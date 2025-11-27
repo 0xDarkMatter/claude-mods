@@ -1,6 +1,6 @@
 ---
 name: python-env
-description: Fast Python environment management with uv. 10-100x faster than pip for installs, venv creation, and dependency resolution. Triggers on: install Python package, create venv, pip install, setup Python project, manage dependencies, Python environment.
+description: "Fast Python environment management with uv. 10-100x faster than pip for installs, venv creation, and dependency resolution. Triggers on: install Python package, create venv, pip install, setup Python project, manage dependencies, Python environment."
 ---
 
 # Python Environment
