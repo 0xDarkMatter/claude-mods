@@ -1,6 +1,6 @@
 ---
 name: safe-file-reader
-description: Read and view files without permission prompts. Use bat for syntax-highlighted code viewing, eza for directory listings with git status, cat/head/tail for plain text. Triggers on: view file, show code, list directory, explore codebase, read config, display contents.
+description: "Read and view files without permission prompts. Use bat for syntax-highlighted code viewing, eza for directory listings with git status, cat/head/tail for plain text. Triggers on: view file, show code, list directory, explore codebase, read config, display contents."
 ---
 
 # Safe File Reader

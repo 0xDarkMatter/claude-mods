@@ -1,6 +1,6 @@
 ---
 name: code-stats
-description: Analyze codebase with tokei (fast line counts by language) and difft (semantic AST-aware diffs). Get quick project overview without manual counting. Triggers on: how big is codebase, count lines of code, what languages, show semantic diff, compare files, code statistics.
+description: "Analyze codebase with tokei (fast line counts by language) and difft (semantic AST-aware diffs). Get quick project overview without manual counting. Triggers on: how big is codebase, count lines of code, what languages, show semantic diff, compare files, code statistics."
 ---
 
 # Code Statistics

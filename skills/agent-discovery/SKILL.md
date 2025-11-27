@@ -1,6 +1,6 @@
 ---
 name: agent-discovery
-description: Analyze current task or codebase and recommend specialized agents. Triggers on: which agent, what tool should I use, help me choose, recommend agent, find the right agent, what agents are available.
+description: "Analyze current task or codebase and recommend specialized agents. Triggers on: which agent, what tool should I use, help me choose, recommend agent, find the right agent, what agents are available."
 ---
 
 # Agent Discovery

@@ -100,17 +100,6 @@ git submodule update --remote
 
 Then re-run the install script.
 
-## Adding Your Own
-
-### Commands
-Create a `.md` file in `commands/` following Claude Code's [slash command format](https://docs.anthropic.com/en/docs/claude-code).
-
-### Skills
-Create a directory in `skills/` with a `SKILL.md` file.
-
-### Agents
-Create a `.md` file in `agents/` with frontmatter defining the agent.
-
 ## License
 
 MIT
