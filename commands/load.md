@@ -6,6 +6,31 @@ description: "Load session context from saved state. Reads claude-state.json and
 
 Load your session context from a previous save. Reads state files, shows what's changed since, and suggests the next action.
 
+## Why This Exists
+
+This command pairs with `/save` to implement structured session continuity. While Claude Code's `--resume` restores conversation history, it **does not restore TodoWrite task state**.
+
+From Anthropic's [Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents):
+
+> "Every subsequent session asks the model to make incremental progress, then leave structured updates."
+
+`/load` reads those structured updates and restores your working context:
+- **Tasks** are restored to TodoWrite
+- **Git context** shows what changed since you left
+- **Notes** remind you where you stopped
+- **Suggested action** helps you pick up immediately
+
+### How It Differs from `--resume`
+
+| `claude --resume` | `/load` |
+|-------------------|---------|
+| Restores conversation history | Restores task state from files |
+| Local to your machine | Portable (git-trackable) |
+| Automatic | Explicit (you control when) |
+| Full context | Structured summary |
+
+**Use both together**: `claude --resume` for conversation context, `/load` for task state.
+
 ## Arguments
 
 $ARGUMENTS

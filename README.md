@@ -97,6 +97,43 @@ Then symlink or copy to your Claude directories:
 | [tailwind-expert](agents/tailwind-expert.md) | Tailwind CSS, responsive design |
 | [wrangler-expert](agents/wrangler-expert.md) | Cloudflare Workers deployment, wrangler.toml |
 
+## Session Continuity: `/save` + `/load`
+
+These commands fill a gap in Claude Code's native session management.
+
+**The problem:** Claude Code's `--resume` flag restores conversation history, but **TodoWrite task state does not persist between sessions**. When you start fresh, your task list is gone.
+
+**The solution:** `/save` and `/load` implement the pattern from Anthropic's [Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents):
+
+> "Every subsequent session asks the model to make incremental progress, then leave structured updates."
+
+### How It Works
+
+```
+Session 1:
+  [work on tasks]
+  /save "Stopped at auth module"    # Writes .claude/claude-state.json + claude-progress.md
+
+Session 2:
+  /load                              # Restores TodoWrite, shows git diff, suggests next action
+  → "In progress: Auth module refactor"
+  → "Notes: Stopped at auth module"
+```
+
+### Why Not Just Use `--resume`?
+
+| Feature | `--resume` | `/save` + `/load` |
+|---------|------------|-------------------|
+| Conversation history | Yes | No |
+| TodoWrite tasks | **No** | Yes |
+| Git context | No | Yes |
+| Human-readable summary | No | Yes |
+| Git-trackable | No | Yes |
+| Works across machines | No | Yes (if committed) |
+| Team sharing | No | Yes |
+
+**Use both together:** `claude --resume` for conversation context, `/load` for task state.
+
 ## Updating
 
 Pull updates including submodules:

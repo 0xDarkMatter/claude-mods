@@ -6,6 +6,33 @@ description: "Save session state before ending. Creates claude-state.json and cl
 
 Save your current session state before ending work. Creates both machine-readable and human-readable progress files.
 
+## Why This Exists
+
+Claude Code's native `--resume` flag restores conversation history, but **TodoWrite state does not persist between sessions**. When you start a new session, your task list is gone.
+
+This command implements the pattern described in Anthropic's [Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents):
+
+> "Every subsequent session asks the model to make incremental progress, then leave structured updates."
+
+### The Gap
+
+| Feature | Native `--resume` | `/save` + `/load` |
+|---------|-------------------|-------------------|
+| Conversation history | Yes | No |
+| TodoWrite tasks | **No** | Yes |
+| Git context | No | Yes |
+| Human-readable summary | No | Yes |
+| Git-trackable | No | Yes |
+| Works across machines | No | Yes (if committed) |
+| Team sharing | No | Yes |
+
+### When to Use
+
+- **End of work session** - Save before closing Claude Code
+- **Before context compaction** - Preserve state before `/compact`
+- **Handoff to teammates** - Commit state files for others to load
+- **Long-running tasks** - Checkpoint progress incrementally
+
 ## Arguments
 
 $ARGUMENTS
