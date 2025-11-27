@@ -61,7 +61,6 @@ Then symlink or copy to your Claude directories:
 | [data-processing](skills/data-processing/) | Process JSON with jq, YAML/TOML with yq |
 | [git-workflow](skills/git-workflow/) | Enhanced git operations with lazygit, gh, delta |
 | [project-docs](skills/project-docs/) | Scan and synthesize project documentation |
-| [project-planner](skills/project-planner/) | Manage ROADMAP.md and PLAN.md for planning |
 | [python-env](skills/python-env/) | Fast Python environment management with uv |
 | [safe-file-reader](skills/safe-file-reader/) | Read files without permission prompts |
 | [structural-search](skills/structural-search/) | Search code by AST structure with ast-grep |
