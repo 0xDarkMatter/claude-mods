@@ -76,6 +76,7 @@ Then symlink or copy to your Claude directories:
 | [aws-fargate-ecs-expert](agents/aws-fargate-ecs-expert.md) | Amazon ECS on Fargate, container deployment |
 | [bash-expert](agents/bash-expert.md) | Defensive Bash scripting, CI/CD pipelines |
 | [cloudflare-expert](agents/cloudflare-expert.md) | Cloudflare Workers, Pages, DNS, security |
+| [craftcms-expert](agents/craftcms-expert.md) | Craft CMS content modeling, Twig, plugins, GraphQL |
 | [fetch-expert](agents/fetch-expert.md) | Parallel web fetching with retry logic |
 | [firecrawl-expert](agents/firecrawl-expert.md) | Web scraping, crawling, structured extraction |
 | [javascript-expert](agents/javascript-expert.md) | Modern JavaScript, async patterns, optimization |
