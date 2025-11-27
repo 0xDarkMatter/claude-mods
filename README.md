@@ -51,8 +51,8 @@ Then symlink or copy to your Claude directories:
 |---------|-------------|
 | [g-slave](commands/g-slave/) | Dispatch Gemini CLI to analyze large codebases. Gemini does the grunt work, Claude gets the summary. |
 | [agent-genesis](commands/agent-genesis.md) | Generate Claude Code expert agent prompts for any technology platform. |
-| [checkpoint](commands/checkpoint.md) | Save session state before ending. Creates claude-state.json and claude-progress.md for session continuity. |
-| [resume](commands/resume.md) | Restore session context from checkpoint. Shows what changed, suggests next action. |
+| [save](commands/save.md) | Save session state before ending. Creates claude-state.json and claude-progress.md for session continuity. |
+| [load](commands/load.md) | Load session context from saved state. Shows what changed, suggests next action. |
 | [review](commands/review.md) | Code review staged changes or specific files. Analyzes bugs, security, performance, style. |
 | [test](commands/test.md) | Generate tests with automatic framework detection (Jest, Vitest, pytest, etc.). |
 | [explain](commands/explain.md) | Deep explanation of complex code, files, or concepts. Architecture, data flow, design decisions. |
