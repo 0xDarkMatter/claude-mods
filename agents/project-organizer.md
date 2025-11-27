@@ -586,10 +586,9 @@ Example: "Claude, [do something]"
 ## Project Planning
 
 This project uses `/plan` for task management:
-- `docs/ROADMAP.md` - Long-term vision and version roadmap
-- `docs/PLAN.md` - Current active tasks
+- `docs/PLAN.md` - Project goals, progress, and active tasks
 
-Run `/plan --sync` to update your plan from git commits.
+Run `/plan --review` to see current status or `/plan --sync` to update from git.
 
 ## Tips & Best Practices
 
@@ -605,7 +604,7 @@ Run `/plan --sync` to update your plan from git commits.
 **Detection Logic**:
 - Check for `.claude/` directory → Claude Code project
 - Check dependencies for `mcp`, `@modelcontextprotocol/sdk` → MCP server (use MCP template)
-- Check for `ROADMAP.md`, `PLAN.md` → Planning workflow active
+- Check for `docs/PLAN.md` → Planning workflow active
 - Otherwise → Use general Claude Code template
 
 Always suggest creating CLAUDE.md if .claude/ directory exists but CLAUDE.md doesn't
