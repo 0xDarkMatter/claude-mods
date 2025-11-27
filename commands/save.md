@@ -2,7 +2,7 @@
 description: "Save session state before ending. Creates claude-state.json and claude-progress.md for session continuity."
 ---
 
-# Checkpoint - Session State Persistence
+# Save - Session State Persistence
 
 Save your current session state before ending work. Creates both machine-readable and human-readable progress files.
 
@@ -10,7 +10,7 @@ Save your current session state before ending work. Creates both machine-readabl
 
 $ARGUMENTS
 
-If no arguments, checkpoint current TodoWrite state and git context.
+If no arguments, save current TodoWrite state and git context.
 
 ## What This Command Does
 
@@ -76,17 +76,17 @@ If no arguments, checkpoint current TodoWrite state and git context.
 ## Usage Examples
 
 ```bash
-# Basic checkpoint
-/checkpoint
+# Basic save
+/save
 
-# Checkpoint with notes
-/checkpoint "Stopped mid-refactor, auth module needs testing"
+# Save with notes
+/save "Stopped mid-refactor, auth module needs testing"
 
-# Checkpoint and commit
-/checkpoint --commit
+# Save and commit
+/save --commit
 
-# Checkpoint with notes and commit
-/checkpoint "Ready for review" --commit
+# Save with notes and commit
+/save "Ready for review" --commit
 ```
 
 ## Execution Steps
@@ -135,7 +135,7 @@ Create `.claude/claude-progress.md` with human-readable format:
 If `--commit` flag present:
 ```bash
 git add .claude/claude-state.json .claude/claude-progress.md
-git commit -m "chore: checkpoint session state"
+git commit -m "chore: save session state"
 ```
 
 ## Output
@@ -143,7 +143,7 @@ git commit -m "chore: checkpoint session state"
 After creating files, report:
 
 ```
-✓ Session checkpointed
+✓ Session saved
 
 State saved to:
   • .claude/claude-state.json
@@ -155,7 +155,7 @@ Summary:
   • Pending: Z tasks
   • Uncommitted files: N
 
-Resume with: /resume
+Load with: /load
 ```
 
 ## Flags
@@ -168,6 +168,6 @@ Resume with: /resume
 ## Notes
 
 - State files are gitignored by default (add to .gitignore if needed)
-- Use `/resume` to restore state in a new session
-- Checkpoint frequently during long tasks
+- Use `/load` to restore state in a new session
+- Save frequently during long tasks
 - Notes are preserved across sessions

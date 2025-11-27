@@ -1,10 +1,10 @@
 ---
-description: "Restore session context from checkpoint. Reads claude-state.json and claude-progress.md, shows what changed, suggests next action."
+description: "Load session context from saved state. Reads claude-state.json and claude-progress.md, shows what changed, suggests next action."
 ---
 
-# Resume - Restore Session Context
+# Load - Restore Session Context
 
-Restore your session context from a previous checkpoint. Reads state files, shows what's changed since, and suggests the next action.
+Load your session context from a previous save. Reads state files, shows what's changed since, and suggests the next action.
 
 ## Arguments
 
@@ -18,8 +18,8 @@ If no arguments, read from default `.claude/` location.
    - Load `.claude/claude-state.json`
    - Load `.claude/claude-progress.md`
 
-2. **Analyze Changes Since Checkpoint**
-   - Git commits since last checkpoint
+2. **Analyze Changes Since Save**
+   - Git commits since last save
    - File modifications
    - Time elapsed
 
@@ -41,9 +41,9 @@ ls -la .claude/claude-state.json .claude/claude-progress.md 2>/dev/null
 
 If missing, report:
 ```
-⚠ No checkpoint found in .claude/
+⚠ No saved state found in .claude/
 
-To create one, use: /checkpoint
+To create one, use: /save
 ```
 
 ### Step 2: Read State
@@ -53,15 +53,15 @@ Parse `.claude/claude-state.json`:
 - Extract task arrays
 - Extract context (branch, last commit, notes)
 
-### Step 3: Calculate Time Since Checkpoint
+### Step 3: Calculate Time Since Save
 
-Compare checkpoint timestamp to current time:
+Compare save timestamp to current time:
 - Format as human-readable ("2 hours ago", "3 days ago")
 
 ### Step 4: Analyze Git Changes
 
 ```bash
-# Commits since checkpoint
+# Commits since save
 git log --oneline <last_commit>..HEAD
 
 # Current status
@@ -78,12 +78,12 @@ Use TodoWrite tool to restore tasks:
 ### Step 6: Display Summary
 
 ```markdown
-# Session Resumed
+# Session Loaded
 
-**Checkpoint from**: <timestamp> (<relative time>)
+**Saved**: <timestamp> (<relative time>)
 **Branch**: <branch>
 
-## Since Last Checkpoint
+## Since Last Save
 - <N> new commits
 - <M> files modified
 - <time> elapsed
@@ -112,72 +112,72 @@ Based on your in-progress task: **<task name>**
 ## Usage Examples
 
 ```bash
-# Basic resume
-/resume
+# Basic load
+/load
 
-# Resume from specific directory
-/resume path/to/project
+# Load from specific directory
+/load path/to/project
 
-# Resume with verbose git log
-/resume --verbose
+# Load with verbose git log
+/load --verbose
 ```
 
 ## Flags
 
 | Flag | Effect |
 |------|--------|
-| `--verbose` | Show full git log since checkpoint |
+| `--verbose` | Show full git log since save |
 | `--no-restore` | Show state without restoring TodoWrite |
-| `--clear` | Clear checkpoint after resuming |
+| `--clear` | Clear saved state after loading |
 
 ## Edge Cases
 
-### No Checkpoint Found
+### No Saved State Found
 ```
-⚠ No checkpoint found
+⚠ No saved state found
 
 This could mean:
-1. You haven't checkpointed yet (use /checkpoint)
+1. You haven't saved yet (use /save)
 2. Wrong directory (check pwd)
 3. State files were deleted
 
 To start fresh, just begin working normally.
 ```
 
-### Stale Checkpoint (>7 days)
+### Stale State (>7 days)
 ```
-⚠ Checkpoint is 12 days old
+⚠ Saved state is 12 days old
 
 A lot may have changed. Consider:
 1. Review git log manually
 2. Start fresh if context is lost
-3. Resume anyway with: /resume --force
+3. Load anyway with: /load --force
 ```
 
 ### Branch Changed
 ```
-⚠ Branch changed since checkpoint
+⚠ Branch changed since save
 
-Checkpoint branch: feature/old-branch
+Saved branch: feature/old-branch
 Current branch: feature/new-branch
 
-The checkpoint may not be relevant. Options:
+The saved state may not be relevant. Options:
 1. Switch back: git checkout feature/old-branch
-2. Resume anyway (tasks may still apply)
-3. Clear and start fresh: /resume --clear
+2. Load anyway (tasks may still apply)
+3. Clear and start fresh: /load --clear
 ```
 
-## Integration with /checkpoint
+## Integration with /save
 
 These commands form a pair:
 
 ```
 Session 1:
   [work on tasks]
-  /checkpoint "Stopped at auth module"
+  /save "Stopped at auth module"
 
 Session 2:
-  /resume
+  /load
   → Shows: "In progress: Auth module refactor"
   → Notes: "Stopped at auth module"
   → Suggests: "Continue with auth module testing"
@@ -185,7 +185,7 @@ Session 2:
 
 ## Notes
 
-- Resume automatically populates TodoWrite
+- Load automatically populates TodoWrite
 - Use `--no-restore` to preview without changing state
-- Clear old checkpoints periodically with `--clear`
+- Clear old saves periodically with `--clear`
 - Works across machines if .claude/ is committed
