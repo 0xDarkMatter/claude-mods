@@ -583,13 +583,13 @@ Example: "Claude, [do something]"
 **Task 2**: Another common workflow
 [Instructions]
 
-## Sprint Planning
+## Project Planning
 
-This project uses `/sprint` for task management:
+This project uses `/plan` for task management:
 - `docs/ROADMAP.md` - Long-term vision and version roadmap
-- `docs/PLAN.md` - Current sprint tasks
+- `docs/PLAN.md` - Current active tasks
 
-Run `/sprint` to sync your plan with git commits and todos.
+Run `/plan --sync` to update your plan from git commits.
 
 ## Tips & Best Practices
 
@@ -605,7 +605,7 @@ Run `/sprint` to sync your plan with git commits and todos.
 **Detection Logic**:
 - Check for `.claude/` directory → Claude Code project
 - Check dependencies for `mcp`, `@modelcontextprotocol/sdk` → MCP server (use MCP template)
-- Check for `ROADMAP.md`, `PLAN.md` → Sprint workflow active
+- Check for `ROADMAP.md`, `PLAN.md` → Planning workflow active
 - Otherwise → Use general Claude Code template
 
 Always suggest creating CLAUDE.md if .claude/ directory exists but CLAUDE.md doesn't
