@@ -8,13 +8,24 @@ Save your current session state before ending work. Creates both machine-readabl
 
 ## Why This Exists
 
-Claude Code's native `--resume` flag restores conversation history, but **TodoWrite state does not persist between sessions**. When you start a new session, your task list is gone.
+Claude Code's native `--resume` flag restores conversation history, but **TodoWrite state does not persist between sessions by design**. Claude Code treats each session as isolated—the philosophy is that persistent state belongs in files you control, not in Claude's internal state.
 
-This command implements the pattern described in Anthropic's [Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents):
+TodoWrite tasks are stored at `~/.claude/todos/[session-id].json` and **deleted when the session ends**. This is intentional, not a bug.
+
+This command bridges the gap by implementing the pattern from Anthropic's [Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents):
 
 > "Every subsequent session asks the model to make incremental progress, then leave structured updates."
 
-### The Gap
+### What Persists vs What Doesn't
+
+| Claude Code Feature | Persists? | Location |
+|---------------------|-----------|----------|
+| Conversation history | Yes | Internal (use `--resume`) |
+| CLAUDE.md context | Yes | `./CLAUDE.md` |
+| TodoWrite tasks | **No** | Deleted on session end |
+| Plan Mode state | **No** | In-memory only |
+
+### The Gap `/save` Fills
 
 | Feature | Native `--resume` | `/save` + `/load` |
 |---------|-------------------|-------------------|
