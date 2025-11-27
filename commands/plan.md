@@ -24,6 +24,8 @@ $ARGUMENTS
 - `--review` - Display current plan
 - `--status` - Update progress on steps
 - `--capture` - Capture conversation context only (no new planning)
+- `--sync` - Auto-update status from recent git commits
+- `--diff` - Show what changed since last plan update
 - `--clear` - Archive current plan and start fresh
 
 ## Default Behavior: Capture First
@@ -37,6 +39,7 @@ $ARGUMENTS
   │     ├─ Detect if Plan Mode was recently active
   │     ├─ Extract plan-related context from conversation
   │     ├─ Check for temp files (.claude/plan*, docs/PLAN.md)
+  │     ├─ Gather git context (uncommitted changes, recent commits)
   │     └─ Merge into working state
   │
   ├─→ Step 1: Check existing docs/PLAN.md
@@ -58,6 +61,11 @@ This ensures you never lose Plan Mode thinking, even if you forget to explicitly
 # Check for Plan Mode artifacts
 ls -la .claude/plan* docs/PLAN.md 2>/dev/null
 
+# Gather git context
+git status --short
+git diff --stat
+git log --oneline -5
+
 # Check conversation for plan-related discussion
 # (Analyze recent messages for: goals, approaches, decisions, steps)
 ```
@@ -68,6 +76,11 @@ ls -la .claude/plan* docs/PLAN.md 2>/dev/null
 - Decisions made ("Let's go with...", "The best approach is...")
 - Steps identified ("First... then... finally...")
 - Open questions ("Should we...", "What about...")
+
+**Git context to capture:**
+- Uncommitted changes (files, insertions, deletions)
+- Recent commits that may relate to plan steps
+- Current branch and status
 
 ### Step 1: Check Existing docs/PLAN.md
 
@@ -81,14 +94,17 @@ Parse structure:
 - Completed steps
 - In-progress steps
 - Pending steps
+- Blockers
 - Open questions
+- Decision log
 
 ### Step 2: Merge and Execute
 
 Combine:
 1. Captured conversation context
 2. Existing docs/PLAN.md content
-3. New goal/instructions from command
+3. Git context (uncommitted changes, recent commits)
+4. New goal/instructions from command
 
 ### Step 3: Write docs/PLAN.md
 
@@ -115,28 +131,80 @@ Combine:
 ## Implementation Steps
 
 ### Completed
-- [x] Step 1: <description>
+- ✓ Step 1: <description> [S]
   - Completed: <date>
+  - Commit: `abc123` <commit message>
   - Notes: <any relevant context>
 
 ### In Progress
-- [ ] Step 2: <description>
+- ◐ Step 2: <description> [M]
   - Started: <date>
-  - Blockers: <if any>
+  - Depends on: Step 1
+  - Notes: <current status>
 
 ### Pending
-- [ ] Step 3: <description>
-- [ ] Step 4: <description>
+- ○ Step 3: <description> [L]
+  - Depends on: Step 2
+- ○ Step 4: <description> [S]
+
+### Blocked
+- ⚠ Step 5: <description> [M]
+  - Blocker: <what's blocking this>
+  - Waiting on: <person/decision/external>
+
+## Uncommitted Changes
+
+```
+📊 Working Tree Status:
+  Modified:  X files (+Y/-Z lines)
+  Staged:    X files
+  Unstaged:  X files
+  Untracked: X files
+
+  Files:
+  • path/to/file.ts    +89/-12 (staged)
+  • path/to/other.ts   +38/-33 (unstaged)
+```
+
+## Decision Log
+
+| Date | Decision | Rationale |
+|------|----------|-----------|
+| <date> | <what was decided> | <why this choice> |
+
+## Blockers
+
+- ⚠ <blocker 1>: <description and what's needed to unblock>
+- ⚠ <blocker 2>: <description>
 
 ## Open Questions
 
-- [ ] <question 1>
-- [ ] <question 2>
+- ○ <question 1>
+- ○ <question 2>
 
 ## Success Criteria
 
-- [ ] <criterion 1>
-- [ ] <criterion 2>
+- ○ <criterion 1>
+- ○ <criterion 2>
+
+## Directory Structure
+
+```
+project/
+├── src/
+│   ├── core/           # Core functionality
+│   └── features/       # Feature modules
+├── tests/
+├── docs/
+│   └── PLAN.md         # This file
+└── config/
+```
+
+## Sources & References
+
+- [Official Documentation](https://example.com/docs)
+- [API Reference](https://example.com/api)
+- [Related RFC/Spec](https://example.com/spec)
 
 ## Notes
 
@@ -145,6 +213,25 @@ Combine:
 ---
 *Plan managed by `/plan` command. Last captured: <timestamp>*
 ```
+
+## Status Markers
+
+| Marker | Meaning | Usage |
+|--------|---------|-------|
+| ✓ | Completed | Task finished successfully |
+| ◐ | In Progress | Currently being worked on |
+| ○ | Pending | Not yet started |
+| ⚠ | Blocked | Cannot proceed, needs resolution |
+
+## Effort Indicators
+
+| Tag | Meaning | Guidance |
+|-----|---------|----------|
+| `[S]` | Small | Quick task, minimal complexity |
+| `[M]` | Medium | Moderate effort, some complexity |
+| `[L]` | Large | Significant effort, high complexity |
+
+Effort is relative to the project, not absolute time. Avoid time estimates.
 
 ## Usage Examples
 
@@ -160,6 +247,12 @@ Combine:
 
 # Update progress on steps
 /plan --status
+
+# Sync status from recent git commits
+/plan --sync
+
+# Show what changed since last update
+/plan --diff
 
 # Start fresh (archives old plan)
 /plan --clear "New feature: payment processing"
@@ -209,6 +302,8 @@ Session 2:
 | `--review` | Display current plan without modifications |
 | `--status` | Interactive update of step progress |
 | `--capture` | Only capture conversation context, no new planning |
+| `--sync` | Auto-update step status from recent git commits |
+| `--diff` | Show what changed since last plan update |
 | `--clear` | Archive current plan to `docs/PLAN-<date>.md` and start fresh |
 | `--verbose` | Show detailed capture/merge process |
 
@@ -218,20 +313,28 @@ Session 2:
 🔍 Capturing internal state...
   ✓ Plan Mode context detected (8 relevant messages)
   ✓ Existing docs/PLAN.md found (3 steps complete)
+  ✓ Git context captured
   ✗ No temp plan files
+
+📊 Uncommitted Changes:
+  Modified:  2 files (+127/-45)
+  • src/auth.ts        +89/-12
+  • tests/auth.test.ts +38/-33
 
 📋 Merging sources...
   → Goal: "Add user authentication with OAuth2"
   → Approach: JWT tokens with refresh rotation
-  → Progress: Steps 1-3 complete, Step 4 in progress
+  → Progress: 3 complete, 1 in progress, 2 pending
 
 📝 Updated docs/PLAN.md
 
 Summary:
-  • Goal: Add user authentication with OAuth2
-  • Steps: 3 complete, 1 in progress, 2 pending
-  • Open questions: 2
-  • Success criteria: 4 defined
+  ✓ Completed:     3 steps
+  ◐ In Progress:   1 step
+  ○ Pending:       2 steps
+  ⚠ Blocked:       0 steps
+  ? Open questions: 2
+  📋 Decisions:    4 logged
 
 Review with: /plan --review
 ```
@@ -243,3 +346,5 @@ Review with: /plan --review
 - Works across machines if docs/PLAN.md is committed
 - Pairs with `/save` + `/load` for complete session continuity
 - Human-readable format works without Claude Code
+- Git context helps track what's changed since last session
+- Effort indicators are relative, not time-based
