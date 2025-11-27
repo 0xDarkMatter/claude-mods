@@ -7,7 +7,6 @@ Custom commands, skills, and agents for [Claude Code](https://docs.anthropic.com
 ```
 claude-mods/
 ├── commands/           # Slash commands
-│   └── g-slave/        # Make Gemini do Claude's dirty work
 ├── skills/             # Custom skills
 ├── agents/             # Custom subagents
 ├── install.sh          # Linux/macOS installer
@@ -51,14 +50,45 @@ Then symlink or copy to your Claude directories:
 | Command | Description |
 |---------|-------------|
 | [g-slave](commands/g-slave/) | Dispatch Gemini CLI to analyze large codebases. Gemini does the grunt work, Claude gets the summary. |
+| [agent-genesis](commands/agent-genesis.md) | Generate Claude Code expert agent prompts for any technology platform. |
 
 ### Skills
 
-*Coming soon*
+| Skill | Description |
+|-------|-------------|
+| [agent-discovery](skills/agent-discovery/) | Analyze tasks and recommend specialized agents |
+| [code-stats](skills/code-stats/) | Analyze codebase with tokei and difft |
+| [data-processing](skills/data-processing/) | Process JSON with jq, YAML/TOML with yq |
+| [git-workflow](skills/git-workflow/) | Enhanced git operations with lazygit, gh, delta |
+| [project-docs](skills/project-docs/) | Scan and synthesize project documentation |
+| [project-planner](skills/project-planner/) | Manage ROADMAP.md and PLAN.md for planning |
+| [python-env](skills/python-env/) | Fast Python environment management with uv |
+| [safe-file-reader](skills/safe-file-reader/) | Read files without permission prompts |
+| [structural-search](skills/structural-search/) | Search code by AST structure with ast-grep |
+| [task-runner](skills/task-runner/) | Run project commands with just |
 
 ### Agents
 
-*Coming soon*
+| Agent | Description |
+|-------|-------------|
+| [astro-expert](agents/astro-expert.md) | Astro projects, SSR/SSG, Cloudflare deployment |
+| [asus-router-expert](agents/asus-router-expert.md) | Asus routers, network hardening, Asuswrt-Merlin |
+| [aws-fargate-ecs-expert](agents/aws-fargate-ecs-expert.md) | Amazon ECS on Fargate, container deployment |
+| [bash-expert](agents/bash-expert.md) | Defensive Bash scripting, CI/CD pipelines |
+| [cloudflare-expert](agents/cloudflare-expert.md) | Cloudflare Workers, Pages, DNS, security |
+| [fetch-expert](agents/fetch-expert.md) | Parallel web fetching with retry logic |
+| [firecrawl-expert](agents/firecrawl-expert.md) | Web scraping, crawling, structured extraction |
+| [javascript-expert](agents/javascript-expert.md) | Modern JavaScript, async patterns, optimization |
+| [laravel-expert](agents/laravel-expert.md) | Laravel framework, Eloquent, testing |
+| [payloadcms-expert](agents/payloadcms-expert.md) | Payload CMS architecture and configuration |
+| [playwright-roulette-expert](agents/playwright-roulette-expert.md) | Playwright automation for casino testing |
+| [postgres-expert](agents/postgres-expert.md) | PostgreSQL management and optimization |
+| [project-organizer](agents/project-organizer.md) | Reorganize directory structures, cleanup |
+| [python-expert](agents/python-expert.md) | Advanced Python, testing, optimization |
+| [rest-expert](agents/rest-expert.md) | RESTful API design, HTTP methods, status codes |
+| [sql-expert](agents/sql-expert.md) | Complex SQL queries, optimization, indexing |
+| [tailwind-expert](agents/tailwind-expert.md) | Tailwind CSS, responsive design |
+| [wrangler-expert](agents/wrangler-expert.md) | Cloudflare Workers deployment, wrangler.toml |
 
 ## Updating
 
