@@ -1,10 +1,10 @@
 ---
-description: "Create, review, and persist project plans. Captures Claude Code Plan Mode state and writes to git-trackable PLAN.md."
+description: "Create, review, and persist project plans. Captures Claude Code Plan Mode state and writes to git-trackable docs/PLAN.md."
 ---
 
 # Plan - Persistent Project Planning
 
-Create, review, and update project plans. Automatically captures Claude Code's internal Plan Mode state and persists to `PLAN.md`.
+Create, review, and update project plans. Automatically captures Claude Code's internal Plan Mode state and persists to `docs/PLAN.md`.
 
 ## Why This Exists
 
@@ -12,7 +12,7 @@ Claude Code's native Plan Mode (Shift+Tab) is powerful for exploration, but **th
 
 This command bridges that gap:
 - **Captures** any active Plan Mode context
-- **Persists** to `PLAN.md` (git-trackable)
+- **Persists** to `docs/PLAN.md` (git-trackable)
 - **Survives** across sessions and machines
 - **Pairs** with `/save` + `/load` for complete session continuity
 
@@ -36,10 +36,10 @@ $ARGUMENTS
   ├─→ Step 0: Capture internal state (ALWAYS RUNS)
   │     ├─ Detect if Plan Mode was recently active
   │     ├─ Extract plan-related context from conversation
-  │     ├─ Check for temp files (.claude/plan*, plan.md)
+  │     ├─ Check for temp files (.claude/plan*, docs/PLAN.md)
   │     └─ Merge into working state
   │
-  ├─→ Step 1: Check existing PLAN.md
+  ├─→ Step 1: Check existing docs/PLAN.md
   │     └─ Load and parse if exists
   │
   └─→ Step 2: Execute requested action
@@ -56,7 +56,7 @@ This ensures you never lose Plan Mode thinking, even if you forget to explicitly
 
 ```bash
 # Check for Plan Mode artifacts
-ls -la .claude/plan* plan.md 2>/dev/null
+ls -la .claude/plan* docs/PLAN.md 2>/dev/null
 
 # Check conversation for plan-related discussion
 # (Analyze recent messages for: goals, approaches, decisions, steps)
@@ -69,11 +69,11 @@ ls -la .claude/plan* plan.md 2>/dev/null
 - Steps identified ("First... then... finally...")
 - Open questions ("Should we...", "What about...")
 
-### Step 1: Check Existing PLAN.md
+### Step 1: Check Existing docs/PLAN.md
 
 ```bash
 # Read existing plan if present
-cat PLAN.md 2>/dev/null
+cat docs/PLAN.md 2>/dev/null
 ```
 
 Parse structure:
@@ -87,10 +87,10 @@ Parse structure:
 
 Combine:
 1. Captured conversation context
-2. Existing PLAN.md content
+2. Existing docs/PLAN.md content
 3. New goal/instructions from command
 
-### Step 3: Write PLAN.md
+### Step 3: Write docs/PLAN.md
 
 ```markdown
 # Project Plan
@@ -182,7 +182,7 @@ Combine:
 
 ```
 Session 1:
-  /plan "Feature X"             # Strategic planning → PLAN.md
+  /plan "Feature X"             # Strategic planning → docs/PLAN.md
   [work on implementation]
   /save "Completed step 2"      # Tactical state → claude-state.json
 
@@ -198,7 +198,7 @@ Session 2:
 
 | Command | Captures | Persists To |
 |---------|----------|-------------|
-| `/plan` | Strategic thinking, decisions | `PLAN.md` |
+| `/plan` | Strategic thinking, decisions | `docs/PLAN.md` |
 | `/save` | TodoWrite tasks, git context | `.claude/claude-state.json` |
 | `/load` | - | Restores from `.claude/` |
 
@@ -209,7 +209,7 @@ Session 2:
 | `--review` | Display current plan without modifications |
 | `--status` | Interactive update of step progress |
 | `--capture` | Only capture conversation context, no new planning |
-| `--clear` | Archive current plan to `PLAN-<date>.md` and start fresh |
+| `--clear` | Archive current plan to `docs/PLAN-<date>.md` and start fresh |
 | `--verbose` | Show detailed capture/merge process |
 
 ## Output
@@ -217,7 +217,7 @@ Session 2:
 ```
 🔍 Capturing internal state...
   ✓ Plan Mode context detected (8 relevant messages)
-  ✓ Existing PLAN.md found (3 steps complete)
+  ✓ Existing docs/PLAN.md found (3 steps complete)
   ✗ No temp plan files
 
 📋 Merging sources...
@@ -225,7 +225,7 @@ Session 2:
   → Approach: JWT tokens with refresh rotation
   → Progress: Steps 1-3 complete, Step 4 in progress
 
-📝 Updated PLAN.md
+📝 Updated docs/PLAN.md
 
 Summary:
   • Goal: Add user authentication with OAuth2
@@ -240,6 +240,6 @@ Review with: /plan --review
 
 - Always captures internal state first—you can't lose Plan Mode thinking
 - Archives old plans when using `--clear` (never destructive)
-- Works across machines if PLAN.md is committed
+- Works across machines if docs/PLAN.md is committed
 - Pairs with `/save` + `/load` for complete session continuity
 - Human-readable format works without Claude Code
