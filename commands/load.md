@@ -8,7 +8,9 @@ Load your session context from a previous save. Reads state files, shows what's 
 
 ## Why This Exists
 
-This command pairs with `/save` to implement structured session continuity. While Claude Code's `--resume` restores conversation history, it **does not restore TodoWrite task state**.
+This command pairs with `/save` to implement structured session continuity. Claude Code's `--resume` restores conversation history, but **TodoWrite task state does not persist by design**.
+
+This is intentional—Claude Code treats each session as isolated. TodoWrite tasks are stored at `~/.claude/todos/[session-id].json` and deleted when the session ends. The philosophy is that persistent state belongs in files you control.
 
 From Anthropic's [Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents):
 
@@ -25,9 +27,9 @@ From Anthropic's [Effective Harnesses for Long-Running Agents](https://www.anthr
 | `claude --resume` | `/load` |
 |-------------------|---------|
 | Restores conversation history | Restores task state from files |
-| Local to your machine | Portable (git-trackable) |
+| Internal storage | Git-trackable files |
+| Local to your machine | Portable across machines |
 | Automatic | Explicit (you control when) |
-| Full context | Structured summary |
 
 **Use both together**: `claude --resume` for conversation context, `/load` for task state.
 

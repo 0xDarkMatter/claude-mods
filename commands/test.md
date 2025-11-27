@@ -52,10 +52,34 @@ $ARGUMENTS
 - nose2
 ```
 
+### PHP
+```bash
+# Check composer.json for:
+- phpunit/phpunit
+- pestphp/pest
+- codeception/codeception
+- phpspec/phpspec
+- behat/behat
+
+# Check for config files:
+- phpunit.xml / phpunit.xml.dist
+- pest.php
+- codeception.yml
+```
+
+### E2E / Browser Testing
+```bash
+# Check package.json for:
+- cypress
+- playwright
+- @playwright/test
+- puppeteer
+- webdriverio
+```
+
 ### Other
 - Go: built-in testing
 - Rust: built-in testing
-- PHP: PHPUnit
 
 ## Execution Steps
 
@@ -90,6 +114,14 @@ src/utils/helper.ts → src/utils/__tests__/helper.test.ts
 app/utils/helper.py → tests/test_helper.py
                    → app/utils/test_helper.py
                    → tests/utils/test_helper.py
+
+# PHP conventions
+app/Services/UserService.php → tests/Unit/Services/UserServiceTest.php
+                             → tests/Feature/UserServiceTest.php
+
+# Cypress conventions
+src/components/Login.vue → cypress/e2e/login.cy.ts
+                        → cypress/component/Login.cy.ts
 ```
 
 ### Step 4: Generate Test File
@@ -141,6 +173,117 @@ class TestFunctionName:
 
     def test_none_input(self):
         assert function_name(None) is None
+```
+
+### PHPUnit (PHP)
+
+```php
+<?php
+
+namespace Tests\Unit\Services;
+
+use PHPUnit\Framework\TestCase;
+use App\Services\UserService;
+
+class UserServiceTest extends TestCase
+{
+    public function test_it_creates_user_with_valid_data(): void
+    {
+        $service = new UserService();
+        $user = $service->create(['name' => 'John', 'email' => 'john@example.com']);
+
+        $this->assertNotNull($user);
+        $this->assertEquals('John', $user->name);
+    }
+
+    public function test_it_throws_on_invalid_email(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        $service = new UserService();
+        $service->create(['name' => 'John', 'email' => 'invalid']);
+    }
+}
+```
+
+### Pest (PHP)
+
+```php
+<?php
+
+use App\Services\UserService;
+
+describe('UserService', function () {
+    it('creates user with valid data', function () {
+        $service = new UserService();
+        $user = $service->create(['name' => 'John', 'email' => 'john@example.com']);
+
+        expect($user)->not->toBeNull()
+            ->and($user->name)->toBe('John');
+    });
+
+    it('throws on invalid email', function () {
+        $service = new UserService();
+        $service->create(['name' => 'John', 'email' => 'invalid']);
+    })->throws(\InvalidArgumentException::class);
+});
+```
+
+### Cypress (E2E)
+
+```typescript
+describe('Login Flow', () => {
+  beforeEach(() => {
+    cy.visit('/login');
+  });
+
+  it('should login with valid credentials', () => {
+    cy.get('[data-cy=email]').type('user@example.com');
+    cy.get('[data-cy=password]').type('password123');
+    cy.get('[data-cy=submit]').click();
+
+    cy.url().should('include', '/dashboard');
+    cy.get('[data-cy=welcome]').should('contain', 'Welcome');
+  });
+
+  it('should show error with invalid credentials', () => {
+    cy.get('[data-cy=email]').type('user@example.com');
+    cy.get('[data-cy=password]').type('wrong');
+    cy.get('[data-cy=submit]').click();
+
+    cy.get('[data-cy=error]').should('be.visible');
+  });
+});
+```
+
+### Cypress (Component)
+
+```typescript
+import Login from './Login.vue';
+
+describe('Login Component', () => {
+  it('renders login form', () => {
+    cy.mount(Login);
+
+    cy.get('[data-cy=email]').should('exist');
+    cy.get('[data-cy=password]').should('exist');
+    cy.get('[data-cy=submit]').should('contain', 'Login');
+  });
+
+  it('emits submit event with credentials', () => {
+    const onSubmit = cy.spy().as('submitSpy');
+    cy.mount(Login, { props: { onSubmit } });
+
+    cy.get('[data-cy=email]').type('user@example.com');
+    cy.get('[data-cy=password]').type('password123');
+    cy.get('[data-cy=submit]').click();
+
+    cy.get('@submitSpy').should('have.been.calledWith', {
+      email: 'user@example.com',
+      password: 'password123'
+    });
+  });
+});
 ```
 
 ## Usage Examples
