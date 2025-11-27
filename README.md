@@ -51,6 +51,11 @@ Then symlink or copy to your Claude directories:
 |---------|-------------|
 | [g-slave](commands/g-slave/) | Dispatch Gemini CLI to analyze large codebases. Gemini does the grunt work, Claude gets the summary. |
 | [agent-genesis](commands/agent-genesis.md) | Generate Claude Code expert agent prompts for any technology platform. |
+| [checkpoint](commands/checkpoint.md) | Save session state before ending. Creates claude-state.json and claude-progress.md for session continuity. |
+| [resume](commands/resume.md) | Restore session context from checkpoint. Shows what changed, suggests next action. |
+| [review](commands/review.md) | Code review staged changes or specific files. Analyzes bugs, security, performance, style. |
+| [test](commands/test.md) | Generate tests with automatic framework detection (Jest, Vitest, pytest, etc.). |
+| [explain](commands/explain.md) | Deep explanation of complex code, files, or concepts. Architecture, data flow, design decisions. |
 
 ### Skills
 
@@ -80,6 +85,8 @@ Then symlink or copy to your Claude directories:
 | [firecrawl-expert](agents/firecrawl-expert.md) | Web scraping, crawling, structured extraction |
 | [javascript-expert](agents/javascript-expert.md) | Modern JavaScript, async patterns, optimization |
 | [laravel-expert](agents/laravel-expert.md) | Laravel framework, Eloquent, testing |
+| [react-expert](agents/react-expert.md) | React hooks, state management, Server Components, performance |
+| [typescript-expert](agents/typescript-expert.md) | TypeScript type system, generics, utility types, strict mode |
 | [payloadcms-expert](agents/payloadcms-expert.md) | Payload CMS architecture and configuration |
 | [playwright-roulette-expert](agents/playwright-roulette-expert.md) | Playwright automation for casino testing |
 | [postgres-expert](agents/postgres-expert.md) | PostgreSQL management and optimization |
