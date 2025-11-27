@@ -1,6 +1,6 @@
 ---
 name: git-workflow
-description: Enhanced git operations using lazygit (TUI for staging/commits), gh (GitHub CLI for PRs/issues), and delta (beautiful diffs). Triggers on: stage changes, create PR, review PR, check issues, git diff, commit interactively, GitHub operations.
+description: "Enhanced git operations using lazygit, gh (GitHub CLI), and delta. Triggers on stage changes, create PR, review PR, check issues, git diff, commit interactively, GitHub operations."
 ---
 
 # Git Workflow
