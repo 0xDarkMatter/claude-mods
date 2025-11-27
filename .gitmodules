@@ -1,0 +1,3 @@
+[submodule "commands/g-slave"]
+	path = commands/g-slave
+	url = https://github.com/0xDarkMatter/g-slave.git
