@@ -99,6 +99,39 @@ Then symlink or copy to your Claude directories:
 | [sql-expert](agents/sql-expert.md) | Complex SQL queries, optimization, indexing |
 | [tailwind-expert](agents/tailwind-expert.md) | Tailwind CSS, responsive design |
 | [wrangler-expert](agents/wrangler-expert.md) | Cloudflare Workers deployment, wrangler.toml |
+| [claude-code-meta-expert](agents/claude-code-meta-expert.md) | Claude Code architecture, extension development, quality review |
+
+## Testing & Validation
+
+Validate all extensions before committing:
+
+```bash
+# Run full validation (requires just)
+just test
+
+# Or run directly
+bash tests/validate.sh
+
+# Windows
+powershell tests/validate.ps1
+```
+
+### What's Validated
+- YAML frontmatter syntax
+- Required fields (name, description)
+- Naming conventions (kebab-case)
+- File structure (agents/*.md, skills/*/SKILL.md)
+
+### Available Tasks
+
+```bash
+just              # List all tasks
+just test         # Run full validation
+just validate-yaml # YAML only
+just validate-names # Naming only
+just stats        # Count extensions
+just list-agents  # List all agents
+```
 
 ## Session Continuity: `/save` + `/load`
 
