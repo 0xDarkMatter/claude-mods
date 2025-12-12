@@ -96,6 +96,49 @@ Token-efficient CLI tools that replace verbose legacy commands. These tools are 
 |--------|--------|-------------|
 | `make` | `just` | Simpler syntax, better errors |
 
+### Web Fetching (URL Retrieval Hierarchy)
+
+When Claude's built-in `WebFetch` gets blocked (403, Cloudflare, etc.), use these alternatives in order:
+
+| Tool | When to Use | Setup |
+|------|-------------|-------|
+| **WebFetch** | First attempt - fast, built-in | None required |
+| **Jina Reader** | JS-rendered pages, PDFs, cleaner extraction | Prefix URL with `r.jina.ai/` |
+| **Firecrawl** | Anti-bot bypass, complex scraping, structured extraction | Use `firecrawl-expert` agent |
+
+**Jina Reader** (free tier: 10M tokens):
+```bash
+# Simple - just prefix any URL
+curl https://r.jina.ai/https://example.com
+
+# Search + fetch in one call
+curl https://s.jina.ai/your%20search%20query
+```
+
+**Firecrawl** (requires API key):
+```bash
+# Simple URL scrape (globally available)
+firecrawl https://blocked-site.com
+
+# Save to file
+firecrawl https://example.com -o output.md
+
+# With JSON metadata
+firecrawl https://example.com --json
+
+# For complex scraping, use the firecrawl-expert agent
+```
+- Handles Cloudflare, Datadome, and other anti-bot systems
+- Supports interactive scraping (click, scroll, fill forms)
+- AI-powered structured data extraction
+- CLI: `E:\Projects\Coding\Firecrawl\scripts\fc.py`
+
+**Decision Tree:**
+1. Try `WebFetch` first (instant, free)
+2. If blocked/JS-heavy → Try `r.jina.ai/URL` prefix
+3. If still blocked → Try `firecrawl <url>` CLI
+4. For complex scraping/extraction → Use `firecrawl-expert` agent
+
 ## Token Efficiency Benchmarks
 
 Tested on a typical Node.js project with `node_modules`:
@@ -116,6 +159,62 @@ After installation, verify all tools:
 # Check all tools are available
 which fd rg eza bat zoxide delta difft jq yq sd lazygit gh tokei uv just ast-grep fzf dust btm procs tldr
 ```
+
+## Experimental / Future
+
+### Nushell - Structured Data Shell
+
+[Nushell](https://www.nushell.sh/) is a modern shell that treats everything as structured data (tables, records, lists) instead of text streams. It could potentially replace jq + yq + awk + sed with a unified syntax.
+
+**Status:** Experimental (v0.108.x) - not recommended for production scripts yet.
+
+**When to consider:**
+- Heavy data pipeline work (parsing APIs, configs)
+- Frustrated with jq syntax
+- Want unified commands across JSON/YAML/CSV/TOML
+
+**Example comparison:**
+
+```bash
+# Traditional (jq)
+curl -s api.example.com/users | jq '.data[] | select(.active) | .name'
+
+# Nushell
+http get api.example.com/users | where active | get name
+```
+
+```bash
+# Traditional (multiple tools)
+ps aux | grep node | awk '{print $2, $4}' | sort -k2 -nr
+
+# Nushell
+ps | where name == "node" | select pid mem | sort-by mem --reverse
+```
+
+**Why we're waiting:**
+- Still 0.x (breaking changes possible)
+- Learning curve for team environments
+- Current jq + yq stack handles 95% of cases
+- CI/CD scripts need POSIX bash compatibility
+
+**Install (when ready to experiment):**
+```bash
+# Windows
+winget install Nushell.Nushell
+
+# macOS
+brew install nushell
+
+# Linux
+cargo install nu
+```
+
+**Resources:**
+- [Nushell Book](https://www.nushell.sh/book/)
+- [Nushell GitHub](https://github.com/nushell/nushell)
+- [Nushell for SREs](https://medium.com/@nonickedgr/nushell-for-sres-modern-shell-scripting-for-internal-tools-7b5dca51dc66)
+
+---
 
 ## Sources
 
