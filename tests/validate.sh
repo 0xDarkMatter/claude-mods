@@ -259,6 +259,118 @@ validate_skills() {
     done < <(find "$skills_dir" -mindepth 1 -maxdepth 1 -type d -print0)
 }
 
+# Validate rules (optional YAML frontmatter with optional paths field)
+validate_rules() {
+    echo ""
+    echo "=== Validating Rules ==="
+
+    local rules_dir="$PROJECT_DIR/templates/rules"
+    if [[ ! -d "$rules_dir" ]]; then
+        echo "  (no templates/rules/ directory - skipping)"
+        return
+    fi
+
+    while IFS= read -r -d '' file; do
+        local basename
+        basename=$(basename "$file")
+
+        # Rules should be .md files
+        if [[ "$file" != *.md ]]; then
+            log_warn "$file - Rule file should be .md"
+            continue
+        fi
+
+        # Check if file has content
+        if [[ ! -s "$file" ]]; then
+            log_fail "$file - Empty rule file"
+            continue
+        fi
+
+        # Check for valid YAML frontmatter if present
+        local content
+        content=$(cat "$file")
+        if [[ "$content" == ---* ]]; then
+            # Has frontmatter - validate it
+            local closing
+            closing=$(echo "$content" | sed -n '2,${/^---$/=;}'| head -1)
+            if [[ -z "$closing" ]]; then
+                log_fail "$file - Invalid YAML frontmatter (no closing ---)"
+                continue
+            fi
+
+            # If paths field exists, validate it's not empty
+            local paths
+            paths=$(get_yaml_field "$file" "paths")
+            if grep -q "^paths:" "$file" && [[ -z "$paths" ]]; then
+                log_warn "$file - paths field is empty"
+            fi
+        fi
+
+        # Check naming convention (kebab-case)
+        local name
+        name=$(basename "$file" .md)
+        if [[ ! "$name" =~ ^[a-z][a-z0-9]*(-[a-z0-9]+)*$ ]]; then
+            log_warn "$file - Filename not kebab-case: $name"
+        fi
+
+        log_pass "$file - Valid rule"
+    done < <(find "$rules_dir" -name "*.md" -type f -print0)
+}
+
+# Validate settings files (permissions and hooks)
+validate_settings() {
+    echo ""
+    echo "=== Validating Settings ==="
+
+    local settings_file="$PROJECT_DIR/templates/settings.local.json"
+    if [[ ! -f "$settings_file" ]]; then
+        echo "  (no templates/settings.local.json - skipping)"
+        return
+    fi
+
+    # Check if valid JSON
+    if ! jq empty "$settings_file" 2>/dev/null; then
+        log_fail "$settings_file - Invalid JSON"
+        return
+    fi
+
+    # Check for permissions structure
+    if ! jq -e '.permissions' "$settings_file" >/dev/null 2>&1; then
+        log_fail "$settings_file - Missing 'permissions' key"
+    else
+        # Check permissions has allow array
+        if ! jq -e '.permissions.allow | type == "array"' "$settings_file" >/dev/null 2>&1; then
+            log_fail "$settings_file - permissions.allow should be an array"
+        else
+            log_pass "$settings_file - Valid permissions structure"
+        fi
+    fi
+
+    # Check for hooks structure (optional but if present should be object)
+    if jq -e '.hooks' "$settings_file" >/dev/null 2>&1; then
+        if ! jq -e '.hooks | type == "object"' "$settings_file" >/dev/null 2>&1; then
+            log_fail "$settings_file - hooks should be an object"
+        else
+            # Validate hook event names if any hooks defined
+            local hook_events
+            hook_events=$(jq -r '.hooks | keys[]' "$settings_file" 2>/dev/null || true)
+            local valid_events="PreToolUse PostToolUse PermissionRequest Notification UserPromptSubmit Stop SubagentStop PreCompact SessionStart SessionEnd"
+
+            for event in $hook_events; do
+                if [[ ! " $valid_events " =~ " $event " ]]; then
+                    log_warn "$settings_file - Unknown hook event: $event"
+                fi
+            done
+
+            if [[ -n "$hook_events" ]]; then
+                log_pass "$settings_file - Valid hooks structure"
+            else
+                log_pass "$settings_file - Hooks defined (empty)"
+            fi
+        fi
+    fi
+}
+
 # Main
 main() {
     echo "claude-mods Validation"
@@ -268,6 +380,8 @@ main() {
     validate_agents
     validate_commands
     validate_skills
+    validate_rules
+    validate_settings
 
     echo ""
     echo "======================"
