@@ -4,7 +4,7 @@ description: Dispatch Gemini CLI to analyze large codebases. Gemini does the gru
 
 # G-SLAVE: Gemini Large-context Analysis & Verification Engine
 
-> Dispatch Gemini CLI to analyze large codebases. Gemini does the grunt work with its 1M token context, Claude gets distilled intel.
+> Dispatch Gemini CLI to analyze large codebases. Gemini does the grunt work with its 1M token context; Claude gets distilled intel.
 
 You are dispatching Gemini CLI as a subordinate tool to analyze code that would bloat your context window. Gemini does the heavy lifting; you receive distilled intelligence.
 
