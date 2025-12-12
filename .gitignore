@@ -1,0 +1,25 @@
+# Context init file (regenerated each session)
+.claude/.context-init.md
+
+# Session state (user-specific)
+.claude/claude-state.json
+.claude/claude-progress.md
+
+# Backup files
+*.bak
+*~
+
+# Windows artifacts
+nul
+Thumbs.db
+
+# macOS artifacts
+.DS_Store
+
+# Temporary files
+*.tmp
+*.temp
+
+# Scraped/generated data
+*_scraped.json
+*_scraped.csv
