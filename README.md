@@ -9,11 +9,10 @@ claude-mods/
 ├── commands/           # Slash commands
 ├── skills/             # Custom skills
 ├── agents/             # Custom subagents
-├── tools/              # Modern CLI toolkit (install scripts, docs)
+├── tools/              # Modern CLI toolkit docs
 ├── rules/              # Claude Code rules (cli-tools.md)
-├── tests/              # Test suites
-├── install.sh          # Linux/macOS installer
-└── install.ps1         # Windows installer
+├── tests/              # Test suites and justfile
+└── scripts/            # Install scripts
 ```
 
 ## Installation
@@ -24,14 +23,14 @@ claude-mods/
 ```bash
 git clone https://github.com/0xDarkMatter/claude-mods.git
 cd claude-mods
-./install.sh
+./scripts/install.sh
 ```
 
 **Windows (PowerShell):**
 ```powershell
 git clone https://github.com/0xDarkMatter/claude-mods.git
 cd claude-mods
-.\install.ps1
+.\scripts\install.ps1
 ```
 
 ### Manual Install
