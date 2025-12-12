@@ -6,9 +6,11 @@ Custom commands, skills, and agents for [Claude Code](https://docs.anthropic.com
 
 ```
 claude-mods/
+├── .claude-plugin/     # Plugin metadata
 ├── agents/             # Expert subagents (24)
 ├── commands/           # Slash commands (11)
-├── skills/             # Custom skills (10)
+├── skills/             # Custom skills (11)
+├── hooks/              # Hook examples & docs
 ├── rules/              # Claude Code rules
 ├── tools/              # Modern CLI toolkit docs
 ├── tests/              # Test suites + justfile
@@ -19,7 +21,15 @@ claude-mods/
 
 ## Installation
 
-### Quick Install
+### Plugin Install (Recommended)
+
+```bash
+# In Claude Code, run:
+/plugin marketplace add 0xDarkMatter/claude-mods
+/plugin install claude-mods
+```
+
+### Script Install
 
 **Linux/macOS:**
 ```bash
@@ -77,6 +87,7 @@ Then symlink or copy to your Claude directories:
 | [safe-file-reader](skills/safe-file-reader/) | Read files without permission prompts |
 | [structural-search](skills/structural-search/) | Search code by AST structure with ast-grep |
 | [task-runner](skills/task-runner/) | Run project commands with just |
+| [tool-discovery](skills/tool-discovery/) | Find the right library/tool for any task |
 
 ### Agents
 
@@ -107,12 +118,13 @@ Then symlink or copy to your Claude directories:
 | [wrangler-expert](agents/wrangler-expert.md) | Cloudflare Workers deployment, wrangler.toml |
 | [claude-architect](agents/claude-architect.md) | Claude Code architecture, extensions, MCP, plugins, debugging |
 
-### Tools & Rules
+### Tools, Rules & Hooks
 
 | Resource | Description |
 |----------|-------------|
 | [tools/](tools/) | Modern CLI toolkit - token-efficient replacements for legacy commands |
 | [rules/cli-tools.md](rules/cli-tools.md) | Tool preference rules (fd, rg, eza, bat, etc.) |
+| [hooks/](hooks/) | Hook examples for pre/post execution automation |
 
 #### Web Fetching Hierarchy
 

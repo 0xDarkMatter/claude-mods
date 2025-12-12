@@ -1,0 +1,78 @@
+{
+  "name": "claude-mods",
+  "version": "1.0.0",
+  "description": "Custom commands, skills, and agents for Claude Code - session continuity, expert agents, modern CLI tools",
+  "author": "0xDarkMatter",
+  "repository": "https://github.com/0xDarkMatter/claude-mods",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "agents",
+    "commands",
+    "skills",
+    "session-management",
+    "cli-tools"
+  ],
+  "components": {
+    "commands": [
+      "commands/sync.md",
+      "commands/plan.md",
+      "commands/saveplan.md",
+      "commands/loadplan.md",
+      "commands/showplan.md",
+      "commands/review.md",
+      "commands/test.md",
+      "commands/explain.md",
+      "commands/agent-genesis.md",
+      "commands/g-slave.md",
+      "commands/init-tools.md"
+    ],
+    "agents": [
+      "agents/astro-expert.md",
+      "agents/asus-router-expert.md",
+      "agents/aws-fargate-ecs-expert.md",
+      "agents/bash-expert.md",
+      "agents/claude-architect.md",
+      "agents/cloudflare-expert.md",
+      "agents/craftcms-expert.md",
+      "agents/cypress-expert.md",
+      "agents/fetch-expert.md",
+      "agents/firecrawl-expert.md",
+      "agents/javascript-expert.md",
+      "agents/laravel-expert.md",
+      "agents/payloadcms-expert.md",
+      "agents/playwright-roulette-expert.md",
+      "agents/postgres-expert.md",
+      "agents/project-organizer.md",
+      "agents/python-expert.md",
+      "agents/react-expert.md",
+      "agents/rest-expert.md",
+      "agents/sql-expert.md",
+      "agents/tailwind-expert.md",
+      "agents/typescript-expert.md",
+      "agents/vue-expert.md",
+      "agents/wrangler-expert.md"
+    ],
+    "skills": [
+      "skills/agent-discovery",
+      "skills/code-stats",
+      "skills/data-processing",
+      "skills/git-workflow",
+      "skills/project-docs",
+      "skills/project-planner",
+      "skills/python-env",
+      "skills/safe-file-reader",
+      "skills/structural-search",
+      "skills/task-runner",
+      "skills/tool-discovery"
+    ],
+    "rules": [
+      "rules/cli-tools.md"
+    ]
+  },
+  "categories": [
+    "productivity",
+    "development",
+    "workflow"
+  ]
+}
