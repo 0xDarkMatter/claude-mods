@@ -1,6 +1,32 @@
 # claude-mods
 
-Custom commands, skills, and agents for [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
+A comprehensive extension toolkit for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) that transforms your AI coding assistant into a powerhouse development environment.
+
+**24 expert agents. 11 slash commands. 11 skills. One plugin install.**
+
+## Why claude-mods?
+
+Claude Code is powerful out of the box, but it has gaps. This toolkit fills them:
+
+- **Session continuity** — TodoWrite tasks vanish when sessions end. We fix that with `/saveplan` and `/loadplan`, implementing Anthropic's [recommended pattern](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) for long-running agents.
+
+- **Expert-level knowledge on demand** — 24 specialized agents covering React, TypeScript, Python, AWS, PostgreSQL, and more. Each agent is deeply researched with real-world patterns, not generic advice.
+
+- **Modern CLI tools** — Stop using `grep`, `find`, and `cat`. Our rules automatically prefer `ripgrep`, `fd`, `eza`, and `bat` — 10-100x faster and token-efficient.
+
+- **Smart web fetching** — A fallback hierarchy that actually works: WebFetch → Jina Reader → Firecrawl. No more "I can't access that URL."
+
+- **Workflow patterns** — TDD cycles, code review, feature development, debugging — all documented with Anthropic's best practices.
+
+## Key Benefits
+
+- **Persistent task state** — Pick up exactly where you left off, even across machines
+- **Domain expertise** — Agents trained on framework docs, not just general knowledge
+- **Token efficiency** — Modern CLI tools produce cleaner output, saving context window
+- **Team sharing** — Git-trackable state files work across your whole team
+- **Production-ready** — Validated test suite, proper plugin format, comprehensive docs
+- **Extended thinking** — Built-in guidance for "think hard" and "ultrathink" triggers
+- **Zero lock-in** — Standard Claude Code plugin format, toggle on/off anytime
 
 ## Structure
 
@@ -234,6 +260,16 @@ git pull
 ```
 
 Then re-run the install script to update your global Claude configuration.
+
+## Contributing
+
+PRs welcome. Run `cd tests && just test` before submitting.
+
+## Resources
+
+- [Claude Code Best Practices](https://www.anthropic.com/engineering/claude-code-best-practices) — Official Anthropic guide
+- [Claude Code Plugins](https://claude.com/blog/claude-code-plugins) — Plugin system documentation
+- [Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) — The pattern behind `/saveplan`
 
 ---
 
