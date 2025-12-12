@@ -27,6 +27,7 @@ stats:
     @echo "Agents:   $(find agents -name '*.md' | wc -l)"
     @echo "Commands: $(find commands -name '*.md' | wc -l)"
     @echo "Skills:   $(find skills -name 'SKILL.md' | wc -l)"
+    @echo "Rules:    $(find templates/rules -name '*.md' 2>/dev/null | wc -l)"
 
 # List all agents
 list-agents:
@@ -39,3 +40,12 @@ list-commands:
 # List all skills
 list-skills:
     @ls -1 skills/*/SKILL.md | xargs -n1 dirname | xargs -n1 basename
+
+# List all rules
+list-rules:
+    @find templates/rules -name '*.md' 2>/dev/null | xargs -n1 basename | sed 's/\.md$//' || echo "(none)"
+
+# Validate settings template
+validate-settings:
+    @echo "Validating settings template..."
+    @jq empty templates/settings.local.json && echo "Valid JSON" || echo "Invalid JSON"

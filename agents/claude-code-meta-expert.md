@@ -30,22 +30,24 @@ Serve as the architect and quality guardian for Claude Code extension developmen
 
 ## Official Documentation
 
-### Primary Sources
-- https://docs.anthropic.com/en/docs/claude-code
-- https://docs.anthropic.com/en/docs/claude-code/memory
-- https://docs.anthropic.com/en/docs/claude-code/sub-agents
-- https://docs.anthropic.com/en/docs/claude-code/hooks
-- https://docs.anthropic.com/en/docs/claude-code/settings
-- https://docs.anthropic.com/en/docs/claude-code/tutorials
-- https://docs.anthropic.com/en/docs/agents/overview
+### Primary Sources (code.claude.com)
+- https://code.claude.com/docs/en/skills - Agent Skills reference
+- https://code.claude.com/docs/en/hooks - Hooks reference
+- https://code.claude.com/docs/en/memory - Memory and rules system
+- https://code.claude.com/docs/en/headless - Headless mode
+- https://code.claude.com/docs/en/sub-agents - Custom subagents
+- https://code.claude.com/docs/en/settings - Settings configuration
+- https://code.claude.com/docs/en/tutorials - Tutorials
 
 ### Additional Resources
-- https://github.com/anthropics/claude-code
-- https://github.com/anthropics/anthropic-cookbook
-- https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering
-- https://www.anthropic.com/research/building-effective-agents
-- https://github.com/VoltAgent/awesome-claude-code-subagents
-- https://github.com/hesreallyhim/awesome-claude-code
+- https://claude.com/blog/skills - Introducing Agent Skills
+- https://claude.com/blog/building-skills-for-claude-code - Building Skills
+- https://claude.com/blog/claude-code-plugins - Plugins guide
+- https://support.claude.com/en/articles/12512198-how-to-create-custom-skills - Creating custom skills
+- https://github.com/anthropics/claude-code - Official repository
+- https://github.com/VoltAgent/awesome-claude-code-subagents - Community subagents
+- https://github.com/hesreallyhim/awesome-claude-code - Community resources
+- https://www.anthropic.com/engineering/claude-code-best-practices - Best practices
 
 ## Architecture Knowledge
 
@@ -67,19 +69,84 @@ Enterprise Policy (system-wide)
                 └── commands/          # Project commands
 ```
 
-### Memory System
+### Memory System (CLAUDE.md)
 
-**CLAUDE.md Files**:
+**Memory Hierarchy** (in order of precedence):
+| Type | Location | Shared With |
+|------|----------|-------------|
+| Enterprise policy | `/Library/Application Support/ClaudeCode/CLAUDE.md` (macOS), `/etc/claude-code/CLAUDE.md` (Linux), `C:\Program Files\ClaudeCode\CLAUDE.md` (Windows) | All org users |
+| Project memory | `./CLAUDE.md` or `./.claude/CLAUDE.md` | Team (via git) |
+| Project rules | `./.claude/rules/*.md` | Team (via git) |
+| User memory | `~/.claude/CLAUDE.md` | Just you (all projects) |
+| Project local | `./CLAUDE.local.md` | Just you (current project) |
+
+**CLAUDE.md Features**:
 - Loaded automatically at session start
-- Support `@path/to/file` imports (up to 5 hops)
+- Support `@path/to/file` imports (up to 5 hops max depth)
 - Project-level overrides global-level
 - Use `#` prefix for quick memory addition
+- View loaded files with `/memory` command
+- Edit memories with `/memory` (opens in system editor)
 
-**Rules Directory** (`.claude/rules/`):
-- Modular, topic-specific instructions
-- Support path-scoping via YAML frontmatter
-- Glob patterns for file targeting
-- Loaded based on current file context
+**Import Syntax**:
+```markdown
+See @README for project overview and @package.json for available npm commands.
+
+# Additional Instructions
+- git workflow @docs/git-instructions.md
+```
+
+### Rules System (`.claude/rules/`)
+
+**Directory Structure**:
+```
+.claude/rules/
+├── frontend/
+│   ├── react.md       # React-specific rules
+│   └── styles.md      # CSS conventions
+├── backend/
+│   ├── api.md         # API guidelines
+│   └── database.md    # DB conventions
+└── general.md         # General rules
+```
+
+**Rule File Format with Path Scoping**:
+```markdown
+---
+paths: src/api/**/*.ts
+---
+
+# API Development Rules
+
+- All API endpoints must include input validation
+- Use the standard error response format
+- Include OpenAPI documentation comments
+```
+
+**Glob Pattern Examples**:
+| Pattern | Matches |
+|---------|---------|
+| `**/*.ts` | All TypeScript files in any directory |
+| `src/**/*` | All files under `src/` directory |
+| `*.md` | Markdown files in project root |
+| `src/components/*.tsx` | React components in specific directory |
+| `src/**/*.{ts,tsx}` | TypeScript and TSX files |
+| `{src,lib}/**/*.ts, tests/**/*.test.ts` | Multiple patterns combined |
+
+**Rules without a `paths` field apply to all files.**
+
+**Symlinks for Shared Rules**:
+```bash
+# Symlink a shared rules directory
+ln -s ~/shared-claude-rules .claude/rules/shared
+
+# Symlink individual rule files
+ln -s ~/company-standards/security.md .claude/rules/security.md
+```
+
+**User-Level Rules** (`~/.claude/rules/`):
+- Load before project rules (lower priority)
+- Personal coding preferences across all projects
 
 ### Permissions Model
 
@@ -103,11 +170,137 @@ Enterprise Policy (system-wide)
 
 ### Hook System
 
-Pre/post hooks for tool execution:
+**Available Hook Events**:
+| Event | Description | Has Matcher |
+|-------|-------------|-------------|
+| `PreToolUse` | Before tool execution | Yes |
+| `PostToolUse` | After tool completes | Yes |
+| `PermissionRequest` | When permission dialog shown | Yes |
+| `Notification` | When notifications sent | Yes |
+| `UserPromptSubmit` | When user submits prompt | No |
+| `Stop` | When agent finishes | No |
+| `SubagentStop` | When subagent finishes | No |
+| `PreCompact` | Before context compaction | No |
+| `SessionStart` | Session begins/resumes | No |
+| `SessionEnd` | Session ends | No |
+
+**Hook Configuration Structure**:
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "path/to/hook-script.sh",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo 'Tool completed'"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+**Matcher Patterns**:
+- Simple string: `"Write"` - matches only Write tool
+- Wildcard: `"*"` - matches all tools
+- Empty string: `""` - matches all tools
+- Common matchers: `Task`, `Bash`, `WebFetch`, `WebSearch`, `Read`, `Write`, `Edit`
+
+**Hook Script Requirements**:
+1. Receives JSON input via stdin
+2. Exit codes:
+   - `0`: Success
+   - `2`: Blocking error (stderr shown to Claude)
+   - Other: Non-blocking error
+3. Stdout can provide feedback to Claude
+
+**Processing Order**:
+```
+PreToolUse Hook → Deny Rules → Allow Rules → Ask Rules → Permission Mode Check → canUseTool Callback → [Tool Execution] → PostToolUse Hook
+```
+
+**Use Cases**:
 - Validate inputs before execution
 - Transform outputs after execution
 - Logging and auditing
 - Custom approval workflows
+- Rate limiting
+- Security checks
+
+### Headless Mode
+
+**Purpose**: Run Claude Code programmatically from command-line scripts without interactive UI.
+
+**Basic Usage**:
+```bash
+claude -p "Stage my changes and write commits" \
+  --allowedTools "Bash,Read" \
+  --permission-mode acceptEdits
+```
+
+**Key CLI Options**:
+| Flag | Description |
+|------|-------------|
+| `--print`, `-p` | Non-interactive mode |
+| `--output-format` | text, json, stream-json |
+| `--resume`, `-r` | Resume conversation by session ID |
+| `--continue`, `-c` | Continue most recent conversation |
+| `--verbose` | Enable verbose logging |
+| `--append-system-prompt` | Append to system prompt |
+| `--allowedTools` | Comma-separated allowed tools |
+| `--disallowedTools` | Comma-separated denied tools |
+| `--mcp-config` | Load MCP servers from JSON |
+
+**Output Formats**:
+- **Text**: Default, human-readable output
+- **JSON**: Structured output with session_id, cost, duration
+- **Stream-JSON**: Real-time JSONL streaming
+
+**JSON Output Structure**:
+```json
+{
+  "type": "result",
+  "subtype": "success",
+  "total_cost_usd": 0.003,
+  "is_error": false,
+  "duration_ms": 1234,
+  "num_turns": 6,
+  "result": "Response text...",
+  "session_id": "abc123"
+}
+```
+
+**Multi-turn Conversations**:
+```bash
+# Resume specific session
+session_id=$(claude -p "Start analysis" --output-format json | jq -r '.session_id')
+claude --resume "$session_id" "Continue with next step"
+```
+
+**Integration Pattern**:
+```bash
+audit_pr() {
+    gh pr diff "$1" | claude -p \
+      --append-system-prompt "Security review: vulnerabilities, patterns, compliance" \
+      --output-format json \
+      --allowedTools "Read,Grep,WebSearch"
+}
+```
 
 ## Extension Patterns
 
@@ -139,7 +332,9 @@ Pre/post hooks for tool execution:
    - Explicit anti-patterns
    - Comprehensive but focused
 
-### Skill Authoring Guide
+### Skill Authoring Guide (Comprehensive)
+
+**Skills are model-invoked** - Claude autonomously decides when to use them based on your request and the Skill's description. This differs from slash commands, which are user-invoked.
 
 1. **Directory Structure**:
    ```
@@ -147,23 +342,129 @@ Pre/post hooks for tool execution:
    └── skill-name/
        ├── SKILL.md        # Required: main definition
        ├── reference.md    # Optional: detailed reference
-       └── templates.md    # Optional: output templates
+       └── templates/      # Optional: output templates
+           └── example.txt
    ```
 
 2. **SKILL.md Format**:
    ```yaml
    ---
    name: skill-name
-   description: "Trigger keywords and use cases..."
+   description: "Brief description. Triggers on: [keyword 1], [keyword 2], [keyword 3]. (location)"
    ---
+
+   # Skill Name
+
+   ## Purpose
+   [What this skill does]
+
+   ## Tools Required
+   | Tool | Command | Purpose |
+   |------|---------|---------|
+   | tool1 | `tool1 args` | What it does |
+
+   ## Usage Examples
+   ### Scenario 1
+   ```bash
+   command example
    ```
 
-3. **Content**:
-   - Purpose statement
-   - Tool requirements (what CLI tools needed)
-   - Usage examples with code blocks
-   - Output interpretation guide
-   - When to use vs alternatives
+   ## When to Use
+   - [Scenario 1]
+   - [Scenario 2]
+   ```
+
+3. **Field Requirements**:
+   - `name`: Lowercase letters, numbers, hyphens (max 64 chars)
+   - `description`: Clear trigger scenarios (max 1024 chars)
+   - `allowed-tools`: Optional - restricts tool access without permission prompts
+   - Description is CRITICAL for Claude to discover when to use your Skill
+
+4. **Storage Locations**:
+   - Personal Skills: `~/.claude/skills/` (available across all projects)
+   - Project Skills: `.claude/skills/` (available in current project)
+   - List with: `ls ~/.claude/skills/` or `ls .claude/skills/`
+
+5. **Best Practices**:
+   - Keep SKILL.md lean with high-level instructions
+   - Put detailed specifications in reference files
+   - Include example inputs and outputs
+   - Test incrementally after each change
+   - Information should live in SKILL.md OR reference files, not both
+
+### Subagent Creation Guide (Comprehensive)
+
+**Custom agents directory locations**:
+- Project-level: `.claude/agents/*.md` - Available only in current project
+- User-level: `~/.claude/agents/*.md` - Available across all projects
+
+**Built-in Subagents**:
+- `Plan`: Used only in plan mode for implementation planning
+- `Explore`: Fast, read-only agent for searching and analyzing codebases
+- `general-purpose`: Default agent for general tasks
+
+1. **Agent File Format**:
+   ```yaml
+   ---
+   name: technology-expert
+   description: "Expert in [technology]. Use for: [scenario 1], [scenario 2], [scenario 3]."
+   model: inherit
+   ---
+
+   # [Technology] Expert Agent
+
+   You are an expert in [technology], specializing in [specific areas].
+
+   ## Focus Areas
+   - [Area 1]
+   - [Area 2]
+
+   ## Approach Principles
+   - [Principle 1]
+   - [Principle 2]
+
+   ## Quality Checklist
+   - [ ] [Requirement 1]
+   - [ ] [Requirement 2]
+
+   ## References
+   - [URL 1]
+   - [URL 2]
+   ```
+
+2. **Configuration Fields**:
+   | Field | Required | Description |
+   |-------|----------|-------------|
+   | `name` | Yes | Unique identifier (lowercase, hyphens) |
+   | `description` | Yes | Purpose - critical for auto-delegation |
+   | `tools` | No | Comma-separated list (inherits all if omitted) |
+   | `model` | No | `sonnet`, `opus`, `haiku`, or `inherit` |
+   | `permissionMode` | No | `default`, `acceptEdits`, `bypassPermissions`, `plan`, `ignore` |
+   | `skills` | No | Auto-load skill names when subagent starts |
+
+3. **Model Options**:
+   - `inherit`: Use parent conversation's model (recommended)
+   - `sonnet`: Claude Sonnet (faster, cheaper)
+   - `opus`: Claude Opus (most capable)
+   - `haiku`: Claude Haiku (fastest, cheapest)
+
+4. **Built-in Subagents**:
+   - `Explore`: Fast read-only agent (Haiku) for codebase searching
+   - `Plan`: Research agent used in plan mode
+   - `general-purpose`: Default agent for complex tasks
+
+5. **Resumable Agents**:
+   Each execution gets a unique `agentId`. Resume with full context:
+   ```bash
+   > Resume agent abc123 and analyze authorization logic too
+   ```
+
+6. **Best Practices**:
+   - Design focused agents with single, clear responsibilities
+   - Limit tool access to only what's necessary
+   - Version control project agents for team collaboration
+   - Include 10+ authoritative documentation URLs
+   - Define clear trigger scenarios in description
 
 ### Command Design Patterns
 

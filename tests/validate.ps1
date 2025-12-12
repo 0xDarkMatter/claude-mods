@@ -104,14 +104,24 @@ function Test-RequiredFields {
     $name = Get-YamlField -FilePath $FilePath -Field "name"
     $description = Get-YamlField -FilePath $FilePath -Field "description"
 
-    if (-not $name) {
-        Write-Fail "$FilePath - Missing required field: name"
-        return $false
+    # Agents require both name and description
+    if ($Type -eq "agent") {
+        if (-not $name) {
+            Write-Fail "$FilePath - Missing required field: name"
+            return $false
+        }
+        if (-not $description) {
+            Write-Fail "$FilePath - Missing required field: description"
+            return $false
+        }
     }
 
-    if (-not $description) {
-        Write-Fail "$FilePath - Missing required field: description"
-        return $false
+    # Commands only require description
+    if ($Type -eq "command") {
+        if (-not $description) {
+            Write-Fail "$FilePath - Missing required field: description"
+            return $false
+        }
     }
 
     return $true
@@ -195,6 +205,11 @@ function Test-Commands {
     foreach ($subdir in $subdirs) {
         $subFiles = Get-ChildItem -Path $subdir.FullName -Filter "*.md" -File
         foreach ($file in $subFiles) {
+            # Skip README and LICENSE files
+            if ($file.Name -eq "README.md" -or $file.Name -eq "LICENSE.md") {
+                continue
+            }
+
             if (-not $NamesOnly) {
                 if (Test-YamlFrontmatter -FilePath $file.FullName) {
                     $desc = Get-YamlField -FilePath $file.FullName -Field "description"
@@ -244,6 +259,116 @@ function Test-Skills {
     }
 }
 
+function Test-Rules {
+    Write-Host ""
+    Write-Host "=== Validating Rules ===" -ForegroundColor Cyan
+
+    $rulesDir = Join-Path $ProjectDir "templates\rules"
+    if (-not (Test-Path $rulesDir)) {
+        Write-Host "  (no templates/rules/ directory - skipping)"
+        return
+    }
+
+    $files = Get-ChildItem -Path $rulesDir -Filter "*.md" -File -Recurse
+    foreach ($file in $files) {
+        # Rules should be .md files
+        if ($file.Extension -ne ".md") {
+            Write-Warn "$($file.FullName) - Rule file should be .md"
+            continue
+        }
+
+        # Check if file has content
+        if ($file.Length -eq 0) {
+            Write-Fail "$($file.FullName) - Empty rule file"
+            continue
+        }
+
+        $content = Get-Content -Path $file.FullName -Raw
+
+        # Check for valid YAML frontmatter if present
+        if ($content.StartsWith("---")) {
+            $lines = $content -split "`n"
+            $foundClosing = $false
+            for ($i = 1; $i -lt $lines.Count; $i++) {
+                if ($lines[$i].Trim() -eq "---") {
+                    $foundClosing = $true
+                    break
+                }
+            }
+
+            if (-not $foundClosing) {
+                Write-Fail "$($file.FullName) - Invalid YAML frontmatter (no closing ---)"
+                continue
+            }
+
+            # If paths field exists, check it's not empty
+            $paths = Get-YamlField -FilePath $file.FullName -Field "paths"
+            if ($content -match "^paths:" -and -not $paths) {
+                Write-Warn "$($file.FullName) - paths field is empty"
+            }
+        }
+
+        # Check naming convention (kebab-case)
+        $basename = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
+        if ($basename -notmatch "^[a-z][a-z0-9]*(-[a-z0-9]+)*$") {
+            Write-Warn "$($file.FullName) - Filename not kebab-case: $basename"
+        }
+
+        Write-Pass "$($file.FullName) - Valid rule"
+    }
+}
+
+function Test-Settings {
+    Write-Host ""
+    Write-Host "=== Validating Settings ===" -ForegroundColor Cyan
+
+    $settingsFile = Join-Path $ProjectDir "templates\settings.local.json"
+    if (-not (Test-Path $settingsFile)) {
+        Write-Host "  (no templates/settings.local.json - skipping)"
+        return
+    }
+
+    # Check if valid JSON
+    try {
+        $settings = Get-Content -Path $settingsFile -Raw | ConvertFrom-Json
+    } catch {
+        Write-Fail "$settingsFile - Invalid JSON"
+        return
+    }
+
+    # Check for permissions structure
+    if (-not $settings.permissions) {
+        Write-Fail "$settingsFile - Missing 'permissions' key"
+    } else {
+        # Check permissions has allow array
+        if (-not ($settings.permissions.allow -is [array])) {
+            Write-Fail "$settingsFile - permissions.allow should be an array"
+        } else {
+            Write-Pass "$settingsFile - Valid permissions structure"
+        }
+    }
+
+    # Check for hooks structure (optional but if present should be object)
+    if ($settings.hooks) {
+        $validEvents = @("PreToolUse", "PostToolUse", "PermissionRequest", "Notification",
+                         "UserPromptSubmit", "Stop", "SubagentStop", "PreCompact",
+                         "SessionStart", "SessionEnd")
+
+        $hookEvents = $settings.hooks.PSObject.Properties.Name
+        foreach ($event in $hookEvents) {
+            if ($event -notin $validEvents) {
+                Write-Warn "$settingsFile - Unknown hook event: $event"
+            }
+        }
+
+        if ($hookEvents.Count -gt 0) {
+            Write-Pass "$settingsFile - Valid hooks structure"
+        } else {
+            Write-Pass "$settingsFile - Hooks defined (empty)"
+        }
+    }
+}
+
 # Main
 Write-Host "claude-mods Validation"
 Write-Host "======================"
@@ -252,6 +377,8 @@ Write-Host "Project: $ProjectDir"
 Test-Agents
 Test-Commands
 Test-Skills
+Test-Rules
+Test-Settings
 
 Write-Host ""
 Write-Host "======================"
