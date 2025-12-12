@@ -99,7 +99,7 @@ Then symlink or copy to your Claude directories:
 | [sql-expert](agents/sql-expert.md) | Complex SQL queries, optimization, indexing |
 | [tailwind-expert](agents/tailwind-expert.md) | Tailwind CSS, responsive design |
 | [wrangler-expert](agents/wrangler-expert.md) | Cloudflare Workers deployment, wrangler.toml |
-| [claude-code-meta-expert](agents/claude-code-meta-expert.md) | Claude Code architecture, extension development, quality review |
+| [claude-architect](agents/claude-architect.md) | Claude Code architecture, extensions, MCP, plugins, debugging |
 
 ## Testing & Validation
 
