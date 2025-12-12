@@ -1,0 +1,33 @@
+name: Sync g-slave to standalone repo
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'commands/g-slave.md'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout claude-mods
+        uses: actions/checkout@v4
+
+      - name: Prepare g-slave.md (strip frontmatter)
+        run: |
+          # Remove YAML frontmatter for standalone repo
+          sed '1{/^---$/!q;};1,/^---$/d' commands/g-slave.md > g-slave-clean.md
+
+      - name: Push to g-slave repo
+        uses: dmnemec/copy_file_to_another_repo_action@main
+        env:
+          API_TOKEN_GITHUB: ${{ secrets.G_SLAVE_SYNC_TOKEN }}
+        with:
+          source_file: 'g-slave-clean.md'
+          destination_repo: '0xDarkMatter/g-slave'
+          destination_folder: '/'
+          destination_branch: 'main'
+          user_email: 'github-actions[bot]@users.noreply.github.com'
+          user_name: 'github-actions[bot]'
+          commit_message: 'sync: Update from claude-mods'
+          rename: 'g-slave.md'
