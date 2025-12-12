@@ -17,17 +17,21 @@ jobs:
         run: |
           # Remove YAML frontmatter for standalone repo
           sed '1{/^---$/!q;};1,/^---$/d' commands/g-slave.md > g-slave-clean.md
+          cat g-slave-clean.md | head -20
 
-      - name: Push to g-slave repo
-        uses: dmnemec/copy_file_to_another_repo_action@main
-        env:
-          API_TOKEN_GITHUB: ${{ secrets.G_SLAVE_SYNC_TOKEN }}
+      - name: Checkout g-slave repo
+        uses: actions/checkout@v4
         with:
-          source_file: 'g-slave-clean.md'
-          destination_repo: '0xDarkMatter/g-slave'
-          destination_folder: '/'
-          destination_branch: 'main'
-          user_email: 'github-actions[bot]@users.noreply.github.com'
-          user_name: 'github-actions[bot]'
-          commit_message: 'sync: Update from claude-mods'
-          rename: 'g-slave.md'
+          repository: 0xDarkMatter/g-slave
+          token: ${{ secrets.G_SLAVE_SYNC_TOKEN }}
+          path: g-slave-repo
+
+      - name: Copy and push
+        run: |
+          cp g-slave-clean.md g-slave-repo/g-slave.md
+          cd g-slave-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add g-slave.md
+          git diff --staged --quiet || git commit -m "sync: Update from claude-mods"
+          git push
