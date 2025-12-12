@@ -19,23 +19,22 @@ claude-mods/
 
 **Linux/macOS:**
 ```bash
-git clone --recursive https://github.com/0xDarkMatter/claude-mods.git
+git clone https://github.com/0xDarkMatter/claude-mods.git
 cd claude-mods
 ./install.sh
 ```
 
 **Windows (PowerShell):**
 ```powershell
-git clone --recursive https://github.com/0xDarkMatter/claude-mods.git
+git clone https://github.com/0xDarkMatter/claude-mods.git
 cd claude-mods
 .\install.ps1
 ```
 
 ### Manual Install
 
-Clone with submodules:
 ```bash
-git clone --recursive https://github.com/0xDarkMatter/claude-mods.git
+git clone https://github.com/0xDarkMatter/claude-mods.git
 ```
 
 Then symlink or copy to your Claude directories:
@@ -49,14 +48,17 @@ Then symlink or copy to your Claude directories:
 
 | Command | Description |
 |---------|-------------|
-| [g-slave](commands/g-slave/) | Dispatch Gemini CLI to analyze large codebases. Gemini does the grunt work, Claude gets the summary. |
-| [agent-genesis](commands/agent-genesis.md) | Generate Claude Code expert agent prompts for any technology platform. |
-| [save](commands/save.md) | Save session state before ending. Creates claude-state.json and claude-progress.md for session continuity. |
-| [load](commands/load.md) | Load session context from saved state. Shows what changed, suggests next action. |
+| [sync](commands/sync.md) | Session bootstrap - read project context (README, AGENTS, docs, skills, agents). Quick orientation. |
+| [loadplan](commands/loadplan.md) | Restore plan session state. Loads TodoWrite tasks, plan progress from saved state. |
+| [saveplan](commands/saveplan.md) | Save plan session state. Persists TodoWrite tasks, current plan step, and git context. |
+| [showplan](commands/showplan.md) | Show plan status: progress, active tasks, git state. Quick read-only view. |
 | [plan](commands/plan.md) | Create and persist project plans. Captures Plan Mode state and writes to git-trackable PLAN.md. |
+| [g-slave](commands/g-slave.md) | Dispatch Gemini CLI to analyze large codebases. Gemini does the grunt work, Claude gets the summary. |
+| [agent-genesis](commands/agent-genesis.md) | Generate Claude Code expert agent prompts for any technology platform. |
 | [review](commands/review.md) | Code review staged changes or specific files. Analyzes bugs, security, performance, style. |
 | [test](commands/test.md) | Generate tests with automatic framework detection (Jest, Vitest, pytest, etc.). |
 | [explain](commands/explain.md) | Deep explanation of complex code, files, or concepts. Architecture, data flow, design decisions. |
+| [init-tools](commands/init-tools.md) | Initialize and verify CLI tool dependencies for skills. |
 
 ### Skills
 
@@ -133,7 +135,7 @@ just stats        # Count extensions
 just list-agents  # List all agents
 ```
 
-## Session Continuity: `/save` + `/load`
+## Session Continuity
 
 These commands fill a gap in Claude Code's native session management.
 
@@ -141,7 +143,7 @@ These commands fill a gap in Claude Code's native session management.
 
 TodoWrite tasks are stored at `~/.claude/todos/[session-id].json` and deleted when the session ends. This is intentional.
 
-**The solution:** `/save` and `/load` implement the pattern from Anthropic's [Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents):
+**The solution:** `/saveplan` and `/loadplan` implement the pattern from Anthropic's [Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents):
 
 > "Every subsequent session asks the model to make incremental progress, then leave structured updates."
 
@@ -154,23 +156,26 @@ TodoWrite tasks are stored at `~/.claude/todos/[session-id].json` and deleted wh
 | TodoWrite tasks | **No** | Deleted on session end |
 | Plan Mode state | **No** | In-memory only |
 
-### How `/save` + `/load` Works
+### Session Workflow
 
 ```
 Session 1:
+  /sync                              # Bootstrap - read project context
   [work on tasks]
-  /save "Stopped at auth module"    # Writes .claude/claude-state.json + claude-progress.md
+  /saveplan "Stopped at auth module" # Writes .claude/claude-state.json
 
 Session 2:
-  /load                              # Restores TodoWrite, shows git diff, suggests next action
+  /sync                              # Read project context
+  /loadplan                          # Restore TodoWrite, show what changed
   → "In progress: Auth module refactor"
   → "Notes: Stopped at auth module"
+  /showplan                          # Quick status check anytime
 ```
 
 ### Why Not Just Use `--resume`?
 
-| Feature | `--resume` | `/save` + `/load` |
-|---------|------------|-------------------|
+| Feature | `--resume` | `/saveplan` + `/loadplan` |
+|---------|------------|---------------------------|
 | Conversation history | Yes | No |
 | TodoWrite tasks | **No** | Yes |
 | Git context | No | Yes |
@@ -179,17 +184,15 @@ Session 2:
 | Works across machines | No | Yes (if committed) |
 | Team sharing | No | Yes |
 
-**Use both together:** `claude --resume` for conversation context, `/load` for task state.
+**Use both together:** `claude --resume` for conversation context, `/loadplan` for task state.
 
 ## Updating
 
-Pull updates including submodules:
 ```bash
-git pull --recurse-submodules
-git submodule update --remote
+git pull
 ```
 
-Then re-run the install script.
+Then re-run the install script to update your global Claude configuration.
 
 ## License
 
