@@ -9,6 +9,9 @@ claude-mods/
 ├── commands/           # Slash commands
 ├── skills/             # Custom skills
 ├── agents/             # Custom subagents
+├── tools/              # Modern CLI toolkit (install scripts, docs)
+├── rules/              # Claude Code rules (cli-tools.md)
+├── tests/              # Test suites
 ├── install.sh          # Linux/macOS installer
 └── install.ps1         # Windows installer
 ```
@@ -102,6 +105,26 @@ Then symlink or copy to your Claude directories:
 | [tailwind-expert](agents/tailwind-expert.md) | Tailwind CSS, responsive design |
 | [wrangler-expert](agents/wrangler-expert.md) | Cloudflare Workers deployment, wrangler.toml |
 | [claude-architect](agents/claude-architect.md) | Claude Code architecture, extensions, MCP, plugins, debugging |
+
+### Tools & Rules
+
+| Resource | Description |
+|----------|-------------|
+| [tools/](tools/) | Modern CLI toolkit - token-efficient replacements for legacy commands |
+| [rules/cli-tools.md](rules/cli-tools.md) | Tool preference rules (fd, rg, eza, bat, etc.) |
+
+#### Web Fetching Hierarchy
+
+When fetching web content, tools are used in this order:
+
+| Priority | Tool | When to Use |
+|----------|------|-------------|
+| 1 | `WebFetch` | First attempt - fast, built-in |
+| 2 | `r.jina.ai/URL` | JS-rendered pages, PDFs, cleaner extraction |
+| 3 | `firecrawl <url>` | Anti-bot bypass, blocked sites (403, Cloudflare) |
+| 4 | `firecrawl-expert` agent | Complex scraping, structured extraction |
+
+See [tools/README.md](tools/README.md) for full documentation and install scripts.
 
 ## Testing & Validation
 
