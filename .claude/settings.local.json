@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git:*)",
+      "Bash(ls:*)",
+      "Bash(mkdir:*)",
+      "Bash(cat:*)",
+      "Bash(wc:*)",
+      "Bash(jq:*)",
+      "Bash(yq:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(nul)",
+      "Bash(.claude/.context-init.md)",
+      "Bash(for:*)",
+      "Bash(do:*)",
+      "Bash(echo:*)",
+      "Bash(done)",
+      "Bash(found=\"\")",
+      "Bash({ cat \"$f\")",
+      "Bash(found=\"$found $f\")",
+      "Bash(})",
+      "Bash([ -n \"$found\" ])",
+      "SlashCommand(/init)"
+    ],
+    "deny": [],
+    "ask": []
+  },
+  "hooks": {}
+}
