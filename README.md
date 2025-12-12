@@ -25,9 +25,10 @@ claude-mods/
 
 ```bash
 # In Claude Code, run:
-/plugin marketplace add 0xDarkMatter/claude-mods
-/plugin install claude-mods
+/plugin install 0xDarkMatter/claude-mods
 ```
+
+This installs directly from GitHub. Toggle on/off with `/plugin` menu.
 
 ### Script Install
 
@@ -55,6 +56,7 @@ Then symlink or copy to your Claude directories:
 - Commands → `~/.claude/commands/`
 - Skills → `~/.claude/skills/`
 - Agents → `~/.claude/agents/`
+- Rules → `~/.claude/rules/`
 
 ## What's Included
 

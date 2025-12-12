@@ -5,20 +5,33 @@
 This is **claude-mods** - a collection of custom extensions for Claude Code:
 - **24 expert agents** for specialized domains (React, Python, AWS, etc.)
 - **11 slash commands** for workflows (/sync, /plan, /review, etc.)
-- **10 skills** for CLI tool integration (git-workflow, code-stats, etc.)
+- **11 skills** for CLI tool integration (git-workflow, code-stats, tool-discovery, etc.)
+
+## Installation
+
+```bash
+# Plugin install (recommended)
+/plugin install 0xDarkMatter/claude-mods
+
+# Or clone and run install script
+git clone https://github.com/0xDarkMatter/claude-mods.git
+cd claude-mods && ./scripts/install.sh  # or .\scripts\install.ps1 on Windows
+```
 
 ## Key Directories
 
 | Directory | Purpose |
 |-----------|---------|
+| `.claude-plugin/` | Plugin metadata (plugin.json) |
 | `agents/` | Expert subagent prompts (.md files) |
 | `commands/` | Slash command definitions |
 | `skills/` | Skill definitions with SKILL.md |
-| `rules/` | Claude Code rules (cli-tools.md) |
+| `hooks/` | Hook examples (pre/post execution) |
+| `rules/` | Claude Code rules (cli-tools.md, thinking.md) |
 | `tools/` | Modern CLI toolkit documentation |
 | `tests/` | Validation scripts + justfile |
 | `scripts/` | Install scripts |
-| `docs/` | PLAN.md, DASH.md |
+| `docs/` | PLAN.md, DASH.md, WORKFLOWS.md |
 
 ## Session Init
 
@@ -26,16 +39,26 @@ On "INIT:" message at session start:
 1. Read the specified file (.claude/.context-init.md)
 2. Proceed with user request - no summary needed
 
-## CLI Tool Preferences
+## Key Resources
 
-See `rules/cli-tools.md` for modern CLI tool preferences:
-- Use `rg` over grep, `fd` over find, `eza` over ls
-- Use `bat` over cat, `dust` over du, `tldr` over man
-- Web fetching: WebFetch → Jina → firecrawl → firecrawl-expert
+| Resource | Description |
+|----------|-------------|
+| `rules/cli-tools.md` | Modern CLI tool preferences (rg, fd, eza, bat) |
+| `rules/thinking.md` | Extended thinking triggers (think → ultrathink) |
+| `docs/WORKFLOWS.md` | 10 workflow patterns from Anthropic best practices |
+| `skills/tool-discovery/` | Find the right library for any task |
+| `hooks/README.md` | Pre/post execution hook examples |
+
+## Quick Reference
+
+**CLI Tools:** Use `rg` over grep, `fd` over find, `eza` over ls, `bat` over cat
+
+**Web Fetching:** WebFetch → Jina (`r.jina.ai/`) → `firecrawl` → firecrawl-expert agent
+
+**Extended Thinking:** "think" < "think hard" < "think harder" < "ultrathink"
 
 ## Testing
 
-Run from `tests/` directory:
 ```bash
 cd tests && just test
 ```
