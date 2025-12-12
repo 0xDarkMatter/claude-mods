@@ -6,13 +6,15 @@ Custom commands, skills, and agents for [Claude Code](https://docs.anthropic.com
 
 ```
 claude-mods/
-├── commands/           # Slash commands
-├── skills/             # Custom skills
-├── agents/             # Custom subagents
+├── agents/             # Expert subagents (24)
+├── commands/           # Slash commands (11)
+├── skills/             # Custom skills (10)
+├── rules/              # Claude Code rules
 ├── tools/              # Modern CLI toolkit docs
-├── rules/              # Claude Code rules (cli-tools.md)
-├── tests/              # Test suites and justfile
-└── scripts/            # Install scripts
+├── tests/              # Test suites + justfile
+├── scripts/            # Install scripts
+├── docs/               # Project docs (PLAN.md, DASH.md)
+└── templates/          # Extension templates
 ```
 
 ## Installation
@@ -130,14 +132,16 @@ See [tools/README.md](tools/README.md) for full documentation and install script
 Validate all extensions before committing:
 
 ```bash
+cd tests
+
 # Run full validation (requires just)
 just test
 
 # Or run directly
-bash tests/validate.sh
+bash validate.sh
 
 # Windows
-powershell tests/validate.ps1
+powershell validate.ps1
 ```
 
 ### What's Validated
@@ -149,6 +153,7 @@ powershell tests/validate.ps1
 ### Available Tasks
 
 ```bash
+cd tests
 just              # List all tasks
 just test         # Run full validation
 just validate-yaml # YAML only
@@ -215,10 +220,6 @@ git pull
 ```
 
 Then re-run the install script to update your global Claude configuration.
-
-## License
-
-MIT
 
 ---
 
