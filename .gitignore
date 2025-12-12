@@ -4,6 +4,7 @@
 # Session state (user-specific)
 .claude/claude-state.json
 .claude/claude-progress.md
+.claude/sync-cache.json
 
 # Backup files
 *.bak
