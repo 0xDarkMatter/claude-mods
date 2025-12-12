@@ -20,7 +20,22 @@
       "Bash(found=\"$found $f\")",
       "Bash(})",
       "Bash([ -n \"$found\" ])",
-      "SlashCommand(/init)"
+      "SlashCommand(/init)",
+      "Bash(find:*)",
+      "Bash(winget install:*)",
+      "Bash(winget search:*)",
+      "Bash(export PATH=\"$PATH:$HOME/AppData/Local/Microsoft/WinGet/Links\")",
+      "Bash(TLDR=\"/c/Users/Mack/AppData/Local/Microsoft/WinGet/Packages/dbrgn.tealdeer_Microsoft.Winget.Source_8wekyb3d8bbwe/tldr.exe\")",
+      "Bash($TLDR --update)",
+      "Bash($TLDR git-rebase)",
+      "Bash(fc https://httpbin.org/html)",
+      "Bash(where fc:*)",
+      "Bash(firecrawl:*)",
+      "Bash(\"C:/Users/Mack/AppData/Local/Microsoft/WinGet/Links/firecrawl.cmd\" https://httpbin.org/html)",
+      "Bash(pip3 list:*)",
+      "Bash(python3:*)",
+      "Bash(where:*)",
+      "Bash(\"C:\\Users\\Mack\\AppData\\Local\\Programs\\Python\\Python313\\python.exe\" -c \"import os; print(''FIRECRAWL_API_KEY is set:'', ''Yes'' if os.getenv(''FIRECRAWL_API_KEY'') else ''No'')\")"
     ],
     "deny": [],
     "ask": []
