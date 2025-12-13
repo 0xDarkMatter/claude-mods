@@ -152,7 +152,7 @@ Suggested: Continue with "Fix callback URL handling"
 
 ## State File Format
 
-`.claude/claude-state.json`:
+`.claude/session-cache.json`:
 
 ```json
 {
@@ -239,7 +239,7 @@ These commands integrate with the `/plan` command:
 │   Strategic (Big Picture)          Tactical (Right Now)    │
 │   ────────────────────────         ───────────────────────  │
 │                                                             │
-│   docs/PLAN.md                     .claude/claude-state.json│
+│   docs/PLAN.md                     .claude/session-cache.json│
 │   ├─ Project goal                  ├─ TodoWrite tasks       │
 │   ├─ Implementation steps          ├─ Current plan step ref │
 │   ├─ Progress markers              ├─ Git context           │

@@ -35,7 +35,18 @@
       "Bash(pip3 list:*)",
       "Bash(python3:*)",
       "Bash(where:*)",
-      "Bash(\"C:\\Users\\Mack\\AppData\\Local\\Programs\\Python\\Python313\\python.exe\" -c \"import os; print(''FIRECRAWL_API_KEY is set:'', ''Yes'' if os.getenv(''FIRECRAWL_API_KEY'') else ''No'')\")"
+      "Bash(\"C:\\Users\\Mack\\AppData\\Local\\Programs\\Python\\Python313\\python.exe\" -c \"import os; print(''FIRECRAWL_API_KEY is set:'', ''Yes'' if os.getenv(''FIRECRAWL_API_KEY'') else ''No'')\")",
+      "Bash(md5:*)",
+      "Bash(certutil:*)",
+      "Bash(certutil -hashfile:*)",
+      "Bash(grep:*)",
+      "Bash(xargs basename:*)",
+      "Bash(FIRECRAWL_API_KEY=fc-62620190118f4aa0907781f3f6f3278e python scripts/pulse_fetch.py:*)",
+      "Bash(FIRECRAWL_API_KEY=fc-62620190118f4aa0907781f3f6f3278e python:*)",
+      "Bash(dir:*)",
+      "Bash(cut:*)",
+      "Bash(tr:*)",
+      "Bash(test:*)"
     ],
     "deny": [],
     "ask": []

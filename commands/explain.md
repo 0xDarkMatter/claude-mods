@@ -1,149 +1,276 @@
 ---
-description: "Deep explanation of complex code, files, or concepts. Breaks down architecture, data flow, and design decisions."
+description: "Deep explanation of complex code, files, or concepts. Routes to expert agents, uses structural search, generates mermaid diagrams."
 ---
 
 # Explain - Deep Code Explanation
 
-Get a comprehensive explanation of complex code, files, or architectural concepts.
+Get a comprehensive explanation of code, files, directories, or architectural concepts. Automatically routes to the most relevant expert agent and uses modern CLI tools for analysis.
 
 ## Arguments
 
 $ARGUMENTS
 
-- File path: Explain specific file
-- Function/class name: Explain specific component
-- `--depth <shallow|normal|deep>`: Level of detail
-- `--focus <arch|flow|deps|api>`: Specific focus area
+- `<target>` - File path, function name, class name, directory, or concept
+- `--depth <shallow|normal|deep|trace>` - Level of detail (default: normal)
+- `--focus <arch|flow|deps|api|perf>` - Specific focus area
 
-## What This Command Does
+## Architecture
 
-1. **Identify Target**
-   - Parse file/function/concept
-   - Gather related files if needed
-   - Understand scope of explanation
-
-2. **Analyze Code**
-   - Parse structure and dependencies
-   - Trace data flow
-   - Identify patterns and design decisions
-
-3. **Generate Explanation**
-   - Architecture overview
-   - Step-by-step breakdown
-   - Visual diagrams (ASCII)
-   - Related concepts
+```
+/explain <target> [--depth] [--focus]
+    │
+    ├─→ Step 1: Detect & Classify Target
+    │     ├─ File exists? → Read it
+    │     ├─ Function/class? → ast-grep to find definition
+    │     ├─ Directory? → tokei for overview
+    │     └─ Concept? → rg search codebase
+    │
+    ├─→ Step 2: Gather Context (parallel)
+    │     ├─ structural-search skill → find usages
+    │     ├─ code-stats skill → assess scope
+    │     ├─ Find related: tests, types, docs
+    │     └─ Load: AGENTS.md, CLAUDE.md conventions
+    │
+    ├─→ Step 3: Route to Expert Agent
+    │     ├─ .ts/.tsx → typescript-expert or react-expert
+    │     ├─ .py → python-expert
+    │     ├─ .vue → vue-expert
+    │     ├─ .sql/migrations → postgres-expert
+    │     ├─ agents/skills/commands → claude-architect
+    │     └─ Default → general-purpose
+    │
+    ├─→ Step 4: Generate Explanation
+    │     ├─ Structured markdown with sections
+    │     ├─ Mermaid diagrams (flowchart/sequence/class)
+    │     ├─ Related code paths as file:line refs
+    │     └─ Design decisions and rationale
+    │
+    └─→ Step 5: Integrate
+          ├─ Offer to save to ARCHITECTURE.md (if significant)
+          └─ Link to /saveplan if working on related task
+```
 
 ## Execution Steps
 
-### Step 1: Parse Target
+### Step 1: Detect Target Type
 
 ```bash
-# If file path
-cat <file>
+# Check if target is a file
+test -f "$TARGET" && echo "FILE" && exit
 
-# If function name, search for it
-grep -rn "function <name>\|def <name>\|class <name>" .
+# Check if target is a directory
+test -d "$TARGET" && echo "DIRECTORY" && exit
 
-# If directory
-ls -la <dir>
-tree <dir> -L 2
+# Otherwise, search for it as a symbol
+```
+
+**For files:** Read directly with bat (syntax highlighted) or Read tool.
+
+**For directories:** Get overview with tokei (if available):
+```bash
+command -v tokei >/dev/null 2>&1 && tokei "$TARGET" --compact || echo "ℹ tokei unavailable"
+```
+
+**For symbols (function/class):** Find definition with ast-grep:
+```bash
+# Try ast-grep first (structural)
+command -v ast-grep >/dev/null 2>&1 && ast-grep -p "function $TARGET" -p "class $TARGET" -p "def $TARGET"
+
+# Fallback to ripgrep
+rg "(?:function|class|def|const|let|var)\s+$TARGET" --type-add 'code:*.{ts,tsx,js,jsx,py,vue}' -t code
 ```
 
 ### Step 2: Gather Context
 
-For the target, collect:
-- Imports/dependencies
-- Exports/public API
-- Related files (tests, types)
-- Usage examples in codebase
+Run these in parallel where possible:
 
-### Step 3: Analyze Structure
+**Find usages (structural-search skill):**
+```bash
+# With ast-grep
+ast-grep -p "$TARGET($_)" --json 2>/dev/null | head -20
 
-**For Functions:**
-- Input parameters and types
-- Return value and type
-- Side effects
-- Error handling
-- Algorithm complexity
+# Fallback
+rg "$TARGET" --type-add 'code:*.{ts,tsx,js,jsx,py,vue}' -t code -l
+```
 
-**For Classes:**
-- Properties and methods
-- Inheritance/composition
-- Lifecycle
-- Public vs private API
+**Find related files:**
+```bash
+# Tests
+fd -e test.ts -e spec.ts -e test.py -e spec.py | xargs rg -l "$TARGET" 2>/dev/null
 
-**For Files/Modules:**
-- Purpose and responsibility
-- Exports and imports
-- Dependencies
-- Integration points
+# Types/interfaces
+fd -e d.ts -e types.ts | xargs rg -l "$TARGET" 2>/dev/null
+```
 
-**For Directories:**
-- Module organization
-- File relationships
-- Naming conventions
-- Architecture pattern
+**Load project conventions:**
+- Read AGENTS.md if exists
+- Read CLAUDE.md if exists
+- Check for framework-specific patterns
+
+### Step 3: Route to Expert Agent
+
+Determine the best expert based on file extension and content:
+
+| Pattern | Primary Agent | Condition |
+|---------|---------------|-----------|
+| `.ts` | typescript-expert | No JSX/React imports |
+| `.tsx` | react-expert | JSX present |
+| `.js`, `.jsx` | javascript-expert | - |
+| `.py` | python-expert | - |
+| `.vue` | vue-expert | - |
+| `.sql`, `migrations/*` | postgres-expert | - |
+| `agents/*.md`, `skills/*`, `commands/*` | claude-architect | Claude extensions |
+| `*.test.*`, `*.spec.*` | (framework expert) | Route by file type |
+| Other | general-purpose | Fallback |
+
+**Invoke via Task tool:**
+```
+Task tool with subagent_type: "[detected]-expert"
+Prompt includes:
+  - File content
+  - Related files found
+  - Project conventions
+  - Requested depth and focus
+```
 
 ### Step 4: Generate Explanation
 
+The expert agent produces a structured explanation:
+
 ```markdown
-# Explanation: <target>
+# Explanation: [target]
 
 ## Overview
-<1-2 sentence summary of what this does and why>
+[1-2 sentence summary of purpose and role in the system]
 
 ## Architecture
-<ASCII diagram if helpful>
 
+[Mermaid diagram - choose appropriate type]
+
+### Flowchart (for control flow)
+```mermaid
+flowchart TD
+    A[Input] --> B{Validate}
+    B -->|Valid| C[Process]
+    B -->|Invalid| D[Error]
+    C --> E[Output]
 ```
-┌─────────────┐    ┌─────────────┐
-│   Input     │───▶│  Processor  │
-└─────────────┘    └──────┬──────┘
-                          │
-                          ▼
-                   ┌─────────────┐
-                   │   Output    │
-                   └─────────────┘
+
+### Sequence (for interactions)
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Server
+    participant Database
+    Client->>Server: Request
+    Server->>Database: Query
+    Database-->>Server: Result
+    Server-->>Client: Response
+```
+
+### Class (for structures)
+```mermaid
+classDiagram
+    class Component {
+        +props: Props
+        +state: State
+        +render(): JSX
+    }
 ```
 
 ## How It Works
 
-### Step 1: <phase name>
-<explanation>
+### Step 1: [Phase Name]
+[Explanation with code references]
 
-### Step 2: <phase name>
-<explanation>
+See: `src/module.ts:42`
+
+### Step 2: [Phase Name]
+[Explanation]
 
 ## Key Concepts
 
-### <Concept 1>
-<explanation>
+### [Concept 1]
+[Explanation]
 
-### <Concept 2>
-<explanation>
+### [Concept 2]
+[Explanation]
 
 ## Dependencies
-- `<dep1>` - <purpose>
-- `<dep2>` - <purpose>
 
-## Usage Examples
-
-```<language>
-// Example usage
-```
+| Import | Purpose |
+|--------|---------|
+| `package` | [why it's used] |
 
 ## Design Decisions
 
-### Why <decision>?
-<rationale>
+### Why [decision]?
+[Rationale and tradeoffs considered]
 
 ## Related Code
-- `<file1>` - <relationship>
-- `<file2>` - <relationship>
 
-## Common Pitfalls
-- <pitfall 1>
-- <pitfall 2>
+| File | Relationship |
+|------|--------------|
+| `path/to/file.ts:123` | [how it relates] |
+
+## See Also
+
+- `/explain path/to/related` - [description]
+- [External docs link] - [description]
+```
+
+## Depth Modes
+
+| Mode | Output |
+|------|--------|
+| `--shallow` | Overview paragraph, key exports, no diagram |
+| `--normal` | Full explanation with 1 diagram, main concepts (default) |
+| `--deep` | Exhaustive: all internals, edge cases, history, multiple diagrams |
+| `--trace` | Data flow tracing through entire system, sequence diagrams |
+
+### Shallow Example
+```bash
+/explain src/auth/token.ts --shallow
+```
+Output: Single paragraph + exports list.
+
+### Deep Example
+```bash
+/explain src/core/engine.ts --deep
+```
+Output: Full internals, algorithm analysis, performance notes, edge cases.
+
+### Trace Example
+```bash
+/explain handleLogin --trace
+```
+Output: Traces data flow from entry to database to response.
+
+## Focus Modes
+
+| Mode | What It Analyzes |
+|------|------------------|
+| `--focus arch` | Module boundaries, layer separation, dependencies |
+| `--focus flow` | Data flow, control flow, state changes |
+| `--focus deps` | Imports, external dependencies, integrations |
+| `--focus api` | Public interface, inputs/outputs, contracts |
+| `--focus perf` | Complexity, bottlenecks, optimization opportunities |
+
+## CLI Tool Integration
+
+Commands use modern CLI tools with graceful fallbacks:
+
+| Tool | Purpose | Fallback |
+|------|---------|----------|
+| `tokei` | Code statistics | Skip stats |
+| `ast-grep` | Structural search | `rg` with patterns |
+| `bat` | Syntax highlighting | Read tool |
+| `rg` | Content search | Grep tool |
+| `fd` | File finding | Glob tool |
+
+**Check availability:**
+```bash
+command -v tokei >/dev/null 2>&1 || echo "ℹ tokei not installed - skipping stats"
 ```
 
 ## Usage Examples
@@ -152,120 +279,51 @@ For the target, collect:
 # Explain a file
 /explain src/auth/oauth.ts
 
-# Explain a function
+# Explain a function (finds it automatically)
 /explain validateToken
-
-# Explain a class
-/explain UserService
 
 # Explain a directory
 /explain src/services/
 
-# Explain with deep detail
-/explain src/core/engine.ts --depth deep
+# Deep dive with architecture focus
+/explain src/core/engine.ts --deep --focus arch
 
-# Focus on data flow
-/explain src/api/routes.ts --focus flow
+# Trace data flow
+/explain handleUserLogin --trace
 
-# Architecture overview
-/explain src/services/ --focus arch
+# Quick overview
+/explain src/utils/helpers.ts --shallow
+
+# Focus on dependencies
+/explain package.json --focus deps
 ```
-
-## Depth Levels
-
-| Level | Output |
-|-------|--------|
-| `shallow` | Quick overview, main purpose, key exports |
-| `normal` | Full explanation with examples (default) |
-| `deep` | Exhaustive breakdown, edge cases, internals |
-
-## Focus Areas
-
-| Focus | Explains |
-|-------|----------|
-| `arch` | Architecture, structure, patterns |
-| `flow` | Data flow, control flow, sequence |
-| `deps` | Dependencies, imports, integrations |
-| `api` | Public API, inputs, outputs, contracts |
-
-## Explanation Styles by Target
-
-### Functions
-- **Input/Output**: What goes in, what comes out
-- **Algorithm**: Step-by-step logic
-- **Edge Cases**: Boundary conditions
-- **Performance**: Time/space complexity
-
-### Classes
-- **Purpose**: Why this class exists
-- **State**: What data it manages
-- **Behavior**: What it can do
-- **Relationships**: How it connects to others
-
-### Files
-- **Role**: Where it fits in the system
-- **Exports**: What it provides
-- **Imports**: What it needs
-- **Patterns**: Design patterns used
-
-### Directories
-- **Organization**: How files are structured
-- **Conventions**: Naming and patterns
-- **Boundaries**: Module responsibilities
-- **Dependencies**: Inter-module relationships
-
-## ASCII Diagrams
-
-For complex systems, include ASCII diagrams:
-
-### Sequence Diagram
-```
-User          Service         Database
-  │              │               │
-  │──request───▶│               │
-  │              │───query─────▶│
-  │              │◀──result─────│
-  │◀─response───│               │
-```
-
-### Data Flow
-```
-[Input] → [Validate] → [Transform] → [Store] → [Output]
-              │
-              └──[Error]──▶ [Log]
-```
-
-### Component Diagram
-```
-┌────────────────────────────────────┐
-│            Application             │
-├──────────┬──────────┬─────────────┤
-│  Routes  │ Services │   Models    │
-├──────────┴──────────┴─────────────┤
-│            Database               │
-└────────────────────────────────────┘
-```
-
-## Flags
-
-| Flag | Effect |
-|------|--------|
-| `--depth <level>` | Set detail level (shallow/normal/deep) |
-| `--focus <area>` | Focus on specific aspect |
-| `--no-examples` | Skip usage examples |
-| `--no-diagrams` | Skip ASCII diagrams |
-| `--json` | Output as structured JSON |
 
 ## Integration
 
-Works well with:
-- `/review` - Review after understanding
-- `/test` - Generate tests for explained code
-- `/checkpoint` - Save progress after learning
+| Command | Relationship |
+|---------|--------------|
+| `/review` | Review after understanding |
+| `/test` | Generate tests for explained code |
+| `/saveplan` | Save progress if working on related task |
+| `/plan` | Add architectural insights to project plan |
+
+## Persistence
+
+After significant explanations, you may be offered:
+
+```
+Would you like to save this explanation?
+  1. Append to ARCHITECTURE.md
+  2. Append to AGENTS.md (if conventions-related)
+  3. Don't save (output only)
+```
+
+This keeps valuable architectural knowledge in git-tracked documentation.
 
 ## Notes
 
 - Explanations are based on code analysis, not documentation
-- Complex systems may need multiple explanations
-- Use `--depth deep` for unfamiliar codebases
-- Diagrams help visualize relationships
+- Complex systems may need multiple `/explain` calls
+- Use `--deep` for unfamiliar codebases
+- Mermaid diagrams render in GitHub, GitLab, VSCode, and most markdown viewers
+- Expert agents provide framework-specific insights

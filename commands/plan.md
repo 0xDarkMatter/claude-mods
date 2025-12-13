@@ -277,7 +277,7 @@ Effort is relative to the project, not absolute time. Avoid time estimates.
 Session 1:
   /plan "Feature X"             # Strategic planning → docs/PLAN.md
   [work on implementation]
-  /save "Completed step 2"      # Tactical state → claude-state.json
+  /save "Completed step 2"      # Tactical state → session-cache.json
 
 Session 2:
   /load                         # Restore TodoWrite tasks
@@ -292,7 +292,7 @@ Session 2:
 | Command | Captures | Persists To |
 |---------|----------|-------------|
 | `/plan` | Strategic thinking, decisions | `docs/PLAN.md` |
-| `/save` | TodoWrite tasks, git context | `.claude/claude-state.json` |
+| `/save` | TodoWrite tasks, git context | `.claude/session-cache.json` |
 | `/load` | - | Restores from `.claude/` |
 
 ## Flags
