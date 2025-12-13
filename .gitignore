@@ -2,6 +2,7 @@
 .claude/.context-init.md
 
 # Session state (user-specific)
+.claude/session-cache.json
 .claude/claude-state.json
 .claude/claude-progress.md
 .claude/sync-cache.json

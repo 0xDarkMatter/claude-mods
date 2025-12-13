@@ -11,7 +11,7 @@ Restore your session context from a previous save. Shows plan progress, restores
 ```
 /load
     │
-    ├─→ Read .claude/claude-state.json
+    ├─→ Read .claude/session-cache.json
     │     ├─ TodoWrite tasks
     │     ├─ Plan context
     │     └─ Git context at save time
@@ -81,13 +81,13 @@ Restore your session context from a previous save. Shows plan progress, restores
 ### Step 1: Check for State Files
 
 ```bash
-ls -la .claude/claude-state.json 2>/dev/null
+ls -la .claude/session-cache.json 2>/dev/null
 ```
 
 If missing:
 ```
 ┌─ Session ──────────────────────────────────────────────────────────────────────────────────────┐
-│ ⚠  State: No saved state found in .claude/claude-state.json                                    │
+│ ⚠  State: No saved state found in .claude/session-cache.json                                    │
 │                                                                                                │
 │    To create one, use: /save                                                                   │
 │    Or check current status: /status                                                            │
@@ -96,7 +96,7 @@ If missing:
 
 ### Step 2: Read State
 
-Parse `.claude/claude-state.json`:
+Parse `.claude/session-cache.json`:
 - Extract todos (completed, in_progress, pending)
 - Extract plan context (goal, current step, progress)
 - Extract git context (branch, last commit)
@@ -234,7 +234,7 @@ Session Lifecycle
   │              └─────────────────────────────┴─────────────────────────────┘                   │
   │                                            │                                                 │
   │                                            ▼                                                 │
-  │                               .claude/claude-state.json                                      │
+  │                               .claude/session-cache.json                                      │
   │                               docs/PLAN.md                                                   │
   │                                            │                                                 │
   └────────────────────────────────────────────┘                                                 │

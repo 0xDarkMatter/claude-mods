@@ -88,7 +88,7 @@ If no plan found:
 If no saved state but plan exists:
 ```
 ┌─ Session ──────────────────────────────────────────────────────────────────────────────────────┐
-│ ⚠  State: No saved state found in .claude/claude-state.json                                    │
+│ ⚠  State: No saved state found in .claude/session-cache.json                                    │
 │ ✅  Plan: Project plan found at docs/PLAN.md                                                    │
 └────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```

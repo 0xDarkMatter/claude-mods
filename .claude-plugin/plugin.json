@@ -25,7 +25,8 @@
       "commands/explain.md",
       "commands/agent-genesis.md",
       "commands/g-slave.md",
-      "commands/init-tools.md"
+      "commands/init-tools.md",
+      "commands/pulse.md"
     ],
     "agents": [
       "agents/astro-expert.md",
@@ -36,7 +37,6 @@
       "agents/cloudflare-expert.md",
       "agents/craftcms-expert.md",
       "agents/cypress-expert.md",
-      "agents/fetch-expert.md",
       "agents/firecrawl-expert.md",
       "agents/javascript-expert.md",
       "agents/laravel-expert.md",
