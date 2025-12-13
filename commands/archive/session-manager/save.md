@@ -23,7 +23,7 @@ Save your current session state before ending work. Captures TodoWrite tasks, cu
     │     └─ Uncommitted changes
     │
     └─→ Write state files
-          ├─ .claude/claude-state.json (machine)
+          ├─ .claude/session-cache.json (machine)
           └─ .claude/claude-progress.md (human)
 ```
 
@@ -42,7 +42,7 @@ This command bridges the gap by saving what Claude Code doesn't.
 
 ## Output Files
 
-### .claude/claude-state.json (v2.0)
+### .claude/session-cache.json (v2.0)
 
 ```json
 {
@@ -157,7 +157,7 @@ mkdir -p .claude
 ### Step 5: Write State Files
 
 Write both:
-- `.claude/claude-state.json` - machine-readable
+- `.claude/session-cache.json` - machine-readable
 - `.claude/claude-progress.md` - human-readable
 
 ### Step 6: Confirm
@@ -173,7 +173,7 @@ Write both:
 └────────────────────────────────────────────────────────────────────────────────────────────────┘
 
 Files:
-  • .claude/claude-state.json
+  • .claude/session-cache.json
   • .claude/claude-progress.md
 
 Restore with: /load

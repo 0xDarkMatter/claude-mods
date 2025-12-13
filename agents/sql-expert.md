@@ -63,31 +63,13 @@ All deliverables must meet:
 - Migration scripts with rollback support
 - Data validation rules
 
-## Common Patterns
-- Use CTEs for complex multi-step queries
-- Window functions for analytics (ROW_NUMBER, RANK, LAG, LEAD)
-- Proper JOIN types (INNER, LEFT, RIGHT, FULL, CROSS)
-- EXISTS vs IN for subqueries
-- Batch operations for large datasets
-- Pagination with OFFSET/LIMIT or keyset pagination
-- Handling temporal data effectively
-- Avoiding SELECT * in production code
+## Optimization Focus
+- Execution plan analysis (EXPLAIN ANALYZE)
+- Index strategy design and review
+- Query plan caching behavior
+- Partitioning decisions for large tables
+- Materialized view candidates
+- Connection pooling tuning
 
-## Optimization Techniques
-- Covering indexes to avoid table lookups
-- Partitioning for large tables
-- Query result caching strategies
-- Denormalization when read-heavy justified
-- Materialized views for expensive queries
-- Index-only scans
-- Parallel query execution
-- Connection pooling considerations
-
-## Anti-Patterns to Avoid
-- N+1 query problems
-- Implicit type conversions preventing index usage
-- Functions on indexed columns in WHERE clauses
-- Unnecessary DISTINCT or GROUP BY
-- Correlated subqueries when joins possible
-- Over-normalization causing excessive joins
-- Ignoring NULL handling in comparisons
+## Related Skill
+For pattern reference (CTEs, window functions, JOINs), use **sql-patterns** skill.

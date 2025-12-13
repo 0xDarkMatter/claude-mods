@@ -71,7 +71,7 @@ Then WRITE `.claude/sync-cache.json`:
 
 Read cache, then run ONE bash for live state:
 ```bash
-git branch --show-current && git status --porcelain | wc -l && test -f .claude/claude-state.json && stat -c %Y .claude/claude-state.json 2>/dev/null
+git branch --show-current && git status --porcelain | wc -l && test -f .claude/session-cache.json && stat -c %Y .claude/session-cache.json 2>/dev/null
 ```
 
 Output cached content + live git/plan/state info.

@@ -2,7 +2,7 @@
 
 A comprehensive extension toolkit for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) that transforms your AI coding assistant into a powerhouse development environment.
 
-**24 expert agents. 11 slash commands. 11 skills. One plugin install.**
+**21 expert agents. 12 slash commands. 18 skills. One plugin install.**
 
 ## Why claude-mods?
 
@@ -33,9 +33,9 @@ Claude Code is powerful out of the box, but it has gaps. This toolkit fills them
 ```
 claude-mods/
 ├── .claude-plugin/     # Plugin metadata
-├── agents/             # Expert subagents (24)
-├── commands/           # Slash commands (11)
-├── skills/             # Custom skills (11)
+├── agents/             # Expert subagents (21)
+├── commands/           # Slash commands (12)
+├── skills/             # Custom skills (18)
 ├── hooks/              # Hook examples & docs
 ├── rules/              # Claude Code rules
 ├── tools/              # Modern CLI toolkit docs
@@ -104,18 +104,34 @@ Then symlink or copy to your Claude directories:
 
 ### Skills
 
+#### Pattern Reference Skills
 | Skill | Description |
 |-------|-------------|
-| [agent-discovery](skills/agent-discovery/) | Analyze tasks and recommend specialized agents |
+| [rest-patterns](skills/rest-patterns/) | HTTP methods, status codes, REST design patterns |
+| [tailwind-patterns](skills/tailwind-patterns/) | Tailwind utilities, responsive breakpoints, config |
+| [sql-patterns](skills/sql-patterns/) | CTEs, window functions, JOIN patterns, indexing |
+| [sqlite-ops](skills/sqlite-ops/) | SQLite schemas, Python sqlite3/aiosqlite patterns |
+| [mcp-patterns](skills/mcp-patterns/) | MCP server structure, tool handlers, resources |
+
+#### CLI Tool Skills
+| Skill | Description |
+|-------|-------------|
+| [file-search](skills/file-search/) | Find files with fd, search code with rg, select with fzf |
+| [find-replace](skills/find-replace/) | Modern find-and-replace with sd |
 | [code-stats](skills/code-stats/) | Analyze codebase with tokei and difft |
 | [data-processing](skills/data-processing/) | Process JSON with jq, YAML/TOML with yq |
+| [structural-search](skills/structural-search/) | Search code by AST structure with ast-grep |
+
+#### Workflow Skills
+| Skill | Description |
+|-------|-------------|
+| [tool-discovery](skills/tool-discovery/) | Recommend agents and skills for any task |
 | [git-workflow](skills/git-workflow/) | Enhanced git operations with lazygit, gh, delta |
 | [project-docs](skills/project-docs/) | Scan and synthesize project documentation |
+| [project-planner](skills/project-planner/) | Track stale plans, suggest /plan command |
 | [python-env](skills/python-env/) | Fast Python environment management with uv |
 | [safe-file-reader](skills/safe-file-reader/) | Read files without permission prompts |
-| [structural-search](skills/structural-search/) | Search code by AST structure with ast-grep |
 | [task-runner](skills/task-runner/) | Run project commands with just |
-| [tool-discovery](skills/tool-discovery/) | Find the right library/tool for any task |
 
 ### Agents
 
@@ -125,26 +141,23 @@ Then symlink or copy to your Claude directories:
 | [asus-router-expert](agents/asus-router-expert.md) | Asus routers, network hardening, Asuswrt-Merlin |
 | [aws-fargate-ecs-expert](agents/aws-fargate-ecs-expert.md) | Amazon ECS on Fargate, container deployment |
 | [bash-expert](agents/bash-expert.md) | Defensive Bash scripting, CI/CD pipelines |
+| [claude-architect](agents/claude-architect.md) | Claude Code architecture, extensions, MCP, plugins, debugging |
 | [cloudflare-expert](agents/cloudflare-expert.md) | Cloudflare Workers, Pages, DNS, security |
 | [craftcms-expert](agents/craftcms-expert.md) | Craft CMS content modeling, Twig, plugins, GraphQL |
 | [cypress-expert](agents/cypress-expert.md) | Cypress E2E and component testing, custom commands, CI/CD |
-| [fetch-expert](agents/fetch-expert.md) | Parallel web fetching with retry logic |
-| [firecrawl-expert](agents/firecrawl-expert.md) | Web scraping, crawling, structured extraction |
+| [firecrawl-expert](agents/firecrawl-expert.md) | Web scraping, crawling, parallel fetching, structured extraction |
 | [javascript-expert](agents/javascript-expert.md) | Modern JavaScript, async patterns, optimization |
 | [laravel-expert](agents/laravel-expert.md) | Laravel framework, Eloquent, testing |
-| [react-expert](agents/react-expert.md) | React hooks, state management, Server Components, performance |
-| [typescript-expert](agents/typescript-expert.md) | TypeScript type system, generics, utility types, strict mode |
-| [vue-expert](agents/vue-expert.md) | Vue 3, Composition API, Pinia state management, performance |
 | [payloadcms-expert](agents/payloadcms-expert.md) | Payload CMS architecture and configuration |
 | [playwright-roulette-expert](agents/playwright-roulette-expert.md) | Playwright automation for casino testing |
 | [postgres-expert](agents/postgres-expert.md) | PostgreSQL management and optimization |
 | [project-organizer](agents/project-organizer.md) | Reorganize directory structures, cleanup |
 | [python-expert](agents/python-expert.md) | Advanced Python, testing, optimization |
-| [rest-expert](agents/rest-expert.md) | RESTful API design, HTTP methods, status codes |
+| [react-expert](agents/react-expert.md) | React hooks, state management, Server Components, performance |
 | [sql-expert](agents/sql-expert.md) | Complex SQL queries, optimization, indexing |
-| [tailwind-expert](agents/tailwind-expert.md) | Tailwind CSS, responsive design |
+| [typescript-expert](agents/typescript-expert.md) | TypeScript type system, generics, utility types, strict mode |
+| [vue-expert](agents/vue-expert.md) | Vue 3, Composition API, Pinia state management, performance |
 | [wrangler-expert](agents/wrangler-expert.md) | Cloudflare Workers deployment, wrangler.toml |
-| [claude-architect](agents/claude-architect.md) | Claude Code architecture, extensions, MCP, plugins, debugging |
 
 ### Tools, Rules & Hooks
 
@@ -229,7 +242,7 @@ TodoWrite tasks are stored at `~/.claude/todos/[session-id].json` and deleted wh
 Session 1:
   /sync                              # Bootstrap - read project context
   [work on tasks]
-  /saveplan "Stopped at auth module" # Writes .claude/claude-state.json
+  /saveplan "Stopped at auth module" # Writes .claude/session-cache.json
 
 Session 2:
   /sync                              # Read project context

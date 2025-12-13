@@ -1,5 +1,5 @@
 # 🎛️ Claude Mods Dashboard
-**Updated:** 2025-12-12 | **Extensions:** 45 | **Lines:** 9,567
+**Updated:** 2025-12-13 | **Extensions:** 51 | **Lines:** 13,553
 
 ---
 
@@ -7,9 +7,9 @@
 
 | Category | Count | Lines |
 |----------|-------|-------|
-| 🤖 **Agents** | 24 | 5,910 |
-| ⚡ **Skills** | 10 | 836 |
-| 🔧 **Commands** | 10 | 2,708 |
+| 🤖 **Agents** | 21 | 7,552 |
+| ⚡ **Skills** | 18 | 2,725 |
+| 🔧 **Commands** | 12 | 3,276 |
 | 📏 **Rules** | 1 | 113 |
 | 🧩 **Templates** | 2 | — |
 
@@ -26,8 +26,7 @@
 | 🤖 **cloudflare-expert** | Cloud | Workers, Pages, DNS |
 | 🤖 **craftcms-expert** | CMS | Craft CMS, Twig, GraphQL |
 | 🤖 **cypress-expert** | Testing | E2E, component tests |
-| 🤖 **fetch-expert** | Utility | Parallel web fetching |
-| 🤖 **firecrawl-expert** | Scraping | Web crawling, extraction |
+| 🤖 **firecrawl-expert** | Scraping | Web crawling, parallel fetch, extraction |
 | 🤖 **javascript-expert** | Language | Modern JS, async |
 | 🤖 **laravel-expert** | Backend | Laravel, Eloquent |
 | 🤖 **payloadcms-expert** | CMS | Payload architecture |
@@ -36,9 +35,7 @@
 | 🤖 **project-organizer** | Utility | Directory restructuring |
 | 🤖 **python-expert** | Language | Advanced Python |
 | 🤖 **react-expert** | Frontend | Hooks, Server Components |
-| 🤖 **rest-expert** | API | RESTful design |
 | 🤖 **sql-expert** | Database | Complex queries |
-| 🤖 **tailwind-expert** | CSS | Utility-first styling |
 | 🤖 **typescript-expert** | Language | Type system, generics |
 | 🤖 **vue-expert** | Frontend | Vue 3, Composition API |
 | 🤖 **wrangler-expert** | Cloud | Workers deployment |
@@ -48,17 +45,33 @@
 
 ## ⚡ Skills
 
+### Pattern Reference Skills
+| Skill | Triggers |
+|-------|----------|
+| ⚡ **rest-patterns** | REST API, HTTP methods, status codes |
+| ⚡ **tailwind-patterns** | Tailwind, utility classes, breakpoints |
+| ⚡ **sql-patterns** | CTEs, window functions, JOINs |
+| ⚡ **sqlite-ops** | SQLite, aiosqlite, local database |
+| ⚡ **mcp-patterns** | MCP server, Model Context Protocol |
+
+### CLI Tool Skills
 | Skill | Tool | Triggers |
 |-------|------|----------|
-| ⚡ **agent-discovery** | — | "Which agent?", recommend tools |
+| ⚡ **file-search** | fd, rg, fzf | Find files, search code, fuzzy select |
+| ⚡ **find-replace** | sd | Batch replace, modern sed |
 | ⚡ **code-stats** | tokei, difft | Line counts, semantic diffs |
 | ⚡ **data-processing** | jq, yq | JSON, YAML, TOML |
+| ⚡ **structural-search** | ast-grep | AST patterns |
+
+### Workflow Skills
+| Skill | Tool | Triggers |
+|-------|------|----------|
+| ⚡ **tool-discovery** | — | "Which agent/skill?", recommend tools |
 | ⚡ **git-workflow** | lazygit, gh, delta | Stage, PR, review |
 | ⚡ **project-docs** | — | AGENTS.md, conventions |
 | ⚡ **project-planner** | — | Stale plans, `/plan` |
-| ⚡ **python-env** | uv | Fast venv, pip |
+| ⚡ **python-env** | uv | Fast venv, pyproject.toml |
 | ⚡ **safe-file-reader** | bat, eza | View without prompts |
-| ⚡ **structural-search** | ast-grep | AST patterns |
 | ⚡ **task-runner** | just | Run tests, build |
 
 ---
@@ -75,7 +88,9 @@
 | 🔧 `/saveplan` | Save plan state |
 | 🔧 `/loadplan` | Restore plan from saved state |
 | 🔧 `/showplan` | Show plan progress |
+| 🔧 `/pulse` | Claude Code ecosystem news digest |
 | 🔧 `/review` | Code review staged changes |
+| 🔧 `/sync` | Session bootstrap with project context |
 | 🔧 `/test` | Generate tests |
 
 ---

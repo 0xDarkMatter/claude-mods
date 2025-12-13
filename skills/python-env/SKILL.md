@@ -1,86 +1,229 @@
----
-name: python-env
-description: "Fast Python environment management with uv. 10-100x faster than pip for installs, venv creation, and dependency resolution. Triggers on: install Python package, create venv, pip install, setup Python project, manage dependencies, Python environment."
----
+# Python Environment Skill
 
-# Python Environment
+Fast Python environment management with uv (10-100x faster than pip).
 
-## Purpose
-Manage Python packages and virtual environments with extreme speed using uv (Rust-based, 10-100x faster than pip).
+## Triggers
 
-## Tools
+uv, venv, pip, pyproject, python environment, install package, dependencies
 
-| Tool | Command | Use For |
-|------|---------|---------|
-| uv | `uv pip install pkg` | Fast package installation |
-| uv | `uv venv` | Virtual environment creation |
-| uv | `uv pip compile` | Lock file generation |
+## Quick Commands
 
-## Usage Examples
+| Task | Command |
+|------|---------|
+| Create venv | `uv venv` |
+| Install package | `uv pip install requests` |
+| Install from requirements | `uv pip install -r requirements.txt` |
+| Run script | `uv run python script.py` |
+| Show installed | `uv pip list` |
 
-### Package Installation
+## Virtual Environment
 
 ```bash
-# Install package (10-100x faster than pip)
-uv pip install requests
-
-# Install multiple packages
-uv pip install flask sqlalchemy pytest
-
-# Install from requirements.txt
-uv pip install -r requirements.txt
-
-# Install with extras
-uv pip install "fastapi[all]"
-
-# Install specific version
-uv pip install "django>=4.0,<5.0"
-```
-
-### Virtual Environments
-
-```bash
-# Create venv (fastest venv creation)
+# Create venv (instant)
 uv venv
 
-# Create with specific Python version
+# Create with specific Python
 uv venv --python 3.11
 
-# Activate (still uses standard activation)
+# Activate
 # Windows: .venv\Scripts\activate
 # Unix: source .venv/bin/activate
+
+# Or skip activation and use uv run
+uv run python script.py
 ```
 
-### Dependency Management
+## Package Installation
 
 ```bash
-# Generate lockfile from requirements.in
-uv pip compile requirements.in -o requirements.txt
+# Single package
+uv pip install requests
 
-# Sync environment to lockfile
-uv pip sync requirements.txt
+# Multiple packages
+uv pip install flask sqlalchemy pytest
 
-# Show installed packages
-uv pip list
+# With extras
+uv pip install "fastapi[all]"
 
-# Uninstall package
+# Version constraints
+uv pip install "django>=4.0,<5.0"
+
+# From requirements
+uv pip install -r requirements.txt
+
+# Uninstall
 uv pip uninstall requests
 ```
 
-### Run Commands
+## pyproject.toml Configuration
+
+### Minimal Project
+```toml
+[project]
+name = "my-project"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "httpx>=0.25",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.1",
+]
+```
+
+### With Build System
+```toml
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "my-package"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "httpx>=0.25",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff", "mypy"]
+docs = ["mkdocs", "mkdocs-material"]
+
+[project.scripts]
+my-cli = "my_package.cli:main"
+```
+
+### With Tool Configuration
+```toml
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+```
+
+## Dependency Management
+
+### Lock File Workflow
+```bash
+# Create requirements.in with loose constraints
+echo "flask>=2.0" > requirements.in
+echo "sqlalchemy>=2.0" >> requirements.in
+
+# Generate locked requirements.txt
+uv pip compile requirements.in -o requirements.txt
+
+# Install exact versions
+uv pip sync requirements.txt
+
+# Update locks
+uv pip compile requirements.in -o requirements.txt --upgrade
+```
+
+### Dev Dependencies Pattern
+```bash
+# requirements.in (production)
+flask>=2.0
+sqlalchemy>=2.0
+
+# requirements-dev.in
+-r requirements.in
+pytest>=7.0
+ruff>=0.1
+
+# Compile both
+uv pip compile requirements.in -o requirements.txt
+uv pip compile requirements-dev.in -o requirements-dev.txt
+```
+
+## Workspace/Monorepo
+
+```toml
+# pyproject.toml (root)
+[tool.uv.workspace]
+members = ["packages/*"]
+
+# packages/core/pyproject.toml
+[project]
+name = "my-core"
+version = "0.1.0"
+
+# packages/api/pyproject.toml
+[project]
+name = "my-api"
+version = "0.1.0"
+dependencies = ["my-core"]
+```
 
 ```bash
-# Run script in project environment
+# Install all workspace packages
+uv pip install -e packages/core -e packages/api
+```
+
+## Running Scripts
+
+```bash
+# Run with project's Python
 uv run python script.py
 
-# Run with specific Python
+# Run with specific Python version
 uv run --python 3.11 python script.py
+
+# Run module
+uv run python -m pytest
+
+# Run installed CLI
+uv run ruff check .
+```
+
+## Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| "No Python found" | `uv python install 3.11` or install from python.org |
+| Wrong Python version | `uv venv --python 3.11` to force version |
+| Conflicting deps | `uv pip compile --resolver=backtracking` |
+| Cache issues | `uv cache clean` |
+| SSL errors | `uv pip install --cert /path/to/cert pkg` |
+
+## Project Setup Checklist
+
+```bash
+# 1. Create project structure
+mkdir my-project && cd my-project
+mkdir src tests
+
+# 2. Create venv
+uv venv
+
+# 3. Create pyproject.toml (see templates above)
+
+# 4. Install dependencies
+uv pip install -e ".[dev]"
+
+# 5. Verify
+uv pip list
+uv run python -c "import my_package"
 ```
 
 ## When to Use
 
-- Installing Python packages (always prefer over pip)
+- **Always** use uv over pip for speed
 - Creating virtual environments
-- Setting up new Python projects
+- Installing packages
 - Managing dependencies
-- Syncing development environments
+- Running scripts in project context
+- Compiling lockfiles

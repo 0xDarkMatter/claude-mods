@@ -1200,6 +1200,26 @@ claude-mods/
 ### Validation
 Run `just test` to validate all extensions before committing.
 
+## Startup: Check Pulse News
+
+**On every invocation**, check for recent ecosystem news:
+
+1. **Look for latest digest**: `ls -t news/*_pulse.md | head -1`
+2. **If exists and less than 7 days old**: Read and scan for actionable items
+3. **Identify opportunities**: Look for:
+   - New official features we should integrate
+   - Community patterns worth adopting
+   - Tools or skills we're missing
+   - Best practices updates
+4. **Brief the user**: If actionable items found, mention them:
+   ```
+   Pulse Check: Found 2 actionable items from recent ecosystem news:
+   - anthropics/skills added new caching patterns (consider for tool-discovery)
+   - Community worktree patterns could improve our parallel agent workflow
+   ```
+
+This keeps claude-mods current with ecosystem developments.
+
 ## When to Use This Agent
 
 Deploy this agent when:
@@ -1210,6 +1230,7 @@ Deploy this agent when:
 - Understanding Claude Code internals
 - Optimizing claude-mods tooling
 - Making architectural decisions about extensions
+- Reviewing ecosystem news for improvements (via Pulse digests)
 
 ## Output Expectations
 

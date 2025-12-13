@@ -466,6 +466,512 @@ All implementations must include:
 - Results can vary for personalized/dynamic content
 - Complex logical queries may miss expected pages
 
+---
+
+## Part 6: Complete Code Examples
+
+### Python SDK Setup
+
+```python
+from firecrawl import FirecrawlApp
+import os
+
+# Initialize client
+app = FirecrawlApp(api_key=os.getenv("FIRECRAWL_API_KEY"))
+```
+
+### Scrape Examples
+
+**Basic Scrape:**
+
+```python
+# Simple markdown extraction
+result = app.scrape_url("https://example.com", params={
+    "formats": ["markdown"],
+    "onlyMainContent": True
+})
+
+print(result["markdown"])
+print(result["metadata"]["title"])
+```
+
+**Scrape with Content Filtering:**
+
+```python
+# Extract only article content, exclude noise
+result = app.scrape_url("https://news-site.com/article", params={
+    "formats": ["markdown", "html"],
+    "onlyMainContent": True,
+    "includeTags": ["article", "main", ".content"],
+    "excludeTags": ["nav", "footer", "aside", ".ads", ".comments"],
+    "waitFor": 3000,  # Wait for JS rendering
+})
+
+# Access different formats
+markdown = result.get("markdown", "")
+html = result.get("html", "")
+metadata = result.get("metadata", {})
+
+print(f"Title: {metadata.get('title')}")
+print(f"Content length: {len(markdown)} chars")
+```
+
+**Scrape with Authentication:**
+
+```python
+# Protected page with cookies/headers
+result = app.scrape_url("https://protected-site.com/dashboard", params={
+    "formats": ["markdown"],
+    "headers": {
+        "Cookie": "session=abc123; auth_token=xyz789",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Authorization": "Bearer your-api-token"
+    },
+    "timeout": 60000,
+})
+```
+
+**Interactive Scrape (Click, Scroll, Fill):**
+
+```python
+# Scrape content that requires interaction
+result = app.scrape_url("https://infinite-scroll-site.com", params={
+    "formats": ["markdown"],
+    "actions": [
+        # Click "Load More" button
+        {"type": "click", "selector": "#load-more-btn"},
+        # Wait for content
+        {"type": "wait", "milliseconds": 2000},
+        # Scroll down
+        {"type": "scroll", "direction": "down", "amount": 500},
+        # Wait again
+        {"type": "wait", "milliseconds": 1000},
+        # Take screenshot
+        {"type": "screenshot"}
+    ]
+})
+
+# For login-protected content
+result = app.scrape_url("https://site.com/login", params={
+    "formats": ["markdown"],
+    "actions": [
+        {"type": "write", "selector": "#email", "text": "user@example.com"},
+        {"type": "write", "selector": "#password", "text": "password123"},
+        {"type": "click", "selector": "#login-btn"},
+        {"type": "wait", "milliseconds": 3000},
+        {"type": "screenshot"}
+    ]
+})
+```
+
+**Screenshot Capture:**
+
+```python
+import base64
+
+result = app.scrape_url("https://example.com", params={
+    "formats": ["screenshot", "markdown"],
+    "screenshot": True,
+})
+
+# Save screenshot
+if "screenshot" in result:
+    screenshot_data = base64.b64decode(result["screenshot"])
+    with open("page_screenshot.png", "wb") as f:
+        f.write(screenshot_data)
+```
+
+### Crawl Examples
+
+**Basic Crawl:**
+
+```python
+# Crawl entire blog section
+result = app.crawl_url("https://example.com/blog", params={
+    "limit": 50,
+    "scrapeOptions": {
+        "formats": ["markdown"],
+        "onlyMainContent": True
+    }
+})
+
+for page in result["data"]:
+    print(f"URL: {page['metadata']['sourceURL']}")
+    print(f"Title: {page['metadata']['title']}")
+    print(f"Content: {page['markdown'][:200]}...")
+    print("---")
+```
+
+**Focused Crawl with Filters:**
+
+```python
+# Only crawl documentation pages, exclude examples
+result = app.crawl_url("https://docs.example.com", params={
+    "limit": 100,
+    "includePaths": ["/docs/*", "/api/*", "/guides/*"],
+    "excludePaths": ["/docs/archive/*", "/api/deprecated/*"],
+    "maxDiscoveryDepth": 3,
+    "scrapeOptions": {
+        "formats": ["markdown"],
+        "onlyMainContent": True,
+        "excludeTags": ["nav", "footer", ".sidebar"]
+    }
+})
+
+# Filter results further
+docs = [
+    page for page in result["data"]
+    if "/docs/" in page["metadata"]["sourceURL"]
+]
+print(f"Found {len(docs)} documentation pages")
+```
+
+**Async Crawl with Polling:**
+
+```python
+import time
+
+# Start async crawl
+job = app.async_crawl_url("https://large-site.com", params={
+    "limit": 500,
+    "scrapeOptions": {"formats": ["markdown"]}
+})
+
+job_id = job["id"]
+print(f"Started crawl job: {job_id}")
+
+# Poll for completion
+while True:
+    status = app.check_crawl_status(job_id)
+
+    print(f"Status: {status['status']}, "
+          f"Completed: {status.get('completed', 0)}/{status.get('total', '?')}")
+
+    if status["status"] == "completed":
+        break
+    elif status["status"] == "failed":
+        raise Exception(f"Crawl failed: {status.get('error')}")
+
+    time.sleep(5)  # Poll every 5 seconds
+
+# Get results
+results = app.get_crawl_status(job_id)
+print(f"Crawled {len(results['data'])} pages")
+```
+
+**Async Crawl with Webhooks:**
+
+```python
+# Start crawl with webhook notification
+job = app.async_crawl_url("https://example.com", params={
+    "limit": 100,
+    "webhook": "https://your-server.com/webhook/firecrawl",
+    "scrapeOptions": {"formats": ["markdown"]}
+})
+
+# Your webhook endpoint receives events:
+# POST /webhook/firecrawl
+# {
+#   "type": "crawl.page",
+#   "jobId": "abc123",
+#   "data": { "markdown": "...", "metadata": {...} }
+# }
+# OR
+# {
+#   "type": "crawl.completed",
+#   "jobId": "abc123",
+#   "data": { "total": 100, "completed": 100 }
+# }
+```
+
+### Map Examples
+
+**Discover All URLs:**
+
+```python
+# Get all accessible URLs on a site
+result = app.map_url("https://example.com", params={
+    "limit": 5000,
+    "includeSubdomains": False
+})
+
+urls = result["links"]
+print(f"Found {len(urls)} URLs")
+
+# Filter by pattern
+blog_urls = [url for url in urls if "/blog/" in url]
+product_urls = [url for url in urls if "/products/" in url]
+```
+
+**Search for Specific Pages:**
+
+```python
+# Find documentation pages about "authentication"
+result = app.map_url("https://docs.example.com", params={
+    "search": "authentication",
+    "limit": 100
+})
+
+auth_pages = result["links"]
+print(f"Found {len(auth_pages)} pages about authentication")
+```
+
+### Extract Examples
+
+**Schema-Based Extraction:**
+
+```python
+from pydantic import BaseModel
+from typing import List, Optional
+
+# Define schema with Pydantic
+class Product(BaseModel):
+    name: str
+    price: float
+    currency: str
+    availability: str
+    description: Optional[str] = None
+    images: List[str] = []
+
+# Extract structured data
+result = app.extract(
+    urls=["https://shop.example.com/products/*"],
+    params={
+        "schema": Product.model_json_schema(),
+        "limit": 50
+    }
+)
+
+# Results are typed according to schema
+for item in result["data"]:
+    product = Product(**item)
+    print(f"{product.name}: {product.currency}{product.price}")
+```
+
+**Prompt-Based Extraction:**
+
+```python
+# Natural language extraction
+result = app.extract(
+    urls=["https://company.com/about"],
+    params={
+        "prompt": """Extract the following information:
+        - Company name
+        - Founded year
+        - Headquarters location
+        - Number of employees (approximate)
+        - Main products or services
+        - Contact email
+        Return as JSON with these exact field names."""
+    }
+)
+
+company_info = result["data"][0]
+print(f"Company: {company_info.get('Company name')}")
+```
+
+**Multi-Page Extraction:**
+
+```python
+# Extract from multiple product pages
+product_urls = [
+    "https://shop.com/product/1",
+    "https://shop.com/product/2",
+    "https://shop.com/product/3",
+]
+
+result = app.extract(
+    urls=product_urls,
+    params={
+        "schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "price": {"type": "number"},
+                "rating": {"type": "number"},
+                "reviews_count": {"type": "integer"}
+            },
+            "required": ["name", "price"]
+        }
+    }
+)
+
+# Process each product
+for i, product in enumerate(result["data"]):
+    print(f"Product {i+1}: {product['name']} - ${product['price']}")
+```
+
+### Batch Operations
+
+```python
+# Batch scrape multiple URLs
+urls = [
+    "https://example.com/page1",
+    "https://example.com/page2",
+    "https://example.com/page3",
+]
+
+# Start batch scrape
+batch_job = app.batch_scrape_urls(urls, params={
+    "formats": ["markdown"],
+    "onlyMainContent": True
+})
+
+# Poll for completion
+batch_id = batch_job["id"]
+while True:
+    status = app.check_batch_scrape_status(batch_id)
+    if status["status"] == "completed":
+        break
+    time.sleep(2)
+
+# Get results
+results = status["data"]
+for result in results:
+    print(f"Scraped: {result['metadata']['sourceURL']}")
+```
+
+### Error Handling Pattern
+
+```python
+from firecrawl import FirecrawlApp
+from firecrawl.exceptions import FirecrawlError
+import time
+
+def scrape_with_retry(url: str, max_retries: int = 3) -> dict | None:
+    """Scrape URL with exponential backoff retry."""
+    app = FirecrawlApp(api_key=os.getenv("FIRECRAWL_API_KEY"))
+
+    for attempt in range(max_retries):
+        try:
+            result = app.scrape_url(url, params={
+                "formats": ["markdown"],
+                "onlyMainContent": True,
+                "timeout": 30000
+            })
+            return result
+
+        except FirecrawlError as e:
+            if e.status_code == 429:  # Rate limited
+                wait_time = 2 ** attempt
+                print(f"Rate limited, waiting {wait_time}s...")
+                time.sleep(wait_time)
+            elif e.status_code == 402:  # Payment required
+                print("Quota exceeded, add credits")
+                return None
+            elif e.status_code >= 500:  # Server error
+                wait_time = 2 ** attempt
+                print(f"Server error, retrying in {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                print(f"Scrape failed: {e}")
+                return None
+
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+            else:
+                return None
+
+    return None
+```
+
+### RAG Pipeline Integration
+
+```python
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.embeddings import OpenAIEmbeddings
+from langchain.vectorstores import Chroma
+
+def build_rag_index(base_url: str, limit: int = 100):
+    """Build RAG index from crawled content."""
+    app = FirecrawlApp(api_key=os.getenv("FIRECRAWL_API_KEY"))
+
+    # Crawl documentation
+    result = app.crawl_url(base_url, params={
+        "limit": limit,
+        "scrapeOptions": {
+            "formats": ["markdown"],
+            "onlyMainContent": True
+        }
+    })
+
+    # Prepare documents
+    documents = []
+    for page in result["data"]:
+        if page.get("markdown"):
+            documents.append({
+                "content": page["markdown"],
+                "metadata": {
+                    "source": page["metadata"]["sourceURL"],
+                    "title": page["metadata"].get("title", "")
+                }
+            })
+
+    # Split into chunks
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200
+    )
+
+    chunks = []
+    for doc in documents:
+        splits = splitter.split_text(doc["content"])
+        for split in splits:
+            chunks.append({
+                "content": split,
+                "metadata": doc["metadata"]
+            })
+
+    # Create embeddings and store
+    embeddings = OpenAIEmbeddings()
+    vectorstore = Chroma.from_texts(
+        texts=[c["content"] for c in chunks],
+        metadatas=[c["metadata"] for c in chunks],
+        embedding=embeddings,
+        persist_directory="./chroma_db"
+    )
+
+    print(f"Indexed {len(chunks)} chunks from {len(documents)} pages")
+    return vectorstore
+```
+
+### CLI Usage
+
+```bash
+# Install CLI
+pip install firecrawl-py
+
+# Scrape single page
+firecrawl scrape https://example.com -o output.md
+
+# Scrape with options
+firecrawl scrape https://example.com \
+    --format markdown \
+    --only-main-content \
+    --timeout 60000 \
+    -o output.md
+
+# Crawl website
+firecrawl crawl https://docs.example.com \
+    --limit 100 \
+    --include-paths "/docs/*" \
+    -o docs_output/
+
+# Map URLs
+firecrawl map https://example.com \
+    --limit 1000 \
+    -o urls.txt
+
+# Extract structured data
+firecrawl extract https://shop.com/products/* \
+    --prompt "Extract product name, price, description" \
+    -o products.json
+```
+
+---
+
 ## Documentation References
 
 When encountering edge cases, new features, or needing the latest API specifications, use WebFetch to retrieve current documentation:
