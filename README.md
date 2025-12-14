@@ -2,7 +2,7 @@
 
 A comprehensive extension toolkit for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) that transforms your AI coding assistant into a powerhouse development environment.
 
-**21 expert agents. 9 slash commands. 18 skills. One plugin install.**
+**21 expert agents. 10 slash commands. 16 skills. One plugin install.**
 
 ## Why claude-mods?
 
@@ -34,8 +34,8 @@ Claude Code is powerful out of the box, but it has gaps. This toolkit fills them
 claude-mods/
 ├── .claude-plugin/     # Plugin metadata
 ├── agents/             # Expert subagents (21)
-├── commands/           # Slash commands (9)
-├── skills/             # Custom skills (18)
+├── commands/           # Slash commands (10)
+├── skills/             # Custom skills (16)
 ├── hooks/              # Hook examples & docs
 ├── rules/              # Claude Code rules
 ├── tools/              # Modern CLI toolkit docs
@@ -126,10 +126,9 @@ Then symlink or copy to your Claude directories:
 |-------|-------------|
 | [tool-discovery](skills/tool-discovery/) | Recommend agents and skills for any task |
 | [git-workflow](skills/git-workflow/) | Enhanced git operations with lazygit, gh, delta |
-| [project-docs](skills/project-docs/) | Scan and synthesize project documentation |
+| [doc-scanner](skills/doc-scanner/) | Scan and synthesize project documentation |
 | [project-planner](skills/project-planner/) | Track stale plans, suggest /plan command |
 | [python-env](skills/python-env/) | Fast Python environment management with uv |
-| [safe-file-reader](skills/safe-file-reader/) | Read files without permission prompts |
 | [task-runner](skills/task-runner/) | Run project commands with just |
 
 ### Agents

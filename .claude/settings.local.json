@@ -51,7 +51,9 @@
       "Bash(printenv:*)",
       "Bash(sed:*)",
       "Bash(perplexity:*)",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(claude --version:*)",
+      "Bash(claude:*)"
     ],
     "deny": [],
     "ask": []
