@@ -1,9 +1,9 @@
 ---
-name: project-docs
+name: doc-scanner
 description: "Scans for project documentation files (AGENTS.md, CLAUDE.md, GEMINI.md, COPILOT.md, CURSOR.md, WARP.md, and 15+ other formats) and synthesizes guidance. Auto-activates when user asks to review, understand, or explore a codebase, when starting work in a new project, when asking about conventions or agents, or when documentation context would help. Can consolidate multiple platform docs into unified AGENTS.md."
 ---
 
-# Project Documentation Scanner
+# Documentation Scanner
 
 Scan for and synthesize project documentation across AI assistants, IDEs, and CLI tools.
 
@@ -17,7 +17,7 @@ Use this skill when:
 - User asks "how do I work with this codebase" or similar
 - User asks which agent to use for a task
 - Before making significant architectural decisions
-- User explicitly invokes `/project-docs`
+- User explicitly invokes `doc-scanner` skill
 
 ## Instructions
 
@@ -25,8 +25,8 @@ Use this skill when:
 
 Before scanning the project, read the supporting files from this skill directory:
 
-1. Read `~/.claude/skills/project-docs/reference.md` - Contains the complete list of documentation files to scan for
-2. Read `~/.claude/skills/project-docs/templates.md` - Contains templates for generating AGENTS.md
+1. Read `~/.claude/skills/doc-scanner/reference.md` - Contains the complete list of documentation files to scan for
+2. Read `~/.claude/skills/doc-scanner/templates.md` - Contains templates for generating AGENTS.md
 
 These files provide the patterns and templates needed for the remaining steps.
 
