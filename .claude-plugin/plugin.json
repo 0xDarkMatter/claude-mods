@@ -21,7 +21,7 @@
       "commands/testgen.md",
       "commands/explain.md",
       "commands/spawn.md",
-      "commands/delegate.md",
+      "commands/conclave.md",
       "commands/setperms.md",
       "commands/pulse.md"
     ],
