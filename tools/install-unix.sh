@@ -210,6 +210,33 @@ echo '  [ -f ~/.fzf.bash ] && source ~/.fzf.bash  # or .zsh'
 echo '  export FZF_DEFAULT_COMMAND="fd --type f --hidden --follow --exclude .git"'
 echo ""
 
+# Install custom CLI wrappers
+echo ""
+echo -e "${BLUE}Installing custom CLI wrappers...${NC}"
+echo "────────────────────────────────"
+
+LOCAL_BIN="$HOME/.local/bin"
+mkdir -p "$LOCAL_BIN"
+
+# Perplexity CLI wrapper
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/perplexity.py" ]; then
+    cp "$SCRIPT_DIR/perplexity.py" "$LOCAL_BIN/perplexity"
+    chmod +x "$LOCAL_BIN/perplexity"
+    echo -e "  perplexity CLI: ${GREEN}OK${NC}"
+else
+    echo -e "  perplexity CLI: ${YELLOW}SKIP (perplexity.py not found)${NC}"
+fi
+
+# Check if ~/.local/bin is in PATH
+if [[ ":$PATH:" != *":$LOCAL_BIN:"* ]]; then
+    echo ""
+    echo -e "${YELLOW}Add ~/.local/bin to your PATH:${NC}"
+    echo '  export PATH="$HOME/.local/bin:$PATH"'
+fi
+
+echo ""
 echo -e "${BLUE}Verify installation with:${NC}"
 echo '  which fd rg eza bat zoxide delta difft jq yq sd lazygit gh tokei uv just fzf dust btm procs tldr'
+echo '  perplexity --list-models'
 echo ""
