@@ -1,3 +1,7 @@
+# Environment files (API keys)
+.env
+.env.*
+
 # Context init file (regenerated each session)
 .claude/.context-init.md
 
