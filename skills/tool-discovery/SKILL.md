@@ -52,11 +52,10 @@ Is this a reference/lookup task?
 
 | Skill | Triggers | Use When |
 |-------|----------|----------|
-| **git-workflow** | lazygit, gh, delta, pr | Git operations, GitHub PRs, staging |
+| **git-workflow** | lazygit, gh, delta, pr, rebase, stash, bisect | Git operations, GitHub PRs, staging, rebase, bisect |
 | **python-env** | uv, venv, pip, pyproject | Python environment setup with uv |
 | **task-runner** | just, justfile, run tests | Running project tasks via justfile |
-| **safe-file-reader** | bat, eza, view file | Viewing files without permission prompts |
-| **project-docs** | AGENTS.md, conventions | Finding and reading project documentation |
+| **doc-scanner** | AGENTS.md, conventions, scan docs | Finding and reading project documentation |
 | **project-planner** | plan, sync plan, track | Project planning with /plan command |
 
 ---

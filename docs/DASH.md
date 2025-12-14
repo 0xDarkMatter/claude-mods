@@ -1,5 +1,5 @@
 # 🎛️ Claude Mods Dashboard
-**Updated:** 2025-12-14 | **Extensions:** 52 | **Lines:** 14,053
+**Updated:** 2025-12-14 | **Extensions:** 50 | **Lines:** 15,300
 
 ---
 
@@ -8,7 +8,7 @@
 | Category | Count | Lines |
 |----------|-------|-------|
 | 🤖 **Agents** | 21 | 7,552 |
-| ⚡ **Skills** | 18 | 2,725 |
+| ⚡ **Skills** | 16 | 3,850 |
 | 🔧 **Commands** | 10 | 3,776 |
 | 📏 **Rules** | 1 | 113 |
 | 🧩 **Templates** | 2 | — |
@@ -67,11 +67,10 @@
 | Skill | Tool | Triggers |
 |-------|------|----------|
 | ⚡ **tool-discovery** | — | "Which agent/skill?", recommend tools |
-| ⚡ **git-workflow** | lazygit, gh, delta | Stage, PR, review |
-| ⚡ **project-docs** | — | AGENTS.md, conventions |
+| ⚡ **git-workflow** | lazygit, gh, delta | Stage, PR, review, rebase, stash, bisect |
+| ⚡ **doc-scanner** | — | AGENTS.md, conventions, consolidate docs |
 | ⚡ **project-planner** | — | Stale plans, `/plan` |
 | ⚡ **python-env** | uv | Fast venv, pyproject.toml |
-| ⚡ **safe-file-reader** | bat, eza | View without prompts |
 | ⚡ **task-runner** | just | Run tests, build |
 
 ---
