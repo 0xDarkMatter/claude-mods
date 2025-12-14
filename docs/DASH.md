@@ -1,5 +1,5 @@
 # 🎛️ Claude Mods Dashboard
-**Updated:** 2025-12-13 | **Extensions:** 51 | **Lines:** 13,553
+**Updated:** 2025-12-14 | **Extensions:** 52 | **Lines:** 14,053
 
 ---
 
@@ -9,7 +9,7 @@
 |----------|-------|-------|
 | 🤖 **Agents** | 21 | 7,552 |
 | ⚡ **Skills** | 18 | 2,725 |
-| 🔧 **Commands** | 9 | 3,276 |
+| 🔧 **Commands** | 10 | 3,776 |
 | 📏 **Rules** | 1 | 113 |
 | 🧩 **Templates** | 2 | — |
 
@@ -87,6 +87,7 @@
 | 🔧 `/explain` | Deep code/concept explanation |
 | 🔧 `/spawn` | Generate expert agents |
 | 🔧 `/conclave` | Summon external LLMs (Gemini, OpenAI, Perplexity) for consensus |
+| 🔧 `/atomise` | Atom of Thoughts reasoning with confidence tracking |
 | 🔧 `/pulse` | Claude Code ecosystem news digest |
 | 🔧 `/setperms` | Set tool permissions |
 
