@@ -22,6 +22,7 @@
       "commands/explain.md",
       "commands/spawn.md",
       "commands/conclave.md",
+      "commands/atomise.md",
       "commands/setperms.md",
       "commands/pulse.md"
     ],
