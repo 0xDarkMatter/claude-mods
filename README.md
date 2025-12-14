@@ -96,7 +96,7 @@ Then symlink or copy to your Claude directories:
 | [testgen](commands/testgen.md) | Generate tests with expert routing, framework detection, focus/depth modes. |
 | [explain](commands/explain.md) | Deep explanation of complex code, files, or concepts. Architecture, data flow, design decisions. |
 | [spawn](commands/spawn.md) | Generate expert agents with PhD-level patterns and code examples. |
-| [delegate](commands/delegate.md) | Delegate to external LLMs (Gemini, OpenAI). Use each model's strengths or get consensus. |
+| [conclave](commands/conclave.md) | Summon external LLMs (Gemini, OpenAI, Perplexity) for analysis, research, and consensus verdicts. |
 | [pulse](commands/pulse.md) | Generate Claude Code ecosystem news digest from blogs, repos, and community sources. |
 | [setperms](commands/setperms.md) | Set tool permissions and CLI preferences. |
 

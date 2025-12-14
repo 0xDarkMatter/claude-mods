@@ -1,5 +1,5 @@
-# ~/.claude/delegate.yaml
-# Configuration for /delegate command - Multi-LLM task dispatch
+# ~/.claude/conclave.yaml
+# Configuration for /conclave command - Multi-LLM task dispatch
 
 # API Keys (preferred over environment variables)
 # Uncomment and add your keys:
@@ -37,8 +37,8 @@ providers:
     # Unique: returns web citations with every response
     # Get API key at: https://www.perplexity.ai/settings/api
 
-# Conclave (Multi-Model) Settings
-conclave:
+# Consensus Mode (--all) Settings
+consensus:
   providers: [gemini, openai]     # Which providers participate
   # providers: [gemini, openai, perplexity]  # Include Perplexity for web-grounded consensus
   require_consensus: true         # All must agree for YES/NO verdicts

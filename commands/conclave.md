@@ -1,19 +1,19 @@
 ---
-description: Delegate tasks to external LLM CLIs (Gemini, OpenAI Codex, Perplexity). Use Gemini's 2M context for large codebases, OpenAI's deep reasoning, Perplexity's web search with citations, or get consensus from multiple models.
+description: Summon external LLM CLIs (Gemini, OpenAI Codex, Perplexity) for analysis, research, and consensus. Use Gemini's 2M context for large codebases, OpenAI's deep reasoning, Perplexity's web search with citations, or convene multiple models for verdicts.
 ---
 
-# Delegate - Multi-LLM Task Dispatch
+# Conclave - Multi-LLM Council
 
-> Delegate tasks to external LLMs. Use each model's strengths: Gemini's massive context, OpenAI's reasoning depth, Perplexity's web-grounded answers, or combine them for consensus.
+> Convene a council of AI models. Use each model's strengths: Gemini's massive context, OpenAI's reasoning depth, Perplexity's web-grounded answers, or summon them all for consensus verdicts.
 
 ```
-/delegate [provider] [target] [--flags]
+/conclave [provider] [target] [--flags]
     |
     +-> Step 1: Detect Provider
     |     +- gemini (default) -> Gemini CLI
     |     +- openai / codex   -> OpenAI Codex CLI
     |     +- perplexity / pplx -> Perplexity CLI (web search)
-    |     +- conclave         -> Multiple providers (consensus mode)
+    |     +- --all            -> Multiple providers (consensus mode)
     |
     +-> Step 2: Select Mode
     |     +- analyze (default) -> Codebase analysis
@@ -27,7 +27,7 @@ description: Delegate tasks to external LLM CLIs (Gemini, OpenAI Codex, Perplexi
     |     +- --quiet           -> Non-interactive, parseable output
     |
     +-> Step 4: Execute & Distill
-          +- Run delegated command
+          +- Run conclaved command
           +- Parse structured output
           +- Return distilled results to Claude
 ```
@@ -38,19 +38,19 @@ description: Delegate tasks to external LLM CLIs (Gemini, OpenAI Codex, Perplexi
 
 ```bash
 # Basic usage (Gemini, analyze current directory)
-/delegate .
+/conclave .
 
 # Ask Gemini a question about the codebase
-/delegate ask "Where is authentication implemented?"
+/conclave ask "Where is authentication implemented?"
 
 # Use OpenAI Codex for deep reasoning
-/delegate openai . --thinking
+/conclave openai . --thinking
 
 # Use Perplexity for web-grounded research
-/delegate perplexity "What are the latest React 19 breaking changes?"
+/conclave perplexity "What are the latest React 19 breaking changes?"
 
 # Get consensus from multiple models
-/delegate conclave "Is this code secure?"
+/conclave --all "Is this code secure?"
 ```
 
 ---
@@ -64,7 +64,7 @@ Providers:
 - (none) / gemini    -> Gemini CLI (default, 2M context)
 - openai / codex     -> OpenAI Codex CLI (deep reasoning)
 - perplexity / pplx  -> Perplexity CLI (web search + citations)
-- conclave           -> Multiple providers (consensus mode)
+- --all              -> Multiple providers (consensus mode)
 
 Modes:
 - <path>             -> Analyze target (default mode)
@@ -97,10 +97,10 @@ Focus flags:
 
 ### Configuration File (Preferred)
 
-Create `~/.claude/delegate.yaml` for all settings including API keys:
+Create `~/.claude/conclave.yaml` for all settings including API keys:
 
 ```yaml
-# ~/.claude/delegate.yaml
+# ~/.claude/conclave.yaml
 
 # API Keys (preferred storage method)
 # These take precedence over environment variables
@@ -145,7 +145,7 @@ conclave:
 | **Perplexity** | `sonar-pro` | 200K tokens | **Real-time web search** - best for research, current info, fact-checking |
 
 > **Notes:**
-> - `gemini-2.5-pro` is tuned as a "CLI agent for software engineering" - it deliberately refuses non-coding questions. Perfect for `/delegate` code analysis.
+> - `gemini-2.5-pro` is tuned as a "CLI agent for software engineering" - it deliberately refuses non-coding questions. Perfect for `/conclave` code analysis.
 > - `gemini-2.5-flash` answers general questions but is less capable for complex code tasks.
 > - Gemini 3 Pro requires Google AI Ultra subscription. Free tier users can [join the waitlist](https://developers.googleblog.com/en/5-things-to-try-with-gemini-3-pro-in-gemini-cli/).
 
@@ -153,13 +153,13 @@ conclave:
 
 Keys are resolved in this priority order:
 
-1. **Config file** - `~/.claude/delegate.yaml` (recommended)
+1. **Config file** - `~/.claude/conclave.yaml` (recommended)
 2. **Environment variables** - `GEMINI_API_KEY`, `OPENAI_API_KEY`
 3. **Interactive prompt** - If missing, prompt user in interactive mode
 
 ```
 Key Resolution:
-    ~/.claude/delegate.yaml (api_keys.gemini)
+    ~/.claude/conclave.yaml (api_keys.gemini)
         ↓ (not found)
     Environment: GEMINI_API_KEY
         ↓ (not found)
@@ -170,9 +170,9 @@ Key Resolution:
 
 ### First-Time Setup
 
-When `/delegate` is run without configuration:
+When `/conclave` is run without configuration:
 
-1. Check for `~/.claude/delegate.yaml`
+1. Check for `~/.claude/conclave.yaml`
 2. If missing or incomplete, prompt:
    ```
    Gemini API key not found.
@@ -181,7 +181,7 @@ When `/delegate` is run without configuration:
    OpenAI API key not found.
    Enter key (or press Enter to skip OpenAI): ___
 
-   Save to ~/.claude/delegate.yaml? [Y/n]
+   Save to ~/.claude/conclave.yaml? [Y/n]
    ```
 3. Create config file with entered keys
 4. Inform user: "Config saved. Future runs will use stored keys."
@@ -207,7 +207,7 @@ export PERPLEXITY_API_KEY="your-key-here"
 
 - Config file is stored in user's `.claude/` directory (not in project)
 - Never commit API keys to git
-- The `delegate.yaml` should be in `.gitignore` by default
+- The `conclave.yaml` should be in `.gitignore` by default
 - Keys in config file take precedence over environment variables
 
 ---
@@ -280,7 +280,7 @@ codex exec "<prompt>" [--full-auto] [--json] [-m <model>] --skip-git-repo-check
 | Auth Method | Setup | Notes |
 |-------------|-------|-------|
 | **Environment Variable** | `export PERPLEXITY_API_KEY="key"` | Standard approach |
-| **Config File** | Add to `~/.claude/delegate.yaml` | Preferred for persistence |
+| **Config File** | Add to `~/.claude/conclave.yaml` | Preferred for persistence |
 
 > Get your API key at [perplexity.ai/settings/api](https://www.perplexity.ai/settings/api)
 
@@ -320,12 +320,12 @@ perplexity -m sonar-reasoning "Explain the tradeoffs of microservices vs monolit
 
 ---
 
-## Conclave Mode
+## Consensus Mode (--all)
 
-Conclave mode dispatches tasks to multiple LLMs and has **Claude arbitrate** the results.
+The `--all` flag dispatches tasks to multiple LLMs and has **Claude arbitrate** the results.
 
 ```
-/delegate conclave "<query>"
+/conclave --all "<query>"
     │
     ├─→ Step 1: Dispatch (parallel)
     │     ├─ Gemini: detailed analysis request
@@ -416,16 +416,16 @@ Structure your response:
 
 ```bash
 # Security review with arbitration
-/delegate conclave "Is this authentication implementation secure?"
+/conclave --all "Is this authentication implementation secure?"
 
 # Architecture decision
-/delegate conclave "Should we use microservices or monolith for this project?"
+/conclave --all "Should we use microservices or monolith for this project?"
 
 # Code quality assessment
-/delegate conclave . --quality "Evaluate the test coverage and error handling"
+/conclave --all . --quality "Evaluate the test coverage and error handling"
 
 # Verify a claim with multiple perspectives
-/delegate conclave verify "All database queries are properly parameterized"
+/conclave --all verify "All database queries are properly parameterized"
 ```
 
 ### When to Use Conclave
@@ -459,14 +459,14 @@ which perplexity || echo "Install: Run tools/install-*.sh from claude-mods"
 
 | Input Pattern | Provider | Mode |
 |---------------|----------|------|
-| `/delegate .` | gemini | analyze |
-| `/delegate openai .` | openai | analyze |
-| `/delegate perplexity "..."` | perplexity | ask |
-| `/delegate ask "..."` | gemini | ask |
-| `/delegate codex ask "..."` | openai | ask |
-| `/delegate pplx ask "..."` | perplexity | ask |
-| `/delegate conclave .` | configured | analyze |
-| `/delegate verify "..."` | gemini | verify |
+| `/conclave .` | gemini | analyze |
+| `/conclave openai .` | openai | analyze |
+| `/conclave perplexity "..."` | perplexity | ask |
+| `/conclave ask "..."` | gemini | ask |
+| `/conclave codex ask "..."` | openai | ask |
+| `/conclave pplx ask "..."` | perplexity | ask |
+| `/conclave --all .` | configured | analyze |
+| `/conclave verify "..."` | gemini | verify |
 
 ### Step 3: Construct Command
 
@@ -518,75 +518,75 @@ perplexity -m sonar-pro "What are the security best practices for JWT tokens in 
 
 ```bash
 # Analyze with Gemini (default)
-/delegate src/
+/conclave src/
 
 # Analyze with OpenAI Codex
-/delegate openai src/
+/conclave openai src/
 
 # Quick architecture overview
-/delegate . --arch --brief
+/conclave . --arch --brief
 ```
 
 ### Questions & Verification
 
 ```bash
 # Ask a question (Gemini)
-/delegate ask "How does the authentication flow work?"
+/conclave ask "How does the authentication flow work?"
 
 # Ask with deep reasoning (OpenAI)
-/delegate openai ask "What are the security implications of this design?" --thinking
+/conclave openai ask "What are the security implications of this design?" --thinking
 
 # Ask with web-grounded research (Perplexity)
-/delegate perplexity "What are the latest OWASP Top 10 vulnerabilities for 2025?"
+/conclave perplexity "What are the latest OWASP Top 10 vulnerabilities for 2025?"
 
 # Verify a claim
-/delegate verify "All database queries use parameterized statements"
+/conclave verify "All database queries use parameterized statements"
 ```
 
 ### Research & Current Info (Perplexity)
 
 ```bash
 # Get current information with sources
-/delegate pplx "Is this npm package actively maintained?"
+/conclave pplx "Is this npm package actively maintained?"
 
 # Research best practices with citations
-/delegate perplexity "What are the recommended JWT token expiration times in 2025?"
+/conclave perplexity "What are the recommended JWT token expiration times in 2025?"
 
 # Fact-check a claim
-/delegate pplx "Does React 19 remove support for class components?"
+/conclave pplx "Does React 19 remove support for class components?"
 ```
 
 ### Autonomous Mode
 
 ```bash
 # Let Gemini run without prompts
-/delegate . --auto --security
+/conclave . --auto --security
 
 # Full autonomous with OpenAI
-/delegate openai . --auto --detailed
+/conclave openai . --auto --detailed
 ```
 
 ### Conclave (Multi-Model)
 
 ```bash
 # Get consensus on architecture
-/delegate conclave . --arch
+/conclave --all . --arch
 
 # Security verification with multiple opinions
-/delegate conclave verify "This code is safe from SQL injection"
+/conclave --all verify "This code is safe from SQL injection"
 
 # Compare complex analysis
-/delegate conclave ask "What's the biggest technical debt in this codebase?"
+/conclave --all ask "What's the biggest technical debt in this codebase?"
 ```
 
 ### Saving Output
 
 ```bash
 # Save analysis to file
-/delegate . --detailed --save analysis.md
+/conclave . --detailed --save analysis.md
 
 # Save conclave results
-/delegate conclave . --security --save security-audit.md
+/conclave --all . --security --save security-audit.md
 ```
 
 ---
@@ -610,9 +610,9 @@ perplexity -m sonar-pro "What are the security best practices for JWT tokens in 
 Gemini API key not found.
 
 Options:
-  1. Enter key now (will save to ~/.claude/delegate.yaml)
+  1. Enter key now (will save to ~/.claude/conclave.yaml)
   2. Set env: export GEMINI_API_KEY="your-key"
-  3. Edit config: ~/.claude/delegate.yaml
+  3. Edit config: ~/.claude/conclave.yaml
 
 Enter key (or 'skip' for OpenAI only): ___
 ```
@@ -621,7 +621,7 @@ Enter key (or 'skip' for OpenAI only): ___
 ```
 ERROR: Gemini API key not found.
 
-Configure in ~/.claude/delegate.yaml:
+Configure in ~/.claude/conclave.yaml:
   api_keys:
     gemini: "your-key"
 
@@ -632,23 +632,23 @@ Or set: export GEMINI_API_KEY="your-key"
 
 ## Migration from /g-slave
 
-The `/delegate` command is the successor to `/g-slave` with expanded capabilities:
+The `/conclave` command is the successor to `/g-slave` with expanded capabilities:
 
 | Old | New | Notes |
 |-----|-----|-------|
-| `/g-slave .` | `/delegate .` | Same behavior |
-| `/g-slave ask "..."` | `/delegate ask "..."` | Same behavior |
-| `/g-slave --raw` | `/delegate --raw` | Same behavior |
-| (n/a) | `/delegate openai .` | NEW: OpenAI support |
-| (n/a) | `/delegate conclave .` | NEW: Multi-model consensus |
-| (n/a) | `/delegate --thinking` | NEW: Extended reasoning |
+| `/g-slave .` | `/conclave .` | Same behavior |
+| `/g-slave ask "..."` | `/conclave ask "..."` | Same behavior |
+| `/g-slave --raw` | `/conclave --raw` | Same behavior |
+| (n/a) | `/conclave openai .` | NEW: OpenAI support |
+| (n/a) | `/conclave --all .` | NEW: Multi-model consensus |
+| (n/a) | `/conclave --thinking` | NEW: Extended reasoning |
 
 ---
 
 ## Remember
 
-1. **Claude commands, LLMs execute.** You delegate heavy lifting, receive distilled intel.
-2. **Read-only always.** Never let delegates modify files (unless explicitly autonomous).
+1. **Claude commands, LLMs execute.** You conclave heavy lifting, receive distilled intel.
+2. **Read-only always.** Never let conclaves modify files (unless explicitly autonomous).
 3. **Default to strongest.** Use best available model unless user specifies otherwise.
 4. **Distill by default.** Only pass raw output when requested.
 5. **Conclave for confidence.** When stakes are high, get multiple opinions.
