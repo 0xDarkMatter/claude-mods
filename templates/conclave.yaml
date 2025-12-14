@@ -6,6 +6,7 @@
 # api_keys:
 #   gemini: "your-gemini-api-key"
 #   openai: "your-openai-api-key"
+#   anthropic: "your-anthropic-api-key"
 #   perplexity: "your-perplexity-api-key"
 
 # Provider Configuration
@@ -28,6 +29,16 @@ providers:
     default_flags:
       - --json
 
+  claude:
+    model: sonnet                 # Best balance of speed and capability
+    # model: opus                 # Most capable - complex reasoning
+    # model: haiku                # Fastest - quick analysis
+    default_flags:
+      - --print
+      - --output-format
+      - text
+    # Uses ANTHROPIC_API_KEY env var or existing Claude Code login
+
   perplexity:
     model: sonar-pro             # Best balance: complex queries, more citations
     # model: sonar               # Fast, cost-effective for quick facts
@@ -39,9 +50,9 @@ providers:
 
 # Consensus Mode (--all) Settings
 consensus:
-  providers: [gemini, openai]     # Which providers participate
-  # providers: [gemini, openai, perplexity]  # Include Perplexity for web-grounded consensus
-  require_consensus: true         # All must agree for YES/NO verdicts
+  providers: [gemini, openai, claude]  # Which providers participate
+  # providers: [gemini, openai, claude, perplexity]  # Include Perplexity for web-grounded consensus
+  require_consensus: true              # All must agree for YES/NO verdicts
 
 # Default behavior
 defaults:
