@@ -134,6 +134,42 @@ if (Get-Command fzf -ErrorAction SilentlyContinue) {
 }
 
 Write-Host ""
+# Install custom CLI wrappers
+Write-Host ""
+Write-Host "Installing custom CLI wrappers..." -ForegroundColor Cyan
+Write-Host "────────────────────────────────"
+
+$localBin = "$env:USERPROFILE\.local\bin"
+if (-not (Test-Path $localBin)) {
+    New-Item -ItemType Directory -Path $localBin -Force | Out-Null
+    Write-Host "  Created $localBin" -ForegroundColor Green
+}
+
+# Perplexity CLI wrapper
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$perplexitySrc = Join-Path $scriptDir "perplexity.py"
+if (Test-Path $perplexitySrc) {
+    Copy-Item $perplexitySrc "$localBin\perplexity.py" -Force
+    # Create batch wrapper for Windows
+    $batchContent = "@echo off`npython `"%USERPROFILE%\.local\bin\perplexity.py`" %*"
+    Set-Content -Path "$localBin\perplexity.cmd" -Value $batchContent
+    Write-Host "  perplexity CLI: " -NoNewline
+    Write-Host "OK" -ForegroundColor Green
+} else {
+    Write-Host "  perplexity CLI: " -NoNewline
+    Write-Host "SKIP (perplexity.py not found)" -ForegroundColor Yellow
+}
+
+# Check if ~/.local/bin is in PATH
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($userPath -notlike "*$localBin*") {
+    Write-Host ""
+    Write-Host "Add ~/.local/bin to your PATH:" -ForegroundColor Yellow
+    Write-Host "  [Environment]::SetEnvironmentVariable('Path', `$env:Path + ';$localBin', 'User')" -ForegroundColor Yellow
+}
+
+Write-Host ""
 Write-Host "Verify installation with:" -ForegroundColor Cyan
 Write-Host '  which fd rg eza bat zoxide delta difft jq yq sd lazygit gh tokei uv just fzf dust btm procs tldr' -ForegroundColor Yellow
+Write-Host '  perplexity --list-models' -ForegroundColor Yellow
 Write-Host ""

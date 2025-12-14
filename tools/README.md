@@ -96,6 +96,61 @@ Token-efficient CLI tools that replace verbose legacy commands. These tools are 
 |--------|--------|-------------|
 | `make` | `just` | Simpler syntax, better errors |
 
+### AI Provider CLIs
+
+Custom CLI wrappers included in this toolkit for multi-LLM delegation:
+
+| Provider | CLI | Strength |
+|----------|-----|----------|
+| Gemini | `gemini` | 1M context, code analysis (install separately) |
+| OpenAI | `codex` | Deep reasoning (install separately) |
+| **Perplexity** | `perplexity` | **Web search + citations** (included) |
+
+**Perplexity CLI** (included - runs via `perplexity.py`):
+```bash
+# Direct question with web-grounded answer
+perplexity "What's new in TypeScript 5.7?"
+
+# Use reasoning model for complex analysis
+perplexity -m sonar-reasoning "Explain microservices vs monolith tradeoffs"
+
+# Pipe content for analysis
+cat code.py | perplexity "Review this code for security issues"
+
+# Filter by recency (day, week, month, year)
+perplexity --recency day "Latest AI news"
+
+# Restrict search to specific domains
+perplexity --domains "github.com,docs.python.org" "Python asyncio patterns"
+
+# JSON output for programmatic use
+perplexity --json "query" > output.json
+
+# List available models
+perplexity --list-models
+```
+
+**Models:**
+| Model | Use Case |
+|-------|----------|
+| `sonar` | Fast, cost-effective for quick facts |
+| `sonar-pro` | Complex queries, more citations (default) |
+| `sonar-reasoning` | Multi-step problem solving |
+| `sonar-reasoning-pro` | Deep reasoning (DeepSeek-R1) |
+| `sonar-deep-research` | Comprehensive agentic research |
+
+**Setup:**
+```bash
+# Set API key (get from https://www.perplexity.ai/settings/api)
+export PERPLEXITY_API_KEY="your-key-here"
+
+# Or add to ~/.claude/delegate.yaml:
+# api_keys:
+#   perplexity: "your-key-here"
+```
+
+---
+
 ### Web Fetching (URL Retrieval Hierarchy)
 
 When Claude's built-in `WebFetch` gets blocked (403, Cloudflare, etc.), use these alternatives in order:
@@ -158,6 +213,9 @@ After installation, verify all tools:
 ```bash
 # Check all tools are available
 which fd rg eza bat zoxide delta difft jq yq sd lazygit gh tokei uv just ast-grep fzf dust btm procs tldr
+
+# Check custom CLI wrappers
+perplexity --list-models
 ```
 
 ## Experimental / Future
