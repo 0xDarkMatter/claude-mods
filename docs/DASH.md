@@ -9,7 +9,7 @@
 |----------|-------|-------|
 | 🤖 **Agents** | 21 | 7,552 |
 | ⚡ **Skills** | 18 | 2,725 |
-| 🔧 **Commands** | 12 | 3,276 |
+| 🔧 **Commands** | 9 | 3,276 |
 | 📏 **Rules** | 1 | 113 |
 | 🧩 **Templates** | 2 | — |
 
@@ -80,18 +80,15 @@
 
 | Command | Purpose |
 |---------|---------|
-| 🔧 `/agent-genesis` | Generate expert agent prompts |
-| 🔧 `/explain` | Deep code/concept explanation |
-| 🔧 `/g-slave` | Dispatch Gemini for large codebases |
-| 🔧 `/init-tools` | Quick project permissions setup |
-| 🔧 `/plan` | Create persistent project plans |
-| 🔧 `/saveplan` | Save plan state |
-| 🔧 `/loadplan` | Restore plan from saved state |
-| 🔧 `/showplan` | Show plan progress |
-| 🔧 `/pulse` | Claude Code ecosystem news digest |
-| 🔧 `/review` | Code review staged changes |
 | 🔧 `/sync` | Session bootstrap with project context |
-| 🔧 `/test` | Generate tests |
+| 🔧 `/plan` | Unified planning: create plans, save/load state, show status |
+| 🔧 `/review` | Code review staged changes |
+| 🔧 `/testgen` | Generate tests with expert routing |
+| 🔧 `/explain` | Deep code/concept explanation |
+| 🔧 `/spawn` | Generate expert agents |
+| 🔧 `/delegate` | Delegate to external LLMs (Gemini, OpenAI) |
+| 🔧 `/pulse` | Claude Code ecosystem news digest |
+| 🔧 `/setperms` | Set tool permissions |
 
 ---
 

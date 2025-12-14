@@ -41,12 +41,17 @@
       "Bash(certutil -hashfile:*)",
       "Bash(grep:*)",
       "Bash(xargs basename:*)",
-      "Bash(FIRECRAWL_API_KEY=fc-62620190118f4aa0907781f3f6f3278e python scripts/pulse_fetch.py:*)",
-      "Bash(FIRECRAWL_API_KEY=fc-62620190118f4aa0907781f3f6f3278e python:*)",
       "Bash(dir:*)",
       "Bash(cut:*)",
       "Bash(tr:*)",
-      "Bash(test:*)"
+      "Bash(test:*)",
+      "Bash(gemini --version:*)",
+      "Bash(gemini:*)",
+      "Bash(codex:*)",
+      "Bash(printenv:*)",
+      "Bash(sed:*)",
+      "Bash(perplexity:*)",
+      "Bash(findstr:*)"
     ],
     "deny": [],
     "ask": []
