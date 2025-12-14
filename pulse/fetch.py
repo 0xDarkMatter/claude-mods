@@ -120,15 +120,50 @@ def fetch_url_firecrawl(app: 'FirecrawlApp', source: dict) -> dict:
         }
 
 
+def get_firecrawl_api_key():
+    """Get Firecrawl API key from env or config file."""
+    import re
+
+    # Try environment variable first
+    key = os.getenv('FIRECRAWL_API_KEY')
+    if key:
+        return key
+
+    # Try ~/.claude/delegate.yaml
+    config_path = os.path.expanduser("~/.claude/delegate.yaml")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                content = f.read()
+            # Parse the api_keys block and find firecrawl
+            in_api_keys = False
+            for line in content.split('\n'):
+                stripped = line.strip()
+                if stripped.startswith('api_keys:'):
+                    in_api_keys = True
+                    continue
+                if in_api_keys and stripped and not line.startswith(' ') and not line.startswith('\t'):
+                    if not stripped.startswith('#'):
+                        in_api_keys = False
+                if in_api_keys and 'firecrawl:' in stripped.lower():
+                    match = re.search(r'firecrawl:\s*["\']?([^"\'\n#]+)', stripped, re.IGNORECASE)
+                    if match:
+                        return match.group(1).strip()
+        except Exception:
+            pass
+
+    return None
+
+
 def fetch_all_parallel(sources: list, max_workers: int = 10) -> list:
     """Fetch all URLs in parallel using ThreadPoolExecutor."""
     if not FIRECRAWL_AVAILABLE:
         print("Error: firecrawl not available")
         return []
 
-    api_key = os.getenv('FIRECRAWL_API_KEY')
+    api_key = get_firecrawl_api_key()
     if not api_key:
-        print("Error: FIRECRAWL_API_KEY environment variable not set")
+        print("Error: FIRECRAWL_API_KEY not set. Set env var or add to ~/.claude/delegate.yaml")
         return []
 
     app = FirecrawlApp(api_key=api_key)
@@ -213,9 +248,9 @@ def discover_articles(sources: list, max_workers: int = 10, max_articles_per_sou
         print("Error: firecrawl not available")
         return []
 
-    api_key = os.getenv('FIRECRAWL_API_KEY')
+    api_key = get_firecrawl_api_key()
     if not api_key:
-        print("Error: FIRECRAWL_API_KEY environment variable not set")
+        print("Error: FIRECRAWL_API_KEY not set. Set env var or add to ~/.claude/delegate.yaml")
         return []
 
     # First, fetch all blog homepages
