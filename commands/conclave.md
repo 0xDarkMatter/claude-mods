@@ -1,10 +1,10 @@
 ---
-description: Summon external LLM CLIs (Gemini, OpenAI Codex, Perplexity) for analysis, research, and consensus. Use Gemini's 2M context for large codebases, OpenAI's deep reasoning, Perplexity's web search with citations, or convene multiple models for verdicts.
+description: Summon external LLM CLIs (Gemini, OpenAI Codex, Claude, Perplexity) for analysis, research, and consensus. Use Gemini's 2M context, OpenAI's deep reasoning, Claude's coding expertise, Perplexity's web search, or convene multiple models for verdicts.
 ---
 
 # Conclave - Multi-LLM Council
 
-> Convene a council of AI models. Use each model's strengths: Gemini's massive context, OpenAI's reasoning depth, Perplexity's web-grounded answers, or summon them all for consensus verdicts.
+> Convene a council of AI models. Use each model's strengths: Gemini's massive context, OpenAI's reasoning depth, Claude's coding excellence, Perplexity's web-grounded answers, or summon them all for consensus verdicts.
 
 ```
 /conclave [provider] [target] [--flags]
@@ -12,6 +12,7 @@ description: Summon external LLM CLIs (Gemini, OpenAI Codex, Perplexity) for ana
     +-> Step 1: Detect Provider
     |     +- gemini (default) -> Gemini CLI
     |     +- openai / codex   -> OpenAI Codex CLI
+    |     +- claude           -> Claude Code CLI (headless)
     |     +- perplexity / pplx -> Perplexity CLI (web search)
     |     +- --all            -> Multiple providers (consensus mode)
     |
@@ -46,6 +47,9 @@ description: Summon external LLM CLIs (Gemini, OpenAI Codex, Perplexity) for ana
 # Use OpenAI Codex for deep reasoning
 /conclave openai . --thinking
 
+# Use Claude CLI for another perspective
+/conclave claude "Review this authentication flow"
+
 # Use Perplexity for web-grounded research
 /conclave perplexity "What are the latest React 19 breaking changes?"
 
@@ -63,6 +67,7 @@ $ARGUMENTS
 Providers:
 - (none) / gemini    -> Gemini CLI (default, 2M context)
 - openai / codex     -> OpenAI Codex CLI (deep reasoning)
+- claude             -> Claude Code CLI (coding expertise, headless mode)
 - perplexity / pplx  -> Perplexity CLI (web search + citations)
 - --all              -> Multiple providers (consensus mode)
 
@@ -107,6 +112,7 @@ Create `~/.claude/conclave.yaml` for all settings including API keys:
 api_keys:
   gemini: "your-gemini-api-key-here"
   openai: "your-openai-api-key-here"
+  anthropic: "your-anthropic-api-key-here"  # For Claude CLI
   perplexity: "your-perplexity-api-key-here"
 
 # Provider Configuration
@@ -122,16 +128,24 @@ providers:
     default_flags:               # Alternatives: gpt-5.1-codex-max, gpt-4o
       - --quiet
 
+  claude:
+    model: sonnet                # Options: sonnet, opus, haiku
+    default_flags:               # Uses Claude Code CLI in headless mode
+      - --print
+      - --output-format
+      - json
+    # Note: Uses ANTHROPIC_API_KEY env var or Claude Code login
+
   perplexity:
     model: sonar-pro             # Best balance: complex queries, more citations
     default_flags:               # Alternatives: sonar, sonar-reasoning, sonar-reasoning-pro
       - --citations
     # Unique: returns web citations with every response
 
-# Conclave (Multi-Model) Settings
-conclave:
-  providers: [gemini, openai]    # Which providers participate
-  require_consensus: true        # All must agree for YES/NO verdicts
+# Consensus Mode (--all) Settings
+consensus:
+  providers: [gemini, openai, claude]  # Which providers participate
+  require_consensus: true              # All must agree for YES/NO verdicts
 ```
 
 ### Default Models (Tested \& Working)
@@ -142,12 +156,16 @@ conclave:
 | **Gemini** | `gemini-2.5-flash` | 1M tokens | General-purpose, fast, answers any question |
 | **Gemini** | `gemini-3-pro` | 1M tokens | Most intelligent (requires [Ultra subscription](https://ai.google.dev/gemini-api/docs/models)) |
 | **OpenAI** | gpt-5.2 | 128K tokens | Deep reasoning, best knowledge (ChatGPT login) |
+| **Claude** | `sonnet` | 200K tokens | **Coding excellence** - best for code review, refactoring, security analysis |
+| **Claude** | `opus` | 200K tokens | Most capable - complex reasoning, nuanced analysis |
+| **Claude** | `haiku` | 200K tokens | Fast, efficient - quick analysis, simple tasks |
 | **Perplexity** | `sonar-pro` | 200K tokens | **Real-time web search** - best for research, current info, fact-checking |
 
 > **Notes:**
 > - `gemini-2.5-pro` is tuned as a "CLI agent for software engineering" - it deliberately refuses non-coding questions. Perfect for `/conclave` code analysis.
 > - `gemini-2.5-flash` answers general questions but is less capable for complex code tasks.
 > - Gemini 3 Pro requires Google AI Ultra subscription. Free tier users can [join the waitlist](https://developers.googleblog.com/en/5-things-to-try-with-gemini-3-pro-in-gemini-cli/).
+> - Claude CLI uses your existing Claude Code authentication or `ANTHROPIC_API_KEY` environment variable.
 
 ### API Key Resolution Order
 
@@ -194,12 +212,14 @@ If you prefer environment variables over config file:
 |----------|---------|
 | `GEMINI_API_KEY` | Gemini CLI authentication |
 | `OPENAI_API_KEY` | OpenAI Codex authentication |
+| `ANTHROPIC_API_KEY` | Claude CLI authentication |
 | `PERPLEXITY_API_KEY` | Perplexity CLI authentication |
 
 ```bash
 # Add to ~/.bashrc or ~/.zshrc
 export GEMINI_API_KEY="your-key-here"
 export OPENAI_API_KEY="your-key-here"
+export ANTHROPIC_API_KEY="your-key-here"
 export PERPLEXITY_API_KEY="your-key-here"
 ```
 
@@ -318,6 +338,55 @@ perplexity -m sonar-reasoning "Explain the tradeoffs of microservices vs monolit
 - Research questions requiring web search
 - Fact-checking claims with citations
 
+### Claude Code CLI
+
+**Authentication:**
+
+| Auth Method | Setup | Notes |
+|-------------|-------|-------|
+| **Claude Code Login** | `claude` (interactive first use) | Uses existing login |
+| **API Key** | `export ANTHROPIC_API_KEY="key"` | Direct API access |
+
+> Claude CLI uses your existing Claude Code authentication. If not logged in, it will prompt on first use.
+
+**Available Models:**
+
+| Model | Capability |
+|-------|------------|
+| `sonnet` | Best balance of speed and capability (default) |
+| `opus` | Most capable - complex reasoning, nuanced analysis |
+| `haiku` | Fastest - quick analysis, simple tasks |
+
+| Flag | Mapped From | Effect |
+|------|-------------|--------|
+| `-p` / `--print` | (required) | Headless mode - print and exit |
+| `--output-format json` | `--quiet` | JSON output for parsing |
+| `--output-format text` | (default) | Plain text output |
+| `--model <model>` | `--model` | Specify model (sonnet/opus/haiku) |
+| `--dangerously-skip-permissions` | `--auto` | Bypass permission checks (sandbox only) |
+| `--system-prompt <prompt>` | (n/a) | Custom system prompt |
+
+**Claude CLI Command Template:**
+```bash
+# Basic headless query
+claude -p "Analyze this code for security issues" --output-format json
+
+# With specific model
+claude -p --model opus "Review this architecture decision"
+
+# Pipe content and analyze
+cat src/auth.ts | claude -p "Review this authentication code"
+
+# With custom system prompt
+claude -p --system-prompt "You are a security auditor" "Check for vulnerabilities"
+```
+
+**Unique Capability:** Claude Code CLI has full access to Claude's coding expertise in headless mode. Use when you need:
+- Code review with Claude's understanding of best practices
+- Security analysis with nuanced reasoning
+- A different perspective from Gemini/OpenAI on the same problem
+- Fast iteration with `haiku` for simple checks
+
 ---
 
 ## Consensus Mode (--all)
@@ -329,14 +398,16 @@ The `--all` flag dispatches tasks to multiple LLMs and has **Claude arbitrate** 
     │
     ├─→ Step 1: Dispatch (parallel)
     │     ├─ Gemini: detailed analysis request
-    │     └─ Codex:  detailed analysis request
+    │     ├─ Codex:  detailed analysis request
+    │     └─ Claude: detailed analysis request
     │
     ├─→ Step 2: Collect Raw Responses
     │     ├─ Gemini returns: analysis, evidence, reasoning
-    │     └─ Codex returns:  analysis, evidence, reasoning
+    │     ├─ Codex returns:  analysis, evidence, reasoning
+    │     └─ Claude returns: analysis, evidence, reasoning
     │
-    └─→ Step 3: Claude Arbitrates
-          ├─ Parse both full responses
+    └─→ Step 3: Synthesize & Arbitrate
+          ├─ Parse all full responses
           ├─ Identify agreements & disagreements
           ├─ Evaluate reasoning quality
           ├─ Weigh evidence strength
@@ -383,29 +454,32 @@ Structure your response:
 **OpenAI's Analysis:**
 <full response with assessment, evidence, reasoning>
 
+**Claude's Analysis:**
+<full response with assessment, evidence, reasoning>
+
 ---
 
-### Claude's Arbitration
+### Synthesis
 
 **Agreements:**
-- Both models concur that...
+- All models concur that...
 - Shared evidence: ...
 
 **Disagreements:**
 - Gemini argues: ... (because...)
 - OpenAI argues: ... (because...)
+- Claude argues: ... (because...)
 
 **Evaluation of Reasoning:**
-- Gemini's strength: ...
-- Gemini's weakness: ...
-- OpenAI's strength: ...
-- OpenAI's weakness: ...
+- Gemini's strength: ... / weakness: ...
+- OpenAI's strength: ... / weakness: ...
+- Claude's strength: ... / weakness: ...
 
 ---
 
 ### Verdict
 
-<Claude's synthesized conclusion drawing on strongest arguments from both>
+<Synthesized conclusion drawing on strongest arguments from all models>
 
 **Confidence:** HIGH / MEDIUM / LOW
 **Primary basis:** <which reasoning was most convincing>
