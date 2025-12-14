@@ -1,0 +1,50 @@
+# ~/.claude/delegate.yaml
+# Configuration for /delegate command - Multi-LLM task dispatch
+
+# API Keys (preferred over environment variables)
+# Uncomment and add your keys:
+# api_keys:
+#   gemini: "your-gemini-api-key"
+#   openai: "your-openai-api-key"
+#   perplexity: "your-perplexity-api-key"
+
+# Provider Configuration
+providers:
+  gemini:
+    model: gemini-2.5-pro        # Recommended: 1M context, best for code analysis
+    # model: gemini-2.5-flash    # Faster, still 1M context
+    # model: gemini-3-pro        # Requires Ultra subscription (waitlist for free tier)
+    default_flags:
+      - --output-format
+      - text
+    # IMPORTANT: Use stdin piping for file content, not @file.md syntax
+    # Example: cat file.md | gemini -m gemini-2.5-pro "prompt"
+
+  openai:
+    model: gpt-5.2          # Strongest (requires ChatGPT login)
+    # model: gpt-5.1-codex-max   # Default for Pro subscription
+    # model: gpt-4o              # API key only (pay per token)
+    auth: chatgpt                 # chatgpt (subscription) or api-key
+    default_flags:
+      - --json
+
+  perplexity:
+    model: sonar-pro             # Best balance: complex queries, more citations
+    # model: sonar               # Fast, cost-effective for quick facts
+    # model: sonar-reasoning     # Multi-step problem solving
+    # model: sonar-reasoning-pro # Deep reasoning (DeepSeek-R1 based)
+    default_flags: []
+    # Unique: returns web citations with every response
+    # Get API key at: https://www.perplexity.ai/settings/api
+
+# Conclave (Multi-Model) Settings
+conclave:
+  providers: [gemini, openai]     # Which providers participate
+  # providers: [gemini, openai, perplexity]  # Include Perplexity for web-grounded consensus
+  require_consensus: true         # All must agree for YES/NO verdicts
+
+# Default behavior
+defaults:
+  provider: gemini                # Default provider when none specified
+  output: text                    # text or json
+  verbosity: default              # brief, default, or detailed
