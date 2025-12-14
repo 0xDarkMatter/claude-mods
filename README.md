@@ -273,10 +273,6 @@ git pull
 
 Then re-run the install script to update your global Claude configuration.
 
-## Contributing
-
-PRs welcome. Run `cd tests && just test` before submitting.
-
 ## Resources
 
 - [Claude Code Best Practices](https://www.anthropic.com/engineering/claude-code-best-practices) — Official Anthropic guide
