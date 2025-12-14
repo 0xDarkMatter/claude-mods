@@ -2,13 +2,13 @@
 
 A comprehensive extension toolkit for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) that transforms your AI coding assistant into a powerhouse development environment.
 
-**21 expert agents. 12 slash commands. 18 skills. One plugin install.**
+**21 expert agents. 9 slash commands. 18 skills. One plugin install.**
 
 ## Why claude-mods?
 
 Claude Code is powerful out of the box, but it has gaps. This toolkit fills them:
 
-- **Session continuity** — TodoWrite tasks vanish when sessions end. We fix that with `/saveplan` and `/loadplan`, implementing Anthropic's [recommended pattern](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) for long-running agents.
+- **Session continuity** — TodoWrite tasks vanish when sessions end. We fix that with `/plan --save` and `/plan --load`, implementing Anthropic's [recommended pattern](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) for long-running agents.
 
 - **Expert-level knowledge on demand** — 24 specialized agents covering React, TypeScript, Python, AWS, PostgreSQL, and more. Each agent is deeply researched with real-world patterns, not generic advice.
 
@@ -34,7 +34,7 @@ Claude Code is powerful out of the box, but it has gaps. This toolkit fills them
 claude-mods/
 ├── .claude-plugin/     # Plugin metadata
 ├── agents/             # Expert subagents (21)
-├── commands/           # Slash commands (12)
+├── commands/           # Slash commands (9)
 ├── skills/             # Custom skills (18)
 ├── hooks/              # Hook examples & docs
 ├── rules/              # Claude Code rules
@@ -91,16 +91,14 @@ Then symlink or copy to your Claude directories:
 | Command | Description |
 |---------|-------------|
 | [sync](commands/sync.md) | Session bootstrap - read project context (README, AGENTS, docs, skills, agents). Quick orientation. |
-| [loadplan](commands/loadplan.md) | Restore plan session state. Loads TodoWrite tasks, plan progress from saved state. |
-| [saveplan](commands/saveplan.md) | Save plan session state. Persists TodoWrite tasks, current plan step, and git context. |
-| [showplan](commands/showplan.md) | Show plan status: progress, active tasks, git state. Quick read-only view. |
-| [plan](commands/plan.md) | Create and persist project plans. Captures Plan Mode state and writes to git-trackable PLAN.md. |
-| [g-slave](commands/g-slave.md) | Dispatch Gemini CLI to analyze large codebases. Gemini does the grunt work, Claude gets the summary. |
-| [agent-genesis](commands/agent-genesis.md) | Generate Claude Code expert agent prompts for any technology platform. |
+| [plan](commands/plan.md) | Unified planning command: create plans, save/load session state, show status. Interactive by default. |
 | [review](commands/review.md) | Code review staged changes or specific files. Analyzes bugs, security, performance, style. |
-| [test](commands/test.md) | Generate tests with automatic framework detection (Jest, Vitest, pytest, etc.). |
+| [testgen](commands/testgen.md) | Generate tests with expert routing, framework detection, focus/depth modes. |
 | [explain](commands/explain.md) | Deep explanation of complex code, files, or concepts. Architecture, data flow, design decisions. |
-| [init-tools](commands/init-tools.md) | Initialize and verify CLI tool dependencies for skills. |
+| [spawn](commands/spawn.md) | Generate expert agents with PhD-level patterns and code examples. |
+| [delegate](commands/delegate.md) | Delegate to external LLMs (Gemini, OpenAI). Use each model's strengths or get consensus. |
+| [pulse](commands/pulse.md) | Generate Claude Code ecosystem news digest from blogs, repos, and community sources. |
+| [setperms](commands/setperms.md) | Set tool permissions and CLI preferences. |
 
 ### Skills
 
@@ -217,13 +215,13 @@ just list-agents  # List all agents
 
 ## Session Continuity
 
-These commands fill a gap in Claude Code's native session management.
+The `/plan` command fills a gap in Claude Code's native session management.
 
 **The problem:** Claude Code's `--resume` flag restores conversation history, but **TodoWrite task state does not persist between sessions—by design**. Claude Code treats each session as isolated; the philosophy is that persistent state belongs in files you control.
 
 TodoWrite tasks are stored at `~/.claude/todos/[session-id].json` and deleted when the session ends. This is intentional.
 
-**The solution:** `/saveplan` and `/loadplan` implement the pattern from Anthropic's [Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents):
+**The solution:** `/plan --save` and `/plan --load` implement the pattern from Anthropic's [Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents):
 
 > "Every subsequent session asks the model to make incremental progress, then leave structured updates."
 
@@ -242,20 +240,20 @@ TodoWrite tasks are stored at `~/.claude/todos/[session-id].json` and deleted wh
 Session 1:
   /sync                              # Bootstrap - read project context
   [work on tasks]
-  /saveplan "Stopped at auth module" # Writes .claude/session-cache.json
+  /plan --save "Stopped at auth module"  # Writes .claude/session-cache.json
 
 Session 2:
   /sync                              # Read project context
-  /loadplan                          # Restore TodoWrite, show what changed
+  /plan --load                       # Restore TodoWrite, show what changed
   → "In progress: Auth module refactor"
   → "Notes: Stopped at auth module"
-  /showplan                          # Quick status check anytime
+  /plan --status                     # Quick status check anytime
 ```
 
 ### Why Not Just Use `--resume`?
 
-| Feature | `--resume` | `/saveplan` + `/loadplan` |
-|---------|------------|---------------------------|
+| Feature | `--resume` | `/plan --save/--load` |
+|---------|------------|-----------------------|
 | Conversation history | Yes | No |
 | TodoWrite tasks | **No** | Yes |
 | Git context | No | Yes |
@@ -264,7 +262,7 @@ Session 2:
 | Works across machines | No | Yes (if committed) |
 | Team sharing | No | Yes |
 
-**Use both together:** `claude --resume` for conversation context, `/loadplan` for task state.
+**Use both together:** `claude --resume` for conversation context, `/plan --load` for task state.
 
 ## Updating
 
@@ -282,7 +280,7 @@ PRs welcome. Run `cd tests && just test` before submitting.
 
 - [Claude Code Best Practices](https://www.anthropic.com/engineering/claude-code-best-practices) — Official Anthropic guide
 - [Claude Code Plugins](https://claude.com/blog/claude-code-plugins) — Plugin system documentation
-- [Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) — The pattern behind `/saveplan`
+- [Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) — The pattern behind `/plan --save`
 
 ---
 
