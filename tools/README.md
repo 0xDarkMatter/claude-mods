@@ -144,7 +144,7 @@ perplexity --list-models
 # Set API key (get from https://www.perplexity.ai/settings/api)
 export PERPLEXITY_API_KEY="your-key-here"
 
-# Or add to ~/.claude/delegate.yaml:
+# Or add to ~/.claude/conclave.yaml:
 # api_keys:
 #   perplexity: "your-key-here"
 ```

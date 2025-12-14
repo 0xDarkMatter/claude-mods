@@ -12,7 +12,7 @@ Usage:
     perplexity --json "query" > output.json
 
 Environment:
-    PERPLEXITY_API_KEY - API key (or set in ~/.claude/delegate.yaml)
+    PERPLEXITY_API_KEY - API key (or set in ~/.claude/conclave.yaml)
     PERPLEXITY_VERBOSE - Show token usage when set
 """
 import argparse
@@ -42,8 +42,8 @@ def get_api_key():
     if key:
         return key
 
-    # Try ~/.claude/delegate.yaml
-    config_path = os.path.expanduser("~/.claude/delegate.yaml")
+    # Try ~/.claude/conclave.yaml
+    config_path = os.path.expanduser("~/.claude/conclave.yaml")
     if os.path.exists(config_path):
         try:
             with open(config_path, encoding="utf-8") as f:
@@ -79,7 +79,7 @@ def query_perplexity(prompt, model=DEFAULT_MODEL, system_prompt=None, recency=No
         sys.exit(
             "Error: PERPLEXITY_API_KEY not set.\n"
             "Set via: export PERPLEXITY_API_KEY='your-key'\n"
-            "Or add to ~/.claude/delegate.yaml under api_keys:"
+            "Or add to ~/.claude/conclave.yaml under api_keys:"
         )
 
     messages = []
@@ -196,7 +196,7 @@ Examples:
   perplexity --domains "github.com,docs.python.org" "Python asyncio best practices"
 
 Environment:
-  PERPLEXITY_API_KEY  API key (required, or set in ~/.claude/delegate.yaml)
+  PERPLEXITY_API_KEY  API key (required, or set in ~/.claude/conclave.yaml)
   PERPLEXITY_VERBOSE  Show token usage when set
 """,
     )

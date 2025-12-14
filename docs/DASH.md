@@ -86,7 +86,7 @@
 | 🔧 `/testgen` | Generate tests with expert routing |
 | 🔧 `/explain` | Deep code/concept explanation |
 | 🔧 `/spawn` | Generate expert agents |
-| 🔧 `/delegate` | Delegate to external LLMs (Gemini, OpenAI) |
+| 🔧 `/conclave` | Summon external LLMs (Gemini, OpenAI, Perplexity) for consensus |
 | 🔧 `/pulse` | Claude Code ecosystem news digest |
 | 🔧 `/setperms` | Set tool permissions |
 
