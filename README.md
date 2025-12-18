@@ -62,14 +62,14 @@ This installs directly from GitHub. Toggle on/off with `/plugin` menu.
 ```bash
 git clone https://github.com/0xDarkMatter/claude-mods.git
 cd claude-mods
-./scripts/install.sh
+./tools/install-unix.sh
 ```
 
 **Windows (PowerShell):**
 ```powershell
 git clone https://github.com/0xDarkMatter/claude-mods.git
 cd claude-mods
-.\scripts\install.ps1
+.\tools\install-windows.ps1
 ```
 
 ### Manual Install
