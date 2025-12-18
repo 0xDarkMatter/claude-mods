@@ -47,7 +47,7 @@ $ARGUMENTS
     │
     └─→ Step 5: Integrate
           ├─ Offer to save to ARCHITECTURE.md (if significant)
-          └─ Link to /saveplan if working on related task
+          └─ Link to /plan --save if working on related task
 ```
 
 ## Execution Steps
@@ -304,7 +304,7 @@ command -v tokei >/dev/null 2>&1 || echo "ℹ tokei not installed - skipping sta
 |---------|--------------|
 | `/review` | Review after understanding |
 | `/test` | Generate tests for explained code |
-| `/saveplan` | Save progress if working on related task |
+| `/plan --save` | Save progress if working on related task |
 | `/plan` | Add architectural insights to project plan |
 
 ## Persistence

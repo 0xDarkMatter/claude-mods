@@ -74,7 +74,7 @@ Replace "Why it matters" with "Pulse insights:" — a brief, opinionated take on
 - Can be snarky when warranted (e.g., "Another 'awesome' list, but this one's actually useful")
 
 **Examples:**
-- "Pulse insights: This slots directly into our session state problem. Worth stealing the checkpoint pattern for `/saveplan`."
+- "Pulse insights: This slots directly into our session state problem. Worth stealing the checkpoint pattern for `/plan --save`."
 - "Pulse insights: The parallel worktree approach could let us run multiple agents without the git conflicts. Time for an experiment."
 - "Pulse insights: Mostly relevant if you're building MCP servers. If you're just using Claude Code, bookmark it for later."
 
@@ -168,6 +168,6 @@ Always link the source name to its parent site:
 >
 > Here's the thing about agents: they're brilliant within a conversation, but ask them to remember what happened yesterday and you're back to square one. The Anthropic team has been wrestling with this exact problem—how do you build harnesses that let agents work across sessions without losing their minds? Their answer draws on an unexpected source: how human engineers manage context when they step away from a problem. The patterns here (checkpointing, resumable state, explicit handoff protocols) feel like the missing manual for anyone building tools that need to survive a context window reset.
 >
-> **Pulse insights:** This speaks directly to our `/saveplan` and `/loadplan` commands. The checkpoint pattern they describe is almost exactly what we're doing with `session-cache.json`, but they've thought through edge cases we haven't. Worth a close read to see if we should adopt their handoff protocol.
+> **Pulse insights:** This speaks directly to our `/plan --save` and `/plan --load` commands. The checkpoint pattern they describe is almost exactly what we're doing with `session-cache.json`, but they've thought through edge cases we haven't. Worth a close read to see if we should adopt their handoff protocol.
 
 *Now it sounds like someone actually read it and has opinions.*
