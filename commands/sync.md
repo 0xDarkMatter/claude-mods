@@ -111,7 +111,7 @@ Based on the current state, suggest 2-3 logical actions:
 3. **[Tertiary action or "Ready for new task"]**
 
 Examples of recommendations:
-- If saved state exists: "Run `/loadplan` to restore your previous session tasks"
+- If saved state exists: "Run `/plan --load` to restore your previous session tasks"
 - If plan exists and in-progress: "Continue with Step N: [description]"
 - If uncommitted changes: "Review and commit staged changes"
 - If no plan/state: "Ready for new task - no pending work detected"
@@ -140,9 +140,9 @@ Examples of recommendations:
 | Command | Relationship |
 |---------|--------------|
 | `/sync` | **This command** - Read project context |
-| `/loadplan` | Restore TodoWrite + plan state from saved JSON |
-| `/saveplan` | Persist TodoWrite + plan state to JSON |
-| `/dash` | Quick status dashboard (read-only) |
+| `/plan --load` | Restore TodoWrite + plan state from saved JSON |
+| `/plan --save` | Persist TodoWrite + plan state to JSON |
+| `/plan --status` | Quick status dashboard (read-only) |
 | `/plan` | Create or manage project plans |
 
 ### Typical Session Flow
@@ -151,10 +151,10 @@ Examples of recommendations:
 New Session
 ────────────────────────────────────────────────────────────────────────
   1. /sync              ← Read project context (always)
-  2. /loadplan          ← Restore saved tasks (if continuing work)
+  2. /plan --load       ← Restore saved tasks (if continuing work)
   3. ... work ...
-  4. /dash              ← Check status anytime
-  5. /saveplan          ← Save before ending session
+  4. /plan --status     ← Check status anytime
+  5. /plan --save       ← Save before ending session
 ```
 
 ## Notes

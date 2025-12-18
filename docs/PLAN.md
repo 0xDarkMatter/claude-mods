@@ -27,7 +27,7 @@ Build modular, composable tools that:
 ## Implementation Steps
 
 ### Completed
-- [x] Session continuity commands (`/save`, `/load`)
+- [x] Session continuity commands (`/plan --save`, `/plan --load`)
   - Completed: 2025-11-27
   - Persists TodoWrite state to `.claude/session-cache.json`
   - Human-readable progress in `.claude/claude-progress.md`

@@ -10,7 +10,7 @@ Claude Code is powerful out of the box, but it has gaps. This toolkit fills them
 
 - **Session continuity** — TodoWrite tasks vanish when sessions end. We fix that with `/plan --save` and `/plan --load`, implementing Anthropic's [recommended pattern](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) for long-running agents.
 
-- **Expert-level knowledge on demand** — 24 specialized agents covering React, TypeScript, Python, AWS, PostgreSQL, and more. Each agent is deeply researched with real-world patterns, not generic advice.
+- **Expert-level knowledge on demand** — 21 specialized agents covering React, TypeScript, Python, AWS, PostgreSQL, and more. Each agent is deeply researched with real-world patterns, not generic advice.
 
 - **Modern CLI tools** — Stop using `grep`, `find`, and `cat`. Our rules automatically prefer `ripgrep`, `fd`, `eza`, and `bat` — 10-100x faster and token-efficient.
 

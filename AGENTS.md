@@ -5,7 +5,7 @@
 This is **claude-mods** - a collection of custom extensions for Claude Code:
 - **21 expert agents** for specialized domains (React, Python, AWS, etc.)
 - **10 slash commands** for workflows (/sync, /plan, /review, /atomise, etc.)
-- **18 skills** for CLI tool integration (git-workflow, code-stats, tool-discovery, etc.)
+- **16 skills** for CLI tool integration (git-workflow, code-stats, tool-discovery, etc.)
 
 ## Installation
 

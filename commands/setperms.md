@@ -3,7 +3,7 @@ name: setperms
 description: "Set tool permissions for Claude Code. Configures allowed commands, rules, and preferences in .claude/ directory."
 ---
 
-# /init-tools
+# /setperms
 
 Initialize Claude Code with modern dev-shell-tools for a comfortable development experience.
 
