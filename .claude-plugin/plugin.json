@@ -52,15 +52,14 @@
     "skills": [
       "skills/code-stats",
       "skills/data-processing",
+      "skills/doc-scanner",
       "skills/file-search",
       "skills/find-replace",
       "skills/git-workflow",
       "skills/mcp-patterns",
-      "skills/project-docs",
       "skills/project-planner",
       "skills/python-env",
       "skills/rest-patterns",
-      "skills/safe-file-reader",
       "skills/sql-patterns",
       "skills/sqlite-ops",
       "skills/structural-search",
@@ -69,7 +68,8 @@
       "skills/tool-discovery"
     ],
     "rules": [
-      "rules/cli-tools.md"
+      "rules/cli-tools.md",
+      "rules/thinking.md"
     ]
   },
   "categories": [
