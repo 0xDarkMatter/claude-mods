@@ -1,10 +1,12 @@
-# REST Patterns Skill
+---
+name: rest-patterns
+description: "Quick reference for RESTful API design patterns, HTTP semantics, caching, and rate limiting. Triggers on: rest api, http methods, status codes, api design, endpoint design, api versioning, rate limiting, caching."
+allowed-tools: "Read Write"
+---
+
+# REST Patterns
 
 Quick reference for RESTful API design patterns, HTTP semantics, caching, and rate limiting.
-
-## Triggers
-
-rest api, http methods, status codes, api design, endpoint design, rest patterns, api versioning, rate limiting, caching
 
 ## HTTP Methods
 

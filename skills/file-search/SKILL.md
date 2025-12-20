@@ -1,10 +1,13 @@
-# File Search Skill
+---
+name: file-search
+description: "Modern file and content search using fd, ripgrep (rg), and fzf. Triggers on: fd, ripgrep, rg, find files, search code, fzf, fuzzy find, search codebase."
+compatibility: "Requires fd, ripgrep (rg), and optionally fzf. Install: brew install fd ripgrep fzf (macOS)."
+allowed-tools: "Bash"
+---
+
+# File Search
 
 Modern file and content search using fd, ripgrep (rg), and fzf for interactive selection.
-
-## Triggers
-
-fd, ripgrep, rg, find files, search code, fzf, fuzzy find, search codebase
 
 ## fd - Find Files (Better than find)
 

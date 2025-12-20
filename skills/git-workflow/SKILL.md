@@ -1,6 +1,8 @@
 ---
 name: git-workflow
 description: "Enhanced git operations using lazygit, gh (GitHub CLI), and delta. Triggers on stage changes, create PR, review PR, check issues, git diff, commit interactively, GitHub operations, rebase, stash, bisect."
+compatibility: "Requires git, gh (GitHub CLI), lazygit, and delta. Network access needed for GitHub operations."
+allowed-tools: "Bash"
 ---
 
 # Git Workflow
