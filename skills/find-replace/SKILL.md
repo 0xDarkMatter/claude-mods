@@ -1,10 +1,13 @@
-# Find Replace Skill
+---
+name: find-replace
+description: "Modern find-and-replace using sd (simpler than sed) and batch replacement patterns. Triggers on: sd, find replace, batch replace, sed replacement, string replacement, rename."
+compatibility: "Requires sd CLI tool. Install: brew install sd (macOS) or cargo install sd (cross-platform)."
+allowed-tools: "Bash"
+---
+
+# Find Replace
 
 Modern find-and-replace using sd (simpler than sed) and batch replacement patterns.
-
-## Triggers
-
-sd, find replace, batch replace, sed replacement, string replacement, rename
 
 ## sd Basics
 

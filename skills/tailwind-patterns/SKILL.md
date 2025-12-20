@@ -1,10 +1,13 @@
-# Tailwind Patterns Skill
+---
+name: tailwind-patterns
+description: "Quick reference for Tailwind CSS utility patterns, responsive design, and configuration. Triggers on: tailwind, utility classes, responsive design, tailwind config, dark mode css, tw classes."
+compatibility: "For projects using Tailwind CSS v3+."
+allowed-tools: "Read Write"
+---
+
+# Tailwind Patterns
 
 Quick reference for Tailwind CSS utility patterns, responsive design, and configuration.
-
-## Triggers
-
-tailwind, utility classes, responsive design, tailwind config, dark mode css, tw classes
 
 ## Responsive Breakpoints
 

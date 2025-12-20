@@ -1,10 +1,12 @@
-# Tool Discovery Skill
+---
+name: tool-discovery
+description: "Recommend the right agents and skills for any task. Covers both heavyweight agents (Task tool) and lightweight skills (Skill tool). Triggers on: which agent, which skill, what tool should I use, help me choose, recommend agent, find the right tool."
+allowed-tools: "Read Glob"
+---
+
+# Tool Discovery
 
 Recommend the right agents and skills for any task. Covers both heavyweight agents (Task tool) and lightweight skills (Skill tool).
-
-## Triggers
-
-which agent, which skill, what tool should I use, help me choose, recommend agent, recommend skill, find the right tool, what's available
 
 ## Decision Flowchart
 
