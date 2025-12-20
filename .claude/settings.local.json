@@ -53,7 +53,10 @@
       "Bash(perplexity:*)",
       "Bash(findstr:*)",
       "Bash(claude --version:*)",
-      "Bash(claude:*)"
+      "Bash(claude:*)",
+      "Bash(nc:*)",
+      "Bash(curl:*)",
+      "Bash(npm update:*)"
     ],
     "deny": [],
     "ask": []
