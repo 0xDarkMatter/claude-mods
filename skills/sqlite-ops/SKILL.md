@@ -1,10 +1,13 @@
-# SQLite Operations Skill
+---
+name: sqlite-ops
+description: "Patterns for SQLite databases in Python projects - state management, caching, and async operations. Triggers on: sqlite, sqlite3, aiosqlite, local database, database schema, migration, wal mode."
+compatibility: "Requires Python 3.8+ with sqlite3 (standard library) or aiosqlite for async."
+allowed-tools: "Read Write Bash"
+---
+
+# SQLite Operations
 
 Patterns for SQLite databases in Python projects - state management, caching, and async operations.
-
-## Triggers
-
-sqlite, sqlite3, aiosqlite, local database, database schema, migration, wal mode
 
 ## Schema Design Patterns
 

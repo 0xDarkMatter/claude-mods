@@ -1,10 +1,12 @@
-# SQL Patterns Skill
+---
+name: sql-patterns
+description: "Quick reference for common SQL patterns, CTEs, window functions, and indexing strategies. Triggers on: sql patterns, cte example, window functions, sql join, index strategy, pagination sql."
+allowed-tools: "Read Write"
+---
+
+# SQL Patterns
 
 Quick reference for common SQL patterns, CTEs, window functions, and indexing strategies.
-
-## Triggers
-
-sql patterns, cte example, window functions, sql join, index strategy, pagination sql
 
 ## CTE (Common Table Expressions)
 

@@ -1,0 +1,18 @@
+name: test-service
+version: 2.0.0
+
+database:
+  host: localhost
+  port: 5432
+  name: testdb
+
+server:
+  port: 3000
+  timeout: 30
+
+features:
+  - auth
+  - logging
+  - caching
+
+environment: development

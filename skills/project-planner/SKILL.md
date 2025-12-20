@@ -1,6 +1,7 @@
 ---
 name: project-planner
-description: Detects stale project plans and suggests /plan command usage. Triggers on: sync plan, update plan, check status, plan is stale, track progress, project planning.
+description: "Detects stale project plans and suggests /plan command usage. Triggers on: sync plan, update plan, check status, plan is stale, track progress, project planning."
+allowed-tools: "Read Glob TodoWrite"
 ---
 
 # Project Planner Skill
