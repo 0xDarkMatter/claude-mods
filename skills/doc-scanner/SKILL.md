@@ -6,165 +6,80 @@ allowed-tools: "Glob Read Write Bash"
 
 # Documentation Scanner
 
-Scan for and synthesize project documentation across AI assistants, IDEs, and CLI tools.
+Scan for and synthesize project documentation.
 
 ## When to Activate
 
-Use this skill when:
 - User asks to review, understand, or explore a codebase
-- User says "review this codebase", "explain this project", "what does this repo do"
-- Starting work in a new or unfamiliar project
-- User asks about project conventions, workflows, or recommended agents
-- User asks "how do I work with this codebase" or similar
-- User asks which agent to use for a task
+- Starting work in a new/unfamiliar project
+- User asks about project conventions or workflows
 - Before making significant architectural decisions
-- User explicitly invokes `doc-scanner` skill
 
 ## Instructions
 
-### Step 0: Load Skill Resources (Do This First)
+### Step 1: Scan for Documentation
 
-Before scanning the project, read the supporting files from this skill directory:
+Use Glob to search project root:
 
-1. Read `~/.claude/skills/doc-scanner/reference.md` - Contains the complete list of documentation files to scan for
-2. Read `~/.claude/skills/doc-scanner/templates.md` - Contains templates for generating AGENTS.md
-
-These files provide the patterns and templates needed for the remaining steps.
-
-### Step 1: Scan for Documentation Files
-
-Use Glob to search the project root for documentation files using the patterns from `reference.md`.
-
-Priority order:
-1. **AGENTS.md** - Platform-agnostic (highest priority)
-2. **CLAUDE.md** - Claude-specific workflows
-3. **Other AI docs** - GEMINI.md, COPILOT.md, CHATGPT.md, CODEIUM.md
-4. **IDE docs** - CURSOR.md, WINDSURF.md, VSCODE.md, JETBRAINS.md
-5. **Terminal docs** - WARP.md, FIG.md, ZELLIJ.md
-6. **Environment docs** - DEVCONTAINER.md, GITPOD.md, CODESPACES.md
-7. **Generic docs** - AI.md, ASSISTANT.md
+```
+AGENTS.md, CLAUDE.md, AI.md, ASSISTANT.md,
+GEMINI.md, COPILOT.md, CHATGPT.md, CODEIUM.md,
+CURSOR.md, WINDSURF.md, VSCODE.md, JETBRAINS.md,
+WARP.md, FIG.md, DEVCONTAINER.md, GITPOD.md
+```
 
 ### Step 2: Read All Found Files
 
-Read the complete contents of every documentation file found. Do not skip any.
+Read complete contents of every documentation file found.
 
-### Step 3: Synthesize and Present
+### Step 3: Synthesize
 
-Combine information from all sources into a unified summary:
+Combine information into unified summary:
 
 ```
 PROJECT DOCUMENTATION
 
-Sources: [list each file found]
+Sources: [list files found]
 
 RECOMMENDED AGENTS
-  Primary: [agents recommended for core work]
+  Primary: [agents for core work]
   Secondary: [agents for specific tasks]
 
 KEY WORKFLOWS
-  [consolidated workflows from all docs]
+  [consolidated workflows]
 
 CONVENTIONS
-  [code style, patterns, architecture guidelines]
+  [code style, patterns]
 
 QUICK COMMANDS
-  [common commands extracted from docs]
+  [common commands]
 ```
-
-When information conflicts between files:
-- Prefer AGENTS.md (platform-agnostic)
-- Then CLAUDE.md (Claude-specific)
-- Note platform-specific details with annotations like "(from CURSOR.md)"
 
 ### Step 4: Offer Consolidation
 
-If 2 or more documentation files exist, ask the user:
+If 2+ documentation files exist, offer to consolidate:
 
-"I found [N] documentation files. Would you like me to consolidate them into a single AGENTS.md?
-
-This would:
-- Merge all guidance into one platform-agnostic file
-- Preserve platform-specific notes with annotations
-- Archive originals to `.doc-archive/`
-
-Reply 'yes' to consolidate, or 'no' to keep separate files."
-
-**If user agrees to consolidate, follow these steps IN ORDER:**
-
-#### 4a: Create Archive Directory
-
-Use Bash to create the archive directory:
-```bash
-mkdir -p .doc-archive
-```
-
-#### 4b: Archive Each Original File (REQUIRED)
-
-For EACH documentation file found (except AGENTS.md if it exists), archive it BEFORE creating the new AGENTS.md:
-
-```bash
-# Get today's date for the suffix
-DATE=$(date +%Y-%m-%d)
-
-# Move each file - repeat for every doc file found
-mv CLAUDE.md .doc-archive/CLAUDE.md.$DATE
-mv WARP.md .doc-archive/WARP.md.$DATE
-# etc. for each file
-```
-
-**Do not skip this step.** Every original file must be safely archived before proceeding.
-
-#### 4c: Verify Archives Exist
-
-Use Glob to confirm files were archived:
-```
-.doc-archive/*.md.*
-```
-
-List what was archived to the user.
-
-#### 4d: Generate Unified AGENTS.md
-
-Now create the new AGENTS.md using the template from `templates.md`. Include:
-- Content merged from all archived files
-- HTML comments marking the source: `<!-- Source: CLAUDE.md -->`
-- Platform-specific notes clearly labeled
-
-#### 4e: Confirm Completion
-
-Report to user:
-```
-Consolidation complete.
-
-Archived to .doc-archive/:
-  - CLAUDE.md.2024-01-15
-  - WARP.md.2024-01-15
-
-Created: AGENTS.md (unified documentation)
-```
+1. Create `.doc-archive/` directory
+2. Archive originals with date suffix
+3. Generate unified AGENTS.md
+4. Report what was consolidated
 
 ### Step 5: No Documentation Found
 
-If no documentation files exist:
+If none found, offer to generate AGENTS.md based on:
+- Project structure and tech stack
+- Patterns observed in codebase
 
-```
-No project documentation found.
+## Priority Order
 
-Recommended: Create AGENTS.md for AI-agnostic project guidance.
+1. AGENTS.md (platform-agnostic)
+2. CLAUDE.md (Claude-specific)
+3. Other AI docs
+4. IDE docs
+5. Terminal docs
 
-I can generate a starter AGENTS.md based on:
-- This project's structure and tech stack
-- Common patterns I observe in the codebase
+## Additional Resources
 
-Would you like me to create one?
-```
-
-If user agrees, analyze the project and generate appropriate AGENTS.md using the template structure from `templates.md`.
-
-## Important Notes
-
-- Always read documentation files completely before summarizing
-- Preserve original intent when synthesizing multiple sources
-- Platform-specific instructions (e.g., Cursor keybindings) should be noted but marked as potentially non-applicable
-- Never delete original files without archiving first
-- Keep summaries concise but comprehensive
+For detailed patterns, load:
+- `./references/file-patterns.md` - Complete list of files to scan
+- `./references/templates.md` - AGENTS.md generation templates

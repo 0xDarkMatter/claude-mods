@@ -3,6 +3,8 @@ name: mcp-patterns
 description: "Model Context Protocol (MCP) server patterns for building integrations with Claude Code. Triggers on: mcp server, model context protocol, tool handler, mcp resource, mcp tool."
 compatibility: "Requires Python 3.10+ or Node.js 18+ for MCP server development."
 allowed-tools: "Read Write Bash"
+depends-on: []
+related-skills: [claude-code-hooks, claude-code-debug]
 ---
 
 # MCP Patterns
@@ -122,6 +124,14 @@ my-mcp-server/
 | Auth failures | Check env vars are set in config, not shell |
 | Timeout errors | Add timeout to httpx calls, use async properly |
 | JSON parse errors | Ensure `call_tool` returns proper content structure |
+
+## Official Documentation
+
+- https://modelcontextprotocol.io - MCP specification
+- https://modelcontextprotocol.io/docs/concepts/tools - Tools reference
+- https://modelcontextprotocol.io/docs/concepts/resources - Resources reference
+- https://github.com/modelcontextprotocol/python-sdk - Python SDK
+- https://github.com/modelcontextprotocol/servers - Official MCP servers
 
 ## Additional Resources
 
