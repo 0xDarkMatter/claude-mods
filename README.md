@@ -33,6 +33,8 @@ Claude Code is powerful out of the box, but it has gaps. This toolkit fills them
 ```
 claude-mods/
 ├── .claude-plugin/     # Plugin metadata
+├── .claude/            # Claude configuration
+│   └── output-styles/  # Custom response personalities
 ├── agents/             # Expert subagents (21)
 ├── commands/           # Slash commands (10)
 ├── skills/             # Custom skills (16)
@@ -164,6 +166,26 @@ Then symlink or copy to your Claude directories:
 | [tools/](tools/) | Modern CLI toolkit - token-efficient replacements for legacy commands |
 | [rules/cli-tools.md](rules/cli-tools.md) | Tool preference rules (fd, rg, eza, bat, etc.) |
 | [hooks/](hooks/) | Hook examples for pre/post execution automation |
+
+### Output Styles
+
+Output styles customize Claude's response personality. Use `/output-style` to switch between them.
+
+| Style | Description |
+|-------|-------------|
+| [vesper](.claude/output-styles/vesper.md) | Sophisticated engineering companion with British wit, intellectual depth, and pattern recognition |
+
+**Creating custom styles:** Add a markdown file to `.claude/output-styles/` with YAML frontmatter:
+
+```yaml
+---
+name: StyleName
+description: Brief description of the personality
+keep-coding-instructions: true  # Preserve Claude Code's core behavior
+---
+
+# Style content here...
+```
 
 #### Web Fetching Hierarchy
 
