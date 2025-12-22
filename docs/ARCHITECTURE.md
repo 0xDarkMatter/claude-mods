@@ -34,16 +34,20 @@ CLAUDE.md is Claude Code's primary memory system - a markdown file containing pe
 - **Hierarchical**: Global, project, and local layers
 - **Imports**: Reference other files with `@path/to/file` syntax
 
-### Authority & Loading
+### Authority
 
-| Location | Priority | Shared |
-|----------|----------|--------|
-| Enterprise policy (`/Library/Application Support/ClaudeCode/CLAUDE.md`) | Highest | All org users |
-| User global (`~/.claude/CLAUDE.md`) | Medium | Just you |
-| Project (`./.claude/CLAUDE.md` or `./CLAUDE.md`) | High | Team via git |
-| Project local (`./CLAUDE.local.md`) | Highest | Just you |
+**Level: HIGH (System Prompt)**
 
-Claude reads memories **recursively** from cwd up to root, merging all found files.
+CLAUDE.md content is injected into the system prompt, giving it high authority over Claude's behavior. Instructions here are treated as foundational rules that should be followed.
+
+| Location | Authority | Compliance |
+|----------|-----------|------------|
+| Enterprise policy | Highest | Mandatory - cannot be overridden |
+| User global (`~/.claude/CLAUDE.md`) | High | Should follow unless project overrides |
+| Project (`.claude/CLAUDE.md`) | High | Primary project instructions |
+| Project local (`CLAUDE.local.md`) | Highest (project) | Personal overrides, highest project priority |
+
+Claude reads memories **recursively** from cwd up to root, merging all found files. Later files (closer to project root) can override earlier ones.
 
 ### Example
 
@@ -83,9 +87,18 @@ AGENTS.md is a cross-platform standard for agent instructions, supported by Clau
 - **Standardized format**: Community-driven specification at [agents.md](https://agents.md)
 - **Fallback**: Claude Code reads AGENTS.md if CLAUDE.md is absent
 
-### Authority & Loading
+### Authority
 
-AGENTS.md is loaded as a user message (not system prompt), giving it slightly lower authority than CLAUDE.md but still high priority in context.
+**Level: MEDIUM-HIGH (User Message)**
+
+AGENTS.md is loaded as a user message (not system prompt), giving it slightly lower authority than CLAUDE.md but still high priority in context. Claude treats it as important project context that should guide behavior.
+
+| Comparison | CLAUDE.md | AGENTS.md |
+|------------|-----------|-----------|
+| Injection point | System prompt | User message |
+| Authority | Higher | Slightly lower |
+| Cross-platform | Claude Code only | Universal |
+| Override behavior | Can override AGENTS.md | Cannot override CLAUDE.md |
 
 ### Example
 
@@ -134,9 +147,19 @@ Rules are modular markdown files in `.claude/rules/` that provide topic-specific
 - **Organized**: Subdirectories for grouping (frontend/, backend/)
 - **Symlinks**: Share rules across projects
 
-### Authority & Loading
+### Authority
 
-All `.md` files in `.claude/rules/` are automatically loaded with the same priority as `.claude/CLAUDE.md`. User-level rules in `~/.claude/rules/` load before project rules (project takes precedence).
+**Level: HIGH (Same as CLAUDE.md)**
+
+All `.md` files in `.claude/rules/` are automatically loaded with the **same priority as `.claude/CLAUDE.md`**. They become part of the instruction set that Claude must follow.
+
+| Location | Authority | Scope |
+|----------|-----------|-------|
+| `~/.claude/rules/` | High | All your projects |
+| `.claude/rules/` | High | Current project |
+| Path-conditional rules | High | Only matching files |
+
+User-level rules load before project rules, so project rules can override user preferences.
 
 ### Example
 
@@ -197,13 +220,19 @@ Skills are structured capability packages that Claude can discover and load dyna
 - **Organized**: Each skill is a self-contained directory
 - **Triggers**: Natural language descriptions help Claude recognize when to use them
 
-### Authority & Loading
+### Authority
 
-Skills use a three-tier loading system:
+**Level: HIGH (When Loaded)**
 
-1. **Level 1**: Name and description in system prompt (always)
-2. **Level 2**: Full SKILL.md loaded when task matches
-3. **Level 3+**: Referenced files loaded as needed
+Skills use a three-tier loading system with varying authority:
+
+| Tier | Content | Authority | When Loaded |
+|------|---------|-----------|-------------|
+| **Tier 1** | Name + description | Medium | Always (system prompt metadata) |
+| **Tier 2** | Full SKILL.md | High | When task matches triggers |
+| **Tier 3** | Referenced files | High | When explicitly needed |
+
+**Key insight**: When a skill is loaded, its content becomes part of the agent's instructions. Unlike agent outputs which are advisory, **skill content is treated as authoritative guidance that must be followed**.
 
 ### Structure
 
@@ -265,10 +294,22 @@ Agents are specialized system prompts that Claude can spawn as subagents via the
 - **Isolated context**: Separate context window, doesn't pollute main conversation
 - **Tool restrictions**: Can limit which tools the agent can use
 - **Parallel execution**: Multiple agents can run simultaneously
+- **Model selection**: Can use cheaper models (Haiku) for simple tasks
 
-### Authority & Loading
+### Authority
 
-Agents are loaded when spawned via the Task tool with a specific `subagent_type`. They receive their own system prompt and run independently, returning results to the main conversation.
+**Level: LOW (Advisory)**
+
+Agent outputs are **advisory, not authoritative**. When you spawn an agent via the Task tool, it runs independently and returns output. The parent agent can choose to ignore, modify, or override that output.
+
+| Aspect | Authority Level | Notes |
+|--------|-----------------|-------|
+| Agent's own instructions | High (within its context) | Agent follows its own system prompt |
+| Agent output to parent | Low | Parent can ignore or override |
+| Tool access | Restricted | No MCP tools, limited bash |
+| Context | Fresh | Doesn't see parent's conversation |
+
+**Critical limitation**: Subagents do NOT have access to MCP server tools (browser automation, custom MCP servers). Only the main session has MCP access.
 
 ### Structure
 
@@ -326,9 +367,18 @@ Slash commands are user-invoked shortcuts that expand into prompts. They provide
 - **Arguments**: Accept `$ARGUMENTS` for dynamic behavior
 - **Natural language**: Written in plain markdown
 
-### Authority & Loading
+### Authority
 
-Commands are loaded from `.claude/commands/` (project) or `~/.claude/commands/` (user). They're invoked by the user with `/command-name` and expand into the full prompt.
+**Level: HIGH (User Intent)**
+
+Commands execute with high authority because they represent explicit user intent. When a user invokes `/review`, they're explicitly requesting that workflow.
+
+| Aspect | Authority |
+|--------|-----------|
+| Command invocation | Explicit user request - high priority |
+| Command content | Treated as user instructions |
+| Can spawn agents | Yes, with Task tool |
+| Can invoke skills | Yes, via Skill tool |
 
 ### Structure
 
@@ -387,16 +437,18 @@ Output styles modify Claude Code's system prompt to change its "personality" whi
 - **Flexible modes**: Full replacement OR additive personality layer
 - **Persistent**: Selection saved per-project
 
-### Authority & Loading
+### Authority
 
-Output styles modify the system prompt in two modes:
+**Level: HIGHEST (System Prompt Modifier)**
 
-| Mode | `keep-coding-instructions` | Behavior |
-|------|---------------------------|----------|
-| **Replacement** | `false` (default) | Removes coding instructions, custom style takes over completely. Use for non-coding personas. |
-| **Additive** | `true` | Preserves coding instructions, adds personality layer on top. Use for coding with personality. |
+Output styles operate at the highest level - they modify the system prompt itself.
 
-In both modes, all tools remain available.
+| Mode | `keep-coding-instructions` | Authority |
+|------|---------------------------|-----------|
+| **Replacement** | `false` (default) | Replaces coding instructions entirely. Custom style has full authority over behavior. |
+| **Additive** | `true` | Preserves coding instructions. Style adds personality layer but coding rules still apply. |
+
+In both modes, all tools remain available. The style changes *how* Claude communicates, not *what* it can do.
 
 ### Structure
 
@@ -457,15 +509,26 @@ Hooks are shell scripts that execute at specific points in Claude Code's lifecyc
 - **Automation**: Auto-formatting, linting, logging, notifications
 - **Guardrails**: Block dangerous operations, validate outputs
 
-### Authority & Loading
+### Authority
 
-Hooks are configured in `.claude/settings.json` or `.claude/settings.local.json`. They execute as shell commands with access to environment variables containing context about the event.
+**Level: ABSOLUTE (Deterministic Execution)**
+
+Hooks have the highest practical authority because they execute deterministically - Claude cannot choose to ignore them.
+
+| Comparison | CLAUDE.md | Hooks |
+|------------|-----------|-------|
+| Execution | Probabilistic (LLM decides) | Deterministic (always runs) |
+| Can be ignored | Yes (LLM might not follow) | No (shell script executes) |
+| Can block actions | No (suggestions only) | Yes (PreToolUse can reject) |
+| Timing | N/A | Precise lifecycle events |
+
+**Key insight**: Hooks = "must do", CLAUDE.md = "should do".
 
 ### Hook Types
 
 | Hook | Trigger | Use Case |
 |------|---------|----------|
-| `PreToolUse` | Before tool execution | Validate inputs, security checks |
+| `PreToolUse` | Before tool execution | Validate inputs, security checks, can block |
 | `PostToolUse` | After tool execution | Format code, run tests, lint |
 | `Notification` | On specific events | Alerts, logging, external notifications |
 | `Stop` | When Claude stops | Cleanup, summaries, commit reminders |
@@ -537,6 +600,12 @@ Plugins are packaged collections of commands, agents, skills, hooks, and MCP ser
 - **Marketplaces**: Discover community plugins
 - **Version control**: Track and update plugins
 
+### Authority
+
+**Level: INHERITED**
+
+Plugins don't have their own authority level - each component within a plugin operates at its normal authority level (skills = high, agents = low, hooks = deterministic, etc.).
+
 ### Structure
 
 ```
@@ -576,59 +645,84 @@ my-plugin/
 
 ## Component Hierarchy
 
-Understanding how components interact and override each other:
+Understanding how components interact and their authority levels:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    SYSTEM PROMPT                             │
-│   ┌─────────────────────────────────────────────────────┐   │
-│   │  Output Style                                       │   │
-│   │  - keep-coding-instructions: false → replaces all   │   │
-│   │  - keep-coding-instructions: true  → adds on top    │   │
-│   ├─────────────────────────────────────────────────────┤   │
-│   │  Enterprise Policy CLAUDE.md (highest authority)    │   │
-│   ├─────────────────────────────────────────────────────┤   │
-│   │  User ~/.claude/CLAUDE.md                           │   │
-│   ├─────────────────────────────────────────────────────┤   │
-│   │  User ~/.claude/rules/*.md                          │   │
-│   ├─────────────────────────────────────────────────────┤   │
-│   │  Skill metadata (names + descriptions)              │   │
-│   └─────────────────────────────────────────────────────┘   │
-├─────────────────────────────────────────────────────────────┤
-│                    USER MESSAGES                             │
-│   ┌─────────────────────────────────────────────────────┐   │
-│   │  Project .claude/CLAUDE.md                          │   │
-│   ├─────────────────────────────────────────────────────┤   │
-│   │  Project .claude/rules/*.md                         │   │
-│   ├─────────────────────────────────────────────────────┤   │
-│   │  Project AGENTS.md                                  │   │
-│   ├─────────────────────────────────────────────────────┤   │
-│   │  CLAUDE.local.md (highest project authority)        │   │
-│   └─────────────────────────────────────────────────────┘   │
-├─────────────────────────────────────────────────────────────┤
-│                    DYNAMIC LOADING                           │
-│   Skills (full content) → Agents (on spawn) → Commands      │
-├─────────────────────────────────────────────────────────────┤
-│                    LIFECYCLE HOOKS                           │
-│   PreToolUse → [Tool Execution] → PostToolUse → Stop        │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  AUTHORITY: DETERMINISTIC (Cannot be ignored)                   │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │  Hooks (PreToolUse/PostToolUse/Stop)                      │  │
+│  │  - Execute as shell scripts                               │  │
+│  │  - Can block operations                                   │  │
+│  └───────────────────────────────────────────────────────────┘  │
+├─────────────────────────────────────────────────────────────────┤
+│  AUTHORITY: HIGHEST (System Prompt Level)                       │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │  Output Style                                             │  │
+│  │  - keep-coding-instructions: false → replaces default     │  │
+│  │  - keep-coding-instructions: true  → adds personality     │  │
+│  ├───────────────────────────────────────────────────────────┤  │
+│  │  Enterprise Policy CLAUDE.md (cannot override)            │  │
+│  ├───────────────────────────────────────────────────────────┤  │
+│  │  User ~/.claude/CLAUDE.md                                 │  │
+│  ├───────────────────────────────────────────────────────────┤  │
+│  │  User ~/.claude/rules/*.md                                │  │
+│  ├───────────────────────────────────────────────────────────┤  │
+│  │  Skill metadata (names + descriptions)                    │  │
+│  └───────────────────────────────────────────────────────────┘  │
+├─────────────────────────────────────────────────────────────────┤
+│  AUTHORITY: HIGH (User Message Level)                           │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │  Project .claude/CLAUDE.md                                │  │
+│  ├───────────────────────────────────────────────────────────┤  │
+│  │  Project .claude/rules/*.md                               │  │
+│  ├───────────────────────────────────────────────────────────┤  │
+│  │  Project AGENTS.md                                        │  │
+│  ├───────────────────────────────────────────────────────────┤  │
+│  │  CLAUDE.local.md (highest project-level priority)         │  │
+│  ├───────────────────────────────────────────────────────────┤  │
+│  │  Skills (full content when loaded)                        │  │
+│  ├───────────────────────────────────────────────────────────┤  │
+│  │  Commands (user-invoked workflows)                        │  │
+│  └───────────────────────────────────────────────────────────┘  │
+├─────────────────────────────────────────────────────────────────┤
+│  AUTHORITY: LOW (Advisory)                                      │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │  Agent outputs (can be ignored by parent)                 │  │
+│  │  - Run in separate process                                │  │
+│  │  - No MCP tool access                                     │  │
+│  │  - Fresh context each invocation                          │  │
+│  └───────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Skills vs Agents: Key Insights
+
+Understanding when to use Skills versus Agents is one of the most important architectural decisions in Claude Code extensions. Here are the essential insights:
+
+**Skills are for knowledge, Agents are for execution.** When you need Claude to *know* something - domain expertise, constraints, patterns, verification rules - use a Skill. The skill content becomes part of Claude's instructions with high authority. When you need Claude to *do* something in parallel, in the background, or with a different model for cost optimization - use an Agent. Agent outputs are advisory and can be ignored; they're workers, not authorities.
+
+**The critical difference is authority and context.** Skills share context with the main conversation and have high authority - Claude treats skill content as rules to follow. Agents run in isolated contexts with fresh memory each time, and their outputs are merely suggestions the parent can override. Additionally, agents have a significant limitation: they cannot access MCP server tools (browser automation, custom MCP servers). If your workflow needs MCP tools, skills or the main session are your only options.
+
+**The hybrid pattern is often optimal.** The most powerful architecture combines both: a Skill provides the authoritative knowledge and orchestration rules (what to do, when, and why), while Agents handle the actual execution (running tasks cheaply with Haiku, analyzing results in parallel with Sonnet). The skill tells Claude it *must* spawn certain agents; the agents do the work efficiently. Don't create agents with `model: inherit` - if you're not using a different model for cost savings or parallel execution, use a skill instead.
 
 ---
 
 ## Quick Reference: When to Use What
 
-| Need | Use | Why |
-|------|-----|-----|
-| Project-wide instructions | CLAUDE.md | Always loaded, team-shared |
-| Cross-platform compatibility | AGENTS.md | Works with Cursor, Codex, etc. |
-| Topic-specific rules | `.claude/rules/` | Modular, can be path-conditional |
-| Extensive reference material | Skills | Progressive loading, unbounded size |
-| Domain expert consultation | Agents | Isolated context, specialized prompts |
-| Workflow shortcuts | Commands | User-invoked, argument support |
-| Different personality | Output Styles | Complete system prompt replacement |
-| Deterministic automation | Hooks | Always runs, not probabilistic |
-| Share with community | Plugins | Bundled distribution |
+| Need | Use | Authority | Why |
+|------|-----|-----------|-----|
+| Project-wide instructions | CLAUDE.md | High | Always loaded, system prompt |
+| Cross-platform compatibility | AGENTS.md | Medium-High | Works with Cursor, Codex, etc. |
+| Topic-specific rules | `.claude/rules/` | High | Modular, can be path-conditional |
+| Domain expertise | Skills | High | Progressive loading, auto-routing |
+| Parallel task execution | Agents | Low | Separate process, can use cheaper models |
+| Workflow shortcuts | Commands | High | User-invoked, explicit intent |
+| Different personality | Output Styles | Highest | System prompt modification |
+| Deterministic automation | Hooks | Absolute | Always runs, can block |
+| Share with community | Plugins | Inherited | Bundled distribution |
 
 ---
 
