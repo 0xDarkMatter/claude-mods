@@ -54,7 +54,9 @@
       "Bash(perplexity:*)",
       "Bash(md5:*)",
       "Bash(test:*)",
-      "Bash(head:*)"
+      "Bash(head:*)",
+      "WebSearch",
+      "WebFetch(domain:www.anthropic.com)"
     ],
     "deny": [],
     "ask": [
