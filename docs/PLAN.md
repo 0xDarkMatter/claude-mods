@@ -1,108 +1,172 @@
-# Project Plan: claude-mods
+# Claude-Mods: Project Plan & Roadmap
 
 **Goal**: A centralized repository of custom Claude Code commands, agents, and skills that enhance Claude Code's native capabilities with persistent session state, specialized expert agents, and streamlined workflows.
 
 **Created**: 2025-11-27
-**Last Updated**: 2025-11-27
-**Status**: In Progress
+**Last Updated**: 2025-12-22
+**Status**: Active Development
 
-## Context
+---
 
-Claude Code is powerful but has gaps:
-- TodoWrite state doesn't persist between sessions (by design)
-- Plan Mode thinking is lost when sessions end
-- No built-in specialized expert agents for specific tech stacks
-- No easy way to share custom configurations across machines
+## Current Inventory
 
-This project bridges those gaps with git-trackable, shareable extensions.
+| Component | Count | Notes |
+|-----------|-------|-------|
+| Agents | 23 | Domain experts (Python, Go, Rust, React, etc.) |
+| Skills | 30 | Pattern libraries (Python deep, others emerging) |
+| Commands | 11 | Workflow automation |
+| Rules | 4 | CLI tools, thinking, commit style, naming |
+| Output Styles | 1 | Vesper personality |
+| Hooks | 0 | Config examples only |
 
-## Approach
+---
 
-Build modular, composable tools that:
-1. Integrate seamlessly with native Claude Code features
-2. Persist important state to git-trackable files
-3. Provide specialized expertise via custom agents
-4. Work across machines via git sync
+## Completed Milestones
 
-## Implementation Steps
+### Core Infrastructure
+- [x] Session continuity (`/plan --save`, `/plan --load`)
+- [x] Plan persistence to `docs/PLAN.md`
+- [x] Agent genesis system (`/spawn`)
+- [x] Installation scripts (Unix + Windows)
 
-### Completed
-- [x] Session continuity commands (`/plan --save`, `/plan --load`)
-  - Completed: 2025-11-27
-  - Persists TodoWrite state to `.claude/session-cache.json`
-  - Human-readable progress in `.claude/claude-progress.md`
+### Expert Agents (23)
+- [x] Languages: Python, TypeScript, JavaScript, Go, Rust, SQL, Bash
+- [x] Frontend: React, Vue, Astro
+- [x] Backend: Laravel, PayloadCMS, CraftCMS
+- [x] Infrastructure: AWS Fargate, Cloudflare, Wrangler
+- [x] Testing: Cypress, Playwright
+- [x] Databases: PostgreSQL, SQL patterns
+- [x] Specialized: Claude-architect, Project-organizer
 
-- [x] Plan persistence command (`/plan`)
-  - Completed: 2025-11-27
-  - Captures Plan Mode state to `docs/PLAN.md`
-  - Auto-captures internal state on every invocation
+### Skills (30)
+- [x] Python patterns (8): async, cli, database, env, fastapi, observability, pytest, typing
+- [x] Claude Code internals: debug, headless, hooks, templates
+- [x] Workflows: git, data-processing, structural-search, task-runner
+- [x] Patterns: REST, SQL, security, testing, tailwind
 
-- [x] Development workflow commands
-  - `/review` - Code review with configurable depth
-  - `/test` - Test generation with framework detection
-  - `/explain` - Deep code explanation
+### Commands (11)
+- [x] Planning: `/plan`, `/sync`, `/atomise`
+- [x] Development: `/review`, `/testgen`, `/explain`
+- [x] Multi-model: `/conclave`, `/spawn`
+- [x] Utilities: `/pulse`, `/setperms`, `/archive`
 
-- [x] Agent genesis system (`/agent-genesis`)
-  - Completed: 2025-11-27
-  - Generates expert agent prompts from templates
+### Documentation
+- [x] ARCHITECTURE.md - Extension system guide with authority levels
+- [x] README.md - Project overview and usage
+- [x] AGENTS.md - Quick reference
 
-- [x] Expert agents collection
-  - TypeScript, React, Vue, Cypress
-  - Python, JavaScript, SQL, Postgres
-  - Laravel, Payload CMS, Astro
-  - AWS Fargate, Cloudflare Workers
-  - And more...
+---
 
-- [x] Installation scripts
-  - `install.sh` for Unix/macOS
-  - `install.ps1` for Windows
+## Enhancement Roadmap
 
-### In Progress
-- [ ] Documentation and examples
-  - Started: 2025-11-27
-  - Need usage examples for each command
-  - Need agent selection guide
+### Tier 1: High Impact, Low Effort
 
-### Pending
-- [ ] More expert agents
-  - Next.js expert
-  - Docker/Kubernetes expert
-  - GraphQL expert
-  - Testing frameworks (Jest, Vitest, Playwright)
+#### Output Style Variations
 
-- [ ] Enhanced `/plan` features
-  - Automatic progress tracking from git commits
-  - Integration with GitHub Issues
-  - Milestone tracking
+| Style | Personality | Best For |
+|-------|-------------|----------|
+| **Vesper** | Sophisticated British wit | General work (exists) |
+| **Spartan** | Minimal, bullet-points only | Quick tasks |
+| **Mentor** | Patient, educational | Learning, onboarding |
+| **Executive** | High-level summaries | Non-technical stakeholders |
 
-- [ ] Skill expansions
-  - Code statistics skill
-  - Dependency analysis skill
-  - Security audit skill
+#### Rules Expansion
 
-- [ ] Cross-project sync
-  - Settings sync across machines
-  - Team sharing capabilities
+| Rule | Purpose | Status |
+|------|---------|--------|
+| `cli-tools.md` | Modern CLI preferences | Done |
+| `thinking.md` | Extended thinking triggers | Done |
+| `commit-style.md` | Conventional commits format | Done |
+| `naming-conventions.md` | Component naming patterns | Done |
+| `code-review.md` | Review checklist | Future |
+| `testing-philosophy.md` | Coverage expectations | Future |
+
+#### Hook Implementations
+
+| Hook | Purpose |
+|------|---------|
+| `pre-commit-lint.sh` | Run linter before committing |
+| `post-edit-format.sh` | Auto-format after edits |
+| `dangerous-cmd-warn.sh` | Confirm destructive commands |
+
+### Tier 2: High Impact, Medium Effort
+
+#### Agent Gaps
+
+| Agent | Why It Matters |
+|-------|----------------|
+| `docker-expert` | Containerisation is ubiquitous |
+| `github-actions-expert` | CI/CD complexity |
+| `nextjs-expert` | App Router specifics |
+| `testing-architect` | Strategy decisions |
+| `api-design-expert` | OpenAPI, versioning |
+
+#### Command Gaps
+
+| Command | Purpose |
+|---------|---------|
+| `/debug` | Systematic debugging workflow |
+| `/migrate` | Framework/version upgrades |
+| `/refactor` | Safe refactoring |
+| `/secure` | Security audit checklist |
+
+#### Skill Parity
+
+Languages needing Python-level depth:
+- `typescript-patterns/`
+- `go-patterns/`
+- `rust-patterns/`
+
+### Tier 3: Strategic Expansions
+
+- **Template System**: Project scaffolding via `/scaffold`
+- **MCP Server Catalog**: Curated high-value servers
+- **Feedback System**: Track tool effectiveness
+
+---
+
+## Priority Matrix
+
+```
+                    IMPACT
+                    High         Low
+            +-----------+-----------+
+       Low  | Output    | Templates |
+            | Styles    |           |
+    EFFORT  | Rules     | MCP       |
+            | Hooks     | Catalog   |
+            +-----------+-----------+
+       High | Agent     | Analytics |
+            | Gaps      |           |
+            | Commands  | Lang      |
+            |           | Parity    |
+            +-----------+-----------+
+```
+
+---
+
+## Immediate Next Steps
+
+- [x] Create `rules/commit-style.md`
+- [x] Create `rules/naming-conventions.md`
+- [ ] Create Spartan output style
+- [ ] Add docker-expert agent
+- [ ] Implement `/debug` command
+
+---
 
 ## Open Questions
 
-- [ ] Should agents auto-update from a central registry?
-- [ ] How to handle agent versioning?
-- [ ] Should there be a "recommended agents" list per project type?
-
-## Success Criteria
-
-- [ ] All commands documented with examples
-- [ ] Installation tested on Windows, macOS, Linux
-- [ ] At least 20 expert agents covering major tech stacks
-- [ ] Session continuity works reliably across sessions
-- [ ] Community contributions via PRs
-
-## Notes
-
-- Based on patterns from Anthropic's "Building Effective Agents" article
-- TodoWrite non-persistence is intentional (confirmed via claude-code-guide)
-- Plan Mode also doesn't persist (this project fixes that)
+- Should agents auto-update from a central registry?
+- How to handle agent versioning?
+- Should there be a "recommended agents" list per project type?
 
 ---
-*Plan managed by `/plan` command. Last captured: 2025-11-27*
+
+## Guiding Principle
+
+> The best enhancements solve problems you've already felt. Follow the pain.
+
+---
+
+*Plan managed by `/plan` command. Last updated: 2025-12-22*
