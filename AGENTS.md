@@ -24,10 +24,10 @@ cd claude-mods && ./scripts/install.sh  # or .\scripts\install.ps1 on Windows
 | Directory | Purpose |
 |-----------|---------|
 | `.claude-plugin/` | Plugin metadata (plugin.json) |
-| `.claude/output-styles/` | Custom response personalities (vesper.md) |
 | `agents/` | Expert subagent prompts (.md files) |
 | `commands/` | Slash command definitions |
 | `skills/` | Skill definitions with SKILL.md |
+| `output-styles/` | Response personalities (vesper.md) |
 | `hooks/` | Hook examples (pre/post execution) |
 | `rules/` | Claude Code rules (cli-tools.md, thinking.md) |
 | `tools/` | Modern CLI toolkit documentation |
