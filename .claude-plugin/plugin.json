@@ -1,6 +1,6 @@
 {
   "name": "claude-mods",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Custom commands, skills, and agents for Claude Code - session continuity, 23 expert agents, 30 skills, modern CLI tools",
   "author": "0xDarkMatter",
   "repository": "https://github.com/0xDarkMatter/claude-mods",
@@ -87,6 +87,9 @@
     "rules": [
       "rules/cli-tools.md",
       "rules/thinking.md"
+    ],
+    "output-styles": [
+      "output-styles/vesper.md"
     ]
   },
   "categories": [

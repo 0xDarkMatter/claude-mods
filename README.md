@@ -33,11 +33,10 @@ Claude Code is powerful out of the box, but it has gaps. This toolkit fills them
 ```
 claude-mods/
 ├── .claude-plugin/     # Plugin metadata
-├── .claude/            # Claude configuration
-│   └── output-styles/  # Custom response personalities
-├── agents/             # Expert subagents (21)
+├── agents/             # Expert subagents (23)
 ├── commands/           # Slash commands (10)
-├── skills/             # Custom skills (16)
+├── skills/             # Custom skills (30)
+├── output-styles/      # Response personalities
 ├── hooks/              # Hook examples & docs
 ├── rules/              # Claude Code rules
 ├── tools/              # Modern CLI toolkit docs
@@ -173,9 +172,9 @@ Output styles customize Claude's response personality. Use `/output-style` to sw
 
 | Style | Description |
 |-------|-------------|
-| [vesper](.claude/output-styles/vesper.md) | Sophisticated engineering companion with British wit, intellectual depth, and pattern recognition |
+| [vesper](output-styles/vesper.md) | Sophisticated engineering companion with British wit, intellectual depth, and pattern recognition |
 
-**Creating custom styles:** Add a markdown file to `.claude/output-styles/` with YAML frontmatter:
+**Creating custom styles:** Add a markdown file to `output-styles/` with YAML frontmatter:
 
 ```yaml
 ---

@@ -54,7 +54,7 @@
       "Bash(perplexity:*)",
       "Bash(md5:*)",
       "Bash(test:*)",
-      "mcp__morph-mcp__edit_file"
+      "Bash(head:*)"
     ],
     "deny": [],
     "ask": [
