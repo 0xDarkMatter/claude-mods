@@ -378,21 +378,25 @@ Provide findings in order of severity (critical → minor).
 
 ### Overview
 
-Output styles replace Claude Code's default system prompt to change its "personality" while keeping all tools intact. Unlike CLAUDE.md which adds instructions, output styles fundamentally change how Claude communicates.
+Output styles modify Claude Code's system prompt to change its "personality" while keeping all tools intact. The behavior depends on the `keep-coding-instructions` frontmatter setting.
 
 ### Benefits
 
-- **Complete personality change**: Not just added instructions, but different behavior
+- **Personality customization**: Change communication style and persona
 - **Tools preserved**: File operations, search, MCP integrations all work
-- **Beyond coding**: Can transform Claude into any domain expert
+- **Flexible modes**: Full replacement OR additive personality layer
 - **Persistent**: Selection saved per-project
 
 ### Authority & Loading
 
-Output styles replace the default system prompt. When selected:
-- Default coding instructions are removed (unless `keep-coding-instructions: true`)
-- Custom personality takes over completely
-- All tools remain available
+Output styles modify the system prompt in two modes:
+
+| Mode | `keep-coding-instructions` | Behavior |
+|------|---------------------------|----------|
+| **Replacement** | `false` (default) | Removes coding instructions, custom style takes over completely. Use for non-coding personas. |
+| **Additive** | `true` | Preserves coding instructions, adds personality layer on top. Use for coding with personality. |
+
+In both modes, all tools remain available.
 
 ### Structure
 
@@ -576,11 +580,12 @@ Understanding how components interact and override each other:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    OUTPUT STYLE                              │
-│            (replaces default system prompt)                  │
-├─────────────────────────────────────────────────────────────┤
 │                    SYSTEM PROMPT                             │
 │   ┌─────────────────────────────────────────────────────┐   │
+│   │  Output Style                                       │   │
+│   │  - keep-coding-instructions: false → replaces all   │   │
+│   │  - keep-coding-instructions: true  → adds on top    │   │
+│   ├─────────────────────────────────────────────────────┤   │
 │   │  Enterprise Policy CLAUDE.md (highest authority)    │   │
 │   ├─────────────────────────────────────────────────────┤   │
 │   │  User ~/.claude/CLAUDE.md                           │   │
