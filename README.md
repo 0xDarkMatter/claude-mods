@@ -2,7 +2,7 @@
 
 A comprehensive extension toolkit for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) that transforms your AI coding assistant into a powerhouse development environment.
 
-**21 expert agents. 10 slash commands. 16 skills. One plugin install.**
+**23 expert agents. 10 slash commands. 30 skills. Custom output styles. One plugin install.**
 
 ## Why claude-mods?
 
