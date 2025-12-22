@@ -1,7 +1,7 @@
 {
   "name": "claude-mods",
-  "version": "1.0.0",
-  "description": "Custom commands, skills, and agents for Claude Code - session continuity, expert agents, modern CLI tools",
+  "version": "1.1.0",
+  "description": "Custom commands, skills, and agents for Claude Code - session continuity, 23 expert agents, 30 skills, modern CLI tools",
   "author": "0xDarkMatter",
   "repository": "https://github.com/0xDarkMatter/claude-mods",
   "license": "MIT",
@@ -11,7 +11,8 @@
     "commands",
     "skills",
     "session-management",
-    "cli-tools"
+    "cli-tools",
+    "output-styles"
   ],
   "components": {
     "commands": [
@@ -36,6 +37,7 @@
       "agents/craftcms-expert.md",
       "agents/cypress-expert.md",
       "agents/firecrawl-expert.md",
+      "agents/go-expert.md",
       "agents/javascript-expert.md",
       "agents/laravel-expert.md",
       "agents/payloadcms-expert.md",
@@ -44,13 +46,19 @@
       "agents/project-organizer.md",
       "agents/python-expert.md",
       "agents/react-expert.md",
+      "agents/rust-expert.md",
       "agents/sql-expert.md",
       "agents/typescript-expert.md",
       "agents/vue-expert.md",
       "agents/wrangler-expert.md"
     ],
     "skills": [
+      "skills/claude-code-debug",
+      "skills/claude-code-headless",
+      "skills/claude-code-hooks",
+      "skills/claude-code-templates",
       "skills/code-stats",
+      "skills/container-orchestration",
       "skills/data-processing",
       "skills/doc-scanner",
       "skills/file-search",
@@ -58,13 +66,22 @@
       "skills/git-workflow",
       "skills/mcp-patterns",
       "skills/project-planner",
+      "skills/python-async-patterns",
+      "skills/python-cli-patterns",
+      "skills/python-database-patterns",
       "skills/python-env",
+      "skills/python-fastapi-patterns",
+      "skills/python-observability-patterns",
+      "skills/python-pytest-patterns",
+      "skills/python-typing-patterns",
       "skills/rest-patterns",
+      "skills/security-patterns",
       "skills/sql-patterns",
       "skills/sqlite-ops",
       "skills/structural-search",
       "skills/tailwind-patterns",
       "skills/task-runner",
+      "skills/testing-patterns",
       "skills/tool-discovery"
     ],
     "rules": [
