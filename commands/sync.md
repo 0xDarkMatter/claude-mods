@@ -4,77 +4,43 @@ description: "Session bootstrap - read project context (README, AGENTS, docs, sk
 
 # Sync - Session Bootstrap
 
-Read yourself into this project. Loads essential context without exploring the full codebase.
+Read yourself into this project. Fast, direct file reads - no caching overhead.
 
-## CRITICAL: Cache-First Strategy
+## Execution
 
-### Step 1: Check Cache
+### Step 1: Parallel Reads
 
-First, read `.claude/sync-cache.json`. If it exists and is valid, skip to Step 3.
+Read these files simultaneously (skip any that don't exist):
 
-Cache is valid if ALL are true:
-- File exists
-- `readme_hash` matches current README.md hash
-- `agents_hash` matches current AGENTS.md hash
-- `plan_hash` matches current docs/PLAN.md hash (or both null if file missing)
+| File | Purpose |
+|------|---------|
+| `README.md` | Project overview |
+| `AGENTS.md` | Agent instructions |
+| `CLAUDE.md` | Project-specific rules |
+| `docs/PLAN.md` | Current plan (first 50 lines) |
+| `.claude/session-cache.json` | Saved session state |
 
-To check hashes, run ONE bash command:
+### Step 2: Parallel Globs
+
+Run these globs simultaneously to discover extensions:
+
+```
+docs/*.md
+commands/*.md OR .claude/commands/*.md
+skills/*/SKILL.md OR .claude/skills/*/SKILL.md
+agents/*.md OR .claude/agents/*.md
+```
+
+### Step 3: Git State
+
+One bash command for live state:
 ```bash
-md5sum README.md AGENTS.md docs/PLAN.md 2>/dev/null
+git branch --show-current 2>/dev/null && git status --porcelain 2>/dev/null | wc -l
 ```
 
-### Step 2: Generate Cache (only if cache invalid/missing)
+### Step 4: Output
 
-**INVOKE THE TASK TOOL** with `subagent_type: "general-purpose"` and `model: "haiku"`:
-
-```
-Gather project context. Return markdown.
-
-READ (skip if missing):
-- README.md (full)
-- AGENTS.md (full)
-- CLAUDE.md (first 100 lines)
-- docs/PLAN.md (first 100 lines)
-
-GLOB:
-- docs/*.md
-- .claude/commands/*.md
-- .claude/skills/*/SKILL.md
-- .claude/agents/*.md
-
-RETURN THIS FORMAT:
-
-## Summary
-[1-2 paragraphs from README/AGENTS]
-
-## Quick Reference
-| Category | Items |
-|----------|-------|
-| **Project** | [name] - [purpose] |
-| **Docs** | [filenames] |
-| **Commands** | [names] or None |
-| **Skills** | [names] or None |
-| **Agents** | [names] or None |
-```
-
-Then WRITE `.claude/sync-cache.json`:
-```json
-{
-  "readme_hash": "[MD5 hash of README.md]",
-  "agents_hash": "[MD5 hash of AGENTS.md]",
-  "plan_hash": "[MD5 hash of docs/PLAN.md or null if missing]",
-  "content": "[the markdown output]"
-}
-```
-
-### Step 3: Display Output
-
-Read cache, then run ONE bash for live state:
-```bash
-git branch --show-current && git status --porcelain | wc -l && test -f .claude/session-cache.json && stat -c %Y .claude/session-cache.json 2>/dev/null
-```
-
-Output cached content + live git/plan/state info.
+Format and display the results.
 
 ## Output Format
 
