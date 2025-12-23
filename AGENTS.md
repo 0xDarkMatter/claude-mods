@@ -4,7 +4,7 @@
 
 This is **claude-mods** - a collection of custom extensions for Claude Code:
 - **23 expert agents** for specialized domains (React, Python, Go, Rust, AWS, etc.)
-- **10 slash commands** for workflows (/sync, /plan, /review, /atomise, etc.)
+- **11 slash commands** for workflows (/sync, /plan, /review, /atomise, etc.)
 - **30 skills** for CLI tool integration, patterns, and workflows
 - **Custom output styles** for response personality (e.g., Vesper)
 
@@ -29,7 +29,7 @@ cd claude-mods && ./scripts/install.sh  # or .\scripts\install.ps1 on Windows
 | `skills/` | Skill definitions with SKILL.md |
 | `output-styles/` | Response personalities (vesper.md) |
 | `hooks/` | Hook examples (pre/post execution) |
-| `rules/` | Claude Code rules (cli-tools.md, thinking.md) |
+| `rules/` | Claude Code rules (4 files: cli-tools, thinking, commit-style, naming-conventions) |
 | `tools/` | Modern CLI toolkit documentation |
 | `tests/` | Validation scripts + justfile |
 | `scripts/` | Install scripts |

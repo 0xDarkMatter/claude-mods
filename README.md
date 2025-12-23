@@ -2,7 +2,7 @@
 
 A comprehensive extension toolkit for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) that transforms your AI coding assistant into a powerhouse development environment.
 
-**23 expert agents. 10 slash commands. 30 skills. Custom output styles. One plugin install.**
+**23 expert agents. 11 slash commands. 30 skills. 4 rules. Custom output styles. One plugin install.**
 
 ## Why claude-mods?
 
@@ -10,7 +10,7 @@ Claude Code is powerful out of the box, but it has gaps. This toolkit fills them
 
 - **Session continuity** — TodoWrite tasks vanish when sessions end. We fix that with `/plan --save` and `/plan --load`, implementing Anthropic's [recommended pattern](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) for long-running agents.
 
-- **Expert-level knowledge on demand** — 21 specialized agents covering React, TypeScript, Python, AWS, PostgreSQL, and more. Each agent is deeply researched with real-world patterns, not generic advice.
+- **Expert-level knowledge on demand** — 23 specialized agents covering React, TypeScript, Python, Go, Rust, AWS, PostgreSQL, and more. Each agent is deeply researched with real-world patterns, not generic advice.
 
 - **Modern CLI tools** — Stop using `grep`, `find`, and `cat`. Our rules automatically prefer `ripgrep`, `fd`, `eza`, and `bat` — 10-100x faster and token-efficient.
 
@@ -34,7 +34,7 @@ Claude Code is powerful out of the box, but it has gaps. This toolkit fills them
 claude-mods/
 ├── .claude-plugin/     # Plugin metadata
 ├── agents/             # Expert subagents (23)
-├── commands/           # Slash commands (10)
+├── commands/           # Slash commands (11)
 ├── skills/             # Custom skills (30)
 ├── output-styles/      # Response personalities
 ├── hooks/              # Hook examples & docs
@@ -101,6 +101,7 @@ Then symlink or copy to your Claude directories:
 | [atomise](commands/atomise.md) | Atom of Thoughts reasoning - decompose problems into atomic units with confidence tracking and backtracking. |
 | [pulse](commands/pulse.md) | Generate Claude Code ecosystem news digest from blogs, repos, and community sources. |
 | [setperms](commands/setperms.md) | Set tool permissions and CLI preferences. |
+| [archive](commands/archive.md) | Archive completed plans and session state. |
 
 ### Skills
 
@@ -145,6 +146,7 @@ Then symlink or copy to your Claude directories:
 | [craftcms-expert](agents/craftcms-expert.md) | Craft CMS content modeling, Twig, plugins, GraphQL |
 | [cypress-expert](agents/cypress-expert.md) | Cypress E2E and component testing, custom commands, CI/CD |
 | [firecrawl-expert](agents/firecrawl-expert.md) | Web scraping, crawling, parallel fetching, structured extraction |
+| [go-expert](agents/go-expert.md) | Go idioms, concurrency, error handling, performance |
 | [javascript-expert](agents/javascript-expert.md) | Modern JavaScript, async patterns, optimization |
 | [laravel-expert](agents/laravel-expert.md) | Laravel framework, Eloquent, testing |
 | [payloadcms-expert](agents/payloadcms-expert.md) | Payload CMS architecture and configuration |
@@ -153,17 +155,26 @@ Then symlink or copy to your Claude directories:
 | [project-organizer](agents/project-organizer.md) | Reorganize directory structures, cleanup |
 | [python-expert](agents/python-expert.md) | Advanced Python, testing, optimization |
 | [react-expert](agents/react-expert.md) | React hooks, state management, Server Components, performance |
+| [rust-expert](agents/rust-expert.md) | Rust ownership, lifetimes, async, unsafe patterns |
 | [sql-expert](agents/sql-expert.md) | Complex SQL queries, optimization, indexing |
 | [typescript-expert](agents/typescript-expert.md) | TypeScript type system, generics, utility types, strict mode |
 | [vue-expert](agents/vue-expert.md) | Vue 3, Composition API, Pinia state management, performance |
 | [wrangler-expert](agents/wrangler-expert.md) | Cloudflare Workers deployment, wrangler.toml |
 
-### Tools, Rules & Hooks
+### Rules
+
+| Rule | Description |
+|------|-------------|
+| [cli-tools.md](rules/cli-tools.md) | Modern CLI tool preferences (fd, rg, eza, bat, etc.) |
+| [thinking.md](rules/thinking.md) | Extended thinking triggers (think → ultrathink) |
+| [commit-style.md](rules/commit-style.md) | Conventional commits format and examples |
+| [naming-conventions.md](rules/naming-conventions.md) | Component naming patterns for agents, skills, commands |
+
+### Tools & Hooks
 
 | Resource | Description |
 |----------|-------------|
 | [tools/](tools/) | Modern CLI toolkit - token-efficient replacements for legacy commands |
-| [rules/cli-tools.md](rules/cli-tools.md) | Tool preference rules (fd, rg, eza, bat, etc.) |
 | [hooks/](hooks/) | Hook examples for pre/post execution automation |
 
 ### Output Styles
