@@ -56,7 +56,10 @@
       "Bash(test:*)",
       "Bash(head:*)",
       "WebSearch",
-      "WebFetch(domain:www.anthropic.com)"
+      "WebFetch(domain:www.anthropic.com)",
+      "SlashCommand(/pulse:*)",
+      "WebFetch(domain:simonwillison.net)",
+      "Skill(sync)"
     ],
     "deny": [],
     "ask": [
