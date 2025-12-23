@@ -1,0 +1,14 @@
+{
+  "name": "claude-mods",
+  "description": "Custom commands, skills, agents, and rules for Claude Code",
+  "plugins": [
+    {
+      "name": "claude-mods",
+      "description": "23 expert agents, 11 commands, 30 skills, 4 rules, and output styles for Claude Code",
+      "source": {
+        "type": "git",
+        "url": "https://github.com/0xDarkMatter/claude-mods.git"
+      }
+    }
+  ]
+}

@@ -11,8 +11,11 @@ This is **claude-mods** - a collection of custom extensions for Claude Code:
 ## Installation
 
 ```bash
-# Plugin install (recommended)
-/plugin install 0xDarkMatter/claude-mods
+# Step 1: Add the marketplace
+/plugin marketplace add 0xDarkMatter/claude-mods
+
+# Step 2: Install the plugin (globally)
+/plugin install claude-mods@0xDarkMatter-claude-mods
 
 # Or clone and run install script
 git clone https://github.com/0xDarkMatter/claude-mods.git

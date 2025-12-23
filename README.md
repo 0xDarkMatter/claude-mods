@@ -51,11 +51,14 @@ claude-mods/
 ### Plugin Install (Recommended)
 
 ```bash
-# In Claude Code, run:
-/plugin install 0xDarkMatter/claude-mods
+# Step 1: Add the marketplace
+/plugin marketplace add 0xDarkMatter/claude-mods
+
+# Step 2: Install the plugin
+/plugin install claude-mods@0xDarkMatter-claude-mods
 ```
 
-This installs directly from GitHub. Toggle on/off with `/plugin` menu.
+This installs globally (available in all projects). Toggle on/off with `/plugin` menu.
 
 ### Script Install
 
