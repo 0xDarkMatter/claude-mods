@@ -1,10 +1,10 @@
 ---
-description: Summon external LLM CLIs (Gemini, OpenAI Codex, Claude, Perplexity) for analysis, research, and consensus. Use Gemini's 2M context, OpenAI's deep reasoning, Claude's coding expertise, Perplexity's web search, or convene multiple models for verdicts.
+description: Summon external LLM CLIs (Gemini, OpenAI, Claude, Perplexity, Grok, GLM) for analysis, research, and consensus. Use each model's strengths or convene multiple for verdicts.
 ---
 
 # Conclave - Multi-LLM Council
 
-> Convene a council of AI models. Use each model's strengths: Gemini's massive context, OpenAI's reasoning depth, Claude's coding excellence, Perplexity's web-grounded answers, or summon them all for consensus verdicts.
+> Convene a council of AI models. Use each model's strengths: Gemini's massive context, OpenAI's reasoning depth, Claude's coding excellence, Perplexity's web search, Grok's real-time knowledge, GLM's multilingual capability, or summon them all for consensus verdicts.
 
 ```
 /conclave [provider] [target] [--flags]
@@ -14,6 +14,8 @@ description: Summon external LLM CLIs (Gemini, OpenAI Codex, Claude, Perplexity)
     |     +- openai / codex   -> OpenAI Codex CLI
     |     +- claude           -> Claude Code CLI (headless)
     |     +- perplexity / pplx -> Perplexity CLI (web search)
+    |     +- grok             -> Grok CLI (xAI)
+    |     +- glm              -> GLM CLI (Zhipu AI)
     |     +- --all            -> Multiple providers (consensus mode)
     |
     +-> Step 2: Select Mode
@@ -53,6 +55,12 @@ description: Summon external LLM CLIs (Gemini, OpenAI Codex, Claude, Perplexity)
 # Use Perplexity for web-grounded research
 /conclave perplexity "What are the latest React 19 breaking changes?"
 
+# Use Grok for real-time knowledge
+/conclave grok "What's the current status of this GitHub issue?"
+
+# Use GLM for multilingual analysis
+/conclave glm "Analyze this Chinese documentation"
+
 # Get consensus from multiple models
 /conclave --all "Is this code secure?"
 ```
@@ -69,6 +77,8 @@ Providers:
 - openai / codex     -> OpenAI Codex CLI (deep reasoning)
 - claude             -> Claude Code CLI (coding expertise, headless mode)
 - perplexity / pplx  -> Perplexity CLI (web search + citations)
+- grok               -> Grok CLI (xAI, real-time knowledge)
+- glm                -> GLM CLI (Zhipu AI, multilingual)
 - --all              -> Multiple providers (consensus mode)
 
 Modes:
@@ -114,6 +124,8 @@ api_keys:
   openai: "your-openai-api-key-here"
   anthropic: "your-anthropic-api-key-here"  # For Claude CLI
   perplexity: "your-perplexity-api-key-here"
+  grok: "your-xai-api-key-here"              # For Grok CLI
+  glm: "your-zhipu-api-key-here"             # For GLM CLI
 
 # Provider Configuration
 providers:
@@ -142,6 +154,20 @@ providers:
       - --citations
     # Unique: returns web citations with every response
 
+  grok:
+    model: grok-3                # Latest: grok-3, grok-3-fast
+    default_flags:               # Alternatives: grok-2
+      - --output-format
+      - json
+    # Unique: real-time X/Twitter knowledge, up-to-date info
+
+  glm:
+    model: glm-4-plus            # Best: glm-4-plus (GLM 4.6 equivalent)
+    default_flags:               # Alternatives: glm-4-air, glm-4-flash
+      - --output-format
+      - json
+    # Unique: strong multilingual, Chinese language excellence
+
 # Consensus Mode (--all) Settings
 consensus:
   providers: [gemini, openai, claude]  # Which providers participate
@@ -160,6 +186,10 @@ consensus:
 | **Claude** | `opus` | 200K tokens | Most capable - complex reasoning, nuanced analysis |
 | **Claude** | `haiku` | 200K tokens | Fast, efficient - quick analysis, simple tasks |
 | **Perplexity** | `sonar-pro` | 200K tokens | **Real-time web search** - best for research, current info, fact-checking |
+| **Grok** | `grok-3` | 128K tokens | **Real-time X/Twitter knowledge** - current events, social context |
+| **Grok** | `grok-3-fast` | 128K tokens | Faster, cheaper - quick queries |
+| **GLM** | `glm-4-plus` | 128K tokens | **Multilingual excellence** - best for Chinese, cross-lingual analysis |
+| **GLM** | `glm-4-flash` | 128K tokens | Fast, efficient - quick multilingual tasks |
 
 > **Notes:**
 > - `gemini-2.5-pro` is tuned as a "CLI agent for software engineering" - it deliberately refuses non-coding questions. Perfect for `/conclave` code analysis.
@@ -214,6 +244,8 @@ If you prefer environment variables over config file:
 | `OPENAI_API_KEY` | OpenAI Codex authentication |
 | `ANTHROPIC_API_KEY` | Claude CLI authentication |
 | `PERPLEXITY_API_KEY` | Perplexity CLI authentication |
+| `GROK_API_KEY` | Grok CLI authentication (xAI) |
+| `GLM_API_KEY` | GLM CLI authentication (Zhipu AI) |
 
 ```bash
 # Add to ~/.bashrc or ~/.zshrc
@@ -221,6 +253,8 @@ export GEMINI_API_KEY="your-key-here"
 export OPENAI_API_KEY="your-key-here"
 export ANTHROPIC_API_KEY="your-key-here"
 export PERPLEXITY_API_KEY="your-key-here"
+export GROK_API_KEY="your-key-here"
+export GLM_API_KEY="your-key-here"
 ```
 
 ### Security Notes
@@ -387,6 +421,92 @@ claude -p --system-prompt "You are a security auditor" "Check for vulnerabilitie
 - A different perspective from Gemini/OpenAI on the same problem
 - Fast iteration with `haiku` for simple checks
 
+### Grok CLI
+
+**Authentication:**
+
+| Auth Method | Setup | Notes |
+|-------------|-------|-------|
+| **Environment Variable** | `export GROK_API_KEY="key"` | Standard approach |
+| **User Settings** | `~/.grok/user-settings.json` | Persistent storage |
+
+> Get your API key at [x.ai](https://x.ai)
+
+**Available Models:**
+
+| Model | Use Case |
+|-------|----------|
+| `grok-3-latest` | Latest Grok 3 - best reasoning |
+| `grok-3-fast` | Faster, cheaper Grok 3 |
+| `grok-code-fast-1` | Optimized for code tasks (default) |
+| `grok-4-latest` | Grok 4 when available |
+
+| Flag | Mapped From | Effect |
+|------|-------------|--------|
+| `-p, --prompt` | (required) | Headless mode - single prompt and exit |
+| `-m, --model` | `--model` | Specify model |
+| `--max-tool-rounds` | (n/a) | Limit tool execution rounds |
+
+**Grok Command Template:**
+```bash
+# Headless single prompt
+grok -p "Analyze this code for security issues"
+
+# With specific model
+grok -p "Review this architecture" -m grok-3-latest
+
+# Pipe content and analyze
+cat src/auth.ts | grok -p "Review this authentication code"
+```
+
+**Unique Capability:** Real-time X/Twitter knowledge, current events awareness. Use when you need:
+- Up-to-date information beyond training cutoffs
+- Social/community context around technologies
+- Current discussions and trends
+
+### GLM CLI (Zhipu AI)
+
+**Authentication:**
+
+| Auth Method | Setup | Notes |
+|-------------|-------|-------|
+| **Environment Variable** | `export GLM_API_KEY="key"` | Standard approach |
+| **Config File** | `~/.glm/config.json` | Persistent storage |
+
+> Get your API key at [open.bigmodel.cn](https://open.bigmodel.cn)
+
+**Available Models:**
+
+| Model | Use Case |
+|-------|----------|
+| `glm-4-plus` | Most capable - complex tasks (GLM 4.6) |
+| `glm-4-air` | Balanced speed and capability |
+| `glm-4-flash` | Fast, efficient for simple tasks |
+| `glm-4-long` | Extended context (1M tokens) |
+
+| Flag | Mapped From | Effect |
+|------|-------------|--------|
+| `-p, --prompt` | (required) | Single prompt mode |
+| `-m, --model` | `--model` | Specify model |
+| `--json` | `--quiet` | JSON output |
+
+**GLM Command Template:**
+```bash
+# Basic prompt
+glm -p "Analyze this code"
+
+# With specific model
+glm -p "Review this design" -m glm-4-plus
+
+# Multilingual analysis
+glm -p "分析这段代码的安全性" -m glm-4-plus
+```
+
+**Unique Capability:** Strong multilingual support, especially Chinese. Use when you need:
+- Chinese language analysis or documentation
+- Cross-lingual code review
+- Asian market/ecosystem context
+
 ---
 
 ## Consensus Mode (--all)
@@ -527,6 +647,12 @@ which codex || echo "Install: https://github.com/openai/codex"
 
 # Check Perplexity (included in claude-mods toolkit)
 which perplexity || echo "Install: Run tools/install-*.sh from claude-mods"
+
+# Check Grok
+which grok || echo "Install: bun add -g @vibe-kit/grok-cli"
+
+# Check GLM
+which glm || echo "Install: pip install zhipuai-cli (or check zhipuai docs)"
 ```
 
 ### Step 2: Parse Provider & Mode
@@ -536,6 +662,8 @@ which perplexity || echo "Install: Run tools/install-*.sh from claude-mods"
 | `/conclave .` | gemini | analyze |
 | `/conclave openai .` | openai | analyze |
 | `/conclave perplexity "..."` | perplexity | ask |
+| `/conclave grok "..."` | grok | ask |
+| `/conclave glm "..."` | glm | ask |
 | `/conclave ask "..."` | gemini | ask |
 | `/conclave codex ask "..."` | openai | ask |
 | `/conclave pplx ask "..."` | perplexity | ask |
@@ -549,12 +677,12 @@ which perplexity || echo "Install: Run tools/install-*.sh from claude-mods"
 
 **Map flags to provider-specific equivalents:**
 
-| Generic Flag | Gemini | OpenAI Codex | Perplexity |
-|--------------|--------|--------------|------------|
-| `--auto` | `--yolo` | `--full-auto` | (n/a) |
-| `--quiet` | `--output-format json` | `--json` | `--json` |
-| `--thinking` | (n/a) | (use default `gpt-5.2`) | `-m sonar-reasoning-pro` |
-| `--model X` | `-m X` | `-m X` | `-m X` |
+| Generic Flag | Gemini | OpenAI Codex | Perplexity | Grok | GLM |
+|--------------|--------|--------------|------------|------|-----|
+| `--auto` | `--yolo` | `--full-auto` | (n/a) | (n/a) | (n/a) |
+| `--quiet` | `--output-format json` | `--json` | `--json` | (n/a) | `--json` |
+| `--thinking` | (n/a) | (use `gpt-5.2`) | `-m sonar-reasoning-pro` | `-m grok-3-latest` | `-m glm-4-plus` |
+| `--model X` | `-m X` | `-m X` | `-m X` | `-m X` | `-m X` |
 
 > **Safety note:** Default mode is read-only analysis. `--auto` explicitly opts into tool execution - use with caution.
 
@@ -737,3 +865,6 @@ The `/conclave` command is the successor to `/g-slave` with expanded capabilitie
 - [OpenAI Codex GitHub](https://github.com/openai/codex)
 - [Perplexity API Docs](https://docs.perplexity.ai/)
 - [Perplexity Model Cards](https://docs.perplexity.ai/guides/model-cards)
+- [Grok CLI GitHub](https://github.com/vibe-kit/grok-cli)
+- [xAI API](https://x.ai)
+- [Zhipu AI (GLM) API](https://open.bigmodel.cn)
