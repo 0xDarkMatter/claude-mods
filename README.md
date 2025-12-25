@@ -2,7 +2,7 @@
 
 A comprehensive extension toolkit for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) that transforms your AI coding assistant into a powerhouse development environment.
 
-**23 expert agents. 11 slash commands. 30 skills. 4 rules. Custom output styles. One plugin install.**
+**23 expert agents. 10 slash commands. 30 skills. 4 rules. Custom output styles. One plugin install.**
 
 ## Why claude-mods?
 
@@ -100,7 +100,7 @@ Then symlink or copy to your Claude directories:
 | [testgen](commands/testgen.md) | Generate tests with expert routing, framework detection, focus/depth modes. |
 | [explain](commands/explain.md) | Deep explanation of complex code, files, or concepts. Architecture, data flow, design decisions. |
 | [spawn](commands/spawn.md) | Generate expert agents with PhD-level patterns and code examples. |
-| [conclave](commands/conclave.md) | Summon external LLMs (Gemini, OpenAI, Claude, Perplexity, Grok, GLM) for analysis, research, and consensus verdicts. |
+| [conclave](commands/conclave.md) | **[DEPRECATED]** Use [Conclave CLI](https://github.com/0xDarkMatter/conclave) instead. |
 | [atomise](commands/atomise.md) | Atom of Thoughts reasoning - decompose problems into atomic units with confidence tracking and backtracking. |
 | [pulse](commands/pulse.md) | Generate Claude Code ecosystem news digest from blogs, repos, and community sources. |
 | [setperms](commands/setperms.md) | Set tool permissions and CLI preferences. |
