@@ -29,3 +29,4 @@ Thumbs.db
 # Scraped/generated data
 *_scraped.json
 *_scraped.csv
+.grok/
