@@ -10,6 +10,7 @@
 .claude/claude-state.json
 .claude/claude-progress.md
 .claude/sync-cache.json
+.claude/canvas/
 
 # Backup files
 *.bak

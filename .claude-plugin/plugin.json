@@ -1,7 +1,7 @@
 {
   "name": "claude-mods",
-  "version": "1.3.0",
-  "description": "Custom commands, skills, and agents for Claude Code - session continuity, 23 expert agents, 30 skills, 4 rules, modern CLI tools",
+  "version": "1.4.0",
+  "description": "Custom commands, skills, and agents for Claude Code - session continuity, terminal canvas, 22 expert agents, 30 skills, 4 rules, modern CLI tools",
   "author": "0xDarkMatter",
   "repository": "https://github.com/0xDarkMatter/claude-mods",
   "license": "MIT",
@@ -12,7 +12,9 @@
     "skills",
     "session-management",
     "cli-tools",
-    "output-styles"
+    "output-styles",
+    "canvas",
+    "terminal-ui"
   ],
   "components": {
     "commands": [
@@ -25,7 +27,8 @@
       "commands/conclave.md",
       "commands/atomise.md",
       "commands/setperms.md",
-      "commands/pulse.md"
+      "commands/pulse.md",
+      "commands/canvas.md"
     ],
     "agents": [
       "agents/astro-expert.md",
@@ -41,7 +44,6 @@
       "agents/javascript-expert.md",
       "agents/laravel-expert.md",
       "agents/payloadcms-expert.md",
-      "agents/playwright-roulette-expert.md",
       "agents/postgres-expert.md",
       "agents/project-organizer.md",
       "agents/python-expert.md",
