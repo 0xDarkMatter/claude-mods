@@ -1,0 +1,30 @@
+# Warp Launch Configuration for Claude Canvas
+#
+# Installation:
+#   Windows: Copy to %APPDATA%\warp\Warp\data\launch_configurations\
+#   macOS:   Copy to ~/.warp/launch_configurations/
+#   Linux:   Copy to ~/.warp/launch_configurations/
+#
+# Usage:
+#   1. Open Warp Command Palette (Cmd+P / Ctrl+Shift+P)
+#   2. Search "Claude Canvas"
+#   3. Select to open split layout
+#
+# Or trigger via URI:
+#   warp://launch/claude-canvas
+#
+---
+name: Claude Canvas
+windows:
+  - active_tab_index: 0
+    tabs:
+      - title: Claude Canvas
+        color: Blue
+        layout:
+          split_direction: vertical
+          panes:
+            # Left pane: Your main terminal (Claude Code runs here)
+            - is_focused: true
+            # Right pane: Canvas TUI watching for content
+            - commands:
+                - exec: "npx @claude-mods/canvas-tui --watch"
