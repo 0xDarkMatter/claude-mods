@@ -10,8 +10,12 @@ export const templates: Record<string, ContentTemplate> = {
     description: 'Professional email format with subject, greeting, and signature',
     template: `# Email Draft
 
-**To:**
-**Subject:**
+\`\`\`
+To:
+CC:
+BCC:
+Subject:
+\`\`\`
 
 ---
 

@@ -4,23 +4,24 @@ import { markedTerminal } from 'marked-terminal';
 import chalk from 'chalk';
 
 // Configure marked with terminal renderer
+// Using colors that work on both light and dark backgrounds
 marked.use(
   markedTerminal({
-    // Colors for different elements
+    // Colors for different elements - avoiding white/black for cross-theme support
     code: chalk.cyan,
     blockquote: chalk.gray.italic,
     html: chalk.gray,
     heading: chalk.bold.blue,
     firstHeading: chalk.bold.blue.underline,
     hr: chalk.gray,
-    listitem: chalk.white,
+    listitem: chalk.reset,  // Use default terminal color
     list: (body: string) => body,
-    table: chalk.white,
-    paragraph: chalk.white,
+    table: chalk.reset,
+    paragraph: chalk.reset, // Use default terminal color
     strong: chalk.bold,
     em: chalk.italic,
-    codespan: chalk.yellow,
-    del: chalk.strikethrough,
+    codespan: chalk.magenta,
+    del: chalk.strikethrough.gray,
     link: chalk.blue.underline,
     href: chalk.blue.underline,
 
