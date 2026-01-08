@@ -1,27 +1,48 @@
 import React from 'react';
 import { Box, Text } from 'ink';
+import { FileSelector } from './FileSelector.js';
+import { FileInfo } from '../hooks/useDirectoryFiles.js';
 
 interface HeaderProps {
   title: string;
-  contentType: string;
   width: number;
+  // File selector props
+  files: FileInfo[];
+  currentFile: string;
+  selectedFileIndex: number;
+  isDropdownOpen: boolean;
+  isDropdownFocused: boolean;
 }
 
-export const Header: React.FC<HeaderProps> = ({ title, contentType, width }) => {
-  const typeLabel = contentType.charAt(0).toUpperCase() + contentType.slice(1);
+export const Header: React.FC<HeaderProps> = ({
+  title,
+  width,
+  files,
+  currentFile,
+  selectedFileIndex,
+  isDropdownOpen,
+  isDropdownFocused,
+}) => {
   const leftContent = ` ${title} `;
-  const rightContent = ` ${typeLabel} `;
 
-  // Calculate padding for centering
-  const totalContentLength = leftContent.length + rightContent.length;
-  const padding = Math.max(0, width - totalContentLength - 2);
+  // Reserve space for file selector (~30 chars)
+  const selectorWidth = 30;
+  const padding = Math.max(0, width - leftContent.length - selectorWidth - 2);
 
   return (
-    <Box borderStyle="single" borderBottom={true} borderTop={false} borderLeft={false} borderRight={false}>
-      <Box width={width}>
-        <Text bold color="blue">{leftContent}</Text>
-        <Text>{' '.repeat(padding)}</Text>
-        <Text color="gray">{rightContent}</Text>
+    <Box flexDirection="column">
+      <Box borderStyle="single" borderBottom={true} borderTop={false} borderLeft={false} borderRight={false}>
+        <Box width={width} justifyContent="space-between">
+          <Text bold color="blue">{leftContent}</Text>
+          <Text>{' '.repeat(padding)}</Text>
+          <FileSelector
+            files={files}
+            currentFile={currentFile}
+            selectedIndex={selectedFileIndex}
+            isOpen={isDropdownOpen}
+            isFocused={isDropdownFocused}
+          />
+        </Box>
       </Box>
     </Box>
   );

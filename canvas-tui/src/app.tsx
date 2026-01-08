@@ -4,6 +4,7 @@ import { Header } from './components/Header.js';
 import { MarkdownView } from './components/MarkdownView.js';
 import { StatusBar } from './components/StatusBar.js';
 import { useFileWatcher } from './hooks/useFileWatcher.js';
+import { useDirectoryFiles } from './hooks/useDirectoryFiles.js';
 import { readMeta, type CanvasMeta } from './lib/ipc.js';
 import { editInExternalEditor } from './lib/editor.js';
 
@@ -29,13 +30,22 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
   const [mouseEnabled, setMouseEnabled] = useState(enableMouse);
   const [isEditing, setIsEditing] = useState(false);
 
+  // File selector state
+  const [currentFilePath, setCurrentFilePath] = useState(watchPath);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isDropdownFocused, setIsDropdownFocused] = useState(false);
+  const [selectedFileIndex, setSelectedFileIndex] = useState(0);
+
   // Terminal dimensions
   const rows = stdout?.rows || 24;
   const cols = stdout?.columns || 80;
   const contentHeight = rows - 4; // Header (2) + Footer (2)
 
-  // File watcher
-  const { content: watchedContent, error } = useFileWatcher(watchPath);
+  // Get files in directory
+  const files = useDirectoryFiles(watchDir);
+
+  // File watcher - watch the current file
+  const { content: watchedContent, error } = useFileWatcher(currentFilePath);
 
   // Enable mouse tracking
   useLayoutEffect(() => {
@@ -85,6 +95,7 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
 
   // Keyboard input
   useInput((input, key) => {
+    // Quit
     if (input === 'q' || (key.ctrl && input === 'c')) {
       if (mouseEnabled) {
         process.stdout.write(DISABLE_MOUSE);
@@ -92,7 +103,51 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
       exit();
     }
 
-    // Scrolling
+    // Tab - toggle file selector focus
+    if (key.tab) {
+      if (isDropdownFocused) {
+        // Close dropdown and unfocus
+        setIsDropdownFocused(false);
+        setIsDropdownOpen(false);
+      } else {
+        // Focus and open dropdown
+        setIsDropdownFocused(true);
+        setIsDropdownOpen(true);
+        // Set selected index to current file
+        const currentIndex = files.findIndex(f => f.path === currentFilePath);
+        setSelectedFileIndex(currentIndex >= 0 ? currentIndex : 0);
+      }
+      return;
+    }
+
+    // Escape - close dropdown
+    if (key.escape && isDropdownOpen) {
+      setIsDropdownOpen(false);
+      setIsDropdownFocused(false);
+      return;
+    }
+
+    // When dropdown is open, arrow keys navigate files
+    if (isDropdownOpen) {
+      if (key.upArrow) {
+        setSelectedFileIndex(prev => Math.max(0, prev - 1));
+        return;
+      }
+      if (key.downArrow) {
+        setSelectedFileIndex(prev => Math.min(files.length - 1, prev + 1));
+        return;
+      }
+      if (key.return && files[selectedFileIndex]) {
+        // Select file and close dropdown
+        setCurrentFilePath(files[selectedFileIndex].path);
+        setIsDropdownOpen(false);
+        setIsDropdownFocused(false);
+        setScrollOffset(0);
+        return;
+      }
+    }
+
+    // Scrolling (only when dropdown is closed)
     if (key.upArrow) {
       setScrollOffset(prev => Math.max(0, prev - 1));
     }
@@ -139,7 +194,7 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
       if (mouseEnabled) {
         process.stdout.write(DISABLE_MOUSE);
       }
-      editInExternalEditor(watchPath)
+      editInExternalEditor(currentFilePath)
         .then(() => {
           setIsEditing(false);
           // Re-enable mouse if it was on
@@ -170,11 +225,21 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
   const mouseHint = mouseEnabled ? 'mouse:on' : 'mouse:off';
   const hints = isEditing
     ? 'Editing... save & quit editor to return'
-    : `q:quit | e:edit | m:${mouseHint} | arrows${scrollHint}`;
+    : isDropdownOpen
+    ? 'Tab:close | ↑↓:select | Enter:open'
+    : `Tab:files | e:edit | m:${mouseHint} | q:quit${scrollHint}`;
 
   return (
     <Box flexDirection="column" height={rows}>
-      <Header title="Canvas" contentType={meta?.contentType || 'doc'} width={cols} />
+      <Header
+        title="Canvas (beta)"
+        width={cols}
+        files={files}
+        currentFile={currentFilePath}
+        selectedFileIndex={selectedFileIndex}
+        isDropdownOpen={isDropdownOpen}
+        isDropdownFocused={isDropdownFocused}
+      />
 
       <Box flexGrow={1} flexDirection="column" overflow="hidden">
         {content ? (
