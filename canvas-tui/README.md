@@ -1,5 +1,7 @@
 # @claude-mods/canvas-tui
 
+> **Beta** - Under active development. Features may change.
+
 Terminal canvas for Claude Code - live markdown preview in split panes.
 
 Works with any terminal that supports split panes: **Warp**, **tmux**, **iTerm2**, **Windows Terminal**, and more.
