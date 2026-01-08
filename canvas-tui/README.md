@@ -28,8 +28,8 @@ canvas-tui --watch ./my-canvas
 # Watch specific file
 canvas-tui --file ./draft.md
 
-# Enable in-app scrolling (arrow keys instead of terminal scroll)
-canvas-tui --watch --scroll
+# Disable mouse scroll capture (keyboard only)
+canvas-tui --watch --no-mouse
 
 # Show help
 canvas-tui --help
@@ -69,25 +69,19 @@ canvas-tui --watch
 wt split-pane --horizontal canvas-tui --watch
 ```
 
-## Keyboard Shortcuts
-
-**Default mode (terminal scroll):**
+## Controls
 
 | Key | Action |
 |-----|--------|
-| `q` | Quit |
-| `Ctrl+C` | Quit |
-| `r` | Refresh |
-
-**With `--scroll` flag (in-app scroll):**
-
-| Key | Action |
-|-----|--------|
-| `Up/Down` | Scroll |
+| `Up/Down` | Scroll line by line |
+| `Page Up/Down` | Scroll by page |
 | `g` | Go to top |
 | `G` | Go to bottom |
-| `q` | Quit |
+| `q` / `Ctrl+C` | Quit |
 | `r` | Refresh |
+| Mouse wheel | Scroll (terminal-dependent) |
+
+**Note:** Mouse wheel scrolling works in iTerm2, Terminal.app, and most xterm-compatible terminals. In Warp, use arrow keys or Warp's native scrollbar instead.
 
 ## Integration with Claude Code
 
