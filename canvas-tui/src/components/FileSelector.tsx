@@ -40,18 +40,22 @@ export const FileSelector: React.FC<FileSelectorProps> = ({
   lines.push(`${displayName} ▲${pad}`);
 
   // Separator
-  lines.push(`· · ·${pad}`);
+  lines.push(`─────────────────────${pad}`);
 
-  // Other files
-  files.slice(0, 6).forEach((file, index) => {
-    const isSelected = index === selectedIndex;
-    const name = truncateFilename(file.name, MAX_DISPLAY_LENGTH);
-    const marker = isSelected ? '▸' : ' ';
-    lines.push(`${marker} ${name}${isSelected ? ' ◂' : '  '}${pad}`);
-  });
+  // Show files or "no files" message
+  if (files.length === 0) {
+    lines.push(`  (no files in drafts/)${pad}`);
+  } else {
+    files.slice(0, 6).forEach((file, index) => {
+      const isSelected = index === selectedIndex;
+      const name = truncateFilename(file.name, MAX_DISPLAY_LENGTH);
+      const marker = isSelected ? '▸' : ' ';
+      lines.push(`${marker} ${name}${isSelected ? ' ◂' : '  '}${pad}`);
+    });
 
-  if (files.length > 6) {
-    lines.push(`  +${files.length - 6} more${pad}`);
+    if (files.length > 6) {
+      lines.push(`  +${files.length - 6} more${pad}`);
+    }
   }
 
   return <Text>{lines.join('\n')}</Text>;

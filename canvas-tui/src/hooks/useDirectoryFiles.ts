@@ -9,7 +9,7 @@ export interface FileInfo {
 }
 
 /**
- * Scans a directory for markdown and text files.
+ * Scans a directory's 'drafts' subdirectory for markdown and text files.
  * Returns sorted list (most recently modified first).
  */
 export function useDirectoryFiles(dirPath: string): FileInfo[] {
@@ -18,9 +18,7 @@ export function useDirectoryFiles(dirPath: string): FileInfo[] {
   useEffect(() => {
     const scanDirectory = () => {
       try {
-        // Resolve to absolute path, scan 'drafts' subdirectory
-        const absoluteDir = path.resolve(dirPath);
-        const draftsDir = path.join(absoluteDir, 'drafts');
+        const draftsDir = path.join(dirPath, 'drafts');
 
         // Create drafts dir if it doesn't exist
         if (!fs.existsSync(draftsDir)) {
@@ -49,18 +47,13 @@ export function useDirectoryFiles(dirPath: string): FileInfo[] {
         // Sort by modified time (most recent first)
         fileInfos.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
         setFiles(fileInfos);
-      } catch (err) {
-        // Directory might not exist yet
+      } catch {
         setFiles([]);
       }
     };
 
-    // Initial scan
     scanDirectory();
-
-    // Re-scan periodically (every 2 seconds) to catch new files
     const interval = setInterval(scanDirectory, 2000);
-
     return () => clearInterval(interval);
   }, [dirPath]);
 

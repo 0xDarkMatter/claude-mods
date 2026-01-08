@@ -211,23 +211,24 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
     }
   });
 
-  // Status message
+  // Status message - truncate path to just filename
+  const currentFileName = currentFilePath.split(/[/\\]/).pop() || 'file';
   const statusMessage = error
     ? `Error: ${error}`
     : syncStatus === 'waiting'
-    ? `Waiting for ${watchPath}...`
-    : `Updated: ${lastUpdate?.toLocaleTimeString() || ''}`;
+    ? `Waiting: ${currentFileName}`
+    : `Synced: ${currentFileName}`;
 
   const scrollHint = totalLines > contentHeight
-    ? ` | ${scrollOffset + 1}-${Math.min(scrollOffset + contentHeight, totalLines)}/${totalLines}`
+    ? ` ${scrollOffset + 1}-${Math.min(scrollOffset + contentHeight, totalLines)}/${totalLines}`
     : '';
 
-  const mouseHint = mouseEnabled ? 'mouse:on' : 'mouse:off';
+  const mouseHint = mouseEnabled ? 'on' : 'off';
   const hints = isEditing
-    ? 'Editing... save & quit editor to return'
+    ? 'Editing...'
     : isDropdownOpen
-    ? 'Tab:close | ↑↓:select | Enter:open'
-    : `Tab:files | e:edit | m:${mouseHint} | q:quit${scrollHint}`;
+    ? 'Tab:close ↑↓:nav Enter:open'
+    : `Tab:files e:edit m:${mouseHint} q:quit${scrollHint}`;
 
   return (
     <Box flexDirection="column" height={rows}>
