@@ -5,6 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
+    "canvas": "./bin/canvas.js",
     "canvas-tui": "./bin/canvas.js"
   },
   "scripts": {
