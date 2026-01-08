@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import React from 'react';
+import fs from 'fs';
+import path from 'path';
 import { render } from 'ink';
 import meow from 'meow';
 import { App } from './app.js';
@@ -50,6 +52,66 @@ const cli = meow(`
   }
 });
 
-const watchPath = cli.flags.file || `${cli.flags.watch}/content.md`;
+// Find canvas directory by searching up from CWD
+function findCanvasDir(startDir: string = process.cwd()): string | null {
+  let current = startDir;
+  const root = path.parse(current).root;
 
-render(<App watchPath={watchPath} watchDir={cli.flags.watch} enableMouse={!cli.flags.noMouse} />);
+  while (current !== root) {
+    const candidate = path.join(current, '.claude', 'canvas');
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+    current = path.dirname(current);
+  }
+  return null;
+}
+
+// Determine watch directory - find it automatically or use explicit path
+function getWatchDir(explicitPath: string): string {
+  // If user specified absolute path, use it
+  if (path.isAbsolute(explicitPath)) {
+    return explicitPath;
+  }
+
+  // Try to find .claude/canvas by searching up
+  const found = findCanvasDir();
+  if (found) {
+    return found;
+  }
+
+  // Fall back to relative path from CWD
+  return path.resolve(explicitPath);
+}
+
+// Determine initial file to watch
+function getInitialFile(watchDir: string, specificFile?: string): string {
+  if (specificFile) return path.resolve(specificFile);
+
+  // Check drafts directory first
+  const draftsDir = path.join(watchDir, 'drafts');
+  try {
+    if (fs.existsSync(draftsDir)) {
+      const files = fs.readdirSync(draftsDir)
+        .filter(f => f.endsWith('.md') || f.endsWith('.txt'))
+        .sort((a, b) => {
+          const statA = fs.statSync(path.join(draftsDir, a));
+          const statB = fs.statSync(path.join(draftsDir, b));
+          return statB.mtime.getTime() - statA.mtime.getTime();
+        });
+      if (files.length > 0) {
+        return path.join(draftsDir, files[0]);
+      }
+    }
+  } catch {
+    // Fall through to default
+  }
+
+  // Fallback to content.md in watch dir
+  return path.join(watchDir, 'content.md');
+}
+
+const watchDir = getWatchDir(cli.flags.watch);
+const watchPath = getInitialFile(watchDir, cli.flags.file);
+
+render(<App watchPath={watchPath} watchDir={watchDir} enableMouse={!cli.flags.noMouse} />);
