@@ -5,6 +5,7 @@ import { MarkdownView } from './components/MarkdownView.js';
 import { StatusBar } from './components/StatusBar.js';
 import { useFileWatcher } from './hooks/useFileWatcher.js';
 import { readMeta, type CanvasMeta } from './lib/ipc.js';
+import { editInExternalEditor } from './lib/editor.js';
 
 interface AppProps {
   watchPath: string;
@@ -25,6 +26,8 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [scrollOffset, setScrollOffset] = useState(0);
   const [totalLines, setTotalLines] = useState(0);
+  const [mouseEnabled, setMouseEnabled] = useState(enableMouse);
+  const [isEditing, setIsEditing] = useState(false);
 
   // Terminal dimensions
   const rows = stdout?.rows || 24;
@@ -36,7 +39,7 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
 
   // Enable mouse tracking
   useLayoutEffect(() => {
-    if (enableMouse) {
+    if (mouseEnabled) {
       process.stdout.write(ENABLE_MOUSE);
 
       // Listen for mouse events on stdin
@@ -65,7 +68,7 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
         process.stdin.off('data', handleData);
       };
     }
-  }, [enableMouse, totalLines, contentHeight]);
+  }, [mouseEnabled, totalLines, contentHeight]);
 
   // Update content when file changes
   useEffect(() => {
@@ -83,12 +86,13 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
   // Keyboard input
   useInput((input, key) => {
     if (input === 'q' || (key.ctrl && input === 'c')) {
-      if (enableMouse) {
+      if (mouseEnabled) {
         process.stdout.write(DISABLE_MOUSE);
       }
       exit();
     }
 
+    // Scrolling
     if (key.upArrow) {
       setScrollOffset(prev => Math.max(0, prev - 1));
     }
@@ -101,14 +105,54 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
     if (key.pageDown) {
       setScrollOffset(prev => Math.min(Math.max(0, totalLines - contentHeight), prev + contentHeight));
     }
-    if (input === 'g') {
+
+    // Home/End and vim-style navigation
+    if (input === 'g' || key.meta && key.upArrow) {
       setScrollOffset(0);
     }
-    if (input === 'G') {
+    if (input === 'G' || key.meta && key.downArrow) {
       setScrollOffset(Math.max(0, totalLines - contentHeight));
     }
+
+    // Refresh
     if (input === 'r') {
       setSyncStatus('watching');
+    }
+
+    // Toggle mouse capture
+    if (input === 'm') {
+      setMouseEnabled(prev => {
+        const newValue = !prev;
+        if (newValue) {
+          process.stdout.write(ENABLE_MOUSE);
+        } else {
+          process.stdout.write(DISABLE_MOUSE);
+        }
+        return newValue;
+      });
+    }
+
+    // Edit in external editor
+    if (input === 'e' && !isEditing && content) {
+      setIsEditing(true);
+      // Disable mouse while editing
+      if (mouseEnabled) {
+        process.stdout.write(DISABLE_MOUSE);
+      }
+      editInExternalEditor(watchPath)
+        .then(() => {
+          setIsEditing(false);
+          // Re-enable mouse if it was on
+          if (mouseEnabled) {
+            process.stdout.write(ENABLE_MOUSE);
+          }
+        })
+        .catch(() => {
+          setIsEditing(false);
+          if (mouseEnabled) {
+            process.stdout.write(ENABLE_MOUSE);
+          }
+        });
     }
   });
 
@@ -123,9 +167,10 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
     ? ` | ${scrollOffset + 1}-${Math.min(scrollOffset + contentHeight, totalLines)}/${totalLines}`
     : '';
 
-  const hints = enableMouse
-    ? `q: quit | scroll: arrows/mouse${scrollHint}`
-    : `q: quit | scroll: arrows${scrollHint}`;
+  const mouseHint = mouseEnabled ? 'mouse:on' : 'mouse:off';
+  const hints = isEditing
+    ? 'Editing... save & quit editor to return'
+    : `q:quit | e:edit | m:${mouseHint} | arrows${scrollHint}`;
 
   return (
     <Box flexDirection="column" height={rows}>

@@ -63,7 +63,24 @@ export function useMarkdown(content: string): string {
       const rendered = marked.parse(content);
       // marked returns Promise in some configs, but sync with markedTerminal
       if (typeof rendered === 'string') {
-        return rendered.trim();
+        // Ensure proper spacing after headings
+        // ANSI underline is \x1B[4m, reset includes \x1B[0m or \x1B[24m
+        const lines = rendered.trim().split('\n');
+        const result: string[] = [];
+
+        for (let i = 0; i < lines.length; i++) {
+          result.push(lines[i]);
+
+          // If this line contains underline codes (h1) or bold (other headings)
+          // and next line exists and is not empty, add a blank line
+          const hasUnderline = lines[i].includes('\x1B[4m');
+          const nextLine = lines[i + 1];
+          if (hasUnderline && nextLine !== undefined && nextLine.trim() !== '') {
+            result.push('');
+          }
+        }
+
+        return result.join('\n');
       }
       return content; // Fallback to raw content
     } catch (err) {
