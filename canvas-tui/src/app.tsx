@@ -103,6 +103,9 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
       exit();
     }
 
+    // Other files (excluding current) for dropdown navigation
+    const otherFiles = files.filter(f => f.path !== currentFilePath);
+
     // Tab - toggle file selector focus
     if (key.tab) {
       if (isDropdownFocused) {
@@ -113,9 +116,8 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
         // Focus and open dropdown
         setIsDropdownFocused(true);
         setIsDropdownOpen(true);
-        // Set selected index to current file
-        const currentIndex = files.findIndex(f => f.path === currentFilePath);
-        setSelectedFileIndex(currentIndex >= 0 ? currentIndex : 0);
+        // Start at first file
+        setSelectedFileIndex(0);
       }
       return;
     }
@@ -134,12 +136,12 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
         return;
       }
       if (key.downArrow) {
-        setSelectedFileIndex(prev => Math.min(files.length - 1, prev + 1));
+        setSelectedFileIndex(prev => Math.min(otherFiles.length - 1, prev + 1));
         return;
       }
-      if (key.return && files[selectedFileIndex]) {
+      if (key.return && otherFiles[selectedFileIndex]) {
         // Select file and close dropdown
-        setCurrentFilePath(files[selectedFileIndex].path);
+        setCurrentFilePath(otherFiles[selectedFileIndex].path);
         setIsDropdownOpen(false);
         setIsDropdownFocused(false);
         setScrollOffset(0);
