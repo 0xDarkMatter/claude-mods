@@ -6,30 +6,31 @@ import { App } from './app.js';
 
 const cli = meow(`
   Usage
-    $ canvas-tui [options]
+    $ canvas [options]
 
   Options
-    --watch, -w       Watch directory for changes (default: .claude/canvas)
+    --watch, -w       Watch directory (default: .claude/canvas)
     --file, -f        Specific file to watch
     --no-mouse        Disable mouse wheel scrolling
-    --help            Show this help message
+    --help            Show this help
     --version         Show version
 
   Examples
-    $ canvas-tui --watch
-    $ canvas-tui --file ./draft.md
-    $ canvas-tui --watch --no-mouse
+    $ canvas                     # Just run it - defaults work
+    $ canvas --file ./draft.md   # Watch specific file
 
   Controls
-    Arrow keys / Mouse wheel    Scroll content
-    g / G                       Go to top / bottom
-    q / Ctrl+C                  Quit
-    r                           Refresh
+    ↑↓ / Mouse wheel    Scroll content
+    g / G               Top / bottom
+    Tab                 Open file selector
+    e                   Edit in external editor
+    m                   Toggle mouse capture
+    q                   Quit
 
   Terminal Setup
-    Warp:     Ctrl+Shift+D to split, run canvas-tui in new pane
-    tmux:     tmux split-window -h 'canvas-tui --watch'
-    iTerm2:   Cmd+D to split, run canvas-tui in new pane
+    Warp:     Ctrl+Shift+D to split, run 'canvas' in new pane
+    tmux:     tmux split-window -h 'canvas'
+    iTerm2:   Cmd+D to split, run 'canvas' in new pane
 `, {
   importMeta: import.meta,
   flags: {
