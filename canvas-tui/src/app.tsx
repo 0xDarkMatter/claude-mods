@@ -213,13 +213,11 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
     }
   });
 
-  // Status message - truncate path to just filename
+  // Status info
   const currentFileName = currentFilePath.split(/[/\\]/).pop() || 'file';
-  const statusMessage = error
-    ? `Error: ${error}`
-    : syncStatus === 'waiting'
-    ? `Waiting: ${currentFileName}`
-    : `Synced: ${currentFileName}`;
+  const timestampStr = lastUpdate
+    ? `${lastUpdate.toLocaleDateString()} ${lastUpdate.toLocaleTimeString()}`
+    : null;
 
   const scrollHint = totalLines > contentHeight
     ? ` ${scrollOffset + 1}-${Math.min(scrollOffset + contentHeight, totalLines)}/${totalLines}`
@@ -229,13 +227,13 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
   const hints = isEditing
     ? 'Editing...'
     : isDropdownOpen
-    ? 'Tab:close ↑↓:nav Enter:open'
-    : `Tab:files e:edit m:${mouseHint} q:quit${scrollHint}`;
+    ? '[Tab] Close [↑↓] Nav [Enter] Open'
+    : `[Tab] Files [e] Edit [m] ${mouseHint} [q] Quit${scrollHint}`;
 
   return (
     <Box flexDirection="column" height={rows}>
       <Header
-        title="Canvas (beta)"
+        title="✿ CANVAS"
         width={cols}
         files={files}
         currentFile={currentFilePath}
@@ -267,7 +265,8 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
 
       <StatusBar
         status={syncStatus}
-        message={statusMessage}
+        filename={currentFileName}
+        timestamp={timestampStr}
         hints={hints}
         width={cols}
       />
