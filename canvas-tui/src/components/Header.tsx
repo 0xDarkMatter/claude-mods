@@ -1,5 +1,5 @@
-import React from 'react';
-import { Box, Text } from 'ink';
+import React, { useEffect } from 'react';
+import { Box, Text, useStdout } from 'ink';
 import { FileInfo, truncateFilename } from '../hooks/useDirectoryFiles.js';
 
 interface HeaderProps {
@@ -24,6 +24,7 @@ export const Header: React.FC<HeaderProps> = ({
   isDropdownOpen,
   isDropdownFocused,
 }) => {
+  const { stdout } = useStdout();
   const leftContent = ` ${title} `;
 
   // Get current filename from path
@@ -32,6 +33,66 @@ export const Header: React.FC<HeaderProps> = ({
 
   // Filter out current file for dropdown
   const otherFiles = files.filter(f => f.path !== currentFile);
+
+  // Render dropdown as overlay using ANSI escape codes
+  useEffect(() => {
+    if (!isDropdownOpen || !stdout) return;
+
+    const cols = stdout.columns || 80;
+    const startRow = 3; // Below header border line
+
+    // Build dropdown content (right-aligned)
+    const lines: string[] = [];
+
+    if (otherFiles.length === 0) {
+      lines.push('(no other files)');
+    } else {
+      otherFiles.slice(0, 6).forEach((file, index) => {
+        const isSelected = index === selectedFileIndex;
+        const name = truncateFilename(file.name, MAX_DISPLAY_LENGTH);
+        if (isSelected) {
+          // Reversed video for selected item
+          lines.push(`\x1B[7m ${name} \x1B[0m`);
+        } else {
+          lines.push(` ${name} `);
+        }
+      });
+
+      if (otherFiles.length > 6) {
+        lines.push(` +${otherFiles.length - 6} more `);
+      }
+    }
+
+    // Find max line length for right-alignment
+    const maxLen = Math.max(...lines.map(l => l.replace(/\x1B\[[0-9;]*m/g, '').length));
+
+    // Save cursor, render dropdown at absolute position (right-aligned), restore cursor
+    let output = '\x1B[s'; // Save cursor position
+
+    lines.forEach((line, idx) => {
+      const row = startRow + idx;
+      const plainLen = line.replace(/\x1B\[[0-9;]*m/g, '').length;
+      const padding = maxLen - plainLen;
+      const startCol = cols - maxLen - 4; // Right margin of 4
+      output += `\x1B[${row};${startCol}H${' '.repeat(padding)}${line}`;
+    });
+
+    output += '\x1B[u'; // Restore cursor position
+
+    process.stdout.write(output);
+
+    // Cleanup: clear the dropdown area when closing
+    return () => {
+      let clear = '\x1B[s';
+      lines.forEach((_, idx) => {
+        const row = startRow + idx;
+        const startCol = cols - maxLen - 4;
+        clear += `\x1B[${row};${startCol}H${' '.repeat(maxLen + 4)}`;
+      });
+      clear += '\x1B[u';
+      process.stdout.write(clear);
+    };
+  }, [isDropdownOpen, selectedFileIndex, otherFiles, stdout]);
 
   return (
     <Box flexDirection="column">
@@ -44,49 +105,6 @@ export const Header: React.FC<HeaderProps> = ({
           <Text>    </Text>
         </Box>
       </Box>
-
-      {/* Dropdown renders BELOW the header border */}
-      {isDropdownOpen && (
-        <Box justifyContent="flex-end" paddingRight={4}>
-          <DropdownList
-            files={otherFiles}
-            selectedIndex={selectedFileIndex}
-          />
-        </Box>
-      )}
     </Box>
   );
-};
-
-// Dropdown list component (only the list items, no header)
-interface DropdownListProps {
-  files: FileInfo[];
-  selectedIndex: number;
-}
-
-const DropdownList: React.FC<DropdownListProps> = ({ files, selectedIndex }) => {
-  const pad = '   ';
-
-  if (files.length === 0) {
-    return <Text color="gray">  (no other files){pad}</Text>;
-  }
-
-  const lines: string[] = [];
-
-  // Subtle separator
-  lines.push(`  · · ·${pad}`);
-
-  // File list
-  files.slice(0, 6).forEach((file, index) => {
-    const isSelected = index === selectedIndex;
-    const name = truncateFilename(file.name, MAX_DISPLAY_LENGTH);
-    const marker = isSelected ? '▸' : ' ';
-    lines.push(`${marker} ${name}${isSelected ? ' ◂' : '  '}${pad}`);
-  });
-
-  if (files.length > 6) {
-    lines.push(`  +${files.length - 6} more${pad}`);
-  }
-
-  return <Text>{lines.join('\n')}</Text>;
 };
