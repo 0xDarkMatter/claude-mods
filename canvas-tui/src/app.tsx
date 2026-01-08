@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect } from 'react';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
+import fs from 'fs';
 import { Header } from './components/Header.js';
 import { MarkdownView } from './components/MarkdownView.js';
 import { StatusBar } from './components/StatusBar.js';
@@ -35,6 +36,9 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isDropdownFocused, setIsDropdownFocused] = useState(false);
   const [selectedFileIndex, setSelectedFileIndex] = useState(0);
+
+  // Info overlay state
+  const [isInfoOpen, setIsInfoOpen] = useState(false);
 
   // Terminal dimensions
   const rows = stdout?.rows || 24;
@@ -93,6 +97,81 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
     }
   }, [watchedContent, watchDir]);
 
+  // Info overlay using ANSI escape codes
+  useEffect(() => {
+    if (!isInfoOpen || !stdout) return;
+
+    // Get file stats
+    let stats: fs.Stats | null = null;
+    try {
+      stats = fs.statSync(currentFilePath);
+    } catch {
+      // File may not exist yet
+    }
+
+    // Calculate content stats
+    const lineCount = content ? content.split('\n').length : 0;
+    const wordCount = content ? content.split(/\s+/).filter(w => w.length > 0).length : 0;
+    const charCount = content ? content.length : 0;
+
+    // Format dates
+    const formatDate = (date: Date) => {
+      return `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
+    };
+
+    const created = stats ? formatDate(stats.birthtime) : 'Unknown';
+    const modified = stats ? formatDate(stats.mtime) : 'Unknown';
+    const fileSize = stats ? `${stats.size} bytes` : 'Unknown';
+
+    // Build info panel content
+    const lines: string[] = [
+      '\x1B[1m  File Info  \x1B[0m',
+      '',
+      `  Created:    ${created}`,
+      `  Modified:   ${modified}`,
+      `  Size:       ${fileSize}`,
+      '',
+      `  Lines:      ${lineCount.toLocaleString()}`,
+      `  Words:      ${wordCount.toLocaleString()}`,
+      `  Characters: ${charCount.toLocaleString()}`,
+      '',
+      '\x1B[2m  Press [i] to close  \x1B[0m',
+    ];
+
+    // Calculate panel dimensions
+    const maxLen = Math.max(...lines.map(l => l.replace(/\x1B\[[0-9;]*m/g, '').length)) + 2;
+    const panelHeight = lines.length;
+
+    // Center the panel
+    const startRow = Math.floor((rows - panelHeight) / 2);
+    const startCol = Math.floor((cols - maxLen) / 2);
+
+    // Render overlay
+    let output = '\x1B[s'; // Save cursor
+
+    lines.forEach((line, idx) => {
+      const row = startRow + idx;
+      const plainLen = line.replace(/\x1B\[[0-9;]*m/g, '').length;
+      const padding = maxLen - plainLen;
+      // Dim background for panel
+      output += `\x1B[${row};${startCol}H\x1B[48;5;236m${line}${' '.repeat(padding)}\x1B[0m`;
+    });
+
+    output += '\x1B[u'; // Restore cursor
+    process.stdout.write(output);
+
+    // Cleanup: clear the info panel area
+    return () => {
+      let clear = '\x1B[s';
+      lines.forEach((_, idx) => {
+        const row = startRow + idx;
+        clear += `\x1B[${row};${startCol}H${' '.repeat(maxLen)}`;
+      });
+      clear += '\x1B[u';
+      process.stdout.write(clear);
+    };
+  }, [isInfoOpen, currentFilePath, content, stdout, rows, cols]);
+
   // Keyboard input
   useInput((input, key) => {
     // Quit
@@ -122,11 +201,17 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
       return;
     }
 
-    // Escape - close dropdown
-    if (key.escape && isDropdownOpen) {
-      setIsDropdownOpen(false);
-      setIsDropdownFocused(false);
-      return;
+    // Escape - close dropdown or info
+    if (key.escape) {
+      if (isInfoOpen) {
+        setIsInfoOpen(false);
+        return;
+      }
+      if (isDropdownOpen) {
+        setIsDropdownOpen(false);
+        setIsDropdownFocused(false);
+        return;
+      }
     }
 
     // When dropdown is open, arrow keys navigate files
@@ -149,26 +234,28 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
       }
     }
 
-    // Scrolling (only when dropdown is closed)
-    if (key.upArrow) {
-      setScrollOffset(prev => Math.max(0, prev - 1));
-    }
-    if (key.downArrow) {
-      setScrollOffset(prev => Math.min(Math.max(0, totalLines - contentHeight), prev + 1));
-    }
-    if (key.pageUp) {
-      setScrollOffset(prev => Math.max(0, prev - contentHeight));
-    }
-    if (key.pageDown) {
-      setScrollOffset(prev => Math.min(Math.max(0, totalLines - contentHeight), prev + contentHeight));
-    }
+    // Scrolling (only when dropdown and info are closed)
+    if (!isInfoOpen) {
+      if (key.upArrow) {
+        setScrollOffset(prev => Math.max(0, prev - 1));
+      }
+      if (key.downArrow) {
+        setScrollOffset(prev => Math.min(Math.max(0, totalLines - contentHeight), prev + 1));
+      }
+      if (key.pageUp) {
+        setScrollOffset(prev => Math.max(0, prev - contentHeight));
+      }
+      if (key.pageDown) {
+        setScrollOffset(prev => Math.min(Math.max(0, totalLines - contentHeight), prev + contentHeight));
+      }
 
-    // Home/End and vim-style navigation
-    if (input === 'g' || key.meta && key.upArrow) {
-      setScrollOffset(0);
-    }
-    if (input === 'G' || key.meta && key.downArrow) {
-      setScrollOffset(Math.max(0, totalLines - contentHeight));
+      // Home/End and vim-style navigation
+      if (input === 'g' || key.meta && key.upArrow) {
+        setScrollOffset(0);
+      }
+      if (input === 'G' || key.meta && key.downArrow) {
+        setScrollOffset(Math.max(0, totalLines - contentHeight));
+      }
     }
 
     // Refresh
@@ -187,6 +274,11 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
         }
         return newValue;
       });
+    }
+
+    // Toggle info overlay
+    if (input === 'i' && !isEditing && !isDropdownOpen) {
+      setIsInfoOpen(prev => !prev);
     }
 
     // Edit in external editor
@@ -226,9 +318,11 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
   const mouseHint = mouseEnabled ? 'on' : 'off';
   const hints = isEditing
     ? 'Editing...'
+    : isInfoOpen
+    ? '[i] Close'
     : isDropdownOpen
     ? '[Tab] Close [↑↓] Nav [Enter] Open'
-    : `[Tab] Files [e] Edit [m] ${mouseHint} [q] Quit${scrollHint}`;
+    : `[Tab] Files [i] Info [e] Edit [m] ${mouseHint} [q] Quit${scrollHint}`;
 
   return (
     <Box flexDirection="column" height={rows}>
