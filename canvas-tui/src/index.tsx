@@ -9,15 +9,27 @@ const cli = meow(`
     $ canvas-tui [options]
 
   Options
-    --watch, -w     Watch directory for changes (default: .claude/canvas)
-    --file, -f      Specific file to watch
-    --help          Show this help message
-    --version       Show version
+    --watch, -w       Watch directory for changes (default: .claude/canvas)
+    --file, -f        Specific file to watch
+    --no-mouse        Disable mouse wheel scrolling
+    --help            Show this help message
+    --version         Show version
 
   Examples
     $ canvas-tui --watch
-    $ canvas-tui --watch .claude/canvas
     $ canvas-tui --file ./draft.md
+    $ canvas-tui --watch --no-mouse
+
+  Controls
+    Arrow keys / Mouse wheel    Scroll content
+    g / G                       Go to top / bottom
+    q / Ctrl+C                  Quit
+    r                           Refresh
+
+  Terminal Setup
+    Warp:     Ctrl+Shift+D to split, run canvas-tui in new pane
+    tmux:     tmux split-window -h 'canvas-tui --watch'
+    iTerm2:   Cmd+D to split, run canvas-tui in new pane
 `, {
   importMeta: import.meta,
   flags: {
@@ -29,10 +41,14 @@ const cli = meow(`
     file: {
       type: 'string',
       shortFlag: 'f'
+    },
+    noMouse: {
+      type: 'boolean',
+      default: false
     }
   }
 });
 
 const watchPath = cli.flags.file || `${cli.flags.watch}/content.md`;
 
-render(<App watchPath={watchPath} watchDir={cli.flags.watch} />);
+render(<App watchPath={watchPath} watchDir={cli.flags.watch} enableMouse={!cli.flags.noMouse} />);

@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect } from 'react';
 import { Box, Text } from 'ink';
 import { useMarkdown } from '../hooks/useMarkdown.js';
 
@@ -6,12 +6,14 @@ interface MarkdownViewProps {
   content: string;
   scrollOffset: number;
   maxHeight: number;
+  onLineCount?: (count: number) => void;
 }
 
 export const MarkdownView: React.FC<MarkdownViewProps> = ({
   content,
   scrollOffset,
-  maxHeight
+  maxHeight,
+  onLineCount
 }) => {
   const rendered = useMarkdown(content);
 
@@ -22,6 +24,11 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({
 
   // Calculate visible window
   const totalLines = lines.length;
+
+  // Report line count to parent for scroll bounds
+  useEffect(() => {
+    onLineCount?.(totalLines);
+  }, [totalLines, onLineCount]);
   const clampedOffset = Math.min(scrollOffset, Math.max(0, totalLines - maxHeight));
   const visibleLines = lines.slice(clampedOffset, clampedOffset + maxHeight);
 
