@@ -1,0 +1,55 @@
+{
+  "name": "@claude-mods/canvas-tui",
+  "version": "0.1.0",
+  "description": "Terminal canvas for Claude Code - live markdown preview in split panes",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "canvas-tui": "./bin/canvas.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node bin/canvas.js",
+    "test": "node --test"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "terminal",
+    "tui",
+    "canvas",
+    "markdown",
+    "ink",
+    "react"
+  ],
+  "author": "0xDarkMatter",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0xDarkMatter/claude-mods.git",
+    "directory": "canvas-tui"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "ink": "^5.0.1",
+    "@inkjs/ui": "^2.0.0",
+    "react": "^18.3.1",
+    "chokidar": "^4.0.3",
+    "marked": "^15.0.4",
+    "marked-terminal": "^7.2.1",
+    "chalk": "^5.3.0",
+    "meow": "^13.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/react": "^18.3.18",
+    "typescript": "^5.7.2"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ]
+}
