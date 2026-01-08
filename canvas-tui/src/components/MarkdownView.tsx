@@ -37,7 +37,7 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({
   const showScrollDown = clampedOffset + maxHeight < totalLines;
 
   return (
-    <Box flexDirection="column" paddingX={1}>
+    <Box flexDirection="column" paddingX={1} paddingY={1}>
       {showScrollUp && (
         <Text color="gray">--- more above ({clampedOffset} lines) ---</Text>
       )}
