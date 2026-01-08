@@ -25,16 +25,13 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const leftContent = ` ${title} `;
 
-  // Reserve space for file selector (~30 chars)
-  const selectorWidth = 30;
-  const padding = Math.max(0, width - leftContent.length - selectorWidth - 2);
-
   return (
     <Box flexDirection="column">
+      {/* Header bar */}
       <Box borderStyle="single" borderBottom={true} borderTop={false} borderLeft={false} borderRight={false}>
-        <Box width={width} justifyContent="space-between">
+        <Box width={width}>
           <Text bold color="blue">{leftContent}</Text>
-          <Text>{' '.repeat(padding)}</Text>
+          <Box flexGrow={1} />
           <FileSelector
             files={files}
             currentFile={currentFile}
@@ -42,6 +39,7 @@ export const Header: React.FC<HeaderProps> = ({
             isOpen={isDropdownOpen}
             isFocused={isDropdownFocused}
           />
+          <Text>    </Text>
         </Box>
       </Box>
     </Box>

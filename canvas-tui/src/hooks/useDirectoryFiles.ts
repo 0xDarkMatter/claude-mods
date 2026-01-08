@@ -18,9 +18,16 @@ export function useDirectoryFiles(dirPath: string): FileInfo[] {
   useEffect(() => {
     const scanDirectory = () => {
       try {
-        // Resolve to absolute path
+        // Resolve to absolute path, scan 'drafts' subdirectory
         const absoluteDir = path.resolve(dirPath);
-        const entries = fs.readdirSync(absoluteDir, { withFileTypes: true });
+        const draftsDir = path.join(absoluteDir, 'drafts');
+
+        // Create drafts dir if it doesn't exist
+        if (!fs.existsSync(draftsDir)) {
+          fs.mkdirSync(draftsDir, { recursive: true });
+        }
+
+        const entries = fs.readdirSync(draftsDir, { withFileTypes: true });
         const fileInfos: FileInfo[] = [];
 
         for (const entry of entries) {
@@ -29,7 +36,7 @@ export function useDirectoryFiles(dirPath: string): FileInfo[] {
           const ext = path.extname(entry.name).toLowerCase();
           if (ext !== '.md' && ext !== '.txt') continue;
 
-          const filePath = path.join(absoluteDir, entry.name);
+          const filePath = path.join(draftsDir, entry.name);
           const stats = fs.statSync(filePath);
 
           fileInfos.push({

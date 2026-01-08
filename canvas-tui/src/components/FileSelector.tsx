@@ -10,7 +10,7 @@ interface FileSelectorProps {
   isFocused: boolean;
 }
 
-const MAX_DISPLAY_LENGTH = 20;
+const MAX_DISPLAY_LENGTH = 30;
 
 export const FileSelector: React.FC<FileSelectorProps> = ({
   files,
@@ -23,39 +23,36 @@ export const FileSelector: React.FC<FileSelectorProps> = ({
   const currentFileName = currentFile.split(/[/\\]/).pop() || 'No file';
   const displayName = truncateFilename(currentFileName, MAX_DISPLAY_LENGTH);
 
-  return (
-    <Box flexDirection="column" alignItems="flex-end">
-      {/* Selector - just filename with arrow */}
-      <Text
-        inverse={isFocused}
-        color={isFocused ? undefined : 'gray'}
-      >
-        {displayName} {isOpen ? '▲' : '▼'}
+  if (!isOpen) {
+    // Closed state - just show current file with arrow
+    return (
+      <Text color="gray">
+        {displayName} ▼
       </Text>
+    );
+  }
 
-      {/* Dropdown - simple list */}
-      {isOpen && files.length > 0 && (
-        <Box flexDirection="column" marginTop={0}>
-          {files.slice(0, 6).map((file, index) => {
-            const isSelected = index === selectedIndex;
-            const isCurrent = file.name === currentFileName;
-            const name = truncateFilename(file.name, MAX_DISPLAY_LENGTH);
+  // Open state - render as single text block to avoid Ink layout issues
+  const lines: string[] = [];
+  const pad = '   '; // Right padding
 
-            return (
-              <Text
-                key={file.path}
-                inverse={isSelected}
-                color={isCurrent && !isSelected ? 'cyan' : undefined}
-              >
-                {isSelected ? '› ' : '  '}{name}
-              </Text>
-            );
-          })}
-          {files.length > 6 && (
-            <Text dimColor>  +{files.length - 6} more</Text>
-          )}
-        </Box>
-      )}
-    </Box>
-  );
+  // Current file
+  lines.push(`${displayName} ▲${pad}`);
+
+  // Separator
+  lines.push(`· · ·${pad}`);
+
+  // Other files
+  files.slice(0, 6).forEach((file, index) => {
+    const isSelected = index === selectedIndex;
+    const name = truncateFilename(file.name, MAX_DISPLAY_LENGTH);
+    const marker = isSelected ? '▸' : ' ';
+    lines.push(`${marker} ${name}${isSelected ? ' ◂' : '  '}${pad}`);
+  });
+
+  if (files.length > 6) {
+    lines.push(`  +${files.length - 6} more${pad}`);
+  }
+
+  return <Text>{lines.join('\n')}</Text>;
 };
