@@ -3,13 +3,13 @@ import { Box, Text } from 'ink';
 
 interface StatusBarProps {
   status: 'waiting' | 'synced' | 'watching';
-  filename: string;
   timestamp: string | null;
+  position: string | null;
   hints: string;
   width: number;
 }
 
-export const StatusBar: React.FC<StatusBarProps> = ({ status, filename, timestamp, hints, width }) => {
+export const StatusBar: React.FC<StatusBarProps> = ({ status, timestamp, position, hints, width }) => {
   const statusColors: Record<string, string> = {
     waiting: 'yellow',
     synced: 'green',
@@ -31,7 +31,11 @@ export const StatusBar: React.FC<StatusBarProps> = ({ status, filename, timestam
   const statusColor = statusColors[status] || 'white';
   const statusIcon = statusIcons[status] || ' ';
   const statusLabel = statusLabels[status] || '';
-  const timeStr = timestamp ? ` ${timestamp}` : '';
+
+  // Build left side: [icon] Synced: 09.01.2026 10:18am | Pos: [001-056/168]
+  const leftParts = [`${statusLabel}:`];
+  if (timestamp) leftParts.push(timestamp);
+  if (position) leftParts.push('|', position);
 
   return (
     <Box
@@ -45,10 +49,11 @@ export const StatusBar: React.FC<StatusBarProps> = ({ status, filename, timestam
     >
       <Box width={width} justifyContent="space-between">
         <Box>
-          <Text color={statusColor}>[{statusIcon}]</Text>
-          <Text dimColor> {statusLabel}: {filename}{timeStr}</Text>
+          <Text color="white" dimColor>[</Text>
+          <Text color={statusColor}>{statusIcon}</Text>
+          <Text color="white" dimColor>] {leftParts.join(' ')}</Text>
         </Box>
-        <Text dimColor>{hints}</Text>
+        <Text color="white" dimColor>{hints}</Text>
       </Box>
     </Box>
   );

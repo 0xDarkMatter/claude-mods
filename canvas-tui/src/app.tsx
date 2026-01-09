@@ -19,7 +19,7 @@ interface AppProps {
 const ENABLE_MOUSE = '\x1B[?1000h\x1B[?1002h\x1B[?1006h';
 const DISABLE_MOUSE = '\x1B[?1000l\x1B[?1002l\x1B[?1006l';
 
-export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = true }) => {
+export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = false }) => {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [content, setContent] = useState<string>('');
@@ -98,7 +98,7 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
   }, [watchedContent, watchDir]);
 
   // Info overlay using ANSI escape codes
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!isInfoOpen || !stdout) return;
 
     // Get file stats
@@ -123,52 +123,108 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
     const modified = stats ? formatDate(stats.mtime) : 'Unknown';
     const fileSize = stats ? `${stats.size} bytes` : 'Unknown';
 
-    // Build info panel content
-    const lines: string[] = [
-      '\x1B[1m  File Info  \x1B[0m',
+    // Get filename from path
+    const fileName = currentFilePath.split(/[/\\]/).pop() || 'Unknown';
+
+    // Content lines (without border/padding - we'll add those)
+    const contentLines: string[] = [
+      '\x1B[1mFile Metadata\x1B[0m',
       '',
-      `  Created:    ${created}`,
-      `  Modified:   ${modified}`,
-      `  Size:       ${fileSize}`,
+      `Filename:   ${fileName}`,
+      `Created:    ${created}`,
+      `Modified:   ${modified}`,
+      `Size:       ${fileSize}`,
       '',
-      `  Lines:      ${lineCount.toLocaleString()}`,
-      `  Words:      ${wordCount.toLocaleString()}`,
-      `  Characters: ${charCount.toLocaleString()}`,
+      `Lines:      ${lineCount.toLocaleString()}`,
+      `Words:      ${wordCount.toLocaleString()}`,
+      `Characters: ${charCount.toLocaleString()}`,
       '',
-      '\x1B[2m  Press [i] to close  \x1B[0m',
+      '\x1B[2m[i] Close\x1B[0m',
     ];
 
-    // Calculate panel dimensions
-    const maxLen = Math.max(...lines.map(l => l.replace(/\x1B\[[0-9;]*m/g, '').length)) + 2;
-    const panelHeight = lines.length;
+    // Calculate inner content width
+    const innerWidth = Math.max(...contentLines.map(l => l.replace(/\x1B\[[0-9;]*m/g, '').length));
 
-    // Center the panel
-    const startRow = Math.floor((rows - panelHeight) / 2);
-    const startCol = Math.floor((cols - maxLen) / 2);
+    // Build the full panel with border and padding
+    // Horizontal: 2 space padding, Vertical: 1 space padding
+    const boxWidth = innerWidth + 6; // 2 space padding each side inside border, +2 for border chars
+    const totalWidth = boxWidth + 2; // +2 for outer spacing
 
-    // Render overlay
-    let output = '\x1B[s'; // Save cursor
+    const panelLines: string[] = [];
 
-    lines.forEach((line, idx) => {
-      const row = startRow + idx;
+    // Outer top padding
+    panelLines.push(' '.repeat(totalWidth));
+
+    // Top border: space + ┌ + ─ repeated + ┐ + space
+    panelLines.push(` ┌${'─'.repeat(boxWidth - 2)}┐ `);
+
+    // Inner top padding row (1 line vertical padding)
+    panelLines.push(` │${' '.repeat(boxWidth - 2)}│ `);
+
+    // Content rows with 2-space horizontal padding
+    contentLines.forEach(line => {
       const plainLen = line.replace(/\x1B\[[0-9;]*m/g, '').length;
-      const padding = maxLen - plainLen;
-      // Dim background for panel
-      output += `\x1B[${row};${startCol}H\x1B[48;5;236m${line}${' '.repeat(padding)}\x1B[0m`;
+      const rightPad = innerWidth - plainLen;
+      panelLines.push(` │  ${line}${' '.repeat(rightPad)}  │ `);
     });
 
-    output += '\x1B[u'; // Restore cursor
-    process.stdout.write(output);
+    // Inner bottom padding row (1 line vertical padding)
+    panelLines.push(` │${' '.repeat(boxWidth - 2)}│ `);
 
-    // Cleanup: clear the info panel area
-    return () => {
-      let clear = '\x1B[s';
-      lines.forEach((_, idx) => {
+    // Bottom border
+    panelLines.push(` └${'─'.repeat(boxWidth - 2)}┘ `);
+
+    // Outer bottom padding
+    panelLines.push(' '.repeat(totalWidth));
+
+    // Center the panel
+    const panelHeight = panelLines.length;
+    const startRow = Math.floor((rows - panelHeight) / 2);
+    const startCol = Math.floor((cols - totalWidth) / 2);
+
+    // Guard against re-entry when we write our own overlay
+    let isRenderingOverlay = false;
+
+    // Function to render the overlay
+    const renderOverlay = () => {
+      if (isRenderingOverlay) return;
+      isRenderingOverlay = true;
+
+      let output = '\x1B[s'; // Save cursor
+      panelLines.forEach((line, idx) => {
         const row = startRow + idx;
-        clear += `\x1B[${row};${startCol}H${' '.repeat(maxLen)}`;
+        output += `\x1B[${row};${startCol}H${line}`;
+      });
+      output += '\x1B[u'; // Restore cursor
+      originalWrite.call(process.stdout, output);
+
+      isRenderingOverlay = false;
+    };
+
+    // Intercept stdout.write to repaint overlay after Ink renders
+    const originalWrite = process.stdout.write;
+    process.stdout.write = function(chunk: any, encoding?: any, callback?: any) {
+      const result = originalWrite.call(process.stdout, chunk, encoding, callback);
+      if (!isRenderingOverlay) {
+        setImmediate(renderOverlay);
+      }
+      return result;
+    } as typeof process.stdout.write;
+
+    // Initial render
+    renderOverlay();
+
+    // Cleanup: restore stdout.write and clear the panel area
+    return () => {
+      process.stdout.write = originalWrite;
+
+      let clear = '\x1B[s';
+      panelLines.forEach((_, idx) => {
+        const row = startRow + idx;
+        clear += `\x1B[${row};${startCol}H${' '.repeat(totalWidth)}`;
       });
       clear += '\x1B[u';
-      process.stdout.write(clear);
+      originalWrite.call(process.stdout, clear);
     };
   }, [isInfoOpen, currentFilePath, content, stdout, rows, cols]);
 
@@ -307,22 +363,34 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
 
   // Status info
   const currentFileName = currentFilePath.split(/[/\\]/).pop() || 'file';
-  const timestampStr = lastUpdate
-    ? `${lastUpdate.toLocaleDateString()} ${lastUpdate.toLocaleTimeString()}`
+
+  // Format timestamp: DD.MM.YYYY HH:MMam (no seconds)
+  const formatTimestamp = (date: Date) => {
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    let hours = date.getHours();
+    const ampm = hours >= 12 ? 'pm' : 'am';
+    hours = hours % 12 || 12;
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    return `${day}.${month}.${year} ${hours}:${minutes}${ampm}`;
+  };
+
+  const timestampStr = lastUpdate ? formatTimestamp(lastUpdate) : null;
+
+  // Position indicator: Pos: [001-056/168]
+  const pad3 = (n: number) => String(n).padStart(3, '0');
+  const positionStr = totalLines > 0
+    ? `Pos: [${pad3(scrollOffset + 1)}-${pad3(Math.min(scrollOffset + contentHeight, totalLines))}/${totalLines}]`
     : null;
 
-  const scrollHint = totalLines > contentHeight
-    ? ` ${scrollOffset + 1}-${Math.min(scrollOffset + contentHeight, totalLines)}/${totalLines}`
-    : '';
-
-  const mouseHint = mouseEnabled ? 'on' : 'off';
   const hints = isEditing
     ? 'Editing...'
     : isInfoOpen
     ? '[i] Close'
     : isDropdownOpen
     ? '[Tab] Close [↑↓] Nav [Enter] Open'
-    : `[Tab] Files [i] Info [e] Edit [m] ${mouseHint} [q] Quit${scrollHint}`;
+    : '[Tab] Files [i] Info [e] Edit [m] Mouse [q] Quit';
 
   return (
     <Box flexDirection="column" height={rows}>
@@ -359,8 +427,8 @@ export const App: React.FC<AppProps> = ({ watchPath, watchDir, enableMouse = tru
 
       <StatusBar
         status={syncStatus}
-        filename={currentFileName}
         timestamp={timestampStr}
+        position={positionStr}
         hints={hints}
         width={cols}
       />
