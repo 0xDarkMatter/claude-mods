@@ -13,7 +13,7 @@ const cli = meow(`
   Options
     --watch, -w       Watch directory (default: .claude/canvas)
     --file, -f        Specific file to watch
-    --no-mouse        Disable mouse wheel scrolling
+    --mouse, -m       Enable mouse wheel scrolling (default: off)
     --help            Show this help
     --version         Show version
 
@@ -45,8 +45,9 @@ const cli = meow(`
       type: 'string',
       shortFlag: 'f'
     },
-    noMouse: {
+    mouse: {
       type: 'boolean',
+      shortFlag: 'm',
       default: false
     }
   }
@@ -114,4 +115,4 @@ function getInitialFile(watchDir: string, specificFile?: string): string {
 const watchDir = getWatchDir(cli.flags.watch);
 const watchPath = getInitialFile(watchDir, cli.flags.file);
 
-render(<App watchPath={watchPath} watchDir={watchDir} enableMouse={!cli.flags.noMouse} />);
+render(<App watchPath={watchPath} watchDir={watchDir} enableMouse={cli.flags.mouse} />);

@@ -1,91 +1,149 @@
 import { useMemo } from 'react';
-import { marked } from 'marked';
-import { markedTerminal } from 'marked-terminal';
 import chalk from 'chalk';
 
-// Configure marked with terminal renderer
-// Using colors that work on both light and dark backgrounds
-marked.use(
-  markedTerminal({
-    // Colors for different elements - avoiding white/black for cross-theme support
-    code: chalk.cyan,
-    blockquote: chalk.gray.italic,
-    html: chalk.gray,
-    heading: chalk.bold.blue,
-    firstHeading: chalk.bold.blue.underline,
-    hr: chalk.gray,
-    listitem: chalk.reset,  // Use default terminal color
-    list: (body: string) => body,
-    table: chalk.reset,
-    paragraph: chalk.reset, // Use default terminal color
-    strong: chalk.bold,
-    em: chalk.italic,
-    codespan: chalk.magenta,
-    del: chalk.strikethrough.gray,
-    link: chalk.blue.underline,
-    href: chalk.blue.underline,
+// @ts-ignore - no types for cli-markdown
+import markdown from 'cli-markdown';
 
-    // Table rendering
-    tableOptions: {
-      chars: {
-        top: '-',
-        'top-mid': '+',
-        'top-left': '+',
-        'top-right': '+',
-        bottom: '-',
-        'bottom-mid': '+',
-        'bottom-left': '+',
-        'bottom-right': '+',
-        left: '|',
-        'left-mid': '+',
-        mid: '-',
-        'mid-mid': '+',
-        right: '|',
-        'right-mid': '+',
-        middle: '|'
-      }
-    },
-
-    // Misc settings
-    reflowText: true,
-    width: 80,
-    showSectionPrefix: false,
-    tab: 2
-  })
-);
-
-export function useMarkdown(content: string): string {
+export function useMarkdown(content: string, width: number = 80): string {
   return useMemo(() => {
     if (!content) return '';
 
     try {
-      // Parse markdown to terminal-formatted string
-      const rendered = marked.parse(content);
-      // marked returns Promise in some configs, but sync with markedTerminal
-      if (typeof rendered === 'string') {
-        // Ensure proper spacing after headings
-        // ANSI underline is \x1B[4m, reset includes \x1B[0m or \x1B[24m
-        const lines = rendered.trim().split('\n');
-        const result: string[] = [];
+      // Normalize line endings (Windows CRLF -> LF)
+      const normalizedContent = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
-        for (let i = 0; i < lines.length; i++) {
-          result.push(lines[i]);
+      // Helper to render inline markdown formatting
+      const renderInline = (text: string): string => {
+        let result = text;
+        // Bold
+        result = result.replace(/\*\*([^*]+)\*\*/g, (_, c) => chalk.bold(c));
+        // Italic
+        result = result.replace(/\*([^*]+)\*/g, (_, c) => chalk.italic(c));
+        // Code
+        result = result.replace(/`([^`]+)`/g, (_, c) => chalk.magenta(c));
+        return result;
+      };
 
-          // If this line contains underline codes (h1) or bold (other headings)
-          // and next line exists and is not empty, add a blank line
-          const hasUnderline = lines[i].includes('\x1B[4m');
-          const nextLine = lines[i + 1];
-          if (hasUnderline && nextLine !== undefined && nextLine.trim() !== '') {
-            result.push('');
+      // Process content in sections - handle numbered lists ourselves, delegate rest to cli-markdown
+      const lines = normalizedContent.split('\n');
+      const outputSections: string[] = [];
+      let currentSection: string[] = [];
+      let inNumberedList = false;
+      let numberedListItems: string[] = [];
+
+      const flushSection = () => {
+        if (currentSection.length > 0) {
+          // Process non-list section with cli-markdown
+          const sectionContent = currentSection.join('\n');
+          if (sectionContent.trim()) {
+            outputSections.push(markdown(sectionContent));
           }
+          currentSection = [];
+        }
+      };
+
+      const flushNumberedList = () => {
+        if (numberedListItems.length > 0) {
+          // Render numbered list ourselves (blank line before for spacing)
+          const listOutput = numberedListItems.map((item, i) =>
+            `  ${i + 1}. ${renderInline(item)}`
+          ).join('\n');
+          outputSections.push('\n' + listOutput);
+          numberedListItems = [];
+        }
+        inNumberedList = false;
+      };
+
+      for (const rawLine of lines) {
+        const line = rawLine.trimEnd();
+        const numMatch = line.match(/^(\s*)(\d+)\.\s+(.+)$/);
+
+        if (numMatch) {
+          if (!inNumberedList) {
+            flushSection(); // Flush any pending non-list content
+            inNumberedList = true;
+          }
+          numberedListItems.push(numMatch[3]);
+        } else {
+          if (inNumberedList) {
+            flushNumberedList(); // Flush the numbered list
+          }
+          currentSection.push(line);
+        }
+      }
+
+      // Flush any remaining content
+      if (inNumberedList) {
+        flushNumberedList();
+      }
+      flushSection();
+
+      let rendered = outputSections.join('\n');
+
+      // Normalize blank lines - collapse multiple consecutive blank lines into one
+      rendered = rendered.replace(/\n{3,}/g, '\n\n');
+
+      // Post-process headings - cli-markdown doesn't style them properly
+      // Strip ANSI codes for matching, then apply our own styles
+      const stripAnsi = (str: string) => str.replace(/\x1B\[[0-9;]*m/g, '');
+
+      const outputLines = rendered.split('\n');
+      const result: string[] = [];
+      let wasInBulletList = false;
+
+      for (const line of outputLines) {
+        const plain = stripAnsi(line);
+        const isBulletStart = /^\s*[•\-\*]\s/.test(plain) || /^\s*\d+\.\s/.test(plain);
+        const isHeading = /^#{1,6}\s/.test(plain);
+        const isBlankLine = plain.trim() === '';
+
+        // Track if we're in a bullet list context
+        if (isBulletStart) {
+          wasInBulletList = true;
         }
 
-        return result.join('\n');
+        // Add blank line when transitioning from bullet list to a heading
+        if (wasInBulletList && isHeading) {
+          result.push('');
+          wasInBulletList = false;
+        }
+
+        // Reset bullet context on blank lines (list has ended)
+        if (isBlankLine) {
+          wasInBulletList = false;
+        }
+
+        // H1: # Heading
+        const h1Match = plain.match(/^# (.+)$/);
+        if (h1Match) {
+          result.push(chalk.bold.blue.underline(h1Match[1]));
+          continue;
+        }
+        // H2: ## Heading
+        const h2Match = plain.match(/^## (.+)$/);
+        if (h2Match) {
+          result.push(chalk.bold.blue(h2Match[1]));
+          continue;
+        }
+        // H3: ### Heading
+        const h3Match = plain.match(/^### (.+)$/);
+        if (h3Match) {
+          result.push(chalk.bold.cyan(h3Match[1]));
+          continue;
+        }
+        // H4+: #### Heading
+        const h4Match = plain.match(/^#{4,} (.+)$/);
+        if (h4Match) {
+          result.push(chalk.bold(h4Match[1]));
+          continue;
+        }
+        result.push(line);
       }
-      return content; // Fallback to raw content
+
+      return result.join('\n');
     } catch (err) {
-      console.error('Markdown parse error:', err);
-      return content; // Return raw content on error
+      console.error('Markdown render error:', err);
+      return content;
     }
-  }, [content]);
+  }, [content, width]);
 }

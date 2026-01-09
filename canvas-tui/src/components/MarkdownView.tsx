@@ -1,5 +1,5 @@
 import React, { useMemo, useEffect } from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, useStdout } from 'ink';
 import { useMarkdown } from '../hooks/useMarkdown.js';
 
 interface MarkdownViewProps {
@@ -15,7 +15,9 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({
   maxHeight,
   onLineCount
 }) => {
-  const rendered = useMarkdown(content);
+  const { stdout } = useStdout();
+  const width = stdout?.columns || 80;
+  const rendered = useMarkdown(content, width);
 
   // Split into lines for scrolling
   const lines = useMemo(() => {

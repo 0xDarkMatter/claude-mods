@@ -102,7 +102,7 @@ export const Header: React.FC<HeaderProps> = ({
         <Box width={width}>
           <Text bold color="blue">{leftContent}</Text>
           <Box flexGrow={1} />
-          <Text dimColor>{displayName} {isDropdownOpen ? '▲' : '▼'}</Text>
+          <Text color="white" dimColor>{displayName} {isDropdownOpen ? '▲' : '▼'}</Text>
           <Text> </Text>
         </Box>
       </Box>
