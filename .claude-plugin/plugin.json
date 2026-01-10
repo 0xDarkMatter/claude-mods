@@ -19,7 +19,7 @@
   "components": {
     "commands": [
       "commands/sync.md",
-      "commands/plan.md",
+      "commands/save.md",
       "commands/review.md",
       "commands/testgen.md",
       "commands/explain.md",

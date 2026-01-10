@@ -58,7 +58,7 @@ $ARGUMENTS
     │
     └─→ Step 6: Integration
           ├─ Auto-create TodoWrite for CRITICAL issues
-          ├─ Link to /plan --save for tracking
+          ├─ Link to /save for tracking
           └─ Suggest follow-up: /test, /explain
 ```
 
@@ -260,7 +260,7 @@ The expert produces a structured review:
 
 - Run `/test src/auth/` to verify security fix
 - Run `/explain src/auth/login.ts` for deeper understanding
-- Use `/plan --save` to track these issues
+- Use `/save` to track these issues
 ```
 
 ### Step 6: Integration
@@ -278,7 +278,7 @@ TodoWrite:
 **Link to session management:**
 ```
 Issues have been added to your task list.
-Run /plan --save to persist before ending session.
+Run /save to persist before ending session.
 ```
 
 ## Severity System
@@ -423,8 +423,8 @@ command -v delta >/dev/null 2>&1 && git diff --cached | delta || git diff --cach
 |---------|--------------|
 | `/explain` | Deep dive into flagged code |
 | `/test` | Generate tests for issues found |
-| `/plan --save` | Persist review findings to session state |
-| `/plan` | Add review findings to project plan |
+| `/save` | Persist review findings to session state |
+| Native `/plan` | Enter Claude Code's planning mode |
 
 ## Workflow Examples
 
@@ -441,7 +441,7 @@ git commit -m "feat: add user auth"
 /review --pr 123 --thorough
 # Creates TodoWrite tasks for critical issues
 # Fix issues...
-/plan --save "Addressed review findings"
+/save "Addressed review findings"
 ```
 
 ### Security Audit
@@ -455,6 +455,6 @@ git commit -m "feat: add user auth"
 - Reviews are suggestions, not absolute rules
 - Context matters - some "issues" may be intentional
 - CRITICAL issues are auto-added to TodoWrite
-- Use `/plan --save` to persist review tasks across sessions
+- Use `/save` to persist review tasks across sessions
 - Expert agents provide framework-specific insights
 - Respects project conventions from AGENTS.md

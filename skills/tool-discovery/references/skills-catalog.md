@@ -217,8 +217,7 @@ Project and development workflow automation.
 **Triggers:** plan, sync plan, track, project planning
 
 **Use For:**
-- Project planning with /plan
-- Session state management
+- Session state with /save and /sync
 - Progress tracking
 - Context preservation
 

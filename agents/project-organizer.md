@@ -585,10 +585,10 @@ Example: "Claude, [do something]"
 
 ## Project Planning
 
-This project uses `/plan` for task management:
+This project uses `/save` and `/sync` for task management:
 - `docs/PLAN.md` - Project goals, progress, and active tasks
 
-Run `/plan --review` to see current status or `/plan --sync` to update from git.
+Run `/sync --status` to see current status or `/sync --git` to update from commits.
 
 ## Tips & Best Practices
 

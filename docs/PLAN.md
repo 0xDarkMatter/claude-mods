@@ -24,7 +24,7 @@
 ## Completed Milestones
 
 ### Core Infrastructure
-- [x] Session continuity (`/plan --save`, `/plan --load`)
+- [x] Session continuity (`/save`, `/sync`)
 - [x] Plan persistence to `docs/PLAN.md`
 - [x] Agent genesis system (`/spawn`)
 - [x] Installation scripts (Unix + Windows)
@@ -45,7 +45,7 @@
 - [x] Patterns: REST, SQL, security, testing, tailwind
 
 ### Commands (11)
-- [x] Planning: `/plan`, `/sync`, `/atomise`
+- [x] Session: `/save`, `/sync`, `/atomise`
 - [x] Development: `/review`, `/testgen`, `/explain`
 - [x] Multi-model: `/conclave`, `/spawn`
 - [x] Utilities: `/pulse`, `/setperms`, `/archive`
@@ -169,4 +169,4 @@ Languages needing Python-level depth:
 
 ---
 
-*Plan managed by `/plan` command. Last updated: 2025-12-22*
+*Plan managed by `/save` command. Last updated: 2025-12-22*
