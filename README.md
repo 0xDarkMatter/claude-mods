@@ -102,7 +102,7 @@ Then symlink or copy to your Claude directories:
 | [spawn](commands/spawn.md) | Generate expert agents with PhD-level patterns and code examples. |
 | [conclave](commands/conclave.md) | **[DEPRECATED]** Use [Conclave CLI](https://github.com/0xDarkMatter/conclave) instead. |
 | [atomise](commands/atomise.md) | Atom of Thoughts reasoning - decompose problems into atomic units with confidence tracking and backtracking. |
-| [pulse](commands/pulse.md) | Generate Claude Code ecosystem news digest from blogs, repos, and community sources. |
+| [pulse](commands/pulse.md) | **[MOVED]** See [0xDarkMatter/pulse](https://github.com/0xDarkMatter/pulse). |
 | [setperms](commands/setperms.md) | Set tool permissions and CLI preferences. |
 | [archive](commands/archive.md) | Archive completed plans and session state. |
 
