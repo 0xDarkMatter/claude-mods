@@ -4,7 +4,7 @@
 
 This is **claude-mods** - a collection of custom extensions for Claude Code:
 - **23 expert agents** for specialized domains (React, Python, Go, Rust, AWS, etc.)
-- **11 slash commands** for workflows (/sync, /plan, /review, /atomise, etc.)
+- **11 slash commands** for workflows (/sync, /save, /review, /atomise, etc.)
 - **30 skills** for CLI tool integration, patterns, and workflows
 - **Custom output styles** for response personality (e.g., Vesper)
 

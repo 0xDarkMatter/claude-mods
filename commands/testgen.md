@@ -61,7 +61,7 @@ $ARGUMENTS
     └─→ Step 6: Integration
           ├─ Auto-create TodoWrite for generated tests
           ├─ Suggest: run tests to verify
-          └─ Link to /plan --save for tracking
+          └─ Link to /save for tracking
 ```
 
 ## Execution Steps
@@ -212,7 +212,7 @@ Tests generated: src/auth.test.ts
 Next steps:
 1. Run tests: npm test src/auth.test.ts
 2. Review and refine edge cases
-3. Use /plan --save to track test coverage goals
+3. Use /save to track test coverage goals
 ```
 
 ---
@@ -764,7 +764,7 @@ command -v jq >/dev/null 2>&1 && cat package.json | jq '.devDependencies' || cat
 |---------|--------------|
 | `/review` | Review generated tests before committing |
 | `/explain` | Understand complex code before testing |
-| `/plan --save` | Track test coverage goals |
+| `/save` | Track test coverage goals |
 | `/testgen` | This command |
 
 ---

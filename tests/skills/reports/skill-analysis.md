@@ -121,7 +121,7 @@ Generated: 2025-12-20
 | Issue | Severity | Details |
 |-------|----------|---------|
 | Specific triggers | Low | "sync plan" is specific enough |
-| Depends on /plan usage | Medium | Only useful if user uses /plan |
+| Depends on session commands | Medium | Only useful if user uses /save and /sync |
 
 **Will it fire?** Appropriately - triggers are specific.
 

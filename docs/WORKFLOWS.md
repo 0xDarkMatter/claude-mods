@@ -205,16 +205,15 @@ Using claude-mods commands for persistent state:
 
 ```
 Session 1:
-  /sync                              # Bootstrap context
+  /sync                              # Bootstrap + restore state
   [work on tasks]
-  /plan --save "Stopped at auth"     # Save state
+  /save "Stopped at auth"            # Save state
 
 Session 2:
-  /sync                              # Bootstrap context
-  /plan --load                       # Restore tasks
-  /plan --status                     # Check progress
+  /sync                              # Bootstrap + restore state
+  /sync --status                     # Check progress
   [continue work]
-  /plan --save "Completed auth"      # Save progress
+  /save "Completed auth"             # Save progress
 ```
 
 ---
@@ -282,6 +281,6 @@ User: "Implement rate limiting"
 | **Debugging** | Reproduce, investigate, fix, test | Bug investigation |
 | **Refactoring** | Test, small changes, verify | Code improvement |
 | **Multi-Agent** | Parallel instances | Large tasks |
-| **Session Continuity** | /sync, /plan --save/--load | Multi-session work |
+| **Session Continuity** | /sync, /save | Multi-session work |
 | **Visual Iteration** | Mock → implement → screenshot → iterate | UI development |
 | **Subagent Verification** | Complete → verify → fix | Critical code |

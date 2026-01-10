@@ -1,8 +1,11 @@
 ---
 description: "Terminal canvas for content drafting with live preview. Start split-pane sessions for email, message, and document composition. Triggers on: canvas, draft, compose, write content."
+experimental: true
 ---
 
 # Canvas - Terminal Content Drafting
+
+> ⚠️ **EXPERIMENTAL** - This feature is under active development. APIs may change. Requires Warp terminal for best experience.
 
 Terminal canvas for interactive content drafting with Claude. Creates a split-pane experience in Warp terminal where Claude writes content and you see live markdown preview.
 

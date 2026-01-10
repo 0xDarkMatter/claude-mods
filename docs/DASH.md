@@ -69,7 +69,7 @@
 | ⚡ **tool-discovery** | — | "Which agent/skill?", recommend tools |
 | ⚡ **git-workflow** | lazygit, gh, delta | Stage, PR, review, rebase, stash, bisect |
 | ⚡ **doc-scanner** | — | AGENTS.md, conventions, consolidate docs |
-| ⚡ **project-planner** | — | Stale plans, `/plan` |
+| ⚡ **project-planner** | — | Stale plans, session commands |
 | ⚡ **python-env** | uv | Fast venv, pyproject.toml |
 | ⚡ **task-runner** | just | Run tests, build |
 
@@ -79,8 +79,8 @@
 
 | Command | Purpose |
 |---------|---------|
-| 🔧 `/sync` | Session bootstrap with project context |
-| 🔧 `/plan` | Unified planning: create plans, save/load state, show status |
+| 🔧 `/sync` | Session bootstrap, restore state, show status |
+| 🔧 `/save` | Save session state (TodoWrite, plan, git context) |
 | 🔧 `/review` | Code review staged changes |
 | 🔧 `/testgen` | Generate tests with expert routing |
 | 🔧 `/explain` | Deep code/concept explanation |
