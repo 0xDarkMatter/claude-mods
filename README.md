@@ -1,8 +1,15 @@
 # claude-mods
 
-A comprehensive extension toolkit for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) that transforms your AI coding assistant into a powerhouse development environment.
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-blueviolet?logo=anthropic)](https://docs.anthropic.com/en/docs/claude-code)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**23 expert agents. 10 slash commands. 30 skills. 4 rules. Custom output styles. One plugin install.**
+> *What if Claude Code remembered what it was doing yesterday?*
+
+Claude Code is brilliant - until your session ends and it forgets everything. Your TodoWrite tasks vanish. Your carefully-built context evaporates. You're back to explaining the codebase from scratch.
+
+**claude-mods fixes that.** It's a plugin that adds session persistence, expert-level domain knowledge, and the modern CLI tools that Claude should've been using all along. Save your work with `/save`, pick up where you left off with `/sync`, and let 23 specialized agents handle everything from React hooks to PostgreSQL optimization. No more "I don't have access to that" - just a smarter, more capable coding assistant that actually remembers.
+
+**23 agents. 10 commands. 30 skills. One install.**
 
 ## Why claude-mods?
 
