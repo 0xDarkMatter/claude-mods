@@ -56,7 +56,7 @@ On "INIT:" message at session start:
 
 ## Quick Reference
 
-**CLI Tools:** Use `rg` over grep, `fd` over find, `eza` over ls, `bat` over cat
+**CLI Tools:** Use `rg` over grep, `fd` over find, `eza` over ls, `bat` over cat, `markitdown` for documents
 
 **Web Fetching:** WebFetch → Jina (`r.jina.ai/`) → `firecrawl` → firecrawl-expert agent
 
