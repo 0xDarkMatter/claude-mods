@@ -139,6 +139,7 @@ Then symlink or copy to your Claude directories:
 | [find-replace](skills/find-replace/) | Modern find-and-replace with sd |
 | [code-stats](skills/code-stats/) | Analyze codebase with tokei and difft |
 | [data-processing](skills/data-processing/) | Process JSON with jq, YAML/TOML with yq |
+| [markitdown](skills/markitdown/) | Convert PDF, Word, Excel, PowerPoint, images to markdown |
 | [structural-search](skills/structural-search/) | Search code by AST structure with ast-grep |
 
 #### Workflow Skills

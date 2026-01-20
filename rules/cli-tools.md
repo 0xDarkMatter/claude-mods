@@ -51,6 +51,23 @@ jq '.dependencies | keys' package.json
 yq '.services | keys' docker-compose.yml
 ```
 
+## Document Conversion
+
+| Instead of | Use | Why |
+|------------|-----|-----|
+| PyMuPDF/pdfplumber | `markitdown` | One tool for PDF, Word, Excel, PowerPoint |
+| python-docx | `markitdown` | Consistent markdown output |
+| Manual OCR | `markitdown` | Built-in image text extraction |
+
+```bash
+# Convert documents to markdown (use markitdown)
+markitdown document.pdf           # PDF to markdown
+markitdown report.docx            # Word to markdown
+markitdown data.xlsx              # Excel to markdown tables
+markitdown slides.pptx            # PowerPoint to markdown
+markitdown screenshot.png         # OCR image text
+```
+
 ## Git Operations
 
 | Instead of | Use | Why |
@@ -161,33 +178,36 @@ just test                     # Run test task
 
 ## Web Fetching (URL Retrieval)
 
-When fetching web content, use this hierarchy in order:
+When fetching web content, use this hierarchy based on benchmarked performance:
 
-| Priority | Tool | When to Use |
-|----------|------|-------------|
-| 1 | `WebFetch` | First attempt - fast, built-in |
-| 2 | `r.jina.ai/URL` | JS-rendered pages, PDFs, cleaner extraction |
-| 3 | `firecrawl <url>` | Anti-bot bypass, blocked sites (403, Cloudflare) |
-| 4 | `firecrawl-expert` agent | Complex scraping, structured extraction |
+| Priority | Tool | Speed | Use Case |
+|----------|------|-------|----------|
+| 1 | `WebFetch` | Instant | First attempt - built-in |
+| 2 | `r.jina.ai/URL` | **0.5s avg** | Default fallback - 5-10x faster than alternatives |
+| 3 | `firecrawl <url>` | 4-5s avg | Anti-bot bypass, Cloudflare, heavy JS |
+| 4 | `markitdown <url>` | 2-3s avg | Simple static pages (or local files) |
 
 ```bash
-# Jina Reader - prefix any URL (free, 10M tokens)
+# Jina Reader - fastest option (free, 10M tokens)
 curl https://r.jina.ai/https://example.com
 
 # Jina Search - search + fetch in one call
 curl https://s.jina.ai/your%20search%20query
 
-# Firecrawl CLI - when WebFetch gets blocked
+# Firecrawl CLI - anti-bot bypass
 firecrawl https://blocked-site.com
-firecrawl https://example.com -o output.md
 firecrawl https://example.com --json
+
+# markitdown - simple pages or local files
+markitdown https://example.com
+markitdown document.pdf
 ```
 
 **Decision Tree:**
 1. Try `WebFetch` first (instant, free)
-2. If 403/blocked/JS-heavy → Try Jina: `r.jina.ai/URL`
-3. If still blocked → Try `firecrawl <url>`
-4. For complex scraping → Use `firecrawl-expert` agent
+2. If blocked → Try Jina: `r.jina.ai/URL` (fastest, 10/10 success rate)
+3. If anti-bot/Cloudflare → Try `firecrawl <url>` (designed for bypass)
+4. For local files (PDF, Word, Excel) → Use `markitdown`
 
 ## Reference
 

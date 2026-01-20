@@ -44,6 +44,27 @@ Token-efficient CLI tools that replace verbose legacy commands. These tools are 
 | JSON manual | `jq` | Structured queries and transforms |
 | YAML manual | `yq` | Same as jq for YAML/TOML |
 
+### Document Conversion
+
+| Legacy | Modern | Improvement |
+|--------|--------|-------------|
+| PyMuPDF/pdfplumber | `markitdown` | One CLI for all document types |
+| python-docx | `markitdown` | Consistent markdown output |
+| Tesseract (OCR) | `markitdown` | Built-in image text extraction |
+
+**markitdown** (Microsoft) - Convert documents to markdown:
+```bash
+pip install markitdown
+
+# Usage
+markitdown document.pdf       # PDF
+markitdown report.docx        # Word
+markitdown data.xlsx          # Excel (tables)
+markitdown slides.pptx        # PowerPoint
+markitdown image.png          # OCR
+```
+Supports: PDF, DOCX, XLSX, PPTX, images (OCR), HTML, audio (speech-to-text), CSV, JSON, XML
+
 ### Git Operations
 
 | Legacy | Modern | Improvement |
@@ -153,15 +174,16 @@ export PERPLEXITY_API_KEY="your-key-here"
 
 ### Web Fetching (URL Retrieval Hierarchy)
 
-When Claude's built-in `WebFetch` gets blocked (403, Cloudflare, etc.), use these alternatives in order:
+Benchmarked performance (10 URLs, varying complexity):
 
-| Tool | When to Use | Setup |
-|------|-------------|-------|
-| **WebFetch** | First attempt - fast, built-in | None required |
-| **Jina Reader** | JS-rendered pages, PDFs, cleaner extraction | Prefix URL with `r.jina.ai/` |
-| **Firecrawl** | Anti-bot bypass, complex scraping, structured extraction | Use `firecrawl-expert` agent |
+| Tool | Avg Speed | Success | Best For |
+|------|-----------|---------|----------|
+| **WebFetch** | Instant | Varies | First attempt - built-in |
+| **Jina Reader** | **0.5s** | 10/10 | Default fallback - 5-10x faster |
+| **Firecrawl** | 4-5s | 10/10 | Anti-bot bypass, Cloudflare |
+| **markitdown** | 2-3s | 9/10 | Local files + simple pages |
 
-**Jina Reader** (free tier: 10M tokens):
+**Jina Reader** (free tier: 10M tokens) - **Recommended default**:
 ```bash
 # Simple - just prefix any URL
 curl https://r.jina.ai/https://example.com
@@ -170,9 +192,9 @@ curl https://r.jina.ai/https://example.com
 curl https://s.jina.ai/your%20search%20query
 ```
 
-**Firecrawl** (requires API key):
+**Firecrawl** (requires API key) - **Anti-bot specialist**:
 ```bash
-# Simple URL scrape (globally available)
+# When Jina fails due to anti-bot
 firecrawl https://blocked-site.com
 
 # Save to file
@@ -180,19 +202,27 @@ firecrawl https://example.com -o output.md
 
 # With JSON metadata
 firecrawl https://example.com --json
-
-# For complex scraping, use the firecrawl-expert agent
 ```
 - Handles Cloudflare, Datadome, and other anti-bot systems
 - Supports interactive scraping (click, scroll, fill forms)
 - AI-powered structured data extraction
-- CLI: `E:\Projects\Coding\Firecrawl\scripts\fc.py`
+
+**markitdown** - **Local files + URLs**:
+```bash
+# URLs (slower than Jina, but works offline)
+markitdown https://example.com
+
+# Local files (unique capability)
+markitdown document.pdf
+markitdown report.docx
+markitdown data.xlsx
+```
 
 **Decision Tree:**
 1. Try `WebFetch` first (instant, free)
-2. If blocked/JS-heavy → Try `r.jina.ai/URL` prefix
-3. If still blocked → Try `firecrawl <url>` CLI
-4. For complex scraping/extraction → Use `firecrawl-expert` agent
+2. If blocked → Try Jina `r.jina.ai/URL` (fastest, best success rate)
+3. If anti-bot/Cloudflare → Try `firecrawl <url>` (designed for bypass)
+4. For local files (PDF, Word, Excel) → Use `markitdown`
 
 ## Token Efficiency Benchmarks
 
