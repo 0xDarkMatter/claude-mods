@@ -83,7 +83,10 @@
       "Bash(opencode run \"What is 2+2? One word.\")",
       "Bash(opencode auth:*)",
       "Bash(opencode models:*)",
-      "Bash(opencode run:*)"
+      "Bash(opencode run:*)",
+      "Bash(markitdown --help:*)",
+      "Bash(where markitdown:*)",
+      "Bash(markitdown:*)"
     ],
     "deny": [],
     "ask": [
