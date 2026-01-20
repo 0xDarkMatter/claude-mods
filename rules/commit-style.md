@@ -98,18 +98,3 @@ BAD:  "feat(agents): Add the new docker expert agent for containerization"
 GOOD: "feat(agents): Add docker-expert agent"
 ```
 
-## Claude Code Integration
-
-When committing via Claude Code, these patterns apply:
-
-1. Analyze staged changes to determine appropriate type
-2. Infer scope from modified directories
-3. Generate concise, imperative subject line
-4. Add body for non-trivial changes explaining rationale
-5. Append standard footer:
-
-```
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
-
-Co-Authored-By: Claude <model> <noreply@anthropic.com>
-```
