@@ -3,7 +3,7 @@
 **Goal**: A centralized repository of custom Claude Code commands, agents, and skills that enhance Claude Code's native capabilities with persistent session state, specialized expert agents, and streamlined workflows.
 
 **Created**: 2025-11-27
-**Last Updated**: 2025-12-22
+**Last Updated**: 2026-01-24
 **Status**: Active Development
 
 ---
@@ -12,10 +12,10 @@
 
 | Component | Count | Notes |
 |-----------|-------|-------|
-| Agents | 23 | Domain experts (Python, Go, Rust, React, etc.) |
-| Skills | 30 | Pattern libraries (Python deep, others emerging) |
-| Commands | 11 | Workflow automation |
-| Rules | 4 | CLI tools, thinking, commit style, naming |
+| Agents | 22 | Domain experts (Python, Go, Rust, React, etc.) |
+| Skills | 38 | Pattern libraries, CLI tools, workflows, dev tasks |
+| Commands | 3 | Session management (sync, save) + experimental (canvas) |
+| Rules | 5 | CLI tools, thinking, commit style, naming, skill-agent-updates |
 | Output Styles | 1 | Vesper personality |
 | Hooks | 0 | Config examples only |
 
@@ -29,26 +29,25 @@
 - [x] Agent genesis system (`/spawn`)
 - [x] Installation scripts (Unix + Windows)
 
-### Expert Agents (23)
+### Expert Agents (22)
 - [x] Languages: Python, TypeScript, JavaScript, Go, Rust, SQL, Bash
 - [x] Frontend: React, Vue, Astro
 - [x] Backend: Laravel, PayloadCMS, CraftCMS
 - [x] Infrastructure: AWS Fargate, Cloudflare, Wrangler
-- [x] Testing: Cypress, Playwright
+- [x] Testing: Cypress
 - [x] Databases: PostgreSQL, SQL patterns
 - [x] Specialized: Claude-architect, Project-organizer
 
-### Skills (30)
+### Skills (38)
 - [x] Python patterns (8): async, cli, database, env, fastapi, observability, pytest, typing
 - [x] Claude Code internals: debug, headless, hooks, templates
 - [x] Workflows: git, data-processing, structural-search, task-runner
 - [x] Patterns: REST, SQL, security, testing, tailwind
+- [x] Development: explain, spawn, atomise, setperms, introspect, review, testgen
 
-### Commands (11)
-- [x] Session: `/save`, `/sync`, `/atomise`
-- [x] Development: `/review`, `/testgen`, `/explain`
-- [x] Multi-model: `/conclave`, `/spawn`
-- [x] Utilities: `/pulse`, `/setperms`, `/archive`
+### Commands (3)
+- [x] Session: `/save`, `/sync`
+- [x] Experimental: `/canvas`
 
 ### Documentation
 - [x] ARCHITECTURE.md - Extension system guide with authority levels
@@ -101,14 +100,14 @@
 | `testing-architect` | Strategy decisions |
 | `api-design-expert` | OpenAPI, versioning |
 
-#### Command Gaps
+#### Skill Gaps
 
-| Command | Purpose |
-|---------|---------|
-| `/debug` | Systematic debugging workflow |
-| `/migrate` | Framework/version upgrades |
-| `/refactor` | Safe refactoring |
-| `/secure` | Security audit checklist |
+| Skill | Purpose |
+|-------|---------|
+| `debug` | Systematic debugging workflow |
+| `migrate` | Framework/version upgrades |
+| `refactor` | Safe refactoring |
+| `secure` | Security audit checklist |
 
 #### Skill Parity
 
@@ -138,7 +137,7 @@ Languages needing Python-level depth:
             +-----------+-----------+
        High | Agent     | Analytics |
             | Gaps      |           |
-            | Commands  | Lang      |
+            | Skills    | Lang      |
             |           | Parity    |
             +-----------+-----------+
 ```
@@ -147,11 +146,33 @@ Languages needing Python-level depth:
 
 ## Immediate Next Steps
 
+### Command-to-Skill Consolidation (Complete)
+
+Most commands have been converted to skills for better discovery and on-demand loading. See `docs/COMMAND-SKILL-PATTERN.md`.
+
+**Completed conversions:**
+- [x] `/testgen` → `skills/testgen/`
+- [x] `/review` → `skills/review/`
+- [x] `/explain` → `skills/explain/`
+- [x] `/spawn` → `skills/spawn/`
+- [x] `/atomise` → `skills/atomise/`
+- [x] `/setperms` → `skills/setperms/`
+- [x] `/introspect` → `skills/introspect/`
+
+**Remaining as commands:**
+- `/sync` - Session bootstrap (paired with /save)
+- `/save` - Session persistence (paired with /sync)
+- `/canvas` - Experimental (Warp-specific)
+
+---
+
+### Planned Work
+
 - [x] Create `rules/commit-style.md`
 - [x] Create `rules/naming-conventions.md`
 - [ ] Create Spartan output style
 - [ ] Add docker-expert agent
-- [ ] Implement `/debug` command
+- [ ] Add `/debug` skill (systematic debugging workflow)
 
 ---
 
@@ -169,4 +190,4 @@ Languages needing Python-level depth:
 
 ---
 
-*Plan managed by `/save` command. Last updated: 2025-12-22*
+*Plan managed by `/save` command. Last updated: 2026-01-24*

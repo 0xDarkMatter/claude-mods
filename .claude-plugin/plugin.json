@@ -1,7 +1,7 @@
 {
   "name": "claude-mods",
-  "version": "1.4.0",
-  "description": "Custom commands, skills, and agents for Claude Code - session continuity, terminal canvas, 22 expert agents, 30 skills, 4 rules, modern CLI tools",
+  "version": "1.5.1",
+  "description": "Custom commands, skills, and agents for Claude Code - session continuity, terminal canvas, 22 expert agents, 38 skills, 3 commands, 5 rules, modern CLI tools",
   "author": "0xDarkMatter",
   "repository": "https://github.com/0xDarkMatter/claude-mods",
   "license": "MIT",
@@ -20,14 +20,6 @@
     "commands": [
       "commands/sync.md",
       "commands/save.md",
-      "commands/review.md",
-      "commands/testgen.md",
-      "commands/explain.md",
-      "commands/spawn.md",
-      "commands/conclave.md",
-      "commands/atomise.md",
-      "commands/setperms.md",
-      "commands/pulse.md",
       "commands/canvas.md"
     ],
     "agents": [
@@ -55,6 +47,7 @@
       "agents/wrangler-expert.md"
     ],
     "skills": [
+      "skills/atomise",
       "skills/claude-code-debug",
       "skills/claude-code-headless",
       "skills/claude-code-hooks",
@@ -63,9 +56,12 @@
       "skills/container-orchestration",
       "skills/data-processing",
       "skills/doc-scanner",
+      "skills/explain",
       "skills/file-search",
       "skills/find-replace",
       "skills/git-workflow",
+      "skills/introspect",
+      "skills/markitdown",
       "skills/mcp-patterns",
       "skills/project-planner",
       "skills/python-async-patterns",
@@ -77,19 +73,24 @@
       "skills/python-pytest-patterns",
       "skills/python-typing-patterns",
       "skills/rest-patterns",
+      "skills/review",
       "skills/security-patterns",
+      "skills/setperms",
+      "skills/spawn",
       "skills/sql-patterns",
       "skills/sqlite-ops",
       "skills/structural-search",
       "skills/tailwind-patterns",
       "skills/task-runner",
       "skills/testing-patterns",
+      "skills/testgen",
       "skills/tool-discovery"
     ],
     "rules": [
       "rules/cli-tools.md",
       "rules/commit-style.md",
       "rules/naming-conventions.md",
+      "rules/skill-agent-updates.md",
       "rules/thinking.md"
     ],
     "output-styles": [

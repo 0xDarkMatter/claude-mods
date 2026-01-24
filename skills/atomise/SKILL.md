@@ -1,5 +1,10 @@
 ---
-description: "Atom of Thoughts (AoT) reasoning - decompose complex problems into atomic units with confidence tracking and backtracking. For genuinely complex reasoning, not everyday questions."
+name: atomise
+description: "Atom of Thoughts (AoT) reasoning - decompose complex problems into atomic units with confidence tracking and backtracking. For genuinely complex reasoning, not everyday questions. Triggers on: atomise, complex reasoning, decompose problem, structured thinking, verify hypothesis."
+allowed-tools: "Read"
+compatibility: "Pure reasoning framework, no external dependencies."
+depends-on: []
+related-skills: []
 ---
 
 # Atomise - Atom of Thoughts Reasoning
@@ -18,11 +23,11 @@ Decompose complex problems into minimal, verifiable "atoms" of thought. Unlike c
 ## The Core Loop
 
 ```
-1. DECOMPOSE → Break into atomic subquestions (1-2 sentences each)
-2. SOLVE      → Answer leaf nodes first, propagate up
-3. VERIFY     → Test each hypothesis (counterexample, consistency, domain check)
-4. CONTRACT   → Summarize verified state in 2 sentences (drop history)
-5. EVALUATE   → Confident enough? Done. Too uncertain? Backtrack and try another path.
+1. DECOMPOSE -> Break into atomic subquestions (1-2 sentences each)
+2. SOLVE     -> Answer leaf nodes first, propagate up
+3. VERIFY    -> Test each hypothesis (counterexample, consistency, domain check)
+4. CONTRACT  -> Summarize verified state in 2 sentences (drop history)
+5. EVALUATE  -> Confident enough? Done. Too uncertain? Backtrack and try another path.
 ```
 
 Repeat until confident or all paths exhausted.
@@ -61,24 +66,24 @@ These numbers are *heuristic*, not calibrated probabilities. They're useful for 
 | **< 0.5** | Backtrack - this path isn't working |
 
 **Verification adjusts confidence:**
-- Confirmed → maintain or slight boost
-- Partial → reduce ~15%
-- Refuted → major reduction, likely backtrack
+- Confirmed -> maintain or slight boost
+- Partial -> reduce ~15%
+- Refuted -> major reduction, likely backtrack
 
 ---
 
 ## Modes
 
 **Depth:**
-- `--light` — Fast: max 3 levels, 0.70 confidence threshold
-- *(default)* — Standard: max 5 levels, 0.85 threshold
-- `--deep` — Exhaustive: max 7 levels, 0.90 threshold
+- `--light` - Fast: max 3 levels, 0.70 confidence threshold
+- *(default)* - Standard: max 5 levels, 0.85 threshold
+- `--deep` - Exhaustive: max 7 levels, 0.90 threshold
 
 **Domain** (adjusts verification style):
-- `--math` — Arithmetic checks, proof validation, boundary tests
-- `--code` — Type checking, invariant verification, test generation
-- `--security` — Threat modeling, attack surface, adversarial thinking
-- `--design` — Tradeoff analysis, constraint satisfaction, feasibility
+- `--math` - Arithmetic checks, proof validation, boundary tests
+- `--code` - Type checking, invariant verification, test generation
+- `--security` - Threat modeling, attack surface, adversarial thinking
+- `--design` - Tradeoff analysis, constraint satisfaction, feasibility
 
 ---
 
@@ -88,7 +93,7 @@ These numbers are *heuristic*, not calibrated probabilities. They're useful for 
 ANSWER: {result}
 CONFIDENCE: {0.0-1.0} - {why}
 
-KEY CHAIN: P1 → R1 → H1 → V1 → C1
+KEY CHAIN: P1 -> R1 -> H1 -> V1 -> C1
 
 ATOMS:
 | id | type | content | conf | verified |
@@ -114,14 +119,14 @@ Add `--verbose` for full trace, `--quiet` for just the answer.
 
 ### Phase 1+: Iterate
 
-1. **Atomicity gate:** Can you answer from verified atoms? Yes → solve. No → decompose.
+1. **Atomicity gate:** Can you answer from verified atoms? Yes -> solve. No -> decompose.
 2. **Decompose:** Build dependency tree of atomic subquestions
 3. **Solve + Verify:** Leaves first, propagate up. Every hypothesis needs verification.
-4. **Contract:** Summarize in ≤2 sentences. Drop everything else.
+4. **Contract:** Summarize in <=2 sentences. Drop everything else.
 5. **Evaluate:**
-   - Confident? → Terminate
-   - Uncertain but viable? → Continue
-   - Low confidence? → Backtrack, try alternative
+   - Confident? -> Terminate
+   - Uncertain but viable? -> Continue
+   - Low confidence? -> Backtrack, try alternative
 
 ### Backtracking
 
@@ -153,9 +158,9 @@ When a path yields confidence < 0.5 after verification:
 ## Anti-Patterns
 
 ```
-BAD:  /atomise "What's 2+2?"           → Just answer it
-BAD:  /atomise "Rewrite this function" → That's implementation, not reasoning
-BAD:  Forcing conclusion despite low confidence → Let it backtrack
+BAD:  /atomise "What's 2+2?"           -> Just answer it
+BAD:  /atomise "Rewrite this function" -> That's implementation, not reasoning
+BAD:  Forcing conclusion despite low confidence -> Let it backtrack
 GOOD: /atomise for genuine uncertainty requiring structured decomposition
 ```
 

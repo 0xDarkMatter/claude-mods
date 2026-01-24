@@ -5,19 +5,19 @@
 
 > *What if Claude Code remembered what it was doing yesterday?*
 
-Claude Code is brilliant - until your session ends and it forgets everything. Your TodoWrite tasks vanish. Your carefully-built context evaporates. You're back to explaining the codebase from scratch.
+Claude Code is brilliant - until your session ends and it forgets everything. Your tasks vanish. Your carefully-built context evaporates. You're back to explaining the codebase from scratch.
 
-**claude-mods fixes that.** It's a plugin that adds session persistence, expert-level domain knowledge, and the modern CLI tools that Claude should've been using all along. Save your work with `/save`, pick up where you left off with `/sync`, and let 23 specialized agents handle everything from React hooks to PostgreSQL optimization. No more "I don't have access to that" - just a smarter, more capable coding assistant that actually remembers.
+**claude-mods fixes that.** It's a plugin that adds session persistence, expert-level domain knowledge, and the modern CLI tools that Claude should've been using all along. Save your work with `/save`, pick up where you left off with `/sync`, and let 22 specialized agents handle everything from React hooks to PostgreSQL optimization. No more "I don't have access to that" - just a smarter, more capable coding assistant that actually remembers.
 
-**23 agents. 10 commands. 30 skills. One install.**
+**22 agents. 38 skills. 3 commands. One install.**
 
 ## Why claude-mods?
 
 Claude Code is powerful out of the box, but it has gaps. This toolkit fills them:
 
-- **Session continuity** — TodoWrite tasks vanish when sessions end. We fix that with `/save` and `/sync`, implementing Anthropic's [recommended pattern](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) for long-running agents.
+- **Session continuity** — Tasks vanish when sessions end. We fix that with `/save` and `/sync`, implementing Anthropic's [recommended pattern](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) for long-running agents.
 
-- **Expert-level knowledge on demand** — 23 specialized agents covering React, TypeScript, Python, Go, Rust, AWS, PostgreSQL, and more. Each agent is deeply researched with real-world patterns, not generic advice.
+- **Expert-level knowledge on demand** — 22 specialized agents covering React, TypeScript, Python, Go, Rust, AWS, PostgreSQL, and more. Each agent is deeply researched with real-world patterns, not generic advice.
 
 - **Modern CLI tools** — Stop using `grep`, `find`, and `cat`. Our rules automatically prefer `ripgrep`, `fd`, `eza`, and `bat` — 10-100x faster and token-efficient.
 
@@ -40,15 +40,15 @@ Claude Code is powerful out of the box, but it has gaps. This toolkit fills them
 ```
 claude-mods/
 ├── .claude-plugin/     # Plugin metadata
-├── agents/             # Expert subagents (23)
-├── commands/           # Slash commands (11)
-├── skills/             # Custom skills (30)
+├── agents/             # Expert subagents (22)
+├── commands/           # Slash commands (3)
+├── skills/             # Custom skills (38)
 ├── output-styles/      # Response personalities
 ├── hooks/              # Hook examples & docs
 ├── rules/              # Claude Code rules
-├── tools/              # Modern CLI toolkit docs
+├── tools/              # Modern CLI toolkit installers
+├── scripts/            # Plugin install scripts
 ├── tests/              # Test suites + justfile
-├── scripts/            # Install scripts
 ├── docs/               # Project docs (PLAN.md, DASH.md)
 └── templates/          # Extension templates
 ```
@@ -73,27 +73,32 @@ This installs globally (available in all projects). Toggle on/off with `/plugin`
 ```bash
 git clone https://github.com/0xDarkMatter/claude-mods.git
 cd claude-mods
-./tools/install-unix.sh
+./scripts/install.sh
 ```
 
 **Windows (PowerShell):**
 ```powershell
 git clone https://github.com/0xDarkMatter/claude-mods.git
 cd claude-mods
-.\tools\install-windows.ps1
+.\scripts\install.ps1
 ```
 
-### Manual Install
+The install scripts:
+- Copy commands, skills, agents, rules to `~/.claude/`
+- Clean up deprecated items (e.g., old `/conclave` command)
+- Handle command→skill migrations (won't create duplicates)
+
+### CLI Tools (Optional)
+
+Install modern CLI tools (fd, rg, bat, etc.) for better performance:
 
 ```bash
-git clone https://github.com/0xDarkMatter/claude-mods.git
-```
+# Windows (Admin PowerShell)
+.\tools\install-windows.ps1
 
-Then symlink or copy to your Claude directories:
-- Commands → `~/.claude/commands/`
-- Skills → `~/.claude/skills/`
-- Agents → `~/.claude/agents/`
-- Rules → `~/.claude/rules/`
+# Linux/macOS
+./tools/install-unix.sh
+```
 
 ## What's Included
 
@@ -101,25 +106,9 @@ Then symlink or copy to your Claude directories:
 
 | Command | Description |
 |---------|-------------|
-| [sync](commands/sync.md) | Session bootstrap - read project context, restore saved state, show status. Quick orientation with optional deep dive. |
-| [save](commands/save.md) | Save session state - persist TodoWrite tasks, plan content, and git context. |
-| [review](commands/review.md) | Code review staged changes or specific files. Analyzes bugs, security, performance, style. |
-| [testgen](commands/testgen.md) | Generate tests with expert routing, framework detection, focus/depth modes. |
-| [explain](commands/explain.md) | Deep explanation of complex code, files, or concepts. Architecture, data flow, design decisions. |
-| [spawn](commands/spawn.md) | Generate expert agents with PhD-level patterns and code examples. |
-| [conclave](commands/conclave.md) | **[DEPRECATED]** Use [Conclave CLI](https://github.com/0xDarkMatter/conclave) instead. |
-| [atomise](commands/atomise.md) | Atom of Thoughts reasoning - decompose problems into atomic units with confidence tracking and backtracking. |
-| [pulse](commands/pulse.md) | **[MOVED]** See [0xDarkMatter/pulse](https://github.com/0xDarkMatter/pulse). |
-| [setperms](commands/setperms.md) | Set tool permissions and CLI preferences. |
-| [archive](commands/archive.md) | Archive completed plans and session state. |
-
-### Experimental Commands
-
-> ⚠️ These features are under active development. APIs may change.
-
-| Command | Description |
-|---------|-------------|
-| [canvas](commands/canvas.md) | Terminal canvas for content drafting with live markdown preview. Requires Warp terminal. |
+| [sync](commands/sync.md) | Session bootstrap - read project context, restore saved state, show status. |
+| [save](commands/save.md) | Save session state - persist tasks, plan content, and git context. |
+| [canvas](commands/canvas.md) | Terminal canvas for content drafting with live markdown preview. Requires Warp terminal. (Experimental) |
 
 ### Skills
 
@@ -152,6 +141,17 @@ Then symlink or copy to your Claude directories:
 | [python-env](skills/python-env/) | Fast Python environment management with uv |
 | [task-runner](skills/task-runner/) | Run project commands with just |
 
+#### Development Skills
+| Skill | Description |
+|-------|-------------|
+| [explain](skills/explain/) | Deep explanation of complex code, files, or concepts. Routes to expert agents. |
+| [spawn](skills/spawn/) | Generate PhD-level expert agent prompts for Claude Code. |
+| [atomise](skills/atomise/) | Atom of Thoughts reasoning - decompose problems into atomic units. |
+| [setperms](skills/setperms/) | Set tool permissions and CLI preferences in .claude/ directory. |
+| [introspect](skills/introspect/) | Analyze previous session logs without consuming current context. |
+| [review](skills/review/) | Code review with semantic diffs, expert routing, and auto-TaskCreate. |
+| [testgen](skills/testgen/) | Generate tests with expert routing and framework detection. |
+
 ### Agents
 
 | Agent | Description |
@@ -169,7 +169,6 @@ Then symlink or copy to your Claude directories:
 | [javascript-expert](agents/javascript-expert.md) | Modern JavaScript, async patterns, optimization |
 | [laravel-expert](agents/laravel-expert.md) | Laravel framework, Eloquent, testing |
 | [payloadcms-expert](agents/payloadcms-expert.md) | Payload CMS architecture and configuration |
-| [playwright-roulette-expert](agents/playwright-roulette-expert.md) | Playwright automation for casino testing |
 | [postgres-expert](agents/postgres-expert.md) | PostgreSQL management and optimization |
 | [project-organizer](agents/project-organizer.md) | Reorganize directory structures, cleanup |
 | [python-expert](agents/python-expert.md) | Advanced Python, testing, optimization |
@@ -188,6 +187,7 @@ Then symlink or copy to your Claude directories:
 | [thinking.md](rules/thinking.md) | Extended thinking triggers (think → ultrathink) |
 | [commit-style.md](rules/commit-style.md) | Conventional commits format and examples |
 | [naming-conventions.md](rules/naming-conventions.md) | Component naming patterns for agents, skills, commands |
+| [skill-agent-updates.md](rules/skill-agent-updates.md) | Mandatory docs check before creating/updating skills or agents |
 
 ### Tools & Hooks
 
@@ -268,9 +268,9 @@ just list-agents  # List all agents
 
 The `/save` and `/sync` commands fill a gap in Claude Code's native session management.
 
-**The problem:** Claude Code's `--resume` flag restores conversation history, but **TodoWrite task state does not persist between sessions—by design**. Claude Code treats each session as isolated; the philosophy is that persistent state belongs in files you control.
+**The problem:** Claude Code's `--resume` flag restores conversation history, but **task state does not persist between sessions—by design**. Claude Code treats each session as isolated; the philosophy is that persistent state belongs in files you control.
 
-TodoWrite tasks are stored at `~/.claude/todos/[session-id].json` and deleted when the session ends. This is intentional.
+Tasks (created via TaskCreate, managed via TaskList/TaskUpdate) are session-scoped and deleted when the session ends. This is intentional.
 
 **The solution:** `/save` and `/sync` implement the pattern from Anthropic's [Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents):
 
@@ -282,7 +282,7 @@ TodoWrite tasks are stored at `~/.claude/todos/[session-id].json` and deleted wh
 |---------------------|-----------|----------|
 | Conversation history | Yes | Internal (use `--resume`) |
 | CLAUDE.md context | Yes | `./CLAUDE.md` |
-| TodoWrite tasks | **No** | Deleted on session end |
+| Tasks | **No** | Deleted on session end |
 | Plan Mode state | **No** | In-memory only |
 
 ### Session Workflow
@@ -294,7 +294,7 @@ Session 1:
   /save "Stopped at auth module"     # Writes .claude/session-cache.json
 
 Session 2:
-  /sync                              # Restore TodoWrite, show status
+  /sync                              # Restore tasks, show status
   → "In progress: Auth module refactor"
   → "Notes: Stopped at auth module"
   /sync --status                     # Quick status check anytime
@@ -305,7 +305,7 @@ Session 2:
 | Feature | `--resume` | `/save` + `/sync` |
 |---------|------------|-------------------|
 | Conversation history | Yes | No |
-| TodoWrite tasks | **No** | Yes |
+| Tasks | **No** | Yes |
 | Git context | No | Yes |
 | Human-readable summary | No | Yes |
 | Git-trackable | No | Yes |
@@ -314,6 +314,30 @@ Session 2:
 
 **Use both together:** `claude --resume` for conversation context, `/sync` for task state.
 
+### Session Cache Schema (v3.0)
+
+The `.claude/session-cache.json` file stores full task objects:
+
+```json
+{
+  "version": "3.0",
+  "tasks": [
+    {
+      "subject": "Task title",
+      "description": "Detailed description",
+      "activeForm": "Working on task",
+      "status": "completed|in_progress|pending",
+      "blockedBy": [0, 1]
+    }
+  ],
+  "plan": { "goal": "...", "current_step": "...", "progress_percent": 40 },
+  "git": { "branch": "main", "last_commit": "abc123" },
+  "notes": "Session notes"
+}
+```
+
+**Migration:** `/sync` auto-detects v2.0 files (legacy `todos` format) and migrates them. Run `/save` after migration to upgrade the file.
+
 ## Updating
 
 ```bash
@@ -321,6 +345,36 @@ git pull
 ```
 
 Then re-run the install script to update your global Claude configuration.
+
+## Performance Tips
+
+### MCP Tool Search
+
+When using multiple MCP servers (Chrome DevTools, Vibe Kanban, etc.), their tool definitions consume context. Enable Tool Search to load tools on-demand:
+
+```json
+// .claude/settings.local.json
+{
+  "env": {
+    "ENABLE_TOOL_SEARCH": "true"
+  }
+}
+```
+
+| Value | Behavior |
+|-------|----------|
+| `"auto"` | Enable when MCP tools > 10% of context (default) |
+| `"auto:5"` | Custom threshold (5%) |
+| `"true"` | Always enabled (recommended) |
+| `"false"` | Disabled |
+
+**Requirements:** Sonnet 4+ or Opus 4+ (Haiku not supported)
+
+### Skills Over Commands
+
+Most functionality lives in skills rather than commands. Skills get slash-hint discovery via trigger keywords and load on-demand, reducing context overhead. Only session management (`/sync`, `/save`) and experimental features (`/canvas`) remain as commands.
+
+See `docs/COMMAND-SKILL-PATTERN.md` for details.
 
 ## Resources
 

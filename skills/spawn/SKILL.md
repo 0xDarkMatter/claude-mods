@@ -1,10 +1,15 @@
 ---
-description: Generate PhD-level expert agent prompts for Claude Code. Creates comprehensive 500-1000 line agents with detailed patterns, code examples, and best practices.
+name: spawn
+description: "Generate PhD-level expert agent prompts for Claude Code. Creates comprehensive 500-1000 line agents with detailed patterns, code examples, and best practices. Triggers on: spawn agent, create agent, generate expert, new agent, agent genesis."
+allowed-tools: "Read Write Bash WebSearch WebFetch AskUserQuestion"
+compatibility: "Requires internet access for WebSearch/WebFetch to research official docs."
+depends-on: []
+related-skills: ["claude-code-templates"]
 ---
 
 # Spawn - Expert Agent Generator
 
-Generate world-class, comprehensive expert agent prompts for Claude Code. Each agent should be a definitive reference for its domain—the kind of guide a PhD-level practitioner would create.
+Generate world-class, comprehensive expert agent prompts for Claude Code. Each agent should be a definitive reference for its domain - the kind of guide a PhD-level practitioner would create.
 
 **Target quality:** 500-1000 lines per agent with real code examples, complete configs, and detailed patterns.
 
@@ -171,7 +176,7 @@ When creating files programmatically:
 
 ### Example 1: Single Agent
 ```
-User: /agent-genesis
+User: /spawn
 Agent: [Shows multi-tab AskUserQuestion with 5 tabs]
   Tab 1 (Mode): Single Agent / Batch Generation / Architecture Analysis
   Tab 2 (Scope): Project Agent / Global Agent
@@ -189,7 +194,7 @@ Agent: [Generates Redis expert prompt and saves to ~/.claude/agents/redis-expert
 
 ### Example 2: Batch Generation
 ```
-User: /agent-genesis
+User: /spawn
 Agent: [Shows multi-tab AskUserQuestion with 3 tabs]
   Tab 1 (Mode): Single Agent / Batch Generation / Architecture Analysis
   Tab 2 (Scope): Project Agent / Global Agent
@@ -208,7 +213,7 @@ Agent: [Creates 3 .md files in .claude/agents/ (project directory)]
 
 ### Example 3: Architecture Analysis
 ```
-User: /agent-genesis
+User: /spawn
 Agent: [Shows multi-tab AskUserQuestion with 3 tabs]
   Tab 1 (Mode): Single Agent / Batch Generation / Architecture Analysis
   Tab 2 (Scope): Project Agent / Global Agent
@@ -277,24 +282,24 @@ Agent: [Generates 4 selected agents in ~/.claude/agents/]
 ## Quality Checklist
 
 Before outputting each agent prompt, verify:
-- ✅ YAML frontmatter present with required fields (name, description)
-- ✅ Name uses lowercase-with-hyphens format
-- ✅ Description is clear and specific (length is flexible)
-- ✅ Tools field specified if restricting access (best practice: limit to necessary tools)
-- ✅ 10+ authoritative URLs included in system prompt
-- ✅ 10+ production-ready code examples included
-- ✅ Complete dev and prod configuration files
-- ✅ Testing patterns with actual test code
-- ✅ Error handling patterns and exception hierarchy
-- ✅ 5+ anti-patterns with bad/good code comparison
-- ✅ Concise and scannable system prompt
-- ✅ Clear use cases defined
-- ✅ Integration points identified
-- ✅ Common patterns referenced
-- ✅ Anti-patterns listed
-- ✅ Proper markdown formatting throughout
-- ✅ Filename matches name field: `[name].md`
-- ✅ Follows Claude Code subagent best practices (see documentation links above)
+- YAML frontmatter present with required fields (name, description)
+- Name uses lowercase-with-hyphens format
+- Description is clear and specific (length is flexible)
+- Tools field specified if restricting access (best practice: limit to necessary tools)
+- 10+ authoritative URLs included in system prompt
+- 10+ production-ready code examples included
+- Complete dev and prod configuration files
+- Testing patterns with actual test code
+- Error handling patterns and exception hierarchy
+- 5+ anti-patterns with bad/good code comparison
+- Concise and scannable system prompt
+- Clear use cases defined
+- Integration points identified
+- Common patterns referenced
+- Anti-patterns listed
+- Proper markdown formatting throughout
+- Filename matches name field: `[name].md`
+- Follows Claude Code subagent best practices (see documentation links above)
 
 ## Post-Generation
 
@@ -309,7 +314,3 @@ After creating agents, remind user:
 - Use `/agents` command to view and manage all available agents
 - Refer to https://docs.claude.com/en/docs/claude-code/sub-agents for detailed subagent documentation
 - Check https://docs.claude.com/en/docs/agents-and-tools/agent-skills/best-practices for authoring guidelines
-
----
-
-**Execute this command to generate expert agent prompts on demand!**

@@ -1,6 +1,10 @@
 ---
 name: setperms
-description: "Set tool permissions for Claude Code. Configures allowed commands, rules, and preferences in .claude/ directory."
+description: "Set tool permissions for Claude Code. Configures allowed commands, rules, and preferences in .claude/ directory. Triggers on: setperms, init tools, configure permissions, setup project, set permissions, init claude."
+allowed-tools: "Read Write Bash"
+compatibility: "Creates project-local .claude/ configuration."
+depends-on: []
+related-skills: []
 ---
 
 # /setperms
@@ -40,7 +44,7 @@ Tools from [dev-shell-tools](https://github.com/0xDarkMatter/dev-shell-tools):
 ## Execution Flow
 
 ```
-/init-tools
+/setperms
     |
     +-- Check for existing .claude/ files
     |     +-- If exists: Ask to overwrite or skip
@@ -228,7 +232,7 @@ Prefer `just` over Makefiles.
 
 ## AI CLI Tools
 
-For multi-model analysis (see /conclave command):
+For multi-model analysis:
 
 | Tool | Model | Best For |
 |------|-------|----------|

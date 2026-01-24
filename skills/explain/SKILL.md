@@ -1,5 +1,10 @@
 ---
-description: "Deep explanation of complex code, files, or concepts. Routes to expert agents, uses structural search, generates mermaid diagrams."
+name: explain
+description: "Deep explanation of complex code, files, or concepts. Routes to expert agents, uses structural search, generates mermaid diagrams. Triggers on: explain, deep dive, how does X work, architecture, data flow."
+allowed-tools: "Read Glob Grep Bash Task"
+compatibility: "Uses ast-grep, tokei, rg, fd if available. Falls back to standard tools."
+depends-on: []
+related-skills: ["structural-search", "code-stats"]
 ---
 
 # Explain - Deep Code Explanation
@@ -18,36 +23,36 @@ $ARGUMENTS
 
 ```
 /explain <target> [--depth] [--focus]
-    │
-    ├─→ Step 1: Detect & Classify Target
-    │     ├─ File exists? → Read it
-    │     ├─ Function/class? → ast-grep to find definition
-    │     ├─ Directory? → tokei for overview
-    │     └─ Concept? → rg search codebase
-    │
-    ├─→ Step 2: Gather Context (parallel)
-    │     ├─ structural-search skill → find usages
-    │     ├─ code-stats skill → assess scope
-    │     ├─ Find related: tests, types, docs
-    │     └─ Load: AGENTS.md, CLAUDE.md conventions
-    │
-    ├─→ Step 3: Route to Expert Agent
-    │     ├─ .ts/.tsx → typescript-expert or react-expert
-    │     ├─ .py → python-expert
-    │     ├─ .vue → vue-expert
-    │     ├─ .sql/migrations → postgres-expert
-    │     ├─ agents/skills/commands → claude-architect
-    │     └─ Default → general-purpose
-    │
-    ├─→ Step 4: Generate Explanation
-    │     ├─ Structured markdown with sections
-    │     ├─ Mermaid diagrams (flowchart/sequence/class)
-    │     ├─ Related code paths as file:line refs
-    │     └─ Design decisions and rationale
-    │
-    └─→ Step 5: Integrate
-          ├─ Offer to save to ARCHITECTURE.md (if significant)
-          └─ Link to /save if working on related task
+    |
+    +-> Step 1: Detect & Classify Target
+    |     +- File exists? -> Read it
+    |     +- Function/class? -> ast-grep to find definition
+    |     +- Directory? -> tokei for overview
+    |     +- Concept? -> rg search codebase
+    |
+    +-> Step 2: Gather Context (parallel)
+    |     +- structural-search skill -> find usages
+    |     +- code-stats skill -> assess scope
+    |     +- Find related: tests, types, docs
+    |     +- Load: AGENTS.md, CLAUDE.md conventions
+    |
+    +-> Step 3: Route to Expert Agent
+    |     +- .ts/.tsx -> typescript-expert or react-expert
+    |     +- .py -> python-expert
+    |     +- .vue -> vue-expert
+    |     +- .sql/migrations -> postgres-expert
+    |     +- agents/skills/commands -> claude-architect
+    |     +- Default -> general-purpose
+    |
+    +-> Step 4: Generate Explanation
+    |     +- Structured markdown with sections
+    |     +- Mermaid diagrams (flowchart/sequence/class)
+    |     +- Related code paths as file:line refs
+    |     +- Design decisions and rationale
+    |
+    +-> Step 5: Integrate
+          +- Offer to save to ARCHITECTURE.md (if significant)
+          +- Link to /save if working on related task
 ```
 
 ## Execution Steps
@@ -68,7 +73,7 @@ test -d "$TARGET" && echo "DIRECTORY" && exit
 
 **For directories:** Get overview with tokei (if available):
 ```bash
-command -v tokei >/dev/null 2>&1 && tokei "$TARGET" --compact || echo "ℹ tokei unavailable"
+command -v tokei >/dev/null 2>&1 && tokei "$TARGET" --compact || echo "tokei unavailable"
 ```
 
 **For symbols (function/class):** Find definition with ast-grep:
@@ -148,16 +153,16 @@ The expert agent produces a structured explanation:
 [Mermaid diagram - choose appropriate type]
 
 ### Flowchart (for control flow)
-```mermaid
+` ` `mermaid
 flowchart TD
     A[Input] --> B{Validate}
     B -->|Valid| C[Process]
     B -->|Invalid| D[Error]
     C --> E[Output]
-```
+` ` `
 
 ### Sequence (for interactions)
-```mermaid
+` ` `mermaid
 sequenceDiagram
     participant Client
     participant Server
@@ -166,17 +171,17 @@ sequenceDiagram
     Server->>Database: Query
     Database-->>Server: Result
     Server-->>Client: Response
-```
+` ` `
 
 ### Class (for structures)
-```mermaid
+` ` `mermaid
 classDiagram
     class Component {
         +props: Props
         +state: State
         +render(): JSX
     }
-```
+` ` `
 
 ## How It Works
 
@@ -270,7 +275,7 @@ Commands use modern CLI tools with graceful fallbacks:
 
 **Check availability:**
 ```bash
-command -v tokei >/dev/null 2>&1 || echo "ℹ tokei not installed - skipping stats"
+command -v tokei >/dev/null 2>&1 || echo "tokei not installed - skipping stats"
 ```
 
 ## Usage Examples
@@ -300,12 +305,11 @@ command -v tokei >/dev/null 2>&1 || echo "ℹ tokei not installed - skipping sta
 
 ## Integration
 
-| Command | Relationship |
-|---------|--------------|
+| Skill/Command | Relationship |
+|---------------|--------------|
 | `/review` | Review after understanding |
-| `/test` | Generate tests for explained code |
+| `/testgen` | Generate tests for explained code |
 | `/save` | Save progress if working on related task |
-| Native `/plan` | Enter Claude Code's planning mode for implementation |
 
 ## Persistence
 
