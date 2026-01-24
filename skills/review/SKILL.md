@@ -1,27 +1,17 @@
 ---
-description: "Code review with semantic diffs, expert routing, and auto-TodoWrite. Analyzes staged changes or specific files for bugs, security, performance, and style."
+name: review
+description: "Code review with semantic diffs, expert routing, and auto-TaskCreate. Triggers on: code review, review changes, check code, review PR, security audit."
+allowed-tools: "Read Write Edit Bash Glob Grep Task TaskCreate TaskUpdate"
 ---
 
-# Review - AI Code Review
+# Review Skill - AI Code Review
 
-Perform a comprehensive code review on staged changes, specific files, or pull requests. Routes to expert agents based on file types, respects project conventions, and automatically creates TodoWrite tasks for critical issues.
-
-## Arguments
-
-$ARGUMENTS
-
-- No args: Review staged changes (`git diff --cached`)
-- `<file>`: Review specific file
-- `<directory>`: Review all files in directory
-- `--all`: Review all uncommitted changes
-- `--pr <number>`: Review a GitHub PR
-- `--focus <security|perf|types|tests|style>`: Focus on specific area
-- `--depth <quick|normal|thorough>`: Review depth
+Perform comprehensive code reviews on staged changes, specific files, or pull requests. Routes to expert agents based on file types and automatically creates tasks for critical issues.
 
 ## Architecture
 
 ```
-/review [target] [--focus] [--depth]
+review [target] [--focus] [--depth]
     │
     ├─→ Step 1: Determine Scope
     │     ├─ No args → git diff --cached (staged)
@@ -45,6 +35,8 @@ $ARGUMENTS
     │     ├─ TypeScript → typescript-expert
     │     ├─ React/JSX → react-expert
     │     ├─ Python → python-expert
+    │     ├─ Go → go-expert
+    │     ├─ Rust → rust-expert
     │     ├─ Vue → vue-expert
     │     ├─ SQL/migrations → postgres-expert
     │     ├─ Claude extensions → claude-architect
@@ -57,9 +49,9 @@ $ARGUMENTS
     │     └─ Overall verdict: Ready to commit? Y/N
     │
     └─→ Step 6: Integration
-          ├─ Auto-create TodoWrite for CRITICAL issues
+          ├─ Auto-create tasks (TaskCreate) for CRITICAL issues
           ├─ Link to /save for tracking
-          └─ Suggest follow-up: /test, /explain
+          └─ Suggest follow-up: /testgen, /explain
 ```
 
 ## Execution Steps
@@ -88,6 +80,11 @@ gh pr diff $PR_NUMBER --patch
 git diff HEAD -- "$FILE"
 ```
 
+**For baseline comparison (--base):**
+```bash
+git diff $BASE_BRANCH...HEAD
+```
+
 ### Step 2: Analyze Changes
 
 Run semantic diff analysis (parallel where possible):
@@ -104,7 +101,6 @@ command -v delta >/dev/null 2>&1 && git diff --cached | delta || git diff --cach
 
 **Categorize changes:**
 ```bash
-# Get changed files
 git diff --cached --name-only | while read file; do
     case "$file" in
         *.test.* | *.spec.*) echo "TEST: $file" ;;
@@ -122,7 +118,6 @@ git diff --cached --stat
 
 ### Step 3: Load Project Standards
 
-**Check for project conventions:**
 ```bash
 # Claude Code conventions
 cat AGENTS.md 2>/dev/null | head -50
@@ -135,7 +130,6 @@ cat pyproject.toml 2>/dev/null | head -30
 
 # Test framework detection
 cat package.json 2>/dev/null | jq '.devDependencies | keys | map(select(test("jest|vitest|mocha|cypress|playwright")))' 2>/dev/null
-cat pyproject.toml 2>/dev/null | grep -E "pytest|unittest" 2>/dev/null
 ```
 
 **Check CI for existing linting:**
@@ -145,21 +139,22 @@ cat .github/workflows/*.yml 2>/dev/null | grep -E "eslint|prettier|pylint|ruff" 
 
 ### Step 4: Route to Expert Reviewers
 
-Determine experts based on changed files:
-
 | File Pattern | Primary Expert | Secondary Expert |
 |--------------|----------------|------------------|
 | `*.ts` | typescript-expert | - |
 | `*.tsx` | react-expert | typescript-expert |
 | `*.vue` | vue-expert | typescript-expert |
 | `*.py` | python-expert | sql-expert (if ORM) |
+| `*.go` | go-expert | - |
+| `*.rs` | rust-expert | - |
 | `*.sql`, `migrations/*` | postgres-expert | - |
 | `agents/*.md`, `skills/*`, `commands/*` | claude-architect | - |
 | `*.test.*`, `*.spec.*` | cypress-expert | (framework expert) |
+| `*.cy.ts`, `cypress/*` | cypress-expert | typescript-expert |
+| `*.spec.ts` (Playwright) | typescript-expert | - |
+| `playwright/*`, `e2e/*` | typescript-expert | - |
 | `wrangler.toml`, `workers/*` | wrangler-expert | cloudflare-expert |
 | `*.sh`, `*.bash` | bash-expert | - |
-
-**Multi-domain changes:** If files span multiple domains, dispatch experts in parallel via Task tool.
 
 **Invoke via Task tool:**
 ```
@@ -218,7 +213,7 @@ The expert produces a structured review:
 
 **Issue:** Missing dependency in useEffect
 
-**Suggestion:** Add `userId` to dependency array or use useCallback
+**Suggestion:** Add `userId` to dependency array
 
 ```diff
 - useEffect(() => { fetchUser(userId) }, []);
@@ -229,22 +224,13 @@ The expert produces a structured review:
 
 ## Suggestions
 
-### `src/utils/helpers.ts:15`
-
-**Suggestion:** Consider using optional chaining
-
-```diff
-- const name = user && user.profile && user.profile.name;
-+ const name = user?.profile?.name;
-```
+[Style improvements, optional enhancements]
 
 ---
 
 ## Praise
 
-### `src/services/api.ts:78`
-
-**Good pattern:** Proper error boundary with typed error handling. This is exactly the pattern we want to follow.
+[Good patterns worth noting]
 
 ---
 
@@ -253,42 +239,44 @@ The expert produces a structured review:
 | File | Changes | Issues |
 |------|---------|--------|
 | `src/auth/login.ts` | +42/-8 | 1 critical |
-| `src/components/Form.tsx` | +89/-23 | 1 warning |
-| `src/utils/helpers.ts` | +15/-3 | 1 suggestion |
-
-## Follow-up
-
-- Run `/test src/auth/` to verify security fix
-- Run `/explain src/auth/login.ts` for deeper understanding
-- Use `/save` to track these issues
 ```
 
 ### Step 6: Integration
 
-**Auto-create TodoWrite tasks for CRITICAL issues:**
-
-For each CRITICAL issue found, automatically add to TodoWrite:
+**Auto-create tasks for CRITICAL issues:**
 ```
-TodoWrite:
-  - content: "Fix: SQL injection in login.ts:42"
-    status: "pending"
-    activeForm: "Fixing SQL injection in login.ts:42"
+TaskCreate:
+  subject: "Fix: SQL injection in login.ts:42"
+  description: "SQL injection vulnerability found in user input handling."
+  activeForm: "Fixing SQL injection in login.ts:42"
 ```
 
-**Link to session management:**
+**Link with dependencies for related issues:**
 ```
-Issues have been added to your task list.
-Run /save to persist before ending session.
+TaskCreate: #1 "Fix SQL injection in login.ts"
+TaskCreate: #2 "Fix SQL injection in register.ts"
+TaskUpdate: taskId: "2", addBlockedBy: ["1"]
 ```
+
+**After fixing issues:**
+```
+TaskUpdate:
+  taskId: "1"
+  status: "completed"
+```
+
+---
 
 ## Severity System
 
-| Level | Icon | Meaning | Action | Auto-Todo? |
+| Level | Icon | Meaning | Action | Auto-Task? |
 |-------|------|---------|--------|------------|
 | CRITICAL | :red_circle: | Security bug, data loss risk, crashes | Must fix before merge | Yes |
 | WARNING | :yellow_circle: | Logic issues, performance problems | Should address | No |
 | SUGGESTION | :blue_circle: | Style, minor improvements | Optional | No |
 | PRAISE | :star: | Good patterns worth noting | Recognition | No |
+
+---
 
 ## Focus Modes
 
@@ -301,28 +289,7 @@ Run /save to persist before ending session.
 | `--style` | Naming, organization, dead code, comments |
 | (default) | All of the above |
 
-### Security Focus Example
-```bash
-/review --security
-```
-Checks for:
-- Hardcoded secrets, API keys
-- SQL/NoSQL injection
-- XSS vulnerabilities
-- Insecure dependencies
-- Auth/authz issues
-- CORS misconfigurations
-
-### Performance Focus Example
-```bash
-/review --perf
-```
-Checks for:
-- N+1 database queries
-- Unnecessary re-renders (React)
-- Memory leaks
-- Blocking operations in async code
-- Unoptimized algorithms
+---
 
 ## Depth Modes
 
@@ -331,6 +298,64 @@ Checks for:
 | `--quick` | Surface-level scan, obvious issues only |
 | `--normal` | Standard review, all severity levels (default) |
 | `--thorough` | Deep analysis, traces data flow, checks edge cases |
+
+---
+
+## Advanced Flags
+
+### `--base <branch>` - Baseline Comparison
+
+Compare changes against a specific branch instead of HEAD:
+
+```bash
+/review --base main
+/review src/ --base develop --thorough
+```
+
+### `--json` - CI/CD Integration
+
+Output review results as JSON:
+
+```json
+{
+  "summary": {
+    "files_reviewed": 3,
+    "lines_changed": { "added": 42, "removed": 8 },
+    "issues": { "critical": 1, "warning": 2, "suggestion": 1 }
+  },
+  "verdict": {
+    "ready_to_commit": false,
+    "reason": "1 critical issue requires attention"
+  },
+  "issues": [...]
+}
+```
+
+**CI/CD usage:**
+```yaml
+- name: Code Review
+  run: |
+    claude "/review --json" > review.json
+    if jq -e '.issues[] | select(.severity == "critical")' review.json; then
+      exit 1
+    fi
+```
+
+### `--fix` - Auto-Apply Fixes
+
+Automatically apply suggested fixes:
+
+1. Performs standard review
+2. For each fixable issue, prompts for confirmation
+3. Uses Edit tool to apply approved fixes
+4. Creates TaskUpdate for resolved issues
+
+**Non-interactive mode:**
+```bash
+/review --fix --auto-approve
+```
+
+---
 
 ## CLI Tool Integration
 
@@ -347,114 +372,19 @@ Checks for:
 command -v delta >/dev/null 2>&1 && git diff --cached | delta || git diff --cached
 ```
 
-## Usage Examples
+---
 
-```bash
-# Review staged changes (default)
-/review
+## Reference Files
 
-# Review all uncommitted changes
-/review --all
+For framework-specific checks, see:
+- `framework-checks.md` - React, TypeScript, Python, Go, Rust, Vue, SQL patterns
 
-# Review specific file
-/review src/auth/login.ts
-
-# Review a directory
-/review src/components/
-
-# Review a GitHub PR
-/review --pr 123
-
-# Security-focused review
-/review --security
-
-# Performance-focused review
-/review --perf
-
-# Quick scan before committing
-/review --quick
-
-# Thorough review for important changes
-/review --thorough
-
-# Combined: thorough security review of PR
-/review --pr 456 --security --thorough
-```
-
-## Framework-Specific Checks
-
-### React/Next.js
-- Hook rules violations
-- Missing useEffect dependencies
-- Key prop issues in lists
-- Server/client component boundaries
-- Hydration mismatches
-
-### TypeScript
-- `any` type abuse
-- Missing type annotations on exports
-- Incorrect generic constraints
-- Type assertion overuse (`as`)
-- Null/undefined handling
-
-### Python
-- Mutable default arguments
-- Bare `except:` clauses
-- Resource leaks (files, connections)
-- SQL string formatting
-- Type hint inconsistencies
-
-### Vue
-- Reactivity gotchas
-- Missing v-key in v-for
-- Props mutation
-- Composition API anti-patterns
-
-### SQL/Database
-- SQL injection risks
-- N+1 query patterns
-- Missing indexes
-- Transaction handling
-- Migration safety
+---
 
 ## Integration
 
 | Command | Relationship |
 |---------|--------------|
 | `/explain` | Deep dive into flagged code |
-| `/test` | Generate tests for issues found |
+| `/testgen` | Generate tests for issues found |
 | `/save` | Persist review findings to session state |
-| Native `/plan` | Enter Claude Code's planning mode |
-
-## Workflow Examples
-
-### Pre-Commit Review
-```bash
-git add .
-/review
-# Fix issues...
-git commit -m "feat: add user auth"
-```
-
-### PR Review Workflow
-```bash
-/review --pr 123 --thorough
-# Creates TodoWrite tasks for critical issues
-# Fix issues...
-/save "Addressed review findings"
-```
-
-### Security Audit
-```bash
-/review src/ --security --thorough
-# Comprehensive security scan of entire directory
-```
-
-## Notes
-
-- Reviews are suggestions, not absolute rules
-- Context matters - some "issues" may be intentional
-- CRITICAL issues are auto-added to TodoWrite
-- Use `/save` to persist review tasks across sessions
-- Expert agents provide framework-specific insights
-- Respects project conventions from AGENTS.md

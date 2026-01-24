@@ -3,9 +3,9 @@
 ## Project Overview
 
 This is **claude-mods** - a collection of custom extensions for Claude Code:
-- **23 expert agents** for specialized domains (React, Python, Go, Rust, AWS, etc.)
-- **11 slash commands** for workflows (/sync, /save, /review, /atomise, etc.)
-- **30 skills** for CLI tool integration, patterns, and workflows
+- **22 expert agents** for specialized domains (React, Python, Go, Rust, AWS, etc.)
+- **3 commands** for session management (/sync, /save) and experimental features (/canvas)
+- **38 skills** for CLI tools, patterns, workflows, and development tasks
 - **Custom output styles** for response personality (e.g., Vesper)
 
 ## Installation
@@ -32,7 +32,7 @@ cd claude-mods && ./scripts/install.sh  # or .\scripts\install.ps1 on Windows
 | `skills/` | Skill definitions with SKILL.md |
 | `output-styles/` | Response personalities (vesper.md) |
 | `hooks/` | Hook examples (pre/post execution) |
-| `rules/` | Claude Code rules (4 files: cli-tools, thinking, commit-style, naming-conventions) |
+| `rules/` | Claude Code rules (5 files: cli-tools, thinking, commit-style, naming-conventions, skill-agent-updates) |
 | `tools/` | Modern CLI toolkit documentation |
 | `tests/` | Validation scripts + justfile |
 | `scripts/` | Install scripts |
@@ -61,6 +61,31 @@ On "INIT:" message at session start:
 **Web Fetching:** WebFetch → Jina (`r.jina.ai/`) → `firecrawl` → firecrawl-expert agent
 
 **Extended Thinking:** "think" < "think hard" < "think harder" < "ultrathink"
+
+**Tasks API:** Use `TaskCreate`, `TaskList`, `TaskUpdate`, `TaskGet` for task management. Tasks are session-scoped (don't persist). Use `/save` to capture and `/sync` to restore.
+
+**Session Cache:** v3.0 schema stores full task objects (subject, description, activeForm, status, blockedBy). Legacy v2.0 files auto-migrate on `/sync`.
+
+## Performance
+
+**MCP Tool Search:** When using multiple MCP servers, enable tool search to save context:
+
+```json
+// .claude/settings.local.json
+{
+  "env": {
+    "ENABLE_TOOL_SEARCH": "true"
+  }
+}
+```
+
+| Value | Behavior |
+|-------|----------|
+| `"auto"` | Enable when MCP tools > 10% context (default) |
+| `"true"` | Always enabled (recommended with many MCP servers) |
+| `"false"` | Disabled, all tools loaded upfront |
+
+Requires Sonnet 4+ or Opus 4+.
 
 ## Testing
 
