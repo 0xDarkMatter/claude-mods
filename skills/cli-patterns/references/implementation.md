@@ -298,6 +298,136 @@ class Client:
 
 ## Config & Token Storage
 
+### Recommended: OS Keyring with Fallbacks
+
+Use OS keyring for secure credential storage with fallbacks:
+
+```python
+# src/<package>/config.py
+import os
+from pathlib import Path
+
+import keyring
+from dotenv import load_dotenv
+
+# Load .env file if it exists
+load_dotenv()
+
+SERVICE_NAME = "mytool"
+TOKEN_KEY = "api_token"
+
+
+def get_token() -> str | None:
+    """
+    Get API token with priority:
+    1. Environment variable (CI/CD, testing)
+    2. OS keyring (secure storage)
+    3. .env file (local development fallback)
+    """
+    # 1. Environment variable (highest priority)
+    token = os.getenv("MYTOOL_API_TOKEN")
+    if token:
+        return token
+
+    # 2. OS keyring (Windows Credential Manager, macOS Keychain, Linux Secret Service)
+    try:
+        token = keyring.get_password(SERVICE_NAME, TOKEN_KEY)
+        if token:
+            return token
+    except Exception:
+        # Keyring not available (headless, CI, etc.)
+        pass
+
+    # 3. .env file fallback
+    # Already loaded by load_dotenv() above, so check env again
+    token = os.getenv("MYTOOL_API_TOKEN")
+    if token:
+        return token
+
+    return None
+
+
+def save_token(token: str) -> None:
+    """Save API token to OS keyring."""
+    try:
+        keyring.set_password(SERVICE_NAME, TOKEN_KEY, token)
+    except Exception as e:
+        # Keyring not available, fallback to .env file
+        _save_to_dotenv(token)
+        raise RuntimeWarning(
+            f"Keyring unavailable, saved to .env file instead: {e}"
+        )
+
+
+def clear_token() -> None:
+    """Remove stored token from all locations."""
+    # Clear from keyring
+    try:
+        keyring.delete_password(SERVICE_NAME, TOKEN_KEY)
+    except Exception:
+        pass
+
+    # Clear from .env file
+    env_file = Path.cwd() / ".env"
+    if env_file.exists():
+        lines = env_file.read_text().splitlines()
+        lines = [l for l in lines if not l.startswith("MYTOOL_API_TOKEN=")]
+        env_file.write_text("\n".join(lines))
+
+
+def get_token_source() -> str:
+    """Get where the token is stored: 'environment', 'keyring', 'dotenv', or 'none'."""
+    if os.getenv("MYTOOL_API_TOKEN"):
+        # Could be from env or .env, check if .env exists
+        env_file = Path.cwd() / ".env"
+        if env_file.exists() and "MYTOOL_API_TOKEN" in env_file.read_text():
+            return "dotenv"
+        return "environment"
+
+    try:
+        token = keyring.get_password(SERVICE_NAME, TOKEN_KEY)
+        if token:
+            return "keyring"
+    except Exception:
+        pass
+
+    return "none"
+
+
+def _save_to_dotenv(token: str) -> None:
+    """Fallback: save to .env file."""
+    env_file = Path.cwd() / ".env"
+
+    # Read existing content
+    if env_file.exists():
+        lines = env_file.read_text().splitlines()
+        # Remove existing MYTOOL_API_TOKEN lines
+        lines = [l for l in lines if not l.startswith("MYTOOL_API_TOKEN=")]
+    else:
+        lines = []
+
+    # Add new token
+    lines.append(f"MYTOOL_API_TOKEN={token}")
+
+    # Write back
+    env_file.write_text("\n".join(lines) + "\n")
+    env_file.chmod(0o600)  # Restrict permissions
+```
+
+**Dependencies:**
+
+```toml
+# pyproject.toml
+dependencies = [
+    "keyring>=24.0.0",
+    "python-dotenv>=1.0.0",
+]
+```
+
+### Simple: Config File Only
+
+For tools that don't need OS keyring:
+
 ```python
 # src/<package>/config.py
 import os

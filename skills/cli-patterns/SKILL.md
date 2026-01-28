@@ -332,6 +332,70 @@ Examples should show:
 
 ---
 
+## Authentication
+
+### Auth Commands
+
+Tools requiring authentication MUST implement:
+
+```
+<tool> auth login      # Interactive authentication
+<tool> auth status     # Check current state
+<tool> auth logout     # Clear credentials
+```
+
+### Credential Storage Priority
+
+**Recommended:** OS keyring with fallbacks for maximum security
+
+1. **Environment variable** (CI/CD, testing)
+   - `MYTOOL_API_TOKEN` or similar
+   - Highest priority, overrides all other sources
+
+2. **OS Keyring** (primary storage - secure)
+   - Windows: Credential Manager
+   - macOS: Keychain
+   - Linux: Secret Service (GNOME Keyring, KWallet)
+   - Encrypted at rest, per-user isolation
+
+3. **.env file** (development fallback)
+   - Plain text in current directory
+   - Convenient for local development
+   - Must be in `.gitignore`
+
+**Dependencies:**
+```toml
+dependencies = [
+    "keyring>=24.0.0",      # OS keyring access
+    "python-dotenv>=1.0.0", # .env file support
+]
+```
+
+**Simple alternative:** Just config file in `~/.config/<tool>/`
+- Good for tools without sensitive credentials
+- Or when OS keyring adds too much complexity
+
+See [references/implementation.md](references/implementation.md) for complete credential storage implementations.
+
+### Unauthenticated Behavior
+
+When auth is required but missing:
+
+```bash
+$ mytool items list
+Error: Not authenticated. Run: mytool auth login
+# exit code: 2
+```
+
+```bash
+$ mytool items list --json
+# stderr: Error: Not authenticated. Run: mytool auth login
+{"error": {"code": "AUTH_REQUIRED", "message": "Not authenticated. Run: mytool auth login"}}
+# exit code: 2
+```
+
+---
+
 ## Data Conventions
 
 ### Date Handling
