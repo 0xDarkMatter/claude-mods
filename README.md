@@ -136,7 +136,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 #### Pattern Reference Skills
 | Skill | Description |
 |-------|-------------|
-| [cli-patterns](skills/cli-patterns/) | Production CLI tool patterns - agentic workflows, stream separation, semantic exit codes |
+| [cli-patterns](skills/cli-patterns/) | Production CLI tool patterns - agentic workflows, stream separation, semantic exit codes, OS keyring auth |
 | [rest-patterns](skills/rest-patterns/) | HTTP methods, status codes, REST design patterns |
 | [tailwind-patterns](skills/tailwind-patterns/) | Tailwind utilities, responsive breakpoints, config |
 | [sql-patterns](skills/sql-patterns/) | CTEs, window functions, JOIN patterns, indexing |
