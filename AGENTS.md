@@ -50,6 +50,7 @@ On "INIT:" message at session start:
 |----------|-------------|
 | `rules/cli-tools.md` | Modern CLI tool preferences (rg, fd, eza, bat) |
 | `rules/thinking.md` | Extended thinking triggers (think → ultrathink) |
+| `skills/cli-patterns/` | Production CLI patterns - agentic workflows, OS keyring auth, stream separation |
 | `docs/WORKFLOWS.md` | 10 workflow patterns from Anthropic best practices |
 | `skills/tool-discovery/` | Find the right library for any task |
 | `hooks/README.md` | Pre/post execution hook examples |
