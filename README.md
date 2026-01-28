@@ -9,7 +9,7 @@ Claude Code is brilliant - until your session ends and it forgets everything. Yo
 
 **claude-mods fixes that.** It's a plugin that adds session persistence, expert-level domain knowledge, and the modern CLI tools that Claude should've been using all along. Save your work with `/save`, pick up where you left off with `/sync`, and let 22 specialized agents handle everything from React hooks to PostgreSQL optimization. No more "I don't have access to that" - just a smarter, more capable coding assistant that actually remembers.
 
-**22 agents. 40 skills. 3 commands. One install.**
+**22 agents. 41 skills. 3 commands. One install.**
 
 ## Why claude-mods?
 
@@ -136,6 +136,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 #### Pattern Reference Skills
 | Skill | Description |
 |-------|-------------|
+| [cli-patterns](skills/cli-patterns/) | Production CLI tool patterns - agentic workflows, stream separation, semantic exit codes |
 | [rest-patterns](skills/rest-patterns/) | HTTP methods, status codes, REST design patterns |
 | [tailwind-patterns](skills/tailwind-patterns/) | Tailwind utilities, responsive breakpoints, config |
 | [sql-patterns](skills/sql-patterns/) | CTEs, window functions, JOIN patterns, indexing |
