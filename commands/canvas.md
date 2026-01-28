@@ -68,12 +68,9 @@ Claude: I'll help you draft that email. Starting canvas mode...
 [Output:]
 Canvas initialized with email template.
 
-To see live preview, open Warp and:
+To see live preview:
 1. Press Cmd+Shift+D (or Ctrl+Shift+D on Windows) to split pane
-2. In the new pane, run: npx @claude-mods/canvas-tui --watch
-
-Or use the launch configuration:
-  warp://launch/claude-canvas
+2. In the new pane, run: canvas-tui --watch
 ```
 
 ### Writing Content
@@ -169,7 +166,7 @@ Write `.claude/canvas/meta.json`:
 Canvas ready with email template.
 
 Setup (one-time):
-  npm install -g @claude-mods/canvas-tui
+  cd claude-mods/canvas-tui && npm link
 
 To view canvas:
   1. Split your terminal (Cmd+Shift+D in Warp)
@@ -303,7 +300,7 @@ windows:
           panes:
             - is_focused: true
             - commands:
-                - exec: "npx @claude-mods/canvas-tui --watch"
+                - exec: "canvas-tui --watch"
 ```
 
 **Usage:**
@@ -314,13 +311,10 @@ windows:
 ### Canvas TUI Package
 
 ```bash
-# Install globally
-npm install -g @claude-mods/canvas-tui
+# Link globally from claude-mods repo
+cd claude-mods/canvas-tui && npm link
 
-# Or run via npx
-npx @claude-mods/canvas-tui --watch
-
-# Options
+# Then use from anywhere
 canvas-tui --watch              # Watch .claude/canvas/content.md
 canvas-tui --file ./draft.md    # Watch specific file
 canvas-tui --help               # Show help

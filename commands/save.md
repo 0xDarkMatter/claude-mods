@@ -1,5 +1,5 @@
 ---
-description: "Save session state - persist TodoWrite tasks, plan content, and git context. Complementary to /sync."
+description: "Save session state - persist tasks (via TaskList), plan content, and git context. Complementary to /sync."
 ---
 
 # Save - Session State Persistence
@@ -10,7 +10,7 @@ Persist your current session state for later restoration with `/sync`.
 
 $ARGUMENTS
 
-- No args: Save current state (TodoWrite, plan, git context)
+- No args: Save current state (tasks, plan, git context)
 - `"notes"`: Save with descriptive notes
 - `--archive`: Archive current plan to `PLAN-<date>.md`, then save fresh
 
@@ -18,7 +18,7 @@ $ARGUMENTS
 
 | Data | Source | Destination |
 |------|--------|-------------|
-| TodoWrite tasks | Current session | `.claude/session-cache.json` |
+| Tasks | TaskList API | `.claude/session-cache.json` |
 | Plan content | Conversation context | `docs/PLAN.md` |
 | Git context | `git status/log` | `.claude/session-cache.json` |
 | User notes | Command argument | `.claude/session-cache.json` |
@@ -26,12 +26,21 @@ $ARGUMENTS
 
 ## Execution
 
-### Step 1: Capture TodoWrite State
+### Step 1: Capture Task State
 
-Read current TodoWrite tasks and categorize:
-- Completed tasks
-- In-progress tasks
-- Pending tasks
+Use TaskList and TaskGet to capture full task data:
+
+```
+1. Call TaskList to get all task IDs and summaries
+2. For each task, call TaskGet to retrieve:
+   - subject (title)
+   - description (full details)
+   - status (pending, in_progress, completed)
+   - blockedBy (dependency IDs)
+3. Store as array with index-based dependency mapping
+```
+
+Note: Tasks do not persist across sessions automatically. This is why /save exists.
 
 ### Step 2: Capture Plan Content
 
@@ -57,13 +66,31 @@ git status --porcelain | wc -l
 **`.claude/session-cache.json`** (machine-readable):
 ```json
 {
-  "version": "2.0",
+  "version": "3.0",
   "timestamp": "2025-12-13T10:30:00Z",
-  "todos": {
-    "completed": ["Set up OAuth credentials"],
-    "in_progress": ["Fix callback URL handling"],
-    "pending": ["Add token refresh"]
-  },
+  "tasks": [
+    {
+      "subject": "Set up OAuth credentials",
+      "description": "Configure Google OAuth app in GCP console",
+      "activeForm": "Setting up OAuth credentials",
+      "status": "completed",
+      "blockedBy": []
+    },
+    {
+      "subject": "Fix callback URL handling",
+      "description": "OAuth callback URL mismatch in production config",
+      "activeForm": "Fixing callback URL handling",
+      "status": "in_progress",
+      "blockedBy": [0]
+    },
+    {
+      "subject": "Add token refresh",
+      "description": "Implement JWT refresh token rotation",
+      "activeForm": "Adding token refresh",
+      "status": "pending",
+      "blockedBy": [1]
+    }
+  ],
   "plan": {
     "file": "docs/PLAN.md",
     "goal": "Add user authentication with OAuth2",

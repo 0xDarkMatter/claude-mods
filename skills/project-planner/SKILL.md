@@ -1,7 +1,7 @@
 ---
 name: project-planner
 description: "Detects stale project plans and suggests session commands. Triggers on: sync plan, update plan, check status, plan is stale, track progress, project planning."
-allowed-tools: "Read Glob TodoWrite"
+allowed-tools: "Read Glob TaskList TaskCreate"
 ---
 
 # Project Planner Skill

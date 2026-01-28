@@ -37,9 +37,14 @@ model: sonnet|opus|haiku     # Recommended model
 
 ### Skills (`/skills`)
 
+All skills follow the official Anthropic pattern with bundled resources:
+
 ```
-{topic}-patterns/skill.md    # Pattern collections
-{tool-name}/skill.md         # Tool-specific knowledge
+{skill-name}/
+├── SKILL.md              # Core workflow
+├── scripts/              # Executable code (optional)
+├── references/           # Documentation (optional)
+└── assets/               # Output files (optional)
 ```
 
 | Pattern | Example | Notes |
@@ -61,6 +66,11 @@ depends-on: [<skill-names>]
 related-skills: [<skill-names>]
 ---
 ```
+
+**Directory Structure:**
+- All skills MUST include `scripts/`, `references/`, and `assets/` directories
+- Directories may be empty if not currently used
+- Ensures consistency and future extensibility
 
 ### Commands (`/commands`)
 

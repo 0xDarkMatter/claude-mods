@@ -8,14 +8,19 @@ Works with any terminal that supports split panes: **Warp**, **tmux**, **iTerm2*
 
 ## Installation
 
+### From claude-mods repo (local)
+
 ```bash
-npm install -g @claude-mods/canvas-tui
+cd claude-mods/canvas-tui
+npm link
 ```
 
-Or run directly with npx:
+Then use `canvas-tui` from anywhere on your machine.
+
+### From npm (coming soon)
 
 ```bash
-npx @claude-mods/canvas-tui --watch
+npm install -g @claude-mods/canvas-tui
 ```
 
 ## Usage

@@ -65,9 +65,9 @@ dependencies were specified. Now handles arrays properly.
 ### Breaking Change
 
 ```
-refactor(commands): Rename /delegate to /conclave
+refactor(commands): Rename /todos to /tasks
 
-BREAKING CHANGE: /delegate command no longer exists. Use /conclave.
+BREAKING CHANGE: /todos command no longer exists. Use /tasks.
 ```
 
 ### Documentation Update
