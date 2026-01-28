@@ -9,7 +9,7 @@
 |----------|-------|-------|
 | 🤖 **Agents** | 21 | 7,552 |
 | ⚡ **Skills** | 16 | 3,850 |
-| 🔧 **Commands** | 10 | 3,776 |
+| 🔧 **Commands** | 9 | 3,720 |
 | 📏 **Rules** | 1 | 113 |
 | 🧩 **Templates** | 2 | — |
 
@@ -80,15 +80,14 @@
 | Command | Purpose |
 |---------|---------|
 | 🔧 `/sync` | Session bootstrap, restore state, show status |
-| 🔧 `/save` | Save session state (TodoWrite, plan, git context) |
+| 🔧 `/save` | Save session state (tasks, plan, git context) |
 | 🔧 `/review` | Code review staged changes |
 | 🔧 `/testgen` | Generate tests with expert routing |
 | 🔧 `/explain` | Deep code/concept explanation |
 | 🔧 `/spawn` | Generate expert agents |
-| 🔧 `/conclave` | Summon external LLMs (Gemini, OpenAI, Perplexity) for consensus |
 | 🔧 `/atomise` | Atom of Thoughts reasoning with confidence tracking |
-| 🔧 `/pulse` | Claude Code ecosystem news digest |
 | 🔧 `/setperms` | Set tool permissions |
+| 🔧 `/introspect` | Analyze previous session logs |
 
 ---
 

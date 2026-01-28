@@ -9,7 +9,7 @@ Claude Code is brilliant - until your session ends and it forgets everything. Yo
 
 **claude-mods fixes that.** It's a plugin that adds session persistence, expert-level domain knowledge, and the modern CLI tools that Claude should've been using all along. Save your work with `/save`, pick up where you left off with `/sync`, and let 22 specialized agents handle everything from React hooks to PostgreSQL optimization. No more "I don't have access to that" - just a smarter, more capable coding assistant that actually remembers.
 
-**22 agents. 38 skills. 3 commands. One install.**
+**22 agents. 40 skills. 3 commands. One install.**
 
 ## Why claude-mods?
 
@@ -100,6 +100,27 @@ Install modern CLI tools (fd, rg, bat, etc.) for better performance:
 ./tools/install-unix.sh
 ```
 
+## Skill Architecture
+
+All skills follow [Anthropic's official pattern](https://github.com/anthropics/skills) with consistent structure:
+
+```
+skill-name/
+├── SKILL.md              # Core workflow (< 500 lines)
+├── scripts/              # Executable code (optional)
+├── references/           # Documentation loaded as needed (optional)
+└── assets/               # Output templates/files (optional)
+```
+
+**Progressive Loading:**
+1. Metadata (name + description) - Always in context (~100 words)
+2. SKILL.md body - Loaded when skill triggers (<5k words)
+3. Bundled resources - Loaded only when Claude needs them
+
+All skills have the complete directory structure, even if `scripts/`, `references/`, or `assets/` are currently empty. This ensures consistency and makes it easy to add bundled resources later.
+
+See [skill-creator](skills/skill-creator/) for the complete guide.
+
 ## What's Included
 
 ### Commands
@@ -140,10 +161,12 @@ Install modern CLI tools (fd, rg, bat, etc.) for better performance:
 | [project-planner](skills/project-planner/) | Track stale plans, suggest session commands |
 | [python-env](skills/python-env/) | Fast Python environment management with uv |
 | [task-runner](skills/task-runner/) | Run project commands with just |
+| [screenshot](skills/screenshot/) | Find and display recent screenshots from common screenshot directories |
 
 #### Development Skills
 | Skill | Description |
 |-------|-------------|
+| [skill-creator](skills/skill-creator/) | Guide for creating effective skills with specialized knowledge, workflows, and tool integrations. |
 | [explain](skills/explain/) | Deep explanation of complex code, files, or concepts. Routes to expert agents. |
 | [spawn](skills/spawn/) | Generate PhD-level expert agent prompts for Claude Code. |
 | [atomise](skills/atomise/) | Atom of Thoughts reasoning - decompose problems into atomic units. |

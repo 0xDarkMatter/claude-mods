@@ -12,7 +12,7 @@ Usage:
     perplexity --json "query" > output.json
 
 Environment:
-    PERPLEXITY_API_KEY - API key (or set in ~/.claude/conclave.yaml)
+    PERPLEXITY_API_KEY - API key (required)
     PERPLEXITY_VERBOSE - Show token usage when set
 """
 import argparse
@@ -34,42 +34,8 @@ DEFAULT_MODEL = "sonar-pro"
 
 
 def get_api_key():
-    """Get API key from env or config file."""
-    import re
-
-    # Try environment variable first
-    key = os.getenv("PERPLEXITY_API_KEY")
-    if key:
-        return key
-
-    # Try ~/.claude/conclave.yaml
-    config_path = os.path.expanduser("~/.claude/conclave.yaml")
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, encoding="utf-8") as f:
-                content = f.read()
-            # Look for perplexity key in api_keys section
-            # Parse the api_keys block and find perplexity
-            in_api_keys = False
-            for line in content.split('\n'):
-                stripped = line.strip()
-                # Detect api_keys section
-                if stripped.startswith('api_keys:'):
-                    in_api_keys = True
-                    continue
-                # Exit section on non-indented line (new section)
-                if in_api_keys and stripped and not line.startswith(' ') and not line.startswith('\t'):
-                    if not stripped.startswith('#'):
-                        in_api_keys = False
-                # Look for perplexity key within api_keys section
-                if in_api_keys and 'perplexity:' in stripped.lower():
-                    match = re.search(r'perplexity:\s*["\']?([^"\'\n#]+)', stripped, re.IGNORECASE)
-                    if match:
-                        return match.group(1).strip()
-        except Exception:
-            pass
-
-    return None
+    """Get API key from environment variable."""
+    return os.getenv("PERPLEXITY_API_KEY")
 
 
 def query_perplexity(prompt, model=DEFAULT_MODEL, system_prompt=None, recency=None, domains=None):
@@ -79,7 +45,7 @@ def query_perplexity(prompt, model=DEFAULT_MODEL, system_prompt=None, recency=No
         sys.exit(
             "Error: PERPLEXITY_API_KEY not set.\n"
             "Set via: export PERPLEXITY_API_KEY='your-key'\n"
-            "Or add to ~/.claude/conclave.yaml under api_keys:"
+            "Get key from: https://www.perplexity.ai/settings/api"
         )
 
     messages = []
@@ -196,7 +162,7 @@ Examples:
   perplexity --domains "github.com,docs.python.org" "Python asyncio best practices"
 
 Environment:
-  PERPLEXITY_API_KEY  API key (required, or set in ~/.claude/conclave.yaml)
+  PERPLEXITY_API_KEY  API key (required)
   PERPLEXITY_VERBOSE  Show token usage when set
 """,
     )

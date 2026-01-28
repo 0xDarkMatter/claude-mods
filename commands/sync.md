@@ -25,7 +25,7 @@ $ARGUMENTS
     |      |
     |      +- Read project context (README, AGENTS, CLAUDE)
     |      +- Read saved state (.claude/session-cache.json)
-    |      +- Restore TodoWrite tasks
+    |      +- Restore tasks via TaskCreate
     |      +- Read plan (docs/PLAN.md)
     |      +- Show unified status
     |      +- Suggest next action
@@ -76,9 +76,23 @@ Read these files simultaneously (skip any that don't exist):
 ### Step 2: Restore Session State
 
 If `.claude/session-cache.json` exists:
-1. Parse saved TodoWrite tasks
-2. Restore to TodoWrite (completed, in_progress, pending)
-3. Note time since last save
+
+```
+1. Parse saved tasks array from JSON
+2. For each task, call TaskCreate with:
+   - subject
+   - description
+   - activeForm
+3. Build ID mapping: savedIndex → newTaskId
+4. For each task with blockedBy, call TaskUpdate:
+   - Map saved indices to new task IDs
+   - Set blockedBy relationships
+5. For each task, call TaskUpdate to set status:
+   - "completed" | "in_progress" | "pending"
+6. Note time since last save
+```
+
+Note: Tasks do not persist across sessions automatically, which is why this restore step is needed.
 
 ### Step 3: Parallel Globs
 
@@ -374,6 +388,30 @@ Warning: Saved state is 12 days old
 Options:
   1. Restore anyway (tasks may still be relevant)
   2. Start fresh: /save --archive
+```
+
+### Legacy v2.0 schema (todos object)
+```
+Info: Found v2.0 session-cache.json (legacy format)
+
+Converting todos to tasks:
+  - 3 completed → tasks with status: "completed"
+  - 1 in_progress → tasks with status: "in_progress"
+  - 2 pending → tasks with status: "pending"
+
+Note: Legacy format lacks descriptions and dependencies.
+Consider running /save to upgrade to v3.0 schema.
+```
+
+**Migration logic:**
+```
+if version == "2.0" and "todos" in json:
+    for task in todos.completed:
+        TaskCreate(subject=task, description="(migrated from v2.0)", status="completed")
+    for task in todos.in_progress:
+        TaskCreate(subject=task, description="(migrated from v2.0)", status="in_progress")
+    for task in todos.pending:
+        TaskCreate(subject=task, description="(migrated from v2.0)", status="pending")
 ```
 
 ### Branch changed since save

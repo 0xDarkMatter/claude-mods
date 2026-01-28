@@ -42,5 +42,8 @@
     "deny": [],
     "ask": []
   },
-  "hooks": {}
+  "hooks": {},
+  "env": {
+    "ENABLE_TOOL_SEARCH": "true"
+  }
 }
