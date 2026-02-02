@@ -11,6 +11,17 @@ Claude Code is brilliant - until your session ends and it forgets everything. Yo
 
 **22 agents. 41 skills. 3 commands. One install.**
 
+## Recent Updates
+
+**v1.5.2** (February 2026)
+- 🆕 Added `cli-patterns`, `screenshot`, `skill-creator` skills (+3 skills, now 41 total)
+- 📚 Enhanced skill-creator with [official Anthropic docs](https://github.com/anthropics/skills) and best practices (+554 lines)
+- 🐛 Fixed `/sync` filesystem scanning issue on Windows (Git Bash compatibility)
+- 🔧 Migrated heavyweight commands to on-demand skills (review, testgen, explain, spawn, atomise, setperms, introspect)
+- 🧹 Cleaned up stale documentation and improved plugin metadata
+
+[View full changelog →](https://github.com/0xDarkMatter/claude-mods/commits/main)
+
 ## Why claude-mods?
 
 Claude Code is powerful out of the box, but it has gaps. This toolkit fills them:
