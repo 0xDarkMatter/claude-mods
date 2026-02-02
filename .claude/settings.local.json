@@ -1,4 +1,7 @@
 {
+  "env": {
+    "ENABLE_TOOL_SEARCH": "true"
+  },
   "permissions": {
     "allow": [
       "WebSearch",
@@ -137,7 +140,6 @@
       "Bash(choco:*)",
       "Bash(scoop:*)",
       "Bash(winget:*)",
-      "Bash(\"E:\\\\Downloads\\\\[TEMPLATE] example-2 Framework - Concierge AI.md\")",
       "Bash(powershell -ExecutionPolicy Bypass -File \"./scripts/install.ps1\")"
     ],
     "deny": [],
@@ -151,8 +153,5 @@
     ]
   },
   "hooks": {},
-  "outputStyle": "Vesper",
-  "env": {
-    "ENABLE_TOOL_SEARCH": "true"
-  }
+  "outputStyle": "Vesper"
 }
