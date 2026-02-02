@@ -6,6 +6,11 @@ description: "Session bootstrap - read project context, restore saved state, sho
 
 Read yourself into this project and restore any saved session state. Fast, direct file reads.
 
+**Environment Requirements:**
+- All shell commands use **Git Bash syntax** (works on Linux/macOS/Windows)
+- NEVER use Windows cmd syntax (`find /c`, `2>nul`) - causes filesystem scanning on Git Bash
+- Use `wc -l` for counting, `2>/dev/null` for error suppression
+
 ## Arguments
 
 $ARGUMENTS
@@ -107,11 +112,25 @@ agents/*.md OR .claude/agents/*.md
 
 ### Step 4: Git State
 
+**CRITICAL:** Use Git Bash syntax ONLY. Never use Windows cmd syntax (`find /c`, `2>nul`) - these will cause filesystem scanning.
+
+Run these commands to get git state:
+
 ```bash
+# Current branch
 git branch --show-current 2>/dev/null
+
+# Count uncommitted files - MUST use wc -l (works in Git Bash on Windows)
 git status --porcelain 2>/dev/null | wc -l
+
+# Latest commit
 git log -1 --format="%h %s" 2>/dev/null
 ```
+
+**Why this matters on Windows:**
+- `find /c` in Git Bash = Unix find searching C: drive (WRONG)
+- `wc -l` in Git Bash = count lines (CORRECT)
+- Git Bash understands `2>/dev/null` but NOT `2>nul`
 
 ### Step 5: Output
 

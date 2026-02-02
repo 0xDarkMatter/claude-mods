@@ -31,3 +31,6 @@ Thumbs.db
 *_scraped.json
 *_scraped.csv
 .grok/
+
+# Test artifacts
+tests/*/output/
