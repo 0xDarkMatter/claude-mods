@@ -3,11 +3,13 @@
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-blueviolet?logo=anthropic)](https://docs.anthropic.com/en/docs/claude-code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> *What if Claude Code remembered what it was doing yesterday?*
+> *A comprehensive extension toolkit that transforms Claude Code into a specialized development powerhouse.*
 
-Claude Code is brilliant - until your session ends and it forgets everything. Your tasks vanish. Your carefully-built context evaporates. You're back to explaining the codebase from scratch.
+**claude-mods** is a production-ready plugin that extends Claude Code with 22 expert agents, 41 specialized skills, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
 
-**claude-mods fixes that.** It's a plugin that adds session persistence, expert-level domain knowledge, and the modern CLI tools that Claude should've been using all along. Save your work with `/save`, pick up where you left off with `/sync`, and let 22 specialized agents handle everything from React hooks to PostgreSQL optimization. No more "I don't have access to that" - just a smarter, more capable coding assistant that actually remembers.
+Built on [Anthropic's Agent Skills standard](https://github.com/anthropics/skills), claude-mods fills critical gaps in Claude Code's capabilities: persistent session state that survives across machines, on-demand expert knowledge for specialized domains, token-efficient modern CLI tools (10-100x faster than traditional alternatives), and proven workflow patterns for TDD, code review, and feature development. The toolkit implements Anthropic's [recommended patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), ensuring your development context never vanishes when sessions end.
+
+From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
 
 **22 agents. 41 skills. 3 commands. One install.**
 
