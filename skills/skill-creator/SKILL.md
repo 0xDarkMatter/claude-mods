@@ -15,6 +15,13 @@ specialized knowledge, workflows, and tools. Think of them as "onboarding guides
 domains or tasks—they transform Claude from a general-purpose agent into a specialized agent
 equipped with procedural knowledge that no model can fully possess.
 
+**Official Anthropic Resources:**
+- [Agent Skills GitHub Repository](https://github.com/anthropics/skills) - Official examples and specification
+- [Creating Custom Skills](https://support.claude.com/en/articles/12512198-creating-custom-skills) - Step-by-step guide
+- [What are Skills?](https://support.claude.com/en/articles/12512176-what-are-skills) - Overview and concepts
+- [The Complete Guide to Building Skills for Claude](https://resources.anthropic.com/hubfs/The-Complete-Guide-to-Building-Skill-for-Claude.pdf) - Comprehensive PDF guide
+- [Agent Skills Standard](http://agentskills.io) - Open standard specification
+
 ### What Skills Provide
 
 1. Specialized workflows - Multi-step procedures for specific domains
@@ -284,10 +291,16 @@ When editing the (newly-generated or existing) skill, remember that the skill is
 
 Consult these helpful guides based on your skill's needs:
 
-- **Multi-step processes**: See references/workflows.md for sequential workflows and conditional logic
-- **Specific output formats or quality standards**: See references/output-patterns.md for template and example patterns
+- **Multi-step processes**: See [references/workflows.md](references/workflows.md) for sequential workflows, conditional logic, and subagent delegation patterns
+- **Specific output formats or quality standards**: See [references/output-patterns.md](references/output-patterns.md) for template and example patterns
+- **Official examples**: Browse [Anthropic's skills repository](https://github.com/anthropics/skills/tree/main/skills) for production-ready examples
 
 These files contain established best practices for effective skill design.
+
+**Pro tips for complex tasks:**
+- **Use subagents** - Append "use subagents" to requests needing heavy computation or parallel exploration
+- **Keep context clean** - Offload individual subtasks to subagents to prevent context window pollution
+- **Visualize complexity** - Ask Claude to draw ASCII diagrams of new protocols and codebases for better understanding
 
 #### Start with Reusable Skill Contents
 
@@ -319,7 +332,9 @@ Write instructions for using the skill and its bundled resources.
 
 ### Step 5: Packaging a Skill
 
-Once development of the skill is complete, it must be packaged into a distributable .skill file that gets shared with the user. The packaging process automatically validates the skill first to ensure it meets all requirements:
+Once development of the skill is complete, it must be packaged into a distributable .skill file that gets shared with the user. Skills follow the [Agent Skills open standard](http://agentskills.io) for portability across AI platforms.
+
+The packaging process automatically validates the skill first to ensure it meets all requirements:
 
 ```bash
 scripts/package_skill.py <path/to/skill-folder>
