@@ -1,7 +1,7 @@
 {
   "name": "claude-mods",
-  "version": "1.5.1",
-  "description": "Custom commands, skills, and agents for Claude Code - session continuity, terminal canvas, 22 expert agents, 38 skills, 3 commands, 5 rules, modern CLI tools",
+  "version": "1.5.2",
+  "description": "Custom commands, skills, and agents for Claude Code - session continuity, terminal canvas, 22 expert agents, 41 skills, 3 commands, 4 rules, modern CLI tools",
   "author": "0xDarkMatter",
   "repository": "https://github.com/0xDarkMatter/claude-mods",
   "license": "MIT",
@@ -52,6 +52,7 @@
       "skills/claude-code-headless",
       "skills/claude-code-hooks",
       "skills/claude-code-templates",
+      "skills/cli-patterns",
       "skills/code-stats",
       "skills/container-orchestration",
       "skills/data-processing",
@@ -74,8 +75,10 @@
       "skills/python-typing-patterns",
       "skills/rest-patterns",
       "skills/review",
+      "skills/screenshot",
       "skills/security-patterns",
       "skills/setperms",
+      "skills/skill-creator",
       "skills/spawn",
       "skills/sql-patterns",
       "skills/sqlite-ops",
@@ -90,8 +93,7 @@
       "rules/cli-tools.md",
       "rules/commit-style.md",
       "rules/naming-conventions.md",
-      "rules/skill-agent-updates.md",
-      "rules/thinking.md"
+      "rules/skill-agent-updates.md"
     ],
     "output-styles": [
       "output-styles/vesper.md"
