@@ -21,7 +21,7 @@ From Python async patterns to Rust ownership models, from AWS Fargate deployment
   - 4 categories: Duplication, Security, Complexity, Dead Code
   - Session-end workflow: catch issues while context is fresh
   - Language-smart: Python, JS/TS, Go, Rust, SQL with AST-based detection
-  - [Boris Cherny's recommendation](https://x.com/bcherny/status/1884282652743635424): "Build a /techdebt slash command and run it at the end of every session"
+  - [Boris Cherny's recommendation](https://x.com/bcherny/status/2017742741636321619): "Build a /techdebt slash command and run it at the end of every session"
 
 **v1.5.2** (February 2026)
 - 🆕 Added `cli-patterns`, `screenshot`, `skill-creator` skills (+3 skills, now 42 total)
