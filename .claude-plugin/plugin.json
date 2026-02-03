@@ -1,7 +1,7 @@
 {
   "name": "claude-mods",
-  "version": "1.5.2",
-  "description": "Custom commands, skills, and agents for Claude Code - session continuity, terminal canvas, 22 expert agents, 41 skills, 3 commands, 4 rules, modern CLI tools",
+  "version": "1.6.0",
+  "description": "Custom commands, skills, and agents for Claude Code - session continuity, terminal canvas, 22 expert agents, 42 skills, 3 commands, 4 rules, modern CLI tools",
   "author": "0xDarkMatter",
   "repository": "https://github.com/0xDarkMatter/claude-mods",
   "license": "MIT",
@@ -85,6 +85,7 @@
       "skills/structural-search",
       "skills/tailwind-patterns",
       "skills/task-runner",
+      "skills/techdebt",
       "skills/testing-patterns",
       "skills/testgen",
       "skills/tool-discovery"

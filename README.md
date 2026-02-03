@@ -5,22 +5,28 @@
 
 > *A comprehensive extension toolkit that transforms Claude Code into a specialized development powerhouse.*
 
-**claude-mods** is a production-ready plugin that extends Claude Code with 22 expert agents, 41 specialized skills, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
+**claude-mods** is a production-ready plugin that extends Claude Code with 22 expert agents, 42 specialized skills, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
 
 Built on [Anthropic's Agent Skills standard](https://github.com/anthropics/skills), claude-mods fills critical gaps in Claude Code's capabilities: persistent session state that survives across machines, on-demand expert knowledge for specialized domains, token-efficient modern CLI tools (10-100x faster than traditional alternatives), and proven workflow patterns for TDD, code review, and feature development. The toolkit implements Anthropic's [recommended patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), ensuring your development context never vanishes when sessions end.
 
 From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
 
-**22 agents. 41 skills. 3 commands. One install.**
+**22 agents. 42 skills. 3 commands. One install.**
 
 ## Recent Updates
 
+**v1.6.0** (February 2026)
+- 🚀 **NEW: Tech Debt Scanner** - Automated detection using parallel subagents (1,520 lines)
+  - Always-parallel architecture for fast analysis (2-15s depending on scope)
+  - 4 categories: Duplication, Security, Complexity, Dead Code
+  - Session-end workflow: catch issues while context is fresh
+  - Language-smart: Python, JS/TS, Go, Rust, SQL with AST-based detection
+  - [Boris Cherny's recommendation](https://x.com/bcherny/status/1884282652743635424): "Build a /techdebt slash command and run it at the end of every session"
+
 **v1.5.2** (February 2026)
-- 🆕 Added `cli-patterns`, `screenshot`, `skill-creator` skills (+3 skills, now 41 total)
+- 🆕 Added `cli-patterns`, `screenshot`, `skill-creator` skills (+3 skills, now 42 total)
 - 📚 Enhanced skill-creator with [official Anthropic docs](https://github.com/anthropics/skills) and best practices (+554 lines)
 - 🐛 Fixed `/sync` filesystem scanning issue on Windows (Git Bash compatibility)
-- 🔧 Migrated heavyweight commands to on-demand skills (review, testgen, explain, spawn, atomise, setperms, introspect)
-- 🧹 Cleaned up stale documentation and improved plugin metadata
 
 [View full changelog →](https://github.com/0xDarkMatter/claude-mods/commits/main)
 
@@ -55,7 +61,7 @@ claude-mods/
 ├── .claude-plugin/     # Plugin metadata
 ├── agents/             # Expert subagents (22)
 ├── commands/           # Slash commands (3)
-├── skills/             # Custom skills (41)
+├── skills/             # Custom skills (42)
 ├── output-styles/      # Response personalities
 ├── hooks/              # Hook examples & docs
 ├── rules/              # Claude Code rules
