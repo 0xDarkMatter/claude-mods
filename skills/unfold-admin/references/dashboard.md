@@ -326,3 +326,70 @@ class MyAdmin(ModelAdmin):
 ```
 
 `InfinitePaginator` provides infinite scroll instead of page numbers.
+
+## Component Data Formats
+
+### Cohort Data
+
+```python
+cohort_data = {
+    "headers": [
+        {"title": "Week 1", "subtitle": "Jan 1-7"},
+        {"title": "Week 2", "subtitle": "Jan 8-14"},
+    ],
+    "rows": [
+        {
+            "header": {"title": "Cohort A", "subtitle": "100 users"},
+            "cols": [
+                {"value": "85%", "subtitle": "85 users"},
+                {"value": "72%", "subtitle": "72 users"},
+            ],
+        },
+    ],
+}
+```
+
+### Tracker Data
+
+```python
+tracker_data = [
+    {"color": "bg-primary-400 dark:bg-primary-700", "tooltip": "Jan 1: 5 events"},
+    {"color": "bg-primary-200 dark:bg-primary-900", "tooltip": "Jan 2: 2 events"},
+    {"color": "bg-danger-400 dark:bg-danger-700", "tooltip": "Jan 3: 0 events"},
+]
+```
+
+### Progress Data (Multi-Segment)
+
+```python
+# Single bar
+progress_single = {
+    "title": "Completion",
+    "description": "57.5%",
+    "value": 57.5,
+}
+
+# Multi-segment bar
+progress_multi = {
+    "title": "Distribution",
+    "description": "Total 100%",
+    "items": [
+        {"title": "Active", "value": 60.0, "progress-class": "bg-primary-500"},
+        {"title": "Pending", "value": 25.0, "progress-class": "bg-warning-500"},
+        {"title": "Inactive", "value": 15.0, "progress-class": "bg-danger-500"},
+    ],
+}
+```
+
+### Table Data
+
+```python
+table_data = {
+    "headers": ["Name", "Status", "Amount"],
+    "rows": [
+        ["John", "Active", "$500"],
+        ["Jane", "Inactive", "$300"],
+    ],
+    "collapsible": True,  # optional
+}
+```

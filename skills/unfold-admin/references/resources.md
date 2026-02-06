@@ -59,7 +59,7 @@ Unfold provides styled wrappers for these packages. Use the multiple inheritance
 | django-money | `unfold.widgets` | `UnfoldAdminMoneyWidget` |
 | djangoql | Compatible | Mix `DjangoQLSearchMixin` with `ModelAdmin` |
 | django-json-widget | Compatible | Use Unfold form overrides |
-| django-crispy-forms | Compatible | Unfold template pack available |
+| django-crispy-forms | Compatible | Unfold template pack `unfold_crispy` |
 
 ### django-import-export Setup
 
@@ -126,6 +126,27 @@ class SolarScheduleAdmin(ModelAdmin):
 class ClockedScheduleAdmin(BaseClockedScheduleAdmin, ModelAdmin):
     pass
 ```
+
+### django-crispy-forms Setup
+
+```python
+# settings.py
+CRISPY_TEMPLATE_PACK = "unfold_crispy"
+CRISPY_ALLOWED_TEMPLATE_PACKS = ["unfold_crispy"]
+```
+
+In templates: `{% crispy form "unfold_crispy" %}`. For formsets, use `"unfold_crispy/layout/table_inline_formset.html"` as the FormHelper template.
+
+### django-constance Setup
+
+```python
+INSTALLED_APPS = [
+    "unfold.contrib.constance",
+    "constance",
+]
+```
+
+Use `UNFOLD_CONSTANCE_ADDITIONAL_FIELDS` from `unfold.contrib.constance.settings` to define custom field widgets for constance config values.
 
 ### Multiple Inheritance Pattern
 

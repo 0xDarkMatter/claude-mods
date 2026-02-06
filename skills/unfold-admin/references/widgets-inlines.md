@@ -97,6 +97,19 @@ All from `unfold.widgets`:
 | `UnfoldAdminMoneyWidget` | `django-money` |
 | `UnfoldAdminLocationWidget` | `django-location-field` |
 
+### Autocomplete Field Classes
+
+For custom autocomplete views (beyond Django's built-in `autocomplete_fields`):
+
+```python
+from unfold.fields import (
+    UnfoldAdminAutocompleteModelChoiceField,        # single select
+    UnfoldAdminMultipleAutocompleteModelChoiceField, # multi select
+)
+```
+
+These are form **fields** (not widgets) - use them in custom forms when you need autocomplete with a custom `BaseAutocompleteView` backend.
+
 ## Automatic Widget Mapping
 
 Unfold automatically applies styled widgets to all standard Django fields. You do NOT need `formfield_overrides` for basic field types - they're handled by default. This mapping shows what Unfold applies behind the scenes:
@@ -297,6 +310,19 @@ class NoteInline(StackedInline):
 class StandingInline(StackedInline):
     model = Standing
     hide_title = True
+```
+
+### Custom Inline Title
+
+Override the default inline title by adding `get_inline_title()` to the model:
+
+```python
+# models.py
+class RelatedModel(models.Model):
+    name = models.CharField(max_length=100)
+
+    def get_inline_title(self):
+        return f"Custom: {self.name}"
 ```
 
 ### Combined Example
