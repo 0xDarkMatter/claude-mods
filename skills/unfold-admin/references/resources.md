@@ -21,7 +21,10 @@
 | Formula Demo App | https://github.com/unfoldadmin/formula |
 | Turbo Boilerplate (Django + Next.js) | https://github.com/unfoldadmin/turbo |
 | Material Symbols (Icons) | https://fonts.google.com/icons |
-| Discord Community | Referenced on unfoldadmin.com |
+| Discord Community | https://discord.gg/9sQj9MEbNz |
+| Blog | https://unfoldadmin.com/blog/ |
+| Features Overview | https://unfoldadmin.com/features/ |
+| Django Packages | https://djangopackages.org/packages/p/django-unfold/ |
 
 ### Formula Demo App
 
@@ -421,11 +424,36 @@ UNFOLD = {
 
 ## Community and Learning
 
-### Tutorials and Articles
+### Official Blog Posts
 
-- **Official docs**: https://unfoldadmin.com/docs/ - comprehensive, covers all features
+| Title | Topic |
+|-------|-------|
+| Making Django admin models readonly with custom mixins | Readonly patterns |
+| Migrating existing Django admin interface to Unfold | Migration guide |
+| Creating modal windows with Alpine.js and HTMX | UI techniques |
+| Turn Django admin into full-fledged dashboard with Unfold | Dashboard setup |
+| Dark mode toggle in Django with TailwindCSS and Alpine.js | Theming |
+| Configuring custom AWS S3 storage backends in django-storages | Storage |
+| Customizing and loading your own Django admin site | Custom admin sites |
+| Setting up a new Django project with Poetry and Docker | Project setup |
+
+All at https://unfoldadmin.com/blog/
+
+### Community Tutorials
+
+| Title | Author | URL |
+|-------|--------|-----|
+| Django Unfold Tutorial: A Better Admin Panel | Bastiaan Rudolf | https://medium.com/@bastiaanrudolf/django-unfold-tutorial-a-better-admin-panel-e0b36e03e653 |
+| Getting Started with Django Unfold | Mehedi Khan | https://medium.com/django-unleashed/getting-started-with-django-unfold-a-modern-ui-for-django-admin-aeb8be63bd0a |
+| Simplify Your Django Admin with django-unfold | eshat002 | https://dev.to/eshat002/simplify-your-django-admin-with-django-unfold-5g16 |
+| Custom Django Unfold Admin Dashboard | thalida | https://www.thalida.com/guides/post/custom-django-unfold-admin-dashboard |
+
+### Other References
+
 - **Formula demo walkthrough**: Study `formula/admin.py` for real-world patterns
 - **GitHub Discussions**: https://github.com/unfoldadmin/django-unfold/discussions
+- **Django Admin Theme Roundup**: https://www.djangoproject.com/weblog/2025/apr/18/admin-theme-roundup/
+- **RTL Support**: https://pypi.org/project/django-unfold-rtl/ (community fork)
 
 ### Tips from the Community
 
@@ -444,3 +472,7 @@ UNFOLD = {
 13. **Action `url_path` must be unique** per admin class - duplicate paths cause silent routing failures
 14. **`readonly_preprocess_fields`** accepts callables like `{"field": "html"}` to render HTML in readonly fields, or custom functions
 15. **`add_fieldsets`** attribute works like Django's UserAdmin - define separate fieldsets for the add form vs. the change form
+16. **Fieldset tabs + `gettext_lazy`**: Tab CSS class detection can break when combined with lazy translation - test tab switching after adding i18n
+17. **Dataset pagination resets focus**: Navigating paginated datasets inside tabs may jump back to the General tab
+18. **`warn_unsaved_form` + `ordering_field`**: These conflict in TabularInline - unsaved warning fires on drag-to-reorder
+19. **Releases every 2-3 weeks** - pin your version in production; Unfold moves fast and breaking changes do occur between minor versions
