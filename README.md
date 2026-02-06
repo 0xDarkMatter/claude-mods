@@ -364,13 +364,14 @@ Session 2:
 
 **Use both together:** `claude --resume` for conversation context, `/sync` for task state.
 
-### Session Cache Schema (v3.0)
+### Session Cache Schema (v3.1)
 
 The `.claude/session-cache.json` file stores full task objects:
 
 ```json
 {
-  "version": "3.0",
+  "version": "3.1",
+  "session_id": "977c26c9-60fa-4afc-a628-a68f8043b1ab",
   "tasks": [
     {
       "subject": "Task title",
@@ -380,13 +381,14 @@ The `.claude/session-cache.json` file stores full task objects:
       "blockedBy": [0, 1]
     }
   ],
-  "plan": { "goal": "...", "current_step": "...", "progress_percent": 40 },
-  "git": { "branch": "main", "last_commit": "abc123" },
+  "plan": { "file": "docs/PLAN.md", "goal": "...", "current_step": "...", "progress_percent": 40 },
+  "git": { "branch": "main", "last_commit": "abc123", "pr_number": 42, "pr_url": "https://..." },
+  "memory": { "synced": true },
   "notes": "Session notes"
 }
 ```
 
-**Migration:** `/sync` auto-detects v2.0 files (legacy `todos` format) and migrates them. Run `/save` after migration to upgrade the file.
+**Compatibility:** `/sync` handles both v3.0 and v3.1 files gracefully. Missing v3.1 fields are treated as absent.
 
 ## Updating
 
