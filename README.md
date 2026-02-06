@@ -22,8 +22,16 @@ From Python async patterns to Rust ownership models, from AWS Fargate deployment
 
 ## Recent Updates
 
+**v1.7.0** (February 2026)
+- 🔄 **Schema v3.1** - `/save` and `/sync` upgraded for Claude Code 2.1.x and Opus 4.6
+  - Session ID tracking with `--resume` suggestions (bridges task state + conversation history)
+  - PR-linked sessions via `gh pr view` with `--from-pr` suggestions
+  - Native memory integration - `/save` writes to MEMORY.md (auto-loaded safety net)
+  - Dynamic plan path via `plansDirectory` setting (Claude Code v2.1.9+)
+  - Dropped legacy v2.0 migration code
+
 **v1.6.0** (February 2026)
-- 🚀 **NEW: Tech Debt Scanner** - Automated detection using parallel subagents (1,520 lines)
+- 🚀 **Tech Debt Scanner** - Automated detection using parallel subagents (1,520 lines)
   - Always-parallel architecture for fast analysis (2-15s depending on scope)
   - 4 categories: Duplication, Security, Complexity, Dead Code
   - Session-end workflow: catch issues while context is fresh
@@ -153,8 +161,8 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 
 | Command | Description |
 |---------|-------------|
-| [sync](commands/sync.md) | Session bootstrap - read project context, restore saved state, show status. |
-| [save](commands/save.md) | Save session state - persist tasks, plan content, and git context. |
+| [sync](commands/sync.md) | Session bootstrap - restore tasks, plan, git/PR context. Suggests `--resume` and `--from-pr`. |
+| [save](commands/save.md) | Persist tasks, plan, git/PR context, and session summary to native memory. |
 | [canvas](commands/canvas.md) | Terminal canvas for content drafting with live markdown preview. Requires Warp terminal. (Experimental) |
 
 ### Skills
@@ -332,6 +340,7 @@ Tasks (created via TaskCreate, managed via TaskList/TaskUpdate) are session-scop
 |---------------------|-----------|----------|
 | Conversation history | Yes | Internal (use `--resume`) |
 | CLAUDE.md context | Yes | `./CLAUDE.md` |
+| Native memory (MEMORY.md) | Yes | `~/.claude/projects/.../memory/` |
 | Tasks | **No** | Deleted on session end |
 | Plan Mode state | **No** | In-memory only |
 
@@ -341,13 +350,14 @@ Tasks (created via TaskCreate, managed via TaskList/TaskUpdate) are session-scop
 Session 1:
   /sync                              # Bootstrap + restore saved state
   [work on tasks]
-  /save "Stopped at auth module"     # Writes .claude/session-cache.json
+  /save "Stopped at auth module"     # Writes session-cache.json + MEMORY.md
 
 Session 2:
-  /sync                              # Restore tasks, show status
+  [MEMORY.md auto-loaded: "Goal: Auth, Branch: feature/auth, PR: #42"]
+  /sync                              # Full restore: tasks, plan, git, PR
+  → "Previous session: abc123... (claude --resume abc123...)"
   → "In progress: Auth module refactor"
-  → "Notes: Stopped at auth module"
-  /sync --status                     # Quick status check anytime
+  → "PR: #42 (claude --from-pr 42)"
 ```
 
 ### Why Not Just Use `--resume`?
@@ -357,12 +367,15 @@ Session 2:
 | Conversation history | Yes | No |
 | Tasks | **No** | Yes |
 | Git context | No | Yes |
+| PR linkage | Yes (`--from-pr`) | Yes (detected via `gh`) |
+| Session ID bridging | N/A | Yes (suggests `--resume <id>`) |
+| Native memory safety net | No | Yes (MEMORY.md auto-loaded) |
 | Human-readable summary | No | Yes |
 | Git-trackable | No | Yes |
 | Works across machines | No | Yes (if committed) |
 | Team sharing | No | Yes |
 
-**Use both together:** `claude --resume` for conversation context, `/sync` for task state.
+**Use both together:** `claude --resume` for conversation context, `/sync` for task state. Since v3.1, `/save` stores your session ID so `/sync` can suggest the exact `--resume` command.
 
 ### Session Cache Schema (v3.1)
 
