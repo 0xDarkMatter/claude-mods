@@ -31,7 +31,8 @@ $ARGUMENTS
     |      +- Read project context (README, AGENTS, CLAUDE)
     |      +- Read saved state (.claude/session-cache.json)
     |      +- Restore tasks via TaskCreate
-    |      +- Read plan (docs/PLAN.md)
+    |      +- Resolve plan path (Step 0)
+    |      +- Read plan (<plan-path>)
     |      +- Show unified status
     |      +- Suggest next action
     |
@@ -66,6 +67,18 @@ $ARGUMENTS
 
 Full bootstrap with state restoration.
 
+### Step 0: Resolve Plan Path
+
+Determine the plan file location before reading:
+
+1. If saved state exists (`.claude/session-cache.json`) and has a `plan.file` value, prefer that path
+2. Else check `.claude/settings.local.json` for a `plansDirectory` key
+3. Else check `.claude/settings.json` for `plansDirectory`
+4. If found, plan path = `<plansDirectory>/PLAN.md`
+5. Otherwise, default to `docs/PLAN.md`
+
+Use the resolved path in all subsequent file reads and output.
+
 ### Step 1: Parallel Reads
 
 Read these files simultaneously (skip any that don't exist):
@@ -75,7 +88,7 @@ Read these files simultaneously (skip any that don't exist):
 | `README.md` | Project overview |
 | `AGENTS.md` | Agent instructions |
 | `CLAUDE.md` | Project-specific rules |
-| `docs/PLAN.md` | Current plan |
+| `<plan-path>` | Current plan (resolved in Step 0) |
 | `.claude/session-cache.json` | Saved session state |
 
 ### Step 2: Restore Session State
@@ -95,6 +108,8 @@ If `.claude/session-cache.json` exists:
 5. For each task, call TaskUpdate to set status:
    - "completed" | "in_progress" | "pending"
 6. Note time since last save
+7. If session_id present, note it for --resume suggestion in output
+8. If git.pr_number/pr_url present, note for --from-pr suggestion in output
 ```
 
 Note: Tasks do not persist across sessions automatically, which is why this restore step is needed.
@@ -151,7 +166,10 @@ Project Synced: [project-name]
 |-------|-------|
 | **Last saved** | 2 hours ago |
 | **Branch** | feature/auth |
+| **Previous session** | abc123... |
 | **Notes** | "Stopped at callback URL issue" |
+
+Note: Previous session row only shown when session_id is present in saved state.
 
 ## Plan Status
 
@@ -182,6 +200,9 @@ Progress: 40% (2/5)
 | **Branch** | feature/auth |
 | **Uncommitted** | 3 files |
 | **Last commit** | abc123f feat: Add OAuth config |
+| **PR** | #42 - https://github.com/user/repo/pull/42 |
+
+Note: PR row only shown when pr_number/pr_url are present in saved state.
 
 ## Quick Reference
 
@@ -195,7 +216,11 @@ Progress: 40% (2/5)
 
 1. **Continue**: Fix callback URL handling
 2. **Check diff**: /sync --diff to see changes since save
+3. **Resume conversation**: `claude --resume abc123...` (when session_id present)
+4. **PR context**: `claude --from-pr 42` (when PR is linked)
 ```
+
+Note: Next Steps items 3-4 are only shown when the corresponding data exists in saved state.
 
 ### Without Saved State
 
@@ -317,7 +342,7 @@ Auto-update plan steps from recent commits.
 
 1. Parse recent git commits (last 20)
 2. Match commit messages to plan steps using keywords
-3. Update step status in `docs/PLAN.md`
+3. Update step status in the resolved plan path
 
 ### Matching Rules
 
@@ -339,7 +364,7 @@ Git Sync
 | abc123 "feat: Add OAuth config" | Step 2 | Marked complete |
 | def456 "fix: Callback handling" | Step 3 | Marked in-progress |
 
-## Updated docs/PLAN.md
+## Updated <plan-path>
 
 | Step | Previous | New |
 |------|----------|-----|
@@ -407,30 +432,6 @@ Warning: Saved state is 12 days old
 Options:
   1. Restore anyway (tasks may still be relevant)
   2. Start fresh: /save --archive
-```
-
-### Legacy v2.0 schema (todos object)
-```
-Info: Found v2.0 session-cache.json (legacy format)
-
-Converting todos to tasks:
-  - 3 completed → tasks with status: "completed"
-  - 1 in_progress → tasks with status: "in_progress"
-  - 2 pending → tasks with status: "pending"
-
-Note: Legacy format lacks descriptions and dependencies.
-Consider running /save to upgrade to v3.0 schema.
-```
-
-**Migration logic:**
-```
-if version == "2.0" and "todos" in json:
-    for task in todos.completed:
-        TaskCreate(subject=task, description="(migrated from v2.0)", status="completed")
-    for task in todos.in_progress:
-        TaskCreate(subject=task, description="(migrated from v2.0)", status="in_progress")
-    for task in todos.pending:
-        TaskCreate(subject=task, description="(migrated from v2.0)", status="pending")
 ```
 
 ### Branch changed since save

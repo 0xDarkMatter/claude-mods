@@ -19,12 +19,26 @@ $ARGUMENTS
 | Data | Source | Destination |
 |------|--------|-------------|
 | Tasks | TaskList API | `.claude/session-cache.json` |
-| Plan content | Conversation context | `docs/PLAN.md` |
+| Plan content | Conversation context | `<plan-path>` (see Step 0) |
 | Git context | `git status/log` | `.claude/session-cache.json` |
 | User notes | Command argument | `.claude/session-cache.json` |
 | Human-readable summary | Generated | `.claude/claude-progress.md` |
 
 ## Execution
+
+### Step 0: Resolve Plan Path
+
+Determine where the strategic plan file lives:
+
+1. Check `.claude/settings.local.json` for a `plansDirectory` key
+2. If not found, check `.claude/settings.json` for `plansDirectory`
+3. If found, plan path = `<plansDirectory>/PLAN.md`
+4. If not found, default to `docs/PLAN.md`
+
+Store the resolved path for use in all subsequent steps.
+
+Note: `plansDirectory` is a Claude Code setting (added in v2.1.9) for plan file storage.
+Our strategic `PLAN.md` co-locates with native plans when this is set.
 
 ### Step 1: Capture Task State
 
@@ -52,21 +66,30 @@ Extract from conversation context:
 - Open questions
 - Blockers
 
-### Step 3: Capture Git Context
+### Step 3: Capture Git & Session Context
 
 ```bash
 git branch --show-current
 git rev-parse --short HEAD
 git log -1 --format="%s"
 git status --porcelain | wc -l
+
+# Detect linked PR (requires gh CLI, fails gracefully)
+gh pr view --json number,url --jq '{number,url}' 2>/dev/null
 ```
+
+Additionally, capture your current session ID. You have access to this from your
+runtime context - it is the unique identifier for this conversation session.
+
+If `gh` is not installed or no PR exists for the current branch, skip the PR fields.
 
 ### Step 4: Write Files
 
 **`.claude/session-cache.json`** (machine-readable):
 ```json
 {
-  "version": "3.0",
+  "version": "3.1",
+  "session_id": "<your-current-session-id>",
   "timestamp": "2025-12-13T10:30:00Z",
   "tasks": [
     {
@@ -92,7 +115,7 @@ git status --porcelain | wc -l
     }
   ],
   "plan": {
-    "file": "docs/PLAN.md",
+    "file": "<resolved-plan-path>",
     "goal": "Add user authentication with OAuth2",
     "current_step": "Step 3: Implement OAuth flow",
     "current_step_index": 3,
@@ -103,13 +126,18 @@ git status --porcelain | wc -l
     "branch": "feature/auth",
     "last_commit": "abc123f",
     "last_commit_message": "feat: Add OAuth config",
-    "uncommitted_count": 3
+    "uncommitted_count": 3,
+    "pr_number": 42,
+    "pr_url": "https://github.com/user/repo/pull/42"
+  },
+  "memory": {
+    "synced": true
   },
   "notes": "Stopped at callback URL issue - need to fix redirect"
 }
 ```
 
-**`docs/PLAN.md`** (strategic plan):
+**`<plan-path>`** (strategic plan, at resolved path):
 ```markdown
 # Project Plan
 
@@ -191,6 +219,42 @@ auth for better scalability and API compatibility.
 *Restore with: /sync*
 ```
 
+### Step 5: Update Native Memory
+
+Write a brief session summary to your auto memory directory as a safety net.
+This ensures basic session context appears in the system prompt of future sessions,
+even without running `/sync`.
+
+**Target file:** Your auto memory `MEMORY.md` (path is in your system prompt).
+
+**Procedure:**
+
+1. Read `MEMORY.md` from your auto memory directory if it exists
+2. If it contains a `## Last Session` section, replace that entire section
+   (from the heading to the next `##` heading or end of file) with the updated content
+3. If no such section exists, append it to the end of the file
+4. If the file does not exist, create it with only this section
+
+**`## Last Session` content** (keep under 10 lines):
+
+```markdown
+## Last Session
+
+- **Goal**: [plan goal or "No active plan"]
+- **Branch**: [current git branch]
+- **Step**: [current plan step or "N/A"]
+- **Session**: [session_id] (resume with `claude --resume <id>`)
+- **PR**: [#number if linked, omit line if none]
+- **Notes**: [user notes if provided, omit line if none]
+- **Restore**: Run `/sync` to restore full task state
+```
+
+**Important:**
+- Do NOT overwrite existing MEMORY.md content outside `## Last Session`
+- Keep the section under 10 lines to preserve the 200-line MEMORY.md budget
+- If the memory directory does not exist, create it with `mkdir -p`
+- This is best-effort - warn but do not fail `/save` if memory write fails
+
 ## Output Format
 
 ```
@@ -201,12 +265,17 @@ Session saved
 | **Plan** | Step 3/5 (40%) - Implement OAuth flow |
 | **Tasks** | 1 completed, 1 in progress, 1 pending |
 | **Git** | 3 uncommitted files on feature/auth |
+| **PR** | #42 (https://github.com/user/repo/pull/42) |
+| **Session** | abc123... (resumable via --resume) |
 | **Notes** | "Stopped at callback URL issue..." |
+
+Note: PR and Session rows are omitted when not available.
 
 Files written:
   .claude/session-cache.json
   .claude/claude-progress.md
-  docs/PLAN.md
+  <plan-path>
+  ~/.claude/projects/.../memory/MEMORY.md (session summary)
 
 Restore with: /sync
 ```
@@ -219,19 +288,19 @@ Archives current plan before saving fresh state.
 
 ### What It Does
 
-1. Moves `docs/PLAN.md` to `docs/PLAN-<date>.md`
+1. Moves `<plan-path>` to `<plan-dir>/PLAN-<date>.md`
 2. Clears `.claude/session-cache.json`
 3. Saves new state (if any)
 
 ### Output
 
 ```
-Archived: docs/PLAN.md -> docs/PLAN-2025-12-13.md
+Archived: <plan-path> -> <plan-dir>/PLAN-2025-12-13.md
 
 Session saved (fresh start)
 
 Files written:
-  docs/PLAN-2025-12-13.md (archived)
+  <plan-dir>/PLAN-2025-12-13.md (archived)
   .claude/session-cache.json (cleared)
 ```
 
@@ -273,10 +342,11 @@ Files written:
 
 | File | Purpose | Git-tracked? |
 |------|---------|--------------|
-| `docs/PLAN.md` | Strategic plan | Yes |
+| `<plan-path>` | Strategic plan (default: `docs/PLAN.md`) | Yes |
 | `.claude/session-cache.json` | Session state | Optional |
 | `.claude/claude-progress.md` | Human-readable progress | Optional |
-| `docs/PLAN-<date>.md` | Archived plans | Yes |
+| `<plan-dir>/PLAN-<date>.md` | Archived plans | Yes |
+| `~/.claude/.../memory/MEMORY.md` | Session summary (auto-loaded) | No (user home) |
 
 ---
 
