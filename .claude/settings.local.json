@@ -140,7 +140,8 @@
       "Bash(choco:*)",
       "Bash(scoop:*)",
       "Bash(winget:*)",
-      "Bash(powershell -ExecutionPolicy Bypass -File \"./scripts/install.ps1\")"
+      "Bash(powershell -ExecutionPolicy Bypass -File \"./scripts/install.ps1\")",
+      "Bash(just.exe test:*)"
     ],
     "deny": [],
     "ask": [
