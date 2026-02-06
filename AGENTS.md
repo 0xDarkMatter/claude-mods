@@ -5,7 +5,7 @@
 This is **claude-mods** - a collection of custom extensions for Claude Code:
 - **22 expert agents** for specialized domains (React, Python, Go, Rust, AWS, etc.)
 - **3 commands** for session management (/sync, /save) and experimental features (/canvas)
-- **41 skills** for CLI tools, patterns, workflows, and development tasks
+- **42 skills** for CLI tools, patterns, workflows, and development tasks
 - **Custom output styles** for response personality (e.g., Vesper)
 
 ## Installation
@@ -65,7 +65,7 @@ On "INIT:" message at session start:
 
 **Tasks API:** Use `TaskCreate`, `TaskList`, `TaskUpdate`, `TaskGet` for task management. Tasks are session-scoped (don't persist). Use `/save` to capture and `/sync` to restore.
 
-**Session Cache:** v3.0 schema stores full task objects (subject, description, activeForm, status, blockedBy). Legacy v2.0 files auto-migrate on `/sync`.
+**Session Cache:** v3.1 schema stores full task objects, session ID (for `--resume`), PR linkage (for `--from-pr`), and writes a summary to native MEMORY.md. Backwards compatible with v3.0.
 
 ## Performance
 
