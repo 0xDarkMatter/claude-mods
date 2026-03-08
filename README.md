@@ -12,13 +12,13 @@
 
 > *A comprehensive extension toolkit that transforms Claude Code into a specialized development powerhouse.*
 
-**claude-mods** is a production-ready plugin that extends Claude Code with 22 expert agents, 44 specialized skills, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
+**claude-mods** is a production-ready plugin that extends Claude Code with 22 expert agents, 50 specialized skills, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
 
 Built on [Anthropic's Agent Skills standard](https://github.com/anthropics/skills), claude-mods fills critical gaps in Claude Code's capabilities: persistent session state that survives across machines, on-demand expert knowledge for specialized domains, token-efficient modern CLI tools (10-100x faster than traditional alternatives), and proven workflow patterns for TDD, code review, and feature development. The toolkit implements Anthropic's [recommended patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), ensuring your development context never vanishes when sessions end.
 
 From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
 
-**22 agents. 44 skills. 3 commands. One install.**
+**22 agents. 50 skills. 3 commands. One install.**
 
 ## Recent Updates
 
@@ -167,16 +167,31 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 
 ### Skills
 
-#### Reference Skills
+#### Language & Framework Skills
 | Skill | Description |
 |-------|-------------|
-| [cli-ops](skills/cli-ops/) | Production CLI tool patterns - agentic workflows, stream separation, semantic exit codes, OS keyring auth |
-| [rest-ops](skills/rest-ops/) | HTTP methods, status codes, REST design patterns |
+| [go-ops](skills/go-ops/) | Go concurrency, error handling, testing, interfaces, generics, project structure |
+| [rust-ops](skills/rust-ops/) | Rust ownership, async/tokio, error handling, traits, serde, ecosystem |
+| [typescript-ops](skills/typescript-ops/) | TypeScript type system, generics, utility types, strict mode, Zod |
+| [cli-ops](skills/cli-ops/) | Production CLI tool patterns - agentic workflows, stream separation, exit codes |
 | [tailwind-ops](skills/tailwind-ops/) | Tailwind utilities, responsive breakpoints, config |
+
+#### Data & API Skills
+| Skill | Description |
+|-------|-------------|
+| [api-design-ops](skills/api-design-ops/) | REST, gRPC, GraphQL design patterns, versioning, auth, rate limiting |
+| [rest-ops](skills/rest-ops/) | HTTP methods, status codes, REST quick reference |
 | [sql-ops](skills/sql-ops/) | CTEs, window functions, JOIN patterns, indexing |
 | [postgres-ops](skills/postgres-ops/) | PostgreSQL operations, optimization, schema design, replication, monitoring |
 | [sqlite-ops](skills/sqlite-ops/) | SQLite schemas, Python sqlite3/aiosqlite patterns |
 | [mcp-ops](skills/mcp-ops/) | MCP server structure, tool handlers, resources |
+
+#### Infrastructure Skills
+| Skill | Description |
+|-------|-------------|
+| [docker-ops](skills/docker-ops/) | Dockerfile best practices, multi-stage builds, Compose, optimization |
+| [ci-cd-ops](skills/ci-cd-ops/) | GitHub Actions, release automation, testing pipelines |
+| [container-orchestration](skills/container-orchestration/) | Kubernetes, Helm, pod patterns |
 
 #### CLI Tool Skills
 | Skill | Description |

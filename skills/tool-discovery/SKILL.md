@@ -33,6 +33,12 @@ Is this a reference/lookup task?
 | **structural-search** | ast-grep, sg, ast pattern |
 | **git-workflow** | lazygit, gh, delta, rebase |
 | **python-env** | uv, venv, pyproject |
+| **go-ops** | golang, go, goroutine, channel, context, errgroup, go test |
+| **rust-ops** | rust, cargo, ownership, tokio, serde, trait, Result, Option |
+| **typescript-ops** | typescript, type system, generics, utility types, Zod |
+| **docker-ops** | docker, Dockerfile, docker-compose, multi-stage build |
+| **ci-cd-ops** | github actions, CI, CD, pipeline, release, workflow |
+| **api-design-ops** | api design, gRPC, GraphQL, REST advanced, protobuf |
 | **rest-ops** | http methods, status codes |
 | **sql-ops** | cte, window functions |
 | **postgres-ops** | postgresql, postgres, EXPLAIN ANALYZE, vacuum, pgbouncer, JSONB, RLS, replication |
