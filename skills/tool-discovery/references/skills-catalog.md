@@ -2,6 +2,102 @@
 
 Complete reference for all available skills.
 
+## Language & Framework Skills
+
+Comprehensive operational expertise for specific languages and frameworks.
+
+### go-ops
+
+**Triggers:** golang, go, goroutine, channel, context, errgroup, go test, go mod, interface, generics, go build, worker pool
+
+**Use For:**
+- Concurrency patterns (goroutines, channels, errgroup, worker pools)
+- Error handling (sentinel errors, custom types, wrapping, errors.Is/As)
+- Testing (table-driven, httptest, benchmarks, fuzz, mocking with interfaces)
+- Interface design, generics, functional options
+- Project structure, module management, workspaces
+- Performance profiling (pprof, trace, escape analysis)
+
+**References:** concurrency.md, error-handling.md, testing.md, interfaces-generics.md, project-structure.md, performance.md
+
+---
+
+### rust-ops
+
+**Triggers:** rust, cargo, ownership, borrow checker, lifetime, tokio, serde, trait, Result, Option, async rust, crate
+
+**Use For:**
+- Ownership, borrowing, lifetimes, interior mutability
+- Traits, generics, associated types, derive macros
+- Error handling (thiserror, anyhow, Result/Option combinators)
+- Async with tokio (spawn, channels, select, graceful shutdown)
+- Ecosystem (serde, clap, reqwest, sqlx, axum, tracing, rayon)
+- Testing (mockall, proptest, criterion, insta)
+
+**References:** ownership-lifetimes.md, traits-generics.md, error-handling.md, async-tokio.md, ecosystem.md, testing.md
+
+---
+
+### typescript-ops
+
+**Triggers:** typescript, type system, generics, utility types, Zod, mapped types, conditional types, tsconfig, strict mode
+
+**Use For:**
+- Type narrowing, type guards, discriminated unions
+- Generics, conditional types, mapped types, template literal types
+- Utility types (Partial, Pick, Omit, Record, ReturnType, etc.)
+- tsconfig configuration, strict mode migration
+- Runtime validation (Zod, Valibot), type-safe APIs (tRPC)
+
+**References:** type-system.md, generics-patterns.md, utility-types.md, config-strict.md, ecosystem.md
+
+---
+
+## Infrastructure Skills
+
+### docker-ops
+
+**Triggers:** docker, Dockerfile, docker-compose, container, image, multi-stage build, distroless, BuildKit
+
+**Use For:**
+- Dockerfile best practices, multi-stage builds (Go, Rust, Node, Python)
+- Docker Compose patterns (services, volumes, networking, health checks)
+- Image optimization, layer caching, security scanning
+- BuildKit features, cross-platform builds
+
+**References:** multi-stage-builds.md, compose-patterns.md, optimization.md
+
+---
+
+### ci-cd-ops
+
+**Triggers:** github actions, CI, CD, pipeline, workflow, release, semantic release, changesets, goreleaser
+
+**Use For:**
+- GitHub Actions workflow syntax, triggers, matrix strategy
+- Caching strategies (node_modules, go modules, cargo, pip)
+- Release automation (semantic-release, changesets, goreleaser)
+- Testing pipelines, code coverage, deployment gates
+
+**References:** github-actions.md, release-automation.md, testing-pipelines.md
+
+---
+
+### api-design-ops
+
+**Triggers:** api design, gRPC, GraphQL, protobuf, api versioning, pagination, rate limiting, webhook, idempotency
+
+**Use For:**
+- API style selection (REST vs gRPC vs GraphQL)
+- REST advanced patterns (pagination, PATCH, bulk ops, webhooks)
+- gRPC (protobuf, streaming, Go/Rust implementations)
+- GraphQL (schema design, DataLoader, federation)
+- API security (JWT, OAuth2, rate limiting, OWASP API Top 10)
+
+**References:** rest-advanced.md, grpc.md, graphql.md, api-security.md
+
+---
+
 ## Pattern Skills
 
 Quick reference for common patterns and syntax.
@@ -252,9 +348,13 @@ Project and development workflow automation.
 | JSON files | data-processing |
 | YAML/TOML | data-processing |
 | SQL databases | sql-ops, postgres-ops, sqlite-ops |
-| TypeScript/JS | file-search, structural-search |
+| Go | go-ops |
+| Rust | rust-ops |
+| TypeScript/JS | typescript-ops, file-search, structural-search |
 | Python | python-env, structural-search |
-| API endpoints | rest-ops |
+| API design | api-design-ops, rest-ops |
+| Docker/containers | docker-ops, container-orchestration |
+| CI/CD | ci-cd-ops, git-workflow |
 | CSS/Tailwind | tailwind-ops |
 
 ### By Task
