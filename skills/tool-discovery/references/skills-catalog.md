@@ -6,7 +6,7 @@ Complete reference for all available skills.
 
 Quick reference for common patterns and syntax.
 
-### rest-patterns
+### rest-ops
 
 **Triggers:** rest api, http methods, status codes, api design, endpoint design
 
@@ -21,7 +21,27 @@ Quick reference for common patterns and syntax.
 
 ---
 
-### sql-patterns
+### postgres-ops
+
+**Triggers:** postgresql, postgres, EXPLAIN ANALYZE, vacuum, autovacuum, pgbouncer, JSONB, RLS, replication, partitioning, pg_stat, GIN, GiST, BRIN, tsvector, WAL, connection pooling, postgresql.conf
+
+**Use For:**
+- Schema design, normalization, data types (JSONB, arrays, ranges)
+- Index selection (B-tree, GIN, GiST, BRIN, Hash)
+- Query tuning with EXPLAIN ANALYZE
+- Backup/restore (pg_dump, pg_basebackup, WAL, PITR)
+- Vacuum and autovacuum tuning
+- Connection pooling (pgBouncer, pgPool)
+- Replication (streaming, logical), failover
+- Partitioning (range, list, hash)
+- Monitoring (pg_stat_statements, bloat, locks)
+- Row-level security, full-text search, extensions
+
+**References:** schema-design.md, indexing.md, query-tuning.md, operations.md, replication.md, config-tuning.md
+
+---
+
+### sql-ops
 
 **Triggers:** sql patterns, cte example, window functions, sql join, index strategy
 
@@ -30,13 +50,13 @@ Quick reference for common patterns and syntax.
 - Window functions (ROW_NUMBER, LAG, running totals)
 - JOIN reference
 - Pagination patterns
-- Index strategies
+- Vendor-neutral index strategies
 
 **References:** window-functions.md, indexing-strategies.md
 
 ---
 
-### tailwind-patterns
+### tailwind-ops
 
 **Triggers:** tailwind, utility classes, responsive design, tailwind config, dark mode
 
@@ -66,7 +86,7 @@ Quick reference for common patterns and syntax.
 
 ---
 
-### mcp-patterns
+### mcp-ops
 
 **Triggers:** mcp server, model context protocol, tool handlers
 
@@ -150,7 +170,7 @@ Modern command-line tools for development workflows.
 - Refactoring operations
 - Security scans
 
-**References:** js-ts-patterns.md, python-patterns.md, go-rust-patterns.md, security-patterns.md, advanced-usage.md
+**References:** js-ts-patterns.md, python-patterns.md, go-rust-patterns.md, security-ops.md, advanced-usage.md
 
 ---
 
@@ -231,11 +251,11 @@ Project and development workflow automation.
 |--------------|-------|
 | JSON files | data-processing |
 | YAML/TOML | data-processing |
-| SQL databases | sql-patterns, sqlite-ops |
+| SQL databases | sql-ops, postgres-ops, sqlite-ops |
 | TypeScript/JS | file-search, structural-search |
 | Python | python-env, structural-search |
-| API endpoints | rest-patterns |
-| CSS/Tailwind | tailwind-patterns |
+| API endpoints | rest-ops |
+| CSS/Tailwind | tailwind-ops |
 
 ### By Task
 
@@ -256,9 +276,9 @@ Project and development workflow automation.
 ### By Complexity
 
 **Quick Lookups (< 1 min):**
-- rest-patterns: Status code lookup
-- sql-patterns: CTE syntax
-- tailwind-patterns: Breakpoint reference
+- rest-ops: Status code lookup
+- sql-ops: CTE syntax
+- tailwind-ops: Breakpoint reference
 - file-search: Basic fd/rg commands
 
 **Medium Tasks (1-5 min):**
@@ -287,5 +307,5 @@ Project and development workflow automation.
 - Architecture or optimization
 
 **Example:**
-- "What's the HTTP status for unauthorized?" → rest-patterns (skill)
+- "What's the HTTP status for unauthorized?" → rest-ops (skill)
 - "Design authentication for my API" → python-expert or relevant framework agent

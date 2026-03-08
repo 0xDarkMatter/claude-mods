@@ -33,6 +33,7 @@ $ARGUMENTS
     |      +- Restore tasks via TaskCreate
     |      +- Resolve plan path (Step 0)
     |      +- Read plan (<plan-path>)
+    |      +- Acknowledge memory context (already auto-loaded)
     |      +- Show unified status
     |      +- Suggest next action
     |
@@ -147,7 +148,17 @@ git log -1 --format="%h %s" 2>/dev/null
 - `wc -l` in Git Bash = count lines (CORRECT)
 - Git Bash understands `2>/dev/null` but NOT `2>nul`
 
-### Step 5: Output
+### Step 5: Acknowledge Memory
+
+MEMORY.md is auto-loaded into the system prompt by Claude Code - do NOT re-read the file.
+Instead, check your system prompt for the memory content you already have, and surface it:
+
+- If MEMORY.md has content (non-empty), summarise what it contains (especially any `## Last Session` section written by `/save`)
+- If MEMORY.md is empty, note "Memory: Empty (no notes from previous sessions)"
+
+This costs zero extra tokens while confirming the safety net is working.
+
+### Step 6: Output
 
 Format and display unified status.
 
@@ -204,6 +215,14 @@ Progress: 40% (2/5)
 
 Note: PR row only shown when pr_number/pr_url are present in saved state.
 
+## Memory
+
+[If MEMORY.md has content, summarise key points - especially any `## Last Session` section]
+[If MEMORY.md is empty: "No memory notes from previous sessions."]
+
+Note: MEMORY.md is auto-loaded into the system prompt. This section surfaces
+what's already in context - no file read needed.
+
 ## Quick Reference
 
 | Category | Items |
@@ -242,6 +261,7 @@ Project Synced: [project-name]
 | **Agents** | [count] available |
 | **Plan** | No active plan |
 | **Saved State** | None |
+| **Memory** | [summary of MEMORY.md content, or "Empty"] |
 | **Git** | [branch], [N] uncommitted |
 
 ## Next Steps
@@ -396,6 +416,10 @@ Status
 | Completed | 1 |
 | In Progress | 1 |
 | Pending | 1 |
+
+## Memory
+
+[Summary of MEMORY.md content, or "Empty"]
 
 ## Git
 

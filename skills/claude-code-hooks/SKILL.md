@@ -107,7 +107,7 @@ echo '{"tool_name":"Bash"}' | ./hooks/validate.sh
 
 - `./references/hook-events.md` - All events with input/output schemas
 - `./references/configuration.md` - Advanced config patterns
-- `./references/security-patterns.md` - Production security
+- `./references/security-ops.md` - Production security
 
 ---
 

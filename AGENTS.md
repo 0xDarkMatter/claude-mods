@@ -5,7 +5,7 @@
 This is **claude-mods** - a collection of custom extensions for Claude Code:
 - **22 expert agents** for specialized domains (React, Python, Go, Rust, AWS, etc.)
 - **3 commands** for session management (/sync, /save) and experimental features (/canvas)
-- **43 skills** for CLI tools, patterns, workflows, and development tasks
+- **44 skills** for CLI tools, patterns, workflows, and development tasks
 - **Custom output styles** for response personality (e.g., Vesper)
 
 ## Installation
@@ -50,7 +50,7 @@ On "INIT:" message at session start:
 |----------|-------------|
 | `rules/cli-tools.md` | Modern CLI tool preferences (rg, fd, eza, bat) |
 | `rules/thinking.md` | Extended thinking triggers (think → ultrathink) |
-| `skills/cli-patterns/` | Production CLI patterns - agentic workflows, OS keyring auth, stream separation |
+| `skills/cli-ops/` | Production CLI patterns - agentic workflows, OS keyring auth, stream separation |
 | `docs/WORKFLOWS.md` | 10 workflow patterns from Anthropic best practices |
 | `skills/tool-discovery/` | Find the right library for any task |
 | `hooks/README.md` | Pre/post execution hook examples |

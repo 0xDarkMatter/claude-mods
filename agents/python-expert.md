@@ -26,7 +26,7 @@ You are a Python expert specializing in decision guidance, performance optimizat
 2. Is it I/O-bound with high concurrency? → Async
 3. Is it simple I/O with few connections? → Sync is fine
 
-→ **Load `python-async-patterns`** for asyncio, TaskGroup, concurrency patterns
+→ **Load `python-async-ops`** for asyncio, TaskGroup, concurrency patterns
 
 ---
 
@@ -91,7 +91,7 @@ class Shape(ABC):
         return f"Area: {self.area()}"
 ```
 
-→ **Load `python-typing-patterns`** for generics, TypeVar, overloads
+→ **Load `python-typing-ops`** for generics, TypeVar, overloads
 
 ---
 
@@ -126,13 +126,13 @@ Route to these skills for detailed patterns:
 
 | Task | Skill | Key Topics |
 |------|-------|------------|
-| FastAPI development | `python-fastapi-patterns` | Dependency injection, middleware, Pydantic v2 |
-| Database/ORM | `python-database-patterns` | SQLAlchemy 2.0, async DB, Alembic |
-| Async patterns | `python-async-patterns` | asyncio, TaskGroup, semaphores, queues |
-| Testing | `python-pytest-patterns` | Fixtures, mocking, parametrize, coverage |
-| Type hints | `python-typing-patterns` | TypeVar, Protocol, generics, overloads |
-| CLI tools | `python-cli-patterns` | Typer, Rich, configuration, subcommands |
-| Logging/metrics | `python-observability-patterns` | structlog, Prometheus, OpenTelemetry |
+| FastAPI development | `python-fastapi-ops` | Dependency injection, middleware, Pydantic v2 |
+| Database/ORM | `python-database-ops` | SQLAlchemy 2.0, async DB, Alembic |
+| Async patterns | `python-async-ops` | asyncio, TaskGroup, semaphores, queues |
+| Testing | `python-pytest-ops` | Fixtures, mocking, parametrize, coverage |
+| Type hints | `python-typing-ops` | TypeVar, Protocol, generics, overloads |
+| CLI tools | `python-cli-ops` | Typer, Rich, configuration, subcommands |
+| Logging/metrics | `python-observability-ops` | structlog, Prometheus, OpenTelemetry |
 | Environment setup | `python-env` | uv, pyproject.toml, publishing |
 
 Each skill includes:
@@ -310,7 +310,7 @@ def setup_logging(level: int = logging.INFO, log_dir: Path = Path("logs")):
     return logger
 ```
 
-→ **Load `python-observability-patterns`** for structlog, metrics, tracing
+→ **Load `python-observability-ops`** for structlog, metrics, tracing
 
 ---
 

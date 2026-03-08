@@ -12,13 +12,13 @@
 
 > *A comprehensive extension toolkit that transforms Claude Code into a specialized development powerhouse.*
 
-**claude-mods** is a production-ready plugin that extends Claude Code with 22 expert agents, 42 specialized skills, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
+**claude-mods** is a production-ready plugin that extends Claude Code with 22 expert agents, 44 specialized skills, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
 
 Built on [Anthropic's Agent Skills standard](https://github.com/anthropics/skills), claude-mods fills critical gaps in Claude Code's capabilities: persistent session state that survives across machines, on-demand expert knowledge for specialized domains, token-efficient modern CLI tools (10-100x faster than traditional alternatives), and proven workflow patterns for TDD, code review, and feature development. The toolkit implements Anthropic's [recommended patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), ensuring your development context never vanishes when sessions end.
 
 From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
 
-**22 agents. 42 skills. 3 commands. One install.**
+**22 agents. 44 skills. 3 commands. One install.**
 
 ## Recent Updates
 
@@ -167,15 +167,16 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 
 ### Skills
 
-#### Pattern Reference Skills
+#### Reference Skills
 | Skill | Description |
 |-------|-------------|
-| [cli-patterns](skills/cli-patterns/) | Production CLI tool patterns - agentic workflows, stream separation, semantic exit codes, OS keyring auth |
-| [rest-patterns](skills/rest-patterns/) | HTTP methods, status codes, REST design patterns |
-| [tailwind-patterns](skills/tailwind-patterns/) | Tailwind utilities, responsive breakpoints, config |
-| [sql-patterns](skills/sql-patterns/) | CTEs, window functions, JOIN patterns, indexing |
+| [cli-ops](skills/cli-ops/) | Production CLI tool patterns - agentic workflows, stream separation, semantic exit codes, OS keyring auth |
+| [rest-ops](skills/rest-ops/) | HTTP methods, status codes, REST design patterns |
+| [tailwind-ops](skills/tailwind-ops/) | Tailwind utilities, responsive breakpoints, config |
+| [sql-ops](skills/sql-ops/) | CTEs, window functions, JOIN patterns, indexing |
+| [postgres-ops](skills/postgres-ops/) | PostgreSQL operations, optimization, schema design, replication, monitoring |
 | [sqlite-ops](skills/sqlite-ops/) | SQLite schemas, Python sqlite3/aiosqlite patterns |
-| [mcp-patterns](skills/mcp-patterns/) | MCP server structure, tool handlers, resources |
+| [mcp-ops](skills/mcp-ops/) | MCP server structure, tool handlers, resources |
 
 #### CLI Tool Skills
 | Skill | Description |

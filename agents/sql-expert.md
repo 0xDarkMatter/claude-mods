@@ -72,4 +72,4 @@ All deliverables must meet:
 - Connection pooling tuning
 
 ## Related Skill
-For pattern reference (CTEs, window functions, JOINs), use **sql-patterns** skill.
+For pattern reference (CTEs, window functions, JOINs), use **sql-ops** skill.

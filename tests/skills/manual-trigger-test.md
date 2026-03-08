@@ -29,11 +29,11 @@ Run these tests in a **fresh Claude Code session** to verify skills are invoked 
 | 15 | "Run the project tests" | task-runner | just | |
 | 16 | "What tasks are available in this project?" | task-runner | just | |
 | 17 | "Scan for project documentation files" | doc-scanner | glob/read | |
-| 18 | "Help me design a REST API endpoint" | rest-patterns | (reference) | |
-| 19 | "What HTTP status code for resource created?" | rest-patterns | (reference) | |
-| 20 | "Write a SQL query with a CTE" | sql-patterns | (reference) | |
+| 18 | "Help me design a REST API endpoint" | rest-ops | (reference) | |
+| 19 | "What HTTP status code for resource created?" | rest-ops | (reference) | |
+| 20 | "Write a SQL query with a CTE" | sql-ops | (reference) | |
 | 21 | "Set up SQLite with WAL mode" | sqlite-ops | sqlite3 | |
-| 22 | "How do I build an MCP server?" | mcp-patterns | (reference) | |
+| 22 | "How do I build an MCP server?" | mcp-ops | (reference) | |
 | 23 | "Which agent should I use for this task?" | tool-discovery | (meta) | |
 
 ## Result Key
