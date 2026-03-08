@@ -13,7 +13,7 @@
 | Component | Count | Notes |
 |-----------|-------|-------|
 | Agents | 22 | Domain experts (Python, Go, Rust, React, etc.) |
-| Skills | 43 | Pattern libraries, CLI tools, workflows, dev tasks |
+| Skills | 44 | Operational skills, CLI tools, workflows, dev tasks |
 | Commands | 3 | Session management (sync, save) + experimental (canvas) |
 | Rules | 5 | CLI tools, thinking, commit style, naming, skill-agent-updates |
 | Output Styles | 1 | Vesper personality |

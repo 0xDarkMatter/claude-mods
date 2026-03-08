@@ -33,11 +33,12 @@ Is this a reference/lookup task?
 | **structural-search** | ast-grep, sg, ast pattern |
 | **git-workflow** | lazygit, gh, delta, rebase |
 | **python-env** | uv, venv, pyproject |
-| **rest-patterns** | http methods, status codes |
-| **sql-patterns** | cte, window functions |
+| **rest-ops** | http methods, status codes |
+| **sql-ops** | cte, window functions |
+| **postgres-ops** | postgresql, postgres, EXPLAIN ANALYZE, vacuum, pgbouncer, JSONB, RLS, replication |
 | **sqlite-ops** | sqlite, aiosqlite |
-| **tailwind-patterns** | tailwind, tw classes |
-| **mcp-patterns** | mcp server, protocol |
+| **tailwind-ops** | tailwind, tw classes |
+| **mcp-ops** | mcp server, protocol |
 
 ## Quick Agent Reference
 
@@ -68,11 +69,11 @@ Task tool → subagent_type: "python-expert"
 
 | Task | Skill First | Agent If Needed |
 |------|-------------|-----------------|
-| "How to write a CTE?" | sql-patterns | sql-expert |
+| "How to write a CTE?" | sql-ops | sql-expert |
 | "Optimize this query" | — | postgres-expert |
 | "Find files named X" | file-search | Explore |
 | "Set up Python project" | python-env | python-expert |
-| "What HTTP status for X?" | rest-patterns | — |
+| "What HTTP status for X?" | rest-ops | — |
 
 ## Tips
 

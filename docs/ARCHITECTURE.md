@@ -251,10 +251,10 @@ skills/
 
 ### Example
 
-**`skills/testing-patterns/SKILL.md`**:
+**`skills/testing-ops/SKILL.md`**:
 ```yaml
 ---
-name: testing-patterns
+name: testing-ops
 description: Test architecture, mocking strategies, and coverage patterns. Triggers on: write tests, test strategy, mocking, fixtures, coverage.
 ---
 

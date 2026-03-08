@@ -114,6 +114,6 @@ For detailed patterns, load:
 This is a **foundation skill** with no prerequisites.
 
 **Build on this skill:**
-- `python-typing-patterns` - Type hints for projects
-- `python-pytest-patterns` - Testing infrastructure
-- `python-fastapi-patterns` - Web API development
+- `python-typing-ops` - Type hints for projects
+- `python-pytest-ops` - Testing infrastructure
+- `python-fastapi-ops` - Web API development

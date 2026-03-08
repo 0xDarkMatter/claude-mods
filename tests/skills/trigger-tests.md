@@ -108,7 +108,7 @@ Test cases to verify skills activate on expected keywords.
 
 ---
 
-## mcp-patterns
+## mcp-ops
 
 **Triggers:** mcp server, model context protocol, tool handler, mcp resource, mcp tool
 
@@ -154,7 +154,7 @@ Test cases to verify skills activate on expected keywords.
 
 ---
 
-## rest-patterns
+## rest-ops
 
 **Triggers:** rest api, http methods, status codes, api design, endpoint design, api versioning, rate limiting, caching
 
@@ -171,7 +171,7 @@ Test cases to verify skills activate on expected keywords.
 
 ---
 
-## sql-patterns
+## sql-ops
 
 **Triggers:** sql patterns, cte example, window functions, sql join, index strategy, pagination sql
 
@@ -220,7 +220,7 @@ Test cases to verify skills activate on expected keywords.
 
 ---
 
-## tailwind-patterns
+## tailwind-ops
 
 **Triggers:** tailwind, utility classes, responsive design, tailwind config, dark mode css, tw classes
 

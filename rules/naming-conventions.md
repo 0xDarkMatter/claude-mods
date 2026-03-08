@@ -49,16 +49,19 @@ All skills follow the official Anthropic pattern with bundled resources:
 
 | Pattern | Example | Notes |
 |---------|---------|-------|
-| Language patterns | `python-async-patterns/` | Domain + "patterns" |
-| Tool knowledge | `sqlite-ops/` | Tool + operation |
+| Operational expertise | `postgres-ops/` | Comprehensive domain knowledge (preferred) |
+| Domain-specific | `python-async-ops/` | Domain + "-ops" |
+| Tool knowledge | `sqlite-ops/` | Tool + "-ops" |
 | Workflow | `git-workflow/` | Activity-focused |
-| Framework | `tailwind-patterns/` | Framework + "patterns" |
+| Framework | `tailwind-ops/` | Framework + "-ops" |
+
+**Naming guidance:** Use `-ops` for all skills providing domain knowledge. The `-ops` suffix signals comprehensive operational expertise - design, implementation, and operations.
 
 **Frontmatter:**
 
 ```yaml
 ---
-name: python-async-patterns  # Match directory name
+name: python-async-ops  # Match directory name
 description: "<trigger phrases>"
 compatibility: "<version requirements>"
 allowed-tools: "<tool list>"
@@ -184,7 +187,7 @@ BAD:  pythonExpert.md        - camelCase
 GOOD: python-expert.md       - kebab-case
 
 BAD:  skills/PythonPatterns/ - PascalCase directory
-GOOD: skills/python-patterns/
+GOOD: skills/python-ops/
 
 BAD:  commands/TestGen.md    - PascalCase
 GOOD: commands/testgen.md    - Concatenated lowercase
@@ -198,7 +201,7 @@ GOOD: vesper.md              - lowercase
 | Component | Pattern | Example |
 |-----------|---------|---------|
 | Agent | `{domain}-expert.md` | `docker-expert.md` |
-| Skill | `{topic}-patterns/skill.md` | `python-async-patterns/skill.md` |
+| Skill | `{topic}-ops/SKILL.md` | `postgres-ops/SKILL.md` |
 | Command | `{action}.md` | `review.md` |
 | Rule | `{topic}.md` | `commit-style.md` |
 | Output Style | `{personality}.md` | `vesper.md` |

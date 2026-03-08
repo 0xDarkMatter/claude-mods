@@ -73,7 +73,7 @@ Route to these skills for detailed patterns:
 | CLI automation | `claude-code-headless` | Flags, output formats, CI/CD |
 | Extension templates | `claude-code-templates` | Agent, skill, command scaffolds |
 | Troubleshooting | `claude-code-debug` | Common issues, debug commands |
-| MCP servers | `mcp-patterns` | Tool handlers, resources, Claude Desktop |
+| MCP servers | `mcp-ops` | Tool handlers, resources, Claude Desktop |
 | Find right tool | `tool-discovery` | Agent vs skill selection flowchart |
 
 Each skill includes:
