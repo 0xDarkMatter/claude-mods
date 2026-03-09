@@ -61,31 +61,45 @@ USAGE
 # Resolve project directory from current working directory
 resolve_project() {
   local project_filter="${1:-}"
+  local candidates=()
+
   if [[ -n "$project_filter" ]]; then
-    # Find by partial match
-    local found
-    found=$(ls "$PROJECTS_DIR" 2>/dev/null | grep -i "$project_filter" | head -1)
-    [[ -n "$found" ]] || die "No project matching '$project_filter'"
-    echo "$PROJECTS_DIR/$found"
+    # Find by partial match - collect all matches
+    while IFS= read -r d; do
+      candidates+=("$d")
+    done < <(ls "$PROJECTS_DIR" 2>/dev/null | grep -i "$project_filter")
   else
     # Derive from cwd
     local encoded
     encoded=$(pwd | sed 's/[:\\\/]/-/g' | sed 's/--*/-/g')
-    local found
-    found=$(ls "$PROJECTS_DIR" 2>/dev/null | grep -i "${encoded##*-}" | head -1)
-    if [[ -n "$found" ]]; then
-      echo "$PROJECTS_DIR/$found"
-    else
-      die "Cannot determine project from $(pwd). Use --project <name>"
-    fi
+    while IFS= read -r d; do
+      candidates+=("$d")
+    done < <(ls "$PROJECTS_DIR" 2>/dev/null | grep -i "${encoded##*-}")
   fi
+
+  [[ ${#candidates[@]} -gt 0 ]] || die "No project matching '${project_filter:-$(pwd)}'"
+
+  # Pick the candidate that actually has JSONL files, preferring most recent
+  for candidate in "${candidates[@]}"; do
+    local dir="$PROJECTS_DIR/$candidate"
+    # Check if directory contains any .jsonl files (not just subdirs)
+    if ls "$dir"/*.jsonl &>/dev/null; then
+      echo "$dir"
+      return
+    fi
+  done
+
+  # Fallback: return first match even without JSONL files
+  echo "$PROJECTS_DIR/${candidates[0]}"
 }
 
 # Resolve session file
 resolve_session() {
   local project_dir="$1"
   local recent="${2:-1}"
-  ls -t "$project_dir"/*.jsonl 2>/dev/null | grep -v 'agent-' | sed -n "${recent}p"
+  # Use ls on directory then filter - portable across Git Bash / macOS / Linux
+  ls -t "$project_dir/" 2>/dev/null | grep '\.jsonl$' | grep -v '^agent-' | sed -n "${recent}p" |
+    while read -r f; do echo "$project_dir/$f"; done
 }
 
 # --- Commands ---
@@ -115,14 +129,14 @@ cmd_overview() {
     cat "$f" | jq -r '.type' | sort | uniq -c | sort -rn
     echo ""
     echo "--- Timing ---"
-    cat "$f" | jq -sc '
+    cat "$f" | jq -rsc '
       ([.[] | select(.type == "system" and .subtype == "turn_duration") | .durationMs] | add // 0) as $total |
       ([.[] | select(.type == "system" and .subtype == "turn_duration")] | length) as $turns |
       "Total time: \($total / 1000 | floor)s (\($total / 60000 | floor)m \(($total / 1000 | floor) % 60)s)\nTurns: \($turns)\nAvg turn: \(if $turns > 0 then ($total / $turns / 1000 | floor) else 0 end)s"
     ' 2>/dev/null
     echo ""
     echo "--- Content ---"
-    cat "$f" | jq -sc '
+    cat "$f" | jq -rsc '
       ([.[] | select(.type == "user") | .message.content[]? | select(.type == "text")] | length) as $user_msgs |
       ([.[] | select(.type == "assistant") | .message.content[]? | select(.type == "tool_use")] | length) as $tools |
       ([.[] | select(.type == "assistant") | .message.content[]? | select(.type == "thinking")] | length) as $thinking |
