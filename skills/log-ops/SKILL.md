@@ -2,7 +2,7 @@
 name: log-ops
 description: "Log analysis and JSONL processing - structured extraction, cross-log correlation, timeline reconstruction, pattern search"
 allowed-tools: "Read Edit Write Bash Glob Grep Agent"
-related-skills: [data-processing, debug-ops, monitoring-ops, file-search]
+related-skills: [data-processing, debug-ops, monitoring-ops, file-search, introspect]
 ---
 
 # Log Operations
@@ -45,19 +45,33 @@ Unknown Log File
 │           └─ rg for search, rg -A/-B for context, lnav for exploration
 ```
 
+## Prerequisites
+
+**Required** (must be installed):
+- `rg` (ripgrep) - text search, prefiltering. Install: `cargo install ripgrep` / `choco install ripgrep`
+- `jq` - JSON/JSONL extraction and transformation. Install: `brew install jq` / `choco install jq`
+
+**Optional** (enhanced capabilities, gracefully degraded without):
+- `lnav` - interactive log exploration with SQL queries. Install: `brew install lnav` / WSL: `apt install lnav`
+- `agrind` (angle-grinder) - pipeline aggregation syntax. Install: `cargo install ag`
+- `mlr` (Miller) - CSV/TSV log analysis. Install: `brew install miller` / `choco install miller`
+- `GNU parallel` - parallel processing of split files. Install: `brew install parallel`
+
+> All patterns in this skill work with just rg + jq. Optional tools add interactive exploration (lnav), pipeline aggregation (agrind), and tabular analysis (mlr).
+
 ## Tool Selection Matrix
 
-| Tool | Best For | Speed | Install |
-|------|----------|-------|---------|
-| `rg` (ripgrep) | Raw pattern matching in any format | Fastest | `cargo install ripgrep` |
-| `jq` | JSONL structured extraction and transformation | Fast | `brew install jq` / `choco install jq` |
-| `jq -s` | JSONL aggregation (slurp all lines into array) | Medium (loads all into memory) | Same as jq |
-| `lnav` | Interactive exploration, SQL over logs | Interactive | `brew install lnav` / `cargo install lnav` |
-| `agrind` (angle-grinder) | Pipeline aggregation and counting | Fast | `cargo install ag` |
+| Tool | Best For | Speed | Required? |
+|------|----------|-------|-----------|
+| `rg` (ripgrep) | Raw pattern matching in any format | Fastest | Yes |
+| `jq` | JSONL structured extraction and transformation | Fast | Yes |
+| `jq -s` | JSONL aggregation (slurp all lines into array) | Medium (loads all into memory) | Yes (part of jq) |
+| `lnav` | Interactive exploration, SQL over logs | Interactive | Optional |
+| `agrind` (angle-grinder) | Pipeline aggregation and counting | Fast | Optional |
 | `awk` | Column-based log formats, field extraction | Fast | Pre-installed |
-| `mlr` (Miller) | CSV/TSV log analysis, statistics | Fast | `brew install miller` |
+| `mlr` (Miller) | CSV/TSV log analysis, statistics | Fast | Optional |
 | `fd` + `rg` | Searching across many log directories | Fast | Pre-installed in dev-shell |
-| `GNU parallel` | Splitting large files for parallel processing | N/A (orchestrator) | `brew install parallel` |
+| `GNU parallel` | Splitting large files for parallel processing | N/A (orchestrator) | Optional |
 
 ### When to Use What
 
