@@ -2,11 +2,47 @@
 name: introspect
 description: "Analyze Claude Code session logs - extract thinking blocks, tool usage stats, error patterns, debug trajectories. Triggers on: introspect, session logs, trajectory, analyze sessions, what went wrong, tool usage, thinking blocks, session history, my reasoning, past sessions, what did I do."
 allowed-tools: "Bash Read Grep Glob"
+related-skills: [log-ops, data-processing]
 ---
 
 # Introspect
 
-Extract actionable intelligence from Claude Code session logs. Analyze tool usage, reasoning patterns, errors, and conversation flow to improve workflows and debug issues.
+Extract actionable intelligence from Claude Code session logs. For general JSONL analysis patterns (filtering, aggregation, cross-file joins), see the `log-ops` skill.
+
+## Analysis Decision Tree
+
+```
+What do you want to know?
+│
+├─ "What happened in a session?"
+│  ├─ Quick overview ── session summaries (jq select .type == "summary")
+│  ├─ Full conversation ── flow reconstruction (user/assistant turns)
+│  └─ Timeline ── entry type distribution + timestamps
+│
+├─ "How was I using tools?"
+│  ├─ One session ── tool frequency (jq select tool_use | sort | uniq -c)
+│  ├─ All sessions ── cat *.jsonl | same pipeline
+│  └─ Which files touched ── filter by Edit/Write tool names
+│
+├─ "What was I thinking?"
+│  ├─ Full reasoning trace ── extract thinking blocks
+│  ├─ Reasoning about topic X ── thinking + grep filter
+│  └─ Decision points ── thinking blocks with response preview
+│
+├─ "What went wrong?"
+│  ├─ Tool errors ── filter tool_result for error/failed patterns
+│  ├─ Error frequency ── group by error pattern, count
+│  └─ Debug trajectory ── reconstruct steps leading to failure
+│
+├─ "Compare sessions"
+│  ├─ Tool usage diff ── side-by-side uniq -c
+│  └─ Token estimation ── character count / 4
+│
+└─ "Search across sessions"
+   ├─ By keyword ── grep across *.jsonl
+   ├─ By file touched ── grep for filename
+   └─ By date ── find -mtime filter
+```
 
 ## Log File Structure
 
@@ -22,7 +58,7 @@ Extract actionable intelligence from Claude Code session logs. Analyze tool usag
 
 ### Project Path Encoding
 
-Project paths use double-dash encoding: `X:\Dev\claude-mods` → `X--Dev-claude-mods`
+Project paths use double-dash encoding: `X:\Dev\claude-mods` -> `X--Dev-claude-mods`
 
 ```bash
 # Find project directory for current path
@@ -30,7 +66,7 @@ project_dir=$(pwd | sed 's/[:\\\/]/-/g' | sed 's/--*/-/g')
 ls ~/.claude/projects/ | grep -i "${project_dir##*-}"
 ```
 
-## Entry Types in Session Files
+## Entry Types
 
 | Type | Contains | Key Fields |
 |------|----------|------------|
@@ -43,197 +79,7 @@ ls ~/.claude/projects/ | grep -i "${project_dir##*-}"
 | `file-history-snapshot` | File state checkpoints | File contents at point in time |
 | `system` | System context | Initial context, rules |
 
-## Core Analysis Patterns
-
-### List Sessions for Current Project
-
-```bash
-# Get sessions index
-cat ~/.claude/projects/X--Dev-claude-mods/sessions-index.json | jq '.'
-
-# List session files with sizes and dates
-ls -lah ~/.claude/projects/X--Dev-claude-mods/*.jsonl | grep -v agent
-```
-
-### Session Overview
-
-```bash
-SESSION="417ce03a-6fc7-4906-b767-6428338f34c3"
-PROJECT="X--Dev-claude-mods"
-
-# Entry type distribution
-jq -r '.type' ~/.claude/projects/$PROJECT/$SESSION.jsonl | sort | uniq -c
-
-# Session duration (first to last timestamp)
-jq -s '[.[].timestamp // .[].message.timestamp | select(.)] | [min, max] | map(. / 1000 | strftime("%Y-%m-%d %H:%M"))' \
-  ~/.claude/projects/$PROJECT/$SESSION.jsonl
-
-# Conversation summaries (quick overview)
-jq -r 'select(.type == "summary") | .summary' ~/.claude/projects/$PROJECT/$SESSION.jsonl
-```
-
-### Tool Usage Statistics
-
-```bash
-PROJECT="X--Dev-claude-mods"
-
-# Tool frequency across all sessions
-cat ~/.claude/projects/$PROJECT/*.jsonl | \
-  jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | .name' | \
-  sort | uniq -c | sort -rn
-
-# Tool frequency for specific session
-jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | .name' \
-  ~/.claude/projects/$PROJECT/$SESSION.jsonl | sort | uniq -c | sort -rn
-
-# Tools with their inputs (sampled)
-jq -c 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | {tool: .name, input: .input}' \
-  ~/.claude/projects/$PROJECT/$SESSION.jsonl | head -20
-```
-
-### Extract Thinking Blocks
-
-```bash
-SESSION="417ce03a-6fc7-4906-b767-6428338f34c3"
-PROJECT="X--Dev-claude-mods"
-
-# All thinking blocks (reasoning trace)
-jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "thinking") | .thinking' \
-  ~/.claude/projects/$PROJECT/$SESSION.jsonl
-
-# Thinking blocks with context (which turn)
-jq -r 'select(.type == "assistant") |
-  .message.content as $content |
-  ($content | map(select(.type == "thinking")) | .[0].thinking) as $thinking |
-  ($content | map(select(.type == "text")) | .[0].text | .[0:100]) as $response |
-  select($thinking) | "---\nThinking: \($thinking[0:500])...\nResponse: \($response)..."' \
-  ~/.claude/projects/$PROJECT/$SESSION.jsonl
-```
-
-### Error Analysis
-
-```bash
-PROJECT="X--Dev-claude-mods"
-
-# Find tool errors across sessions
-cat ~/.claude/projects/$PROJECT/*.jsonl | \
-  jq -r 'select(.type == "user") | .message.content[]? | select(.type == "tool_result") |
-    select(.content | test("error|Error|ERROR|failed|Failed|FAILED"; "i")) |
-    {tool_id: .tool_use_id, error: .content[0:200]}' 2>/dev/null | head -50
-
-# Count errors by pattern
-cat ~/.claude/projects/$PROJECT/*.jsonl | \
-  jq -r 'select(.type == "user") | .message.content[]? | select(.type == "tool_result") | .content' 2>/dev/null | \
-  grep -i "error\|failed\|exception" | \
-  sed 's/[0-9]\+//g' | sort | uniq -c | sort -rn | head -20
-```
-
-### Search Across Sessions
-
-```bash
-PROJECT="X--Dev-claude-mods"
-
-# Search user messages
-cat ~/.claude/projects/$PROJECT/*.jsonl | \
-  jq -r 'select(.type == "user") | .message.content[]? | select(.type == "text") | .text' | \
-  grep -i "pattern"
-
-# Search assistant responses
-cat ~/.claude/projects/$PROJECT/*.jsonl | \
-  jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text' | \
-  grep -i "pattern"
-
-# Find sessions mentioning a file
-for f in ~/.claude/projects/$PROJECT/*.jsonl; do
-  if grep -q "specific-file.ts" "$f"; then
-    echo "Found in: $(basename $f)"
-  fi
-done
-```
-
-### Conversation Flow Reconstruction
-
-```bash
-SESSION="417ce03a-6fc7-4906-b767-6428338f34c3"
-PROJECT="X--Dev-claude-mods"
-
-# Reconstruct conversation (user/assistant turns)
-jq -r '
-  if .type == "user" then
-    .message.content[]? | select(.type == "text") | "USER: \(.text[0:200])"
-  elif .type == "assistant" then
-    .message.content[]? | select(.type == "text") | "CLAUDE: \(.text[0:200])"
-  else empty end
-' ~/.claude/projects/$PROJECT/$SESSION.jsonl
-```
-
-### Subagent Analysis
-
-```bash
-PROJECT="X--Dev-claude-mods"
-
-# List subagent sessions
-ls ~/.claude/projects/$PROJECT/agent-*.jsonl 2>/dev/null
-
-# Subagent tool usage
-for f in ~/.claude/projects/$PROJECT/agent-*.jsonl; do
-  echo "=== $(basename $f) ==="
-  jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | .name' "$f" | \
-    sort | uniq -c | sort -rn | head -5
-done
-```
-
-## Advanced Analysis
-
-### Token/Cost Estimation
-
-```bash
-SESSION="417ce03a-6fc7-4906-b767-6428338f34c3"
-PROJECT="X--Dev-claude-mods"
-
-# Rough character count (tokens ≈ chars/4)
-jq -r '[
-  (select(.type == "user") | .message.content[]? | select(.type == "text") | .text | length),
-  (select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text | length)
-] | add' ~/.claude/projects/$PROJECT/$SESSION.jsonl | \
-  awk '{sum+=$1} END {print "Total chars:", sum, "Est tokens:", int(sum/4)}'
-```
-
-### File Modification Tracking
-
-```bash
-SESSION="417ce03a-6fc7-4906-b767-6428338f34c3"
-PROJECT="X--Dev-claude-mods"
-
-# Files edited (Edit tool usage)
-jq -r 'select(.type == "assistant") | .message.content[]? |
-  select(.type == "tool_use" and .name == "Edit") | .input.file_path' \
-  ~/.claude/projects/$PROJECT/$SESSION.jsonl | sort | uniq -c | sort -rn
-
-# Files written
-jq -r 'select(.type == "assistant") | .message.content[]? |
-  select(.type == "tool_use" and .name == "Write") | .input.file_path' \
-  ~/.claude/projects/$PROJECT/$SESSION.jsonl | sort | uniq
-```
-
-### Session Comparison
-
-```bash
-PROJECT="X--Dev-claude-mods"
-SESSION1="session-id-1"
-SESSION2="session-id-2"
-
-# Compare tool usage between sessions
-echo "=== Session 1 ===" && \
-jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | .name' \
-  ~/.claude/projects/$PROJECT/$SESSION1.jsonl | sort | uniq -c | sort -rn
-
-echo "=== Session 2 ===" && \
-jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | .name' \
-  ~/.claude/projects/$PROJECT/$SESSION2.jsonl | sort | uniq -c | sort -rn
-```
-
-## Quick Reference Commands
+## Quick Reference
 
 | Task | Command Pattern |
 |------|-----------------|
@@ -241,84 +87,36 @@ jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "too
 | Entry types | `jq -r '.type' $SESSION.jsonl \| sort \| uniq -c` |
 | Tool stats | `jq -r '... \| select(.type == "tool_use") \| .name' \| sort \| uniq -c` |
 | Extract thinking | `jq -r '... \| select(.type == "thinking") \| .thinking'` |
-| Find errors | `grep -i "error\|failed" $SESSION.jsonl` |
+| Find errors | `rg -i "error\|failed" $SESSION.jsonl` |
 | Session summaries | `jq -r 'select(.type == "summary") \| .summary'` |
 | User messages | `jq -r 'select(.type == "user") \| .message.content[]?.text'` |
+| Files edited | `jq -r '... \| select(.name == "Edit") \| .input.file_path'` |
 
-## Usage Examples
+## Using lnav for Interactive Exploration
 
-### "What tools did I use most in yesterday's session?"
-
-```bash
-# Find yesterday's sessions by modification time
-find ~/.claude/projects/X--Dev-claude-mods -name "*.jsonl" -mtime -1 ! -name "agent-*" | \
-  xargs -I{} jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | .name' {} | \
-  sort | uniq -c | sort -rn
-```
-
-### "Show me my reasoning when debugging the auth issue"
+If `lnav` is installed (see `log-ops` prerequisites), it provides SQL-based interactive exploration of session logs:
 
 ```bash
-# Search for sessions mentioning auth, then extract thinking
-for f in ~/.claude/projects/$PROJECT/*.jsonl; do
-  if grep -qi "auth" "$f"; then
-    echo "=== $(basename $f) ==="
-    jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "thinking") | .thinking' "$f" | \
-      grep -i -A5 -B5 "auth"
-  fi
-done
+# Open a session in lnav (treats JSONL as structured log)
+lnav ~/.claude/projects/$PROJECT/$SESSION.jsonl
+
+# SQL query inside lnav: count tool usage
+;SELECT json_extract(log_body, '$.message.content[0].name') as tool,
+        count(*) as n
+ FROM all_logs
+ WHERE json_extract(log_body, '$.type') = 'assistant'
+ GROUP BY tool ORDER BY n DESC
 ```
 
-### "What errors occurred most frequently this week?"
+> For large session files (>50MB), use the two-stage rg+jq pipeline from `log-ops` rather than loading everything into jq with `-s`.
 
-```bash
-find ~/.claude/projects/ -name "*.jsonl" -mtime -7 | \
-  xargs cat 2>/dev/null | \
-  jq -r 'select(.type == "user") | .message.content[]? | select(.type == "tool_result") | .content' 2>/dev/null | \
-  grep -i "error\|failed" | \
-  sed 's/[0-9]\+//g' | sed 's/\/[^ ]*//g' | \
-  sort | uniq -c | sort -rn | head -10
-```
+## Reference Files
 
-## Privacy Considerations
+| File | Contents | Lines |
+|------|----------|-------|
+| `references/session-analysis.md` | Full jq recipes: session overview, tool stats, thinking extraction, error analysis, search, flow reconstruction, subagent analysis, exports | ~230 |
 
-Session logs contain:
-- Full conversation history including any sensitive data discussed
-- File contents that were read or written
-- Thinking/reasoning (internal deliberation)
-- Tool inputs/outputs
+## See Also
 
-**Before sharing session exports:**
-1. Review for credentials, API keys, personal data
-2. Consider redacting file paths if they reveal project structure
-3. Thinking blocks may contain candid assessments
-
-## Export Formats
-
-### Markdown Report
-
-```bash
-SESSION="session-id"
-PROJECT="X--Dev-claude-mods"
-
-echo "# Session Report: $SESSION"
-echo ""
-echo "## Summary"
-jq -r 'select(.type == "summary") | "- \(.summary)"' ~/.claude/projects/$PROJECT/$SESSION.jsonl
-echo ""
-echo "## Tool Usage"
-jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | .name' \
-  ~/.claude/projects/$PROJECT/$SESSION.jsonl | sort | uniq -c | sort -rn | \
-  awk '{print "| " $2 " | " $1 " |"}'
-```
-
-### JSON Export (for further processing)
-
-```bash
-jq -s '{
-  session_id: "'$SESSION'",
-  entries: length,
-  tools: [.[] | select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | .name] | group_by(.) | map({tool: .[0], count: length}),
-  summaries: [.[] | select(.type == "summary") | .summary]
-}' ~/.claude/projects/$PROJECT/$SESSION.jsonl
-```
+- **log-ops** - General JSONL processing, two-stage pipelines, cross-file correlation, large file strategies
+- **data-processing** - JSON/YAML/TOML processing with jq and yq
