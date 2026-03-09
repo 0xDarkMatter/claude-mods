@@ -80,6 +80,44 @@ Complete reference for all available agents in the Task tool.
 
 ---
 
+### go-expert
+
+**Triggers:** golang, go, goroutine, concurrency, channel, context
+
+**Capabilities:**
+- Go idioms and patterns
+- Concurrency (goroutines, channels, errgroup)
+- Error handling and wrapping
+- Testing (table-driven, benchmarks, fuzz)
+- Performance profiling (pprof, trace)
+
+**Best For:**
+- Go architecture decisions
+- Concurrency design
+- Performance optimization
+- Complex error handling
+
+---
+
+### rust-expert
+
+**Triggers:** rust, cargo, ownership, borrow checker, lifetime, tokio
+
+**Capabilities:**
+- Ownership, borrowing, lifetimes
+- Traits, generics, type system
+- Async with tokio
+- Error handling (thiserror, anyhow)
+- Testing and ecosystem
+
+**Best For:**
+- Fighting the borrow checker
+- Async Rust architecture
+- Trait design
+- Unsafe code review
+
+---
+
 ## Framework Experts
 
 ### react-expert
@@ -456,3 +494,5 @@ Complete reference for all available agents in the Task tool.
 | "Fix React performance" | react-expert | - |
 | "Write E2E tests" | cypress-expert | - |
 | "Restructure project" | project-organizer | - |
+| "Go concurrency design" | go-expert | - |
+| "Rust lifetime issues" | rust-expert | - |

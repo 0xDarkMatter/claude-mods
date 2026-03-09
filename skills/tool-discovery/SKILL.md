@@ -43,8 +43,17 @@ Is this a reference/lookup task?
 | **sql-ops** | cte, window functions |
 | **postgres-ops** | postgresql, postgres, EXPLAIN ANALYZE, vacuum, pgbouncer, JSONB, RLS, replication |
 | **sqlite-ops** | sqlite, aiosqlite |
-| **tailwind-ops** | tailwind, tw classes |
-| **mcp-ops** | mcp server, protocol |
+| **tailwind-ops** | tailwind, tw classes, dark mode, responsive |
+| **mcp-ops** | mcp server, fastmcp, tool handler, transport |
+| **react-ops** | react, hooks, useState, next.js, RSC, zustand |
+| **vue-ops** | vue, composition api, pinia, nuxt, script setup |
+| **javascript-ops** | javascript, node, esm, async/await, event loop |
+| **astro-ops** | astro, islands, content collections, partial hydration |
+| **laravel-ops** | laravel, eloquent, artisan, sanctum, pest |
+| **nginx-ops** | nginx, reverse proxy, ssl, load balancer, proxy_pass |
+| **auth-ops** | jwt, oauth2, session, rbac, passkey, mfa, login |
+| **monitoring-ops** | prometheus, grafana, opentelemetry, SLO, alerting |
+| **debug-ops** | debug, crash, memory leak, race condition, bisect |
 
 ## Quick Agent Reference
 
@@ -80,6 +89,12 @@ Task tool → subagent_type: "python-expert"
 | "Find files named X" | file-search | Explore |
 | "Set up Python project" | python-env | python-expert |
 | "What HTTP status for X?" | rest-ops | — |
+| "React Server Components?" | react-ops | react-expert |
+| "Vue 3 composable pattern" | vue-ops | vue-expert |
+| "Configure nginx SSL" | nginx-ops | — |
+| "JWT vs session auth" | auth-ops | — |
+| "Set up Prometheus" | monitoring-ops | — |
+| "Debug memory leak" | debug-ops | — |
 
 ## Tips
 

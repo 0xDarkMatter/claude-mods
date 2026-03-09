@@ -1,7 +1,7 @@
 {
   "name": "claude-mods",
-  "version": "1.8.0",
-  "description": "Custom commands, skills, and agents for Claude Code - session continuity, 22 expert agents, 50 skills, 3 commands, 5 rules, modern CLI tools",
+  "version": "1.9.0",
+  "description": "Custom commands, skills, and agents for Claude Code - session continuity, 22 expert agents, 59 skills, 3 commands, 5 rules, modern CLI tools",
   "author": "0xDarkMatter",
   "repository": "https://github.com/0xDarkMatter/claude-mods",
   "license": "MIT",
@@ -48,7 +48,9 @@
     ],
     "skills": [
       "skills/api-design-ops",
+      "skills/astro-ops",
       "skills/atomise",
+      "skills/auth-ops",
       "skills/ci-cd-ops",
       "skills/claude-code-debug",
       "skills/claude-code-headless",
@@ -59,6 +61,7 @@
       "skills/container-orchestration",
       "skills/data-processing",
       "skills/doc-scanner",
+      "skills/debug-ops",
       "skills/docker-ops",
       "skills/explain",
       "skills/file-search",
@@ -66,8 +69,12 @@
       "skills/git-workflow",
       "skills/go-ops",
       "skills/introspect",
+      "skills/javascript-ops",
+      "skills/laravel-ops",
       "skills/markitdown",
       "skills/mcp-ops",
+      "skills/monitoring-ops",
+      "skills/nginx-ops",
       "skills/postgres-ops",
       "skills/project-planner",
       "skills/python-async-ops",
@@ -78,6 +85,7 @@
       "skills/python-observability-ops",
       "skills/python-pytest-ops",
       "skills/python-typing-ops",
+      "skills/react-ops",
       "skills/rest-ops",
       "skills/review",
       "skills/rust-ops",
@@ -96,7 +104,8 @@
       "skills/testgen",
       "skills/tool-discovery",
       "skills/typescript-ops",
-      "skills/unfold-admin"
+      "skills/unfold-admin",
+      "skills/vue-ops"
     ],
     "rules": [
       "rules/cli-tools.md",
