@@ -14,15 +14,53 @@ set -euo pipefail
 CLAUDE_DIR="${CLAUDE_DIR:-$HOME/.claude}"
 PROJECTS_DIR="$CLAUDE_DIR/projects"
 
+# --- Formatting ---
+
+# Colors (disabled if not a terminal or NO_COLOR is set)
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  C_RESET='\033[0m'
+  C_BOLD='\033[1m'
+  C_DIM='\033[2m'
+  C_CYAN='\033[36m'
+  C_GREEN='\033[32m'
+  C_YELLOW='\033[33m'
+  C_BLUE='\033[34m'
+  C_MAGENTA='\033[35m'
+  C_RED='\033[31m'
+  C_WHITE='\033[37m'
+else
+  C_RESET='' C_BOLD='' C_DIM='' C_CYAN='' C_GREEN=''
+  C_YELLOW='' C_BLUE='' C_MAGENTA='' C_RED='' C_WHITE=''
+fi
+
+header()  { printf "${C_BOLD}${C_CYAN}%s${C_RESET}\n" "$1"; }
+subhead() { printf "\n${C_BOLD}%s${C_RESET}\n" "$1"; }
+label()   { printf "  ${C_DIM}%-16s${C_RESET} %s\n" "$1" "$2"; }
+divider() { printf "${C_DIM}%s${C_RESET}\n" "$(printf '%.0s-' {1..50})"; }
+bar() {
+  # Usage: bar <value> <max> <width>
+  local val=${1:-0} max=${2:-1} width=${3:-20}
+  [[ $max -le 0 ]] && max=1
+  local filled=$(( val * width / max ))
+  [[ $filled -gt $width ]] && filled=$width
+  local empty=$(( width - filled ))
+  local filled_str="" empty_str=""
+  local i
+  for (( i=0; i<filled; i++ )); do filled_str+="█"; done
+  for (( i=0; i<empty; i++ )); do empty_str+="░"; done
+  printf "${C_GREEN}%s${C_DIM}%s${C_RESET}" "$filled_str" "$empty_str"
+}
+
 # --- Helpers ---
 
-die() { printf 'error: %s\n' "$1" >&2; exit 1; }
+die() { printf "${C_RED}error:${C_RESET} %s\n" "$1" >&2; exit 1; }
 
 usage() {
   cat <<'USAGE'
 cc-session - Claude Code session log analyzer
 
 COMMANDS:
+  sessions           List recent sessions with size and age
   overview           Entry type counts, duration, model info
   tools              Tool usage frequency (sorted)
   tool-chain         Sequential tool call trace with timing
@@ -104,6 +142,53 @@ resolve_session() {
 
 # --- Commands ---
 
+cmd_sessions() {
+  local project_dir="$1" json="${2:-}"
+  if [[ "$json" == "json" ]]; then
+    ls -t "$project_dir/" 2>/dev/null | grep '\.jsonl$' | grep -v '^agent-' | while read -r fname; do
+      local fpath="$project_dir/$fname"
+      local session_id="${fname%.jsonl}"
+      local size
+      size=$(wc -c < "$fpath" 2>/dev/null | tr -d ' ')
+      local mod_date
+      mod_date=$(date -r "$fpath" '+%Y-%m-%d %H:%M' 2>/dev/null || stat -c '%y' "$fpath" 2>/dev/null | cut -d. -f1)
+      printf '{"session":"%s","size_bytes":%s,"modified":"%s"}\n' "$session_id" "$size" "$mod_date"
+    done
+  else
+    header "Sessions"
+    echo ""
+    printf "  ${C_DIM}%-4s %-38s %6s  %s${C_RESET}\n" "#" "Session ID" "Size" "Last Modified"
+    divider
+    local n=0
+    ls -t "$project_dir/" 2>/dev/null | grep '\.jsonl$' | grep -v '^agent-' | while read -r fname; do
+      n=$((n + 1))
+      local fpath="$project_dir/$fname"
+      local session_id="${fname%.jsonl}"
+      # Human-readable size
+      local bytes
+      bytes=$(wc -c < "$fpath" 2>/dev/null | tr -d ' ')
+      local size_h
+      if [[ $bytes -ge 1048576 ]]; then
+        size_h="$(( bytes / 1048576 ))M"
+      elif [[ $bytes -ge 1024 ]]; then
+        size_h="$(( bytes / 1024 ))K"
+      else
+        size_h="${bytes}B"
+      fi
+      local mod_date
+      mod_date=$(date -r "$fpath" '+%Y-%m-%d %H:%M' 2>/dev/null || stat -c '%y' "$fpath" 2>/dev/null | cut -d. -f1)
+      if [[ $n -eq 1 ]]; then
+        printf "  ${C_GREEN}%-4s${C_RESET} ${C_BOLD}%-38s${C_RESET} %6s  %s  ${C_GREEN}(latest)${C_RESET}\n" "$n" "$session_id" "$size_h" "$mod_date"
+      else
+        printf "  ${C_DIM}%-4s${C_RESET} %-38s %6s  %s\n" "$n" "$session_id" "$size_h" "$mod_date"
+      fi
+    done
+    echo ""
+    printf "  ${C_DIM}Use --recent <n> to select a session, e.g.: cc-session overview --recent 3${C_RESET}\n"
+    printf "  ${C_DIM}Resume with: claude --resume <full-session-id>${C_RESET}\n"
+  fi
+}
+
 cmd_overview() {
   local f="$1" json="${2:-}"
   if [[ "$json" == "json" ]]; then
@@ -122,26 +207,81 @@ cmd_overview() {
       user_messages: ([.[] | select(.type == "user") | .message.content[]? | select(.type == "text")] | length)
     }' 2>/dev/null
   else
-    echo "=== Session Overview ==="
-    echo "File: $(basename "$f")"
-    echo ""
-    echo "--- Entry Types ---"
-    cat "$f" | jq -r '.type' | sort | uniq -c | sort -rn
-    echo ""
-    echo "--- Timing ---"
-    cat "$f" | jq -rsc '
-      ([.[] | select(.type == "system" and .subtype == "turn_duration") | .durationMs] | add // 0) as $total |
+    # Gather all stats in one jq pass
+    local stats
+    stats=$(cat "$f" | jq -rsc '
+      ([.[] | select(.type == "system" and .subtype == "turn_duration") | .durationMs] | add // 0) as $total_ms |
       ([.[] | select(.type == "system" and .subtype == "turn_duration")] | length) as $turns |
-      "Total time: \($total / 1000 | floor)s (\($total / 60000 | floor)m \(($total / 1000 | floor) % 60)s)\nTurns: \($turns)\nAvg turn: \(if $turns > 0 then ($total / $turns / 1000 | floor) else 0 end)s"
-    ' 2>/dev/null
-    echo ""
-    echo "--- Content ---"
-    cat "$f" | jq -rsc '
       ([.[] | select(.type == "user") | .message.content[]? | select(.type == "text")] | length) as $user_msgs |
       ([.[] | select(.type == "assistant") | .message.content[]? | select(.type == "tool_use")] | length) as $tools |
       ([.[] | select(.type == "assistant") | .message.content[]? | select(.type == "thinking")] | length) as $thinking |
-      "User messages: \($user_msgs)\nTool calls: \($tools)\nThinking blocks: \($thinking)"
-    ' 2>/dev/null
+      ([.[] | select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | .name] |
+        group_by(.) | map({t: .[0], n: length}) | sort_by(-.n) | .[:5]) as $top_tools |
+      (map(.timestamp | select(.) | strings) | sort) as $ts |
+      ([.[] | select(.type == "user") | .message.content[]? | select(.type == "text") | .text | length] | add // 0) as $user_chars |
+      ([.[] | select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text | length] | add // 0) as $asst_chars |
+      ([.[] | select(.type == "assistant") | .message.content[]? | select(.type == "thinking") | .thinking | length] | add // 0) as $think_chars |
+      (($user_chars + $asst_chars + $think_chars) / 4 | floor) as $est_tokens |
+      {
+        total_ms: $total_ms,
+        total_s: ($total_ms / 1000 | floor),
+        mins: ($total_ms / 60000 | floor),
+        secs: (($total_ms / 1000 | floor) % 60),
+        turns: $turns,
+        avg_s: (if $turns > 0 then ($total_ms / $turns / 1000 | floor) else 0 end),
+        user_msgs: $user_msgs,
+        tools: $tools,
+        thinking: $thinking,
+        top_tools: $top_tools,
+        entries: length,
+        first_ts: ($ts | first // "unknown"),
+        last_ts: ($ts | last // "unknown"),
+        est_tokens_k: (($est_tokens / 1000 * 10 | floor) / 10)
+      } | @json
+    ' 2>/dev/null)
+
+    local session_id
+    session_id=$(basename "$f" .jsonl)
+
+    header "Session Overview"
+    echo ""
+    label "Session" "$session_id"
+    label "Resume" "claude --resume $session_id"
+    label "Started" "$(echo "$stats" | jq -r '.first_ts | .[0:19] | gsub("T"; " ")')"
+    label "Ended" "$(echo "$stats" | jq -r '.last_ts | .[0:19] | gsub("T"; " ")')"
+    label "Entries" "$(echo "$stats" | jq -r '.entries')"
+
+    subhead "Timing"
+    divider
+    local mins secs turns avg
+    mins=$(echo "$stats" | jq -r '.mins')
+    secs=$(echo "$stats" | jq -r '.secs')
+    turns=$(echo "$stats" | jq -r '.turns')
+    avg=$(echo "$stats" | jq -r '.avg_s')
+    label "Duration" "${mins}m ${secs}s"
+    label "Turns" "$turns"
+    label "Avg turn" "${avg}s"
+
+    subhead "Activity"
+    divider
+    local user_msgs tools thinking
+    user_msgs=$(echo "$stats" | jq -r '.user_msgs')
+    tools=$(echo "$stats" | jq -r '.tools')
+    thinking=$(echo "$stats" | jq -r '.thinking')
+    local est_tokens
+    est_tokens=$(echo "$stats" | jq -r '.est_tokens_k')
+    label "User messages" "$user_msgs"
+    label "Tool calls" "$tools"
+    label "Thinking" "$thinking blocks"
+    label "Est. tokens" "${est_tokens}k"
+
+    subhead "Top Tools"
+    divider
+    echo "$stats" | jq -r '.top_tools[] | "\(.t)\t\(.n)"' | tr -d '\r' | while IFS=$'\t' read -r tool count; do
+      printf "  ${C_YELLOW}%-16s${C_RESET} %3s  " "$tool" "$count"
+      bar "$count" "$tools" 20
+      echo ""
+    done
   fi
 }
 
@@ -153,10 +293,18 @@ cmd_tools() {
       select(.type == "tool_use") | .name
     ] | group_by(.) | map({tool: .[0], count: length}) | sort_by(-.count)' 2>/dev/null
   else
-    cat "$f" | jq -r '
-      select(.type == "assistant") | .message.content[]? |
-      select(.type == "tool_use") | .name
-    ' | sort | uniq -c | sort -rn
+    header "Tool Usage"
+    echo ""
+    local total
+    total=$(cat "$f" | jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | .name' | wc -l)
+    cat "$f" | jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | .name' |
+      sort | uniq -c | sort -rn | tr -d '\r' | while read -r count tool; do
+        printf "  ${C_YELLOW}%-16s${C_RESET} %3s  " "$tool" "$count"
+        bar "$count" "$total" 25
+        echo ""
+      done
+    divider
+    label "Total" "$total calls"
   fi
 }
 
@@ -269,14 +417,28 @@ cmd_files() {
       written: [.[] | select(.type == "assistant") | .message.content[]? | select(.type == "tool_use" and .name == "Write") | .input.file_path] | unique
     }' 2>/dev/null
   else
-    echo "=== Files Read ==="
-    cat "$f" | jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use" and .name == "Read") | .input.file_path' | sort | uniq -c | sort -rn
-    echo ""
-    echo "=== Files Edited ==="
-    cat "$f" | jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use" and .name == "Edit") | .input.file_path' | sort | uniq -c | sort -rn
-    echo ""
-    echo "=== Files Written ==="
-    cat "$f" | jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use" and .name == "Write") | .input.file_path' | sort -u
+    header "Files Touched"
+    subhead "Read"
+    divider
+    cat "$f" | jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use" and .name == "Read") | .input.file_path' |
+      sort | uniq -c | sort -rn | while read -r count path; do
+        local short="${path##*/}"
+        printf "  ${C_DIM}%3s${C_RESET}  ${C_BLUE}%s${C_RESET}\n" "$count" "$short"
+      done
+    subhead "Edited"
+    divider
+    cat "$f" | jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use" and .name == "Edit") | .input.file_path' |
+      sort | uniq -c | sort -rn | while read -r count path; do
+        local short="${path##*/}"
+        printf "  ${C_DIM}%3s${C_RESET}  ${C_YELLOW}%s${C_RESET}\n" "$count" "$short"
+      done
+    subhead "Written (new files)"
+    divider
+    cat "$f" | jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use" and .name == "Write") | .input.file_path' |
+      sort -u | while read -r path; do
+        local short="${path##*/}"
+        printf "  ${C_GREEN}+ %s${C_RESET}\n" "$short"
+      done
   fi
 }
 
@@ -296,7 +458,38 @@ cmd_turns() {
       }
     ]
   ' 2>/dev/null | if [[ "$json" == "json" ]]; then cat; else
-    jq -r '.[] | "Turn \(.turn): \(.duration_s)s, \(.tools) tools [\(.tool_names | join(", "))]\(if .has_thinking then " [thinking]" else "" end)"' 2>/dev/null
+    local max_dur
+    max_dur=$(jq '[.[].duration_s] | max // 1' <<< "$(cat)")
+    # Re-read from the pipe above (need to re-run since we consumed stdin)
+    cat "$f" | jq -sc '
+      [.[] | select(.type == "system" and .subtype == "turn_duration")] as $durations |
+      [.[] | select(.type == "assistant")] as $assistants |
+      ([.[] | select(.type == "system" and .subtype == "turn_duration") | .durationMs] | max // 1000) as $max_ms |
+      [range(0; [$durations | length, $assistants | length] | min) |
+        {
+          turn: (. + 1),
+          duration_s: ($durations[.].durationMs / 1000 | floor),
+          max_s: ($max_ms / 1000 | floor),
+          tools: ([$assistants[.].message.content[]? | select(.type == "tool_use") | .name] | length),
+          tool_names: ([$assistants[.].message.content[]? | select(.type == "tool_use") | .name]),
+          has_thinking: ([$assistants[.].message.content[]? | select(.type == "thinking")] | length > 0)
+        }
+      ]
+    ' 2>/dev/null | jq -r '.[] | "\(.turn)\t\(.duration_s)\t\(.max_s)\t\(.tools)\t\(.tool_names | join(", ") | if . == "" then "-" else . end)\t\(.has_thinking)"' | tr -d '\r' |
+    {
+      header "Turns"
+      echo ""
+      printf "  ${C_DIM}%-6s %-8s %-6s %-8s %s${C_RESET}\n" "Turn" "Time" "Tools" "" "Details"
+      divider
+      while IFS=$'\t' read -r turn dur max_s tools tool_names thinking; do
+        thinking=$(echo "$thinking" | tr -d '\r ')
+        local think_flag=""
+        [[ "$thinking" == "true" ]] && think_flag=" ${C_MAGENTA}[T]${C_RESET}"
+        printf "  ${C_BOLD}%-6s${C_RESET} %5ss  " "#$turn" "$dur"
+        bar "$dur" "$max_s" 12
+        printf " %2s  ${C_DIM}%s${C_RESET}%b\n" "$tools" "$tool_names" "$think_flag"
+      done
+    }
   fi
 }
 
@@ -361,7 +554,24 @@ cmd_cost() {
       est_tokens_k: (($est_tokens / 1000 * 10 | floor) / 10)
     }
   ' 2>/dev/null | if [[ "$json" == "json" ]]; then cat; else
-    jq -r '"Token estimate: \(.est_tokens_k)k tokens\n  User: \(.user_chars) chars\n  Assistant: \(.assistant_chars) chars\n  Thinking: \(.thinking_chars) chars"' 2>/dev/null
+    jq -r '.' | {
+      header "Cost Estimate"
+      echo ""
+      local data
+      data=$(cat)
+      local est_k user asst think total
+      est_k=$(echo "$data" | jq -r '.est_tokens_k')
+      user=$(echo "$data" | jq -r '.user_chars')
+      asst=$(echo "$data" | jq -r '.assistant_chars')
+      think=$(echo "$data" | jq -r '.thinking_chars')
+      total=$(echo "$data" | jq -r '.total_chars')
+      label "Est. tokens" "${C_BOLD}${est_k}k${C_RESET}"
+      label "User" "${user} chars"
+      label "Assistant" "${asst} chars"
+      label "Thinking" "${think} chars"
+      divider
+      label "Total chars" "$total"
+    }
   fi
 }
 
@@ -448,6 +658,11 @@ fi
 
 # Execute command
 case "$cmd" in
+  sessions)
+    project_dir=$(resolve_project "${project}${dir_pattern:+$dir_pattern}")
+    cmd_sessions "$project_dir" "$output"
+    exit 0
+    ;;
   overview)          cmd_overview "$session_file" "$output" ;;
   tools)             cmd_tools "$session_file" "$output" ;;
   tool-chain)        cmd_tool_chain "$session_file" "$output" ;;
