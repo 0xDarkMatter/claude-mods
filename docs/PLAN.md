@@ -3,7 +3,7 @@
 **Goal**: A centralized repository of custom Claude Code commands, agents, and skills that enhance Claude Code's native capabilities with persistent session state, specialized expert agents, and streamlined workflows.
 
 **Created**: 2025-11-27
-**Last Updated**: 2026-01-24
+**Last Updated**: 2026-03-09
 **Status**: Active Development
 
 ---
@@ -13,11 +13,11 @@
 | Component | Count | Notes |
 |-----------|-------|-------|
 | Agents | 22 | Domain experts (Python, Go, Rust, React, etc.) |
-| Skills | 59 | Operational skills, CLI tools, workflows, dev tasks |
+| Skills | 64 | Operational skills, CLI tools, workflows, dev tasks |
 | Commands | 3 | Session management (sync, save) + experimental (canvas) |
 | Rules | 5 | CLI tools, thinking, commit style, naming, skill-agent-updates |
-| Output Styles | 1 | Vesper personality |
-| Hooks | 0 | Config examples only |
+| Output Styles | 4 | Vesper, Spartan, Mentor, Executive |
+| Hooks | 3 | pre-commit-lint, post-edit-format, dangerous-cmd-warn |
 
 ---
 
@@ -170,9 +170,18 @@ Most commands have been converted to skills for better discovery and on-demand l
 
 - [x] Create `rules/commit-style.md`
 - [x] Create `rules/naming-conventions.md`
-- [ ] Create Spartan output style
+- [x] Create Spartan output style
+- [x] Create Mentor output style
+- [x] Create Executive output style
+- [x] Add `debug-ops` skill (systematic debugging workflow)
+- [x] Add 3 hook implementations (lint, format, safety)
+- [x] Add `migrate-ops` skill (framework/language upgrades)
+- [x] Add `refactor-ops` skill (safe refactoring patterns)
+- [x] Add `scaffold` skill (project scaffolding)
+- [x] Add `perf-ops` skill (performance profiling)
+- [x] Add `log-ops` skill (JSONL/log analysis)
 - [ ] Add docker-expert agent
-- [ ] Add `/debug` skill (systematic debugging workflow)
+- [ ] Install lnav on Windows for log analysis
 
 ---
 
@@ -190,4 +199,4 @@ Most commands have been converted to skills for better discovery and on-demand l
 
 ---
 
-*Plan managed by `/save` command. Last updated: 2026-01-24*
+*Plan managed by `/save` command. Last updated: 2026-03-09*

@@ -554,6 +554,89 @@ Project and development workflow automation.
 - structural-search: Security scans
 - doc-scanner: Documentation consolidation
 - project-planner: Session planning
+- migrate-ops: Framework version upgrades
+- refactor-ops: Large-scale refactoring
+
+---
+
+### migrate-ops
+
+**Triggers:** migrate, upgrade, migration, version upgrade, breaking changes, codemod, rector, jscodeshift, framework upgrade, dependency audit
+
+**Use For:**
+- Framework version upgrades (React 18→19, Vue 2→3, Next.js Pages→App Router, Laravel 10→11)
+- Language upgrades (Python 3.9→3.13, Node 18→22, TypeScript 4→5, Go, Rust editions)
+- Dependency audit and upgrade workflows (npm audit, pip-audit, cargo audit, govulncheck)
+- Breaking change detection and codemod application
+- Rollback strategies and pre-migration checklists
+
+**References:** framework-upgrades.md, language-upgrades.md, dependency-management.md
+
+---
+
+### refactor-ops
+
+**Triggers:** refactor, extract function, extract component, code smell, dead code, rename, restructure, technical debt, cyclomatic complexity
+
+**Use For:**
+- Extract patterns (function, component, hook, module, class, configuration)
+- Code smell detection (long functions, god objects, feature envy, duplicate code)
+- Dead code detection and removal workflows
+- Test-driven refactoring methodology (characterization tests, strangler fig)
+- Safe rename and move operations across codebase
+
+**References:** extract-patterns.md, code-smells.md, safe-methodology.md
+
+---
+
+### scaffold
+
+**Triggers:** scaffold, boilerplate, project template, init project, create project, starter, new project, setup project
+
+**Use For:**
+- API project scaffolding (FastAPI, Express, Gin, Axum)
+- Web app scaffolding (Next.js, Nuxt, Astro, SvelteKit)
+- CLI tool scaffolding (Typer, Commander, Cobra, Clap)
+- Library/package scaffolding (npm, PyPI, crate, Go module)
+- Monorepo scaffolding (Turborepo, Nx, workspaces)
+- Common additions (CI/CD, Docker, linting, pre-commit)
+
+**References:** api-templates.md, frontend-templates.md, tooling-templates.md
+
+---
+
+### perf-ops
+
+**Triggers:** performance, profiling, flamegraph, memory leak, bundle size, load test, benchmark, slow, latency, optimization, pprof, py-spy, clinic.js
+
+**Use For:**
+- CPU profiling (flamegraphs, pprof, py-spy, clinic.js, samply)
+- Memory profiling (heaptrack, memray, Chrome DevTools, Valgrind)
+- Bundle analysis (webpack-bundle-analyzer, source-map-explorer)
+- Load testing (k6, artillery, vegeta, locust)
+- Benchmarking (hyperfine, criterion, pytest-benchmark, vitest bench)
+- Optimization patterns (caching, lazy loading, connection pooling)
+
+**References:** cpu-memory-profiling.md, load-testing.md, optimization-patterns.md
+
+---
+
+### log-ops
+
+**Triggers:** log analysis, JSONL, log file, parse logs, search logs, lnav, jq logs, structured logs, log aggregation, timeline reconstruction, cross-log correlation
+
+**Use For:**
+- JSONL streaming extraction and aggregation with jq
+- Two-stage rg+jq pipelines for large log files
+- Timeline reconstruction from log timestamps
+- Cross-log correlation across multiple files
+- Agent conversation log analysis (tool calls, errors, phases)
+- Cross-directory log searching (fd + rg + jq composition)
+- Interactive log exploration with lnav
+
+**References:** jsonl-patterns.md, analysis-workflows.md, tool-setup.md
+
+---
 
 ## When to Use Skills vs Agents
 
