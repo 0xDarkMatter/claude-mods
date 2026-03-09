@@ -9,114 +9,171 @@ related-skills: [log-ops, data-processing]
 
 Extract actionable intelligence from Claude Code session logs. For general JSONL analysis patterns (filtering, aggregation, cross-file joins), see the `log-ops` skill.
 
+## cc-session CLI
+
+The `scripts/cc-session` script provides zero-dependency analysis (requires only jq + bash). Auto-resolves the current project and most recent session.
+
+```bash
+# Copy to PATH for global access
+cp skills/introspect/scripts/cc-session ~/.local/bin/
+# Or on Windows (Git Bash)
+cp skills/introspect/scripts/cc-session ~/bin/
+```
+
+### Commands
+
+| Command | What It Does |
+|---------|-------------|
+| `cc-session overview` | Entry counts, timing, tool/thinking totals |
+| `cc-session tools` | Tool usage frequency (sorted) |
+| `cc-session tool-chain` | Sequential tool call trace with input summaries |
+| `cc-session thinking` | Full thinking/reasoning blocks |
+| `cc-session thinking-summary` | First 200 chars of each thinking block |
+| `cc-session errors` | Tool results containing error patterns |
+| `cc-session conversation` | Reconstructed user/assistant turns |
+| `cc-session files` | Files read, edited, written (with counts) |
+| `cc-session turns` | Per-turn breakdown (duration, tools used) |
+| `cc-session agents` | Subagent spawns with type and prompt preview |
+| `cc-session cost` | Rough token/cost estimation |
+| `cc-session timeline` | Event timeline with timestamps |
+| `cc-session summary` | Session summaries (compaction boundaries) |
+| `cc-session search <pattern>` | Search across sessions (text content) |
+
+### Options
+
+```
+--project, -p <name>    Filter by project (partial match)
+--dir, -d <pattern>     Filter by directory pattern in project path
+--all                   Search all projects (with search command)
+--recent <n>            Use nth most recent session (default: 1)
+--json                  Output as JSON instead of text
+```
+
+### Examples
+
+```bash
+cc-session overview                              # Current project, latest session
+cc-session tools --recent 2                      # Tools from second-latest session
+cc-session tool-chain                            # Full tool call sequence
+cc-session errors -p claude-mods                 # Errors in claude-mods project
+cc-session thinking | grep -i "decision"         # Search reasoning
+cc-session search "auth" --all                   # Search all projects
+cc-session turns --json | jq '.[] | select(.tools > 5)'  # Complex turns
+cc-session files --json | jq '.edited[:5]'       # Top 5 edited files
+cc-session overview --json                       # Pipe to other tools
+```
+
 ## Analysis Decision Tree
 
 ```
 What do you want to know?
-│
-├─ "What happened in a session?"
-│  ├─ Quick overview ── session summaries (jq select .type == "summary")
-│  ├─ Full conversation ── flow reconstruction (user/assistant turns)
-│  └─ Timeline ── entry type distribution + timestamps
-│
-├─ "How was I using tools?"
-│  ├─ One session ── tool frequency (jq select tool_use | sort | uniq -c)
-│  ├─ All sessions ── cat *.jsonl | same pipeline
-│  └─ Which files touched ── filter by Edit/Write tool names
-│
-├─ "What was I thinking?"
-│  ├─ Full reasoning trace ── extract thinking blocks
-│  ├─ Reasoning about topic X ── thinking + grep filter
-│  └─ Decision points ── thinking blocks with response preview
-│
-├─ "What went wrong?"
-│  ├─ Tool errors ── filter tool_result for error/failed patterns
-│  ├─ Error frequency ── group by error pattern, count
-│  └─ Debug trajectory ── reconstruct steps leading to failure
-│
-├─ "Compare sessions"
-│  ├─ Tool usage diff ── side-by-side uniq -c
-│  └─ Token estimation ── character count / 4
-│
-└─ "Search across sessions"
-   ├─ By keyword ── grep across *.jsonl
-   ├─ By file touched ── grep for filename
-   └─ By date ── find -mtime filter
+|
+|- "What happened in a session?"
+|  |- Quick overview ---- cc-session overview
+|  |- Full conversation -- cc-session conversation
+|  |- Timeline ---------- cc-session timeline
+|  |- Summaries --------- cc-session summary
+|
+|- "How was I using tools?"
+|  |- Frequency ---------- cc-session tools
+|  |- Call sequence ------- cc-session tool-chain
+|  |- Files touched ------- cc-session files
+|
+|- "What was I thinking?"
+|  |- Full reasoning ------ cc-session thinking
+|  |- Quick scan ---------- cc-session thinking-summary
+|  |- Topic search -------- cc-session thinking | grep -i "topic"
+|
+|- "What went wrong?"
+|  |- Tool errors --------- cc-session errors
+|  |- Debug trajectory ---- cc-session tool-chain (trace the sequence)
+|
+|- "Compare sessions"
+|  |- Tool usage diff ----- cc-session tools --recent 1 vs --recent 2
+|  |- Token estimation ---- cc-session cost
+|
+|- "Search across sessions"
+|  |- Current project ----- cc-session search "pattern"
+|  |- All projects -------- cc-session search "pattern" --all
 ```
 
-## Log File Structure
+## Session Log Schema
+
+### File Structure
 
 ```
 ~/.claude/
-├── history.jsonl                              # Global: all user inputs across projects
-├── projects/
-│   └── {project-path}/                        # e.g., X--Dev-claude-mods/
-│       ├── sessions-index.json                # Session metadata index
-│       ├── {session-uuid}.jsonl               # Full session transcript
-│       └── agent-{short-id}.jsonl             # Subagent transcripts
+|- projects/
+|   |- {project-path}/                        # e.g., X--Forge-claude-mods/
+|       |- sessions-index.json                # Session metadata index
+|       |- {session-uuid}.jsonl               # Full session transcript
+|       |- agent-{short-id}.jsonl             # Subagent transcripts
 ```
 
-### Project Path Encoding
+Project paths use double-dash encoding: `X:\Forge\claude-mods` -> `X--Forge-claude-mods`
 
-Project paths use double-dash encoding: `X:\Dev\claude-mods` -> `X--Dev-claude-mods`
+### Entry Types
+
+| Type | Role | Key Fields |
+|------|------|------------|
+| `user` | User messages + tool results | `message.content[].type` = "text" or "tool_result" |
+| `assistant` | Claude responses | `message.content[].type` = "text", "tool_use", or "thinking" |
+| `system` | Turn duration, compaction | `subtype` = "turn_duration" (has `durationMs`) or "compact_boundary" |
+| `progress` | Hook/tool progress events | `data.type`, `toolUseID`, `parentToolUseID` |
+| `file-history-snapshot` | File state checkpoints | `snapshot`, `messageId`, `isSnapshotUpdate` |
+| `queue-operation` | Message queue events | `operation`, `content` |
+| `last-prompt` | Last user prompt cache | `lastPrompt` |
+| `summary` | Compaction summaries | `summary`, `leafUuid` |
+
+### Content Block Types (inside message.content[])
+
+| Block Type | Found In | Fields |
+|-----------|----------|--------|
+| `text` | user, assistant | `.text` |
+| `tool_use` | assistant | `.id`, `.name`, `.input` |
+| `tool_result` | user | `.tool_use_id`, `.content` |
+| `thinking` | assistant | `.thinking`, `.signature` |
+
+### Common Fields (all entry types)
+
+```
+uuid, parentUuid, sessionId, timestamp, type,
+cwd, gitBranch, version, isSidechain, userType
+```
+
+## Session Log Retention
+
+By default, Claude Code deletes sessions inactive for 30 days (on startup). Increase to preserve history for analysis.
+
+```json
+// ~/.claude/settings.json
+{
+  "cleanupPeriodDays": 90
+}
+```
+
+Currently set to 90 days. Adjust based on disk usage (`dust -d 1 ~/.claude/projects/`).
+
+## Quick jq Reference
+
+For one-off queries when cc-session doesn't cover your need:
 
 ```bash
-# Find project directory for current path
-project_dir=$(pwd | sed 's/[:\\\/]/-/g' | sed 's/--*/-/g')
-ls ~/.claude/projects/ | grep -i "${project_dir##*-}"
+# Pipe through cat on Windows (jq file args can fail)
+cat session.jsonl | jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | .name'
+
+# Two-stage for large files
+rg '"tool_use"' session.jsonl | jq -r '.message.content[]? | select(.type == "tool_use") | .name'
 ```
-
-## Entry Types
-
-| Type | Contains | Key Fields |
-|------|----------|------------|
-| `user` | User messages | `message.content`, `uuid`, `timestamp` |
-| `assistant` | Claude responses | `message.content[]`, `cwd`, `gitBranch` |
-| `thinking` | Reasoning blocks | `thinking`, `signature` (in content array) |
-| `tool_use` | Tool invocations | `name`, `input`, `id` (in content array) |
-| `tool_result` | Tool outputs | `tool_use_id`, `content` |
-| `summary` | Conversation summaries | `summary`, `leafUuid` |
-| `file-history-snapshot` | File state checkpoints | File contents at point in time |
-| `system` | System context | Initial context, rules |
-
-## Quick Reference
-
-| Task | Command Pattern |
-|------|-----------------|
-| List sessions | `ls -lah ~/.claude/projects/$PROJECT/*.jsonl \| grep -v agent` |
-| Entry types | `jq -r '.type' $SESSION.jsonl \| sort \| uniq -c` |
-| Tool stats | `jq -r '... \| select(.type == "tool_use") \| .name' \| sort \| uniq -c` |
-| Extract thinking | `jq -r '... \| select(.type == "thinking") \| .thinking'` |
-| Find errors | `rg -i "error\|failed" $SESSION.jsonl` |
-| Session summaries | `jq -r 'select(.type == "summary") \| .summary'` |
-| User messages | `jq -r 'select(.type == "user") \| .message.content[]?.text'` |
-| Files edited | `jq -r '... \| select(.name == "Edit") \| .input.file_path'` |
-
-## Using lnav for Interactive Exploration
-
-If `lnav` is installed (see `log-ops` prerequisites), it provides SQL-based interactive exploration of session logs:
-
-```bash
-# Open a session in lnav (treats JSONL as structured log)
-lnav ~/.claude/projects/$PROJECT/$SESSION.jsonl
-
-# SQL query inside lnav: count tool usage
-;SELECT json_extract(log_body, '$.message.content[0].name') as tool,
-        count(*) as n
- FROM all_logs
- WHERE json_extract(log_body, '$.type') = 'assistant'
- GROUP BY tool ORDER BY n DESC
-```
-
-> For large session files (>50MB), use the two-stage rg+jq pipeline from `log-ops` rather than loading everything into jq with `-s`.
 
 ## Reference Files
 
-| File | Contents | Lines |
-|------|----------|-------|
-| `references/session-analysis.md` | Full jq recipes: session overview, tool stats, thinking extraction, error analysis, search, flow reconstruction, subagent analysis, exports | ~230 |
+| File | Contents |
+|------|----------|
+| `scripts/cc-session` | CLI tool - session analysis with 14 commands, JSON output, project filtering |
+| `references/session-analysis.md` | Raw jq recipes for custom analysis beyond cc-session |
 
 ## See Also
 
-- **log-ops** - General JSONL processing, two-stage pipelines, cross-file correlation, large file strategies
+- **log-ops** - General JSONL processing, two-stage pipelines, cross-file correlation
 - **data-processing** - JSON/YAML/TOML processing with jq and yq

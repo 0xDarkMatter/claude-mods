@@ -1,0 +1,465 @@
+#!/usr/bin/env bash
+# cc-session: Analyze Claude Code session JSONL logs
+# Zero dependencies beyond jq (required) and standard coreutils.
+#
+# Usage:
+#   cc-session <command> [session.jsonl] [options]
+#   cc-session <command> --project <project-name> [options]
+#   cc-session <command> --dir <directory-pattern> [options]
+#
+# If no file given, uses the most recent session in the current project.
+
+set -euo pipefail
+
+CLAUDE_DIR="${CLAUDE_DIR:-$HOME/.claude}"
+PROJECTS_DIR="$CLAUDE_DIR/projects"
+
+# --- Helpers ---
+
+die() { printf 'error: %s\n' "$1" >&2; exit 1; }
+
+usage() {
+  cat <<'USAGE'
+cc-session - Claude Code session log analyzer
+
+COMMANDS:
+  overview           Entry type counts, duration, model info
+  tools              Tool usage frequency (sorted)
+  tool-chain         Sequential tool call trace with timing
+  thinking           Extract thinking/reasoning blocks
+  thinking-summary   First 200 chars of each thinking block
+  errors             Tool results containing errors
+  conversation       Reconstructed user/assistant turns
+  files              Files read, edited, or written
+  turns              Per-turn breakdown (duration, tools, tokens)
+  agents             Subagent spawns and their tool usage
+  search <pattern>   Search across sessions (user + assistant text)
+  cost               Rough token/cost estimation
+  timeline           Event timeline with gaps highlighted
+  summary            Session summaries (compaction boundaries)
+
+OPTIONS:
+  --project, -p <name>    Filter by project name (partial match)
+  --dir, -d <pattern>     Filter by directory pattern in project path
+  --all                   Search all projects (with search command)
+  --recent <n>            Use nth most recent session (default: 1)
+  --json                  Output as JSON instead of text
+
+EXAMPLES:
+  cc-session overview                           # Current project, latest session
+  cc-session tools                              # Tool frequency
+  cc-session tools --recent 2                   # Second most recent session
+  cc-session search "auth" --all                # Search all projects
+  cc-session errors -p claude-mods              # Errors in claude-mods project
+  cc-session tool-chain                         # Full tool call sequence
+  cc-session thinking | grep -i "decision"      # Search reasoning
+  cc-session turns --json | jq '.[] | select(.tools > 5)'
+USAGE
+  exit 0
+}
+
+# Resolve project directory from current working directory
+resolve_project() {
+  local project_filter="${1:-}"
+  if [[ -n "$project_filter" ]]; then
+    # Find by partial match
+    local found
+    found=$(ls "$PROJECTS_DIR" 2>/dev/null | grep -i "$project_filter" | head -1)
+    [[ -n "$found" ]] || die "No project matching '$project_filter'"
+    echo "$PROJECTS_DIR/$found"
+  else
+    # Derive from cwd
+    local encoded
+    encoded=$(pwd | sed 's/[:\\\/]/-/g' | sed 's/--*/-/g')
+    local found
+    found=$(ls "$PROJECTS_DIR" 2>/dev/null | grep -i "${encoded##*-}" | head -1)
+    if [[ -n "$found" ]]; then
+      echo "$PROJECTS_DIR/$found"
+    else
+      die "Cannot determine project from $(pwd). Use --project <name>"
+    fi
+  fi
+}
+
+# Resolve session file
+resolve_session() {
+  local project_dir="$1"
+  local recent="${2:-1}"
+  ls -t "$project_dir"/*.jsonl 2>/dev/null | grep -v 'agent-' | sed -n "${recent}p"
+}
+
+# --- Commands ---
+
+cmd_overview() {
+  local f="$1" json="${2:-}"
+  if [[ "$json" == "json" ]]; then
+    cat "$f" | jq -sc '{
+      file: input_filename,
+      entries: length,
+      types: (group_by(.type) | map({type: .[0].type, count: length})),
+      first_ts: (map(.timestamp | select(.) | strings) | sort | first),
+      last_ts: (map(.timestamp | select(.) | strings) | sort | last),
+      duration_ms: (
+        [.[] | select(.type == "system" and .subtype == "turn_duration") | .durationMs] | add
+      ),
+      turns: ([.[] | select(.type == "system" and .subtype == "turn_duration")] | length),
+      tool_calls: ([.[] | select(.type == "assistant") | .message.content[]? | select(.type == "tool_use")] | length),
+      thinking_blocks: ([.[] | select(.type == "assistant") | .message.content[]? | select(.type == "thinking")] | length),
+      user_messages: ([.[] | select(.type == "user") | .message.content[]? | select(.type == "text")] | length)
+    }' 2>/dev/null
+  else
+    echo "=== Session Overview ==="
+    echo "File: $(basename "$f")"
+    echo ""
+    echo "--- Entry Types ---"
+    cat "$f" | jq -r '.type' | sort | uniq -c | sort -rn
+    echo ""
+    echo "--- Timing ---"
+    cat "$f" | jq -sc '
+      ([.[] | select(.type == "system" and .subtype == "turn_duration") | .durationMs] | add // 0) as $total |
+      ([.[] | select(.type == "system" and .subtype == "turn_duration")] | length) as $turns |
+      "Total time: \($total / 1000 | floor)s (\($total / 60000 | floor)m \(($total / 1000 | floor) % 60)s)\nTurns: \($turns)\nAvg turn: \(if $turns > 0 then ($total / $turns / 1000 | floor) else 0 end)s"
+    ' 2>/dev/null
+    echo ""
+    echo "--- Content ---"
+    cat "$f" | jq -sc '
+      ([.[] | select(.type == "user") | .message.content[]? | select(.type == "text")] | length) as $user_msgs |
+      ([.[] | select(.type == "assistant") | .message.content[]? | select(.type == "tool_use")] | length) as $tools |
+      ([.[] | select(.type == "assistant") | .message.content[]? | select(.type == "thinking")] | length) as $thinking |
+      "User messages: \($user_msgs)\nTool calls: \($tools)\nThinking blocks: \($thinking)"
+    ' 2>/dev/null
+  fi
+}
+
+cmd_tools() {
+  local f="$1" json="${2:-}"
+  if [[ "$json" == "json" ]]; then
+    cat "$f" | jq -sc '[
+      .[] | select(.type == "assistant") | .message.content[]? |
+      select(.type == "tool_use") | .name
+    ] | group_by(.) | map({tool: .[0], count: length}) | sort_by(-.count)' 2>/dev/null
+  else
+    cat "$f" | jq -r '
+      select(.type == "assistant") | .message.content[]? |
+      select(.type == "tool_use") | .name
+    ' | sort | uniq -c | sort -rn
+  fi
+}
+
+cmd_tool_chain() {
+  local f="$1" json="${2:-}"
+  if [[ "$json" == "json" ]]; then
+    cat "$f" | jq -c '
+      select(.type == "assistant") | .message.content[]? |
+      select(.type == "tool_use") |
+      {name, id, input_summary: (
+        if .name == "Bash" then (.input.command | .[0:120])
+        elif .name == "Read" then .input.file_path
+        elif .name == "Write" then .input.file_path
+        elif .name == "Edit" then .input.file_path
+        elif .name == "Grep" then "\(.input.pattern) in \(.input.path // ".")"
+        elif .name == "Glob" then .input.pattern
+        elif .name == "Agent" then "\(.input.subagent_type // "general"): \(.input.description // "")"
+        elif .name == "Skill" then .input.skill
+        elif .name == "WebSearch" then .input.query
+        elif .name == "WebFetch" then .input.url
+        else (.input | tostring | .[0:100])
+        end
+      )}
+    ' 2>/dev/null
+  else
+    cat "$f" | jq -r '
+      select(.type == "assistant") | .message.content[]? |
+      select(.type == "tool_use") |
+      "\(.name | . + " " * (15 - length))  \(
+        if .name == "Bash" then (.input.command | .[0:100])
+        elif .name == "Read" then .input.file_path
+        elif .name == "Write" then .input.file_path
+        elif .name == "Edit" then .input.file_path
+        elif .name == "Grep" then "pattern=\(.input.pattern) path=\(.input.path // ".")"
+        elif .name == "Glob" then .input.pattern
+        elif .name == "Agent" then "\(.input.subagent_type // "general"): \(.input.description // "")"
+        elif .name == "Skill" then .input.skill
+        elif .name == "WebSearch" then .input.query
+        elif .name == "WebFetch" then .input.url
+        else (.input | tostring | .[0:80])
+        end
+      )"
+    ' 2>/dev/null
+  fi
+}
+
+cmd_thinking() {
+  local f="$1"
+  cat "$f" | jq -r '
+    select(.type == "assistant") | .message.content[]? |
+    select(.type == "thinking") | .thinking
+  ' 2>/dev/null
+}
+
+cmd_thinking_summary() {
+  local f="$1" json="${2:-}"
+  if [[ "$json" == "json" ]]; then
+    cat "$f" | jq -sc '[
+      .[] | select(.type == "assistant") | .message.content[]? |
+      select(.type == "thinking") | {preview: (.thinking | .[0:200])}
+    ]' 2>/dev/null
+  else
+    local n=0
+    cat "$f" | jq -r '
+      select(.type == "assistant") | .message.content[]? |
+      select(.type == "thinking") | .thinking | .[0:200] | gsub("\n"; " ")
+    ' 2>/dev/null | while read -r line; do
+      n=$((n + 1))
+      printf "[%d] %s...\n\n" "$n" "$line"
+    done
+  fi
+}
+
+cmd_errors() {
+  local f="$1" json="${2:-}"
+  if [[ "$json" == "json" ]]; then
+    cat "$f" | jq -c '
+      select(.type == "user") | .message.content[]? |
+      select(.type == "tool_result") |
+      select(.content | type == "string" and test("error|Error|ERROR|failed|Failed|FAILED")) |
+      {tool_use_id, error: (.content | .[0:300])}
+    ' 2>/dev/null
+  else
+    cat "$f" | jq -r '
+      select(.type == "user") | .message.content[]? |
+      select(.type == "tool_result") |
+      select(.content | type == "string" and test("error|Error|ERROR|failed|Failed|FAILED")) |
+      "--- tool_use_id: \(.tool_use_id) ---\n\(.content | .[0:300])\n"
+    ' 2>/dev/null
+  fi
+}
+
+cmd_conversation() {
+  local f="$1"
+  cat "$f" | jq -r '
+    if .type == "user" then
+      .message.content[]? | select(.type == "text") | "USER: \(.text)"
+    elif .type == "assistant" then
+      .message.content[]? | select(.type == "text") | "CLAUDE: \(.text | .[0:500])"
+    else empty end
+  ' 2>/dev/null
+}
+
+cmd_files() {
+  local f="$1" json="${2:-}"
+  if [[ "$json" == "json" ]]; then
+    cat "$f" | jq -sc '{
+      read: [.[] | select(.type == "assistant") | .message.content[]? | select(.type == "tool_use" and .name == "Read") | .input.file_path] | group_by(.) | map({file: .[0], count: length}) | sort_by(-.count),
+      edited: [.[] | select(.type == "assistant") | .message.content[]? | select(.type == "tool_use" and .name == "Edit") | .input.file_path] | group_by(.) | map({file: .[0], count: length}) | sort_by(-.count),
+      written: [.[] | select(.type == "assistant") | .message.content[]? | select(.type == "tool_use" and .name == "Write") | .input.file_path] | unique
+    }' 2>/dev/null
+  else
+    echo "=== Files Read ==="
+    cat "$f" | jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use" and .name == "Read") | .input.file_path' | sort | uniq -c | sort -rn
+    echo ""
+    echo "=== Files Edited ==="
+    cat "$f" | jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use" and .name == "Edit") | .input.file_path' | sort | uniq -c | sort -rn
+    echo ""
+    echo "=== Files Written ==="
+    cat "$f" | jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use" and .name == "Write") | .input.file_path' | sort -u
+  fi
+}
+
+cmd_turns() {
+  local f="$1" json="${2:-}"
+  cat "$f" | jq -sc '
+    [.[] | select(.type == "system" and .subtype == "turn_duration")] as $durations |
+    [.[] | select(.type == "assistant")] as $assistants |
+    [range(0; [$durations | length, $assistants | length] | min) |
+      {
+        turn: (. + 1),
+        duration_s: ($durations[.].durationMs / 1000 | floor),
+        tools: ([$assistants[.].message.content[]? | select(.type == "tool_use") | .name] | length),
+        tool_names: ([$assistants[.].message.content[]? | select(.type == "tool_use") | .name]),
+        has_thinking: ([$assistants[.].message.content[]? | select(.type == "thinking")] | length > 0),
+        text_length: ([$assistants[.].message.content[]? | select(.type == "text") | .text | length] | add // 0)
+      }
+    ]
+  ' 2>/dev/null | if [[ "$json" == "json" ]]; then cat; else
+    jq -r '.[] | "Turn \(.turn): \(.duration_s)s, \(.tools) tools [\(.tool_names | join(", "))]\(if .has_thinking then " [thinking]" else "" end)"' 2>/dev/null
+  fi
+}
+
+cmd_agents() {
+  local f="$1" json="${2:-}"
+  if [[ "$json" == "json" ]]; then
+    cat "$f" | jq -c '
+      select(.type == "assistant") | .message.content[]? |
+      select(.type == "tool_use" and .name == "Agent") |
+      {
+        id,
+        subagent_type: (.input.subagent_type // "general-purpose"),
+        description: .input.description,
+        prompt_preview: (.input.prompt | .[0:200]),
+        background: (.input.run_in_background // false),
+        isolation: (.input.isolation // null)
+      }
+    ' 2>/dev/null
+  else
+    cat "$f" | jq -r '
+      select(.type == "assistant") | .message.content[]? |
+      select(.type == "tool_use" and .name == "Agent") |
+      "[\(.input.subagent_type // "general")] \(.input.description // "no description")\n  prompt: \(.input.prompt | .[0:150] | gsub("\n"; " "))...\n"
+    ' 2>/dev/null
+  fi
+}
+
+cmd_search() {
+  local pattern="$1"
+  shift
+  local search_dir="$1"
+
+  rg -l "$pattern" "$search_dir"/*.jsonl 2>/dev/null | while read -r f; do
+    local session
+    session=$(basename "$f" .jsonl)
+    echo "=== $session ==="
+    cat "$f" | jq -r "
+      if .type == \"user\" then
+        .message.content[]? | select(.type == \"text\") | .text
+      elif .type == \"assistant\" then
+        .message.content[]? | select(.type == \"text\") | .text
+      else empty end
+    " 2>/dev/null | grep -i --color=auto -C2 "$pattern" || true
+    echo ""
+  done
+}
+
+cmd_cost() {
+  local f="$1" json="${2:-}"
+  cat "$f" | jq -sc '
+    ([.[] | select(.type == "user") | .message.content[]? | select(.type == "text") | .text | length] | add // 0) as $user_chars |
+    ([.[] | select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text | length] | add // 0) as $asst_chars |
+    ([.[] | select(.type == "assistant") | .message.content[]? | select(.type == "thinking") | .thinking | length] | add // 0) as $think_chars |
+    ($user_chars + $asst_chars + $think_chars) as $total_chars |
+    ($total_chars / 4 | floor) as $est_tokens |
+    {
+      user_chars: $user_chars,
+      assistant_chars: $asst_chars,
+      thinking_chars: $think_chars,
+      total_chars: $total_chars,
+      est_tokens: $est_tokens,
+      est_tokens_k: (($est_tokens / 1000 * 10 | floor) / 10)
+    }
+  ' 2>/dev/null | if [[ "$json" == "json" ]]; then cat; else
+    jq -r '"Token estimate: \(.est_tokens_k)k tokens\n  User: \(.user_chars) chars\n  Assistant: \(.assistant_chars) chars\n  Thinking: \(.thinking_chars) chars"' 2>/dev/null
+  fi
+}
+
+cmd_timeline() {
+  local f="$1"
+  cat "$f" | jq -r '
+    select(.type == "user" or .type == "assistant") |
+    select(.timestamp) |
+    "\(.timestamp)  \(.type | . + " " * (12 - length))  \(
+      if .type == "user" then
+        (.message.content[]? | select(.type == "text") | .text | .[0:80] | gsub("\n"; " ")) // "[tool_result]"
+      else
+        (.message.content[]? |
+          if .type == "tool_use" then "[\(.name)] \(
+            if .name == "Bash" then (.input.command | .[0:60])
+            elif .name == "Read" then .input.file_path
+            elif .name == "Edit" then .input.file_path
+            elif .name == "Write" then .input.file_path
+            else (.input | tostring | .[0:60])
+            end
+          )"
+          elif .type == "text" then .text | .[0:80] | gsub("\n"; " ")
+          elif .type == "thinking" then "[thinking...]"
+          else empty
+          end
+        ) // ""
+      end
+    )"
+  ' 2>/dev/null
+}
+
+cmd_summary() {
+  local f="$1"
+  cat "$f" | jq -r '
+    select(.type == "summary" or (.type == "system" and .subtype == "compact_boundary")) |
+    if .type == "summary" then
+      "=== Summary ===\n\(.summary)\n"
+    else
+      "--- Compaction Boundary ---"
+    end
+  ' 2>/dev/null
+}
+
+# --- Main ---
+
+[[ $# -eq 0 ]] && usage
+
+cmd="$1"
+shift
+
+# Parse options
+session_file=""
+project=""
+recent=1
+output="text"
+search_all=false
+dir_pattern=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --project|-p) project="$2"; shift 2 ;;
+    --dir|-d) dir_pattern="$2"; shift 2 ;;
+    --recent) recent="$2"; shift 2 ;;
+    --json) output="json"; shift ;;
+    --all) search_all=true; shift ;;
+    --help|-h) usage ;;
+    *)
+      if [[ -f "$1" ]]; then
+        session_file="$1"
+      elif [[ "$cmd" == "search" && -z "${search_pattern:-}" ]]; then
+        search_pattern="$1"
+      fi
+      shift
+      ;;
+  esac
+done
+
+# Resolve session file if not given directly
+if [[ -z "$session_file" ]]; then
+  project_dir=$(resolve_project "${project}${dir_pattern:+$dir_pattern}")
+  session_file=$(resolve_session "$project_dir" "$recent")
+  [[ -n "$session_file" ]] || die "No session files found in $project_dir"
+fi
+
+# Execute command
+case "$cmd" in
+  overview)          cmd_overview "$session_file" "$output" ;;
+  tools)             cmd_tools "$session_file" "$output" ;;
+  tool-chain)        cmd_tool_chain "$session_file" "$output" ;;
+  thinking)          cmd_thinking "$session_file" ;;
+  thinking-summary)  cmd_thinking_summary "$session_file" "$output" ;;
+  errors)            cmd_errors "$session_file" "$output" ;;
+  conversation)      cmd_conversation "$session_file" ;;
+  files)             cmd_files "$session_file" "$output" ;;
+  turns)             cmd_turns "$session_file" "$output" ;;
+  agents)            cmd_agents "$session_file" "$output" ;;
+  cost)              cmd_cost "$session_file" "$output" ;;
+  timeline)          cmd_timeline "$session_file" ;;
+  summary)           cmd_summary "$session_file" ;;
+  search)
+    [[ -n "${search_pattern:-}" ]] || die "search requires a pattern"
+    if [[ "$search_all" == true ]]; then
+      for d in "$PROJECTS_DIR"/*/; do
+        echo ">>> $(basename "$d")"
+        cmd_search "$search_pattern" "$d"
+      done
+    else
+      project_dir=$(resolve_project "${project}${dir_pattern:+$dir_pattern}")
+      cmd_search "$search_pattern" "$project_dir"
+    fi
+    ;;
+  *)
+    die "Unknown command: $cmd. Run cc-session --help for usage."
+    ;;
+esac
