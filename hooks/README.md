@@ -2,6 +2,14 @@
 
 Claude Code hooks allow you to run custom scripts at key workflow points.
 
+## Available Hooks
+
+| Hook Script | Type | Purpose |
+|-------------|------|---------|
+| `pre-commit-lint.sh` | PreToolUse | Auto-lint staged files before commit (JS/TS, Python, Go, Rust, PHP) |
+| `post-edit-format.sh` | PostToolUse | Auto-format files after Write/Edit (Prettier, Ruff, gofmt, rustfmt) |
+| `dangerous-cmd-warn.sh` | PreToolUse | Block destructive commands (force push, rm -rf, DROP TABLE, etc.) |
+
 ## Configuration
 
 Add hooks to `.claude/settings.json` or `.claude/settings.local.json`:
@@ -12,13 +20,16 @@ Add hooks to `.claude/settings.json` or `.claude/settings.local.json`:
     "PreToolUse": [
       {
         "matcher": "Bash",
-        "hooks": ["bash hooks/security-check.sh $TOOL_INPUT"]
+        "hooks": [
+          "bash hooks/dangerous-cmd-warn.sh $TOOL_INPUT",
+          "bash hooks/pre-commit-lint.sh $TOOL_INPUT"
+        ]
       }
     ],
     "PostToolUse": [
       {
         "matcher": "Write|Edit",
-        "hooks": ["bash hooks/post-edit.sh $FILE_PATH"]
+        "hooks": ["bash hooks/post-edit-format.sh $FILE_PATH"]
       }
     ]
   }

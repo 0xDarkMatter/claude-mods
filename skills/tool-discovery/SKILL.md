@@ -54,6 +54,11 @@ Is this a reference/lookup task?
 | **auth-ops** | jwt, oauth2, session, rbac, passkey, mfa, login |
 | **monitoring-ops** | prometheus, grafana, opentelemetry, SLO, alerting |
 | **debug-ops** | debug, crash, memory leak, race condition, bisect |
+| **perf-ops** | performance, profiling, flamegraph, bundle size, load test, benchmark |
+| **migrate-ops** | migrate, upgrade, breaking changes, codemod, version upgrade |
+| **refactor-ops** | refactor, extract, code smell, dead code, rename, restructure |
+| **scaffold** | scaffold, boilerplate, project template, init project, new project |
+| **log-ops** | JSONL, log analysis, parse logs, lnav, log search, timeline |
 
 ## Quick Agent Reference
 

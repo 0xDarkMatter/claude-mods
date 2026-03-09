@@ -1,7 +1,7 @@
 {
   "name": "claude-mods",
-  "version": "1.9.0",
-  "description": "Custom commands, skills, and agents for Claude Code - session continuity, 22 expert agents, 59 skills, 3 commands, 5 rules, modern CLI tools",
+  "version": "2.0.0",
+  "description": "Custom commands, skills, and agents for Claude Code - session continuity, 22 expert agents, 65 skills, 3 commands, 5 rules, 3 hooks, 4 output styles, modern CLI tools",
   "author": "0xDarkMatter",
   "repository": "https://github.com/0xDarkMatter/claude-mods",
   "license": "MIT",
@@ -71,10 +71,13 @@
       "skills/introspect",
       "skills/javascript-ops",
       "skills/laravel-ops",
+      "skills/log-ops",
       "skills/markitdown",
       "skills/mcp-ops",
+      "skills/migrate-ops",
       "skills/monitoring-ops",
       "skills/nginx-ops",
+      "skills/perf-ops",
       "skills/postgres-ops",
       "skills/project-planner",
       "skills/python-async-ops",
@@ -86,9 +89,11 @@
       "skills/python-pytest-ops",
       "skills/python-typing-ops",
       "skills/react-ops",
+      "skills/refactor-ops",
       "skills/rest-ops",
       "skills/review",
       "skills/rust-ops",
+      "skills/scaffold",
       "skills/screenshot",
       "skills/security-ops",
       "skills/setperms",
@@ -114,8 +119,16 @@
       "rules/skill-agent-updates.md",
       "rules/thinking.md"
     ],
+    "hooks": [
+      "hooks/pre-commit-lint.sh",
+      "hooks/post-edit-format.sh",
+      "hooks/dangerous-cmd-warn.sh"
+    ],
     "output-styles": [
-      "output-styles/vesper.md"
+      "output-styles/vesper.md",
+      "output-styles/spartan.md",
+      "output-styles/mentor.md",
+      "output-styles/executive.md"
     ]
   },
   "categories": [

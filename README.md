@@ -12,13 +12,13 @@
 
 > *A comprehensive extension toolkit that transforms Claude Code into a specialized development powerhouse.*
 
-**claude-mods** is a production-ready plugin that extends Claude Code with 22 expert agents, 50 specialized skills, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
+**claude-mods** is a production-ready plugin that extends Claude Code with 22 expert agents, 64 specialized skills, 4 output styles, 3 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
 
 Built on [Anthropic's Agent Skills standard](https://github.com/anthropics/skills), claude-mods fills critical gaps in Claude Code's capabilities: persistent session state that survives across machines, on-demand expert knowledge for specialized domains, token-efficient modern CLI tools (10-100x faster than traditional alternatives), and proven workflow patterns for TDD, code review, and feature development. The toolkit implements Anthropic's [recommended patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), ensuring your development context never vanishes when sessions end.
 
 From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
 
-**22 agents. 59 skills. 3 commands. One install.**
+**22 agents. 64 skills. 4 styles. 3 hooks. One install.**
 
 ## Recent Updates
 
@@ -201,6 +201,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [auth-ops](skills/auth-ops/) | JWT, OAuth2, sessions, RBAC/ABAC, passkeys, MFA |
 | [monitoring-ops](skills/monitoring-ops/) | Prometheus, Grafana, OpenTelemetry, structured logging, alerting |
 | [debug-ops](skills/debug-ops/) | Systematic debugging, language-specific debuggers, common scenarios |
+| [perf-ops](skills/perf-ops/) | Performance profiling - CPU, memory, bundle analysis, load testing, flamegraphs |
 
 #### CLI Tool Skills
 | Skill | Description |
@@ -211,6 +212,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [data-processing](skills/data-processing/) | Process JSON with jq, YAML/TOML with yq |
 | [markitdown](skills/markitdown/) | Convert PDF, Word, Excel, PowerPoint, images to markdown |
 | [structural-search](skills/structural-search/) | Search code by AST structure with ast-grep |
+| [log-ops](skills/log-ops/) | Log analysis, JSONL processing, cross-log correlation, timeline reconstruction |
 
 #### Workflow Skills
 | Skill | Description |
@@ -234,6 +236,27 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [introspect](skills/introspect/) | Analyze previous session logs without consuming current context. |
 | [review](skills/review/) | Code review with semantic diffs, expert routing, and auto-TaskCreate. |
 | [testgen](skills/testgen/) | Generate tests with expert routing and framework detection. |
+| [techdebt](skills/techdebt/) | Technical debt detection using parallel subagents. |
+| [migrate-ops](skills/migrate-ops/) | Framework/language migration patterns, version upgrades, codemods |
+| [refactor-ops](skills/refactor-ops/) | Safe refactoring patterns, code smell detection, test-driven methodology |
+| [scaffold](skills/scaffold/) | Project scaffolding - generate boilerplate for APIs, web apps, CLIs, monorepos |
+
+### Hooks
+
+| Hook | Type | Description |
+|------|------|-------------|
+| [pre-commit-lint.sh](hooks/pre-commit-lint.sh) | PreToolUse | Auto-lint staged files before commit (JS/TS, Python, Go, Rust, PHP) |
+| [post-edit-format.sh](hooks/post-edit-format.sh) | PostToolUse | Auto-format files after Write/Edit (Prettier, Ruff, gofmt, rustfmt) |
+| [dangerous-cmd-warn.sh](hooks/dangerous-cmd-warn.sh) | PreToolUse | Block destructive commands (force push, rm -rf, DROP TABLE) |
+
+### Output Styles
+
+| Style | Personality | Best For |
+|-------|-------------|----------|
+| [Vesper](output-styles/vesper.md) | Sophisticated British wit, intellectual depth | General development work |
+| [Spartan](output-styles/spartan.md) | Minimal, bullet-points only | Quick tasks, CI output |
+| [Mentor](output-styles/mentor.md) | Patient, educational | Learning, onboarding |
+| [Executive](output-styles/executive.md) | High-level summaries | Non-technical stakeholders |
 
 ### Agents
 
