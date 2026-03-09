@@ -182,17 +182,169 @@ Quick reference for common patterns and syntax.
 
 ---
 
-### mcp-ops
+### react-ops
 
-**Triggers:** mcp server, model context protocol, tool handlers
+**Triggers:** react, hooks, useState, useEffect, jsx, tsx, next.js, nextjs, app router, server components, RSC, zustand, react query
 
 **Use For:**
-- MCP server structure
-- Tool handler patterns
-- Resource configuration
-- Protocol implementation
+- Hook patterns (built-in, custom, React 19)
+- Component architecture (compound, render props, HOCs)
+- State management (Context, Zustand, Jotai, Redux Toolkit, TanStack Query)
+- React Server Components, Server Actions, streaming
+- Performance optimization (memo, code splitting, virtualization)
+- Testing (React Testing Library, MSW, Vitest)
 
-**References:** server-patterns.md, tool-handlers.md, resources.md
+**References:** hooks-patterns.md, component-architecture.md, state-management.md, server-components.md, performance.md, testing.md
+
+---
+
+### vue-ops
+
+**Triggers:** vue, vuejs, composition api, pinia, vue router, nuxt, nuxt3, script setup, composable, reactive, defineProps
+
+**Use For:**
+- Composition API and composables
+- Pinia state management
+- Vue Router (guards, lazy loading, meta)
+- Nuxt 3 (SSR/SSG, useFetch, server routes, modules)
+- Testing (Vitest, Vue Test Utils, Pinia testing)
+
+**References:** composition-api.md, state-routing.md, nuxt.md, testing.md
+
+---
+
+### javascript-ops
+
+**Triggers:** javascript, js, node, nodejs, esm, commonjs, promise, async await, event loop, v8, npm, es2024
+
+**Use For:**
+- Async patterns (Promises, async/await, streams, workers)
+- Module systems (ESM, CJS, dual-package)
+- Modern JS features (ES2022-2025)
+- Node.js patterns (built-in test runner, worker_threads, streams)
+- V8 optimization and memory management
+
+**References:** async-patterns.md, modules-runtime.md, modern-features.md, node-patterns.md
+
+---
+
+### astro-ops
+
+**Triggers:** astro, islands architecture, content collections, astro cloudflare, view transitions, partial hydration
+
+**Use For:**
+- Rendering strategies (SSG, SSR, hybrid)
+- Islands architecture and partial hydration
+- Content Collections (schema, queries, MDX)
+- Deployment (Cloudflare, Vercel, Netlify, Node)
+
+**References:** content-collections.md, islands-rendering.md, deployment.md
+
+---
+
+### laravel-ops
+
+**Triggers:** laravel, eloquent, artisan, blade, php, sanctum, livewire, inertia, pest, phpunit
+
+**Use For:**
+- Eloquent ORM (relationships, scopes, query optimization)
+- Architecture (Service Container, providers, facades, middleware)
+- Authentication (Sanctum, Fortify, policies/gates)
+- Testing (Pest, PHPUnit, factories, facade fakes)
+
+**References:** eloquent-queries.md, architecture.md, testing-auth.md
+
+---
+
+### mcp-ops
+
+**Triggers:** mcp, model context protocol, mcp server, mcp tool, mcp resource, fastmcp, mcp transport, stdio, sse
+
+**Use For:**
+- MCP server development (Python FastMCP, TypeScript SDK)
+- Tool design (schema, validation, error handling)
+- Resources and prompts
+- Transport configuration (stdio, SSE, streamable HTTP)
+- Authentication and session management
+- Testing and debugging (MCP Inspector)
+
+**References:** server-architecture.md, tool-handlers.md, resources-prompts.md, transport-auth.md, testing-debugging.md
+
+---
+
+### tailwind-ops
+
+**Triggers:** tailwind, tailwindcss, utility classes, responsive design, dark mode, tailwind v4, container queries
+
+**Use For:**
+- Layout patterns (flex, grid, container queries)
+- Responsive design and dark mode
+- Component patterns (cards, forms, navbars, modals)
+- Tailwind v4 migration (CSS-first config, @theme)
+- Configuration and plugins
+
+**References:** component-patterns.md, v4-migration.md, configuration.md
+
+---
+
+## Infrastructure & Operations Skills
+
+### nginx-ops
+
+**Triggers:** nginx, reverse proxy, load balancer, proxy_pass, ssl certificate, lets encrypt, web server
+
+**Use For:**
+- Reverse proxy configuration and load balancing
+- SSL/TLS setup (Let's Encrypt, HSTS, OCSP)
+- Security headers and rate limiting
+- Performance tuning (gzip, caching, worker config)
+- Docker patterns (nginx as sidecar)
+
+**References:** reverse-proxy.md, ssl-security.md, performance.md
+
+---
+
+### auth-ops
+
+**Triggers:** authentication, authorization, jwt, oauth, oauth2, session, login, rbac, abac, passkey, mfa, api key
+
+**Use For:**
+- Authentication methods (JWT, sessions, OAuth2, passkeys)
+- Authorization models (RBAC, ABAC, ReBAC)
+- OAuth2/OIDC flows (Authorization Code + PKCE, Client Credentials)
+- Password handling, MFA, session management
+- Implementation patterns across Node.js, Python, Go
+
+**References:** jwt-sessions.md, oauth2-oidc.md, authorization.md, implementation.md
+
+---
+
+### monitoring-ops
+
+**Triggers:** monitoring, observability, prometheus, grafana, metrics, alerting, opentelemetry, SLO, distributed tracing
+
+**Use For:**
+- Metrics (Prometheus, PromQL, OpenTelemetry)
+- Structured logging (Loki, ELK, language-specific)
+- Distributed tracing (OpenTelemetry, Jaeger)
+- Alerting and SLO/SLI design
+- Infrastructure monitoring and health checks
+
+**References:** metrics-alerting.md, logging.md, tracing.md, infrastructure.md
+
+---
+
+### debug-ops
+
+**Triggers:** debug, debugging, bug, crash, memory leak, race condition, deadlock, bisect, root cause, profiling
+
+**Use For:**
+- Systematic debugging methodology
+- Language-specific debugger usage (Node, Python, Go, Rust)
+- Common scenarios (memory leaks, deadlocks, race conditions)
+- Root cause analysis and reproduction techniques
+
+**References:** systematic-methods.md, tool-specific.md, common-scenarios.md
 
 ---
 
@@ -350,12 +502,19 @@ Project and development workflow automation.
 | SQL databases | sql-ops, postgres-ops, sqlite-ops |
 | Go | go-ops |
 | Rust | rust-ops |
-| TypeScript/JS | typescript-ops, file-search, structural-search |
+| TypeScript/JS | typescript-ops, javascript-ops, file-search, structural-search |
+| React/Next.js | react-ops, typescript-ops |
+| Vue/Nuxt | vue-ops, typescript-ops |
+| Astro | astro-ops, typescript-ops |
+| PHP/Laravel | laravel-ops |
 | Python | python-env, structural-search |
 | API design | api-design-ops, rest-ops |
 | Docker/containers | docker-ops, container-orchestration |
 | CI/CD | ci-cd-ops, git-workflow |
 | CSS/Tailwind | tailwind-ops |
+| Nginx/web server | nginx-ops |
+| Auth/security | auth-ops, security-ops |
+| Monitoring | monitoring-ops, python-observability-ops |
 
 ### By Task
 
@@ -372,6 +531,10 @@ Project and development workflow automation.
 | Run project tasks | task-runner |
 | Find project docs | doc-scanner |
 | Plan implementation | project-planner |
+| Debug a crash/leak | debug-ops |
+| Configure nginx | nginx-ops |
+| Set up auth | auth-ops |
+| Add monitoring | monitoring-ops |
 
 ### By Complexity
 

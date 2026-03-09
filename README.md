@@ -18,7 +18,7 @@ Built on [Anthropic's Agent Skills standard](https://github.com/anthropics/skill
 
 From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
 
-**22 agents. 50 skills. 3 commands. One install.**
+**22 agents. 59 skills. 3 commands. One install.**
 
 ## Recent Updates
 
@@ -173,8 +173,13 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [go-ops](skills/go-ops/) | Go concurrency, error handling, testing, interfaces, generics, project structure |
 | [rust-ops](skills/rust-ops/) | Rust ownership, async/tokio, error handling, traits, serde, ecosystem |
 | [typescript-ops](skills/typescript-ops/) | TypeScript type system, generics, utility types, strict mode, Zod |
+| [javascript-ops](skills/javascript-ops/) | JavaScript/Node.js async patterns, modules, ES2024+, runtime internals |
+| [react-ops](skills/react-ops/) | React hooks, Server Components, state management, performance, testing |
+| [vue-ops](skills/vue-ops/) | Vue 3 Composition API, Pinia, Vue Router, Nuxt 3 |
+| [astro-ops](skills/astro-ops/) | Astro islands, content collections, rendering strategies, deployment |
+| [laravel-ops](skills/laravel-ops/) | Laravel Eloquent, architecture, authentication, testing with Pest |
 | [cli-ops](skills/cli-ops/) | Production CLI tool patterns - agentic workflows, stream separation, exit codes |
-| [tailwind-ops](skills/tailwind-ops/) | Tailwind utilities, responsive breakpoints, config |
+| [tailwind-ops](skills/tailwind-ops/) | Tailwind CSS patterns, v4 migration, components, configuration |
 
 #### Data & API Skills
 | Skill | Description |
@@ -184,7 +189,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [sql-ops](skills/sql-ops/) | CTEs, window functions, JOIN patterns, indexing |
 | [postgres-ops](skills/postgres-ops/) | PostgreSQL operations, optimization, schema design, replication, monitoring |
 | [sqlite-ops](skills/sqlite-ops/) | SQLite schemas, Python sqlite3/aiosqlite patterns |
-| [mcp-ops](skills/mcp-ops/) | MCP server structure, tool handlers, resources |
+| [mcp-ops](skills/mcp-ops/) | MCP server development, FastMCP, transports, tool design, testing |
 
 #### Infrastructure Skills
 | Skill | Description |
@@ -192,6 +197,10 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [docker-ops](skills/docker-ops/) | Dockerfile best practices, multi-stage builds, Compose, optimization |
 | [ci-cd-ops](skills/ci-cd-ops/) | GitHub Actions, release automation, testing pipelines |
 | [container-orchestration](skills/container-orchestration/) | Kubernetes, Helm, pod patterns |
+| [nginx-ops](skills/nginx-ops/) | Nginx reverse proxy, SSL/TLS, load balancing, performance tuning |
+| [auth-ops](skills/auth-ops/) | JWT, OAuth2, sessions, RBAC/ABAC, passkeys, MFA |
+| [monitoring-ops](skills/monitoring-ops/) | Prometheus, Grafana, OpenTelemetry, structured logging, alerting |
+| [debug-ops](skills/debug-ops/) | Systematic debugging, language-specific debuggers, common scenarios |
 
 #### CLI Tool Skills
 | Skill | Description |

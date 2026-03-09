@@ -1,6 +1,7 @@
 {
   "env": {
-    "ENABLE_TOOL_SEARCH": "true"
+    "ENABLE_TOOL_SEARCH": "true",
+    "ENABLE_LSP_TOOL": "true"
   },
   "permissions": {
     "allow": [
@@ -141,7 +142,18 @@
       "Bash(scoop:*)",
       "Bash(winget:*)",
       "Bash(powershell -ExecutionPolicy Bypass -File \"./scripts/install.ps1\")",
-      "Bash(just.exe test:*)"
+      "Bash(just.exe test:*)",
+      "Bash(Select-String \"Results:\")",
+      "Bash(for skill in atomise cli-patterns explain screenshot setperms skill-creator spawn techdebt)",
+      "Bash(do cp -r \"X:/Forge/claude-mods/skills/$skill\" \"C:/Users/Mack/.claude/skills/$skill\")",
+      "Bash(done)",
+      "Bash(do basename:*)",
+      "Bash(/tmp/skill_analysis.txt:*)",
+      "Read(//tmp/**)",
+      "Bash(do mkdir:*)",
+      "Bash(for skill in go-ops rust-ops typescript-ops docker-ops ci-cd-ops api-design-ops)",
+      "Bash(do echo \"=== $skill ===\")",
+      "Read(//x/Forge/claude-mods/skills/$skill/**)"
     ],
     "deny": [],
     "ask": [
