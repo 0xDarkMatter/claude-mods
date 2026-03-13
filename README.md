@@ -90,7 +90,7 @@ claude-mods/
 ├── tools/              # Modern CLI toolkit installers
 ├── scripts/            # Plugin install scripts
 ├── tests/              # Test suites + justfile
-├── docs/               # Project docs (PLAN.md, DASH.md)
+├── docs/               # Project docs (ARCHITECTURE.md, WORKFLOWS.md)
 └── templates/          # Extension templates
 ```
 
@@ -304,9 +304,13 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 
 Output styles customize Claude's response personality. Use `/output-style` to switch between them.
 
-| Style | Description |
-|-------|-------------|
-| [vesper](output-styles/vesper.md) | Sophisticated engineering companion with British wit, intellectual depth, and pattern recognition |
+| Style | Description | Best For |
+|-------|-------------|----------|
+| [vesper](output-styles/vesper.md) | Sophisticated British wit, intellectual depth, pattern recognition | General work |
+| [spartan](output-styles/spartan.md) | Minimal, no-nonsense. Bullets, code, done | Quick tasks, experienced devs |
+| [mentor](output-styles/mentor.md) | Patient, educational. Explains the why, builds mental models | Learning, onboarding |
+| [executive](output-styles/executive.md) | High-level summaries, trade-offs, recommendations | Stakeholder communication |
+| [pair](output-styles/pair.md) | Thinks out loud, explores together, rubber-duck style | Collaborative problem-solving |
 
 **Creating custom styles:** Add a markdown file to `output-styles/` with YAML frontmatter:
 

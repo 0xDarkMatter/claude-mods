@@ -36,7 +36,7 @@ cd claude-mods && ./scripts/install.sh  # or .\scripts\install.ps1 on Windows
 | `tools/` | Modern CLI toolkit documentation |
 | `tests/` | Validation scripts + justfile |
 | `scripts/` | Install scripts |
-| `docs/` | PLAN.md, WORKFLOWS.md, ARCHITECTURE.md |
+| `docs/` | ARCHITECTURE.md, WORKFLOWS.md |
 
 ## Session Init
 
