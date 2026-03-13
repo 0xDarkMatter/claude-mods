@@ -22,6 +22,18 @@ From Python async patterns to Rust ownership models, from AWS Fargate deployment
 
 ## Recent Updates
 
+**v1.8.0** (March 2026)
+- 🚀 **Major skills expansion** - 7 new deep-reference skills (+26,000 lines)
+  - `go-ops` - Concurrency, error handling, interfaces, generics, testing, project structure
+  - `rust-ops` - Ownership, lifetimes, async/tokio, traits, error handling, ecosystem
+  - `typescript-ops` - Type system, generics, utility types, strict mode, ecosystem
+  - `docker-ops` - Multi-stage builds, Compose patterns, image optimization
+  - `ci-cd-ops` - GitHub Actions, release automation, testing pipelines
+  - `api-design-ops` - REST, GraphQL, gRPC design patterns, API security
+  - `postgres-ops` - Schema design, indexing, query tuning, replication, monitoring
+- 🔄 **Naming convention migration** - All `-patterns` skills renamed to `-ops` for consistency
+- 📦 **50 skills total** (up from 43)
+
 **v1.7.0** (February 2026)
 - 🔄 **Schema v3.1** - `/save` and `/sync` upgraded for Claude Code 2.1.x and Opus 4.6
   - Session ID tracking with `--resume` suggestions (bridges task state + conversation history)
@@ -37,11 +49,6 @@ From Python async patterns to Rust ownership models, from AWS Fargate deployment
   - Session-end workflow: catch issues while context is fresh
   - Language-smart: Python, JS/TS, Go, Rust, SQL with AST-based detection
   - [Boris Cherny's recommendation](https://x.com/bcherny/status/2017742741636321619): "Build a /techdebt slash command and run it at the end of every session"
-
-**v1.5.2** (February 2026)
-- 🆕 Added `cli-patterns`, `screenshot`, `skill-creator` skills (+3 skills, now 42 total)
-- 📚 Enhanced skill-creator with [official Anthropic docs](https://github.com/anthropics/skills) and best practices (+554 lines)
-- 🐛 Fixed `/sync` filesystem scanning issue on Windows (Git Bash compatibility)
 
 [View full changelog →](https://github.com/0xDarkMatter/claude-mods/commits/main)
 
@@ -76,7 +83,7 @@ claude-mods/
 ├── .claude-plugin/     # Plugin metadata
 ├── agents/             # Expert subagents (22)
 ├── commands/           # Slash commands (3)
-├── skills/             # Custom skills (42)
+├── skills/             # Custom skills (50)
 ├── output-styles/      # Response personalities
 ├── hooks/              # Hook examples & docs
 ├── rules/              # Claude Code rules
@@ -172,9 +179,21 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 |-------|-------------|
 | [go-ops](skills/go-ops/) | Go concurrency, error handling, testing, interfaces, generics, project structure |
 | [rust-ops](skills/rust-ops/) | Rust ownership, async/tokio, error handling, traits, serde, ecosystem |
-| [typescript-ops](skills/typescript-ops/) | TypeScript type system, generics, utility types, strict mode, Zod |
+| [typescript-ops](skills/typescript-ops/) | TypeScript type system, generics, utility types, strict mode, ecosystem |
 | [cli-ops](skills/cli-ops/) | Production CLI tool patterns - agentic workflows, stream separation, exit codes |
 | [tailwind-ops](skills/tailwind-ops/) | Tailwind utilities, responsive breakpoints, config |
+
+#### Python Skills
+| Skill | Description |
+|-------|-------------|
+| [python-async-ops](skills/python-async-ops/) | Async/await, asyncio, aiohttp, concurrent patterns |
+| [python-cli-ops](skills/python-cli-ops/) | Typer, Click, Rich output, CLI configuration |
+| [python-database-ops](skills/python-database-ops/) | SQLAlchemy async, connection pooling, migrations, transactions |
+| [python-env](skills/python-env/) | Fast Python environment management with uv |
+| [python-fastapi-ops](skills/python-fastapi-ops/) | FastAPI endpoints, dependency injection, middleware, validation |
+| [python-observability-ops](skills/python-observability-ops/) | Structured logging, metrics, distributed tracing |
+| [python-pytest-ops](skills/python-pytest-ops/) | Pytest fixtures, async testing, mocking, coverage strategies |
+| [python-typing-ops](skills/python-typing-ops/) | Type annotations, generics, protocols, mypy config, runtime validation |
 
 #### Data & API Skills
 | Skill | Description |
@@ -192,6 +211,8 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [docker-ops](skills/docker-ops/) | Dockerfile best practices, multi-stage builds, Compose, optimization |
 | [ci-cd-ops](skills/ci-cd-ops/) | GitHub Actions, release automation, testing pipelines |
 | [container-orchestration](skills/container-orchestration/) | Kubernetes, Helm, pod patterns |
+| [security-ops](skills/security-ops/) | OWASP patterns, auth, crypto, secure headers, dependency auditing |
+| [testing-ops](skills/testing-ops/) | TDD workflow, mocking strategies, CI testing, test data patterns |
 
 #### CLI Tool Skills
 | Skill | Description |
@@ -210,21 +231,30 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [git-workflow](skills/git-workflow/) | Enhanced git operations with lazygit, gh, delta |
 | [doc-scanner](skills/doc-scanner/) | Scan and synthesize project documentation |
 | [project-planner](skills/project-planner/) | Track stale plans, suggest session commands |
-| [python-env](skills/python-env/) | Fast Python environment management with uv |
 | [task-runner](skills/task-runner/) | Run project commands with just |
 | [screenshot](skills/screenshot/) | Find and display recent screenshots from common screenshot directories |
+| [techdebt](skills/techdebt/) | Automated tech debt scanning with parallel subagents |
+| [unfold-admin](skills/unfold-admin/) | Django Unfold admin theme patterns and configuration |
 
 #### Development Skills
 | Skill | Description |
 |-------|-------------|
-| [skill-creator](skills/skill-creator/) | Guide for creating effective skills with specialized knowledge, workflows, and tool integrations. |
-| [explain](skills/explain/) | Deep explanation of complex code, files, or concepts. Routes to expert agents. |
-| [spawn](skills/spawn/) | Generate PhD-level expert agent prompts for Claude Code. |
-| [atomise](skills/atomise/) | Atom of Thoughts reasoning - decompose problems into atomic units. |
-| [setperms](skills/setperms/) | Set tool permissions and CLI preferences in .claude/ directory. |
-| [introspect](skills/introspect/) | Analyze previous session logs without consuming current context. |
-| [review](skills/review/) | Code review with semantic diffs, expert routing, and auto-TaskCreate. |
-| [testgen](skills/testgen/) | Generate tests with expert routing and framework detection. |
+| [skill-creator](skills/skill-creator/) | Guide for creating effective skills with specialized knowledge, workflows, and tool integrations |
+| [explain](skills/explain/) | Deep explanation of complex code, files, or concepts. Routes to expert agents |
+| [spawn](skills/spawn/) | Generate PhD-level expert agent prompts for Claude Code |
+| [atomise](skills/atomise/) | Atom of Thoughts reasoning - decompose problems into atomic units |
+| [setperms](skills/setperms/) | Set tool permissions and CLI preferences in .claude/ directory |
+| [introspect](skills/introspect/) | Analyze previous session logs without consuming current context |
+| [review](skills/review/) | Code review with semantic diffs, expert routing, and auto-TaskCreate |
+| [testgen](skills/testgen/) | Generate tests with expert routing and framework detection |
+
+#### Claude Code Internals
+| Skill | Description |
+|-------|-------------|
+| [claude-code-debug](skills/claude-code-debug/) | Troubleshooting Claude Code issues, common problems, debug commands |
+| [claude-code-headless](skills/claude-code-headless/) | Headless/CI mode, CLI options, output formats, integration patterns |
+| [claude-code-hooks](skills/claude-code-hooks/) | Hook events, configuration, security patterns for lifecycle automation |
+| [claude-code-templates](skills/claude-code-templates/) | Templates for creating new agents, commands, and skills |
 
 ### Agents
 
