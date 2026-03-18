@@ -44,6 +44,32 @@ deprecated_items=(
     "$CLAUDE_DIR/skills/conclave"         # Deprecated
 )
 
+# Renamed skills: -patterns -> -ops (March 2026)
+renamed_skills=(
+    cli-patterns
+    mcp-patterns
+    python-async-patterns
+    python-cli-patterns
+    python-database-patterns
+    python-fastapi-patterns
+    python-observability-patterns
+    python-pytest-patterns
+    python-typing-patterns
+    rest-patterns
+    security-patterns
+    sql-patterns
+    tailwind-patterns
+    testing-patterns
+)
+
+for old_skill in "${renamed_skills[@]}"; do
+    old_path="$CLAUDE_DIR/skills/$old_skill"
+    if [ -d "$old_path" ]; then
+        rm -rf "$old_path"
+        echo -e "  ${RED}Removed renamed: $old_skill (now ${old_skill%-patterns}-ops)${NC}"
+    fi
+done
+
 for item in "${deprecated_items[@]}"; do
     if [ -e "$item" ]; then
         rm -rf "$item"

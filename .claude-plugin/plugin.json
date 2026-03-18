@@ -1,6 +1,6 @@
 {
   "name": "claude-mods",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Custom commands, skills, and agents for Claude Code - session continuity, 22 expert agents, 65 skills, 3 commands, 5 rules, 3 hooks, 4 output styles, modern CLI tools",
   "author": "0xDarkMatter",
   "repository": "https://github.com/0xDarkMatter/claude-mods",
@@ -69,6 +69,7 @@
       "skills/git-workflow",
       "skills/go-ops",
       "skills/introspect",
+      "skills/iterate",
       "skills/javascript-ops",
       "skills/laravel-ops",
       "skills/log-ops",

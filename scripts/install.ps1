@@ -43,6 +43,33 @@ $deprecated = @(
     "$claudeDir\skills\conclave"
 )
 
+# Renamed skills: -patterns -> -ops (March 2026)
+$renamedSkills = @(
+    "cli-patterns",
+    "mcp-patterns",
+    "python-async-patterns",
+    "python-cli-patterns",
+    "python-database-patterns",
+    "python-fastapi-patterns",
+    "python-observability-patterns",
+    "python-pytest-patterns",
+    "python-typing-patterns",
+    "rest-patterns",
+    "security-patterns",
+    "sql-patterns",
+    "tailwind-patterns",
+    "testing-patterns"
+)
+
+foreach ($oldSkill in $renamedSkills) {
+    $oldPath = "$claudeDir\skills\$oldSkill"
+    if (Test-Path $oldPath) {
+        Remove-Item -Path $oldPath -Recurse -Force
+        $newName = $oldSkill -replace '-patterns$', '-ops'
+        Write-Host "  Removed renamed: $oldSkill (now $newName)" -ForegroundColor Red
+    }
+}
+
 Write-Host "Cleaning up deprecated items..." -ForegroundColor Yellow
 foreach ($item in $deprecated) {
     if (Test-Path $item) {

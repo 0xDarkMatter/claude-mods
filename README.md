@@ -12,15 +12,25 @@
 
 > *A comprehensive extension toolkit that transforms Claude Code into a specialized development powerhouse.*
 
-**claude-mods** is a production-ready plugin that extends Claude Code with 22 expert agents, 64 specialized skills, 4 output styles, 3 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
+**claude-mods** is a production-ready plugin that extends Claude Code with 22 expert agents, 65 specialized skills, 4 output styles, 3 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
 
 Built on [Anthropic's Agent Skills standard](https://github.com/anthropics/skills), claude-mods fills critical gaps in Claude Code's capabilities: persistent session state that survives across machines, on-demand expert knowledge for specialized domains, token-efficient modern CLI tools (10-100x faster than traditional alternatives), and proven workflow patterns for TDD, code review, and feature development. The toolkit implements Anthropic's [recommended patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), ensuring your development context never vanishes when sessions end.
 
 From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
 
-**22 agents. 64 skills. 4 styles. 3 hooks. One install.**
+**22 agents. 65 skills. 4 styles. 3 hooks. One install.**
 
 ## Recent Updates
+
+**v2.1.0** (March 2026)
+- 🔁 **`/iterate` skill** - Autonomous improvement loop inspired by [Karpathy's autoresearch](https://github.com/karpathy/autoresearch). Define a goal, scope, and mechanical metric - the agent loops autonomously: modify, measure, keep or discard, repeat. Works for any domain (test coverage, bundle size, performance, ML training, code quality). 65 skills total.
+
+**v2.0.0** (March 2026)
+- 🚀 **64 skills** - 22 new `-ops` skills covering React, Vue, JavaScript, Go, Rust, TypeScript, Docker, CI/CD, API design, PostgreSQL, Astro, Laravel, Nginx, Auth, Monitoring, Debug, MCP, Tailwind, Migrate, Refactor, Scaffold, Perf, Log analysis
+- 🔄 **Renamed `-patterns` to `-ops`** - All 14 pattern skills renamed to signal comprehensive operational expertise
+- 🛠️ **cc-session CLI** - Zero-dependency session log analyzer (15 commands, `--json` output, cross-project search)
+- 📦 **Install scripts updated** - Automatic cleanup of renamed skills, preserves project-specific extras
+- 🏷️ **3 hooks, 4 output styles** - Pre-commit lint, post-edit format, dangerous command warnings; Vesper, Spartan, Mentor, Executive
 
 **v1.7.0** (February 2026)
 - 🔄 **Schema v3.1** - `/save` and `/sync` upgraded for Claude Code 2.1.x and Opus 4.6
@@ -39,7 +49,7 @@ From Python async patterns to Rust ownership models, from AWS Fargate deployment
   - [Boris Cherny's recommendation](https://x.com/bcherny/status/2017742741636321619): "Build a /techdebt slash command and run it at the end of every session"
 
 **v1.5.2** (February 2026)
-- 🆕 Added `cli-patterns`, `screenshot`, `skill-creator` skills (+3 skills, now 42 total)
+- 🆕 Added `cli-ops`, `screenshot`, `skill-creator` skills (+3 skills, now 42 total)
 - 📚 Enhanced skill-creator with [official Anthropic docs](https://github.com/anthropics/skills) and best practices (+554 lines)
 - 🐛 Fixed `/sync` filesystem scanning issue on Windows (Git Bash compatibility)
 
@@ -76,7 +86,7 @@ claude-mods/
 ├── .claude-plugin/     # Plugin metadata
 ├── agents/             # Expert subagents (22)
 ├── commands/           # Slash commands (3)
-├── skills/             # Custom skills (42)
+├── skills/             # Custom skills (64)
 ├── output-styles/      # Response personalities
 ├── hooks/              # Hook examples & docs
 ├── rules/              # Claude Code rules
@@ -118,9 +128,11 @@ cd claude-mods
 ```
 
 The install scripts:
-- Copy commands, skills, agents, rules to `~/.claude/`
+- Copy commands, skills, agents, rules, output styles to `~/.claude/`
 - Clean up deprecated items (e.g., old `/conclave` command)
+- Remove renamed skills (e.g., `-patterns` -> `-ops`)
 - Handle command→skill migrations (won't create duplicates)
+- Preserve any extra skills installed separately (e.g., project-specific skills)
 
 ### CLI Tools (Optional)
 
@@ -240,6 +252,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [migrate-ops](skills/migrate-ops/) | Framework/language migration patterns, version upgrades, codemods |
 | [refactor-ops](skills/refactor-ops/) | Safe refactoring patterns, code smell detection, test-driven methodology |
 | [scaffold](skills/scaffold/) | Project scaffolding - generate boilerplate for APIs, web apps, CLIs, monorepos |
+| [iterate](skills/iterate/) | Autonomous improvement loop - modify, measure, keep or discard, repeat. Inspired by Karpathy's autoresearch. |
 
 ### Hooks
 
@@ -301,26 +314,6 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 |----------|-------------|
 | [tools/](tools/) | Modern CLI toolkit - token-efficient replacements for legacy commands |
 | [hooks/](hooks/) | Hook examples for pre/post execution automation |
-
-### Output Styles
-
-Output styles customize Claude's response personality. Use `/output-style` to switch between them.
-
-| Style | Description |
-|-------|-------------|
-| [vesper](output-styles/vesper.md) | Sophisticated engineering companion with British wit, intellectual depth, and pattern recognition |
-
-**Creating custom styles:** Add a markdown file to `output-styles/` with YAML frontmatter:
-
-```yaml
----
-name: StyleName
-description: Brief description of the personality
-keep-coding-instructions: true  # Preserve Claude Code's core behavior
----
-
-# Style content here...
-```
 
 #### Web Fetching Hierarchy
 
