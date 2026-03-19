@@ -1,7 +1,7 @@
 ---
 name: iterate
 description: "Autonomous improvement loop - modify, measure, keep or discard, repeat. Inspired by Karpathy's autoresearch. Triggers on: iterate, improve autonomously, run overnight, keep improving, autoresearch, improvement loop, iterate until done, autonomous iteration."
-allowed-tools: "Read Write Edit Glob Grep Bash Agent"
+allowed-tools: "Read Write Edit Glob Grep Bash Agent TaskCreate TaskUpdate TaskList"
 ---
 
 # Iterate - Autonomous Improvement Loop
@@ -10,9 +10,13 @@ Inspired by [Karpathy's autoresearch](https://github.com/karpathy/autoresearch):
 
 The power is in the constraint. One metric. One scope. One loop. Git as memory.
 
-## Setup
+## Preflight
 
-Collect five inputs. If the user provides them inline, extract and proceed. If any are missing, ask once using `AskUserQuestion` with all missing fields batched together.
+Before the loop starts, do the work that makes the loop effective. Don't skip steps - this discipline is what separates a productive overnight run from a flailing one.
+
+### 1. Collect Config
+
+Five inputs. If provided inline, extract and proceed. If any are missing, ask once using `AskUserQuestion` with all missing fields batched together.
 
 | Field | Required | What it is | Example |
 |-------|----------|------------|---------|
@@ -24,15 +28,51 @@ Collect five inputs. If the user provides them inline, extract and proceed. If a
 
 **Bounded mode:** If the user includes `Iterations: N`, run exactly N iterations then stop with a summary. Otherwise, loop forever until interrupted.
 
-### Baseline
+### 2. Plan
 
-Once config is complete:
+Read all in-scope files. Understand the codebase before touching anything.
 
-1. Read all in-scope files for full context
-2. Run the verify command on the current state
-3. Extract the metric value - this is iteration 0 (baseline)
-4. Create `results.tsv` with the header and baseline row
-5. Confirm setup to the user, then begin the loop
+- What's the current state? What's already been tried?
+- What are the likely improvement vectors? Rank them.
+- What are the risks? What could break?
+- Form a rough strategy for the first 5-10 iterations.
+
+### 3. Permissions
+
+Check that `allowed-tools` cover what the loop needs. The verify and guard commands must run without permission prompts - a blocked tool at 3am kills the whole run.
+
+- Dry-run the verify command. If it gets blocked, note which `Bash(command:*)` pattern is needed.
+- Dry-run the guard command (if set). Same check.
+- If permissions are missing, suggest specific wildcard additions for `.claude/settings.local.json` and ask the user to approve before starting. Reference `/setperms` for a full setup.
+
+### 4. Tasks
+
+Create a TaskList to track progress across iterations. This provides structure the user can check without reading the full results log.
+
+```
+TaskCreate: "Establish baseline" (status: in_progress)
+TaskCreate: "Iteration loop - [goal]" (status: pending)
+TaskCreate: "Final summary and cleanup" (status: pending)
+```
+
+Update task status as the loop progresses. Mark the iteration task as `in_progress` when the loop starts, `completed` when it ends.
+
+### 5. Tests and Verification
+
+Before the first iteration, make sure verification actually works:
+
+- Run the verify command on the current state. If it fails or produces no parseable number, fix this first.
+- Run the guard command (if set). If it fails on the current state, the codebase has pre-existing issues - flag to the user.
+- If tests don't exist yet for the scope, consider writing them as iteration 0. Good tests make the loop more effective.
+
+### 6. Baseline
+
+Record the starting point:
+
+1. Run verify command, extract the metric - this is iteration 0
+2. Create `results.tsv` with the header and baseline row
+3. Update the baseline task to `completed`
+4. Confirm setup to the user, then begin the loop
 
 ```
 Goal:      Increase test coverage to 90%
@@ -42,6 +82,8 @@ Direction: higher
 Guard:     npm run typecheck
 Baseline:  72.3%
 Mode:      unbounded
+Tasks:     3 created
+Permissions: verified (all commands pre-approved)
 
 Starting iteration loop.
 ```

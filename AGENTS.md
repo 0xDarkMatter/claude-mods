@@ -5,7 +5,7 @@
 This is **claude-mods** - a collection of custom extensions for Claude Code:
 - **22 expert agents** for specialized domains (React, Python, Go, Rust, AWS, etc.)
 - **3 commands** for session management (/sync, /save) and experimental features (/canvas)
-- **65 skills** for CLI tools, patterns, workflows, and development tasks
+- **64 skills** for CLI tools, patterns, workflows, and development tasks
 - **4 output styles** for response personality (Vesper, Spartan, Mentor, Executive)
 - **3 hooks** for pre-commit linting, post-edit formatting, and dangerous command warnings
 
