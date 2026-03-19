@@ -22,8 +22,13 @@ From Python async patterns to Rust ownership models, from AWS Fargate deployment
 
 ## Recent Updates
 
+**v2.2.0** (March 2026)
+- 🔍 **`/introspect` enhanced** - Now generates Session Insights after every analysis: workflow improvements, skill suggestions, and ready-to-paste permission configs to reduce interruptions. Scales recommendations to session size.
+- 🔧 **`/setperms` expanded** - Default template now includes 74 tool permissions (was 51): docker, cargo, go, pytest, npx, pnpm, yarn, bun, make, archive tools, data utilities.
+- 🗑️ **`claude-code-templates` removed** - Redundant with Anthropic's first-party `skill-creator`. Install scripts auto-clean existing installs.
+
 **v2.1.0** (March 2026)
-- 🔁 **`/iterate` skill** - Autonomous improvement loop inspired by [Karpathy's autoresearch](https://github.com/karpathy/autoresearch). Define a goal, scope, and mechanical metric - the agent loops autonomously: modify, measure, keep or discard, repeat. Works for any domain (test coverage, bundle size, performance, ML training, code quality). 65 skills total.
+- 🔁 **`/iterate` skill** - Autonomous improvement loop inspired by [Karpathy's autoresearch](https://github.com/karpathy/autoresearch). Define a goal, scope, and mechanical metric - the agent loops autonomously: modify, measure, keep or discard, repeat. Works for any domain (test coverage, bundle size, performance, ML training, code quality).
 
 **v2.0.0** (March 2026)
 - 🚀 **64 skills** - 22 new `-ops` skills covering React, Vue, JavaScript, Go, Rust, TypeScript, Docker, CI/CD, API design, PostgreSQL, Astro, Laravel, Nginx, Auth, Monitoring, Debug, MCP, Tailwind, Migrate, Refactor, Scaffold, Perf, Log analysis

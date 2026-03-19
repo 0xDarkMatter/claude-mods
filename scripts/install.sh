@@ -41,7 +41,8 @@ deprecated_items=(
     "$CLAUDE_DIR/commands/pulse.md"       # Now a skill only
 
     # Removed skills
-    "$CLAUDE_DIR/skills/conclave"         # Deprecated
+    "$CLAUDE_DIR/skills/conclave"                # Deprecated
+    "$CLAUDE_DIR/skills/claude-code-templates"   # Replaced by skill-creator
 )
 
 # Renamed skills: -patterns -> -ops (March 2026)

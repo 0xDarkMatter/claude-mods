@@ -29,9 +29,13 @@ Tools from [dev-shell-tools](https://github.com/0xDarkMatter/dev-shell-tools):
 - **Analysis**: tokei, procs, hyperfine, dust
 
 **Dev Tools:**
-- **Package managers**: npm, node, python, uv, pip, brew
-- **Task runners**: just, bash
-- **Network**: curl, http (httpie), firecrawl
+- **Package managers**: npm, npx, node, pnpm, yarn, bun, python, uv, pip, cargo, go, brew
+- **Build tools**: just, make, bash, rustc
+- **Network**: curl, http (httpie), firecrawl, markitdown
+- **Containers**: docker, docker-compose
+- **Archives**: tar, zip, unzip
+- **Testing**: pytest
+- **Data**: sort, uniq, cut, tr, xargs, tee, head, tail, diff
 - **Documentation**: tldr
 - **Windows**: powershell
 
@@ -116,20 +120,43 @@ Write to `.claude/settings.local.json`:
       "Bash(procs:*)",
       "Bash(hyperfine:*)",
       "Bash(npm:*)",
+      "Bash(npx:*)",
       "Bash(node:*)",
+      "Bash(pnpm:*)",
+      "Bash(yarn:*)",
+      "Bash(bun:*)",
       "Bash(python:*)",
       "Bash(pip:*)",
+      "Bash(cargo:*)",
+      "Bash(go:*)",
+      "Bash(rustc:*)",
+      "Bash(pytest:*)",
+      "Bash(make:*)",
+      "Bash(docker:*)",
+      "Bash(docker-compose:*)",
       "Bash(powershell -Command:*)",
       "Bash(powershell.exe:*)",
       "Bash(bash:*)",
       "Bash(chmod:*)",
+      "Bash(sort:*)",
+      "Bash(uniq:*)",
+      "Bash(cut:*)",
+      "Bash(tr:*)",
       "Bash(xargs:*)",
+      "Bash(tee:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(diff:*)",
+      "Bash(tar:*)",
+      "Bash(zip:*)",
+      "Bash(unzip:*)",
       "Bash(command -v:*)",
       "Bash(brew:*)",
       "Bash(tldr:*)",
       "Bash(dust:*)",
       "Bash(btm:*)",
       "Bash(bottom:*)",
+      "Bash(markitdown:*)",
       "Bash(firecrawl:*)",
       "Bash(gemini:*)",
       "Bash(claude:*)",
@@ -270,7 +297,7 @@ Report to user:
 Initialized Claude Code with dev-shell-tools:
 
 Created:
-  .claude/settings.local.json  (51 tool permissions, 11 guardrails)
+  .claude/settings.local.json  (74 tool permissions, 11 guardrails)
   .claude/rules/cli-tools.md   (modern tool preferences)
 
 Claude will now:
@@ -298,8 +325,6 @@ To add to git: git add .claude/
 
 Adds to permissions:
 ```json
-"Bash(docker:*)",
-"Bash(docker-compose:*)",
 "Bash(podman:*)",
 "Bash(kubectl:*)",
 "Bash(helm:*)",

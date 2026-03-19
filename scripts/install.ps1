@@ -40,7 +40,8 @@ $deprecated = @(
     "$claudeDir\commands\testgen.md",
     "$claudeDir\commands\conclave.md",
     "$claudeDir\commands\pulse.md",
-    "$claudeDir\skills\conclave"
+    "$claudeDir\skills\conclave",
+    "$claudeDir\skills\claude-code-templates"   # Replaced by skill-creator
 )
 
 # Renamed skills: -patterns -> -ops (March 2026)
