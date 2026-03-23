@@ -52,7 +52,7 @@ All skills follow the official Anthropic pattern with bundled resources:
 | Operational expertise | `postgres-ops/` | Comprehensive domain knowledge (preferred) |
 | Domain-specific | `python-async-ops/` | Domain + "-ops" |
 | Tool knowledge | `sqlite-ops/` | Tool + "-ops" |
-| Workflow | `git-workflow/` | Activity-focused |
+| Workflow | `git-ops/` | Activity-focused |
 | Framework | `tailwind-ops/` | Framework + "-ops" |
 
 **Naming guidance:** Use `-ops` for all skills providing domain knowledge. The `-ops` suffix signals comprehensive operational expertise - design, implementation, and operations.

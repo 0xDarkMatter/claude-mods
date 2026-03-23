@@ -2,7 +2,7 @@
 name: ci-cd-ops
 description: "CI/CD pipeline patterns with GitHub Actions, release automation, and testing strategies. Use for: github actions, workflow, CI, CD, pipeline, deploy, release, semantic release, changesets, goreleaser, matrix, cache, secrets, environment, artifact, reusable workflow, composite action."
 allowed-tools: "Read Write Bash"
-related-skills: [git-workflow, docker-ops, testing-ops]
+related-skills: [git-ops, docker-ops, testing-ops]
 ---
 
 # CI/CD Operations

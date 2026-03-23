@@ -50,7 +50,7 @@ Current claude-mods skills/commands (verified no conflicts):
 - atomise, canvas, explain, introspect, save, setperms, spawn, sync
 
 **Skills:**
-- review, testgen, code-stats, doc-scanner, file-search, find-replace, git-workflow, tool-discovery, task-runner, python-env, structural-search, data-processing, markitdown, etc.
+- review, testgen, code-stats, doc-scanner, file-search, find-replace, git-ops, tool-discovery, task-runner, python-env, structural-search, data-processing, markitdown, etc.
 
 ## Before Adding New Skills
 
