@@ -31,7 +31,7 @@ Is this a reference/lookup task?
 | **code-stats** | tokei, difft, line counts |
 | **data-processing** | jq, yq, json, yaml |
 | **structural-search** | ast-grep, sg, ast pattern |
-| **git-workflow** | lazygit, gh, delta, rebase |
+| **git-ops** | git, gh, lazygit, delta, commit, PR, release, rebase |
 | **python-env** | uv, venv, pyproject |
 | **go-ops** | golang, go, goroutine, channel, context, errgroup, go test |
 | **rust-ops** | rust, cargo, ownership, tokio, serde, trait, Result, Option |

@@ -291,4 +291,4 @@ Refactoring Untested Code
 | `debug-ops` | When refactoring exposes hidden bugs or introduces regressions |
 | `code-stats` | Measure complexity before and after refactoring to quantify improvement |
 | `migrate-ops` | Large-scale migrations that require systematic refactoring |
-| `git-workflow` | Branch strategy for refactoring PRs, stacked PRs, bisect to find regressions |
+| `git-ops` | Branch strategy for refactoring PRs, stacked PRs, bisect to find regressions |

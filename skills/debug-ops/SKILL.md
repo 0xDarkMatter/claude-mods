@@ -274,4 +274,4 @@ jq -r 'select(.level == "error") | .error_type' app.log | sort | uniq -c | sort 
 - **monitoring-ops** -- Production observability, alerting, dashboards
 - **code-stats** -- Measure code complexity and identify bug-prone areas
 - **container-orchestration** -- Docker and Kubernetes debugging context
-- **git-workflow** -- Git bisect workflow and history investigation
+- **git-ops** -- Git bisect workflow and history investigation

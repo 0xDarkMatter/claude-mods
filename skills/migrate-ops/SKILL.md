@@ -2,7 +2,7 @@
 name: migrate-ops
 description: "Framework and language migration patterns - version upgrades, breaking changes, dependency audit, safe rollback. Use for: migrate, migration, upgrade, version bump, breaking changes, deprecation, dependency audit, npm audit, pip-audit, codemod, jscodeshift, rector, rollback, semver, changelog, framework upgrade, language upgrade, React 19, Vue 3, Next.js App Router, Laravel 11, Angular, Python 3.12, Node 22, TypeScript 5, Go 1.22, Rust 2024, PHP 8.4."
 allowed-tools: "Read Edit Write Bash Glob Grep Agent"
-related-skills: [testing-ops, debug-ops, git-workflow, refactor-ops]
+related-skills: [testing-ops, debug-ops, git-ops, refactor-ops]
 ---
 
 # Migrate Operations
@@ -271,7 +271,7 @@ Migration failed or caused issues — how to roll back?
 |-------|----------------|
 | `testing-ops` | Ensuring test coverage before migration, writing regression tests after |
 | `debug-ops` | Diagnosing failures introduced by migration, bisecting breaking commits |
-| `git-workflow` | Branch strategy for migration, git bisect to find breaking change |
+| `git-ops` | Branch strategy for migration, git bisect to find breaking change |
 | `refactor-ops` | Code transformations that often accompany version upgrades |
 | `ci-cd-ops` | Updating CI pipelines to test against new versions, matrix builds |
 | `container-orchestration` | Updating base images, Dockerfile changes for new runtime versions |

@@ -426,16 +426,20 @@ Modern command-line tools for development workflows.
 
 Project and development workflow automation.
 
-### git-workflow
+### git-ops
 
-**Triggers:** lazygit, gh, delta, pr, rebase, stash, bisect
+**Triggers:** commit, push, pull request, create PR, git status, git diff, rebase, stash, branch, merge, release, tag, changelog, semver, cherry-pick, bisect, worktree, lazygit, gh, delta
 
 **Use For:**
+- Commit, push, and branch management (dispatched to background Sonnet agent)
+- PR creation with contextual titles and descriptions
+- Release workflows - tagging, GitHub releases, changelog generation
+- Semantic versioning analysis from Conventional Commits
 - Interactive git operations (lazygit)
 - GitHub CLI (gh) commands
-- Syntax-highlighted diffs (delta)
-- Rebase and stash patterns
-- Bug hunting with bisect
+- Safety-tiered operations (read-only inline, safe writes dispatched, destructive with preflight)
+
+**Agent:** git-agent (model: sonnet, background)
 
 **References:** rebase-patterns.md, stash-patterns.md, advanced-git.md
 
@@ -510,7 +514,7 @@ Project and development workflow automation.
 | Python | python-env, structural-search |
 | API design | api-design-ops, rest-ops |
 | Docker/containers | docker-ops, container-orchestration |
-| CI/CD | ci-cd-ops, git-workflow |
+| CI/CD | ci-cd-ops, git-ops |
 | CSS/Tailwind | tailwind-ops |
 | Nginx/web server | nginx-ops |
 | Auth/security | auth-ops, security-ops |
@@ -526,7 +530,7 @@ Project and development workflow automation.
 | Count lines of code | code-stats |
 | Compare code changes | code-stats |
 | Process JSON/YAML | data-processing |
-| Git operations | git-workflow |
+| Git operations | git-ops |
 | Set up Python project | python-env |
 | Run project tasks | task-runner |
 | Find project docs | doc-scanner |
@@ -547,7 +551,7 @@ Project and development workflow automation.
 **Medium Tasks (1-5 min):**
 - find-replace: Batch replacements
 - data-processing: JSON transformations
-- git-workflow: Rebase operations
+- git-ops: Rebase, PR creation, release workflows
 - python-env: Project setup
 
 **Complex Workflows (5+ min):**
