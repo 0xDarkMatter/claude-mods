@@ -1,325 +1,294 @@
 ---
 name: perf-ops
-description: "Performance profiling and optimization - CPU, memory, bundle analysis, load testing, flamegraphs. Use for: performance, profiling, flamegraph, pprof, py-spy, clinic.js, memray, heaptrack, bundle size, webpack analyzer, load testing, k6, artillery, vegeta, locust, benchmark, hyperfine, criterion, slow query, EXPLAIN ANALYZE, N+1, caching, optimization, latency, throughput, p99, memory leak, CPU spike, bottleneck."
-allowed-tools: "Read Edit Write Bash Glob Grep Agent"
-related-skills: [debug-ops, monitoring-ops, testing-ops, code-stats]
+description: "Performance profiling and optimization orchestrator - diagnoses symptoms, dispatches profiling to language experts, manages before/after comparisons. Triggers on: performance, profiling, flamegraph, pprof, py-spy, clinic.js, memray, heaptrack, bundle size, webpack analyzer, load testing, k6, artillery, vegeta, locust, benchmark, hyperfine, criterion, slow query, EXPLAIN ANALYZE, N+1, caching, optimization, latency, throughput, p99, memory leak, CPU spike, bottleneck."
+allowed-tools: "Read Edit Write Bash Glob Grep Agent TaskCreate TaskUpdate"
+related-skills: [debug-ops, monitoring-ops, testing-ops, code-stats, postgres-ops]
 ---
 
 # Performance Operations
 
-Cross-language performance profiling, optimization patterns, and load testing methodology.
+Orchestrator for cross-language performance profiling and optimization. Classifies symptoms inline, dispatches profiling to language expert agents (background), and manages optimization with confirmation.
 
-## Performance Issue Decision Tree
-
-```
-What symptom are you observing?
-│
-├─ High CPU usage
-│  ├─ Sustained 100% on one core
-│  │  └─ CPU-bound: hot loop, regex backtracking, tight computation
-│  │     → Profile with flamegraph (py-spy, pprof, clinic flame, samply)
-│  ├─ Sustained 100% across all cores
-│  │  └─ Parallelism gone wrong: fork bomb, unbounded workers, spin locks
-│  │     → Check process count, thread count, lock contention
-│  └─ Periodic spikes
-│     └─ GC pressure, cron job, batch processing, cache stampede
-│        → Correlate with GC logs, scheduled tasks, traffic patterns
-│
-├─ High memory usage
-│  ├─ Growing over time (never decreasing)
-│  │  └─ Memory leak: unclosed resources, growing caches, event listener accumulation
-│  │     → Heap snapshots over time, compare retained objects
-│  ├─ Sudden large allocation
-│  │  └─ Unbounded buffer, loading full dataset into memory, large file read
-│  │     → Check allocation sizes, switch to streaming
-│  └─ High but stable
-│     └─ May be normal: in-memory cache, preloaded data, memory-mapped files
-│        → Verify with expected working set size
-│
-├─ Slow responses / high latency
-│  ├─ All endpoints slow
-│  │  └─ Systemic: resource exhaustion, GC pauses, DNS issues, TLS overhead
-│  │     → Check resource utilization, GC metrics, network path
-│  ├─ Specific endpoint slow
-│  │  └─ Query-specific: N+1 queries, missing index, unoptimized algorithm
-│  │     → EXPLAIN ANALYZE, query logging, endpoint profiling
-│  └─ Intermittently slow (p99 spikes)
-│     └─ Contention: lock wait, connection pool exhaustion, noisy neighbor
-│        → Check lock metrics, pool sizes, correlated traffic
-│
-├─ Low throughput
-│  ├─ CPU not saturated
-│  │  └─ I/O bound: disk wait, network latency, blocking calls in async code
-│  │     → Check iowait, network RTT, ensure async throughout
-│  ├─ CPU saturated
-│  │  └─ Compute bound: need algorithmic improvement or horizontal scaling
-│  │     → Profile hot paths, optimize or scale out
-│  └─ Queues backing up
-│     └─ Consumer too slow: batch size, consumer count, downstream bottleneck
-│        → Increase consumers, optimize processing, check downstream
-│
-├─ Large bundle size (frontend)
-│  ├─ Main bundle too large
-│  │  └─ Missing code splitting, tree shaking not working, barrel file imports
-│  │     → Bundle analyzer, check import patterns, add dynamic imports
-│  ├─ Duplicate dependencies
-│  │  └─ Multiple versions of same library bundled
-│  │     → Dedupe, check peer dependencies, use resolutions
-│  └─ Large assets
-│     └─ Unoptimized images, embedded fonts, inline data URIs
-│        → Image optimization, font subsetting, external assets
-│
-└─ Slow database queries
-   ├─ Single slow query
-   │  └─ Missing index, suboptimal join order, full table scan
-   │     → EXPLAIN ANALYZE, add index, rewrite query
-   ├─ Many small queries (N+1)
-   │  └─ ORM lazy loading, loop with individual queries
-   │     → Eager loading, batch queries, dataloader pattern
-   └─ Lock contention
-      └─ Long transactions, row-level locks, table locks
-         → Shorten transactions, check isolation level, advisory locks
-```
-
-## Profiling Tool Selection Matrix
-
-| Problem | Node.js | Python | Go | Rust | Browser |
-|---------|---------|--------|----|------|---------|
-| **CPU hotspots** | clinic flame, 0x | py-spy, scalene | pprof (CPU) | cargo-flamegraph, samply | DevTools Performance |
-| **Memory leaks** | clinic doctor, heap snapshot | memray, tracemalloc | pprof (heap) | DHAT, heaptrack | DevTools Memory |
-| **Memory allocation** | --heap-prof | memray, scalene | pprof (allocs) | DHAT | DevTools Allocation |
-| **Async bottlenecks** | clinic bubbleprof | asyncio debug mode | pprof (goroutine) | tokio-console | DevTools Performance |
-| **I/O profiling** | clinic doctor | strace, py-spy | pprof (block) | strace, perf | Network tab |
-| **GC pressure** | --trace-gc | gc.set_debug | GODEBUG=gctrace=1 | N/A (no GC) | Performance timeline |
-| **Lock contention** | N/A | py-spy (threading) | pprof (mutex) | parking_lot stats | N/A |
-| **Startup time** | --cpu-prof | python -X importtime | go build -v | cargo build --timings | Lighthouse |
-
-## CPU Profiling Quick Reference
-
-### Flamegraph Basics
+## Architecture
 
 ```
-Reading a flamegraph:
-- X-axis: proportion of total samples (wider = more time)
-- Y-axis: call stack depth (bottom = entry point, top = leaf)
-- Color: random (not meaningful) in most tools
-- Look for: wide plateaus at the top (hot functions)
-- Ignore: narrow towers (called often but fast)
-
-Key actions:
-1. Find the widest bars at the TOP of the graph
-2. Trace down to see what calls them
-3. Focus optimization on the widest top-level functions
-4. Re-profile after each change to verify improvement
+User describes performance issue or requests profiling
+    |
+    +---> T1: Diagnose (inline, fast)
+    |       +---> Classify symptom (decision tree)
+    |       +---> Detect language/runtime from project
+    |       +---> Check installed profiling tools
+    |       +---> Determine production vs development
+    |       +---> Gather system baseline (CPU/mem/disk)
+    |       +---> Present: diagnosis + recommended profiling approach
+    |
+    +---> T2: Profile (dispatch to language expert, background)
+    |       +---> Select expert agent from routing table
+    |       +---> Build perf-focused dispatch prompt
+    |       +---> Expert runs profiler, collects data, interprets results
+    |       |       +---> Fallback: general-purpose with tool commands inlined
+    |       +---> Returns: findings + bottleneck identification + suggestions
+    |       |
+    |       +---> [Optional parallel dispatch]:
+    |             +---> CPU profiling agent  ---+
+    |             +---> Memory profiling agent --+--> Consolidate findings
+    |             +---> Baseline benchmark ------+
+    |
+    +---> T3: Optimize (dispatch to expert, foreground + confirm)
+            +---> Expert proposes specific code changes
+            +---> Preflight: what changes, expected impact, risks
+            +---> User confirms
+            +---> Apply changes
+            +---> Re-benchmark for before/after delta
 ```
 
-### Tool Quick Start
+## Safety Tiers
 
-| Tool | Language | Command | Output |
-|------|----------|---------|--------|
-| **py-spy** | Python | `py-spy record -o profile.svg -- python app.py` | SVG flamegraph |
-| **py-spy top** | Python | `py-spy top --pid PID` | Live top-like view |
-| **pprof** | Go | `go tool pprof -http :8080 http://localhost:6060/debug/pprof/profile?seconds=30` | Interactive web UI |
-| **clinic flame** | Node.js | `clinic flame -- node app.js` | HTML flamegraph |
-| **0x** | Node.js | `0x app.js` | SVG flamegraph |
-| **cargo-flamegraph** | Rust | `cargo flamegraph --bin myapp` | SVG flamegraph |
-| **samply** | Rust/C/C++ | `samply record ./target/release/myapp` | Firefox Profiler UI |
-| **perf** | Linux (any) | `perf record -g ./myapp && perf script \| inferno-flamegraph > out.svg` | SVG flamegraph |
+### T1: Diagnose - Run Inline
 
-## Memory Profiling Quick Reference
+No agent needed. Execute directly via Bash for instant results.
 
-| Tool | Language | Command | What It Shows |
-|------|----------|---------|---------------|
-| **memray** | Python | `memray run script.py && memray flamegraph output.bin` | Allocation flamegraph, leak detection |
-| **tracemalloc** | Python | `tracemalloc.start(); snapshot = tracemalloc.take_snapshot()` | Top allocators, allocation traceback |
-| **scalene** | Python | `scalene script.py` | CPU + memory + GPU in one profiler |
-| **heaptrack** | C/C++/Rust | `heaptrack ./myapp && heaptrack_gui heaptrack.myapp.*.zst` | Allocation timeline, flamegraph, leak candidates |
-| **DHAT** | Rust | `valgrind --tool=dhat ./target/debug/myapp` | Allocation sites, short-lived allocs |
-| **pprof (heap)** | Go | `go tool pprof http://localhost:6060/debug/pprof/heap` | Live heap, allocation counts |
-| **Chrome heap** | JS/Browser | DevTools → Memory → Take heap snapshot | Object retention, detached DOM |
-| **clinic doctor** | Node.js | `clinic doctor -- node app.js` | Memory + CPU + event loop diagnosis |
+| Operation | Command / Method |
+|-----------|-----------------|
+| Detect Python profilers | `which py-spy && which memray && which scalene` |
+| Detect Go profilers | `which go && go tool pprof -h 2>/dev/null` |
+| Detect Rust profilers | `which cargo-flamegraph && which samply` |
+| Detect Node profilers | `which clinic && which 0x` |
+| Detect benchmarking tools | `which hyperfine && which k6 && which vegeta` |
+| System CPU baseline | `top -bn1 -o %CPU \| head -20` (Linux) or `wmic cpu get loadpercentage` (Win) |
+| System memory baseline | `free -h` (Linux) or `wmic OS get FreePhysicalMemory` (Win) |
+| Disk I/O check | `iostat -x 1 3` (Linux) |
+| Identify language | Check for `package.json`, `go.mod`, `Cargo.toml`, `pyproject.toml`, `requirements.txt` |
+| Production vs dev | Ask user or detect from environment (NODE_ENV, FLASK_ENV, etc.) |
+| Read existing profiles | Parse `.prof`, `.svg`, `.bin` files in project |
 
-## Bundle Analysis Quick Reference
+**Production safety rule:** In production environments, only recommend sampling profilers (py-spy, pprof HTTP endpoint, perf). Never suggest attaching debuggers, tracing profilers, or tools that require process restart.
 
-| Tool | Bundler | Command | Output |
-|------|---------|---------|--------|
-| **webpack-bundle-analyzer** | Webpack | `npx webpack-bundle-analyzer stats.json` | Interactive treemap |
-| **source-map-explorer** | Any | `npx source-map-explorer bundle.js` | Treemap from source maps |
-| **rollup-plugin-visualizer** | Rollup/Vite | Add plugin, build | HTML treemap |
-| **vite-bundle-visualizer** | Vite | `npx vite-bundle-visualizer` | Treemap visualization |
-| **bundlephobia** | npm | `npx bundlephobia <package>` | Package size analysis |
-| **size-limit** | Any | Configure in package.json, run in CI | Size budget enforcement |
+### T2: Profile - Dispatch to Expert Agent
 
-### Bundle Size Reduction Checklist
+Gather context from T1 diagnosis, then dispatch to the appropriate language expert.
 
-```
-[ ] Dynamic imports for routes and heavy components
-[ ] Tree shaking working (check for side effects in package.json)
-[ ] No barrel file re-exports pulling in entire modules
-[ ] Lodash: use lodash-es or individual imports (lodash/debounce)
-[ ] Moment.js replaced with date-fns or dayjs
-[ ] Images optimized (WebP/AVIF, responsive sizes, lazy loading)
-[ ] Fonts subsetted to used characters
-[ ] Gzip/Brotli compression enabled on server
-[ ] Source maps excluded from production bundle size
-[ ] CSS purged of unused styles (PurgeCSS, Tailwind JIT)
-```
+**Language Expert Routing:**
 
-## Database Performance Quick Reference
+| Detected Language | Expert Agent | Key Profiling Tools |
+|-------------------|-------------|---------------------|
+| Python (.py, pyproject.toml, requirements.txt) | python-expert | py-spy, memray, scalene, tracemalloc |
+| Go (go.mod, .go files) | go-expert | pprof (CPU/heap/goroutine/mutex), benchstat |
+| Rust (Cargo.toml, .rs files) | rust-expert | cargo-flamegraph, samply, DHAT, criterion |
+| TypeScript/JavaScript (backend, package.json + server) | javascript-expert | clinic flame/doctor/bubbleprof, 0x |
+| TypeScript/JavaScript (frontend, bundle issues) | typescript-expert | webpack-bundle-analyzer, Lighthouse, source-map-explorer |
+| SQL / PostgreSQL | postgres-expert | EXPLAIN ANALYZE, pg_stat_statements, pgbench |
+| General / unknown / CLI benchmarking | general-purpose | hyperfine, perf, strace |
 
-### EXPLAIN ANALYZE Interpretation
+**Dispatch template (T2):**
 
 ```
-Key metrics in EXPLAIN ANALYZE output:
-│
-├─ Seq Scan          → Full table scan (often bad for large tables)
-│  └─ Fix: Add index on filter columns
-├─ Index Scan        → Using index (good)
-├─ Bitmap Index Scan → Multiple index conditions combined (good)
-├─ Nested Loop       → OK for small inner table, bad for large joins
-│  └─ Fix: Add index on join column, consider Hash Join
-├─ Hash Join         → Good for large equi-joins
-├─ Sort              → Check if index can provide order
-│  └─ Fix: Add index matching ORDER BY
-├─ actual time       → First row..last row in milliseconds
-├─ rows              → Actual rows vs planned (estimate accuracy)
-└─ buffers           → shared hit (cache) vs read (disk I/O)
+You are handling a performance profiling task dispatched by the perf-ops orchestrator.
+
+## Diagnosis (from T1)
+- Symptom: {classified symptom from decision tree}
+- Language/Runtime: {detected language}
+- Environment: {production | development}
+- Installed tools: {list from tool detection}
+- System baseline: {CPU/memory/disk metrics}
+
+## Profiling Task
+{specific profiling request - e.g., "CPU profile the API server under load"}
+
+## Target
+- Process/file: {target application or endpoint}
+- Expected workload: {how to generate representative load if needed}
+
+## Instructions
+1. Run the appropriate profiler for this language and symptom
+2. Collect sufficient samples (minimum 30 seconds for CPU, multiple snapshots for memory)
+3. Interpret the results - identify the top 3-5 bottlenecks
+4. For each bottleneck: explain what it is, why it's slow, and suggest a fix
+5. Report findings in structured format with metrics
 ```
 
-### N+1 Detection
+**Execution mode:**
+
+| Scenario | Mode | Why |
+|----------|------|-----|
+| User waiting for results | `run_in_background=False` | They need findings before continuing |
+| User continuing other work | `run_in_background=True` | Don't block the main session |
+| Quick benchmark (hyperfine) | `run_in_background=False` | Fast enough to wait |
+| Load test (k6, artillery) | `run_in_background=True` | Takes minutes |
+
+### T3: Optimize - Preflight Required
+
+Dispatch to language expert with explicit instruction to produce a preflight report before any code changes.
+
+**Dispatch template (T3 preflight):**
 
 ```
-Symptoms:
-- Many identical queries with different WHERE values
-- Response time scales linearly with result count
-- Query log shows repeated patterns
+You are handling a performance optimization dispatched by the perf-ops orchestrator.
 
-Detection:
-- Django: django-debug-toolbar, nplusone
-- Rails: Bullet gem
-- SQLAlchemy: sqlalchemy.echo=True, look for repeated patterns
-- General: enable slow query log, count queries per request
+## Profiling Results (from T2)
+{bottleneck findings, metrics, flamegraph interpretation}
 
-Fix:
-- Eager loading (JOIN, prefetch, include)
-- Batch queries (WHERE id IN (...))
-- DataLoader pattern (batch + cache per request)
+## Optimization Request
+{specific optimization - e.g., "Fix the N+1 query in UserController.list"}
+
+IMPORTANT: Do NOT apply changes yet. Produce a Preflight Report:
+1. Exactly what code/config changes you will make
+2. Expected performance improvement (with reasoning)
+3. Risks (correctness, side effects, edge cases)
+4. How to verify the improvement (specific benchmark or test)
+5. How to revert if the optimization causes issues
 ```
 
-## Load Testing Quick Reference
+**After user confirms:** Re-dispatch with execute authority plus the before/after protocol.
 
-| Tool | Language | Strengths | Command |
-|------|----------|-----------|---------|
-| **k6** | Go (JS scripts) | Scripted scenarios, thresholds, cloud | `k6 run script.js` |
-| **artillery** | Node.js | YAML config, plugins, Playwright | `artillery run config.yml` |
-| **vegeta** | Go | CLI piping, constant rate | `echo "GET http://localhost" \| vegeta attack \| vegeta report` |
-| **wrk** | C | Lightweight, Lua scripts | `wrk -t4 -c100 -d30s http://localhost` |
-| **autocannon** | Node.js | Programmatic, pipelining | `autocannon -c 100 -d 30 http://localhost` |
-| **locust** | Python | Python classes, distributed | `locust -f locustfile.py` |
-
-### Load Test Types
+**Dispatch template (T3 execute + before/after):**
 
 ```
-Test Type Selection:
-│
-├─ Smoke Test
-│  └─ Minimal load (1-2 VUs) to verify system works
-│     Duration: 1-5 minutes
-│
-├─ Load Test
-│  └─ Expected production load
-│     Duration: 15-60 minutes
-│     Goal: Verify SLOs are met under normal conditions
-│
-├─ Stress Test
-│  └─ Beyond expected load, find breaking point
-│     Ramp up until errors or unacceptable latency
-│     Goal: Know the system's limits
-│
-├─ Spike Test
-│  └─ Sudden burst of traffic
-│     Instant jump to high load, then drop
-│     Goal: Test auto-scaling, queue behavior
-│
-├─ Soak Test (Endurance)
-│  └─ Moderate load for extended period (hours)
-│     Goal: Find memory leaks, resource exhaustion, GC issues
-│
-└─ Breakpoint Test
-   └─ Continuously ramp up until failure
-      Goal: Find maximum capacity
+User confirmed the optimization. Proceed with execution.
+
+## Approved Changes
+{exact changes from preflight report}
+
+## Before/After Protocol
+1. Record the current benchmark baseline: {specific command from T2}
+2. Apply the approved changes
+3. Run the same benchmark again
+4. Report comparison:
+   - Metric: before value -> after value (% change)
+   - Include statistical confidence if tool supports it
+5. If regression detected: revert and report
 ```
 
-## Benchmarking Quick Reference
+## Parallel Profiling
 
-| Tool | Domain | Command | Notes |
-|------|--------|---------|-------|
-| **hyperfine** | CLI commands | `hyperfine 'cmd1' 'cmd2'` | Warm-up, statistical analysis, export |
-| **criterion** | Rust | `cargo bench` (with criterion dep) | Statistical, HTML reports, regression detection |
-| **testing.B** | Go | `go test -bench=. -benchmem` | Built-in, memory allocs, sub-benchmarks |
-| **pytest-benchmark** | Python | `pytest --benchmark-only` | Statistical, histograms, comparison |
-| **vitest bench** | JS/TS | `vitest bench` | Built-in to Vitest, Tinybench engine |
-| **Benchmark.js** | JS | Programmatic setup | Statistical analysis, ops/sec |
+When multiple independent symptoms are detected, or the user requests comprehensive profiling, dispatch parallel agents.
 
-### Benchmarking Best Practices
+**Parallelizable combinations:**
+
+| Agent 1 | Agent 2 | Why Independent |
+|---------|---------|-----------------|
+| CPU profiler | Memory profiler | Different tools, different data |
+| CPU profiler | Baseline benchmark | Read vs measurement |
+| Backend profiler | Frontend bundle analysis | Different runtimes |
+| Service A profiler | Service B profiler | Different processes |
+
+**NOT parallelizable:**
+
+| Operation A | Operation B | Why Sequential |
+|-------------|-------------|----------------|
+| Profile | Interpret results | Dependency |
+| Before benchmark | After benchmark | Requires code change between |
+| Load test | CPU profile same process | Tool interference |
+
+**Dispatch pattern for parallel profiling:**
+
+```python
+# Example: CPU + memory profiling in parallel
+Agent(
+    subagent_type="python-expert",
+    model="sonnet",
+    run_in_background=True,
+    prompt="CPU profiling task: {cpu_prompt}"
+)
+Agent(
+    subagent_type="python-expert",
+    model="sonnet",
+    run_in_background=True,
+    prompt="Memory profiling task: {memory_prompt}"
+)
+# Both run simultaneously, consolidate findings when both complete
+```
+
+## Fallback: When Expert Agent Is Unavailable
+
+If the target language expert is not registered as a subagent type, fall back to `general-purpose` with profiling commands inlined.
+
+```python
+Agent(
+    subagent_type="general-purpose",
+    model="sonnet",
+    run_in_background=True,
+    prompt="""You are acting as a performance profiling agent for {language}.
+
+Use these specific tools and commands:
+{tool commands from diagnosis-quickref.md for the detected language}
+
+{original dispatch prompt}
+"""
+)
+```
+
+For simple benchmarks (hyperfine, single command timing), skip agent dispatch entirely and run inline via Bash.
+
+## Decision Logic
+
+When a performance-related request arrives:
 
 ```
-[ ] Warm up before measuring (JIT compilation, cache population)
-[ ] Run multiple iterations (minimum 10, prefer 100+)
-[ ] Report statistical summary (mean, median, stddev, min, max)
-[ ] Control for system noise (close other apps, pin CPU frequency)
-[ ] Compare against baseline (previous version, alternative impl)
-[ ] Measure what matters (end-to-end, not micro-operations in isolation)
-[ ] Profile before benchmarking (know WHAT to benchmark)
-[ ] Document environment (hardware, OS, runtime version, flags)
+1. Classify the request:
+   - Symptom description? -> Start at T1 (diagnose)
+   - "Profile my app"? -> T1 (detect language + tools) then T2 (profile)
+   - "Benchmark X vs Y"? -> T2 directly (hyperfine or language benchmark)
+   - "Optimize this"? -> T2 (profile first) then T3 (optimize)
+   - "Why is X slow"? -> T1 (diagnose) then T2 (targeted profile)
+
+2. T1 Diagnose (always runs first for new issues):
+   - Detect language/runtime
+   - Check installed profiling tools
+   - Classify symptom using decision tree (see diagnosis-quickref.md)
+   - Determine production vs development
+   - Present findings + recommend next step
+
+3. T2 Profile (when diagnosis points to a specific bottleneck):
+   - Route to appropriate language expert
+   - Decide foreground vs background
+   - Consider parallel dispatch if multiple symptoms
+   - Consolidate findings from all agents
+
+4. T3 Optimize (only when user wants changes applied):
+   - Always produce preflight report first
+   - Wait for explicit user confirmation
+   - Execute with before/after comparison
+   - Report delta with statistical confidence
 ```
 
-## Optimization Patterns Quick Reference
+## Quick Reference
 
-| Pattern | When to Use | Example |
-|---------|-------------|---------|
-| **Caching** | Repeated expensive computations or I/O | Redis, in-memory LRU, CDN, memoization |
-| **Lazy loading** | Resources not needed immediately | Dynamic imports, virtual scrolling, pagination |
-| **Connection pooling** | Frequent DB/HTTP connections | PgBouncer, HikariCP, urllib3 pool |
-| **Batch operations** | Many small operations on same resource | Bulk INSERT, DataLoader, batch API calls |
-| **Pagination** | Large result sets | Cursor-based (not offset) for large datasets |
-| **Compression** | Network transfer of text data | Brotli > gzip for static, gzip for dynamic |
-| **Streaming** | Processing large files or datasets | Line-by-line, chunk processing, async iterators |
-| **Precomputation** | Predictable expensive calculations | Materialized views, build-time generation |
-| **Denormalization** | Read-heavy with expensive joins | Duplicate data for read performance |
-| **Index optimization** | Slow queries on large tables | Composite indexes matching query patterns |
-
-## Common Gotchas
-
-| Gotcha | Why It Hurts | Fix |
-|--------|-------------|-----|
-| Premature optimization | Wastes time on non-bottlenecks, adds complexity | Profile first, optimize the measured hot path |
-| Micro-benchmarks misleading | JIT, caching, branch prediction differ from real workload | Benchmark realistic workloads, validate with production metrics |
-| Profiling overhead | Profiler itself skews results (observer effect) | Use sampling profilers (py-spy, pprof) not tracing profilers |
-| Cache invalidation | Stale data served, inconsistent state across nodes | TTL + event-based invalidation, cache-aside pattern |
-| Optimizing cold path | Spending effort on rarely-executed code | Focus on hot paths identified by profiling |
-| Ignoring tail latency | p50 looks great but p99 is 10x worse | Measure and optimize p95/p99, not just averages |
-| N+1 queries hidden by ORM | Each page load fires hundreds of queries | Enable query logging, use eager loading |
-| Compression on small payloads | Overhead exceeds savings for payloads <150 bytes | Only compress above minimum size threshold |
-| Connection pool too large | Each connection uses memory, causes lock contention | Size pool to CPU cores x 2-3, not hundreds |
-| Missing async in I/O path | One blocking call serializes all concurrent requests | Audit entire request path for blocking calls |
-| Benchmarking debug builds | Debug builds 10-100x slower, misleading results | Always benchmark release/optimized builds |
-| Over-indexing database | Write performance degrades, storage bloats | Only index columns in WHERE, JOIN, ORDER BY clauses |
+| Task | Tier | Execution |
+|------|------|-----------|
+| Detect tools | T1 | Inline |
+| Check system metrics | T1 | Inline |
+| Classify symptom | T1 | Inline |
+| Identify language | T1 | Inline |
+| Run CPU profiler | T2 | Agent (bg) |
+| Run memory profiler | T2 | Agent (bg) |
+| Run load test | T2 | Agent (bg) |
+| Run benchmark | T2 | Agent (bg or inline for hyperfine) |
+| Bundle analysis | T2 | Agent (bg) |
+| EXPLAIN ANALYZE | T2 | Agent (fg) |
+| Before/after comparison | T2 | Agent (fg) |
+| Apply optimization | T3 | Agent + confirm |
+| Add index | T3 | Agent + confirm |
+| Refactor hot path | T3 | Agent + confirm |
 
 ## Reference Files
 
-| File | Contents | Lines |
-|------|----------|-------|
-| `references/cpu-memory-profiling.md` | Flamegraph interpretation, Node.js/Python/Go/Rust/Browser profiling, memory leak detection | ~700 |
-| `references/load-testing.md` | k6, Artillery, vegeta, wrk, Locust, load testing methodology, CI integration | ~600 |
-| `references/optimization-patterns.md` | Caching, database, frontend, API, concurrency, memory, algorithm optimization | ~550 |
+| File | Contents |
+|------|----------|
+| `references/diagnosis-quickref.md` | Decision tree, tool selection matrix, quick references for all profiling domains, common gotchas |
+| `references/cpu-memory-profiling.md` | Deep flamegraph interpretation, language-specific CPU/memory profiling guides |
+| `references/load-testing.md` | k6, Artillery, vegeta, wrk, Locust methodology and CI integration |
+| `references/optimization-patterns.md` | Caching, database, frontend, API, concurrency, memory optimization strategies |
+| `references/ci-integration.md` | Performance budgets, regression detection, CI pipeline patterns, benchmark baselines |
+
+Load reference files when deeper tool-specific guidance is needed beyond what the dispatch prompt provides.
 
 ## See Also
 
 | Skill | When to Combine |
 |-------|----------------|
-| `debug-ops` | Debugging performance regressions, root cause analysis for slowdowns |
-| `monitoring-ops` | Production metrics, alerting on latency/throughput, dashboards |
+| `debug-ops` | Root cause analysis for performance regressions |
+| `monitoring-ops` | Production metrics, alerting on latency/throughput |
 | `testing-ops` | Performance regression tests in CI, benchmark suites |
 | `code-stats` | Identify complex code that may be performance-sensitive |
 | `postgres-ops` | PostgreSQL-specific query optimization, indexing, EXPLAIN |
