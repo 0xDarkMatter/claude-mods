@@ -12,7 +12,7 @@
 
 | Component | Count | Notes |
 |-----------|-------|-------|
-| Agents | 22 | Domain experts (Python, Go, Rust, React, etc.) |
+| Agents | 23 | Domain experts + git-agent background worker |
 | Skills | 64 | Operational skills, CLI tools, workflows, dev tasks |
 | Commands | 3 | Session management (sync, save) + experimental (canvas) |
 | Rules | 5 | CLI tools, thinking, commit style, naming, skill-agent-updates |

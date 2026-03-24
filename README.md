@@ -22,6 +22,14 @@ From Python async patterns to Rust ownership models, from AWS Fargate deployment
 
 ## Recent Updates
 
+**v2.3.0** (March 2026)
+- 🎯 **Orchestrator-dispatch pattern** - Three skills upgraded from static reference dumps to active orchestrators that classify intent, dispatch to agents, and manage safety tiers:
+  - **`git-ops`** + **`git-agent`** - First skill+agent pair. Orchestrator routes T1 reads inline, dispatches T2 writes and T3 destructive ops to a dedicated Sonnet background agent with preflight confirmation. Replaces `git-workflow`.
+  - **`perf-ops`** - Routes profiling to language experts (python-expert for py-spy, go-expert for pprof, etc.). Parallel CPU+memory profiling, before/after benchmarking protocol.
+  - **`security-ops`** - 3 parallel audit agents (dependency scan, SAST patterns, auth/config review) consolidate into OWASP-mapped severity report. Modelled on techdebt's parallel scanner architecture.
+- 📚 **Skill preloading** - Dispatching skills now instruct agents to read relevant skill references before starting work. Review and testgen agents load security-ops + testing-ops context. Perf-ops agents load profiling references. Git-agent loads CI/CD context for releases.
+- 🔧 **`model: sonnet`** specified for all expert dispatch - Cheaper, faster analysis without sacrificing quality for read-only review, test generation, and profiling tasks.
+
 **v2.2.0** (March 2026)
 - 🔍 **`/introspect` enhanced** - Now generates Session Insights after every analysis: workflow improvements, skill suggestions, and ready-to-paste permission configs to reduce interruptions. Scales recommendations to session size.
 - 🔧 **`/setperms` expanded** - Default template now includes 74 tool permissions (was 51): docker, cargo, go, pytest, npx, pnpm, yarn, bun, make, archive tools, data utilities.
