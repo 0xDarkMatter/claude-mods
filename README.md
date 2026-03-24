@@ -18,7 +18,7 @@ Built on [Anthropic's Agent Skills standard](https://github.com/anthropics/skill
 
 From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
 
-**23 agents. 64 skills. 4 styles. 3 hooks. One install.**
+**23 agents. 64 skills. 5 styles. 3 hooks. One install.**
 
 ## Recent Updates
 
@@ -283,6 +283,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [Spartan](output-styles/spartan.md) | Minimal, bullet-points only | Quick tasks, CI output |
 | [Mentor](output-styles/mentor.md) | Patient, educational | Learning, onboarding |
 | [Executive](output-styles/executive.md) | High-level summaries | Non-technical stakeholders |
+| [Pair](output-styles/pair.md) | Thinks out loud, explores together | Collaborative problem-solving |
 
 ### Agents
 

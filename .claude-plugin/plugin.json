@@ -129,7 +129,8 @@
       "output-styles/vesper.md",
       "output-styles/spartan.md",
       "output-styles/mentor.md",
-      "output-styles/executive.md"
+      "output-styles/executive.md",
+      "output-styles/pair.md"
     ]
   },
   "categories": [
