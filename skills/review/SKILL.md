@@ -40,7 +40,8 @@ review [target] [--focus] [--depth]
     │     ├─ Vue → vue-expert
     │     ├─ SQL/migrations → postgres-expert
     │     ├─ Claude extensions → claude-architect
-    │     └─ Multi-domain → parallel expert dispatch
+    │     ├─ Multi-domain → parallel expert dispatch
+    │     └─ All experts preload: security-ops + testing-ops context
     │
     ├─→ Step 5: Generate Review
     │     ├─ Severity: CRITICAL / WARNING / SUGGESTION / PRAISE
@@ -159,13 +160,27 @@ cat .github/workflows/*.yml 2>/dev/null | grep -E "eslint|prettier|pylint|ruff" 
 **Invoke via Task tool:**
 ```
 Task tool with subagent_type: "[detected]-expert"
+model: "sonnet"
 Prompt includes:
+  - Skill preloading (domain knowledge):
+    "First, read these files for review context:
+     - Read: skills/security-ops/references/owasp-detailed.md
+     - Read: skills/testing-ops/SKILL.md"
   - Diff content
   - Project conventions from AGENTS.md
   - Linting config summaries
   - Requested focus area
   - Request for structured review output
 ```
+
+**Language-specific preloads** (append to the preloading section above):
+
+| Expert | Additional Preload | Why |
+|--------|-------------------|-----|
+| python-expert | `skills/python-pytest-ops/SKILL.md` | Python test patterns for coverage review |
+| go-expert | `skills/go-ops/SKILL.md` | Go idioms, concurrency gotchas |
+| rust-expert | `skills/rust-ops/SKILL.md` | Ownership patterns, unsafe review |
+| typescript-expert | `skills/typescript-ops/SKILL.md` | Type safety patterns |
 
 ### Step 5: Generate Review
 

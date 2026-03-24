@@ -95,6 +95,11 @@ Launch 4 subagents simultaneously (or subset if category specified):
 ```
 Scan {scope} for {category} issues.
 
+## Domain Knowledge
+Before scanning, read the relevant skill for deeper patterns:
+- Security scanner: Read skills/security-ops/references/owasp-detailed.md
+- Complexity scanner: Read skills/refactor-ops/SKILL.md
+
 Scope: {file_list or "entire codebase"}
 Language: {detected from file extensions}
 Focus: {category-specific patterns}

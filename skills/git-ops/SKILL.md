@@ -84,6 +84,10 @@ Gather relevant context, then dispatch to `git-agent` (background, Sonnet).
 ```
 You are the git-agent handling a Tier 2 (safe write) operation.
 
+## Domain Knowledge
+For release or PR operations, read CI context first:
+- Read: skills/ci-cd-ops/SKILL.md (release workflows, PR conventions)
+
 ## Context
 - Current branch: {branch}
 - Repository: {repo info}

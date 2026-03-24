@@ -43,6 +43,7 @@ $ARGUMENTS
     |     +- .sql/migrations -> postgres-expert
     |     +- agents/skills/commands -> claude-architect
     |     +- Default -> general-purpose
+    |     +- All experts preload: debug-ops (systematic analysis)
     |
     +-> Step 4: Generate Explanation
     |     +- Structured markdown with sections
@@ -131,7 +132,11 @@ Determine the best expert based on file extension and content:
 **Invoke via Task tool:**
 ```
 Task tool with subagent_type: "[detected]-expert"
+model: "sonnet"
 Prompt includes:
+  - Skill preloading (domain knowledge):
+    "First, read this file for systematic analysis methodology:
+     - Read: skills/debug-ops/SKILL.md"
   - File content
   - Related files found
   - Project conventions
