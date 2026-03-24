@@ -153,12 +153,25 @@ src/auth.rs → src/auth.rs (mod tests { ... })            # inline tests
 **Invoke via Task tool:**
 ```
 Task tool with subagent_type: "[detected]-expert"
+model: "sonnet"
 Prompt includes:
+  - Skill preloading (domain knowledge):
+    "First, read these files for testing context:
+     - Read: skills/security-ops/references/owasp-detailed.md
+     - Read: skills/testing-ops/SKILL.md"
   - Source file content
   - Function signatures to test
   - Detected framework and conventions
   - Requested test type and focus
 ```
+
+**Language-specific preloads** (append to the preloading section above):
+
+| Expert | Additional Preload | Why |
+|--------|-------------------|-----|
+| python-expert | `skills/python-pytest-ops/SKILL.md` | Fixtures, marks, parametrize, async testing |
+| go-expert | `skills/go-ops/SKILL.md` | Table-driven tests, benchmarks, testify |
+| rust-expert | `skills/rust-ops/SKILL.md` | Property testing, criterion, proptest |
 
 ### Step 5: Generate Tests
 

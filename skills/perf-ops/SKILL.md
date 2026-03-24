@@ -99,6 +99,16 @@ You are handling a performance profiling task dispatched by the perf-ops orchest
 - Process/file: {target application or endpoint}
 - Expected workload: {how to generate representative load if needed}
 
+## Domain Knowledge
+Before starting, read the relevant profiling reference for this language:
+- Read: skills/perf-ops/references/cpu-memory-profiling.md
+
+For load testing tasks, also read:
+- Read: skills/perf-ops/references/load-testing.md
+
+For database profiling, also read:
+- Read: skills/postgres-ops/SKILL.md (if PostgreSQL)
+
 ## Instructions
 1. Run the appropriate profiler for this language and symptom
 2. Collect sufficient samples (minimum 30 seconds for CPU, multiple snapshots for memory)
