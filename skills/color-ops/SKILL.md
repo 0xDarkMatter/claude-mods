@@ -299,6 +299,54 @@ color: oklch(0.7 0.3 150);  /* if out of sRGB, browser reduces chroma */
 // CSS.supports('color', 'color(display-p3 1 0 0)')
 ```
 
+## Scripts
+
+Zero-dependency Node.js tools. Run directly or let Claude invoke them during color tasks.
+
+### Contrast Checker
+
+```bash
+node scripts/contrast-check.js <color1> <color2>
+node scripts/contrast-check.js "#1a1a2e" "#e0e0e0"
+node scripts/contrast-check.js "oklch(0.15 0.02 250)" "oklch(0.9 0.01 250)"
+```
+
+Returns WCAG 2.x contrast ratio with AA/AAA pass/fail for normal and large text.
+
+### Palette Generator
+
+```bash
+node scripts/palette-gen.js <hue> [name] [--neutral] [--json]
+node scripts/palette-gen.js 250 blue              # 10-step blue scale
+node scripts/palette-gen.js 250 blue --neutral     # + matching neutral scale
+node scripts/palette-gen.js 30 orange --json       # JSON output
+```
+
+Generates a perceptually uniform 10-step OKLCH scale (100-1000) as CSS custom properties. Chroma peaks at midtones via sine curve. Flags out-of-gamut sRGB values.
+
+### Color Converter
+
+```bash
+node scripts/color-convert.js <color>
+node scripts/color-convert.js "#3b82f6"
+node scripts/color-convert.js "oklch(0.62 0.18 250)"
+node scripts/color-convert.js "hsl(217, 91%, 60%)"
+```
+
+Converts any color to all formats: hex, rgb, hsl, oklch, oklab. Shows relative luminance and sRGB gamut status.
+
+### Harmony Generator
+
+```bash
+node scripts/harmony-gen.js <color|hue> [scheme] [--css] [--json] [--tokens] [--tints]
+node scripts/harmony-gen.js "#3b82f6" triadic      # Triadic palette from hex
+node scripts/harmony-gen.js 250 complementary --tokens  # Design tokens
+node scripts/harmony-gen.js 30 earth               # Earth tone palette
+node scripts/harmony-gen.js random                  # Curated random palette
+```
+
+12 harmony schemes: `complementary`, `analogous`, `triadic`, `split`, `tetradic`, `monochromatic`, `warm`, `cool`, `earth`, `pastel`, `vibrant`, `random`. All output gamut-clamped to sRGB. Use `--tokens` for semantic design tokens (primary, secondary, accent, surface), `--tints` for tint/shade/muted variants per color.
+
 ## Agent Dispatch
 
 For complex color work beyond this skill's scope, dispatch to specialized agents:
