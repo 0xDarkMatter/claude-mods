@@ -85,6 +85,11 @@ assert_exit_code() {
   fi
 }
 
+# Helper: clear hook cooldown so next hook call fires
+clear_cooldown() {
+  rm -f /tmp/agentmail_claude-mods 2>/dev/null
+}
+
 # --- Setup: clean slate ---
 rm -f "$MAIL_DB"
 
@@ -222,16 +227,19 @@ echo "=== Hook Tests ==="
 
 # T21: Hook silent on empty inbox
 bash "$MAIL_SCRIPT" read >/dev/null 2>&1  # clear any unread
+clear_cooldown
 result=$(bash "$HOOK_SCRIPT" 2>&1)
 assert_empty "hook silent when no mail" "$result"
 
 # T22: Hook shows notification
 bash "$MAIL_SCRIPT" send "claude-mods" "Hook test" "Should trigger hook" >/dev/null 2>&1
+clear_cooldown
 result=$(bash "$HOOK_SCRIPT" 2>&1)
 assert_contains "hook shows MAIL notification" "MAIL" "$result"
 assert_contains "hook shows message count" "1 unread" "$result"
 
 # T23: Hook with missing database
+clear_cooldown
 backup_db="${MAIL_DB}.testbak"
 mv "$MAIL_DB" "$backup_db"
 result=$(bash "$HOOK_SCRIPT" 2>&1)
@@ -356,7 +364,7 @@ result=$(bash "$MAIL_SCRIPT" send --urgent "claude-mods" "Server down" "Producti
 assert_contains "urgent send succeeds" "URGENT" "$result"
 
 # T39: Hook highlights urgent
-rm -f /tmp/agentmail_check_* 2>/dev/null
+clear_cooldown
 result=$(bash "$HOOK_SCRIPT" 2>&1)
 assert_contains "hook shows URGENT" "URGENT" "$result"
 assert_contains "hook shows [!] prefix" "[!]" "$result"
@@ -465,15 +473,20 @@ bash "$MAIL_SCRIPT" read >/dev/null 2>&1
 echo ""
 echo "=== Performance ==="
 
-# T38: Hook cooldown - second call within cooldown is silent even with mail
+# T52: Hook cooldown - second call within cooldown is silent
 bash "$MAIL_SCRIPT" send "claude-mods" "cooldown test" "testing cooldown" >/dev/null 2>&1
-# Clear any cooldown files for current PID
-rm -f /tmp/agentmail_check_* 2>/dev/null
+# Clear cooldown file for this project
+rm -f /tmp/agentmail_claude-mods 2>/dev/null
 # First call should show mail
 result1=$(bash "$HOOK_SCRIPT" 2>&1)
 assert_contains "hook fires on first call" "MAIL" "$result1"
-# Note: can't easily test cooldown across separate bash invocations since PID changes
-# But we can verify the cooldown file was created
+
+# T53: Second call within cooldown is silent (cooldown file exists from first call)
+result2=$(bash "$HOOK_SCRIPT" 2>&1)
+assert_empty "hook silent during cooldown" "$result2"
+
+# Cleanup
+rm -f /tmp/agentmail_claude-mods 2>/dev/null
 bash "$MAIL_SCRIPT" read >/dev/null 2>&1
 
 echo ""
@@ -481,7 +494,7 @@ echo "=== Per-Project Disable ==="
 
 # T52: Hook respects .claude/agentmail.disable
 bash "$MAIL_SCRIPT" send "claude-mods" "disable test" "should not appear" >/dev/null 2>&1
-rm -f /tmp/agentmail_check_* 2>/dev/null
+clear_cooldown
 mkdir -p .claude
 touch .claude/agentmail.disable
 result=$(bash "$HOOK_SCRIPT" 2>&1)
@@ -489,7 +502,7 @@ assert_empty "hook silent when disabled" "$result"
 
 # T53: Hook works again after removing disable file
 rm -f .claude/agentmail.disable
-rm -f /tmp/agentmail_check_* 2>/dev/null
+clear_cooldown
 result=$(bash "$HOOK_SCRIPT" 2>&1)
 assert_contains "hook works after re-enable" "MAIL" "$result"
 bash "$MAIL_SCRIPT" read >/dev/null 2>&1

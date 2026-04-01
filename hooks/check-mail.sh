@@ -15,7 +15,6 @@
 # }
 
 MAIL_DB="$HOME/.claude/mail.db"
-COOLDOWN_FILE="/tmp/agentmail_check_$$"
 COOLDOWN_SECONDS=10
 
 # Skip if disabled for this project
@@ -23,6 +22,9 @@ COOLDOWN_SECONDS=10
 
 # Skip if no database exists yet
 [ -f "$MAIL_DB" ] || exit 0
+
+PROJECT=$(basename "$PWD" | sed "s/'/''/g")
+COOLDOWN_FILE="/tmp/agentmail_${PROJECT}"
 
 # Cooldown: skip if checked recently (within COOLDOWN_SECONDS)
 if [ -f "$COOLDOWN_FILE" ]; then
@@ -33,8 +35,6 @@ if [ -f "$COOLDOWN_FILE" ]; then
   fi
 fi
 touch "$COOLDOWN_FILE"
-
-PROJECT=$(basename "$PWD" | sed "s/'/''/g")
 
 # Single fast query - count unread
 UNREAD=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${PROJECT}' AND read=0;" 2>/dev/null)
