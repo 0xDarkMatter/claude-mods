@@ -490,6 +490,28 @@ rm -f /tmp/agentmail_claude-mods 2>/dev/null
 bash "$MAIL_SCRIPT" read >/dev/null 2>&1
 
 echo ""
+echo "=== Purge ==="
+
+# T54: Purge removes messages for current project
+bash "$MAIL_SCRIPT" send "claude-mods" "purge test 1" "msg1" >/dev/null 2>&1
+bash "$MAIL_SCRIPT" send "claude-mods" "purge test 2" "msg2" >/dev/null 2>&1
+# Insert a message not involving claude-mods at all
+sqlite3 "$MAIL_DB" "INSERT INTO messages (from_project, to_project, subject, body) VALUES ('alpha', 'beta', 'unrelated', 'should survive');"
+result=$(bash "$MAIL_SCRIPT" purge 2>&1)
+assert_contains "purge reports count" "Purged" "$result"
+
+# T55: Unrelated project messages survive purge
+other_count=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE from_project='alpha';")
+assert "unrelated messages survive purge" "1" "$other_count"
+
+# T56: Purge --all removes everything
+bash "$MAIL_SCRIPT" send "claude-mods" "test" "body" >/dev/null 2>&1
+result=$(bash "$MAIL_SCRIPT" purge --all 2>&1)
+assert_contains "purge --all reports count" "Purged all" "$result"
+total=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages;")
+assert "purge --all empties db" "0" "$total"
+
+echo ""
 echo "=== Per-Project Disable ==="
 
 # T52: Hook respects .claude/agentmail.disable
