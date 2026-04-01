@@ -86,8 +86,19 @@ assert_exit_code() {
 }
 
 # Helper: clear hook cooldown so next hook call fires
+# Uses git root commit hash (matches check-mail.sh identity logic)
 clear_cooldown() {
-  rm -f /tmp/agentmail_claude-mods 2>/dev/null
+  local root_commit
+  root_commit=$(git rev-list --max-parents=0 HEAD 2>/dev/null | head -1)
+  if [ -n "$root_commit" ]; then
+    rm -f "/tmp/agentmail_${root_commit:0:6}" 2>/dev/null
+  else
+    local canonical
+    canonical=$(cd "$PWD" && pwd -P)
+    local hash
+    hash=$(printf '%s' "$canonical" | shasum -a 256 | cut -c1-6)
+    rm -f "/tmp/agentmail_${hash}" 2>/dev/null
+  fi
 }
 
 # --- Setup: clean slate ---
@@ -476,7 +487,7 @@ echo "=== Performance ==="
 # T52: Hook cooldown - second call within cooldown is silent
 bash "$MAIL_SCRIPT" send "claude-mods" "cooldown test" "testing cooldown" >/dev/null 2>&1
 # Clear cooldown file for this project
-rm -f /tmp/agentmail_claude-mods 2>/dev/null
+clear_cooldown
 # First call should show mail
 result1=$(bash "$HOOK_SCRIPT" 2>&1)
 assert_contains "hook fires on first call" "MAIL" "$result1"
@@ -486,7 +497,7 @@ result2=$(bash "$HOOK_SCRIPT" 2>&1)
 assert_empty "hook silent during cooldown" "$result2"
 
 # Cleanup
-rm -f /tmp/agentmail_claude-mods 2>/dev/null
+clear_cooldown
 bash "$MAIL_SCRIPT" read >/dev/null 2>&1
 
 echo ""
