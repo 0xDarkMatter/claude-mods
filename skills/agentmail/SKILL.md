@@ -17,7 +17,7 @@ Inter-session messaging for Claude Code. Sessions running in different project d
 Session A (claude-mods)    Session B (some-api)     Session C (frontend)
     |                          |                        |
     +-- check-mail hook -------+-- check-mail hook -----+-- check-mail hook
-    |   (PreToolUse, silent    |                        |
+    |   (PreToolUse, silent    |   (10s cooldown)       |
     |    when empty)           |                        |
     |                          |                        |
     +-- /mail send some-api ---+--> unread message -----+
@@ -32,33 +32,15 @@ Project name = `basename` of current working directory. No configuration needed.
 - `X:\Forge\claude-mods` -> `claude-mods`
 - `X:\Forge\some-api` -> `some-api`
 
+If a project directory is renamed, use the `alias` command to link old and new names:
+
+```bash
+bash skills/agentmail/scripts/mail-db.sh alias "old-name" "new-name"
+```
+
 ## Commands
 
 All commands use the helper script at `skills/agentmail/scripts/mail-db.sh`.
-
-### Check for Mail
-
-The `check-mail.sh` hook runs automatically on every tool call. When unread messages exist, it outputs a notification. No action needed from user or assistant.
-
-To manually check:
-
-```bash
-bash skills/agentmail/scripts/mail-db.sh count
-```
-
-### Read Messages
-
-Read all unread messages and mark them as read:
-
-```bash
-bash skills/agentmail/scripts/mail-db.sh read
-```
-
-Read a specific message by ID:
-
-```bash
-bash skills/agentmail/scripts/mail-db.sh read 42
-```
 
 ### Send a Message
 
@@ -66,64 +48,90 @@ bash skills/agentmail/scripts/mail-db.sh read 42
 bash skills/agentmail/scripts/mail-db.sh send "<target-project>" "<subject>" "<body>"
 ```
 
-**Examples:**
+Send with urgent priority (highlighted in hook notifications):
 
 ```bash
-# Simple notification
-bash skills/agentmail/scripts/mail-db.sh send "some-api" "Auth ready" "OAuth2 endpoints are implemented and tested on branch feature/oauth2"
-
-# Request for action
-bash skills/agentmail/scripts/mail-db.sh send "frontend" "API contract changed" "The /api/users endpoint now returns {data: User[], meta: {total: number}} instead of a flat array. See commit abc123."
-
-# Broadcast to multiple projects
-for project in frontend some-api; do
-  bash skills/agentmail/scripts/mail-db.sh send "$project" "Main is broken" "Do not merge until fix lands - CI is red"
-done
+bash skills/agentmail/scripts/mail-db.sh send --urgent "<target-project>" "<subject>" "<body>"
 ```
 
-### List Messages
-
-Show recent messages (read and unread):
+### Read Messages
 
 ```bash
-bash skills/agentmail/scripts/mail-db.sh list        # Last 20
-bash skills/agentmail/scripts/mail-db.sh list 50      # Last 50
+bash skills/agentmail/scripts/mail-db.sh read          # All unread, mark as read
+bash skills/agentmail/scripts/mail-db.sh read 42        # Single message by ID
 ```
 
-### List Known Projects
+### Reply
 
-Show all projects that have sent or received mail:
+Reply to a message - automatically addresses the sender with Re: prefix:
 
 ```bash
-bash skills/agentmail/scripts/mail-db.sh projects
+bash skills/agentmail/scripts/mail-db.sh reply <message-id> "<body>"
 ```
 
-### Cleanup
+### Broadcast
 
-Delete old read messages:
+Send to all known projects (except self):
 
 ```bash
-bash skills/agentmail/scripts/mail-db.sh clear        # Older than 7 days
-bash skills/agentmail/scripts/mail-db.sh clear 30      # Older than 30 days
+bash skills/agentmail/scripts/mail-db.sh broadcast "<subject>" "<body>"
+```
+
+### Search
+
+Find messages by keyword in subject or body:
+
+```bash
+bash skills/agentmail/scripts/mail-db.sh search "<keyword>"
+```
+
+### Status
+
+Inbox summary with per-project breakdown:
+
+```bash
+bash skills/agentmail/scripts/mail-db.sh status
+```
+
+### Other Commands
+
+```bash
+bash skills/agentmail/scripts/mail-db.sh count          # Unread count (number only)
+bash skills/agentmail/scripts/mail-db.sh unread          # List unread (brief)
+bash skills/agentmail/scripts/mail-db.sh list [N]        # Recent messages (default 20)
+bash skills/agentmail/scripts/mail-db.sh projects        # All known projects
+bash skills/agentmail/scripts/mail-db.sh clear [days]    # Delete read msgs older than N days
+bash skills/agentmail/scripts/mail-db.sh alias <old> <new>  # Rename project in all messages
+bash skills/agentmail/scripts/mail-db.sh init            # Initialize database
 ```
 
 ## Passive Notification (Hook)
 
-The `hooks/check-mail.sh` hook provides passive notification. It:
+The `hooks/check-mail.sh` hook provides passive notification:
 
-1. Runs on every tool call (PreToolUse matcher: `*`)
-2. Checks `~/.claude/mail.db` for unread messages where `to_project` matches current directory name
-3. Outputs nothing if inbox is empty (zero overhead)
-4. Shows count + preview of up to 3 messages when mail exists
+1. Runs on every tool call (PreToolUse, 10-second cooldown)
+2. Checks for unread messages matching current directory name
+3. Silent when inbox is empty
+4. Shows count + preview of up to 3 messages
+5. Highlights urgent messages with `[!]` prefix
 
-### Hook Output Example
+### Hook Output
 
 ```
-=== MAIL: 2 unread message(s) ===
+=== MAIL: 3 unread message(s) ===
   From: some-api  |  Auth endpoints ready
   From: frontend  |  Need updated types
+  ... and 1 more
 Use /mail to read messages.
-===
+```
+
+Urgent messages:
+
+```
+=== URGENT MAIL: 2 unread (1 urgent) ===
+  [!] From: some-api  |  Production is down
+  From: frontend  |  Need updated types
+Use /mail to read messages.
 ```
 
 ## When to Use
@@ -138,7 +146,7 @@ Use /mail to read messages.
 
 ## Database
 
-Single SQLite file at `~/.claude/mail.db`. Schema:
+Single SQLite file at `~/.claude/mail.db`. Not inside any git repo.
 
 ```sql
 CREATE TABLE messages (
@@ -148,17 +156,19 @@ CREATE TABLE messages (
     subject TEXT DEFAULT '',
     body TEXT NOT NULL,
     timestamp TEXT DEFAULT (datetime('now')),
-    read INTEGER DEFAULT 0
+    read INTEGER DEFAULT 0,
+    priority TEXT DEFAULT 'normal'
 );
 ```
 
-Database is auto-created on first use. Not inside any git repo - no gitignore needed.
+All user inputs are sanitized via SQL single-quote escaping. Numeric inputs (IDs, limits) are validated before use.
 
 ## Troubleshooting
 
 | Issue | Fix |
 |-------|-----|
-| `sqlite3: not found` | Install sqlite3 (ships with most OS installs, Git Bash on Windows) |
-| Hook not firing | Check hook is registered in `.claude/settings.json` or `.claude/settings.local.json` |
-| Wrong project name | Hook uses `basename $PWD` - ensure cwd is the project root |
-| Messages not arriving | Check `to_project` matches target's directory basename exactly |
+| `sqlite3: not found` | Ships with macOS, Linux, and Git Bash on Windows |
+| Hook not firing | Register in `.claude/settings.json` or `.claude/settings.local.json` |
+| Wrong project name | Uses `basename $PWD` - ensure cwd is project root |
+| Messages not arriving | `to_project` must match target's directory basename exactly |
+| Renamed directory | Use `alias` command to update old name to new name |

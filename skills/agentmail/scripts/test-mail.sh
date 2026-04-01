@@ -428,6 +428,41 @@ result=$(bash "$MAIL_SCRIPT" status 2>&1)
 assert_contains "status shows 0 unread" "0 unread" "$result"
 
 echo ""
+echo "=== Alias (Rename) ==="
+
+# Setup: send messages with old project name
+bash "$MAIL_SCRIPT" send "old-project" "before rename" "testing alias" >/dev/null 2>&1
+bash "$MAIL_SCRIPT" send "claude-mods" "from old" "message from old name" >/dev/null 2>&1
+
+# T47: Alias renames in all messages
+result=$(bash "$MAIL_SCRIPT" alias "old-project" "new-project" 2>&1)
+assert_contains "alias reports rename" "Renamed" "$result"
+assert_contains "alias shows old name" "old-project" "$result"
+assert_contains "alias shows new name" "new-project" "$result"
+
+# T48: Old project name no longer appears
+result=$(bash "$MAIL_SCRIPT" projects)
+TOTAL=$((TOTAL + 1))
+if echo "$result" | grep -qF "old-project"; then
+  echo "FAIL: old project name still present after alias"
+  FAIL=$((FAIL + 1))
+else
+  echo "PASS: old project name removed after alias"
+  PASS=$((PASS + 1))
+fi
+
+# T49: New project name appears
+assert_contains "new project name present" "new-project" "$result"
+
+# T50: Alias with missing args fails
+result=$(bash "$MAIL_SCRIPT" alias "only-one" 2>&1)
+exit_code=$?
+assert_exit_code "alias with missing arg fails" "1" "$exit_code"
+
+# Clean up
+bash "$MAIL_SCRIPT" read >/dev/null 2>&1
+
+echo ""
 echo "=== Performance ==="
 
 # T38: Hook cooldown - second call within cooldown is silent even with mail
