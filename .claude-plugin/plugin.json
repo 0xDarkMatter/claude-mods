@@ -111,7 +111,8 @@
       "skills/tool-discovery",
       "skills/typescript-ops",
       "skills/unfold-admin",
-      "skills/vue-ops"
+      "skills/vue-ops",
+      "skills/agentmail"
     ],
     "rules": [
       "rules/cli-tools.md",
@@ -123,7 +124,8 @@
     "hooks": [
       "hooks/pre-commit-lint.sh",
       "hooks/post-edit-format.sh",
-      "hooks/dangerous-cmd-warn.sh"
+      "hooks/dangerous-cmd-warn.sh",
+      "hooks/check-mail.sh"
     ],
     "output-styles": [
       "output-styles/vesper.md",
