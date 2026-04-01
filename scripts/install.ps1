@@ -151,6 +151,48 @@ if (Test-Path $stylesDir) {
 Write-Host ""
 
 # =============================================================================
+# AGENTMAIL - Global install (scripts + hook config hint)
+# =============================================================================
+Write-Host "Installing agentmail..." -ForegroundColor Cyan
+
+$agentmailDir = Join-Path $claudeDir "agentmail"
+New-Item -ItemType Directory -Force -Path $agentmailDir | Out-Null
+
+$mailDbSrc = Join-Path $projectRoot "skills\agentmail\scripts\mail-db.sh"
+$checkMailSrc = Join-Path $projectRoot "hooks\check-mail.sh"
+
+if (Test-Path $mailDbSrc) {
+    Copy-Item $mailDbSrc -Destination "$agentmailDir\" -Force
+    Write-Host "  mail-db.sh" -ForegroundColor Green
+}
+if (Test-Path $checkMailSrc) {
+    Copy-Item $checkMailSrc -Destination "$agentmailDir\" -Force
+    Write-Host "  check-mail.sh" -ForegroundColor Green
+}
+
+$settingsPath = Join-Path $claudeDir "settings.json"
+if ((Test-Path $settingsPath) -and (Select-String -Path $settingsPath -Pattern "check-mail.sh" -Quiet)) {
+    Write-Host "  Hook already configured in settings.json" -ForegroundColor Green
+} else {
+    Write-Host ""
+    Write-Host '  To enable automatic mail notifications, add this to ~/.claude/settings.json:' -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host '  "hooks": {'
+    Write-Host '    "PreToolUse": [{'
+    Write-Host '      "matcher": "*",'
+    Write-Host '      "hooks": [{'
+    Write-Host '        "type": "command",'
+    Write-Host '        "command": "bash \"$HOME/.claude/agentmail/check-mail.sh\"",'
+    Write-Host '        "timeout": 5'
+    Write-Host '      }]'
+    Write-Host '    }]'
+    Write-Host '  }'
+    Write-Host ""
+    Write-Host "  Without this, agentmail works but you must check manually (agentmail read)." -ForegroundColor Yellow
+}
+Write-Host ""
+
+# =============================================================================
 # SUMMARY
 # =============================================================================
 Write-Host "================================================================" -ForegroundColor Cyan

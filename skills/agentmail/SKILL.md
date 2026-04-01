@@ -90,29 +90,31 @@ Only the hook is disabled - you can still send messages from the project.
 
 ## Installation
 
-Agentmail installs globally - one setup, every project gets mail automatically.
+Agentmail requires two things: **scripts** (the mail engine) and a **hook** (passive notifications). Both install globally - one setup, every project gets mail.
 
-### Files
+### Prerequisites
 
-```
-~/.claude/
-  mail.db                  # Message store (auto-created on first use)
-  agentmail/
-    mail-db.sh             # Mail commands
-    check-mail.sh          # PreToolUse hook
-```
+- `sqlite3` - ships with macOS, most Linux distros, and Git Bash on Windows. No install needed.
 
-### Setup
-
-1. Copy scripts to global location:
+### Step 1: Copy Scripts
 
 ```bash
 mkdir -p ~/.claude/agentmail
 cp skills/agentmail/scripts/mail-db.sh ~/.claude/agentmail/
 cp hooks/check-mail.sh ~/.claude/agentmail/
+chmod +x ~/.claude/agentmail/mail-db.sh ~/.claude/agentmail/check-mail.sh
 ```
 
-2. Add the hook to `~/.claude/settings.json`:
+This gives you the mail commands. You can now send and read messages manually:
+
+```bash
+bash ~/.claude/agentmail/mail-db.sh init      # Create database
+bash ~/.claude/agentmail/mail-db.sh status    # Check it works
+```
+
+### Step 2: Enable the Hook
+
+Add a `hooks` block to `~/.claude/settings.json`. This makes Claude check for mail automatically on every tool call (with a 10-second cooldown so it doesn't slow anything down):
 
 ```json
 {
@@ -133,9 +135,44 @@ cp hooks/check-mail.sh ~/.claude/agentmail/
 }
 ```
 
+**Important:** If you already have a `hooks` section in your settings, merge the PreToolUse entry into the existing array - don't replace the whole block.
+
+Without this step, agentmail still works but you have to check manually (`agentmail read`). With the hook, unread mail appears automatically.
+
+### What Gets Created
+
+```
+~/.claude/
+  settings.json            # Hook config (you edit this)
+  mail.db                  # Message store (auto-created on first use)
+  agentmail/
+    mail-db.sh             # All mail commands (send, read, reply, etc.)
+    check-mail.sh          # PreToolUse hook (silent when inbox empty)
+```
+
+### Verify
+
+```bash
+# Send yourself a test message
+bash ~/.claude/agentmail/mail-db.sh send "$(basename $PWD)" "Test" "Hello from agentmail"
+
+# Check it arrived
+bash ~/.claude/agentmail/mail-db.sh read
+
+# Clean up
+bash ~/.claude/agentmail/mail-db.sh purge --all
+```
+
+### Uninstall
+
+```bash
+rm -rf ~/.claude/agentmail ~/.claude/mail.db
+# Then remove the hooks.PreToolUse entry from ~/.claude/settings.json
+```
+
 ## Database
 
-Single SQLite file at `~/.claude/mail.db`. Auto-created on first use.
+Single SQLite file at `~/.claude/mail.db`. Auto-created on first `init` or `send`.
 
 ```sql
 CREATE TABLE messages (
@@ -154,8 +191,10 @@ CREATE TABLE messages (
 
 | Issue | Fix |
 |-------|-----|
-| `sqlite3: not found` | Ships with macOS, Linux, and Git Bash on Windows |
-| Hook not firing | Add PreToolUse hook to `~/.claude/settings.json` (see Installation) |
-| Wrong project name | Uses `basename $PWD` - ensure cwd is project root |
-| Messages not arriving | `to_project` must match target's directory basename exactly |
-| Renamed directory | Use `agentmail alias old-name new-name` |
+| `sqlite3: not found` | Ships with macOS, Linux, and Git Bash on Windows. Run `sqlite3 --version` to check. |
+| Hook not firing | Ensure `hooks` block is in `~/.claude/settings.json` (Step 2 above) |
+| Hook fires but no notification | Working as intended - hook is silent when inbox is empty |
+| Wrong project name | Uses `basename $PWD` - ensure cwd is the project root, not a subdirectory |
+| Messages not arriving | `to_project` must match the target's directory basename exactly. Use `agentmail projects` to see known names |
+| Renamed a project directory | Use `agentmail alias old-name new-name` to update old messages |
+| Want to disable for one project | `touch .claude/agentmail.disable` in that project's root |

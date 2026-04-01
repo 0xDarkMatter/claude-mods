@@ -165,6 +165,45 @@ fi
 echo ""
 
 # =============================================================================
+# AGENTMAIL - Global install (scripts + hook config hint)
+# =============================================================================
+echo -e "${BLUE}Installing agentmail...${NC}"
+
+mkdir -p "$CLAUDE_DIR/agentmail"
+if [ -f "$PROJECT_ROOT/skills/agentmail/scripts/mail-db.sh" ]; then
+    cp "$PROJECT_ROOT/skills/agentmail/scripts/mail-db.sh" "$CLAUDE_DIR/agentmail/"
+    chmod +x "$CLAUDE_DIR/agentmail/mail-db.sh"
+    echo -e "  ${GREEN}mail-db.sh${NC}"
+fi
+if [ -f "$PROJECT_ROOT/hooks/check-mail.sh" ]; then
+    cp "$PROJECT_ROOT/hooks/check-mail.sh" "$CLAUDE_DIR/agentmail/"
+    chmod +x "$CLAUDE_DIR/agentmail/check-mail.sh"
+    echo -e "  ${GREEN}check-mail.sh${NC}"
+fi
+
+# Check if hook is already configured
+if grep -q "check-mail.sh" "$CLAUDE_DIR/settings.json" 2>/dev/null; then
+    echo -e "  ${GREEN}Hook already configured in settings.json${NC}"
+else
+    echo ""
+    echo -e "  ${YELLOW}To enable automatic mail notifications, add this to ~/.claude/settings.json:${NC}"
+    echo ""
+    echo '  "hooks": {'
+    echo '    "PreToolUse": [{'
+    echo '      "matcher": "*",'
+    echo '      "hooks": [{'
+    echo '        "type": "command",'
+    echo '        "command": "bash \"$HOME/.claude/agentmail/check-mail.sh\"",'
+    echo '        "timeout": 5'
+    echo '      }]'
+    echo '    }]'
+    echo '  }'
+    echo ""
+    echo -e "  ${YELLOW}Without this, agentmail works but you must check manually (agentmail read).${NC}"
+fi
+echo ""
+
+# =============================================================================
 # SUMMARY
 # =============================================================================
 echo -e "${BLUE}════════════════════════════════════════════════════════════════${NC}"
