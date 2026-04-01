@@ -477,6 +477,24 @@ assert_contains "hook fires on first call" "MAIL" "$result1"
 bash "$MAIL_SCRIPT" read >/dev/null 2>&1
 
 echo ""
+echo "=== Per-Project Disable ==="
+
+# T52: Hook respects .claude/agentmail.disable
+bash "$MAIL_SCRIPT" send "claude-mods" "disable test" "should not appear" >/dev/null 2>&1
+rm -f /tmp/agentmail_check_* 2>/dev/null
+mkdir -p .claude
+touch .claude/agentmail.disable
+result=$(bash "$HOOK_SCRIPT" 2>&1)
+assert_empty "hook silent when disabled" "$result"
+
+# T53: Hook works again after removing disable file
+rm -f .claude/agentmail.disable
+rm -f /tmp/agentmail_check_* 2>/dev/null
+result=$(bash "$HOOK_SCRIPT" 2>&1)
+assert_contains "hook works after re-enable" "MAIL" "$result"
+bash "$MAIL_SCRIPT" read >/dev/null 2>&1
+
+echo ""
 echo "=== Results ==="
 echo "Passed: $PASS / $TOTAL"
 echo "Failed: $FAIL / $TOTAL"
