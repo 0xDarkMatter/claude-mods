@@ -15,9 +15,21 @@
 # }
 
 MAIL_DB="$HOME/.claude/mail.db"
+COOLDOWN_FILE="/tmp/agentmail_check_$$"
+COOLDOWN_SECONDS=10
 
 # Skip if no database exists yet
 [ -f "$MAIL_DB" ] || exit 0
+
+# Cooldown: skip if checked recently (within COOLDOWN_SECONDS)
+if [ -f "$COOLDOWN_FILE" ]; then
+  last_check=$(stat -c %Y "$COOLDOWN_FILE" 2>/dev/null || stat -f %m "$COOLDOWN_FILE" 2>/dev/null || echo 0)
+  now=$(date +%s)
+  if [ $((now - last_check)) -lt $COOLDOWN_SECONDS ]; then
+    exit 0
+  fi
+fi
+touch "$COOLDOWN_FILE"
 
 PROJECT=$(basename "$PWD" | sed "s/'/''/g")
 
