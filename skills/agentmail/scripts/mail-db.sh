@@ -18,11 +18,15 @@ CREATE TABLE IF NOT EXISTS messages (
     subject TEXT DEFAULT '',
     body TEXT NOT NULL,
     timestamp TEXT DEFAULT (datetime('now')),
-    read INTEGER DEFAULT 0
+    read INTEGER DEFAULT 0,
+    priority TEXT DEFAULT 'normal'
 );
 CREATE INDEX IF NOT EXISTS idx_unread ON messages(to_project, read);
 CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp);
 SQL
+  # Migration: add priority column if missing
+  sqlite3 "$MAIL_DB" "SELECT priority FROM messages LIMIT 0;" 2>/dev/null || \
+    sqlite3 "$MAIL_DB" "ALTER TABLE messages ADD COLUMN priority TEXT DEFAULT 'normal';" 2>/dev/null
 }
 
 # Sanitize string for safe SQL interpolation (escape single quotes)
@@ -78,11 +82,16 @@ read_one() {
     "UPDATE messages SET read=1 WHERE id=${msg_id};"
 }
 
-# Send a message
+# Send a message (optional --urgent flag before args)
 send() {
-  local to_project="$1"
-  local subject="$2"
-  local body="$3"
+  local priority="normal"
+  if [ "${1:-}" = "--urgent" ]; then
+    priority="urgent"
+    shift
+  fi
+  local to_project="${1:?to_project required}"
+  local subject="${2:-no subject}"
+  local body="${3:?body required}"
   if [ -z "$body" ]; then
     echo "Error: message body cannot be empty" >&2
     return 1
@@ -95,8 +104,24 @@ send() {
   safe_subject=$(sql_escape "$subject")
   safe_body=$(sql_escape "$body")
   sqlite3 "$MAIL_DB" \
-    "INSERT INTO messages (from_project, to_project, subject, body) VALUES ('${from_project}', '${safe_to}', '${safe_subject}', '${safe_body}');"
-  echo "Sent to ${to_project}: ${subject}"
+    "INSERT INTO messages (from_project, to_project, subject, body, priority) VALUES ('${from_project}', '${safe_to}', '${safe_subject}', '${safe_body}', '${priority}');"
+  echo "Sent to ${to_project}: ${subject}$([ "$priority" = "urgent" ] && echo " [URGENT]" || true)"
+}
+
+# Search messages by keyword
+search() {
+  local keyword="$1"
+  if [ -z "$keyword" ]; then
+    echo "Error: search keyword required" >&2
+    return 1
+  fi
+  init_db
+  local project
+  project=$(sql_escape "$(get_project)")
+  local safe_keyword
+  safe_keyword=$(sql_escape "$keyword")
+  sqlite3 -header -separator ' | ' "$MAIL_DB" \
+    "SELECT id, from_project, subject, CASE WHEN read=0 THEN 'UNREAD' ELSE 'read' END as status, timestamp FROM messages WHERE to_project='${project}' AND (subject LIKE '%${safe_keyword}%' OR body LIKE '%${safe_keyword}%') ORDER BY timestamp DESC LIMIT 20;"
 }
 
 # List all messages (read and unread) for current project
@@ -224,11 +249,12 @@ case "${1:-help}" in
   count)      count_unread ;;
   unread)     list_unread ;;
   read)       if [ -n "${2:-}" ]; then read_one "$2"; else read_mail; fi ;;
-  send)       send "${2:?to_project required}" "${3:-no subject}" "${4:?body required}" ;;
+  send)       shift; send "$@" ;;
   reply)      reply "${2:?message_id required}" "${3:?body required}" ;;
   list)       list_all "${2:-20}" ;;
   clear)      clear_old "${2:-7}" ;;
   broadcast)  broadcast "${2:-no subject}" "${3:?body required}" ;;
+  search)     search "${2:?keyword required}" ;;
   status)     status ;;
   projects)   list_projects ;;
   help)
@@ -239,11 +265,13 @@ case "${1:-help}" in
     echo "  count                   Count unread messages"
     echo "  unread                  List unread messages (brief)"
     echo "  read [id]               Read messages and mark as read"
-    echo "  send <to> <subj> <body> Send a message"
+    echo "  send [--urgent] <to> <subj> <body>"
+    echo "                          Send a message"
     echo "  reply <id> <body>       Reply to a message"
     echo "  list [limit]            List recent messages (default 20)"
     echo "  clear [days]            Clear read messages older than N days"
     echo "  broadcast <subj> <body> Send to all known projects"
+    echo "  search <keyword>        Search messages by keyword"
     echo "  status                  Inbox summary"
     echo "  projects                List known projects"
     ;;

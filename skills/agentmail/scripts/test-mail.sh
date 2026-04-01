@@ -349,6 +349,53 @@ assert_exit_code "reply with non-numeric ID fails" "1" "$exit_code"
 bash "$MAIL_SCRIPT" read >/dev/null 2>&1
 
 echo ""
+echo "=== Priority & Search ==="
+
+# T38: Send urgent message
+result=$(bash "$MAIL_SCRIPT" send --urgent "claude-mods" "Server down" "Production is on fire" 2>&1)
+assert_contains "urgent send succeeds" "URGENT" "$result"
+
+# T39: Hook highlights urgent
+rm -f /tmp/agentmail_check_* 2>/dev/null
+result=$(bash "$HOOK_SCRIPT" 2>&1)
+assert_contains "hook shows URGENT" "URGENT" "$result"
+assert_contains "hook shows [!] prefix" "[!]" "$result"
+bash "$MAIL_SCRIPT" read >/dev/null 2>&1
+
+# T40: Normal send still works after priority feature
+result=$(bash "$MAIL_SCRIPT" send "claude-mods" "Normal msg" "not urgent" 2>&1)
+TOTAL=$((TOTAL + 1))
+if echo "$result" | grep -qvF "URGENT"; then
+  echo "PASS: normal send has no URGENT tag"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: normal send incorrectly tagged URGENT"
+  FAIL=$((FAIL + 1))
+fi
+bash "$MAIL_SCRIPT" read >/dev/null 2>&1
+
+# T41: Search by keyword in subject
+bash "$MAIL_SCRIPT" send "claude-mods" "API endpoint changed" "details here" >/dev/null 2>&1
+bash "$MAIL_SCRIPT" send "claude-mods" "unrelated" "nothing relevant" >/dev/null 2>&1
+result=$(bash "$MAIL_SCRIPT" search "API" 2>&1)
+assert_contains "search finds by subject" "API endpoint" "$result"
+
+# T42: Search by keyword in body
+result=$(bash "$MAIL_SCRIPT" search "relevant" 2>&1)
+assert_contains "search finds by body" "unrelated" "$result"
+
+# T43: Search with no results
+result=$(bash "$MAIL_SCRIPT" search "xyznonexistent" 2>&1)
+assert_empty "search no results is empty" "$result"
+
+# T44: Search with no keyword fails
+result=$(bash "$MAIL_SCRIPT" search 2>&1)
+exit_code=$?
+assert_exit_code "search no keyword fails" "1" "$exit_code"
+
+bash "$MAIL_SCRIPT" read >/dev/null 2>&1
+
+echo ""
 echo "=== Broadcast & Status ==="
 
 # Setup: ensure multiple projects exist
