@@ -39,11 +39,18 @@ UNREAD=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${P
 # Silent exit if no mail
 [ "${UNREAD:-0}" -eq 0 ] && exit 0
 
+# Check for urgent messages
+URGENT=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${PROJECT}' AND read=0 AND priority='urgent';" 2>/dev/null)
+
 # Show notification with preview of first 3 messages
 echo ""
-echo "=== MAIL: ${UNREAD} unread message(s) ==="
+if [ "${URGENT:-0}" -gt 0 ]; then
+  echo "=== URGENT MAIL: ${UNREAD} unread (${URGENT} urgent) ==="
+else
+  echo "=== MAIL: ${UNREAD} unread message(s) ==="
+fi
 sqlite3 -separator '  ' "$MAIL_DB" \
-  "SELECT '  From: ' || from_project || '  |  ' || subject FROM messages WHERE to_project='${PROJECT}' AND read=0 ORDER BY timestamp DESC LIMIT 3;" 2>/dev/null
+  "SELECT '  ' || CASE WHEN priority='urgent' THEN '[!] ' ELSE '' END || 'From: ' || from_project || '  |  ' || subject FROM messages WHERE to_project='${PROJECT}' AND read=0 ORDER BY priority DESC, timestamp DESC LIMIT 3;" 2>/dev/null
 if [ "$UNREAD" -gt 3 ]; then
   echo "  ... and $((UNREAD - 3)) more"
 fi
