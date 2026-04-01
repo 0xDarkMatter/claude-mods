@@ -236,6 +236,29 @@ status() {
   fi
 }
 
+# Rename a project in all messages (for directory renames/moves)
+alias_project() {
+  local old_name="$1"
+  local new_name="$2"
+  if [ -z "$old_name" ] || [ -z "$new_name" ]; then
+    echo "Error: both old and new project names required" >&2
+    return 1
+  fi
+  init_db
+  local safe_old safe_new
+  safe_old=$(sql_escape "$old_name")
+  safe_new=$(sql_escape "$new_name")
+  local updated=0
+  local count
+  count=$(sqlite3 "$MAIL_DB" \
+    "UPDATE messages SET from_project='${safe_new}' WHERE from_project='${safe_old}'; SELECT changes();")
+  updated=$((updated + count))
+  count=$(sqlite3 "$MAIL_DB" \
+    "UPDATE messages SET to_project='${safe_new}' WHERE to_project='${safe_old}'; SELECT changes();")
+  updated=$((updated + count))
+  echo "Renamed '${old_name}' -> '${new_name}' in ${updated} message(s)"
+}
+
 # List all known projects (that have sent or received mail)
 list_projects() {
   init_db
@@ -256,6 +279,7 @@ case "${1:-help}" in
   broadcast)  broadcast "${2:-no subject}" "${3:?body required}" ;;
   search)     search "${2:?keyword required}" ;;
   status)     status ;;
+  alias)      alias_project "${2:?old name required}" "${3:?new name required}" ;;
   projects)   list_projects ;;
   help)
     echo "Usage: mail-db.sh <command> [args]"
@@ -273,6 +297,7 @@ case "${1:-help}" in
     echo "  broadcast <subj> <body> Send to all known projects"
     echo "  search <keyword>        Search messages by keyword"
     echo "  status                  Inbox summary"
+    echo "  alias <old> <new>       Rename project in all messages"
     echo "  projects                List known projects"
     ;;
   *)          echo "Unknown command: $1. Run with 'help' for usage." >&2; exit 1 ;;
