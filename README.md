@@ -205,7 +205,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [laravel-ops](skills/laravel-ops/) | Laravel Eloquent, architecture, authentication, testing with Pest |
 | [cli-ops](skills/cli-ops/) | Production CLI tool patterns - agentic workflows, stream separation, exit codes |
 | [tailwind-ops](skills/tailwind-ops/) | Tailwind CSS patterns, v4 migration, components, configuration |
-| [color-ops](skills/color-ops/) | Color spaces (OKLCH/OKLAB), accessibility contrast (WCAG/APCA), palette generation, CSS color functions, design tokens, dark mode |
+| [color-ops](skills/color-ops/) | Color spaces, WCAG/APCA contrast checker, palette + harmony generators, CSS color functions, design tokens, color converter |
 
 #### Data & API Skills
 | Skill | Description |
