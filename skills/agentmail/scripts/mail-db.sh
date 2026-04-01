@@ -127,6 +127,40 @@ clear_old() {
   echo "Cleared ${deleted} read messages older than ${days} days"
 }
 
+# Reply to a message by ID
+reply() {
+  local msg_id="$1"
+  local body="$2"
+  if ! [[ "$msg_id" =~ ^[0-9]+$ ]]; then
+    echo "Error: message ID must be numeric" >&2
+    return 1
+  fi
+  if [ -z "$body" ]; then
+    echo "Error: reply body cannot be empty" >&2
+    return 1
+  fi
+  init_db
+  # Get original sender and subject
+  local orig
+  orig=$(sqlite3 -separator '|' "$MAIL_DB" "SELECT from_project, subject FROM messages WHERE id=${msg_id};")
+  if [ -z "$orig" ]; then
+    echo "Error: message #${msg_id} not found" >&2
+    return 1
+  fi
+  local orig_from orig_subject
+  orig_from=$(echo "$orig" | cut -d'|' -f1)
+  orig_subject=$(echo "$orig" | cut -d'|' -f2)
+  local from_project
+  from_project=$(sql_escape "$(get_project)")
+  local safe_to safe_subject safe_body
+  safe_to=$(sql_escape "$orig_from")
+  safe_subject=$(sql_escape "Re: ${orig_subject}")
+  safe_body=$(sql_escape "$body")
+  sqlite3 "$MAIL_DB" \
+    "INSERT INTO messages (from_project, to_project, subject, body) VALUES ('${from_project}', '${safe_to}', '${safe_subject}', '${safe_body}');"
+  echo "Replied to ${orig_from}: Re: ${orig_subject}"
+}
+
 # List all known projects (that have sent or received mail)
 list_projects() {
   init_db
@@ -141,6 +175,7 @@ case "${1:-help}" in
   unread)     list_unread ;;
   read)       if [ -n "${2:-}" ]; then read_one "$2"; else read_mail; fi ;;
   send)       send "${2:?to_project required}" "${3:-no subject}" "${4:?body required}" ;;
+  reply)      reply "${2:?message_id required}" "${3:?body required}" ;;
   list)       list_all "${2:-20}" ;;
   clear)      clear_old "${2:-7}" ;;
   projects)   list_projects ;;
@@ -153,6 +188,7 @@ case "${1:-help}" in
     echo "  unread                  List unread messages (brief)"
     echo "  read [id]               Read messages and mark as read"
     echo "  send <to> <subj> <body> Send a message"
+    echo "  reply <id> <body>       Reply to a message"
     echo "  list [limit]            List recent messages (default 20)"
     echo "  clear [days]            Clear read messages older than N days"
     echo "  projects                List known projects"
