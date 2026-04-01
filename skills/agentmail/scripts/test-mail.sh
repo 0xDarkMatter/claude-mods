@@ -320,6 +320,35 @@ assert_contains "empty subject accepted" "Sent to claude-mods" "$result"
 bash "$MAIL_SCRIPT" read >/dev/null 2>&1
 
 echo ""
+echo "=== Reply ==="
+
+# T38: Reply to a message
+bash "$MAIL_SCRIPT" send "claude-mods" "Original msg" "Please reply" >/dev/null 2>&1
+msg_id=$(sqlite3 "$MAIL_DB" "SELECT id FROM messages WHERE subject='Original msg' AND read=0 LIMIT 1;")
+bash "$MAIL_SCRIPT" read "$msg_id" >/dev/null 2>&1
+result=$(bash "$MAIL_SCRIPT" reply "$msg_id" "Here is my reply" 2>&1)
+assert_contains "reply succeeds" "Replied to claude-mods" "$result"
+assert_contains "reply has Re: prefix" "Re: Original msg" "$result"
+
+# T39: Reply to nonexistent message
+result=$(bash "$MAIL_SCRIPT" reply 99999 "reply to nothing" 2>&1)
+exit_code=$?
+assert_exit_code "reply to nonexistent fails" "1" "$exit_code"
+
+# T40: Reply with empty body
+result=$(bash "$MAIL_SCRIPT" reply "$msg_id" "" 2>&1)
+exit_code=$?
+assert_exit_code "reply with empty body fails" "1" "$exit_code"
+
+# T41: Reply with non-numeric ID
+result=$(bash "$MAIL_SCRIPT" reply "abc" "body" 2>&1)
+exit_code=$?
+assert_exit_code "reply with non-numeric ID fails" "1" "$exit_code"
+
+# Clean up
+bash "$MAIL_SCRIPT" read >/dev/null 2>&1
+
+echo ""
 echo "=== Performance ==="
 
 # T38: Hook cooldown - second call within cooldown is silent even with mail
