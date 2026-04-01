@@ -236,6 +236,23 @@ status() {
   fi
 }
 
+# Purge all messages for current project (or all projects with --all)
+purge() {
+  init_db
+  if [ "${1:-}" = "--all" ]; then
+    local count
+    count=$(sqlite3 "$MAIL_DB" "DELETE FROM messages; SELECT changes();")
+    echo "Purged all ${count} message(s) from database"
+  else
+    local project
+    project=$(sql_escape "$(get_project)")
+    local count
+    count=$(sqlite3 "$MAIL_DB" \
+      "DELETE FROM messages WHERE to_project='${project}' OR from_project='${project}'; SELECT changes();")
+    echo "Purged ${count} message(s) for $(get_project)"
+  fi
+}
+
 # Rename a project in all messages (for directory renames/moves)
 alias_project() {
   local old_name="$1"
@@ -279,6 +296,7 @@ case "${1:-help}" in
   broadcast)  broadcast "${2:-no subject}" "${3:?body required}" ;;
   search)     search "${2:?keyword required}" ;;
   status)     status ;;
+  purge)      purge "${2:-}" ;;
   alias)      alias_project "${2:?old name required}" "${3:?new name required}" ;;
   projects)   list_projects ;;
   help)
@@ -297,6 +315,7 @@ case "${1:-help}" in
     echo "  broadcast <subj> <body> Send to all known projects"
     echo "  search <keyword>        Search messages by keyword"
     echo "  status                  Inbox summary"
+    echo "  purge [--all]           Delete all messages for this project"
     echo "  alias <old> <new>       Rename project in all messages"
     echo "  projects                List known projects"
     ;;
