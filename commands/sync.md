@@ -148,7 +148,20 @@ git log -1 --format="%h %s" 2>/dev/null
 - `wc -l` in Git Bash = count lines (CORRECT)
 - Git Bash understands `2>/dev/null` but NOT `2>nul`
 
-### Step 5: Acknowledge Memory
+### Step 5: Check Mail
+
+Check for unread agentmail messages using the globally installed script:
+
+```bash
+bash "$HOME/.claude/agentmail/mail-db.sh" status 2>/dev/null
+bash "$HOME/.claude/agentmail/mail-db.sh" unread 2>/dev/null
+```
+
+- If the script doesn't exist or returns no unread, skip silently
+- If unread messages exist, show count and preview in the output Mail section
+- Do NOT auto-mark messages as read - just show what's waiting
+
+### Step 6: Acknowledge Memory
 
 MEMORY.md is auto-loaded into the system prompt by Claude Code - do NOT re-read the file.
 Instead, check your system prompt for the memory content you already have, and surface it:
@@ -158,7 +171,7 @@ Instead, check your system prompt for the memory content you already have, and s
 
 This costs zero extra tokens while confirming the safety net is working.
 
-### Step 6: Output
+### Step 7: Output
 
 Format and display unified status.
 
@@ -223,6 +236,18 @@ Note: PR row only shown when pr_number/pr_url are present in saved state.
 Note: MEMORY.md is auto-loaded into the system prompt. This section surfaces
 what's already in context - no file read needed.
 
+## Mail
+
+[If agentmail is installed and has unread messages:]
+3 unread messages:
+  From: some-api  |  Auth endpoints ready
+  From: frontend  |  Need updated types
+  From: infra     |  Deploy complete
+
+Run `agentmail read` to read.
+
+[If no unread messages or agentmail not installed: omit this section entirely]
+
 ## Quick Reference
 
 | Category | Items |
@@ -233,10 +258,11 @@ what's already in context - no file read needed.
 
 ## Next Steps
 
-1. **Continue**: Fix callback URL handling
-2. **Check diff**: /sync --diff to see changes since save
-3. **Resume conversation**: `claude --resume abc123...` (when session_id present)
-4. **PR context**: `claude --from-pr 42` (when PR is linked)
+1. **Read mail**: N unread messages - `agentmail read` (when unread mail exists)
+2. **Continue**: Fix callback URL handling
+3. **Check diff**: /sync --diff to see changes since save
+4. **Resume conversation**: `claude --resume abc123...` (when session_id present)
+5. **PR context**: `claude --from-pr 42` (when PR is linked)
 ```
 
 Note: Next Steps items 3-4 are only shown when the corresponding data exists in saved state.
@@ -262,13 +288,15 @@ Project Synced: [project-name]
 | **Plan** | No active plan |
 | **Saved State** | None |
 | **Memory** | [summary of MEMORY.md content, or "Empty"] |
+| **Mail** | [N unread, or omit row if none/not installed] |
 | **Git** | [branch], [N] uncommitted |
 
 ## Next Steps
 
-1. **Ready for new task** - No pending work detected
-2. **Create a plan** - Use native /plan for implementation planning
-3. **Save before leaving** - /save "notes" to persist state
+1. **Read mail**: N unread messages - `agentmail read` (when unread mail exists)
+2. **Ready for new task** - No pending work detected
+3. **Create a plan** - Use native /plan for implementation planning
+4. **Save before leaving** - /save "notes" to persist state
 ```
 
 ---
@@ -420,6 +448,10 @@ Status
 ## Memory
 
 [Summary of MEMORY.md content, or "Empty"]
+
+## Mail
+
+[N unread messages with preview, or omit if none/not installed]
 
 ## Git
 
