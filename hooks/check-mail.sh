@@ -57,5 +57,5 @@ sqlite3 -separator '  ' "$MAIL_DB" \
 if [ "$UNREAD" -gt 3 ]; then
   echo "  ... and $((UNREAD - 3)) more"
 fi
-echo "Use /mail to read messages."
+echo "Use agentmail read to read messages."
 echo "==="
