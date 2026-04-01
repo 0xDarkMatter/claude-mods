@@ -161,6 +161,56 @@ reply() {
   echo "Replied to ${orig_from}: Re: ${orig_subject}"
 }
 
+# Broadcast a message to all known projects (except self)
+broadcast() {
+  local subject="$1"
+  local body="$2"
+  if [ -z "$body" ]; then
+    echo "Error: message body cannot be empty" >&2
+    return 1
+  fi
+  init_db
+  local from_project
+  from_project=$(get_project)
+  local targets
+  targets=$(sqlite3 "$MAIL_DB" \
+    "SELECT DISTINCT from_project FROM messages UNION SELECT DISTINCT to_project FROM messages ORDER BY 1;")
+  local count=0
+  local safe_subject safe_body safe_from
+  safe_from=$(sql_escape "$from_project")
+  safe_subject=$(sql_escape "$subject")
+  safe_body=$(sql_escape "$body")
+  while IFS= read -r target; do
+    [ -z "$target" ] && continue
+    [ "$target" = "$from_project" ] && continue
+    local safe_to
+    safe_to=$(sql_escape "$target")
+    sqlite3 "$MAIL_DB" \
+      "INSERT INTO messages (from_project, to_project, subject, body) VALUES ('${safe_from}', '${safe_to}', '${safe_subject}', '${safe_body}');"
+    count=$((count + 1))
+  done <<< "$targets"
+  echo "Broadcast to ${count} project(s): ${subject}"
+}
+
+# Show inbox status summary
+status() {
+  init_db
+  local project
+  project=$(sql_escape "$(get_project)")
+  local unread total
+  unread=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${project}' AND read=0;")
+  total=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${project}';")
+  local projects
+  projects=$(sqlite3 "$MAIL_DB" \
+    "SELECT COUNT(DISTINCT from_project) FROM messages WHERE to_project='${project}' AND read=0;")
+  echo "Inbox: ${unread} unread / ${total} total"
+  if [ "${unread:-0}" -gt 0 ]; then
+    echo "From: ${projects} project(s)"
+    sqlite3 -separator ': ' "$MAIL_DB" \
+      "SELECT from_project, COUNT(*) || ' message(s)' FROM messages WHERE to_project='${project}' AND read=0 GROUP BY from_project ORDER BY COUNT(*) DESC;"
+  fi
+}
+
 # List all known projects (that have sent or received mail)
 list_projects() {
   init_db
@@ -178,6 +228,8 @@ case "${1:-help}" in
   reply)      reply "${2:?message_id required}" "${3:?body required}" ;;
   list)       list_all "${2:-20}" ;;
   clear)      clear_old "${2:-7}" ;;
+  broadcast)  broadcast "${2:-no subject}" "${3:?body required}" ;;
+  status)     status ;;
   projects)   list_projects ;;
   help)
     echo "Usage: mail-db.sh <command> [args]"
@@ -191,6 +243,8 @@ case "${1:-help}" in
     echo "  reply <id> <body>       Reply to a message"
     echo "  list [limit]            List recent messages (default 20)"
     echo "  clear [days]            Clear read messages older than N days"
+    echo "  broadcast <subj> <body> Send to all known projects"
+    echo "  status                  Inbox summary"
     echo "  projects                List known projects"
     ;;
   *)          echo "Unknown command: $1. Run with 'help' for usage." >&2; exit 1 ;;

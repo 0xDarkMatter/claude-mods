@@ -349,6 +349,38 @@ assert_exit_code "reply with non-numeric ID fails" "1" "$exit_code"
 bash "$MAIL_SCRIPT" read >/dev/null 2>&1
 
 echo ""
+echo "=== Broadcast & Status ==="
+
+# Setup: ensure multiple projects exist
+bash "$MAIL_SCRIPT" send "project-a" "setup" "creating project-a" >/dev/null 2>&1
+bash "$MAIL_SCRIPT" send "project-b" "setup" "creating project-b" >/dev/null 2>&1
+
+# T42: Broadcast sends to all known projects except self
+result=$(bash "$MAIL_SCRIPT" broadcast "Announcement" "Main is frozen" 2>&1)
+assert_contains "broadcast reports count" "Broadcast to" "$result"
+
+# T43: Broadcast doesn't send to self
+self_count=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='claude-mods' AND subject='Announcement';")
+assert "broadcast skips self" "0" "$self_count"
+
+# T44: Broadcast with empty body fails
+result=$(bash "$MAIL_SCRIPT" broadcast "test" "" 2>&1)
+exit_code=$?
+assert_exit_code "broadcast empty body fails" "1" "$exit_code"
+
+# T45: Status shows inbox summary
+bash "$MAIL_SCRIPT" send "claude-mods" "Status test 1" "msg1" >/dev/null 2>&1
+bash "$MAIL_SCRIPT" send "claude-mods" "Status test 2" "msg2" >/dev/null 2>&1
+result=$(bash "$MAIL_SCRIPT" status 2>&1)
+assert_contains "status shows unread count" "unread" "$result"
+assert_contains "status shows Inbox" "Inbox" "$result"
+
+# T46: Status on empty inbox
+bash "$MAIL_SCRIPT" read >/dev/null 2>&1
+result=$(bash "$MAIL_SCRIPT" status 2>&1)
+assert_contains "status shows 0 unread" "0 unread" "$result"
+
+echo ""
 echo "=== Performance ==="
 
 # T38: Hook cooldown - second call within cooldown is silent even with mail
