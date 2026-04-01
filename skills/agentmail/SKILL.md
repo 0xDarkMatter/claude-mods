@@ -163,6 +163,17 @@ CREATE TABLE messages (
 
 All user inputs are sanitized via SQL single-quote escaping. Numeric inputs (IDs, limits) are validated before use.
 
+## Per-Project Disable
+
+To disable mail notifications for a specific project:
+
+```bash
+touch .claude/agentmail.disable    # Disable
+rm .claude/agentmail.disable       # Re-enable
+```
+
+Only the hook is disabled - you can still send messages from the project. This is useful for projects where you don't want hook overhead or notification noise.
+
 ## Troubleshooting
 
 | Issue | Fix |

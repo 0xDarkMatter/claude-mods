@@ -18,6 +18,9 @@ MAIL_DB="$HOME/.claude/mail.db"
 COOLDOWN_FILE="/tmp/agentmail_check_$$"
 COOLDOWN_SECONDS=10
 
+# Skip if disabled for this project
+[ -f ".claude/agentmail.disable" ] && exit 0
+
 # Skip if no database exists yet
 [ -f "$MAIL_DB" ] || exit 0
 
