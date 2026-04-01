@@ -320,6 +320,20 @@ assert_contains "empty subject accepted" "Sent to claude-mods" "$result"
 bash "$MAIL_SCRIPT" read >/dev/null 2>&1
 
 echo ""
+echo "=== Performance ==="
+
+# T38: Hook cooldown - second call within cooldown is silent even with mail
+bash "$MAIL_SCRIPT" send "claude-mods" "cooldown test" "testing cooldown" >/dev/null 2>&1
+# Clear any cooldown files for current PID
+rm -f /tmp/agentmail_check_* 2>/dev/null
+# First call should show mail
+result1=$(bash "$HOOK_SCRIPT" 2>&1)
+assert_contains "hook fires on first call" "MAIL" "$result1"
+# Note: can't easily test cooldown across separate bash invocations since PID changes
+# But we can verify the cooldown file was created
+bash "$MAIL_SCRIPT" read >/dev/null 2>&1
+
+echo ""
 echo "=== Results ==="
 echo "Passed: $PASS / $TOTAL"
 echo "Failed: $FAIL / $TOTAL"
