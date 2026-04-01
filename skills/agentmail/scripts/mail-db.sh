@@ -25,6 +25,11 @@ CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp);
 SQL
 }
 
+# Sanitize string for safe SQL interpolation (escape single quotes)
+sql_escape() {
+  printf '%s' "$1" | sed "s/'/''/g"
+}
+
 # Get project name from cwd
 get_project() {
   basename "$PWD"
@@ -34,7 +39,7 @@ get_project() {
 count_unread() {
   init_db
   local project
-  project=$(get_project)
+  project=$(sql_escape "$(get_project)")
   sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${project}' AND read=0;"
 }
 
@@ -42,7 +47,7 @@ count_unread() {
 list_unread() {
   init_db
   local project
-  project=$(get_project)
+  project=$(sql_escape "$(get_project)")
   sqlite3 -separator ' | ' "$MAIL_DB" \
     "SELECT id, from_project, subject, timestamp FROM messages WHERE to_project='${project}' AND read=0 ORDER BY timestamp DESC;"
 }
@@ -51,7 +56,7 @@ list_unread() {
 read_mail() {
   init_db
   local project
-  project=$(get_project)
+  project=$(sql_escape "$(get_project)")
   sqlite3 -header -separator ' | ' "$MAIL_DB" \
     "SELECT id, from_project, subject, body, timestamp FROM messages WHERE to_project='${project}' AND read=0 ORDER BY timestamp ASC;"
   sqlite3 "$MAIL_DB" \
@@ -61,6 +66,11 @@ read_mail() {
 # Read a single message by ID and mark as read
 read_one() {
   local msg_id="$1"
+  # Validate ID is numeric
+  if ! [[ "$msg_id" =~ ^[0-9]+$ ]]; then
+    echo "Error: message ID must be numeric" >&2
+    return 1
+  fi
   init_db
   sqlite3 -header -separator ' | ' "$MAIL_DB" \
     "SELECT id, from_project, to_project, subject, body, timestamp FROM messages WHERE id=${msg_id};"
@@ -73,11 +83,19 @@ send() {
   local to_project="$1"
   local subject="$2"
   local body="$3"
+  if [ -z "$body" ]; then
+    echo "Error: message body cannot be empty" >&2
+    return 1
+  fi
   init_db
   local from_project
-  from_project=$(get_project)
+  from_project=$(sql_escape "$(get_project)")
+  local safe_to safe_subject safe_body
+  safe_to=$(sql_escape "$to_project")
+  safe_subject=$(sql_escape "$subject")
+  safe_body=$(sql_escape "$body")
   sqlite3 "$MAIL_DB" \
-    "INSERT INTO messages (from_project, to_project, subject, body) VALUES ('${from_project}', '${to_project}', '${subject}', '${body}');"
+    "INSERT INTO messages (from_project, to_project, subject, body) VALUES ('${from_project}', '${safe_to}', '${safe_subject}', '${safe_body}');"
   echo "Sent to ${to_project}: ${subject}"
 }
 
@@ -85,8 +103,12 @@ send() {
 list_all() {
   init_db
   local project
-  project=$(get_project)
+  project=$(sql_escape "$(get_project)")
   local limit="${1:-20}"
+  # Validate limit is numeric
+  if ! [[ "$limit" =~ ^[0-9]+$ ]]; then
+    limit=20
+  fi
   sqlite3 -header -separator ' | ' "$MAIL_DB" \
     "SELECT id, from_project, subject, CASE WHEN read=0 THEN 'UNREAD' ELSE 'read' END as status, timestamp FROM messages WHERE to_project='${project}' ORDER BY timestamp DESC LIMIT ${limit};"
 }
@@ -95,6 +117,10 @@ list_all() {
 clear_old() {
   init_db
   local days="${1:-7}"
+  # Validate days is numeric
+  if ! [[ "$days" =~ ^[0-9]+$ ]]; then
+    days=7
+  fi
   local deleted
   deleted=$(sqlite3 "$MAIL_DB" \
     "DELETE FROM messages WHERE read=1 AND timestamp < datetime('now', '-${days} days'); SELECT changes();")

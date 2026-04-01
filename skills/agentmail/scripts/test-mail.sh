@@ -262,6 +262,64 @@ exit_code=$?
 assert_exit_code "unknown command fails" "1" "$exit_code"
 
 echo ""
+echo "=== Input Validation ==="
+
+# T28: Non-numeric message ID rejected
+result=$(bash "$MAIL_SCRIPT" read "abc" 2>&1)
+exit_code=$?
+assert_exit_code "non-numeric ID rejected" "1" "$exit_code"
+
+# T29: SQL injection via message ID
+bash "$MAIL_SCRIPT" send "claude-mods" "id-inject-test" "before injection" >/dev/null 2>&1
+result=$(bash "$MAIL_SCRIPT" read "1 OR 1=1" 2>&1)
+exit_code=$?
+assert_exit_code "SQL injection via ID rejected" "1" "$exit_code"
+
+# T30: Non-numeric limit in list
+result=$(bash "$MAIL_SCRIPT" list "abc" 2>&1)
+exit_code=$?
+assert_exit_code "non-numeric limit handled" "0" "$exit_code"
+
+# T31: Non-numeric days in clear
+result=$(bash "$MAIL_SCRIPT" clear "abc" 2>&1)
+assert_contains "non-numeric days handled" "Cleared" "$result"
+
+# T32: Single quotes in subject preserved
+bash "$MAIL_SCRIPT" read >/dev/null 2>&1  # clear unread
+bash "$MAIL_SCRIPT" send "claude-mods" "it's working" "body with 'quotes'" >/dev/null 2>&1
+result=$(bash "$MAIL_SCRIPT" read 2>&1)
+assert_contains "single quotes in subject" "it's working" "$result"
+
+# T33: Double quotes in body preserved
+bash "$MAIL_SCRIPT" send "claude-mods" "quotes" 'She said "hello"' >/dev/null 2>&1
+result=$(bash "$MAIL_SCRIPT" read 2>&1)
+assert_contains "double quotes in body" "hello" "$result"
+
+# T34: Project name with spaces (edge case)
+bash "$MAIL_SCRIPT" send "my project" "spaces" "project name has spaces" >/dev/null 2>&1
+result=$(bash "$MAIL_SCRIPT" projects)
+assert_contains "project with spaces stored" "my project" "$result"
+
+# T35: Multiple rapid sends
+for i in 1 2 3 4 5; do
+  bash "$MAIL_SCRIPT" send "claude-mods" "rapid-$i" "rapid fire test $i" >/dev/null 2>&1
+done
+result=$(bash "$MAIL_SCRIPT" count)
+assert "5 rapid sends all counted" "5" "$result"
+bash "$MAIL_SCRIPT" read >/dev/null 2>&1
+
+# T36: Init is idempotent
+bash "$MAIL_SCRIPT" init >/dev/null 2>&1
+bash "$MAIL_SCRIPT" init >/dev/null 2>&1
+result=$(bash "$MAIL_SCRIPT" count)
+assert "init idempotent" "0" "$result"
+
+# T37: Empty subject defaults
+result=$(bash "$MAIL_SCRIPT" send "claude-mods" "" "empty subject body" 2>&1)
+assert_contains "empty subject accepted" "Sent to claude-mods" "$result"
+bash "$MAIL_SCRIPT" read >/dev/null 2>&1
+
+echo ""
 echo "=== Results ==="
 echo "Passed: $PASS / $TOTAL"
 echo "Failed: $FAIL / $TOTAL"

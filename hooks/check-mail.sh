@@ -19,7 +19,7 @@ MAIL_DB="$HOME/.claude/mail.db"
 # Skip if no database exists yet
 [ -f "$MAIL_DB" ] || exit 0
 
-PROJECT=$(basename "$PWD")
+PROJECT=$(basename "$PWD" | sed "s/'/''/g")
 
 # Single fast query - count unread
 UNREAD=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${PROJECT}' AND read=0;" 2>/dev/null)
