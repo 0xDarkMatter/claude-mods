@@ -1,13 +1,57 @@
 #!/bin/bash
 # mail-db.sh - SQLite mail database operations
 # Global mail database at ~/.claude/mail.db
-# Project identity derived from basename of working directory
+# Project identity: 6-char ID derived from git root commit (stable across
+# renames, moves, clones) with fallback to canonical path hash for non-git dirs.
 
 set -euo pipefail
 
 MAIL_DB="$HOME/.claude/mail.db"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Ensure database and schema exist
+# ============================================================================
+# Identity - git-rooted project IDs
+# ============================================================================
+
+# Get canonical path (resolves symlinks + case on macOS)
+canonical_path() {
+  if [ -d "${1:-$PWD}" ]; then
+    (cd "${1:-$PWD}" && pwd -P)
+  else
+    printf '%s' "${1:-$PWD}"
+  fi
+}
+
+# Generate 6-char project ID
+# Priority: git root commit hash > canonical path hash
+project_hash() {
+  local dir="${1:-$PWD}"
+
+  # Try git root commit (first commit in repo history)
+  if [ -d "$dir" ]; then
+    local root_commit
+    root_commit=$(git -C "$dir" rev-list --max-parents=0 HEAD 2>/dev/null | head -1)
+    if [ -n "$root_commit" ]; then
+      echo "${root_commit:0:6}"
+      return 0
+    fi
+  fi
+
+  # Fallback: hash of canonical path
+  local path
+  path=$(canonical_path "$dir")
+  printf '%s' "$path" | shasum -a 256 | cut -c1-6
+}
+
+# Get display name (basename of canonical path)
+project_name() {
+  basename "$(canonical_path "${1:-$PWD}")"
+}
+
+# ============================================================================
+# Database
+# ============================================================================
+
 init_db() {
   mkdir -p "$(dirname "$MAIL_DB")"
   sqlite3 "$MAIL_DB" <<'SQL'
@@ -23,73 +67,185 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS idx_unread ON messages(to_project, read);
 CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp);
+
+CREATE TABLE IF NOT EXISTS projects (
+    hash TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    path TEXT NOT NULL,
+    registered TEXT DEFAULT (datetime('now'))
+);
 SQL
   # Migration: add priority column if missing
   sqlite3 "$MAIL_DB" "SELECT priority FROM messages LIMIT 0;" 2>/dev/null || \
     sqlite3 "$MAIL_DB" "ALTER TABLE messages ADD COLUMN priority TEXT DEFAULT 'normal';" 2>/dev/null
+  # Migration: create projects table if missing (for existing installs)
+  sqlite3 "$MAIL_DB" "SELECT hash FROM projects LIMIT 0;" 2>/dev/null || \
+    sqlite3 "$MAIL_DB" "CREATE TABLE IF NOT EXISTS projects (hash TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL, registered TEXT DEFAULT (datetime('now')));" 2>/dev/null
 }
 
-# Sanitize string for safe SQL interpolation (escape single quotes)
 sql_escape() {
   printf '%s' "$1" | sed "s/'/''/g"
 }
 
-# Get project name from cwd
-get_project() {
-  basename "$PWD"
+# Register current project in the projects table (idempotent)
+register_project() {
+  local hash name path
+  hash=$(project_hash "${1:-$PWD}")
+  name=$(sql_escape "$(project_name "${1:-$PWD}")")
+  path=$(sql_escape "$(canonical_path "${1:-$PWD}")")
+  sqlite3 "$MAIL_DB" \
+    "INSERT OR REPLACE INTO projects (hash, name, path) VALUES ('${hash}', '${name}', '${path}');"
 }
 
-# Count unread messages for current project
+# Get project ID for current directory
+get_project_id() {
+  project_hash "${1:-$PWD}"
+}
+
+# Resolve a user-supplied name/hash to a project hash
+# Accepts: hash (6 chars), project name, or path
+resolve_target() {
+  local target="$1"
+  local safe_target
+  safe_target=$(sql_escape "$target")
+
+  # 1. Exact hash match
+  if [[ ${#target} -eq 6 ]] && [[ "$target" =~ ^[0-9a-f]+$ ]]; then
+    local found
+    found=$(sqlite3 "$MAIL_DB" "SELECT hash FROM projects WHERE hash='${safe_target}';")
+    if [ -n "$found" ]; then
+      echo "$found"
+      return 0
+    fi
+  fi
+
+  # 2. Name match (case-insensitive)
+  local by_name
+  by_name=$(sqlite3 "$MAIL_DB" "SELECT hash FROM projects WHERE LOWER(name)=LOWER('${safe_target}') ORDER BY registered DESC LIMIT 1;")
+  if [ -n "$by_name" ]; then
+    echo "$by_name"
+    return 0
+  fi
+
+  # 3. Path match - target might be a directory
+  if [ -d "$target" ]; then
+    local hash
+    hash=$(project_hash "$target")
+    echo "$hash"
+    return 0
+  fi
+
+  # 4. Generate hash from target as a string (for unknown projects)
+  # Register it so replies work
+  local hash
+  hash=$(printf '%s' "$target" | shasum -a 256 | cut -c1-6)
+  sqlite3 "$MAIL_DB" \
+    "INSERT OR IGNORE INTO projects (hash, name, path) VALUES ('${hash}', '${safe_target}', '${safe_target}');"
+  echo "$hash"
+}
+
+# Look up display name for a hash
+display_name() {
+  local hash="$1"
+  local name
+  name=$(sqlite3 "$MAIL_DB" "SELECT name FROM projects WHERE hash='${hash}';")
+  if [ -n "$name" ]; then
+    echo "$name"
+  else
+    echo "$hash"
+  fi
+}
+
+# ============================================================================
+# Identicon display (inline, compact)
+# ============================================================================
+
+show_identicon() {
+  local target="${1:-$PWD}"
+  if [ -f "$SCRIPT_DIR/identicon.sh" ]; then
+    bash "$SCRIPT_DIR/identicon.sh" "$target"
+  fi
+}
+
+# ============================================================================
+# Mail operations
+# ============================================================================
+
 count_unread() {
   init_db
-  local project
-  project=$(sql_escape "$(get_project)")
-  sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${project}' AND read=0;"
+  register_project
+  local pid
+  pid=$(get_project_id)
+  sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${pid}' AND read=0;"
 }
 
-# List unread messages (brief) for current project
 list_unread() {
   init_db
-  local project
-  project=$(sql_escape "$(get_project)")
-  sqlite3 -separator ' | ' "$MAIL_DB" \
-    "SELECT id, from_project, subject, timestamp FROM messages WHERE to_project='${project}' AND read=0 ORDER BY timestamp DESC;"
+  register_project
+  local pid
+  pid=$(get_project_id)
+  local rows
+  rows=$(sqlite3 -separator '|' "$MAIL_DB" \
+    "SELECT id, from_project, subject, timestamp FROM messages WHERE to_project='${pid}' AND read=0 ORDER BY timestamp DESC;")
+  [ -z "$rows" ] && return 0
+  while IFS='|' read -r id from_hash subj ts; do
+    local from_name
+    from_name=$(display_name "$from_hash")
+    echo "${id} | ${from_name} (${from_hash}) | ${subj} | ${ts}"
+  done <<< "$rows"
 }
 
-# Read all unread messages (full) and mark as read
 read_mail() {
   init_db
-  local project
-  project=$(sql_escape "$(get_project)")
-  sqlite3 -header -separator ' | ' "$MAIL_DB" \
-    "SELECT id, from_project, subject, body, timestamp FROM messages WHERE to_project='${project}' AND read=0 ORDER BY timestamp ASC;"
+  register_project
+  local pid
+  pid=$(get_project_id)
+  local rows
+  rows=$(sqlite3 -separator '|' "$MAIL_DB" \
+    "SELECT id, from_project, subject, body, timestamp FROM messages WHERE to_project='${pid}' AND read=0 ORDER BY timestamp ASC;")
+  if [ -z "$rows" ]; then
+    return 0
+  fi
+  echo "id | from_project | subject | body | timestamp"
+  while IFS='|' read -r id from_hash subj body ts; do
+    local from_name
+    from_name=$(display_name "$from_hash")
+    echo "${id} | ${from_name} (${from_hash}) | ${subj} | ${body} | ${ts}"
+  done <<< "$rows"
   sqlite3 "$MAIL_DB" \
-    "UPDATE messages SET read=1 WHERE to_project='${project}' AND read=0;"
+    "UPDATE messages SET read=1 WHERE to_project='${pid}' AND read=0;"
 }
 
-# Read a single message by ID and mark as read
 read_one() {
   local msg_id="$1"
-  # Validate ID is numeric
   if ! [[ "$msg_id" =~ ^[0-9]+$ ]]; then
     echo "Error: message ID must be numeric" >&2
     return 1
   fi
   init_db
-  sqlite3 -header -separator ' | ' "$MAIL_DB" \
-    "SELECT id, from_project, to_project, subject, body, timestamp FROM messages WHERE id=${msg_id};"
+  local row
+  row=$(sqlite3 -separator '|' "$MAIL_DB" \
+    "SELECT id, from_project, to_project, subject, body, timestamp FROM messages WHERE id=${msg_id};")
+  if [ -n "$row" ]; then
+    echo "id | from_project | to_project | subject | body | timestamp"
+    local id from_hash to_hash subj body ts
+    IFS='|' read -r id from_hash to_hash subj body ts <<< "$row"
+    local from_name to_name
+    from_name=$(display_name "$from_hash")
+    to_name=$(display_name "$to_hash")
+    echo "${id} | ${from_name} (${from_hash}) | ${to_name} (${to_hash}) | ${subj} | ${body} | ${ts}"
+  fi
   sqlite3 "$MAIL_DB" \
     "UPDATE messages SET read=1 WHERE id=${msg_id};"
 }
 
-# Send a message (optional --urgent flag before args)
 send() {
   local priority="normal"
   if [ "${1:-}" = "--urgent" ]; then
     priority="urgent"
     shift
   fi
-  local to_project="${1:?to_project required}"
+  local to_input="${1:?to_project required}"
   local subject="${2:-no subject}"
   local body="${3:?body required}"
   if [ -z "$body" ]; then
@@ -97,18 +253,20 @@ send() {
     return 1
   fi
   init_db
-  local from_project
-  from_project=$(sql_escape "$(get_project)")
-  local safe_to safe_subject safe_body
-  safe_to=$(sql_escape "$to_project")
+  register_project
+  local from_id to_id
+  from_id=$(get_project_id)
+  to_id=$(resolve_target "$to_input")
+  local safe_subject safe_body
   safe_subject=$(sql_escape "$subject")
   safe_body=$(sql_escape "$body")
   sqlite3 "$MAIL_DB" \
-    "INSERT INTO messages (from_project, to_project, subject, body, priority) VALUES ('${from_project}', '${safe_to}', '${safe_subject}', '${safe_body}', '${priority}');"
-  echo "Sent to ${to_project}: ${subject}$([ "$priority" = "urgent" ] && echo " [URGENT]" || true)"
+    "INSERT INTO messages (from_project, to_project, subject, body, priority) VALUES ('${from_id}', '${to_id}', '${safe_subject}', '${safe_body}', '${priority}');"
+  local to_name
+  to_name=$(display_name "$to_id")
+  echo "Sent to ${to_name} (${to_id}): ${subject}$([ "$priority" = "urgent" ] && echo " [URGENT]" || true)"
 }
 
-# Search messages by keyword
 search() {
   local keyword="$1"
   if [ -z "$keyword" ]; then
@@ -116,33 +274,47 @@ search() {
     return 1
   fi
   init_db
-  local project
-  project=$(sql_escape "$(get_project)")
+  register_project
+  local pid
+  pid=$(get_project_id)
   local safe_keyword
   safe_keyword=$(sql_escape "$keyword")
-  sqlite3 -header -separator ' | ' "$MAIL_DB" \
-    "SELECT id, from_project, subject, CASE WHEN read=0 THEN 'UNREAD' ELSE 'read' END as status, timestamp FROM messages WHERE to_project='${project}' AND (subject LIKE '%${safe_keyword}%' OR body LIKE '%${safe_keyword}%') ORDER BY timestamp DESC LIMIT 20;"
+  local rows
+  rows=$(sqlite3 -separator '|' "$MAIL_DB" \
+    "SELECT id, from_project, subject, CASE WHEN read=0 THEN 'UNREAD' ELSE 'read' END, timestamp FROM messages WHERE to_project='${pid}' AND (subject LIKE '%${safe_keyword}%' OR body LIKE '%${safe_keyword}%') ORDER BY timestamp DESC LIMIT 20;")
+  [ -z "$rows" ] && return 0
+  echo "id | from | subject | status | timestamp"
+  while IFS='|' read -r id from_hash subj status ts; do
+    local from_name
+    from_name=$(display_name "$from_hash")
+    echo "${id} | ${from_name} (${from_hash}) | ${subj} | ${status} | ${ts}"
+  done <<< "$rows"
 }
 
-# List all messages (read and unread) for current project
 list_all() {
   init_db
-  local project
-  project=$(sql_escape "$(get_project)")
+  register_project
+  local pid
+  pid=$(get_project_id)
   local limit="${1:-20}"
-  # Validate limit is numeric
   if ! [[ "$limit" =~ ^[0-9]+$ ]]; then
     limit=20
   fi
-  sqlite3 -header -separator ' | ' "$MAIL_DB" \
-    "SELECT id, from_project, subject, CASE WHEN read=0 THEN 'UNREAD' ELSE 'read' END as status, timestamp FROM messages WHERE to_project='${project}' ORDER BY timestamp DESC LIMIT ${limit};"
+  local rows
+  rows=$(sqlite3 -separator '|' "$MAIL_DB" \
+    "SELECT id, from_project, subject, CASE WHEN read=0 THEN 'UNREAD' ELSE 'read' END, timestamp FROM messages WHERE to_project='${pid}' ORDER BY timestamp DESC LIMIT ${limit};")
+  [ -z "$rows" ] && return 0
+  echo "id | from | subject | status | timestamp"
+  while IFS='|' read -r id from_hash subj status ts; do
+    local from_name
+    from_name=$(display_name "$from_hash")
+    echo "${id} | ${from_name} (${from_hash}) | ${subj} | ${status} | ${ts}"
+  done <<< "$rows"
 }
 
-# Clear old read messages (default: older than 7 days)
 clear_old() {
   init_db
   local days="${1:-7}"
-  # Validate days is numeric
   if ! [[ "$days" =~ ^[0-9]+$ ]]; then
     days=7
   fi
@@ -152,7 +324,6 @@ clear_old() {
   echo "Cleared ${deleted} read messages older than ${days} days"
 }
 
-# Reply to a message by ID
 reply() {
   local msg_id="$1"
   local body="$2"
@@ -165,28 +336,28 @@ reply() {
     return 1
   fi
   init_db
-  # Get original sender and subject
+  register_project
   local orig
   orig=$(sqlite3 -separator '|' "$MAIL_DB" "SELECT from_project, subject FROM messages WHERE id=${msg_id};")
   if [ -z "$orig" ]; then
     echo "Error: message #${msg_id} not found" >&2
     return 1
   fi
-  local orig_from orig_subject
-  orig_from=$(echo "$orig" | cut -d'|' -f1)
+  local orig_from_hash orig_subject
+  orig_from_hash=$(echo "$orig" | cut -d'|' -f1)
   orig_subject=$(echo "$orig" | cut -d'|' -f2)
-  local from_project
-  from_project=$(sql_escape "$(get_project)")
-  local safe_to safe_subject safe_body
-  safe_to=$(sql_escape "$orig_from")
+  local from_id
+  from_id=$(get_project_id)
+  local safe_subject safe_body
   safe_subject=$(sql_escape "Re: ${orig_subject}")
   safe_body=$(sql_escape "$body")
   sqlite3 "$MAIL_DB" \
-    "INSERT INTO messages (from_project, to_project, subject, body) VALUES ('${from_project}', '${safe_to}', '${safe_subject}', '${safe_body}');"
-  echo "Replied to ${orig_from}: Re: ${orig_subject}"
+    "INSERT INTO messages (from_project, to_project, subject, body) VALUES ('${from_id}', '${orig_from_hash}', '${safe_subject}', '${safe_body}');"
+  local orig_name
+  orig_name=$(display_name "$orig_from_hash")
+  echo "Replied to ${orig_name} (${orig_from_hash}): Re: ${orig_subject}"
 }
 
-# Broadcast a message to all known projects (except self)
 broadcast() {
   local subject="$1"
   local body="$2"
@@ -195,48 +366,46 @@ broadcast() {
     return 1
   fi
   init_db
-  local from_project
-  from_project=$(get_project)
+  register_project
+  local from_id
+  from_id=$(get_project_id)
   local targets
   targets=$(sqlite3 "$MAIL_DB" \
-    "SELECT DISTINCT from_project FROM messages UNION SELECT DISTINCT to_project FROM messages ORDER BY 1;")
+    "SELECT hash FROM projects WHERE hash != '${from_id}' ORDER BY name;")
   local count=0
-  local safe_subject safe_body safe_from
-  safe_from=$(sql_escape "$from_project")
+  local safe_subject safe_body
   safe_subject=$(sql_escape "$subject")
   safe_body=$(sql_escape "$body")
-  while IFS= read -r target; do
-    [ -z "$target" ] && continue
-    [ "$target" = "$from_project" ] && continue
-    local safe_to
-    safe_to=$(sql_escape "$target")
+  while IFS= read -r target_hash; do
+    [ -z "$target_hash" ] && continue
     sqlite3 "$MAIL_DB" \
-      "INSERT INTO messages (from_project, to_project, subject, body) VALUES ('${safe_from}', '${safe_to}', '${safe_subject}', '${safe_body}');"
+      "INSERT INTO messages (from_project, to_project, subject, body) VALUES ('${from_id}', '${target_hash}', '${safe_subject}', '${safe_body}');"
     count=$((count + 1))
   done <<< "$targets"
   echo "Broadcast to ${count} project(s): ${subject}"
 }
 
-# Show inbox status summary
 status() {
   init_db
-  local project
-  project=$(sql_escape "$(get_project)")
+  register_project
+  local pid
+  pid=$(get_project_id)
   local unread total
-  unread=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${project}' AND read=0;")
-  total=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${project}';")
-  local projects
-  projects=$(sqlite3 "$MAIL_DB" \
-    "SELECT COUNT(DISTINCT from_project) FROM messages WHERE to_project='${project}' AND read=0;")
+  unread=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${pid}' AND read=0;")
+  total=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${pid}';")
   echo "Inbox: ${unread} unread / ${total} total"
   if [ "${unread:-0}" -gt 0 ]; then
-    echo "From: ${projects} project(s)"
-    sqlite3 -separator ': ' "$MAIL_DB" \
-      "SELECT from_project, COUNT(*) || ' message(s)' FROM messages WHERE to_project='${project}' AND read=0 GROUP BY from_project ORDER BY COUNT(*) DESC;"
+    local senders
+    senders=$(sqlite3 -separator '|' "$MAIL_DB" \
+      "SELECT from_project, COUNT(*) FROM messages WHERE to_project='${pid}' AND read=0 GROUP BY from_project ORDER BY COUNT(*) DESC;")
+    while IFS='|' read -r from_hash cnt; do
+      local from_name
+      from_name=$(display_name "$from_hash")
+      echo "  ${from_name} (${from_hash}): ${cnt} message(s)"
+    done <<< "$senders"
   fi
 }
 
-# Purge all messages for current project (or all projects with --all)
 purge() {
   init_db
   if [ "${1:-}" = "--all" ]; then
@@ -244,16 +413,18 @@ purge() {
     count=$(sqlite3 "$MAIL_DB" "DELETE FROM messages; SELECT changes();")
     echo "Purged all ${count} message(s) from database"
   else
-    local project
-    project=$(sql_escape "$(get_project)")
+    register_project
+    local pid
+    pid=$(get_project_id)
     local count
     count=$(sqlite3 "$MAIL_DB" \
-      "DELETE FROM messages WHERE to_project='${project}' OR from_project='${project}'; SELECT changes();")
-    echo "Purged ${count} message(s) for $(get_project)"
+      "DELETE FROM messages WHERE to_project='${pid}' OR from_project='${pid}'; SELECT changes();")
+    local name
+    name=$(project_name)
+    echo "Purged ${count} message(s) for ${name} (${pid})"
   fi
 }
 
-# Rename a project in all messages (for directory renames/moves)
 alias_project() {
   local old_name="$1"
   local new_name="$2"
@@ -262,28 +433,99 @@ alias_project() {
     return 1
   fi
   init_db
-  local safe_old safe_new
-  safe_old=$(sql_escape "$old_name")
+  # Resolve old name to hash, then update the display name
+  local old_hash
+  old_hash=$(resolve_target "$old_name")
+  local safe_new
   safe_new=$(sql_escape "$new_name")
-  local updated=0
-  local count
-  count=$(sqlite3 "$MAIL_DB" \
-    "UPDATE messages SET from_project='${safe_new}' WHERE from_project='${safe_old}'; SELECT changes();")
-  updated=$((updated + count))
-  count=$(sqlite3 "$MAIL_DB" \
-    "UPDATE messages SET to_project='${safe_new}' WHERE to_project='${safe_old}'; SELECT changes();")
-  updated=$((updated + count))
-  echo "Renamed '${old_name}' -> '${new_name}' in ${updated} message(s)"
+  local safe_old
+  safe_old=$(sql_escape "$old_name")
+  sqlite3 "$MAIL_DB" \
+    "UPDATE projects SET name='${safe_new}' WHERE hash='${old_hash}';"
+  # Also update path if it matches the old name (phantom projects)
+  sqlite3 "$MAIL_DB" \
+    "UPDATE projects SET path='${safe_new}' WHERE hash='${old_hash}' AND path='${safe_old}';"
+  echo "Renamed '${old_name}' -> '${new_name}' (hash: ${old_hash})"
 }
 
-# List all known projects (that have sent or received mail)
 list_projects() {
   init_db
-  sqlite3 "$MAIL_DB" \
-    "SELECT DISTINCT from_project FROM messages UNION SELECT DISTINCT to_project FROM messages ORDER BY 1;"
+  register_project
+  local rows
+  rows=$(sqlite3 -separator '|' "$MAIL_DB" \
+    "SELECT hash, name, path FROM projects ORDER BY name;")
+  [ -z "$rows" ] && echo "No known projects" && return 0
+  local my_id
+  my_id=$(get_project_id)
+  while IFS='|' read -r hash name path; do
+    local marker=""
+    [ "$hash" = "$my_id" ] && marker=" (you)"
+    echo ""
+    # Show identicon if available
+    if [ -f "$SCRIPT_DIR/identicon.sh" ]; then
+      bash "$SCRIPT_DIR/identicon.sh" "$path" --compact 2>/dev/null || true
+    fi
+    echo "${name} ${hash}${marker}"
+    echo "${path}"
+  done <<< "$rows"
 }
 
+# Migrate old basename-style messages to hash IDs
+migrate() {
+  init_db
+  register_project
+  echo "Migrating old messages to hash-based IDs..."
+  # Find all unique project names in messages that aren't 6-char hex hashes
+  local old_names
+  old_names=$(sqlite3 "$MAIL_DB" \
+    "SELECT DISTINCT from_project FROM messages WHERE LENGTH(from_project) != 6 OR from_project GLOB '*[^0-9a-f]*' UNION SELECT DISTINCT to_project FROM messages WHERE LENGTH(to_project) != 6 OR to_project GLOB '*[^0-9a-f]*';")
+  if [ -z "$old_names" ]; then
+    echo "No messages need migration."
+    return 0
+  fi
+  local count=0
+  while IFS= read -r old_name; do
+    [ -z "$old_name" ] && continue
+    # Try to find the project path - check common locations
+    local found_path=""
+    for base_dir in "$HOME/projects" "$HOME/Projects" "$HOME/code" "$HOME/Code" "$HOME/dev" "$HOME/repos"; do
+      if [ -d "${base_dir}/${old_name}" ]; then
+        found_path=$(cd "${base_dir}/${old_name}" && pwd -P)
+        break
+      fi
+    done
+
+    local new_hash
+    if [ -n "$found_path" ]; then
+      new_hash=$(printf '%s' "$found_path" | shasum -a 256 | cut -c1-6)
+      local safe_name safe_path
+      safe_name=$(sql_escape "$old_name")
+      safe_path=$(sql_escape "$found_path")
+      sqlite3 "$MAIL_DB" \
+        "INSERT OR IGNORE INTO projects (hash, name, path) VALUES ('${new_hash}', '${safe_name}', '${safe_path}');"
+    else
+      # Can't find directory - hash the name itself
+      new_hash=$(printf '%s' "$old_name" | shasum -a 256 | cut -c1-6)
+      local safe_name
+      safe_name=$(sql_escape "$old_name")
+      sqlite3 "$MAIL_DB" \
+        "INSERT OR IGNORE INTO projects (hash, name, path) VALUES ('${new_hash}', '${safe_name}', '${safe_name}');"
+    fi
+
+    local safe_old
+    safe_old=$(sql_escape "$old_name")
+    sqlite3 "$MAIL_DB" "UPDATE messages SET from_project='${new_hash}' WHERE from_project='${safe_old}';"
+    sqlite3 "$MAIL_DB" "UPDATE messages SET to_project='${new_hash}' WHERE to_project='${safe_old}';"
+    echo "  ${old_name} -> ${new_hash}$([ -n "$found_path" ] && echo " (${found_path})" || echo " (name only)")"
+    count=$((count + 1))
+  done <<< "$old_names"
+  echo "Migrated ${count} project name(s)."
+}
+
+# ============================================================================
 # Dispatch
+# ============================================================================
+
 case "${1:-help}" in
   init)       init_db && echo "Mail database initialized at $MAIL_DB" ;;
   count)      count_unread ;;
@@ -299,16 +541,19 @@ case "${1:-help}" in
   purge)      purge "${2:-}" ;;
   alias)      alias_project "${2:?old name required}" "${3:?new name required}" ;;
   projects)   list_projects ;;
+  migrate)    migrate ;;
+  id)         init_db; register_project; echo "$(project_name) $(get_project_id)" ;;
   help)
     echo "Usage: mail-db.sh <command> [args]"
     echo ""
     echo "Commands:"
     echo "  init                    Initialize database"
+    echo "  id                      Show this project's name and hash"
     echo "  count                   Count unread messages"
     echo "  unread                  List unread messages (brief)"
     echo "  read [id]               Read messages and mark as read"
     echo "  send [--urgent] <to> <subj> <body>"
-    echo "                          Send a message"
+    echo "                          Send a message (to = name, hash, or path)"
     echo "  reply <id> <body>       Reply to a message"
     echo "  list [limit]            List recent messages (default 20)"
     echo "  clear [days]            Clear read messages older than N days"
@@ -316,8 +561,9 @@ case "${1:-help}" in
     echo "  search <keyword>        Search messages by keyword"
     echo "  status                  Inbox summary"
     echo "  purge [--all]           Delete all messages for this project"
-    echo "  alias <old> <new>       Rename project in all messages"
-    echo "  projects                List known projects"
+    echo "  alias <old> <new>       Rename project display name"
+    echo "  projects                List known projects with identicons"
+    echo "  migrate                 Convert old basename messages to hash IDs"
     ;;
   *)          echo "Unknown command: $1. Run with 'help' for usage." >&2; exit 1 ;;
 esac

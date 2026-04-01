@@ -2,17 +2,7 @@
 # hooks/check-mail.sh
 # PreToolUse hook - checks for unread inter-session mail
 # Runs on every tool call. Silent when inbox is empty.
-# Matcher: * (all tools)
-#
-# Configuration in .claude/settings.json or .claude/settings.local.json:
-# {
-#   "hooks": {
-#     "PreToolUse": [{
-#       "matcher": "*",
-#       "hooks": ["bash hooks/check-mail.sh"]
-#     }]
-#   }
-# }
+# Uses hash-based project identity (resolves case sensitivity).
 
 MAIL_DB="$HOME/.claude/mail.db"
 COOLDOWN_SECONDS=10
@@ -23,8 +13,16 @@ COOLDOWN_SECONDS=10
 # Skip if no database exists yet
 [ -f "$MAIL_DB" ] || exit 0
 
-PROJECT=$(basename "$PWD" | sed "s/'/''/g")
-COOLDOWN_FILE="/tmp/agentmail_${PROJECT}"
+# Project identity: git root commit hash, fallback to path hash
+ROOT_COMMIT=$(git rev-list --max-parents=0 HEAD 2>/dev/null | head -1)
+if [ -n "$ROOT_COMMIT" ]; then
+  PROJECT_HASH="${ROOT_COMMIT:0:6}"
+else
+  CANONICAL=$(cd "$PWD" && pwd -P)
+  PROJECT_HASH=$(printf '%s' "$CANONICAL" | shasum -a 256 | cut -c1-6)
+fi
+
+COOLDOWN_FILE="/tmp/agentmail_${PROJECT_HASH}"
 
 # Cooldown: skip if checked recently (within COOLDOWN_SECONDS)
 if [ -f "$COOLDOWN_FILE" ]; then
@@ -37,13 +35,21 @@ fi
 touch "$COOLDOWN_FILE"
 
 # Single fast query - count unread
-UNREAD=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${PROJECT}' AND read=0;" 2>/dev/null)
+UNREAD=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${PROJECT_HASH}' AND read=0;" 2>/dev/null)
 
 # Silent exit if no mail
 [ "${UNREAD:-0}" -eq 0 ] && exit 0
 
 # Check for urgent messages
-URGENT=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${PROJECT}' AND read=0 AND priority='urgent';" 2>/dev/null)
+URGENT=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${PROJECT_HASH}' AND read=0 AND priority='urgent';" 2>/dev/null)
+
+# Resolve display names for preview
+show_from() {
+  local hash="$1"
+  local name
+  name=$(sqlite3 "$MAIL_DB" "SELECT name FROM projects WHERE hash='${hash}';" 2>/dev/null)
+  [ -n "$name" ] && echo "$name" || echo "$hash"
+}
 
 # Show notification with preview of first 3 messages
 echo ""
@@ -52,8 +58,16 @@ if [ "${URGENT:-0}" -gt 0 ]; then
 else
   echo "=== MAIL: ${UNREAD} unread message(s) ==="
 fi
-sqlite3 -separator '  ' "$MAIL_DB" \
-  "SELECT '  ' || CASE WHEN priority='urgent' THEN '[!] ' ELSE '' END || 'From: ' || from_project || '  |  ' || subject FROM messages WHERE to_project='${PROJECT}' AND read=0 ORDER BY priority DESC, timestamp DESC LIMIT 3;" 2>/dev/null
+
+# Preview messages with resolved names
+while IFS='|' read -r from_hash priority subject; do
+  from_name=$(show_from "$from_hash")
+  prefix=""
+  [ "$priority" = "urgent" ] && prefix="[!] "
+  echo "  ${prefix}From: ${from_name}  |  ${subject}"
+done < <(sqlite3 -separator '|' "$MAIL_DB" \
+  "SELECT from_project, priority, subject FROM messages WHERE to_project='${PROJECT_HASH}' AND read=0 ORDER BY priority DESC, timestamp DESC LIMIT 3;" 2>/dev/null)
+
 if [ "$UNREAD" -gt 3 ]; then
   echo "  ... and $((UNREAD - 3)) more"
 fi

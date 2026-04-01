@@ -44,6 +44,8 @@ Parse the user's input after `agentmail` (or `/agentmail`) and run the matching 
 | `agentmail alias <old> <new>` | `bash "$MAIL" alias "<old>" "<new>"` |
 | `agentmail purge` | `bash "$MAIL" purge` |
 | `agentmail purge --all` | `bash "$MAIL" purge --all` |
+| `agentmail id` | `bash "$MAIL" id` |
+| `agentmail migrate` | `bash "$MAIL" migrate` |
 | `agentmail init` | `bash "$MAIL" init` |
 
 When the user just says "check mail", "read mail", "inbox", or "any mail?" - run `bash "$MAIL" read`.
@@ -52,11 +54,25 @@ When the user says "send mail to X" or "message X" - parse out the project name,
 
 ## Project Identity
 
-Project name = `basename` of current working directory. No configuration needed.
+Each project gets a stable 6-character hash ID derived from its **git root commit** (the very first commit in the repo). This means:
 
-- `C:\Projects\claude-mods` -> `claude-mods`
-- `C:\Projects\some-api` -> `some-api`
-- `X:\Roam\Fathom` -> `Fathom`
+- IDs survive directory renames, moves, and clones
+- Case-insensitive filesystems (macOS) don't cause collisions
+- Every clone of the same repo shares the same identity
+
+For non-git directories, falls back to a hash of the canonical path (`pwd -P`).
+
+Use `agentmail id` to see your project's name and hash:
+
+```
+claude-mods 7663d6
+```
+
+When sending messages, you can address projects by **name**, **hash**, or **path** - they all resolve to the same hash ID.
+
+### Identicons
+
+Each project hash renders as a unique pixel-art identicon (11x11 symmetric grid using Unicode half-block characters). Run `identicon.sh` to see yours, or view all projects with `agentmail projects`.
 
 ## Passive Notification (Hook)
 
@@ -153,8 +169,11 @@ Without this step, agentmail still works but you have to check manually (`agentm
 ### Verify
 
 ```bash
-# Send yourself a test message
-bash ~/.claude/agentmail/mail-db.sh send "$(basename $PWD)" "Test" "Hello from agentmail"
+# Check your project identity
+bash ~/.claude/agentmail/mail-db.sh id
+
+# Send yourself a test message (use your project name from above)
+bash ~/.claude/agentmail/mail-db.sh send "my-project" "Test" "Hello from agentmail"
 
 # Check it arrived
 bash ~/.claude/agentmail/mail-db.sh read
@@ -177,13 +196,20 @@ Single SQLite file at `~/.claude/mail.db`. Auto-created on first `init` or `send
 ```sql
 CREATE TABLE messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    from_project TEXT NOT NULL,
-    to_project TEXT NOT NULL,
+    from_project TEXT NOT NULL,   -- 6-char hash ID
+    to_project TEXT NOT NULL,     -- 6-char hash ID
     subject TEXT DEFAULT '',
     body TEXT NOT NULL,
     timestamp TEXT DEFAULT (datetime('now')),
     read INTEGER DEFAULT 0,
     priority TEXT DEFAULT 'normal'
+);
+
+CREATE TABLE projects (
+    hash TEXT PRIMARY KEY,        -- 6-char ID (git root commit or path hash)
+    name TEXT NOT NULL,           -- Display name (basename of project dir)
+    path TEXT NOT NULL,           -- Canonical path
+    registered TEXT DEFAULT (datetime('now'))
 );
 ```
 
@@ -194,7 +220,8 @@ CREATE TABLE messages (
 | `sqlite3: not found` | Ships with macOS, Linux, and Git Bash on Windows. Run `sqlite3 --version` to check. |
 | Hook not firing | Ensure `hooks` block is in `~/.claude/settings.json` (Step 2 above) |
 | Hook fires but no notification | Working as intended - hook is silent when inbox is empty |
-| Wrong project name | Uses `basename $PWD` - ensure cwd is the project root, not a subdirectory |
-| Messages not arriving | `to_project` must match the target's directory basename exactly. Use `agentmail projects` to see known names |
-| Renamed a project directory | Use `agentmail alias old-name new-name` to update old messages |
+| Messages not arriving | Target must be a known name, hash, or path. Use `agentmail projects` to see registered projects |
+| Upgraded from basename IDs | Run `agentmail migrate` to convert old messages to hash-based IDs |
+| Changed display name | Use `agentmail alias old-name new-name` to update the project's display name |
 | Want to disable for one project | `touch .claude/agentmail.disable` in that project's root |
+| Check your project ID | Run `agentmail id` to see name and 6-char hash |
