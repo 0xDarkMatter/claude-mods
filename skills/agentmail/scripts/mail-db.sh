@@ -84,10 +84,23 @@ SQL
   # Migration: add thread_id column if missing
   sqlite3 "$MAIL_DB" "SELECT thread_id FROM messages LIMIT 0;" 2>/dev/null || \
     sqlite3 "$MAIL_DB" "ALTER TABLE messages ADD COLUMN thread_id INTEGER REFERENCES messages(id);" 2>/dev/null
+  # Migration: add attachments column if missing
+  sqlite3 "$MAIL_DB" "SELECT attachments FROM messages LIMIT 0;" 2>/dev/null || \
+    sqlite3 "$MAIL_DB" "ALTER TABLE messages ADD COLUMN attachments TEXT DEFAULT '';" 2>/dev/null
 }
 
 sql_escape() {
   printf '%s' "$1" | sed "s/'/''/g"
+}
+
+# Resolve attachment path to absolute, validate existence
+resolve_attach() {
+  local p="$1"
+  if [ ! -e "$p" ]; then
+    echo "Error: attachment not found: $p" >&2
+    return 1
+  fi
+  (cd "$(dirname "$p")" && echo "$(pwd -P)/$(basename "$p")")
 }
 
 # Read body from argument or stdin (use - or omit for stdin)
@@ -224,13 +237,22 @@ read_mail() {
   echo "id | from_project | subject | body | timestamp"
   while read -r msg_id; do
     [ -z "$msg_id" ] && continue
-    local from_hash subj body ts from_name
+    local from_hash subj body ts from_name attachments
     from_hash=$(sqlite3 "$MAIL_DB" "SELECT from_project FROM messages WHERE id=${msg_id};")
     subj=$(sqlite3 "$MAIL_DB" "SELECT subject FROM messages WHERE id=${msg_id};")
     body=$(sqlite3 "$MAIL_DB" "SELECT body FROM messages WHERE id=${msg_id};")
     ts=$(sqlite3 "$MAIL_DB" "SELECT timestamp FROM messages WHERE id=${msg_id};")
+    attachments=$(sqlite3 "$MAIL_DB" "SELECT COALESCE(attachments,'') FROM messages WHERE id=${msg_id};")
     from_name=$(display_name "$from_hash")
     echo "${msg_id} | ${from_name} (${from_hash}) | ${subj} | ${body} | ${ts}"
+    if [ -n "$attachments" ]; then
+      while IFS= read -r apath; do
+        [ -z "$apath" ] && continue
+        local astat="missing"
+        [ -e "$apath" ] && astat="$(wc -c < "$apath" | tr -d ' ') bytes"
+        echo "  [Attached: ${apath} (${astat})]"
+      done <<< "$attachments"
+    fi
   done <<< "$ids"
   sqlite3 "$MAIL_DB" \
     "UPDATE messages SET read=1 WHERE to_project='${pid}' AND read=0;"
@@ -248,26 +270,40 @@ read_one() {
   local exists
   exists=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE id=${msg_id};")
   [ "${exists:-0}" -eq 0 ] && return 0
-  local from_hash to_hash subj body ts from_name to_name
+  local from_hash to_hash subj body ts from_name to_name attachments
   from_hash=$(sqlite3 "$MAIL_DB" "SELECT from_project FROM messages WHERE id=${msg_id};")
   to_hash=$(sqlite3 "$MAIL_DB" "SELECT to_project FROM messages WHERE id=${msg_id};")
   subj=$(sqlite3 "$MAIL_DB" "SELECT subject FROM messages WHERE id=${msg_id};")
   body=$(sqlite3 "$MAIL_DB" "SELECT body FROM messages WHERE id=${msg_id};")
   ts=$(sqlite3 "$MAIL_DB" "SELECT timestamp FROM messages WHERE id=${msg_id};")
+  attachments=$(sqlite3 "$MAIL_DB" "SELECT COALESCE(attachments,'') FROM messages WHERE id=${msg_id};")
   from_name=$(display_name "$from_hash")
   to_name=$(display_name "$to_hash")
   echo "id | from_project | to_project | subject | body | timestamp"
   echo "${msg_id} | ${from_name} (${from_hash}) | ${to_name} (${to_hash}) | ${subj} | ${body} | ${ts}"
+  if [ -n "$attachments" ]; then
+    while IFS= read -r apath; do
+      [ -z "$apath" ] && continue
+      local astat="missing"
+      [ -e "$apath" ] && astat="$(wc -c < "$apath" | tr -d ' ') bytes"
+      echo "  [Attached: ${apath} (${astat})]"
+    done <<< "$attachments"
+  fi
   sqlite3 "$MAIL_DB" \
     "UPDATE messages SET read=1 WHERE id=${msg_id};"
 }
 
 send() {
   local priority="normal"
-  if [ "${1:-}" = "--urgent" ]; then
-    priority="urgent"
-    shift
-  fi
+  local -a attach_paths=()
+  # Parse flags before positional args
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --urgent) priority="urgent"; shift ;;
+      --attach) shift; local resolved; resolved=$(resolve_attach "$1") || return 1; attach_paths+=("$resolved"); shift ;;
+      *) break ;;
+    esac
+  done
   local to_input="${1:?to_project required}"
   local subject="${2:-no subject}"
   local body
@@ -281,16 +317,24 @@ send() {
   local from_id to_id
   from_id=$(get_project_id)
   to_id=$(resolve_target "$to_input")
-  local safe_subject safe_body
+  local safe_subject safe_body safe_attachments
   safe_subject=$(sql_escape "$subject")
   safe_body=$(sql_escape "$body")
+  # Join attachment paths with newlines
+  local attachments=""
+  if [ ${#attach_paths[@]} -gt 0 ]; then
+    attachments=$(IFS=$'\n'; echo "${attach_paths[*]}")
+  fi
+  safe_attachments=$(sql_escape "$attachments")
   sqlite3 "$MAIL_DB" \
-    "INSERT INTO messages (from_project, to_project, subject, body, priority) VALUES ('${from_id}', '${to_id}', '${safe_subject}', '${safe_body}', '${priority}');"
+    "INSERT INTO messages (from_project, to_project, subject, body, priority, attachments) VALUES ('${from_id}', '${to_id}', '${safe_subject}', '${safe_body}', '${priority}', '${safe_attachments}');"
   # Signal the recipient
   touch "/tmp/agentmail_signal_${to_id}"
   local to_name
   to_name=$(display_name "$to_id")
-  echo "Sent to ${to_name} (${to_id}): ${subject}$([ "$priority" = "urgent" ] && echo " [URGENT]" || true)"
+  local attach_note=""
+  [ ${#attach_paths[@]} -gt 0 ] && attach_note=" [${#attach_paths[@]} attachment(s)]"
+  echo "Sent to ${to_name} (${to_id}): ${subject}${attach_note}$([ "$priority" = "urgent" ] && echo " [URGENT]" || true)"
 }
 
 sent() {
@@ -369,6 +413,14 @@ clear_old() {
 }
 
 reply() {
+  local -a attach_paths=()
+  # Parse flags before positional args
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --attach) shift; local resolved; resolved=$(resolve_attach "$1") || return 1; attach_paths+=("$resolved"); shift ;;
+      *) break ;;
+    esac
+  done
   local msg_id="$1"
   local body
   body=$(read_body "${2:-}")
@@ -396,16 +448,23 @@ reply() {
   local thread_id="${orig_thread:-$msg_id}"
   local from_id
   from_id=$(get_project_id)
-  local safe_subject safe_body
+  local safe_subject safe_body safe_attachments
   safe_subject=$(sql_escape "Re: ${orig_subject}")
   safe_body=$(sql_escape "$body")
+  local attachments=""
+  if [ ${#attach_paths[@]} -gt 0 ]; then
+    attachments=$(IFS=$'\n'; echo "${attach_paths[*]}")
+  fi
+  safe_attachments=$(sql_escape "$attachments")
   sqlite3 "$MAIL_DB" \
-    "INSERT INTO messages (from_project, to_project, subject, body, thread_id) VALUES ('${from_id}', '${orig_from_hash}', '${safe_subject}', '${safe_body}', ${thread_id});"
+    "INSERT INTO messages (from_project, to_project, subject, body, thread_id, attachments) VALUES ('${from_id}', '${orig_from_hash}', '${safe_subject}', '${safe_body}', ${thread_id}, '${safe_attachments}');"
   # Signal the recipient
   touch "/tmp/agentmail_signal_${orig_from_hash}"
   local orig_name
   orig_name=$(display_name "$orig_from_hash")
-  echo "Replied to ${orig_name} (${orig_from_hash}): Re: ${orig_subject}"
+  local attach_note=""
+  [ ${#attach_paths[@]} -gt 0 ] && attach_note=" [${#attach_paths[@]} attachment(s)]"
+  echo "Replied to ${orig_name} (${orig_from_hash}): Re: ${orig_subject}${attach_note}"
 }
 
 thread() {
@@ -428,14 +487,23 @@ thread() {
   echo "=== Thread #${thread_root} ==="
   while read -r tid; do
     [ -z "$tid" ] && continue
-    local from_hash body ts from_name
+    local from_hash body ts from_name attachments
     from_hash=$(sqlite3 "$MAIL_DB" "SELECT from_project FROM messages WHERE id=${tid};")
     body=$(sqlite3 "$MAIL_DB" "SELECT body FROM messages WHERE id=${tid};")
     ts=$(sqlite3 "$MAIL_DB" "SELECT timestamp FROM messages WHERE id=${tid};")
+    attachments=$(sqlite3 "$MAIL_DB" "SELECT COALESCE(attachments,'') FROM messages WHERE id=${tid};")
     from_name=$(display_name "$from_hash")
     echo ""
     echo "--- #${tid} ${from_name} @ ${ts} ---"
     echo "${body}"
+    if [ -n "$attachments" ]; then
+      while IFS= read -r apath; do
+        [ -z "$apath" ] && continue
+        local astat="missing"
+        [ -e "$apath" ] && astat="$(wc -c < "$apath" | tr -d ' ') bytes"
+        echo "  [Attached: ${apath} (${astat})]"
+      done <<< "$attachments"
+    fi
     msg_count=$((msg_count + 1))
   done <<< "$ids"
   echo ""
@@ -617,7 +685,7 @@ case "${1:-help}" in
   unread)     list_unread ;;
   read)       if [ -n "${2:-}" ]; then read_one "$2"; else read_mail; fi ;;
   send)       shift; send "$@" ;;
-  reply)      reply "${2:?message_id required}" "${3:-}" ;;
+  reply)      shift; reply "$@" ;;
   sent)       sent "${2:-20}" ;;
   thread)     thread "${2:?message_id required}" ;;
   list)       list_all "${2:-20}" ;;
@@ -639,8 +707,8 @@ case "${1:-help}" in
     echo "  count                   Count unread messages"
     echo "  unread                  List unread messages (brief)"
     echo "  read [id]               Read messages and mark as read"
-    echo "  send [--urgent] <to> <subj> <body|->  Send (- or pipe for stdin body)"
-    echo "  reply <id> <body|->     Reply (- or pipe for stdin body)"
+    echo "  send [--urgent] [--attach <path>]... <to> <subj> <body|->  Send with optional attachments"
+    echo "  reply [--attach <path>]... <id> <body|->  Reply with optional attachments"
     echo "  sent [limit]            Show sent messages (outbox)"
     echo "  thread <id>             View full conversation thread"
     echo "  list [limit]            List recent messages (default 20)"
