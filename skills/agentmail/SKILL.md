@@ -31,7 +31,9 @@ Parse the user's input after `agentmail` (or `/agentmail`) and run the matching 
 | `agentmail read 42` | `bash "$MAIL" read 42` |
 | `agentmail send <project> "<subject>" "<body>"` | `bash "$MAIL" send "<project>" "<subject>" "<body>"` |
 | `agentmail send --urgent <project> "<subject>" "<body>"` | `bash "$MAIL" send --urgent "<project>" "<subject>" "<body>"` |
+| `agentmail send --attach <path> <project> "<subject>" "<body>"` | `bash "$MAIL" send --attach "<path>" "<project>" "<subject>" "<body>"` |
 | `agentmail reply <id> "<body>"` | `bash "$MAIL" reply <id> "<body>"` |
+| `agentmail reply --attach <path> <id> "<body>"` | `bash "$MAIL" reply --attach "<path>" <id> "<body>"` |
 | `agentmail broadcast "<subject>" "<body>"` | `bash "$MAIL" broadcast "<subject>" "<body>"` |
 | `agentmail search <keyword>` | `bash "$MAIL" search "<keyword>"` |
 | `agentmail status` | `bash "$MAIL" status` |
@@ -85,6 +87,23 @@ A global PreToolUse hook checks for mail on every tool call (no cooldown). Silen
   ... and 1 more
 Use agentmail read to read messages.
 ```
+
+## Attachments
+
+Send file references with `--attach <path>` (repeatable). Paths are resolved to absolute and stored as references - files are not copied.
+
+```bash
+# Send with one attachment
+agentmail send --attach src/config.ts my-api "Config update" "Updated the auth config"
+
+# Send with multiple attachments
+agentmail send --attach src/schema.sql --attach docs/API.md my-api "Schema + docs" "See attached"
+
+# Reply with attachment
+agentmail reply --attach output/report.json 42 "Here's the analysis"
+```
+
+Recipients see attachment paths with file sizes and can read them directly with the Read tool. If a file has been moved or deleted since sending, it shows as `(missing)`.
 
 ## When to Send
 

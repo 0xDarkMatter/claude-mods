@@ -491,6 +491,99 @@ assert_empty "hook silent after signal cleared (2)" "$result2"
 bash "$MAIL_SCRIPT" read >/dev/null 2>&1
 
 echo ""
+echo "=== Attachments ==="
+
+# Create temp files for attachment tests
+ATTACH_DIR=$(mktemp -d)
+echo "file one content" > "$ATTACH_DIR/file1.txt"
+echo "file two content" > "$ATTACH_DIR/file2.txt"
+mkdir -p "$ATTACH_DIR/sub dir"
+echo "spaced path" > "$ATTACH_DIR/sub dir/spaced.txt"
+
+# T: Send with single attachment
+result=$(bash "$MAIL_SCRIPT" send --attach "$ATTACH_DIR/file1.txt" "claude-mods" "attach test" "one file" 2>&1)
+assert_contains "send with attachment succeeds" "1 attachment" "$result"
+
+# T: Attachment path stored as absolute
+last_id=$(sqlite3 "$MAIL_DB" "SELECT id FROM messages ORDER BY id DESC LIMIT 1;")
+stored=$(sqlite3 "$MAIL_DB" "SELECT attachments FROM messages WHERE id=${last_id};")
+assert_contains "attachment path is absolute" "$ATTACH_DIR/file1.txt" "$stored"
+
+# T: Read shows attachment with size
+result=$(bash "$MAIL_SCRIPT" read "$last_id" 2>&1)
+assert_contains "read shows Attached" "[Attached:" "$result"
+assert_contains "read shows file size" "bytes" "$result"
+
+# T: Send with multiple attachments
+result=$(bash "$MAIL_SCRIPT" send --attach "$ATTACH_DIR/file1.txt" --attach "$ATTACH_DIR/file2.txt" "claude-mods" "multi attach" "two files" 2>&1)
+assert_contains "send with 2 attachments" "2 attachment" "$result"
+
+# T: Multiple attachment paths stored correctly
+last_id=$(sqlite3 "$MAIL_DB" "SELECT id FROM messages ORDER BY id DESC LIMIT 1;")
+attach_count=$(sqlite3 "$MAIL_DB" "SELECT attachments FROM messages WHERE id=${last_id};" | grep -c '.')
+assert "two attachment paths stored" "2" "$attach_count"
+
+# T: No trailing empty line in stored attachments
+trailing=$(sqlite3 "$MAIL_DB" "SELECT attachments FROM messages WHERE id=${last_id};" | tail -1)
+assert_not_empty "no trailing empty line" "$trailing"
+
+# T: Nonexistent file rejected
+result=$(bash "$MAIL_SCRIPT" send --attach "/tmp/nonexistent_$$.txt" "claude-mods" "fail" "body" 2>&1)
+exit_code=$?
+assert_contains "nonexistent attach rejected" "not found" "$result"
+assert_exit_code "nonexistent attach exits 1" "1" "$exit_code"
+
+# T: Send without attachment still works (no regression)
+result=$(bash "$MAIL_SCRIPT" send "claude-mods" "no attach" "plain message" 2>&1)
+assert_contains "send without attach works" "Sent to" "$result"
+last_id=$(sqlite3 "$MAIL_DB" "SELECT id FROM messages ORDER BY id DESC LIMIT 1;")
+stored=$(sqlite3 "$MAIL_DB" "SELECT COALESCE(attachments,'') FROM messages WHERE id=${last_id};")
+assert "no-attach message has empty attachments" "" "$stored"
+
+# T: Reply with attachment via dispatch
+base_id=$(sqlite3 "$MAIL_DB" "SELECT id FROM messages ORDER BY id DESC LIMIT 1;")
+result=$(bash "$MAIL_SCRIPT" reply --attach "$ATTACH_DIR/file1.txt" "$base_id" "reply with file" 2>&1)
+assert_contains "reply with attachment succeeds" "1 attachment" "$result"
+
+# T: Reply attachment stored correctly
+last_id=$(sqlite3 "$MAIL_DB" "SELECT id FROM messages ORDER BY id DESC LIMIT 1;")
+stored=$(sqlite3 "$MAIL_DB" "SELECT attachments FROM messages WHERE id=${last_id};")
+assert_contains "reply attachment path stored" "$ATTACH_DIR/file1.txt" "$stored"
+
+# T: Attachment with spaces in path
+result=$(bash "$MAIL_SCRIPT" send --attach "$ATTACH_DIR/sub dir/spaced.txt" "claude-mods" "spaced path" "path has spaces" 2>&1)
+assert_contains "spaced path attachment succeeds" "1 attachment" "$result"
+last_id=$(sqlite3 "$MAIL_DB" "SELECT id FROM messages ORDER BY id DESC LIMIT 1;")
+stored=$(sqlite3 "$MAIL_DB" "SELECT attachments FROM messages WHERE id=${last_id};")
+assert_contains "spaced path preserved" "sub dir/spaced.txt" "$stored"
+
+# T: Hook shows attachments
+bash "$MAIL_SCRIPT" send --attach "$ATTACH_DIR/file1.txt" "claude-mods" "hook attach" "check hook" >/dev/null 2>&1
+clear_cooldown
+result=$(bash "$HOOK_SCRIPT" 2>&1)
+assert_contains "hook shows attachment" "[Attached:" "$result"
+assert_contains "hook shows Read hint" "Use Read tool" "$result"
+bash "$MAIL_SCRIPT" read >/dev/null 2>&1
+
+# T: Mixed flags - --urgent with --attach
+result=$(bash "$MAIL_SCRIPT" send --urgent --attach "$ATTACH_DIR/file1.txt" "claude-mods" "urgent+attach" "both flags" 2>&1)
+assert_contains "urgent+attach shows attachment" "1 attachment" "$result"
+assert_contains "urgent+attach shows URGENT" "URGENT" "$result"
+
+# T: Deleted file shows as missing
+VANISH="$ATTACH_DIR/vanish.txt"
+echo "temporary" > "$VANISH"
+bash "$MAIL_SCRIPT" send --attach "$VANISH" "claude-mods" "vanish test" "file will disappear" >/dev/null 2>&1
+rm -f "$VANISH"
+last_id=$(sqlite3 "$MAIL_DB" "SELECT id FROM messages ORDER BY id DESC LIMIT 1;")
+result=$(bash "$MAIL_SCRIPT" read "$last_id" 2>&1)
+assert_contains "deleted file shows missing" "missing" "$result"
+
+# Clean up temp dir
+rm -rf "$ATTACH_DIR"
+bash "$MAIL_SCRIPT" read >/dev/null 2>&1
+
+echo ""
 echo "=== Purge ==="
 
 # T54: Purge removes messages for current project

@@ -59,10 +59,25 @@ while read -r msg_id; do
   urgent=""
   [ "$priority" = "urgent" ] && urgent=" [URGENT]"
 
+  attachments=$(sqlite3 "$MAIL_DB" "SELECT COALESCE(attachments,'') FROM messages WHERE id=${msg_id};" 2>/dev/null)
+
   echo ""
   echo "--- #${msg_id} from ${from_name} (${from_hash})${urgent} @ ${timestamp} ---"
   echo "Subject: ${subject}"
   echo "${body}"
+
+  # Show attachments
+  if [ -n "$attachments" ]; then
+    echo ""
+    while IFS= read -r apath; do
+      [ -z "$apath" ] && continue
+      if [ -e "$apath" ]; then
+        echo "[Attached: ${apath} ($(wc -c < "$apath" | tr -d ' ') bytes)] <-- Use Read tool to view"
+      else
+        echo "[Attached: ${apath} (missing)]"
+      fi
+    done <<< "$attachments"
+  fi
 
   # Show thread context if this is part of a conversation
   if [ -n "$thread_id" ]; then
