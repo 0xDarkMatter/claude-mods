@@ -76,7 +76,7 @@ Each project hash renders as a unique pixel-art identicon (11x11 symmetric grid 
 
 ## Passive Notification (Hook)
 
-A global PreToolUse hook checks for mail on every tool call (10-second cooldown). Silent when inbox is empty.
+A global PreToolUse hook checks for mail on every tool call (no cooldown). Silent when inbox is empty.
 
 ```
 === MAIL: 3 unread message(s) ===
@@ -130,7 +130,7 @@ bash ~/.claude/agentmail/mail-db.sh status    # Check it works
 
 ### Step 2: Enable the Hook
 
-Add a `hooks` block to `~/.claude/settings.json`. This makes Claude check for mail automatically on every tool call (with a 10-second cooldown so it doesn't slow anything down):
+Add a `hooks` block to `~/.claude/settings.json`. This makes Claude check for mail automatically on every tool call (with a no cooldown so it doesn't slow anything down):
 
 ```json
 {
