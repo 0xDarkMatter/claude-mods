@@ -1,17 +1,14 @@
 #!/bin/bash
 # hooks/check-mail.sh
-# PreToolUse hook - checks for unread inter-session mail
-# Runs on every tool call. Silent when inbox is empty.
-# Uses hash-based project identity (resolves case sensitivity).
+# PreToolUse hook - event-driven mail delivery with thread context.
+# Checks a signal file (stat, nanoseconds) before touching SQLite.
+# Silent when no signal. Delivers full thread context for each message.
 
 MAIL_DB="$HOME/.claude/mail.db"
-COOLDOWN_SECONDS=10
+MAIL_SCRIPT="$HOME/.claude/agentmail/mail-db.sh"
 
 # Skip if disabled for this project
 [ -f ".claude/agentmail.disable" ] && exit 0
-
-# Skip if no database exists yet
-[ -f "$MAIL_DB" ] || exit 0
 
 # Project identity: git root commit hash, fallback to path hash
 ROOT_COMMIT=$(git rev-list --max-parents=0 HEAD 2>/dev/null | head -1)
@@ -22,28 +19,23 @@ else
   PROJECT_HASH=$(printf '%s' "$CANONICAL" | shasum -a 256 | cut -c1-6)
 fi
 
-COOLDOWN_FILE="/tmp/agentmail_${PROJECT_HASH}"
+SIGNAL="/tmp/agentmail_signal_${PROJECT_HASH}"
 
-# Cooldown: skip if checked recently (within COOLDOWN_SECONDS)
-if [ -f "$COOLDOWN_FILE" ]; then
-  last_check=$(stat -c %Y "$COOLDOWN_FILE" 2>/dev/null || stat -f %m "$COOLDOWN_FILE" 2>/dev/null || echo 0)
-  now=$(date +%s)
-  if [ $((now - last_check)) -lt $COOLDOWN_SECONDS ]; then
-    exit 0
-  fi
-fi
-touch "$COOLDOWN_FILE"
+# Fast path: no signal file = no mail. Stat check only, no SQLite.
+[ -f "$SIGNAL" ] || exit 0
 
-# Single fast query - count unread
+# Signal exists - check DB to confirm
+[ -f "$MAIL_DB" ] || exit 0
+
 UNREAD=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${PROJECT_HASH}' AND read=0;" 2>/dev/null)
 
-# Silent exit if no mail
-[ "${UNREAD:-0}" -eq 0 ] && exit 0
+if [ "${UNREAD:-0}" -eq 0 ]; then
+  # Signal was stale, clean up
+  rm -f "$SIGNAL"
+  exit 0
+fi
 
-# Check for urgent messages
-URGENT=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${PROJECT_HASH}' AND read=0 AND priority='urgent';" 2>/dev/null)
-
-# Resolve display names for preview
+# Resolve display name for a hash
 show_from() {
   local hash="$1"
   local name
@@ -51,25 +43,43 @@ show_from() {
   [ -n "$name" ] && echo "$name" || echo "$hash"
 }
 
-# Show notification with preview of first 3 messages
+# Deliver each message with thread context
 echo ""
-if [ "${URGENT:-0}" -gt 0 ]; then
-  echo "=== URGENT MAIL: ${UNREAD} unread (${URGENT} urgent) ==="
-else
-  echo "=== MAIL: ${UNREAD} unread message(s) ==="
-fi
+echo "=== INCOMING MAIL (${UNREAD} message(s)) ==="
 
-# Preview messages with resolved names
-while IFS='|' read -r from_hash priority subject; do
+while read -r msg_id; do
+  [ -z "$msg_id" ] && continue
+  from_hash=$(sqlite3 "$MAIL_DB" "SELECT from_project FROM messages WHERE id=${msg_id};" 2>/dev/null)
+  priority=$(sqlite3 "$MAIL_DB" "SELECT priority FROM messages WHERE id=${msg_id};" 2>/dev/null)
+  subject=$(sqlite3 "$MAIL_DB" "SELECT subject FROM messages WHERE id=${msg_id};" 2>/dev/null)
+  body=$(sqlite3 "$MAIL_DB" "SELECT body FROM messages WHERE id=${msg_id};" 2>/dev/null)
+  timestamp=$(sqlite3 "$MAIL_DB" "SELECT timestamp FROM messages WHERE id=${msg_id};" 2>/dev/null)
+  thread_id=$(sqlite3 "$MAIL_DB" "SELECT thread_id FROM messages WHERE id=${msg_id};" 2>/dev/null)
   from_name=$(show_from "$from_hash")
-  prefix=""
-  [ "$priority" = "urgent" ] && prefix="[!] "
-  echo "  ${prefix}From: ${from_name}  |  ${subject}"
-done < <(sqlite3 -separator '|' "$MAIL_DB" \
-  "SELECT from_project, priority, subject FROM messages WHERE to_project='${PROJECT_HASH}' AND read=0 ORDER BY priority DESC, timestamp DESC LIMIT 3;" 2>/dev/null)
+  urgent=""
+  [ "$priority" = "urgent" ] && urgent=" [URGENT]"
 
-if [ "$UNREAD" -gt 3 ]; then
-  echo "  ... and $((UNREAD - 3)) more"
-fi
-echo "Use agentmail read to read messages."
-echo "==="
+  echo ""
+  echo "--- #${msg_id} from ${from_name} (${from_hash})${urgent} @ ${timestamp} ---"
+  echo "Subject: ${subject}"
+  echo "${body}"
+
+  # Show thread context if this is part of a conversation
+  if [ -n "$thread_id" ]; then
+    thread_root="$thread_id"
+    thread_count=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE id=${thread_root} OR thread_id=${thread_root};" 2>/dev/null)
+    if [ "${thread_count:-0}" -gt 1 ]; then
+      echo ""
+      echo "[Thread #${thread_root} - ${thread_count} messages. Run: agentmail thread ${thread_root}]"
+    fi
+  fi
+done < <(sqlite3 "$MAIL_DB" \
+  "SELECT id FROM messages WHERE to_project='${PROJECT_HASH}' AND read=0 ORDER BY priority DESC, timestamp ASC;" 2>/dev/null)
+
+echo ""
+echo "=== ACTION REQUIRED: Inform the user about these messages and ask if they want to reply. ==="
+echo "=== Then run: agentmail read (to mark as read) ==="
+echo "=== To reply: agentmail reply <id> \"message\" ==="
+
+# Clear signal (new sends will re-create it)
+rm -f "$SIGNAL"

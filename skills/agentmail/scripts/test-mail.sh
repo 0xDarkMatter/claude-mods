@@ -85,21 +85,8 @@ assert_exit_code() {
   fi
 }
 
-# Helper: clear hook cooldown so next hook call fires
-# Uses git root commit hash (matches check-mail.sh identity logic)
-clear_cooldown() {
-  local root_commit
-  root_commit=$(git rev-list --max-parents=0 HEAD 2>/dev/null | head -1)
-  if [ -n "$root_commit" ]; then
-    rm -f "/tmp/agentmail_${root_commit:0:6}" 2>/dev/null
-  else
-    local canonical
-    canonical=$(cd "$PWD" && pwd -P)
-    local hash
-    hash=$(printf '%s' "$canonical" | shasum -a 256 | cut -c1-6)
-    rm -f "/tmp/agentmail_${hash}" 2>/dev/null
-  fi
-}
+# No-op: cooldown was removed, but tests still call this
+clear_cooldown() { :; }
 
 # --- Setup: clean slate ---
 rm -f "$MAIL_DB"
@@ -242,12 +229,21 @@ clear_cooldown
 result=$(bash "$HOOK_SCRIPT" 2>&1)
 assert_empty "hook silent when no mail" "$result"
 
-# T22: Hook shows notification
+# T22: Hook delivers message inline (does NOT auto-read)
 bash "$MAIL_SCRIPT" send "claude-mods" "Hook test" "Should trigger hook" >/dev/null 2>&1
 clear_cooldown
 result=$(bash "$HOOK_SCRIPT" 2>&1)
-assert_contains "hook shows MAIL notification" "MAIL" "$result"
-assert_contains "hook shows message count" "1 unread" "$result"
+assert_contains "hook shows INCOMING MAIL" "INCOMING MAIL" "$result"
+assert_contains "hook shows subject" "Hook test" "$result"
+assert_contains "hook shows body" "Should trigger hook" "$result"
+# Signal cleared after first delivery, so second call is silent
+result2=$(bash "$HOOK_SCRIPT" 2>&1)
+assert_empty "hook silent after signal cleared" "$result2"
+# But messages are still unread (hook does NOT auto-read)
+unread_count=$(bash "$MAIL_SCRIPT" count 2>&1)
+assert_contains "messages persist unread after hook" "1" "$unread_count"
+# Manually mark read for cleanup
+bash "$MAIL_SCRIPT" read >/dev/null 2>&1
 
 # T23: Hook with missing database
 clear_cooldown
@@ -374,12 +370,11 @@ echo "=== Priority & Search ==="
 result=$(bash "$MAIL_SCRIPT" send --urgent "claude-mods" "Server down" "Production is on fire" 2>&1)
 assert_contains "urgent send succeeds" "URGENT" "$result"
 
-# T39: Hook highlights urgent
+# T39: Hook delivers urgent message with marker
 clear_cooldown
 result=$(bash "$HOOK_SCRIPT" 2>&1)
 assert_contains "hook shows URGENT" "URGENT" "$result"
-assert_contains "hook shows [!] prefix" "[!]" "$result"
-bash "$MAIL_SCRIPT" read >/dev/null 2>&1
+assert_contains "hook shows urgent body" "Production is on fire" "$result"
 
 # T40: Normal send still works after priority feature
 result=$(bash "$MAIL_SCRIPT" send "claude-mods" "Normal msg" "not urgent" 2>&1)
@@ -482,22 +477,17 @@ assert_exit_code "alias with missing arg fails" "1" "$exit_code"
 bash "$MAIL_SCRIPT" read >/dev/null 2>&1
 
 echo ""
-echo "=== Performance ==="
+echo "=== Hook ==="
 
-# T52: Hook cooldown - second call within cooldown is silent
-bash "$MAIL_SCRIPT" send "claude-mods" "cooldown test" "testing cooldown" >/dev/null 2>&1
-# Clear cooldown file for this project
-clear_cooldown
-# First call should show mail
+# T52: Hook delivers without auto-read
+bash "$MAIL_SCRIPT" send "claude-mods" "hook test" "testing hook" >/dev/null 2>&1
 result1=$(bash "$HOOK_SCRIPT" 2>&1)
-assert_contains "hook fires on first call" "MAIL" "$result1"
+assert_contains "hook delivers message" "INCOMING MAIL" "$result1"
 
-# T53: Second call within cooldown is silent (cooldown file exists from first call)
+# T53: Signal cleared after delivery, second call silent
 result2=$(bash "$HOOK_SCRIPT" 2>&1)
-assert_empty "hook silent during cooldown" "$result2"
-
-# Cleanup
-clear_cooldown
+assert_empty "hook silent after signal cleared (2)" "$result2"
+# Messages still unread - verify then clean up
 bash "$MAIL_SCRIPT" read >/dev/null 2>&1
 
 echo ""
@@ -533,12 +523,11 @@ touch .claude/agentmail.disable
 result=$(bash "$HOOK_SCRIPT" 2>&1)
 assert_empty "hook silent when disabled" "$result"
 
-# T53: Hook works again after removing disable file
+# T53: Hook delivers after re-enable
 rm -f .claude/agentmail.disable
 clear_cooldown
 result=$(bash "$HOOK_SCRIPT" 2>&1)
-assert_contains "hook works after re-enable" "MAIL" "$result"
-bash "$MAIL_SCRIPT" read >/dev/null 2>&1
+assert_contains "hook works after re-enable" "INCOMING MAIL" "$result"
 
 echo ""
 echo "=== Results ==="
