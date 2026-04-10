@@ -151,6 +151,55 @@ if (Test-Path $stylesDir) {
 Write-Host ""
 
 # =============================================================================
+# PIGEON - Global install (scripts + hook config hint)
+# =============================================================================
+Write-Host "Installing pigeon (pmail)..." -ForegroundColor Cyan
+
+# Clean up old agentmail install if present
+$oldAgentmailDir = Join-Path $claudeDir "agentmail"
+if (Test-Path $oldAgentmailDir) {
+    Remove-Item -Path $oldAgentmailDir -Recurse -Force
+    Write-Host "  Removed old agentmail/ (renamed to pigeon/)" -ForegroundColor Red
+}
+
+$pigeonDir = Join-Path $claudeDir "pigeon"
+New-Item -ItemType Directory -Force -Path $pigeonDir | Out-Null
+
+$mailDbSrc = Join-Path $projectRoot "skills\pigeon\scripts\mail-db.sh"
+$checkMailSrc = Join-Path $projectRoot "hooks\check-mail.sh"
+
+if (Test-Path $mailDbSrc) {
+    Copy-Item $mailDbSrc -Destination "$pigeonDir\" -Force
+    Write-Host "  mail-db.sh" -ForegroundColor Green
+}
+if (Test-Path $checkMailSrc) {
+    Copy-Item $checkMailSrc -Destination "$pigeonDir\" -Force
+    Write-Host "  check-mail.sh" -ForegroundColor Green
+}
+
+$settingsPath = Join-Path $claudeDir "settings.json"
+if ((Test-Path $settingsPath) -and (Select-String -Path $settingsPath -Pattern "check-mail.sh" -Quiet)) {
+    Write-Host "  Hook already configured in settings.json" -ForegroundColor Green
+} else {
+    Write-Host ""
+    Write-Host '  To enable automatic pmail notifications, add this to ~/.claude/settings.json:' -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host '  "hooks": {'
+    Write-Host '    "PreToolUse": [{'
+    Write-Host '      "matcher": "*",'
+    Write-Host '      "hooks": [{'
+    Write-Host '        "type": "command",'
+    Write-Host '        "command": "bash \"$HOME/.claude/pigeon/check-mail.sh\"",'
+    Write-Host '        "timeout": 5'
+    Write-Host '      }]'
+    Write-Host '    }]'
+    Write-Host '  }'
+    Write-Host ""
+    Write-Host "  Without this, pigeon works but you must check manually (pigeon read)." -ForegroundColor Yellow
+}
+Write-Host ""
+
+# =============================================================================
 # SUMMARY
 # =============================================================================
 Write-Host "================================================================" -ForegroundColor Cyan

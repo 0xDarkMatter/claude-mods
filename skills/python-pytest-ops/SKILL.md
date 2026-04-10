@@ -1,10 +1,12 @@
 ---
 name: python-pytest-ops
 description: "pytest testing patterns for Python. Triggers on: pytest, fixture, mark, parametrize, mock, conftest, test coverage, unit test, integration test, pytest.raises."
+license: MIT
 compatibility: "pytest 7.0+, Python 3.9+. Some features require pytest-asyncio, pytest-mock, pytest-cov."
 allowed-tools: "Read Write Bash"
-depends-on: []
-related-skills: [python-typing-ops, python-async-ops]
+metadata:
+  author: claude-mods
+  related-skills: python-typing-ops, python-async-ops
 ---
 
 # Python pytest Patterns

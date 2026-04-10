@@ -1,8 +1,11 @@
 ---
 name: tailwind-ops
 description: "Tailwind CSS utility patterns, responsive design, component patterns, v4 migration, and configuration. Use for: tailwind, tailwindcss, utility classes, responsive design, dark mode, tailwind v4, tailwind config, tw, container queries, @apply, prose, typography, animation."
+license: MIT
 allowed-tools: "Read Write Bash"
-related-skills: [react-ops, vue-ops, astro-ops]
+metadata:
+  author: claude-mods
+  related-skills: react-ops, vue-ops, astro-ops
 ---
 
 # Tailwind Operations

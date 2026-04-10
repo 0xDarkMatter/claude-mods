@@ -1,8 +1,11 @@
 ---
 name: scaffold
 description: "Project scaffolding - generate boilerplate for common project types with best-practice defaults. Use for: scaffold, boilerplate, template, new project, init, create project, starter, setup, project structure, directory structure, monorepo, microservice, API template, web app template, CLI tool template, library template."
+license: MIT
 allowed-tools: "Read Edit Write Bash Glob Grep Agent"
-related-skills: [docker-ops, ci-cd-ops, testing-ops, python-env, typescript-ops]
+metadata:
+  author: claude-mods
+  related-skills: docker-ops, ci-cd-ops, testing-ops, python-env, typescript-ops
 ---
 
 # Scaffold

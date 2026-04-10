@@ -1,8 +1,11 @@
 ---
 name: testing-ops
 description: "Cross-language testing strategies and patterns. Triggers on: test pyramid, unit test, integration test, e2e test, TDD, BDD, test coverage, mocking strategy, test doubles, test isolation."
+license: MIT
 compatibility: "Language-agnostic patterns. Framework-specific details in references."
 allowed-tools: "Read Write Bash"
+metadata:
+  author: claude-mods
 ---
 
 # Testing Patterns

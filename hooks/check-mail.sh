@@ -1,61 +1,100 @@
 #!/bin/bash
 # hooks/check-mail.sh
-# PreToolUse hook - checks for unread inter-session mail
-# Runs on every tool call. Silent when inbox is empty.
-# Matcher: * (all tools)
-#
-# Configuration in .claude/settings.json or .claude/settings.local.json:
-# {
-#   "hooks": {
-#     "PreToolUse": [{
-#       "matcher": "*",
-#       "hooks": ["bash hooks/check-mail.sh"]
-#     }]
-#   }
-# }
+# PreToolUse hook - event-driven mail delivery with thread context.
+# Checks a signal file (stat, nanoseconds) before touching SQLite.
+# Silent when no signal. Delivers full thread context for each message.
 
-MAIL_DB="$HOME/.claude/mail.db"
-COOLDOWN_SECONDS=10
+PMAIL_DB="$HOME/.claude/pmail.db"
+PMAIL_SCRIPT="$HOME/.claude/pigeon/mail-db.sh"
 
 # Skip if disabled for this project
-[ -f ".claude/agentmail.disable" ] && exit 0
+[ -f ".claude/pigeon.disable" ] && exit 0
 
-# Skip if no database exists yet
-[ -f "$MAIL_DB" ] || exit 0
-
-PROJECT=$(basename "$PWD" | sed "s/'/''/g")
-COOLDOWN_FILE="/tmp/agentmail_${PROJECT}"
-
-# Cooldown: skip if checked recently (within COOLDOWN_SECONDS)
-if [ -f "$COOLDOWN_FILE" ]; then
-  last_check=$(stat -c %Y "$COOLDOWN_FILE" 2>/dev/null || stat -f %m "$COOLDOWN_FILE" 2>/dev/null || echo 0)
-  now=$(date +%s)
-  if [ $((now - last_check)) -lt $COOLDOWN_SECONDS ]; then
-    exit 0
-  fi
-fi
-touch "$COOLDOWN_FILE"
-
-# Single fast query - count unread
-UNREAD=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${PROJECT}' AND read=0;" 2>/dev/null)
-
-# Silent exit if no mail
-[ "${UNREAD:-0}" -eq 0 ] && exit 0
-
-# Check for urgent messages
-URGENT=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${PROJECT}' AND read=0 AND priority='urgent';" 2>/dev/null)
-
-# Show notification with preview of first 3 messages
-echo ""
-if [ "${URGENT:-0}" -gt 0 ]; then
-  echo "=== URGENT MAIL: ${UNREAD} unread (${URGENT} urgent) ==="
+# Project identity: git root commit hash, fallback to path hash
+ROOT_COMMIT=$(git rev-list --max-parents=0 HEAD 2>/dev/null | head -1)
+if [ -n "$ROOT_COMMIT" ]; then
+  PROJECT_HASH="${ROOT_COMMIT:0:6}"
 else
-  echo "=== MAIL: ${UNREAD} unread message(s) ==="
+  CANONICAL=$(cd "$PWD" && pwd -P)
+  PROJECT_HASH=$(printf '%s' "$CANONICAL" | shasum -a 256 | cut -c1-6)
 fi
-sqlite3 -separator '  ' "$MAIL_DB" \
-  "SELECT '  ' || CASE WHEN priority='urgent' THEN '[!] ' ELSE '' END || 'From: ' || from_project || '  |  ' || subject FROM messages WHERE to_project='${PROJECT}' AND read=0 ORDER BY priority DESC, timestamp DESC LIMIT 3;" 2>/dev/null
-if [ "$UNREAD" -gt 3 ]; then
-  echo "  ... and $((UNREAD - 3)) more"
+
+SIGNAL="/tmp/pigeon_signal_${PROJECT_HASH}"
+
+# Fast path: no signal file = no mail. Stat check only, no SQLite.
+[ -f "$SIGNAL" ] || exit 0
+
+# Signal exists - check DB to confirm
+[ -f "$PMAIL_DB" ] || exit 0
+
+UNREAD=$(sqlite3 "$PMAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${PROJECT_HASH}' AND read=0;" 2>/dev/null)
+
+if [ "${UNREAD:-0}" -eq 0 ]; then
+  # Signal was stale, clean up
+  rm -f "$SIGNAL"
+  exit 0
 fi
-echo "Use agentmail read to read messages."
-echo "==="
+
+# Resolve display name for a hash
+show_from() {
+  local hash="$1"
+  local name
+  name=$(sqlite3 "$PMAIL_DB" "SELECT name FROM projects WHERE hash='${hash}';" 2>/dev/null)
+  [ -n "$name" ] && echo "$name" || echo "$hash"
+}
+
+# Deliver each message with thread context
+echo ""
+echo "=== INCOMING PMAIL (${UNREAD} message(s)) ==="
+
+while read -r msg_id; do
+  [ -z "$msg_id" ] && continue
+  from_hash=$(sqlite3 "$PMAIL_DB" "SELECT from_project FROM messages WHERE id=${msg_id};" 2>/dev/null)
+  priority=$(sqlite3 "$PMAIL_DB" "SELECT priority FROM messages WHERE id=${msg_id};" 2>/dev/null)
+  subject=$(sqlite3 "$PMAIL_DB" "SELECT subject FROM messages WHERE id=${msg_id};" 2>/dev/null)
+  body=$(sqlite3 "$PMAIL_DB" "SELECT body FROM messages WHERE id=${msg_id};" 2>/dev/null)
+  timestamp=$(sqlite3 "$PMAIL_DB" "SELECT timestamp FROM messages WHERE id=${msg_id};" 2>/dev/null)
+  thread_id=$(sqlite3 "$PMAIL_DB" "SELECT thread_id FROM messages WHERE id=${msg_id};" 2>/dev/null)
+  from_name=$(show_from "$from_hash")
+  urgent=""
+  [ "$priority" = "urgent" ] && urgent=" [URGENT]"
+
+  attachments=$(sqlite3 "$PMAIL_DB" "SELECT COALESCE(attachments,'') FROM messages WHERE id=${msg_id};" 2>/dev/null)
+
+  echo ""
+  echo "--- #${msg_id} from ${from_name} (${from_hash})${urgent} @ ${timestamp} ---"
+  echo "Subject: ${subject}"
+  echo "${body}"
+
+  # Show attachments
+  if [ -n "$attachments" ]; then
+    echo ""
+    while IFS= read -r apath; do
+      [ -z "$apath" ] && continue
+      if [ -e "$apath" ]; then
+        echo "[Attached: ${apath} ($(wc -c < "$apath" | tr -d ' ') bytes)] <-- Use Read tool to view"
+      else
+        echo "[Attached: ${apath} (missing)]"
+      fi
+    done <<< "$attachments"
+  fi
+
+  # Show thread context if this is part of a conversation
+  if [ -n "$thread_id" ]; then
+    thread_root="$thread_id"
+    thread_count=$(sqlite3 "$PMAIL_DB" "SELECT COUNT(*) FROM messages WHERE id=${thread_root} OR thread_id=${thread_root};" 2>/dev/null)
+    if [ "${thread_count:-0}" -gt 1 ]; then
+      echo ""
+      echo "[Thread #${thread_root} - ${thread_count} messages. Run: pigeon thread ${thread_root}]"
+    fi
+  fi
+done < <(sqlite3 "$PMAIL_DB" \
+  "SELECT id FROM messages WHERE to_project='${PROJECT_HASH}' AND read=0 ORDER BY priority DESC, timestamp ASC;" 2>/dev/null)
+
+echo ""
+echo "=== ACTION REQUIRED: Inform the user about these messages and ask if they want to reply. ==="
+echo "=== Then run: pigeon read (to mark as read) ==="
+echo "=== To reply: pigeon reply <id> \"message\" ==="
+
+# Clear signal (new sends will re-create it)
+rm -f "$SIGNAL"

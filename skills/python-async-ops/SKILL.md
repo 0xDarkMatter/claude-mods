@@ -1,10 +1,13 @@
 ---
 name: python-async-ops
 description: "Python asyncio patterns for concurrent programming. Triggers on: asyncio, async, await, coroutine, gather, semaphore, TaskGroup, event loop, aiohttp, concurrent."
+license: MIT
 compatibility: "Python 3.10+ recommended. Some patterns require 3.11+ (TaskGroup, timeout)."
 allowed-tools: "Read Write"
-depends-on: [python-typing-ops]
-related-skills: [python-fastapi-ops, python-observability-ops]
+metadata:
+  author: claude-mods
+  depends-on: python-typing-ops
+  related-skills: python-fastapi-ops, python-observability-ops
 ---
 
 # Python Async Patterns

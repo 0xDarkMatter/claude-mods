@@ -1,8 +1,11 @@
 ---
 name: rust-ops
 description: "Rust development patterns, ownership, async, error handling, and ecosystem. Use for: rust, cargo, ownership, borrow checker, lifetime, tokio, serde, trait, Result, Option, async rust, crate, derive, impl, enum, pattern matching, Arc, Mutex, Send, Sync, thiserror, anyhow, clap, axum, sqlx, reqwest, rayon, tracing."
+license: MIT
 allowed-tools: "Read Write Bash"
-related-skills: [docker-ops, ci-cd-ops, testing-ops]
+metadata:
+  author: claude-mods
+  related-skills: docker-ops, ci-cd-ops, testing-ops
 ---
 
 # Rust Operations

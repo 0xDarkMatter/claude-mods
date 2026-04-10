@@ -1,8 +1,11 @@
 ---
 name: go-ops
 description: "Go development patterns, concurrency, error handling, testing, and project structure. Use for: golang, go, goroutine, channel, context, errgroup, go test, go mod, go build, interface, generics, table-driven tests, worker pool, sync.Mutex, sync.WaitGroup, pprof, go vet, golangci-lint, go workspace, functional options, middleware, http handler."
+license: MIT
 allowed-tools: "Read Write Bash"
-related-skills: [docker-ops, ci-cd-ops, api-design-ops, testing-ops]
+metadata:
+  author: claude-mods
+  related-skills: docker-ops, ci-cd-ops, api-design-ops, testing-ops
 ---
 
 # Go Operations

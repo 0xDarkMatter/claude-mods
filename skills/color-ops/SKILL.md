@@ -1,8 +1,11 @@
 ---
 name: color-ops
 description: "Color for developers - color spaces, accessibility contrast, palette generation, CSS color functions, design tokens, dark mode, and CVD simulation. Use for: color, colour, palette, contrast, accessibility, WCAG, APCA, OKLCH, OKLAB, HSL, color picker, color-mix, dark mode colors, design tokens, color system, color scale, color ramp, gradient, CVD, color blind, gamut, P3, sRGB, color naming, color harmony, color temperature, semantic colors."
+license: MIT
 allowed-tools: "Read Write Bash"
-related-skills: [tailwind-ops, react-ops, frontend-design]
+metadata:
+  author: claude-mods
+  related-skills: tailwind-ops, react-ops, frontend-design
 ---
 
 # Color Operations

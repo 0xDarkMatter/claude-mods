@@ -1,8 +1,11 @@
 ---
 name: astro-ops
 description: "Astro framework patterns, islands architecture, content collections, rendering strategies, and deployment. Use for: astro, islands architecture, content collections, astro cloudflare, view transitions, partial hydration, astrojs, SSG, SSR, hybrid rendering, astro adapter."
+license: MIT
 allowed-tools: "Read Write Bash"
-related-skills: [typescript-ops, tailwind-ops, javascript-ops]
+metadata:
+  author: claude-mods
+  related-skills: typescript-ops, tailwind-ops, javascript-ops
 ---
 
 # Astro Operations

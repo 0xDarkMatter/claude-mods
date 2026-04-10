@@ -1,8 +1,11 @@
 ---
 name: log-ops
 description: "Log analysis and JSONL processing - structured extraction, cross-log correlation, timeline reconstruction, pattern search"
+license: MIT
 allowed-tools: "Read Edit Write Bash Glob Grep Agent"
-related-skills: [data-processing, debug-ops, monitoring-ops, file-search, introspect]
+metadata:
+  author: claude-mods
+  related-skills: data-processing, debug-ops, monitoring-ops, file-search, introspect
 ---
 
 # Log Operations
