@@ -1,7 +1,10 @@
 ---
 name: rest-ops
 description: "Quick reference for RESTful API design patterns, HTTP semantics, caching, and rate limiting. Triggers on: rest api, http methods, status codes, api design, endpoint design, api versioning, rate limiting, caching headers."
+license: MIT
 allowed-tools: "Read Write"
+metadata:
+  author: claude-mods
 ---
 
 # REST Patterns

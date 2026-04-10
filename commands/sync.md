@@ -150,11 +150,11 @@ git log -1 --format="%h %s" 2>/dev/null
 
 ### Step 5: Check Mail
 
-Check for unread agentmail messages using the globally installed script:
+Check for unread pigeon messages using the globally installed script:
 
 ```bash
-bash "$HOME/.claude/agentmail/mail-db.sh" status 2>/dev/null
-bash "$HOME/.claude/agentmail/mail-db.sh" unread 2>/dev/null
+bash "$HOME/.claude/pigeon/mail-db.sh" status 2>/dev/null
+bash "$HOME/.claude/pigeon/mail-db.sh" unread 2>/dev/null
 ```
 
 - If the script doesn't exist or returns no unread, skip silently
@@ -238,15 +238,15 @@ what's already in context - no file read needed.
 
 ## Mail
 
-[If agentmail is installed and has unread messages:]
+[If pigeon is installed and has unread messages:]
 3 unread messages:
   From: some-api  |  Auth endpoints ready
   From: frontend  |  Need updated types
   From: infra     |  Deploy complete
 
-Run `agentmail read` to read.
+Run `pigeon read` to read.
 
-[If no unread messages or agentmail not installed: omit this section entirely]
+[If no unread messages or pigeon not installed: omit this section entirely]
 
 ## Quick Reference
 
@@ -258,7 +258,7 @@ Run `agentmail read` to read.
 
 ## Next Steps
 
-1. **Read mail**: N unread messages - `agentmail read` (when unread mail exists)
+1. **Read mail**: N unread messages - `pigeon read` (when unread mail exists)
 2. **Continue**: Fix callback URL handling
 3. **Check diff**: /sync --diff to see changes since save
 4. **Resume conversation**: `claude --resume abc123...` (when session_id present)
@@ -293,7 +293,7 @@ Project Synced: [project-name]
 
 ## Next Steps
 
-1. **Read mail**: N unread messages - `agentmail read` (when unread mail exists)
+1. **Read mail**: N unread messages - `pigeon read` (when unread mail exists)
 2. **Ready for new task** - No pending work detected
 3. **Create a plan** - Use native /plan for implementation planning
 4. **Save before leaving** - /save "notes" to persist state

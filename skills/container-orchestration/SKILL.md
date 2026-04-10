@@ -1,8 +1,11 @@
 ---
 name: container-orchestration
 description: "Docker and Kubernetes patterns. Triggers on: Dockerfile, docker-compose, kubernetes, k8s, helm, pod, deployment, service, ingress, container, image."
+license: MIT
 compatibility: "Docker 20+, Kubernetes 1.25+, Helm 3+"
 allowed-tools: "Read Write Bash"
+metadata:
+  author: claude-mods
 ---
 
 # Container Orchestration

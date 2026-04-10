@@ -1,8 +1,11 @@
 ---
 name: auth-ops
 description: "Authentication and authorization patterns - JWT, OAuth2, sessions, RBAC, ABAC, passkeys, and MFA. Use for: authentication, authorization, jwt, oauth, oauth2, session, login, rbac, abac, passkey, mfa, totp, api key, token, auth, cookie, csrf, cors credentials, bearer token, refresh token, oidc."
+license: MIT
 allowed-tools: "Read Write Bash"
-related-skills: [security-ops, api-design-ops, postgres-ops]
+metadata:
+  author: claude-mods
+  related-skills: security-ops, api-design-ops, postgres-ops
 ---
 
 # Auth Operations

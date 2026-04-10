@@ -1,10 +1,11 @@
 ---
 name: screenshot
 description: "Find and display recent screenshots. Triggers: screenshot, check screenshot, show screenshot, recent screenshot, last screenshot."
+license: MIT
 compatibility: "Windows, macOS, Linux"
 allowed-tools: "Bash, Glob, Read"
-depends-on: []
-related-skills: []
+metadata:
+  author: claude-mods
 ---
 
 # Screenshot Viewer

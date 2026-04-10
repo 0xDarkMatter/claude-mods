@@ -1,8 +1,11 @@
 ---
 name: api-design-ops
 description: "API design patterns for REST, gRPC, and GraphQL. Use for: api design, REST, gRPC, GraphQL, protobuf, schema design, api versioning, pagination, rate limiting, error format, OpenAPI, API authentication, JWT, OAuth2, API gateway, webhook, idempotency."
+license: MIT
 allowed-tools: "Read Write Bash"
-related-skills: [rest-ops, security-ops, go-ops, rust-ops, typescript-ops]
+metadata:
+  author: claude-mods
+  related-skills: rest-ops, security-ops, go-ops, rust-ops, typescript-ops
 ---
 
 # API Design Ops

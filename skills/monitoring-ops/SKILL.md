@@ -1,8 +1,11 @@
 ---
 name: monitoring-ops
 description: "Observability patterns - metrics, logging, tracing, alerting, and infrastructure monitoring. Use for: monitoring, observability, prometheus, grafana, metrics, alerting, structured logging, distributed tracing, opentelemetry, SLO, SLI, dashboard, health check, loki, jaeger, datadog, pagerduty."
+license: MIT
 allowed-tools: "Read Write Bash"
-related-skills: [python-observability-ops, docker-ops, ci-cd-ops, nginx-ops]
+metadata:
+  author: claude-mods
+  related-skills: python-observability-ops, docker-ops, ci-cd-ops, nginx-ops
 ---
 
 # Monitoring Operations

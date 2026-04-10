@@ -1,10 +1,12 @@
 ---
 name: claude-code-headless
 description: "Run Claude Code programmatically without interactive UI. Triggers on: headless, CLI automation, --print, output-format, stream-json, CI/CD, scripting."
+license: MIT
 compatibility: "Claude Code CLI"
 allowed-tools: "Bash Read"
-depends-on: []
-related-skills: [claude-code-hooks, claude-code-debug]
+metadata:
+  author: claude-mods
+  related-skills: claude-code-hooks, claude-code-debug
 ---
 
 # Claude Code Headless Mode

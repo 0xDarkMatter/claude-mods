@@ -1,7 +1,7 @@
 {
   "name": "claude-mods",
   "version": "2.3.0",
-  "description": "Custom commands, skills, and agents for Claude Code - session continuity, 23 expert agents, 65 skills, 3 commands, 5 rules, 3 hooks, 5 output styles, modern CLI tools",
+  "description": "Custom commands, skills, and agents for Claude Code - session continuity, 23 expert agents, 67 skills, 3 commands, 5 rules, 4 hooks, 5 output styles, modern CLI tools",
   "author": "0xDarkMatter",
   "repository": "https://github.com/0xDarkMatter/claude-mods",
   "license": "MIT",
@@ -49,6 +49,7 @@
     ],
     "skills": [
       "skills/api-design-ops",
+      "skills/pigeon",
       "skills/astro-ops",
       "skills/atomise",
       "skills/auth-ops",
@@ -113,7 +114,7 @@
       "skills/typescript-ops",
       "skills/unfold-admin",
       "skills/vue-ops",
-      "skills/agentmail"
+      "skills/genart-ops"
     ],
     "rules": [
       "rules/cli-tools.md",

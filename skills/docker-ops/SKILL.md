@@ -1,8 +1,11 @@
 ---
 name: docker-ops
 description: "Docker containerization patterns, Dockerfile best practices, multi-stage builds, and Docker Compose. Use for: docker, Dockerfile, docker-compose, container, image, multi-stage build, docker build, docker run, .dockerignore, health check, distroless, scratch image, BuildKit, layer caching, container security."
+license: MIT
 allowed-tools: "Read Write Bash"
-related-skills: [container-orchestration, go-ops, rust-ops, ci-cd-ops]
+metadata:
+  author: claude-mods
+  related-skills: container-orchestration, go-ops, rust-ops, ci-cd-ops
 ---
 
 # Docker Operations

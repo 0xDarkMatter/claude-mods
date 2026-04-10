@@ -1,8 +1,11 @@
 ---
 name: migrate-ops
 description: "Framework and language migration patterns - version upgrades, breaking changes, dependency audit, safe rollback. Use for: migrate, migration, upgrade, version bump, breaking changes, deprecation, dependency audit, npm audit, pip-audit, codemod, jscodeshift, rector, rollback, semver, changelog, framework upgrade, language upgrade, React 19, Vue 3, Next.js App Router, Laravel 11, Angular, Python 3.12, Node 22, TypeScript 5, Go 1.22, Rust 2024, PHP 8.4."
+license: MIT
 allowed-tools: "Read Edit Write Bash Glob Grep Agent"
-related-skills: [testing-ops, debug-ops, git-ops, refactor-ops]
+metadata:
+  author: claude-mods
+  related-skills: testing-ops, debug-ops, git-ops, refactor-ops
 ---
 
 # Migrate Operations

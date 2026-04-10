@@ -1,8 +1,11 @@
 ---
 name: git-ops
 description: "Git operations orchestrator - commits, PRs, branch management, releases, changelog. Routes lightweight reads inline, dispatches heavy work to background Sonnet agent. Triggers on: commit, push, pull request, create PR, git status, git diff, rebase, stash, branch, merge, release, tag, changelog, semver, cherry-pick, bisect, worktree."
+license: MIT
 allowed-tools: "Read Bash Glob Grep Agent TaskCreate TaskUpdate"
-related-skills: [review, ci-cd-ops]
+metadata:
+  author: claude-mods
+  related-skills: review, ci-cd-ops
 ---
 
 # Git Ops

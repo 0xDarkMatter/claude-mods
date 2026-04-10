@@ -1,8 +1,11 @@
 ---
 name: postgres-ops
 description: "PostgreSQL operations, optimization, and administration. Use for: schema design, index selection, query tuning with EXPLAIN ANALYZE, postgresql.conf configuration, backup and restore (pg_dump, pg_basebackup, WAL, PITR), vacuum and autovacuum tuning, connection pooling (pgBouncer, pgPool), replication (streaming, logical), partitioning, monitoring (pg_stat_statements, pg_stat_activity), JSONB operations, full-text search (tsvector, tsquery), row-level security (RLS), extensions (PostGIS, pg_trgm, timescaledb), GiST/GIN/BRIN indexes, materialized views, foreign data wrappers, LISTEN/NOTIFY."
+license: MIT
 allowed-tools: "Read Write Bash"
-related-skills: [sql-ops, sqlite-ops, python-database-ops]
+metadata:
+  author: claude-mods
+  related-skills: sql-ops, sqlite-ops, python-database-ops
 ---
 
 # PostgreSQL Operations
