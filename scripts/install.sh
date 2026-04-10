@@ -43,6 +43,7 @@ deprecated_items=(
     # Removed skills
     "$CLAUDE_DIR/skills/conclave"                # Deprecated
     "$CLAUDE_DIR/skills/claude-code-templates"   # Replaced by skill-creator
+    "$CLAUDE_DIR/skills/agentmail"               # Renamed to pigeon (v2.3.0)
 )
 
 # Renamed skills: -patterns -> -ops (March 2026)
@@ -187,8 +188,14 @@ if [ -f "$PROJECT_ROOT/hooks/check-mail.sh" ]; then
     echo -e "  ${GREEN}check-mail.sh${NC}"
 fi
 
-# Check if hook is already configured
-if grep -q "check-mail.sh" "$CLAUDE_DIR/settings.json" 2>/dev/null; then
+# Migrate stale agentmail hook path → pigeon
+if grep -q "agentmail/check-mail.sh" "$CLAUDE_DIR/settings.json" 2>/dev/null; then
+    sed -i 's|agentmail/check-mail\.sh|pigeon/check-mail.sh|g' "$CLAUDE_DIR/settings.json"
+    echo -e "  ${GREEN}Migrated agentmail hook → pigeon in settings.json${NC}"
+fi
+
+# Check if hook is already configured (pigeon path)
+if grep -q "pigeon/check-mail.sh" "$CLAUDE_DIR/settings.json" 2>/dev/null; then
     echo -e "  ${GREEN}Hook already configured in settings.json${NC}"
 else
     echo ""
