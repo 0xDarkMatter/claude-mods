@@ -26,7 +26,7 @@ From Python async patterns to Rust ownership models, from AWS Fargate deployment
 - 🎨 **`genart-ops` skill** - Comprehensive generative art skill (1,843 lines) covering three.js scene scaffolding, p5.js sketch structure, SVG generation, GLSL shaders (noise, SDF, ray marching, IQ palettes), procedural algorithms (flow fields, Poisson disk, L-systems, WFC, Voronoi), and OKLAB/OKLCH colour theory
 - 📐 **Agent Skills spec compliance** - All 67 skills migrated to the [Agent Skills specification](https://agentskills.io/specification). Non-standard frontmatter fields moved into `metadata:` block, `license: MIT` and `metadata.author: claude-mods` on every skill. Verified 67/67 pass.
 - 📚 **Docs updated** - `SKILL-SUBAGENT-REFERENCE.md` rewritten with spec as standard, `naming-conventions.md` updated with spec-compliant frontmatter examples, `AGENT-SKILLS-COMPLIANCE-BRIEF.md` added to docs/
-- 📬 **`pigeon` skill** - Inter-session pmail between Claude Code sessions across projects. SQLite-backed messaging at `~/.claude/pmail.db` with hook-based notification. Integrated into `/sync` for session-start mail check.
+- 📬 **`pigeon` skill** - Inter-session pmail between Claude Code sessions across projects. SQLite-backed at `~/.claude/pmail.db` with git-rooted project identity (survives renames/moves/clones), threading, file attachments, broadcast, search, and signal-file-driven hook notifications. Integrated into `/sync` for session-start mail check. Per-project disable via `.claude/pigeon.disable`. Renamed from `agentmail` to avoid collision with [AgentMail](https://www.agentmail.to) (YC S25).
 
 **v2.3.0** (March 2026)
 - 🎯 **Orchestrator-dispatch pattern** - Three skills upgraded from static reference dumps to active orchestrators that classify intent, dispatch to agents, and manage safety tiers:
@@ -257,7 +257,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [python-env](skills/python-env/) | Fast Python environment management with uv |
 | [task-runner](skills/task-runner/) | Run project commands with just |
 | [screenshot](skills/screenshot/) | Find and display recent screenshots from common screenshot directories |
-| [pigeon](skills/pigeon/) | Inter-session pmail - SQLite-backed messaging between Claude Code sessions across projects |
+| [pigeon](skills/pigeon/) | Inter-session pmail - send/receive messages between Claude Code sessions across projects. SQLite-backed (`~/.claude/pmail.db`), git-rooted project identity, threading, attachments, broadcast, search. Hook-driven notifications. Per-project disable. |
 
 #### Development Skills
 | Skill | Description |
@@ -283,7 +283,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [pre-commit-lint.sh](hooks/pre-commit-lint.sh) | PreToolUse | Auto-lint staged files before commit (JS/TS, Python, Go, Rust, PHP) |
 | [post-edit-format.sh](hooks/post-edit-format.sh) | PostToolUse | Auto-format files after Write/Edit (Prettier, Ruff, gofmt, rustfmt) |
 | [dangerous-cmd-warn.sh](hooks/dangerous-cmd-warn.sh) | PreToolUse | Block destructive commands (force push, rm -rf, DROP TABLE) |
-| [check-mail.sh](hooks/check-mail.sh) | PreToolUse | Check for unread inter-session mail (10s cooldown, silent when empty) |
+| [check-mail.sh](hooks/check-mail.sh) | PreToolUse | Check for unread pmail via signal file (no cooldown, zero-cost when empty) |
 
 ### Output Styles
 
