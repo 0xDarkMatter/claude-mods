@@ -41,7 +41,8 @@ $deprecated = @(
     "$claudeDir\commands\conclave.md",
     "$claudeDir\commands\pulse.md",
     "$claudeDir\skills\conclave",
-    "$claudeDir\skills\claude-code-templates"   # Replaced by skill-creator
+    "$claudeDir\skills\claude-code-templates",  # Replaced by skill-creator
+    "$claudeDir\skills\agentmail"               # Renamed to pigeon (v2.3.0)
 )
 
 # Renamed skills: -patterns -> -ops (March 2026)
@@ -178,7 +179,17 @@ if (Test-Path $checkMailSrc) {
 }
 
 $settingsPath = Join-Path $claudeDir "settings.json"
-if ((Test-Path $settingsPath) -and (Select-String -Path $settingsPath -Pattern "check-mail.sh" -Quiet)) {
+
+# Migrate stale agentmail hook path -> pigeon
+if ((Test-Path $settingsPath) -and (Select-String -Path $settingsPath -Pattern "agentmail/check-mail\.sh" -Quiet)) {
+    $content = Get-Content $settingsPath -Raw
+    $content = $content -replace 'agentmail/check-mail\.sh', 'pigeon/check-mail.sh'
+    Set-Content $settingsPath -Value $content -NoNewline
+    Write-Host "  Migrated agentmail hook -> pigeon in settings.json" -ForegroundColor Green
+}
+
+# Check if hook is already configured (pigeon path)
+if ((Test-Path $settingsPath) -and (Select-String -Path $settingsPath -Pattern "pigeon/check-mail\.sh" -Quiet)) {
     Write-Host "  Hook already configured in settings.json" -ForegroundColor Green
 } else {
     Write-Host ""
