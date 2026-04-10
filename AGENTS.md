@@ -7,7 +7,8 @@ This is **claude-mods** - a collection of custom extensions for Claude Code:
 - **3 commands** for session management (/sync, /save) and experimental features (/canvas)
 - **67 skills** for CLI tools, patterns, workflows, and development tasks
 - **5 output styles** for response personality (Vesper, Spartan, Mentor, Executive, Pair)
-- **4 hooks** for pre-commit linting, post-edit formatting, dangerous command warnings, and inter-session mail
+- **4 hooks** for pre-commit linting, post-edit formatting, dangerous command warnings, and pmail notifications
+- **Pigeon** inter-session messaging (`pigeon send/read/reply`) - SQLite-backed pmail at `~/.claude/pmail.db`
 
 ## Installation
 
@@ -32,7 +33,7 @@ cd claude-mods && ./scripts/install.sh  # or .\scripts\install.ps1 on Windows
 | `commands/` | Slash command definitions |
 | `skills/` | Skill definitions with SKILL.md |
 | `output-styles/` | Response personalities (vesper, spartan, mentor, executive, pair) |
-| `hooks/` | Working hook scripts (lint, format, safety) |
+| `hooks/` | Working hook scripts (lint, format, safety, pmail) |
 | `rules/` | Claude Code rules (5 files: cli-tools, thinking, commit-style, naming-conventions, skill-agent-updates) |
 | `tools/` | Modern CLI toolkit documentation |
 | `tests/` | Validation scripts + justfile |
@@ -55,6 +56,7 @@ On "INIT:" message at session start:
 | `docs/WORKFLOWS.md` | 10 workflow patterns from Anthropic best practices |
 | `skills/tool-discovery/` | Find the right library for any task |
 | `hooks/README.md` | Pre/post execution hook examples |
+| `skills/pigeon/` | Inter-session pmail - send, read, reply, broadcast, search across projects |
 
 ## Quick Reference
 
@@ -67,6 +69,8 @@ On "INIT:" message at session start:
 **Tasks API:** Use `TaskCreate`, `TaskList`, `TaskUpdate`, `TaskGet` for task management. Tasks are session-scoped (don't persist). Use `/save` to capture and `/sync` to restore.
 
 **Session Cache:** v3.1 schema stores full task objects, session ID (for `--resume`), PR linkage (for `--from-pr`), and writes a summary to native MEMORY.md. Backwards compatible with v3.0.
+
+**Pigeon (pmail):** `pigeon send <project> "subject" "body"` | `pigeon read` | `pigeon reply <id> "body"` | `pigeon status` | `pigeon broadcast "subject" "body"`. Attach files with `--attach <path>`. Disable per-project: `touch .claude/pigeon.disable`. DB at `~/.claude/pmail.db`, scripts at `~/.claude/pigeon/`.
 
 ## Performance
 
