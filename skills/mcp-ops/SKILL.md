@@ -1,8 +1,11 @@
 ---
 name: mcp-ops
 description: "Model Context Protocol server development, tool design, resource handling, and transport configuration. Use for: mcp, model context protocol, mcp server, mcp tool, mcp resource, fastmcp, mcp transport, stdio, sse, streamable http, mcp inspector, tool handler, mcp prompt."
+license: MIT
 allowed-tools: "Read Write Bash"
-related-skills: [claude-code-hooks, claude-code-debug, typescript-ops, python-fastapi-ops]
+metadata:
+  author: claude-mods
+  related-skills: claude-code-hooks, claude-code-debug, typescript-ops, python-fastapi-ops
 ---
 
 # MCP Operations

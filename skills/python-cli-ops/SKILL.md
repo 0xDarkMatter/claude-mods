@@ -1,10 +1,12 @@
 ---
 name: python-cli-ops
 description: "CLI application patterns for Python. Triggers on: cli, command line, typer, click, argparse, terminal, rich, console, terminal ui."
+license: MIT
 compatibility: "Python 3.10+. Requires typer and rich for modern CLI development."
 allowed-tools: "Read Write Bash"
-depends-on: []
-related-skills: [python-typing-ops, python-observability-ops]
+metadata:
+  author: claude-mods
+  related-skills: python-typing-ops, python-observability-ops
 ---
 
 # Python CLI Patterns

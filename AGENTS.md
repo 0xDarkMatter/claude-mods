@@ -5,7 +5,7 @@
 This is **claude-mods** - a collection of custom extensions for Claude Code:
 - **23 expert agents** for specialized domains (React, Python, Go, Rust, AWS, git, etc.)
 - **3 commands** for session management (/sync, /save) and experimental features (/canvas)
-- **66 skills** for CLI tools, patterns, workflows, and development tasks
+- **67 skills** for CLI tools, patterns, workflows, and development tasks
 - **5 output styles** for response personality (Vesper, Spartan, Mentor, Executive, Pair)
 - **4 hooks** for pre-commit linting, post-edit formatting, dangerous command warnings, and inter-session mail
 
@@ -37,7 +37,7 @@ cd claude-mods && ./scripts/install.sh  # or .\scripts\install.ps1 on Windows
 | `tools/` | Modern CLI toolkit documentation |
 | `tests/` | Validation scripts + justfile |
 | `scripts/` | Install scripts |
-| `docs/` | PLAN.md, DASH.md, WORKFLOWS.md |
+| `docs/` | PLAN.md, DASH.md, WORKFLOWS.md, SKILL-SUBAGENT-REFERENCE.md, AGENT-SKILLS-COMPLIANCE-BRIEF.md |
 
 ## Session Init
 

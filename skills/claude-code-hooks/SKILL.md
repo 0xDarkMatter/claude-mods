@@ -1,10 +1,12 @@
 ---
 name: claude-code-hooks
 description: "Claude Code hook system for pre/post tool execution. Triggers on: hooks, PreToolUse, PostToolUse, hook script, tool validation, audit logging."
+license: MIT
 compatibility: "Claude Code CLI with settings.json support"
 allowed-tools: "Bash Read Write"
-depends-on: []
-related-skills: [claude-code-debug, claude-code-headless]
+metadata:
+  author: claude-mods
+  related-skills: claude-code-debug, claude-code-headless
 ---
 
 # Claude Code Hooks

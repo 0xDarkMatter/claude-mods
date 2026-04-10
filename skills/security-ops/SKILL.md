@@ -1,8 +1,11 @@
 ---
 name: security-ops
 description: "Security audit orchestrator - parallel dependency scanning, SAST pattern detection, auth/config review. Dispatches 3 audit agents simultaneously, consolidates into OWASP-mapped severity report. Triggers on: security review, security audit, OWASP, XSS, SQL injection, CSRF, authentication, authorization, secrets management, input validation, secure coding, vulnerability scan, dependency audit."
+license: MIT
 allowed-tools: "Read Edit Write Bash Glob Grep Agent TaskCreate TaskUpdate"
-related-skills: [auth-ops, testing-ops, debug-ops, monitoring-ops]
+metadata:
+  author: claude-mods
+  related-skills: auth-ops, testing-ops, debug-ops, monitoring-ops
 ---
 
 # Security Operations

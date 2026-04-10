@@ -1,7 +1,10 @@
 ---
 name: iterate
 description: "Autonomous improvement loop - modify, measure, keep or discard, repeat. Inspired by Karpathy's autoresearch. Triggers on: iterate, improve autonomously, run overnight, keep improving, autoresearch, improvement loop, iterate until done, autonomous iteration."
+license: MIT
 allowed-tools: "Read Write Edit Glob Grep Bash Agent TaskCreate TaskUpdate TaskList"
+metadata:
+  author: claude-mods
 ---
 
 # Iterate - Autonomous Improvement Loop

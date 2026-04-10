@@ -5,7 +5,7 @@
 
 set -uo pipefail
 
-MAIL_DB="$HOME/.claude/mail.db"
+MAIL_DB="$HOME/.claude/pmail.db"
 MAIL_SCRIPT="$(dirname "$0")/mail-db.sh"
 HOOK_SCRIPT="$(dirname "$0")/../../hooks/check-mail.sh"
 # Resolve relative to repo root if needed
@@ -608,16 +608,16 @@ assert "purge --all empties db" "0" "$total"
 echo ""
 echo "=== Per-Project Disable ==="
 
-# T52: Hook respects .claude/agentmail.disable
+# T52: Hook respects .claude/pigeon.disable
 bash "$MAIL_SCRIPT" send "claude-mods" "disable test" "should not appear" >/dev/null 2>&1
 clear_cooldown
 mkdir -p .claude
-touch .claude/agentmail.disable
+touch .claude/pigeon.disable
 result=$(bash "$HOOK_SCRIPT" 2>&1)
 assert_empty "hook silent when disabled" "$result"
 
 # T53: Hook delivers after re-enable
-rm -f .claude/agentmail.disable
+rm -f .claude/pigeon.disable
 clear_cooldown
 result=$(bash "$HOOK_SCRIPT" 2>&1)
 assert_contains "hook works after re-enable" "INCOMING MAIL" "$result"

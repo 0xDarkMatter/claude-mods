@@ -1,8 +1,11 @@
 ---
 name: perf-ops
 description: "Performance profiling and optimization orchestrator - diagnoses symptoms, dispatches profiling to language experts, manages before/after comparisons. Triggers on: performance, profiling, flamegraph, pprof, py-spy, clinic.js, memray, heaptrack, bundle size, webpack analyzer, load testing, k6, artillery, vegeta, locust, benchmark, hyperfine, criterion, slow query, EXPLAIN ANALYZE, N+1, caching, optimization, latency, throughput, p99, memory leak, CPU spike, bottleneck."
+license: MIT
 allowed-tools: "Read Edit Write Bash Glob Grep Agent TaskCreate TaskUpdate"
-related-skills: [debug-ops, monitoring-ops, testing-ops, code-stats, postgres-ops]
+metadata:
+  author: claude-mods
+  related-skills: debug-ops, monitoring-ops, testing-ops, code-stats, postgres-ops
 ---
 
 # Performance Operations

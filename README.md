@@ -12,15 +12,21 @@
 
 > *A comprehensive extension toolkit that transforms Claude Code into a specialized development powerhouse.*
 
-**claude-mods** is a production-ready plugin that extends Claude Code with 23 expert agents, 66 specialized skills, 5 output styles, 4 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
+**claude-mods** is a production-ready plugin that extends Claude Code with 23 expert agents, 67 specialized skills, 5 output styles, 4 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
 
-Built on [Anthropic's Agent Skills standard](https://github.com/anthropics/skills), claude-mods fills critical gaps in Claude Code's capabilities: persistent session state that survives across machines, on-demand expert knowledge for specialized domains, token-efficient modern CLI tools (10-100x faster than traditional alternatives), and proven workflow patterns for TDD, code review, and feature development. The toolkit implements Anthropic's [recommended patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), ensuring your development context never vanishes when sessions end.
+Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms), claude-mods fills critical gaps in Claude Code's capabilities: persistent session state that survives across machines, on-demand expert knowledge for specialized domains, token-efficient modern CLI tools (10-100x faster than traditional alternatives), and proven workflow patterns for TDD, code review, and feature development. The toolkit implements Anthropic's [recommended patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), ensuring your development context never vanishes when sessions end.
 
 From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
 
-**23 agents. 66 skills. 5 styles. 4 hooks. One install.**
+**23 agents. 67 skills. 5 styles. 4 hooks. One install.**
 
 ## Recent Updates
+
+**v2.3.1** (April 2026)
+- 🎨 **`genart-ops` skill** - Comprehensive generative art skill (1,843 lines) covering three.js scene scaffolding, p5.js sketch structure, SVG generation, GLSL shaders (noise, SDF, ray marching, IQ palettes), procedural algorithms (flow fields, Poisson disk, L-systems, WFC, Voronoi), and OKLAB/OKLCH colour theory
+- 📐 **Agent Skills spec compliance** - All 67 skills migrated to the [Agent Skills specification](https://agentskills.io/specification). Non-standard frontmatter fields moved into `metadata:` block, `license: MIT` and `metadata.author: claude-mods` on every skill. Verified 67/67 pass.
+- 📚 **Docs updated** - `SKILL-SUBAGENT-REFERENCE.md` rewritten with spec as standard, `naming-conventions.md` updated with spec-compliant frontmatter examples, `AGENT-SKILLS-COMPLIANCE-BRIEF.md` added to docs/
+- 📬 **`pigeon` skill** - Inter-session pmail between Claude Code sessions across projects. SQLite-backed messaging at `~/.claude/pmail.db` with hook-based notification. Integrated into `/sync` for session-start mail check.
 
 **v2.3.0** (March 2026)
 - 🎯 **Orchestrator-dispatch pattern** - Three skills upgraded from static reference dumps to active orchestrators that classify intent, dispatch to agents, and manage safety tiers:
@@ -99,14 +105,14 @@ claude-mods/
 ├── .claude-plugin/     # Plugin metadata
 ├── agents/             # Expert subagents (22)
 ├── commands/           # Slash commands (3)
-├── skills/             # Custom skills (66)
+├── skills/             # Custom skills (67)
 ├── output-styles/      # Response personalities
 ├── hooks/              # Hook examples & docs
 ├── rules/              # Claude Code rules
 ├── tools/              # Modern CLI toolkit installers
 ├── scripts/            # Plugin install scripts
 ├── tests/              # Test suites + justfile
-├── docs/               # Project docs (PLAN.md, DASH.md)
+├── docs/               # Project docs
 └── templates/          # Extension templates
 ```
 
@@ -161,7 +167,7 @@ Install modern CLI tools (fd, rg, bat, etc.) for better performance:
 
 ## Skill Architecture
 
-All skills follow [Anthropic's official pattern](https://github.com/anthropics/skills) with consistent structure:
+All skills comply with the [Agent Skills specification](https://agentskills.io/specification) and follow a consistent structure:
 
 ```
 skill-name/
@@ -206,6 +212,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [cli-ops](skills/cli-ops/) | Production CLI tool patterns - agentic workflows, stream separation, exit codes |
 | [tailwind-ops](skills/tailwind-ops/) | Tailwind CSS patterns, v4 migration, components, configuration |
 | [color-ops](skills/color-ops/) | Color spaces, WCAG/APCA contrast checker, palette + harmony generators, CSS color functions, design tokens, color converter |
+| [genart-ops](skills/genart-ops/) | Generative art - three.js scenes, p5.js sketches, SVG generation, GLSL shaders, procedural algorithms, colour theory |
 
 #### Data & API Skills
 | Skill | Description |
@@ -250,7 +257,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [python-env](skills/python-env/) | Fast Python environment management with uv |
 | [task-runner](skills/task-runner/) | Run project commands with just |
 | [screenshot](skills/screenshot/) | Find and display recent screenshots from common screenshot directories |
-| [agentmail](skills/agentmail/) | Inter-session messaging - SQLite-backed mail between Claude Code sessions across projects |
+| [pigeon](skills/pigeon/) | Inter-session pmail - SQLite-backed messaging between Claude Code sessions across projects |
 
 #### Development Skills
 | Skill | Description |

@@ -1,8 +1,11 @@
 ---
 name: markitdown
 description: "Convert local documents to Markdown using Microsoft's markitdown CLI. Best for: PDF, Word, Excel, PowerPoint, images (OCR), audio. Can fetch URLs but Jina is faster for web. Triggers on: convert to markdown, read PDF, parse document, extract text from, docx, xlsx, pptx, OCR image, local file."
+license: MIT
 compatibility: "Requires markitdown. Install: pip install markitdown"
 allowed-tools: "Bash"
+metadata:
+  author: claude-mods
 ---
 
 # markitdown - Document to Markdown

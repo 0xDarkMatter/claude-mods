@@ -1,10 +1,13 @@
 ---
 name: python-fastapi-ops
 description: "FastAPI web framework patterns. Triggers on: fastapi, api endpoint, dependency injection, pydantic model, openapi, swagger, starlette, async api, rest api, uvicorn."
+license: MIT
 compatibility: "FastAPI 0.100+, Pydantic v2, Python 3.10+. Requires uvicorn for production."
 allowed-tools: "Read Write Bash"
-depends-on: [python-typing-ops, python-async-ops]
-related-skills: [python-database-ops, python-observability-ops, python-pytest-ops]
+metadata:
+  author: claude-mods
+  depends-on: python-typing-ops, python-async-ops
+  related-skills: python-database-ops, python-observability-ops, python-pytest-ops
 ---
 
 # FastAPI Patterns

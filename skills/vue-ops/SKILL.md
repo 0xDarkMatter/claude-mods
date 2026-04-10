@@ -1,8 +1,11 @@
 ---
 name: vue-ops
 description: "Vue 3 development patterns, Composition API, Pinia state management, Vue Router, and Nuxt 3. Use for: vue, vuejs, composition api, pinia, vue router, nuxt, nuxt3, script setup, composable, reactive, defineProps, defineEmits, defineModel, v-model, provide inject, vue3."
+license: MIT
 allowed-tools: "Read Write Bash"
-related-skills: [typescript-ops, testing-ops, tailwind-ops, javascript-ops]
+metadata:
+  author: claude-mods
+  related-skills: typescript-ops, testing-ops, tailwind-ops, javascript-ops
 ---
 
 # Vue Operations

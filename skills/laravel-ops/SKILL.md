@@ -1,8 +1,11 @@
 ---
 name: laravel-ops
 description: "Laravel framework patterns, Eloquent ORM, authentication, queues, and testing. Use for: laravel, eloquent, artisan, blade, php, sanctum, livewire, inertia, pest, phpunit, forge, vapor, queue, middleware, migration, factory, seeder."
+license: MIT
 allowed-tools: "Read Write Bash"
-related-skills: [sql-ops, postgres-ops, testing-ops, docker-ops]
+metadata:
+  author: claude-mods
+  related-skills: sql-ops, postgres-ops, testing-ops, docker-ops
 ---
 
 # Laravel Operations

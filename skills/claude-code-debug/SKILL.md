@@ -1,10 +1,12 @@
 ---
 name: claude-code-debug
 description: "Troubleshoot Claude Code extensions and behavior. Triggers on: debug, troubleshoot, not working, skill not loading, hook not running, agent not found."
+license: MIT
 compatibility: "Claude Code CLI"
 allowed-tools: "Bash Read"
-depends-on: []
-related-skills: [claude-code-hooks, claude-code-headless, claude-code-templates]
+metadata:
+  author: claude-mods
+  related-skills: claude-code-hooks, claude-code-headless, claude-code-templates
 ---
 
 # Claude Code Debug

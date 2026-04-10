@@ -1,7 +1,10 @@
 ---
 name: review
 description: "Code review with semantic diffs, expert routing, and auto-TaskCreate. Triggers on: code review, review changes, check code, review PR, security audit."
+license: MIT
 allowed-tools: "Read Write Edit Bash Glob Grep Task TaskCreate TaskUpdate"
+metadata:
+  author: claude-mods
 ---
 
 # Review Skill - AI Code Review
