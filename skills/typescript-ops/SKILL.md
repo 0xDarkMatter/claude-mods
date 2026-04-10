@@ -1,8 +1,11 @@
 ---
 name: typescript-ops
 description: "TypeScript type system, generics, utility types, strict mode, and ecosystem patterns. Use for: typescript, ts, type, generic, utility type, Partial, Pick, Omit, Record, Exclude, Extract, ReturnType, Parameters, keyof, typeof, infer, mapped type, conditional type, template literal type, discriminated union, type guard, type assertion, type narrowing, tsconfig, strict mode, declaration file, zod, valibot."
+license: MIT
 allowed-tools: "Read Write Bash"
-related-skills: [react-ops, testing-ops]
+metadata:
+  author: claude-mods
+  related-skills: react-ops, testing-ops
 ---
 
 # TypeScript Operations

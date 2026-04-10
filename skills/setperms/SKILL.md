@@ -1,10 +1,11 @@
 ---
 name: setperms
 description: "Set tool permissions for Claude Code. Configures allowed commands, rules, and preferences in .claude/ directory. Triggers on: setperms, init tools, configure permissions, setup project, set permissions, init claude."
-allowed-tools: "Read Write Bash"
+license: MIT
 compatibility: "Creates project-local .claude/ configuration."
-depends-on: []
-related-skills: []
+allowed-tools: "Read Write Bash"
+metadata:
+  author: claude-mods
 ---
 
 # /setperms

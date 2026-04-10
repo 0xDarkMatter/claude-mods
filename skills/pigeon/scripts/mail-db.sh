@@ -1,12 +1,12 @@
 #!/bin/bash
-# mail-db.sh - SQLite mail database operations
-# Global mail database at ~/.claude/mail.db
+# mail-db.sh - SQLite pmail database operations
+# Global mail database at ~/.claude/pmail.db
 # Project identity: 6-char ID derived from git root commit (stable across
 # renames, moves, clones) with fallback to canonical path hash for non-git dirs.
 
 set -euo pipefail
 
-MAIL_DB="$HOME/.claude/mail.db"
+MAIL_DB="$HOME/.claude/pmail.db"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ============================================================================
@@ -257,7 +257,7 @@ read_mail() {
   sqlite3 "$MAIL_DB" \
     "UPDATE messages SET read=1 WHERE to_project='${pid}' AND read=0;"
   # Clear signal file
-  rm -f "/tmp/agentmail_signal_${pid}"
+  rm -f "/tmp/pigeon_signal_${pid}"
 }
 
 read_one() {
@@ -329,7 +329,7 @@ send() {
   sqlite3 "$MAIL_DB" \
     "INSERT INTO messages (from_project, to_project, subject, body, priority, attachments) VALUES ('${from_id}', '${to_id}', '${safe_subject}', '${safe_body}', '${priority}', '${safe_attachments}');"
   # Signal the recipient
-  touch "/tmp/agentmail_signal_${to_id}"
+  touch "/tmp/pigeon_signal_${to_id}"
   local to_name
   to_name=$(display_name "$to_id")
   local attach_note=""
@@ -459,7 +459,7 @@ reply() {
   sqlite3 "$MAIL_DB" \
     "INSERT INTO messages (from_project, to_project, subject, body, thread_id, attachments) VALUES ('${from_id}', '${orig_from_hash}', '${safe_subject}', '${safe_body}', ${thread_id}, '${safe_attachments}');"
   # Signal the recipient
-  touch "/tmp/agentmail_signal_${orig_from_hash}"
+  touch "/tmp/pigeon_signal_${orig_from_hash}"
   local orig_name
   orig_name=$(display_name "$orig_from_hash")
   local attach_note=""
@@ -532,7 +532,7 @@ broadcast() {
     [ -z "$target_hash" ] && continue
     sqlite3 "$MAIL_DB" \
       "INSERT INTO messages (from_project, to_project, subject, body) VALUES ('${from_id}', '${target_hash}', '${safe_subject}', '${safe_body}');"
-    touch "/tmp/agentmail_signal_${target_hash}"
+    touch "/tmp/pigeon_signal_${target_hash}"
     count=$((count + 1))
   done <<< "$targets"
   echo "Broadcast to ${count} project(s): ${subject}"

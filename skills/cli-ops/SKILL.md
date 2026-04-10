@@ -1,10 +1,12 @@
 ---
 name: cli-ops
 description: "Patterns for building production-quality CLI tools with predictable behavior, parseable output, and agentic workflows. Triggers: cli tool, command line tool, build cli, cli patterns, agentic cli, cli design, typer cli, click cli."
+license: MIT
 compatibility: "Python 3.11+, Typer, Click"
 allowed-tools: "Read, Write, Edit"
-depends-on: []
-related-skills: [python-cli-ops, python-async-ops]
+metadata:
+  author: claude-mods
+  related-skills: python-cli-ops, python-async-ops
 ---
 
 # CLI Patterns for Agentic Workflows

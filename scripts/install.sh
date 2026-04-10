@@ -165,19 +165,25 @@ fi
 echo ""
 
 # =============================================================================
-# AGENTMAIL - Global install (scripts + hook config hint)
+# PIGEON - Global install (scripts + hook config hint)
 # =============================================================================
-echo -e "${BLUE}Installing agentmail...${NC}"
+echo -e "${BLUE}Installing pigeon (pmail)...${NC}"
 
-mkdir -p "$CLAUDE_DIR/agentmail"
-if [ -f "$PROJECT_ROOT/skills/agentmail/scripts/mail-db.sh" ]; then
-    cp "$PROJECT_ROOT/skills/agentmail/scripts/mail-db.sh" "$CLAUDE_DIR/agentmail/"
-    chmod +x "$CLAUDE_DIR/agentmail/mail-db.sh"
+# Clean up old agentmail install if present
+if [ -d "$CLAUDE_DIR/agentmail" ]; then
+    rm -rf "$CLAUDE_DIR/agentmail"
+    echo -e "  ${RED}Removed old agentmail/ (renamed to pigeon/)${NC}"
+fi
+
+mkdir -p "$CLAUDE_DIR/pigeon"
+if [ -f "$PROJECT_ROOT/skills/pigeon/scripts/mail-db.sh" ]; then
+    cp "$PROJECT_ROOT/skills/pigeon/scripts/mail-db.sh" "$CLAUDE_DIR/pigeon/"
+    chmod +x "$CLAUDE_DIR/pigeon/mail-db.sh"
     echo -e "  ${GREEN}mail-db.sh${NC}"
 fi
 if [ -f "$PROJECT_ROOT/hooks/check-mail.sh" ]; then
-    cp "$PROJECT_ROOT/hooks/check-mail.sh" "$CLAUDE_DIR/agentmail/"
-    chmod +x "$CLAUDE_DIR/agentmail/check-mail.sh"
+    cp "$PROJECT_ROOT/hooks/check-mail.sh" "$CLAUDE_DIR/pigeon/"
+    chmod +x "$CLAUDE_DIR/pigeon/check-mail.sh"
     echo -e "  ${GREEN}check-mail.sh${NC}"
 fi
 
@@ -186,20 +192,20 @@ if grep -q "check-mail.sh" "$CLAUDE_DIR/settings.json" 2>/dev/null; then
     echo -e "  ${GREEN}Hook already configured in settings.json${NC}"
 else
     echo ""
-    echo -e "  ${YELLOW}To enable automatic mail notifications, add this to ~/.claude/settings.json:${NC}"
+    echo -e "  ${YELLOW}To enable automatic pmail notifications, add this to ~/.claude/settings.json:${NC}"
     echo ""
     echo '  "hooks": {'
     echo '    "PreToolUse": [{'
     echo '      "matcher": "*",'
     echo '      "hooks": [{'
     echo '        "type": "command",'
-    echo '        "command": "bash \"$HOME/.claude/agentmail/check-mail.sh\"",'
+    echo '        "command": "bash \"$HOME/.claude/pigeon/check-mail.sh\"",'
     echo '        "timeout": 5'
     echo '      }]'
     echo '    }]'
     echo '  }'
     echo ""
-    echo -e "  ${YELLOW}Without this, agentmail works but you must check manually (agentmail read).${NC}"
+    echo -e "  ${YELLOW}Without this, pigeon works but you must check manually (pigeon read).${NC}"
 fi
 echo ""
 

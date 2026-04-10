@@ -1,8 +1,11 @@
 ---
 name: debug-ops
 description: "Systematic debugging methodology, language-specific debuggers, and common scenario playbooks. Use for: debug, debugging, bug, crash, hang, memory leak, race condition, deadlock, bisect, reproduce, root cause, breakpoint, profiling, performance issue, segfault, stack trace, core dump."
+license: MIT
 allowed-tools: "Read Write Bash"
-related-skills: [testing-ops, security-ops, monitoring-ops, code-stats]
+metadata:
+  author: claude-mods
+  related-skills: testing-ops, security-ops, monitoring-ops, code-stats
 ---
 
 # Debug Operations

@@ -1,10 +1,12 @@
 ---
 name: python-typing-ops
 description: "Python type hints and type safety patterns. Triggers on: type hints, typing, TypeVar, Generic, Protocol, mypy, pyright, type annotation, overload, TypedDict."
+license: MIT
 compatibility: "Python 3.10+ (uses union syntax X | Y). Some patterns require 3.11+ (Self, TypeVarTuple)."
 allowed-tools: "Read Write"
-depends-on: []
-related-skills: [python-pytest-ops]
+metadata:
+  author: claude-mods
+  related-skills: python-pytest-ops
 ---
 
 # Python Typing Patterns

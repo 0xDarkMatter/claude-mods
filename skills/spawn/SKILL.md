@@ -1,10 +1,12 @@
 ---
 name: spawn
 description: "Generate PhD-level expert agent prompts for Claude Code. Creates comprehensive 500-1000 line agents with detailed patterns, code examples, and best practices. Triggers on: spawn agent, create agent, generate expert, new agent, agent genesis."
-allowed-tools: "Read Write Bash WebSearch WebFetch AskUserQuestion"
+license: MIT
 compatibility: "Requires internet access for WebSearch/WebFetch to research official docs."
-depends-on: []
-related-skills: ["claude-code-templates"]
+allowed-tools: "Read Write Bash WebSearch WebFetch AskUserQuestion"
+metadata:
+  author: claude-mods
+  related-skills: claude-code-templates
 ---
 
 # Spawn - Expert Agent Generator
