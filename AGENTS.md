@@ -5,8 +5,8 @@
 This is **claude-mods** - a collection of custom extensions for Claude Code:
 - **23 expert agents** for specialized domains (React, Python, Go, Rust, AWS, git, etc.)
 - **3 commands** for session management (/sync, /save) and experimental features (/canvas)
-- **64 skills** for CLI tools, patterns, workflows, and development tasks
-- **4 output styles** for response personality (Vesper, Spartan, Mentor, Executive)
+- **65 skills** for CLI tools, patterns, workflows, and development tasks
+- **5 output styles** for response personality (Vesper, Spartan, Mentor, Executive, Pair)
 - **3 hooks** for pre-commit linting, post-edit formatting, and dangerous command warnings
 
 ## Installation
@@ -31,7 +31,7 @@ cd claude-mods && ./scripts/install.sh  # or .\scripts\install.ps1 on Windows
 | `agents/` | Expert subagent prompts (.md files) |
 | `commands/` | Slash command definitions |
 | `skills/` | Skill definitions with SKILL.md |
-| `output-styles/` | Response personalities (vesper, spartan, mentor, executive) |
+| `output-styles/` | Response personalities (vesper, spartan, mentor, executive, pair) |
 | `hooks/` | Working hook scripts (lint, format, safety) |
 | `rules/` | Claude Code rules (5 files: cli-tools, thinking, commit-style, naming-conventions, skill-agent-updates) |
 | `tools/` | Modern CLI toolkit documentation |
