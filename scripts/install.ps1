@@ -211,6 +211,43 @@ if ((Test-Path $settingsPath) -and (Select-String -Path $settingsPath -Pattern "
 Write-Host ""
 
 # =============================================================================
+# AUTO-SKILL - Global install (tracking + evaluation hooks)
+# =============================================================================
+Write-Host "Installing auto-skill..." -ForegroundColor Cyan
+
+$autoSkillDir = Join-Path $claudeDir "auto-skill"
+New-Item -ItemType Directory -Force -Path $autoSkillDir | Out-Null
+
+$scripts = @("track-tools.sh", "evaluate.sh")
+foreach ($script in $scripts) {
+    $src = Join-Path $projectRoot "skills\auto-skill\scripts\$script"
+    if (Test-Path $src) {
+        Copy-Item $src -Destination "$autoSkillDir\" -Force
+        Write-Host "  $script" -ForegroundColor Green
+    }
+}
+
+$settingsPath = Join-Path $claudeDir "settings.json"
+if ((Test-Path $settingsPath) -and (Select-String -Path $settingsPath -Pattern "auto-skill" -Quiet)) {
+    Write-Host "  Hooks already configured in settings.json" -ForegroundColor Green
+} else {
+    Write-Host ""
+    Write-Host '  To enable automatic skill suggestions, add these hooks to ~/.claude/settings.json:' -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host '  "PostToolUse": [{ "matcher": "*", "hooks": [{'
+    Write-Host '    "type": "command",'
+    Write-Host '    "command": "bash \"$HOME/.claude/auto-skill/track-tools.sh\"", "timeout": 2'
+    Write-Host '  }] }],'
+    Write-Host '  "Stop": [{ "hooks": [{'
+    Write-Host '    "type": "command",'
+    Write-Host '    "command": "bash \"$HOME/.claude/auto-skill/evaluate.sh\"", "timeout": 5'
+    Write-Host '  }] }]'
+    Write-Host ""
+    Write-Host "  Without this, /auto-skill still works but won't suggest automatically." -ForegroundColor Yellow
+}
+Write-Host ""
+
+# =============================================================================
 # SUMMARY
 # =============================================================================
 Write-Host "================================================================" -ForegroundColor Cyan
