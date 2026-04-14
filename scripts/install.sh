@@ -217,6 +217,40 @@ fi
 echo ""
 
 # =============================================================================
+# AUTO-SKILL - Global install (tracking + evaluation hooks)
+# =============================================================================
+echo -e "${BLUE}Installing auto-skill...${NC}"
+
+mkdir -p "$CLAUDE_DIR/auto-skill"
+for script in track-tools.sh evaluate.sh; do
+    if [ -f "$PROJECT_ROOT/skills/auto-skill/scripts/$script" ]; then
+        cp "$PROJECT_ROOT/skills/auto-skill/scripts/$script" "$CLAUDE_DIR/auto-skill/"
+        chmod +x "$CLAUDE_DIR/auto-skill/$script"
+        echo -e "  ${GREEN}$script${NC}"
+    fi
+done
+
+# Check if hooks are already configured
+if grep -q "auto-skill" "$CLAUDE_DIR/settings.json" 2>/dev/null; then
+    echo -e "  ${GREEN}Hooks already configured in settings.json${NC}"
+else
+    echo ""
+    echo -e "  ${YELLOW}To enable automatic skill suggestions, add these hooks to ~/.claude/settings.json:${NC}"
+    echo ""
+    echo '  "PostToolUse": [{ "matcher": "*", "hooks": [{'
+    echo '    "type": "command",'
+    echo '    "command": "bash \"$HOME/.claude/auto-skill/track-tools.sh\"", "timeout": 2'
+    echo '  }] }],'
+    echo '  "Stop": [{ "hooks": [{'
+    echo '    "type": "command",'
+    echo '    "command": "bash \"$HOME/.claude/auto-skill/evaluate.sh\"", "timeout": 5'
+    echo '  }] }]'
+    echo ""
+    echo -e "  ${YELLOW}Without this, /auto-skill still works but won't suggest automatically.${NC}"
+fi
+echo ""
+
+# =============================================================================
 # SUMMARY
 # =============================================================================
 echo -e "${BLUE}════════════════════════════════════════════════════════════════${NC}"

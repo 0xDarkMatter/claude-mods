@@ -12,21 +12,24 @@
 
 > *A comprehensive extension toolkit that transforms Claude Code into a specialized development powerhouse.*
 
-**claude-mods** is a production-ready plugin that extends Claude Code with 23 expert agents, 67 specialized skills, 5 output styles, 4 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
+**claude-mods** is a production-ready plugin that extends Claude Code with 23 expert agents, 68 specialized skills, 5 output styles, 4 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
 
 Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms), claude-mods fills critical gaps in Claude Code's capabilities: persistent session state that survives across machines, on-demand expert knowledge for specialized domains, token-efficient modern CLI tools (10-100x faster than traditional alternatives), and proven workflow patterns for TDD, code review, and feature development. The toolkit implements Anthropic's [recommended patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), ensuring your development context never vanishes when sessions end.
 
 From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
 
-**23 agents. 67 skills. 5 styles. 4 hooks. One install.**
+**23 agents. 68 skills. 5 styles. 4 hooks. One install.**
 
 ## Recent Updates
+
+**v2.4.0** (April 2026)
+- 🧠 **`auto-skill` skill** - Self-learning skill creation inspired by [Hermes Agent](https://github.com/nousresearch/hermes-agent) and Forma's auto-skill system. PostToolUse hook silently tracks tool calls; Stop hook evaluates session complexity via 5 gates (8+ mutating ops, 4+ distinct tool types, no existing skill loaded, per-session cooldown, toggle check). Suggests skill creation via `systemMessage` while context is fresh. Agent Skills spec compliant with quality gates and duplicate detection. Toggle with `/auto-skill on/off/status`.
+- 📬 **`pigeon` skill** (renamed from `agentmail`) - Inter-session pmail between Claude Code sessions across projects. SQLite-backed at `~/.claude/pmail.db` with git-rooted project identity (survives renames/moves/clones), threading, file attachments, broadcast, search, and signal-file-driven hook notifications. Integrated into `/sync` for session-start mail check. Per-project disable via `.claude/pigeon.disable`. Renamed to avoid collision with [AgentMail](https://www.agentmail.to) (YC S25, $6M seed).
 
 **v2.3.1** (April 2026)
 - 🎨 **`genart-ops` skill** - Comprehensive generative art skill (1,843 lines) covering three.js scene scaffolding, p5.js sketch structure, SVG generation, GLSL shaders (noise, SDF, ray marching, IQ palettes), procedural algorithms (flow fields, Poisson disk, L-systems, WFC, Voronoi), and OKLAB/OKLCH colour theory
 - 📐 **Agent Skills spec compliance** - All 67 skills migrated to the [Agent Skills specification](https://agentskills.io/specification). Non-standard frontmatter fields moved into `metadata:` block, `license: MIT` and `metadata.author: claude-mods` on every skill. Verified 67/67 pass.
 - 📚 **Docs updated** - `SKILL-SUBAGENT-REFERENCE.md` rewritten with spec as standard, `naming-conventions.md` updated with spec-compliant frontmatter examples, `AGENT-SKILLS-COMPLIANCE-BRIEF.md` added to docs/
-- 📬 **`pigeon` skill** - Inter-session pmail between Claude Code sessions across projects. SQLite-backed at `~/.claude/pmail.db` with git-rooted project identity (survives renames/moves/clones), threading, file attachments, broadcast, search, and signal-file-driven hook notifications. Integrated into `/sync` for session-start mail check. Per-project disable via `.claude/pigeon.disable`. Renamed from `agentmail` to avoid collision with [AgentMail](https://www.agentmail.to) (YC S25).
 
 **v2.3.0** (March 2026)
 - 🎯 **Orchestrator-dispatch pattern** - Three skills upgraded from static reference dumps to active orchestrators that classify intent, dispatch to agents, and manage safety tiers:
@@ -262,6 +265,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 #### Development Skills
 | Skill | Description |
 |-------|-------------|
+| [auto-skill](skills/auto-skill/) | Automatically detect skill-worthy workflows and create reusable skills. Stop hook suggests after complex sessions (8+ mutating ops across 4+ tool types). Agent Skills spec compliant with quality gates and duplicate detection. Toggle with `/auto-skill on/off`. |
 | [skill-creator](skills/skill-creator/) | Guide for creating effective skills with specialized knowledge, workflows, and tool integrations. |
 | [explain](skills/explain/) | Deep explanation of complex code, files, or concepts. Routes to expert agents. |
 | [spawn](skills/spawn/) | Generate PhD-level expert agent prompts for Claude Code. |

@@ -5,7 +5,7 @@
 This is **claude-mods** - a collection of custom extensions for Claude Code:
 - **23 expert agents** for specialized domains (React, Python, Go, Rust, AWS, git, etc.)
 - **3 commands** for session management (/sync, /save) and experimental features (/canvas)
-- **67 skills** for CLI tools, patterns, workflows, and development tasks
+- **68 skills** for CLI tools, patterns, workflows, and development tasks
 - **5 output styles** for response personality (Vesper, Spartan, Mentor, Executive, Pair)
 - **4 hooks** for pre-commit linting, post-edit formatting, dangerous command warnings, and pmail notifications
 - **Pigeon** inter-session messaging (`pigeon send/read/reply`) - SQLite-backed pmail at `~/.claude/pmail.db`
@@ -57,6 +57,7 @@ On "INIT:" message at session start:
 | `skills/tool-discovery/` | Find the right library for any task |
 | `hooks/README.md` | Pre/post execution hook examples |
 | `skills/pigeon/` | Inter-session pmail - send, read, reply, broadcast, search across projects |
+| `skills/auto-skill/` | Auto-detect skill-worthy workflows; Stop hook suggests after complex sessions. `/auto-skill on/off/status` to toggle |
 
 ## Quick Reference
 
