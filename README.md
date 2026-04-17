@@ -12,7 +12,7 @@
 
 > *A comprehensive extension toolkit that transforms Claude Code into a specialized development powerhouse.*
 
-**claude-mods** is a production-ready plugin that extends Claude Code with 23 expert agents, 68 specialized skills, 5 output styles, 4 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
+**claude-mods** is a production-ready plugin that extends Claude Code with 23 expert agents, 68 specialized skills, 13 output styles, 4 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
 
 Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms), claude-mods fills critical gaps in Claude Code's capabilities: persistent session state that survives across machines, on-demand expert knowledge for specialized domains, token-efficient modern CLI tools (10-100x faster than traditional alternatives), and proven workflow patterns for TDD, code review, and feature development. The toolkit implements Anthropic's [recommended patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), ensuring your development context never vanishes when sessions end.
 
@@ -21,6 +21,9 @@ From Python async patterns to Rust ownership models, from AWS Fargate deployment
 **23 agents. 68 skills. 5 styles. 4 hooks. One install.**
 
 ## Recent Updates
+
+**v2.4.1** (April 2026)
+- 🎭 **13 output styles** - Added 8 daemon personalities from Forma: Atlas (strategic advisor), Coach (momentum builder), Harbour (calm stability), Meridian (chief of staff), Noir (hard-boiled detective), Roast (honest friend), Sage (measured precision), Scout (lateral thinker). Standardised all frontmatter to Title Case names and unquoted descriptions.
 
 **v2.4.0** (April 2026)
 - 🧠 **`auto-skill` skill** - Self-learning skill creation inspired by [Hermes Agent](https://github.com/nousresearch/hermes-agent) and Forma's auto-skill system. PostToolUse hook silently tracks tool calls; Stop hook evaluates session complexity via 5 gates (8+ mutating ops, 4+ distinct tool types, no existing skill loaded, per-session cooldown, toggle check). Suggests skill creation via `systemMessage` while context is fresh. Agent Skills spec compliant with quality gates and duplicate detection. Toggle with `/auto-skill on/off/status`.
@@ -52,7 +55,7 @@ From Python async patterns to Rust ownership models, from AWS Fargate deployment
 - 🔄 **Renamed `-patterns` to `-ops`** - All 14 pattern skills renamed to signal comprehensive operational expertise
 - 🛠️ **cc-session CLI** - Zero-dependency session log analyzer (15 commands, `--json` output, cross-project search)
 - 📦 **Install scripts updated** - Automatic cleanup of renamed skills, preserves project-specific extras
-- 🏷️ **3 hooks, 4 output styles** - Pre-commit lint, post-edit format, dangerous command warnings; Vesper, Spartan, Mentor, Executive
+- 🏷️ **3 hooks, 5 output styles** - Pre-commit lint, post-edit format, dangerous command warnings; Vesper, Spartan, Mentor, Executive, Pair
 
 **v1.7.0** (February 2026)
 - 🔄 **Schema v3.1** - `/save` and `/sync` upgraded for Claude Code 2.1.x and Opus 4.6
@@ -298,6 +301,14 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [Mentor](output-styles/mentor.md) | Patient, educational | Learning, onboarding |
 | [Executive](output-styles/executive.md) | High-level summaries | Non-technical stakeholders |
 | [Pair](output-styles/pair.md) | Thinks out loud, explores together | Collaborative problem-solving |
+| [Atlas](output-styles/atlas.md) | Strategic advisor, systems thinking | Architecture, planning |
+| [Coach](output-styles/coach.md) | Celebrates wins, pushes to level up | Momentum, motivation |
+| [Harbour](output-styles/harbour.md) | Warm, steady, calm in the storm | Complex or stressful tasks |
+| [Meridian](output-styles/meridian.md) | Chief of staff, anticipatory | Project coordination |
+| [Noir](output-styles/noir.md) | Hard-boiled detective, Chandler meets SRE | Debugging, investigations |
+| [Roast](output-styles/roast.md) | Brutally honest friend | Code review, improvement |
+| [Sage](output-styles/sage.md) | Thoughtful, measured, precise | Post-mortems, analysis |
+| [Scout](output-styles/scout.md) | Curious, lateral, challenges assumptions | Design, problem reframing |
 
 ### Agents
 

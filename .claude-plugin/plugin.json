@@ -1,7 +1,7 @@
 {
   "name": "claude-mods",
-  "version": "2.4.0",
-  "description": "Custom commands, skills, and agents for Claude Code - session continuity, 23 expert agents, 68 skills, 3 commands, 5 rules, 4 hooks, 5 output styles, modern CLI tools",
+  "version": "2.4.1",
+  "description": "Custom commands, skills, and agents for Claude Code - session continuity, 23 expert agents, 68 skills, 3 commands, 5 rules, 4 hooks, 13 output styles, modern CLI tools",
   "author": "0xDarkMatter",
   "repository": "https://github.com/0xDarkMatter/claude-mods",
   "license": "MIT",
@@ -135,7 +135,15 @@
       "output-styles/spartan.md",
       "output-styles/mentor.md",
       "output-styles/executive.md",
-      "output-styles/pair.md"
+      "output-styles/pair.md",
+      "output-styles/atlas.md",
+      "output-styles/coach.md",
+      "output-styles/harbour.md",
+      "output-styles/meridian.md",
+      "output-styles/noir.md",
+      "output-styles/roast.md",
+      "output-styles/sage.md",
+      "output-styles/scout.md"
     ]
   },
   "categories": [
