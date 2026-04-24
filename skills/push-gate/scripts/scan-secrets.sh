@@ -85,7 +85,12 @@ fi
 # ── Layer 2: regex corpus on the diff ─────────────────────────────────────────
 echo "push-gate: regex layer on added lines"
 DIFF_FILE="$(mktemp -t push-gate-diff.XXXXXX)"
-git diff "$RANGE" > "$DIFF_FILE"
+# Exclude push-gate's own pattern corpus — it contains examples of every
+# secret shape it's trying to detect, so scanning it matches everything.
+# (Classic snake-eating-tail when push-gate is part of the pushed content.)
+git diff "$RANGE" -- . \
+  ':(exclude,glob)**/push-gate/references/secret-patterns.txt' \
+  > "$DIFF_FILE"
 
 # Extract added lines only (strip the leading '+'), ignore file-header lines
 ADDED_FILE="$(mktemp -t push-gate-added.XXXXXX)"
@@ -103,10 +108,14 @@ done < "$PATTERNS_FILE"
 # Run ripgrep with all patterns; capture matches
 RAW_HITS="$(rg --no-filename --line-number --no-heading "${PATTERN_ARGS[@]}" "$ADDED_FILE" 2>/dev/null || true)"
 
-# Filter common false positives
+# Filter common false positives.
+# Note: the `\.\.\.'` ellipsis-apostrophe patterns were removed because they
+# required an embedded `'` inside a bash single-quoted string, which closes
+# the string early and breaks the regex ("Unmatched ( or \("). The remaining
+# patterns (placeholder/example/getenv/etc) cover the bulk of false positives.
 FILTERED_HITS="$(
   printf '%s\n' "$RAW_HITS" \
-    | grep -viE '(example|placeholder|\<dummy\>|\<fake\>|\<TODO\>|<unset>|os\.environ|process\.env|getenv|\$\{[A-Z_]+:-|\$\{[A-Z_]+\}|\$\([A-Z_]+\)|\$env:[A-Z_]+|\.\.\.<|\.\.\.')|\.\.\.'\s*$)' \
+    | grep -viE '(example|placeholder|\<dummy\>|\<fake\>|\<TODO\>|<unset>|os\.environ|process\.env|getenv|\$\{[A-Z_]+:-|\$\{[A-Z_]+\}|\$\([A-Z_]+\)|\$env:[A-Z_]+|\.\.\.<)' \
     || true
 )"
 
