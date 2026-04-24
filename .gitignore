@@ -12,6 +12,10 @@
 .claude/sync-cache.json
 .claude/canvas/
 
+# Runtime artefacts (must never be tracked)
+.claude/scheduled_tasks.lock
+.claude/worktrees/
+
 # Backup files
 *.bak
 *~
