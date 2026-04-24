@@ -31,6 +31,8 @@ Parse arguments after `auto-skill` (or `/auto-skill`):
 | `auto-skill off --project` | Disable for this project: `mkdir -p .claude && touch .claude/auto-skill.disable` |
 | `auto-skill on --project` | Enable for this project: `rm -f .claude/auto-skill.disable` |
 | `auto-skill status` | Show current state (see Status section below) |
+| `auto-skill pending` | Show all entries in `~/.claude/auto-skill/pending.log` (past suggestions the user may have missed) |
+| `auto-skill clear` | Truncate `~/.claude/auto-skill/pending.log` after confirming with user |
 
 ### Status
 
@@ -179,6 +181,39 @@ After creating, verify the skill:
 3. Confirm the procedure section exists and has steps
 4. Tell the user the skill is ready and how to invoke it
 
+## Pending Log
+
+Because `systemMessage` output from the Stop hook is delivered to Claude (not
+directly to the user), suggestions often die silently when the user's next
+prompt doesn't invite them to be mentioned. To solve this, the hook also
+appends a line to `~/.claude/auto-skill/pending.log` each time it fires:
+
+```
+2026-04-24T19:28:03+10:00|9dc8576c|/x/forge/axiom|12|5|28|Write(4) Edit(3) Bash(3)
+```
+
+Fields (pipe-delimited):
+
+| # | Field | Example |
+|---|-------|---------|
+| 1 | ISO8601 timestamp | `2026-04-24T19:28:03+10:00` |
+| 2 | Short session ID | `9dc8576c` |
+| 3 | CWD when suggestion fired | `/x/forge/axiom` |
+| 4 | Mutating op count | `12` |
+| 5 | Unique tool type count | `5` |
+| 6 | Total tool calls | `28` |
+| 7 | Top-6 tool histogram | `Write(4) Edit(3) Bash(3)` |
+
+`/sync` reads this log at session start and surfaces any entries from the
+last 72 hours under a **"Skill Suggestions"** section — the one place the
+user will reliably see them.
+
+### Viewing and clearing
+
+- `auto-skill pending` — `cat ~/.claude/auto-skill/pending.log` (or show
+  "no pending suggestions" if absent/empty)
+- `auto-skill clear` — truncate after confirming with the user
+
 ## Per-Project Disable
 
 ```bash
@@ -234,7 +269,7 @@ The Stop hook only suggests skill creation when ALL of these pass:
 |------|-----------|-----------|
 | **Mutating ops** | 8+ | High bar reduces noise from routine edits |
 | **Tool diversity** | 4+ distinct types | Write+Edit+Bash+Agent = workflow; Write*20 = repetitive |
-| **No skill loaded** | `Skill` tool absent | If following a skill, work isn't novel |
+| **No non-harness skill loaded** | Skill tool absent OR only harness skills | If following a domain skill, work isn't novel. Harness skills (sync, save, introspect, auto-skill, setperms, tool-discovery) are whitelisted — they're bootstrap/meta, not recipes. |
 | **Per-session** | Once per session | Never nags on resume/continue |
 | **Not disabled** | No `.disable` file | Global or per-project toggle |
 

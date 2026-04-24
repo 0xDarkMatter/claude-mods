@@ -171,7 +171,29 @@ Instead, check your system prompt for the memory content you already have, and s
 
 This costs zero extra tokens while confirming the safety net is working.
 
-### Step 7: Output
+### Step 7: Check Pending Skill Suggestions
+
+The `auto-skill` Stop hook writes to `~/.claude/auto-skill/pending.log` whenever
+it detects a skill-worthy session. Those suggestions go to Claude via
+`systemMessage` — which usually dies silently. `/sync` is the surfacing point.
+
+```bash
+LOG="$HOME/.claude/auto-skill/pending.log"
+[ -f "$LOG" ] || exit 0
+
+# Show entries from the last 72 hours
+CUTOFF=$(date -d '72 hours ago' -Iseconds 2>/dev/null || \
+         date -v-72H '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null)
+
+awk -F'|' -v cutoff="$CUTOFF" '$1 >= cutoff' "$LOG" 2>/dev/null | tail -10
+```
+
+- If the log doesn't exist, or no entries in the last 72h, skip silently
+- If entries exist, show a "Skill Suggestions" section with each row
+- Format per row: timestamp (local), writes/unique, cwd, top tools
+- Offer: run `/auto-skill` to capture, or `auto-skill clear` to dismiss
+
+### Step 8: Output
 
 Format and display unified status.
 
@@ -247,6 +269,17 @@ what's already in context - no file read needed.
 Run `pigeon read` to read.
 
 [If no unread messages or pigeon not installed: omit this section entirely]
+
+## Skill Suggestions
+
+[If ~/.claude/auto-skill/pending.log has entries from the last 72 hours:]
+2 skill-worthy sessions detected (you missed the in-turn prompts):
+  2026-04-24 19:28  |  12w/5t  |  C:/Projects/target-repo           |  Write(4) Edit(3) Bash(3)
+  2026-04-24 14:47  |  9w/4t   |  C:/Projects/claude-mods     |  Edit(4) Bash(3) Write(2)
+
+Run `/auto-skill` to capture a workflow, or `auto-skill clear` to dismiss.
+
+[If no pending entries in last 72h, or log doesn't exist: omit this section entirely]
 
 ## Quick Reference
 
