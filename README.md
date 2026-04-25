@@ -18,9 +18,16 @@ Built on the [Agent Skills specification](https://agentskills.io/specification) 
 
 From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
 
-**23 agents. 69 skills. 5 styles. 4 hooks. One install.**
+**23 agents. 69 skills. 13 styles. 4 hooks. 6 rules. One install.**
 
 ## Recent Updates
+
+**v2.4.3** (April 2026)
+- 🌳 **Worktree-aware `git-ops`** - Folded the briefly-considered `git-status` skill straight into `git-ops` rather than ship a third sibling. T1 inline now exposes `scripts/status.sh` (rich repo overview: HEAD, sync, tree, worktrees, branches, optional PR) and `scripts/worktree-survey.sh` (per-worktree triage table — categorises each as `(trunk)` / `PRUNABLE` / `has WIP` / `unpushed` / `in-flight` / `GHOST` / `ORPHAN` and detects drift between git registration and `.claude/worktrees/` filesystem). New "Worktree Operations" section maps every worktree concern to a tier: T1 survey, T2 create/land/prune-clean, T3 remove (preflight per worktree). Survey-first discipline enforced before any prune recommendation.
+- 🛡️ **`push-gate` skill** - Hard pre-push safety gate. Gitleaks + regex layer secret scan, forbidden-file check, divergence check, dirty-tree refusal, explicit confirm before push. Refuses on any secret hit — no bypass flag. Distinct semantics from `git-ops`: gate, not orchestrator.
+- 📌 **`rules/worktree-boundaries.md`** - Hard rule promoted from user-global into the plugin: never `rm -rf .claude/worktrees/`, never `git add -A` when worktree gitlinks are untracked, never decide another session's worktree is orphaned. Cross-project worktrees are not yours to clean up.
+- 📬 **`auto-skill` visibility fix** - Stop hook's `systemMessage` JSON only reaches Claude, not the user — ~80 suggestions vanished silently in a week. Now also appends to `~/.claude/auto-skill/pending.log`, surfaced at next `/sync` under a "Skill Suggestions" section. Plus a harness whitelist on Gate 1: loading `sync`, `save`, `introspect`, `auto-skill`, `setperms`, or `tool-discovery` no longer disqualifies the session (they're meta/bootstrap, not domain recipes).
+- 🐛 **`push-gate` regex bugs fixed** - Two bugs that blocked every invocation: (1) `\.\.\.'` patterns embedded `'` inside a bash single-quoted string, leaving an orphan `)` that grep rejected; (2) push-gate scanned its own `secret-patterns.txt` corpus and flagged every shape it knew about. Both repaired.
 
 **v2.4.1** (April 2026)
 - 🎭 **13 output styles** - Added 8 daemon personalities from Forma: Atlas (strategic advisor), Coach (momentum builder), Harbour (calm stability), Meridian (chief of staff), Noir (hard-boiled detective), Roast (honest friend), Sage (measured precision), Scout (lateral thinker). Standardised all frontmatter to Title Case names and unquoted descriptions.
