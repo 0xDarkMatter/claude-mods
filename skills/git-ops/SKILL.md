@@ -1,11 +1,11 @@
 ---
 name: git-ops
-description: "Git operations orchestrator - commits, PRs, branch management, releases, changelog. Routes lightweight reads inline, dispatches heavy work to background Sonnet agent. Triggers on: commit, push, pull request, create PR, git status, git diff, rebase, stash, branch, merge, release, tag, changelog, semver, cherry-pick, bisect, worktree."
+description: "Full git + worktree orchestrator. Rich status survey, per-worktree triage (prunable/WIP/ghost/orphan), commits, PRs, branches, releases, rebases — reads run inline, writes dispatch to a background Sonnet agent. Triggers on: status, state, where are we, git status, anything to commit, anything to push, commit, push, pull request, create PR, git diff, rebase, stash, branch, merge, release, tag, changelog, semver, cherry-pick, bisect, worktree, worktree survey, prunable worktrees, land worktree."
 license: MIT
 allowed-tools: "Read Bash Glob Grep Agent TaskCreate TaskUpdate"
 metadata:
   author: claude-mods
-  related-skills: review, ci-cd-ops
+  related-skills: review, ci-cd-ops, push-gate
 ---
 
 # Git Ops
@@ -45,7 +45,9 @@ No subagent needed. Execute directly via Bash for instant results.
 
 | Operation | Command |
 |-----------|---------|
-| Status | `git status --short` |
+| **Status (rich)** | `bash $HOME/.claude/skills/git-ops/scripts/status.sh` — one-shot HEAD + sync + tree + worktrees + branches + PR |
+| **Worktree survey** | `bash $HOME/.claude/skills/git-ops/scripts/worktree-survey.sh` — per-worktree state, drift detection, prunable/WIP/ghost/orphan triage |
+| Status (bare) | `git status --short` |
 | Log | `git log --oneline -20` |
 | Diff (unstaged) | `git diff --stat` |
 | Diff (staged) | `git diff --cached --stat` |
@@ -57,6 +59,7 @@ No subagent needed. Execute directly via Bash for instant results.
 | Show commit | `git show [hash] --stat` |
 | Reflog | `git reflog --oneline -20` |
 | Tags | `git tag --list --sort=-v:refname` |
+| Worktree list | `git worktree list` |
 | PR list | `gh pr list` |
 | PR status | `gh pr view [N]` |
 | Issue list | `gh issue list` |
@@ -64,6 +67,11 @@ No subagent needed. Execute directly via Bash for instant results.
 | Run status | `gh run list --limit 5` |
 
 For T1 operations, format results cleanly and present directly. Use `delta` for diffs when available.
+
+**When to reach for the bundled scripts:**
+- User asks "status", "where are we", "anything to commit", "anything to push" → `status.sh`
+- User asks about worktrees, prunable branches, drift, "what can we clean up" → `worktree-survey.sh`
+- Both scripts exit 0 if clean, 1 if attention needed, 2 if not-a-repo — composable.
 
 ### Tier 2: Safe Writes - Dispatch to Agent
 
@@ -289,6 +297,52 @@ When user encounters merge conflicts:
 3. **Present options:** ours, theirs, manual resolution
 4. **After resolution:** Dispatch to git-agent (T2) for staging and continue
 
+## Worktree Operations
+
+Worktrees are first-class in this skill. The classification is:
+
+| Op | Tier | How |
+|----|------|-----|
+| **Survey** | T1 | `bash scripts/worktree-survey.sh` — read-only, reports per-worktree state + drift |
+| **Create** | T2 | `git worktree add .claude/worktrees/<name> -b <branch>` via agent (respects project conventions) |
+| **Land** | T2 | Rebase worktree branch onto trunk + test + fast-forward. Multi-step procedure — see "Worktree Land Procedure" below |
+| **Prune (clean)** | T2 | `git worktree prune` for ghost entries (registered but FS-missing). Always safe, no data loss possible |
+| **Remove** | **T3** | `git worktree remove <path>` — destroys filesystem state. Requires preflight + explicit confirm per worktree |
+
+### Survey-first discipline
+
+Never recommend prune/remove without first running `scripts/worktree-survey.sh`
+and presenting the output to the user. The survey categorises each worktree as:
+
+- `(trunk)` — the main repo itself, never prune
+- `PRUNABLE` — merged into trunk, no uncommitted work, no unpushed commits → safe to remove
+- `has WIP` — uncommitted changes → commit or stash first, never auto-remove
+- `unpushed` — commits ahead of upstream → push or cherry-pick before remove
+- `in-flight` — not merged, not dirty → probably still in active use
+- `GHOST` — registered but filesystem gone → `git worktree prune` fixes
+- `UNREGISTERED` / orphan — filesystem dir with no git entry → **DO NOT touch without explicit review**
+
+### Worktree Land Procedure (T2)
+
+For landing a branch from a worktree onto the trunk (rebase + test + ff):
+
+1. Verify preconditions: worktree clean, branch ahead of trunk, not already merged
+2. Fetch trunk, rebase worktree branch onto it
+3. Run project test command (detect from `package.json` / `pyproject.toml` / `justfile`)
+4. On test pass: fast-forward trunk to the rebased tip
+5. Do NOT push — that's a separate explicit step (and should go through `push-gate`)
+
+Dispatch this to `git-agent` as a T2 operation with the worktree path + trunk name.
+
+### Boundaries (HARD RULE)
+
+See `rules/worktree-boundaries.md`. Summary:
+
+- **Never** `rm -rf .claude/worktrees/` — the orphan count in survey is informational, never a cleanup cue
+- **Never** `git add -A` when `.claude/worktrees/` has untracked entries (sweeps gitlinks into commits)
+- **Never** decide another session's worktree is "orphaned" — ask first
+- Cross-project work stays cross-project; a worktree in repo X is never our concern when we're operating on repo Y
+
 ## Decision Logic
 
 When a git-related request arrives, follow this flow:
@@ -322,7 +376,8 @@ When a git-related request arrives, follow this flow:
 
 | Task | Tier | Inline/Agent |
 |------|------|-------------|
-| Check status | T1 | Inline |
+| Check status (rich) | T1 | Inline (`scripts/status.sh`) |
+| Worktree survey | T1 | Inline (`scripts/worktree-survey.sh`) |
 | View diff | T1 | Inline |
 | View log | T1 | Inline |
 | List PRs | T1 | Inline |
@@ -334,12 +389,16 @@ When a git-related request arrives, follow this flow:
 | Stash push/pop | T2 | Agent |
 | Cherry-pick | T2 | Agent |
 | Create branch | T2 | Agent |
+| Create worktree | T2 | Agent |
+| Land worktree | T2 | Agent (rebase + test + ff) |
+| Prune ghost worktrees | T2 | Agent (`git worktree prune`) |
 | Rebase | T3 | Agent (preflight) |
 | Force push | T3 | Agent (preflight) |
 | Reset --hard | T3 | Agent (preflight) |
 | Delete branch | T3 | Agent (preflight) |
 | Discard changes | T3 | Agent (preflight) |
 | Merge to main | T3 | Agent (preflight) |
+| Remove worktree | T3 | Agent (preflight per worktree) |
 
 ## Tools
 
