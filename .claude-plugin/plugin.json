@@ -1,6 +1,6 @@
 {
   "name": "claude-mods",
-  "version": "2.4.2",
+  "version": "2.4.3",
   "description": "Custom commands, skills, and agents for Claude Code - session continuity, 23 expert agents, 68 skills, 3 commands, 5 rules, 4 hooks, 13 output styles, modern CLI tools",
   "author": "0xDarkMatter",
   "repository": "https://github.com/0xDarkMatter/claude-mods",
@@ -123,7 +123,8 @@
       "rules/commit-style.md",
       "rules/naming-conventions.md",
       "rules/skill-agent-updates.md",
-      "rules/thinking.md"
+      "rules/thinking.md",
+      "rules/worktree-boundaries.md"
     ],
     "hooks": [
       "hooks/pre-commit-lint.sh",
