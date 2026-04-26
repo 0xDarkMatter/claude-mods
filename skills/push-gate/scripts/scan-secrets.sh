@@ -33,28 +33,43 @@ if ! command -v rg >/dev/null 2>&1; then
 fi
 
 # ── Range to scan ─────────────────────────────────────────────────────────────
-RANGE="${REMOTE}/${BRANCH}..${BRANCH}"
+# Two cases:
+#   (a) origin/<branch> exists  → diff range scan (incremental push)
+#   (b) origin/<branch> missing → full branch scan (first push to new remote)
+# The well-known empty-tree SHA lets us express "everything as added" for the
+# regex layer's diff-based extraction without special-casing its plumbing.
+EMPTY_TREE="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
-if ! git rev-parse --verify "${REMOTE}/${BRANCH}" >/dev/null 2>&1; then
-  echo "push-gate: remote ref ${REMOTE}/${BRANCH} not found locally — did you fetch?" >&2
-  exit 5
-fi
-
-COMMIT_COUNT="$(git rev-list --count "$RANGE")"
-if [ "$COMMIT_COUNT" -eq 0 ]; then
-  echo "push-gate: nothing to push (${RANGE} is empty)."
-  exit 0
+if git rev-parse --verify "${REMOTE}/${BRANCH}" >/dev/null 2>&1; then
+  RANGE="${REMOTE}/${BRANCH}..${BRANCH}"
+  GITLEAKS_LOG_OPTS="$RANGE"
+  DIFF_RANGE="$RANGE"
+  COMMIT_COUNT="$(git rev-list --count "$RANGE")"
+  if [ "$COMMIT_COUNT" -eq 0 ]; then
+    echo "push-gate: nothing to push (${RANGE} is empty)."
+    exit 0
+  fi
+  SCAN_LABEL="${COMMIT_COUNT} commits via gitleaks (${RANGE})"
+else
+  COMMIT_COUNT="$(git rev-list --count "$BRANCH")"
+  if [ "$COMMIT_COUNT" -eq 0 ]; then
+    echo "push-gate: branch ${BRANCH} has no commits."
+    exit 0
+  fi
+  GITLEAKS_LOG_OPTS="$BRANCH"
+  DIFF_RANGE="${EMPTY_TREE}..${BRANCH}"
+  SCAN_LABEL="full branch — ${COMMIT_COUNT} commits via gitleaks (first push to new remote)"
 fi
 
 # ── Layer 1: gitleaks on the commit range ─────────────────────────────────────
-echo "push-gate: scanning ${COMMIT_COUNT} commits via gitleaks (${RANGE})"
+echo "push-gate: scanning ${SCAN_LABEL}"
 GITLEAKS_REPORT="$(mktemp -t gitleaks.XXXXXX.json)"
 trap 'rm -f "$GITLEAKS_REPORT" "$DIFF_FILE" 2>/dev/null || true' EXIT
 
 GITLEAKS_EXIT=0
 gitleaks detect \
   --source . \
-  --log-opts="$RANGE" \
+  --log-opts="$GITLEAKS_LOG_OPTS" \
   --report-format=json \
   --report-path="$GITLEAKS_REPORT" \
   --redact \
@@ -88,7 +103,7 @@ DIFF_FILE="$(mktemp -t push-gate-diff.XXXXXX)"
 # Exclude push-gate's own pattern corpus — it contains examples of every
 # secret shape it's trying to detect, so scanning it matches everything.
 # (Classic snake-eating-tail when push-gate is part of the pushed content.)
-git diff "$RANGE" -- . \
+git diff "$DIFF_RANGE" -- . \
   ':(exclude,glob)**/push-gate/references/secret-patterns.txt' \
   > "$DIFF_FILE"
 
