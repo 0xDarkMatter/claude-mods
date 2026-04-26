@@ -22,6 +22,9 @@ From Python async patterns to Rust ownership models, from AWS Fargate deployment
 
 ## Recent Updates
 
+**v2.4.8** (April 2026)
+- 📝 **`github-ops` README intros** - Stopped shipping single-line taglines as "descriptions". Skill now drafts a proper 2–3 paragraph intro on first publish (what it is / why it exists / who it's for), reading package metadata, CHANGELOG, and the primary entry point before writing — and surfaces the draft for approval rather than committing one-shot. New `references/readme-description.md` codifies voice (developer-to-developer, concrete, occasional dry wit), structure, anti-patterns ("blazing fast", emoji walls, marketing fluff, "this project aims to..."), and ships a worked before/after example. Mode `update` proposes expansion only if intro is < 80 words or scope has drifted (no churning good prose); mode `audit` flags thin intros. The `gh repo create --description` one-liner now derives from the README intro draft rather than blindly copying `pyproject.toml.description`.
+
 **v2.4.7** (April 2026)
 - 🛡️ **`push-gate` first-push fix** - Detected on first publish to a new remote: gitleaks scan failed because `origin/main` doesn't exist yet. Now branches on remote-ref existence — full-branch scan when new, diff-range scan when incremental.
 
