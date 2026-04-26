@@ -18,9 +18,12 @@ Built on the [Agent Skills specification](https://agentskills.io/specification) 
 
 From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
 
-**23 agents. 69 skills. 13 styles. 4 hooks. 6 rules. One install.**
+**23 agents. 70 skills. 13 styles. 4 hooks. 6 rules. One install.**
 
 ## Recent Updates
+
+**v2.4.5** (April 2026)
+- 🗄️ **`leveldb-ops` skill** - Read and decode Chromium/Electron LevelDB stores (Local Storage, IndexedDB, Session Storage). Pure-Python via `ccl_chromium_reader` (GitHub-only, not on PyPI) — `plyvel` skipped because Windows wheels don't exist and MSVC compile fails. Ships three reusable scripts (`dump_localstorage.py`, `dump_indexeddb.py`, `extract_keys.py`) and two reference docs: `chromium-format.md` (on-disk layout, append-only semantics, locking quirks per OS) and `claude-desktop-state.md` (full state map for Claude Desktop v1.3109.0 — origin keys, account-binding distinctions, sidebar mutation recipes, MCP iframe partitioning). Codifies the safety pattern (copy-then-delete-LOCK) and the append-only gotcha (last-write-wins per `script_key`). Triggers on Electron app forensics, IndexedDB decoding, "where does the desktop app cache X" questions.
 
 **v2.4.4** (April 2026)
 - 🔁 **`/iterate` enhancements** - Configurable throughput vs. atomicity tradeoff. New `Batch: N` argument applies N independent changes per iteration; on regression the loop bisects (cherry-pick replay) to identify the culprit, keeping good commits and dropping bad ones — preserves the "git as memory" guarantee while lifting the throughput ceiling. New stop conditions: `Until: <value>` (target metric) and `Stagnation: N` (consecutive no-improvement cap), OR'd with existing `Iterations` cap. New `Branch: auto|<name>|current` for branch isolation — `auto` derives `iterate/<slug-from-goal>` from the Goal text. New `iterate/best` git tag floats forward to the highest-metric commit, surviving any later regression. Always-summarize-on-exit rule — overnight runs interrupted in the morning now produce a final block before yielding control. Skill grew 243 → 356 lines.
