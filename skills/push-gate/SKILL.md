@@ -42,8 +42,14 @@ Step 11 →  Post-push verify (ls-remote matches pushed SHA)
 ## Invocation
 
 ```bash
+# From the repo root (most common)
 bash .claude/skills/push-gate/scripts/preflight.sh <remote> <branch>
+
+# When calling from another skill with a different cwd (e.g. github-ops)
+bash $HOME/.claude/skills/push-gate/scripts/preflight.sh --cwd <repo-root> <remote> <branch>
 ```
+
+`--cwd` must precede the positional arguments. When omitted, the script operates against `$PWD`.
 
 The script prints a structured report and exits with:
 
