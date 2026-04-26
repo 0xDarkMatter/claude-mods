@@ -71,7 +71,7 @@ Triggered by: "publish to github", "create repo on github", "push to github" (wh
    (NEVER pass --push; we want push-gate to run between)
 
 5. Run push-gate preflight:
-   bash $HOME/.claude/skills/push-gate/scripts/preflight.sh origin main
+   bash $HOME/.claude/skills/push-gate/scripts/preflight.sh --cwd <repo> origin main
    On any non-zero exit: stop, report, do not push.
 
 6. Push main + tags:
@@ -126,7 +126,9 @@ Triggered by: "ship a release", "cut a release", "release v0.X.Y", "publish upda
 6. Create local tag via git-ops:
    git tag -a v<N> -m "v<N>"
 
-7. Run push-gate preflight on origin <branch>.
+7. Run push-gate preflight:
+   bash $HOME/.claude/skills/push-gate/scripts/preflight.sh --cwd <repo> origin <branch>
+   On any non-zero exit: stop, report, do not push.
 
 8. Push commits + tag:
    git push origin <branch>

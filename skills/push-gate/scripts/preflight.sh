@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # preflight.sh — Full pre-push gate orchestration.
 #
-# Usage:   preflight.sh <remote> <branch>
+# Usage:   preflight.sh [--cwd <repo-root>] <remote> <branch>
 # Exit codes:
 #   0  all gates passed; ready to push
 #   1  secret hit (gitleaks or regex)
@@ -13,14 +13,25 @@
 
 set -euo pipefail
 
+# Optional --cwd <path> must come before positional args
+REPO_ROOT=""
+if [ "${1:-}" = "--cwd" ]; then
+  REPO_ROOT="${2:?"push-gate: --cwd requires a path argument"}"
+  shift 2
+fi
+
 REMOTE="${1:-}"
 BRANCH="${2:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [ -z "$REMOTE" ] || [ -z "$BRANCH" ]; then
-  echo "push-gate: usage: preflight.sh <remote> <branch>" >&2
+  echo "push-gate: usage: preflight.sh [--cwd <repo-root>] <remote> <branch>" >&2
   exit 6
+fi
+
+if [ -n "$REPO_ROOT" ]; then
+  cd "$REPO_ROOT"
 fi
 
 divider() { printf '%.0s─' $(seq 1 63); echo; }
