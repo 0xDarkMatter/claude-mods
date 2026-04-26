@@ -153,7 +153,21 @@
       "Bash(do mkdir:*)",
       "Bash(for skill in go-ops rust-ops typescript-ops docker-ops ci-cd-ops api-design-ops)",
       "Bash(do echo \"=== $skill ===\")",
-      "Read(//x/Forge/claude-mods/skills/$skill/**)"
+      "Read(//x/Forge/claude-mods/skills/$skill/**)",
+      "Read(//x/Forge/claude-mods/**)",
+      "Bash(mv .git/info/exclude.tmp .git/info/exclude tail -5 .git/info/exclude echo \"\" echo \"=== Status ===\" git status --short)",
+      "PowerShell(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^\\(bash|sh|wsl|cmd|pwsh|powershell|conhost|node|python\\)$' } | Select-Object Id, ProcessName, StartTime, @{N='Path';E={$_.Path}} | Sort-Object StartTime -Descending | Select-Object -First 20 | Format-Table -AutoSize)",
+      "PowerShell(Get-WinEvent -LogName 'Microsoft-Windows-TaskScheduler/Operational' -MaxEvents 50 -ErrorAction SilentlyContinue | Where-Object { $_.Id -in 100, 200, 201 -and $_.TimeCreated -gt \\(Get-Date\\).AddMinutes\\(-30\\) } | Select-Object TimeCreated, Id, @{N='Task';E={$_.Properties[0].Value}}, @{N='Detail';E={$_.Properties[1].Value}} | Format-Table -AutoSize -Wrap)",
+      "PowerShell(Get-CimInstance *)",
+      "Bash(pm2-broker list *)",
+      "Bash(cygpath -w /tmp/cc-leveldb-probe)",
+      "Read(//c/Users/<user>/.claude/skills/github-ops/**)",
+      "Read(//c/Users/<user>/.claude/skills/github-ops/references/**)",
+      "Bash(cp \"C:/Projects/claude-mods/skills/github-ops/SKILL.md\" ~/.claude/skills/github-ops/SKILL.md)",
+      "Bash(cp \"C:/Projects/claude-mods/skills/github-ops/references/readme-description.md\" ~/.claude/skills/github-ops/references/readme-description.md)",
+      "Bash(cp \"C:/Projects/claude-mods/skills/github-ops/references/metadata-checklist.md\" ~/.claude/skills/github-ops/references/metadata-checklist.md)",
+      "Bash(pigeon read *)",
+      "Bash(/c/Users/<user>/AppData/Local/Programs/Python/Python313/python -)"
     ],
     "deny": [],
     "ask": [
