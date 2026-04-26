@@ -22,6 +22,10 @@ From Python async patterns to Rust ownership models, from AWS Fargate deployment
 
 ## Recent Updates
 
+**v2.4.9** (April 2026)
+- 🔍 **`git-ops` hygiene checks** - `status.sh` now proactively flags bad git practices during every status read: main checkout sitting on a feature branch (feature work belongs in worktrees), and merged branches not yet deleted. `SKILL.md` documents all four anti-patterns (feature branch, stale merges, WIP commits, large uncommitted pile) with severity ratings and remediation steps.
+- 📖 **`docs/references/claude-desktop-internals.md`** - Comprehensive map of Claude Desktop's file system layout and session architecture, validated by live probing. Key findings: cross-account session transfer works by copying only the metadata JSON; sidebar population is filesystem-driven on login (not server cache); `react-query-cache-ls` probe confirmed 7/8 transferred sessions were absent from server data but appeared in sidebar.
+
 **v2.4.8** (April 2026)
 - 📝 **`github-ops` README intros** - Stopped shipping single-line taglines as "descriptions". Skill now drafts a proper 2–3 paragraph intro on first publish (what it is / why it exists / who it's for), reading package metadata, CHANGELOG, and the primary entry point before writing — and surfaces the draft for approval rather than committing one-shot. New `references/readme-description.md` codifies voice (developer-to-developer, concrete, occasional dry wit), structure, anti-patterns ("blazing fast", emoji walls, marketing fluff, "this project aims to..."), and ships a worked before/after example. Mode `update` proposes expansion only if intro is < 80 words or scope has drifted (no churning good prose); mode `audit` flags thin intros. The `gh repo create --description` one-liner now derives from the README intro draft rather than blindly copying `pyproject.toml.description`.
 
