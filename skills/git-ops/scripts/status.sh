@@ -95,6 +95,45 @@ if command -v gh >/dev/null 2>&1 && [ "$BRANCH" != "(detached)" ]; then
   fi
 fi
 
+# --- Hygiene checks ---------------------------------------------------------
+# Detect if we're in the main checkout or a worktree
+GIT_DIR_REL=$(git rev-parse --git-dir 2>/dev/null)
+IS_WORKTREE=false
+case "$GIT_DIR_REL" in
+  *worktrees*) IS_WORKTREE=true ;;
+esac
+
+# Detect the repo's default branch
+DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
+if [ -z "$DEFAULT_BRANCH" ]; then
+  for b in main master trunk develop; do
+    if git show-ref --verify --quiet "refs/heads/$b" 2>/dev/null; then
+      DEFAULT_BRANCH="$b"
+      break
+    fi
+  done
+fi
+
+HYGIENE_FLAGS=""
+
+# Check 1: main checkout on a feature branch
+if [ "$IS_WORKTREE" = false ] && \
+   [ -n "$DEFAULT_BRANCH" ] && \
+   [ "$BRANCH" != "$DEFAULT_BRANCH" ] && \
+   [ "$BRANCH" != "(detached)" ]; then
+  HYGIENE_FLAGS="${HYGIENE_FLAGS}HYGIENE[1]: main checkout is on '$BRANCH' (default: '$DEFAULT_BRANCH') — feature work belongs in worktrees\n"
+fi
+
+# Check 2: stale merged branches
+if [ -n "$DEFAULT_BRANCH" ]; then
+  MERGED_COUNT=$(git branch --merged "$DEFAULT_BRANCH" 2>/dev/null \
+    | grep -v "^\*\|^\s*${DEFAULT_BRANCH}$\|^\s*master$\|^\s*main$\|^\s*trunk$" \
+    | grep -c . 2>/dev/null || echo 0)
+  if [ "$MERGED_COUNT" -gt 0 ]; then
+    HYGIENE_FLAGS="${HYGIENE_FLAGS}HYGIENE[2]: $MERGED_COUNT merged branch(es) not yet deleted — run: git branch --merged $DEFAULT_BRANCH\n"
+  fi
+fi
+
 # --- Output -----------------------------------------------------------------
 echo "repo:    $REPO_ROOT"
 echo "branch:  $BRANCH"
@@ -116,6 +155,12 @@ echo "branch:  $BR_LOCAL local / $BR_REMOTE remote"
 
 if [ -n "$PR_LINE" ]; then
   echo "pr:      $PR_LINE"
+fi
+
+# Hygiene warnings
+if [ -n "$HYGIENE_FLAGS" ]; then
+  echo ""
+  printf "%b" "$HYGIENE_FLAGS" | sed 's/^/⚠  /'
 fi
 
 # Fetch failure warning
