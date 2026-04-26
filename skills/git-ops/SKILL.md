@@ -73,6 +73,57 @@ For T1 operations, format results cleanly and present directly. Use `delta` for 
 - User asks about worktrees, prunable branches, drift, "what can we clean up" → `worktree-survey.sh`
 - Both scripts exit 0 if clean, 1 if attention needed, 2 if not-a-repo — composable.
 
+## Hygiene Checks (Proactive — Run During Every T1 Status)
+
+When running any status check, scan for these anti-patterns and surface them **before** the status output. Don't wait for the user to notice. The `status.sh` script handles checks 1 and 2 automatically; checks 3 and 4 are Claude's responsibility.
+
+### Anti-pattern 1: Main checkout on a feature branch 🔴
+
+**Signal:** In the main checkout (not a worktree) and `git branch --show-current` ≠ the repo's default branch (`main`/`master`/`trunk`).
+
+**Why it's bad:** The main checkout is the fallback workspace. Feature branches sitting there block clean status reads, confuse worktree operations, and make it unclear what "current" state is. Feature work belongs in dedicated worktrees.
+
+**Flag it:** Emit a prominent warning before the status output.
+
+**Fix:**
+```bash
+git checkout main                                              # return main to trunk
+git worktree add .claude/worktrees/<name> <feature-branch>   # move work to worktree
+```
+
+**Detecting main checkout vs worktree:**
+```bash
+GIT_DIR=$(git rev-parse --git-dir 2>/dev/null)
+# ".git"               → main checkout  → check applies
+# contains "worktrees" → inside a worktree → skip this check
+```
+
+### Anti-pattern 2: Stale merged branches 🟡
+
+**Signal:** `git branch --merged <default>` returns branches other than the trunk.
+
+**Why it's bad:** Merged-but-undeleted branches are noise that obscures what's actually in flight.
+
+**Flag it:** Report the count. Suggest `git branch cleanup` to review and delete.
+
+### Anti-pattern 3: WIP commits on a pushed branch 🟡
+
+**Signal:** `git log --oneline @{u}..HEAD` contains subject lines matching `wip|WIP|todo|TODO|fixme|FIXME|temp|TEMP|hack|HACK`.
+
+**Why it's bad:** WIP markers in pushed history signal unfinished work that shouldn't have left the local machine. Creates confusing history and blocks clean PRs.
+
+**Flag it:** List the offending commits and suggest an interactive rebase to squash or rename.
+
+### Anti-pattern 4: Large uncommitted pile 🟡
+
+**Signal:** staged + unstaged + untracked > 20 files.
+
+**Why it's bad:** Large uncommitted diffs are hard to review, easy to lose, and signal a broken "commit as you go" habit.
+
+**Flag it:** Note the total and suggest committing incrementally by logical unit.
+
+---
+
 ### Tier 2: Safe Writes - Dispatch to Agent
 
 Gather relevant context, then dispatch to `git-agent` (background, Sonnet).
