@@ -22,6 +22,9 @@ From Python async patterns to Rust ownership models, from AWS Fargate deployment
 
 ## Recent Updates
 
+**v2.4.7** (April 2026)
+- 🛡️ **`push-gate` first-push fix** - Detected on first publish to a new remote: gitleaks scan failed because `origin/main` doesn't exist yet. Now branches on remote-ref existence — full-branch scan when new, diff-range scan when incremental.
+
 **v2.4.6** (April 2026)
 - 🐙 **`github-ops` skill** - GitHub remote operations companion to `git-ops` (local) and `push-gate` (pre-push safety). Owns `gh repo create`, repo metadata (description / homepage / topics / visibility), `gh release create`, and the README "Recent Updates" section convention. Three modes: `new` (first publish — audit, scaffold Recent Updates, create private-by-default repo, push, set topics, cut release), `update` (subsequent release — bump version per strategy, update Recent Updates + CHANGELOG, tag, push, release), `audit` (read-only checklist scoring LICENSE / README / package metadata / GitHub state). Bundles four reference docs codifying release strategy (default minor, never auto-major), Recent Updates style (claude-mods per-version blocks vs flarecrawl table), private-by-default visibility, and the full audit checklist with topic-derivation rules. Trims `git-ops` Release Workflow to stop at the local tag; remote half delegates here.
 
