@@ -237,6 +237,8 @@ The last-resort inline path should only be used for simple T2 operations (single
 
 ### Release Workflow
 
+`git-ops` owns the **local** half of releases only — analysing commits, generating CHANGELOG content, creating the local tag. The **remote** half (push, `gh release create`, repo metadata) belongs to the `github-ops` skill.
+
 When user asks to "create a release", "bump version", or "tag a release":
 
 1. **Inline (T1):** Check current version and commits since last tag
@@ -248,10 +250,12 @@ When user asks to "create a release", "bump version", or "tag a release":
 2. **Determine version bump:**
    - `feat:` commits -> minor bump
    - `fix:` commits -> patch bump
-   - `BREAKING CHANGE:` or `!:` -> major bump
+   - `BREAKING CHANGE:` or `!:` -> requires explicit user approval (never auto-major)
    - Or use version specified by user
 
-3. **Dispatch to git-agent (T2):** Tag, push tag, create GitHub release with generated notes
+3. **Dispatch to git-agent (T2):** Generate CHANGELOG content + create local tag.
+
+4. **Hand off to `github-ops`** for the remote half: push commits, push tag, create the GitHub release with notes, update repo metadata if warranted. Do not call `gh release create` from git-ops — that crosses the local/remote boundary. See `skills/github-ops/SKILL.md` mode `update`.
 
 ### Changelog Generation
 
