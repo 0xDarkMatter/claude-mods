@@ -1,7 +1,7 @@
 {
   "name": "claude-mods",
-  "version": "2.4.4",
-  "description": "Custom commands, skills, and agents for Claude Code - session continuity, 23 expert agents, 69 skills, 3 commands, 6 rules, 4 hooks, 13 output styles, modern CLI tools",
+  "version": "2.4.5",
+  "description": "Custom commands, skills, and agents for Claude Code - session continuity, 23 expert agents, 70 skills, 3 commands, 6 rules, 4 hooks, 13 output styles, modern CLI tools",
   "author": "0xDarkMatter",
   "repository": "https://github.com/0xDarkMatter/claude-mods",
   "license": "MIT",
@@ -75,6 +75,7 @@
       "skills/iterate",
       "skills/javascript-ops",
       "skills/laravel-ops",
+      "skills/leveldb-ops",
       "skills/log-ops",
       "skills/markitdown",
       "skills/mcp-ops",
