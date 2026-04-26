@@ -128,7 +128,7 @@ fi
 if [ -n "$DEFAULT_BRANCH" ]; then
   MERGED_COUNT=$(git branch --merged "$DEFAULT_BRANCH" 2>/dev/null \
     | grep -v "^\*\|^\s*${DEFAULT_BRANCH}$\|^\s*master$\|^\s*main$\|^\s*trunk$" \
-    | grep -c . 2>/dev/null || echo 0)
+    | wc -l | tr -d ' ')
   if [ "$MERGED_COUNT" -gt 0 ]; then
     HYGIENE_FLAGS="${HYGIENE_FLAGS}HYGIENE[2]: $MERGED_COUNT merged branch(es) not yet deleted — run: git branch --merged $DEFAULT_BRANCH\n"
   fi
