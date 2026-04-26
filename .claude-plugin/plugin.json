@@ -1,6 +1,6 @@
 {
   "name": "claude-mods",
-  "version": "2.4.8",
+  "version": "2.4.9",
   "description": "Custom commands, skills, and agents for Claude Code - session continuity, 23 expert agents, 71 skills, 3 commands, 6 rules, 4 hooks, 13 output styles, modern CLI tools",
   "author": "0xDarkMatter",
   "repository": "https://github.com/0xDarkMatter/claude-mods",
