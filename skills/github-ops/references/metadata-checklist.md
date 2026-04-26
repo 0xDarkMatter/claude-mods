@@ -10,6 +10,7 @@ Source of truth for mode `audit`. Ordered by criticality.
 | LICENSE matches package metadata | grep license field in pyproject.toml/package.json, compare to LICENSE header |
 | README.md present | `[ -f README.md ]` |
 | README has tagline | first non-empty paragraph is < 200 chars and not a heading |
+| README intro ≥ 80 words | word-count of prose between title and first `##` heading; see `readme-description.md` |
 | README has install section | `grep -iE '^##\\s+(install|installation|getting started|quickstart)' README.md` |
 | Package metadata file present | `pyproject.toml` (Python) OR `package.json` (Node) OR `Cargo.toml` (Rust) etc. |
 | Package metadata: description set | `jq -r .description` / `tomlq` equivalent |

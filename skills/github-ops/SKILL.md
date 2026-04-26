@@ -54,42 +54,54 @@ Triggered by: "publish to github", "create repo on github", "push to github" (wh
    - At least one tag exists (typically v0.1.0)?
    - CHANGELOG.md has an entry for the latest tag?
 
-2. Add "Recent Updates" section to README if missing
+2. Draft / refine README intro (2–3 paragraphs) — see references/readme-description.md
+   - If the README intro is just a tagline or < 80 words, draft a proper 2–3 paragraph
+     description: what it is, why it exists, who it's for. Read package metadata, CHANGELOG,
+     and the primary entry point first; do not fabricate.
+   - Voice: developer-to-developer, concrete, occasional dry wit (earned, never sprayed).
+     Anti-patterns ("blazing fast", emoji walls, marketing fluff) listed in the reference.
+   - Surface the draft to the user for approval before committing — this is the repo's
+     first impression and shouldn't be a one-shot.
+   - Commit via git-ops with: docs: Expand README intro
+
+3. Add "Recent Updates" section to README if missing
    - Use claude-mods style by default (see references/readme-recent-updates.md)
    - Place after Quickstart, before deep "why this exists" sections
    - For first release, single bullet block describing the initial extraction
    - Commit via git-ops with: docs: Add Recent Updates section
 
-3. Surface the publish plan to user, with visibility as a flippable line:
+4. Surface the publish plan to user, with visibility as a flippable line:
    "Creating as **private** at github.com/<org>/<repo> — say 'public' to flip"
    Wait for explicit confirmation.
 
-4. Create the repo:
+5. Create the repo:
    gh repo create <org>/<repo> --private --source=. --remote=origin \
-     --description "<derived from package metadata or asked>" \
+     --description "<one-line — distilled from the README intro draft in step 2, ≤ 350 chars>" \
      --homepage "<homepage URL or omit>"
    (NEVER pass --push; we want push-gate to run between)
+   Note: the GitHub `--description` is a single line and distinct from the README intro.
+   Derive it FROM the intro you just wrote, not from package metadata blindly.
 
-5. Run push-gate preflight:
+6. Run push-gate preflight:
    bash $HOME/.claude/skills/push-gate/scripts/preflight.sh --cwd <repo> origin main
    On any non-zero exit: stop, report, do not push.
 
-6. Push main + tags:
+7. Push main + tags:
    git -C <repo> push -u origin main
    git -C <repo> push origin --tags
 
-7. Set topics (derived from package keywords + language + frameworks):
+8. Set topics (derived from package keywords + language + frameworks):
    gh repo edit <org>/<repo> --add-topic <t1> --add-topic <t2> ...
    Aim for 6–12 topics. See references/metadata-checklist.md for derivation.
 
-8. Create the release for the latest tag:
+9. Create the release for the latest tag:
    gh release create <tag> --title "<tag> — <one-line headline>" \
      --notes "$(extract from CHANGELOG.md)"
 
-9. Verify:
-   gh repo view <org>/<repo>
-   gh release view <tag>
-   Report URL to user.
+10. Verify:
+    gh repo view <org>/<repo>
+    gh release view <tag>
+    Report URL to user.
 ```
 
 ### Mode `update` — subsequent release
@@ -119,6 +131,10 @@ Triggered by: "ship a release", "cut a release", "release v0.X.Y", "publish upda
    For minor: update Recent Updates AND scan diff for new commands/config/install steps;
               touch README body sections only if found.
    For patch: update Recent Updates ONLY (single bullet); no body changes unless asked.
+
+   Also: if the README intro is still < 80 words OR the repo's scope has drifted since
+   the intro was written, propose an expansion (see references/readme-description.md).
+   Don't churn good prose — only act if the intro is genuinely thin or stale.
 
 5. Commit README + CHANGELOG via git-ops:
    docs: Recent Updates + CHANGELOG for v<N>
@@ -153,6 +169,7 @@ Read-only — produces a report without making changes. See `references/metadata
 LOCAL FILE CHECKS
   [ ] LICENSE file present + matches metadata
   [ ] README has: tagline, install, quickstart, license link
+  [ ] README intro is ≥ 80 words (2–3 paragraphs orienting a cold reader)
   [ ] README has "Recent Updates" section near top
   [ ] CHANGELOG.md present and has entry for latest tag
   [ ] pyproject.toml / package.json: description, keywords, license, repository URL, homepage
@@ -175,6 +192,7 @@ Output: per-row pass/fail/warn, then a summary score and list of fixes. Fixes ar
 | Convention | File | Default |
 |---|---|---|
 | Release strategy | `references/release-strategy.md` | minor on `feat:`, patch on `fix:`-only, major requires approval |
+| README intro (2–3 paragraphs) | `references/readme-description.md` | what it is / why it exists / who it's for; concrete, dry, no marketing fluff |
 | README Recent Updates style | `references/readme-recent-updates.md` | claude-mods per-version blocks (alternate: flarecrawl table) |
 | Repo visibility default | `references/repo-visibility.md` | `--private` unless user says "public" |
 | Metadata audit checklist | `references/metadata-checklist.md` | full source-of-truth for mode `audit` |
@@ -251,6 +269,7 @@ When adding any of the above, keep the boundary discipline: anything talking to 
 |---|---|
 | `SKILL.md` | This file — modes, rules, delegation |
 | `references/release-strategy.md` | Version bump policy |
+| `references/readme-description.md` | 2–3 paragraph README intro — voice, structure, anti-patterns |
 | `references/readme-recent-updates.md` | "Recent Updates" section format + emoji vocabulary |
 | `references/repo-visibility.md` | Private-by-default policy |
 | `references/metadata-checklist.md` | Audit checklist source of truth |
