@@ -74,32 +74,38 @@ terminal width so the header reads as the section's banner.
 
 ### Grouped tree (default body)
 
-**Tree-control rule:** the connectors `├─ │ └─` are the scaffold. They
-run in their own column from the top of the body to the last leaf, and
-**nothing breaks the vertical**. Icons and labels live to the right of
-the connector, not between it and its parent's `│`. If you find yourself
-wanting to put an icon where the `│` should continue, you don't have a
-tree — you have a list with decorations.
+**Tree-control rule:** the connectors `├─ │ └─` are the scaffold.
+**Nothing sits at a junction.** A junction is the point where a node's
+connector meets its parent's vertical — putting a glyph there breaks
+the eye-line that gives the tree its meaning.
+
+- Group headers (interior nodes — they have children below) get **no
+  icon**. State is carried by the label text plus color.
+- Leaves (terminal nodes — nothing continues below them) **may** carry
+  an icon, since there's no vertical line to interrupt.
+- If you find yourself wanting an icon on an interior node, ask whether
+  it's really a group or just a decorated leaf — the answer is usually
+  the latter.
 
 #### 2-level: groups → leaves
 
-The default for state-bucketed views (lanes, PR checks, jobs).
+The default for state-bucketed views (lanes, PR checks, jobs). Group
+labels read as plain text, the `│` runs unbroken down column 0.
 
 ```
 ── fleet ─────────────────────────────────────────────────────  4 lanes · 3 active
-├─ ⏳ RUNNING   (2)
+├─  RUNNING     (2)
 │  ├─ feat/auth-rewrite             12m
 │  └─ spike/wasm-eval               34m
-├─ ✅ READY     (1)
+├─  READY       (1)
 │  └─ fix/cache-bust                2m
-└─ 🚀 LANDED    (1)
+└─  LANDED      (1)
    └─ chore/bump-deps               1h
 ```
 
-Notice: the `│` running down column 0 is unbroken from the first group
-to the last child of the second-last group. The `└─` on `LANDED`
-terminates the vertical cleanly. Empty groups are omitted — never
-render `(0)`.
+The double space after each connector (`├─ ` + leading space on the
+label) gives the eye a small breath before the label, reinforcing that
+the connector is structural and the label is content.
 
 Why grouped instead of flat: when ten lanes are in flight, scanning a
 flat table for "what's actually ready to land?" forces your eyes to do
@@ -110,23 +116,27 @@ glance whether the answer is none, one, or twelve.
 
 For hierarchies with intermediate structure — repos with branches with
 files, projects with packages with tests, lanes with commits with
-patches. Same rule: connectors don't break.
+patches. Interior nodes (`main`, `src/`, `utils/`) stay icon-free; only
+the leaves carry glyphs (state of the file).
 
 ```
 ── repo ──────────────────────────────────────────────────────  X:/Forge/claude-mods · 2 worktrees
-├─ 📦 main
-│  ├─ src/
-│  │  ├─ index.ts                   modified
-│  │  └─ utils/
-│  │     ├─ format.ts               modified
-│  │     └─ parse.ts                added
+├─  main
+│  ├─  src/
+│  │  ├─ index.ts                   ⚠️  modified
+│  │  └─  utils/
+│  │     ├─ format.ts               ⚠️  modified
+│  │     └─ parse.ts                ✅  added
 │  └─ README.md                     clean
-└─ 🌿 feat/auth-rewrite
-   └─ src/
-      ├─ auth.ts                    new
-      └─ middleware/
-         └─ session.ts              modified
+└─  feat/auth-rewrite
+   └─  src/
+      ├─ auth.ts                    ✅  new
+      └─  middleware/
+         └─ session.ts              ⚠️  modified
 ```
+
+Look at any `├─` or `└─` and trace upward: there's always a clean `│`
+or empty space directly above it, never a glyph. That's the rule.
 
 Each level adds a 3-column indent: `│  ` while the ancestor still has
 siblings to render, `   ` once the ancestor is on its last sibling. The
@@ -198,19 +208,19 @@ Disabled when stdout isn't a TTY, or `NO_COLOR` is set. Forced on with
 
 ```
 ── fleet ─────────────────────────────────────────────────────  3 lanes · 2 active
-├─ ⏳ RUNNING   (1)
+├─  RUNNING     (1)
 │  └─ feat/auth-rewrite             12m
-├─ ✅ READY     (1)
+├─  READY       (1)
 │  └─ fix/cache-bust                2m
-└─ 🚀 LANDED    (1)
+└─  LANDED      (1)
    └─ chore/bump-deps               1h
 ```
 
-The header rule survives — it's the strongest visual cue that you're
-inside a skill's output. The flat table gives way to a tree where
-groups are first-class branches: the `│` runs uninterrupted from the
-first group to the last leaf above the terminating `└─`, and icons
-sit *after* the connector instead of breaking it.
+The header rule stays — strongest cue you're inside a skill's output.
+Group labels are icon-free so the `│` running down column 0 is unbroken
+from the first group to the last leaf. State is carried by the label
+text and color (yellow for RUNNING, green for READY/LANDED). The tree
+reads as a tree, not a list with decorations.
 
 ### `git-ops/status` reformatted in the same language
 

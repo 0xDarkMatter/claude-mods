@@ -187,16 +187,21 @@ cmd_fleet() {
   for i in "${active_groups[@]}"; do
     local n=${state_counts[$i]}
     local state=${order[$i]}
-    local icon
-    icon=$(term_state_icon "$state")
-    [[ -z "$icon" || "$icon" == "?" ]] && icon="$ICON_UNKNOWN"
 
-    # Group line — connector at column 0, then icon + label live to its right.
-    local g_conn
+    # Group line — connector + plain label. NO icon at the junction:
+    # a glyph here breaks the eye-line of the tree's vertical. State is
+    # carried by label + color (and the per-leaf glyph if needed).
+    local g_conn group_label
     g_conn=$(term_tree_connector "$g_idx" "$g_last")
-    local group_label
-    group_label="$icon $state"
-    term_tree_node "" "$g_conn" "$group_label" "($n)"
+    case "$state" in
+      RUNNING|PENDING)  group_label=$(term_color yellow "$state") ;;
+      READY)            group_label=$(term_color green  "$state") ;;
+      LANDED|DONE|OK)   group_label=$(term_color green  "$state") ;;
+      FAILED|ERROR)     group_label=$(term_color red    "$state") ;;
+      CONFLICT|WARN)    group_label=$(term_color yellow "$state") ;;
+      *)                group_label="$state" ;;
+    esac
+    term_tree_node "" "$g_conn " "$group_label" "($n)"
 
     # Children indent = continuation of this group's connector.
     local child_prefix

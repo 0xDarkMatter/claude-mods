@@ -161,9 +161,12 @@ echo "$scrub_out" | grep -q "FORBIDDEN" && ok "scrub-check flagged TODO_SCRUB" |
 git -C "$SCRATCH" checkout main >/dev/null 2>&1
 
 # ── ASCII fallback ──
-step "FLEET_ASCII=1 swaps icons"
+step "FLEET_ASCII=1 swaps glyphs to ASCII"
 ascii_out=$(FLEET_ASCII=1 bash "$FLEET" fleet 2>&1 || true)
-echo "$ascii_out" | grep -qE '\[\*\]|\[\+\]|\[\.\]' && ok "ASCII icons rendered" || fail "ASCII icons not used"
+# Tree connectors carry the ASCII signal now (+- / `-); group headers
+# no longer carry icons (they sat at the junction and broke the tree).
+echo "$ascii_out" | grep -qE '\+-|`-' && ok "ASCII tree connectors rendered" || fail "ASCII connectors not used"
+echo "$ascii_out" | grep -qE '├─|└─|│' && fail "Unicode connectors leaked in ASCII mode" || ok "no Unicode in ASCII mode"
 
 # ── summary ──
 echo ""
