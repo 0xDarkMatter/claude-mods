@@ -8,7 +8,7 @@ GIT_COMMON_DIR=$(git rev-parse --git-common-dir 2>/dev/null || true)
 [[ -z "$GIT_COMMON_DIR" ]] && { echo "signal.sh ERROR: not in a git repo" >&2; exit 2; }
 # git-common-dir is .git/ at main repo root → parent is the main worktree
 MAIN_REPO_ROOT=$(cd "$GIT_COMMON_DIR/.." && pwd)
-LANES_DIR="$MAIN_REPO_ROOT/.fleet/lanes"
+LANES_DIR="$MAIN_REPO_ROOT/.claude/fleet/lanes"
 BRANCH=$(git branch --show-current 2>/dev/null || true)
 
 if [[ -z "$BRANCH" ]]; then

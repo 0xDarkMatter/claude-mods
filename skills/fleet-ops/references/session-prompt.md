@@ -21,9 +21,9 @@ Rules:
   - Make atomic commits with conventional commit messages as you go.
   - Run TESTS before finishing.
   - When tests pass and you're ready to land, run:
-      bash .fleet/signal.sh READY <path-to-test-log>
+      bash .claude/fleet/signal.sh READY <path-to-test-log>
   - If you hit a conflict, scope creep, or any unresolvable issue, run:
-      bash .fleet/signal.sh CONFLICT "<one-line reason>"
+      bash .claude/fleet/signal.sh CONFLICT "<one-line reason>"
     then stop and explain.
   - Do not merge to main yourself. The fleet daemon handles landing.
 

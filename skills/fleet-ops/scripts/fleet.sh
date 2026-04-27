@@ -3,15 +3,16 @@
 # Status: experimental
 set -euo pipefail
 
-FLEET_DIR=".fleet"
+FLEET_DIR=".claude/fleet"
 LANES_DIR="$FLEET_DIR/lanes"
 LOG="$FLEET_DIR/activity.log"
 CONFIG="$FLEET_DIR/config"
+PID_FILE="$FLEET_DIR/daemon.pid"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# defaults (overridable via .fleet/config: key=value, no quotes)
+# defaults (overridable via .claude/fleet/config: key=value, no quotes)
 MODE="auto"
-WORKTREE_ROOT=".fleet/worktrees"
+WORKTREE_ROOT=".claude/fleet/worktrees"
 TEST_CMD=""
 FORBIDDEN_PATTERN="TODO_SCRUB|XXX[^a-z]|FIXME_BEFORE_LAND"
 BASE_BRANCH="main"
@@ -39,10 +40,10 @@ ensure_fleet_dir() {
   mkdir -p "$LANES_DIR"
   [[ -f "$FLEET_DIR/signal.sh" ]] || cp "$SCRIPT_DIR/signal.sh" "$FLEET_DIR/signal.sh"
   chmod +x "$FLEET_DIR/signal.sh" 2>/dev/null || true
-  # Auto-ignore .fleet/ in git so it doesn't show as "dirty" or get committed
+  # Auto-ignore .claude/fleet/ in git so it doesn't show as "dirty" or get committed
   if [[ -d .git ]] || git rev-parse --git-dir >/dev/null 2>&1; then
-    if [[ ! -f .gitignore ]] || ! grep -qxF '.fleet/' .gitignore 2>/dev/null; then
-      echo '.fleet/' >> .gitignore
+    if [[ ! -f .gitignore ]] || ! grep -qxF '.claude/fleet/' .gitignore 2>/dev/null; then
+      echo '.claude/fleet/' >> .gitignore
     fi
   fi
 }
@@ -251,6 +252,31 @@ cmd_land() {
   land_one "$branch" && rebase_others "$branch"
 }
 
+cmd_stop() {
+  if [[ ! -f "$PID_FILE" ]]; then
+    echo "no daemon running (no $PID_FILE)" >&2
+    return 0
+  fi
+  local pid
+  pid=$(cat "$PID_FILE")
+  if ! kill -0 "$pid" 2>/dev/null; then
+    log "stale PID file (pid $pid not alive) — clearing"
+    rm -f "$PID_FILE"
+    return 0
+  fi
+  log "sending SIGTERM to daemon (pid $pid)"
+  kill -TERM "$pid" 2>/dev/null || true
+  # Wait up to 5s for graceful exit
+  local i
+  for i in 1 2 3 4 5; do
+    sleep 1
+    kill -0 "$pid" 2>/dev/null || { log "daemon stopped"; return 0; }
+  done
+  log "daemon didn't exit on SIGTERM, sending SIGKILL"
+  kill -KILL "$pid" 2>/dev/null || true
+  rm -f "$PID_FILE"
+}
+
 cmd_revert() {
   local branch=${1:-}
   [[ -z "$branch" ]] && { echo "usage: fleet revert <branch>" >&2; exit 1; }
@@ -263,10 +289,31 @@ cmd_revert() {
   log "reverted: $branch"
 }
 
+daemon_cleanup() {
+  log "daemon stopping (pid $$)"
+  rm -f "$PID_FILE"
+}
+
 cmd_start() {
   ensure_fleet_dir
   refuse_if_shared_tree || exit 1
-  log "daemon start (poll: ${POLL_INTERVAL}s, test_cmd: ${TEST_CMD:-<none>})"
+
+  # Refuse if a daemon is already running
+  if [[ -f "$PID_FILE" ]]; then
+    local existing_pid
+    existing_pid=$(cat "$PID_FILE" 2>/dev/null || echo "")
+    if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" 2>/dev/null; then
+      log "ERROR: daemon already running (pid $existing_pid). Run: fleet stop"
+      exit 1
+    else
+      log "stale PID file (pid $existing_pid not alive) — clearing"
+      rm -f "$PID_FILE"
+    fi
+  fi
+
+  echo "$$" > "$PID_FILE"
+  trap daemon_cleanup EXIT INT TERM HUP
+  log "daemon start (pid $$, poll: ${POLL_INTERVAL}s, test_cmd: ${TEST_CMD:-<none>})"
 
   while true; do
     local ready=()
@@ -302,6 +349,7 @@ cmd_start() {
 case "${1:-}" in
   init)         shift; cmd_init "$@" ;;
   start)        shift; cmd_start "$@" ;;
+  stop)         cmd_stop ;;
   fleet|status) cmd_fleet ;;
   land)         shift; cmd_land "$@" ;;
   revert)       shift; cmd_revert "$@" ;;
@@ -312,7 +360,8 @@ fleet-ops — landing queue for concurrent Claude sessions (experimental)
 
 Usage:
   fleet init <name>...        Create branch + worktree per name
-  fleet start                 Run the daemon (Ctrl-C to stop)
+  fleet start                 Run the daemon (writes pid to $PID_FILE)
+  fleet stop                  Signal the running daemon to exit cleanly
   fleet fleet                 One-shot status view
   fleet land <branch>         Manual land + rebase others
   fleet revert <branch>       Revert merge commit on $BASE_BRANCH

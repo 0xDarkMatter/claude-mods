@@ -25,18 +25,32 @@ The skill doesn't care if there are 2 lanes or 20, doesn't care about branch nam
 
 ```
 fleet init <name>...        Create branch + worktree per name
-fleet start                 Run the daemon (Ctrl-C to stop)
+fleet start                 Run the daemon (writes pid to .claude/fleet/daemon.pid)
+fleet stop                  Signal the running daemon to exit cleanly
 fleet fleet                 One-shot status view
 fleet land <branch>         Manual land + rebase others
 fleet revert <branch>       Revert merge commit on main
 fleet scrub-check <branch>  Dry-run forbidden-pattern check
 ```
 
-`signal.sh` deploys to `.fleet/signal.sh` on `init`. Sessions call:
+## Daemon lifecycle
+
+When Claude invokes `fleet start` via `Bash(run_in_background: true)`, the daemon:
+
+1. Writes its PID to `.claude/fleet/daemon.pid`
+2. Traps `SIGINT/SIGTERM/SIGHUP` and removes the PID file on exit
+3. Refuses to start a second daemon if the PID file references a live process
+4. Exits naturally when all lanes are terminal (`LANDED` or `FAILED`)
+
+To stop early: `fleet stop` reads the PID file, sends `SIGTERM`, waits up to 5s, escalates to `SIGKILL` if needed.
+
+If the Claude Code session ends abruptly while the daemon is running, the process is best-effort cleaned up by the OS (POSIX: child receives `SIGHUP`; Windows: depends on harness). On next `fleet start`, a stale PID file is auto-detected and cleared.
+
+`signal.sh` deploys to `.claude/fleet/signal.sh` on `init`. Sessions call:
 
 ```bash
-bash .fleet/signal.sh READY <test-log>
-bash .fleet/signal.sh CONFLICT "<reason>"
+bash .claude/fleet/signal.sh READY <test-log>
+bash .claude/fleet/signal.sh CONFLICT "<reason>"
 ```
 
 ## Decision tree
@@ -100,19 +114,19 @@ If your terminal mojibakes the status icons (⏳ ✅ 🚀 ❌ ⚠️), fall back
 
 ```bash
 export FLEET_ASCII=1
-# or in .fleet/config:
+# or in .claude/fleet/config:
 icons=ascii
 ```
 
-Long-path warning (Windows only): worktrees nest under `.fleet/worktrees/<name>/`. If your repo lives deep in the filesystem, lane names should stay short to avoid Windows' 260-char path limit. Enable `core.longpaths=true` in git if you hit it.
+Long-path warning (Windows only): worktrees nest under `.claude/fleet/worktrees/<name>/`. If your repo lives deep in the filesystem, lane names should stay short to avoid Windows' 260-char path limit. Enable `core.longpaths=true` in git if you hit it.
 
 ## Configuration
 
-Optional `.fleet/config` (key=value, no quotes):
+Optional `.claude/fleet/config` (key=value, no quotes):
 
 ```
 mode=auto                            # auto | worktree | branch
-worktree_root=.fleet/worktrees
+worktree_root=.claude/fleet/worktrees
 test_cmd=                            # if set, daemon runs this; else trust signal log
 forbidden_pattern=TODO_SCRUB|XXX
 base_branch=main
@@ -120,6 +134,12 @@ poll_interval=5
 ```
 
 Zero-config works for the common case.
+
+## Future work
+
+- **JSONL activity log** — currently plain text (`[HH:MM:SS] event`). Switch to JSONL when a TUI, `--json` output, or `log-ops` integration earns the cost. Migration is mechanical.
+- **`--batch` mode** — land all READY lanes in one go, test once at end. Add when dogfooding shows demand.
+- **Cross-session daemon** — currently dies with the Claude Code session. For overnight runs, a real detached process (`nohup`/`systemd`/`tmux`) is needed.
 
 ## References
 
@@ -129,4 +149,4 @@ Zero-config works for the common case.
 ## Scripts
 
 - `scripts/fleet.sh` — main CLI
-- `scripts/signal.sh` — branch-aware signaler (deployed to `.fleet/signal.sh` on init)
+- `scripts/signal.sh` — branch-aware signaler (deployed to `.claude/fleet/signal.sh` on init)

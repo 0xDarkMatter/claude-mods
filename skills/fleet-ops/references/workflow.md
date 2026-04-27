@@ -10,9 +10,9 @@ End-to-end walkthrough plus recovery scenarios. The decision tree and CLI surfac
 fleet init auth-mw rate-limiter cache-layer
 ```
 
-Creates: a branch per name (off `main`), a worktree at `.fleet/worktrees/<name>/`, a status file at `.fleet/lanes/<name>` (state: `RUNNING`), and deploys `signal.sh` to `.fleet/signal.sh`.
+Creates: a branch per name (off `main`), a worktree at `.claude/fleet/worktrees/<name>/`, a status file at `.claude/fleet/lanes/<name>` (state: `RUNNING`), and deploys `signal.sh` to `.claude/fleet/signal.sh`.
 
-Force branch-only mode: `mode=branch` in `.fleet/config`. Use this when each session is in a separate clone or remote machine — no worktrees needed.
+Force branch-only mode: `mode=branch` in `.claude/fleet/config`. Use this when each session is in a separate clone or remote machine — no worktrees needed.
 
 ### 2. Launch sessions
 
@@ -21,7 +21,7 @@ For each lane, open a Claude session pointing at that worktree (or that clone). 
 Each session works in isolation, commits atomically, runs tests, and signals when ready:
 
 ```bash
-bash .fleet/signal.sh READY tests/test_auth.log
+bash .claude/fleet/signal.sh READY tests/test_auth.log
 ```
 
 `signal.sh` will refuse if the lane has uncommitted changes or if the test log shows failures.
@@ -32,7 +32,7 @@ bash .fleet/signal.sh READY tests/test_auth.log
 fleet start
 ```
 
-Polls `.fleet/lanes/` every 5 seconds. When a lane shows `READY`:
+Polls `.claude/fleet/lanes/` every 5 seconds. When a lane shows `READY`:
 
 1. Pre-land scrub — refuses if forbidden patterns found in the diff
 2. Refuses if `main` is dirty
@@ -63,11 +63,14 @@ fleet fleet
 When all lanes are terminal (`LANDED` or `FAILED`), the daemon exits. To tear down:
 
 ```bash
-git worktree remove .fleet/worktrees/<name>     # for each worktree lane
-rm -rf .fleet                                    # nuke fleet state
+fleet stop                                              # if daemon still running
+git worktree remove .claude/fleet/worktrees/<name>      # for each worktree lane
+rm -rf .claude/fleet                                    # nuke fleet state
 ```
 
-`fleet init` is idempotent — keep `.fleet/` for the next round if you want.
+`fleet init` is idempotent — keep `.claude/fleet/` for the next round if you want.
+
+If a previous daemon was killed without cleanup, `fleet start` auto-detects the stale `daemon.pid` and clears it.
 
 ## Recovery
 
@@ -83,7 +86,7 @@ Or resolve manually:
 git checkout <lane-branch>
 # fix conflicts
 git rebase --continue
-bash .fleet/signal.sh READY <test-log>
+bash .claude/fleet/signal.sh READY <test-log>
 ```
 
 ### `FAILED` lane (tests broke `main` post-merge)
@@ -93,7 +96,7 @@ Daemon already reverted the merge. Branch still exists:
 ```bash
 git checkout <lane-branch>
 # fix the test
-bash .fleet/signal.sh READY <test-log>
+bash .claude/fleet/signal.sh READY <test-log>
 ```
 
 Daemon picks it up on next poll.
