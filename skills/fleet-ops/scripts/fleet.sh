@@ -119,32 +119,87 @@ cmd_init() {
   echo "Then: bash $0 start"
 }
 
+format_age() {
+  local secs=$1
+  if   [[ $secs -lt 60   ]]; then printf '%ds' "$secs"
+  elif [[ $secs -lt 3600 ]]; then printf '%dm' "$((secs/60))"
+  else printf '%dh%dm' "$((secs/3600))" "$(( (secs%3600)/60 ))"
+  fi
+}
+
 cmd_fleet() {
   ensure_fleet_dir
-  local count=0
-  for f in "$LANES_DIR"/*; do [[ -f "$f" ]] && count=$((count+1)); done
 
-  echo ""
-  term_header "Fleet" "$count $([ "$count" -eq 1 ] && echo lane || echo lanes)"
-  term_table_row "" "BRANCH" "STATUS" "AGE"
+  # Bucket lanes by state. ASCII-safe assoc-array alternative: parallel arrays.
+  local order=(RUNNING READY CONFLICT FAILED LANDED)
+  local now total=0 active=0
+  now=$(date +%s)
 
-  local now=$(date +%s)
+  # state_buckets[i] = newline-joined "branch|age|meta" rows for order[i]
+  local state_buckets=("" "" "" "" "")
+  local state_counts=(0 0 0 0 0)
+
   for f in "$LANES_DIR"/*; do
     [[ -f "$f" ]] || continue
-    local branch state mtime secs age icon
+    total=$((total+1))
+    local branch state meta mtime secs age idx
     branch=$(basename "$f")
     state=$(head -n1 "$f")
+    meta=$(sed -n '2p' "$f")
     mtime=$(file_mtime "$f")
     secs=$((now - mtime))
-    if   [[ $secs -lt 60   ]]; then age="${secs}s"
-    elif [[ $secs -lt 3600 ]]; then age="$((secs/60))m"
-    else age="$((secs/3600))h$(( (secs%3600)/60 ))m"
-    fi
+    age=$(format_age "$secs")
+    [[ "$state" != "LANDED" && "$state" != "FAILED" ]] && active=$((active+1))
+
+    idx=-1
+    case "$state" in
+      RUNNING)  idx=0 ;;
+      READY)    idx=1 ;;
+      CONFLICT) idx=2 ;;
+      FAILED)   idx=3 ;;
+      LANDED)   idx=4 ;;
+    esac
+    [[ $idx -lt 0 ]] && continue
+    state_counts[$idx]=$(( state_counts[idx] + 1 ))
+    state_buckets[$idx]="${state_buckets[$idx]}${branch}|${age}|${meta}"$'\n'
+  done
+
+  echo ""
+  term_header "fleet" "$total $([ "$total" -eq 1 ] && echo lane || echo lanes) · $active active"
+
+  if [[ $total -eq 0 ]]; then
+    echo ""
+    term_empty "no lanes — run: fleet init <name>..."
+    echo ""
+    return
+  fi
+
+  local i
+  for i in 0 1 2 3 4; do
+    local n=${state_counts[$i]}
+    [[ $n -eq 0 ]] && continue
+    local state=${order[$i]}
+    local icon
     icon=$(term_state_icon "$state")
     [[ -z "$icon" || "$icon" == "?" ]] && icon="$ICON_UNKNOWN"
-    term_table_row "$icon" "$branch" "$state" "$age"
+    echo ""
+    term_group_header "$icon" "$state" "$n"
+
+    local lines="${state_buckets[$i]}"
+    local idx=0 last_idx=$((n - 1))
+    local branch age meta
+    while IFS='|' read -r branch age meta; do
+      [[ -z "$branch" ]] && continue
+      local connector
+      connector=$(term_tree_connector "$idx" "$last_idx")
+      local label="$branch"
+      local meta_str="$age"
+      [[ -n "$meta" ]] && meta_str="$age  $meta"
+      printf '    %s %-32s %s\n' "$connector" "$label" "$(term_color dim "$meta_str")"
+      idx=$((idx+1))
+    done <<< "$lines"
   done
-  [[ $count -eq 0 ]] && term_empty "no lanes — run: fleet init <name>..."
+  echo ""
 }
 
 cmd_scrub_check() {

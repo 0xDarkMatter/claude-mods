@@ -70,6 +70,9 @@ term_init() {
     TERM_ICON_FAILED="[x]"
     TERM_ICON_WARN="[!]"
     TERM_ICON_HINT="[i]"
+    TERM_TREE_BRANCH="+-"
+    TERM_TREE_LAST="\`-"
+    TERM_TREE_VERT="|"
   else
     TERM_ICON_PENDING="⏳"
     TERM_ICON_READY="✅"
@@ -77,6 +80,9 @@ term_init() {
     TERM_ICON_FAILED="❌"
     TERM_ICON_WARN="⚠️ "
     TERM_ICON_HINT="💡"
+    TERM_TREE_BRANCH="├─"
+    TERM_TREE_LAST="└─"
+    TERM_TREE_VERT="│"
   fi
 
   if [[ "$TERM_COLOR" -eq 1 ]]; then
@@ -156,6 +162,44 @@ term_tree_item() {
   else
     printf '  %s  %s\n' "$icon" "$label"
   fi
+}
+
+# Tree connectors — set by term_init via TERM_ASCII_MODE.
+TERM_TREE_BRANCH=""    # ├─  /  +-
+TERM_TREE_LAST=""      # └─  /  `-
+TERM_TREE_VERT=""      # │   /  |
+
+# term_group_header <icon> <LABEL> <count>  — "  ⏳ RUNNING   (3)"
+# Use as the parent line above term_tree_branch / term_tree_last children.
+term_group_header() {
+  local icon=$1 label=$2 count=$3
+  printf '  %s %-9s %s\n' "$icon" "$label" "$(term_color dim "($count)")"
+}
+
+# term_tree_branch <label> [meta]  — "    ├─ label                meta"
+term_tree_branch() {
+  local label=$1 meta=${2:-}
+  if [[ -n "$meta" ]]; then
+    printf '    %s %-32s %s\n' "$TERM_TREE_BRANCH" "$label" "$(term_color dim "$meta")"
+  else
+    printf '    %s %s\n' "$TERM_TREE_BRANCH" "$label"
+  fi
+}
+
+# term_tree_last <label> [meta]  — "    └─ label                meta"
+term_tree_last() {
+  local label=$1 meta=${2:-}
+  if [[ -n "$meta" ]]; then
+    printf '    %s %-32s %s\n' "$TERM_TREE_LAST" "$label" "$(term_color dim "$meta")"
+  else
+    printf '    %s %s\n' "$TERM_TREE_LAST" "$label"
+  fi
+}
+
+# term_tree_connector <idx> <last_idx>  — echo branch or last, for loops.
+term_tree_connector() {
+  if [[ "$1" -eq "$2" ]]; then printf '%s' "$TERM_TREE_LAST"
+  else printf '%s' "$TERM_TREE_BRANCH"; fi
 }
 
 # term_table_row <c1> <c2> <c3>  — fixed-width 3-col row.

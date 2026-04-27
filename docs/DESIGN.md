@@ -58,28 +58,60 @@ Use sparingly — borders that wrap nothing waste lines.
 
 ## Layouts
 
-### Header block
+The default layout is **rule + grouped tree**: a horizontal-line "app
+header" on top, then items grouped by state with tree connectors. Flat
+tables are reserved for one-row-per-thing data where grouping would just
+add noise.
 
-A header opens a logical section. Title is cyan; trailing meta is dim.
+### Header rule (the "app header")
 
-```
-── Fleet ──────────────────────────────────────────────────────  3 lanes
-```
-
-### Status table
-
-Two- or three-column, glyph-first. No nested tables.
+Always present. Title in cyan, trailing meta in dim. The rule extends to
+terminal width so the header reads as the section's banner.
 
 ```
-  ⏳  feat/auth-rewrite             RUNNING    12m
-  ✅  fix/cache-bust                READY      2m
-  🚀  chore/bump-deps               LANDED     1h
-  ❌  spike/wasm                    FAILED     34m
+── fleet ─────────────────────────────────────────────────────  4 lanes · 3 active
 ```
 
-### Tree
+### Grouped tree (default body)
 
-For hierarchical state — worktrees under a repo, files under a branch.
+State icon + group label + count, then children under tree connectors.
+Empty groups are omitted — never render a group with `(0)`.
+
+```
+── fleet ─────────────────────────────────────────────────────  4 lanes · 3 active
+
+  ⏳ RUNNING   (2)
+    ├─ feat/auth-rewrite             12m
+    └─ spike/wasm-eval               34m
+
+  ✅ READY     (1)
+    └─ fix/cache-bust                2m
+
+  🚀 LANDED    (1)
+    └─ chore/bump-deps               1h
+```
+
+Why grouped instead of flat: when ten lanes are in flight, scanning a
+flat table for "what's actually ready to land?" forces your eyes to do
+the filtering. Grouping does it for you, and the count tells you at a
+glance whether the answer is none, one, or twelve.
+
+### Flat status table (escape hatch)
+
+When the data is genuinely flat — `git status`-style fields, a single
+PR's checks — drop the tree. Glyph-first, no nested tables.
+
+```
+  ✅  secret scan        clean
+  ✅  forbidden files    none
+  ❌  divergence         3 ahead, 1 behind
+```
+
+### Plain tree (filesystem-style, no state grouping)
+
+For hierarchies that aren't keyed on state — a directory tree, an
+include graph. Use sparingly; the grouped-tree above is preferred for
+state.
 
 ```
 repo/
@@ -122,7 +154,7 @@ Disabled when stdout isn't a TTY, or `NO_COLOR` is set. Forced on with
 
 ## Examples (rendered)
 
-### Before — `fleet-ops` rolling its own
+### Before — `fleet-ops` rolling its own (flat table, double rules)
 
 ```
 ── Fleet ──────────────────────────────────────────────────────
@@ -130,18 +162,29 @@ Disabled when stdout isn't a TTY, or `NO_COLOR` is set. Forced on with
 ────────────────────────────────────────────────────────────────
   ⏳   feat/auth-rewrite                 RUNNING    12m
   ✅   fix/cache-bust                    READY      2m
+  🚀   chore/bump-deps                   LANDED     1h
 ────────────────────────────────────────────────────────────────
 ```
 
-### After — same skill, sourcing `_lib/term.sh`
+### After — rule on top, grouped tree as default
 
 ```
-── Fleet ──────────────────────────────────────────────────────  2 lanes
-  ⏳   feat/auth-rewrite                 RUNNING    12m
-  ✅   fix/cache-bust                    READY      2m
+── fleet ─────────────────────────────────────────────────────  3 lanes · 2 active
+
+  ⏳ RUNNING   (1)
+    └─ feat/auth-rewrite             12m
+
+  ✅ READY     (1)
+    └─ fix/cache-bust                2m
+
+  🚀 LANDED    (1)
+    └─ chore/bump-deps               1h
 ```
 
-The chrome shrinks; the glyph and meta carry the structure.
+The header rule survives — it's the strongest visual cue that you're
+inside a skill's output. The flat table gives way to grouped state, so
+"what's ready" and "what's still running" answer themselves before you
+read a single branch name.
 
 ### `git-ops/status` reformatted in the same language
 
