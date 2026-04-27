@@ -224,7 +224,16 @@ cmd_fleet() {
       [[ -z "$branch" ]] && continue
       local c_conn
       if [[ $c_idx -eq $c_last ]]; then c_conn="$TERM_TREE_LAST"; else c_conn="$TERM_TREE_BRANCH"; fi
-      term_leaf_line "$c_conn" "$branch" "─" "${meta:-}" "$age"
+
+      # Build the rail glyph from this lane's commits-ahead and state.
+      local ahead head_kind rail
+      ahead=$(git rev-list --count "${BASE_BRANCH}..${branch}" 2>/dev/null || echo 0)
+      head_kind="HEAD"
+      [[ "$state" == "CONFLICT" ]] && head_kind="CONFLICT"
+      [[ "$state" == "FAILED" ]] && head_kind="CONFLICT"
+      rail=$(term_rail "$ahead" "$head_kind")
+
+      term_leaf_line "$c_conn" "$branch" "$rail" "${meta:-}" "$age"
       c_idx=$((c_idx+1))
     done <<< "$lines"
     term_panel_vert
