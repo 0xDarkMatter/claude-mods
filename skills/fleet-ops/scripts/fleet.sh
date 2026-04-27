@@ -10,6 +10,13 @@ CONFIG="$FLEET_DIR/config"
 PID_FILE="$FLEET_DIR/daemon.pid"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Shared terminal-output helpers (see docs/DESIGN.md).
+# shellcheck source=../../_lib/term.sh
+. "$SCRIPT_DIR/../../_lib/term.sh"
+# Honor legacy FLEET_ASCII alongside TERM_ASCII.
+[[ "${FLEET_ASCII:-}" == "1" || "${icons:-}" == "ascii" ]] && export TERM_ASCII=1
+term_init
+
 # defaults (overridable via .claude/fleet/config: key=value, no quotes)
 MODE="auto"
 WORKTREE_ROOT=".claude/fleet/worktrees"
@@ -19,15 +26,13 @@ BASE_BRANCH="main"
 POLL_INTERVAL=5
 [[ -f "$CONFIG" ]] && source "$CONFIG" 2>/dev/null || true
 
-# OS-aware icon set: Unicode by default, ASCII fallback for legacy terminals
-# Override: FLEET_ASCII=1 or .fleet/config has icons=ascii
-if [[ "${FLEET_ASCII:-}" == "1" ]] || [[ "${icons:-}" == "ascii" ]]; then
-  ICON_RUNNING="[.]"; ICON_READY="[+]"; ICON_LANDED="[*]"
-  ICON_FAILED="[X]";  ICON_CONFLICT="[!]"; ICON_UNKNOWN="[?]"
-else
-  ICON_RUNNING="⏳";  ICON_READY="✅";  ICON_LANDED="🚀"
-  ICON_FAILED="❌";   ICON_CONFLICT="⚠️ "; ICON_UNKNOWN="? "
-fi
+# Icons resolved through the shared term lib (term_state_icon).
+ICON_RUNNING="$(term_state_icon RUNNING)"
+ICON_READY="$(term_state_icon READY)"
+ICON_LANDED="$(term_state_icon LANDED)"
+ICON_FAILED="$(term_state_icon FAILED)"
+ICON_CONFLICT="$(term_state_icon CONFLICT)"
+ICON_UNKNOWN="?"
 
 # Cross-platform mtime: GNU stat (Linux/Git Bash) vs BSD stat (macOS)
 file_mtime() {
@@ -116,14 +121,16 @@ cmd_init() {
 
 cmd_fleet() {
   ensure_fleet_dir
+  local count=0
+  for f in "$LANES_DIR"/*; do [[ -f "$f" ]] && count=$((count+1)); done
+
   echo ""
-  echo "── Fleet ──────────────────────────────────────────────────────"
-  printf "  %-2s  %-32s %-10s %s\n" "" "BRANCH" "STATUS" "AGE"
-  echo "────────────────────────────────────────────────────────────────"
-  local any=0 now=$(date +%s)
+  term_header "Fleet" "$count $([ "$count" -eq 1 ] && echo lane || echo lanes)"
+  term_table_row "" "BRANCH" "STATUS" "AGE"
+
+  local now=$(date +%s)
   for f in "$LANES_DIR"/*; do
     [[ -f "$f" ]] || continue
-    any=1
     local branch state mtime secs age icon
     branch=$(basename "$f")
     state=$(head -n1 "$f")
@@ -133,18 +140,11 @@ cmd_fleet() {
     elif [[ $secs -lt 3600 ]]; then age="$((secs/60))m"
     else age="$((secs/3600))h$(( (secs%3600)/60 ))m"
     fi
-    case $state in
-      RUNNING)  icon="$ICON_RUNNING" ;;
-      READY)    icon="$ICON_READY" ;;
-      LANDED)   icon="$ICON_LANDED" ;;
-      FAILED)   icon="$ICON_FAILED" ;;
-      CONFLICT) icon="$ICON_CONFLICT" ;;
-      *)        icon="$ICON_UNKNOWN" ;;
-    esac
-    printf "  %s  %-32s %-10s %s\n" "$icon" "$branch" "$state" "$age"
+    icon=$(term_state_icon "$state")
+    [[ -z "$icon" || "$icon" == "?" ]] && icon="$ICON_UNKNOWN"
+    term_table_row "$icon" "$branch" "$state" "$age"
   done
-  [[ $any -eq 0 ]] && echo "  (no lanes — run: fleet init <name>...)"
-  echo "────────────────────────────────────────────────────────────────"
+  [[ $count -eq 0 ]] && term_empty "no lanes — run: fleet init <name>..."
 }
 
 cmd_scrub_check() {
