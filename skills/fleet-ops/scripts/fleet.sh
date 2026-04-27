@@ -3,12 +3,21 @@
 # Status: experimental
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT=""
+
+# Resolve repo root via git, so fleet works from any worktree.
+# cd to it once so all relative paths below resolve correctly.
+if GIT_COMMON_DIR=$(git rev-parse --git-common-dir 2>/dev/null); then
+  REPO_ROOT="$(cd "$GIT_COMMON_DIR/.." && pwd)"
+  cd "$REPO_ROOT"
+fi
+
 FLEET_DIR=".claude/fleet"
 LANES_DIR="$FLEET_DIR/lanes"
 LOG="$FLEET_DIR/activity.log"
 CONFIG="$FLEET_DIR/config"
 PID_FILE="$FLEET_DIR/daemon.pid"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # defaults (overridable via .claude/fleet/config: key=value, no quotes)
 MODE="auto"
@@ -114,37 +123,166 @@ cmd_init() {
   echo "Then: bash $0 start"
 }
 
-cmd_fleet() {
-  ensure_fleet_dir
-  echo ""
-  echo "── Fleet ──────────────────────────────────────────────────────"
-  printf "  %-2s  %-32s %-10s %s\n" "" "BRANCH" "STATUS" "AGE"
-  echo "────────────────────────────────────────────────────────────────"
-  local any=0 now=$(date +%s)
+format_age() {
+  local secs=$1
+  if   [[ $secs -lt 60   ]]; then printf "%ds" "$secs"
+  elif [[ $secs -lt 3600 ]]; then printf "%dm" "$((secs/60))"
+  else printf "%dh%dm" "$((secs/3600))" "$(( (secs%3600)/60 ))"
+  fi
+}
+
+icon_for_state() {
+  case "$1" in
+    RUNNING)  echo "$ICON_RUNNING" ;;
+    READY)    echo "$ICON_READY" ;;
+    LANDED)   echo "$ICON_LANDED" ;;
+    FAILED)   echo "$ICON_FAILED" ;;
+    CONFLICT) echo "$ICON_CONFLICT" ;;
+    *)        echo "$ICON_UNKNOWN" ;;
+  esac
+}
+
+# Grouped-by-status view (default). Compact, scales to many lanes.
+fleet_view_grouped() {
+  local now=$(date +%s)
+  local total=0 active=0
+  declare -A buckets counts
+  for state in RUNNING READY CONFLICT FAILED LANDED; do
+    buckets[$state]=""
+    counts[$state]=0
+  done
+
   for f in "$LANES_DIR"/*; do
     [[ -f "$f" ]] || continue
-    any=1
-    local branch state mtime secs age icon
+    total=$((total+1))
+    local branch state mtime secs age meta
     branch=$(basename "$f")
     state=$(head -n1 "$f")
+    meta=$(sed -n '2p' "$f")
     mtime=$(file_mtime "$f")
     secs=$((now - mtime))
-    if   [[ $secs -lt 60   ]]; then age="${secs}s"
-    elif [[ $secs -lt 3600 ]]; then age="$((secs/60))m"
-    else age="$((secs/3600))h$(( (secs%3600)/60 ))m"
-    fi
-    case $state in
-      RUNNING)  icon="$ICON_RUNNING" ;;
-      READY)    icon="$ICON_READY" ;;
-      LANDED)   icon="$ICON_LANDED" ;;
-      FAILED)   icon="$ICON_FAILED" ;;
-      CONFLICT) icon="$ICON_CONFLICT" ;;
-      *)        icon="$ICON_UNKNOWN" ;;
-    esac
-    printf "  %s  %-32s %-10s %s\n" "$icon" "$branch" "$state" "$age"
+    age=$(format_age "$secs")
+    [[ "$state" != "LANDED" && "$state" != "FAILED" ]] && active=$((active+1))
+    counts[$state]=$(( ${counts[$state]:-0} + 1 ))
+    buckets[$state]="${buckets[$state]}${branch}|${age}|${meta}"$'\n'
   done
-  [[ $any -eq 0 ]] && echo "  (no lanes — run: fleet init <name>...)"
-  echo "────────────────────────────────────────────────────────────────"
+
+  echo ""
+  echo "── fleet ─────────────────────────────────────────────  ${REPO_LABEL:-$(pwd)}"
+  if [[ $total -eq 0 ]]; then
+    echo ""
+    echo "  (no lanes — run: fleet init <name>...)"
+    echo ""
+    return
+  fi
+  echo ""
+
+  for state in RUNNING READY CONFLICT FAILED LANDED; do
+    local n=${counts[$state]:-0}
+    [[ $n -eq 0 ]] && continue
+    local icon
+    icon=$(icon_for_state "$state")
+    printf "  %s %-9s (%d)\n" "$icon" "$state" "$n"
+    local last_idx=$((n - 1)) idx=0
+    while IFS='|' read -r branch age meta; do
+      [[ -z "$branch" ]] && continue
+      local connector="├─"
+      [[ $idx -eq $last_idx ]] && connector="└─"
+      if [[ -n "$meta" ]]; then
+        printf "    %s %-32s %5s   %s\n" "$connector" "$branch" "$age" "$meta"
+      else
+        printf "    %s %-32s %5s\n" "$connector" "$branch" "$age"
+      fi
+      idx=$((idx+1))
+    done <<< "${buckets[$state]}"
+    echo ""
+  done
+
+  local daemon_status="not running"
+  if [[ -f "$PID_FILE" ]]; then
+    local pid
+    pid=$(cat "$PID_FILE" 2>/dev/null || echo "")
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+      daemon_status="running (pid $pid)"
+    else
+      daemon_status="stale pid file"
+    fi
+  fi
+  echo "──────────────────────────────────────────────────────────────────"
+  printf "  total: %d  active: %d  daemon: %s  base: %s\n" "$total" "$active" "$daemon_status" "$BASE_BRANCH"
+  echo ""
+}
+
+# Verbose per-lane view (--verbose). Best for investigating one lane.
+fleet_view_verbose() {
+  local now=$(date +%s)
+  local total=0
+  for f in "$LANES_DIR"/*; do [[ -f "$f" ]] && total=$((total+1)); done
+
+  echo ""
+  echo "── fleet (verbose) ───────────────────────────────────  ${REPO_LABEL:-$(pwd)}"
+  if [[ $total -eq 0 ]]; then
+    echo ""
+    echo "  (no lanes — run: fleet init <name>...)"
+    echo ""
+    return
+  fi
+
+  for f in "$LANES_DIR"/*; do
+    [[ -f "$f" ]] || continue
+    local branch state meta mtime age secs icon wt commits
+    branch=$(basename "$f")
+    state=$(head -n1 "$f")
+    meta=$(sed -n '2p' "$f")
+    mtime=$(file_mtime "$f")
+    secs=$((now - mtime))
+    age=$(format_age "$secs")
+    icon=$(icon_for_state "$state")
+    wt=$(worktree_path_for "$branch" 2>/dev/null || echo "")
+    commits=$(git rev-list --count "$BASE_BRANCH..$branch" 2>/dev/null || echo "?")
+
+    echo ""
+    printf "  %s %-32s [%s]  %s ago\n" "$icon" "$branch" "$state" "$age"
+    local details=()
+    if [[ -n "$wt" ]]; then
+      local wt_short="$wt" repo_root="${REPO_ROOT:-}"
+      [[ -n "$repo_root" ]] && wt_short="${wt#$repo_root/}"
+      if [[ "$wt_short" == "$wt" && -n "$repo_root" ]]; then
+        local repo_native
+        repo_native=$(cygpath -m "$repo_root" 2>/dev/null || echo "$repo_root")
+        wt_short="${wt#$repo_native/}"
+      fi
+      details+=("worktree:  $wt_short")
+    fi
+    [[ "$commits" != "?" && "$commits" != "0" ]] && details+=("commits:   $commits ahead of $BASE_BRANCH")
+    [[ -n "$meta" ]] && details+=("note:      $meta")
+    local n_details=${#details[@]} i
+    for ((i=0; i<n_details; i++)); do
+      local connector="├─"
+      [[ $i -eq $((n_details - 1)) ]] && connector="└─"
+      printf "     %s %s\n" "$connector" "${details[$i]}"
+    done
+  done
+  echo ""
+}
+
+cmd_fleet() {
+  ensure_fleet_dir
+  REPO_LABEL="${REPO_ROOT:-$(pwd)}"
+  REPO_LABEL="${REPO_LABEL/$HOME/~}"
+
+  local mode="grouped"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -v|--verbose) mode="verbose"; shift ;;
+      -g|--grouped) mode="grouped"; shift ;;
+      *)            shift ;;
+    esac
+  done
+  case "$mode" in
+    verbose) fleet_view_verbose ;;
+    *)       fleet_view_grouped ;;
+  esac
 }
 
 cmd_scrub_check() {
@@ -350,7 +488,7 @@ case "${1:-}" in
   init)         shift; cmd_init "$@" ;;
   start)        shift; cmd_start "$@" ;;
   stop)         cmd_stop ;;
-  fleet|status) cmd_fleet ;;
+  fleet|status) shift; cmd_fleet "$@" ;;
   land)         shift; cmd_land "$@" ;;
   revert)       shift; cmd_revert "$@" ;;
   scrub-check)  shift; cmd_scrub_check "$@" ;;
