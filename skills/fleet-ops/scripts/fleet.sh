@@ -174,30 +174,50 @@ cmd_fleet() {
     return
   fi
 
+  # Build list of non-empty group indices so we know which is "last" at
+  # the top level — the tree's vertical needs to terminate cleanly.
+  local active_groups=()
   local i
   for i in 0 1 2 3 4; do
+    [[ ${state_counts[$i]} -gt 0 ]] && active_groups+=("$i")
+  done
+
+  local g_idx=0
+  local g_last=$(( ${#active_groups[@]} - 1 ))
+  for i in "${active_groups[@]}"; do
     local n=${state_counts[$i]}
-    [[ $n -eq 0 ]] && continue
     local state=${order[$i]}
     local icon
     icon=$(term_state_icon "$state")
     [[ -z "$icon" || "$icon" == "?" ]] && icon="$ICON_UNKNOWN"
-    echo ""
-    term_group_header "$icon" "$state" "$n"
+
+    # Group line — connector at column 0, then icon + label live to its right.
+    local g_conn
+    g_conn=$(term_tree_connector "$g_idx" "$g_last")
+    local group_label
+    group_label="$icon $state"
+    term_tree_node "" "$g_conn" "$group_label" "($n)"
+
+    # Children indent = continuation of this group's connector.
+    local child_prefix
+    if [[ $g_idx -eq $g_last ]]; then
+      child_prefix=$(term_tree_indent 1)
+    else
+      child_prefix=$(term_tree_indent 0)
+    fi
 
     local lines="${state_buckets[$i]}"
-    local idx=0 last_idx=$((n - 1))
+    local c_idx=0 c_last=$((n - 1))
     local branch age meta
     while IFS='|' read -r branch age meta; do
       [[ -z "$branch" ]] && continue
-      local connector
-      connector=$(term_tree_connector "$idx" "$last_idx")
-      local label="$branch"
-      local meta_str="$age"
+      local c_conn meta_str="$age"
+      c_conn=$(term_tree_connector "$c_idx" "$c_last")
       [[ -n "$meta" ]] && meta_str="$age  $meta"
-      printf '    %s %-32s %s\n' "$connector" "$label" "$(term_color dim "$meta_str")"
-      idx=$((idx+1))
+      term_tree_node "$child_prefix" "$c_conn" "$branch" "$meta_str"
+      c_idx=$((c_idx+1))
     done <<< "$lines"
+    g_idx=$((g_idx+1))
   done
   echo ""
 }

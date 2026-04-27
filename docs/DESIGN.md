@@ -74,27 +74,65 @@ terminal width so the header reads as the section's banner.
 
 ### Grouped tree (default body)
 
-State icon + group label + count, then children under tree connectors.
-Empty groups are omitted — never render a group with `(0)`.
+**Tree-control rule:** the connectors `├─ │ └─` are the scaffold. They
+run in their own column from the top of the body to the last leaf, and
+**nothing breaks the vertical**. Icons and labels live to the right of
+the connector, not between it and its parent's `│`. If you find yourself
+wanting to put an icon where the `│` should continue, you don't have a
+tree — you have a list with decorations.
+
+#### 2-level: groups → leaves
+
+The default for state-bucketed views (lanes, PR checks, jobs).
 
 ```
 ── fleet ─────────────────────────────────────────────────────  4 lanes · 3 active
-
-  ⏳ RUNNING   (2)
-    ├─ feat/auth-rewrite             12m
-    └─ spike/wasm-eval               34m
-
-  ✅ READY     (1)
-    └─ fix/cache-bust                2m
-
-  🚀 LANDED    (1)
-    └─ chore/bump-deps               1h
+├─ ⏳ RUNNING   (2)
+│  ├─ feat/auth-rewrite             12m
+│  └─ spike/wasm-eval               34m
+├─ ✅ READY     (1)
+│  └─ fix/cache-bust                2m
+└─ 🚀 LANDED    (1)
+   └─ chore/bump-deps               1h
 ```
+
+Notice: the `│` running down column 0 is unbroken from the first group
+to the last child of the second-last group. The `└─` on `LANDED`
+terminates the vertical cleanly. Empty groups are omitted — never
+render `(0)`.
 
 Why grouped instead of flat: when ten lanes are in flight, scanning a
 flat table for "what's actually ready to land?" forces your eyes to do
 the filtering. Grouping does it for you, and the count tells you at a
 glance whether the answer is none, one, or twelve.
+
+#### 3-level: groups → branches → leaves
+
+For hierarchies with intermediate structure — repos with branches with
+files, projects with packages with tests, lanes with commits with
+patches. Same rule: connectors don't break.
+
+```
+── repo ──────────────────────────────────────────────────────  X:/Forge/claude-mods · 2 worktrees
+├─ 📦 main
+│  ├─ src/
+│  │  ├─ index.ts                   modified
+│  │  └─ utils/
+│  │     ├─ format.ts               modified
+│  │     └─ parse.ts                added
+│  └─ README.md                     clean
+└─ 🌿 feat/auth-rewrite
+   └─ src/
+      ├─ auth.ts                    new
+      └─ middleware/
+         └─ session.ts              modified
+```
+
+Each level adds a 3-column indent: `│  ` while the ancestor still has
+siblings to render, `   ` once the ancestor is on its last sibling. The
+helpers in `term.sh` (`term_tree_node`, `term_tree_indent`,
+`term_tree_connector`) compose this prefix so you don't have to count
+spaces.
 
 ### Flat status table (escape hatch)
 
@@ -102,23 +140,13 @@ When the data is genuinely flat — `git status`-style fields, a single
 PR's checks — drop the tree. Glyph-first, no nested tables.
 
 ```
+── push-gate ─────────────────────────────────────────────────  refusing
   ✅  secret scan        clean
   ✅  forbidden files    none
   ❌  divergence         3 ahead, 1 behind
 ```
 
-### Plain tree (filesystem-style, no state grouping)
-
-For hierarchies that aren't keyed on state — a directory tree, an
-include graph. Use sparingly; the grouped-tree above is preferred for
-state.
-
-```
-repo/
-├─ main                           clean
-├─ feat/auth-rewrite              ahead 3, dirty
-└─ fix/cache-bust                 behind 1
-```
+The header rule still anchors the section; only the body is flat.
 
 ### Section divider
 
@@ -166,25 +194,23 @@ Disabled when stdout isn't a TTY, or `NO_COLOR` is set. Forced on with
 ────────────────────────────────────────────────────────────────
 ```
 
-### After — rule on top, grouped tree as default
+### After — rule on top, grouped tree with unbroken connectors
 
 ```
 ── fleet ─────────────────────────────────────────────────────  3 lanes · 2 active
-
-  ⏳ RUNNING   (1)
-    └─ feat/auth-rewrite             12m
-
-  ✅ READY     (1)
-    └─ fix/cache-bust                2m
-
-  🚀 LANDED    (1)
-    └─ chore/bump-deps               1h
+├─ ⏳ RUNNING   (1)
+│  └─ feat/auth-rewrite             12m
+├─ ✅ READY     (1)
+│  └─ fix/cache-bust                2m
+└─ 🚀 LANDED    (1)
+   └─ chore/bump-deps               1h
 ```
 
 The header rule survives — it's the strongest visual cue that you're
-inside a skill's output. The flat table gives way to grouped state, so
-"what's ready" and "what's still running" answer themselves before you
-read a single branch name.
+inside a skill's output. The flat table gives way to a tree where
+groups are first-class branches: the `│` runs uninterrupted from the
+first group to the last leaf above the terminating `└─`, and icons
+sit *after* the connector instead of breaking it.
 
 ### `git-ops/status` reformatted in the same language
 

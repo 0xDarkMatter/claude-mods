@@ -169,37 +169,42 @@ TERM_TREE_BRANCH=""    # ├─  /  +-
 TERM_TREE_LAST=""      # └─  /  `-
 TERM_TREE_VERT=""      # │   /  |
 
-# term_group_header <icon> <LABEL> <count>  — "  ⏳ RUNNING   (3)"
-# Use as the parent line above term_tree_branch / term_tree_last children.
-term_group_header() {
-  local icon=$1 label=$2 count=$3
-  printf '  %s %-9s %s\n' "$icon" "$label" "$(term_color dim "($count)")"
-}
+# Tree-control philosophy: the connectors (├─ │ └─) are the scaffold.
+# Icons and labels sit AFTER the connector, never between it and the
+# vertical line of its parent. To render a tree:
+#
+#   term_tree_node "" "$(term_tree_connector $i $last)" "⏳ RUNNING (3)"
+#   term_tree_node "│  " "$(term_tree_connector $j $last)" "feat/auth" "12m"
+#
+# `prefix` is what comes before this row's connector — built by walking
+# the ancestor chain and appending TERM_TREE_VERT+"  " for non-last
+# ancestors, or three spaces for last ancestors.
 
-# term_tree_branch <label> [meta]  — "    ├─ label                meta"
-term_tree_branch() {
-  local label=$1 meta=${2:-}
-  if [[ -n "$meta" ]]; then
-    printf '    %s %-32s %s\n' "$TERM_TREE_BRANCH" "$label" "$(term_color dim "$meta")"
-  else
-    printf '    %s %s\n' "$TERM_TREE_BRANCH" "$label"
-  fi
-}
-
-# term_tree_last <label> [meta]  — "    └─ label                meta"
-term_tree_last() {
-  local label=$1 meta=${2:-}
-  if [[ -n "$meta" ]]; then
-    printf '    %s %-32s %s\n' "$TERM_TREE_LAST" "$label" "$(term_color dim "$meta")"
-  else
-    printf '    %s %s\n' "$TERM_TREE_LAST" "$label"
-  fi
-}
-
-# term_tree_connector <idx> <last_idx>  — echo branch or last, for loops.
+# term_tree_connector <idx> <last_idx>  — echo branch or last glyph.
 term_tree_connector() {
   if [[ "$1" -eq "$2" ]]; then printf '%s' "$TERM_TREE_LAST"
   else printf '%s' "$TERM_TREE_BRANCH"; fi
+}
+
+# term_tree_indent <is_last>  — echo the 3-col continuation segment for
+# this ancestor: "│  " when more siblings follow, "   " when last.
+term_tree_indent() {
+  if [[ "$1" -eq 1 ]]; then printf '   '
+  else printf '%s  ' "$TERM_TREE_VERT"; fi
+}
+
+# term_tree_node <prefix> <connector> <label> [meta]
+#   prefix:    ancestor-chain string (built from term_tree_indent calls)
+#   connector: result of term_tree_connector for THIS row
+#   label:     visible text (may include leading icon — won't break the line)
+#   meta:      optional dim trailing text
+term_tree_node() {
+  local prefix=$1 conn=$2 label=$3 meta=${4:-}
+  if [[ -n "$meta" ]]; then
+    printf '%s%s %-32s %s\n' "$prefix" "$conn" "$label" "$(term_color dim "$meta")"
+  else
+    printf '%s%s %s\n' "$prefix" "$conn" "$label"
+  fi
 }
 
 # term_table_row <c1> <c2> <c3>  — fixed-width 3-col row.
