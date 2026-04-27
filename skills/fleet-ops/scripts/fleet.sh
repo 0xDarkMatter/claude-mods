@@ -164,66 +164,73 @@ cmd_fleet() {
     state_buckets[$idx]="${state_buckets[$idx]}${branch}|${age}|${meta}"$'\n'
   done
 
+  # Daemon health for the footer
+  local daemon_state="busted"
+  if [[ -f "$PID_FILE" ]]; then
+    local pid
+    pid=$(cat "$PID_FILE" 2>/dev/null || echo "")
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+      daemon_state="healthy"
+    fi
+  fi
+
+  # Footer composition (reused on every render path)
+  local hotkeys
+  hotkeys="$(term_hotkey R refresh) · $(term_hotkey L land) · $(term_hotkey '?' help)"
+  local healths
+  healths="$(term_health "$daemon_state" "daemon")"
+  [[ $total -gt 0 ]] && healths="$healths  $(term_health pending "$active active")"
+
   echo ""
-  term_header "fleet" "$total $([ "$total" -eq 1 ] && echo lane || echo lanes) · $active active"
+  term_panel_open fleet fleet "$TERM_GLYPH_BRANCH $BASE_BRANCH"
 
   if [[ $total -eq 0 ]]; then
-    echo ""
-    term_empty "no lanes — run: fleet init <name>..."
+    # Empty state: tip + suggested commands
+    term_panel_vert
+    term_panel_vert
+    printf '%s   %s\n' "$(term_color dim "$TERM_TREE_VERT")" "no lanes yet"
+    term_panel_vert
+    term_panel_vert
+    printf '%s   %s %s\n' "$(term_color dim "$TERM_TREE_VERT")" "$TERM_GLYPH_TIP" "to get started:"
+    term_panel_vert
+    printf '%s      1. fleet init <name>...\n' "$(term_color dim "$TERM_TREE_VERT")"
+    printf '%s      2. (work in each lane)\n'  "$(term_color dim "$TERM_TREE_VERT")"
+    printf '%s      3. fleet start\n'          "$(term_color dim "$TERM_TREE_VERT")"
+    term_panel_vert
+    term_panel_vert
+    term_panel_close "$(term_hotkey '?' help)" "$(term_health unknown "v2.4.9")"
     echo ""
     return
   fi
 
-  # Build list of non-empty group indices so we know which is "last" at
-  # the top level — the tree's vertical needs to terminate cleanly.
-  local active_groups=()
+  # Summary branch + breath
+  term_panel_vert
+  term_summary_line "$total $([ "$total" -eq 1 ] && echo lane || echo lanes) · $active active"
+  term_panel_vert
+
+  # State sections with leaves underneath
   local i
   for i in 0 1 2 3 4; do
-    [[ ${state_counts[$i]} -gt 0 ]] && active_groups+=("$i")
-  done
-
-  local g_idx=0
-  local g_last=$(( ${#active_groups[@]} - 1 ))
-  for i in "${active_groups[@]}"; do
     local n=${state_counts[$i]}
+    [[ $n -eq 0 ]] && continue
     local state=${order[$i]}
 
-    # Group line — connector + plain label. NO icon at the junction:
-    # a glyph here breaks the eye-line of the tree's vertical. State is
-    # carried by label + color (and the per-leaf glyph if needed).
-    local g_conn group_label
-    g_conn=$(term_tree_connector "$g_idx" "$g_last")
-    case "$state" in
-      RUNNING|PENDING)  group_label=$(term_color yellow "$state") ;;
-      READY)            group_label=$(term_color green  "$state") ;;
-      LANDED|DONE|OK)   group_label=$(term_color green  "$state") ;;
-      FAILED|ERROR)     group_label=$(term_color red    "$state") ;;
-      CONFLICT|WARN)    group_label=$(term_color yellow "$state") ;;
-      *)                group_label="$state" ;;
-    esac
-    term_tree_node "" "$g_conn " "$group_label" "($n)"
-
-    # Children indent = continuation of this group's connector.
-    local child_prefix
-    if [[ $g_idx -eq $g_last ]]; then
-      child_prefix=$(term_tree_indent 1)
-    else
-      child_prefix=$(term_tree_indent 0)
-    fi
+    term_section "$state" "$state" "$n"
 
     local lines="${state_buckets[$i]}"
     local c_idx=0 c_last=$((n - 1))
     local branch age meta
     while IFS='|' read -r branch age meta; do
       [[ -z "$branch" ]] && continue
-      local c_conn meta_str="$age"
-      c_conn=$(term_tree_connector "$c_idx" "$c_last")
-      [[ -n "$meta" ]] && meta_str="$age  $meta"
-      term_tree_node "$child_prefix" "$c_conn" "$branch" "$meta_str"
+      local c_conn
+      if [[ $c_idx -eq $c_last ]]; then c_conn="$TERM_TREE_LAST"; else c_conn="$TERM_TREE_BRANCH"; fi
+      term_leaf_line "$c_conn" "$branch" "─" "${meta:-}" "$age"
       c_idx=$((c_idx+1))
     done <<< "$lines"
-    g_idx=$((g_idx+1))
+    term_panel_vert
   done
+
+  term_panel_close "$hotkeys" "$healths"
   echo ""
 }
 
