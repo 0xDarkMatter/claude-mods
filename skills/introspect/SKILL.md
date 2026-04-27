@@ -113,7 +113,7 @@ What do you want to know?
 |       |- agent-{short-id}.jsonl             # Subagent transcripts
 ```
 
-Project paths use double-dash encoding: `C:\Projects\claude-mods` -> `X--Forge-claude-mods`
+Project paths use double-dash encoding: `X:\Forge\claude-mods` -> `X--Forge-claude-mods`
 
 ### Entry Types
 
