@@ -3,12 +3,21 @@
 # Status: experimental
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT=""
+
+# Resolve repo root via git, so fleet works from any worktree.
+# cd to it once so all relative paths below resolve correctly.
+if GIT_COMMON_DIR=$(git rev-parse --git-common-dir 2>/dev/null); then
+  REPO_ROOT="$(cd "$GIT_COMMON_DIR/.." && pwd)"
+  cd "$REPO_ROOT"
+fi
+
 FLEET_DIR=".claude/fleet"
 LANES_DIR="$FLEET_DIR/lanes"
 LOG="$FLEET_DIR/activity.log"
 CONFIG="$FLEET_DIR/config"
 PID_FILE="$FLEET_DIR/daemon.pid"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Shared terminal-output helpers (see docs/DESIGN.md).
 # shellcheck source=../../_lib/term.sh
@@ -127,18 +136,27 @@ format_age() {
   fi
 }
 
-cmd_fleet() {
-  ensure_fleet_dir
+icon_for_state() {
+  case "$1" in
+    RUNNING)  echo "$ICON_RUNNING" ;;
+    READY)    echo "$ICON_READY" ;;
+    LANDED)   echo "$ICON_LANDED" ;;
+    FAILED)   echo "$ICON_FAILED" ;;
+    CONFLICT) echo "$ICON_CONFLICT" ;;
+    *)        echo "$ICON_UNKNOWN" ;;
+  esac
+}
 
-  # Bucket lanes by state. ASCII-safe assoc-array alternative: parallel arrays.
-  local order=(RUNNING READY CONFLICT FAILED LANDED)
-  local now total=0 active=0
-  now=$(date +%s)
-
-  # state_buckets[i] = newline-joined "branch|age|meta" rows for order[i]
-  local state_buckets=("" "" "" "" "")
-  local state_counts=(0 0 0 0 0)
-
+# Bucket lanes by state into parallel arrays. Sets:
+#   total, active                       — globals
+#   state_buckets[0..4]                  — newline-joined "branch|age|meta"
+#   state_counts[0..4]                   — count per state
+# Order: 0=RUNNING 1=READY 2=CONFLICT 3=FAILED 4=LANDED
+__fleet_bucket() {
+  total=0; active=0
+  state_buckets=("" "" "" "" "")
+  state_counts=(0 0 0 0 0)
+  local now=$(date +%s)
   for f in "$LANES_DIR"/*; do
     [[ -f "$f" ]] || continue
     total=$((total+1))
@@ -150,7 +168,6 @@ cmd_fleet() {
     secs=$((now - mtime))
     age=$(format_age "$secs")
     [[ "$state" != "LANDED" && "$state" != "FAILED" ]] && active=$((active+1))
-
     idx=-1
     case "$state" in
       RUNNING)  idx=0 ;;
@@ -163,29 +180,47 @@ cmd_fleet() {
     state_counts[$idx]=$(( state_counts[idx] + 1 ))
     state_buckets[$idx]="${state_buckets[$idx]}${branch}|${age}|${meta}"$'\n'
   done
+}
 
-  # Daemon health for the footer
-  local daemon_state="busted"
+# Daemon health → "healthy" or "busted"
+__fleet_daemon_state() {
   if [[ -f "$PID_FILE" ]]; then
     local pid
     pid=$(cat "$PID_FILE" 2>/dev/null || echo "")
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-      daemon_state="healthy"
+      printf 'healthy'
+      return
     fi
   fi
+  printf 'busted'
+}
 
-  # Footer composition (reused on every render path)
+# Footer composition shared by all panel views.
+__fleet_footer() {
+  local active=$1 daemon_state=$2
   local hotkeys
   hotkeys="$(term_hotkey R refresh) · $(term_hotkey L land) · $(term_hotkey '?' help)"
   local healths
   healths="$(term_health "$daemon_state" "daemon")"
-  [[ $total -gt 0 ]] && healths="$healths  $(term_health pending "$active active")"
+  [[ "$active" -gt 0 ]] && healths="$healths  $(term_health pending "$active active")"
+  term_panel_close "$hotkeys" "$healths"
+}
+
+# Default panel view — design-system grouped tree
+fleet_view_panel() {
+  ensure_fleet_dir
+
+  local order=(RUNNING READY CONFLICT FAILED LANDED)
+  local total active
+  local state_buckets state_counts
+  __fleet_bucket
+  local daemon_state
+  daemon_state=$(__fleet_daemon_state)
 
   echo ""
   term_panel_open fleet fleet "$TERM_GLYPH_BRANCH $BASE_BRANCH"
 
   if [[ $total -eq 0 ]]; then
-    # Empty state: tip + suggested commands
     term_panel_vert
     term_panel_vert
     printf '%s   %s\n' "$(term_color dim "$TERM_TREE_VERT")" "no lanes yet"
@@ -203,12 +238,10 @@ cmd_fleet() {
     return
   fi
 
-  # Summary branch + breath
   term_panel_vert
   term_summary_line "$total $([ "$total" -eq 1 ] && echo lane || echo lanes) · $active active"
   term_panel_vert
 
-  # State sections with leaves underneath
   local i
   for i in 0 1 2 3 4; do
     local n=${state_counts[$i]}
@@ -229,8 +262,7 @@ cmd_fleet() {
       local ahead head_kind rail
       ahead=$(git rev-list --count "${BASE_BRANCH}..${branch}" 2>/dev/null || echo 0)
       head_kind="HEAD"
-      [[ "$state" == "CONFLICT" ]] && head_kind="CONFLICT"
-      [[ "$state" == "FAILED" ]] && head_kind="CONFLICT"
+      [[ "$state" == "CONFLICT" || "$state" == "FAILED" ]] && head_kind="CONFLICT"
       rail=$(term_rail "$ahead" "$head_kind")
 
       term_leaf_line "$c_conn" "$branch" "$rail" "${meta:-}" "$age"
@@ -239,8 +271,114 @@ cmd_fleet() {
     term_panel_vert
   done
 
-  term_panel_close "$hotkeys" "$healths"
+  __fleet_footer "$active" "$daemon_state"
   echo ""
+}
+
+# Verbose view — per-lane detail blocks rendered in panel grammar.
+# Each lane gets a header row + sub-rows for worktree, commits, and note.
+fleet_view_verbose() {
+  ensure_fleet_dir
+
+  local total active
+  local state_buckets state_counts
+  __fleet_bucket
+  local daemon_state
+  daemon_state=$(__fleet_daemon_state)
+  local now=$(date +%s)
+
+  echo ""
+  term_panel_open fleet "fleet · verbose" "$TERM_GLYPH_BRANCH $BASE_BRANCH"
+
+  if [[ $total -eq 0 ]]; then
+    term_panel_vert
+    printf '%s   no lanes yet\n' "$(term_color dim "$TERM_TREE_VERT")"
+    term_panel_vert
+    term_panel_close "$(term_hotkey '?' help)" "$(term_health unknown "v2.4.9")"
+    echo ""
+    return
+  fi
+
+  term_panel_vert
+  term_summary_line "$total $([ "$total" -eq 1 ] && echo lane || echo lanes) · $active active"
+  term_panel_vert
+
+  for f in "$LANES_DIR"/*; do
+    [[ -f "$f" ]] || continue
+    local branch state meta mtime age secs wt commits color label_state
+    branch=$(basename "$f")
+    state=$(head -n1 "$f")
+    meta=$(sed -n '2p' "$f")
+    mtime=$(file_mtime "$f")
+    secs=$((now - mtime))
+    age=$(format_age "$secs")
+    wt=$(worktree_path_for "$branch" 2>/dev/null || echo "")
+    commits=$(git rev-list --count "$BASE_BRANCH..$branch" 2>/dev/null || echo "?")
+
+    color=""
+    case "$state" in
+      RUNNING|PENDING|CONFLICT|WARN) color="yellow" ;;
+      READY|LANDED|DONE|OK)          color="green" ;;
+      FAILED|ERROR)                  color="red" ;;
+    esac
+    label_state="$state"
+    [[ -n "$color" ]] && label_state=$(term_color "$color" "$state")
+
+    # Lane header row
+    printf '%s%s %-30s %-10s %s\n' \
+      "$(term_color dim "$TERM_TREE_VERT")" \
+      "$(term_color dim "$TERM_TREE_BRANCH$TERM_PANEL_HRULE")" \
+      "$branch" \
+      "$label_state" \
+      "$(term_color dim "$age")"
+
+    # Detail sub-rows (under the lane's │ continuation)
+    if [[ -n "$wt" ]]; then
+      local wt_short="$wt" repo_root="${REPO_ROOT:-}"
+      [[ -n "$repo_root" ]] && wt_short="${wt#$repo_root/}"
+      if [[ "$wt_short" == "$wt" && -n "$repo_root" ]]; then
+        local repo_native
+        repo_native=$(cygpath -m "$repo_root" 2>/dev/null || echo "$repo_root")
+        wt_short="${wt#$repo_native/}"
+      fi
+      printf '%s   %s worktree:  %s\n' \
+        "$(term_color dim "$TERM_TREE_VERT")" \
+        "$(term_color dim "$TERM_TREE_VERT")" \
+        "$(term_color dim "$wt_short")"
+    fi
+    if [[ "$commits" != "?" && "$commits" != "0" ]]; then
+      printf '%s   %s commits:   %s ahead of %s\n' \
+        "$(term_color dim "$TERM_TREE_VERT")" \
+        "$(term_color dim "$TERM_TREE_VERT")" \
+        "$(term_color dim "$commits")" \
+        "$(term_color dim "$BASE_BRANCH")"
+    fi
+    if [[ -n "$meta" ]]; then
+      printf '%s   %s note:      %s\n' \
+        "$(term_color dim "$TERM_TREE_VERT")" \
+        "$(term_color dim "$TERM_TREE_VERT")" \
+        "$(term_color dim "$meta")"
+    fi
+    term_panel_vert
+  done
+
+  __fleet_footer "$active" "$daemon_state"
+  echo ""
+}
+
+cmd_fleet() {
+  local mode="panel"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -v|--verbose) mode="verbose"; shift ;;
+      -g|--grouped) mode="panel"; shift ;;
+      *)            shift ;;
+    esac
+  done
+  case "$mode" in
+    verbose) fleet_view_verbose ;;
+    *)       fleet_view_panel ;;
+  esac
 }
 
 cmd_scrub_check() {
@@ -446,7 +584,7 @@ case "${1:-}" in
   init)         shift; cmd_init "$@" ;;
   start)        shift; cmd_start "$@" ;;
   stop)         cmd_stop ;;
-  fleet|status) cmd_fleet ;;
+  fleet|status) shift; cmd_fleet "$@" ;;
   land)         shift; cmd_land "$@" ;;
   revert)       shift; cmd_revert "$@" ;;
   scrub-check)  shift; cmd_scrub_check "$@" ;;

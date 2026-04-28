@@ -168,6 +168,17 @@ ascii_out=$(FLEET_ASCII=1 bash "$FLEET" fleet 2>&1 || true)
 echo "$ascii_out" | grep -qE '\+-|`-' && ok "ASCII tree connectors rendered" || fail "ASCII connectors not used"
 echo "$ascii_out" | grep -qE '├─|└─|│' && fail "Unicode connectors leaked in ASCII mode" || ok "no Unicode in ASCII mode"
 
+# ── verbose view ──
+step "fleet fleet --verbose shows per-lane detail"
+verbose_out=$(bash "$FLEET" fleet --verbose 2>&1 || true)
+echo "$verbose_out" | grep -q "verbose" && ok "verbose header present" || fail "no verbose header"
+echo "$verbose_out" | grep -q "worktree:" && ok "verbose shows worktree path" || fail "no worktree path in verbose"
+
+# ── works from inside a worktree (cwd-bug regression test) ──
+step "fleet fleet works from inside a worktree"
+wt_out=$( cd "$SCRATCH/.claude/fleet/worktrees/alpha" 2>/dev/null && bash "$FLEET" fleet 2>&1 || true )
+echo "$wt_out" | grep -q "alpha" && ok "fleet view from worktree finds lanes" || fail "fleet view from worktree empty"
+
 # ── summary ──
 echo ""
 echo "═══════════════════════════════════════"
