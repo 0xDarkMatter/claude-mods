@@ -22,6 +22,9 @@ From Python async patterns to Rust ownership models, from AWS Fargate deployment
 
 ## Recent Updates
 
+**v2.4.10** (April 2026)
+- 📌 **`github-ops` Recent Updates rule sharpened** - `references/readme-recent-updates.md` gains an explicit "Recent Updates is for *features*, not bugs" subsection with three inclusion criteria, four exclusion criteria, and a self-check ("are you writing this because *you* remembered the fix or because *the user* is waiting for it?"). Replaces a soft single-bullet rule that allowed pre-existing bug fixes to slip into feature-release entries silently.
+
 **v2.4.9** (April 2026)
 - 🔍 **`git-ops` hygiene checks** - `status.sh` now proactively flags bad git practices during every status read: main checkout sitting on a feature branch (feature work belongs in worktrees), and merged branches not yet deleted. `SKILL.md` documents all four anti-patterns (feature branch, stale merges, WIP commits, large uncommitted pile) with severity ratings and remediation steps.
 - 📖 **`docs/references/claude-desktop-internals.md`** - Comprehensive map of Claude Desktop's file system layout and session architecture, validated by live probing. Key findings: cross-account session transfer works by copying only the metadata JSON; sidebar population is filesystem-driven on login (not server cache); `react-query-cache-ls` probe confirmed 7/8 transferred sessions were absent from server data but appeared in sidebar.

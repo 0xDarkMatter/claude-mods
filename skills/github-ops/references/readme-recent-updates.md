@@ -43,11 +43,31 @@ Each bullet should be **scannable in one breath** — roughly 30–60 words afte
 
 - Drop parenthetical category lists ("(`PRUNABLE` / `WIP` / `GHOST` / `ORPHAN`)") — these belong in skill docs, not release notes
 - Drop sub-features ("Plus a harness whitelist on Gate 1: ...") — split into a separate bullet or omit
-- Drop bug fixes from feature releases unless they're the headline — move to a `🐛` bullet only if user-visible
 
 Rule of thumb: a release block of 4 bullets averaging 40 words each (~160 words total) reads cleanly. A block of 5 bullets averaging 80 words each (~400 words) becomes a wall and visitors skim past it.
 
 Long bullets erode the value of the section — visitors should see velocity at a glance, not have to read paragraphs to extract what shipped.
+
+### Recent Updates is for *features*, not bugs
+
+Recent Updates surfaces **capability changes and direction**. Bug fixes go in `CHANGELOG.md`.
+
+**Include a `🐛` bullet only when one of these is true:**
+
+1. **The bug fix IS the release.** A patch release whose entire purpose is the fix (e.g. `v2.0.1` shipped specifically to address a regression).
+2. **You're closing a loop.** The bug was previously called out in a Recent Updates entry as a known issue, and this release resolves it.
+3. **The fix is the headline of a larger release.** If the most important thing a minor release ships is fixing a long-standing issue, lead with it.
+
+**Exclude bug fixes that are:**
+
+- Pre-existing issues squashed during unrelated feature work (the most common silent failure)
+- Fixes for bugs that weren't user-visible enough to be previously flagged
+- "Technically user-visible" but discovered and fixed without anyone reporting them
+- Anything where the fix is one of several changes in the release rather than the focus
+
+**Test for inclusion:** if the bullet starts with `🐛` and you're writing it because *you remembered the fix happened*, not because *the user is waiting for it* — it doesn't go here. Send it to `CHANGELOG.md`.
+
+The failure mode is silent: a 🐛 bullet appears that probably shouldn't, and there's nothing in the rule that flags it. The section drifts toward CHANGELOG. Recent Updates should answer "*what's new in capability?*", not "*what got fixed?*"
 
 ## Alternate style — flarecrawl (table)
 
