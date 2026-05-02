@@ -22,6 +22,9 @@ From Python async patterns to Rust ownership models, from AWS Fargate deployment
 
 ## Recent Updates
 
+**v2.4.11** (May 2026)
+- ✨ **`summon` skill** - Push Claude Desktop Code-tab sessions across accounts so they appear in the next account you switch to. Best run *before* switching — while still on your current near-limit account, push mid-flight sessions to the destination, then Logout/Login as the natural switch. Default is copy (sessions visible from both accounts); `--move` for lean cleanup. Hierarchical Account → Project → Session picker with global numbering, `--peek <id>` for transcript preview, `--list-accounts` inventory, recency aliases (`--1d/--3d/--7d/--all`), 8-hint rotating tip system. Output follows `docs/DESIGN.md` (Terminal Panel Design System).
+
 **v2.4.10** (April 2026)
 - 📌 **`github-ops` Recent Updates rule sharpened** - `references/readme-recent-updates.md` gains an explicit "Recent Updates is for *features*, not bugs" subsection with three inclusion criteria, four exclusion criteria, and a self-check ("are you writing this because *you* remembered the fix or because *the user* is waiting for it?"). Replaces a soft single-bullet rule that allowed pre-existing bug fixes to slip into feature-release entries silently.
 

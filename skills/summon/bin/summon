@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# summon — pull Claude Desktop Code-tab sessions across accounts.
+# See: ~/.claude/skills/summon/SKILL.md
+exec python "$HOME/.claude/skills/summon/scripts/summon.py" "$@"
