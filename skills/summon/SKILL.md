@@ -1,6 +1,6 @@
 ---
 name: summon
-description: "Push Claude Desktop Code-tab sessions across accounts so they appear in the next account you switch to — by copying (default) or moving (--move) the session metadata file. Best run BEFORE switching accounts: while still on your current near-limit account, push mid-flight sessions to the destination account, then Logout/Login as the natural switch. Triggers on: summon, summon sessions, push sessions, pull sessions, before switching accounts, account approaching usage limit, account ran out of usage, prepare next account, mid-flight desktop sessions, claude desktop multi-account workflow, transfer claude desktop sessions across accounts, peek session, see desktop sessions across accounts. Default copies the metadata wrapper so sessions are visible from both accounts; --move for lean cleanup. Transcript JSONLs are account-agnostic and stay where they are — both wrappers point at the same conversation. No API calls, no summarisation, full transcripts intact. Desktop's sidebar caches at login: a Logout/Login is required for new sessions to appear, which is why running summon BEFORE the natural account switch is the cleanest workflow."
+description: "Transfer Claude Desktop Code-tab sessions between Claude accounts — copy (default) or move (--move) the session metadata file so the session shows up in another account's left-hand sidebar (the session picker on the left side of Desktop's Code tab). Two natural framings: push (run while still on your current near-limit account, send sessions to the next one, then Logout/Login as the natural switch) or pull (after switching accounts, bring earlier sessions into the now-active one). Push is the recommended workflow because the Logout/Login becomes invisible — it IS the switch you were going to do anyway. Triggers on: summon, summon sessions, push sessions, pull sessions, before switching accounts, account approaching usage limit, account ran out of usage, prepare next account, mid-flight desktop sessions, claude desktop multi-account workflow, transfer claude desktop sessions across accounts, peek session, see desktop sessions across accounts. Default copy keeps the session visible in both accounts' sidebars; --move for lean cleanup. Transcript JSONLs are account-agnostic and stay where they are — both wrappers point at the same conversation. No API calls, no summarisation, full transcripts intact. The left-hand session picker is loaded at login, so a Logout/Login on the destination is required for new sessions to appear there."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
@@ -18,7 +18,7 @@ Copy (or move) Claude Desktop Code-tab sessions across accounts so they're visib
 1. Notice you're approaching usage limit on the account you're currently using
 2. Run `summon --to <next-account>` — sessions get copied (default) into the next account's dir
 3. Logout from current account in Desktop → Login to the new account
-4. **All your mid-flight sessions appear in the new account's sidebar.** The Logout/Login is the natural switch you were going to do anyway.
+4. **All your mid-flight sessions appear in the new account's left-hand session picker** (the sidebar on the left side of Desktop's Code tab). The Logout/Login is the natural switch you were going to do anyway.
 
 Running summon *after* hitting the usage limit also works — the file moves are pure local ops, no API needed — but you'll still need to Logout/Login on the destination to see the sessions, since Desktop's session list is cached at login. Doing it proactively just means the Logout/Login is no longer "extra friction," it's the same step you'd be doing anyway.
 
@@ -31,7 +31,7 @@ Each Desktop session has two halves:
 | Metadata JSON | `%APPDATA%/Claude/claude-code-sessions/<account>/<workspace>/local_<uuid>.json` | **Yes** — lives under `<account>` |
 | Transcript JSONL | `~/.claude/projects/<encoded-cwd>/<cli-uuid>.jsonl` | **No** — global, shared |
 
-Summon copies (or with `--move`, relocates) the metadata wrapper into the destination account's dir. The transcript stays put — both wrappers point at the same conversation. After Logout/Login on the destination, the new sidebar entries appear.
+Summon copies (or with `--move`, relocates) the metadata wrapper into the destination account's dir. The transcript stays put — both wrappers point at the same conversation. After Logout/Login on the destination, the new entries appear in the **left-hand session picker** (Desktop's Code-tab sidebar).
 
 ## Run
 
@@ -114,7 +114,7 @@ Header shows `→ destination`. Summary line shows count, source breadth, and ac
 
 ## Sidebar refresh
 
-Desktop loads sessions on login and doesn't watch the filesystem afterwards (verified via bundle inspection — no `chokidar`, no relevant `fs.watch` on the session dir, only direct `fs.readdir` calls). Summon throws a best-effort nudge at fs.watch (sentinel pings, mtime touches, rename ping-pong) but **don't rely on it** — assume Logout/Login is required to see new sessions.
+Desktop loads sessions into its left-hand session picker on login and doesn't watch the filesystem afterwards (verified via bundle inspection — no `chokidar`, no relevant `fs.watch` on the session dir, only direct `fs.readdir` calls). Summon throws a best-effort nudge at fs.watch (sentinel pings, mtime touches, rename ping-pong) but **don't rely on it** — assume Logout/Login is required to populate the sidebar with new sessions.
 
 This is why summon is best run **before switching accounts**: the Logout/Login is what you'd do anyway. Running summon as a "rescue" after the fact still works mechanically, but the Logout/Login still has to happen.
 
