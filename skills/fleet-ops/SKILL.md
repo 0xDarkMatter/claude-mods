@@ -118,7 +118,13 @@ export FLEET_ASCII=1
 icons=ascii
 ```
 
-Long-path warning (Windows only): worktrees nest under `.claude/fleet/worktrees/<name>/`. If your repo lives deep in the filesystem, lane names should stay short to avoid Windows' 260-char path limit. Enable `core.longpaths=true` in git if you hit it.
+Long-path warning (Windows only): worktrees nest under `.fleet-worktrees/<name>/`. If your repo lives deep in the filesystem, lane names should stay short to avoid Windows' 260-char path limit. Enable `core.longpaths=true` in git if you hit it.
+
+## Headless agent compatibility
+
+**Don't put fleet worktrees under `.claude/`.** Claude Code applies a global sensitive-file guard to anything under `.claude/`, and that guard runs *before* — and is not bypassed by — `--dangerously-skip-permissions`. Headless lane sessions (`claude -p ... --dangerously-skip-permissions`) will fail every Write/Edit if their worktree lives at e.g. `.claude/fleet/worktrees/<lane>`.
+
+That's why the default `worktree_root` is `.fleet-worktrees/` at the repo top, not `.claude/fleet/worktrees/`. If you override `worktree_root` in config, keep it outside `.claude/` for the same reason. Runtime state (`lanes/`, `daemon.pid`, `activity.log`) is read/write from the orchestrator only and stays under `.claude/fleet/` — it never needs lane-session writes.
 
 ## Configuration
 
@@ -126,7 +132,7 @@ Optional `.claude/fleet/config` (key=value, no quotes):
 
 ```
 mode=auto                            # auto | worktree | branch
-worktree_root=.claude/fleet/worktrees
+worktree_root=.fleet-worktrees       # keep outside .claude/ — see "Headless agent compatibility"
 test_cmd=                            # if set, daemon runs this; else trust signal log
 forbidden_pattern=TODO_SCRUB|XXX
 base_branch=main
@@ -134,6 +140,8 @@ poll_interval=5
 ```
 
 Zero-config works for the common case.
+
+`fleet init` appends `.claude/fleet/` and `.fleet-worktrees/` to `.gitignore` and auto-commits that change with `chore: gitignore fleet-ops runtime state` when the tree is otherwise clean and you're on `BASE_BRANCH`. If either condition fails, it prints an `ACTION REQUIRED` message — commit `.gitignore` yourself before `fleet start`, or the daemon will refuse to land with `uncommitted tracked changes`.
 
 ## Future work
 

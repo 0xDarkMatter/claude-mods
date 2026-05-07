@@ -28,7 +28,12 @@ term_init
 
 # defaults (overridable via .claude/fleet/config: key=value, no quotes)
 MODE="auto"
-WORKTREE_ROOT=".claude/fleet/worktrees"
+# Default worktree root sits at repo top, NOT under .claude/. Claude Code's
+# headless mode (--dangerously-skip-permissions) bypasses prompts but still
+# enforces the global .claude/ sensitive-file guard, so worktrees nested
+# under .claude/ can't be written to by lane sessions. See SKILL.md
+# "Headless agent compatibility".
+WORKTREE_ROOT=".fleet-worktrees"
 TEST_CMD=""
 FORBIDDEN_PATTERN="TODO_SCRUB|XXX[^a-z]|FIXME_BEFORE_LAND"
 BASE_BRANCH="main"
@@ -50,15 +55,60 @@ file_mtime() {
 
 log() { echo "[$(date '+%H:%M:%S')] $*" | tee -a "$LOG" >&2; }
 
+maybe_commit_gitignore() {
+  # Auto-commit the .gitignore append from ensure_fleet_dir, but only when
+  # safe: must be on BASE_BRANCH and .gitignore must be the only change in
+  # the tree. Otherwise warn loudly — the daemon's land step will refuse
+  # otherwise with "main has uncommitted tracked changes".
+  local current
+  current=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+  if [[ "$current" != "$BASE_BRANCH" ]]; then
+    log "ACTION REQUIRED: .gitignore updated for fleet-ops runtime paths."
+    log "                 You're on '$current', not '$BASE_BRANCH'. Switch to"
+    log "                 '$BASE_BRANCH' and commit .gitignore before 'fleet start',"
+    log "                 or the daemon will refuse to land with"
+    log "                 'uncommitted tracked changes — clean before landing'."
+    return 0
+  fi
+  local other_changes
+  other_changes=$(git status --porcelain 2>/dev/null | grep -vE '^.. \.gitignore$' || true)
+  if [[ -n "$other_changes" ]]; then
+    log "ACTION REQUIRED: .gitignore updated for fleet-ops runtime paths,"
+    log "                 but other uncommitted changes exist on $BASE_BRANCH."
+    log "                 Commit .gitignore yourself before 'fleet start' or"
+    log "                 the daemon will refuse to land. Suggested:"
+    log "                   git add .gitignore && git commit -m 'chore: gitignore fleet-ops runtime state'"
+    return 0
+  fi
+  git add .gitignore 2>/dev/null || { log "WARN: git add .gitignore failed"; return 0; }
+  if git commit -m "chore: gitignore fleet-ops runtime state" -- .gitignore >/dev/null 2>&1; then
+    log "auto-committed .gitignore (fleet-ops runtime paths: .claude/fleet/, .fleet-worktrees/)"
+  else
+    log "WARN: auto-commit of .gitignore failed — commit it manually before 'fleet start'"
+  fi
+}
+
 ensure_fleet_dir() {
   mkdir -p "$LANES_DIR"
   [[ -f "$FLEET_DIR/signal.sh" ]] || cp "$SCRIPT_DIR/signal.sh" "$FLEET_DIR/signal.sh"
   chmod +x "$FLEET_DIR/signal.sh" 2>/dev/null || true
-  # Auto-ignore .claude/fleet/ in git so it doesn't show as "dirty" or get committed
-  if [[ -d .git ]] || git rev-parse --git-dir >/dev/null 2>&1; then
-    if [[ ! -f .gitignore ]] || ! grep -qxF '.claude/fleet/' .gitignore 2>/dev/null; then
+  # Auto-ignore fleet-ops runtime state in git so it doesn't show as "dirty"
+  # or get committed. Two paths:
+  #   .claude/fleet/      — lanes/, daemon.pid, activity.log, signal.sh, config
+  #   .fleet-worktrees/   — default worktree root (top-level so headless
+  #                         Claude lane sessions can write there)
+  if git rev-parse --git-dir >/dev/null 2>&1; then
+    [[ -f .gitignore ]] || touch .gitignore
+    local appended=0
+    if ! grep -qxF '.claude/fleet/' .gitignore 2>/dev/null; then
       echo '.claude/fleet/' >> .gitignore
+      appended=1
     fi
+    if ! grep -qxF '.fleet-worktrees/' .gitignore 2>/dev/null; then
+      echo '.fleet-worktrees/' >> .gitignore
+      appended=1
+    fi
+    [[ $appended -eq 1 ]] && maybe_commit_gitignore
   fi
 }
 

@@ -10,7 +10,9 @@ End-to-end walkthrough plus recovery scenarios. The decision tree and CLI surfac
 fleet init auth-mw rate-limiter cache-layer
 ```
 
-Creates: a branch per name (off `main`), a worktree at `.claude/fleet/worktrees/<name>/`, a status file at `.claude/fleet/lanes/<name>` (state: `RUNNING`), and deploys `signal.sh` to `.claude/fleet/signal.sh`.
+Creates: a branch per name (off `main`), a worktree at `.fleet-worktrees/<name>/` (top-level so headless lane sessions can write — see "Headless agent compatibility" in `SKILL.md`), a status file at `.claude/fleet/lanes/<name>` (state: `RUNNING`), and deploys `signal.sh` to `.claude/fleet/signal.sh`.
+
+`fleet init` also appends `.claude/fleet/` and `.fleet-worktrees/` to `.gitignore` and auto-commits that change (`chore: gitignore fleet-ops runtime state`) when the tree is otherwise clean and you're on `main`. If it can't auto-commit safely, you'll see an `ACTION REQUIRED` notice — commit `.gitignore` yourself before `fleet start` or the daemon will refuse to land with `uncommitted tracked changes`.
 
 Force branch-only mode: `mode=branch` in `.claude/fleet/config`. Use this when each session is in a separate clone or remote machine — no worktrees needed.
 
@@ -64,7 +66,7 @@ When all lanes are terminal (`LANDED` or `FAILED`), the daemon exits. To tear do
 
 ```bash
 fleet stop                                              # if daemon still running
-git worktree remove .claude/fleet/worktrees/<name>      # for each worktree lane
+git worktree remove .fleet-worktrees/<name>             # for each worktree lane
 rm -rf .claude/fleet                                    # nuke fleet state
 ```
 
