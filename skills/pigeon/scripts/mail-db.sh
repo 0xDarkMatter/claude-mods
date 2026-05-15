@@ -22,6 +22,45 @@ canonical_path() {
   fi
 }
 
+# Resolve to the canonical main-repository root. If the given dir is inside
+# a git worktree, returns the MAIN repo's top-level directory rather than the
+# worktree's. This prevents pigeon from registering a worktree as if it were
+# the project (a worktree session would otherwise INSERT OR REPLACE the main
+# repo's projects row with the worktree's name + path).
+#
+# Mechanism:
+#   - `git rev-parse --git-common-dir` returns the canonical .git directory:
+#       - For a main repo: same as --git-dir (e.g. /repo/.git)
+#       - For a worktree: the main repo's .git (e.g. /repo/.git, NOT
+#         /repo/.git/worktrees/<wt-name>)
+#   - Strip trailing /.git to get the main repo's top-level directory.
+#   - Bare repos / non-git dirs fall back to canonical_path.
+resolve_main_repo() {
+  local dir="${1:-$PWD}"
+  if [ ! -d "$dir" ]; then
+    canonical_path "$dir"
+    return
+  fi
+  local commondir
+  commondir=$(git -C "$dir" rev-parse --git-common-dir 2>/dev/null)
+  if [ -z "$commondir" ]; then
+    # Not a git repo — fall through
+    canonical_path "$dir"
+    return
+  fi
+  # commondir may be relative to $dir; make it absolute and canonical.
+  case "$commondir" in
+    /*) ;;  # absolute
+    *)  commondir=$(cd "$dir" && cd "$commondir" 2>/dev/null && pwd -P) ;;
+  esac
+  # Strip trailing /.git to get the main repo's top-level (non-bare repos).
+  # Bare repos: commondir IS the repo top-level, no /.git suffix.
+  case "$commondir" in
+    */.git)  dirname "$commondir" ;;
+    *)       printf '%s' "$commondir" ;;
+  esac
+}
+
 # Generate 6-char project ID
 # Priority: git root commit hash > canonical path hash
 project_hash() {
@@ -43,9 +82,9 @@ project_hash() {
   printf '%s' "$path" | shasum -a 256 | cut -c1-6
 }
 
-# Get display name (basename of canonical path)
+# Get display name (basename of the MAIN-REPO top-level — never a worktree's).
 project_name() {
-  basename "$(canonical_path "${1:-$PWD}")"
+  basename "$(resolve_main_repo "${1:-$PWD}")"
 }
 
 # ============================================================================
@@ -113,12 +152,14 @@ read_body() {
   fi
 }
 
-# Register current project in the projects table (idempotent)
+# Register current project in the projects table (idempotent).
+# Always registers the main repo's top-level — a worktree session must NOT
+# overwrite the main repo's row with the worktree's path/name.
 register_project() {
   local hash name path
   hash=$(project_hash "${1:-$PWD}")
   name=$(sql_escape "$(project_name "${1:-$PWD}")")
-  path=$(sql_escape "$(canonical_path "${1:-$PWD}")")
+  path=$(sql_escape "$(resolve_main_repo "${1:-$PWD}")")
   sqlite3 "$MAIL_DB" \
     "INSERT OR REPLACE INTO projects (hash, name, path) VALUES ('${hash}', '${name}', '${path}');"
 }
