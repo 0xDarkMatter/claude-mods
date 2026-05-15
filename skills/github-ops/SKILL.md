@@ -39,6 +39,7 @@ git-ops                        push-gate           github-ops  (this skill)
 4. **Delegate local git operations to `git-ops`.** Don't reimplement commit/tag/push logic. github-ops orchestrates the GitHub-side calls (`gh`) and the README/CHANGELOG edits; git-ops handles git itself.
 5. **README "Recent Updates" updates on every release.** This is the one README touch that always happens, regardless of how minor the release. See `references/readme-recent-updates.md` for the canonical claude-mods style.
 6. **Never push without confirming visibility decision.** When creating a new repo, surface visibility as a flippable line in the plan ("creating as **private** — say 'public' to flip"), not buried in flag soup.
+7. **No local-machine paths in committed content.** Never bake `C:\Users\<name>\…`, `/home/<name>/…`, `/Users/<name>/…`, `/tmp/<one-off-test-dir>`, or any other machine-specific path into README entries, Recent Updates bullets, CHANGELOG entries, release notes, tag annotations, or commit messages. Public release artefacts have to read the same on someone else's machine. Use generic placeholders (`~/Temp/`, `<temp-dir>`, "a temp directory") or describe the file's purpose abstractly instead. If a path genuinely is part of the project's public API (install location, config path), state it canonically (`$HOME/.claude/skills/...`), not as a literal absolute that includes a user name.
 
 ## Three modes
 
