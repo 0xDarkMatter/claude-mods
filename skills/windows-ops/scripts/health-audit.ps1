@@ -54,6 +54,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\_lib\common.ps1"
+. (Join-Path $PSScriptRoot '..\..\_lib\term.ps1')
+Initialize-Term
 
 $Findings = New-Object System.Collections.Generic.List[hashtable]
 
@@ -74,9 +76,10 @@ function Add-Finding {
         ts       = (Get-Date).ToString('o')
     }
     $Findings.Add($f)
-    if (-not $Quiet -or $Level -in @('warn','fail')) {
+    # Inline trace only with -Verbose; default is silent walk + panel at end.
+    if ($VerbosePreference -ne 'SilentlyContinue') {
         $tag = $Level.ToUpper()
-        [Console]::Error.WriteLine("[$tag] $Category :: $Subject -> $Detail")
+        Write-Verbose "[$tag] $Category :: $Subject -> $Detail"
     }
     if ($Json) {
         [Console]::Out.WriteLine(($f | ConvertTo-Json -Compress -Depth 5))
@@ -86,7 +89,7 @@ function Add-Finding {
 # ─────────────────────────────────────────────────────────────────────
 # Section: Hardware errors (WHEA)
 # ─────────────────────────────────────────────────────────────────────
-if (-not $Quiet) { Write-Section "1. Hardware errors (WHEA)" }
+Write-Verbose "Section 1: Hardware errors (WHEA)"
 
 try {
     $whea = Get-WinEvent -FilterHashtable @{
@@ -114,13 +117,10 @@ try {
 # ─────────────────────────────────────────────────────────────────────
 # Section: Storage health per disk
 # ─────────────────────────────────────────────────────────────────────
-if (-not $Quiet) { Write-Section "2. Storage health per disk" }
-
+Write-Verbose "Section 2: Storage health per disk"
 $diskMap = Get-DiskMap
 foreach ($d in $diskMap) {
-    if (-not $Quiet) {
-        [Console]::Error.WriteLine("  Disk $($d.Number): $($d.Model) [$($d.MediaType), $($d.BusType), $($d.SizeGB) GB, $($d.DriveLetters)]")
-    }
+    Write-Verbose "  Disk $($d.Number): $($d.Model) [$($d.MediaType), $($d.BusType), $($d.SizeGB) GB, $($d.DriveLetters)]"
 }
 
 # Aggregate disk errors across the time window
@@ -237,7 +237,7 @@ try {
 # ─────────────────────────────────────────────────────────────────────
 # Section: Crash history
 # ─────────────────────────────────────────────────────────────────────
-if (-not $Quiet) { Write-Section "3. Crash history" }
+Write-Verbose "Section 3: Crash history"
 
 try {
     $crashes = Get-WinEvent -FilterHashtable @{
@@ -297,7 +297,7 @@ try {
 # ─────────────────────────────────────────────────────────────────────
 # Section: Startup inventory
 # ─────────────────────────────────────────────────────────────────────
-if (-not $Quiet) { Write-Section "4. Startup inventory" }
+Write-Verbose "Section 4: Startup inventory"
 
 $runPaths = @(
     'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
@@ -336,7 +336,7 @@ Add-Finding -Level $level -Category 'startup' -Subject 'Total auto-launch items'
 # ─────────────────────────────────────────────────────────────────────
 # Section: Resource pressure (right now)
 # ─────────────────────────────────────────────────────────────────────
-if (-not $Quiet) { Write-Section "5. Resource pressure (right now)" }
+Write-Verbose "Section 5: Resource pressure (right now)"
 
 try {
     $os = Get-CimInstance Win32_OperatingSystem
@@ -413,26 +413,77 @@ $warnCount = ($Findings | Where-Object { $_.level -eq 'warn' }).Count
 $passCount = ($Findings | Where-Object { $_.level -eq 'pass' }).Count
 
 if (-not $Json) {
-    Write-Section "VERDICT"
-    [Console]::Out.WriteLine("")
-    [Console]::Out.WriteLine("  Findings: $failCount FAIL, $warnCount WARN, $passCount PASS")
-    [Console]::Out.WriteLine("")
-    if ($failingDisks) {
-        [Console]::Out.WriteLine("  FAILING DRIVES:")
-        foreach ($d in $failingDisks) {
-            [Console]::Out.WriteLine("    - Disk $($d.Number): $($d.Model) [$($d.DriveLetters)]")
-        }
-        [Console]::Out.WriteLine("")
-        [Console]::Out.WriteLine("  Recommended actions:")
-        [Console]::Out.WriteLine("    1. Back up data from failing drive(s) immediately")
-        [Console]::Out.WriteLine("    2. Physically disconnect or set Offline via diskpart")
-        [Console]::Out.WriteLine("    3. Replace drive before further use")
-    } elseif ($failCount -gt 0) {
-        [Console]::Out.WriteLine("  Critical findings present. See [FAIL] markers above.")
-    } else {
-        [Console]::Out.WriteLine("  No critical findings. System health within normal bounds.")
+    # Right indicator: hostname
+    $hostname = $env:COMPUTERNAME
+    if (-not $hostname) { $hostname = (Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue).Name }
+
+    Write-TermLine (New-TermPanelOpen -Brand 'windows-ops' -Name 'windows-ops' -Subtitle 'health-audit' -Indicator $hostname)
+    Write-TermLine (New-TermPanelVert)
+
+    # Summary line — single-glance digest
+    $summary = "$($diskMap.Count) disks · $($failingDisks.Count) failing"
+    $crashCount = ($Findings | Where-Object { $_.category -eq 'crash' -and $_.level -eq 'fail' -and $_.subject -ne 'Pattern' -and $_.subject -ne 'Dump config' }).Count
+    if ($crashCount -gt 0) { $summary += " · $crashCount unclean shutdowns" }
+    Write-TermLine (New-TermSummary -Text $summary)
+    Write-TermLine (New-TermPanelVert)
+
+    # Group findings by state (per approved decision #7)
+    $byState = @{
+        FAILING = $Findings | Where-Object { $_.level -eq 'fail' }
+        WARN    = $Findings | Where-Object { $_.level -eq 'warn' }
+        PASS    = $Findings | Where-Object { $_.level -eq 'pass' }
+        INFO    = $Findings | Where-Object { $_.level -eq 'info' }
     }
-    [Console]::Out.WriteLine("")
+
+    function Format-CategoryLabel {
+        param([string]$Cat)
+        return $Cat
+    }
+
+    foreach ($state in @('FAILING','WARN','PASS','INFO')) {
+        $items = @($byState[$state])
+        if ($items.Count -eq 0) { continue }
+        $stateLabel = $state.ToLower()
+        Write-TermLine (New-TermSection -State $state -Label $stateLabel -Count $items.Count)
+        for ($i = 0; $i -lt $items.Count; $i++) {
+            $f = $items[$i]
+            $cat = Format-CategoryLabel -Cat $f.category
+            $name = "[$cat] $($f.subject)"
+            $detail = Get-TermTruncated -Text $f.detail -MaxCols 60
+            Write-TermLine (New-TermLeaf -Name $name -Meta $detail -IsLast:($i -eq $items.Count - 1) -NameColWidth 38 -RailColWidth 0 -MetaColWidth 60)
+        }
+        # Critical inline alert for FAILING section if a failing drive is identified
+        if ($state -eq 'FAILING' -and $failingDisks) {
+            $driveList = ($failingDisks | ForEach-Object { "Disk $($_.Number) ($($_.DriveLetters))" }) -join ', '
+            Write-TermLine (New-TermAlert -Severity critical -Text "back up + disconnect $driveList — see recover-clone.ps1 and drive-dependencies.ps1")
+        }
+        Write-TermLine (New-TermPanelVert)
+    }
+
+    # Footer
+    # Highest-action signals per decision #8
+    $healthIndicators = New-Object System.Collections.Generic.List[string]
+    if ($failingDisks) {
+        $healthIndicators.Add((New-TermHealth -State 'busted' -Text 'storage'))
+    }
+    if ($crashCount -gt 0) {
+        $word = if ($crashCount -eq 1) { 'crash' } else { 'crashes' }
+        $healthIndicators.Add((New-TermHealth -State 'warning' -Text "$crashCount $word"))
+    }
+    # If neither, show a single healthy indicator
+    if ($healthIndicators.Count -eq 0) {
+        $healthIndicators.Add((New-TermHealth -State 'healthy' -Text 'clean'))
+    }
+    # Cap at 2 per design § 4.3
+    $healthIndicators = $healthIndicators | Select-Object -First 2
+    $hl = $healthIndicators | Join-TermHealths
+
+    $hk = @(
+        (New-TermHotkey -Key 'R' -Verb 'refresh')
+        (New-TermHotkey -Key 'D' -Verb 'drill')
+        (New-TermHotkey -Key '?' -Verb 'help')
+    ) | Join-TermHotkeys
+    Write-TermLine (New-TermPanelClose -Hotkeys $hk -Healths $hl)
 }
 
 # Exit code semantics
