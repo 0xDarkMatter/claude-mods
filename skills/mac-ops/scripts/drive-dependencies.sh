@@ -83,19 +83,21 @@ fi
 # ----------------------------------------------------------------------------
 section "3. SPOTLIGHT INDEX STATE"
 # ----------------------------------------------------------------------------
-spotlight_status=$(mdutil -s "$TARGET" 2>/dev/null | tail -1)
+spotlight_status=$(mdutil -s "$TARGET" 2>/dev/null | tail -1 | sed 's/^[[:space:]]*//')
 note "  $spotlight_status"
 case "$spotlight_status" in
     *"Indexing enabled"*) log_warn "Spotlight indexing" "enabled on this volume — eject may corrupt index" ;;
     *"Indexing disabled"*) log_pass "Spotlight indexing" "disabled" ;;
-    *) log_info "Spotlight indexing" "$spotlight_status" ;;
+    *"unknown"*) log_pass "Spotlight indexing" "(no user index — system or read-only volume)" ;;
+    *) log_info "Spotlight indexing" "${spotlight_status:-(no response)}" ;;
 esac
 
 # ----------------------------------------------------------------------------
 section "4. TIME MACHINE DESTINATION CHECK"
 # ----------------------------------------------------------------------------
 tm_dest=$(tmutil destinationinfo 2>/dev/null | awk -F': *' '/Mount Point/{print $2}')
-if [[ "$tm_dest" == "$TARGET" ]] || [[ "$TARGET" == "$tm_dest"/* ]]; then
+# Empty tm_dest matches /tmp via prefix logic if not careful; require non-empty + exact prefix
+if [[ -n "$tm_dest" ]] && { [[ "$tm_dest" == "$TARGET" ]] || [[ "$TARGET" == "$tm_dest"/* ]]; }; then
     log_fail "Time Machine destination" "this volume IS the TM target — eject will fail current/next backup"
 elif [[ -n "$tm_dest" ]]; then
     log_pass "Time Machine destination" "different volume ($tm_dest)"

@@ -61,8 +61,9 @@ fi
 # ----------------------------------------------------------------------------
 section "2. APFS SNAPSHOTS"
 # ----------------------------------------------------------------------------
-snap_count=$(tmutil listlocalsnapshots "$VOL" 2>/dev/null | grep -c "com.apple" || echo 0)
-if [[ "$snap_count" -gt 0 ]]; then
+snap_count=$(tmutil listlocalsnapshots "$VOL" 2>/dev/null | grep -c "com.apple" | tr -d ' \n')
+snap_count="${snap_count:-0}"
+if (( snap_count > 0 )); then
     log_info "Local Time Machine snapshots" "$snap_count"
     note "  Recent (last 10):"
     tmutil listlocalsnapshots "$VOL" 2>/dev/null | tail -10 | sed 's/^/    /'
@@ -80,7 +81,7 @@ if [[ "$snap_count" -gt 0 ]]; then
         fi
     fi
 
-    if [[ "$snap_count" -gt 20 ]]; then
+    if (( snap_count > 20 )); then
         log_warn "Snapshot count" "$snap_count — consider 'tmutil thinlocalsnapshots $VOL'"
     fi
 else

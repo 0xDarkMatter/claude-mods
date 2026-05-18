@@ -22,6 +22,9 @@ From Python async patterns to Rust ownership models, from AWS Fargate deployment
 
 ## Recent Updates
 
+**v2.7.4** (May 2026)
+- 🩺 **`mac-ops` keychain audit + dogfood bug fixes** - Added `keychain-audit.sh` (login keychain status, lock state, securityd/trustd error log, cert inventory, Gatekeeper + Apple Silicon developer mode, iCloud Keychain detection, fix sequence for the "macOS keeps asking for password" case). Plus three real bugs found via dogfood and fixed: `disk-health.sh` snapshot-count arithmetic (`wc -l` outputs `0\n0` on BSD which broke `[[` expressions), `storage-pressure.sh` same pattern, `drive-dependencies.sh` falsely matching empty Time Machine target as the queried volume's prefix. Total: 20 scripts, 10 reference docs, 6,095 lines.
+
 **v2.7.3** (May 2026)
 - 🩺 **`mac-ops` dev tooling + update state** - Three more scripts focused on the developer-side and Mac-keeping-itself-current dimensions: `brew-health.sh` (Homebrew doctor + outdated formulae/casks + cleanup opportunities + Apple Silicon vs Intel architecture sanity + pinned formulae + brew services + tap inventory), `update-state.sh` (macOS auto-update policy + pending updates from softwareupdate + Mac App Store auto-update settings + mas CLI integration), `media-libraries.sh` (Photos/Music/TV/Final Cut/Logic/iMovie library sizes, iCloud Drive cache, photolibraryd/cloudphotod sync daemon CPU snapshot, recent sync errors). Total: 19 scripts, 10 reference docs, 5,918 lines.
 

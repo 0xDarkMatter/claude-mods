@@ -153,10 +153,11 @@ section "4. APFS SNAPSHOT BLOAT"
 # Per-volume snapshot count
 mount | awk '/apfs/{print $3}' | while read -r mnt; do
     [[ -z "$mnt" ]] && continue
-    snap_count=$(tmutil listlocalsnapshots "$mnt" 2>/dev/null | grep -c "com.apple" || echo 0)
-    if [[ "$snap_count" -gt 20 ]]; then
+    snap_count=$(tmutil listlocalsnapshots "$mnt" 2>/dev/null | grep -c "com.apple" | tr -d ' \n')
+    snap_count="${snap_count:-0}"
+    if (( snap_count > 20 )); then
         log_warn "Snapshots on $mnt" "$snap_count — purgeable space tied up"
-    elif [[ "$snap_count" -gt 0 ]]; then
+    elif (( snap_count > 0 )); then
         log_info "Snapshots on $mnt" "$snap_count"
     else
         log_pass "Snapshots on $mnt" "0"
