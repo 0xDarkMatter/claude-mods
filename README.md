@@ -22,6 +22,9 @@ From Python async patterns to Rust ownership models, from AWS Fargate deployment
 
 ## Recent Updates
 
+**v2.7.5** (May 2026)
+- 🩺 **`mac-ops` bluetooth + fonts** - Added `bluetooth-audit.sh` (paired devices, connection state, recent connect/disconnect events, BT-driven wake settings — useful for "AirPods keep dropping" and "Magic Mouse cursor stutter" diagnoses) and `font-audit.sh` (font directory inventory across system/user/Adobe locations, fontd CPU + recent errors, duplicate font filename detection — font conflicts crash Office and Adobe apps). Total: 22 scripts, 10 reference docs, 6,355 lines.
+
 **v2.7.4** (May 2026)
 - 🩺 **`mac-ops` keychain audit + dogfood bug fixes** - Added `keychain-audit.sh` (login keychain status, lock state, securityd/trustd error log, cert inventory, Gatekeeper + Apple Silicon developer mode, iCloud Keychain detection, fix sequence for the "macOS keeps asking for password" case). Plus three real bugs found via dogfood and fixed: `disk-health.sh` snapshot-count arithmetic (`wc -l` outputs `0\n0` on BSD which broke `[[` expressions), `storage-pressure.sh` same pattern, `drive-dependencies.sh` falsely matching empty Time Machine target as the queried volume's prefix. Total: 20 scripts, 10 reference docs, 6,095 lines.
 
