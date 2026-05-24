@@ -1,0 +1,79 @@
+{
+  "schema_version": "v0.1.0",
+  "_about": "IOC exposure catalog for exposure-check.py. Format borrowed from Perplexity's Bumblebee (docs/schema/v0.1.0/exposure-catalog.schema.json, Apache-2.0). Seed it from advisories: each entry is a known-bad {ecosystem, package, versions[]}. Only add versions you can cite from a real advisory — a fabricated entry is a false match waiting to happen. Use versions:[\"*\"] ONLY for tag-rewrite attacks where every version is poisoned (never for a normal compromise — it would false-match legit installs). ecosystem one of: npm, pypi, composer, cargo, go, rubygems, mcp, editor-extension, browser-extension.",
+  "_large_advisory_sets": "This catalog is for hand-curated high-value IOCs (single poisoned versions, or tag-rewrites). For LARGE advisory sets — TanStack (CVE-2026-45321 / GHSA-g7cv-rxg3-hmpx, 42 @tanstack/* pkgs, 84 artifacts, 2026-05-11) and AntV (300+ pkgs / 323 versions, 2026-05-19) — do NOT inline dozens of versions here. Run osv-scanner on the lockfile (it ingests these GHSAs) or use depscore; that's the right tool for bulk advisory matching. Keep this catalog fresh from advisories or `socket threat-feed`.",
+  "entries": [
+    {
+      "id": "AXIOM-SC-2026-LARAVEL-LANG",
+      "name": "Laravel-Lang Composer tag-rewrite credential stealer",
+      "ecosystem": "composer",
+      "package": "laravel-lang/lang",
+      "versions": ["*"],
+      "severity": "critical",
+      "note": "2026-05-22: ~700 historical git tags across laravel-lang/lang, /attributes, /http-statuses, /actions rewritten to a malicious commit. Payload injected via Composer autoload.files (helpers.php) — runs every PHP request, NOT a lifecycle script (so --no-scripts does NOT help). ALL versions suspect → versions:[*]. One entry per package; duplicate for /attributes, /http-statuses, /actions."
+    },
+    {
+      "id": "AXIOM-SC-2026-LARAVEL-LANG-ATTRIBUTES",
+      "name": "Laravel-Lang Composer tag-rewrite credential stealer",
+      "ecosystem": "composer",
+      "package": "laravel-lang/attributes",
+      "versions": ["*"],
+      "severity": "critical",
+      "note": "Part of the 2026-05-22 laravel-lang tag-rewrite compromise. See AXIOM-SC-2026-LARAVEL-LANG."
+    },
+    {
+      "id": "AXIOM-SC-2026-LARAVEL-LANG-HTTP-STATUSES",
+      "name": "Laravel-Lang Composer tag-rewrite credential stealer",
+      "ecosystem": "composer",
+      "package": "laravel-lang/http-statuses",
+      "versions": ["*"],
+      "severity": "critical",
+      "note": "Part of the 2026-05-22 laravel-lang tag-rewrite compromise. See AXIOM-SC-2026-LARAVEL-LANG."
+    },
+    {
+      "id": "AXIOM-SC-2026-LARAVEL-LANG-ACTIONS",
+      "name": "Laravel-Lang Composer tag-rewrite credential stealer",
+      "ecosystem": "composer",
+      "package": "laravel-lang/actions",
+      "versions": ["*"],
+      "severity": "critical",
+      "note": "Part of the 2026-05-22 laravel-lang tag-rewrite compromise. See AXIOM-SC-2026-LARAVEL-LANG."
+    },
+    {
+      "id": "AXIOM-SC-2026-NX-CONSOLE",
+      "name": "Nx Console VS Code extension credential stealer",
+      "ecosystem": "editor-extension",
+      "package": "nrwl.angular-console",
+      "versions": ["18.95.0"],
+      "severity": "critical",
+      "note": "2026-05-18: Nx Console v18.95.0 (2.2M+ installs, verified publisher) published to the VS Code Marketplace with a credential stealer (GitHub/npm/AWS/Vault/k8s/1Password) that specifically reads ~/.claude/settings.json. Live ~11 min; auto-update pushed it widely. The poisoned extension behind the GitHub 3,800-repo breach. Match id is <publisher>.<name>."
+    },
+    {
+      "id": "AXIOM-SC-2026-DURABLETASK",
+      "name": "Microsoft durabletask PyPI dropper (Mini Shai-Hulud / AntV wave)",
+      "ecosystem": "pypi",
+      "package": "durabletask",
+      "versions": ["1.4.1", "1.4.2", "1.4.3"],
+      "severity": "critical",
+      "note": "2026-05-19: 3 malicious versions of Microsoft's official durabletask SDK published to PyPI (safe = 1.4.0). Dropper injected into source files fetches a stage-2 infostealer/worm that harvests cloud/password-manager/dev-tool creds, RSA-encrypts, exfiltrates. No PyPI provenance on any version. Yanked. Cited: Aikido, Snyk."
+    },
+    {
+      "id": "AXIOM-SC-2026-AXIOS",
+      "name": "axios RAT delivery (Sapphire Sleet)",
+      "ecosystem": "npm",
+      "package": "axios",
+      "versions": ["1.14.1", "0.30.4"],
+      "severity": "critical",
+      "note": "2026-03-30/31: maintainer account compromised, two backdoored versions published in a 39-min window, live ~3h. Cross-platform RAT delivery. Attributed to Sapphire Sleet (NK)."
+    },
+    {
+      "id": "EXAMPLE-TEMPLATE-DO-NOT-MATCH",
+      "name": "Format example — replace with real advisory IOCs",
+      "ecosystem": "pypi",
+      "package": "example-bad-package-that-does-not-exist",
+      "versions": ["0.0.0-never"],
+      "severity": "info",
+      "note": "Template only. When an advisory names a package (e.g. the Microsoft durabletask PyPI compromise, the TanStack/AntV npm waves), add an entry here with the exact versions from the advisory. This example package name is intentionally non-existent so it never matches."
+    }
+  ]
+}

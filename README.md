@@ -12,15 +12,18 @@
 
 > *A comprehensive extension toolkit that transforms Claude Code into a specialized development powerhouse.*
 
-**claude-mods** is a production-ready plugin that extends Claude Code with 23 expert agents, 78 specialized skills, 13 output styles, 5 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
+**claude-mods** is a production-ready plugin that extends Claude Code with 23 expert agents, 79 specialized skills, 13 output styles, 7 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
 
 Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms), claude-mods fills critical gaps in Claude Code's capabilities: persistent session state that survives across machines, on-demand expert knowledge for specialized domains, token-efficient modern CLI tools (10-100x faster than traditional alternatives), and proven workflow patterns for TDD, code review, and feature development. The toolkit implements Anthropic's [recommended patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), ensuring your development context never vanishes when sessions end.
 
 From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
 
-**23 agents. 78 skills. 13 styles. 5 hooks. 6 rules. One install.**
+**23 agents. 79 skills. 13 styles. 7 hooks. 7 rules. One install.**
 
 ## Recent Updates
+
+**v2.9.0** (May 2026)
+- 🛡️ **`supply-chain-defense` skill** - Behavioural-first defense against the 2026 npm/PyPI/Composer worm campaign (Shai-Hulud / Mini Shai-Hulud) that `npm audit` misses in the publish-to-advisory window — the proactive sibling to `security-ops`. Free-first Socket.dev integration (open-source CLI, $0 tier, zero-auth `depscore` MCP for Claude Code) plus two advisory hooks covering both ways a dependency enters: install commands and the agent editing a manifest. `exposure-check.py` answers "are we running a named-bad version?" by matching installed lockfiles across npm/pnpm/yarn/bun, PyPI, Composer, Cargo, Go, RubyGems + editor extensions against a cited-IOC catalog (axios 1.14.1, Laravel-Lang tag-rewrite, Nx Console 18.95.0, durabletask 1.4.1–1.4.3); `integrity-audit.sh` hunts worm persistence in Claude/editor configs, shell rc files, and `.npmrc`; `scan-extensions.sh` adds inventory + recency + opt-in GuardDog triage; `preinstall-check.sh` enforces a 7-day release-age cooldown. A global `rules/supply-chain.md` carries the doctrine to every project, and four references map the free-OSS complements (GuardDog, OSV-Scanner, zizmor, Harden-Runner). 42-assertion offline test suite; IOC-catalog format borrowed from Perplexity's [Bumblebee](https://github.com/perplexityai/bumblebee).
 
 **v2.8.0** (May 2026)
 - 🩺 **`mac-ops` skill** - Comprehensive macOS workstation diagnostics, peer to `windows-ops`. 23 scripts + 11 reference docs along an 8-rung ladder: `health-audit` orchestrates and `quickrun` gives a one-shot "what's wrong with my Mac?" verdict. Mac-unique probes cover TCC privacy permissions (the "can't screen-share" cause), wake reasons, Spotlight, and APFS storage pressure (the "disk full but `du` disagrees" mystery).
@@ -278,6 +281,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [monitoring-ops](skills/monitoring-ops/) | Prometheus, Grafana, OpenTelemetry, structured logging, alerting |
 | [debug-ops](skills/debug-ops/) | Systematic debugging, language-specific debuggers, common scenarios |
 | [perf-ops](skills/perf-ops/) | Performance profiling - CPU, memory, bundle analysis, load testing, flamegraphs |
+| [supply-chain-defense](skills/supply-chain-defense/) | Behavioural-first dependency security - Socket.dev (free CLI + depscore MCP), exposure-check (IOC match across npm/pnpm/yarn/bun/PyPI/Composer/Cargo/Go/RubyGems + extensions), integrity-audit (worm persistence), scan-extensions, install/manifest hooks |
 
 #### CLI Tool Skills
 | Skill | Description |
@@ -328,6 +332,8 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [post-edit-format.sh](hooks/post-edit-format.sh) | PostToolUse | Auto-format files after Write/Edit (Prettier, Ruff, gofmt, rustfmt) |
 | [dangerous-cmd-warn.sh](hooks/dangerous-cmd-warn.sh) | PreToolUse | Block destructive commands (force push, rm -rf, DROP TABLE) |
 | [enforce-uv.sh](hooks/enforce-uv.sh) | PreToolUse | Enforce uv over pip/bare tools in uv projects (`pip install` → `uv add`, bare `pytest`/`ruff` → `uv run`) |
+| [pre-install-scan.sh](hooks/pre-install-scan.sh) | PreToolUse | Advisory on dependency installs (npm/pnpm/yarn/bun/pip/uv/poetry/composer/gem/cargo, incl. `composer update`) - route through Socket, respect cooldown; `SUPPLY_CHAIN_BLOCK=1` for a hard gate |
+| [manifest-dep-scan.sh](hooks/manifest-dep-scan.sh) | PostToolUse | Advisory when the agent edits a dependency manifest (package.json/requirements/composer.json/Cargo.toml/go.mod/Gemfile) - depscore + cooldown the added package; silent on version bumps |
 | [check-mail.sh](hooks/check-mail.sh) | PreToolUse | Check for unread pmail via signal file (no cooldown, zero-cost when empty) |
 
 ### Output Styles
@@ -385,6 +391,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [commit-style.md](rules/commit-style.md) | Conventional commits format and examples |
 | [naming-conventions.md](rules/naming-conventions.md) | Component naming patterns for agents, skills, commands |
 | [skill-agent-updates.md](rules/skill-agent-updates.md) | Mandatory docs check before creating/updating skills or agents |
+| [supply-chain.md](rules/supply-chain.md) | Behavioural-first dependency hygiene - scan before adding, day-zero cooldown, OIDC audit, persistence-hook awareness |
 
 ### Tools & Hooks
 

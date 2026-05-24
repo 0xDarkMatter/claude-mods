@@ -1,7 +1,7 @@
 {
   "name": "claude-mods",
   "version": "2.8.0",
-  "description": "Custom commands, skills, and agents for Claude Code - session continuity, 23 expert agents, 78 skills, 2 commands, 6 rules, 5 hooks, 13 output styles, modern CLI tools",
+  "description": "Custom commands, skills, and agents for Claude Code - session continuity, 23 expert agents, 79 skills, 2 commands, 7 rules, 7 hooks, 13 output styles, modern CLI tools",
   "author": "0xDarkMatter",
   "repository": "https://github.com/0xDarkMatter/claude-mods",
   "license": "MIT",
@@ -105,6 +105,7 @@
       "skills/scaffold",
       "skills/screenshot",
       "skills/security-ops",
+      "skills/supply-chain-defense",
       "skills/setperms",
       "skills/skill-creator",
       "skills/spawn",
@@ -129,6 +130,7 @@
       "rules/commit-style.md",
       "rules/naming-conventions.md",
       "rules/skill-agent-updates.md",
+      "rules/supply-chain.md",
       "rules/thinking.md",
       "rules/worktree-boundaries.md"
     ],
@@ -136,6 +138,8 @@
       "hooks/pre-commit-lint.sh",
       "hooks/post-edit-format.sh",
       "hooks/dangerous-cmd-warn.sh",
+      "hooks/pre-install-scan.sh",
+      "hooks/manifest-dep-scan.sh",
       "hooks/check-mail.sh",
       "hooks/enforce-uv.sh"
     ],

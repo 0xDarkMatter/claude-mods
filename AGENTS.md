@@ -5,9 +5,9 @@
 This is **claude-mods** - a collection of custom extensions for Claude Code:
 - **23 expert agents** for specialized domains (React, Python, Go, Rust, AWS, git, etc.)
 - **2 commands** for session management (/sync, /save)
-- **78 skills** for CLI tools, patterns, workflows, and development tasks (incl. `net-ops` for network troubleshooting, `windows-ops` for Windows workstation diagnostics, `mac-ops` for macOS workstation diagnostics)
+- **79 skills** for CLI tools, patterns, workflows, and development tasks (incl. `supply-chain-defense` for behavioural-first dependency security, `net-ops` for network troubleshooting, `windows-ops` / `mac-ops` for workstation diagnostics)
 - **13 output styles** for response personality (Vesper, Spartan, Mentor, Executive, Pair, Atlas, Coach, Harbour, Meridian, Noir, Roast, Sage, Scout)
-- **4 hooks** for pre-commit linting, post-edit formatting, dangerous command warnings, and pmail notifications
+- **7 hooks** for pre-commit linting, post-edit formatting, dangerous command warnings, uv enforcement, dependency-install + manifest-edit supply-chain advisories, and pmail notifications
 - **Pigeon** inter-session messaging (`pigeon send/read/reply`) - SQLite-backed pmail at `~/.claude/pmail.db`
 
 ## Installation
@@ -34,7 +34,7 @@ cd claude-mods && ./scripts/install.sh  # or .\scripts\install.ps1 on Windows
 | `skills/` | Skill definitions with SKILL.md |
 | `output-styles/` | Response personalities (13 styles incl. vesper, atlas, noir, roast, scout) |
 | `hooks/` | Working hook scripts (lint, format, safety, pmail) |
-| `rules/` | Claude Code rules (5 files: cli-tools, thinking, commit-style, naming-conventions, skill-agent-updates) |
+| `rules/` | Claude Code rules (7 files: cli-tools, thinking, commit-style, naming-conventions, skill-agent-updates, supply-chain, worktree-boundaries) |
 | `tools/` | Modern CLI toolkit documentation |
 | `tests/` | Validation scripts + justfile |
 | `scripts/` | Install scripts |
@@ -58,6 +58,7 @@ On "INIT:" message at session start:
 | `hooks/README.md` | Pre/post execution hook examples |
 | `skills/pigeon/` | Inter-session pmail - send, read, reply, broadcast, search across projects |
 | `skills/auto-skill/` | Auto-detect skill-worthy workflows; Stop hook suggests after complex sessions. `/auto-skill on/off/status` to toggle |
+| `skills/supply-chain-defense/` | Behavioural-first dependency security - Socket.dev depscore MCP, exposure-check (IOC match across npm/pnpm/yarn/bun/PyPI/Composer/Cargo/Go/RubyGems + extensions), integrity-audit (persistence), scan-extensions, install/manifest hooks. Paired with `rules/supply-chain.md` |
 
 ## Quick Reference
 
