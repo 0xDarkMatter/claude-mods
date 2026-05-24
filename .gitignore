@@ -5,6 +5,9 @@
 # Context init file (regenerated each session)
 .claude/.context-init.md
 
+# Local settings (user-specific; may contain API keys in permission rules)
+.claude/settings.local.json
+
 # Session state (user-specific)
 .claude/session-cache.json
 .claude/claude-state.json

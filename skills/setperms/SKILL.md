@@ -59,6 +59,7 @@ Tools from [dev-shell-tools](https://github.com/0xDarkMatter/dev-shell-tools):
     +-- Create .claude/rules directory
     |
     +-- Write settings.local.json (permissions)
+    +-- Ensure .gitignore excludes settings.local.json (secret-safety)
     +-- Write rules/cli-tools.md (tool preferences)
 ```
 
@@ -182,6 +183,27 @@ Write to `.claude/settings.local.json`:
   "hooks": {}
 }
 ```
+
+### Step 3b: Protect settings.local.json from git (mandatory)
+
+`settings.local.json` is user-specific and frequently accumulates secrets in
+permission rules (an API key baked into a `Bash(...)` allow entry, a token in a
+custom command). It must never reach a remote. Before finishing, ensure the repo
+root `.gitignore` excludes it:
+
+```bash
+# Add the rule only if it's not already present
+grep -qxF '.claude/settings.local.json' .gitignore 2>/dev/null \
+  || printf '\n# Local settings (user-specific; may contain API keys)\n.claude/settings.local.json\n' >> .gitignore
+
+# If it was already tracked from a prior commit, stop tracking it (keeps the file)
+git ls-files --error-unmatch .claude/settings.local.json >/dev/null 2>&1 \
+  && git rm --cached .claude/settings.local.json
+```
+
+Skip silently if the project has no git repo. This pairs with the git-ops
+push-safety gate, which also refuses any push that adds `.claude/settings.local.json`
+— defense in depth so a leaked key can't recur.
 
 ### Step 4: Write rules file
 
