@@ -12,13 +12,13 @@
 
 > *A comprehensive extension toolkit that transforms Claude Code into a specialized development powerhouse.*
 
-**claude-mods** is a production-ready plugin that extends Claude Code with 23 expert agents, 78 specialized skills, 13 output styles, 5 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
+**claude-mods** is a production-ready plugin that extends Claude Code with 23 expert agents, 80 specialized skills, 13 output styles, 6 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
 
 Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms), claude-mods fills critical gaps in Claude Code's capabilities: persistent session state that survives across machines, on-demand expert knowledge for specialized domains, token-efficient modern CLI tools (10-100x faster than traditional alternatives), and proven workflow patterns for TDD, code review, and feature development. The toolkit implements Anthropic's [recommended patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), ensuring your development context never vanishes when sessions end.
 
 From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
 
-**23 agents. 78 skills. 13 styles. 5 hooks. 6 rules. One install.**
+**23 agents. 80 skills. 13 styles. 6 hooks. 7 rules. One install.**
 
 ## Recent Updates
 
@@ -248,6 +248,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [rust-ops](skills/rust-ops/) | Rust ownership, async/tokio, error handling, traits, serde, ecosystem |
 | [typescript-ops](skills/typescript-ops/) | TypeScript type system, generics, utility types, strict mode, Zod |
 | [javascript-ops](skills/javascript-ops/) | JavaScript/Node.js async patterns, modules, ES2024+, runtime internals |
+| [r-ops](skills/r-ops/) | Modern R - tidyverse (dplyr/tidyr/ggplot2), data.table, readr/arrow/DBI, stringr/lubridate/forcats, purrr, broom/tidymodels, tsibble/fable, Quarto/renv |
 | [react-ops](skills/react-ops/) | React hooks, Server Components, state management, performance, testing |
 | [vue-ops](skills/vue-ops/) | Vue 3 Composition API, Pinia, Vue Router, Nuxt 3 |
 | [astro-ops](skills/astro-ops/) | Astro islands, content collections, rendering strategies, deployment |
@@ -278,6 +279,8 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [monitoring-ops](skills/monitoring-ops/) | Prometheus, Grafana, OpenTelemetry, structured logging, alerting |
 | [debug-ops](skills/debug-ops/) | Systematic debugging, language-specific debuggers, common scenarios |
 | [perf-ops](skills/perf-ops/) | Performance profiling - CPU, memory, bundle analysis, load testing, flamegraphs |
+| [security-ops](skills/security-ops/) | Reactive security audit - parallel dependency/SAST/auth scan, OWASP-mapped report |
+| [supply-chain-defense](skills/supply-chain-defense/) | Behavioural-first supply chain defense - Socket.dev (free CLI + depscore MCP), stale-OIDC audit, dependency cooldown, exposure-check (IOC catalog match), self-integrity scan for worm persistence hooks in Claude Code / VS Code settings |
 
 #### CLI Tool Skills
 | Skill | Description |
@@ -328,6 +331,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [post-edit-format.sh](hooks/post-edit-format.sh) | PostToolUse | Auto-format files after Write/Edit (Prettier, Ruff, gofmt, rustfmt) |
 | [dangerous-cmd-warn.sh](hooks/dangerous-cmd-warn.sh) | PreToolUse | Block destructive commands (force push, rm -rf, DROP TABLE) |
 | [enforce-uv.sh](hooks/enforce-uv.sh) | PreToolUse | Enforce uv over pip/bare tools in uv projects (`pip install` → `uv add`, bare `pytest`/`ruff` → `uv run`) |
+| [pre-install-scan.sh](hooks/pre-install-scan.sh) | PreToolUse | Advisory on dependency installs (npm/pip/uv/composer/gem/cargo) - route through Socket, respect cooldown; `SUPPLY_CHAIN_BLOCK=1` for a hard gate |
 | [check-mail.sh](hooks/check-mail.sh) | PreToolUse | Check for unread pmail via signal file (no cooldown, zero-cost when empty) |
 
 ### Output Styles
@@ -385,6 +389,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [commit-style.md](rules/commit-style.md) | Conventional commits format and examples |
 | [naming-conventions.md](rules/naming-conventions.md) | Component naming patterns for agents, skills, commands |
 | [skill-agent-updates.md](rules/skill-agent-updates.md) | Mandatory docs check before creating/updating skills or agents |
+| [supply-chain.md](rules/supply-chain.md) | Behavioural-first dependency hygiene - scan before adding, day-zero cooldown, OIDC audit, persistence-hook awareness |
 
 ### Tools & Hooks
 

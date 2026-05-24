@@ -1,0 +1,24 @@
+{
+  "schema_version": "v0.1.0",
+  "_about": "IOC exposure catalog for exposure-check.py. Format borrowed from Perplexity's Bumblebee (docs/schema/v0.1.0/exposure-catalog.schema.json, Apache-2.0). Seed it from advisories: each entry is a known-bad {ecosystem, package, versions[]}. Only add versions you can cite from a real advisory — a fabricated entry is a false match waiting to happen. ecosystem is one of: npm, pypi, go, rubygems, packagist, mcp, editor-extension, browser-extension.",
+  "entries": [
+    {
+      "id": "AXIOM-SC-2026-AXIOS",
+      "name": "axios RAT delivery (Sapphire Sleet)",
+      "ecosystem": "npm",
+      "package": "axios",
+      "versions": ["1.14.1", "0.30.4"],
+      "severity": "critical",
+      "note": "2026-03-30/31: maintainer account compromised, two backdoored versions published in a 39-min window, live ~3h. Cross-platform RAT delivery. Attributed to Sapphire Sleet (NK)."
+    },
+    {
+      "id": "EXAMPLE-TEMPLATE-DO-NOT-MATCH",
+      "name": "Format example — replace with real advisory IOCs",
+      "ecosystem": "pypi",
+      "package": "example-bad-package-that-does-not-exist",
+      "versions": ["0.0.0-never"],
+      "severity": "info",
+      "note": "Template only. When an advisory names a package (e.g. the Microsoft durabletask PyPI compromise, the TanStack/AntV npm waves), add an entry here with the exact versions from the advisory. This example package name is intentionally non-existent so it never matches."
+    }
+  ]
+}
