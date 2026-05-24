@@ -1,0 +1,22 @@
+# gitleaks false-positive allowlist (exact fingerprints).
+# All entries are illustrative/example keys in skill documentation, or
+# machine-local permission strings — confirmed non-secret. Listed by exact
+# commit:file:rule:line fingerprint so real secrets in these files are still
+# caught. See references/push-safety.md.
+
+# Documentation example keys (anti-pattern illustrations, sample tokens)
+194934a1e3c4d11edad042a76d4eebd32b7b2daf:skills/review/framework-checks.md:generic-api-key:793
+194934a1e3c4d11edad042a76d4eebd32b7b2daf:skills/testgen/frameworks.md:generic-api-key:128
+194934a1e3c4d11edad042a76d4eebd32b7b2daf:skills/testgen/frameworks.md:generic-api-key:20
+194934a1e3c4d11edad042a76d4eebd32b7b2daf:skills/testgen/frameworks.md:generic-api-key:212
+2c603fdb1f9f757408be3e47e4d90dff2e2d8b01:commands/testgen.md:generic-api-key:291
+2c603fdb1f9f757408be3e47e4d90dff2e2d8b01:commands/testgen.md:generic-api-key:395
+9f26d955c49a83b45d23cd6f6f5ba0efc6df8533:skills/security-patterns/SKILL.md:generic-api-key:121
+abe6bce3b9a1277bf40a08db1dd2be8dc3bdb115:skills/techdebt/references/patterns.md:generic-api-key:37
+abe6bce3b9a1277bf40a08db1dd2be8dc3bdb115:skills/techdebt/references/severity-guide.md:generic-api-key:351
+cb575e7888f19eef36ec279169d2267f9aa50dad:skills/security-ops/SKILL.md:generic-api-key:181
+cb575e7888f19eef36ec279169d2267f9aa50dad:skills/security-ops/references/audit-quickref.md:generic-api-key:114
+
+# Local permission strings (settings.local.json — now untracked, retained for history scan)
+0ade4e6405798e5b8dd9a4e7f668add5e0a3c6e9:.claude/settings.local.json:generic-api-key:44
+0ade4e6405798e5b8dd9a4e7f668add5e0a3c6e9:.claude/settings.local.json:generic-api-key:45
