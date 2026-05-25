@@ -113,7 +113,7 @@ echo "STEP 6  OK    secret scan clean"
 # ── Step 7: forbidden files ───────────────────────────────────────────────────
 # Files that should never ship to a remote. Matched against added-file paths.
 # Gitignore-style patterns would be nicer; for now, a small explicit list.
-FORBIDDEN_REGEX='(^|/)\.env(\.|$)|(^|/)\.env\.(local|development|production|test)$|\.(pem|key|pfx|p12|asc|ppk|id_rsa|id_ed25519|id_ecdsa|id_dsa)$|(^|/)\.aws/credentials$|(^|/)\.ssh/(id_|config)|(^|/)\.claude/worktrees/|(^|/)secrets?\.(json|ya?ml|toml|ini)$'
+FORBIDDEN_REGEX='(^|/)\.env(\.|$)|(^|/)\.env\.(local|development|production|test)$|\.(pem|key|pfx|p12|asc|ppk|id_rsa|id_ed25519|id_ecdsa|id_dsa)$|(^|/)\.aws/credentials$|(^|/)\.ssh/(id_|config)|(^|/)\.claude/worktrees/|(^|/)\.claude/settings\.local\.json$|(^|/)secrets?\.(json|ya?ml|toml|ini)$'
 
 if git rev-parse --verify "${REMOTE}/${BRANCH}" >/dev/null 2>&1; then
   ADDED_FILES="$(git diff --name-only --diff-filter=A "${REMOTE}/${BRANCH}..${BRANCH}")"

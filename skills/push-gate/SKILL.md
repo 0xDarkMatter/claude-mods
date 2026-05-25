@@ -57,7 +57,7 @@ The script prints a structured report and exits with:
 |---|---|---|
 | 0 | All gates passed; ready for push | Ask user to confirm, then `git push <remote> <branch>` |
 | 1 | Secret-scanner hit | Report to user; refuse; suggest `git filter-repo` / BFG |
-| 2 | Forbidden file added (.env, key files, worktree paths, etc.) | Report; refuse |
+| 2 | Forbidden file added (.env, key files, `.claude/settings.local.json`, worktree paths, etc.) | Report; refuse |
 | 3 | Dirty working tree | Report; ask user to commit or stash first |
 | 4 | Non-ff divergence | Report; ask user to rebase or merge first |
 | 5 | Missing dependency (gitleaks) | Report install instructions; refuse |
