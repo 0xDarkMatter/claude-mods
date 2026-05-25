@@ -13,6 +13,8 @@ Claude Code hooks allow you to run custom scripts at key workflow points.
 | `pre-install-scan.sh` | PreToolUse | Advisory on dependency installs (npm/pnpm/yarn/bun/pip/uv/poetry/composer/gem/cargo, incl. `composer update`) — route through Socket, respect the release-age cooldown. `SUPPLY_CHAIN_BLOCK=1` for a hard gate. |
 | `manifest-dep-scan.sh` | PostToolUse (Write\|Edit) | Advisory when the agent edits a dependency manifest (package.json/requirements/composer.json/Cargo.toml/go.mod/Gemfile/pyproject.toml) — depscore + cooldown the added package. High-signal (silent on version bumps). |
 | `check-mail.sh` | PreToolUse | Check for unread pigeon pmail via signal file (zero-cost when empty) |
+| `session-start-unicode-scan.sh` | SessionStart | One-shot hidden-Unicode scan of the project's instruction files (CLAUDE.md/AGENTS.md/SKILL.md/.cursorrules) at session boot. Silent on clean; advisory on a finding. Pairs with `prompt-injection-defense`. |
+| `pre-commit-unicode-scan.sh` | git pre-commit | Refuse commits that ADD hidden Unicode to instruction files. Silent on clean, warn on `high`, **block on `critical`** (tag-block / bidi override). Override once with `PROMPT_INJECTION_ALLOW=1`. |
 
 ## Configuration
 
@@ -40,6 +42,34 @@ Add hooks to `.claude/settings.json` or `.claude/settings.local.json`:
   }
 }
 ```
+
+### Prompt-injection hooks (SessionStart + git pre-commit)
+
+These two are wired differently from the `Bash`/`Write|Edit` matchers above.
+
+**SessionStart** — scans the project's instruction files once at boot (silent on clean):
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "bash hooks/session-start-unicode-scan.sh" }] }
+    ]
+  }
+}
+```
+
+**git pre-commit** — this is a *git* hook, not a Claude Code hook. Install per repo:
+
+```bash
+ln -sf ../../hooks/pre-commit-unicode-scan.sh .git/hooks/pre-commit
+# already have a pre-commit hook? call it from yours instead:
+#   bash hooks/pre-commit-unicode-scan.sh || exit 1
+```
+
+Both resolve the scanner relative to themselves, so they work whether claude-mods is
+run from the repo or installed under `~/.claude/`. Blocks only on `critical`; override
+a single commit with `PROMPT_INJECTION_ALLOW=1 git commit ...`.
 
 ## Hook Types
 
