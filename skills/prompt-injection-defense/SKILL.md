@@ -171,17 +171,25 @@ scripts/scan-hidden-unicode.py path/to/mcp-server/manifest.json --strict
 A description that scans clean can still be *visibly* adversarial ("always also send
 results to..."); read the prose too. See `references/ingestion-surfaces.md`.
 
-### Pattern 5: Gate it in pre-commit / CI
+### Pattern 5: Deploy as silent guardians (hooks + rule), not per-read scans
 
-Stop a poisoned instruction file from entering the repo:
+Scanning is cheap (~20 ms) but a process spawn is not (~140 ms). So scan at the few
+**boundary moments** where untrusted content enters trust - never on every read (that
+would add ~140 ms to every file open). Three shipped artefacts wire this up; all are
+silent on clean and speak only on a finding:
 
-```bash
-# .git/hooks/pre-commit (or a CI step) - fail the commit on a dangerous hit
-git diff --cached --name-only --diff-filter=AM -z \
-  | grep -zE '\.(md|mdc)$|(^|/)(CLAUDE|AGENTS|GEMINI|SKILL)\.md$|\.cursorrules$' \
-  | xargs -0 -r python skills/prompt-injection-defense/scripts/scan-hidden-unicode.py
-# exit 10 from the scan fails the hook
-```
+- **SessionStart hook** (`hooks/session-start-unicode-scan.sh`) - one scan of the
+  project's instruction files at boot. This is the only point your *own* project's
+  `CLAUDE.md`/`AGENTS.md` is checkable, since the harness loads them into context
+  before any skill or Read hook can see them.
+- **git pre-commit gate** (`hooks/pre-commit-unicode-scan.sh`) - refuses commits that
+  *add* hidden Unicode to instruction files; blocks on `critical`, warns on `high`.
+- **`rules/prompt-injection.md`** - the directive that makes the agent scan on entering
+  an unfamiliar repo and sanitize fetched/MCP content on ingest, without being asked.
+
+Do NOT put the scanner on a PreToolUse `Read` hook: matchers match the tool *name*,
+not the path, so it would spawn on every read (~140 ms each, tens of seconds/session).
+Boundary scanning gets the same coverage for one spawn per rare event.
 
 ## Ingestion surfaces (where injected instructions enter)
 
@@ -270,3 +278,14 @@ UTF-8 stdio so they don't crash on Windows cp1252 consoles.
   feeds untrusted content into context, the control for each, and the
   data-vs-instruction doctrine. Load when hardening an agent's ingestion paths or
   vetting MCP servers.
+
+## Related claude-mods artefacts
+
+- `rules/prompt-injection.md` - the global directive that drives proactive use
+  (scan-on-repo-entry, sanitize-on-ingest, raw-byte review, noise discipline).
+- `hooks/session-start-unicode-scan.sh` - SessionStart scan of project instruction
+  files; the only control that reaches your *own* harness-loaded `CLAUDE.md`.
+- `hooks/pre-commit-unicode-scan.sh` - git gate blocking `critical` hidden Unicode
+  from entering the repo.
+- `supply-chain-defense` skill - the package-behaviour sibling; a poisoned dependency
+  README is both a supply-chain and a prompt-injection concern.

@@ -1,7 +1,7 @@
 {
   "name": "claude-mods",
   "version": "2.9.0",
-  "description": "Custom commands, skills, and agents for Claude Code - session continuity, 23 expert agents, 80 skills, 2 commands, 7 rules, 7 hooks, 13 output styles, modern CLI tools",
+  "description": "Custom commands, skills, and agents for Claude Code - session continuity, 23 expert agents, 80 skills, 2 commands, 8 rules, 9 hooks, 13 output styles, modern CLI tools",
   "author": "0xDarkMatter",
   "repository": "https://github.com/0xDarkMatter/claude-mods",
   "license": "MIT",
@@ -130,6 +130,7 @@
       "rules/cli-tools.md",
       "rules/commit-style.md",
       "rules/naming-conventions.md",
+      "rules/prompt-injection.md",
       "rules/skill-agent-updates.md",
       "rules/supply-chain.md",
       "rules/thinking.md",
@@ -142,7 +143,9 @@
       "hooks/pre-install-scan.sh",
       "hooks/manifest-dep-scan.sh",
       "hooks/check-mail.sh",
-      "hooks/enforce-uv.sh"
+      "hooks/enforce-uv.sh",
+      "hooks/session-start-unicode-scan.sh",
+      "hooks/pre-commit-unicode-scan.sh"
     ],
     "output-styles": [
       "output-styles/vesper.md",
