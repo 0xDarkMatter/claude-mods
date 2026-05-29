@@ -10,8 +10,8 @@
       "name": "claude-mods",
       "description": "23 expert agents, 79 skills, 2 commands, 7 rules, 7 hooks, and output styles for Claude Code",
       "source": {
-        "type": "git",
-        "url": "https://github.com/0xDarkMatter/claude-mods.git"
+        "source": "github",
+        "repo": "0xDarkMatter/claude-mods"
       }
     }
   ]

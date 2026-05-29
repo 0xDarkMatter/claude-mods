@@ -375,71 +375,84 @@ validate_settings() {
 }
 
 # Validate plugin + marketplace manifests (.claude-plugin/)
+#
+# The authoritative validator is `claude plugin validate` (it tracks the live
+# schema - it caught a bad plugin `source` shape and an `author` type error
+# that a hand-rolled jq check sailed past). We prefer it when the CLI is
+# present and fall back to lightweight structural jq checks otherwise. The
+# stray-root-file guard runs regardless, because the official tool validates
+# whatever path it is given and cannot see a misplaced copy.
 validate_plugin() {
     echo ""
     echo "=== Validating Plugin Manifests ==="
 
     local plugin_dir="$PROJECT_DIR/.claude-plugin"
-
-    # --- plugin.json ---
     local plugin_file="$plugin_dir/plugin.json"
-    if [[ ! -f "$plugin_file" ]]; then
-        log_fail ".claude-plugin/plugin.json - Missing"
-    elif ! jq empty "$plugin_file" 2>/dev/null; then
-        log_fail "$plugin_file - Invalid JSON"
-    else
-        if jq -e '.name | strings' "$plugin_file" >/dev/null 2>&1; then
-            log_pass "$plugin_file - Valid plugin manifest"
-        else
-            log_fail "$plugin_file - Missing required field: name"
-        fi
-    fi
+    local mkt_file="$plugin_dir/marketplace.json"
 
-    # --- marketplace.json location guard ---
+    # --- location guard (official tool can't see this) ---
     # The spec mandates .claude-plugin/marketplace.json. A copy at the repo
     # root is the regression that caused /plugin marketplace add to fail (#4).
     if [[ -f "$PROJECT_DIR/marketplace.json" ]]; then
         log_fail "marketplace.json found at repo root - must live at .claude-plugin/marketplace.json"
     fi
 
-    local mkt_file="$plugin_dir/marketplace.json"
-    if [[ ! -f "$mkt_file" ]]; then
-        log_fail ".claude-plugin/marketplace.json - Missing (required for /plugin marketplace add)"
-        return
-    fi
+    [[ -f "$plugin_file" ]] || log_fail ".claude-plugin/plugin.json - Missing"
+    [[ -f "$mkt_file" ]] || log_fail ".claude-plugin/marketplace.json - Missing (required for /plugin marketplace add)"
 
-    if ! jq empty "$mkt_file" 2>/dev/null; then
-        log_fail "$mkt_file - Invalid JSON"
-        return
-    fi
-
-    # Required top-level fields per the marketplace schema.
-    jq -e '.name | strings' "$mkt_file" >/dev/null 2>&1 \
-        || log_fail "$mkt_file - Missing required field: name (string)"
-
-    # owner must be an object with a name - this is the field whose absence
-    # produced "owner: expected object, received undefined" (#4).
-    if jq -e '.owner | objects' "$mkt_file" >/dev/null 2>&1; then
-        jq -e '.owner.name | strings' "$mkt_file" >/dev/null 2>&1 \
-            || log_fail "$mkt_file - owner.name missing (owner must be an object with a name)"
-    else
-        log_fail "$mkt_file - Missing required field: owner (object with a name)"
-    fi
-
-    if jq -e '.plugins | arrays' "$mkt_file" >/dev/null 2>&1; then
-        # Every listed plugin needs a name and a source.
-        local bad
-        bad=$(jq -r '[.plugins[] | select((.name | type) != "string" or (has("source") | not))] | length' "$mkt_file" 2>/dev/null || echo "0")
-        if [[ "$bad" != "0" ]]; then
-            log_fail "$mkt_file - $bad plugin entry/entries missing name or source"
+    # --- authoritative path: claude plugin validate ---
+    if command -v claude >/dev/null 2>&1; then
+        # Marketplace manifest (repo root resolves to the marketplace).
+        if claude plugin validate "$PROJECT_DIR" >/dev/null 2>&1; then
+            log_pass "marketplace.json - claude plugin validate passed"
+        else
+            log_fail "marketplace.json - claude plugin validate failed (run: claude plugin validate .)"
         fi
-    else
-        log_fail "$mkt_file - Missing required field: plugins (array)"
+
+        # Plugin manifest: validate in isolation so it is not shadowed by the
+        # marketplace manifest in the same .claude-plugin/ directory.
+        if [[ -f "$plugin_file" ]]; then
+            local tmp
+            tmp=$(mktemp -d)
+            mkdir -p "$tmp/.claude-plugin"
+            cp "$plugin_file" "$tmp/.claude-plugin/plugin.json"
+            if claude plugin validate "$tmp" >/dev/null 2>&1; then
+                log_pass "plugin.json - claude plugin validate passed"
+            else
+                log_fail "plugin.json - claude plugin validate failed (unrecognized keys or wrong field types)"
+            fi
+            rm -rf "$tmp"
+        fi
+        return
     fi
 
-    # Only emit the pass line if nothing above failed for this file.
-    if jq -e '.name and (.owner | objects) and (.owner.name | strings) and (.plugins | arrays)' "$mkt_file" >/dev/null 2>&1; then
-        log_pass "$mkt_file - Valid marketplace manifest"
+    # --- fallback path: lightweight structural checks (jq) ---
+    log_warn "claude CLI not found - using lightweight manifest checks only (install Claude Code for authoritative validation)"
+
+    if [[ -f "$plugin_file" ]]; then
+        if ! jq empty "$plugin_file" 2>/dev/null; then
+            log_fail "$plugin_file - Invalid JSON"
+        elif jq -e '.name | strings' "$plugin_file" >/dev/null 2>&1; then
+            log_pass "$plugin_file - structurally OK (name present)"
+        else
+            log_fail "$plugin_file - Missing required field: name"
+        fi
+    fi
+
+    if [[ -f "$mkt_file" ]]; then
+        if ! jq empty "$mkt_file" 2>/dev/null; then
+            log_fail "$mkt_file - Invalid JSON"
+        else
+            jq -e '.name | strings' "$mkt_file" >/dev/null 2>&1 \
+                || log_fail "$mkt_file - Missing required field: name (string)"
+            jq -e '.owner.name | strings' "$mkt_file" >/dev/null 2>&1 \
+                || log_fail "$mkt_file - owner.name missing (owner must be an object with a name)"
+            jq -e '.plugins | arrays' "$mkt_file" >/dev/null 2>&1 \
+                || log_fail "$mkt_file - Missing required field: plugins (array)"
+            if jq -e '.name and (.owner.name | strings) and (.plugins | arrays)' "$mkt_file" >/dev/null 2>&1; then
+                log_pass "$mkt_file - structurally OK (run claude plugin validate for full schema)"
+            fi
+        fi
     fi
 }
 

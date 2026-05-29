@@ -51,8 +51,9 @@ validate-settings:
     @jq empty templates/settings.local.json && echo "Valid JSON" || echo "Invalid JSON"
 
 # Validate plugin + marketplace manifests (.claude-plugin/)
+# Uses the authoritative `claude plugin validate` when available.
 validate-plugin:
     @echo "Validating plugin manifests..."
-    @jq empty .claude-plugin/plugin.json && echo "plugin.json: Valid JSON" || echo "plugin.json: Invalid JSON"
-    @jq -e '.owner.name and .name and (.plugins|arrays)' .claude-plugin/marketplace.json >/dev/null && echo "marketplace.json: owner/name/plugins OK" || echo "marketplace.json: MISSING owner/name/plugins"
-    @test ! -f marketplace.json && echo "no stray root marketplace.json" || echo "ERROR: marketplace.json at repo root - move to .claude-plugin/"
+    @test ! -f marketplace.json || (echo "ERROR: stray marketplace.json at repo root - move to .claude-plugin/" && exit 1)
+    @claude plugin validate .
+    @tmp="$(mktemp -d)"; mkdir -p "$tmp/.claude-plugin"; cp .claude-plugin/plugin.json "$tmp/.claude-plugin/plugin.json"; claude plugin validate "$tmp"; rm -rf "$tmp"

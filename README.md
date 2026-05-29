@@ -438,7 +438,7 @@ powershell validate.ps1
 - Required fields (name, description)
 - Naming conventions (kebab-case)
 - File structure (agents/*.md, skills/*/SKILL.md)
-- Plugin manifests (`.claude-plugin/plugin.json` + `marketplace.json`: valid JSON, required `owner`/`name`/`plugins` fields, canonical location)
+- Plugin manifests (`.claude-plugin/plugin.json` + `marketplace.json`) via the authoritative `claude plugin validate`, plus a guard against a stray root `marketplace.json`
 
 ### Available Tasks
 
