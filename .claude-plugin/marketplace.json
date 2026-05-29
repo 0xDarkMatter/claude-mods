@@ -1,10 +1,14 @@
 {
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "claude-mods",
   "description": "Custom commands, skills, agents, and rules for Claude Code",
+  "owner": {
+    "name": "0xDarkMatter"
+  },
   "plugins": [
     {
       "name": "claude-mods",
-      "description": "22 expert agents, 38 skills, 3 commands, 5 rules, and output styles for Claude Code",
+      "description": "23 expert agents, 79 skills, 2 commands, 7 rules, 7 hooks, and output styles for Claude Code",
       "source": {
         "type": "git",
         "url": "https://github.com/0xDarkMatter/claude-mods.git"
