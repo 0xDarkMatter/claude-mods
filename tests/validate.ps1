@@ -236,6 +236,9 @@ function Test-Skills {
 
     $subdirs = Get-ChildItem -Path $skillsDir -Directory
     foreach ($subdir in $subdirs) {
+        # Skip shared helper dirs (e.g. _lib) - not skills, no SKILL.md expected.
+        if ($subdir.Name -like "_*") { continue }
+
         $skillFile = Join-Path $subdir.FullName "SKILL.md"
 
         if (-not (Test-Path $skillFile)) {
@@ -369,6 +372,85 @@ function Test-Settings {
     }
 }
 
+function Test-Plugin {
+    Write-Host ""
+    Write-Host "=== Validating Plugin Manifests ===" -ForegroundColor Cyan
+
+    $pluginDir = Join-Path $ProjectDir ".claude-plugin"
+
+    # --- plugin.json ---
+    $pluginFile = Join-Path $pluginDir "plugin.json"
+    if (-not (Test-Path $pluginFile)) {
+        Write-Fail ".claude-plugin/plugin.json - Missing"
+    } else {
+        try {
+            $plugin = Get-Content -Path $pluginFile -Raw | ConvertFrom-Json
+            if ($plugin.name -is [string] -and $plugin.name) {
+                Write-Pass "$pluginFile - Valid plugin manifest"
+            } else {
+                Write-Fail "$pluginFile - Missing required field: name"
+            }
+        } catch {
+            Write-Fail "$pluginFile - Invalid JSON"
+        }
+    }
+
+    # --- marketplace.json location guard ---
+    # The spec mandates .claude-plugin/marketplace.json. A copy at the repo
+    # root is the regression that caused /plugin marketplace add to fail (#4).
+    if (Test-Path (Join-Path $ProjectDir "marketplace.json")) {
+        Write-Fail "marketplace.json found at repo root - must live at .claude-plugin/marketplace.json"
+    }
+
+    $mktFile = Join-Path $pluginDir "marketplace.json"
+    if (-not (Test-Path $mktFile)) {
+        Write-Fail ".claude-plugin/marketplace.json - Missing (required for /plugin marketplace add)"
+        return
+    }
+
+    try {
+        $mkt = Get-Content -Path $mktFile -Raw | ConvertFrom-Json
+    } catch {
+        Write-Fail "$mktFile - Invalid JSON"
+        return
+    }
+
+    $ok = $true
+
+    if (-not ($mkt.name -is [string] -and $mkt.name)) {
+        Write-Fail "$mktFile - Missing required field: name (string)"
+        $ok = $false
+    }
+
+    # owner must be an object with a name - this is the field whose absence
+    # produced "owner: expected object, received undefined" (#4).
+    if ($null -eq $mkt.owner -or $mkt.owner -isnot [PSCustomObject]) {
+        Write-Fail "$mktFile - Missing required field: owner (object with a name)"
+        $ok = $false
+    } elseif (-not ($mkt.owner.name -is [string] -and $mkt.owner.name)) {
+        Write-Fail "$mktFile - owner.name missing (owner must be an object with a name)"
+        $ok = $false
+    }
+
+    if ($mkt.plugins -isnot [array]) {
+        Write-Fail "$mktFile - Missing required field: plugins (array)"
+        $ok = $false
+    } else {
+        $bad = 0
+        foreach ($p in $mkt.plugins) {
+            if (-not ($p.name -is [string] -and $p.name) -or $null -eq $p.source) { $bad++ }
+        }
+        if ($bad -gt 0) {
+            Write-Fail "$mktFile - $bad plugin entry/entries missing name or source"
+            $ok = $false
+        }
+    }
+
+    if ($ok) {
+        Write-Pass "$mktFile - Valid marketplace manifest"
+    }
+}
+
 # Main
 Write-Host "claude-mods Validation"
 Write-Host "======================"
@@ -379,6 +461,7 @@ Test-Commands
 Test-Skills
 Test-Rules
 Test-Settings
+Test-Plugin
 
 Write-Host ""
 Write-Host "======================"
