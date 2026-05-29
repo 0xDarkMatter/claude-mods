@@ -9,10 +9,7 @@
     {
       "name": "claude-mods",
       "description": "23 expert agents, 79 skills, 2 commands, 7 rules, 7 hooks, and output styles for Claude Code",
-      "source": {
-        "source": "github",
-        "repo": "0xDarkMatter/claude-mods"
-      }
+      "source": "./"
     }
   ]
 }
