@@ -323,8 +323,21 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 
 > **Skills-first (v3.0):** language/framework expert agents (python-expert, react-expert, etc.) were
 > deprecated in favour of their `-ops` skill twins — unique agent content was folded into the skills.
-> Dispatching skills (review, testgen, perf-ops, security-ops, explain) now route to `general-purpose`
-> agents that preload the relevant skill references. The agents below remain because no skill twin exists.
+>
+> **Why, per Anthropic's guidance:** skills and subagents solve different problems. A subagent's value is
+> *context isolation* — it runs in a separate context window so a large, noisy investigation returns only its
+> distilled result to the main thread. Skills are the home for *knowledge*: thanks to progressive disclosure
+> they cost ~100 tokens (name + description) until they're relevant, then load their body and references on
+> demand. A `python-expert` agent that only carried Python knowledge used none of the isolation benefit — it
+> was a knowledge container paying a dispatch cost, and it duplicated the `python-*-ops` skills (5 of the 11
+> retired agents had *no* content their skill twin lacked). Knowledge belongs in skills; subagents are reserved
+> for delegation that needs its own context or model.
+>
+> Delegation stays where it earns its keep: dispatching skills (review, testgen, perf-ops, security-ops,
+> explain) still route to `general-purpose` agents — but those agents now *preload the relevant skill* for
+> their knowledge. Subagent = the isolation mechanism, skill = the knowledge it loads. The agents below remain
+> because they have no skill twin (a distinct capability, or — like git-agent — a real background-worker role
+> that uses the isolation boundary).
 
 | Agent | Description |
 |-------|-------------|
