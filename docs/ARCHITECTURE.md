@@ -317,20 +317,20 @@ Agents are markdown files in `agents/` or `.claude/agents/`:
 
 ```yaml
 ---
-name: cypress-expert
-description: Expert in Cypress E2E and component testing, custom commands, and CI integration
+name: firecrawl-expert
+description: Expert in web scraping, crawling, anti-bot bypass, and structured data extraction
 model: sonnet
 ---
 
-# Cypress Expert
+# Firecrawl Expert
 
-You are a Cypress expert specializing in reliable end-to-end testing...
+You are a web-scraping expert specializing in reliable data extraction...
 
 ## Core Expertise
-- E2E and component test architecture
-- Custom commands and page objects
-- Network stubbing and fixtures
-- CI integration and flake reduction
+- Crawl and scrape architecture
+- Anti-bot and Cloudflare bypass
+- Dynamic/JS-rendered content handling
+- Structured data extraction pipelines
 
 ## Patterns
 [Detailed patterns and examples...]
@@ -338,13 +338,13 @@ You are a Cypress expert specializing in reliable end-to-end testing...
 
 ### Example Usage
 
-When Claude encounters a Cypress-specific question, it can spawn the cypress-expert:
+When Claude encounters a scraping-specific question, it can spawn the firecrawl-expert:
 
 ```
-User: "Why do these E2E tests pass locally but flake in CI?"
+User: "How do I extract structured data from this Cloudflare-protected site?"
 
-Claude: I'll consult the cypress-expert agent for specialized guidance.
-[Uses Task tool with subagent_type="cypress-expert"]
+Claude: I'll consult the firecrawl-expert agent for specialized guidance.
+[Uses Task tool with subagent_type="firecrawl-expert"]
 ```
 
 ### References

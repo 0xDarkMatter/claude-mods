@@ -302,7 +302,7 @@ safer default, with Playwright covering E2E.
 | In-browser interactive DX | UI mode (excellent) | The original benchmark; some teams still prefer it |
 
 Reach for Cypress when component testing maturity or an existing Cypress investment dominates;
-otherwise Playwright is the default for new E2E suites. (Repo also has a `cypress-expert` agent.)
+otherwise Playwright is the default for new E2E suites. (Repo also has a sibling `cypress-ops` skill.)
 
 ## Debugging & Codegen
 

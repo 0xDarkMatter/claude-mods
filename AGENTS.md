@@ -3,9 +3,9 @@
 ## Project Overview
 
 This is **claude-mods** - a collection of custom extensions for Claude Code:
-- **12 expert agents** for domains without a skill twin (Cloudflare, Cypress, CraftCMS, git-agent, web scraping, etc.) - language/framework experts were folded into their `-ops` skills (v3.0, skills-first)
+- **6 expert agents** for genuine workers + too-niche-for-always-on-budget domains (git-agent, firecrawl, project-organizer, craftcms, payloadcms, asus-router) - language/framework + cypress/cloudflare/bash experts folded into `-ops` skills (v3.0, skills-first)
 - **2 commands** for session management (/sync, /save)
-- **81 skills** for CLI tools, patterns, workflows, and development tasks (incl. `supply-chain-defense` for behavioural-first dependency security, `prompt-injection-defense` for instruction-integrity scanning, `net-ops` for network troubleshooting, `windows-ops` / `mac-ops` for workstation diagnostics)
+- **84 skills** for CLI tools, patterns, workflows, and development tasks (incl. `supply-chain-defense` for behavioural-first dependency security, `prompt-injection-defense` for instruction-integrity scanning, `net-ops` for network troubleshooting, `windows-ops` / `mac-ops` for workstation diagnostics)
 - **13 output styles** for response personality (Vesper, Spartan, Mentor, Executive, Pair, Atlas, Coach, Harbour, Meridian, Noir, Roast, Sage, Scout)
 - **11 hooks** for pre-commit linting, post-edit formatting, dangerous command warnings, uv enforcement, dependency-install + manifest-edit supply-chain advisories, hidden-Unicode scanning (session-start + pre-commit), live config-change + worktree guards, and pmail notifications - security set auto-wired via plugin hooks.json
 - **Pigeon** inter-session messaging (`pigeon send/read/reply`) - SQLite-backed pmail at `~/.claude/pmail.db`

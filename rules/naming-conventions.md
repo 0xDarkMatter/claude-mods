@@ -20,15 +20,15 @@ Consistent naming patterns for all claude-mods components.
 | Pattern | Example | Notes |
 |---------|---------|-------|
 | Framework | `craftcms-expert.md` | Frameworks/CMS |
-| Tool | `cypress-expert.md` | Specific tools |
-| Domain | `aws-fargate-ecs-expert.md` | Compound domains |
+| CMS | `payloadcms-expert.md` | Headless CMS |
+| Tool | `firecrawl-expert.md` | Specific tools |
 | Specialized | `asus-router-expert.md` | Niche/device-specific |
 
 **Frontmatter:**
 
 ```yaml
 ---
-name: cypress-expert         # Match filename (without .md)
+name: craftcms-expert        # Match filename (without .md)
 description: <one line>      # Concise capability summary
 model: sonnet|opus|haiku     # Recommended model
 ---
@@ -180,10 +180,10 @@ depends_on: [bad]     # snake_case wrong
 ## Anti-patterns
 
 ```
-BAD:  Cypress-Expert.md      - PascalCase
-BAD:  cypress_expert.md      - snake_case
-BAD:  cypressExpert.md       - camelCase
-GOOD: cypress-expert.md      - kebab-case
+BAD:  Craftcms-Expert.md     - PascalCase
+BAD:  craftcms_expert.md     - snake_case
+BAD:  craftcmsExpert.md      - camelCase
+GOOD: craftcms-expert.md     - kebab-case
 
 BAD:  skills/PythonPatterns/ - PascalCase directory
 GOOD: skills/python-pytest-ops/
@@ -199,7 +199,7 @@ GOOD: vesper.md              - lowercase
 
 | Component | Pattern | Example |
 |-----------|---------|---------|
-| Agent | `{domain}-expert.md` | `cypress-expert.md` |
+| Agent | `{domain}-expert.md` | `craftcms-expert.md` |
 | Skill | `{topic}-ops/SKILL.md` | `postgres-ops/SKILL.md` |
 | Command | `{action}.md` | `review.md` |
 | Rule | `{topic}.md` | `commit-style.md` |

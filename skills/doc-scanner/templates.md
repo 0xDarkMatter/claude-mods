@@ -13,9 +13,9 @@ Brief description of the project and what it does.
 
 | Task | Agent | Example Prompt |
 |------|-------|----------------|
-| E2E testing | `cypress-expert` | "Stabilize these flaky tests" |
 | Web scraping | `firecrawl-expert` | "Extract structured data from this site" |
-| Deployment | `bash-expert` | "Deploy to staging" |
+| Project cleanup | `project-organizer` | "Restructure this directory layout" |
+| CMS modeling | `payloadcms-expert` | "Design these collections and access control" |
 
 ## Primary Agents
 

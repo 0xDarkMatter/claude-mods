@@ -1,7 +1,7 @@
 ---
 name: claude-code-ops
-description: "Claude Code internals - hooks, skills, subagents, headless mode, and debugging, current as of June 2026. Use for: hooks, hook events, hook not firing, PreToolUse, PostToolUse, SessionStart, Stop hook, hook script, stdin JSON contract, tool validation, audit logging, skill frontmatter, SKILL.md, skill not loading, skill not triggering, disable-model-invocation, context fork, dynamic context injection, skill description budget, headless, claude -p, CLI automation, --print, output-format, stream-json, json-schema structured output, CI/CD scripting, bare mode, background agents, debug, troubleshoot, not working, agent not found, plugin not loading, claude plugin validate, /doctor, --safe-mode, MCP server not connecting, settings precedence."
-when_to_use: "Use for questions about Claude Code itself — e.g. 'my hook isn't firing', 'why won't this skill trigger', 'run claude headless in CI', 'plugin fails to validate', 'which settings file wins'."
+description: "Claude Code internals - hooks, skills, subagents, headless mode, and debugging, current as of June 2026. Use for: hooks, hook events, hook not firing, PreToolUse, PostToolUse, SessionStart, Stop hook, hook script, stdin JSON contract, tool validation, audit logging, skill frontmatter, SKILL.md, skill not loading, skill not triggering, disable-model-invocation, context fork, dynamic context injection, skill description budget, headless, claude -p, CLI automation, --print, output-format, stream-json, json-schema structured output, CI/CD scripting, bare mode, background agents, debug, troubleshoot, not working, agent not found, plugin not loading, claude plugin validate, /doctor, --safe-mode, MCP server not connecting, settings precedence, extension architecture, which extension type, agent vs skill vs command vs hook, where to put a skill, extension scope, plugin design, authoring an agent, writing a skill description."
+when_to_use: "Use for questions about Claude Code itself — e.g. 'my hook isn't firing', 'why won't this skill trigger', 'run claude headless in CI', 'plugin fails to validate', 'which settings file wins', 'should this be an agent or a skill', 'how do I design this extension'."
 license: MIT
 compatibility: "Claude Code CLI v2.1.x (June 2026 docs)"
 allowed-tools: "Bash Read Grep"
@@ -24,6 +24,7 @@ One skill for the machinery of Claude Code itself: the **hook system**, the **sk
 | Authoring a skill; frontmatter fields; `$ARGUMENTS`; `` !`cmd` `` injection; triggering problems | [references/skills-reference.md](references/skills-reference.md) |
 | `claude -p`; CI scripts; output parsing; stream-json; structured output; background agents | [references/headless-reference.md](references/headless-reference.md) |
 | Anything configured isn't taking effect; plugin validation; /doctor | [references/debugging-reference.md](references/debugging-reference.md) |
+| Designing a new extension — which surface to build, where to scope it, how to author the description/prompt | [references/extension-architecture.md](references/extension-architecture.md) |
 
 ## Resources
 

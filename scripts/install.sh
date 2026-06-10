@@ -73,6 +73,12 @@ deprecated_items=(
     "$CLAUDE_DIR/agents/laravel-expert.md"
     "$CLAUDE_DIR/agents/sql-expert.md"
     "$CLAUDE_DIR/agents/postgres-expert.md"
+    "$CLAUDE_DIR/agents/cypress-expert.md"       # -> skills/cypress-ops
+    "$CLAUDE_DIR/agents/cloudflare-expert.md"    # -> skills/cloudflare-ops
+    "$CLAUDE_DIR/agents/wrangler-expert.md"      # -> skills/cloudflare-ops
+    "$CLAUDE_DIR/agents/bash-expert.md"          # -> skills/bash-ops
+    "$CLAUDE_DIR/agents/claude-architect.md"     # -> skills/claude-code-ops
+    "$CLAUDE_DIR/agents/aws-fargate-ecs-expert.md" # -> skills/container-orchestration
 )
 
 # Renamed skills: -patterns -> -ops (March 2026)

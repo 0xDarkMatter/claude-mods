@@ -28,11 +28,20 @@ feature releases live in the README "Recent Updates" section.
   `.github/workflows/freshness.yml` runs the live drift checks weekly (advisory)
 
 ### Removed
-- **11 language/framework expert agents** deprecated in favour of their `-ops`
-  skill twins (python, typescript, javascript, go, rust, react, vue, astro,
-  laravel, sql, postgres) - unique agent content folded into the skills;
-  dispatching skills (review, testgen, explain, perf-ops, security-ops) now
-  route `general-purpose` agents with skill preloading. 23 → 12 agents.
+- **17 expert agents** deprecated as part of the skills-first restructure
+  (23 → 6 agents):
+  - 11 language/framework experts → their `-ops` skill twins (python,
+    typescript, javascript, go, rust, react, vue, astro, laravel, sql, postgres)
+  - cypress-expert → new `cypress-ops` skill; cloudflare-expert +
+    wrangler-expert → new `cloudflare-ops` skill; bash-expert → new `bash-ops`
+    skill
+  - claude-architect → folded into `claude-code-ops`; aws-fargate-ecs-expert →
+    folded into `container-orchestration`
+  Per Anthropic's guidance, knowledge belongs in skills (progressive disclosure,
+  single source of truth); subagents are reserved for context isolation. Only
+  genuine workers (git-agent) and too-niche-for-always-on-budget domains
+  (firecrawl, project-organizer, craftcms, payloadcms, asus-router) kept agent
+  form. Dispatching skills route `general-purpose` agents with skill preloading.
 - `claude-code-debug`, `claude-code-headless`, `claude-code-hooks` skills -
   merged into `claude-code-ops` (content was written against Claude Code
   ~2.0; the stale `$TOOL_INPUT` hook contract is gone, stdin JSON is current)
@@ -49,7 +58,12 @@ feature releases live in the README "Recent Updates" section.
 - **`claude-code-ops` skill** - merges + refreshes claude-code-debug,
   claude-code-headless, claude-code-hooks against current docs: 30-event hook
   catalog with JSON contracts, current skill frontmatter spec, headless/CLI
-  reference, extension debugging decision trees
+  reference, extension debugging decision trees (+ extension-architecture from
+  claude-architect)
+- **`cypress-ops`, `cloudflare-ops`, `bash-ops` skills** - converted from the
+  cypress/cloudflare/wrangler/bash agents and refreshed against current docs
+  (Cypress `data-test`/Test Replay/cy.session; wrangler `deploy` not `publish`,
+  jsonc config, Workers static assets; defensive bash to the resource protocol)
 - **Live security guard hooks**: `config-change-guard.sh` (ConfigChange event -
   scans edited Claude settings files for worm-persistence IOCs the moment
   they're written, reusing integrity-audit patterns) and `worktree-guard.sh`

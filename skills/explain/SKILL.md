@@ -44,7 +44,7 @@ $ARGUMENTS
     |     +- .py -> general-purpose, preload python-* skill by topic
     |     +- .vue -> general-purpose, preload vue-ops
     |     +- .sql/migrations -> general-purpose, preload postgres-ops
-    |     +- agents/skills/commands -> claude-architect
+    |     +- agents/skills/commands -> general-purpose, preload claude-code-ops
     |     +- Default -> general-purpose
     |     +- All explainers preload: debug-ops (systematic analysis)
     |
@@ -128,13 +128,13 @@ Dispatch is skills-first: the generic `general-purpose` subagent preloads the re
 | `.py` | general-purpose | relevant `skills/python-*/SKILL.md` by topic | - |
 | `.vue` | general-purpose | `skills/vue-ops/SKILL.md` | - |
 | `.sql`, `migrations/*` | general-purpose | `skills/postgres-ops/SKILL.md` | - |
-| `agents/*.md`, `skills/*`, `commands/*` | claude-architect | - | Claude extensions |
+| `agents/*.md`, `skills/*`, `commands/*` | general-purpose | `skills/claude-code-ops/SKILL.md` | Claude extensions |
 | `*.test.*`, `*.spec.*` | general-purpose | (framework skill by file type) | - |
 | Other | general-purpose | - | Fallback |
 
 **Invoke via Task tool:**
 ```
-Task tool with subagent_type: "general-purpose" (or claude-architect for Claude extensions)
+Task tool with subagent_type: "general-purpose" (preload claude-code-ops for Claude extensions)
 model: "sonnet"
 Prompt includes:
   - Skill preloading (domain knowledge):

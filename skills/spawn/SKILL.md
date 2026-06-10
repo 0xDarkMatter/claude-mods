@@ -15,7 +15,7 @@ Generate world-class, comprehensive expert agent prompts for Claude Code. Each a
 
 **Target quality:** 500-1000 lines per agent with real code examples, complete configs, and detailed patterns.
 
-**Benchmark agents:** `firecrawl-expert.md` (1026 lines), `claude-architect.md` (347 lines)
+**Benchmark agents:** `firecrawl-expert.md` (1026 lines), `project-organizer.md` (610 lines)
 
 ## Usage Modes
 
@@ -139,7 +139,7 @@ Every generated agent MUST follow this comprehensive 10-part structure:
 
 Plus: Quality Checklist, Anti-Patterns (5-10 with bad/good code), Canonical Resources (10-15 URLs)
 
-See `firecrawl-expert.md` and `claude-architect.md` in agents/ for reference implementations.
+See `firecrawl-expert.md` and `project-organizer.md` in agents/ for reference implementations.
 
 **Requirements:**
 - YAML frontmatter at top with required fields (name, description)

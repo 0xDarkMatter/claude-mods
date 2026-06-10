@@ -45,7 +45,10 @@ review [target] [--focus] [--depth]
     │     ├─ Rust → general-purpose, preload rust-ops
     │     ├─ Vue → general-purpose, preload vue-ops
     │     ├─ SQL/migrations → general-purpose, preload postgres-ops
-    │     ├─ Claude extensions → claude-architect
+    │     ├─ Cypress/E2E → general-purpose, preload cypress-ops
+    │     ├─ Cloudflare/Workers → general-purpose, preload cloudflare-ops
+    │     ├─ Shell/bash → general-purpose, preload bash-ops
+    │     ├─ Claude extensions → general-purpose, preload claude-code-ops
     │     ├─ Multi-domain → parallel general-purpose dispatch
     │     └─ All reviewers preload: security-ops + testing-ops context
     │
@@ -146,7 +149,7 @@ cat .github/workflows/*.yml 2>/dev/null | grep -E "eslint|prettier|pylint|ruff" 
 
 ### Step 4: Route to Reviewers
 
-Dispatch is skills-first: domain knowledge lives in `-ops` skills, and the generic `general-purpose` subagent preloads the relevant SKILL.md before reviewing. Surviving specialist agents (cypress-expert, claude-architect, wrangler-expert, bash-expert) are still dispatched directly.
+Dispatch is skills-first: domain knowledge lives in `-ops` skills, and the generic `general-purpose` subagent preloads the relevant SKILL.md before reviewing.
 
 | File Pattern | Dispatch | Preload |
 |--------------|----------|---------|
@@ -157,13 +160,13 @@ Dispatch is skills-first: domain knowledge lives in `-ops` skills, and the gener
 | `*.go` | general-purpose | `skills/go-ops/SKILL.md` |
 | `*.rs` | general-purpose | `skills/rust-ops/SKILL.md` |
 | `*.sql`, `migrations/*` | general-purpose | `skills/postgres-ops/SKILL.md` |
-| `agents/*.md`, `skills/*`, `commands/*` | claude-architect | - |
-| `*.test.*`, `*.spec.*` | cypress-expert | (framework skill by file type) |
-| `*.cy.ts`, `cypress/*` | cypress-expert | `skills/typescript-ops/SKILL.md` |
-| `*.spec.ts` (Playwright) | general-purpose | `skills/typescript-ops/SKILL.md` |
-| `playwright/*`, `e2e/*` | general-purpose | `skills/typescript-ops/SKILL.md` |
-| `wrangler.toml`, `workers/*` | wrangler-expert (cloudflare-expert secondary) | - |
-| `*.sh`, `*.bash` | bash-expert | - |
+| `agents/*.md`, `skills/*`, `commands/*` | general-purpose | `skills/claude-code-ops/SKILL.md` |
+| `*.test.*`, `*.spec.*` | general-purpose | (framework skill by file type) |
+| `*.cy.ts`, `cypress/*` | general-purpose | `skills/cypress-ops/SKILL.md` + `skills/typescript-ops/SKILL.md` |
+| `*.spec.ts` (Playwright) | general-purpose | `skills/playwright-ops/SKILL.md` + `skills/typescript-ops/SKILL.md` |
+| `playwright/*`, `e2e/*` | general-purpose | `skills/playwright-ops/SKILL.md` + `skills/typescript-ops/SKILL.md` |
+| `wrangler.toml`, `workers/*` | general-purpose | `skills/cloudflare-ops/SKILL.md` |
+| `*.sh`, `*.bash` | general-purpose | `skills/bash-ops/SKILL.md` |
 
 **Invoke via Task tool:**
 ```

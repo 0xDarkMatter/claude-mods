@@ -45,8 +45,9 @@ testgen <target> [--type] [--focus] [--depth]
     │     ├─ .go → general-purpose, preload go-ops
     │     ├─ .rs → general-purpose, preload rust-ops
     │     ├─ .php → general-purpose, preload laravel-ops
-    │     ├─ E2E/Cypress → cypress-expert
+    │     ├─ E2E/Cypress → general-purpose, preload cypress-ops
     │     ├─ Playwright → general-purpose, preload typescript-ops
+    │     ├─ Shell/bash → general-purpose, preload bash-ops
     │     ├─ --visual → Chrome DevTools MCP
     │     └─ Multi-file → parallel general-purpose dispatch
     │
@@ -140,7 +141,7 @@ src/auth.rs → src/auth.rs (mod tests { ... })            # inline tests
 
 ### Step 4: Route to Test Generator
 
-Dispatch is skills-first: the generic `general-purpose` subagent preloads the relevant `-ops` skill before generating tests. Surviving specialist agents (cypress-expert, bash-expert) are still dispatched directly.
+Dispatch is skills-first: the generic `general-purpose` subagent preloads the relevant `-ops` skill before generating tests.
 
 | File Pattern | Dispatch | Preload |
 |--------------|----------|---------|
@@ -151,10 +152,10 @@ Dispatch is skills-first: the generic `general-purpose` subagent preloads the re
 | `*.go` | general-purpose | `skills/go-ops/SKILL.md` |
 | `*.rs` | general-purpose | `skills/rust-ops/SKILL.md` |
 | `*.php` | general-purpose | `skills/laravel-ops/SKILL.md` |
-| `*.cy.ts`, `cypress/*` | cypress-expert | - |
-| `*.spec.ts` (Playwright) | general-purpose | `skills/typescript-ops/SKILL.md` |
-| `playwright/*`, `e2e/*` | general-purpose | `skills/typescript-ops/SKILL.md` |
-| `*.sh`, `*.bash` | bash-expert | - |
+| `*.cy.ts`, `cypress/*` | general-purpose | `skills/cypress-ops/SKILL.md` + `skills/typescript-ops/SKILL.md` |
+| `*.spec.ts` (Playwright) | general-purpose | `skills/playwright-ops/SKILL.md` + `skills/typescript-ops/SKILL.md` |
+| `playwright/*`, `e2e/*` | general-purpose | `skills/playwright-ops/SKILL.md` + `skills/typescript-ops/SKILL.md` |
+| `*.sh`, `*.bash` | general-purpose | `skills/bash-ops/SKILL.md` |
 | (--visual flag) | Chrome DevTools MCP | `skills/typescript-ops/SKILL.md` |
 
 **Invoke via Task tool:**
@@ -265,10 +266,15 @@ Next steps:
 - Database transactions
 - Factory usage
 
-### E2E → cypress-expert
+### E2E/Cypress (preload cypress-ops)
 - Page object patterns
 - Custom commands
 - Network stubbing
+
+### Shell/bash (preload bash-ops)
+- bats / shunit2 patterns
+- Stubbing external commands
+- Exit-code and stderr assertions
 
 ### Playwright (preload typescript-ops)
 - Page object model patterns

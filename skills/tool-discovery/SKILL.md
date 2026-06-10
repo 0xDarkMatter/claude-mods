@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Glob"
 metadata:
   author: claude-mods
-  related-skills: claude-code-templates, claude-code-debug
+  related-skills: claude-code-ops
 ---
 
 # Tool Discovery
@@ -53,6 +53,10 @@ Is this a reference/lookup task?
 | **astro-ops** | astro, islands, content collections, partial hydration |
 | **laravel-ops** | laravel, eloquent, artisan, sanctum, pest |
 | **nginx-ops** | nginx, reverse proxy, ssl, load balancer, proxy_pass |
+| **cloudflare-ops** | cloudflare, workers, KV, D1, R2, pages, wrangler, edge |
+| **cypress-ops** | cypress, e2e, component testing, custom commands, stubbing |
+| **bash-ops** | bash, shell scripting, traps, CI scripts, defensive scripting |
+| **claude-code-ops** | claude code extensions, skills, agents, hooks, MCP, plugins |
 | **auth-ops** | jwt, oauth2, session, rbac, passkey, mfa, login |
 | **monitoring-ops** | prometheus, grafana, opentelemetry, SLO, alerting |
 | **debug-ops** | debug, crash, memory leak, race condition, bisect |
@@ -66,16 +70,16 @@ Is this a reference/lookup task?
 
 | Agent | Triggers |
 |-------|----------|
-| **cloudflare-expert** | Workers, KV, D1, R2 |
-| **wrangler-expert** | wrangler.toml, Workers deployment |
-| **cypress-expert** | Cypress E2E, component testing |
 | **firecrawl-expert** | web scraping, crawling, anti-bot |
-| **claude-architect** | Claude Code extensions, MCP, plugins |
-| **bash-expert** | shell scripting, CI/CD scripts |
+| **payloadcms-expert** | payload, headless cms |
+| **craftcms-expert** | craft, craftcms, twig |
+| **asus-router-expert** | asus router, asuswrt, merlin |
+| **project-organizer** | restructure, organize, cleanup |
+| **git-agent** | commit, push, PR (dispatched by git-ops) |
 | **Explore** | "where is", "find" |
 | **Plan** | design, architect |
 
-For language/framework work (Python, TypeScript, React, Postgres, etc.), use the matching `-ops` skill — or dispatch `general-purpose` with an instruction to read that skill's SKILL.md first.
+For Cloudflare/Workers, Cypress/E2E, shell scripting, and Claude Code extension work, use the matching `-ops` skill (`cloudflare-ops`, `cypress-ops`, `bash-ops`, `claude-code-ops`). For language/framework work (Python, TypeScript, React, Postgres, etc.), use the matching `-ops` skill — or dispatch `general-purpose` with an instruction to read that skill's SKILL.md first.
 
 ## How to Launch
 
@@ -86,7 +90,7 @@ Skill tool → skill: "file-search"
 
 **Agents:**
 ```
-Task tool → subagent_type: "cloudflare-expert"
+Task tool → subagent_type: "firecrawl-expert"
          → prompt: "Your task"
 ```
 

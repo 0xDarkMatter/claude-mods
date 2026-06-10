@@ -1,0 +1,133 @@
+{
+  // Cloudflare Workers config — current format (Wrangler v4, verified 2026-06).
+  // Cloudflare recommends wrangler.jsonc for new projects; some newer features are
+  // JSON-config-only. The legacy wrangler.toml still parses (binding shapes map 1:1).
+  //
+  // Strip the bindings you don't use. Fill <placeholders> with real IDs
+  // (get them from `wrangler kv namespace create`, `wrangler d1 create`, etc.).
+  // Deploy with `wrangler deploy` (NOT the deprecated `wrangler publish`).
+
+  // Enables editor autocompletion + validation of this file.
+  "$schema": "node_modules/wrangler/config-schema.json",
+
+  "name": "my-worker",            // Worker name (becomes part of the *.workers.dev subdomain)
+  "main": "src/index.ts",         // entry module — omit entirely for an asset-only (static) Worker
+
+  // REQUIRED. Pins the Workers runtime version. Bump deliberately and test —
+  // a newer date can change runtime behaviour. Format: yyyy-mm-dd.
+  "compatibility_date": "2026-06-01",
+
+  // Opt into upcoming/Node-compat runtime features. "nodejs_compat" enables a
+  // subset of Node built-ins (node:crypto, node:buffer, ...). Hyperdrive needs it.
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Workers Logs — captures console.log/errors in the dashboard. OFF by default; opt in.
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+
+  // Explicit CPU budget (ms). Paid plans allow up to 30000. Omit for the default.
+  // "limits": { "cpu_ms": 50 },
+
+  // --- Static assets (the current way to serve a static site / SPA from a Worker) ---
+  // Asset-only: keep this block, REMOVE "main" above — files are served directly,
+  //   matching requests never invoke (or bill) Worker code.
+  // Assets + Worker: keep both — assets served first, your fetch() handles the rest;
+  //   reach files from code via env.ASSETS.fetch(request).
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "html_handling": "auto-trailing-slash",
+    // "single-page-application" → serve index.html for unmatched routes (SPA routing)
+    // "404-page" → serve a custom /404.html ; "none" → plain 404
+    "not_found_handling": "single-page-application"
+    // "run_worker_first": true   // run the Worker BEFORE asset matching (auth gates, rewrites)
+  },
+
+  // --- Non-secret config. NEVER put secrets here (ships plaintext). ---
+  // Secrets: `wrangler secret put NAME` (deployed) / .dev.vars file (local).
+  "vars": {
+    "ENVIRONMENT": "production"
+  },
+
+  // --- Bindings (delete the ones you don't need) ---
+
+  // KV — eventually-consistent (~60s) global key-value. Cache/config, read-heavy.
+  "kv_namespaces": [
+    { "binding": "CACHE", "id": "<kv-namespace-id>", "preview_id": "<kv-preview-id>" }
+  ],
+
+  // D1 — SQLite at the edge. Relational app data. Always use .bind() params.
+  "d1_databases": [
+    { "binding": "DB", "database_name": "app", "database_id": "<d1-database-id>" }
+  ],
+
+  // R2 — S3-compatible object storage, zero egress fees. Files/blobs/media.
+  "r2_buckets": [
+    { "binding": "BUCKET", "bucket_name": "uploads" }
+  ],
+
+  // Durable Objects — strong consistency + coordination (realtime, counters, locks).
+  // Requires a migration to register the class (see "migrations" below).
+  "durable_objects": {
+    "bindings": [
+      { "name": "ROOM", "class_name": "ChatRoom" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ChatRoom"] }  // use new_classes for non-SQLite DOs
+  ],
+
+  // Queues — async background work. Producer binding + consumer handler.
+  "queues": {
+    "producers": [
+      { "binding": "JOBS", "queue": "jobs" }
+    ],
+    "consumers": [
+      { "queue": "jobs", "max_batch_size": 10, "max_batch_timeout": 30, "dead_letter_queue": "jobs-dlq" }
+    ]
+  },
+
+  // Hyperdrive — pooled + cached access to an EXISTING external Postgres/MySQL.
+  // Needs "nodejs_compat" (above) and a Workers-compatible driver.
+  "hyperdrive": [
+    { "binding": "HYPERDRIVE", "id": "<hyperdrive-config-id>" }
+  ],
+
+  // Workers AI — inference on Cloudflare GPUs. Single object binding (no array).
+  "ai": { "binding": "AI" },
+
+  // Vectorize — vector DB for embeddings / RAG.
+  "vectorize": [
+    { "binding": "INDEX", "index_name": "docs" }
+  ],
+
+  // Service bindings — zero-latency Worker-to-Worker RPC.
+  "services": [
+    { "binding": "AUTH", "service": "auth-worker" }
+  ],
+
+  // Analytics Engine — custom time-series metrics from the Worker.
+  "analytics_engine_datasets": [
+    { "binding": "AE", "dataset": "my_metrics" }
+  ],
+
+  // Cron triggers — scheduled() handler.
+  "triggers": {
+    "crons": ["0 0 * * *"]
+  },
+
+  // Custom routes (serve on your own domain instead of *.workers.dev).
+  // "routes": [
+  //   { "pattern": "example.com/api/*", "zone_name": "example.com" }
+  // ],
+
+  // --- Named environments: override vars/bindings per target. Deploy: `wrangler deploy --env staging`.
+  // Bindings are NOT inherited — redeclare what each env needs.
+  "env": {
+    "staging": {
+      "vars": { "ENVIRONMENT": "staging" },
+      "kv_namespaces": [
+        { "binding": "CACHE", "id": "<staging-kv-namespace-id>" }
+      ]
+    }
+  }
+}

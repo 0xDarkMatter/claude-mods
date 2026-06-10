@@ -4,85 +4,17 @@ Complete reference for all available agents in the Task tool.
 
 **Note:** Language and framework domains (Python, JavaScript, TypeScript, Go, Rust, React, Vue, Laravel, Astro, SQL, PostgreSQL) are covered by `-ops` skills, not agents — see `skills-catalog.md`. When subagent work is needed in those domains, dispatch `general-purpose` with an instruction to first read the relevant skill's SKILL.md and references (skill preloading).
 
-## Language Experts
+**Skills-first domains:** Cloudflare/Workers, Cypress/E2E, shell scripting, AWS ECS/Fargate containers, and Claude Code extension work are now covered by `-ops` skills rather than dedicated agents:
 
-### bash-expert
+| Former agent | Now use |
+|--------------|---------|
+| `cloudflare-expert`, `wrangler-expert` | `cloudflare-ops` skill |
+| `cypress-expert` | `cypress-ops` skill |
+| `bash-expert` | `bash-ops` skill |
+| `aws-fargate-ecs-expert` | `container-orchestration` skill |
+| `claude-architect` | `claude-code-ops` skill |
 
-**Triggers:** bash, shell, script, zsh, cli
-
-**Capabilities:**
-- Defensive bash scripting
-- Error handling and traps
-- CI/CD pipeline scripts
-- System utilities
-- Cross-platform considerations
-
-**Best For:**
-- Production automation scripts
-- CI/CD pipelines
-- System administration
-- Build scripts
-
----
-
-## Infrastructure Experts
-
-### cloudflare-expert
-
-**Triggers:** cloudflare, workers, pages, kv, d1, r2
-
-**Capabilities:**
-- Workers development
-- KV/D1/R2 storage
-- Edge computing patterns
-- Security configuration
-- DNS and CDN setup
-
-**Best For:**
-- Cloudflare Workers apps
-- Edge optimization
-- Storage architecture
-- Security hardening
-
----
-
-### wrangler-expert
-
-**Triggers:** wrangler, deploy, cloudflare cli
-
-**Capabilities:**
-- Wrangler CLI configuration
-- Multi-environment deployment
-- Binding configuration
-- Troubleshooting deployments
-- CI/CD integration
-
-**Best For:**
-- Deployment issues
-- Wrangler configuration
-- Environment setup
-- CI/CD pipelines
-
----
-
-### aws-fargate-ecs-expert
-
-**Triggers:** ecs, fargate, aws containers, task definition
-
-**Capabilities:**
-- ECS/Fargate deployment
-- Task definitions
-- Service Auto Scaling
-- Networking (awsvpc)
-- Logging (FireLens)
-
-**Best For:**
-- Container deployment on AWS
-- ECS architecture
-- Scaling strategy
-- Cost optimization
-
----
+For these, invoke the skill directly, or dispatch `general-purpose` with an instruction to read the skill's SKILL.md first.
 
 ## Specialized Experts
 
@@ -143,25 +75,6 @@ Complete reference for all available agents in the Task tool.
 
 ---
 
-### cypress-expert
-
-**Triggers:** cypress, e2e, component testing, test runner
-
-**Capabilities:**
-- E2E test architecture
-- Component testing
-- Custom commands
-- Network stubbing
-- CI integration
-
-**Best For:**
-- E2E test suite setup
-- Test architecture
-- Flaky test debugging
-- CI optimization
-
----
-
 ### asus-router-expert
 
 **Triggers:** asus router, asuswrt, merlin, network hardening
@@ -176,23 +89,6 @@ Complete reference for all available agents in the Task tool.
 - Router configuration
 - Home network security
 - Firmware feature guidance
-
----
-
-### claude-architect
-
-**Triggers:** claude code extensions, skills, agents, hooks, MCP, plugins
-
-**Capabilities:**
-- Skill/agent/command/hook design
-- Plugin and marketplace configuration
-- MCP server integration
-- Extension debugging
-
-**Best For:**
-- Building Claude Code extensions
-- Reviewing skills and agents
-- Plugin architecture decisions
 
 ---
 
@@ -312,10 +208,10 @@ Complete reference for all available agents in the Task tool.
 | "Find where X is defined" | Explore | general-purpose |
 | "Plan feature implementation" | Plan | general-purpose |
 | "Scrape this website" | firecrawl-expert | - |
-| "Deploy to Cloudflare" | wrangler-expert | cloudflare-expert |
+| "Deploy to Cloudflare" | cloudflare-ops skill | general-purpose + skill preload |
 | "Fix React performance" | react-ops skill | general-purpose + skill preload |
-| "Write E2E tests" | cypress-expert | - |
+| "Write E2E tests" | cypress-ops skill | general-purpose + skill preload |
 | "Restructure project" | project-organizer | - |
 | "Go concurrency design" | go-ops skill | general-purpose + skill preload |
 | "Rust lifetime issues" | rust-ops skill | general-purpose + skill preload |
-| "Build a Claude Code skill" | claude-architect | - |
+| "Build a Claude Code skill" | claude-code-ops skill | general-purpose + skill preload |

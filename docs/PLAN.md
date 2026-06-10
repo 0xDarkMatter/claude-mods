@@ -15,8 +15,8 @@
 
 | Component | Count | Notes |
 |-----------|-------|-------|
-| Agents | 12 | Domain experts without skill twins + git-agent background worker |
-| Skills | 81 | Operational skills, CLI tools, workflows, diagnostics, security |
+| Agents | 6 | Genuine workers (git-agent) + niche domains too rarely-fired for always-on skill budget (firecrawl, project-organizer, craftcms, payloadcms, asus-router) |
+| Skills | 84 | Operational skills, CLI tools, workflows, diagnostics, security |
 | Commands | 2 | Session management (sync, save) |
 | Rules | 7 | cli-tools, commit-style, naming-conventions, prompt-injection, skill-agent-updates, supply-chain, worktree-boundaries |
 | Output Styles | 13 | Vesper, Spartan, Mentor, Executive, Pair, Atlas, Coach, Harbour, Meridian, Noir, Roast, Sage, Scout |
