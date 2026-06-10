@@ -1,5 +1,5 @@
 #!/bin/bash
-# Functional tests for git-workflow skill
+# Functional tests for git CLI tools (gh, delta, lazygit) used by git-ops
 # Tests gh (GitHub CLI) and delta
 
 set -euo pipefail
@@ -190,7 +190,7 @@ test_lazygit_version() {
 # === Run Tests ===
 
 main() {
-    echo "=== git-workflow functional tests ==="
+    echo "=== git-cli-tools functional tests ==="
     echo ""
 
     check_prereqs

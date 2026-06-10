@@ -5,9 +5,9 @@
 This is **claude-mods** - a collection of custom extensions for Claude Code:
 - **23 expert agents** for specialized domains (React, Python, Go, Rust, AWS, git, etc.)
 - **2 commands** for session management (/sync, /save)
-- **79 skills** for CLI tools, patterns, workflows, and development tasks (incl. `supply-chain-defense` for behavioural-first dependency security, `net-ops` for network troubleshooting, `windows-ops` / `mac-ops` for workstation diagnostics)
+- **80 skills** for CLI tools, patterns, workflows, and development tasks (incl. `supply-chain-defense` for behavioural-first dependency security, `prompt-injection-defense` for instruction-integrity scanning, `net-ops` for network troubleshooting, `windows-ops` / `mac-ops` for workstation diagnostics)
 - **13 output styles** for response personality (Vesper, Spartan, Mentor, Executive, Pair, Atlas, Coach, Harbour, Meridian, Noir, Roast, Sage, Scout)
-- **7 hooks** for pre-commit linting, post-edit formatting, dangerous command warnings, uv enforcement, dependency-install + manifest-edit supply-chain advisories, and pmail notifications
+- **9 hooks** for pre-commit linting, post-edit formatting, dangerous command warnings, uv enforcement, dependency-install + manifest-edit supply-chain advisories, hidden-Unicode scanning (session-start + pre-commit), and pmail notifications
 - **Pigeon** inter-session messaging (`pigeon send/read/reply`) - SQLite-backed pmail at `~/.claude/pmail.db`
 
 ## Installation
@@ -34,11 +34,11 @@ cd claude-mods && ./scripts/install.sh  # or .\scripts\install.ps1 on Windows
 | `skills/` | Skill definitions with SKILL.md |
 | `output-styles/` | Response personalities (13 styles incl. vesper, atlas, noir, roast, scout) |
 | `hooks/` | Working hook scripts (lint, format, safety, pmail) |
-| `rules/` | Claude Code rules (7 files: cli-tools, thinking, commit-style, naming-conventions, skill-agent-updates, supply-chain, worktree-boundaries) |
+| `rules/` | Claude Code rules (7 files: cli-tools, commit-style, naming-conventions, prompt-injection, skill-agent-updates, supply-chain, worktree-boundaries) |
 | `tools/` | Modern CLI toolkit documentation |
 | `tests/` | Validation scripts + justfile |
 | `scripts/` | Install scripts |
-| `docs/` | PLAN.md, DASH.md, WORKFLOWS.md, SKILL-SUBAGENT-REFERENCE.md, AGENT-SKILLS-COMPLIANCE-BRIEF.md |
+| `docs/` | ARCHITECTURE.md, WORKFLOWS.md, PLAN.md, SKILL-SUBAGENT-REFERENCE.md, TERMINAL-DESIGN.md |
 
 ## Session Init
 
@@ -51,7 +51,7 @@ On "INIT:" message at session start:
 | Resource | Description |
 |----------|-------------|
 | `rules/cli-tools.md` | Modern CLI tool preferences (rg, fd, eza, bat) |
-| `rules/thinking.md` | Extended thinking triggers (think → ultrathink) |
+| `rules/prompt-injection.md` | Instruction-integrity defense - scan-on-entry, sanitize-on-ingest |
 | `skills/cli-ops/` | Production CLI patterns - agentic workflows, OS keyring auth, stream separation |
 | `docs/WORKFLOWS.md` | 10 workflow patterns from Anthropic best practices |
 | `skills/tool-discovery/` | Find the right library for any task |

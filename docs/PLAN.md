@@ -3,8 +3,11 @@
 **Goal**: A centralized repository of custom Claude Code commands, agents, and skills that enhance Claude Code's native capabilities with persistent session state, specialized expert agents, and streamlined workflows.
 
 **Created**: 2025-11-27
-**Last Updated**: 2026-03-09
+**Last Updated**: 2026-06-10
 **Status**: Active Development
+
+> Historical record of what shipped lives in [CHANGELOG.md](../CHANGELOG.md) and the
+> README "Recent Updates" section. This file only tracks what's *next*.
 
 ---
 
@@ -12,189 +15,61 @@
 
 | Component | Count | Notes |
 |-----------|-------|-------|
-| Agents | 23 | Domain experts + git-agent background worker |
-| Skills | 64 | Operational skills, CLI tools, workflows, dev tasks |
+| Agents | 23 | Domain experts + git-agent background worker (cull in progress — see below) |
+| Skills | 80 | Operational skills, CLI tools, workflows, diagnostics, security |
 | Commands | 2 | Session management (sync, save) |
-| Rules | 5 | CLI tools, thinking, commit style, naming, skill-agent-updates |
-| Output Styles | 4 | Vesper, Spartan, Mentor, Executive |
-| Hooks | 3 | pre-commit-lint, post-edit-format, dangerous-cmd-warn |
+| Rules | 7 | cli-tools, commit-style, naming-conventions, prompt-injection, skill-agent-updates, supply-chain, worktree-boundaries |
+| Output Styles | 13 | Vesper, Spartan, Mentor, Executive, Pair, Atlas, Coach, Harbour, Meridian, Noir, Roast, Sage, Scout |
+| Hooks | 9 | lint, format, safety, uv, install-scan, manifest-scan, pmail, unicode-scan ×2 |
+
+Counts are enforced by the CI doc-drift gate (see roadmap) — if this table rots, CI fails.
 
 ---
 
-## Completed Milestones
+## Active Roadmap (June 2026 strategic review)
 
-### Core Infrastructure
-- [x] Session continuity (`/save`, `/sync`)
-- [x] Plan persistence to `docs/PLAN.md`
-- [x] Agent genesis system (`/spawn`)
-- [x] Installation scripts (Unix + Windows)
+### Phase 1 — Hygiene & truth (v2.11)
 
-### Expert Agents (22)
-- [x] Languages: Python, TypeScript, JavaScript, Go, Rust, SQL, Bash
-- [x] Frontend: React, Vue, Astro
-- [x] Backend: Laravel, PayloadCMS, CraftCMS
-- [x] Infrastructure: AWS Fargate, Cloudflare, Wrangler
-- [x] Testing: Cypress
-- [x] Databases: PostgreSQL, SQL patterns
-- [x] Specialized: Claude-architect, Project-organizer
+- [x] README skill/hook/rule tables match disk (24 missing skills added)
+- [x] Remove ghost references (`rules/thinking.md`, `docs/DASH.md`)
+- [x] Rename `tests/skills/functional/git-workflow.*` → `git-cli-tools.*`
+- [ ] `CHANGELOG.md` (keep-a-changelog format, seeded from Recent Updates)
+- [ ] CI: doc-drift gate (counts on disk vs README claims, ghost-link check)
+- [ ] CI: run every `skills/*/tests/run.sh` behavioural suite
 
-### Skills (38)
-- [x] Python patterns (8): async, cli, database, env, fastapi, observability, pytest, typing
-- [x] Claude Code internals: debug, headless, hooks, templates
-- [x] Workflows: git, data-processing, structural-search, task-runner
-- [x] Patterns: REST, SQL, security, testing, tailwind
-- [x] Development: explain, spawn, atomise, setperms, introspect, review, testgen
+### Phase 2 — Skills-first restructure (v3.0)
 
-### Commands (2)
-- [x] Session: `/save`, `/sync`
+- [ ] **Agent cull**: deprecate language/framework experts with `-ops` skill twins
+      (python, typescript, javascript, go, rust, react, vue, astro, laravel).
+      Fold unique agent content into the twin skill first. Keep: git-agent,
+      claude-architect, firecrawl-expert, niche experts without skill twins.
+- [ ] **claude-code-internals**: merge + refresh claude-code-debug /
+      claude-code-headless / claude-code-hooks against current official docs
+      (new hook events, skill frontmatter fields, CLI flags).
+- [ ] **New skills**: claude-api-ops (Messages API, tool use, caching, Agent SDK),
+      playwright-ops, terraform-ops.
 
-### Documentation
-- [x] ARCHITECTURE.md - Extension system guide with authority levels
-- [x] README.md - Project overview and usage
-- [x] AGENTS.md - Quick reference
+### Phase 3 — Distribution & native-feature adoption
 
----
-
-## Enhancement Roadmap
-
-### Tier 1: High Impact, Low Effort
-
-#### Output Style Variations
-
-| Style | Personality | Best For |
-|-------|-------------|----------|
-| **Vesper** | Sophisticated British wit | General work (exists) |
-| **Spartan** | Minimal, bullet-points only | Quick tasks |
-| **Mentor** | Patient, educational | Learning, onboarding |
-| **Executive** | High-level summaries | Non-technical stakeholders |
-
-#### Rules Expansion
-
-| Rule | Purpose | Status |
-|------|---------|--------|
-| `cli-tools.md` | Modern CLI preferences | Done |
-| `thinking.md` | Extended thinking triggers | Done |
-| `commit-style.md` | Conventional commits format | Done |
-| `naming-conventions.md` | Component naming patterns | Done |
-| `code-review.md` | Review checklist | Future |
-| `testing-philosophy.md` | Coverage expectations | Future |
-
-#### Hook Implementations
-
-| Hook | Purpose |
-|------|---------|
-| `pre-commit-lint.sh` | Run linter before committing |
-| `post-edit-format.sh` | Auto-format after edits |
-| `dangerous-cmd-warn.sh` | Confirm destructive commands |
-
-### Tier 2: High Impact, Medium Effort
-
-#### Agent Gaps
-
-| Agent | Why It Matters |
-|-------|----------------|
-| `docker-expert` | Containerisation is ubiquitous |
-| `github-actions-expert` | CI/CD complexity |
-| `nextjs-expert` | App Router specifics |
-| `testing-architect` | Strategy decisions |
-| `api-design-expert` | OpenAPI, versioning |
-
-#### Skill Gaps
-
-| Skill | Purpose |
-|-------|---------|
-| `debug` | Systematic debugging workflow |
-| `migrate` | Framework/version upgrades |
-| `refactor` | Safe refactoring |
-| `secure` | Security audit checklist |
-
-#### Skill Parity
-
-Languages needing Python-level depth:
-- `typescript-patterns/`
-- `go-patterns/`
-- `rust-patterns/`
-
-### Tier 3: Strategic Expansions
-
-- **Template System**: Project scaffolding via `/scaffold`
-- **MCP Server Catalog**: Curated high-value servers
-- **Feedback System**: Track tool effectiveness
-
----
-
-## Priority Matrix
-
-```
-                    IMPACT
-                    High         Low
-            +-----------+-----------+
-       Low  | Output    | Templates |
-            | Styles    |           |
-    EFFORT  | Rules     | MCP       |
-            | Hooks     | Catalog   |
-            +-----------+-----------+
-       High | Agent     | Analytics |
-            | Gaps      |           |
-            | Skills    | Lang      |
-            |           | Parity    |
-            +-----------+-----------+
-```
-
----
-
-## Immediate Next Steps
-
-### Command-to-Skill Consolidation (Complete)
-
-Most commands have been converted to skills for better discovery and on-demand loading. See `docs/COMMAND-SKILL-PATTERN.md`.
-
-**Completed conversions:**
-- [x] `/testgen` → `skills/testgen/`
-- [x] `/review` → `skills/review/`
-- [x] `/explain` → `skills/explain/`
-- [x] `/spawn` → `skills/spawn/`
-- [x] `/atomise` → `skills/atomise/`
-- [x] `/setperms` → `skills/setperms/`
-- [x] `/introspect` → `skills/introspect/`
-
-**Remaining as commands:**
-- `/sync` - Session bootstrap (paired with /save)
-- `/save` - Session persistence (paired with /sync)
-
----
-
-### Planned Work
-
-- [x] Create `rules/commit-style.md`
-- [x] Create `rules/naming-conventions.md`
-- [x] Create Spartan output style
-- [x] Create Mentor output style
-- [x] Create Executive output style
-- [x] Add `debug-ops` skill (systematic debugging workflow)
-- [x] Add 3 hook implementations (lint, format, safety)
-- [x] Add `migrate-ops` skill (framework/language upgrades)
-- [x] Add `refactor-ops` skill (safe refactoring patterns)
-- [x] Add `scaffold` skill (project scaffolding)
-- [x] Add `perf-ops` skill (performance profiling)
-- [x] Add `log-ops` skill (JSONL/log analysis)
-- [ ] Add docker-expert agent
-- [ ] Install lnav on Windows for log analysis
+- [ ] Submit to community marketplace (claude.ai/settings/plugins/submit)
+- [ ] Reposition /save + /sync as session introspection + team-shareable state
+      (native auto-memory now covers solo persistence)
+- [ ] Adopt new hook events (ConfigChange guard for supply-chain-defense,
+      WorktreeCreate/Remove for worktree-boundaries, InstructionsLoaded for
+      unicode scanning)
+- [ ] Skill-scoped hooks: move manifest-dep-scan inside supply-chain-defense
+- [ ] Evaluate agent teams as fleet-ops v2 substrate
 
 ---
 
 ## Open Questions
 
-- Should agents auto-update from a central registry?
-- How to handle agent versioning?
-- Should there be a "recommended agents" list per project type?
+- Should output styles be repositioned as "persona kits"? (still natively supported,
+  but de-emphasized)
+- Skill description budget at 80+ skills — document `skillOverrides` guidance?
 
 ---
 
 ## Guiding Principle
 
 > The best enhancements solve problems you've already felt. Follow the pain.
-
----
-
-*Plan managed by `/save` command. Last updated: 2026-03-09*

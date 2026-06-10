@@ -12,13 +12,13 @@
 
 > *A comprehensive extension toolkit that transforms Claude Code into a specialized development powerhouse.*
 
-**claude-mods** is a production-ready plugin that extends Claude Code with 23 expert agents, 79 specialized skills, 13 output styles, 7 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
+**claude-mods** is a production-ready plugin that extends Claude Code with 23 expert agents, 80 specialized skills, 13 output styles, 9 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
 
 Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms), claude-mods fills critical gaps in Claude Code's capabilities: persistent session state that survives across machines, on-demand expert knowledge for specialized domains, token-efficient modern CLI tools (10-100x faster than traditional alternatives), and proven workflow patterns for TDD, code review, and feature development. The toolkit implements Anthropic's [recommended patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), ensuring your development context never vanishes when sessions end.
 
 From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
 
-**23 agents. 79 skills. 13 styles. 7 hooks. 7 rules. One install.**
+**23 agents. 80 skills. 13 styles. 9 hooks. 7 rules. One install.**
 
 ## Recent Updates
 
@@ -136,7 +136,7 @@ Claude Code is powerful out of the box, but it has gaps. This toolkit fills them
 
 - **Session continuity** — Tasks vanish when sessions end. We fix that with `/save` and `/sync`, implementing Anthropic's [recommended pattern](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) for long-running agents.
 
-- **Expert-level knowledge on demand** — 22 specialized agents covering React, TypeScript, Python, Go, Rust, AWS, PostgreSQL, and more. Each agent is deeply researched with real-world patterns, not generic advice.
+- **Expert-level knowledge on demand** — 23 specialized agents covering React, TypeScript, Python, Go, Rust, AWS, PostgreSQL, and more. Each agent is deeply researched with real-world patterns, not generic advice.
 
 - **Modern CLI tools** — Stop using `grep`, `find`, and `cat`. Our rules automatically prefer `ripgrep`, `fd`, `eza`, and `bat` — 10-100x faster and token-efficient.
 
@@ -159,9 +159,9 @@ Claude Code is powerful out of the box, but it has gaps. This toolkit fills them
 ```
 claude-mods/
 ├── .claude-plugin/     # Plugin metadata
-├── agents/             # Expert subagents (22)
-├── commands/           # Slash commands (3)
-├── skills/             # Custom skills (67)
+├── agents/             # Expert subagents (23)
+├── commands/           # Slash commands (2)
+├── skills/             # Custom skills (80)
 ├── output-styles/      # Response personalities
 ├── hooks/              # Hook examples & docs
 ├── rules/              # Claude Code rules
@@ -262,6 +262,18 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [tailwind-ops](skills/tailwind-ops/) | Tailwind CSS patterns, v4 migration, components, configuration |
 | [color-ops](skills/color-ops/) | Color spaces, WCAG/APCA contrast checker, palette + harmony generators, CSS color functions, design tokens, color converter |
 | [genart-ops](skills/genart-ops/) | Generative art - three.js scenes, p5.js sketches, SVG generation, GLSL shaders, procedural algorithms, colour theory |
+| [unfold-admin](skills/unfold-admin/) | Django Unfold admin theme - ModelAdmin, dashboards, filters, widgets, theming |
+
+#### Python Skills
+| Skill | Description |
+|-------|-------------|
+| [python-async-ops](skills/python-async-ops/) | asyncio concurrency, aiohttp, error handling, sync/async mixing, production patterns |
+| [python-cli-ops](skills/python-cli-ops/) | Click/Typer/argparse CLIs, stream handling, packaging |
+| [python-database-ops](skills/python-database-ops/) | SQLAlchemy async, connection pooling, transactions |
+| [python-fastapi-ops](skills/python-fastapi-ops/) | FastAPI dependency injection, background tasks, Pydantic |
+| [python-observability-ops](skills/python-observability-ops/) | Structured logging, tracing, metrics for Python services |
+| [python-pytest-ops](skills/python-pytest-ops/) | pytest fixtures, parametrization, property-based testing |
+| [python-typing-ops](skills/python-typing-ops/) | Advanced generics, type narrowing, runtime validation |
 
 #### Data & API Skills
 | Skill | Description |
@@ -285,6 +297,17 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [debug-ops](skills/debug-ops/) | Systematic debugging, language-specific debuggers, common scenarios |
 | [perf-ops](skills/perf-ops/) | Performance profiling - CPU, memory, bundle analysis, load testing, flamegraphs |
 | [supply-chain-defense](skills/supply-chain-defense/) | Behavioural-first dependency security - Socket.dev (free CLI + depscore MCP), exposure-check (IOC match across npm/pnpm/yarn/bun/PyPI/Composer/Cargo/Go/RubyGems + extensions), integrity-audit (worm persistence), scan-extensions, install/manifest hooks |
+| [prompt-injection-defense](skills/prompt-injection-defense/) | Instruction-integrity defense - hidden Unicode scanning (bidi/Trojan Source, tag-block smuggling, zero-width), content sanitization, trust-boundary doctrine |
+| [security-ops](skills/security-ops/) | Reactive security auditing - 3 parallel agents (dependency CVEs, SAST patterns, auth/config review) consolidated into OWASP-mapped report |
+| [portless-ops](skills/portless-ops/) | Local-dev HTTPS proxy operations for Vercel Labs' portless - TLD selection, supervisor pairing, Windows gotchas |
+| [process-compose-ops](skills/process-compose-ops/) | Process Compose supervisor operations - YAML schema, readiness probes, dependency patterns, boot persistence |
+
+#### Workstation & Network Diagnostics
+| Skill | Description |
+|-------|-------------|
+| [windows-ops](skills/windows-ops/) | Windows workstation diagnostics - health audit, crash triage, drive mapping, dying-drive recovery |
+| [mac-ops](skills/mac-ops/) | macOS workstation diagnostics - TCC privacy permissions, wake reasons, Spotlight, APFS storage pressure |
+| [net-ops](skills/net-ops/) | Cross-platform network troubleshooting - layered ladder from link to app, IPv6 classifier, DoH detection, MTU/PMTU |
 
 #### CLI Tool Skills
 | Skill | Description |
@@ -296,12 +319,17 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [markitdown](skills/markitdown/) | Convert PDF, Word, Excel, PowerPoint, images to markdown |
 | [structural-search](skills/structural-search/) | Search code by AST structure with ast-grep |
 | [log-ops](skills/log-ops/) | Log analysis, JSONL processing, cross-log correlation, timeline reconstruction |
+| [leveldb-ops](skills/leveldb-ops/) | Read Chromium/Electron LevelDB stores (Local Storage, IndexedDB) - app-state forensics |
 
 #### Workflow Skills
 | Skill | Description |
 |-------|-------------|
 | [tool-discovery](skills/tool-discovery/) | Recommend agents and skills for any task |
 | [git-ops](skills/git-ops/) | Git orchestrator - commits, PRs, releases, changelog. Routes to background Sonnet agent. |
+| [github-ops](skills/github-ops/) | GitHub remote operations - repo creation, releases, metadata, README Recent Updates convention |
+| [push-gate](skills/push-gate/) | Pre-push safety gate - gitleaks + regex secret scan, forbidden-file check, no bypass |
+| [fleet-ops](skills/fleet-ops/) | Manage a fleet of concurrent Claude sessions - landing queue with test gate, pre-land scrub (experimental) |
+| [summon](skills/summon/) | Transfer Claude Desktop Code-tab sessions between accounts - push/pull with picker |
 | [doc-scanner](skills/doc-scanner/) | Scan and synthesize project documentation |
 | [project-planner](skills/project-planner/) | Track stale plans, suggest session commands |
 | [python-env](skills/python-env/) | Fast Python environment management with uv |
@@ -326,6 +354,10 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [refactor-ops](skills/refactor-ops/) | Safe refactoring patterns, code smell detection, test-driven methodology |
 | [scaffold](skills/scaffold/) | Project scaffolding - generate boilerplate for APIs, web apps, CLIs, monorepos |
 | [iterate](skills/iterate/) | Autonomous improvement loop - modify, measure, keep or discard, repeat. Inspired by Karpathy's autoresearch. |
+| [testing-ops](skills/testing-ops/) | Test strategy patterns - mocking, CI testing, test data design |
+| [claude-code-debug](skills/claude-code-debug/) | Troubleshoot Claude Code extensions - skills not loading, hooks not firing |
+| [claude-code-headless](skills/claude-code-headless/) | Run Claude Code programmatically - headless mode, output formats, CI/CD scripting |
+| [claude-code-hooks](skills/claude-code-hooks/) | Claude Code hook system - events, configuration, security patterns |
 
 ### Hooks
 
@@ -338,6 +370,8 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [pre-install-scan.sh](hooks/pre-install-scan.sh) | PreToolUse | Advisory on dependency installs (npm/pnpm/yarn/bun/pip/uv/poetry/composer/gem/cargo, incl. `composer update`) - route through Socket, respect cooldown; `SUPPLY_CHAIN_BLOCK=1` for a hard gate |
 | [manifest-dep-scan.sh](hooks/manifest-dep-scan.sh) | PostToolUse | Advisory when the agent edits a dependency manifest (package.json/requirements/composer.json/Cargo.toml/go.mod/Gemfile) - depscore + cooldown the added package; silent on version bumps |
 | [check-mail.sh](hooks/check-mail.sh) | PreToolUse | Check for unread pmail via signal file (no cooldown, zero-cost when empty) |
+| [session-start-unicode-scan.sh](hooks/session-start-unicode-scan.sh) | SessionStart | One-shot hidden-Unicode scan of project instruction files at boot (silent on clean) |
+| [pre-commit-unicode-scan.sh](hooks/pre-commit-unicode-scan.sh) | Git pre-commit | Block commits that add critical hidden Unicode (bidi, tag-block) to instruction files |
 
 ### Output Styles
 
@@ -390,11 +424,12 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | Rule | Description |
 |------|-------------|
 | [cli-tools.md](rules/cli-tools.md) | Modern CLI tool preferences (fd, rg, eza, bat, etc.) |
-| [thinking.md](rules/thinking.md) | Extended thinking triggers (think → ultrathink) |
 | [commit-style.md](rules/commit-style.md) | Conventional commits format and examples |
 | [naming-conventions.md](rules/naming-conventions.md) | Component naming patterns for agents, skills, commands |
+| [prompt-injection.md](rules/prompt-injection.md) | Instruction-integrity defense - scan-on-entry, sanitize-on-ingest, hidden-Unicode hygiene |
 | [skill-agent-updates.md](rules/skill-agent-updates.md) | Mandatory docs check before creating/updating skills or agents |
 | [supply-chain.md](rules/supply-chain.md) | Behavioural-first dependency hygiene - scan before adding, day-zero cooldown, OIDC audit, persistence-hook awareness |
+| [worktree-boundaries.md](rules/worktree-boundaries.md) | Never touch other sessions' worktrees - no rm -rf, no git add -A sweeping gitlinks |
 
 ### Tools & Hooks
 

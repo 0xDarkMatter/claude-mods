@@ -38,7 +38,7 @@ tests/skills/
 └── functional/
     ├── data-processing.sh    # jq, yq tests
     ├── code-stats.sh         # tokei, difft tests
-    ├── git-workflow.sh       # gh, delta, lazygit tests
+    ├── git-cli-tools.sh      # gh, delta, lazygit tests
     └── structural-search.sh  # ast-grep tests
 ```
 
@@ -130,7 +130,7 @@ Each functional test:
 - 3 tokei tests (line counts, JSON output)
 - 3 difft tests (file comparison, syntax-aware)
 
-#### git-workflow.sh
+#### git-cli-tools.sh
 - 4 gh tests (auth, repo, API)
 - 3 delta tests (diff formatting)
 - 1 lazygit test (version check)

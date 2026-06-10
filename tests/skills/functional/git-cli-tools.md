@@ -1,4 +1,4 @@
-# git-workflow Functional Tests
+# Git CLI Tools Functional Tests
 
 Verify git workflow tools work correctly.
 

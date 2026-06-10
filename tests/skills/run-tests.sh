@@ -38,7 +38,7 @@ Tests:
     triggers        Trigger keyword validation
     data-processing Functional tests for data-processing skill
     code-stats      Functional tests for code-stats skill
-    git-workflow    Functional tests for git-workflow skill
+    git-cli-tools   Functional tests for git CLI tools (gh, delta, lazygit)
     structural-search Functional tests for structural-search skill
 
 Examples:
@@ -80,7 +80,7 @@ run_functional() {
     local tests=("$@")
 
     if [[ ${#tests[@]} -eq 0 ]]; then
-        tests=(data-processing code-stats git-workflow structural-search)
+        tests=(data-processing code-stats git-cli-tools structural-search)
     fi
 
     for test in "${tests[@]}"; do

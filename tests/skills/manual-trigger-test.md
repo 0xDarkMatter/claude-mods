@@ -22,8 +22,8 @@ Run these tests in a **fresh Claude Code session** to verify skills are invoked 
 | 8 | "Find all TypeScript files" | file-search | fd | |
 | 9 | "Fuzzy find the config file" | file-search | fzf | |
 | 10 | "Batch replace newName with newName across all files" | find-replace | sd | |
-| 11 | "Create a PR for this branch" | git-workflow | gh | |
-| 12 | "Show git diff with syntax highlighting" | git-workflow | delta | |
+| 11 | "Create a PR for this branch" | git-ops | gh | |
+| 12 | "Show git diff with syntax highlighting" | git-ops | delta | |
 | 13 | "Set up a Python environment with uv" | python-env | uv | |
 | 14 | "Install these Python dependencies" | python-env | uv pip | |
 | 15 | "Run the project tests" | task-runner | just | |

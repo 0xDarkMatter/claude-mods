@@ -89,7 +89,7 @@ Test cases to verify skills activate on expected keywords.
 
 ---
 
-## git-workflow
+## git-ops (formerly git-workflow)
 
 **Triggers:** stage changes, create PR, review PR, check issues, git diff, commit interactively, GitHub operations, rebase, stash, bisect
 
