@@ -13,8 +13,41 @@ Claude Code hooks allow you to run custom scripts at key workflow points.
 | `pre-install-scan.sh` | PreToolUse | Advisory on dependency installs (npm/pnpm/yarn/bun/pip/uv/poetry/composer/gem/cargo, incl. `composer update`) — route through Socket, respect the release-age cooldown. `SUPPLY_CHAIN_BLOCK=1` for a hard gate. |
 | `manifest-dep-scan.sh` | PostToolUse (Write\|Edit) | Advisory when the agent edits a dependency manifest (package.json/requirements/composer.json/Cargo.toml/go.mod/Gemfile/pyproject.toml) — depscore + cooldown the added package. High-signal (silent on version bumps). |
 | `check-mail.sh` | PreToolUse | Check for unread pigeon pmail via signal file (zero-cost when empty) |
+| `config-change-guard.sh` | ConfigChange | Worm-persistence tripwire: when a Claude settings file changes mid-session, scan just that file for the vetted IOC set (curl\|sh, base64-decode eval, Invoke-Expression+Download, /dev/tcp, reads of `.claude/settings` / `.aws/credentials`). Silent on clean; advisory `systemMessage` on a finding. `SUPPLY_CHAIN_BLOCK=1` blocks the change (exit 2). Fast single-file sibling of `supply-chain-defense`'s `integrity-audit.sh`. |
+| `worktree-guard.sh` | PreToolUse (Bash) | Enforce `rules/worktree-boundaries.md`: flags `rm` on `.claude/worktrees`, `git worktree remove/prune` against worktrees, `git rm` on worktree gitlinks, and `git add -A`/`.` in a repo that has a `.claude/worktrees` dir. Sessions whose cwd is inside their own worktree are exempt. Advisory by default; `WORKTREE_GUARD_BLOCK=1` hard-denies (exit 2). |
 | `session-start-unicode-scan.sh` | SessionStart | One-shot hidden-Unicode scan of the project's instruction files (CLAUDE.md/AGENTS.md/SKILL.md/.cursorrules) at session boot. Silent on clean; advisory on a finding. Pairs with `prompt-injection-defense`. |
 | `pre-commit-unicode-scan.sh` | git pre-commit | Refuse commits that ADD hidden Unicode to instruction files. Silent on clean, warn on `high`, **block on `critical`** (tag-block / bidi override). Override once with `PROMPT_INJECTION_ALLOW=1`. |
+
+## Auto-wired vs opt-in
+
+`hooks/hooks.json` is the **plugin-level hook config** — when claude-mods is installed
+as a plugin, these hooks are active automatically (no settings.json hand-wiring), with
+paths resolved via `${CLAUDE_PLUGIN_ROOT}`:
+
+| Set | Hooks | Why |
+|-----|-------|-----|
+| **Auto-wired (security advisory)** | `pre-install-scan.sh` (PreToolUse Bash), `worktree-guard.sh` (PreToolUse Bash), `manifest-dep-scan.sh` (PostToolUse Write\|Edit), `session-start-unicode-scan.sh` (SessionStart), `config-change-guard.sh` (ConfigChange) | Silent-on-clean guardrails: zero noise until something is actually wrong, so they're safe to ship on by default. |
+| **Opt-in (opinionated / formatting)** | `pre-commit-lint.sh`, `post-edit-format.sh`, `dangerous-cmd-warn.sh`, `enforce-uv.sh`, `check-mail.sh`, `pre-commit-unicode-scan.sh` (a *git* hook) | Workflow opinions — wire them yourself per the examples below. |
+
+### Env toggles (auto-wired set)
+
+All auto-wired hooks are **advisory by default** (exit 0, command/change proceeds).
+Escalate to a hard gate per concern:
+
+| Variable | Affects | Effect when `1` |
+|----------|---------|-----------------|
+| `SUPPLY_CHAIN_BLOCK` | `pre-install-scan.sh`, `config-change-guard.sh` | Block the install / settings change (exit 2) until reviewed |
+| `WORKTREE_GUARD_BLOCK` | `worktree-guard.sh` | Deny the boundary-violating command (exit 2) |
+
+### ConfigChange coverage note
+
+`ConfigChange` fires only for Claude settings sources (`user_settings`,
+`project_settings`, `local_settings`; `policy_settings` can't be blocked, `skills` has
+no single file). It does **not** fire for VS Code `settings.json` or `~/.claude.json` —
+those persistence surfaces are covered by the periodic
+`skills/supply-chain-defense/scripts/integrity-audit.sh` sweep. The payload carries a
+`source` field (no file path), which the hook maps to the file itself; it also accepts
+a file path as `$1` for manual scans.
 
 ## Configuration
 

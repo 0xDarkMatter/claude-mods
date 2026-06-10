@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# fleet-ops — landing queue manager for concurrent Claude sessions
-# Status: experimental
+# fleet-ops — landing discipline for parallel work: sequential landing queue
+# with test gate, pre-land scrub, auto-rebase, one-shot revert.
+# Spawning/monitoring parallel sessions is native Claude Code territory
+# (agent teams, claude --bg / agent view); this script only governs landing.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -108,7 +110,11 @@ ensure_fleet_dir() {
       echo '.fleet-worktrees/' >> .gitignore
       appended=1
     fi
-    [[ $appended -eq 1 ]] && maybe_commit_gitignore
+    # NB: plain `[[ ... ]] && cmd` here would return 1 when nothing was
+    # appended, and under set -e that kills any caller invoked after init.
+    if [[ $appended -eq 1 ]]; then
+      maybe_commit_gitignore
+    fi
   fi
 }
 
@@ -176,6 +182,29 @@ cmd_init() {
   echo "Fleet initialized. Hand each session the prompt template:"
   echo "  $SCRIPT_DIR/../references/session-prompt.md"
   echo "Then: bash $0 start"
+}
+
+cmd_track() {
+  # Register existing branches as lanes — the bridge from natively-spawned
+  # work (agent teams, claude --bg auto-worktrees) into the landing queue.
+  # Never creates or touches worktrees; the branch is taken as-is.
+  ensure_fleet_dir
+  [[ $# -eq 0 ]] && { echo "usage: fleet track <branch>..." >&2; exit 1; }
+  local rc=0
+  for name in "$@"; do
+    if ! git rev-parse --verify "refs/heads/$name" >/dev/null 2>&1; then
+      log "ERROR: no local branch '$name' — nothing to track"
+      rc=1
+      continue
+    fi
+    if [[ -f "$LANES_DIR/$name" ]]; then
+      log "already tracked: $name ($(lane_state "$name"))"
+    else
+      set_lane_state "$name" "RUNNING"
+      log "tracking lane: $name"
+    fi
+  done
+  return $rc
 }
 
 format_age() {
@@ -632,6 +661,7 @@ cmd_start() {
 
 case "${1:-}" in
   init)         shift; cmd_init "$@" ;;
+  track)        shift; cmd_track "$@" ;;
   start)        shift; cmd_start "$@" ;;
   stop)         cmd_stop ;;
   status|fleet) shift; cmd_fleet "$@" ;;
@@ -640,10 +670,11 @@ case "${1:-}" in
   scrub-check)  shift; cmd_scrub_check "$@" ;;
   ""|-h|--help)
     cat <<EOF
-fleet-ops — landing queue for concurrent Claude sessions (experimental)
+fleet-ops — landing discipline for parallel work (queue + test gate)
 
 Usage:
-  fleet init <name>...        Create branch + worktree per name
+  fleet init <name>...        Create branch + worktree per name (manual spawn)
+  fleet track <branch>...     Register existing branches as lanes (native spawn)
   fleet start                 Run the daemon (writes pid to $PID_FILE)
   fleet stop                  Signal the running daemon to exit cleanly
   fleet status                One-shot status view

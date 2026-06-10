@@ -1,8 +1,44 @@
 # Workflow
 
-End-to-end walkthrough plus recovery scenarios. The decision tree and CLI surface live in `SKILL.md` — this doc is the operational manual.
+End-to-end walkthroughs plus recovery scenarios. The native-primitives routing table and CLI surface live in `SKILL.md` — this doc is the operational manual.
 
-## End-to-end
+There are two ways work enters the fleet: **native spawn** (preferred — agent teams or background agents do the parallel work) and **manual spawn** (`fleet init` creates lanes you point sessions at). Landing is identical for both.
+
+## Path A — native spawn, fleet landing
+
+### 1. Spawn the parallel work natively
+
+Use whichever native primitive fits ([agent teams](https://code.claude.com/docs/en/agent-teams) for collaborating teammates, [background agents](https://code.claude.com/docs/en/agent-view) for independent fire-and-forget sessions):
+
+```bash
+claude --bg "Add JWT middleware. Work on branch auth-mw. <lane brief>"
+claude --bg "Add rate limiting. Work on branch rate-limiter. <lane brief>"
+```
+
+Background sessions automatically isolate into worktrees under `.claude/worktrees/`. Embed the lane brief from `references/session-prompt.md` so each session commits to a named branch, respects its scope, and signals when green.
+
+### 2. Track the branches
+
+Once branches exist with commits:
+
+```bash
+fleet track auth-mw rate-limiter
+```
+
+Registers each existing branch as a lane (`RUNNING`), deploys `signal.sh`, touches no worktrees. **Never delete or relocate a native session's `.claude/worktrees/` entry** — worktree cleanup belongs to agent view / `claude rm`, after the branch has landed.
+
+### 3. Land
+
+Either manually, in the order you choose:
+
+```bash
+fleet land auth-mw        # scrub → clean-base check → merge --no-ff → test gate → rebase others
+fleet land rate-limiter
+```
+
+Or via the daemon + `signal.sh READY` gates (see Path B steps 3–4) if sessions signal their own readiness.
+
+## Path B — manual spawn (`fleet init`)
 
 ### 1. Init
 
@@ -49,16 +85,7 @@ Polls `.claude/fleet/lanes/` every 5 seconds. When a lane shows `READY`:
 fleet status
 ```
 
-```
-── Fleet ──────────────────────────────────────────────────────
-       BRANCH                           STATUS     AGE
-────────────────────────────────────────────────────────────────
-  ⏳   auth-mw                          RUNNING    23m
-  ✅   rate-limiter                     READY      1m
-  🚀   cache-layer                      LANDED     8m
-  ⚠️   error-handling                   CONFLICT   12m
-────────────────────────────────────────────────────────────────
-```
+One panel: every lane grouped by state (`RUNNING / READY / CONFLICT / FAILED / LANDED`) with age and commits-ahead. `fleet status --verbose` adds worktree paths and notes.
 
 ### 5. Cleanup
 
@@ -66,9 +93,11 @@ When all lanes are terminal (`LANDED` or `FAILED`), the daemon exits. To tear do
 
 ```bash
 fleet stop                                              # if daemon still running
-git worktree remove .fleet-worktrees/<name>             # for each worktree lane
+git worktree remove .fleet-worktrees/<name>             # for each fleet-created worktree lane
 rm -rf .claude/fleet                                    # nuke fleet state
 ```
+
+Only remove worktrees that `fleet init` created. Native sessions' worktrees under `.claude/worktrees/` are cleaned up through agent view (`Ctrl+X`) or `claude rm` — not by hand.
 
 `fleet init` is idempotent — keep `.claude/fleet/` for the next round if you want.
 
@@ -78,7 +107,7 @@ If a previous daemon was killed without cleanup, `fleet start` auto-detects the 
 
 ### `CONFLICT` lane (rebase or merge failed)
 
-Pop into that session's terminal. Tell Claude:
+Pop into that session (for background agents: open it from `claude agents` and reply). Tell Claude:
 
 > "Rebase conflict on `<file>`. Lane that landed modified `<symbol>`. Resolve and re-signal READY."
 
@@ -101,7 +130,7 @@ git checkout <lane-branch>
 bash .claude/fleet/signal.sh READY <test-log>
 ```
 
-Daemon picks it up on next poll.
+Daemon picks it up on next poll (or `fleet land` it manually).
 
 ### Bad land that snuck through scrub + tests
 
@@ -113,9 +142,13 @@ Finds the merge commit on `main` (by message `merge: <branch>`), runs `git rever
 
 ## Common patterns
 
+### Agent team built a feature across three branches
+
+Lead reports teammates done. `fleet track <b1> <b2> <b3>`, then `fleet land` in dependency order. Each landing rebases the rest, so the second and third merges are tested against a `main` that already contains the first.
+
 ### Five small refactors, no shared scope
 
-Default mode. Each lane is independent. Cleanest case — daemon handles everything.
+Path B default. Each lane is independent. Cleanest case — daemon handles everything.
 
 ### Lanes with shared dependencies
 
@@ -127,4 +160,4 @@ Land the quick fixes first. The long-running lane rebases against each landing. 
 
 ### Hackathon pace, multiple lanes ready at once
 
-Currently the daemon lands them strictly one at a time. If batch mode becomes a real need, the next iteration adds `--batch`.
+Currently the daemon lands them strictly one at a time — that sequencing is the point. If batch mode becomes a real need, the next iteration adds `--batch`.

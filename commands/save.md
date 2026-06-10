@@ -6,6 +6,8 @@ description: "Save session state - persist tasks (via TaskList), plan content, a
 
 Persist your current session state for later restoration with `/sync`.
 
+Claude Code's native auto-memory remembers learnings for you on this machine, but tasks are still session-scoped and nothing native is portable. `/save` writes state you control — a git-trackable `.claude/session-cache.json` (tasks, git/PR context, session ID, handoff notes) you can commit, share with a team, or pick up on another machine.
+
 ## Arguments
 
 $ARGUMENTS

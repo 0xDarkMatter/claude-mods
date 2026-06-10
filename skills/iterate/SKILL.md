@@ -1,6 +1,9 @@
 ---
 name: iterate
 description: "Autonomous improvement loop - modify, measure, keep or discard, repeat. Inspired by Karpathy's autoresearch. Triggers on: iterate, improve autonomously, run overnight, keep improving, autoresearch, improvement loop, iterate until done, autonomous iteration, batch experiments."
+when_to_use: "Use when the user wants an autonomous improvement loop against one mechanical metric — e.g. 'iterate until coverage hits 90%', 'run overnight reducing bundle size', 'keep improving X until Y'."
+argument-hint: "[goal] [inline config: Scope/Verify/Direction/Guard/Batch/Iterations/Until/Stagnation/Branch]"
+effort: high
 license: MIT
 allowed-tools: "Read Write Edit Glob Grep Bash Agent TaskCreate TaskUpdate TaskList"
 metadata:

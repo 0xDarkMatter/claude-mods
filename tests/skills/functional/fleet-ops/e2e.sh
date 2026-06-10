@@ -50,49 +50,62 @@ note "repo at $SCRATCH"
 step "fleet init alpha beta"
 bash "$FLEET" init alpha beta >/dev/null 2>&1
 [[ -d .claude/fleet/lanes ]] && ok "lanes/ created" || fail "lanes/ missing"
-[[ -d .claude/fleet/worktrees/alpha ]] && ok "alpha worktree created" || fail "alpha worktree missing"
-[[ -d .claude/fleet/worktrees/beta ]] && ok "beta worktree created" || fail "beta worktree missing"
+[[ -d .fleet-worktrees/alpha ]] && ok "alpha worktree created" || fail "alpha worktree missing"
+[[ -d .fleet-worktrees/beta ]] && ok "beta worktree created" || fail "beta worktree missing"
 [[ -f .claude/fleet/signal.sh ]] && ok "signal.sh deployed" || fail "signal.sh not deployed"
 grep -qxF '.claude/fleet/' .gitignore && ok ".claude/fleet/ in .gitignore" || fail ".gitignore not updated"
+grep -qxF '.fleet-worktrees/' .gitignore && ok ".fleet-worktrees/ in .gitignore" || fail ".fleet-worktrees/ not in .gitignore"
 [[ "$(cat .claude/fleet/lanes/alpha)" == "RUNNING" ]] && ok "alpha state = RUNNING" || fail "alpha state wrong"
 [[ "$(cat .claude/fleet/lanes/beta)" == "RUNNING" ]] && ok "beta state = RUNNING" || fail "beta state wrong"
+
+# ── track (native-spawn path) ──
+step "fleet track registers an existing branch as a lane"
+git branch gamma main
+bash "$FLEET" track gamma >/dev/null 2>&1
+[[ -f .claude/fleet/lanes/gamma ]] && ok "gamma lane file created" || fail "gamma lane missing"
+[[ "$(head -n1 .claude/fleet/lanes/gamma 2>/dev/null)" == "RUNNING" ]] && ok "gamma state = RUNNING" || fail "gamma state wrong"
+[[ -d .fleet-worktrees/gamma ]] && fail "track created a worktree (it must not)" || ok "track created no worktree"
+bash "$FLEET" track no-such-branch >/dev/null 2>&1 && fail "track accepted missing branch" || ok "track refused missing branch"
+# untrack gamma so it doesn't block daemon self-exit later
+git branch -D gamma >/dev/null 2>&1
+rm -f .claude/fleet/lanes/gamma
 
 # ── work in alpha lane ──
 step "do work in alpha worktree, signal READY"
 (
-  cd .claude/fleet/worktrees/alpha
+  cd .fleet-worktrees/alpha
   echo "alpha feature" > a.txt
   git add . && git -c user.email=e2e@test -c user.name=e2e commit -q -m "feat: alpha"
 )
 echo "0 failed, 1 passed" > "$SCRATCH/alpha-test.log"
-( cd .claude/fleet/worktrees/alpha && bash "$SCRATCH/.claude/fleet/signal.sh" READY "$SCRATCH/alpha-test.log" >/dev/null )
+( cd .fleet-worktrees/alpha && bash "$SCRATCH/.claude/fleet/signal.sh" READY "$SCRATCH/alpha-test.log" >/dev/null )
 [[ "$(head -n1 .claude/fleet/lanes/alpha)" == "READY" ]] && ok "alpha state = READY after signal" || fail "alpha not READY"
 
 step "signal.sh refuses dirty tree"
 (
-  cd .claude/fleet/worktrees/alpha
+  cd .fleet-worktrees/alpha
   echo "uncommitted change" >> a.txt
 )
-( cd .claude/fleet/worktrees/alpha && bash "$SCRATCH/.claude/fleet/signal.sh" READY "$SCRATCH/alpha-test.log" 2>/dev/null ) \
+( cd .fleet-worktrees/alpha && bash "$SCRATCH/.claude/fleet/signal.sh" READY "$SCRATCH/alpha-test.log" 2>/dev/null ) \
   && fail "signal.sh accepted dirty tree" || ok "signal.sh refused dirty tree"
-( cd .claude/fleet/worktrees/alpha && git checkout -- a.txt )  # clean back up
+( cd .fleet-worktrees/alpha && git checkout -- a.txt )  # clean back up
 
 step "signal.sh refuses failing test log"
 echo "ERROR: 3 tests failed" > "$SCRATCH/bad-test.log"
-( cd .claude/fleet/worktrees/alpha && bash "$SCRATCH/.claude/fleet/signal.sh" READY "$SCRATCH/bad-test.log" 2>/dev/null ) \
+( cd .fleet-worktrees/alpha && bash "$SCRATCH/.claude/fleet/signal.sh" READY "$SCRATCH/bad-test.log" 2>/dev/null ) \
   && fail "signal.sh accepted failing log" || ok "signal.sh refused failing log"
 # Re-signal with good log to reset state for daemon test
-( cd .claude/fleet/worktrees/alpha && bash "$SCRATCH/.claude/fleet/signal.sh" READY "$SCRATCH/alpha-test.log" >/dev/null )
+( cd .fleet-worktrees/alpha && bash "$SCRATCH/.claude/fleet/signal.sh" READY "$SCRATCH/alpha-test.log" >/dev/null )
 
 # ── work in beta lane ──
 step "do work in beta worktree, signal READY"
 (
-  cd .claude/fleet/worktrees/beta
+  cd .fleet-worktrees/beta
   echo "beta feature" > b.txt
   git add . && git -c user.email=e2e@test -c user.name=e2e commit -q -m "feat: beta"
 )
 echo "0 failed, 2 passed" > "$SCRATCH/beta-test.log"
-( cd .claude/fleet/worktrees/beta && bash "$SCRATCH/.claude/fleet/signal.sh" READY "$SCRATCH/beta-test.log" >/dev/null )
+( cd .fleet-worktrees/beta && bash "$SCRATCH/.claude/fleet/signal.sh" READY "$SCRATCH/beta-test.log" >/dev/null )
 
 # ── daemon ──
 step "start daemon (background) and watch it land both lanes"
@@ -176,7 +189,7 @@ echo "$verbose_out" | grep -q "worktree:" && ok "verbose shows worktree path" ||
 
 # ── works from inside a worktree (cwd-bug regression test) ──
 step "fleet fleet works from inside a worktree"
-wt_out=$( cd "$SCRATCH/.claude/fleet/worktrees/alpha" 2>/dev/null && bash "$FLEET" fleet 2>&1 || true )
+wt_out=$( cd "$SCRATCH/.fleet-worktrees/alpha" 2>/dev/null && bash "$FLEET" fleet 2>&1 || true )
 echo "$wt_out" | grep -q "alpha" && ok "fleet view from worktree finds lanes" || fail "fleet view from worktree empty"
 
 # ── summary ──

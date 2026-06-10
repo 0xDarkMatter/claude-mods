@@ -1,6 +1,7 @@
 ---
 name: techdebt
 description: "Technical debt detection and remediation. Run at session end to find duplicated code, dead imports, security issues, and complexity hotspots. Triggers: 'find tech debt', 'scan for issues', 'check code quality', 'wrap up session', 'ready to commit', 'before merge', 'code review prep'. Always uses parallel subagents for fast analysis."
+when_to_use: "Use at session wrap-up or before a commit/merge — e.g. 'find tech debt', 'scan for issues before I commit', 'check code quality', 'anything to clean up before merge?'."
 license: MIT
 metadata:
   author: claude-mods

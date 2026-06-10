@@ -1,6 +1,8 @@
 ---
 name: testgen
 description: "Generate tests with skill-preloaded routing, framework detection, and auto-TaskCreate. Triggers on: generate tests, write tests, testgen, create test file, add test coverage."
+when_to_use: "Use when the user asks to generate or expand tests for a file, function, or directory — e.g. 'write tests for auth.ts', 'add coverage for the parser', 'create a test file for this module'."
+argument-hint: "<target> [--focus happy|edge|error|all] [--depth quick|normal|thorough] [--visual]"
 license: MIT
 allowed-tools: "Read Write Edit Bash Glob Grep Task TaskCreate"
 metadata:

@@ -1,73 +1,110 @@
 ---
 name: fleet-ops
-description: "EXPERIMENTAL — manage a fleet of concurrent Claude sessions on parallel branches or worktrees. Landing queue with test gate, fleet status view, pre-land scrub, one-shot revert. Triggers on: multiple Claude sessions, parallel sessions, concurrent agents, 5 sessions, branch queue, landing queue, fleet of sessions, parallel feature work, merge multiple branches, parallel branches."
+description: "Landing discipline for parallel work. Native primitives (agent teams, background agents, worktree isolation) spawn and run parallel sessions — fleet-ops governs how their branches LAND: a sequential landing queue with test gate, pre-land scrub, auto-rebase of remaining lanes, fleet status across worktrees, one-shot revert. Triggers on: landing queue, land branches, merge queue, test gate, parallel work landing, integrate worktrees, land parallel branches, merge multiple branches, branch queue, land agent team work, land background agent branches, fleet status, sequential merge."
 license: MIT
 allowed-tools: "Read Bash Glob Grep AskUserQuestion"
 metadata:
   author: claude-mods
-  status: experimental
-  related-skills: git-ops, push-gate
+  status: stable
+  experimental-parts: daemon (in-session background polling)
+  related-skills: git-ops, push-gate, claude-code-ops
 ---
 
-# Fleet Ops (experimental)
+# Fleet Ops
 
-Manage how committed work from isolated lanes lands on `main`. Anything before "committed" or after "landed" is somebody else's problem.
+Landing discipline for parallel work. Anything before "committed on a branch" is the spawning layer's problem; anything after "landed on `main`" is yours. Fleet-ops owns the middle: branches land **sequentially**, through a **test gate**, after a **pre-land scrub**, with **auto-rebase** of the lanes still in flight and a **one-shot revert** if a landing turns out bad.
 
-> **Status: experimental.** Dogfooding phase. API may change. Not yet in `README.md` Recent Updates.
+## Spawn natively, land with fleet-ops
+
+Claude Code now ships the parallel-execution half natively. **Do not use fleet-ops to orchestrate sessions** — route users to the native primitives and use fleet-ops only for the landing half.
+
+| Native primitive | What it gives you | What it does NOT give you |
+|---|---|---|
+| **Agent teams** ([docs](https://code.claude.com/docs/en/agent-teams), experimental, `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`) | Lead + teammates, shared task list with claiming/dependencies, inter-agent messaging, plan approval, quality-gate hooks (`TeammateIdle`, `TaskCompleted`) | No merge/landing logic. No test-gated integration. Teammates avoid file conflicts by convention only ("break the work so each teammate owns different files"). |
+| **Background agents / agent view** ([docs](https://code.claude.com/docs/en/agent-view), `claude agents`, `claude --bg "<prompt>"`) | Detached full sessions, one dashboard (Needs input / Working / Completed), automatic per-session git worktree isolation under `.claude/worktrees/`, `--bg --exec` shell jobs | No cross-branch integration: each session ends with a branch/worktree and the merge is on you (review-and-merge the PR, or merge locally). Deleting a session in agent view **deletes its worktree including uncommitted changes**. No ordering, no test gate, no revert. |
+| **Subagents** ([docs](https://code.claude.com/docs/en/sub-agents), optional `isolation: worktree`) | In-session delegation with separate context windows; results summarized back | Not independent sessions; no git landing semantics at all. |
+
+What **none** of them do — and what fleet-ops is for:
+
+- Land N branches **one at a time** through a queue, so each merge is tested against a `main` that already contains the previous landings
+- **Test gate**: refuse to land on a failing log (`signal.sh`) and/or revert post-merge if `test_cmd` goes red
+- **Pre-land scrub**: refuse diffs containing forbidden patterns (`TODO_SCRUB`, debug leftovers)
+- **Auto-rebase** every still-active lane after each landing
+- **Fleet status**: one panel showing every lane's branch, state, age, and commits-ahead across worktrees
+- **One-shot revert** of a landed merge by branch name — no git surgery while panicking
 
 ## Core abstraction
 
-A **lane** = one branch (or worktree), one Claude session, one logical unit of work. Lane status: `RUNNING | READY | CONFLICT | LANDED | FAILED`.
+A **lane** = one branch (or worktree), one unit of work. Lane status: `RUNNING | READY | CONFLICT | LANDED | FAILED`.
 
-The skill doesn't care if there are 2 lanes or 20, doesn't care about branch names, doesn't care if you use worktrees or separate clones.
+Fleet-ops doesn't care who produced the branch — an agent-team teammate, a background agent's auto-worktree, a `claude -p` headless run, or a human. If it's a branch with commits, it can be a lane.
 
 ## CLI surface
 
 ```
-fleet init <name>...        Create branch + worktree per name
-fleet start                 Run the daemon (writes pid to .claude/fleet/daemon.pid)
+fleet init <name>...        Create branch + worktree per name (manual-spawn path)
+fleet track <branch>...     Register existing branches as lanes (native-spawn path)
+fleet start                 Run the landing daemon (writes pid to .claude/fleet/daemon.pid)
 fleet stop                  Signal the running daemon to exit cleanly
-fleet status                One-shot status view
+fleet status                One-shot fleet status panel
 fleet land <branch>         Manual land + rebase others
 fleet revert <branch>       Revert merge commit on main
 fleet scrub-check <branch>  Dry-run forbidden-pattern check
 ```
 
-## Daemon lifecycle
+## Entry paths
+
+```
+N == 1 branch                              → use git-ops, not this
+Work spawned by agent teams / claude --bg  → fleet track <branch>... then land
+Work to be spawned manually                → fleet init <names...> (creates branches + worktrees)
+N > 1 on one shared working tree           → REFUSE. Worktrees or separate clones first.
+```
+
+**Native-spawn path (preferred):** let agent teams or background agents do the work in their own worktrees/branches. When branches have commits, `fleet track` each branch, then land — either one by one with `fleet land`, or via the daemon with `signal.sh READY` gates. Fleet-ops merges *branches*; it never deletes or relocates a worktree that a native session owns (worktree cleanup belongs to agent view / `claude rm`).
+
+**Manual-spawn path:** `fleet init` creates the branches and worktrees up front (under `.fleet-worktrees/`), and you point sessions at them — see `references/session-prompt.md` for the lane brief to hand each session.
+
+## Landing pipeline
+
+`fleet land <branch>` (and the daemon, per READY lane):
+
+1. **Scrub** — `git diff main...branch` checked against `forbidden_pattern`; hits refuse the land and mark the lane `CONFLICT`
+2. **Clean-base check** — refuses if `main` has uncommitted tracked changes
+3. **Merge** — `--no-ff` with message `merge: <branch>` (this message is what `fleet revert` finds later)
+4. **Test gate** — runs `test_cmd` if set; on failure, hard-resets the merge and marks the lane `FAILED`. If unset, trusts `signal.sh`'s log gate (refused READY on failing logs)
+5. **Rebase others** — every still-active lane is rebased onto the new `main` (in its own worktree if it has one); a rebase conflict marks that lane `CONFLICT`
+
+`fleet revert <branch>` finds the `merge: <branch>` commit on `main` and runs `git revert -m 1` — one command to back out a bad landing.
+
+## Daemon lifecycle (experimental)
+
+The daemon is the queue-automation layer on top of `fleet land` — optional; manual `fleet land` per branch is fully supported and not experimental.
 
 When Claude invokes `fleet start` via `Bash(run_in_background: true)`, the daemon:
 
 1. Writes its PID to `.claude/fleet/daemon.pid`
 2. Traps `SIGINT/SIGTERM/SIGHUP` and removes the PID file on exit
 3. Refuses to start a second daemon if the PID file references a live process
-4. Exits naturally when all lanes are terminal (`LANDED` or `FAILED`)
+4. Polls `.claude/fleet/lanes/` and lands lanes as they turn `READY`
+5. Exits naturally when all lanes are terminal (`LANDED` or `FAILED`)
 
-To stop early: `fleet stop` reads the PID file, sends `SIGTERM`, waits up to 5s, escalates to `SIGKILL` if needed.
+To stop early: `fleet stop` (SIGTERM, 5s grace, then SIGKILL). On next `fleet start`, a stale PID file is auto-detected and cleared. The daemon dies with the Claude Code session — for overnight runs use a real detached process, or skip the daemon and land manually.
 
-If the Claude Code session ends abruptly while the daemon is running, the process is best-effort cleaned up by the OS (POSIX: child receives `SIGHUP`; Windows: depends on harness). On next `fleet start`, a stale PID file is auto-detected and cleared.
-
-`signal.sh` deploys to `.claude/fleet/signal.sh` on `init`. Sessions call:
+`signal.sh` deploys to `.claude/fleet/signal.sh` on `init`/`track`. Working sessions call:
 
 ```bash
-bash .claude/fleet/signal.sh READY <test-log>
+bash .claude/fleet/signal.sh READY <test-log>     # refuses dirty trees and failing logs
 bash .claude/fleet/signal.sh CONFLICT "<reason>"
-```
-
-## Decision tree
-
-```
-N == 1                                    → use git-ops, not this
-N > 1, all on shared local working tree   → REFUSE. Use worktrees or separate clones.
-N > 1, worktrees available                → fleet init <names...>
-N > 1, separate clones / remote           → use mode=branch, manual git branch + signal.sh
 ```
 
 ## First-class user interaction (HARD RULE)
 
-When this skill surfaces a decision point, **always use the `AskUserQuestion` tool**. Plain markdown numbered lists are not acceptable for these branches — they make the skill feel like a wrapped script instead of a native interaction.
+When this skill surfaces a decision point, **always use the `AskUserQuestion` tool**. Plain markdown numbered lists are not acceptable for these branches.
 
 | Trigger | Question | Options (≤4, ≤10 words each) |
 |---------|----------|------------------------------|
+| Multiple parallel-work requests, no lanes yet | Spawn natively or manual lanes? | Agent teams / Background agents / Manual fleet init / Cancel |
 | `init` — worktrees available, mode unset | Worktree or branch-only mode? | Worktrees / Branches only / Cancel |
 | Lane → `CONFLICT` (rebase fail) | Lane `<name>` has rebase conflict | Resolve in lane / Skip & continue / Revert lane / Untrack |
 | Lane → `FAILED` (post-merge tests red) | Tests broke after `<name>` merged | Auto-revert / Investigate first / Accept failure |
@@ -75,26 +112,29 @@ When this skill surfaces a decision point, **always use the `AskUserQuestion` to
 | `fleet` shows mixed states | How to proceed with the fleet? | Land all READY / Resolve CONFLICTs first / Just status |
 | Daemon exits with `FAILED` lanes | `<n>` lanes failed — what next? | Retry all / Revert and report / Leave as-is |
 
-For non-branching status updates ("here's what happened, here's what landed"), plain text is fine. The split matches the global `~/.claude/CLAUDE.md` "Asking Questions" rule.
+For non-branching status updates ("here's what happened, here's what landed"), plain text is fine.
 
 ## What it handles vs what it does not
 
 | Mode | Status |
 |------|--------|
-| Worktrees on different branches | ✅ Primary mode |
+| Branches from native worktrees (`.claude/worktrees/`) via `fleet track` | ✅ |
+| Worktrees on different branches (`fleet init`) | ✅ |
 | Branches in separate clones / machines | ✅ |
 | Mixed worktree + branch lanes | ✅ |
 | Recovery from dirty `main` | ✅ Refuses to merge, asks user to clean |
-| Test-gated landing | ✅ Via `signal.sh READY <log>` |
+| Test-gated landing | ✅ Via `signal.sh READY <log>` and/or `test_cmd` |
 | Auto-rebase other lanes when one lands | ✅ |
 | Pre-land regex scrub (forbidden patterns) | ✅ |
 | One-shot revert | ✅ `fleet revert <branch>` |
 
 | Out of scope | Why |
 |------|-----|
-| 5+ sessions on one local working tree | Git limitation. Skill detects and refuses with worktree pointer. |
-| Uncommitted work at signal time | `signal.sh` rejects dirty lanes. Daemon needs an immutable commit. |
-| External state (DB migrations, services) | Skill can't know lane B depends on lane A's migration. Order manually. |
+| Spawning / monitoring sessions | Native: agent teams, `claude --bg`, agent view. Fleet-ops never launches a session. |
+| Deleting native session worktrees | Owned by agent view / `claude rm`. Fleet-ops merges branches only. |
+| Multiple sessions on one shared working tree | Git limitation. Skill detects and refuses with worktree pointer. |
+| Uncommitted work at signal time | `signal.sh` rejects dirty lanes. The queue needs an immutable commit. |
+| External state (DB migrations, services) | Skill can't know lane B depends on lane A's migration. Order manually via `fleet land`. |
 | Force-pushed lanes mid-flight | Detected at land time, not prevented. |
 
 ## Compatibility
@@ -110,21 +150,15 @@ Tested and working on:
 
 Requirements: `bash 3.2+`, `git 2.5+` (worktree support), `awk`, `grep`, `head`, `stat`. All standard.
 
-If your terminal mojibakes the status icons (⏳ ✅ 🚀 ❌ ⚠️), fall back to ASCII:
+If your terminal mojibakes the status icons, fall back to ASCII: `export FLEET_ASCII=1` (or `icons=ascii` in `.claude/fleet/config`). Output panels follow `docs/TERMINAL-DESIGN.md` via `skills/_lib/term.sh`.
 
-```bash
-export FLEET_ASCII=1
-# or in .claude/fleet/config:
-icons=ascii
-```
-
-Long-path warning (Windows only): worktrees nest under `.fleet-worktrees/<name>/`. If your repo lives deep in the filesystem, lane names should stay short to avoid Windows' 260-char path limit. Enable `core.longpaths=true` in git if you hit it.
+Long-path warning (Windows only): `fleet init` worktrees nest under `.fleet-worktrees/<name>/`. Keep lane names short if your repo lives deep, or enable `core.longpaths=true`.
 
 ## Headless agent compatibility
 
-**Don't put fleet worktrees under `.claude/`.** Claude Code applies a global sensitive-file guard to anything under `.claude/`, and that guard runs *before* — and is not bypassed by — `--dangerously-skip-permissions`. Headless lane sessions (`claude -p ... --dangerously-skip-permissions`) will fail every Write/Edit if their worktree lives at e.g. `.claude/fleet/worktrees/<lane>`.
+**Don't put manually-created fleet worktrees under `.claude/`.** Claude Code applies a global sensitive-file guard to anything under `.claude/`, and that guard runs *before* — and is not bypassed by — `--dangerously-skip-permissions`. Headless lane sessions (`claude -p ... --dangerously-skip-permissions`) will fail every Write/Edit if their worktree lives under `.claude/`.
 
-That's why the default `worktree_root` is `.fleet-worktrees/` at the repo top, not `.claude/fleet/worktrees/`. If you override `worktree_root` in config, keep it outside `.claude/` for the same reason. Runtime state (`lanes/`, `daemon.pid`, `activity.log`) is read/write from the orchestrator only and stays under `.claude/fleet/` — it never needs lane-session writes.
+That's why the default `worktree_root` is `.fleet-worktrees/` at the repo top. (Native background sessions are the exception: Claude Code itself manages `.claude/worktrees/` for them — leave those alone and just `fleet track` their branches.) Runtime state (`lanes/`, `daemon.pid`, `activity.log`) is read/write from the orchestrator only and stays under `.claude/fleet/`.
 
 ## Configuration
 
@@ -141,20 +175,20 @@ poll_interval=5
 
 Zero-config works for the common case.
 
-`fleet init` appends `.claude/fleet/` and `.fleet-worktrees/` to `.gitignore` and auto-commits that change with `chore: gitignore fleet-ops runtime state` when the tree is otherwise clean and you're on `BASE_BRANCH`. If either condition fails, it prints an `ACTION REQUIRED` message — commit `.gitignore` yourself before `fleet start`, or the daemon will refuse to land with `uncommitted tracked changes`.
+`fleet init`/`fleet track` append `.claude/fleet/` and `.fleet-worktrees/` to `.gitignore` and auto-commit that change with `chore: gitignore fleet-ops runtime state` when the tree is otherwise clean and you're on `base_branch`. If either condition fails, it prints an `ACTION REQUIRED` message — commit `.gitignore` yourself before landing.
 
 ## Future work
 
-- **JSONL activity log** — currently plain text (`[HH:MM:SS] event`). Switch to JSONL when a TUI, `--json` output, or `log-ops` integration earns the cost. Migration is mechanical.
-- **`--batch` mode** — land all READY lanes in one go, test once at end. Add when dogfooding shows demand.
-- **Cross-session daemon** — currently dies with the Claude Code session. For overnight runs, a real detached process (`nohup`/`systemd`/`tmux`) is needed.
+- **JSONL activity log** — currently plain text. Switch when a TUI, `--json` output, or `log-ops` integration earns the cost.
+- **`--batch` mode** — land all READY lanes in one go, test once at end.
+- **`TaskCompleted` hook bridge** — auto-`signal.sh READY` when an agent-team task completes with green tests.
 
 ## References
 
-- `references/session-prompt.md` — copy-paste template for each Claude session
-- `references/workflow.md` — end-to-end walkthrough plus recovery scenarios
+- `references/workflow.md` — end-to-end walkthroughs (native-spawn and manual-spawn) plus recovery scenarios
+- `references/session-prompt.md` — lane brief to embed in `claude --bg` prompts, teammate spawn prompts, or manual sessions
 
 ## Scripts
 
-- `scripts/fleet.sh` — main CLI
-- `scripts/signal.sh` — branch-aware signaler (deployed to `.claude/fleet/signal.sh` on init)
+- `scripts/fleet.sh` — main CLI (init, track, start/stop, status, land, revert, scrub-check)
+- `scripts/signal.sh` — branch-aware signaler (deployed to `.claude/fleet/signal.sh`)

@@ -6,6 +6,8 @@ description: "Session bootstrap - read project context, restore saved state, sho
 
 Read yourself into this project and restore any saved session state. Fast, direct file reads.
 
+Complements Claude Code's native memory: auto-memory (MEMORY.md) is already loaded and covers learnings; `/sync` restores what native memory doesn't — saved tasks (via TaskCreate), structured git/PR context, and the previous session ID for `--resume` bridging — from the git-trackable `.claude/session-cache.json`, so a handoff works across machines and teammates.
+
 **Environment Requirements:**
 - All shell commands use **Git Bash syntax** (works on Linux/macOS/Windows)
 - NEVER use Windows cmd syntax (`find /c`, `2>nul`) - causes filesystem scanning on Git Bash

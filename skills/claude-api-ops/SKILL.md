@@ -1,6 +1,7 @@
 ---
 name: claude-api-ops
 description: "Building applications ON Claude - the Anthropic API and Claude Agent SDK. Use for: anthropic api, claude api, messages api, tool use, function calling, prompt caching, agent sdk, claude-agent-sdk, structured output, json schema output, batches api, extended thinking, adaptive thinking, model selection, claude pricing, build claude agent, anthropic sdk, stop_reason handling, streaming claude, token counting, cache_control, output_config, tool_choice, agentic loop, rate limits anthropic."
+when_to_use: "Use when building applications on the Anthropic API or Claude Agent SDK — e.g. 'add tool use to my Claude app', 'set up prompt caching', 'which Claude model should I use', 'handle stop_reason / streaming'."
 license: MIT
 allowed-tools: "Read Write Bash WebFetch"
 metadata:

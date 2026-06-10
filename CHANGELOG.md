@@ -30,8 +30,38 @@ feature releases live in the README "Recent Updates" section.
   claude-code-headless, claude-code-hooks against current docs: 30-event hook
   catalog with JSON contracts, current skill frontmatter spec, headless/CLI
   reference, extension debugging decision trees
+- **Live security guard hooks**: `config-change-guard.sh` (ConfigChange event -
+  scans edited Claude settings files for worm-persistence IOCs the moment
+  they're written, reusing integrity-audit patterns) and `worktree-guard.sh`
+  (PreToolUse - mechanically enforces `rules/worktree-boundaries.md`)
+- **Plugin hook auto-wiring** (`hooks/hooks.json`) - plugin installs get the
+  security-advisory hook set (pre-install-scan, manifest-dep-scan,
+  session-start unicode scan, config-change guard, worktree guard) with zero
+  hand-wiring; formatting/lint hooks stay opt-in examples
+- **`fleet track`** command - register natively-spawned branches as fleet lanes
+- New frontmatter on high-traffic skills: `when_to_use` (10 skills),
+  `argument-hint` (iterate/review/testgen/explain), `effort: high`
+  (iterate/review)
+- README "Skill Description Budget" guidance - /doctor overflow check,
+  `skillOverrides`, 1,536-char per-skill cap
 - CI: doc-drift gate (`tests/doc-drift.sh`) - docs must match disk
 - CI: skill behavioural test suites (`tests/run-skill-tests.sh`)
+
+### Fixed
+- `fleet.sh` `ensure_fleet_dir` returned 1 under `set -e` on every invocation
+  after the first, silently killing post-init commands
+- fleet-ops e2e suite asserted a worktree path `fleet.sh` no longer uses
+  (now 29/29 against real behaviour)
+
+### Changed (v3 repositioning)
+- **fleet-ops v2** - repositioned as landing discipline (queue, test gate,
+  pre-land scrub, one-shot revert) on top of native agent teams / background
+  agents, which now own the spawning half; no longer EXPERIMENTAL except the
+  daemon
+- **/save + /sync repositioned** - native auto-memory covers single-machine
+  context; these commands' value is portable state: task restore,
+  git-trackable, team-shareable, cross-machine
+- supply-chain-defense description trimmed under the 1,536-char listing cap
 
 ### Changed
 - README/AGENTS.md/PLAN.md reconciled with actual inventory (80 skills, 9 hooks,

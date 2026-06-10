@@ -7,7 +7,7 @@ This is **claude-mods** - a collection of custom extensions for Claude Code:
 - **2 commands** for session management (/sync, /save)
 - **81 skills** for CLI tools, patterns, workflows, and development tasks (incl. `supply-chain-defense` for behavioural-first dependency security, `prompt-injection-defense` for instruction-integrity scanning, `net-ops` for network troubleshooting, `windows-ops` / `mac-ops` for workstation diagnostics)
 - **13 output styles** for response personality (Vesper, Spartan, Mentor, Executive, Pair, Atlas, Coach, Harbour, Meridian, Noir, Roast, Sage, Scout)
-- **9 hooks** for pre-commit linting, post-edit formatting, dangerous command warnings, uv enforcement, dependency-install + manifest-edit supply-chain advisories, hidden-Unicode scanning (session-start + pre-commit), and pmail notifications
+- **11 hooks** for pre-commit linting, post-edit formatting, dangerous command warnings, uv enforcement, dependency-install + manifest-edit supply-chain advisories, hidden-Unicode scanning (session-start + pre-commit), live config-change + worktree guards, and pmail notifications - security set auto-wired via plugin hooks.json
 - **Pigeon** inter-session messaging (`pigeon send/read/reply`) - SQLite-backed pmail at `~/.claude/pmail.db`
 
 ## Installation

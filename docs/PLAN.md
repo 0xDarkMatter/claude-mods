@@ -20,7 +20,7 @@
 | Commands | 2 | Session management (sync, save) |
 | Rules | 7 | cli-tools, commit-style, naming-conventions, prompt-injection, skill-agent-updates, supply-chain, worktree-boundaries |
 | Output Styles | 13 | Vesper, Spartan, Mentor, Executive, Pair, Atlas, Coach, Harbour, Meridian, Noir, Roast, Sage, Scout |
-| Hooks | 9 | lint, format, safety, uv, install-scan, manifest-scan, pmail, unicode-scan ×2 |
+| Hooks | 11 | lint, format, safety, uv, install-scan, manifest-scan, pmail, unicode-scan ×2, config-change guard, worktree guard |
 
 Counts are enforced by the CI doc-drift gate (see roadmap) — if this table rots, CI fails.
 
@@ -52,13 +52,17 @@ Counts are enforced by the CI doc-drift gate (see roadmap) — if this table rot
 ### Phase 3 — Distribution & native-feature adoption
 
 - [ ] Submit to community marketplace (claude.ai/settings/plugins/submit)
-- [ ] Reposition /save + /sync as session introspection + team-shareable state
-      (native auto-memory now covers solo persistence)
-- [ ] Adopt new hook events (ConfigChange guard for supply-chain-defense,
-      WorktreeCreate/Remove for worktree-boundaries, InstructionsLoaded for
-      unicode scanning)
-- [ ] Skill-scoped hooks: move manifest-dep-scan inside supply-chain-defense
-- [ ] Evaluate agent teams as fleet-ops v2 substrate
+- [x] Reposition /save + /sync as portable/team-shareable state (native
+      auto-memory covers single-machine context)
+- [x] Adopt new hook events: ConfigChange guard (worm-persistence IOCs on
+      settings edits) + worktree guard (worktree-boundaries enforcement).
+      Note: ConfigChange payload carries source-not-path, so VS Code settings
+      stay covered by integrity-audit.sh instead.
+- [x] Auto-wire security hooks via plugin hooks/hooks.json (skill-scoped hooks
+      only fire while a skill is active, so plugin level is the right layer)
+- [x] fleet-ops v2: repositioned as landing discipline (queue, test gate,
+      scrub, revert) on top of native agent teams / background agents; new
+      `fleet track` registers natively-spawned branches
 
 ---
 

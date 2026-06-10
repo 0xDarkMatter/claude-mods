@@ -12,13 +12,13 @@
 
 > *A comprehensive extension toolkit that transforms Claude Code into a specialized development powerhouse.*
 
-**claude-mods** is a production-ready plugin that extends Claude Code with 81 specialized skills, 12 expert agents, 13 output styles, 9 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
+**claude-mods** is a production-ready plugin that extends Claude Code with 81 specialized skills, 12 expert agents, 13 output styles, 11 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
 
 Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms), claude-mods fills critical gaps in Claude Code's capabilities: persistent session state that survives across machines, on-demand expert knowledge for specialized domains, token-efficient modern CLI tools (10-100x faster than traditional alternatives), and proven workflow patterns for TDD, code review, and feature development. The toolkit implements Anthropic's [recommended patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), ensuring your development context never vanishes when sessions end.
 
 From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
 
-**12 agents. 81 skills. 13 styles. 9 hooks. 7 rules. One install.**
+**12 agents. 81 skills. 13 styles. 11 hooks. 7 rules. One install.**
 
 ## Recent Updates
 
@@ -373,6 +373,8 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [check-mail.sh](hooks/check-mail.sh) | PreToolUse | Check for unread pmail via signal file (no cooldown, zero-cost when empty) |
 | [session-start-unicode-scan.sh](hooks/session-start-unicode-scan.sh) | SessionStart | One-shot hidden-Unicode scan of project instruction files at boot (silent on clean) |
 | [pre-commit-unicode-scan.sh](hooks/pre-commit-unicode-scan.sh) | Git pre-commit | Block commits that add critical hidden Unicode (bidi, tag-block) to instruction files |
+| [config-change-guard.sh](hooks/config-change-guard.sh) | ConfigChange | Scan changed Claude settings files for worm-persistence IOCs the moment they're edited (advisory; `SUPPLY_CHAIN_BLOCK=1` to deny) |
+| [worktree-guard.sh](hooks/worktree-guard.sh) | PreToolUse | Warn on commands that touch other sessions' `.claude/worktrees/` (rm, worktree remove/prune, sweeping `git add -A`); `WORKTREE_GUARD_BLOCK=1` to deny |
 
 ### Output Styles
 
@@ -484,23 +486,23 @@ just list-agents  # List all agents
 
 ## Session Continuity
 
-The `/save` and `/sync` commands fill a gap in Claude Code's native session management.
+The `/save` and `/sync` commands make session state **portable**.
 
-**The problem:** Claude Code's `--resume` flag restores conversation history, but **task state does not persist between sessions—by design**. Claude Code treats each session as isolated; the philosophy is that persistent state belongs in files you control.
+**What's native now:** Claude Code remembers a lot on its own. `--resume` and the session picker restore conversation history, auto-memory writes a per-project `MEMORY.md` with learnings Claude decides are worth keeping, and `/rewind` checkpoints let you roll back within a session. All of it is machine-local — per the docs, auto-memory files "are not shared across machines or cloud environments" — and it remembers context *for you*, in a format Claude curates.
 
-Tasks (created via TaskCreate, managed via TaskList/TaskUpdate) are session-scoped and deleted when the session ends. This is intentional.
+**What's still missing:** task state. Tasks (created via TaskCreate, managed via TaskList/TaskUpdate) are session-scoped and deleted when the session ends — by design. And none of the native state is something you can commit, review, or hand to a teammate.
 
-**The solution:** `/save` and `/sync` implement the pattern from Anthropic's [Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents):
+**What `/save` + `/sync` add:** a state file you control — task restore, structured git/PR context, explicit human-readable handoff notes, and session-ID bridging. Because it lives in your repo, it's git-trackable, team-shareable, and follows you across machines. This implements the pattern from Anthropic's [Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents):
 
 > "Every subsequent session asks the model to make incremental progress, then leave structured updates."
 
 ### What Persists vs What Doesn't
 
-| Claude Code Feature | Persists? | Location |
-|---------------------|-----------|----------|
-| Conversation history | Yes | Internal (use `--resume`) |
-| CLAUDE.md context | Yes | `./CLAUDE.md` |
-| Native memory (MEMORY.md) | Yes | `~/.claude/projects/.../memory/` |
+| Claude Code Feature | Persists? | Scope |
+|---------------------|-----------|-------|
+| Conversation history | Yes | This machine (`--resume` / session picker) |
+| Auto-memory (MEMORY.md) | Yes | This machine, per repo — Claude-curated learnings, not task state |
+| CLAUDE.md context | Yes | Wherever you commit it |
 | Tasks | **No** | Deleted on session end |
 | Plan Mode state | **No** | In-memory only |
 
@@ -520,22 +522,21 @@ Session 2:
   → "PR: #42 (claude --from-pr 42)"
 ```
 
-### Why Not Just Use `--resume`?
+### Why Not Just Use `--resume` or Auto-Memory?
 
-| Feature | `--resume` | `/save` + `/sync` |
-|---------|------------|-------------------|
-| Conversation history | Yes | No |
-| Tasks | **No** | Yes |
-| Git context | No | Yes |
-| PR linkage | Yes (`--from-pr`) | Yes (detected via `gh`) |
-| Session ID bridging | N/A | Yes (suggests `--resume <id>`) |
-| Native memory safety net | No | Yes (MEMORY.md auto-loaded) |
-| Human-readable summary | No | Yes |
-| Git-trackable | No | Yes |
-| Works across machines | No | Yes (if committed) |
-| Team sharing | No | Yes |
+| Feature | `--resume` | Auto-memory | `/save` + `/sync` |
+|---------|------------|-------------|-------------------|
+| Conversation history | Yes | No | No |
+| Learnings/preferences | No | Yes (Claude-curated) | No |
+| Tasks | **No** | **No** | Yes |
+| Git/PR context | PR only (`--from-pr`) | Incidental | Yes (structured, `gh`-detected) |
+| Session ID bridging | N/A | No | Yes (suggests `--resume <id>`) |
+| Explicit handoff notes | No | No | Yes |
+| Git-trackable | No | No | Yes |
+| Works across machines | No | No (machine-local) | Yes (if committed) |
+| Team sharing | No | No | Yes |
 
-**Use both together:** `claude --resume` for conversation context, `/sync` for task state. Since v3.1, `/save` stores your session ID so `/sync` can suggest the exact `--resume` command.
+**Use all three together:** `claude --resume` for conversation context, auto-memory for accumulated learnings, `/sync` for task state and handoff. Since v3.1, `/save` stores your session ID so `/sync` can suggest the exact `--resume` command.
 
 ### Session Cache Schema (v3.1)
 
@@ -594,6 +595,14 @@ When using multiple MCP servers (Chrome DevTools, Vibe Kanban, etc.), their tool
 | `"false"` | Disabled |
 
 **Requirements:** Sonnet 4+ or Opus 4+ (Haiku not supported)
+
+### Skill Description Budget
+
+With 80+ skills installed (this plugin alone ships 81), skill descriptions can overflow the listing budget. All skill names are always listed, but descriptions share a budget of **1% of the model context window** — on overflow, least-invoked skills lose their descriptions first and **silently stop auto-triggering** (explicit `/name` invocation still works). Each skill's combined `description` + `when_to_use` is also truncated at **1,536 chars**, so trigger phrases belong at the front.
+
+- **Check:** run `/doctor` — it shows whether the budget is overflowing and which skills are affected.
+- **Fix:** demote or disable skills you don't use via `skillOverrides` in settings (`"on"` / `"name-only"` / `"user-invocable-only"` / `"off"` per skill, or `/skills` + `Space`). Plugin skills are managed via `/plugin` instead.
+- **Or raise the budget:** `skillListingBudgetFraction` setting (e.g. `0.02`), `SLASH_COMMAND_TOOL_CHAR_BUDGET` env var for a fixed char count, or `maxSkillDescriptionChars` for the per-skill cap.
 
 ### Skills Over Commands
 
