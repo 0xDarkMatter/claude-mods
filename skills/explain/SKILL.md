@@ -1,11 +1,11 @@
 ---
 name: explain
 description: "Deep explanation of complex code, files, or concepts. Dispatches skill-preloaded agents, uses structural search, generates mermaid diagrams. Triggers on: explain, deep dive, how does X work, architecture, data flow."
-argument-hint: "<target> [--depth shallow|normal|deep|trace] [--focus arch|flow|deps|api|perf]"
 license: MIT
 compatibility: "Uses ast-grep, tokei, rg, fd if available. Falls back to standard tools."
 allowed-tools: "Read Glob Grep Bash Task"
 metadata:
+  argument-hint: "<target> [--depth shallow|normal|deep|trace] [--focus arch|flow|deps|api|perf]"
   author: claude-mods
   related-skills: structural-search, code-stats
 ---

@@ -1,10 +1,10 @@
 ---
 name: bash-ops
 description: "Defensive Bash scripting for production automation, CI scripts, and agent-facing tools. Triggers on: bash, shell script, defensive bash, bash strict mode, set -euo pipefail, set -Eeuo pipefail, shellcheck, trap, IFS, cleanup trap, mktemp, getopts, argument parsing, exit codes, stream separation, stdout stderr, quoting, word splitting, pipefail, subshell, CI script, shell footgun, bats, shfmt, POSIX, portable shell."
-when_to_use: "Use when writing or reviewing any Bash/shell script — especially skill scripts, CI steps, and automation that must fail safely. Covers strict mode, quoting, argument parsing, traps/cleanup, safe tempfiles, the stream-separation + exit-code contract, and shellcheck."
 license: MIT
 allowed-tools: "Read Write Edit Bash"
 metadata:
+  when_to_use: "Use when writing or reviewing any Bash/shell script — especially skill scripts, CI steps, and automation that must fail safely. Covers strict mode, quoting, argument parsing, traps/cleanup, safe tempfiles, the stream-separation + exit-code contract, and shellcheck."
   author: claude-mods
   related-skills: cli-ops, ci-cd-ops
 ---
