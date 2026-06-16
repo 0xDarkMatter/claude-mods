@@ -1,5 +1,10 @@
 # The Complete Guide to Building Skills for Claude
 
+> **Vendored reference** — Anthropic's general guide to building skills, kept for
+> background reading. For claude-mods-specific skill creation, start with
+> [SKILL-CREATION-PROTOCOL.md](../SKILL-CREATION-PROTOCOL.md) (it sequences the repo's
+> workflow and cites the layer-owning docs); this guide is the upstream theory behind it.
+
 ## Contents
 
 - [Introduction](#introduction)

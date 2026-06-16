@@ -60,4 +60,4 @@ Current claude-mods skills/commands (verified no conflicts):
 
 ## Last Updated
 
-2025-01-23
+2026-06-16 — verified against https://code.claude.com/docs/en/interactive-mode#built-in-commands

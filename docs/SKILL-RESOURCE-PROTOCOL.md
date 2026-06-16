@@ -5,17 +5,18 @@
 > script in `mac-ops` behaves like a script in `supply-chain-defense` — predictable
 > streams, predictable exit codes, predictable help.
 
-**Scope.** This document governs skill *resources*. Frontmatter, naming, and body
-structure live elsewhere — see [naming-conventions.md](../rules/naming-conventions.md),
+**Scope.** This document governs skill *resources* — the resource layer of the
+[Skill Creation Protocol](SKILL-CREATION-PROTOCOL.md) (Step 4). Frontmatter, naming, and
+body structure live elsewhere — see [naming-conventions.md](../rules/naming-conventions.md),
 [SKILL-SUBAGENT-REFERENCE.md](SKILL-SUBAGENT-REFERENCE.md), and the
 [Agent Skills spec](https://agentskills.io/specification). Terminal/TTY output is
 [TERMINAL-DESIGN.md](TERMINAL-DESIGN.md) (`skills/_lib/term.sh`).
 
 **Why it exists.** Claude executes these scripts mid-task and parses their output.
 Inconsistent interfaces mean wasted tokens (the agent re-derives usage), broken pipes
-(status text pollutes `| jq`), and silent failures (exit 0 on bad input). The repo has
-56 skill scripts; the strong ones already follow this — `supply-chain-defense/scripts/preinstall-check.sh`
-is the canonical exemplar.
+(status text pollutes `| jq`), and silent failures (exit 0 on bad input). Of the many
+skill scripts in this repo, the strong ones already follow this —
+`supply-chain-defense/scripts/preinstall-check.sh` is the canonical exemplar.
 
 ---
 
@@ -248,6 +249,6 @@ Recommended (the bar for a world-class skill):
 
 - `skills/supply-chain-defense/scripts/preinstall-check.sh` — the canonical script:
   ecosystem flags, `--json`, exit-10 domain signal, `command -v` guards, registry-unavailable→7.
-- `skills/supply-chain-defense/tests/run.sh` — offline self-test peer suite (67 assertions).
+- `skills/supply-chain-defense/tests/run.sh` — offline self-test peer suite.
 - `skills/_lib/term.sh` + [TERMINAL-DESIGN.md](TERMINAL-DESIGN.md) — for any script that
   prints a panel to a TTY.

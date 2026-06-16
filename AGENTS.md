@@ -38,7 +38,7 @@ cd claude-mods && ./scripts/install.sh  # or .\scripts\install.ps1 on Windows
 | `tools/` | Modern CLI toolkit documentation |
 | `tests/` | Validation scripts + justfile |
 | `scripts/` | Install scripts |
-| `docs/` | ARCHITECTURE.md, WORKFLOWS.md, PLAN.md, SKILL-SUBAGENT-REFERENCE.md, SKILL-RESOURCE-PROTOCOL.md, TERMINAL-DESIGN.md |
+| `docs/` | ARCHITECTURE.md, SKILL-CREATION-PROTOCOL.md (start here to build a skill), SKILL-SUBAGENT-REFERENCE.md, SKILL-RESOURCE-PROTOCOL.md, WORKFLOWS.md, PLAN.md, RESERVED-COMMANDS.md, TERMINAL-DESIGN.md; `archive/` (completed-migration records), `references/` (vendored guides) |
 
 ## Session Init
 

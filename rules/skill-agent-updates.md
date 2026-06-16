@@ -1,13 +1,20 @@
 # Skill and Agent Updates
 
-**BEFORE creating or updating any skill or agent**, check the official docs:
+**BEFORE creating a new skill**, follow `docs/SKILL-CREATION-PROTOCOL.md` — the single
+canonical lifecycle doc (warranted? → frontmatter → body → resources → tests → repo
+wiring → ship). It sequences the steps and points to the layer-owning docs below; read
+it first, then drill into whichever adjacent doc a step cites.
+
+**BEFORE creating or updating any skill or agent**, also check the official docs:
 
 | Resource | URL |
 |----------|-----|
 | Skills | https://code.claude.com/docs/en/skills |
 | Sub-agents | https://code.claude.com/docs/en/sub-agents |
 
-These APIs change frequently. For detailed reference (frontmatter fields, decision frameworks), see `docs/SKILL-SUBAGENT-REFERENCE.md`.
+These APIs change frequently. The protocol's adjacent docs: `docs/SKILL-SUBAGENT-REFERENCE.md`
+(frontmatter fields, subagent decision frameworks), `rules/naming-conventions.md` (naming +
+layout), and `docs/SKILL-RESOURCE-PROTOCOL.md` (the resource contract, below).
 
 ## Skill resources (scripts / assets / references)
 

@@ -1,5 +1,8 @@
 # Command-Skill Pattern
 
+> **ARCHIVED — completed.** The command→skill conversion this doc describes is done: only `/sync` and `/save` remain commands; all domain knowledge lives in skills. For the current component model see [ARCHITECTURE.md](../ARCHITECTURE.md); to build a skill see [SKILL-CREATION-PROTOCOL.md](../SKILL-CREATION-PROTOCOL.md). Kept as a historical record.
+
+
 ## Overview
 
 Claude Code has two extension concepts:

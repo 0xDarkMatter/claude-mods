@@ -1,5 +1,8 @@
 # Agent Skills Spec Compliance Brief
 
+> **ARCHIVED — completed.** The Agent Skills spec migration this brief describes finished in v3.0 (June 2026): all skills carry spec-compliant frontmatter, enforced by `tests/validate.sh`. New skills inherit the format via the `skill-creator` skill + [SKILL-CREATION-PROTOCOL.md](../SKILL-CREATION-PROTOCOL.md). Kept as a historical record.
+
+
 > Bring all 66 skills in claude-mods into compliance with the Agent Skills specification at https://agentskills.io/specification
 
 ## Background

@@ -2,6 +2,17 @@
 
 Recommended patterns for common development tasks.
 
+> **Orientation (v3.0+).** The core loops below — Explore→Plan→Code→Commit, TDD — are
+> timeless Anthropic best practice and unchanged. Two repo specifics to read them by:
+> (1) claude-mods is **skills-first** — domain knowledge lives in `-ops` skills loaded
+> on demand, not in agents; **subagents are reserved for context-isolation/worker roles
+> only** (git-agent, firecrawl-expert, project-organizer). Dispatching skills (review,
+> testgen, perf-ops, …) route `general-purpose` agents that preload the relevant skill.
+> (2) To **build** a skill, follow [SKILL-CREATION-PROTOCOL.md](SKILL-CREATION-PROTOCOL.md);
+> for what's shipping/next, see [PLAN.md](PLAN.md). Treat any specific skill/agent named
+> in older examples below as illustrative — [ARCHITECTURE.md](ARCHITECTURE.md) is the
+> current component authority.
+
 ## Core Workflow: Explore → Plan → Code → Commit
 
 The fundamental Claude Code workflow from [Anthropic's best practices](https://www.anthropic.com/engineering/claude-code-best-practices):

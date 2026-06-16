@@ -8,6 +8,22 @@ feature releases live in the README "Recent Updates" section.
 ## [Unreleased]
 
 ### Added
+- **`docs/SKILL-CREATION-PROTOCOL.md`** - the canonical "how to build a claude-mods
+  skill" sequencing doc (warranted? → frontmatter → body → resources → tests → repo
+  wiring → ship). Cites rather than restates the layer-owning docs (skill-creator,
+  SKILL-SUBAGENT-REFERENCE, naming-conventions, SKILL-RESOURCE-PROTOCOL) and carries a
+  precedence table for when they disagree. `skill-agent-updates.md` now routes here first.
+
+### Changed (docs review)
+- Refreshed `WORKFLOWS.md` with a v3.0 orientation banner (skills-first; subagents are
+  isolation/worker-only); fixed `naming-conventions.md` frontmatter example (metadata
+  block, not top-level arrays); dated `RESERVED-COMMANDS.md`; noted `anthropic-skills-guide.md`
+  as a vendored reference pointing at the creation protocol.
+- Archived completed-migration docs to `docs/archive/`: `AGENT-SKILLS-COMPLIANCE-BRIEF.md`
+  (spec migration done, CI-enforced) and `COMMAND-SKILL-PATTERN.md` (command→skill
+  conversion done). docs/ top level is now 8 load-bearing docs + `archive/` + `references/`.
+
+### Added
 - **github-ops open-issue awareness** - `scripts/check-issues.sh` surfaces open
   issues you may not have seen (externally-authored + stale), read-only via
   `gh issue list`. Wired into the pre-push gate (`push-gate/preflight.sh`) as a

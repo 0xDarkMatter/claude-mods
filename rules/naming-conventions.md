@@ -59,16 +59,22 @@ All skills follow the official Anthropic pattern with bundled resources:
 
 **Naming guidance:** Use `-ops` for all skills providing domain knowledge. The `-ops` suffix signals comprehensive operational expertise - design, implementation, and operations.
 
-**Frontmatter:**
+**Frontmatter:** field placement is owned by
+[SKILL-SUBAGENT-REFERENCE.md](../docs/SKILL-SUBAGENT-REFERENCE.md) (the Agent Skills
+spec). Only `name`, `description`, `license`, `compatibility`, `allowed-tools`, and
+`metadata` are legal at the top level; `depends-on` / `related-skills` go **inside
+`metadata` as comma-separated strings, not arrays**.
 
 ```yaml
 ---
 name: python-async-ops  # Match directory name
 description: "<trigger phrases>"
-compatibility: "<version requirements>"
+license: MIT
 allowed-tools: "<tool list>"
-depends-on: [<skill-names>]
-related-skills: [<skill-names>]
+metadata:
+  author: claude-mods
+  related-skills: "skill-a, skill-b"
+  depends-on: "skill-c"
 ---
 ```
 
