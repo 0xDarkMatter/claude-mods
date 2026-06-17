@@ -40,6 +40,60 @@ root="$(cd "$here/.." && pwd)"
 echo "=== net-ops self-tests ==="
 echo "Root: $root"
 
+# ---------------------------------------------------------------------------
+echo
+echo "--- terminal design system (term.sh panel adoption) ---"
+# ---------------------------------------------------------------------------
+# OS-independent: drives _lib/output.sh directly (no live probe), so it runs on
+# every platform including Windows where the probe ladder is skipped below.
+OUTLIB="$root/scripts/_lib/output.sh"
+TERMLIB="$root/../_lib/term.sh"
+
+assert "output.sh sources shared term.sh" contains "$(cat "$OUTLIB")" '_lib/term.sh'
+assert "probe scripts set a PANEL_TITLE" \
+    bash -c 'grep -q "PANEL_TITLE=" "$1"' _ "$root/scripts/linux/probe.sh"
+
+# Exercise the public output API in one of the three modes.
+_drive() {
+    bash -c '
+        OUT="$1"; shift
+        . "$OUT"
+        PANEL_TITLE="linux probe"
+        parse_output_flags "$@"
+        section "1. LINK LAYER"; pass "iface up" "eth0"; fail "carrier" "no link"
+        emit_summary
+    ' _ "$OUTLIB" "$@"
+}
+
+# Panel path (FORCE_COLOR forces the render): the enclosing frame appears and is
+# pure ASCII under TERM_ASCII=1.
+panel_ascii="$(TERM_ASCII=1 FORCE_COLOR=1 _drive 2>/dev/null)"
+assert "panel renders the enclosing frame" contains "$panel_ascii" "+-- "
+assert "panel footer carries a health indicator" contains "$panel_ascii" "fail"
+assert "panel is pure ASCII under TERM_ASCII=1" \
+    bash -c '! printf "%s" "$1" | LC_ALL=C grep -q "[^[:print:][:cntrl:]]"' _ "$panel_ascii"
+
+# Legacy text path (piped / non-TTY): the greppable [PASS]/[FAIL]/SUMMARY contract
+# is byte-stable, so humans, LLMs, tests, and the --watch dispatcher keep working.
+legacy="$(_drive 2>/dev/null)"
+assert "piped text keeps [PASS] anchor" contains "$legacy" "[PASS]"
+assert "piped text keeps [FAIL] anchor" contains "$legacy" "[FAIL]"
+assert "piped text keeps SUMMARY block" contains "$legacy" "=== SUMMARY ==="
+assert "piped text carries no ANSI" not_contains "$legacy" $'\033'
+
+# JSON unaffected by the panel.
+js="$(_drive --json 2>/dev/null)"
+assert "json mode still emits a summary record" contains "$js" '"type":"summary"'
+assert "json mode carries no panel chrome" not_contains "$js" "+-- "
+
+# term.sh primitives are pure ASCII under TERM_ASCII=1.
+if [[ -f "$TERMLIB" ]]; then
+    prim="$(TERM_ASCII=1 LT="$TERMLIB" bash -c '. "$LT"; term_init; printf "%s%s%s%s" \
+        "$(term_mark ok)" "$(term_status_row ok a b)" "$(term_panel_open net-ops x)" "$TERM_DOT"')"
+    assert "term.sh primitives pure ASCII under TERM_ASCII=1" \
+        bash -c '! printf "%s" "$1" | LC_ALL=C grep -q "[^[:print:][:cntrl:]]"' _ "$prim"
+fi
+
 # Determine the local OS probe for testing
 case "$(uname -s)" in
     Darwin) probe="$root/scripts/macos/probe.sh"; audit="$root/scripts/macos/dns-audit.sh" ;;

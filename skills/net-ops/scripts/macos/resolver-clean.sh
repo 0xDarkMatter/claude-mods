@@ -7,6 +7,12 @@
 # Requires sudo.
 
 set -eu
+# Shared terminal toolkit (skills/_lib/term.sh) — colorized, ASCII-aware section
+# headers. Dump/fixer output isn't a checklist, so it uses the bare-header style
+# (a deliberate exception per docs/TERMINAL-DESIGN.md), not the enclosing panel.
+__nlib="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../_lib" 2>/dev/null && pwd || true)"
+if [ -n "${__nlib:-}" ] && [ -f "$__nlib/term.sh" ]; then . "$__nlib/term.sh"; term_init
+else term_header() { printf '== %s ==\n' "${1:-}"; }; fi
 
 APPLY=0
 PROTECT_PATTERNS="${PROTECT_PATTERNS:-100\.100\.100\.100}"
@@ -36,7 +42,7 @@ if [[ ! -d /etc/resolver ]] || [[ -z "$(ls -A /etc/resolver 2>/dev/null)" ]]; th
     exit 0
 fi
 
-echo "=== BEFORE ==="
+term_header "BEFORE"
 for f in /etc/resolver/*; do
     [[ -f "$f" ]] || continue
     ns=$(awk '/^nameserver/{print $2}' "$f" | tr '\n' ',')
@@ -59,7 +65,7 @@ if [[ "${#TARGETS[@]}" -eq 0 ]]; then
 fi
 
 echo
-echo "=== TARGETS FOR REMOVAL ==="
+term_header "TARGETS FOR REMOVAL"
 for f in "${TARGETS[@]}"; do
     echo "  $f"
 done
@@ -77,7 +83,7 @@ if [[ "$EUID" -ne 0 ]]; then
 fi
 
 echo
-echo "=== REMOVING ==="
+term_header "REMOVING"
 for f in "${TARGETS[@]}"; do
     if rm -f "$f"; then
         echo "[OK]   $f"
@@ -87,13 +93,13 @@ for f in "${TARGETS[@]}"; do
 done
 
 echo
-echo "=== FLUSHING DNS CACHE ==="
+term_header "FLUSHING DNS CACHE"
 dscacheutil -flushcache
 killall -HUP mDNSResponder 2>/dev/null || true
 echo "  done."
 
 echo
-echo "=== VERIFICATION ==="
+term_header "VERIFICATION"
 if out=$(dscacheutil -q host -a name google.com 2>&1) && echo "$out" | grep -q "ip_address:"; then
     addr=$(echo "$out" | awk '/ip_address:/{print $2; exit}')
     echo "[PASS] dscacheutil google.com -> $addr"
@@ -108,7 +114,7 @@ else
 fi
 
 echo
-echo "=== AFTER ==="
+term_header "AFTER"
 if [[ -n "$(ls -A /etc/resolver 2>/dev/null)" ]]; then
     for f in /etc/resolver/*; do
         [[ -f "$f" ]] || continue

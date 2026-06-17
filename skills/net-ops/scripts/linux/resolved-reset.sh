@@ -7,6 +7,12 @@
 # Requires sudo for the apply path.
 
 set -eu
+# Shared terminal toolkit (skills/_lib/term.sh) — colorized, ASCII-aware section
+# headers. Dump/fixer output isn't a checklist, so it uses the bare-header style
+# (a deliberate exception per docs/TERMINAL-DESIGN.md), not the enclosing panel.
+__nlib="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../_lib" 2>/dev/null && pwd || true)"
+if [ -n "${__nlib:-}" ] && [ -f "$__nlib/term.sh" ]; then . "$__nlib/term.sh"; term_init
+else term_header() { printf '== %s ==\n' "${1:-}"; }; fi
 
 APPLY=0
 for arg in "$@"; do
@@ -31,7 +37,7 @@ if ! systemctl is-active systemd-resolved >/dev/null 2>&1; then
     exit 0
 fi
 
-echo "=== BEFORE ==="
+term_header "BEFORE"
 resolvectl status 2>/dev/null | head -60
 
 # Find links with non-empty per-link DNS (potential stale state)
@@ -47,7 +53,7 @@ if [[ -z "$LINKS_WITH_DNS" ]]; then
 fi
 
 echo
-echo "=== LINKS WITH EXPLICIT DNS ==="
+term_header "LINKS WITH EXPLICIT DNS"
 echo "$LINKS_WITH_DNS" | while IFS='|' read -r idx name; do
     echo "  Link $idx ($name)"
 done
@@ -64,7 +70,7 @@ if [[ "$EUID" -ne 0 ]]; then
 fi
 
 echo
-echo "=== RESETTING ==="
+term_header "RESETTING"
 echo "$LINKS_WITH_DNS" | while IFS='|' read -r idx name; do
     if resolvectl revert "$name" 2>/dev/null; then
         echo "[OK]   reverted $name"
@@ -74,7 +80,7 @@ echo "$LINKS_WITH_DNS" | while IFS='|' read -r idx name; do
 done
 
 echo
-echo "=== FLUSHING CACHE ==="
+term_header "FLUSHING CACHE"
 resolvectl flush-caches && echo "  cache flushed"
 
 # Restart for good measure if user really wanted a reset
@@ -82,7 +88,7 @@ systemctl restart systemd-resolved
 echo "  systemd-resolved restarted"
 
 echo
-echo "=== VERIFICATION ==="
+term_header "VERIFICATION"
 if out=$(getent hosts google.com 2>&1) && [[ -n "$out" ]]; then
     echo "[PASS] getent hosts google.com -> $(echo "$out" | awk '{print $1}')"
 else
@@ -96,5 +102,5 @@ else
 fi
 
 echo
-echo "=== AFTER ==="
+term_header "AFTER"
 resolvectl status 2>/dev/null | head -40

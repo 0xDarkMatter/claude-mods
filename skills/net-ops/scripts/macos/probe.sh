@@ -36,6 +36,7 @@ source "$(dirname "$0")/../_lib/redact.sh"
 source "$(dirname "$0")/../_lib/output.sh"
 # shellcheck source=../_lib/cache.sh
 source "$(dirname "$0")/../_lib/cache.sh"
+PANEL_TITLE="macos probe"
 parse_redact_flag "$@"
 parse_output_flags "$@"
 parse_quick_flag "$@"

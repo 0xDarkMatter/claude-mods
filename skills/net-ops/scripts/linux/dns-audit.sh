@@ -4,17 +4,23 @@
 # but rung 5 (getent / resolvectl) FAIL.
 
 set -u
+# Shared terminal toolkit (skills/_lib/term.sh) — colorized, ASCII-aware section
+# headers. Dump/fixer output isn't a checklist, so it uses the bare-header style
+# (a deliberate exception per docs/TERMINAL-DESIGN.md), not the enclosing panel.
+__nlib="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../_lib" 2>/dev/null && pwd || true)"
+if [ -n "${__nlib:-}" ] && [ -f "$__nlib/term.sh" ]; then . "$__nlib/term.sh"; term_init
+else term_header() { printf '== %s ==\n' "${1:-}"; }; fi
 
 # shellcheck source=../_lib/redact.sh
 source "$(dirname "$0")/../_lib/redact.sh"
 parse_redact_flag "$@"
 maybe_redact_self "$@"
 
-echo "=== /etc/nsswitch.conf (hosts line) ==="
+term_header "/etc/nsswitch.conf (hosts line)"
 grep "^hosts:" /etc/nsswitch.conf 2>/dev/null || echo "  (no hosts entry)"
 
 echo
-echo "=== /etc/resolv.conf ==="
+term_header "/etc/resolv.conf"
 if [[ -L /etc/resolv.conf ]]; then
     echo "  Type: symlink -> $(readlink /etc/resolv.conf)"
 else
@@ -25,7 +31,7 @@ echo "  --- contents ---"
 cat /etc/resolv.conf 2>/dev/null | sed 's/^/  /'
 
 echo
-echo "=== systemd-resolved ==="
+term_header "systemd-resolved"
 if systemctl is-active systemd-resolved >/dev/null 2>&1; then
     echo "  Service: active"
     echo "  --- resolvectl status ---"
@@ -35,7 +41,7 @@ else
 fi
 
 echo
-echo "=== NetworkManager DNS config ==="
+term_header "NetworkManager DNS config"
 if command -v nmcli >/dev/null 2>&1; then
     echo "  --- nmcli dev show (DNS lines) ---"
     nmcli dev show 2>/dev/null | grep -E 'DEVICE|IP4.DNS|IP6.DNS|DOMAIN' | sed 's/^/  /'
@@ -48,7 +54,7 @@ else
 fi
 
 echo
-echo "=== dnsmasq ==="
+term_header "dnsmasq"
 if pgrep -x dnsmasq >/dev/null; then
     pid=$(pgrep -x dnsmasq | head -1)
     echo "  Running, PID $pid"
@@ -61,15 +67,15 @@ for d in /etc/dnsmasq.d /etc/NetworkManager/dnsmasq.d; do
 done
 
 echo
-echo "=== Local DNS listeners ==="
+term_header "Local DNS listeners"
 ss -tulnp 2>/dev/null | awk 'NR==1 || $5 ~ /:53$/' | sed 's/^/  /'
 
 echo
-echo "=== /etc/hosts (non-comment) ==="
+term_header "/etc/hosts (non-comment)"
 grep -vE '^\s*(#|$)' /etc/hosts 2>/dev/null | sed 's/^/  /' || echo "  (no custom entries)"
 
 echo
-echo "=== VPN / WireGuard interfaces ==="
+term_header "VPN / WireGuard interfaces"
 ip -br link 2>/dev/null | awk '/^(wg|tun|tap|nordlynx|proton|mullvad|nextdns)/' | sed 's/^/  /' || true
 if command -v wg >/dev/null 2>&1; then
     echo "  --- wg show ---"
@@ -77,7 +83,7 @@ if command -v wg >/dev/null 2>&1; then
 fi
 
 echo
-echo "=== ATTRIBUTION HINTS ==="
+term_header "ATTRIBUTION HINTS"
 # Inspect nameservers visible across the stack for known patterns
 ns_list=$( {
     awk '/^nameserver/{print $2}' /etc/resolv.conf 2>/dev/null

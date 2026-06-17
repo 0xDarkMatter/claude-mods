@@ -30,6 +30,7 @@ TIMEOUT=4
 source "$(dirname "$0")/_lib/redact.sh"
 # shellcheck source=_lib/output.sh
 source "$(dirname "$0")/_lib/output.sh"
+PANEL_TITLE="reverse probe"
 parse_redact_flag "$@"
 parse_output_flags "$@"
 maybe_redact_self "$TARGET" "$@"
