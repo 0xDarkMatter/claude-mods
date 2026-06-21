@@ -7,6 +7,23 @@ feature releases live in the README "Recent Updates" section.
 
 ## [Unreleased]
 
+### Added
+- **`fleet-worker` skill** - delegate tool-using, multi-step agent tasks to a cheaper
+  headless Claude Code worker on a non-Anthropic model (GLM via z.ai by default; any
+  Anthropic-compatible endpoint via `ANTHROPIC_BASE_URL`). Each worker is a real
+  `claude -p` carrying Claude Code's full tool harness but a "grunt" brain, isolated
+  in its own git worktree + `CLAUDE_CONFIG_DIR` (the load-bearing auth-isolation
+  finding - without it a host subscription token leaks to the endpoint and 401s). An
+  Opus orchestrator fans workers out in parallel, gates raw results with
+  `fleet-collect.sh` (the `is_error`-not-`subtype` footgun, encoded), and hands the
+  winning branches to `fleet-ops` for test-gated landing - fleet-worker is the spawn
+  layer fleet-ops disowns. Ships bash + PowerShell launchers, `fleet-doctor.sh`
+  (offline structural / `--live` endpoint staleness verifier + the oauth-trap
+  preflight), a sanitized design spec, the fleet-ops handoff recipes, and a
+  34-assertion offline self-test. Provider-agnostic framing; carries a "know your
+  terms" note (custom endpoints are documented Claude Code config; keep the
+  orchestrator interactive or on an API key per Anthropic's automated-access terms).
+
 ## [3.1.0] - 2026-06-17
 
 ### Added

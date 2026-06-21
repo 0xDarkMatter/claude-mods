@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# fleet-worker - run a cheap headless Claude Code worker on a non-Anthropic model.
+#
+# Thin launcher: points Claude Code (`claude -p`) at any Anthropic-compatible
+# endpoint (default: z.ai / GLM) via env, inside an ISOLATED config dir, then
+# execs. The result is a headless agent with Claude Code's full tool harness
+# (Read/Write/Edit/Bash/Glob/Grep/Task) but a cheaper "grunt" brain - fanned
+# out and verified by an Opus orchestrator. See ../SKILL.md.
+#
+# Usage:   fleet-worker [--help] [claude-flags...] "PROMPT"
+#          fleet-worker [claude-flags...] < prompt.txt
+# Input:   prompt as the final positional arg, or piped on stdin
+# Output:  whatever `claude -p` emits (text, or --output-format json/stream-json)
+# Stderr:  claude's own diagnostics; this launcher is silent on success
+# Exit:    0 ok; 1 worker/API error; 2 usage; 5 missing dep / no key resolved
+#
+# Config (env, all optional - defaults target the z.ai GLM Coding Plan):
+#   FLEET_WORKER_CONFIG_DIR   isolated CLAUDE_CONFIG_DIR (default ~/.fleet-worker/cfg)
+#   FLEET_WORKER_BASE_URL     Anthropic-compatible endpoint (default z.ai)
+#   FLEET_WORKER_MODEL        main model      (default GLM-5.2)
+#   FLEET_WORKER_SMALL_MODEL  background model (default GLM-4.5-Air)
+#   FLEET_WORKER_EFFORT       seeded effortLevel (default high)
+# Key resolution order (the key is never printed):
+#   1. ANTHROPIC_AUTH_TOKEN (already exported)            -> used as-is
+#   2. FLEET_WORKER_KEYRING_SERVICE + FLEET_WORKER_KEYRING_KEY -> `keyring get svc key`
+#   3. ZHIPU_API_KEY / GLM_API_KEY                         -> used as-is
+#
+# Examples:
+#   fleet-worker "List the TODOs under src/ and summarize them"
+#   fleet-worker --output-format json "Refactor utils.py" | fleet-collect.sh
+#   FLEET_WORKER_CONFIG_DIR=~/.fleet-worker/cfg-a fleet-worker --output-format json "task a"
+set -uo pipefail
+
+EXIT_OK=0; EXIT_USAGE=2; EXIT_MISSING_DEP=5
+
+case "${1:-}" in
+  -h|--help) awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"; exit "$EXIT_OK" ;;
+esac
+
+# --- Auth isolation (LOAD-BEARING; see references/fleet-worker-spec.md sec 4) ------
+# A dedicated config dir means the worker inherits NO host Claude.ai OAuth
+# account or forceLoginMethod, so our token is the only credential and actually
+# reaches the endpoint - otherwise a host subscription token wins and the
+# endpoint rejects it with 401.
+GLM_CFG="${FLEET_WORKER_CONFIG_DIR:-$HOME/.fleet-worker/cfg}"
+if ! mkdir -p "$GLM_CFG" 2>/dev/null; then
+  echo "fleet-worker: cannot create config dir: $GLM_CFG" >&2
+  exit "$EXIT_MISSING_DEP"
+fi
+if [ ! -f "$GLM_CFG/settings.json" ]; then
+  printf '{ "hooks": {}, "effortLevel": "%s" }\n' "${FLEET_WORKER_EFFORT:-high}" > "$GLM_CFG/settings.json"
+fi
+export CLAUDE_CONFIG_DIR="$GLM_CFG"
+
+# --- Resolve the API key (never echoed) --------------------------------------
+resolve_key() {
+  if [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]; then printf '%s' "$ANTHROPIC_AUTH_TOKEN"; return 0; fi
+  if [ -n "${FLEET_WORKER_KEYRING_SERVICE:-}" ] && [ -n "${FLEET_WORKER_KEYRING_KEY:-}" ] \
+     && command -v keyring >/dev/null 2>&1; then
+    local k
+    k="$(keyring get "$FLEET_WORKER_KEYRING_SERVICE" "$FLEET_WORKER_KEYRING_KEY" 2>/dev/null | tr -d '\r\n')"
+    if [ -n "$k" ]; then printf '%s' "$k"; return 0; fi
+  fi
+  if [ -n "${ZHIPU_API_KEY:-}" ]; then printf '%s' "$ZHIPU_API_KEY"; return 0; fi
+  if [ -n "${GLM_API_KEY:-}" ];   then printf '%s' "$GLM_API_KEY";   return 0; fi
+  return 1
+}
+if ! __key="$(resolve_key)"; then
+  cat >&2 <<'MSG'
+fleet-worker: no API key resolved. Provide one of:
+  - export ANTHROPIC_AUTH_TOKEN=<key>
+  - export FLEET_WORKER_KEYRING_SERVICE=<svc> FLEET_WORKER_KEYRING_KEY=<name>   (uses `keyring get`)
+  - export ZHIPU_API_KEY=<key>    (or GLM_API_KEY)
+MSG
+  exit "$EXIT_MISSING_DEP"
+fi
+
+command -v claude >/dev/null 2>&1 || {
+  echo "fleet-worker: 'claude' (Claude Code) not found on PATH" >&2; exit "$EXIT_MISSING_DEP"; }
+
+# --- Endpoint + model mapping ------------------------------------------------
+export ANTHROPIC_BASE_URL="${FLEET_WORKER_BASE_URL:-https://api.z.ai/api/anthropic}"
+export ANTHROPIC_AUTH_TOKEN="$__key"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="${FLEET_WORKER_MODEL:-GLM-5.2}"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="${FLEET_WORKER_MODEL:-GLM-5.2}"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="${FLEET_WORKER_SMALL_MODEL:-GLM-4.5-Air}"
+
+# `--model sonnet` resolves to $FLEET_WORKER_MODEL via the mapping above.
+# `</dev/null` avoids the ~3s "no stdin data received" wait when the prompt is
+# passed as an argument.
+exec claude -p --model sonnet --permission-mode bypassPermissions "$@" </dev/null

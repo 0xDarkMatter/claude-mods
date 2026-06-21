@@ -57,6 +57,10 @@ echo "== mapbox-ops: fact/staleness verifier"
 run "mapbox-ops --offline consistent" 0 "$PY" skills/mapbox-ops/scripts/check-mapbox-facts.py --offline
 run "mapbox-ops --help"               0 "$PY" skills/mapbox-ops/scripts/check-mapbox-facts.py --help
 
+echo "== fleet-worker: doctor (preflight + staleness) verifier"
+run "fleet-doctor --offline consistent" 0 bash skills/fleet-worker/scripts/fleet-doctor.sh --offline
+run "fleet-doctor --help"               0 bash skills/fleet-worker/scripts/fleet-doctor.sh --help
+
 echo "== protocol: every new verifier is executable + compiles"
 for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/claude-code-ops/scripts/validate-hooks-json.py \
@@ -70,6 +74,8 @@ bash -n skills/ffmpeg-ops/scripts/verify-commands.sh 2>/dev/null \
     && pass "bash -n verify-commands.sh" || bad "bash -n verify-commands.sh"
 bash -n skills/ytdlp-ops/scripts/check-ytdlp-version.sh 2>/dev/null \
     && pass "bash -n check-ytdlp-version.sh" || bad "bash -n check-ytdlp-version.sh"
+bash -n skills/fleet-worker/scripts/fleet-doctor.sh 2>/dev/null \
+    && pass "bash -n fleet-doctor.sh" || bad "bash -n fleet-doctor.sh"
 
 echo "== terminal design: verifier framing adopts term.sh and is ASCII-pure"
 # Each verifier renders its human framing on stderr; under TERM_ASCII=1 every
@@ -88,8 +94,11 @@ purity "hooks-lint"  "$PY" skills/claude-code-ops/scripts/validate-hooks-json.py
 __tf="$(mktemp)"; printf '{"suites":[]}' > "$__tf"
 purity "flake-triage" "$PY" skills/playwright-ops/scripts/triage-flakes.py "$__tf"
 rm -f "$__tf"
+purity "fleet-doctor"  bash skills/fleet-worker/scripts/fleet-doctor.sh --offline
 grep -q '_lib/term.sh' skills/terraform-ops/scripts/check-action-refs.sh \
     && pass "check-action-refs sources term.sh" || bad "check-action-refs missing term.sh"
+grep -q '_lib/term.sh' skills/fleet-worker/scripts/fleet-doctor.sh \
+    && pass "fleet-doctor sources term.sh" || bad "fleet-doctor missing term.sh"
 for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/claude-code-ops/scripts/validate-hooks-json.py \
          skills/playwright-ops/scripts/triage-flakes.py; do
