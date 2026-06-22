@@ -252,6 +252,15 @@ out="$("$PYTHON" "$SYNC" --json 2>/dev/null)"
 expect_has "pricing-sync json schema" "claude-mods.loop-ops.pricing-sync/v1" "$out"
 expect_has "pricing-sync json in_sync" '"in_sync": true' "$out"
 
+# ── worked example: the shipped example stays gate-clean ───────────────────
+echo "-- worked example --"
+EX="$SKILL/assets/examples/pr-babysitter/loop.config.yaml"
+[[ -f "$EX" ]] && ok "worked example present" || no "worked example missing"
+bash "$AUDIT" "$EX" >/dev/null 2>&1; expect_exit "shipped example audits clean -> 0" 0 $?
+bash "$DOCTOR" --offline "$EX" >/dev/null 2>&1; expect_exit "shipped example doctors clean -> 0" 0 $?
+[[ -f "$SKILL/assets/examples/pr-babysitter/github-actions.yml" ]] && ok "example ships a scheduler" || no "example missing scheduler"
+[[ -f "$SKILL/assets/examples/pr-babysitter/run.md" ]] && ok "example ships a run prompt" || no "example missing run.md"
+
 # ── terminal design system ─────────────────────────────────────────────────
 echo "-- terminal design system --"
 for s in "$INIT" "$AUDIT" "$DOCTOR"; do

@@ -277,6 +277,18 @@ python scripts/check-pricing-sync.py --offline   # exit 0 in sync, 10 drift, 3 a
 8. **Read the reports.** Only after the loop's judgment is proven do you graduate it to
    **L2** (worktree + guard + `fleet-ops` landing) and re-audit at the higher tier.
 
+## Worked example
+
+A complete, **audit + doctor-clean** L1 loop ships at
+[assets/examples/pr-babysitter/](assets/examples/pr-babysitter/): a filled
+`loop.config.yaml`, a *populated* `STATE.md`, the `run.md` run prompt, a sample
+`run-log.md`, and `github-actions.yml` — the scheduler with the **kill-switch gate and
+`dontAsk` + allowlist profile baked in**. Copy the dir, adjust scope/cadence, run
+`loop-audit` + `loop-doctor --live`, wire the workflow. The other patterns don't ship as
+static dirs that rot — `loop-init --pattern <name>` *generates* the same, seeded and
+gate-clean, for any pattern at any tier. CI runs `loop-audit` + `loop-doctor` on this
+example every build, so it can't drift out of validity.
+
 ## Anti-patterns (these are detected and wrong)
 
 - **Routing around the gate.** Wrapping `claude -p --permission-mode bypassPermissions`
