@@ -1,6 +1,6 @@
 ---
 name: fleet-worker
-description: "Delegate tool-using, multi-step agent tasks to a cheaper headless Claude Code worker on a non-Anthropic model (GLM via z.ai by default) — a 'grunt worker' an Opus orchestrator fans out in parallel and verifies. Each worker is a real `claude -p` carrying Claude Code's full tool harness (Read/Write/Edit/Bash/Glob/Grep/Task) but a cheaper brain, isolated in its own git worktree + CLAUDE_CONFIG_DIR. Pairs with fleet-ops for test-gated landing. Triggers on: fleet-worker, delegate to GLM, spin up a GLM worker, cheap parallel agent, grunt worker, offload to glm, headless GLM, z.ai worker, GLM-5.2 worker, cheap coding agent, fan out workers, non-Anthropic model in Claude Code, ANTHROPIC_BASE_URL worker."
+description: "Delegate tool-using, multi-step agent tasks to a cheaper headless Claude Code worker on a cheaper model — Anthropic Sonnet/Haiku or a non-Anthropic endpoint (GLM via z.ai by default) — a 'grunt worker' an Opus orchestrator fans out in parallel and verifies. Each worker is a real `claude -p` carrying Claude Code's full tool harness (Read/Write/Edit/Bash/Glob/Grep/Task) but a cheaper brain, isolated in its own git worktree + CLAUDE_CONFIG_DIR. Pairs with fleet-ops for test-gated landing. Triggers on: fleet-worker, delegate to GLM, spin up a GLM worker, cheap parallel agent, grunt worker, offload to glm, headless GLM, z.ai worker, GLM-5.2 worker, sonnet worker, haiku worker, cheap coding agent, fan out workers, non-Anthropic model in Claude Code, ANTHROPIC_BASE_URL worker."
 when_to_use: "Use when you have independent, well-scoped, tool-using subtasks (refactors, test-writing, doc edits, mechanical multi-file changes) that don't need Opus-level judgment, and you want them done cheaply in parallel while the orchestrator reviews and gates the results before they land. Not for tasks needing the orchestrator's conversation context or expensive-if-wrong unreviewed changes."
 license: MIT
 allowed-tools: "Read Bash Glob Grep AskUserQuestion"
@@ -12,12 +12,13 @@ metadata:
 
 # fleet-worker
 
-Run a **cheap headless Claude Code worker on a non-Anthropic model** and let an
+Run a **cheap headless Claude Code worker on a cheaper model** and let an
 Opus orchestrator (this session) fan workers out in parallel, then verify and
 land their work. The worker keeps Claude Code's *entire tool harness*
 (Read/Write/Edit/Bash/Glob/Grep/Task/MCP/hooks) — only the **brain** is swapped
-to a cheaper model via env. GLM-5.2 on z.ai is the default worked example; the
-mechanism is provider-agnostic (any Anthropic-compatible endpoint).
+to a cheaper model via env — a cheaper Anthropic model (Sonnet/Haiku) or a
+non-Anthropic endpoint. GLM-5.2 on z.ai is the default worked example; the
+mechanism is provider- and model-agnostic (any Anthropic-compatible endpoint).
 
 **This is the spawning layer. [`fleet-ops`](../fleet-ops/) is the landing layer.**
 fleet-worker produces branches cheaply; fleet-ops lands them through a test gate
@@ -49,6 +50,16 @@ The launcher sets this automatically. It also gives each worker a clean
 hook/permission/MCP profile so it can't trip the host's hooks. Full analysis in
 [references/fleet-worker-spec.md](references/fleet-worker-spec.md) §4.
 
+## Giving a worker skills
+
+The isolated config dir starts **clean** — the worker inherits none of the host's
+skills, MCP servers, or hooks (that isolation is what keeps it off your
+credentials). So *provision* what a worker should have: drop skill dirs into the
+worker's own config (`$FLEET_WORKER_CONFIG_DIR/skills/<name>/`) or commit them to
+the project's `.claude/skills/` in the worktree. The cheap brain then loads the
+same on-demand, progressively-disclosed procedural knowledge your orchestrator has
+— often the cheapest way to lift a weak model's output on a specialized task.
+
 ## Setup
 
 1. **Install** — these scripts ship with the skill. After `scripts/install.sh`
@@ -78,6 +89,13 @@ hook/permission/MCP profile so it can't trip the host's hooks. Full analysis in
 Point `FLEET_WORKER_BASE_URL`/`FLEET_WORKER_MODEL` at any other Anthropic-compatible
 gateway (this is the documented Claude Code custom-endpoint mechanism) to drive a
 different cheap model.
+
+**Staying all-Anthropic?** The same separate-process trick runs a cheaper *Claude*
+model as the worker — an Opus orchestrator with Sonnet/Haiku workers, no third-party
+account. Point `FLEET_WORKER_BASE_URL` at Anthropic's API and set `FLEET_WORKER_MODEL`/
+`FLEET_WORKER_SMALL_MODEL` to a Claude model, authenticating with an Anthropic API key.
+The defaults target z.ai/GLM only because that's the cheapest brain; the mechanism
+doesn't care which model answers.
 
 ## When to delegate (and when not)
 
@@ -176,15 +194,16 @@ credentials. Avoid `--debug` in shared logs (may print headers).
 ## Know your terms (read before publishing or automating)
 
 Using Claude Code with a custom `ANTHROPIC_BASE_URL` is a **documented** feature,
-and the worker's inference never touches Anthropic's API/subscription. But terms
+and a non-Anthropic worker's inference never touches Anthropic's API/subscription. But terms
 change and vary by plan — verify both your **Anthropic** terms and your **model
 provider's** terms for your own use. Two specifics worth knowing:
 
 - **Automated subscription access:** Anthropic's Consumer Terms restrict driving a
   Claude.ai/Pro/Max **subscription** by "automated or non-human means … except
   when accessing via an Anthropic API Key." Keep the orchestrator **interactive**,
-  or run it on an **API key** if you automate it. (Workers are non-Anthropic, so
-  this clause doesn't reach them.)
+  or run it on an **API key** if you automate it. (A non-Anthropic worker isn't
+  reached by this clause; an Anthropic-model worker driven by an **API key** lands
+  in the API-key exemption.)
 - This skill is a tool, not legal advice. When in doubt, ask your provider.
 
 ## Scripts

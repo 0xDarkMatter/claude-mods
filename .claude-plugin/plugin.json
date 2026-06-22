@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "claude-mods",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "description": "Custom commands, skills, agents, rules, hooks, and output styles for Claude Code - session continuity and modern CLI tooling for real-world development workflows",
   "author": {
     "name": "0xDarkMatter"

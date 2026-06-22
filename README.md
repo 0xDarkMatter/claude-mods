@@ -22,6 +22,9 @@ From Python async patterns to Rust ownership models, from AWS Fargate deployment
 
 ## Recent Updates
 
+**v3.2.0** (June 2026)
+- 🤖 **`fleet-worker` skill** — delegate tool-using, multi-step tasks to *cheaper headless Claude Code workers* — a cheaper Anthropic model (Sonnet/Haiku) or any Anthropic-compatible endpoint (e.g. GLM 5.2 via z.ai) — while an Opus orchestrator fans them out in parallel and gates their results before anything lands. Each worker is a real `claude -p` with Claude Code's full tool harness (Read/Write/Edit/Bash/Glob/Grep/Task) and any skills you provision into it, but a cheaper brain — isolated in its own git worktree + `CLAUDE_CONFIG_DIR`. Ships bash + PowerShell launchers, a result-gating collector, an endpoint health verifier, and the fleet-ops handoff recipes. fleet-worker is the **spawn** layer; [`fleet-ops`](skills/fleet-ops/) is the test-gated **landing** layer it hands winning branches to. Provider-agnostic.
+
 **v3.1.0** (June 2026)
 - 🗺️ **`mapbox-ops` skill** - advanced Mapbox GL JS for the web (v3): custom SVG/canvas markers and circular photo pins, thematic dataviz (choropleth, heatmaps, proportional symbols, 3D extrusions), terrain with hillshade and contours, cinematic flight/orbit camera and animated day–night cycles, style composition (v3 Standard slots + config, classic palette recolour, third-party styles), expression-driven styling, and the hard-won gotchas that silently drop your markers. 14 reference files plus a headless-Playwright marker-alignment verifier.
 - 📐 **Skill Creation Protocol** - [docs/SKILL-CREATION-PROTOCOL.md](docs/SKILL-CREATION-PROTOCOL.md), the canonical "how to build a claude-mods skill" doc: one sequenced lifecycle (warranted? → frontmatter → body → resources → tests → repo wiring → ship) that cites the layer-owning docs rather than restating them, with a precedence table for when they disagree.

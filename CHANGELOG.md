@@ -5,11 +5,12 @@ All notable changes to claude-mods are documented here. Format follows
 [Semantic Versioning](https://semver.org/). Fuller narrative entries for
 feature releases live in the README "Recent Updates" section.
 
-## [Unreleased]
+## [3.2.0] - 2026-06-22
 
 ### Added
 - **`fleet-worker` skill** - delegate tool-using, multi-step agent tasks to a cheaper
-  headless Claude Code worker on a non-Anthropic model (GLM via z.ai by default; any
+  headless Claude Code worker on a cheaper model — Anthropic Sonnet/Haiku, or a
+  non-Anthropic endpoint (GLM via z.ai by default; any
   Anthropic-compatible endpoint via `ANTHROPIC_BASE_URL`). Each worker is a real
   `claude -p` carrying Claude Code's full tool harness but a "grunt" brain, isolated
   in its own git worktree + `CLAUDE_CONFIG_DIR` (the load-bearing auth-isolation
