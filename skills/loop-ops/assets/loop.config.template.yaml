@@ -1,5 +1,5 @@
 # loop.config.yaml — one OUTER-loop definition.
-# Scaffolded by loop-init.sh, scored by loop-audit.sh. Flat YAML on purpose: every
+# Scaffolded by loop-scaffold.sh, scored by loop-check.sh. Flat YAML on purpose: every
 # key sits at column 0 so the audit parses it without a yq dependency.
 # Full field semantics: skills/loop-ops/references/state-spine.md
 #
@@ -8,7 +8,7 @@
 
 # ── identity ────────────────────────────────────────────────────────────────
 name: <loop-name>            # matches the .loops/<name>/ directory
-pattern: <pattern-key>       # a catalog key (pr-babysitter, ci-sweeper, …) or "custom"
+pattern: <pattern-key>       # a catalog key (pr-watch, ci-watch, …) or "custom"
 
 # ── autonomy ────────────────────────────────────────────────────────────────
 tier: L1                     # L1 report-only | L2 assisted (worktree+gate) | L3 unattended

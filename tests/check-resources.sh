@@ -66,8 +66,8 @@ run "pricing-sync --offline in sync" 0 "$PY" skills/loop-ops/scripts/check-prici
 run "pricing-sync --help"            0 "$PY" skills/loop-ops/scripts/check-pricing-sync.py --help
 
 echo "== loop-ops: worked example is gate-clean (dogfood)"
-LOOP_EX="skills/loop-ops/assets/examples/pr-babysitter/loop.config.yaml"
-run "example audits clean"          0 bash skills/loop-ops/scripts/loop-audit.sh "$LOOP_EX"
+LOOP_EX="skills/loop-ops/assets/examples/pr-watch/loop.config.yaml"
+run "example audits clean"          0 bash skills/loop-ops/scripts/loop-check.sh "$LOOP_EX"
 run "example doctors clean (offline)" 0 bash skills/loop-ops/scripts/loop-doctor.sh --offline "$LOOP_EX"
 
 echo "== protocol: every new verifier is executable + compiles"

@@ -2,7 +2,7 @@
 
 Each pattern is a proven outer-loop shape with a cadence, a starting risk tier, a gate,
 and an escalation rule. **Start every pattern at L1** (read-only) and graduate it only
-after its reports prove its judgment. The `loop-init` script seeds a `loop.config.yaml`
+after its reports prove its judgment. The `loop-scaffold` script seeds a `loop.config.yaml`
 keyed by `--pattern <name>`; the names below are the canonical keys.
 
 The columns that matter for every pattern: **cadence** (how often), **tier** (starting
@@ -11,7 +11,7 @@ human instead of doing).
 
 ---
 
-## `daily-triage` — discover + prioritize
+## `daily-scan` — discover + prioritize
 
 | | |
 |---|---|
@@ -26,7 +26,7 @@ human draw from. Output is a `STATE.md` priority/watch/noise snapshot, nothing e
 
 ---
 
-## `pr-babysitter` — watch review state
+## `pr-watch` — watch review state
 
 | | |
 |---|---|
@@ -42,7 +42,7 @@ Public-comment text follows the repo's preview-before-send discipline.
 
 ---
 
-## `ci-sweeper` — triage build failures
+## `ci-watch` — triage build failures
 
 | | |
 |---|---|
@@ -58,7 +58,7 @@ branch to `fleet-ops` for the gated merge. Never auto-merges to `main`.
 
 ---
 
-## `dependency-sweeper` — patch-only bumps
+## `dep-bump` — patch-only bumps
 
 | | |
 |---|---|
@@ -75,7 +75,7 @@ and only on a feature branch, never `main`.
 
 ---
 
-## `changelog-drafter` — release-note drafts
+## `changelog-gen` — release-note drafts
 
 | | |
 |---|---|
@@ -91,7 +91,7 @@ commitment — it stays a human step (the repo's release-review discipline). Pai
 
 ---
 
-## `post-merge-cleanup` — hygiene
+## `merge-hygiene` — hygiene
 
 | | |
 |---|---|
@@ -106,7 +106,7 @@ session's `.claude/worktrees/`, never sweeps with `git add -A`.
 
 ---
 
-## `issue-triage` — classify + label
+## `issue-sort` — classify + label
 
 | | |
 |---|---|
@@ -126,10 +126,10 @@ At L1 it proposes; at L2 it may apply purely-mechanical labels (`needs-triage` �
 1. **Match the job** to the closest pattern; use `custom` only if none fit.
 2. **Start at the pattern's L1 tier.** Run it read-only until you trust its reports.
 3. **Set the cadence** to the slowest that still catches the work in time — cadence is
-   the biggest cost lever (see [loop-cost](../scripts/loop-cost.py)). A 5-min PR
-   babysitter costs 3× a 15-min one for marginal freshness gain.
+   the biggest cost lever (see [loop-estimate](../scripts/loop-estimate.py)). A 5-min PR
+   pr-watch loop costs 3× a 15-min one for marginal freshness gain.
 4. **Graduate** to L2 only with a `guard`, a `worktree`, an `escalation` rule, and a
-   `land_via` — then re-run `loop-audit` at the new tier.
+   `land_via` — then re-run `loop-check` at the new tier.
 
 ## See also
 

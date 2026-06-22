@@ -10,7 +10,7 @@ TTL and reports the cached projection alongside the naive one.
 Pricing reads from assets/model-pricing.json (date-stamped; skills/claude-api-ops is
 the source of truth - run its check-model-table.py if you suspect drift).
 
-Usage:   loop-cost.py --pattern P --cadence C --model M [OPTIONS]
+Usage:   loop-estimate.py --pattern P --cadence C --model M [OPTIONS]
 Input:   argv flags only (no stdin).
 Output:  stdout = the cost breakdown (plain rows, or --json envelope). Data only.
 Stderr:  the assumptions + caching note, errors.
@@ -21,10 +21,10 @@ order of impact: cadence (halving frequency halves cost), prompt caching (model 
 model tier.
 
 Examples:
-  loop-cost.py --pattern pr-babysitter --cadence 10m --model claude-haiku-4-5
-  loop-cost.py --pattern ci-sweeper --cadence 15m --model claude-sonnet-4-6 --days 30 --json
-  loop-cost.py --pattern daily-triage --cadence 6h --model claude-opus-4-8   # too slow to cache
-  loop-cost.py --list-models
+  loop-estimate.py --pattern pr-watch --cadence 10m --model claude-haiku-4-5
+  loop-estimate.py --pattern ci-watch --cadence 15m --model claude-sonnet-4-6 --days 30 --json
+  loop-estimate.py --pattern daily-scan --cadence 6h --model claude-opus-4-8   # too slow to cache
+  loop-estimate.py --list-models
 """
 from __future__ import annotations
 
@@ -180,7 +180,7 @@ def fmt_money(x: float) -> str:
 
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(
-        prog="loop-cost.py",
+        prog="loop-estimate.py",
         description="Estimate outer-loop cost by pattern × cadence × model, with prompt caching.",
     )
     p.add_argument("--pattern", default="custom", help="catalog pattern key (default: custom)")
@@ -287,7 +287,7 @@ def main(argv: list[str]) -> int:
             else:
                 data["caching"] = {"beneficial": False, "reason": cache["reason"],
                                    "prefix_tokens": cache["prefix_tokens"]}
-        print(json.dumps({"data": data, "meta": {"as_of": as_of, "schema": "claude-mods.loop-ops.cost/v1"}}, indent=2))
+        print(json.dumps({"data": data, "meta": {"as_of": as_of, "schema": "claude-mods.loop-ops.estimate/v1"}}, indent=2))
         return EX_OK
 
     t = Term(sys.stderr)

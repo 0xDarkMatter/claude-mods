@@ -12,7 +12,7 @@ writes at the end. This is the loop's working memory, audit trail, and definitio
 └── run-log.md          # append-only audit trail (one line per run)
 ```
 
-`loop-init` scaffolds all three. The config is human-owned; `STATE.md` and `run-log.md`
+`loop-scaffold` scaffolds all three. The config is human-owned; `STATE.md` and `run-log.md`
 are loop-owned.
 
 ---
@@ -25,7 +25,7 @@ Flat YAML so it's trivially parseable (no `yq` dependency). Full annotated templ
 | Field | Required | Meaning |
 |---|---|---|
 | `name` | yes | the loop's identifier; matches the directory |
-| `pattern` | yes | a catalog key (`pr-babysitter`, …) or `custom` |
+| `pattern` | yes | a catalog key (`pr-watch`, …) or `custom` |
 | `tier` | yes | `L1` / `L2` / `L3` — the autonomy rung |
 | `cadence` | yes | `10m` / `1h` / `6h` / `1d`, or a cron string |
 | `goal` | yes | one sentence: what this loop does and what it must NOT do |
@@ -39,7 +39,7 @@ Flat YAML so it's trivially parseable (no `yq` dependency). Full annotated templ
 | `kill_switch` | yes | the stop signal every run checks first |
 | `land_via` | L2+ | who gates + lands winning branches (e.g. `fleet-ops`) |
 
-`loop-audit` reads this file and scores it against the tier's requirements.
+`loop-check` reads this file and scores it against the tier's requirements.
 
 ---
 
@@ -105,10 +105,10 @@ Two controls:
 
 - **`budget_tokens`** in the config — a per-run output ceiling. The loop stops the run
   when it's reached (the same discipline as a dynamic `/loop` watching `budget.remaining()`).
-- **The run-log** — the actual spend, line by line. Reconcile estimate (`loop-cost`)
+- **The run-log** — the actual spend, line by line. Reconcile estimate (`loop-estimate`)
   against actual periodically; if they diverge, the loop's scope crept.
 
-Estimate before you schedule: [../scripts/loop-cost.py](../scripts/loop-cost.py). The
+Estimate before you schedule: [../scripts/loop-estimate.py](../scripts/loop-estimate.py). The
 cheapest lever is **cadence** — halving the frequency halves the cost. The next is
 **model** — a Haiku triage loop costs a fifth of an Opus one; put the cheap model on the
 maker and reserve the expensive one for the gate decision.
@@ -122,14 +122,14 @@ Running several loops against one repo, two rules prevent them tripping over eac
 ### Priority order (collision avoidance)
 
 ```
-CI Sweeper  ►  PR Babysitter  ►  Dependency Sweeper  ►  Post-Merge/Changelog  ►  Daily Triage
+CI Watch  ►  PR Watch  ►  Dependency Bump  ►  Post-Merge/Changelog  ►  Daily Scan
  (highest)                                                                        (off-peak)
 ```
 
-A red build blocks everyone, so the CI sweeper wins any worktree contention; daily triage
+A red build blocks everyone, so the CI watch wins any worktree contention; daily scan
 yields to all. When two loops want the same worktree/branch, the higher-priority one
 proceeds and the lower defers to its next cadence tick. Loops announce what they're
-touching via [`pigeon`](../../pigeon/SKILL.md) so a peer can see "ci-sweeper holds a
+touching via [`pigeon`](../../pigeon/SKILL.md) so a peer can see "ci-watch holds a
 worktree on PR #412" and stand off.
 
 ### The kill switch (every loop honors it)

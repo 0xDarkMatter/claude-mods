@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Preflight a loop config - will this loop actually RUN, or die at 3am?
 #
-# loop-audit checks the config is well-formed; loop-doctor checks the loop will
+# loop-check checks the config is well-formed; loop-doctor checks the loop will
 # execute: the gate command's binary resolves, claude/git are on PATH, the budget
 # can fit a tick, and the permission mode is achievable from where it launches.
 # Modeled on fleet-worker/scripts/fleet-doctor.sh.
@@ -20,9 +20,9 @@
 #                        leading binary resolvable, the kill-switch path's parent exists.
 #
 # Examples:
-#   loop-doctor.sh --offline .loops/pr-babysitter/loop.config.yaml
-#   loop-doctor.sh --live .loops/ci-sweeper/loop.config.yaml
-#   loop-doctor.sh --live --json .loops/dep-sweeper/loop.config.yaml | jq '.data[] | select(.state=="bad")'
+#   loop-doctor.sh --offline .loops/pr-watch/loop.config.yaml
+#   loop-doctor.sh --live .loops/ci-watch/loop.config.yaml
+#   loop-doctor.sh --live --json .loops/dep-bump/loop.config.yaml | jq '.data[] | select(.state=="bad")'
 set -uo pipefail
 
 readonly EX_OK=0 EX_USAGE=2 EX_NOTFOUND=3 EX_UNPARSEABLE=4 EX_MISSING_DEP=5 EX_FINDINGS=10
@@ -58,9 +58,9 @@ Exit codes:
   0 ok   2 usage   3 not found   4 unparseable   5 missing dep   10 predicted runtime failure
 
 Examples:
-  loop-doctor.sh --offline .loops/pr-babysitter/loop.config.yaml
-  loop-doctor.sh --live .loops/ci-sweeper/loop.config.yaml
-  loop-doctor.sh --live --json .loops/dep-sweeper/loop.config.yaml | jq '.data[] | select(.state=="bad")'
+  loop-doctor.sh --offline .loops/pr-watch/loop.config.yaml
+  loop-doctor.sh --live .loops/ci-watch/loop.config.yaml
+  loop-doctor.sh --live --json .loops/dep-bump/loop.config.yaml | jq '.data[] | select(.state=="bad")'
 EOF
 }
 die_usage() { printf 'error: %s\n' "$1" >&2; echo >&2; usage >&2; exit "$EX_USAGE"; }
@@ -90,7 +90,7 @@ for c in python python3 py; do
   if command -v "$c" >/dev/null 2>&1 && "$c" -c "" >/dev/null 2>&1; then PY="$c"; break; fi
 done
 
-# ── flat-YAML readers (no yq), same contract as loop-audit.sh ────────────────
+# ── flat-YAML readers (no yq), same contract as loop-check.sh ────────────────
 cfg_scalar() {
   awk -v k="$1" -v q="'" '
     $0 ~ "^"k":" { sub("^"k":[ \t]*",""); sub(/[ \t]*#.*$/,""); gsub(/^[ \t]+|[ \t]+$/,"");

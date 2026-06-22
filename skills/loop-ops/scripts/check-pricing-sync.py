@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Offline verifier: loop-ops pricing must match claude-api-ops's model table.
 
-loop-cost.py reads assets/model-pricing.json. That table is a *copy* of the
+loop-estimate.py reads assets/model-pricing.json. That table is a *copy* of the
 authoritative "Current Models" table in skills/claude-api-ops/SKILL.md — and a
 copy drifts silently (the exact §7 failure mode). This asserts every model in
 loop-ops' pricing exists in the claude-api-ops table with matching input/output

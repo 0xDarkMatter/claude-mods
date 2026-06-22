@@ -1,11 +1,11 @@
 # OPTIONAL scheduler — use this ONLY if your repo already lives on GitHub. The portable,
 # runner-agnostic path is loop-run.sh (cron / Windows Task Scheduler / systemd / by hand) —
 # no GitHub Actions dependency. This file just wraps the same loop-run.sh idea in Actions.
-# Copy to .github/workflows/pr-babysitter.yml, PIN the action/CLI versions, add the
+# Copy to .github/workflows/pr-watch.yml, PIN the action/CLI versions, add the
 # ANTHROPIC_API_KEY secret. The SCHEDULER is the authorizer (no auto-mode session in the
 # loop), and the child runs gated (--permission-mode dontAsk + a narrow allowlist), never
 # bypassPermissions on a shared runner. See references/claude-code-loops.md.
-name: pr-babysitter
+name: pr-watch
 on:
   schedule:
     - cron: "*/10 * * * *"   # every 10 min (matches loop.config.yaml cadence: 10m)
@@ -16,7 +16,7 @@ permissions:
   pull-requests: write       # post the at-most-one summary comment (L1 stays report-only)
 
 concurrency:
-  group: pr-babysitter       # never overlap two ticks
+  group: pr-watch       # never overlap two ticks
   cancel-in-progress: false
 
 jobs:
@@ -30,7 +30,7 @@ jobs:
         id: gate
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
-          if [ -f .loops/pr-babysitter/PAUSED ]; then echo "paused=1" >> "$GITHUB_OUTPUT"; fi
+          if [ -f .loops/pr-watch/PAUSED ]; then echo "paused=1" >> "$GITHUB_OUTPUT"; fi
           if gh label list --limit 100 | grep -qi '^loop-pause'; then echo "paused=1" >> "$GITHUB_OUTPUT"; fi
 
       - name: Install Claude Code
@@ -44,7 +44,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: "${{ secrets.ANTHROPIC_API_KEY }}"
         run: |
-          cd .loops/pr-babysitter
+          cd .loops/pr-watch
           claude -p "$(cat run.md)" \
             --permission-mode dontAsk \
             --append-system-prompt "$(cat STATE.md)" \
@@ -54,8 +54,8 @@ jobs:
       - name: Persist STATE + run-log
         if: steps.gate.outputs.paused != '1'
         run: |
-          git config user.name  "pr-babysitter-loop"
+          git config user.name  "pr-watch-loop"
           git config user.email "loop@users.noreply.github.com"
-          git add .loops/pr-babysitter/STATE.md .loops/pr-babysitter/run-log.md
-          git diff --cached --quiet || git commit -m "chore(loop): pr-babysitter tick $(date -u +%FT%TZ)"
+          git add .loops/pr-watch/STATE.md .loops/pr-watch/run-log.md
+          git diff --cached --quiet || git commit -m "chore(loop): pr-watch tick $(date -u +%FT%TZ)"
           git push

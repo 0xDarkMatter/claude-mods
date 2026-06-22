@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Score an outer-loop config for readiness before it is scheduled.
 #
-# Usage:   loop-audit.sh [OPTIONS] <loop.config.yaml>
+# Usage:   loop-check.sh [OPTIONS] <loop.config.yaml>
 # Input:   argv flags + a config path (no stdin).
 # Output:  stdout = findings (plain `SEVERITY  message` rows, or --json envelope).
 #          Data only.
@@ -12,12 +12,12 @@
 # Scores a flat loop.config.yaml against the tier's requirements: a bounded scope,
 # a defined escalation rule + kill switch, and — at L2+ — a verify gate, a guard, a
 # worktree, and a landing path. The config is parsed without a yq dependency.
-# Pair with loop-init.sh (scaffold) and references/risk-tiers.md (the rubric).
+# Pair with loop-scaffold.sh (scaffold) and references/risk-tiers.md (the rubric).
 #
 # Examples:
-#   loop-audit.sh .loops/pr-babysitter/loop.config.yaml
-#   loop-audit.sh --json .loops/dep-sweeper/loop.config.yaml | jq '.data[] | select(.severity=="error")'
-#   loop-audit.sh --min 80 --strict .loops/ci-sweeper/loop.config.yaml
+#   loop-check.sh .loops/pr-watch/loop.config.yaml
+#   loop-check.sh --json .loops/dep-bump/loop.config.yaml | jq '.data[] | select(.severity=="error")'
+#   loop-check.sh --min 80 --strict .loops/ci-watch/loop.config.yaml
 set -uo pipefail
 
 readonly EX_OK=0 EX_USAGE=2 EX_NOTFOUND=3 EX_UNPARSEABLE=4 EX_FINDINGS=10
@@ -39,10 +39,10 @@ JSON=0
 
 usage() {
   cat <<'EOF'
-loop-audit.sh — score an outer-loop config for readiness.
+loop-check.sh — score an outer-loop config for readiness.
 
 Usage:
-  loop-audit.sh [OPTIONS] <loop.config.yaml>
+  loop-check.sh [OPTIONS] <loop.config.yaml>
 
 Options:
   --min N        readiness score (0-100) required for a "ready" verdict (default: 70).
@@ -54,9 +54,9 @@ Exit codes:
   0 ready    2 usage    3 config not found    4 unparseable    10 NOT ready (findings)
 
 Examples:
-  loop-audit.sh .loops/pr-babysitter/loop.config.yaml
-  loop-audit.sh --json .loops/dep-sweeper/loop.config.yaml | jq '.data[] | select(.severity=="error")'
-  loop-audit.sh --min 80 --strict .loops/ci-sweeper/loop.config.yaml
+  loop-check.sh .loops/pr-watch/loop.config.yaml
+  loop-check.sh --json .loops/dep-bump/loop.config.yaml | jq '.data[] | select(.severity=="error")'
+  loop-check.sh --min 80 --strict .loops/ci-watch/loop.config.yaml
 EOF
 }
 
@@ -220,7 +220,7 @@ if [[ "$JSON" -eq 1 ]]; then
     sep=","; [[ "$i" -eq $(( ${#FIND_SEV[@]} - 1 )) ]] && sep=""
     printf '    {"severity": "%s", "message": "%s"}%s\n' "${FIND_SEV[$i]}" "$msg" "$sep"
   done
-  printf '  ],\n  "meta": {"count": %d, "errors": %d, "warnings": %d, "score": %d, "min": %d, "ready": %s, "tier": "%s", "schema": "claude-mods.loop-ops.audit/v1"}\n}\n' \
+  printf '  ],\n  "meta": {"count": %d, "errors": %d, "warnings": %d, "score": %d, "min": %d, "ready": %s, "tier": "%s", "schema": "claude-mods.loop-ops.check/v1"}\n}\n' \
     "${#FIND_SEV[@]}" "$ERRORS" "$WARNINGS" "$SCORE" "$MIN" "$([[ "$READY" -eq 1 ]] && echo true || echo false)" "${TIER:-unknown}"
 else
   if [[ ${#FIND_SEV[@]} -gt 0 ]]; then

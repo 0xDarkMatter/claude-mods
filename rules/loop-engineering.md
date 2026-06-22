@@ -1,7 +1,7 @@
 # Loop Engineering — graduated-autonomy discipline for agent loops
 
 Companion to the [`loop-ops`](../skills/loop-ops/SKILL.md) skill (the full playbook +
-`loop-init`/`loop-audit`/`loop-doctor`/`loop-cost` scripts). This file is the *directive*
+`loop-scaffold`/`loop-check`/`loop-doctor`/`loop-estimate` scripts). This file is the *directive*
 — what to do every time you design or run a **recurring / scheduled / autonomous** agent
 loop, in any project: a `/loop`, a `/schedule` routine, a cron `claude -p`, an `iterate`
 run, a `fleet-worker` fan-out.
@@ -41,11 +41,11 @@ the authority you'd already seen it use well.
 
 | Situation | Directive |
 |---|---|
-| Designing any scheduled/autonomous loop | Start at **L1 (read-only)**. Scaffold with `loop-init`; fill a bounded `scope` (never `*`), a `verify` gate, an `escalation` rule, a `kill_switch`, a `budget_tokens`. |
-| Before scheduling a loop | Run **`loop-audit`** (config sane?) **then `loop-doctor --live`** (will it actually run — gate binary on PATH, budget fits a tick, permission mode achievable?). Don't schedule a loop that fails either. |
+| Designing any scheduled/autonomous loop | Start at **L1 (read-only)**. Scaffold with `loop-scaffold`; fill a bounded `scope` (never `*`), a `verify` gate, an `escalation` rule, a `kill_switch`, a `budget_tokens`. |
+| Before scheduling a loop | Run **`loop-check`** (config sane?) **then `loop-doctor --live`** (will it actually run — gate binary on PATH, budget fits a tick, permission mode achievable?). Don't schedule a loop that fails either. |
 | Choosing the permission mode | Default to **`dontAsk` + a narrow allowlist** (runs anywhere, fully gated). Reserve `bypassPermissions` for an **isolated container** (the enumerate-vs-isolate fork). Never `default` (interactive) for a headless loop. |
 | Wiring the cadence | A **scheduler** runs `claude -p` (the authorizer). Do **not** run an orchestrator session in auto mode whose job is spawning the loop. |
-| Setting the cadence + cost | Cadence is the biggest cost lever; **caching** is the next (a loop re-sends the same prompt — cache the static prefix, and note a loop slower than ~1h can't cache). Estimate with `loop-cost` before committing. |
+| Setting the cadence + cost | Cadence is the biggest cost lever; **caching** is the next (a loop re-sends the same prompt — cache the static prefix, and note a loop slower than ~1h can't cache). Estimate with `loop-estimate` before committing. |
 | Running several loops | Give them a **priority order** (CI > PR > deps > cleanup > triage) and a **shared kill switch**; coordinate via `pigeon` so they don't collide on a worktree. |
 | Anything high-blast-radius | **Escalate, don't act** (see below). A general goal is *not* authorization for a specific destructive action it implies. |
 
@@ -61,7 +61,7 @@ generated draft, a label/triage classification, a comment.
 ## Self-check before wiring a loop
 
 - Is it starting at L1? If you're reaching for L3 on a fresh loop, stop.
-- Does `loop-audit` pass and `loop-doctor --live` say it will run?
+- Does `loop-check` pass and `loop-doctor --live` say it will run?
 - Is the child **gated** (`dontAsk`+allowlist) or genuinely **isolated** (container)? If
   you're using `bypassPermissions` on the host to avoid enumerating permissions, that's the
   exact pattern the auto-mode classifier blocks — authorize it properly or isolate it.
@@ -71,7 +71,7 @@ generated draft, a label/triage classification, a comment.
 
 For the full operational workflow — the risk-tier ↔ permission-mode mapping, the STATE/
 run-log/budget spine, the seven production patterns, multi-loop coordination, the
-scheduler mechanics, and the `loop-init`/`loop-audit`/`loop-doctor`/`loop-cost` tools —
+scheduler mechanics, and the `loop-scaffold`/`loop-check`/`loop-doctor`/`loop-estimate` tools —
 **invoke the [`loop-ops`](../skills/loop-ops/SKILL.md) skill.**
 
 ## Cross-reference

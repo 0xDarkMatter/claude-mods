@@ -1,8 +1,8 @@
 # WORKED EXAMPLE — a complete, audit-clean L1 loop. Copy the dir, adjust scope/cadence,
-# run loop-audit + loop-doctor --live, then wire the scheduler (github-actions.yml).
-# The other patterns: `loop-init --pattern <name>` generates the same, seeded.
-name: pr-babysitter
-pattern: pr-babysitter
+# run loop-check + loop-doctor --live, then wire the scheduler (github-actions.yml).
+# The other patterns: `loop-scaffold --pattern <name>` generates the same, seeded.
+name: pr-watch
+pattern: pr-watch
 tier: L1
 permission_mode: dontAsk
 cadence: 10m
@@ -11,7 +11,7 @@ scope:
   - "src/**"
 escalation: "a human reviews and merges; never merge to main; never push; never close a PR"
 budget_tokens: 60000
-kill_switch: ".loops/pr-babysitter/PAUSED exists, OR the 'loop-pause' label is on the repo"
+kill_switch: ".loops/pr-watch/PAUSED exists, OR the 'loop-pause' label is on the repo"
 
 # ── graduate to L2 (assisted: open a fix-the-PR-description / rebase branch) ──
 # tier: L2

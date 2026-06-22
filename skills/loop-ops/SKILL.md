@@ -1,7 +1,7 @@
 ---
 name: loop-ops
-description: "Design, scaffold, and safely run OUTER loops — scheduled discover→triage→implement→verify→escalate-or-land agent loops, the orchestration layer above a single run. Risk-tier ladder (L1 report → L2 assisted → L3 unattended) mapped onto Claude Code's permission model, a persistent STATE/run-log/budget spine, a production pattern catalog, multi-loop coordination, and a kill switch. Composes iterate (inner loop), fleet-worker (spawn), fleet-ops (land), and native /loop + /schedule. Triggers on: loop engineering, outer loop, loop design, design a loop, scheduled agent, autonomous loop, background agent loop, PR babysitter, CI sweeper, dependency sweeper, changelog drafter, issue triage, daily triage, loop audit, loop cost, loop readiness, ralph loop, agent harness, escalation gate, risk tier, kill switch, run it overnight on a schedule."
-when_to_use: "Use when designing or running a recurring/scheduled agent loop rather than a one-shot task — e.g. 'set up a loop that triages PRs every 10 minutes', 'design an autonomous CI-failure sweeper', 'how risky is this loop / is it ready to run unattended', 'estimate what this loop costs per month', 'build a loop-engineering setup'. For a single-session improvement loop against one metric, use iterate instead."
+description: "Design, scaffold, and safely run OUTER loops — scheduled discover→triage→implement→verify→escalate-or-land agent loops, the orchestration layer above a single run. Risk-tier ladder (L1 report → L2 assisted → L3 unattended) mapped onto Claude Code's permission model, a persistent STATE/run-log/budget spine, a production pattern catalog, multi-loop coordination, and a kill switch. Composes iterate (inner loop), fleet-worker (spawn), fleet-ops (land), and native /loop + /schedule. Triggers on: loop engineering, outer loop, loop design, design a loop, scheduled agent, autonomous loop, background agent loop, PR watch, CI watch, dependency bump, changelog gen, issue sort, daily scan, loop check, loop estimate, loop readiness, ralph loop, agent harness, escalation gate, risk tier, kill switch, run it overnight on a schedule."
+when_to_use: "Use when designing or running a recurring/scheduled agent loop rather than a one-shot task — e.g. 'set up a loop that triages PRs every 10 minutes', 'design an autonomous CI-failure recovery loop', 'how risky is this loop / is it ready to run unattended', 'estimate what this loop costs per month', 'build a loop-engineering setup'. For a single-session improvement loop against one metric, use iterate instead."
 license: MIT
 allowed-tools: "Read Write Edit Bash Glob Grep"
 metadata:
@@ -110,7 +110,7 @@ read/write contract in [references/state-spine.md](references/state-spine.md)):
 - **`run-log.md`** — append one line per run (timestamp, action, outcome, tokens). The
   audit trail that answers "what has this loop been doing?"
 - **`loop.config.yaml`** — the loop's definition (goal, tier, cadence, scope, gate,
-  budget, escalation). Scaffolded by `loop-init`, scored by `loop-audit`.
+  budget, escalation). Scaffolded by `loop-scaffold`, scored by `loop-check`.
 
 ## Pattern catalog
 
@@ -119,13 +119,13 @@ Full skeletons in [references/pattern-catalog.md](references/pattern-catalog.md)
 
 | Pattern | Cadence | Tier | One-line job |
 |---|---|---|---|
-| Daily Triage | 1–2 h | L1 | discover + prioritize, report only |
-| PR Babysitter | 5–15 min | L1 | watch review state, surface stuck PRs |
-| CI Sweeper | 5–15 min | L2 | triage build failures, propose a fix |
-| Dependency Sweeper | 6 h–1 d | L2 | patch-only bumps behind the cooldown + guard |
-| Changelog Drafter | 1 d / tag | L1 | draft release notes for human approval |
-| Post-Merge Cleanup | 1–6 h | L1 | hygiene: dead branches, stale flags |
-| Issue Triage | 2 h–1 d | L1 | classify + label, propose only |
+| Daily Scan | 1–2 h | L1 | discover + prioritize, report only |
+| PR Watch | 5–15 min | L1 | watch review state, surface stuck PRs |
+| CI Watch | 5–15 min | L2 | triage build failures, propose a fix |
+| Dependency Bump | 6 h–1 d | L2 | patch-only bumps behind the cooldown + guard |
+| Changelog Gen | 1 d / tag | L1 | draft release notes for human approval |
+| Merge Hygiene | 1–6 h | L1 | hygiene: dead branches, stale flags |
+| Issue Sort | 2 h–1 d | L1 | classify + label, propose only |
 
 Start any pattern at L1. Graduate to L2 only after the L1 reports prove its judgment.
 
@@ -134,8 +134,8 @@ Start any pattern at L1. Graduate to L2 only after the L1 reports prove its judg
 Running several loops? Two non-negotiables (detail in
 [references/state-spine.md](references/state-spine.md)):
 
-- **Priority order** prevents collisions: `CI Sweeper → PR Babysitter → Dependency
-  Sweeper → Post-Merge/Changelog → Daily Triage (off-peak)`. A higher-priority loop's
+- **Priority order** prevents collisions: `CI Watch → PR Watch → Dependency Bump →
+  Merge-Hygiene/Changelog → Daily Scan (off-peak)`. A higher-priority loop's
   worktree wins; lowers defer. Loops signal each other via [`pigeon`](../pigeon/SKILL.md).
 - **A kill switch every loop honors.** A single stop signal — a `PAUSED` sentinel file
   or a `loop-pause` label — that every loop checks at the top of its run and exits on.
@@ -165,7 +165,7 @@ preflights whether it will actually *run*, **cost** estimates spend (caching-awa
 **check-pricing-sync** gates pricing drift in CI. The discipline before scheduling is
 `init → fill → cost → audit → doctor --live`.
 
-### `scripts/loop-init.sh` — scaffold a loop's state spine
+### `scripts/loop-scaffold.sh` — scaffold a loop's state spine
 
 Writes `<dir>/<name>/` with five files from the bundled templates:
 `loop.config.yaml` ([assets/loop.config.template.yaml](assets/loop.config.template.yaml)),
@@ -174,17 +174,17 @@ Writes `<dir>/<name>/` with five files from the bundled templates:
 executable **`loop-run.sh`** ([assets/run.sh.template](assets/run.sh.template)) — the
 runner-agnostic tick wrapper any scheduler invokes (cron / Windows Task Scheduler /
 systemd / by hand), **no GitHub Actions required**. Pass a known `--pattern`
-(pr-babysitter, ci-sweeper, dependency-sweeper, …) and the config is **seeded** with that
+(pr-watch, ci-watch, dep-bump, …) and the config is **seeded** with that
 pattern's scope/goal/escalation — and, at L2+, its gate — so you get a near-ready config to
 review, not blank placeholders (it audits clean immediately). Doctrine holds: it still
 scaffolds at L1 by default with a graduation block.
 
 ```bash
-# Create .loops/pr-babysitter/ with config + STATE.md + run-log.md + run.md from templates:
-bash scripts/loop-init.sh --name pr-babysitter --pattern pr-babysitter --tier L1
+# Create .loops/pr-watch/ with config + STATE.md + run-log.md + run.md from templates:
+bash scripts/loop-scaffold.sh --name pr-watch --pattern pr-watch --tier L1
 
 # Custom dir + cadence, preview without writing:
-bash scripts/loop-init.sh --name dep-sweeper --pattern dependency-sweeper \
+bash scripts/loop-scaffold.sh --name dep-bump --pattern dep-bump \
   --tier L2 --cadence 1d --dir .loops --dry-run
 ```
 
@@ -192,7 +192,7 @@ Refuses to overwrite a populated `<dir>/<name>/` (exit 5) unless `--force`. Atom
 writes. `--dry-run` prints what it would create and writes nothing. stdout = the created
 config path.
 
-### `scripts/loop-audit.sh` — readiness scorer (run before you schedule)
+### `scripts/loop-check.sh` — readiness scorer (run before you schedule)
 
 The question this answers: *is this loop safe to turn on at its declared tier?* It scores
 a `loop.config.yaml` against the readiness rubric — gate present, scope bounded,
@@ -200,9 +200,9 @@ escalation defined, guard + worktree at L2+, budget + kill switch set, permissio
 consistent with tier — and refuses a green light if any **critical** gap exists.
 
 ```bash
-bash scripts/loop-audit.sh .loops/pr-babysitter/loop.config.yaml   # exit 0 ready, 10 not ready
-bash scripts/loop-audit.sh --json .loops/dep-sweeper/loop.config.yaml | jq '.data[] | select(.severity=="error")'
-bash scripts/loop-audit.sh --min 80 .loops/ci-sweeper/loop.config.yaml   # raise the score bar
+bash scripts/loop-check.sh .loops/pr-watch/loop.config.yaml   # exit 0 ready, 10 not ready
+bash scripts/loop-check.sh --json .loops/dep-bump/loop.config.yaml | jq '.data[] | select(.severity=="error")'
+bash scripts/loop-check.sh --min 80 .loops/ci-watch/loop.config.yaml   # raise the score bar
 ```
 
 Exit **0** = ready (no errors, score ≥ `--min`), **10** = not ready (findings on stdout),
@@ -211,7 +211,7 @@ toward the not-ready signal.
 
 ### `scripts/loop-doctor.sh` — live preflight (will it actually run?)
 
-`loop-audit` proves the config is *well-formed*; `loop-doctor` proves the loop will
+`loop-check` proves the config is *well-formed*; `loop-doctor` proves the loop will
 *execute* — catching the "blocked at 3am" failures audit can't see. `--offline` (CI-safe):
 the budget fits a tick's estimated tokens, the permission mode is achievable (not
 interactive), an L3 bypass declares an isolation boundary. `--live` adds runtime preflight:
@@ -219,16 +219,16 @@ the `verify`/`guard` gate's leading binary resolves on PATH, `claude`/`git` are 
 the kill-switch sentinel's parent dir exists.
 
 ```bash
-bash scripts/loop-doctor.sh --offline .loops/pr-babysitter/loop.config.yaml   # CI gate
-bash scripts/loop-doctor.sh --live .loops/ci-sweeper/loop.config.yaml          # before scheduling
-bash scripts/loop-doctor.sh --live --json .loops/dep-sweeper/loop.config.yaml | jq '.data[] | select(.state=="bad")'
+bash scripts/loop-doctor.sh --offline .loops/pr-watch/loop.config.yaml   # CI gate
+bash scripts/loop-doctor.sh --live .loops/ci-watch/loop.config.yaml          # before scheduling
+bash scripts/loop-doctor.sh --live --json .loops/dep-bump/loop.config.yaml | jq '.data[] | select(.state=="bad")'
 ```
 
 Exit **0** = will run, **10** = a check predicts a runtime failure (gate binary missing,
 bypass on host without isolation, budget too small for a tick), `2` usage, `3` not found,
-`4` unparseable, `5` missing core dep. Run it **after** `loop-audit` and before scheduling.
+`4` unparseable, `5` missing core dep. Run it **after** `loop-check` and before scheduling.
 
-### `scripts/loop-cost.py` — token/$ estimate by pattern × cadence × model (caching-aware)
+### `scripts/loop-estimate.py` — token/$ estimate by pattern × cadence × model (caching-aware)
 
 Estimate spend **before** committing to a cadence — the cost of an outer loop is
 runs/day × tokens/run × price, and sub-agents multiply it. It also models **prompt
@@ -240,9 +240,9 @@ between ticks); the estimator says so and recommends the TTL. Pricing reads from
 is the source of truth — run its `check-model-table.py` if you suspect drift).
 
 ```bash
-python scripts/loop-cost.py --pattern pr-babysitter --cadence 10m --model claude-haiku-4-5
-python scripts/loop-cost.py --pattern ci-sweeper --cadence 15m --model claude-sonnet-4-6 --days 30 --json
-python scripts/loop-cost.py --list-models      # the pricing table + its as-of date
+python scripts/loop-estimate.py --pattern pr-watch --cadence 10m --model claude-haiku-4-5
+python scripts/loop-estimate.py --pattern ci-watch --cadence 15m --model claude-sonnet-4-6 --days 30 --json
+python scripts/loop-estimate.py --list-models      # the pricing table + its as-of date
 ```
 
 Exit `0` ok, `2` usage, `3` pricing file missing, `4` bad cadence/model. Output names
@@ -267,12 +267,12 @@ python scripts/check-pricing-sync.py --offline   # exit 0 in sync, 10 drift, 3 a
 ## End-to-end workflow
 
 1. **Pick a pattern** from the catalog (or `custom`). Start at **L1**.
-2. **Scaffold:** `bash scripts/loop-init.sh --name <n> --pattern <p> --tier L1`.
+2. **Scaffold:** `bash scripts/loop-scaffold.sh --name <n> --pattern <p> --tier L1`.
 3. **Fill `loop.config.yaml`** — the real `goal`, `scope` (bounded globs, never `*`),
    `verify` gate, `escalation` rule, `budget_tokens`, `kill_switch`.
-4. **Cost it:** `python scripts/loop-cost.py --pattern <p> --cadence <c> --model <m>` —
+4. **Cost it:** `python scripts/loop-estimate.py --pattern <p> --cadence <c> --model <m>` —
    sanity-check the monthly spend against the value.
-5. **Audit it:** `bash scripts/loop-audit.sh .loops/<n>/loop.config.yaml` — fix every
+5. **Audit it:** `bash scripts/loop-check.sh .loops/<n>/loop.config.yaml` — fix every
    error before scheduling. Don't schedule a loop that fails its own audit.
 6. **Doctor it:** `bash scripts/loop-doctor.sh --live .loops/<n>/loop.config.yaml` — prove
    it will actually *run* (gate binary on PATH, budget fits a tick). Audit = well-formed;
@@ -290,15 +290,15 @@ python scripts/check-pricing-sync.py --offline   # exit 0 in sync, 10 drift, 3 a
 ## Worked example
 
 A complete, **audit + doctor-clean** L1 loop ships at
-[assets/examples/pr-babysitter/](assets/examples/pr-babysitter/): a filled
+[assets/examples/pr-watch/](assets/examples/pr-watch/): a filled
 `loop.config.yaml`, a *populated* `STATE.md`, the `run.md` run prompt, a sample
 `run-log.md`, the runner-agnostic **`loop-run.sh`** (the tick wrapper, with the
 kill-switch gate and `dontAsk` + allowlist baked in — point cron / Task Scheduler at it),
 and an *optional* `github-actions.yml` for repos already on GitHub. Copy the dir, adjust
-scope/cadence, run `loop-audit` + `loop-doctor --live`, then wire `loop-run.sh` to your
+scope/cadence, run `loop-check` + `loop-doctor --live`, then wire `loop-run.sh` to your
 scheduler. The other patterns don't ship as
-static dirs that rot — `loop-init --pattern <name>` *generates* the same, seeded and
-gate-clean, for any pattern at any tier. CI runs `loop-audit` + `loop-doctor` on this
+static dirs that rot — `loop-scaffold --pattern <name>` *generates* the same, seeded and
+gate-clean, for any pattern at any tier. CI runs `loop-check` + `loop-doctor` on this
 example every build, so it can't drift out of validity.
 
 ## Anti-patterns (these are detected and wrong)
@@ -316,7 +316,7 @@ gate reward-hacking, …). The headline ones:
   the wrong place to launch the loop. The scheduler/cron/Task-Scheduler/CI runner that
   invokes `claude -p` is the authorizer. See [references/risk-tiers.md](references/risk-tiers.md) §"enumerate vs isolate".
 - **No gate.** A loop whose `verify:` is empty is not a loop, it's an unsupervised typer.
-  `loop-audit` errors on it.
+  `loop-check` errors on it.
 - **Unbounded scope.** `scope: "*"` means "may touch anything" — the audit rejects it.
 - **No kill switch / no budget.** A loop you can't stop, or whose spend you didn't
   bound, will eventually surprise you. Both are audit findings.
@@ -331,4 +331,4 @@ gate reward-hacking, …). The headline ones:
 - [references/claude-code-loops.md](references/claude-code-loops.md) — where loops actually live: `/loop`, `/schedule`, hooks, the scheduler pattern.
 - [references/failure-modes.md](references/failure-modes.md) — how loops break (incident-shaped) and the control that catches each.
 - [assets/loop.config.template.yaml](assets/loop.config.template.yaml) — the loop definition starter; [assets/STATE.template.md](assets/STATE.template.md) — the state-spine starter; [assets/run.template.md](assets/run.template.md) — the headless run prompt.
-- The lineage: [Ralph loop](https://ghuntley.com/ralph/) (inner brute-force), [loop-engineering](https://github.com/cobusgreyling/loop-engineering) (the methodology this distills).
+- Lineage (public sources): the [Ralph loop](https://ghuntley.com/ralph/) (fresh-context inner brute-force) and the broader *loop engineering* discipline framed by Peter Steinberger and Addy Osmani.

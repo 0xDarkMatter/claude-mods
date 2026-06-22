@@ -78,7 +78,7 @@ the classifier for batch workers.
 
 ## The cardinal rule: scheduler invokes `claude -p`, not session-spawns-loop
 
-This is the one thing the upstream methodology can't tell you because it isn't grounded
+This is the one thing a generic-agent methodology can't tell you because it isn't grounded
 in Claude Code's gate. **An unattended loop must be a scheduler/script that invokes
 `claude -p` — not a Claude session that tries to launch the loop.**
 
@@ -150,7 +150,7 @@ multi-agent matrix would dilute exactly that. The *doctrine* ports to any agent 
 ladder, the gate, the kill switch, the STATE spine, the escalation classes); the
 permission-mode **mapping** is Claude Code's, and that specificity is the point.
 
-## Tier checklist (what `loop-audit` enforces)
+## Tier checklist (what `loop-check` enforces)
 
 - **L1:** bounded `scope` (never `*`), a `kill_switch`, `permission_mode` ∈ {plan,
   dontAsk}, **no** `verify` that writes. Report-only.

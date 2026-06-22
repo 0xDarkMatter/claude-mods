@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Scaffold an outer-loop state spine (loop.config.yaml + STATE.md + run-log.md).
 #
-# Usage:   loop-init.sh --name NAME [OPTIONS]
+# Usage:   loop-scaffold.sh --name NAME [OPTIONS]
 # Input:   argv flags only (no stdin).
 # Output:  stdout = the created loop.config.yaml path (data). Under --dry-run, the
 #          path then the rendered config. Data only.
@@ -11,12 +11,12 @@
 #
 # Creates <dir>/<name>/ from the bundled templates, substituting name/pattern/tier/
 # cadence/permission_mode. Never clobbers a populated loop dir. Atomic writes.
-# Next step: fill the config, then `loop-audit.sh <dir>/<name>/loop.config.yaml`.
+# Next step: fill the config, then `loop-check.sh <dir>/<name>/loop.config.yaml`.
 #
 # Examples:
-#   loop-init.sh --name pr-babysitter --pattern pr-babysitter --tier L1
-#   loop-init.sh --name dep-sweeper --pattern dependency-sweeper --tier L2 --cadence 1d
-#   loop-init.sh --name nightly --cadence "0 3 * * *" --dry-run
+#   loop-scaffold.sh --name pr-watch --pattern pr-watch --tier L1
+#   loop-scaffold.sh --name dep-bump --pattern dep-bump --tier L2 --cadence 1d
+#   loop-scaffold.sh --name nightly --cadence "0 3 * * *" --dry-run
 set -uo pipefail
 
 readonly EX_OK=0 EX_USAGE=2 EX_NOTFOUND=3 EX_PRECOND=5
@@ -51,16 +51,16 @@ FORCE=0
 
 usage() {
   cat <<'EOF'
-loop-init.sh — scaffold an outer-loop state spine.
+loop-scaffold.sh — scaffold an outer-loop state spine.
 
 Usage:
-  loop-init.sh --name NAME [OPTIONS]
+  loop-scaffold.sh --name NAME [OPTIONS]
 
 Options:
   --name NAME        loop identifier, kebab-case (required). Names the directory.
-  --pattern KEY      catalog key (pr-babysitter, ci-sweeper, dependency-sweeper,
-                     changelog-drafter, post-merge-cleanup, issue-triage,
-                     daily-triage) or "custom" (default: custom).
+  --pattern KEY      catalog key (pr-watch, ci-watch, dep-bump,
+                     changelog-gen, merge-hygiene, issue-sort,
+                     daily-scan) or "custom" (default: custom).
   --tier L1|L2|L3    starting autonomy tier (default: L1).
   --cadence STR      10m | 1h | 6h | 1d, or a cron string (default: 1h).
   --dir DIR          parent directory for the loop (default: .loops).
@@ -72,9 +72,9 @@ Exit codes:
   0 created (or dry-run)   2 usage   3 template/dir not found   5 dir populated
 
 Examples:
-  loop-init.sh --name pr-babysitter --pattern pr-babysitter --tier L1
-  loop-init.sh --name dep-sweeper --pattern dependency-sweeper --tier L2 --cadence 1d
-  loop-init.sh --name nightly --cadence "0 3 * * *" --dry-run
+  loop-scaffold.sh --name pr-watch --pattern pr-watch --tier L1
+  loop-scaffold.sh --name dep-bump --pattern dep-bump --tier L2 --cadence 1d
+  loop-scaffold.sh --name nightly --cadence "0 3 * * *" --dry-run
 EOF
 }
 
@@ -122,33 +122,33 @@ esac
 # propose/draft patterns carry no gate (VERIFY_SEED empty), code-changing ones do.
 SEEDED=0; SCOPE_SEED=""; GOAL_SEED=""; ESCAL_SEED=""; VERIFY_SEED=""; GUARD_SEED=""
 case "$PATTERN" in
-  daily-triage) SEEDED=1
+  daily-scan) SEEDED=1
     SCOPE_SEED="src/**"
     GOAL_SEED="Sweep the backlog/issues/alerts and write the day's STATE.md priority list; report only."
     ESCAL_SEED="everything - a human decides what to action; this loop never changes code" ;;
-  pr-babysitter) SEEDED=1
+  pr-watch) SEEDED=1
     SCOPE_SEED="src/**"
     GOAL_SEED="Watch open PRs; flag stuck/failing/conflicted; post a summary comment at most; never merge."
     ESCAL_SEED="a human reviews and merges; never merge to main" ;;
-  ci-sweeper) SEEDED=1
+  ci-watch) SEEDED=1
     SCOPE_SEED="src/**"
     GOAL_SEED="Detect red CI; classify the failure; at L2 propose a fix in a worktree; never auto-merge to main."
     ESCAL_SEED="flaky/infra failures, anything touching deploy/secrets, ambiguous root cause"
     VERIFY_SEED="npm test"; GUARD_SEED="npm run typecheck" ;;
-  dependency-sweeper) SEEDED=1
+  dep-bump) SEEDED=1
     SCOPE_SEED="package.json"
     GOAL_SEED="Patch-only dependency bumps behind the release cooldown + guard; open a PR; never minor/major."
     ESCAL_SEED="minor/major bumps, guard failures, any flagged advisory"
     VERIFY_SEED="npm test"; GUARD_SEED="npm run build && npm test" ;;
-  changelog-drafter) SEEDED=1
+  changelog-gen) SEEDED=1
     SCOPE_SEED="CHANGELOG.md"
     GOAL_SEED="Summarize merged PRs since the last tag into RELEASE_NOTES_DRAFT.md; never publish a release."
     ESCAL_SEED="the human edits and publishes; never run gh release create" ;;
-  post-merge-cleanup) SEEDED=1
+  merge-hygiene) SEEDED=1
     SCOPE_SEED="src/**"
     GOAL_SEED="Find merged-deletable branches / stale flags / orphaned artifacts; report; never delete unmerged work."
     ESCAL_SEED="anything ambiguous; never delete a branch with unmerged commits" ;;
-  issue-triage) SEEDED=1
+  issue-sort) SEEDED=1
     SCOPE_SEED="src/**"
     GOAL_SEED="Classify new issues and suggest labels + priority; propose only; never close or set priority unattended."
     ESCAL_SEED="priority calls, dupe-closing, anything needing product judgment" ;;
@@ -217,7 +217,7 @@ render_run_sh() {
 # the pattern's gate if it has one, else a <fill:…> placeholder the audit will flag.
 render_seeded_config() {
   cat <<EOF
-# loop.config.yaml - $PATTERN (seeded by loop-init at $TIER; REVIEW before scheduling)
+# loop.config.yaml - $PATTERN (seeded by loop-scaffold at $TIER; REVIEW before scheduling)
 # Full field semantics: skills/loop-ops/references/state-spine.md
 name: $NAME
 pattern: $PATTERN
@@ -234,7 +234,7 @@ EOF
   if [[ "$TIER" == "L1" ]]; then
     cat <<EOF
 
-# ── graduate to L2 (assisted): set tier: L2, uncomment + fill, re-run loop-audit + loop-doctor --live ──
+# ── graduate to L2 (assisted): set tier: L2, uncomment + fill, re-run loop-check + loop-doctor --live ──
 # verify: "${VERIFY_SEED:-<fill: the gate command, e.g. npm test>}"
 # guard: "${GUARD_SEED:-<fill: a must-always-pass command>}"
 # worktree: true
@@ -298,7 +298,7 @@ printf '%s\n' "$CFG_OUT"
     term_alert warning "tier $TIER needs a verify gate, guard, worktree, escalation + land_via — fill them before auditing"
   fi
   term_panel_vert
-  term_panel_close "then: fill the config ${TERM_DOT} loop-audit.sh $CFG_OUT" ""
+  term_panel_close "then: fill the config ${TERM_DOT} loop-check.sh $CFG_OUT" ""
 } >&2
 
 exit "$EX_OK"

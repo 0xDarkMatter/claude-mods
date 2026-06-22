@@ -16,34 +16,33 @@ feature releases live in the README "Recent Updates" section.
   *actual* permission model — each tier a concrete permission mode, plus the
   enumerate-vs-isolate fork and the load-bearing rule that a scheduler invokes `claude -p`,
   not a session that spawns ungated children (grounded in `docs/AUTO-MODE-CLASSIFIER.md`).
-  Ships a STATE/run-log/budget state spine, a 7-pattern catalog (PR babysitter, CI sweeper,
-  dependency sweeper, changelog drafter, post-merge cleanup, issue/daily triage), multi-loop
-  coordination + kill switch, and three Resource-Protocol scripts: `loop-init` (scaffold),
-  `loop-audit` (readiness scorer — refuses a green light on an unbounded scope, missing gate,
-  or undefined escalation), and `loop-cost` (token-$ estimate by pattern × cadence × model,
+  Ships a STATE/run-log/budget state spine, a 7-pattern catalog (PR watch, CI watch,
+  dependency bump, changelog gen, merge hygiene, issue/daily scan), multi-loop
+  coordination + kill switch, and three Resource-Protocol scripts: `loop-scaffold` (scaffold),
+  `loop-check` (readiness scorer — refuses a green light on an unbounded scope, missing gate,
+  or undefined escalation), and `loop-estimate` (token-$ estimate by pattern × cadence × model,
   pricing sourced from `claude-api-ops`). Composes `fleet-worker` (spawn) and `fleet-ops`
-  (land); 58-assertion offline self-test. Distils
-  [loop-engineering](https://github.com/cobusgreyling/loop-engineering) and the
-  [Ralph loop](https://ghuntley.com/ralph/).
+  (land); 58-assertion offline self-test. Builds on the public *loop engineering*
+  discipline (Steinberger, Osmani) and the [Ralph loop](https://ghuntley.com/ralph/).
 - **`docs/AUTO-MODE-CLASSIFIER.md`** - reference on Claude Code's auto-mode permission
   classifier (the two-gate model, gating categories, legitimate-authorization decision tree),
   cited by `loop-ops` as the authority for its risk-tier mapping.
 - **loop-ops hardening (world-class pass)**: `loop-doctor.sh` - a live preflight
   (`--offline`/`--live`) that proves a loop will *run* (gate binary on PATH, budget fits a
-  tick, permission mode achievable, L3 isolation present), complementing loop-audit's
-  *well-formed* check; `loop-cost.py` is now **caching-aware** - it models the static
+  tick, permission mode achievable, L3 isolation present), complementing loop-check's
+  *well-formed* check; `loop-estimate.py` is now **caching-aware** - it models the static
   run-prompt prefix as a cache entry and the TTL-vs-cadence rule (a loop slower than ~1h
   can't cache), the key loop economics lever; and a companion **`rules/loop-engineering.md`**
   carries the graduated-autonomy directive (L1→L2→L3, scheduler-not-session, escalation
   gate, kill switch + budget) into every session, not just when the skill is invoked.
   Suite now 81 assertions.
-- **loop-ops beat-the-source pass** (iterated against cobusgreyling/loop-engineering until
-  strictly better on every dimension): pattern-aware `loop-init` (seeds a near-ready,
+- **loop-ops depth pass** (closing every gap vs the broader loop-engineering discipline):
+  pattern-aware `loop-scaffold` (seeds a near-ready,
   audit-clean config per pattern, tier-aware, with a graduation block — vs upstream's
-  static seeds); a complete **worked example** `assets/examples/pr-babysitter/` (filled
+  static seeds); a complete **worked example** `assets/examples/pr-watch/` (filled
   config + populated STATE + run prompt + run-log + a scheduler workflow with the
   kill-switch gate and `dontAsk` allowlist baked in) that CI **dogfoods**
-  (`loop-audit` + `loop-doctor` run on it every build) — vs upstream's 9 static starter
+  (`loop-check` + `loop-doctor` run on it every build) — vs upstream's 9 static starter
   dirs; a `references/failure-modes.md` catalog (11 incident-shaped failures, each mapped
   to the control that catches it); connector/MCP least-privilege scoping + the auto-merge
   guard in `references/risk-tiers.md`; and an honest "why Claude Code-specific, not a
@@ -51,7 +50,7 @@ feature releases live in the README "Recent Updates" section.
 - **loop-ops native-first, runner-agnostic scheduling**: the cadence layer now leads with
   Claude Code's own primitives — `/loop` (in-session), **Desktop scheduled tasks** (local,
   unattended), `/schedule` cloud routines (with the load-bearing *fresh-clone, no-local-files*
-  caveat surfaced), and `/goal` as the native completion gate — with `loop-init` scaffolding
+  caveat surfaced), and `/goal` as the native completion gate — with `loop-scaffold` scaffolding
   an executable runner-agnostic `loop-run.sh` for external schedulers (cron / Task Scheduler /
   systemd / process-compose) and GitHub Actions demoted to one optional path. No GitHub
   Actions dependency anywhere. 96-assertion suite.

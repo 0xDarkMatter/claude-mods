@@ -1,4 +1,4 @@
-# pr-babysitter — STATE
+# pr-watch — STATE
 _Updated: 2026-06-22T14:05:00Z · run #142 · readiness 100/100_
 
 <!-- Read first every run: check the kill switch, then act on the Priority list.
@@ -18,4 +18,4 @@ _Updated: 2026-06-22T14:05:00Z · run #142 · readiness 100/100_
 - PR #402 already merged since last run — drop from tracking
 
 ---
-_Source: .github/workflows/pr-babysitter.yml · config: loop.config.yaml_
+_Source: .github/workflows/pr-watch.yml · config: loop.config.yaml_

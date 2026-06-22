@@ -30,7 +30,7 @@ scheduler only when you want non-Claude-Code control.
 
 The unattended options (Desktop task, cloud routine, external scheduler, Actions) are the
 human-configured **authorizer** — no parent auto-mode session, so nothing blocks the
-headless child. Upstream loop-engineering is GitHub-Actions-centric; loop-ops is
+headless child. Many loop frameworks are CI/Actions-centric; loop-ops is
 runner-agnostic and **native-first** on purpose.
 
 ## Completion — when the work stops: `/goal`
@@ -74,13 +74,13 @@ Desktop task (or daemon) every morning running `/goal` over the issue backlog.
 ### The economics (why the daemon beats `/loop` at scale)
 
 Cadence is the top cost lever, **caching is the next** ([state-spine.md](state-spine.md),
-[loop-cost](../scripts/loop-cost.py)). The two interact:
+[loop-estimate](../scripts/loop-estimate.py)). The two interact:
 
 - **`/loop`** keeps one session alive; its input grows every iteration (accumulating
   transcript), so cost climbs and the cache helps less. Great for short supervised runs.
 - **A daemon/cron `claude -p`** starts fresh each tick (the Ralph property → flat per-tick
   cost) and, fired **under the 5-min cache TTL**, keeps the static prefix warm (~0.1× reads).
-  `loop-cost --cadence 5m` will show this; a 6 h loop can't cache at all.
+  `loop-estimate --cadence 5m` will show this; a 6 h loop can't cache at all.
 
 A minimal local daemon (no scheduler infra) — wake under the cache window, fresh context each tick:
 
@@ -97,7 +97,7 @@ while true; do .loops/<name>/loop-run.sh; sleep 270; done
 Native paths (Desktop task, cloud routine, `/loop`) run the tick prompt — or
 `claude -p "/goal …"` — **directly**, so they need no wrapper. When you instead drive the
 loop from an **external** scheduler (cron / Task Scheduler / systemd / process-compose /
-CI — e.g. for sub-minute cadence or to fit existing infra), `loop-init` scaffolds a
+CI — e.g. for sub-minute cadence or to fit existing infra), `loop-scaffold` scaffolds a
 **`loop-run.sh`** in the loop dir as the runner-agnostic glue. No GitHub Actions required.
 
 ```
@@ -112,11 +112,11 @@ Wire it with whatever you already run — **no cloud dependency**:
 
 ```bash
 # cron (Linux/macOS):
-*/10 * * * *  /path/.loops/pr-babysitter/loop-run.sh >> /path/.loops/pr-babysitter/tick.log 2>&1
+*/10 * * * *  /path/.loops/pr-watch/loop-run.sh >> /path/.loops/pr-watch/tick.log 2>&1
 
 # Windows Task Scheduler (every 10 min; S4U logon, see windows-ops for the hardened form):
-schtasks /Create /SC MINUTE /MO 10 /TN pr-babysitter \
-  /TR "bash -lc '/c/path/.loops/pr-babysitter/loop-run.sh'"
+schtasks /Create /SC MINUTE /MO 10 /TN pr-watch \
+  /TR "bash -lc '/c/path/.loops/pr-watch/loop-run.sh'"
 
 # process-compose / systemd timer / a while-sleep loop — all work; loop-run.sh is just a script.
 ```
@@ -192,7 +192,7 @@ The cadence fires; the work is done by the layers this repo already ships:
 3. **L2, unattended:** move the cadence to `/schedule` (or cron → `claude -p`). Switch the
    run prompt to "open a fix PR in a worktree" with `--permission-mode dontAsk` + a narrow
    allowlist (`Bash(npm test)`, `Bash(git …)`). Add a `guard`, set `land_via: fleet-ops`,
-   write the `escalation` rule. Re-run `loop-audit` at L2 — fix every error — then enable.
+   write the `escalation` rule. Re-run `loop-check` at L2 — fix every error — then enable.
 
 The point of the ladder: the cadence mechanism *changes* (session `/loop` → scheduled
 `claude -p`) exactly when the autonomy does, and the audit gates the transition.

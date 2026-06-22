@@ -16,9 +16,9 @@ judgment has earned.
 - **Symptom:** a day's token spend gone in an hour; the bill is 5–10× the estimate.
 - **Mechanism:** cadence too tight, or scope crept so each tick reads/does far more than
   scoped (a "report PRs" loop that started crawling diffs). Sub-agents multiply it.
-- **Catch:** set `budget_tokens` (a per-run ceiling). Estimate with `loop-cost` *before*
+- **Catch:** set `budget_tokens` (a per-run ceiling). Estimate with `loop-estimate` *before*
   scheduling; `loop-doctor` fails the loop if `budget_tokens` < estimated tokens/run.
-  Reconcile the `loop-cost` estimate against `run-log.md` actuals periodically — a tick
+  Reconcile the `loop-estimate` estimate against `run-log.md` actuals periodically — a tick
   that used to cost 2k now costing 40k means scope crept.
 
 ## 2. The 3am-dead loop
@@ -33,14 +33,14 @@ judgment has earned.
 
 ## 3. The cache-cold loop
 
-- **Symptom:** cost far higher than `loop-cost --cached` projected; `cache_read_input_tokens`
+- **Symptom:** cost far higher than `loop-estimate --cached` projected; `cache_read_input_tokens`
   stays 0.
 - **Mechanism:** the run prompt isn't byte-identical every tick — a `datetime.now()`, a
   per-run UUID, or unsorted JSON in the prefix invalidates the cache. Or the cadence is
   slower than the cache TTL (a 6h loop can't keep a 1h entry warm), so every tick is a
   cold write.
 - **Catch:** keep `run.md` byte-identical (the template enforces this — fresh context,
-  same prompt). `loop-cost` tells you whether the cadence can cache at all and which TTL;
+  same prompt). `loop-estimate` tells you whether the cadence can cache at all and which TTL;
   if it can't, don't pay the write multiplier — run uncached.
 
 ## 4. The force-push / push-to-main loop
@@ -83,7 +83,7 @@ judgment has earned.
   a paused runner, an expired token. Loops fail *open* into silence, not error.
 - **Catch:** treat `STATE.md`'s `_Updated_` timestamp + the `run-log.md` tail as a
   heartbeat — if the latest run is older than ~2× the cadence, the loop is down. A
-  separate cheap monitor (or a `daily-triage` loop) that flags stale loop heartbeats
+  separate cheap monitor (or a `daily-scan` loop) that flags stale loop heartbeats
   closes this; the kill switch is for stopping, the heartbeat is for noticing it stopped.
 
 ## 8. The test-deleting "fix" (gate reward-hacking)
@@ -100,7 +100,7 @@ judgment has earned.
 
 - **Symptom:** the loop edited files far outside its job.
 - **Mechanism:** `scope: "*"` (or `**`, or empty) — "may touch anything."
-- **Catch:** `loop-audit` **rejects** an unbounded or placeholder scope (exit 10). Scope
+- **Catch:** `loop-check` **rejects** an unbounded or placeholder scope (exit 10). Scope
   is bounded globs, always.
 
 ## 10. The no-kill-switch loop
@@ -108,7 +108,7 @@ judgment has earned.
 - **Symptom:** the loop is misbehaving and there's no fast way to stop it.
 - **Mechanism:** no stop signal was designed in; stopping means disabling the workflow by
   hand mid-tick.
-- **Catch:** `kill_switch` is mandatory (`loop-audit` errors without one) and checked
+- **Catch:** `kill_switch` is mandatory (`loop-check` errors without one) and checked
   **first** every run. The cheapest implementation is a `PreToolUse` hook that blocks
   every tool the instant a `PAUSED` sentinel appears — an instant breaker.
 
@@ -129,15 +129,15 @@ judgment has earned.
 
 | Failure | Primary control |
 |---|---|
-| Runaway budget | `budget_tokens` + `loop-cost` + `loop-doctor` budget check |
+| Runaway budget | `budget_tokens` + `loop-estimate` + `loop-doctor` budget check |
 | 3am-dead | `loop-doctor --live` (gate binary + PATH) |
-| Cache-cold | byte-identical `run.md` + `loop-cost` TTL guidance |
+| Cache-cold | byte-identical `run.md` + `loop-estimate` TTL guidance |
 | Force-push / prod | escalation gate + auto-mode classifier |
 | Ungated-child spawn | scheduler-invokes-`claude -p` (rule #2) |
 | Colliding loops | priority order + per-loop worktree + `pigeon` |
 | Silent-stop | `STATE.md`/run-log heartbeat staleness |
 | Gate reward-hacking | full-suite `guard` + scope excludes tests + human PR gate |
-| Unbounded scope | `loop-audit` rejects `*` |
+| Unbounded scope | `loop-check` rejects `*` |
 | No kill switch | mandatory `kill_switch` + PreToolUse PAUSED hook |
 | Comprehension debt | L1-first graduation; read the reports |
 

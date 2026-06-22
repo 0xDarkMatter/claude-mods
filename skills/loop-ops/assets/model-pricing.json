@@ -1,5 +1,5 @@
 {
-  "_comment": "Per-model USD pricing per million tokens, read by loop-cost.py. SOURCE OF TRUTH is skills/claude-api-ops/SKILL.md 'Current Models' table — run skills/claude-api-ops/scripts/check-model-table.py --live if you suspect drift. Date-stamp this file when updating.",
+  "_comment": "Per-model USD pricing per million tokens, read by loop-estimate.py. SOURCE OF TRUTH is skills/claude-api-ops/SKILL.md 'Current Models' table — run skills/claude-api-ops/scripts/check-model-table.py --live if you suspect drift. Date-stamp this file when updating.",
   "_as_of": "2026-06",
   "_schema": "claude-mods.loop-ops.pricing/v1",
   "models": {
@@ -10,13 +10,13 @@
   },
   "_pattern_defaults": {
     "_comment": "Rough per-run token estimates by pattern. input = context the run reads (STATE, diffs, tool results); output = tokens the model generates; subagents multiplies tokens when the pattern fans out makers/checkers. Estimates, not guarantees — reconcile against run-log.md actuals.",
-    "daily-triage":        { "input": 40000,  "output": 6000,  "subagents": 1 },
-    "pr-babysitter":       { "input": 15000,  "output": 3000,  "subagents": 1 },
-    "ci-sweeper":          { "input": 60000,  "output": 12000, "subagents": 2 },
-    "dependency-sweeper":  { "input": 30000,  "output": 8000,  "subagents": 1 },
-    "changelog-drafter":   { "input": 25000,  "output": 9000,  "subagents": 1 },
-    "post-merge-cleanup":  { "input": 20000,  "output": 4000,  "subagents": 1 },
-    "issue-triage":        { "input": 18000,  "output": 4000,  "subagents": 1 },
+    "daily-scan":        { "input": 40000,  "output": 6000,  "subagents": 1 },
+    "pr-watch":       { "input": 15000,  "output": 3000,  "subagents": 1 },
+    "ci-watch":          { "input": 60000,  "output": 12000, "subagents": 2 },
+    "dep-bump":  { "input": 30000,  "output": 8000,  "subagents": 1 },
+    "changelog-gen":   { "input": 25000,  "output": 9000,  "subagents": 1 },
+    "merge-hygiene":  { "input": 20000,  "output": 4000,  "subagents": 1 },
+    "issue-sort":        { "input": 18000,  "output": 4000,  "subagents": 1 },
     "custom":              { "input": 30000,  "output": 8000,  "subagents": 1 }
   }
 }

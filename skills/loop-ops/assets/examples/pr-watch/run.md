@@ -5,12 +5,12 @@ Wired by github-actions.yml:
   claude -p "$(cat run.md)" --permission-mode dontAsk --append-system-prompt "$(cat STATE.md)"
 -->
 
-# Run: pr-babysitter  (tier L1, report-only)
+# Run: pr-watch  (tier L1, report-only)
 
 You are one tick of a scheduled loop. Goal: **watch open PRs and report; never merge, push, or close.**
 
 ## Do these in order
-1. **Kill switch first.** If `.loops/pr-babysitter/PAUSED` exists or the repo has the `loop-pause` label, STOP — do nothing.
+1. **Kill switch first.** If `.loops/pr-watch/PAUSED` exists or the repo has the `loop-pause` label, STOP — do nothing.
 2. **Read `STATE.md`** (in your system prompt): the Priority / Watch / Noise lists from last run.
 3. **List open PRs:** `gh pr list --state open --json number,title,reviewDecision,statusCheckRollup,mergeStateStatus,updatedAt`.
 4. **Classify each** PR: failing checks · merge conflict · awaiting-review past 4h · draft · healthy.
