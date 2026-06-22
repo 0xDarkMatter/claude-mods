@@ -16,6 +16,7 @@ SCRIPTS="$SKILL/scripts"
 INIT="$SCRIPTS/loop-init.sh"
 AUDIT="$SCRIPTS/loop-audit.sh"
 COST="$SCRIPTS/loop-cost.py"
+SYNC="$SCRIPTS/check-pricing-sync.py"
 
 # Pick a python that actually executes — skips the Windows Store python3 stub.
 PYTHON=""
@@ -85,6 +86,10 @@ expect_has  "prints the config path" "pr-watch/loop.config.yaml" "$out"
 [[ -f "$SB/loops/pr-watch/loop.config.yaml" ]] && ok "wrote loop.config.yaml" || no "no loop.config.yaml"
 [[ -f "$SB/loops/pr-watch/STATE.md" ]] && ok "wrote STATE.md" || no "no STATE.md"
 [[ -f "$SB/loops/pr-watch/run-log.md" ]] && ok "wrote run-log.md" || no "no run-log.md"
+[[ -f "$SB/loops/pr-watch/run.md" ]] && ok "wrote run.md" || no "no run.md"
+runmd="$(cat "$SB/loops/pr-watch/run.md")"
+expect_has "run.md substitutes loop name" "Run: pr-watch" "$runmd"
+expect_has "run.md substitutes tier" "tier L1)" "$runmd"
 cfg="$(cat "$SB/loops/pr-watch/loop.config.yaml")"
 expect_has "substituted name" "name: pr-watch" "$cfg"
 expect_has "substituted tier" "tier: L1" "$cfg"
@@ -189,6 +194,18 @@ expect_has  "uses the override" "5 runs/day" "$out"
 "$PYTHON" "$COST" --pattern pr-babysitter --cadence "garbage cron" --model claude-haiku-4-5 >/dev/null 2>&1; expect_exit "bad cadence -> 4" 4 $?
 "$PYTHON" "$COST" --pricing "$SB/no-pricing.json" --pattern custom --cadence 1h --input-tokens 1 --output-tokens 1 --model x >/dev/null 2>&1; expect_exit "missing pricing file -> 3" 3 $?
 
+# ── check-pricing-sync: offline clean -> 0, drift -> 10, --json ────────────
+echo "-- check-pricing-sync --"
+"$PYTHON" "$SYNC" --help >/dev/null 2>&1; expect_exit "pricing-sync --help -> 0" 0 $?
+"$PYTHON" "$SYNC" --offline >/dev/null 2>&1; expect_exit "pricing-sync offline in sync -> 0" 0 $?
+# Tamper a copy: opus input price 5.0 -> 999.0 (sed; argv path is MSYS-converted for python).
+sed 's/"input_per_mtok": 5\.0/"input_per_mtok": 999.0/' "$SKILL/assets/model-pricing.json" > "$SB/badprice.json"
+"$PYTHON" "$SYNC" --pricing "$SB/badprice.json" >/dev/null 2>&1; expect_exit "pricing-sync drift -> 10" 10 $?
+"$PYTHON" "$SYNC" --pricing "$SB/no-such.json" >/dev/null 2>&1; expect_exit "pricing-sync missing file -> 3" 3 $?
+out="$("$PYTHON" "$SYNC" --json 2>/dev/null)"
+expect_has "pricing-sync json schema" "claude-mods.loop-ops.pricing-sync/v1" "$out"
+expect_has "pricing-sync json in_sync" '"in_sync": true' "$out"
+
 # ── terminal design system ─────────────────────────────────────────────────
 echo "-- terminal design system --"
 for s in "$INIT" "$AUDIT"; do
@@ -196,6 +213,7 @@ for s in "$INIT" "$AUDIT"; do
   grep -q '_lib/term.sh' "$s" && ok "$b sources _lib/term.sh" || no "$b does not source _lib/term.sh"
 done
 grep -q 'class Term' "$COST" && ok "loop-cost carries inline Term helper" || no "loop-cost missing inline Term helper"
+grep -q 'class Term' "$SYNC" && ok "check-pricing-sync carries inline Term helper" || no "check-pricing-sync missing inline Term helper"
 grep -q 'BRAND::loop' "$SKILL/../_lib/term.sh" && ok "term.sh registers the loop brand glyph" || no "term.sh missing loop brand glyph"
 # Piped audit findings stay plain (no ANSI in the data stream).
 po="$(bash "$AUDIT" "$SB/l2-nogate.yaml" 2>/dev/null)"

@@ -162,8 +162,14 @@ estimates spend before you commit to a cadence.
 
 ### `scripts/loop-init.sh` — scaffold a loop's state spine
 
+Writes `<dir>/<name>/` with four files from the bundled templates:
+`loop.config.yaml` ([assets/loop.config.template.yaml](assets/loop.config.template.yaml)),
+`STATE.md` ([assets/STATE.template.md](assets/STATE.template.md)), `run-log.md`, and
+`run.md` — the headless run prompt a scheduler feeds to `claude -p`
+([assets/run.template.md](assets/run.template.md)).
+
 ```bash
-# Create .loops/pr-babysitter/ with config + STATE.md + run-log.md from templates:
+# Create .loops/pr-babysitter/ with config + STATE.md + run-log.md + run.md from templates:
 bash scripts/loop-init.sh --name pr-babysitter --pattern pr-babysitter --tier L1
 
 # Custom dir + cadence, preview without writing:
@@ -209,6 +215,19 @@ Exit `0` ok, `2` usage, `3` pricing file missing, `4` bad cadence/model. Output 
 every assumption (runs/day, tokens/run, sub-agent multiplier) — it's an estimate, and it
 says so.
 
+### `scripts/check-pricing-sync.py` — offline drift guard (CI)
+
+`model-pricing.json` is a *copy* of claude-api-ops's authoritative model table, and a copy
+drifts silently. This offline verifier asserts every model in
+[assets/model-pricing.json](assets/model-pricing.json) matches claude-api-ops's "Current
+Models" table (prices included). Both files are in-repo, so it's network-free and gates PR
+CI via `tests/check-resources.sh`; live model-id drift is owned by claude-api-ops's
+`check-model-table.py`.
+
+```bash
+python scripts/check-pricing-sync.py --offline   # exit 0 in sync, 10 drift, 3 a file missing
+```
+
 ---
 
 ## End-to-end workflow
@@ -249,5 +268,5 @@ says so.
 - [references/pattern-catalog.md](references/pattern-catalog.md) — the seven patterns, full skeletons + escalation rules.
 - [references/state-spine.md](references/state-spine.md) — STATE.md / run-log / budget schemas, multi-loop coordination.
 - [references/claude-code-loops.md](references/claude-code-loops.md) — where loops actually live: `/loop`, `/schedule`, hooks, the scheduler pattern.
-- [assets/loop.config.template.yaml](assets/loop.config.template.yaml) — the loop definition starter.
+- [assets/loop.config.template.yaml](assets/loop.config.template.yaml) — the loop definition starter; [assets/STATE.template.md](assets/STATE.template.md) — the state-spine starter; [assets/run.template.md](assets/run.template.md) — the headless run prompt.
 - The lineage: [Ralph loop](https://ghuntley.com/ralph/) (inner brute-force), [loop-engineering](https://github.com/cobusgreyling/loop-engineering) (the methodology this distills).
