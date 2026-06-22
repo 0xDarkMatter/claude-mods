@@ -12,15 +12,18 @@
 
 > *A comprehensive extension toolkit that transforms Claude Code into a specialized development powerhouse.*
 
-**claude-mods** is a production-ready plugin that extends Claude Code with 94 specialized skills, 3 expert agents, 13 output styles, 11 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
+**claude-mods** is a production-ready plugin that extends Claude Code with 95 specialized skills, 3 expert agents, 13 output styles, 11 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
 
 Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms), claude-mods fills critical gaps in Claude Code's capabilities: persistent session state that survives across machines, on-demand expert knowledge for specialized domains, token-efficient modern CLI tools (10-100x faster than traditional alternatives), and proven workflow patterns for TDD, code review, and feature development. The toolkit implements Anthropic's [recommended patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), ensuring your development context never vanishes when sessions end.
 
 From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
 
-**3 agents. 94 skills. 13 styles. 11 hooks. 7 rules. One install.**
+**3 agents. 95 skills. 13 styles. 11 hooks. 7 rules. One install.**
 
 ## Recent Updates
+
+**v3.3.0** (June 2026)
+- 🔁 **`loop-ops` skill** — the *outer-loop* design discipline, twin to [`iterate`](skills/iterate/) (the inner loop). Where `iterate` drives one metric in one session, `loop-ops` is the orchestration layer above it: how to design, scaffold, cost, and **safely** run scheduled discover→triage→implement→verify→escalate-or-land agent loops. Its spine is the **risk-tier ladder** — L1 report → L2 assisted → L3 unattended — mapped onto Claude Code's *actual* permission model (the thing the upstream methodology can't do): each tier is a concrete permission mode, with the *enumerate-vs-isolate* fork and the load-bearing rule that **a scheduler invokes `claude -p`, not a session that spawns ungated children**. Ships a STATE/run-log/budget state spine, a 7-pattern catalog (PR babysitter, CI sweeper, dependency sweeper, changelog drafter, post-merge cleanup, issue/daily triage), multi-loop coordination + kill switch, and three Resource-Protocol scripts — `loop-init` (scaffold), `loop-audit` (readiness scorer that refuses a green light on an unbounded scope / missing gate / undefined escalation), `loop-cost` (token-$ estimate by pattern × cadence × model). Composes `fleet-worker` (spawn) and `fleet-ops` (land); 58-assertion offline suite. Distils [loop-engineering](https://github.com/cobusgreyling/loop-engineering) and the [Ralph loop](https://ghuntley.com/ralph/), grounded in this repo's auto-mode-classifier reference.
 
 **v3.2.0** (June 2026)
 - 🤖 **`fleet-worker` skill** — delegate tool-using, multi-step tasks to *cheaper headless Claude Code workers* — a cheaper Anthropic model (Sonnet/Haiku) or any Anthropic-compatible endpoint (e.g. GLM 5.2 via z.ai) — while an Opus orchestrator fans them out in parallel and gates their results before anything lands. Each worker is a real `claude -p` with Claude Code's full tool harness (Read/Write/Edit/Bash/Glob/Grep/Task) and any skills you provision into it, but a cheaper brain — isolated in its own git worktree + `CLAUDE_CONFIG_DIR`. Ships bash + PowerShell launchers, a result-gating collector, an endpoint health verifier, and the fleet-ops handoff recipes. fleet-worker is the **spawn** layer; [`fleet-ops`](skills/fleet-ops/) is the test-gated **landing** layer it hands winning branches to. Provider-agnostic.
@@ -76,7 +79,7 @@ Claude Code is powerful out of the box, but it has gaps. This toolkit fills them
 
 - **Session continuity** — Tasks vanish when sessions end. We fix that with `/save` and `/sync`, implementing Anthropic's [recommended pattern](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) for long-running agents.
 
-- **Expert-level knowledge on demand** — 94 on-demand skills covering React, TypeScript, Python, Go, Rust, PostgreSQL, and more, plus 3 specialized agents reserved for genuine context-isolation/worker roles (git operations, web scraping, project reorganization). Skills-first: knowledge loads when relevant instead of living in heavyweight agent prompts.
+- **Expert-level knowledge on demand** — 95 on-demand skills covering React, TypeScript, Python, Go, Rust, PostgreSQL, and more, plus 3 specialized agents reserved for genuine context-isolation/worker roles (git operations, web scraping, project reorganization). Skills-first: knowledge loads when relevant instead of living in heavyweight agent prompts.
 
 - **Modern CLI tools** — Stop using `grep`, `find`, and `cat`. Our rules automatically prefer `ripgrep`, `fd`, `eza`, and `bat` — 10-100x faster and token-efficient.
 
@@ -101,7 +104,7 @@ claude-mods/
 ├── .claude-plugin/     # Plugin metadata
 ├── agents/             # Expert subagents (3)
 ├── commands/           # Slash commands (2)
-├── skills/             # Custom skills (94)
+├── skills/             # Custom skills (95)
 ├── output-styles/      # Response personalities
 ├── hooks/              # Hook examples & docs
 ├── rules/              # Claude Code rules
@@ -309,6 +312,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [refactor-ops](skills/refactor-ops/) | Safe refactoring patterns, code smell detection, test-driven methodology |
 | [scaffold](skills/scaffold/) | Project scaffolding - generate boilerplate for APIs, web apps, CLIs, monorepos |
 | [iterate](skills/iterate/) | Autonomous improvement loop - modify, measure, keep or discard, repeat. Inspired by Karpathy's autoresearch. |
+| [loop-ops](skills/loop-ops/) | Outer-loop design discipline - the orchestration layer above `iterate`: risk-tier ladder (L1 report → L2 assisted → L3 unattended) mapped onto Claude Code's permission model, STATE/run-log/budget spine, 7-pattern catalog (PR babysitter, CI sweeper, dependency sweeper…), multi-loop coordination, kill switch. Composes iterate/fleet-worker/fleet-ops/native-loop. loop-init/loop-audit/loop-cost scripts. |
 | [testing-ops](skills/testing-ops/) | Test strategy patterns - mocking, CI testing, test data design |
 | [claude-code-ops](skills/claude-code-ops/) | Claude Code internals - full hook event catalog, skill frontmatter spec, headless/CLI reference, extension debugging |
 | [playwright-ops](skills/playwright-ops/) | Playwright e2e testing - selector hierarchy, fixtures, network mocking, CI sharding, flake hunting |
@@ -562,7 +566,7 @@ When using multiple MCP servers (Chrome DevTools, Vibe Kanban, etc.), their tool
 
 ### Skill Description Budget
 
-With 90+ skills installed (this plugin alone ships 94), skill descriptions can overflow the listing budget. All skill names are always listed, but descriptions share a budget of **1% of the model context window** — on overflow, least-invoked skills lose their descriptions first and **silently stop auto-triggering** (explicit `/name` invocation still works). Each skill's combined `description` + `when_to_use` is also truncated at **1,536 chars**, so trigger phrases belong at the front.
+With 90+ skills installed (this plugin alone ships 95), skill descriptions can overflow the listing budget. All skill names are always listed, but descriptions share a budget of **1% of the model context window** — on overflow, least-invoked skills lose their descriptions first and **silently stop auto-triggering** (explicit `/name` invocation still works). Each skill's combined `description` + `when_to_use` is also truncated at **1,536 chars**, so trigger phrases belong at the front.
 
 - **Check:** run `/doctor` — it shows whether the budget is overflowing and which skills are affected.
 - **Fix:** demote or disable skills you don't use via `skillOverrides` in settings (`"on"` / `"name-only"` / `"user-invocable-only"` / `"off"` per skill, or `/skills` + `Space`). Plugin skills are managed via `/plugin` instead.

@@ -1,0 +1,41 @@
+# loop.config.yaml — one OUTER-loop definition.
+# Scaffolded by loop-init.sh, scored by loop-audit.sh. Flat YAML on purpose: every
+# key sits at column 0 so the audit parses it without a yq dependency.
+# Full field semantics: skills/loop-ops/references/state-spine.md
+#
+# >>> ADAPT every <PLACEHOLDER> below. The audit errors on unbounded scope, a
+#     missing gate, an undefined escalation rule, or a tier/permission mismatch.
+
+# ── identity ────────────────────────────────────────────────────────────────
+name: <loop-name>            # matches the .loops/<name>/ directory
+pattern: <pattern-key>       # a catalog key (pr-babysitter, ci-sweeper, …) or "custom"
+
+# ── autonomy ────────────────────────────────────────────────────────────────
+tier: L1                     # L1 report-only | L2 assisted (worktree+gate) | L3 unattended
+permission_mode: dontAsk     # plan | dontAsk | auto | acceptEdits | bypassPermissions
+                             #   L1 → plan or dontAsk · L2 → dontAsk/auto · L3 → bypassPermissions (container only)
+
+# ── cadence ─────────────────────────────────────────────────────────────────
+cadence: 1h                  # 10m | 1h | 6h | 1d, or a cron string ("*/10 * * * *")
+
+# ── purpose & bounds ────────────────────────────────────────────────────────
+goal: "<one sentence: what this loop does AND what it must never do>"
+scope:                       # bounded globs the loop may touch — NEVER "*" or "**"
+  - "<src/**>"
+
+# ── the gate (required at L2+) ──────────────────────────────────────────────
+verify: "<command that decides pass/fail, e.g. npm test>"   # a loop with no gate is invalid at L2+
+guard: "<must-always-pass, e.g. npm run typecheck>"          # required at L2+
+
+# ── isolation & landing (required at L2+) ───────────────────────────────────
+worktree: true               # isolate code changes in a git worktree (required L2+)
+land_via: fleet-ops          # who test-gates + lands winning branches (L2+)
+
+# ── the escalation rule (required) ──────────────────────────────────────────
+# What the loop ESCALATES instead of doing. Mirror the never-auto-land classes:
+# force-push, push to main, prod deploy/migration, mass delete, IAM grants, .claude edits.
+escalation: "<e.g. open a PR with context; never merge to main; never deploy>"
+
+# ── safety rails ────────────────────────────────────────────────────────────
+budget_tokens: 200000        # per-run output-token ceiling (stop the run when reached)
+kill_switch: ".loops/<loop-name>/PAUSED exists, OR the loop-pause label is set"

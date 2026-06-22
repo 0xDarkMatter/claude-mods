@@ -202,6 +202,7 @@ __term_lookup() {
     BRAND::supply-chain)        entry="🛡|[S]" ;;
     BRAND::net-ops)             entry="📡|[N]" ;;
     BRAND::adr)                 entry="📒|[A]" ;;
+    BRAND::loop)                entry="🔁|[L]" ;;
     BRAND::terraform)           entry="🏗|[T]" ;;
     BRAND::claude)              entry="✶|[C]" ;;
     BRAND::play)                entry="🎭|[P]" ;;

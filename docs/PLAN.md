@@ -16,7 +16,7 @@
 | Component | Count | Notes |
 |-----------|-------|-------|
 | Agents | 3 | Pure context-isolation/worker roles only: git-agent (background commits/PRs), firecrawl-expert (noisy scrapes), project-organizer (bulk restructure) |
-| Skills | 94 | Operational skills, CLI tools, workflows, diagnostics, security |
+| Skills | 95 | Operational skills, CLI tools, workflows, diagnostics, security |
 | Commands | 2 | Session management (sync, save) |
 | Rules | 7 | cli-tools, commit-style, naming-conventions, prompt-injection, skill-agent-updates, supply-chain, worktree-boundaries |
 | Output Styles | 13 | Vesper, Spartan, Mentor, Executive, Pair, Atlas, Coach, Harbour, Meridian, Noir, Roast, Sage, Scout |

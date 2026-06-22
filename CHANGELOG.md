@@ -5,6 +5,30 @@ All notable changes to claude-mods are documented here. Format follows
 [Semantic Versioning](https://semver.org/). Fuller narrative entries for
 feature releases live in the README "Recent Updates" section.
 
+## [3.3.0] - 2026-06-22
+
+### Added
+- **`loop-ops` skill** - the *outer-loop* design discipline, twin to `iterate` (the inner
+  loop). Where `iterate` drives one metric in one session, `loop-ops` is the orchestration
+  layer above it: how to design, scaffold, cost, and safely run scheduled
+  discover→triage→implement→verify→escalate-or-land agent loops. Its spine is the
+  **risk-tier ladder** (L1 report → L2 assisted → L3 unattended) mapped onto Claude Code's
+  *actual* permission model — each tier a concrete permission mode, plus the
+  enumerate-vs-isolate fork and the load-bearing rule that a scheduler invokes `claude -p`,
+  not a session that spawns ungated children (grounded in `docs/AUTO-MODE-CLASSIFIER.md`).
+  Ships a STATE/run-log/budget state spine, a 7-pattern catalog (PR babysitter, CI sweeper,
+  dependency sweeper, changelog drafter, post-merge cleanup, issue/daily triage), multi-loop
+  coordination + kill switch, and three Resource-Protocol scripts: `loop-init` (scaffold),
+  `loop-audit` (readiness scorer — refuses a green light on an unbounded scope, missing gate,
+  or undefined escalation), and `loop-cost` (token-$ estimate by pattern × cadence × model,
+  pricing sourced from `claude-api-ops`). Composes `fleet-worker` (spawn) and `fleet-ops`
+  (land); 58-assertion offline self-test. Distils
+  [loop-engineering](https://github.com/cobusgreyling/loop-engineering) and the
+  [Ralph loop](https://ghuntley.com/ralph/).
+- **`docs/AUTO-MODE-CLASSIFIER.md`** - reference on Claude Code's auto-mode permission
+  classifier (the two-gate model, gating categories, legitimate-authorization decision tree),
+  cited by `loop-ops` as the authority for its risk-tier mapping.
+
 ## [3.2.0] - 2026-06-22
 
 ### Added
