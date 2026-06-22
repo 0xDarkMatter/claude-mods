@@ -70,12 +70,17 @@ LOOP_EX="skills/loop-ops/assets/examples/pr-watch/loop.config.yaml"
 run "example audits clean"          0 bash skills/loop-ops/scripts/loop-check.sh "$LOOP_EX"
 run "example doctors clean (offline)" 0 bash skills/loop-ops/scripts/loop-doctor.sh --offline "$LOOP_EX"
 
+echo "== r-ops: R-stack staleness verifier"
+run "r-facts --offline consistent" 0 "$PY" skills/r-ops/scripts/check-r-facts.py --offline
+run "r-facts --help"               0 "$PY" skills/r-ops/scripts/check-r-facts.py --help
+
 echo "== protocol: every new verifier is executable + compiles"
 for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/claude-code-ops/scripts/validate-hooks-json.py \
          skills/playwright-ops/scripts/triage-flakes.py \
          skills/mapbox-ops/scripts/check-mapbox-facts.py \
-         skills/loop-ops/scripts/check-pricing-sync.py; do
+         skills/loop-ops/scripts/check-pricing-sync.py \
+         skills/r-ops/scripts/check-r-facts.py; do
     "$PY" -m py_compile "$s" 2>/dev/null && pass "py_compile $(basename "$s")" || bad "py_compile $(basename "$s")"
 done
 bash -n skills/terraform-ops/scripts/check-action-refs.sh 2>/dev/null \
@@ -106,6 +111,7 @@ purity "flake-triage" "$PY" skills/playwright-ops/scripts/triage-flakes.py "$__t
 rm -f "$__tf"
 purity "fleet-doctor"  bash skills/fleet-worker/scripts/fleet-doctor.sh --offline
 purity "pricing-sync"  "$PY" skills/loop-ops/scripts/check-pricing-sync.py --offline
+purity "r-facts"       "$PY" skills/r-ops/scripts/check-r-facts.py --offline
 grep -q '_lib/term.sh' skills/terraform-ops/scripts/check-action-refs.sh \
     && pass "check-action-refs sources term.sh" || bad "check-action-refs missing term.sh"
 grep -q '_lib/term.sh' skills/fleet-worker/scripts/fleet-doctor.sh \
@@ -113,7 +119,8 @@ grep -q '_lib/term.sh' skills/fleet-worker/scripts/fleet-doctor.sh \
 for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/claude-code-ops/scripts/validate-hooks-json.py \
          skills/playwright-ops/scripts/triage-flakes.py \
-         skills/loop-ops/scripts/check-pricing-sync.py; do
+         skills/loop-ops/scripts/check-pricing-sync.py \
+         skills/r-ops/scripts/check-r-facts.py; do
     grep -q 'class Term' "$s" && pass "$(basename "$s") carries inline Term" \
         || bad "$(basename "$s") missing inline Term"
 done

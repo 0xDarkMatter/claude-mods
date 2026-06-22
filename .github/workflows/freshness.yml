@@ -79,6 +79,15 @@ jobs:
           if [ "$rc" -eq 7 ]; then echo "::warning::mapbox-ops live check unreachable — skipped"; fi
           exit 0
 
+      - name: r-ops recommended packages still on CRAN
+        run: |
+          set +e
+          python skills/r-ops/scripts/check-r-facts.py --live
+          rc=$?
+          if [ "$rc" -eq 10 ]; then echo "::error::r-ops drift — a recommended CRAN package no longer resolves (archived/removed)"; exit 1; fi
+          if [ "$rc" -eq 7 ]; then echo "::warning::r-ops live check unreachable (CRAN/crandb) — skipped"; fi
+          exit 0
+
       - name: GitHub Action refs still resolve
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -5,6 +5,25 @@ All notable changes to claude-mods are documented here. Format follows
 [Semantic Versioning](https://semver.org/). Fuller narrative entries for
 feature releases live in the README "Recent Updates" section.
 
+## [3.4.0] - 2026-06-23
+
+### Added
+- **`r-ops` skill** - the set's first data-science skill: a tidyverse-first,
+  current-best-practice reference for modern R (2024+). `SKILL.md` routes an
+  import → tidy → transform → visualize → model → communicate workflow across
+  9 reference files (~115 KB): tidyverse-core, import-io, strings-dates-factors,
+  visualization, iteration-functional, modeling-stats, data-table, time-series,
+  workflow-tooling. Leads with current idioms (native `|>`, dplyr `.by=`, the
+  `\(x)` lambda, `across()`, `list_rbind`, `slice_*`, tidymodels, tsibble/fable,
+  Quarto + renv); names base R and `data.table` where they win. Ships a
+  43-assertion offline self-test and a `check-r-facts.py` §7 staleness verifier:
+  `--offline` (PR CI) asserts every CRAN package in `assets/r-packages.json` is
+  still named in the prose and the currency note carries a year; `--live`
+  (weekly freshness, never blocks a PR) resolves each package on CRAN, exit 10
+  if one is archived/removed, exit 7 if CRAN is unreachable. Salvaged and
+  freshened from the stale stacked PR #6 (which also duplicated the
+  already-shipped supply-chain-defense); re-landed clean off current `main`.
+
 ## [3.3.0] - 2026-06-22
 
 ### Added
