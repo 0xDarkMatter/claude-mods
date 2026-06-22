@@ -96,6 +96,9 @@ Code's classifier tiers. Bake these into the config's `escalation:` field:
 - **The test:** *would a careful human let this happen unattended in this repo?* If the
   action's blast radius exceeds the loop's stated purpose, it escalates. A general goal
   ("keep CI green") is **not** authorization for a specific high-blast action it implies.
+- **Scope the tools, not just the mode.** Allowlist exactly the tools/MCP connectors the
+  job needs (read-only at L1); keep `gh pr merge` out and `land_via: fleet-ops` in. Full
+  connector/MCP-scope discipline + the auto-merge guard: [references/risk-tiers.md](references/risk-tiers.md).
 
 ## The state spine
 
@@ -291,6 +294,11 @@ example every build, so it can't drift out of validity.
 
 ## Anti-patterns (these are detected and wrong)
 
+The incident-shaped catalog — symptom → mechanism → the control that catches each — is
+[references/failure-modes.md](references/failure-modes.md) (runaway budget, the 3am-dead
+loop, cache-cold, force-push, ungated-child spawn, colliding loops, silent-stop,
+gate reward-hacking, …). The headline ones:
+
 - **Routing around the gate.** Wrapping `claude -p --permission-mode bypassPermissions`
   in a script to dodge the classifier is *Auto-Mode Bypass* — a `hard_deny` nothing
   clears. If an outcome is blocked, **authorize it** (a narrow allow rule, or run the
@@ -312,5 +320,6 @@ example every build, so it can't drift out of validity.
 - [references/pattern-catalog.md](references/pattern-catalog.md) — the seven patterns, full skeletons + escalation rules.
 - [references/state-spine.md](references/state-spine.md) — STATE.md / run-log / budget schemas, multi-loop coordination.
 - [references/claude-code-loops.md](references/claude-code-loops.md) — where loops actually live: `/loop`, `/schedule`, hooks, the scheduler pattern.
+- [references/failure-modes.md](references/failure-modes.md) — how loops break (incident-shaped) and the control that catches each.
 - [assets/loop.config.template.yaml](assets/loop.config.template.yaml) — the loop definition starter; [assets/STATE.template.md](assets/STATE.template.md) — the state-spine starter; [assets/run.template.md](assets/run.template.md) — the headless run prompt.
 - The lineage: [Ralph loop](https://ghuntley.com/ralph/) (inner brute-force), [loop-engineering](https://github.com/cobusgreyling/loop-engineering) (the methodology this distills).

@@ -120,6 +120,36 @@ execution *and* you have a real sandbox (no internet, can't damage the host).
 
 ---
 
+## Connector & MCP scopes — least privilege for the loop's tools
+
+A loop is only as safe as the tools it can reach. The permission *mode* gates Bash + file
+edits; the *tool surface* gates everything else — MCP connectors (Slack, GitHub, Jira, a
+DB), `WebFetch`, the `Agent` tool. Scope them per tier:
+
+- **Allowlist, don't blanket.** Headless, name exactly what the job needs:
+  `--allowedTools 'Bash(gh pr list:*)' 'Bash(gh pr view:*)' 'Read' 'mcp__github__*'`. Use
+  `--disallowedTools` to subtract a dangerous one (block `WebFetch` on a loop that
+  shouldn't read the web; block a Slack `post_message` on a read-only triage loop).
+- **Read-scoped connectors at L1.** An L1 report loop gets read-only MCP scopes
+  (list/get/search), never write (post/create/delete/merge). Scope the connector *itself*
+  least-privilege — don't hand a triage loop a write-capable GitHub token "just in case".
+- **The auto-merge guard.** Never give a loop a path to merge `main`: keep `gh pr merge`
+  out of the allowlist, set `land_via: fleet-ops` (test-gated, human-or-queue), and list
+  main-push in `escalation`. A green PR on a feature branch is the *most* a loop
+  auto-produces.
+- **MCP tool descriptions are instructions.** A poisoned connector description is
+  prompt-injection straight into the loop's context — vet a connector (and prefer read
+  scopes) before a loop uses it. See [`prompt-injection-defense`](../../prompt-injection-defense/SKILL.md).
+
+## Why Claude Code-specific (not a multi-tool matrix)
+
+`loop-ops` is deliberately scoped to **Claude Code**, not a cross-tool primitives matrix
+(Grok / Codex / …). The whole edge is grounding in Claude Code's *actual* gate model — the
+permission modes, the auto-mode classifier, `claude -p`, the hook events. A generic
+multi-agent matrix would dilute exactly that. The *doctrine* ports to any agent (the tier
+ladder, the gate, the kill switch, the STATE spine, the escalation classes); the
+permission-mode **mapping** is Claude Code's, and that specificity is the point.
+
 ## Tier checklist (what `loop-audit` enforces)
 
 - **L1:** bounded `scope` (never `*`), a `kill_switch`, `permission_mode` ∈ {plan,
