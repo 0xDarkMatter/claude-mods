@@ -115,6 +115,21 @@ bash "$INIT" --dir "$SB/loops" >/dev/null 2>&1; expect_exit "missing --name -> 2
 bash "$INIT" --name BadName --dir "$SB/loops" >/dev/null 2>&1; expect_exit "non-kebab name -> 2" 2 $?
 bash "$INIT" --name x --tier L9 --dir "$SB/loops" >/dev/null 2>&1; expect_exit "bad tier -> 2" 2 $?
 
+# pattern-seeding: a known pattern seeds a near-ready, audit-clean config
+bash "$INIT" --name seed-l1 --pattern ci-sweeper --tier L1 --cadence 15m --dir "$SB/seed" >/dev/null 2>&1
+seedcfg="$(cat "$SB/seed/seed-l1/loop.config.yaml")"
+expect_has "seeded config carries the pattern goal" "Detect red CI" "$seedcfg"
+expect_has "seeded L1 leaves a graduation block" "graduate to L2" "$seedcfg"
+bash "$AUDIT" "$SB/seed/seed-l1/loop.config.yaml" >/dev/null 2>&1; expect_exit "seeded L1 audits clean -> 0" 0 $?
+# at L2 the pattern's gate is filled (not commented) and audits clean
+bash "$INIT" --name seed-l2 --pattern ci-sweeper --tier L2 --cadence 15m --dir "$SB/seed" >/dev/null 2>&1
+l2cfg="$(cat "$SB/seed/seed-l2/loop.config.yaml")"
+case "$l2cfg" in *$'\nverify: "npm test"'*) ok "seeded L2 fills the gate";; *) no "seeded L2 did not fill the gate";; esac
+bash "$AUDIT" "$SB/seed/seed-l2/loop.config.yaml" >/dev/null 2>&1; expect_exit "seeded L2 audits clean -> 0" 0 $?
+# an unknown pattern falls back to the generic placeholder template (not ready)
+bash "$INIT" --name seed-x --pattern custom --tier L1 --dir "$SB/seed" >/dev/null 2>&1
+case "$(cat "$SB/seed/seed-x/loop.config.yaml")" in *"<one sentence"*) ok "unknown pattern uses generic template";; *) no "unknown pattern did not use template";; esac
+
 # ── loop-audit: a freshly-init'd config is NOT ready (placeholders) -> 10 ───
 echo "-- loop-audit --"
 bash "$INIT" --name raw --pattern custom --tier L1 --dir "$SB/loops" >/dev/null 2>&1

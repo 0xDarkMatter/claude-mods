@@ -114,6 +114,44 @@ case "$TIER" in
   L3)    PMODE="bypassPermissions" ;;
 esac
 
+# ── pattern presets ─────────────────────────────────────────────────────────
+# Seed a near-ready config for a known --pattern (the user reviews, doesn't start
+# from blank placeholders). Doctrine: always scaffold at the chosen tier; report/
+# propose/draft patterns carry no gate (VERIFY_SEED empty), code-changing ones do.
+SEEDED=0; SCOPE_SEED=""; GOAL_SEED=""; ESCAL_SEED=""; VERIFY_SEED=""; GUARD_SEED=""
+case "$PATTERN" in
+  daily-triage) SEEDED=1
+    SCOPE_SEED="src/**"
+    GOAL_SEED="Sweep the backlog/issues/alerts and write the day's STATE.md priority list; report only."
+    ESCAL_SEED="everything - a human decides what to action; this loop never changes code" ;;
+  pr-babysitter) SEEDED=1
+    SCOPE_SEED="src/**"
+    GOAL_SEED="Watch open PRs; flag stuck/failing/conflicted; post a summary comment at most; never merge."
+    ESCAL_SEED="a human reviews and merges; never merge to main" ;;
+  ci-sweeper) SEEDED=1
+    SCOPE_SEED="src/**"
+    GOAL_SEED="Detect red CI; classify the failure; at L2 propose a fix in a worktree; never auto-merge to main."
+    ESCAL_SEED="flaky/infra failures, anything touching deploy/secrets, ambiguous root cause"
+    VERIFY_SEED="npm test"; GUARD_SEED="npm run typecheck" ;;
+  dependency-sweeper) SEEDED=1
+    SCOPE_SEED="package.json"
+    GOAL_SEED="Patch-only dependency bumps behind the release cooldown + guard; open a PR; never minor/major."
+    ESCAL_SEED="minor/major bumps, guard failures, any flagged advisory"
+    VERIFY_SEED="npm test"; GUARD_SEED="npm run build && npm test" ;;
+  changelog-drafter) SEEDED=1
+    SCOPE_SEED="CHANGELOG.md"
+    GOAL_SEED="Summarize merged PRs since the last tag into RELEASE_NOTES_DRAFT.md; never publish a release."
+    ESCAL_SEED="the human edits and publishes; never run gh release create" ;;
+  post-merge-cleanup) SEEDED=1
+    SCOPE_SEED="src/**"
+    GOAL_SEED="Find merged-deletable branches / stale flags / orphaned artifacts; report; never delete unmerged work."
+    ESCAL_SEED="anything ambiguous; never delete a branch with unmerged commits" ;;
+  issue-triage) SEEDED=1
+    SCOPE_SEED="src/**"
+    GOAL_SEED="Classify new issues and suggest labels + priority; propose only; never close or set priority unattended."
+    ESCAL_SEED="priority calls, dupe-closing, anything needing product judgment" ;;
+esac
+
 TARGET_DIR="$DIR/$NAME"
 CFG_OUT="$TARGET_DIR/loop.config.yaml"
 STATE_OUT="$TARGET_DIR/STATE.md"
@@ -162,6 +200,47 @@ render_run() {
     "$RUN_TPL"
 }
 
+# Seeded config for a known pattern. L1 stays report-only (gate fields are a
+# commented graduation block); L2/L3 emit verify/guard/worktree/land_via — using
+# the pattern's gate if it has one, else a <fill:…> placeholder the audit will flag.
+render_seeded_config() {
+  cat <<EOF
+# loop.config.yaml - $PATTERN (seeded by loop-init at $TIER; REVIEW before scheduling)
+# Full field semantics: skills/loop-ops/references/state-spine.md
+name: $NAME
+pattern: $PATTERN
+tier: $TIER
+permission_mode: $PMODE
+cadence: $CADENCE
+goal: "$GOAL_SEED"
+scope:
+  - "$SCOPE_SEED"
+escalation: "$ESCAL_SEED"
+budget_tokens: 200000
+kill_switch: ".loops/$NAME/PAUSED exists, OR the loop-pause label is set"
+EOF
+  if [[ "$TIER" == "L1" ]]; then
+    cat <<EOF
+
+# ── graduate to L2 (assisted): set tier: L2, uncomment + fill, re-run loop-audit + loop-doctor --live ──
+# verify: "${VERIFY_SEED:-<fill: the gate command, e.g. npm test>}"
+# guard: "${GUARD_SEED:-<fill: a must-always-pass command>}"
+# worktree: true
+# land_via: fleet-ops
+EOF
+  else
+    cat <<EOF
+verify: "${VERIFY_SEED:-<fill: the gate command for this loop>}"
+guard: "${GUARD_SEED:-<fill: a must-always-pass command>}"
+worktree: true
+land_via: fleet-ops
+EOF
+  fi
+}
+
+# Pick the seeded renderer for a known pattern, else the generic template.
+emit_config() { if [[ "$SEEDED" -eq 1 ]]; then render_seeded_config; else render_config; fi; }
+
 # ── dry-run: print and stop ─────────────────────────────────────────────────
 if [[ "$DRY_RUN" -eq 1 ]]; then
   printf '%s\n' "$CFG_OUT"
@@ -174,7 +253,7 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
     term_panel_vert
     term_panel_close "nothing written" ""
   } >&2
-  render_config
+  emit_config
   exit "$EX_OK"
 fi
 
@@ -188,7 +267,7 @@ write_atomic() {  # write_atomic <dest> <content>
   mv -f "$tmp" "$dest" || { rm -f "$tmp"; printf 'error: failed to move into place: %s\n' "$dest" >&2; exit 1; }
 }
 
-write_atomic "$CFG_OUT"   "$(render_config)"
+write_atomic "$CFG_OUT"   "$(emit_config)"
 write_atomic "$STATE_OUT" "$(render_state)"
 write_atomic "$LOG_OUT"   "$(render_log)"
 write_atomic "$RUN_OUT"   "$(render_run)"

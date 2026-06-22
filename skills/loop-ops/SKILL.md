@@ -168,7 +168,11 @@ Writes `<dir>/<name>/` with four files from the bundled templates:
 `loop.config.yaml` ([assets/loop.config.template.yaml](assets/loop.config.template.yaml)),
 `STATE.md` ([assets/STATE.template.md](assets/STATE.template.md)), `run-log.md`, and
 `run.md` — the headless run prompt a scheduler feeds to `claude -p`
-([assets/run.template.md](assets/run.template.md)).
+([assets/run.template.md](assets/run.template.md)). Pass a known `--pattern`
+(pr-babysitter, ci-sweeper, dependency-sweeper, …) and the config is **seeded** with that
+pattern's scope/goal/escalation — and, at L2+, its gate — so you get a near-ready config to
+review, not blank placeholders (it audits clean immediately). Doctrine holds: it still
+scaffolds at L1 by default with a graduation block.
 
 ```bash
 # Create .loops/pr-babysitter/ with config + STATE.md + run-log.md + run.md from templates:
