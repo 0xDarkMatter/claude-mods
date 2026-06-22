@@ -277,12 +277,13 @@ python scripts/check-pricing-sync.py --offline   # exit 0 in sync, 10 drift, 3 a
 6. **Doctor it:** `bash scripts/loop-doctor.sh --live .loops/<n>/loop.config.yaml` — prove
    it will actually *run* (gate binary on PATH, budget fits a tick). Audit = well-formed;
    doctor = will-run.
-7. **Schedule** the L1 run, native-first (read-only — it just writes `STATE.md` + a
-   report): `/loop` while you watch, a **Desktop scheduled task** for unattended *local*
-   loops, or a `/schedule` cloud routine for cloud-only work (no local files — see
-   [references/claude-code-loops.md](references/claude-code-loops.md)). Use `loop-run.sh` +
-   cron/Task Scheduler only if you want non-Claude-Code control. Bound a "work-until-done"
-   tick with `/goal`.
+7. **Schedule** the L1 run — but pick the mechanism deliberately; the **recipe selector**
+   in [references/claude-code-loops.md](references/claude-code-loops.md) prescribes it per
+   situation, because they're not interchangeable: connector-driven (email/Asana, no local
+   code) → **cloud routine**; touches local code → **Desktop scheduled task**; sustained &
+   token-sensitive → a **cache-warm daemon** (`claude -p` every ~270 s), *not* `/loop`
+   (which grows a session and chews tokens); fixed-criteria long task → **`/goal`**; quick
+   supervised polling → `/loop`. (L1 is read-only — it just writes `STATE.md` + a report.)
 8. **Read the reports.** Only after the loop's judgment is proven do you graduate it to
    **L2** (worktree + guard + `fleet-ops` landing) and re-audit at the higher tier.
 

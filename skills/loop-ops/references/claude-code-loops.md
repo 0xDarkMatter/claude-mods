@@ -53,6 +53,45 @@ spine. No cron, no Task Scheduler, no Actions.
 
 ---
 
+## Which mechanism? — the recipe selector
+
+These mechanisms are **not interchangeable** — each has a load-bearing trade-off. Pick by
+answering: does it need **local code**, is it **connector-driven**, is it **recurring** or
+**run-to-completion**, and **does token cost matter**?
+
+| Your situation | Prescribed recipe | The trade-off that decides it |
+|---|---|---|
+| **Connector work, no local code** — triage email, Asana, Slack, calendar, issues via your claude.ai connectors | **Cloud routine** (`/schedule`) | Runs unattended in the cloud and **keeps all your claude.ai connectors** — email/Asana/tools work with your machine *off*. The fresh-clone/no-local-files limit doesn't bite because the work isn't in your repo. (≥1-hour cadence.) |
+| **Touches local code / build / tools**, unattended | **Desktop scheduled task**, or a **background daemon** running `claude -p` | Both have local files and need no open session. The daemon adds fresh context per tick + deterministic, tunable cost (next row). |
+| **Sustained / heavy cadence where tokens matter** | a **deterministic daemon** (or cron) firing `claude -p` — **not** `/loop` | `/loop` runs in one *growing* session: context accumulates, tokens climb, quality drifts past ~150k. A daemon fires a **fresh** `claude -p` each tick — bounded cost, no drift — and is deterministic. **Wake it just under the 5-min prompt-cache TTL (~240–270 s)** so the static `run.md`+system prefix stays cache-warm and each tick reads it at ~0.1×. Fresh context *and* cache reads — the cheap sustained-loop recipe. |
+| **Supervised, light, you're watching** | **`/loop`** | Quickest to start, in-session — perfect for a short burst ("watch this deploy"). But it's **token-hungry if left running heavy**; graduate to a daemon for anything sustained. |
+| **Long task with a fixed, verifiable end state** — "migrate until tests pass", "split until each file < N lines", "drain the labeled backlog" | **`/goal`** (+ auto mode) | Runs turn-after-turn until a fast model confirms the criteria, then stops — a *completion gate*, not a cadence. Auto mode makes each turn unattended; bound with `or stop after N turns`. |
+
+**Cadence × completion compose.** A recurring loop whose every tick should run *to
+completion* = a cadence mechanism driving `claude -p "/goal <tick condition>"`. E.g. a
+Desktop task (or daemon) every morning running `/goal` over the issue backlog.
+
+### The economics (why the daemon beats `/loop` at scale)
+
+Cadence is the top cost lever, **caching is the next** ([state-spine.md](state-spine.md),
+[loop-cost](../scripts/loop-cost.py)). The two interact:
+
+- **`/loop`** keeps one session alive; its input grows every iteration (accumulating
+  transcript), so cost climbs and the cache helps less. Great for short supervised runs.
+- **A daemon/cron `claude -p`** starts fresh each tick (the Ralph property → flat per-tick
+  cost) and, fired **under the 5-min cache TTL**, keeps the static prefix warm (~0.1× reads).
+  `loop-cost --cadence 5m` will show this; a 6 h loop can't cache at all.
+
+A minimal local daemon (no scheduler infra) — wake under the cache window, fresh context each tick:
+
+```bash
+# fires loop-run.sh every ~4.5 min: fresh `claude -p`, prefix stays cache-warm
+while true; do .loops/<name>/loop-run.sh; sleep 270; done
+# or run it under process-compose / a systemd timer / nohup for boot persistence
+```
+
+---
+
 ## The external-scheduler shape (when you're not using a native mechanism)
 
 Native paths (Desktop task, cloud routine, `/loop`) run the tick prompt — or
