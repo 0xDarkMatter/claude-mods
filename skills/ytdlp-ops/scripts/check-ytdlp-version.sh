@@ -133,6 +133,9 @@ live_checks() {
   emit "== check-ytdlp-version --live (version age + extractor smoke)"
   local seamed=0
   [[ -n "${CM_YTDLP_INSTALLED:-}" && -n "${CM_YTDLP_LATEST:-}" ]] && { seamed=1; SMOKE=0; }
+  # Test seam: CM_YTDLP_SMOKE_ERR injects a smoke failure (empty = success)
+  # without yt-dlp/network, so the classifier below is exercised in CI.
+  [[ -n "${CM_YTDLP_SMOKE_ERR+x}" ]] && SMOKE=1
 
   # installed version
   if [[ "$seamed" -eq 1 ]]; then
@@ -205,10 +208,16 @@ live_checks() {
   if [[ "$SMOKE" -eq 1 ]]; then
     # NOTE: no --no-warnings here — the JS-runtime detection below greps the
     # "No supported JavaScript runtime" WARNING from captured stderr.
-    local smoke_cmd=(yt-dlp --simulate --no-playlist --socket-timeout 15 "$SMOKE_URL")
-    command -v timeout >/dev/null 2>&1 && smoke_cmd=(timeout 90 "${smoke_cmd[@]}")
-    local smoke_err
-    if smoke_err="$("${smoke_cmd[@]}" 2>&1 >/dev/null)"; then
+    local smoke_err smoke_rc
+    if [[ -n "${CM_YTDLP_SMOKE_ERR+x}" ]]; then
+      smoke_err="$CM_YTDLP_SMOKE_ERR"
+      [[ -z "$smoke_err" ]] && smoke_rc=0 || smoke_rc=1
+    else
+      local smoke_cmd=(yt-dlp --simulate --no-playlist --socket-timeout 15 "$SMOKE_URL")
+      command -v timeout >/dev/null 2>&1 && smoke_cmd=(timeout 90 "${smoke_cmd[@]}")
+      smoke_err="$("${smoke_cmd[@]}" 2>&1 >/dev/null)"; smoke_rc=$?
+    fi
+    if [[ "$smoke_rc" -eq 0 ]]; then
       SMOKE_RESULT="pass"
       JS_RUNTIME="present"
     elif grep -qiE "confirm you'?re not a bot|HTTP Error 429|too many requests" <<<"$smoke_err"; then
@@ -216,13 +225,23 @@ live_checks() {
       # treating it as drift would make the scheduled job flaky-red (§7).
       SMOKE_RESULT="blocked"
       emit "   warn: smoke extraction blocked by an IP challenge (bot-check/429) — not drift; skipped"
+    elif grep -q "No supported JavaScript runtime" <<<"$smoke_err"; then
+      # YouTube now requires a JS runtime (deno/node) to extract formats. On a
+      # runner without one the extraction fails for an ENVIRONMENT reason, not
+      # extractor drift — treat it like the IP challenge: advisory skip, never
+      # exit-10 (§7). Install deno on the runner (or pass --js-runtimes node) to
+      # give the smoke test teeth. This was the false-positive that red-failed
+      # the weekly freshness job.
+      SMOKE_RESULT="skipped-no-jsruntime"
+      JS_RUNTIME="missing"
+      emit "   warn: no JS runtime (deno/node) — smoke extraction skipped, not drift; install deno or pass --js-runtimes node"
     else
       SMOKE_RESULT="fail"
       finding "DRIFT: smoke extraction failed ($SMOKE_URL) with the network reachable — extractor broken; update yt-dlp"
     fi
-    # YouTube extraction without a JS runtime is deprecated and silently thins
-    # the format list — surface it, but it's an environment warning, not drift.
-    if grep -q "No supported JavaScript runtime" <<<"$smoke_err"; then
+    # Smoke PASSED but yt-dlp still warned about a missing JS runtime: formats
+    # were thinned. Record the environment state without treating it as drift.
+    if [[ "$SMOKE_RESULT" == "pass" ]] && grep -q "No supported JavaScript runtime" <<<"$smoke_err"; then
       JS_RUNTIME="missing"
       emit "   warn: no JS runtime (deno/node) — YouTube formats reduced; install deno or use --js-runtimes node"
     fi

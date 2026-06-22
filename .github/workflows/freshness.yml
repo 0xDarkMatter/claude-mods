@@ -48,6 +48,15 @@ jobs:
           if [ "$rc" -eq 7 ]; then echo "::warning::ffmpeg unavailable on runner — live check skipped"; fi
           exit 0
 
+      - name: Set up Deno (JS runtime for yt-dlp YouTube extraction)
+        # YouTube now needs a JS runtime to solve its nsig challenge; yt-dlp
+        # auto-detects deno on PATH. Without it the smoke test can't extract and
+        # the verifier correctly treats it as advisory-skip — but with deno the
+        # smoke test actually exercises extraction and can catch real drift.
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
       - name: ytdlp-ops version age + extractor smoke test
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

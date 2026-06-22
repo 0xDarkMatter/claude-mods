@@ -106,6 +106,36 @@ case "$err" in
   *) no "stdout carries only the JSON envelope";;
 esac
 
+# ── smoke classification (seamed; fixes the freshness false-positive) ────────
+echo "-- smoke classification (seamed) --"
+# (a) no JS runtime on the runner = ENVIRONMENT gap, advisory skip — NEVER
+#     exit 10. This is the exact false-positive that red-failed the weekly job.
+out="$(CM_YTDLP_INSTALLED=2026.06.01 CM_YTDLP_LATEST=2026.06.01 \
+       CM_YTDLP_SMOKE_ERR='ERROR: [youtube] jNQXAC9IVRw: No supported JavaScript runtime found, please install deno' \
+       bash "$V" --live --json 2>/dev/null)"; rc=$?
+expect_exit "no-JS-runtime smoke -> 0 (advisory, not drift)" 0 "$rc"
+expect_has "smoke marked skipped-no-jsruntime" '"smoke": "skipped-no-jsruntime"' "$out"
+expect_has "js_runtime reported missing" '"js_runtime": "missing"' "$out"
+case "$out" in *DRIFT*) no "no-JS-runtime must not record DRIFT";; *) ok "no-JS-runtime records no DRIFT";; esac
+
+# (b) a genuine extractor break (JS runtime present) IS drift -> 10
+CM_YTDLP_INSTALLED=2026.06.01 CM_YTDLP_LATEST=2026.06.01 \
+  CM_YTDLP_SMOKE_ERR='ERROR: unable to extract player response; please report this issue' \
+  bash "$V" --live >/dev/null 2>&1
+expect_exit "real extractor break -> 10 (drift)" 10 $?
+
+# (c) IP bot-challenge / 429 = advisory skip, not drift
+CM_YTDLP_INSTALLED=2026.06.01 CM_YTDLP_LATEST=2026.06.01 \
+  CM_YTDLP_SMOKE_ERR='ERROR: HTTP Error 429: Too Many Requests' \
+  bash "$V" --live >/dev/null 2>&1
+expect_exit "bot-challenge/429 -> 0 (advisory)" 0 $?
+
+# (d) smoke success (empty seam) -> pass, exit 0
+out="$(CM_YTDLP_INSTALLED=2026.06.01 CM_YTDLP_LATEST=2026.06.01 CM_YTDLP_SMOKE_ERR='' \
+       bash "$V" --live --json 2>/dev/null)"; rc=$?
+expect_exit "smoke success -> 0" 0 "$rc"
+expect_has "smoke marked pass" '"smoke": "pass"' "$out"
+
 # ── SKILL.md sanity ──────────────────────────────────────────────────────────
 echo "-- SKILL.md --"
 grep -q '^name: ytdlp-ops$' "$SKILL/SKILL.md" && ok "frontmatter name" || no "frontmatter name"
