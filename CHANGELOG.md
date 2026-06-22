@@ -54,6 +54,16 @@ feature releases live in the README "Recent Updates" section.
   an executable runner-agnostic `loop-run.sh` for external schedulers (cron / Task Scheduler /
   systemd / process-compose) and GitHub Actions demoted to one optional path. No GitHub
   Actions dependency anywhere. 96-assertion suite.
+- **pattern catalog v2 (morphology + event-driven + new archetypes)**: patterns are now a
+  generative **morphology** — `trigger` (cadence / **event** via a Channel / `goal`) ×
+  `posture` (L1/L2/L3) × `locus` (connector→cloud / local→desktop) — not a flat list, so
+  any point in the space composes. Adds the **event-driven trigger** (Channels: a CI/error/
+  deploy webhook pushes the tick in — cheaper + faster than polling) and six archetypes
+  beyond the GitHub-CI slice: `metric-chase` (drive a metric via `iterate`),
+  `regression-watch` (benchmark/eval diff), `digest` (connector-only cloud routine for
+  email/Asana), `backfill` (run-to-completion via `/goal`), `monitor` (event-driven
+  triage), `freshness` (doc/dep drift). `loop-scaffold` seeds all 13, the cost model knows
+  them, each carries its dominant failure mode + cost profile. 109-assertion suite.
 
 ## [3.2.0] - 2026-06-22
 

@@ -7,10 +7,11 @@ children* — is in [risk-tiers.md](risk-tiers.md); this is the how.
 
 ---
 
-A loop is two things, and Claude Code has **native** answers to both: a **cadence** (when
-a tick fires) and a **completion** rule (when the work stops). **Prefer the native
-mechanisms — they're zero/low-infra and need no GitHub Actions.** Reach for an external
-scheduler only when you want non-Claude-Code control.
+A loop's **trigger** answers *when a tick fires* — a **cadence** (poll on a clock) or an
+**event** (something pushed in by a Channel) — and its **completion** rule answers *when
+the work stops*. Claude Code has native answers to all three. **Prefer the native
+mechanisms — zero/low-infra, no GitHub Actions.** Reach for an external scheduler only for
+non-Claude-Code control.
 
 ## Cadence — when a tick fires
 
@@ -32,6 +33,27 @@ The unattended options (Desktop task, cloud routine, external scheduler, Actions
 human-configured **authorizer** — no parent auto-mode session, so nothing blocks the
 headless child. Many loop frameworks are CI/Actions-centric; loop-ops is
 runner-agnostic and **native-first** on purpose.
+
+## Event — when something happens (Channels)
+
+Polling burns tokens while nothing changes and lags the thing it watches. A
+[**Channel**](https://code.claude.com/docs/en/channels) (v2.1.80+, research preview) is an
+MCP plugin that **pushes** an external event — a CI failure, an error-tracker alert, a
+deploy webhook, a chat message — straight into a running session, so the tick fires *on the
+event* instead of on a timer.
+
+- **Cheaper + faster than polling** — no idle ticks; the loop reacts the instant the event
+  lands. The right trigger for `ci-watch`, `pr-watch`, `monitor`.
+- **The trade-off:** an event arrives only while a session is open, so an unattended
+  event-loop is a **persistent background session** (`claude --channels plugin:<name> …`,
+  or `-p` for non-interactive) kept alive — not a fully-detached cron. Detachment traded
+  for responsiveness.
+- **Setup:** install a channel plugin (Telegram/Discord/iMessage ship in the preview; build
+  a [webhook receiver](https://code.claude.com/docs/en/channels-reference) for CI/error/
+  deploy), launch with `--channels`, lock the sender allowlist. Anthropic-auth only (not
+  Bedrock/Vertex/Foundry).
+- **Still gated** — an event-driven tick runs under the same permission mode + allowlist as
+  any other; a webhook firing the loop never widens what it may do.
 
 ## Completion — when the work stops: `/goal`
 

@@ -120,7 +120,7 @@ esac
 # Seed a near-ready config for a known --pattern (the user reviews, doesn't start
 # from blank placeholders). Doctrine: always scaffold at the chosen tier; report/
 # propose/draft patterns carry no gate (VERIFY_SEED empty), code-changing ones do.
-SEEDED=0; SCOPE_SEED=""; GOAL_SEED=""; ESCAL_SEED=""; VERIFY_SEED=""; GUARD_SEED=""
+SEEDED=0; SCOPE_SEED=""; GOAL_SEED=""; ESCAL_SEED=""; VERIFY_SEED=""; GUARD_SEED=""; BUDGET_SEED=""
 case "$PATTERN" in
   daily-scan) SEEDED=1
     SCOPE_SEED="src/**"
@@ -152,6 +152,33 @@ case "$PATTERN" in
     SCOPE_SEED="src/**"
     GOAL_SEED="Classify new issues and suggest labels + priority; propose only; never close or set priority unattended."
     ESCAL_SEED="priority calls, dupe-closing, anything needing product judgment" ;;
+  metric-chase) SEEDED=1
+    SCOPE_SEED="src/**"
+    GOAL_SEED="Drive a measurable target (coverage/latency/bundle/eval score) to goal via iterate; keep gains, discard regressions."
+    ESCAL_SEED="target unreachable after the budget, guard failures, any change to the gate/test itself"
+    VERIFY_SEED="npm test -- --coverage"; GUARD_SEED="npm run typecheck"
+    BUDGET_SEED=400000 ;;   # iterate fan-out is the most expensive tick — fit it
+  regression-watch) SEEDED=1
+    SCOPE_SEED="bench/**"
+    GOAL_SEED="Run the benchmark/eval suite, diff against the recorded baseline; report a regression; never edit the suite."
+    ESCAL_SEED="a confirmed regression (a human triages); a single flaky run is advisory, not a page" ;;
+  digest) SEEDED=1
+    SCOPE_SEED="reports/**"
+    GOAL_SEED="Summarize email/Asana/calendar/news via connectors into a morning report; read-only, never act."
+    ESCAL_SEED="anything requiring a reply or an action; this loop only summarizes" ;;
+  backfill) SEEDED=1
+    SCOPE_SEED="src/**"
+    GOAL_SEED="Drain a migration/queue to completion via /goal; one item per step, verify each; stop when empty or after the bound."
+    ESCAL_SEED="any item needing a judgment call; never exceed the stop-after-N / token bound"
+    VERIFY_SEED="npm test"; GUARD_SEED="npm run typecheck" ;;
+  monitor) SEEDED=1
+    SCOPE_SEED="src/**"
+    GOAL_SEED="React to an error/log/deploy event (via a Channel); triage it and page a human on a real anomaly; never auto-remediate prod."
+    ESCAL_SEED="any anomaly worth a human; production remediation; anything destructive" ;;
+  freshness) SEEDED=1
+    SCOPE_SEED="docs/**"
+    GOAL_SEED="Re-check docs/data/deps/links against reality on a cadence; report confirmed drift; never auto-edit on a transient failure."
+    ESCAL_SEED="confirmed drift a human should fix; a transient/network failure is advisory only" ;;
 esac
 
 TARGET_DIR="$DIR/$NAME"
@@ -228,7 +255,7 @@ goal: "$GOAL_SEED"
 scope:
   - "$SCOPE_SEED"
 escalation: "$ESCAL_SEED"
-budget_tokens: 200000
+budget_tokens: ${BUDGET_SEED:-200000}
 kill_switch: ".loops/$NAME/PAUSED exists, OR the loop-pause label is set"
 EOF
   if [[ "$TIER" == "L1" ]]; then

@@ -1,6 +1,6 @@
 ---
 name: loop-ops
-description: "Design, scaffold, and safely run OUTER loops — scheduled discover→triage→implement→verify→escalate-or-land agent loops, the orchestration layer above a single run. Risk-tier ladder (L1 report → L2 assisted → L3 unattended) mapped onto Claude Code's permission model, a persistent STATE/run-log/budget spine, a production pattern catalog, multi-loop coordination, and a kill switch. Composes iterate (inner loop), fleet-worker (spawn), fleet-ops (land), and native /loop + /schedule. Triggers on: loop engineering, outer loop, loop design, design a loop, scheduled agent, autonomous loop, background agent loop, PR watch, CI watch, dependency bump, changelog gen, issue sort, daily scan, loop check, loop estimate, loop readiness, ralph loop, agent harness, escalation gate, risk tier, kill switch, run it overnight on a schedule."
+description: "Design, scaffold, and safely run OUTER loops — scheduled discover→triage→implement→verify→escalate-or-land agent loops, the orchestration layer above a single run. Risk-tier ladder (L1 report → L2 assisted → L3 unattended) mapped onto Claude Code's permission model, a persistent STATE/run-log/budget spine, a production pattern catalog, multi-loop coordination, and a kill switch. Composes iterate (inner loop), fleet-worker (spawn), fleet-ops (land), and native /loop + /schedule. Triggers on: loop engineering, outer loop, loop design, design a loop, scheduled agent, autonomous loop, background agent loop, PR watch, CI watch, dependency bump, changelog gen, issue sort, daily scan, metric chase, regression watch, digest loop, backfill, monitor loop, freshness check, event-driven loop, channel webhook, loop check, loop estimate, loop readiness, ralph loop, agent harness, escalation gate, risk tier, kill switch, run it overnight on a schedule."
 when_to_use: "Use when designing or running a recurring/scheduled agent loop rather than a one-shot task — e.g. 'set up a loop that triages PRs every 10 minutes', 'design an autonomous CI-failure recovery loop', 'how risky is this loop / is it ready to run unattended', 'estimate what this loop costs per month', 'build a loop-engineering setup'. For a single-session improvement loop against one metric, use iterate instead."
 license: MIT
 allowed-tools: "Read Write Edit Bash Glob Grep"
@@ -112,22 +112,31 @@ read/write contract in [references/state-spine.md](references/state-spine.md)):
 - **`loop.config.yaml`** — the loop's definition (goal, tier, cadence, scope, gate,
   budget, escalation). Scaffolded by `loop-scaffold`, scored by `loop-check`.
 
-## Pattern catalog
+## Pattern catalog (a morphology, not a fixed list)
 
-Seven battle-tested shapes, each with a cadence, a risk tier, and an escalation rule.
-Full skeletons in [references/pattern-catalog.md](references/pattern-catalog.md):
+Patterns are **compositions of three axes** — `trigger` (cadence / **event** via a Channel
+/ `goal`) × `posture` (L1/L2/L3) × `locus` (connector→cloud routine / local→Desktop task).
+The named patterns are well-trodden points in that space; compose your own from the axes.
+Full recipes + the morphology in [references/pattern-catalog.md](references/pattern-catalog.md):
 
-| Pattern | Cadence | Tier | One-line job |
+| Pattern | Trigger · Locus | Tier | One-line job |
 |---|---|---|---|
-| Daily Scan | 1–2 h | L1 | discover + prioritize, report only |
-| PR Watch | 5–15 min | L1 | watch review state, surface stuck PRs |
-| CI Watch | 5–15 min | L2 | triage build failures, propose a fix |
-| Dependency Bump | 6 h–1 d | L2 | patch-only bumps behind the cooldown + guard |
-| Changelog Gen | 1 d / tag | L1 | draft release notes for human approval |
-| Merge Hygiene | 1–6 h | L1 | hygiene: dead branches, stale flags |
-| Issue Sort | 2 h–1 d | L1 | classify + label, propose only |
+| `daily-scan` | cadence · local | L1 | discover + prioritize, report only |
+| `pr-watch` | event\|cadence · connector | L1 | watch review state, surface stuck PRs |
+| `ci-watch` | **event** · local | L2 | triage build failures, propose a fix |
+| `dep-bump` | cadence · local | L2 | patch-only bumps behind cooldown + guard |
+| `changelog-gen` | event(tag)\|cadence · local | L1 | draft release notes for approval |
+| `merge-hygiene` | cadence · local | L1 | dead branches, stale flags |
+| `issue-sort` | cadence · connector | L1 | classify + label, propose only |
+| `metric-chase` | **goal** · local | L2 | drive a metric (coverage/latency/eval) via `iterate` |
+| `regression-watch` | cadence\|event · local | L1 | run a benchmark/eval, flag a regression |
+| `digest` | cadence · **connector** | L1 | summarize email/Asana/news (cloud routine) |
+| `backfill` | **goal** · local | L2 | drain a migration/queue **to completion** |
+| `monitor` | **event** · local | L1 | error/deploy webhook → triage + page |
+| `freshness` | cadence · local | L1 | re-check docs/data/deps vs reality |
 
 Start any pattern at L1. Graduate to L2 only after the L1 reports prove its judgment.
+**Prefer `event` over `cadence`** where a webhook exists (cheaper, faster than polling).
 
 ## Multi-loop coordination & the kill switch
 

@@ -17,6 +17,12 @@
     "changelog-gen":   { "input": 25000,  "output": 9000,  "subagents": 1 },
     "merge-hygiene":  { "input": 20000,  "output": 4000,  "subagents": 1 },
     "issue-sort":        { "input": 18000,  "output": 4000,  "subagents": 1 },
+    "metric-chase":      { "input": 50000,  "output": 20000, "subagents": 3 },
+    "regression-watch":  { "input": 45000,  "output": 8000,  "subagents": 1 },
+    "digest":            { "input": 30000,  "output": 7000,  "subagents": 1 },
+    "backfill":          { "input": 40000,  "output": 15000, "subagents": 2 },
+    "monitor":           { "input": 12000,  "output": 3000,  "subagents": 1 },
+    "freshness":         { "input": 35000,  "output": 6000,  "subagents": 1 },
     "custom":              { "input": 30000,  "output": 8000,  "subagents": 1 }
   }
 }

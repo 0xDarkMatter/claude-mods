@@ -134,6 +134,18 @@ bash "$AUDIT" "$SB/seed/seed-l2/loop.config.yaml" >/dev/null 2>&1; expect_exit "
 # an unknown pattern falls back to the generic placeholder template (not ready)
 bash "$INIT" --name seed-x --pattern custom --tier L1 --dir "$SB/seed" >/dev/null 2>&1
 case "$(cat "$SB/seed/seed-x/loop.config.yaml")" in *"<one sentence"*) ok "unknown pattern uses generic template";; *) no "unknown pattern did not use template";; esac
+# v2 archetypes: scaffold must be audit-clean AND doctor-clean at L1 + known to the cost model
+# (doctor-clean catches budget < tokens/run — the metric-chase trap: it seeds a bigger budget)
+for p in metric-chase regression-watch digest backfill monitor freshness; do
+  bash "$INIT" --name "a-$p" --pattern "$p" --tier L1 --dir "$SB/arch" >/dev/null 2>&1
+  bash "$AUDIT" "$SB/arch/a-$p/loop.config.yaml" >/dev/null 2>&1; expect_exit "archetype $p seeds audit-clean (L1)" 0 $?
+  bash "$DOCTOR" --offline "$SB/arch/a-$p/loop.config.yaml" >/dev/null 2>&1; expect_exit "archetype $p doctors clean (L1)" 0 $?
+  "$PYTHON" "$COST" --pattern "$p" --cadence 1h --model claude-haiku-4-5 >/dev/null 2>&1; expect_exit "cost model knows $p" 0 $?
+done
+# the most expensive archetype at L2: gate filled, budget fits the tick (audit + doctor clean)
+bash "$INIT" --name a-mc --pattern metric-chase --tier L2 --cadence 1h --dir "$SB/arch" >/dev/null 2>&1
+bash "$AUDIT" "$SB/arch/a-mc/loop.config.yaml" >/dev/null 2>&1; expect_exit "metric-chase L2 audits clean -> 0" 0 $?
+bash "$DOCTOR" --offline "$SB/arch/a-mc/loop.config.yaml" >/dev/null 2>&1; expect_exit "metric-chase L2 doctors clean (budget fits) -> 0" 0 $?
 
 # ── loop-check: a freshly-init'd config is NOT ready (placeholders) -> 10 ───
 echo "-- loop-check --"
