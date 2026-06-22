@@ -91,6 +91,11 @@ expect_has  "prints the config path" "pr-watch/loop.config.yaml" "$out"
 runmd="$(cat "$SB/loops/pr-watch/run.md")"
 expect_has "run.md substitutes loop name" "Run: pr-watch" "$runmd"
 expect_has "run.md substitutes tier" "tier L1)" "$runmd"
+# runner-agnostic wrapper: emitted, executable, fully substituted, no GH Actions dep
+[[ -f "$SB/loops/pr-watch/loop-run.sh" ]] && ok "wrote loop-run.sh" || no "no loop-run.sh"
+runsh="$(cat "$SB/loops/pr-watch/loop-run.sh")"
+case "$runsh" in *"<loop-name>"*|*"<permission-mode>"*) no "loop-run.sh left a placeholder";; *) ok "loop-run.sh fully substituted";; esac
+expect_has "loop-run.sh wires the gated mode" "--permission-mode dontAsk" "$runsh"
 cfg="$(cat "$SB/loops/pr-watch/loop.config.yaml")"
 expect_has "substituted name" "name: pr-watch" "$cfg"
 expect_has "substituted tier" "tier: L1" "$cfg"
@@ -258,7 +263,8 @@ EX="$SKILL/assets/examples/pr-babysitter/loop.config.yaml"
 [[ -f "$EX" ]] && ok "worked example present" || no "worked example missing"
 bash "$AUDIT" "$EX" >/dev/null 2>&1; expect_exit "shipped example audits clean -> 0" 0 $?
 bash "$DOCTOR" --offline "$EX" >/dev/null 2>&1; expect_exit "shipped example doctors clean -> 0" 0 $?
-[[ -f "$SKILL/assets/examples/pr-babysitter/github-actions.yml" ]] && ok "example ships a scheduler" || no "example missing scheduler"
+[[ -f "$SKILL/assets/examples/pr-babysitter/loop-run.sh" ]] && ok "example ships loop-run.sh (runner-agnostic)" || no "example missing loop-run.sh"
+[[ -f "$SKILL/assets/examples/pr-babysitter/github-actions.yml" ]] && ok "example ships an optional GH Actions scheduler" || no "example missing GH Actions option"
 [[ -f "$SKILL/assets/examples/pr-babysitter/run.md" ]] && ok "example ships a run prompt" || no "example missing run.md"
 
 # ── terminal design system ─────────────────────────────────────────────────

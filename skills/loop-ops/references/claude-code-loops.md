@@ -7,40 +7,91 @@ children* — is in [risk-tiers.md](risk-tiers.md); this is the how.
 
 ---
 
-## The four cadence mechanisms
+A loop is two things, and Claude Code has **native** answers to both: a **cadence** (when
+a tick fires) and a **completion** rule (when the work stops). **Prefer the native
+mechanisms — they're zero/low-infra and need no GitHub Actions.** Reach for an external
+scheduler only when you want non-Claude-Code control.
 
-| Mechanism | What it is | Best for | Tier fit |
-|---|---|---|---|
-| **`/loop`** | runs a prompt/slash-command on a recurring interval (or self-paced) in the *current* session | interactive, supervised loops; polling you watch | L1, supervised |
-| **`/schedule`** | cron-scheduled **cloud** agents (routines) that run detached | unattended recurring loops, the real L2/L3 cadence | L2/L3 |
-| **`ScheduleWakeup`** | re-enter *this* session after a delay (dynamic `/loop` pacing) | self-pacing a single long task; polling external state | L1, supervised |
-| **OS scheduler / CI** | Task Scheduler / cron / GitHub Actions invoking `claude -p` | the canonical unattended loop; the authorizer is the scheduler | L2/L3 |
+## Cadence — when a tick fires
 
-The first three keep a session in the loop (good for L1, supervised). The fourth is the
-unattended pattern: **the scheduler is the human-configured authorizer**, so there's no
-parent classifier to block the headless child.
+| Mechanism | Runs on | Local files? | Open session? | Min interval | Best for |
+|---|---|---|---|---|---|
+| **`/loop`** | your machine | ✅ | **yes** | 1 min | supervised, in-session polling (L1) |
+| **Desktop scheduled task** | your machine | ✅ | no | 1 min | **the local-first unattended default** — loops that touch the repo/build/tools |
+| **Cloud routine** (`/schedule` → [Routines](https://code.claude.com/docs/en/routines)) | **Anthropic cloud** | ❌ **fresh clone** | no | **1 hour** | unattended loops needing **no** local state (GitHub PRs, web) |
+| **`ScheduleWakeup`** | your machine | ✅ | yes | — | self-pacing one long task |
+| external scheduler + `loop-run.sh` | your machine | ✅ | no | your call | non-Claude-Code control: cron / Task Scheduler / systemd / process-compose / CI |
+| **GitHub Actions** | GH runner | fresh clone | no | — | *optional* — only if the repo already lives on GitHub |
+
+> **Load-bearing caveat:** **cloud routines run on a fresh clone with no access to your
+> local files.** A loop that touches a local repo, build, model dir, or tool **cannot** be
+> a cloud routine — use a **Desktop scheduled task** or `/loop`. Cloud routines are for
+> cloud-reachable, local-state-free work only.
+
+The unattended options (Desktop task, cloud routine, external scheduler, Actions) are the
+human-configured **authorizer** — no parent auto-mode session, so nothing blocks the
+headless child. Upstream loop-engineering is GitHub-Actions-centric; loop-ops is
+runner-agnostic and **native-first** on purpose.
+
+## Completion — when the work stops: `/goal`
+
+[`/goal <condition>`](https://code.claude.com/docs/en/goal) (v2.1.139+) keeps the session
+working turn-after-turn until a small fast model confirms the condition holds, then
+auto-clears — the **native inner-loop gate**. It's the native expression of a loop's
+`verify`/Until rule: *"keep going until the acceptance criteria hold."* Bound it with
+`or stop after N turns`. It's a session-scoped **prompt-based Stop hook**, and it pairs
+with auto mode (auto removes per-*tool* prompts; `/goal` removes per-*turn* prompts).
+Headless, one tick to completion:
+
+```bash
+claude -p "/goal all tests in test/auth pass and lint is clean, or stop after 20 turns"
+```
+
+**The fully-native, zero-external-infra loop** = a **Desktop scheduled task** (local, has
+files, no open session) that runs `claude -p "/goal <tick condition>"` against the STATE
+spine. No cron, no Task Scheduler, no Actions.
 
 ---
 
-## The canonical unattended shape
+## The external-scheduler shape (when you're not using a native mechanism)
+
+Native paths (Desktop task, cloud routine, `/loop`) run the tick prompt — or
+`claude -p "/goal …"` — **directly**, so they need no wrapper. When you instead drive the
+loop from an **external** scheduler (cron / Task Scheduler / systemd / process-compose /
+CI — e.g. for sub-minute cadence or to fit existing infra), `loop-init` scaffolds a
+**`loop-run.sh`** in the loop dir as the runner-agnostic glue. No GitHub Actions required.
 
 ```
-                    ┌────────────────────────────────────────────┐
-   cron / Task      │  for each tick:                            │
-   Scheduler / CI ──┤    claude -p "$(cat .loops/<name>/run.md)" \│
-   (the authorizer) │      --permission-mode dontAsk \           │
-                    │      --append-system-prompt "$(cat STATE.md)"│
-                    │    → run reads STATE, does work, rewrites it │
-                    └────────────────────────────────────────────┘
+   any scheduler ──▶ .loops/<name>/loop-run.sh
+   (the authorizer)      ├─ kill switch first (PAUSED sentinel) → exit if set
+                         ├─ claude -p "$(cat run.md)" --permission-mode dontAsk \
+                         │     --append-system-prompt "$(cat STATE.md)" --allowedTools …
+                         └─ git add/commit STATE.md + run-log.md (if in a repo)
 ```
 
-- The **scheduler** (not a Claude session) invokes `claude -p`. It is the human-configured
-  authorizer; nothing upstream gates the run.
+Wire it with whatever you already run — **no cloud dependency**:
+
+```bash
+# cron (Linux/macOS):
+*/10 * * * *  /path/.loops/pr-babysitter/loop-run.sh >> /path/.loops/pr-babysitter/tick.log 2>&1
+
+# Windows Task Scheduler (every 10 min; S4U logon, see windows-ops for the hardened form):
+schtasks /Create /SC MINUTE /MO 10 /TN pr-babysitter \
+  /TR "bash -lc '/c/path/.loops/pr-babysitter/loop-run.sh'"
+
+# process-compose / systemd timer / a while-sleep loop — all work; loop-run.sh is just a script.
+```
+
+- The **scheduler** (not a Claude session) invokes `loop-run.sh`. It is the
+  human-configured authorizer; nothing upstream gates the run.
 - `--permission-mode dontAsk` + a curated allowlist = a **gated** worker that runs
   anywhere. (For L3 arbitrary-execution jobs, swap to a container + `bypassPermissions` —
   see the enumerate-vs-isolate fork in [risk-tiers.md](risk-tiers.md).)
 - The run prompt (`run.md`) is the same every tick — fresh context each time (the Ralph
   property). State survives in `STATE.md` + the codebase + git, not the conversation.
+- **GitHub Actions** is one option, not a requirement — the worked example ships an
+  optional `github-actions.yml` for repos already on GitHub; everyone else uses the local
+  schedulers above.
 
 ### Why not "a Claude session that launches the loop"?
 

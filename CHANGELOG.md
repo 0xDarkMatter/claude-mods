@@ -48,6 +48,13 @@ feature releases live in the README "Recent Updates" section.
   to the control that catches it); connector/MCP least-privilege scoping + the auto-merge
   guard in `references/risk-tiers.md`; and an honest "why Claude Code-specific, not a
   multi-tool matrix" note. 92-assertion suite.
+- **loop-ops native-first, runner-agnostic scheduling**: the cadence layer now leads with
+  Claude Code's own primitives — `/loop` (in-session), **Desktop scheduled tasks** (local,
+  unattended), `/schedule` cloud routines (with the load-bearing *fresh-clone, no-local-files*
+  caveat surfaced), and `/goal` as the native completion gate — with `loop-init` scaffolding
+  an executable runner-agnostic `loop-run.sh` for external schedulers (cron / Task Scheduler /
+  systemd / process-compose) and GitHub Actions demoted to one optional path. No GitHub
+  Actions dependency anywhere. 96-assertion suite.
 
 ## [3.2.0] - 2026-06-22
 

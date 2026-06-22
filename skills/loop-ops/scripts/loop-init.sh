@@ -38,6 +38,7 @@ ASSETS="$HERE/../assets"
 CFG_TPL="$ASSETS/loop.config.template.yaml"
 STATE_TPL="$ASSETS/STATE.template.md"
 RUN_TPL="$ASSETS/run.template.md"
+RUN_SH_TPL="$ASSETS/run.sh.template"
 
 # ── defaults ────────────────────────────────────────────────────────────────
 NAME=""
@@ -107,6 +108,7 @@ case "$TIER" in L1|L2|L3) ;; *) die_usage "--tier must be L1|L2|L3 (got '$TIER')
 [[ -f "$CFG_TPL" ]]   || { printf 'error: config template not found at %s\n' "$CFG_TPL" >&2; exit "$EX_NOTFOUND"; }
 [[ -f "$STATE_TPL" ]] || { printf 'error: STATE template not found at %s\n' "$STATE_TPL" >&2; exit "$EX_NOTFOUND"; }
 [[ -f "$RUN_TPL" ]]   || { printf 'error: run template not found at %s\n' "$RUN_TPL" >&2; exit "$EX_NOTFOUND"; }
+[[ -f "$RUN_SH_TPL" ]] || { printf 'error: run.sh template not found at %s\n' "$RUN_SH_TPL" >&2; exit "$EX_NOTFOUND"; }
 
 # Default permission_mode from tier (the workhorse mapping; see references/risk-tiers.md).
 case "$TIER" in
@@ -157,6 +159,7 @@ CFG_OUT="$TARGET_DIR/loop.config.yaml"
 STATE_OUT="$TARGET_DIR/STATE.md"
 LOG_OUT="$TARGET_DIR/run-log.md"
 RUN_OUT="$TARGET_DIR/run.md"
+RUN_SH_OUT="$TARGET_DIR/loop-run.sh"
 
 # Refuse a populated target unless --force.
 if [[ -d "$TARGET_DIR" ]] && [[ -n "$(ls -A "$TARGET_DIR" 2>/dev/null)" ]] && [[ "$FORCE" -ne 1 ]]; then
@@ -198,6 +201,15 @@ render_run() {
     -e "s|<loop-name>|$NAME|g" \
     -e "s|tier <L1\\|L2\\|L3>|tier $TIER|g" \
     "$RUN_TPL"
+}
+
+# The runner-agnostic tick wrapper any scheduler invokes (cron / Task Scheduler /
+# systemd / process-compose / by hand) — no GitHub Actions required.
+render_run_sh() {
+  sed -E \
+    -e "s|<loop-name>|$NAME|g" \
+    -e "s|<permission-mode>|$PMODE|g" \
+    "$RUN_SH_TPL"
 }
 
 # Seeded config for a known pattern. L1 stays report-only (gate fields are a
@@ -249,7 +261,7 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
     term_panel_vert
     term_status_row skip "would create  $TARGET_DIR/" "tier $TIER ${TERM_DOT} $PATTERN ${TERM_DOT} $CADENCE"
     term_status_row skip "  loop.config.yaml" "permission_mode: $PMODE"
-    term_status_row skip "  STATE.md / run-log.md / run.md" ""
+    term_status_row skip "  STATE.md / run-log.md / run.md / loop-run.sh" ""
     term_panel_vert
     term_panel_close "nothing written" ""
   } >&2
@@ -271,6 +283,8 @@ write_atomic "$CFG_OUT"   "$(emit_config)"
 write_atomic "$STATE_OUT" "$(render_state)"
 write_atomic "$LOG_OUT"   "$(render_log)"
 write_atomic "$RUN_OUT"   "$(render_run)"
+write_atomic "$RUN_SH_OUT" "$(render_run_sh)"
+chmod +x "$RUN_SH_OUT" 2>/dev/null || true
 
 printf '%s\n' "$CFG_OUT"
 
@@ -279,7 +293,7 @@ printf '%s\n' "$CFG_OUT"
   term_panel_vert
   term_status_row ok "created  $TARGET_DIR/" "tier $TIER ${TERM_DOT} $PATTERN ${TERM_DOT} $CADENCE"
   term_status_row ok "  loop.config.yaml" "permission_mode: $PMODE"
-  term_status_row ok "  STATE.md / run-log.md / run.md" ""
+  term_status_row ok "  STATE.md / run-log.md / run.md / loop-run.sh" ""
   if [[ "$TIER" != "L1" ]]; then
     term_alert warning "tier $TIER needs a verify gate, guard, worktree, escalation + land_via — fill them before auditing"
   fi

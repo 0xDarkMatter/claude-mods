@@ -34,7 +34,7 @@ already exist:
 
 | Primitive | What it is | Owned in claude-mods by |
 |---|---|---|
-| **Schedule** | fire the loop on a cadence | native `/loop`, `/schedule` (cron agents), `ScheduleWakeup` |
+| **Schedule** | fire the loop on a cadence | native-first: `/loop` (in-session), **Desktop scheduled task** (local, unattended), `/schedule` cloud routines (no local files); `/goal` is the native completion gate. External (cron/Task Scheduler + `loop-run.sh`) only for non-Claude-Code control |
 | **Worktree** | isolated, discardable execution context | `git-ops` worktrees, `fleet-worker` (per-task worktree) |
 | **Skills** | persistent project knowledge the run loads | this repo's skill layer + your `CLAUDE.md` |
 | **Sub-agents** | maker/checker separation | `Agent`/`Task`; dispatching skills (`review`, `testgen`) |
@@ -148,7 +148,7 @@ Running several loops? Two non-negotiables (detail in
 | improve one metric in one session | [`iterate`](../iterate/SKILL.md) | a hand-rolled inner loop |
 | spawn cheap parallel makers | [`fleet-worker`](../fleet-worker/SKILL.md) | bespoke `claude -p` plumbing |
 | test-gate + land winning branches | [`fleet-ops`](../fleet-ops/SKILL.md) | a manual merge step |
-| fire on a cadence | native `/loop`, `/schedule` | a custom cron in this skill |
+| fire on a cadence | native `/loop` · Desktop scheduled task · `/schedule` cloud routine; `/goal` for completion | a custom cron in this skill |
 | commit / PR / release | [`git-ops`](../git-ops/SKILL.md), [`github-ops`](../github-ops/SKILL.md) | raw `git push` |
 | signal between loops | [`pigeon`](../pigeon/SKILL.md) | a shared scratch file |
 
@@ -167,11 +167,13 @@ preflights whether it will actually *run*, **cost** estimates spend (caching-awa
 
 ### `scripts/loop-init.sh` — scaffold a loop's state spine
 
-Writes `<dir>/<name>/` with four files from the bundled templates:
+Writes `<dir>/<name>/` with five files from the bundled templates:
 `loop.config.yaml` ([assets/loop.config.template.yaml](assets/loop.config.template.yaml)),
-`STATE.md` ([assets/STATE.template.md](assets/STATE.template.md)), `run-log.md`, and
-`run.md` — the headless run prompt a scheduler feeds to `claude -p`
-([assets/run.template.md](assets/run.template.md)). Pass a known `--pattern`
+`STATE.md` ([assets/STATE.template.md](assets/STATE.template.md)), `run-log.md`, `run.md`
+(the headless run prompt, [assets/run.template.md](assets/run.template.md)), and an
+executable **`loop-run.sh`** ([assets/run.sh.template](assets/run.sh.template)) — the
+runner-agnostic tick wrapper any scheduler invokes (cron / Windows Task Scheduler /
+systemd / by hand), **no GitHub Actions required**. Pass a known `--pattern`
 (pr-babysitter, ci-sweeper, dependency-sweeper, …) and the config is **seeded** with that
 pattern's scope/goal/escalation — and, at L2+, its gate — so you get a near-ready config to
 review, not blank placeholders (it audits clean immediately). Doctrine holds: it still
@@ -275,8 +277,12 @@ python scripts/check-pricing-sync.py --offline   # exit 0 in sync, 10 drift, 3 a
 6. **Doctor it:** `bash scripts/loop-doctor.sh --live .loops/<n>/loop.config.yaml` — prove
    it will actually *run* (gate binary on PATH, budget fits a tick). Audit = well-formed;
    doctor = will-run.
-7. **Schedule** the L1 run with native `/loop` or `/schedule` (read-only — it just
-   writes `STATE.md` + a report).
+7. **Schedule** the L1 run, native-first (read-only — it just writes `STATE.md` + a
+   report): `/loop` while you watch, a **Desktop scheduled task** for unattended *local*
+   loops, or a `/schedule` cloud routine for cloud-only work (no local files — see
+   [references/claude-code-loops.md](references/claude-code-loops.md)). Use `loop-run.sh` +
+   cron/Task Scheduler only if you want non-Claude-Code control. Bound a "work-until-done"
+   tick with `/goal`.
 8. **Read the reports.** Only after the loop's judgment is proven do you graduate it to
    **L2** (worktree + guard + `fleet-ops` landing) and re-audit at the higher tier.
 
@@ -285,9 +291,11 @@ python scripts/check-pricing-sync.py --offline   # exit 0 in sync, 10 drift, 3 a
 A complete, **audit + doctor-clean** L1 loop ships at
 [assets/examples/pr-babysitter/](assets/examples/pr-babysitter/): a filled
 `loop.config.yaml`, a *populated* `STATE.md`, the `run.md` run prompt, a sample
-`run-log.md`, and `github-actions.yml` — the scheduler with the **kill-switch gate and
-`dontAsk` + allowlist profile baked in**. Copy the dir, adjust scope/cadence, run
-`loop-audit` + `loop-doctor --live`, wire the workflow. The other patterns don't ship as
+`run-log.md`, the runner-agnostic **`loop-run.sh`** (the tick wrapper, with the
+kill-switch gate and `dontAsk` + allowlist baked in — point cron / Task Scheduler at it),
+and an *optional* `github-actions.yml` for repos already on GitHub. Copy the dir, adjust
+scope/cadence, run `loop-audit` + `loop-doctor --live`, then wire `loop-run.sh` to your
+scheduler. The other patterns don't ship as
 static dirs that rot — `loop-init --pattern <name>` *generates* the same, seeded and
 gate-clean, for any pattern at any tier. CI runs `loop-audit` + `loop-doctor` on this
 example every build, so it can't drift out of validity.

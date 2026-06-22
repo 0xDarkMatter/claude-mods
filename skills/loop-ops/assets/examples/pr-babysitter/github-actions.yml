@@ -1,4 +1,6 @@
-# EXAMPLE scheduler for the pr-babysitter L1 loop — the "clone-and-run" glue.
+# OPTIONAL scheduler — use this ONLY if your repo already lives on GitHub. The portable,
+# runner-agnostic path is loop-run.sh (cron / Windows Task Scheduler / systemd / by hand) —
+# no GitHub Actions dependency. This file just wraps the same loop-run.sh idea in Actions.
 # Copy to .github/workflows/pr-babysitter.yml, PIN the action/CLI versions, add the
 # ANTHROPIC_API_KEY secret. The SCHEDULER is the authorizer (no auto-mode session in the
 # loop), and the child runs gated (--permission-mode dontAsk + a narrow allowlist), never

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# loop-run.sh - one tick of the <loop-name> loop. RUNNER-AGNOSTIC: point any scheduler
+# at it - cron, Windows Task Scheduler, a systemd timer, process-compose, or run by hand.
+# No GitHub Actions required. The scheduler is the authorizer; this runs a gated `claude -p`
+# (dontAsk + an allowlist), never bypassPermissions on a shared host. See
+# references/claude-code-loops.md for cron / Task Scheduler wiring.
+set -uo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$HERE"
+
+# 1. Kill switch first - a PAUSED sentinel here, or the 'loop-pause' label if you use one.
+if [ -f PAUSED ]; then echo "<loop-name>: paused (PAUSED sentinel) - skipping tick" >&2; exit 0; fi
+
+command -v claude >/dev/null 2>&1 || { echo "<loop-name>: 'claude' not on PATH" >&2; exit 5; }
+
+# 2. Run one tick. SAME prompt every time (cache-friendly); fresh context each run.
+#    Add this loop's own tools to --allowedTools (e.g. 'Bash(gh pr list:*)').
+claude -p "$(cat run.md)" \
+  --permission-mode <permission-mode> \
+  --append-system-prompt "$(cat STATE.md)" \
+  --allowedTools 'Read' 'Write(STATE.md)' 'Write(run-log.md)' \
+  --max-turns 30
+
+# 3. Persist STATE + run-log if this dir lives in a git repo (skipped otherwise).
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git add STATE.md run-log.md 2>/dev/null || true
+  git diff --cached --quiet 2>/dev/null || git commit -q -m "chore(loop): <loop-name> tick" || true
+fi
