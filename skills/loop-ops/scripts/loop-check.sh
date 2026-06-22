@@ -78,6 +78,11 @@ done
 [[ "$MIN" =~ ^[0-9]+$ ]] || die_usage "--min must be an integer (got '$MIN')"
 [[ -f "$CFG" ]] || { printf 'error: config not found: %s\n' "$CFG" >&2; exit "$EX_NOTFOUND"; }
 
+# Normalize Windows-authored configs: strip a leading UTF-8 BOM (line 1) and CR
+# line-endings so a CRLF/BOM file parses identically to a clean LF one (octal BOM +
+# gsub \r are portable across gawk/mawk/BSD awk). Falls back to the original on failure.
+__NORM="$(mktemp 2>/dev/null)" && awk 'NR==1{sub(/^\357\273\277/,"")} {gsub(/\r/,""); print}' "$CFG" > "$__NORM" 2>/dev/null && CFG="$__NORM" && trap 'rm -f "$__NORM"' EXIT
+
 # Unparseable: no top-level `key:` lines at all.
 if ! grep -Eq '^[a-z_]+:' "$CFG"; then
   printf 'error: no parseable top-level keys in %s\n' "$CFG" >&2

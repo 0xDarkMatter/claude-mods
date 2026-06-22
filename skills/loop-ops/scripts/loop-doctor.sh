@@ -82,6 +82,9 @@ command -v grep >/dev/null 2>&1 || { echo "loop-doctor: grep required" >&2; exit
 
 [[ -n "$CFG" ]] || die_usage "a loop.config.yaml path is required"
 [[ -f "$CFG" ]] || { printf 'error: config not found: %s\n' "$CFG" >&2; exit "$EX_NOTFOUND"; }
+# Normalize Windows-authored configs: strip a leading UTF-8 BOM + CR line-endings so a
+# CRLF/BOM file parses like a clean LF one (portable octal BOM + gsub \r).
+__NORM="$(mktemp 2>/dev/null)" && awk 'NR==1{sub(/^\357\273\277/,"")} {gsub(/\r/,""); print}' "$CFG" > "$__NORM" 2>/dev/null && CFG="$__NORM" && trap 'rm -f "$__NORM"' EXIT
 grep -Eq '^[a-z_]+:' "$CFG" || { printf 'error: no parseable keys in %s\n' "$CFG" >&2; exit "$EX_UNPARSEABLE"; }
 
 # Pick a working python for the budget-vs-cost check (skipped gracefully if none).

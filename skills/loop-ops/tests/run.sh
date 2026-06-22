@@ -269,6 +269,16 @@ out="$("$PYTHON" "$SYNC" --json 2>/dev/null)"
 expect_has "pricing-sync json schema" "claude-mods.loop-ops.pricing-sync/v1" "$out"
 expect_has "pricing-sync json in_sync" '"in_sync": true' "$out"
 
+# ── Windows-authored configs: CRLF + UTF-8 BOM must parse like clean LF ─────
+echo "-- windows-authored configs (CRLF / BOM) --"
+good_l1 "$SB/win.yaml"
+sed 's/$/\r/' "$SB/win.yaml" > "$SB/win-crlf.yaml"                       # LF -> CRLF
+bash "$AUDIT"  "$SB/win-crlf.yaml" >/dev/null 2>&1; expect_exit "CRLF config audits clean -> 0" 0 $?
+bash "$DOCTOR" --offline "$SB/win-crlf.yaml" >/dev/null 2>&1; expect_exit "CRLF config doctors clean -> 0" 0 $?
+printf '\xEF\xBB\xBF' > "$SB/win-bom.yaml"; cat "$SB/win.yaml" >> "$SB/win-bom.yaml"  # prepend BOM
+bash "$AUDIT"  "$SB/win-bom.yaml" >/dev/null 2>&1; expect_exit "BOM config audits clean -> 0" 0 $?
+bash "$DOCTOR" --offline "$SB/win-bom.yaml" >/dev/null 2>&1; expect_exit "BOM config doctors clean -> 0" 0 $?
+
 # ── worked example: the shipped example stays gate-clean ───────────────────
 echo "-- worked example --"
 EX="$SKILL/assets/examples/pr-watch/loop.config.yaml"
