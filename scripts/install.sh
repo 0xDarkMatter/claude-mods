@@ -158,8 +158,16 @@ for skill_dir in "$PROJECT_ROOT/skills"/*/; do
     [ -d "$skill_dir" ] || continue
     skill_name=$(basename "$skill_dir")
 
-    # Skip _lib (shared library used by multiple skills, not a skill itself)
-    [ "$skill_name" = "_lib" ] && continue
+    # _lib is the shared terminal library (skills/_lib/term.sh) that many skill
+    # scripts source. It is NOT a skill, but it MUST be refreshed — scripts that
+    # use newer term.sh features (TERM_DOT, brand glyphs, term_pip_bar) break with
+    # an "unbound variable" under `set -u` against a stale copy.
+    if [ "$skill_name" = "_lib" ]; then
+        rm -rf "$CLAUDE_DIR/skills/_lib"
+        cp -r "${skill_dir%/}" "$CLAUDE_DIR/skills/"
+        echo -e "  ${GREEN}_lib/${NC} (shared term library)"
+        continue
+    fi
 
     # Remove existing and copy fresh. Strip trailing slash from $skill_dir
     # so cp creates a subdirectory rather than merging contents (the *.*/* glob
