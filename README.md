@@ -18,7 +18,7 @@ Built on the [Agent Skills specification](https://agentskills.io/specification) 
 
 From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
 
-**3 agents. 95 skills. 13 styles. 11 hooks. 7 rules. One install.**
+**3 agents. 95 skills. 13 styles. 11 hooks. 8 rules. One install.**
 
 ## Recent Updates
 
@@ -395,6 +395,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [skill-agent-updates.md](rules/skill-agent-updates.md) | Mandatory docs check before creating/updating skills or agents |
 | [supply-chain.md](rules/supply-chain.md) | Behavioural-first dependency hygiene - scan before adding, day-zero cooldown, OIDC audit, persistence-hook awareness |
 | [worktree-boundaries.md](rules/worktree-boundaries.md) | Never touch other sessions' worktrees - no rm -rf, no git add -A sweeping gitlinks |
+| [loop-engineering.md](rules/loop-engineering.md) | Graduated-autonomy discipline for scheduled/autonomous agent loops - L1→L2→L3, scheduler-not-session, escalation gate, kill switch + budget; companion to loop-ops |
 
 ### Tools & Hooks
 

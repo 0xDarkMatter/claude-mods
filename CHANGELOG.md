@@ -28,6 +28,15 @@ feature releases live in the README "Recent Updates" section.
 - **`docs/AUTO-MODE-CLASSIFIER.md`** - reference on Claude Code's auto-mode permission
   classifier (the two-gate model, gating categories, legitimate-authorization decision tree),
   cited by `loop-ops` as the authority for its risk-tier mapping.
+- **loop-ops hardening (world-class pass)**: `loop-doctor.sh` - a live preflight
+  (`--offline`/`--live`) that proves a loop will *run* (gate binary on PATH, budget fits a
+  tick, permission mode achievable, L3 isolation present), complementing loop-audit's
+  *well-formed* check; `loop-cost.py` is now **caching-aware** - it models the static
+  run-prompt prefix as a cache entry and the TTL-vs-cadence rule (a loop slower than ~1h
+  can't cache), the key loop economics lever; and a companion **`rules/loop-engineering.md`**
+  carries the graduated-autonomy directive (L1→L2→L3, scheduler-not-session, escalation
+  gate, kill switch + budget) into every session, not just when the skill is invoked.
+  Suite now 81 assertions.
 
 ## [3.2.0] - 2026-06-22
 

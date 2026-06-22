@@ -155,10 +155,12 @@ Running several loops? Two non-negotiables (detail in
 
 ## Tools
 
-Three scripts, all following the [Skill Resource Protocol](../../docs/SKILL-RESOURCE-PROTOCOL.md)
-(stdout = data, semantic exit codes, `--help` with EXAMPLES, `--json` envelopes). They
-are the legs of a stool: **init** scaffolds, **audit** scores readiness, **cost**
-estimates spend before you commit to a cadence.
+Five scripts, all following the [Skill Resource Protocol](../../docs/SKILL-RESOURCE-PROTOCOL.md)
+(stdout = data, semantic exit codes, `--help` with EXAMPLES, `--json` envelopes): **init**
+scaffolds the loop, **audit** scores whether the config is *well-formed*, **doctor**
+preflights whether it will actually *run*, **cost** estimates spend (caching-aware), and
+**check-pricing-sync** gates pricing drift in CI. The discipline before scheduling is
+`init → fill → cost → audit → doctor --live`.
 
 ### `scripts/loop-init.sh` — scaffold a loop's state spine
 
@@ -198,10 +200,33 @@ Exit **0** = ready (no errors, score ≥ `--min`), **10** = not ready (findings 
 `2` usage, `3` config not found, `4` config unparseable. `--strict` counts warnings
 toward the not-ready signal.
 
-### `scripts/loop-cost.py` — token/$ estimate by pattern × cadence × model
+### `scripts/loop-doctor.sh` — live preflight (will it actually run?)
+
+`loop-audit` proves the config is *well-formed*; `loop-doctor` proves the loop will
+*execute* — catching the "blocked at 3am" failures audit can't see. `--offline` (CI-safe):
+the budget fits a tick's estimated tokens, the permission mode is achievable (not
+interactive), an L3 bypass declares an isolation boundary. `--live` adds runtime preflight:
+the `verify`/`guard` gate's leading binary resolves on PATH, `claude`/`git` are present,
+the kill-switch sentinel's parent dir exists.
+
+```bash
+bash scripts/loop-doctor.sh --offline .loops/pr-babysitter/loop.config.yaml   # CI gate
+bash scripts/loop-doctor.sh --live .loops/ci-sweeper/loop.config.yaml          # before scheduling
+bash scripts/loop-doctor.sh --live --json .loops/dep-sweeper/loop.config.yaml | jq '.data[] | select(.state=="bad")'
+```
+
+Exit **0** = will run, **10** = a check predicts a runtime failure (gate binary missing,
+bypass on host without isolation, budget too small for a tick), `2` usage, `3` not found,
+`4` unparseable, `5` missing core dep. Run it **after** `loop-audit` and before scheduling.
+
+### `scripts/loop-cost.py` — token/$ estimate by pattern × cadence × model (caching-aware)
 
 Estimate spend **before** committing to a cadence — the cost of an outer loop is
-runs/day × tokens/run × price, and sub-agents multiply it. Pricing reads from
+runs/day × tokens/run × price, and sub-agents multiply it. It also models **prompt
+caching**: a loop re-sends the same `run.md`+system prefix every tick (the Ralph
+property), so the prefix should be cache-written once then read (~0.1×) — *but only if the
+tick interval fits the cache TTL*. A loop slower than ~1h can't cache (the entry expires
+between ticks); the estimator says so and recommends the TTL. Pricing reads from
 `assets/model-pricing.json` (date-stamped; [`claude-api-ops`](../claude-api-ops/SKILL.md)
 is the source of truth — run its `check-model-table.py` if you suspect drift).
 
@@ -240,9 +265,12 @@ python scripts/check-pricing-sync.py --offline   # exit 0 in sync, 10 drift, 3 a
    sanity-check the monthly spend against the value.
 5. **Audit it:** `bash scripts/loop-audit.sh .loops/<n>/loop.config.yaml` — fix every
    error before scheduling. Don't schedule a loop that fails its own audit.
-6. **Schedule** the L1 run with native `/loop` or `/schedule` (read-only — it just
+6. **Doctor it:** `bash scripts/loop-doctor.sh --live .loops/<n>/loop.config.yaml` — prove
+   it will actually *run* (gate binary on PATH, budget fits a tick). Audit = well-formed;
+   doctor = will-run.
+7. **Schedule** the L1 run with native `/loop` or `/schedule` (read-only — it just
    writes `STATE.md` + a report).
-7. **Read the reports.** Only after the loop's judgment is proven do you graduate it to
+8. **Read the reports.** Only after the loop's judgment is proven do you graduate it to
    **L2** (worktree + guard + `fleet-ops` landing) and re-audit at the higher tier.
 
 ## Anti-patterns (these are detected and wrong)

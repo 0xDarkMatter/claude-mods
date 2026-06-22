@@ -17,6 +17,7 @@ INIT="$SCRIPTS/loop-init.sh"
 AUDIT="$SCRIPTS/loop-audit.sh"
 COST="$SCRIPTS/loop-cost.py"
 SYNC="$SCRIPTS/check-pricing-sync.py"
+DOCTOR="$SCRIPTS/loop-doctor.sh"
 
 # Pick a python that actually executes — skips the Windows Store python3 stub.
 PYTHON=""
@@ -187,6 +188,36 @@ expect_exit "cron cadence -> 0" 0 $?
 out="$("$PYTHON" "$COST" --pattern custom --cadence weird --runs-per-day 5 --model claude-haiku-4-5 2>/dev/null)"; rc=$?
 expect_exit "runs-per-day override -> 0" 0 "$rc"
 expect_has  "uses the override" "5 runs/day" "$out"
+# caching: a fast loop (10m -> 1h TTL) projects a cached saving
+out="$("$PYTHON" "$COST" --pattern ci-sweeper --cadence 10m --model claude-sonnet-4-6 2>&1)"
+expect_has "fast loop shows a cached projection" "cached/" "$out"
+# caching: a slow loop (6h > 1h TTL) is not cache-beneficial
+out="$("$PYTHON" "$COST" --pattern daily-triage --cadence 6h --model claude-opus-4-8 2>&1)"
+expect_has "slow loop: caching not beneficial" "not beneficial" "$out"
+# --no-cache suppresses the cached projection
+out="$("$PYTHON" "$COST" --pattern ci-sweeper --cadence 10m --model claude-sonnet-4-6 --no-cache 2>&1)"
+case "$out" in *"cached/"*) no "--no-cache still showed caching";; *) ok "--no-cache suppresses caching";; esac
+# json caching block present for a cacheable loop
+out="$("$PYTHON" "$COST" --pattern ci-sweeper --cadence 5m --model claude-sonnet-4-6 --json 2>/dev/null)"
+expect_has "cost json carries caching block" '"caching"' "$out"
+
+# ── loop-doctor: preflight (offline budget, live binary), json ─────────────
+echo "-- loop-doctor --"
+bash "$DOCTOR" --help >/dev/null 2>&1; expect_exit "loop-doctor --help -> 0" 0 $?
+bash "$DOCTOR" --offline "$SB/l1.yaml" >/dev/null 2>&1; expect_exit "doctor offline healthy L1 -> 0" 0 $?
+bash "$DOCTOR" --live "$SB/l1.yaml" >/dev/null 2>&1; expect_exit "doctor live healthy L1 -> 0" 0 $?
+# budget too small for the pattern -> bad -> 10
+sed 's/^budget_tokens: 300000/budget_tokens: 100/' "$SB/l2.yaml" > "$SB/l2-poor.yaml"
+out="$(bash "$DOCTOR" --offline "$SB/l2-poor.yaml" 2>/dev/null)"; rc=$?
+expect_exit "doctor budget-too-small -> 10" 10 "$rc"
+expect_has  "doctor names the budget gap" "tokens/run" "$out"
+# live: a verify gate whose binary is missing -> bad -> 10
+sed 's/^verify: "npm test"/verify: "totally-missing-binary-zzz run"/' "$SB/l2.yaml" > "$SB/l2-nobin.yaml"
+bash "$DOCTOR" --live "$SB/l2-nobin.yaml" >/dev/null 2>&1; expect_exit "doctor missing gate binary -> 10" 10 $?
+# missing config -> 3, json schema
+bash "$DOCTOR" --offline "$SB/no-such.yaml" >/dev/null 2>&1; expect_exit "doctor missing config -> 3" 3 $?
+out="$(bash "$DOCTOR" --offline --json "$SB/l1.yaml" 2>/dev/null)"
+expect_has "doctor json schema" "claude-mods.loop-ops.doctor/v1" "$out"
 
 # ── loop-cost: validation errors ───────────────────────────────────────────
 "$PYTHON" "$COST" --pattern pr-babysitter --cadence 10m --model claude-nope >/dev/null 2>&1; expect_exit "unknown model -> 4" 4 $?
@@ -208,7 +239,7 @@ expect_has "pricing-sync json in_sync" '"in_sync": true' "$out"
 
 # ── terminal design system ─────────────────────────────────────────────────
 echo "-- terminal design system --"
-for s in "$INIT" "$AUDIT"; do
+for s in "$INIT" "$AUDIT" "$DOCTOR"; do
   b="$(basename "$s")"
   grep -q '_lib/term.sh' "$s" && ok "$b sources _lib/term.sh" || no "$b does not source _lib/term.sh"
 done
