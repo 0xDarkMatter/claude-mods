@@ -37,6 +37,17 @@ feature releases live in the README "Recent Updates" section.
   carries the graduated-autonomy directive (L1→L2→L3, scheduler-not-session, escalation
   gate, kill switch + budget) into every session, not just when the skill is invoked.
   Suite now 81 assertions.
+- **loop-ops beat-the-source pass** (iterated against cobusgreyling/loop-engineering until
+  strictly better on every dimension): pattern-aware `loop-init` (seeds a near-ready,
+  audit-clean config per pattern, tier-aware, with a graduation block — vs upstream's
+  static seeds); a complete **worked example** `assets/examples/pr-babysitter/` (filled
+  config + populated STATE + run prompt + run-log + a scheduler workflow with the
+  kill-switch gate and `dontAsk` allowlist baked in) that CI **dogfoods**
+  (`loop-audit` + `loop-doctor` run on it every build) — vs upstream's 9 static starter
+  dirs; a `references/failure-modes.md` catalog (11 incident-shaped failures, each mapped
+  to the control that catches it); connector/MCP least-privilege scoping + the auto-merge
+  guard in `references/risk-tiers.md`; and an honest "why Claude Code-specific, not a
+  multi-tool matrix" note. 92-assertion suite.
 
 ## [3.2.0] - 2026-06-22
 
