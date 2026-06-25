@@ -16,7 +16,12 @@ if [[ -z "$BRANCH" ]]; then
   exit 2
 fi
 
-if [[ ! -f "$LANES_DIR/$BRANCH" ]]; then
+# Lane files are flat: encode '/' in branch names (feat/x, fleet/x) so they don't
+# nest into nonexistent subdirs. MUST match fleet.sh's encode_lane.
+encode_lane() { local s=${1//\%/%25}; printf '%s' "${s//\//%2F}"; }
+LANE_FILE="$LANES_DIR/$(encode_lane "$BRANCH")"
+
+if [[ ! -f "$LANE_FILE" ]]; then
   echo "signal.sh ERROR: branch '$BRANCH' is not a registered lane (run: fleet track $BRANCH)" >&2
   exit 2
 fi
@@ -39,16 +44,16 @@ case "$STATE" in
         exit 1
       fi
     fi
-    { echo "READY"; [[ -n "$LOG" ]] && echo "log=$LOG"; } > "$LANES_DIR/$BRANCH"
+    { echo "READY"; [[ -n "$LOG" ]] && echo "log=$LOG"; } > "$LANE_FILE"
     echo "signal: $BRANCH → READY"
     ;;
   CONFLICT)
     REASON=${2:-"unspecified"}
-    { echo "CONFLICT"; echo "reason=$REASON"; } > "$LANES_DIR/$BRANCH"
+    { echo "CONFLICT"; echo "reason=$REASON"; } > "$LANE_FILE"
     echo "signal: $BRANCH → CONFLICT ($REASON)"
     ;;
   RUNNING)
-    echo "RUNNING" > "$LANES_DIR/$BRANCH"
+    echo "RUNNING" > "$LANE_FILE"
     echo "signal: $BRANCH → RUNNING"
     ;;
   *)

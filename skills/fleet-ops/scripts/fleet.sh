@@ -55,6 +55,14 @@ file_mtime() {
   stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || date +%s
 }
 
+# Lane files are named after branches, but branch names can contain '/'
+# (feat/x, fleet/x) — which would nest the lane into a nonexistent subdir and
+# break `track`/status/daemon. Encode '/' (and the escape char) so every lane is
+# one flat file under lanes/, and decode when mapping a filename back to a branch.
+# signal.sh carries an identical encoder so the two interoperate.
+encode_lane() { local s=${1//\%/%25}; printf '%s' "${s//\//%2F}"; }
+decode_lane() { local s=${1//%2F/\/}; printf '%s' "${s//%25/\%}"; }
+
 log() { echo "[$(date '+%H:%M:%S')] $*" | tee -a "$LOG" >&2; }
 
 maybe_commit_gitignore() {
@@ -123,14 +131,15 @@ is_dirty_tracked() {
   ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null
 }
 
-lane_state() { [[ -f "$LANES_DIR/$1" ]] && head -n1 "$LANES_DIR/$1" || echo "MISSING"; }
+lane_state() { local f="$LANES_DIR/$(encode_lane "$1")"; [[ -f "$f" ]] && head -n1 "$f" || echo "MISSING"; }
 set_lane_state() {
-  local l=$1 s=$2
+  local l=$1 s=$2 f
+  f="$LANES_DIR/$(encode_lane "$l")"
   shift 2
   if [[ $# -gt 0 ]]; then
-    printf '%s\n%s\n' "$s" "$*" > "$LANES_DIR/$l"
+    printf '%s\n%s\n' "$s" "$*" > "$f"
   else
-    printf '%s\n' "$s" > "$LANES_DIR/$l"
+    printf '%s\n' "$s" > "$f"
   fi
 }
 
@@ -197,7 +206,7 @@ cmd_track() {
       rc=1
       continue
     fi
-    if [[ -f "$LANES_DIR/$name" ]]; then
+    if [[ -f "$LANES_DIR/$(encode_lane "$name")" ]]; then
       log "already tracked: $name ($(lane_state "$name"))"
     else
       set_lane_state "$name" "RUNNING"
@@ -240,7 +249,7 @@ __fleet_bucket() {
     [[ -f "$f" ]] || continue
     total=$((total+1))
     local branch state meta mtime secs age idx
-    branch=$(basename "$f")
+    branch=$(decode_lane "$(basename "$f")")
     state=$(head -n1 "$f")
     meta=$(sed -n '2p' "$f")
     mtime=$(file_mtime "$f")
@@ -385,7 +394,7 @@ fleet_view_verbose() {
   for f in "$LANES_DIR"/*; do
     [[ -f "$f" ]] || continue
     local branch state meta mtime age secs wt commits color label_state
-    branch=$(basename "$f")
+    branch=$(decode_lane "$(basename "$f")")
     state=$(head -n1 "$f")
     meta=$(sed -n '2p' "$f")
     mtime=$(file_mtime "$f")
@@ -528,7 +537,7 @@ rebase_others() {
   local landed=$1
   for f in "$LANES_DIR"/*; do
     local b state wt
-    b=$(basename "$f")
+    b=$(decode_lane "$(basename "$f")")
     [[ "$b" == "$landed" ]] && continue
     state=$(lane_state "$b")
     [[ "$state" == "LANDED" || "$state" == "FAILED" ]] && continue
@@ -631,7 +640,7 @@ cmd_start() {
   while true; do
     local ready=()
     for f in "$LANES_DIR"/*; do
-      [[ -f "$f" && "$(head -n1 "$f")" == "READY" ]] && ready+=("$(basename "$f")")
+      [[ -f "$f" && "$(head -n1 "$f")" == "READY" ]] && ready+=("$(decode_lane "$(basename "$f")")")
     done
 
     if [[ ${#ready[@]} -gt 0 ]]; then
