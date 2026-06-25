@@ -120,7 +120,8 @@ implement, in order: isolate `CLAUDE_CONFIG_DIR` and seed its `settings.json`
 (§4, §10); resolve the key from `ANTHROPIC_AUTH_TOKEN` → keyring
 (`FLEET_WORKER_KEYRING_SERVICE`/`_KEY`) → `ZHIPU_API_KEY`/`GLM_API_KEY` (never
 echoed); set `ANTHROPIC_BASE_URL` + the model mapping; `exec claude -p --model
-sonnet --permission-mode bypassPermissions "$@" </dev/null`.
+sonnet --permission-mode "$FLEET_WORKER_PERMISSION_MODE" "$@" </dev/null`
+(default `bypassPermissions`; override per §9).
 
 Notes:
 - **`--model sonnet`** maps to `FLEET_WORKER_MODEL` (default GLM-5.2). Mapping
@@ -141,7 +142,7 @@ fleet-worker [claude-flags…] < prompt.txt
 | Aspect | Value |
 |---|---|
 | Prompt | final positional arg, or piped on stdin (arg form recommended) |
-| Baked-in flags | `-p`, `--model sonnet`, `--permission-mode bypassPermissions` |
+| Baked-in flags | `-p`, `--model sonnet`, `--permission-mode $FLEET_WORKER_PERMISSION_MODE` (default `bypassPermissions`) |
 | Common extra flags | `--output-format {text,json,stream-json}`, `--add-dir`, `--max-turns N`, `--append-system-prompt`, `--allowedTools`/`--disallowedTools` |
 | Env knobs | `FLEET_WORKER_*` (see SKILL.md table) — give each parallel worker its own `FLEET_WORKER_CONFIG_DIR` |
 | CWD | the worker operates in the process CWD — spawn it `cd`'d into the target worktree |
@@ -202,16 +203,28 @@ the winners (hand to `fleet-ops`), discard/retry failures.
 
 ## 9. Permission modes
 
+Set via `FLEET_WORKER_PERMISSION_MODE` (default `bypassPermissions`).
+
 | Mode | Edits | Bash | Prompts | For a delegated worker |
 |---|---|---|---|---|
 | `default` | ask | ask | yes | ❌ hangs headless |
 | `acceptEdits` | auto | ask | partial | ⚠ Bash still prompts → can hang |
-| `bypassPermissions` | auto | auto | no | ✅ recommended |
+| `dontAsk` | allowlist | allowlist | no (auto-deny) | ✅ when an allowlist is supplied; spawnable from an auto-mode orchestrator |
+| `bypassPermissions` | auto | auto | no | ✅ default; cage-protected — but blocked when spawned from auto mode |
 
 **Safety comes from the cage, not the prompt:** dedicated worktree (blast radius),
 isolated `CLAUDE_CONFIG_DIR` (no host hooks/MCP/creds), optional `--disallowedTools`
 / `--add-dir` scoping, and the orchestrator's **merge gate** — nothing the worker
 writes reaches `main` without review. Standard headless-CI posture.
+
+**Spawning from an auto-mode parent.** The auto-mode classifier hard-denies a
+`bypassPermissions` child as *Create Unsafe Agents* (an agent spawning an ungated
+agent), and broad/interpreter allow-rules are dropped on entry to auto mode, so an
+allow-rule can't whitelist the launch. Either launch the fan-out from outside the
+auto-mode session (script / Task Scheduler, or an interactive orchestrator), or run
+the worker in `dontAsk` + an allowlist (`--allowedTools …` or `permissions.allow` in
+the worker config) — `dontAsk` is non-interactive yet not an "unsafe agent." The
+launcher warns on `dontAsk` with no allowlist. Full model: `docs/auto-mode-classifier.md`.
 
 ## 10. Effort control
 

@@ -16,6 +16,10 @@
 #   FLEET_WORKER_MODEL        main model      (default GLM-5.2)
 #   FLEET_WORKER_SMALL_MODEL  background model (default GLM-4.5-Air)
 #   FLEET_WORKER_EFFORT       seeded effortLevel (default high)
+#   FLEET_WORKER_PERMISSION_MODE  worker --permission-mode (default bypassPermissions).
+#                             Use dontAsk + an allowlist to spawn FROM an auto-mode
+#                             orchestrator - a bypassPermissions launch is hard-denied
+#                             there as "Create Unsafe Agents". See ../SKILL.md.
 # Key resolution order (the key is never printed):
 #   1. ANTHROPIC_AUTH_TOKEN (already set)                  -> used as-is
 #   2. FLEET_WORKER_KEYRING_SERVICE + FLEET_WORKER_KEYRING_KEY -> `keyring get svc key`
@@ -76,5 +80,22 @@ $env:ANTHROPIC_DEFAULT_OPUS_MODEL   = if ($env:FLEET_WORKER_MODEL) { $env:FLEET_
 $env:ANTHROPIC_DEFAULT_SONNET_MODEL = $env:ANTHROPIC_DEFAULT_OPUS_MODEL
 $env:ANTHROPIC_DEFAULT_HAIKU_MODEL  = if ($env:FLEET_WORKER_SMALL_MODEL) { $env:FLEET_WORKER_SMALL_MODEL } else { 'GLM-4.5-Air' }
 
-claude -p --model sonnet --permission-mode bypassPermissions @args
+# Permission mode: default bypassPermissions (back-compat; safety = the cage). When
+# spawned FROM an auto-mode orchestrator, a bypassPermissions launch is hard-denied as
+# "Create Unsafe Agents" - use dontAsk + an allowlist instead. See ../SKILL.md.
+$permMode = if ($env:FLEET_WORKER_PERMISSION_MODE) { $env:FLEET_WORKER_PERMISSION_MODE } else { 'bypassPermissions' }
+if ($permMode -notin @('default','acceptEdits','plan','auto','dontAsk','bypassPermissions')) {
+  # Direct stderr (not Write-Error) so exit 2 is honored under $ErrorActionPreference='Stop'.
+  [Console]::Error.WriteLine("fleet-worker: invalid FLEET_WORKER_PERMISSION_MODE: $permMode (expected default|acceptEdits|plan|auto|dontAsk|bypassPermissions)")
+  exit 2
+}
+if ($permMode -eq 'dontAsk') {
+  $hasAllow = ($args -contains '--allowedTools') -or ($args -contains '--allowed-tools') -or `
+              ((Test-Path $settings) -and ((Get-Content -Raw $settings) -match '"allow"'))
+  if (-not $hasAllow) {
+    [Console]::Error.WriteLine("fleet-worker: permission-mode dontAsk with no allowlist - worker will auto-deny most tools; pass --allowedTools '...' or set permissions.allow in $settings")
+  }
+}
+
+claude -p --model sonnet --permission-mode $permMode @args
 exit $LASTEXITCODE

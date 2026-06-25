@@ -77,6 +77,46 @@ eh "bakes flags + forwards args"    "ARGS=-p --model sonnet --permission-mode by
 [ -f "$CFG/settings.json" ] && ok "seeds settings.json" || no "settings.json not seeded"
 eh "settings carries effortLevel"   "effortLevel" "$(cat "$CFG/settings.json" 2>/dev/null)"
 
+# Permission-mode knob: default stays bypassPermissions (asserted above); override flows through.
+: > "$PROBE"
+PATH="$PC" FLEET_WORKER_CONFIG_DIR="$SB/cfg-pm" ANTHROPIC_AUTH_TOKEN="T" \
+  FLEET_WORKER_PERMISSION_MODE="dontAsk" \
+  "$WORKER" --allowedTools "Read" "hi" >/dev/null 2>&1
+eh "permission-mode override flows through" "--permission-mode dontAsk" "$(cat "$PROBE")"
+
+# Invalid permission mode -> usage exit 2
+PATH="$PC" FLEET_WORKER_CONFIG_DIR="$SB/cfg-pm2" ANTHROPIC_AUTH_TOKEN="T" \
+  FLEET_WORKER_PERMISSION_MODE="bogus" \
+  "$WORKER" "hi" >/dev/null 2>&1; ee "invalid permission-mode -> 2" 2 $?
+
+# acceptEdits also flows through (any valid mode, not just dontAsk)
+: > "$PROBE"
+PATH="$PC" FLEET_WORKER_CONFIG_DIR="$SB/cfg-pm7" ANTHROPIC_AUTH_TOKEN="T" \
+  FLEET_WORKER_PERMISSION_MODE="acceptEdits" "$WORKER" "hi" >/dev/null 2>&1
+eh "acceptEdits flows through" "--permission-mode acceptEdits" "$(cat "$PROBE")"
+
+# dontAsk advisory: warns on stderr when no allowlist is present (worker would auto-deny all)
+err="$(PATH="$PC" FLEET_WORKER_CONFIG_DIR="$SB/cfg-pm3" ANTHROPIC_AUTH_TOKEN="T" \
+       FLEET_WORKER_PERMISSION_MODE="dontAsk" "$WORKER" "hi" 2>&1 1>/dev/null)"
+eh "dontAsk w/o allowlist warns" "auto-deny most tools" "$err"
+
+# ...suppressed when --allowedTools is passed
+err="$(PATH="$PC" FLEET_WORKER_CONFIG_DIR="$SB/cfg-pm4" ANTHROPIC_AUTH_TOKEN="T" \
+       FLEET_WORKER_PERMISSION_MODE="dontAsk" "$WORKER" --allowedTools "Read" "hi" 2>&1 1>/dev/null)"
+case "$err" in *"auto-deny most tools"*) no "advisory wrongly fired with --allowedTools";; *) ok "no advisory when --allowedTools present";; esac
+
+# ...suppressed when the worker config already carries permissions.allow
+CFGALLOW="$SB/cfg-pm5"; mkdir -p "$CFGALLOW"
+printf '{ "hooks": {}, "permissions": { "allow": ["Read"] } }\n' > "$CFGALLOW/settings.json"
+err="$(PATH="$PC" FLEET_WORKER_CONFIG_DIR="$CFGALLOW" ANTHROPIC_AUTH_TOKEN="T" \
+       FLEET_WORKER_PERMISSION_MODE="dontAsk" "$WORKER" "hi" 2>&1 1>/dev/null)"
+case "$err" in *"auto-deny most tools"*) no "advisory wrongly fired with settings allow";; *) ok "no advisory when settings has permissions.allow";; esac
+
+# default (unset) mode must not emit the dontAsk advisory
+err="$(PATH="$PC" FLEET_WORKER_CONFIG_DIR="$SB/cfg-pm6" ANTHROPIC_AUTH_TOKEN="T" \
+       "$WORKER" "hi" 2>&1 1>/dev/null)"
+case "$err" in *"auto-deny most tools"*) no "default mode wrongly warned";; *) ok "default mode emits no dontAsk advisory";; esac
+
 # Custom endpoint/model override
 : > "$PROBE"
 PATH="$PC" FLEET_WORKER_CONFIG_DIR="$SB/cfg-x" \

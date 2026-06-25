@@ -85,6 +85,7 @@ same on-demand, progressively-disclosed procedural knowledge your orchestrator h
 | `FLEET_WORKER_SMALL_MODEL` | `GLM-4.5-Air` | background/cheap model (haiku mapping) |
 | `FLEET_WORKER_CONFIG_DIR` | `~/.fleet-worker/cfg` | isolated config dir — **one per parallel worker** |
 | `FLEET_WORKER_EFFORT` | `high` | seeded `effortLevel` in the worker's settings |
+| `FLEET_WORKER_PERMISSION_MODE` | `bypassPermissions` | worker `--permission-mode`; use `dontAsk` + an allowlist to spawn from an auto-mode orchestrator (see *Permission posture*) |
 
 Point `FLEET_WORKER_BASE_URL`/`FLEET_WORKER_MODEL` at any other Anthropic-compatible
 gateway (this is the documented Claude Code custom-endpoint mechanism) to drive a
@@ -163,10 +164,35 @@ Full walkthrough + recovery in [references/fleet-ops-handoff.md](references/flee
 
 ## Permission posture
 
-Headless `-p` can't answer a permission prompt — it would stall. The launcher
-bakes in `--permission-mode bypassPermissions`; safety comes from the cage
-(worktree + isolated config + merge gate), not the prompt. Optionally constrain
-with `--disallowedTools` (e.g. block `WebFetch`) or `--add-dir` scoping.
+Headless `-p` can't answer a permission prompt — it would stall, so the worker runs
+in a **non-interactive** mode. The default is `--permission-mode bypassPermissions`
+(set `FLEET_WORKER_PERMISSION_MODE` to override); safety comes from the **cage**
+(isolated worktree + isolated config + merge gate), not the prompt. Optionally
+constrain further with `--disallowedTools` (e.g. block `WebFetch`) or `--add-dir`.
+
+**Spawning from an auto-mode orchestrator.** If the session that runs `fleet-worker`
+is itself in **auto mode**, a `bypassPermissions` launch is *hard-denied* by the
+auto-mode classifier as **Create Unsafe Agents** (an agent spawning an ungated agent)
+— and no allow-rule saves it (broad/interpreter allow-rules are dropped on entry to
+auto mode). Two fixes, either works:
+
+1. **Launch from outside the auto-mode session** — run the fan-out from a plain
+   script / Task Scheduler / cron, or keep the orchestrator interactive
+   (`default`/`acceptEdits`). With no parent classifier in the loop, the worker's own
+   `bypassPermissions` is fine.
+2. **Give the worker gates** — `FLEET_WORKER_PERMISSION_MODE=dontAsk` plus an allowlist
+   (`--allowedTools "Read Edit Write Bash(npm:*) Bash(git:*)"`, or `permissions.allow`
+   in the worker's config). `dontAsk` is **equally non-interactive** — it auto-denies
+   non-allowlisted calls instead of stalling — but it is *not* an "unsafe agent," so an
+   auto-mode orchestrator will spawn it. The launcher warns if you select `dontAsk`
+   with no allowlist (the worker would otherwise auto-deny everything). Keep
+   `bypassPermissions` for the isolated-container variant.
+
+`FLEET_WORKER_PERMISSION_MODE` accepts any Claude Code mode
+(`default|acceptEdits|plan|auto|dontAsk|bypassPermissions`). See
+[../../docs/auto-mode-classifier.md](../../docs/auto-mode-classifier.md) for the full
+classifier model (the override rules, the broad-allow-rule drop, and §7.9 on running
+headless sessions).
 
 > **Worktree-under-`.claude/` gotcha:** Claude Code's sensitive-file guard runs
 > *before* `bypassPermissions` for anything under `.claude/`. Keep manual worker

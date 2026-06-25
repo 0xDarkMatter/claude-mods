@@ -20,6 +20,10 @@
 #   FLEET_WORKER_MODEL        main model      (default GLM-5.2)
 #   FLEET_WORKER_SMALL_MODEL  background model (default GLM-4.5-Air)
 #   FLEET_WORKER_EFFORT       seeded effortLevel (default high)
+#   FLEET_WORKER_PERMISSION_MODE  worker --permission-mode (default bypassPermissions).
+#                             Use dontAsk + an allowlist to spawn FROM an auto-mode
+#                             orchestrator - a bypassPermissions launch is hard-denied
+#                             there as "Create Unsafe Agents". See ../SKILL.md.
 # Key resolution order (the key is never printed):
 #   1. ANTHROPIC_AUTH_TOKEN (already exported)            -> used as-is
 #   2. FLEET_WORKER_KEYRING_SERVICE + FLEET_WORKER_KEYRING_KEY -> `keyring get svc key`
@@ -85,7 +89,30 @@ export ANTHROPIC_DEFAULT_OPUS_MODEL="${FLEET_WORKER_MODEL:-GLM-5.2}"
 export ANTHROPIC_DEFAULT_SONNET_MODEL="${FLEET_WORKER_MODEL:-GLM-5.2}"
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="${FLEET_WORKER_SMALL_MODEL:-GLM-4.5-Air}"
 
+# --- Permission mode ---------------------------------------------------------
+# Default bypassPermissions keeps back-compat; safety = the cage (isolated worktree
+# + config + the orchestrator's merge gate), not the prompt. But when this worker is
+# spawned FROM a parent session in auto mode, a bypassPermissions launch is hard-denied
+# by the auto-mode classifier as "Create Unsafe Agents" - no allow-rule saves it. The
+# fix is a gated but still-non-interactive mode: dontAsk + an allowlist. Full model in
+# ../SKILL.md "Permission posture" and docs/auto-mode-classifier.md.
+PERM_MODE="${FLEET_WORKER_PERMISSION_MODE:-bypassPermissions}"
+case "$PERM_MODE" in
+  default|acceptEdits|plan|auto|dontAsk|bypassPermissions) ;;
+  *) echo "fleet-worker: invalid FLEET_WORKER_PERMISSION_MODE: $PERM_MODE" >&2
+     echo "  (expected: default|acceptEdits|plan|auto|dontAsk|bypassPermissions)" >&2
+     exit "$EXIT_USAGE" ;;
+esac
+# dontAsk auto-denies anything not allow-listed; a worker with no allowlist does nothing.
+if [ "$PERM_MODE" = "dontAsk" ]; then
+  case " $* " in
+    *" --allowedTools "*|*" --allowed-tools "*) : ;;
+    *) grep -q '"allow"' "$GLM_CFG/settings.json" 2>/dev/null || \
+       echo "fleet-worker: permission-mode dontAsk with no allowlist - worker will auto-deny most tools; pass --allowedTools \"...\" or set permissions.allow in $GLM_CFG/settings.json" >&2 ;;
+  esac
+fi
+
 # `--model sonnet` resolves to $FLEET_WORKER_MODEL via the mapping above.
 # `</dev/null` avoids the ~3s "no stdin data received" wait when the prompt is
 # passed as an argument.
-exec claude -p --model sonnet --permission-mode bypassPermissions "$@" </dev/null
+exec claude -p --model sonnet --permission-mode "$PERM_MODE" "$@" </dev/null
