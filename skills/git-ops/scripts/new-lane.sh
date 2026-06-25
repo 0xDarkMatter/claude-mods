@@ -2,6 +2,7 @@
 # new-lane.sh — create an isolated git worktree + branch ("lane") for parallel work, carrying over
 # the gitignored env files a fresh worktree won't have. The one-command remedy when the peer-writer
 # guard fires, or any time you want to parallelise without two sessions sharing one checkout.
+# Part of the git-ops skill (Worktree Operations → "Lane provisioning").
 #
 # Usage:   new-lane.sh <slug> [base-branch]
 #   <slug>        short kebab name -> branch lane/<slug>, worktree <repo>/../<repo>-<slug>
@@ -18,7 +19,7 @@ set -euo pipefail
 
 case "${1:-}" in
    -h|--help|"")
-    sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//' >&2
+    sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//' >&2
     [ -z "${1:-}" ] && exit 2 || exit 0 ;;
 esac
 

@@ -360,10 +360,29 @@ Worktrees are first-class in this skill. The classification is:
 | Op | Tier | How |
 |----|------|-----|
 | **Survey** | T1 | `bash scripts/worktree-survey.sh` — read-only, reports per-worktree state + drift |
-| **Create** | T2 | `git worktree add .claude/worktrees/<name> -b <branch>` via agent (respects project conventions) |
+| **New lane** | T2 (inline) | `bash scripts/new-lane.sh <slug> [base]` — fast scripted provisioning: branch `lane/<slug>` in a **sibling** worktree `<repo>-<slug>` (outside `.claude/`) + carries over gitignored env files. The one-command collision remedy — see "Lane provisioning" below |
+| **Create (bespoke)** | T2 | `git worktree add <path> -b <branch>` via agent — for non-standard layouts the script doesn't cover |
 | **Land** | T2 | Rebase worktree branch onto trunk + test + fast-forward. Multi-step procedure — see "Worktree Land Procedure" below |
 | **Prune (clean)** | T2 | `git worktree prune` for ghost entries (registered but FS-missing). Always safe, no data loss possible |
 | **Remove** | **T3** | `git worktree remove <path>` — destroys filesystem state. Requires preflight + explicit confirm per worktree |
+
+### Lane provisioning (the collision remedy)
+
+`scripts/new-lane.sh <slug> [base-branch]` is the fast, model-invocable way to isolate parallel
+work — the remedy the peer-writer guards (`session-start-unicode-scan.sh` at boot,
+`pre-write-peer-guard.sh` mid-session) point you to. It:
+
+- creates branch `lane/<slug>` in a **sibling** worktree `<repo>/../<repo>-<slug>` — outside
+  `.claude/` so headless agents can write there (see `rules/worktree-boundaries.md`) — off
+  `[base-branch]` (default: current branch);
+- **carries over gitignored env files** (`.dev.vars`, `.env*`, `.secrets`) the fresh worktree
+  would otherwise lack, so the lane runs immediately;
+- prints the worktree path on stdout (everything else on stderr), so it composes:
+  `cd "$(bash scripts/new-lane.sh hotfix main)"`;
+- refuses if the branch or path already exists — never clobbers.
+
+Run it **inline** (deterministic, non-destructive); land the lane back via the Worktree Land
+Procedure below or `fleet-ops`. Reach for it whenever two sessions would otherwise share one checkout.
 
 ### Survey-first discipline
 
