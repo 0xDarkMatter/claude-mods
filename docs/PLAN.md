@@ -20,7 +20,7 @@
 | Commands | 2 | Session management (sync, save) |
 | Rules | 8 | cli-tools, commit-style, naming-conventions, prompt-injection, skill-agent-updates, supply-chain, worktree-boundaries, loop-engineering |
 | Output Styles | 13 | Vesper, Spartan, Mentor, Executive, Pair, Atlas, Coach, Harbour, Meridian, Noir, Roast, Sage, Scout |
-| Hooks | 11 | lint, format, safety, uv, install-scan, manifest-scan, pmail, unicode-scan ×2, config-change guard, worktree guard |
+| Hooks | 13 | lint, format, safety, uv, install-scan, manifest-scan, pmail, unicode-scan ×2, config-change guard, worktree guard, peer-writer guard, touched-files ledger |
 
 Counts are enforced by the CI doc-drift gate (see roadmap) — if this table rots, CI fails.
 

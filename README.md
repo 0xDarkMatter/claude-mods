@@ -12,13 +12,13 @@
 
 > *A comprehensive extension toolkit that transforms Claude Code into a specialized development powerhouse.*
 
-**claude-mods** is a production-ready plugin that extends Claude Code with 96 specialized skills, 3 expert agents, 13 output styles, 11 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
+**claude-mods** is a production-ready plugin that extends Claude Code with 96 specialized skills, 3 expert agents, 13 output styles, 13 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
 
 Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms), claude-mods fills critical gaps in Claude Code's capabilities: persistent session state that survives across machines, on-demand expert knowledge for specialized domains, token-efficient modern CLI tools (10-100x faster than traditional alternatives), and proven workflow patterns for TDD, code review, and feature development. The toolkit implements Anthropic's [recommended patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), ensuring your development context never vanishes when sessions end.
 
 From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
 
-**3 agents. 96 skills. 13 styles. 11 hooks. 8 rules. One install.**
+**3 agents. 96 skills. 13 styles. 13 hooks. 8 rules. One install.**
 
 ## Recent Updates
 
@@ -335,7 +335,9 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [session-start-unicode-scan.sh](hooks/session-start-unicode-scan.sh) | SessionStart | One-shot hidden-Unicode scan of project instruction files at boot (silent on clean) |
 | [pre-commit-unicode-scan.sh](hooks/pre-commit-unicode-scan.sh) | Git pre-commit | Block commits that add critical hidden Unicode (bidi, tag-block) to instruction files |
 | [config-change-guard.sh](hooks/config-change-guard.sh) | ConfigChange | Scan changed Claude settings files for worm-persistence IOCs the moment they're edited (advisory; `SUPPLY_CHAIN_BLOCK=1` to deny) |
-| [worktree-guard.sh](hooks/worktree-guard.sh) | PreToolUse | Warn on commands that touch other sessions' `.claude/worktrees/` (rm, worktree remove/prune, sweeping `git add -A`); `WORKTREE_GUARD_BLOCK=1` to deny |
+| [worktree-guard.sh](hooks/worktree-guard.sh) | PreToolUse | Warn on commands that touch other sessions' `.claude/worktrees/` (rm, worktree remove/prune, sweeping `git add -A`, double-force `git clean -ff`); `WORKTREE_GUARD_BLOCK=1` to deny |
+| [pre-write-peer-guard.sh](hooks/pre-write-peer-guard.sh) | PreToolUse | Mid-session peer-writer guard — warn before writing a file a live peer session in the same checkout just modified (collisions happen during a session, not only at boot); pairs with session-touched-ledger.sh |
+| [session-touched-ledger.sh](hooks/session-touched-ledger.sh) | PostToolUse | Record files this session has written so the peer-writer guard can tell own edits from a peer's (silent, never blocks) |
 
 ### Output Styles
 
