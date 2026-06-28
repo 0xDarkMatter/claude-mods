@@ -156,6 +156,7 @@ Running several loops? Two non-negotiables (detail in
 |---|---|---|
 | improve one metric in one session | [`iterate`](../iterate/SKILL.md) | a hand-rolled inner loop |
 | spawn cheap parallel makers | [`fleet-worker`](../fleet-worker/SKILL.md) | bespoke `claude -p` plumbing |
+| route models across a fan-out (cheap finders, Opus judges) | [`fleet-worker` model-routing](../fleet-worker/references/model-routing.md) | every agent on the orchestrator's model |
 | test-gate + land winning branches | [`fleet-ops`](../fleet-ops/SKILL.md) | a manual merge step |
 | fire on a cadence | native `/loop` · Desktop scheduled task · `/schedule` cloud routine; `/goal` for completion | a custom cron in this skill |
 | commit / PR / release | [`git-ops`](../git-ops/SKILL.md), [`github-ops`](../github-ops/SKILL.md) | raw `git push` |

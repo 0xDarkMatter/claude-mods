@@ -110,6 +110,36 @@ The safety comes from the **cage, not the model**: isolated worktree (blast
 radius), isolated config dir (no host creds/hooks), and the orchestrator's
 merge gate (nothing lands without review).
 
+## Model routing convention (hybrid: in-process tiers + provider workers)
+
+"Delegate or not" has a third axis: **which model**, and **where**. One taxonomy
+answers both — for the in-process Workflow-tool agents *and* the fleet-worker
+provider workers — so a fan-out routes models intentionally instead of defaulting
+every agent to the orchestrator's model.
+
+It rests on the *architecture crux* above: model **alias slots** (`opus｜sonnet｜haiku`)
+vary **per agent within one process** (set via a Workflow `agent()`'s `opts.model`),
+but the **provider** (`ANTHROPIC_BASE_URL`) is **process-global** — so cross-provider
+routing needs a separate process, which is fleet-worker. Hence two loci:
+
+| Work class | Locus | Model | Effort |
+|---|---|---|---|
+| **mechanical** | fleet-worker (GLM) or in-proc | `haiku` / GLM-4.5-Air | low |
+| **scout** | in-proc (fleet-worker if wide) | `sonnet` / GLM-5.2 | low |
+| **build** | in-proc | `sonnet`→`opus` | medium |
+| **synthesize** | in-proc only | `opus` | high |
+| **judge** | in-proc only | `opus` | high–max |
+
+**Locus rule:** shell out to fleet-worker only for a **large (≈12+), independent,
+file-mutating, cost-dominant** fan-out you can **gate before landing**; everything
+else — and always synthesize/judge — stays in-process. Two guardrails: *never
+under-power a judge* (a cheap rubber-stamp verifier is worse than none), and *reach
+for the `effort` lever before the `model` lever* (it's finer-grained, no quality cliff).
+
+Drop-in helper + worked examples (review→verify, hybrid migrate, budget-aware
+degradation): [`assets/route.js`](assets/route.js) and
+[`references/model-routing.md`](references/model-routing.md).
+
 ## Single-worker recipe
 
 ```bash
@@ -249,5 +279,10 @@ provider's** terms for your own use. Two specifics worth knowing:
   control, the reliability evidence, and the phased-rollout stance.
 - [references/fleet-ops-handoff.md](references/fleet-ops-handoff.md) — fan-out →
   collect → `fleet track` → `fleet land` walkthrough and recovery.
+- [references/model-routing.md](references/model-routing.md) — the hybrid
+  model-routing convention: work-class taxonomy, the in-process-vs-provider locus
+  rule, budget-aware degradation, and worked examples.
+- [assets/route.js](assets/route.js) — paste-in `route()` / `useFleetWorker()`
+  helper for Workflow scripts (model + effort per work class).
 - [assets/worker-settings.json](assets/worker-settings.json) — the seed
   `settings.json` the launcher drops into a fresh config dir (`effortLevel: high`).

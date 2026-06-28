@@ -191,5 +191,34 @@ printf '{ "hooks": {}, "effortLevel": "high" }\n' > "$DSB/assets/worker-settings
 bash "$DSB/scripts/fleet-doctor.sh" --offline -q >/dev/null 2>&1
 ee "drift (undocumented model) -> 10" 10 $?
 
+# --- assets/route.js: paste-in model-routing helper ---------------------------
+ROUTE="$SKILL/assets/route.js"
+if [ -f "$ROUTE" ] && command -v node >/dev/null 2>&1; then
+  node --check "$ROUTE" && ok "route.js valid JS" || no "route.js syntax error"
+  RT="$SB/rt.js"
+  { cat "$ROUTE"; cat <<'TEST'
+
+const S=JSON.stringify; let P=0,F=0;
+const eq=(n,g,w)=>{ if(S(g)===S(w)){P++} else {F++;console.error("ROUTE FAIL "+n+" got "+S(g)+" want "+S(w))} };
+eq("judge",route("judge"),{model:"opus",effort:"high"});
+eq("scout",route("scout"),{model:"sonnet",effort:"low"});
+eq("unknown->inherit",route("nope"),{});
+const low={total:100000,remaining:()=>10000};
+eq("judge low-budget",route("judge",low),{model:"sonnet",effort:"low"});
+eq("scout low-budget",route("scout",low),{model:"haiku",effort:"low"});
+const okb={total:100000,remaining:()=>50000};
+eq("judge healthy",route("judge",okb),{model:"opus",effort:"high"});
+eq("fw yes",useFleetWorker({items:30,selfContained:true,mutatesFiles:true}),true);
+eq("fw small",useFleetWorker({items:3,selfContained:true,mutatesFiles:true}),false);
+eq("fw shared",useFleetWorker({items:30,selfContained:false,mutatesFiles:true}),false);
+eq("fw read-only",useFleetWorker({items:30,selfContained:true,mutatesFiles:false}),false);
+process.exit(F?1:0);
+TEST
+  } > "$RT"
+  node "$RT" >/dev/null 2>&1; ee "route()/useFleetWorker() logic (10 cases)" 0 $?
+else
+  ok "route.js helper test (SKIP — node unavailable or asset absent)"
+fi
+
 echo "=== $PASS passed, $FAIL failed ==="
 [ "$FAIL" -eq 0 ] || exit 1
