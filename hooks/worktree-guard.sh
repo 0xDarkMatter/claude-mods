@@ -13,6 +13,10 @@
 #   3. git worktree prune  — when the cwd's repo has a .claude/worktrees dir
 #   4. git rm targeting .claude/worktrees paths
 #   5. git add -A / --all / .  — when cwd has a .claude/worktrees dir
+#   6. git clean -ff (double-force) — when cwd has a .claude/worktrees dir.
+#      Single `-f` git clean SKIPS nested worktrees ("Skipping repository …");
+#      only a DOUBLE force (`-ff` / `--force --force`) deletes them — taking any
+#      UNCOMMITTED lane work with it (committed work survives in the object store).
 #
 # On (3) and (5) we use directory existence ([ -d cwd/.claude/worktrees ]) as
 # the cheap proxy. True gitlink detection would need `git status --porcelain`
@@ -66,6 +70,10 @@ elif printf '%s' "$CMD" | grep -qE "\brm\b[^;|&]*$WT"; then
 elif printf '%s' "$CMD" | grep -qE '\bgit\b.*\badd[[:space:]]+([^;|&]*[[:space:]])?(-A|--all|\.)([[:space:]]|$|;)' \
      && [[ -d "$CWD/.claude/worktrees" ]]; then
   VIOLATION="git add -A/. in a repo with .claude/worktrees (may stage worktree gitlinks)"
+elif printf '%s' "$CMD" | grep -qE '\bgit\b[^;|&]*\bclean\b' \
+     && printf '%s' "$CMD" | grep -qE '(-[a-eg-z]*f[a-eg-z]*f|--force[^;|&]*--force)' \
+     && [[ -d "$CWD/.claude/worktrees" ]]; then
+  VIOLATION="git clean -ff (double-force) in a repo with .claude/worktrees (force-removes live lanes + their uncommitted work)"
 fi
 
 [[ -z "$VIOLATION" ]] && exit 0   # clean → silent

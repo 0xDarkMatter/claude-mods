@@ -11,6 +11,7 @@ Never touch `.claude/worktrees/` in any repo. Never touch git worktrees, submodu
 - Do not `rm -rf .claude/worktrees/` in any repo
 - Do not `git rm` or `git rm --cached` worktree entries
 - Do not stage deletions of worktree dirs via `git add -A` (this is the subtle one — `-A` sweeps up changes you didn't intend)
+- Do not `git clean -ff` / `--force --force` in a repo with `.claude/worktrees/` — a *single* `-f` git clean safely skips nested worktrees ("Skipping repository …"), but a **double** force deletes them, taking any uncommitted lane work with it
 - Do not commit changes that reference `.claude/worktrees/` paths
 - Do not reason about whether a worktree is "orphaned" unless the owning project explicitly asks
 
@@ -69,7 +70,17 @@ Corollaries:
   integration tree. Land parallel branches through [fleet-ops](../skills/fleet-ops/SKILL.md) (the
   manual, test-gated landing queue).
 - **Land early, land often.** Bound divergence by integrating green lanes continuously, not as one
-  big-bang merge at the end — at 10+ lanes that's what bites.
+  big-bang merge at the end — at 10+ lanes that's what bites. It's also your real safety net:
+  **committed lane work lives in the shared object store and survives even deletion of the worktree
+  directory** (recover with `git worktree add <path> lane/<slug>`); only *uncommitted* work is
+  destructible. So commit-often is what makes a lane's work durable.
+- **Lane location:** default **in-repo** at `<main>/.claude/worktrees/<slug>` — tidy (no sibling dirs
+  scattered across the parent), native to Claude Code's own worktrees, and gitignored so `git add -A`
+  can't stage its gitlinks. This is only safe *because* `.claude/worktrees/` is gitignored, so a tool
+  placing a lane there must ensure that ignore first (`new-lane.sh` does). Use a **sibling**
+  (`<repo>-<slug>`, outside the repo — `new-lane.sh --sibling`) only when you need structural
+  isolation from repo-scoped destructive ops (`git clean -ff`, `rm -rf <repo>`) or in a repo that
+  can't gitignore the dir.
 - **Lane naming:** `lane/<slug>` (and the native `claude/<slug>`) so the backlog is legible.
 - **A branch name does not reveal isolation** — `claude/eager-wozniak` looks identical whether it's a
   worktree-isolated background agent or a session in your main checkout. Isolation is a structural
