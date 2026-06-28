@@ -36,6 +36,7 @@ for a in "$@"; do
     --sibling) SIBLING=1 ;;
     -h|--help) show_help; exit 0 ;;
     --) : ;;
+    -*) echo "new-lane: unknown option '$a' (valid: --sibling, -h/--help)" >&2; exit 2 ;;
     *) ARGS+=("$a") ;;
   esac
 done
@@ -61,22 +62,28 @@ REPO=$(basename "$MAIN")
 BRANCH="lane/$SLUG"
 BASE="${2:-$(git -C "$MAIN" rev-parse --abbrev-ref HEAD 2>/dev/null)}"
 
+# Resolve the lane path (no side effects yet).
 if [ "$SIBLING" -eq 1 ]; then
   WT="$(dirname "$MAIN")/${REPO}-${SLUG}"
 else
-  # In-repo placement is only safe when the lane dir is gitignored — otherwise
-  # `git add -A` from the main checkout stages worktree gitlinks (the 2026-04-19
-  # incident). Ensure the ignore so the in-repo default is safe in ANY repo, not
-  # just one someone already tidied.
-  if ! git -C "$MAIN" check-ignore -q ".claude/worktrees/.probe" 2>/dev/null; then
-    printf '\n# git worktrees / lanes — never tracked (new-lane.sh)\n.claude/worktrees/\n' >> "$MAIN/.gitignore"
-    echo "new-lane: '.claude/worktrees/' was not gitignored — added it to .gitignore (commit this)" >&2
-  fi
   WT="$MAIN/.claude/worktrees/$SLUG"
 fi
 
+# Validate EVERYTHING before mutating anything — a bad base or a conflict must
+# never leave partial state (e.g. a stray .gitignore append, see below).
+git -C "$MAIN" rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null 2>&1 \
+  || { echo "new-lane: base '$BASE' is not a valid branch/commit" >&2; exit 2; }
 git -C "$MAIN" show-ref --verify --quiet "refs/heads/$BRANCH" && { echo "new-lane: branch $BRANCH already exists" >&2; exit 1; }
 [ -e "$WT" ] && { echo "new-lane: path $WT already exists" >&2; exit 1; }
+
+# In-repo placement is only safe when the lane dir is gitignored — otherwise
+# `git add -A` from the main checkout stages worktree gitlinks (the 2026-04-19
+# incident). Ensure the ignore now that all checks have passed, so the in-repo
+# default is safe in ANY repo — not just one someone already tidied.
+if [ "$SIBLING" -ne 1 ] && ! git -C "$MAIN" check-ignore -q ".claude/worktrees/.probe" 2>/dev/null; then
+  printf '\n# git worktrees / lanes — never tracked (new-lane.sh)\n.claude/worktrees/\n' >> "$MAIN/.gitignore"
+  echo "new-lane: '.claude/worktrees/' was not gitignored — added it to .gitignore (commit this)" >&2
+fi
 
 git -C "$MAIN" worktree add "$WT" -b "$BRANCH" "$BASE" >&2
 

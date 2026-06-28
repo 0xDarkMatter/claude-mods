@@ -71,9 +71,19 @@ elif printf '%s' "$CMD" | grep -qE '\bgit\b.*\badd[[:space:]]+([^;|&]*[[:space:]
      && [[ -d "$CWD/.claude/worktrees" ]]; then
   VIOLATION="git add -A/. in a repo with .claude/worktrees (may stage worktree gitlinks)"
 elif printf '%s' "$CMD" | grep -qE '\bgit\b[^;|&]*\bclean\b' \
-     && printf '%s' "$CMD" | grep -qE '(-[a-eg-z]*f[a-eg-z]*f|--force[^;|&]*--force)' \
      && [[ -d "$CWD/.claude/worktrees" ]]; then
-  VIOLATION="git clean -ff (double-force) in a repo with .claude/worktrees (force-removes live lanes + their uncommitted work)"
+  # git deletes a NESTED worktree only at force level >= 2 (a single -f safely
+  # "Skipping repository …"). Force level = count of --force PLUS the count of
+  # 'f' chars inside short bundles, so -ff, -f -f, -fd -fx and --force --force
+  # all read as 2, while a safe -fdx reads as 1. Bound to the clean invocation.
+  SEG=$(printf '%s' "$CMD" | grep -oE '\bclean\b[^;|&]*' | head -1)
+  # NB: count OCCURRENCES (grep -o | wc -l), not matching lines (grep -c counts
+  # lines, so two --force on one line would wrongly read as 1).
+  NLONG=$(printf '%s' "$SEG" | grep -oE -- '--force' | wc -l | tr -d ' ')
+  NSHORT=$(printf '%s' "$SEG" | grep -oE -- '(^|[[:space:]])-[A-Za-z]+' | grep -v -- '--' | tr -cd 'fF' | wc -c | tr -d ' ')
+  if [[ $(( ${NLONG:-0} + ${NSHORT:-0} )) -ge 2 ]]; then
+    VIOLATION="git clean double-force in a repo with .claude/worktrees (force-removes live lanes + their uncommitted work)"
+  fi
 fi
 
 [[ -z "$VIOLATION" ]] && exit 0   # clean → silent
