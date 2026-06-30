@@ -66,9 +66,16 @@ echo "push-gate: scanning ${SCAN_LABEL}"
 GITLEAKS_REPORT="$(mktemp -t gitleaks.XXXXXX.json)"
 trap 'rm -f "$GITLEAKS_REPORT" "$DIFF_FILE" 2>/dev/null || true' EXIT
 
+# Config: default rule set + allowlist for public-by-design tokens (e.g. Mapbox pk.*).
+# Guarded so push-gate still runs with the built-in default config if it's absent.
+GL_PUBTOKEN_CFG="$SCRIPT_DIR/../references/gitleaks-config.toml"
+GL_CONFIG_ARG=()
+[ -f "$GL_PUBTOKEN_CFG" ] && GL_CONFIG_ARG=(--config "$GL_PUBTOKEN_CFG")
+
 GITLEAKS_EXIT=0
 gitleaks detect \
   --source . \
+  "${GL_CONFIG_ARG[@]}" \
   --log-opts="$GITLEAKS_LOG_OPTS" \
   --report-format=json \
   --report-path="$GITLEAKS_REPORT" \
@@ -130,7 +137,7 @@ RAW_HITS="$(rg --no-filename --line-number --no-heading "${PATTERN_ARGS[@]}" "$A
 # patterns (placeholder/example/getenv/etc) cover the bulk of false positives.
 FILTERED_HITS="$(
   printf '%s\n' "$RAW_HITS" \
-    | grep -viE '(example|placeholder|\<dummy\>|\<fake\>|\<TODO\>|<unset>|os\.environ|process\.env|getenv|\$\{[A-Z_]+:-|\$\{[A-Z_]+\}|\$\([A-Z_]+\)|\$env:[A-Z_]+|\.\.\.<)' \
+    | grep -viE '(example|placeholder|\<dummy\>|\<fake\>|\<TODO\>|<unset>|os\.environ|process\.env|getenv|\$\{[A-Z_]+:-|\$\{[A-Z_]+\}|\$\([A-Z_]+\)|\$env:[A-Z_]+|\.\.\.<|pk\.eyJ[A-Za-z0-9_-]{6,})' \
     || true
 )"
 

@@ -1,0 +1,14 @@
+# push-gate gitleaks config — the full built-in rule set PLUS an allowlist for
+# tokens that are PUBLIC BY DESIGN and therefore not secrets. Loaded via --config
+# from scan-secrets.sh. `useDefault = true` keeps every built-in gitleaks rule
+# active; the allowlist only carves out known-public token shapes.
+[extend]
+useDefault = true
+
+# Mapbox public client tokens (pk.*) are embedded in the page source of every
+# Mapbox GL site and are exposed in-browser by design — they are not secrets.
+# Secret tokens (sk.*) are deliberately NOT allowlisted and remain flagged.
+[[allowlists]]
+description = "Mapbox public pk.* client tokens (public by design; sk.* still flagged)"
+regexTarget = "secret"
+regexes = ['''pk\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}''']
