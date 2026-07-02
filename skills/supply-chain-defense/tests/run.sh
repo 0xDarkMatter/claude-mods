@@ -233,7 +233,10 @@ if [[ -f "$WGHOOK" ]]; then
   out="$(printf '{"tool_input":{"command":"ls -la"},"cwd":"%s"}' "$SB/wt-proj" | bash "$WGHOOK" 2>&1)"; rc=$?
   expect_exit "benign command -> 0" 0 "$rc"
   [[ -z "$out" ]] && ok "benign command is silent" || no "benign command should be silent"
-  out="$(bash "$WGHOOK" "rm -rf .claude/worktrees/x" </dev/null 2>&1)"; rc=$?
+  # arg mode has no payload cwd — the hook falls back to CLAUDE_PROJECT_DIR/PWD,
+  # so pin it to the sandbox or the own-worktree exemption silently swallows the
+  # advisory when the suite itself runs from inside a .claude/worktrees/ checkout.
+  out="$(CLAUDE_PROJECT_DIR="$SB/wt-plain" bash "$WGHOOK" "rm -rf .claude/worktrees/x" </dev/null 2>&1)"; rc=$?
   expect_exit "arg: rm worktrees advisory -> 0" 0 "$rc"
   expect_has  "arg: advisory text" "WORKTREE GUARD" "$out"
 else
