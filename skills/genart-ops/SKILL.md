@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: color-ops, javascript-ops, typescript-ops, mapbox-ops
+  related-skills: color-ops, javascript-ops, typescript-ops, mapbox-ops, threejs-ops
 ---
 
 # Generative Art Operations
@@ -13,6 +13,8 @@ metadata:
 Practical patterns for creative coding and generative art. Covers three.js, p5.js, SVG generation, GLSL shaders, procedural algorithms, and color theory for computational aesthetics.
 
 > Color-ops handles CSS color, accessibility, and design tokens. This skill focuses on generative/procedural color techniques (palette algorithms, shader color, gradient interpolation in perceptual space).
+>
+> Application/game-scale three.js — GLTF asset pipelines, AnimationMixer, fixed-timestep game loops, physics (rapier/cannon-es), react-three-fiber, instancing/disposal at scale — is [threejs-ops](../threejs-ops/SKILL.md). This skill owns the creative/shader side of three.js.
 
 ---
 

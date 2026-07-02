@@ -1,6 +1,6 @@
 ---
 name: threejs-ops
-description: "Application/game-scale three.js — ES modules + import maps (UMD builds are dead), GLTF asset pipeline (DRACO/KTX2/meshopt, gltf-transform, gltfpack, CC0 sources), AnimationMixer crossfading, game loops (fixed timestep, dt clamp), physics (@dimforge/rapier3d vs cannon-es), react-three-fiber + drei, and scale (InstancedMesh, LOD, draw-call budgets, disposal, boids/steering). Use for: three.js app, three.js game, import map, three.min.js, UMD, GLTFLoader, DRACOLoader, KTX2Loader, meshopt, gltf-transform, gltfpack, glb optimize, CC0 models, Quaternius, Kenney, Poly Pizza, AnimationMixer, crossfade, animation blending, skeletal animation, morph targets, game loop, fixed timestep, rapier, rapier3d, cannon-es, character controller, kinematic body, react-three-fiber, r3f, drei, InstancedMesh, LOD, frustum culling, draw calls, dispose geometry, WebGL memory leak, boids, steering, waypoint, NPC ambient life."
+description: "Application/game-scale three.js — ES modules + import maps (UMD builds are dead), GLTF asset pipeline (DRACO/KTX2/meshopt, gltf-transform, gltfpack, CC0 sources), AnimationMixer crossfading, game loops (fixed timestep, dt clamp), physics (@dimforge/rapier3d vs cannon-es), react-three-fiber + drei, and scale (InstancedMesh, LOD, draw-call budgets, disposal, boids/steering). Use for: three.js app, three.js game, import map, three.min.js, UMD, GLTFLoader, DRACOLoader, KTX2Loader, meshopt, gltf-transform, gltfpack, glb optimize, CC0 models, Quaternius, Kenney, Poly Pizza, AnimationMixer, crossfade, animation blending, skeletal animation, morph targets, game loop, fixed timestep, rapier, rapier3d, cannon-es, character controller, kinematic body, react-three-fiber, r3f, drei, InstancedMesh, LOD, frustum culling, draw calls, dispose geometry, WebGL memory leak, WebGPURenderer, TSL, boids, steering, waypoint, NPC ambient life."
 license: MIT
 compatibility: "Web three.js r150+ (ES modules only — UMD builds removed in r160). check-three-facts.py is stdlib-only Python 3.10+."
 metadata:
@@ -19,7 +19,7 @@ fast (and leak-free) as scene complexity grows.
 | Concern | Owner |
 |---|---|
 | Creative/generative three.js — scene scaffolding, GLSL shaders, particles, post-processing | [genart-ops](../genart-ops/SKILL.md) |
-| three.js inside a Mapbox GL custom layer | [mapbox-ops](../mapbox-ops/references/three-custom-layer.md) |
+| three.js inside a Mapbox GL custom layer (`CustomLayerInterface`, threebox) | [mapbox-ops](../mapbox-ops/SKILL.md) |
 | App/game-scale three.js — modules, assets, animation, loops, physics, R3F, scale | **this skill** |
 
 ---
@@ -72,6 +72,18 @@ script.
 
 With a bundler, `import { X } from 'three/addons/…'` resolves via the package's
 `exports` map — same specifier both worlds.
+
+### WebGPU (know it exists; default to WebGL)
+
+Since **r167** three ships a parallel build: `import { WebGPURenderer } from
+'three/webgpu'` plus the TSL node-shader language from `three/tsl` (import-map
+users: point the `"three"` key at `build/three.webgpu.js` **instead of**
+`three.module.js` — it re-exports core; never load both). `WebGPURenderer`
+falls back to WebGL2 automatically and initializes async (`await
+renderer.init()`, or let `setAnimationLoop` defer for you). Default for
+app/game work remains `WebGLRenderer` — reach for WebGPU when you need compute
+(GPU crowds, particle sims) or TSL materials. Shader-level TSL/GLSL work is
+[genart-ops](../genart-ops/SKILL.md) territory.
 
 ---
 
@@ -128,7 +140,9 @@ idle.crossFadeTo(run, 0.3, /*warp*/ true);
 
 Render on rAF; simulate on a **fixed timestep** when gameplay/physics needs
 determinism. Full accumulator pattern (with render interpolation), dt clamping,
-and tab-hidden handling in [references/game-loop.md](references/game-loop.md).
+tab-hidden handling, input sampling, and frame-rate-independent damping
+(`MathUtils.damp`, follow cameras) in
+[references/game-loop.md](references/game-loop.md).
 
 ```javascript
 const FIXED = 1 / 60;
@@ -240,7 +254,7 @@ self-explanatory reference implementations.
 |---|---|
 | [references/asset-pipeline.md](references/asset-pipeline.md) | Loading/optimizing GLTF, decoder wiring, sourcing CC0 models |
 | [references/animation.md](references/animation.md) | Crossfades, blend weights, one-shots, morph targets |
-| [references/game-loop.md](references/game-loop.md) | Fixed timestep, interpolation, pause/visibility, determinism |
+| [references/game-loop.md](references/game-loop.md) | Fixed timestep, interpolation, pause/visibility, input sampling, damping/follow-cam, determinism |
 | [references/physics.md](references/physics.md) | rapier vs cannon-es, init, sync, character controllers |
 | [references/r3f-drei.md](references/r3f-drei.md) | React Three Fiber apps, drei helpers, R3F pitfalls |
 | [references/scale-and-disposal.md](references/scale-and-disposal.md) | Instancing, LOD, culling, draw-call budgets, disposal/leaks |

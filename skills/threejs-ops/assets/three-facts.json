@@ -5,7 +5,8 @@
   "version_gates": {
     "examples_js_removed": "r148",
     "umd_builds_removed": "r160",
-    "_comment": "r148 (Dec 2022) dropped examples/js non-module loaders; r160 (Dec 2023) dropped build/three.js + build/three.min.js UMD builds. The skill assumes r150+ and ES modules only."
+    "webgpu_build_added": "r167",
+    "_comment": "r148 (Dec 2022) dropped examples/js non-module loaders; r160 (Dec 2023) dropped build/three.js + build/three.min.js UMD builds; r167 (Jul 2024) added the three.webgpu.js build + three/webgpu + three/tsl exports. The skill assumes r150+ and ES modules only."
   },
   "npm_scheme": {
     "package": "three",

@@ -99,7 +99,54 @@ document.addEventListener('visibilitychange', () => {
   and suspend `AudioContext`.
 - `THREE.Timer.connect(document)` implements exactly this for its delta.
 
-## 5. Determinism
+## 5. Input sampling
+
+DOM input events fire asynchronously, between frames — never mutate game state
+in the handler. Handlers write to a state object; the loop reads it:
+
+```javascript
+const input = { keys: new Set(), pointer: new THREE.Vector2(), pointerDown: false };
+addEventListener('keydown', (e) => { if (!e.repeat) input.keys.add(e.code); });
+addEventListener('keyup',   (e) => input.keys.delete(e.code));
+addEventListener('blur',    () => input.keys.clear());   // alt-tab = stuck keys otherwise
+
+// inside the fixed tick:
+const forward = input.keys.has('KeyW') ? 1 : 0;
+```
+
+- Use `e.code` (physical key — `KeyW` works on AZERTY), not `e.key`.
+- The `blur` clear matters: without it, releasing a key while the window is
+  unfocused leaves it "held" forever.
+- One-shot presses (jump) need edge detection: track `justPressed` by diffing
+  against the previous tick's set, or consume the key on read.
+- Mouse-look wants the Pointer Lock API — drei's `<PointerLockControls>` or
+  three's addon of the same name wrap it.
+- Sampling input in the **fixed tick** (not per rAF) keeps replays/determinism
+  intact (§7): the same tick always sees the same input snapshot.
+
+## 6. Smoothing — frame-rate-independent damping
+
+`value += (target - value) * 0.1` per frame is the classic bug: the smoothing
+speed changes with the frame rate (2.4× stiffer at 144 Hz). The correct,
+dt-aware form is exponential decay — built in as `THREE.MathUtils.damp`:
+
+```javascript
+// λ ≈ 1/seconds-to-close-63%-of-the-gap; bigger = snappier
+camera.position.x = THREE.MathUtils.damp(camera.position.x, target.x, 4, dt);
+```
+
+The third-person follow camera in four lines:
+
+```javascript
+const behind = player.localToWorld(new THREE.Vector3(0, 2.5, -5)); // offset in player space
+camera.position.lerp(behind, 1 - Math.exp(-4 * dt));               // same math as damp
+camera.lookAt(player.position);
+```
+
+Use damping for cameras, UI-ish motion, and audio params; never for physics
+bodies (the solver owns those — see [physics.md](physics.md)).
+
+## 7. Determinism
 
 Fixed timestep is necessary but not sufficient. For replays, lockstep
 networking, or reproducible tests:
@@ -117,7 +164,7 @@ networking, or reproducible tests:
   construction, and the same WASM build — one of the reasons it's the default
   ([physics.md](physics.md)).
 
-## 6. Frame budget quick reference
+## 8. Frame budget quick reference
 
 At 60 fps the whole frame is **16.6 ms**; browsers need ~2 ms, leaving ~14 ms
 for sim + render. Measure before optimizing:

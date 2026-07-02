@@ -112,11 +112,13 @@ def run_offline(findings: list[Finding]) -> None:
         findings.append(Finding("facts-meta", "fail",
                                 f"schema={facts.get('schema')!r} as_of={facts.get('as_of')!r}"))
 
-    # O2 — version gates stated in SKILL.md exactly as the facts commit to them.
+    # O2 — every version gate the facts commit to is stated in SKILL.md.
     gates = facts.get("version_gates", {})
-    for key, gate in (("examples_js_removed", gates.get("examples_js_removed")),
-                      ("umd_builds_removed", gates.get("umd_builds_removed"))):
-        if not gate or not re.match(r"r\d{3}$", gate):
+    gate_items = [(k, v) for k, v in gates.items() if k != "_comment"]
+    if len(gate_items) < 2:
+        findings.append(Finding("gates", "fail", f"expected >= 2 version gates, got {len(gate_items)}"))
+    for key, gate in gate_items:
+        if not gate or not re.match(r"r\d{3}$", str(gate)):
             findings.append(Finding(f"gate:{key}", "fail", f"malformed gate {gate!r} in facts"))
         elif re.search(rf"\*\*{gate}\*\*|\b{gate}\b", skill_md):
             findings.append(Finding(f"gate:{key}", "ok", f"{gate} stated in SKILL.md"))

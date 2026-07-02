@@ -21,7 +21,7 @@ license: MIT
 compatibility: "Web mapbox-gl-js v3.x. screenshot_map.py needs Python 3.10+ and Playwright (chromium); check-mapbox-facts.py is stdlib-only Python 3.10+."
 metadata:
   author: claude-mods
-  related-skills: "color-ops, screenshot, genart-ops"
+  related-skills: "color-ops, screenshot, genart-ops, threejs-ops"
 ---
 
 # Mapbox GL JS — advanced web toolkit (v3)

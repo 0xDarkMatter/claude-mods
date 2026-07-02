@@ -51,7 +51,7 @@ class Agent {
 
 **Wander** (idle meandering): project a point ahead of the agent, jitter a
 target around a small circle there, `seek` it. Deterministic if the jitter uses
-the seeded RNG ([game-loop.md](game-loop.md) §5).
+the seeded RNG ([game-loop.md](game-loop.md) §7).
 
 Facing: agents look along velocity —
 `mesh.quaternion.setFromRotationMatrix(m.lookAt(ZERO, velocity, UP))`, slerped
