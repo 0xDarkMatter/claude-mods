@@ -79,6 +79,15 @@ jobs:
           if [ "$rc" -eq 7 ]; then echo "::warning::mapbox-ops live check unreachable — skipped"; fi
           exit 0
 
+      - name: threejs-ops packages vs npm registry (existence + three major)
+        run: |
+          set +e
+          python skills/threejs-ops/scripts/check-three-facts.py --live
+          rc=$?
+          if [ "$rc" -eq 10 ]; then echo "::error::threejs-ops drift — a committed npm package is gone, or three left the 0.<release> scheme"; exit 1; fi
+          if [ "$rc" -eq 7 ]; then echo "::warning::threejs-ops live check unreachable (npm registry) — skipped"; fi
+          exit 0
+
       - name: r-ops recommended packages still on CRAN
         run: |
           set +e

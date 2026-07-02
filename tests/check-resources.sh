@@ -74,13 +74,18 @@ echo "== r-ops: R-stack staleness verifier"
 run "r-facts --offline consistent" 0 "$PY" skills/r-ops/scripts/check-r-facts.py --offline
 run "r-facts --help"               0 "$PY" skills/r-ops/scripts/check-r-facts.py --help
 
+echo "== threejs-ops: three.js fact/staleness verifier"
+run "three-facts --offline consistent" 0 "$PY" skills/threejs-ops/scripts/check-three-facts.py --offline
+run "three-facts --help"               0 "$PY" skills/threejs-ops/scripts/check-three-facts.py --help
+
 echo "== protocol: every new verifier is executable + compiles"
 for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/claude-code-ops/scripts/validate-hooks-json.py \
          skills/playwright-ops/scripts/triage-flakes.py \
          skills/mapbox-ops/scripts/check-mapbox-facts.py \
          skills/loop-ops/scripts/check-pricing-sync.py \
-         skills/r-ops/scripts/check-r-facts.py; do
+         skills/r-ops/scripts/check-r-facts.py \
+         skills/threejs-ops/scripts/check-three-facts.py; do
     "$PY" -m py_compile "$s" 2>/dev/null && pass "py_compile $(basename "$s")" || bad "py_compile $(basename "$s")"
 done
 bash -n skills/terraform-ops/scripts/check-action-refs.sh 2>/dev/null \

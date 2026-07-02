@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<!--
+  threejs-ops import-map starter — complete no-bundler three.js app skeleton.
+
+  Serve over HTTP (any static server; ES modules don't load from file://):
+    npx serve .        # or: python -m http.server
+
+  ADAPT: [1] pin your three version (BOTH entries, same version)
+         [2] swap the demo scene for your own
+         [3] delete OrbitControls if you don't need it
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>three.js app</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; }
+    canvas { display: block; }
+  </style>
+
+  <!-- Import map MUST come before any type="module" script.
+       [1] Pin the SAME exact version in both entries — mixing versions loads
+       two copies of three and breaks instanceof checks across modules. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+<script type="module">
+  import * as THREE from 'three';
+  import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+  // --- renderer / scene / camera -----------------------------------------
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x10141c);
+
+  const camera = new THREE.PerspectiveCamera(
+    60, window.innerWidth / window.innerHeight, 0.1, 200);
+  camera.position.set(3, 2, 5);
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+
+  // --- [2] demo scene — replace ------------------------------------------
+  scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+  const sun = new THREE.DirectionalLight(0xffffff, 2.5);
+  sun.position.set(5, 10, 5);
+  scene.add(sun);
+
+  const cube = new THREE.Mesh(
+    new THREE.BoxGeometry(1, 1, 1),
+    new THREE.MeshStandardMaterial({ color: 0x4488ff, roughness: 0.4 }));
+  cube.position.y = 0.5;
+  scene.add(cube);
+
+  scene.add(new THREE.Mesh(
+    new THREE.PlaneGeometry(20, 20).rotateX(-Math.PI / 2),
+    new THREE.MeshStandardMaterial({ color: 0x222831 })));
+
+  // --- resize --------------------------------------------------------------
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // --- loop: render dt + clamped, fixed-step-ready (see game-loop.md) ------
+  let last = 0;
+  renderer.setAnimationLoop((now) => {
+    const dt = Math.min((now - last) / 1000, 0.1);   // clamp tab-switch spike
+    last = now;
+
+    cube.rotation.y += dt;                            // dt-scaled, never per-frame constants
+    controls.update();
+    renderer.render(scene, camera);
+  });
+</script>
+</body>
+</html>

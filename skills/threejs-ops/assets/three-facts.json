@@ -1,0 +1,36 @@
+{
+  "_comment": "Canonical fast-moving facts the threejs-ops skill encodes. scripts/check-three-facts.py asserts SKILL.md + references state these consistently (--offline) and probes the npm registry for drift (--live). Edit deliberately: a change here is a skill-content decision, not housekeeping.",
+  "schema": "claude-mods.threejs-ops.facts/v1",
+  "as_of": "2026-07-02",
+  "version_gates": {
+    "examples_js_removed": "r148",
+    "umd_builds_removed": "r160",
+    "_comment": "r148 (Dec 2022) dropped examples/js non-module loaders; r160 (Dec 2023) dropped build/three.js + build/three.min.js UMD builds. The skill assumes r150+ and ES modules only."
+  },
+  "npm_scheme": {
+    "package": "three",
+    "pattern": "0.<release>.<patch>",
+    "example": "three@0.185.1 is r185",
+    "major": 0,
+    "_comment": "--live flags drift if the latest dist-tag ever leaves major 0 (a 1.x would signal an API-break release requiring a skill review pass)."
+  },
+  "packages": {
+    "three": { "sampled": "0.185.1", "role": "core" },
+    "@dimforge/rapier3d": { "sampled": "0.19.3", "role": "physics (bundler, wasm-bindgen)" },
+    "@dimforge/rapier3d-compat": { "sampled": "0.19.3", "role": "physics (no-bundler, inlined wasm)" },
+    "cannon-es": { "sampled": "0.20.0", "role": "physics (pure JS fallback)" },
+    "@react-three/fiber": { "sampled": "9.6.1", "role": "react renderer", "peer_react": ">=19", "peer_three": ">=0.156" },
+    "@react-three/drei": { "sampled": "10.7.7", "role": "r3f helpers" },
+    "@gltf-transform/cli": { "sampled": "4.4.1", "role": "asset optimizer" },
+    "gltfpack": { "sampled": "1.2.0", "role": "asset optimizer (meshoptimizer)" }
+  },
+  "cc0_sources": [
+    { "id": "quaternius", "url": "https://quaternius.com" },
+    { "id": "kenney", "url": "https://kenney.nl/assets" },
+    { "id": "poly-pizza", "url": "https://poly.pizza" },
+    { "id": "ambientcg", "url": "https://ambientcg.com" }
+  ],
+  "reference_repos": [
+    { "id": "gameblocks", "url": "https://github.com/xt4d/GameBlocks", "note": "agent-oriented game building blocks: actor motion controllers, waypoint drivers, camera rigs" }
+  ]
+}
