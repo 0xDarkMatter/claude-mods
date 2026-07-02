@@ -14,12 +14,14 @@ description: >-
   recolour, setPaintProperty, v3 Standard style / slots / setConfigProperty /
   lightPreset, style switcher / library, text labels / text-optional, popups,
   flyTo / easeTo / freeCameraOptions camera animation, setStyle re-add,
-  map.resize, WebGL teardown, or headless Playwright map verification.
+  map.resize, WebGL teardown, three.js custom layer / CustomLayerInterface /
+  threebox / animated 3D objects or models on the map,
+  or headless Playwright map verification.
 license: MIT
 compatibility: "Web mapbox-gl-js v3.x. screenshot_map.py needs Python 3.10+ and Playwright (chromium); check-mapbox-facts.py is stdlib-only Python 3.10+."
 metadata:
   author: claude-mods
-  related-skills: "color-ops, screenshot"
+  related-skills: "color-ops, screenshot, genart-ops"
 ---
 
 # Mapbox GL JS — advanced web toolkit (v3)
@@ -61,6 +63,7 @@ Read the matching reference file only when the task needs it:
 | Style expressions — `interpolate`/`step`/`match`/`case`, the **zoom-outermost** rule, `feature-state` in expressions | [references/expressions.md](references/expressions.md) |
 | Hover/select via `feature-state` (not `setData`), `queryRenderedFeatures` caveats, clustering, GeoJSON perf, event hygiene | [references/interaction-and-performance.md](references/interaction-and-performance.md) |
 | Data viz & 3D — `fill-extrusion` buildings/extruded data, heatmap layer, data-join choropleth (feature-state/`match`), proportional symbols, sky/fog | [references/dataviz-and-3d.md](references/dataviz-and-3d.md) |
+| **three.js in the map** — `CustomLayerInterface` + shared GL context, animated 3D objects/models, the baked-matrix vs reconstructed-camera (Threebox `CameraSync`) fork, raycast picking, ENU-metre scene space, constant screen-size actors, terrain elevation, far-plane clipping at pitch | [references/three-custom-layer.md](references/three-custom-layer.md) |
 | Camera & animation — `flyTo`/`easeTo`/`fitBounds` padding, `freeCameraOptions` cinematics/orbit, flight/first-person camera (roll, 6-DoF), animated day–night cycle (`setLights`), HUD synced to camera, point-along-line, draw-in lines, paint transitions, spinning globe, the `essential`/reduced-motion gotcha | [references/camera-and-animation.md](references/camera-and-animation.md) |
 | Style library & composition — first-party style catalog, choosing a base by use case, custom/third-party styles, style switcher, light/dark, hand-rolled style JSON | [references/styles.md](references/styles.md) (+ [assets/style-catalog.json](assets/style-catalog.json)) |
 | `setStyle` wiping custom layers, the 0×0 `resize()` bug, SPA teardown / WebGL-context cap, token security, readiness events | [references/lifecycle.md](references/lifecycle.md) |

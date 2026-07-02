@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: color-ops, javascript-ops, typescript-ops
+  related-skills: color-ops, javascript-ops, typescript-ops, mapbox-ops
 ---
 
 # Generative Art Operations
