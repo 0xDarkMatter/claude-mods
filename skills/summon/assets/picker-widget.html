@@ -91,7 +91,8 @@ const btns = ["recover","summon","clear"].map(id => document.getElementById(id))
 function sel(){ return chks.filter(c => c.checked).map(c => S[+c.dataset.i]); }
 function refresh(){
   const n = sel().length;
-  cnt.textContent = n + " selected";
+  const shown = chks.filter(c => c.closest(".row").style.display !== "none").length;
+  cnt.textContent = (shown < S.length ? shown + "/" + S.length + " shown · " : "") + n + " selected";
   btns.forEach(b => b.disabled = !n);
   document.querySelectorAll(".gchk").forEach(g => {
     const mine = chks.filter(c => c.dataset.g === g.dataset.g);
