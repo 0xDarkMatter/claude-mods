@@ -65,14 +65,15 @@ const S = [
 const NOW = Date.now();
 const age = ts => { const h = (NOW - Date.parse(ts)) / 36e5; return h < 1 ? Math.round(h*60)+"m" : h < 48 ? Math.round(h)+"h" : Math.round(h/24)+"d"; };
 const groups = {};
-S.forEach((s,i) => { (groups[s[2]] = groups[s[2]] || []).push(i); });
+const projKey = p => p.replace(/\//g, "\\");
+S.forEach((s,i) => { const k = projKey(s[2]); (groups[k] = groups[k] || []).push(i); });
 const gEl = document.getElementById("groups");
 const ordered = Object.keys(groups).sort((a,b) => Math.max(...groups[b].map(i=>Date.parse(S[i][5]))) - Math.max(...groups[a].map(i=>Date.parse(S[i][5]))));
 ordered.forEach((proj, gi) => {
   const det = document.createElement("details");
   det.className = "grp"; det.open = gi < 2;
   const ids = groups[proj];
-  det.innerHTML = `<summary><span class="car">▶</span><input type="checkbox" class="gchk" data-g="${gi}" onclick="event.stopPropagation()"><span style="font-family:var(--font-mono);font-size:12px">${proj}</span><span style="color:var(--text-muted);font-weight:400">(${ids.length})</span></summary>` +
+  det.innerHTML = `<summary><span class="car">▶</span><input type="checkbox" class="gchk" data-g="${gi}" onclick="event.stopPropagation()"><span>${proj}</span><span style="color:var(--text-muted);font-weight:400">(${ids.length})</span></summary>` +
     ids.map(i => { const [id,t,,arch,run,ts,wt] = S[i]; return `<label class="row" data-i="${i}" data-ts="${Date.parse(ts)}" data-txt="${(t+" "+proj+" "+wt).toLowerCase().replace(/"/g,"")}">
       <input type="checkbox" class="chk" data-i="${i}" data-g="${gi}">
       <span class="ttl" title="${t.replace(/"/g,"&quot;")}">${t}</span>
