@@ -81,6 +81,7 @@ ordered.forEach((proj, gi) => {
       ${arch ? `<span class="badge b-arch">archived</span>` : ""}
       ${REBOUND.has(id) ? `<span class="badge b-reb">✓ rebound</span>` : ""}
       <button class="peek" data-i="${i}" title="peek last messages">👁</button>
+      <button class="peek cpy" data-id="${id}" title="copy session id ${id}">📋</button>
       <span class="age">${age(ts)}</span>
     </label>`; }).join("");
   gEl.appendChild(det);
@@ -124,10 +125,24 @@ function applyFilters(){
 }
 flt.addEventListener("input", applyFilters);
 win.addEventListener("change", applyFilters);
-document.querySelectorAll(".peek").forEach(p => p.addEventListener("click", e => {
+document.querySelectorAll(".peek:not(.cpy)").forEach(p => p.addEventListener("click", e => {
   e.preventDefault(); e.stopPropagation();
   const [id, t] = S[+p.dataset.i];
   sendPrompt(`Peek session ${id} ("${t}") — show me its last few messages via summon --peek so I can decide whether to recover it.`);
+}));
+document.querySelectorAll(".cpy").forEach(b => b.addEventListener("click", async e => {
+  e.preventDefault(); e.stopPropagation();
+  let ok = false;
+  try { await navigator.clipboard.writeText(b.dataset.id); ok = true; } catch (_) {}
+  if (!ok) {
+    const ta = document.createElement("textarea");
+    ta.value = b.dataset.id; ta.style.position = "absolute"; ta.style.left = "-9999px";
+    document.body.appendChild(ta); ta.select();
+    try { ok = document.execCommand("copy"); } catch (_) {}
+    ta.remove();
+  }
+  b.textContent = ok ? "✅" : "❌";
+  setTimeout(() => { b.textContent = "📋"; }, 900);
 }));
 function fmt(list){ return list.map(([id,t,cwd,,,,wt]) => `- ${id} "${t}" @ ${cwd}${wt ? "\\.claude\\worktrees\\" + wt : ""}`).join("\n"); }
 document.getElementById("recover").addEventListener("click", () => {
