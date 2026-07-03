@@ -1,0 +1,119 @@
+<!--
+  summon in-chat picker widget — TEMPLATE (proven working 2026-07-03 in Claude Desktop chat)
+
+  How Claude uses this: run `summon pick --json`, map the envelope's sessions into the
+  `S` array below (shape documented inline), render via the show_widget tool.
+  Everything else is self-contained. Styling uses ONLY host CSS variables (light/dark safe).
+  sendPrompt(text) is a host-provided global: submits a chat message as if the user typed it.
+
+  DATA SHAPE per session row:
+    [shortId, title, projectRoot, isArchived(0|1), isRunning(0|1), isoTimestamp, worktreeName("" if none)]
+  REBOUND: set of shortIds to badge as recently-rebound (optional; empty Set() is fine).
+-->
+<h2 class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Interactive picker listing Claude Desktop sessions grouped by project, with checkboxes to select sessions for recovery or cross-account summon.</h2>
+<div id="sp" style="font-family:var(--font-sans);color:var(--text-primary);border:1px solid var(--border);border-radius:12px;background:var(--surface-1);overflow:hidden">
+  <div style="display:flex;gap:var(--gap-sm);align-items:center;padding:var(--pad-md);border-bottom:1px solid var(--border);flex-wrap:wrap">
+    <span style="font-weight:600">🪄 Session picker</span>
+    <input id="flt" type="text" placeholder="filter title / path…" style="flex:1;min-width:140px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2);color:var(--text-primary);font:inherit;font-size:13px">
+    <span id="cnt" style="font-size:12px;color:var(--text-secondary);white-space:nowrap">0 selected</span>
+  </div>
+  <div id="groups"></div>
+  <div style="display:flex;gap:var(--gap-sm);padding:var(--pad-md);border-top:1px solid var(--border);flex-wrap:wrap;align-items:center">
+    <button id="recover" class="act" disabled>📥 Recover selected</button>
+    <button id="summon" class="act sec" disabled>🔁 Summon to other account</button>
+    <button id="clear" class="act sec" disabled>✕ Clear</button>
+    <span style="font-size:11px;color:var(--text-muted);margin-left:auto">👁 peek shows a session's last messages</span>
+  </div>
+</div>
+<style>
+  .act{padding:7px 14px;border-radius:var(--radius);border:1px solid var(--border-accent);background:var(--bg-accent);color:var(--text-accent);font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+  .act.sec{background:var(--surface-2);border-color:var(--border);color:var(--text-secondary)}
+  .act:disabled{opacity:.45;cursor:default}
+  .grp summary{display:flex;gap:8px;align-items:center;padding:8px 12px;cursor:pointer;list-style:none;background:var(--surface-0);border-bottom:1px solid var(--border);font-size:13px;font-weight:600}
+  .grp summary::-webkit-details-marker{display:none}
+  .grp .car{transition:transform .15s;color:var(--text-muted);font-size:10px}
+  .grp[open] .car{transform:rotate(90deg)}
+  .row{display:flex;gap:8px;align-items:center;padding:6px 12px 6px 26px;border-bottom:1px solid var(--border);font-size:13px}
+  .row:hover{background:var(--surface-0)}
+  .row .ttl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .badge{font-size:10px;padding:1px 6px;border-radius:8px;white-space:nowrap}
+  .b-arch{background:var(--surface-0);color:var(--text-muted);border:1px solid var(--border)}
+  .b-run{background:var(--bg-success);color:var(--text-success)}
+  .b-wt{background:var(--surface-0);color:var(--text-secondary);border:1px solid var(--border);font-family:var(--font-mono)}
+  .b-reb{background:var(--bg-accent);color:var(--text-accent)}
+  .age{font-size:11px;color:var(--text-muted);white-space:nowrap;width:34px;text-align:right}
+  .peek{cursor:pointer;border:none;background:none;font-size:13px;opacity:.55;padding:0 2px}
+  .peek:hover{opacity:1}
+  .gchk,.row input{accent-color:var(--text-accent)}
+</style>
+<script>
+// >>> INJECT: replace with real data from `summon pick --json` <<<
+const REBOUND = new Set([]);
+const S = [
+ ["00000000","Example session title","X:\\Example\\Project",0,0,"2026-01-01T00:00:00Z",""]
+];
+// >>> END INJECT <<<
+const NOW = Date.now();
+const age = ts => { const h = (NOW - Date.parse(ts)) / 36e5; return h < 1 ? Math.round(h*60)+"m" : h < 48 ? Math.round(h)+"h" : Math.round(h/24)+"d"; };
+const groups = {};
+S.forEach((s,i) => { (groups[s[2]] = groups[s[2]] || []).push(i); });
+const gEl = document.getElementById("groups");
+const ordered = Object.keys(groups).sort((a,b) => Math.max(...groups[b].map(i=>Date.parse(S[i][5]))) - Math.max(...groups[a].map(i=>Date.parse(S[i][5]))));
+ordered.forEach((proj, gi) => {
+  const det = document.createElement("details");
+  det.className = "grp"; det.open = gi < 2;
+  const ids = groups[proj];
+  det.innerHTML = `<summary><span class="car">▶</span><input type="checkbox" class="gchk" data-g="${gi}" onclick="event.stopPropagation()"><span style="font-family:var(--font-mono);font-size:12px">${proj}</span><span style="color:var(--text-muted);font-weight:400">(${ids.length})</span></summary>` +
+    ids.map(i => { const [id,t,,arch,run,ts,wt] = S[i]; return `<label class="row" data-i="${i}" data-txt="${(t+" "+proj+" "+wt).toLowerCase().replace(/"/g,"")}">
+      <input type="checkbox" class="chk" data-i="${i}" data-g="${gi}">
+      <span class="ttl" title="${t.replace(/"/g,"&quot;")}">${t}</span>
+      ${wt ? `<span class="badge b-wt">⌥ ${wt.replace(/-[0-9a-f]+$/,"")}</span>` : ""}
+      ${run ? `<span class="badge b-run">running</span>` : ""}
+      ${arch ? `<span class="badge b-arch">archived</span>` : ""}
+      ${REBOUND.has(id) ? `<span class="badge b-reb">✓ rebound</span>` : ""}
+      <button class="peek" data-i="${i}" title="peek last messages">👁</button>
+      <span class="age">${age(ts)}</span>
+    </label>`; }).join("");
+  gEl.appendChild(det);
+});
+const chks = [...document.querySelectorAll(".chk")];
+const cnt = document.getElementById("cnt");
+const btns = ["recover","summon","clear"].map(id => document.getElementById(id));
+function sel(){ return chks.filter(c => c.checked).map(c => S[+c.dataset.i]); }
+function refresh(){
+  const n = sel().length;
+  cnt.textContent = n + " selected";
+  btns.forEach(b => b.disabled = !n);
+  document.querySelectorAll(".gchk").forEach(g => {
+    const mine = chks.filter(c => c.dataset.g === g.dataset.g);
+    const on = mine.filter(c => c.checked).length;
+    g.checked = on === mine.length && on > 0;
+    g.indeterminate = on > 0 && on < mine.length;
+  });
+}
+document.getElementById("sp").addEventListener("change", e => {
+  if (e.target.classList.contains("gchk"))
+    chks.filter(c => c.dataset.g === e.target.dataset.g && c.closest(".row").style.display !== "none")
+        .forEach(c => c.checked = e.target.checked);
+  refresh();
+});
+document.getElementById("flt").addEventListener("input", e => {
+  const q = e.target.value.toLowerCase();
+  document.querySelectorAll(".row").forEach(r => r.style.display = r.dataset.txt.includes(q) ? "" : "none");
+  document.querySelectorAll(".grp").forEach(d => { if (q) d.open = true; });
+});
+document.querySelectorAll(".peek").forEach(p => p.addEventListener("click", e => {
+  e.preventDefault(); e.stopPropagation();
+  const [id, t] = S[+p.dataset.i];
+  sendPrompt(`Peek session ${id} ("${t}") — show me its last few messages via summon --peek so I can decide whether to recover it.`);
+}));
+function fmt(list){ return list.map(([id,t,cwd,,,,wt]) => `- ${id} "${t}" @ ${cwd}${wt ? "\\.claude\\worktrees\\" + wt : ""}`).join("\n"); }
+document.getElementById("recover").addEventListener("click", () => {
+  sendPrompt(`Recover these sessions I ticked in the picker (summon recover each — distilled handover brief + fresh-start prompt):\n${fmt(sel())}`);
+});
+document.getElementById("summon").addEventListener("click", () => {
+  sendPrompt(`Summon (copy) these sessions to my other account — run summon with --select for exactly these, show me the plan with --dry-run first:\n${fmt(sel())}`);
+});
+document.getElementById("clear").addEventListener("click", () => { chks.forEach(c => c.checked = false); refresh(); });
+refresh();
+</script>

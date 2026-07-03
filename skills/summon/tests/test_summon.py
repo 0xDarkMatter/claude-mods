@@ -39,6 +39,14 @@ Distilled handover (recover -> extract -> distill -> cache -> emit):
       --refresh forces re-distillation; a newer transcript mtime busts the cache
   20. degrade: `claude` absent from PATH -> plain pointer prompt, exit 0,
       stderr warning; failing `claude` (exit 1) -> same advisory fallback
+
+Pick --json (the in-chat visual picker's data feed):
+  21. pick --json emits a parseable claude-mods.summon.pick/v1 envelope on a
+      stdout free of panel glyphs (pure-ASCII JSON, nothing before/after it)
+  22. worktree cwds are split into projectRoot + worktree; non-worktree cwds
+      get worktree ""; brokenCwd flags the session whose recorded cwd is gone;
+      transcriptPath is resolved (scan fallback included) and ISO timestamps
+      parse
 """
 
 from __future__ import annotations
@@ -533,6 +541,86 @@ def distill_tests() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def pick_json_tests() -> None:
+    """21-22. pick --json: envelope shape, clean stdout, worktree split, brokenCwd."""
+    import re
+    tmp = Path(tempfile.mkdtemp(prefix="summon-pickjson-"))
+    try:
+        sb = build_toolbox_sandbox(tmp)
+        env = sb["env"]
+
+        # _is_live also checks wrapper mtime — the fixtures were just written,
+        # so backdate them past the 10-minute liveness window.
+        stale = time.time() - 3600
+        for f in sb["ws"].glob("local_*.json"):
+            os.utime(f, (stale, stale))
+
+        # 21. parseable envelope, schema match, stdout clean of panel glyphs
+        rc, out, _ = run_mode(env, ["pick", "--json"])
+        try:
+            envlp = json.loads(out)
+        except json.JSONDecodeError:
+            envlp = {}
+        pure_ascii = all(ord(c) < 128 for c in out)
+        checks = {
+            "rc": rc == 0,
+            "parses": bool(envlp),
+            "schema": envlp.get("meta", {}).get("schema") == "claude-mods.summon.pick/v1",
+            "count": envlp.get("meta", {}).get("count") == 3 == len(envlp.get("data", [])),
+            "stdout-json-only": out.lstrip().startswith("{") and pure_ascii,
+            "no-glyphs": not any(g in out for g in ("╭", "│", "╰", "├", "\x1b[")),
+        }
+        if all(checks.values()):
+            ok("pick --json emits parseable pick/v1 envelope; stdout clean")
+        else:
+            no("pick --json emits parseable pick/v1 envelope; stdout clean",
+               f"failed={[k for k, v in checks.items() if not v]} rc={rc} out-head={out[:200]!r}")
+            return
+
+        rows = {r["sessionId"]: r for r in envlp["data"]}
+        moved = rows.get("local_aaaa-moved", {})
+        healthy = rows.get("local_bbbb-healthy", {})
+        mismatch = rows.get("local_cccc-mismatch", {})
+
+        # 22a. worktree cwd split into projectRoot + worktree
+        if (moved.get("projectRoot") == str(sb["old_root"])
+                and moved.get("worktree") == "wt1"
+                and healthy.get("worktree") == ""
+                and healthy.get("projectRoot") == healthy.get("cwd")):
+            ok("pick --json splits worktree cwd into projectRoot + worktree")
+        else:
+            no("pick --json splits worktree cwd into projectRoot + worktree",
+               f"moved-root={moved.get('projectRoot')!r} wt={moved.get('worktree')!r}")
+
+        # 22b. brokenCwd flags the moved session only
+        if (moved.get("brokenCwd") is True and healthy.get("brokenCwd") is False
+                and mismatch.get("brokenCwd") is False):
+            ok("pick --json flags brokenCwd for the missing-cwd session")
+        else:
+            no("pick --json flags brokenCwd for the missing-cwd session",
+               f"moved={moved.get('brokenCwd')} healthy={healthy.get('brokenCwd')}")
+
+        # 22c. transcriptPath resolved (incl. scan fallback), booleans + ISO stamps
+        scan_path = sb["projects"] / "X--some-unrelated-munged-dir" / "cli-mismatch.jsonl"
+        iso_re = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+        checks = {
+            "scan-fallback": mismatch.get("transcriptPath") == str(scan_path),
+            "expected-path": str(healthy.get("transcriptPath") or "").endswith("cli-healthy.jsonl"),
+            "branch": moved.get("branch") == "claude/wt1",
+            "not-running": healthy.get("isRunning") is False,
+            "not-archived": healthy.get("isArchived") is False,
+            "iso": all(iso_re.match(r["lastActivityAt"]) for r in envlp["data"]),
+            "short-id": moved.get("id") == "aaaa-mov",
+        }
+        if all(checks.values()):
+            ok("pick --json resolves transcriptPath; ISO stamps + field types sane")
+        else:
+            no("pick --json resolves transcriptPath; ISO stamps + field types sane",
+               f"failed={[k for k, v in checks.items() if not v]}")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main() -> int:
     # 1. Piped selection honoured even with --yes (the original bug: --yes
     #    used to select ALL candidates, ignoring the piped picks).
@@ -634,6 +722,9 @@ def main() -> int:
 
     # 18-20. Distilled handover: shim claude, cache lifecycle, degrade paths
     distill_tests()
+
+    # 21-22. pick --json: envelope, clean stdout, worktree split, brokenCwd
+    pick_json_tests()
 
     print(f"\nsummon tests: {PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0
