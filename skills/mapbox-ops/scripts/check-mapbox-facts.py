@@ -5,9 +5,12 @@
 #   --offline (default): NO network. Asserts the skill is internally consistent —
 #                        style-catalog.json parses, the v3 Standard config enums
 #                        (lightPreset/theme) agree between catalog and references,
-#                        the terrain tileset IDs and version gates (weather >= 3.7,
-#                        camera roll >= 3.5) are stated consistently, every classic
-#                        style url matches its id, every third-party entry is
+#                        the terrain tileset IDs and the weather >= 3.7 version gate
+#                        are stated consistently, no reference attributes camera roll
+#                        to Mapbox GL JS (roll is MapLibre GL JS v5 — Mapbox has none,
+#                        and freeCameraOptions orientation must be pitch+bearing-
+#                        representable), every classic style url matches its id,
+#                        every third-party entry is
 #                        addressable. Runs in PR CI and MAY block.
 #   --live:              network. Resolves the concrete third-party style-JSON URLs
 #                        and probes whether Mapbox GL JS has shipped a major beyond
@@ -141,14 +144,30 @@ def run_offline(findings: list[Finding]) -> None:
         findings.append(Finding("weather-gate", "fail",
                                 f"weather version gate mismatch (catalog={cat_ver!r}, ref={ref_ver!r}, want 3.7)"))
 
-    # O6 — camera roll gate >= 3.5 stated in camera-and-animation.md.
+    # O6 — no native camera roll. Mapbox GL JS has no roll on any camera API
+    # (FreeCameraOptions orientation "must be representable using only pitch and
+    # bearing"); true roll is MapLibre GL JS v5. The reference must not attribute
+    # a roll camera option / setRoll to Mapbox, and must keep the MapLibre pointer
+    # for anyone who needs real roll.
     camera_md = read_text(REFS / "camera-and-animation.md") if (REFS / "camera-and-animation.md").exists() else ""
-    roll_ver = _first_gl_gate(camera_md, near="roll")
-    if roll_ver == "3.5":
-        findings.append(Finding("camera-roll-gate", "ok", "native roll GL JS >= 3.5 stated"))
+    cam_lines = camera_md.splitlines()
+    roll_api = re.compile(r"setRoll|\{[^}]*\broll\b|\broll\s*:")
+    misattributed = []
+    for i, ln in enumerate(cam_lines):
+        if roll_api.search(ln):
+            context = " ".join(cam_lines[max(0, i - 2):i + 2])
+            if "maplibre" not in context.lower():
+                misattributed.append(ln.strip())
+    if misattributed:
+        findings.append(Finding("no-native-roll", "fail",
+                                "roll API attributed to Mapbox GL JS (it has none): "
+                                + " | ".join(misattributed[:3])))
+    elif "maplibre" not in camera_md.lower():
+        findings.append(Finding("no-native-roll", "fail",
+                                "MapLibre-v5 roll pointer missing from camera-and-animation.md"))
     else:
-        findings.append(Finding("camera-roll-gate", "fail",
-                                f"camera roll gate = {roll_ver!r}, want 3.5"))
+        findings.append(Finding("no-native-roll", "ok",
+                                "no Mapbox roll claim; MapLibre v5 pointer present"))
 
     # O7 — GL JS major scope: SKILL.md says v3.
     skill_md = read_text(SKILL_MD)

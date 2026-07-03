@@ -79,30 +79,36 @@ map.setFreeCameraOptions(cam);
 ## Flight / first-person camera (drone, fly-through, sim)
 
 Continuous first-person movement — a flight sim, drone pass, or walkthrough — drives the
-camera every frame from a `{lng, lat, alt, heading, pitch, roll, speed}` state.
+camera every frame from a `{lng, lat, alt, heading, pitch, speed}` state.
 
-- **Native (GL JS ≥ 3.5):** the camera now has **`roll`** alongside `bearing`/`pitch`
-  (`jumpTo`/`easeTo`/`flyTo({roll})`, `map.setRoll`) — enough for banking turns. Per-frame
-  `jumpTo` is instant (no easing lag):
+- **Native camera:** Mapbox GL JS has **no camera roll** — only `bearing` + `pitch`.
+  "Banked" turns are choreography: sweep `bearing` through the turn while easing `pitch`
+  up a few degrees; the combined motion reads as a bank even though the horizon stays
+  level. Per-frame `jumpTo` is instant (no easing lag):
 
 ```js
-const s = { lng:146.9, lat:-36.1, alt:1500, heading:0, pitch:75, roll:0, speed:0 };
+const s = { lng:146.9, lat:-36.1, alt:1500, heading:0, pitch:75, speed:0 };
 function fly() {
   // advance along heading by speed (deg/frame ≈ metres → deg)
   const rad = s.heading * Math.PI/180, d = s.speed * 1e-5;
   s.lat += Math.cos(rad) * d; s.lng += Math.sin(rad) * d;
-  map.jumpTo({ center:[s.lng,s.lat], bearing:s.heading, pitch:s.pitch, roll:s.roll });
+  map.jumpTo({ center:[s.lng,s.lat], bearing:s.heading, pitch:s.pitch });
   requestAnimationFrame(fly);
 }
-fly();   // A/D → s.heading & s.roll, W/S → s.pitch, R/F → s.speed (key handlers)
+fly();   // A/D → s.heading, W/S → s.pitch, R/F → s.speed (key handlers)
 ```
 
-- **Full 6-DoF** (arbitrary position + look vector, e.g. a nose-down dive that the
-  pitch-clamped map camera can't reach): use `freeCameraOptions` — set
-  `position = MercatorCoordinate.fromLngLat([lng,lat], alt)` and orientation each frame.
-- Pre-3.5, roll required `freeCameraOptions` (the map camera had only bearing/pitch).
-- Cap pitch near 85° on the native camera; beyond that switch to freeCamera or the horizon
-  inverts.
+- **Full positional control** (camera at an exact altitude, aimed at a target): use
+  `freeCameraOptions` — set `position = MercatorCoordinate.fromLngLat([lng,lat], alt)`
+  and orientation each frame. This does **not** unlock roll either: the orientation
+  quaternion "must be representable using only pitch and bearing" (per the
+  FreeCameraOptions docs — a non-conforming orientation is discarded). freeCamera buys
+  position freedom, not a rolled horizon.
+- **Need true roll?** Switch libraries — MapLibre GL JS v5 added first-class camera roll
+  (`easeTo`/`flyTo({roll})`, `map.setRoll`) plus pitch beyond 90°. Mapbox GL JS has no
+  equivalent on any camera API.
+- Cap pitch near 85° — the native camera's hard maximum (`maxPitch`); a nose-down or
+  looking-up shot past that is likewise MapLibre-v5-only territory.
 
 ## Animated day–night cycle
 

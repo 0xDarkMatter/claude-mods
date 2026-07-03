@@ -64,7 +64,7 @@ Read the matching reference file only when the task needs it:
 | Hover/select via `feature-state` (not `setData`), `queryRenderedFeatures` caveats, clustering, GeoJSON perf, event hygiene | [references/interaction-and-performance.md](references/interaction-and-performance.md) |
 | Data viz & 3D — `fill-extrusion` buildings/extruded data, heatmap layer, data-join choropleth (feature-state/`match`), proportional symbols, sky/fog | [references/dataviz-and-3d.md](references/dataviz-and-3d.md) |
 | **three.js in the map** — `CustomLayerInterface` + shared GL context, animated 3D objects/models, the baked-matrix vs reconstructed-camera (Threebox `CameraSync`) fork, raycast picking, ENU-metre scene space, constant screen-size actors, terrain elevation, far-plane clipping at pitch | [references/three-custom-layer.md](references/three-custom-layer.md) |
-| Camera & animation — `flyTo`/`easeTo`/`fitBounds` padding, `freeCameraOptions` cinematics/orbit, flight/first-person camera (roll, 6-DoF), animated day–night cycle (`setLights`), HUD synced to camera, point-along-line, draw-in lines, paint transitions, spinning globe, the `essential`/reduced-motion gotcha | [references/camera-and-animation.md](references/camera-and-animation.md) |
+| Camera & animation — `flyTo`/`easeTo`/`fitBounds` padding, `freeCameraOptions` cinematics/orbit, flight/first-person camera (bearing+pitch choreography; roll is MapLibre-only), animated day–night cycle (`setLights`), HUD synced to camera, point-along-line, draw-in lines, paint transitions, spinning globe, the `essential`/reduced-motion gotcha | [references/camera-and-animation.md](references/camera-and-animation.md) |
 | Style library & composition — first-party style catalog, choosing a base by use case, custom/third-party styles, style switcher, light/dark, hand-rolled style JSON | [references/styles.md](references/styles.md) (+ [assets/style-catalog.json](assets/style-catalog.json)) |
 | `setStyle` wiping custom layers, the 0×0 `resize()` bug, SPA teardown / WebGL-context cap, token security, readiness events | [references/lifecycle.md](references/lifecycle.md) |
 | **v3 Standard style** — slots vs `beforeId`, `setConfigProperty`/`lightPreset`, why layer-walking (palette/terrain) breaks; localisation, RTL, globe | [references/v3-standard-style.md](references/v3-standard-style.md) |
@@ -92,7 +92,8 @@ Read the matching reference file only when the task needs it:
   stdlib-only (no Playwright), guards the fast-moving facts this skill encodes
   (SKILL-RESOURCE-PROTOCOL §7). `--offline` (default) asserts internal consistency —
   the v3 Standard config enums (`lightPreset`/`theme`), terrain tileset IDs, the weather
-  (≥3.7) and camera-roll (≥3.5) version gates, and every style URL/id in
+  (≥3.7) version gate, the no-native-camera-roll fact (roll is MapLibre GL JS v5, not
+  Mapbox), and every style URL/id in
   [assets/style-catalog.json](assets/style-catalog.json). `--live` resolves the
   third-party style URLs and probes whether Mapbox GL JS has shipped a major past v3.
 
