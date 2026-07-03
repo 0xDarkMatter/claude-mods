@@ -22,10 +22,23 @@ Toolbox modes (rebind / recover / pick / doctor):
   11. rebind to a nonexistent path exits 3 without --force, 0 with it
   12. doctor flags the broken-cwd session (exit 10, --json envelope), and
       goes healthy (exit 0) after the rebind
-  13. recover emits a paste-ready prompt on stdout; transcript found via the
-      scan fallback when the munged dir doesn't derive from the recorded cwd
+  13. recover --no-distill emits the plain pointer prompt on stdout; transcript
+      found via the scan fallback when the munged dir doesn't derive from the
+      recorded cwd; no handover cache is written
   14. recover with unknown id exits 3
   15. pick --select N emits the recovery prompt for the Nth candidate
+  16. rebind into a .claude/worktrees/ path prints the `git worktree repair` hint
+
+Distilled handover (recover -> extract -> distill -> cache -> emit):
+  17. extract_conversation keeps user/assistant text, skips tool_use inputs and
+      tool_result blobs (fixture JSONL); respects the char budget with the
+      verbatim tail winning
+  18. recover distills via a PATH-shimmed fake `claude`, emits brief + pointer
+      clause, caches at <transcript>.handover.md
+  19. cache hit: unchanged transcript reuses the cached brief (no re-distill);
+      --refresh forces re-distillation; a newer transcript mtime busts the cache
+  20. degrade: `claude` absent from PATH -> plain pointer prompt, exit 0,
+      stderr warning; failing `claude` (exit 1) -> same advisory fallback
 """
 
 from __future__ import annotations
@@ -290,6 +303,13 @@ def toolbox_tests() -> None:
             no("rebind rewrites wrapper + backup + transcript bridge",
                f"failed={[k for k, v in checks.items() if not v]} rc={rc}")
 
+        # 16. rebind into a worktree path prints the `git worktree repair` hint
+        if "git worktree repair" in out and str(new_wt.resolve()) in out:
+            ok("rebind worktree hint present (git worktree repair)")
+        else:
+            no("rebind worktree hint present (git worktree repair)",
+               f"out-tail={out[-300:]!r}")
+
         # 12b. doctor post-rebind: healthy, exit 0
         rc, out, _ = run_mode(env, ["doctor", "--json"])
         try:
@@ -310,17 +330,20 @@ def toolbox_tests() -> None:
         else:
             no("rebind --force accepts a nonexistent path", f"rc={rc} cwd={data['cwd']!r}")
 
-        # 13. recover: prompt on stdout, scan fallback for the mismatched dir
-        rc, out, err = run_mode(env, ["recover", "cccc-mismatch"])
+        # 13. recover --no-distill: plain pointer prompt on stdout, scan
+        #     fallback for the mismatched dir, no handover cache written
+        rc, out, err = run_mode(env, ["recover", "cccc-mismatch", "--no-distill"])
         scan_path = sb["projects"] / "X--some-unrelated-munged-dir" / "cli-mismatch.jsonl"
+        cache = scan_path.with_name(scan_path.name + ".handover.md")
         if (rc == 0 and str(scan_path) in out
                 and "Continue a previous Claude session" in out
                 and "TAIL of the transcript" in out
-                and "Continue a previous" not in err):
-            ok("recover emits prompt; scan fallback finds mismatched transcript")
+                and "Continue a previous" not in err
+                and not cache.exists()):
+            ok("recover --no-distill emits pointer prompt; scan fallback; no cache")
         else:
-            no("recover emits prompt; scan fallback finds mismatched transcript",
-               f"rc={rc} out-head={out[:200]!r}")
+            no("recover --no-distill emits pointer prompt; scan fallback; no cache",
+               f"rc={rc} cache={cache.exists()} out-head={out[:200]!r}")
 
         # 14. recover unknown id
         rc, _, _ = run_mode(env, ["recover", "zzzz-nope"])
@@ -330,12 +353,182 @@ def toolbox_tests() -> None:
             no("recover unknown id exits 3", f"rc={rc}")
 
         # 15. pick --select 2 -> second-newest candidate (healthy session)
-        rc, out, _ = run_mode(env, ["pick", "--select", "2"])
+        rc, out, _ = run_mode(env, ["pick", "--select", "2", "--no-distill"])
         if rc == 0 and "healthy session" in out and "cli-healthy.jsonl" in out:
             ok("pick --select 2 recovers the 2nd candidate")
         else:
             no("pick --select 2 recovers the 2nd candidate",
                f"rc={rc} out-head={out[:200]!r}")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _load_summon_module():
+    """Import summon.py as a module for unit-testing extraction (no side effects
+    at import time beyond terminal-capability sniffing)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("summon_under_test", SCRIPT)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod  # dataclass needs the module registered
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def extraction_tests() -> None:
+    """17. extract_conversation: tool blobs skipped, budget respected."""
+    mod = _load_summon_module()
+    tmp = Path(tempfile.mkdtemp(prefix="summon-extract-"))
+    try:
+        tr = tmp / "fixture.jsonl"
+        recs = [
+            {"type": "user", "message": {"content": "Build the frobnicator widget"}},
+            {"type": "assistant", "message": {"content": [
+                {"type": "text", "text": "Plan: refactor the gadget first"},
+                {"type": "tool_use", "name": "Bash",
+                 "input": {"command": "echo TOOL-INPUT-NOISE && make all"}},
+            ]}},
+            {"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "t1",
+                 "content": "TOOL-RESULT-BLOB " * 200},
+            ]}},
+            {"type": "summary", "summary": "not a conversation turn"},
+            {"type": "assistant", "message": {"content": [
+                {"type": "text", "text": "Done; committed abc1234 on lane/foo"},
+            ]}},
+        ]
+        tr.write_text("\n".join(json.dumps(r) for r in recs) + "\n", encoding="utf-8")
+        out = mod.extract_conversation(tr, 120_000)
+        checks = {
+            "user-text": "frobnicator" in out,
+            "assistant-text": "abc1234" in out,
+            "roles": "USER:" in out and "ASSISTANT:" in out,
+            "no-tool-input": "TOOL-INPUT-NOISE" not in out,
+            "no-tool-result": "TOOL-RESULT-BLOB" not in out,
+        }
+        if all(checks.values()):
+            ok("extraction keeps text turns, skips tool_use/tool_result blobs")
+        else:
+            no("extraction keeps text turns, skips tool_use/tool_result blobs",
+               f"failed={[k for k, v in checks.items() if not v]}")
+
+        # Budget: 40 turns x ~1KB, budget 5000 -> verbatim tail wins, earliest
+        # turns dropped, output within budget.
+        tr2 = tmp / "long.jsonl"
+        recs2 = [{"type": "user" if i % 2 == 0 else "assistant",
+                  "message": {"content": f"turn-{i} " + "x" * 1000}}
+                 for i in range(40)]
+        tr2.write_text("\n".join(json.dumps(r) for r in recs2) + "\n", encoding="utf-8")
+        out2 = mod.extract_conversation(tr2, 5_000)
+        if len(out2) <= 5_000 and "turn-39" in out2 and "turn-0 " not in out2:
+            ok("extraction respects char budget; verbatim tail wins")
+        else:
+            no("extraction respects char budget; verbatim tail wins",
+               f"len={len(out2)} tail-present={'turn-39' in out2}")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def make_claude_shim(shim_dir: Path, brief_file: Path | None, fail: bool = False) -> None:
+    """Drop a fake `claude` onto PATH: prints brief_file's content, or exits 1."""
+    if sys.platform == "win32":
+        bat = shim_dir / "claude.bat"
+        if fail:
+            bat.write_text("@echo off\r\nexit /b 1\r\n", encoding="ascii")
+        else:
+            bat.write_text(f'@echo off\r\ntype "{brief_file}"\r\n', encoding="ascii")
+    else:
+        sh = shim_dir / "claude"
+        if fail:
+            sh.write_text("#!/bin/sh\ncat >/dev/null\nexit 1\n", encoding="ascii")
+        else:
+            sh.write_text(f'#!/bin/sh\ncat >/dev/null\ncat "{brief_file}"\n',
+                          encoding="ascii")
+        sh.chmod(0o755)
+
+
+def distill_tests() -> None:
+    """18-20. recover distillation: shim claude, cache lifecycle, degrade paths."""
+    tmp = Path(tempfile.mkdtemp(prefix="summon-distill-"))
+    try:
+        sb = build_toolbox_sandbox(tmp)
+        env = sb["env"]
+        good = tmp / "proj-good"
+        transcript = sb["projects"] / encode_cwd(str(good)) / "cli-healthy.jsonl"
+        cache = transcript.with_name(transcript.name + ".handover.md")
+
+        shim = tmp / "shim"
+        shim.mkdir()
+        brief_file = tmp / "brief.txt"
+        brief_file.write_text("## Goal\nBRIEF-ONE\n", encoding="utf-8")
+        make_claude_shim(shim, brief_file)
+        env_shim = dict(env)
+        env_shim["PATH"] = str(shim) + os.pathsep + env.get("PATH", "")
+
+        # 18. distill + cache write + brief-and-pointer emission
+        rc, out, err = run_mode(env_shim, ["recover", "bbbb-healthy"])
+        if (rc == 0 and "BRIEF-ONE" in out
+                and "consult it only if something specific is missing" in out
+                and str(transcript) in out
+                and cache.exists() and "BRIEF-ONE" in cache.read_text(encoding="utf-8")
+                and "BRIEF-ONE" not in err):
+            ok("recover distills via shim claude; brief + pointer; cache written")
+        else:
+            no("recover distills via shim claude; brief + pointer; cache written",
+               f"rc={rc} cache={cache.exists()} out-head={out[:200]!r} err-tail={err[-200:]!r}")
+
+        # 19a. cache hit: shim now yields BRIEF-TWO but the cache must win
+        brief_file.write_text("## Goal\nBRIEF-TWO\n", encoding="utf-8")
+        rc, out, err = run_mode(env_shim, ["recover", "bbbb-healthy"])
+        if rc == 0 and "BRIEF-ONE" in out and "BRIEF-TWO" not in out and "cached" in err:
+            ok("cache hit: unchanged transcript reuses cached brief")
+        else:
+            no("cache hit: unchanged transcript reuses cached brief",
+               f"rc={rc} out-head={out[:200]!r}")
+
+        # 19b. --refresh forces re-distillation
+        rc, out, _ = run_mode(env_shim, ["recover", "bbbb-healthy", "--refresh"])
+        if rc == 0 and "BRIEF-TWO" in out:
+            ok("--refresh forces re-distillation")
+        else:
+            no("--refresh forces re-distillation", f"rc={rc} out-head={out[:200]!r}")
+
+        # 19c. newer transcript mtime busts the cache
+        brief_file.write_text("## Goal\nBRIEF-THREE\n", encoding="utf-8")
+        newer = cache.stat().st_mtime + 10
+        os.utime(transcript, (newer, newer))
+        rc, out, _ = run_mode(env_shim, ["recover", "bbbb-healthy"])
+        if rc == 0 and "BRIEF-THREE" in out:
+            ok("newer transcript mtime busts the cache")
+        else:
+            no("newer transcript mtime busts the cache", f"rc={rc} out-head={out[:200]!r}")
+
+        # 20a. degrade: claude absent from PATH -> pointer prompt, exit 0, warning
+        emptybin = tmp / "emptybin"
+        emptybin.mkdir()
+        env_absent = dict(env)
+        env_absent["PATH"] = str(emptybin)
+        rc, out, err = run_mode(env_absent, ["recover", "cccc-mismatch"])
+        if (rc == 0 and "TAIL of the transcript" in out
+                and "not on PATH" in err):
+            ok("degrade: absent claude falls back to pointer prompt (exit 0)")
+        else:
+            no("degrade: absent claude falls back to pointer prompt (exit 0)",
+               f"rc={rc} err-tail={err[-300:]!r}")
+
+        # 20b. degrade: failing claude (exit 1) -> same advisory fallback
+        shim_fail = tmp / "shim-fail"
+        shim_fail.mkdir()
+        make_claude_shim(shim_fail, None, fail=True)
+        env_fail = dict(env)
+        env_fail["PATH"] = str(shim_fail)
+        rc, out, err = run_mode(env_fail, ["recover", "cccc-mismatch"])
+        if (rc == 0 and "TAIL of the transcript" in out
+                and "exited 1" in err):
+            ok("degrade: failing claude falls back to pointer prompt (exit 0)")
+        else:
+            no("degrade: failing claude falls back to pointer prompt (exit 0)",
+               f"rc={rc} err-tail={err[-300:]!r}")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -433,8 +626,14 @@ def main() -> int:
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
-    # 8-15. Toolbox modes: rebind / recover / pick / doctor
+    # 8-16. Toolbox modes: rebind / recover / pick / doctor
     toolbox_tests()
+
+    # 17. Extraction (in-process unit tests)
+    extraction_tests()
+
+    # 18-20. Distilled handover: shim claude, cache lifecycle, degrade paths
+    distill_tests()
 
     print(f"\nsummon tests: {PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0

@@ -4,7 +4,11 @@
 # Offline-deterministic: builds a throwaway Claude Desktop dir tree in a temp
 # sandbox (HOME/USERPROFILE/APPDATA redirected), so no real account data is
 # read or written. Covers the selection/confirmation flow (--yes, --select,
-# piped stdin) and the cp1252 UnicodeEncodeError regression.
+# piped stdin), the cp1252 UnicodeEncodeError regression, the toolbox modes
+# (rebind/recover/pick/doctor, incl. the worktree-repair hint), and the
+# distilled-handover flow (extraction skips tool blobs, cache hit/miss on
+# mtime, --no-distill, degrade paths via a PATH-shimmed fake `claude` —
+# no real LLM call is ever made by this suite).
 #
 # Usage:   bash tests/run.sh
 # Exit:    0 all pass, 1 one or more failures

@@ -1,6 +1,6 @@
 ---
 name: summon
-description: "Claude Desktop session toolbox: cross-account transfer, recovery picker, cwd rebind after folder moves, and a session-store doctor. Transfer (default mode): copy (default) or move (--move) the session metadata file so the session shows up in another account's left-hand sidebar — push (run while still on your current near-limit account, send sessions to the next one, then Logout/Login as the natural switch) or pull (after switching, bring earlier sessions into the now-active one); push is recommended because the Logout/Login IS the switch you were doing anyway. Toolbox modes: `summon pick` / `summon recover <id>` (picker over the whole session store that resolves the transcript JSONL — handling the wrapper-uuid vs transcript-filename trap — and emits a ready-to-paste, token-cheap recovery prompt for a new session), `summon rebind <id> --cwd <newpath>` (fix a session's recorded cwd after a project folder moves, with backup + transcript bridging), `summon doctor` (scan all sessions for broken cwd bindings and report which need rebinding). Triggers on: summon, summon sessions, push sessions, pull sessions, before switching accounts, account approaching usage limit, account ran out of usage, prepare next account, mid-flight desktop sessions, claude desktop multi-account workflow, transfer claude desktop sessions across accounts, peek session, see desktop sessions across accounts, recover session, resume old session, session picker, rebind session, moved project folder, session cwd broken, session won't reopen after folder move, broken session bindings, session doctor. Default copy keeps the session visible in both accounts' sidebars; transcript JSONLs are account-agnostic and stay where they are. No API calls, no summarisation, full transcripts intact. The left-hand session picker is loaded at login, so a Logout/Login on the destination is required for new sessions to appear there."
+description: "Claude Desktop session toolbox: cross-account transfer, recovery picker, cwd rebind after folder moves, and a session-store doctor. Transfer (default mode): copy (default) or move (--move) the session metadata file so the session shows up in another account's left-hand sidebar — push (run while still on your current near-limit account, send sessions to the next one, then Logout/Login as the natural switch) or pull (after switching, bring earlier sessions into the now-active one); push is recommended because the Logout/Login IS the switch you were doing anyway. Toolbox modes: `summon pick` / `summon recover <id>` (picker over the whole session store that resolves the transcript JSONL — handling the wrapper-uuid vs transcript-filename trap — extracts the conversation in-script, distills it into a handover brief via one tool-less `claude -p` Sonnet call cached at `<transcript>.handover.md`, and emits a ready-to-paste handover for a new session; degrades to a plain pointer prompt when the `claude` CLI is unavailable, `--no-distill` to force that, `--refresh` to re-distill), `summon rebind <id> --cwd <newpath>` (fix a session's recorded cwd after a project folder moves, with backup + transcript bridging), `summon doctor` (scan all sessions for broken cwd bindings and report which need rebinding). Triggers on: summon, summon sessions, push sessions, pull sessions, before switching accounts, account approaching usage limit, account ran out of usage, prepare next account, mid-flight desktop sessions, claude desktop multi-account workflow, transfer claude desktop sessions across accounts, peek session, see desktop sessions across accounts, recover session, resume old session, handover brief, session picker, rebind session, moved project folder, session cwd broken, session won't reopen after folder move, broken session bindings, session doctor. Default copy keeps the session visible in both accounts' sidebars; transcript JSONLs are account-agnostic and stay where they are. Transfer makes no API calls and keeps full transcripts intact; recover's distillation is the only LLM call — one gated, tool-less `claude -p`. The left-hand session picker is loaded at login, so a Logout/Login on the destination is required for new sessions to appear there."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
@@ -14,11 +14,11 @@ Claude Desktop session toolbox. Four jobs, one store:
 | Mode | Invocation | Job |
 |------|-----------|-----|
 | **Transfer** (default) | `summon [flags]` | Copy/move sessions across accounts so they're visible from the account you switch to next |
-| **Pick / Recover** | `summon pick` · `summon recover <id>` | Find a past session, resolve its transcript, emit a paste-ready recovery prompt for a new session |
+| **Pick / Recover** | `summon pick` · `summon recover <id>` | Find a past session, resolve its transcript, distill a handover brief, emit a paste-ready handover for a new session |
 | **Rebind** | `summon rebind <id> --cwd <newpath>` | Fix a session's recorded cwd after the project folder moved |
 | **Doctor** | `summon doctor [--json]` | Scan every session for broken cwd bindings; report which need rebinding |
 
-Full transcripts intact; no API calls; no summarisation. Transfer is documented first; the toolbox modes follow under [Toolbox modes](#toolbox-modes-pick--recover--rebind--doctor).
+Transfer touches no transcripts and makes no API calls. Recover/pick make exactly one optional, gated LLM call (the distillation) and degrade gracefully without it. Transfer is documented first; the toolbox modes follow under [Toolbox modes](#toolbox-modes-pick--recover--rebind--doctor).
 
 ## When to run it
 
@@ -86,28 +86,47 @@ Mechanically identical — the file moves are the same regardless of which frami
 
 Semantic exit codes across all modes: `0` ok, `2` usage/ambiguous id, `3` session or path not found, `10` doctor found broken sessions.
 
-### `summon pick` — session picker → recovery prompt
+### `summon pick` — session picker → distilled handover
 
 Interactive picker over the **whole** session store (all accounts, default last 30 days — `--days N`/`--all` to widen, `--cwd`/`--title` to narrow). Uses `fzf` when it's on PATH and the terminal is interactive; falls back to a numbered list (`--select N` answers it non-interactively). A `●` marks sessions active in the last 10 minutes — don't recover a session that's still running.
 
-Selecting a session emits a **paste-ready recovery prompt on stdout** (context panel on stderr, so `summon pick | clip` stays clean):
+Selecting a session emits a **paste-ready handover on stdout** (context panel and progress on stderr, so `summon pick | clip` stays clean). Same output as `recover`, below.
+
+### `summon recover <id>` — distilled handover brief
+
+`summon recover 6577b24c` — id is a `sessionId` or `cliSessionId`, prefix ok. Four-stage flow:
+
+1. **Extract** (in-script, no LLM): parses the transcript JSONL and pulls conversational content only — user/assistant text turns, skipping `tool_result` blobs and `tool_use` inputs (they are most of the bytes). The final ~15 turns are included verbatim; earlier turns fill the remaining budget from the start (so the goal statement survives), middle elided when too long. Total capped at a char budget (`--budget`, default 120k).
+2. **Distill** (cheap, tool-less): pipes the extraction to a single `claude -p --model sonnet --permission-mode dontAsk` call — one-shot stdin summarisation, no tools, no agentic loop, never `bypassPermissions` (per `rules/loop-engineering.md`). Produces a brief with fixed sections: **Goal / What landed** (branch + commits if mentioned) **/ Unfinished / Open decisions / Key context**, ~1k-word cap. `--model` overrides sonnet.
+3. **Cache**: the brief is written to `<transcript-path>.handover.md` next to the JSONL and reused while it's newer than the transcript's mtime. `--refresh` forces re-distillation.
+4. **Emit** (stdout = the data product): the brief inline plus a pointer clause:
 
 ```
-Continue a previous Claude session.
+Continue a previous Claude session: 'Fix overlapping photo pins with gentle displacement'.
+Branch: claude/funny-hypatia-5e54f7
 
-Title:      Fix overlapping photo pins with gentle displacement
-Branch:     claude/funny-hypatia-5e54f7
-Orig cwd:   X:\Roam\LCMap\.claude\worktrees\funny-hypatia-5e54f7  (missing on disk — folder moved?)
-Transcript: C:\Users\Mack\.claude\projects\X--Roam-LCMap-…\e640a2a8-….jsonl
+## Goal
+…
+## What landed
+…
+## Unfinished
+…
+## Open decisions
+…
+## Key context
+…
 
-First read only the TAIL of the transcript (last ~150-200 lines) … continue the work from there in the current directory.
+Full transcript at C:\Users\Mack\.claude\projects\X--Roam-LCMap-…\e640a2a8-….jsonl (session 6577b24c-…, branch claude/funny-hypatia-5e54f7); consult it only if something specific is missing.
 ```
 
-The prompt is deliberately **token-cheap**: it points the new session at the transcript file and instructs selective tail-reading — never whole-file ingestion (a long session's JSONL can be many MB).
+**Degrade, never hard-fail**: if the `claude` CLI is absent from PATH, or the call fails/times out (60s), recover falls back to the classic non-distilled pointer prompt (Title/Branch/Orig cwd/Transcript + tail-reading instruction) with a stderr warning and **exit 0** — worker unavailability is advisory, not an error. `--no-distill` forces the fallback (no LLM call at all).
 
-### `summon recover <id>` — same, for a known session
-
-`summon recover 6577b24c` — id is a `sessionId` or `cliSessionId`, prefix ok. Same prompt output as pick.
+| Flag | Default | Effect |
+|------|---------|--------|
+| `--no-distill` | | Skip the LLM distillation; emit the plain pointer prompt |
+| `--refresh` | | Ignore a cached `<transcript>.handover.md` and re-distill |
+| `--model <m>` | `sonnet` | Model for the distillation call |
+| `--budget <n>` | `120000` | Char budget for the transcript extraction fed to the distiller |
 
 ### `summon rebind <id> --cwd <newpath>` — fix cwd after a folder move
 
@@ -122,6 +141,7 @@ summon rebind 6577b24c --cwd "X:\Maplab\LCMap\.claude\worktrees\funny-hypatia-5e
 3. **Bridges the transcript**: Desktop resolves the transcript via the munged *new* cwd, so the `<cliSessionId>.jsonl` is copied (never moved) into the new munged project dir. `--no-transcript` skips this
 4. **Verifies** by re-reading the wrapper; on mismatch it restores from the backup
 5. If the same session was transfer-copied into several accounts, **all copies are rebound**
+6. When the new cwd is inside a `.claude\worktrees\` path, prints a reminder that **git worktree links break on folder moves** — run `git worktree repair <new-worktree-path>` from the repo root (verified fix 2026-07-03 on X:\Maplab\LCMap)
 
 `--dry-run` previews; `--force` allows a `--cwd` that doesn't exist yet. The new cwd must normally exist on disk. After a rebind, restart Desktop (or Logout/Login) so the sidebar re-reads the wrapper.
 
@@ -218,4 +238,5 @@ Full file system layout, session schemas, account binding, and the validated cro
 - **Treating this as a transfer for archived sessions** — it's for mid-flight work; archived sessions belong in the source account's archive view.
 - **Using `--move` for sessions you might want to access from both accounts** — copy is default precisely because multi-account workflows are the common case.
 - **Rebinding without checking the new path** — `rebind` refuses a nonexistent `--cwd` for a reason; a typo'd rebind is two edits instead of one. `--force` is for pre-creating bindings, not for skipping the check.
-- **Recovering by pasting the whole transcript** — the recovery prompt exists so the new session tail-reads the JSONL selectively. Feeding a full multi-MB transcript into a fresh session burns the context you were trying to save.
+- **Recovering by pasting the whole transcript** — the handover brief exists so the new session starts from a distilled summary and consults the JSONL only for specifics. Feeding a full multi-MB transcript into a fresh session burns the context you were trying to save.
+- **Re-distilling on every recover** — the brief is cached at `<transcript>.handover.md` and reused while the transcript is unchanged; reach for `--refresh` only when the session has genuinely moved on since the cache was written.

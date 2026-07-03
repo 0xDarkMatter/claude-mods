@@ -5,16 +5,23 @@ Usage:   summon [MODE] [ID] [OPTIONS]
 Input:   optional MODE positional (rebind|pick|recover|doctor; omit for transfer),
          ID = sessionId/cliSessionId prefix for rebind/recover; picker reads stdin
 Output:  transfer/pick/doctor render TTY panels; recover/pick emit a paste-ready
-         recovery prompt on stdout (context panel on stderr); doctor --json emits
-         {"data": [...], "meta": {"schema": "claude-mods.summon.doctor/v1"}}
-Stderr:  context panels for recover/pick, warnings, errors
-Exit:    0 ok, 2 usage/ambiguous id, 3 session or path not found,
-         10 doctor found broken sessions
+         handover on stdout — a Sonnet-distilled brief (Goal / What landed /
+         Unfinished / Open decisions / Key context) + transcript pointer, cached
+         at <transcript>.handover.md; falls back to the plain pointer prompt when
+         the `claude` CLI is unavailable or --no-distill is set. doctor --json
+         emits {"data": [...], "meta": {"schema": "claude-mods.summon.doctor/v1"}}
+Stderr:  context panels for recover/pick, distillation progress, warnings, errors
+Exit:    0 ok (including the non-distilled fallback — worker unavailability is
+         advisory, never fatal), 2 usage/ambiguous id, 3 session or path not
+         found, 10 doctor found broken sessions
 
 Examples:
   summon --to mknv74                          # transfer: push sessions to next account
-  summon pick                                 # fzf/numbered picker -> recovery prompt
-  summon recover 6577b24c                     # recovery prompt for one session
+  summon pick                                 # fzf/numbered picker -> distilled handover
+  summon recover 6577b24c                     # distilled handover brief for one session
+  summon recover 6577b24c --refresh           # ignore cached brief, re-distill
+  summon recover 6577b24c --no-distill        # plain pointer prompt, no LLM call
+  summon recover 6577b24c --model haiku       # distill with a different model
   summon rebind 6577b24c --cwd X:\\Maplab\\LCMap\\.claude\\worktrees\\funny-hypatia-5e54f7
   summon doctor                               # scan all sessions for broken cwd bindings
   summon doctor --json | jq '.data[]'
@@ -1126,6 +1133,10 @@ def mode_rebind(args, accounts: list[Account]) -> int:
         echo()
         echo(Term.color("warn",
              "next: restart Desktop (or Logout/Login) so the sidebar re-reads the wrapper."))
+        if any(m in new_cwd for m in _WORKTREE_MARKERS):
+            echo(Term.color("meta",
+                 "  git worktree links break on folder moves — run "
+                 f"`git worktree repair {new_cwd}` from the repo root."))
     return 1 if problems else 0
 
 
@@ -1138,8 +1149,200 @@ _RECOVERY_INSTRUCTION = (
 )
 
 
-def emit_recovery_prompt(s: Session) -> int:
-    """Print a paste-ready recovery prompt for a new session (stdout = the prompt)."""
+# --- Distilled handover: extract -> distill -> cache -> emit -----------------
+
+EXTRACT_BUDGET_DEFAULT = 120_000   # chars of conversation fed to the distiller
+VERBATIM_TAIL_TURNS = 15           # final turns always included in full
+HEAD_TURN_CAP = 4_000              # per-turn cap for pre-tail turns (giant pastes)
+DISTILL_TIMEOUT_S = 60
+DISTILL_MODEL_DEFAULT = "sonnet"
+
+_DISTILL_INSTRUCTION = """\
+You are writing a HANDOVER BRIEF so a fresh Claude session can continue an \
+interrupted one. Below is the previous session's conversation with tool noise \
+removed; the final turns are verbatim.
+
+Produce ONLY the brief, in markdown, with exactly these sections:
+
+## Goal
+## What landed
+## Unfinished
+## Open decisions
+## Key context
+
+Rules:
+- "What landed" names the branch and any commits/hashes if mentioned.
+- Be specific: file paths, branch names, commands, decisions.
+- Do not invent anything not present in the conversation.
+- No preamble, no closing remarks, no tool use.
+- Keep the entire brief under about 1000 words.
+"""
+
+
+def _text_only(content) -> str:
+    """Conversational text only — tool_use inputs and tool_result blobs are
+    skipped entirely (they are most of a transcript's bytes)."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        chunks = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                t = block.get("text", "")
+                if t:
+                    chunks.append(t)
+        return "\n".join(chunks)
+    return ""
+
+
+def extract_conversation(transcript: Path, budget: int = EXTRACT_BUDGET_DEFAULT) -> str:
+    """Build the distillation input from a transcript JSONL — in-script, no LLM.
+
+    User/assistant text turns only. The final VERBATIM_TAIL_TURNS turns are
+    always included in full; earlier turns fill the remaining budget from the
+    START (so the goal statement survives), with the middle elided when the
+    session is too long to fit.
+    """
+    turns: list[tuple[str, str]] = []
+    try:
+        with transcript.open("r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                role = rec.get("type")
+                if role not in ("user", "assistant"):
+                    continue
+                text = _text_only(rec.get("message", {}).get("content")).strip()
+                if text:
+                    turns.append((role, text))
+    except OSError:
+        return ""
+    if not turns:
+        return ""
+
+    def fmt(role: str, text: str) -> str:
+        return f"{role.upper()}: {text}"
+
+    tail = turns[-VERBATIM_TAIL_TURNS:]
+    head = turns[:-VERBATIM_TAIL_TURNS]
+    tail_block = "\n\n".join(fmt(r, t) for r, t in tail)
+    if len(tail_block) >= budget:
+        return tail_block[-budget:]  # most recent state wins
+
+    remaining = budget - len(tail_block)
+    head_parts: list[str] = []
+    elided = not head
+    for r, t in head:
+        if len(t) > HEAD_TURN_CAP:
+            t = t[:HEAD_TURN_CAP] + " …[turn truncated]"
+        piece = fmt(r, t)
+        cost = len(piece) + 2
+        if cost > remaining:
+            elided = True
+            break
+        head_parts.append(piece)
+        remaining -= cost
+
+    parts = list(head_parts)
+    if elided and head_parts:
+        parts.append("[… middle of session elided to fit extraction budget …]")
+    parts.append(tail_block)
+    return "\n\n".join(parts)
+
+
+def handover_cache_path(transcript: Path) -> Path:
+    return transcript.with_name(transcript.name + ".handover.md")
+
+
+def load_cached_brief(transcript: Path, *, refresh: bool) -> str | None:
+    """Cached brief, valid only when newer than the transcript itself."""
+    if refresh:
+        return None
+    cache = handover_cache_path(transcript)
+    try:
+        if cache.exists() and cache.stat().st_mtime > transcript.stat().st_mtime:
+            text = cache.read_text(encoding="utf-8").strip()
+            return text or None
+    except OSError:
+        pass
+    return None
+
+
+def store_brief(transcript: Path, brief: str) -> None:
+    cache = handover_cache_path(transcript)
+    tmp = cache.with_name(cache.name + ".tmp")
+    try:
+        tmp.write_text(brief + "\n", encoding="utf-8")
+        os.replace(tmp, cache)
+    except OSError as e:
+        eecho(f"warning: could not cache handover brief at {cache}: {e}")
+
+
+def distill_brief(extraction: str, s: Session, model: str) -> str | None:
+    """One-shot tool-less `claude -p` summarisation (gated child: dontAsk,
+    no allowlist — per loop-engineering, never bypassPermissions).
+
+    Returns None on any worker unavailability — absent CLI, non-zero exit,
+    timeout, empty output — with a stderr warning. Advisory, never fatal.
+    """
+    claude_bin = shutil.which("claude")
+    if not claude_bin:
+        eecho("warning: `claude` CLI not on PATH — emitting non-distilled pointer prompt")
+        return None
+    branch = str(s.data.get("branch") or "")
+    payload = (
+        _DISTILL_INSTRUCTION
+        + "\n--- SESSION METADATA ---\n"
+        + f"Title: {s.title}\nBranch: {branch or '(none)'}\nCwd: {s.cwd}\n"
+        + "\n--- CONVERSATION EXTRACTION ---\n"
+        + extraction
+    )
+    import subprocess
+    eecho(f"distilling handover brief via `claude -p --model {model}` "
+          f"({len(extraction)} chars in, ~{DISTILL_TIMEOUT_S}s timeout)…")
+    try:
+        r = subprocess.run(
+            [claude_bin, "-p", "--model", model, "--permission-mode", "dontAsk"],
+            input=payload.encode("utf-8"),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=DISTILL_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        eecho(f"warning: distillation timed out after {DISTILL_TIMEOUT_S}s — "
+              "emitting non-distilled pointer prompt")
+        return None
+    except OSError as e:
+        eecho(f"warning: could not run `claude`: {e} — emitting non-distilled pointer prompt")
+        return None
+    if r.returncode != 0:
+        tail = r.stderr.decode("utf-8", "replace").strip()[-200:]
+        eecho(f"warning: `claude -p` exited {r.returncode}"
+              + (f" ({tail})" if tail else "")
+              + " — emitting non-distilled pointer prompt")
+        return None
+    brief = r.stdout.decode("utf-8", "replace").strip()
+    if not brief:
+        eecho("warning: distillation produced no output — emitting non-distilled pointer prompt")
+        return None
+    return brief
+
+
+def _pointer_clause(s: Session, transcript: Path) -> str:
+    branch = str(s.data.get("branch") or "")
+    ident = s.sid.removeprefix("local_") or s.cli_id
+    branch_part = f", branch {branch}" if branch else ""
+    return (f"Full transcript at {transcript} (session {ident}{branch_part}); "
+            "consult it only if something specific is missing.")
+
+
+def emit_recovery_prompt(s: Session, args) -> int:
+    """Print a paste-ready recovery prompt for a new session (stdout = the prompt).
+
+    Default flow: extract conversation -> distill via `claude -p` -> cache the
+    brief at <transcript>.handover.md -> emit brief + pointer clause. Falls
+    back to the plain pointer prompt when distillation is unavailable/disabled.
+    """
     transcript, how = resolve_transcript(s)
 
     sep = Term.g("·", "|")
@@ -1156,6 +1359,35 @@ def emit_recovery_prompt(s: Session) -> int:
         eecho(f"no transcript found for cliSessionId {s.cli_id or '(none)'} — cannot recover")
         return 3
 
+    branch = str(s.data.get("branch") or "")
+
+    # --- Distilled handover path ---
+    if not getattr(args, "no_distill", False):
+        brief = load_cached_brief(transcript, refresh=getattr(args, "refresh", False))
+        if brief:
+            eecho(f"reusing cached handover brief: {handover_cache_path(transcript)} "
+                  "(--refresh to re-distill)")
+        else:
+            extraction = extract_conversation(
+                transcript, getattr(args, "budget", EXTRACT_BUDGET_DEFAULT))
+            if extraction:
+                brief = distill_brief(extraction, s,
+                                      getattr(args, "model", DISTILL_MODEL_DEFAULT))
+                if brief:
+                    store_brief(transcript, brief)
+            else:
+                eecho("warning: transcript has no conversational text — "
+                      "emitting non-distilled pointer prompt")
+        if brief:
+            lines = [f"Continue a previous Claude session: {s.title!r}."]
+            if branch:
+                lines.append(f"Branch: {branch}")
+            lines += ["", brief, "", _pointer_clause(s, transcript)]
+            for line in lines:
+                _print_safe(line)
+            return 0
+
+    # --- Fallback: non-distilled pointer prompt ---
     cwd_note = ""
     if s.cwd and not s.cwd.startswith("/sessions/") and not Path(s.cwd).exists():
         cwd_note = "  (missing on disk — folder moved?)"
@@ -1165,7 +1397,6 @@ def emit_recovery_prompt(s: Session) -> int:
         "",
         f"Title:      {s.title}",
     ]
-    branch = str(s.data.get("branch") or "")
     if branch:
         lines.append(f"Branch:     {branch}")
     lines.append(f"Orig cwd:   {s.cwd}{cwd_note}")
@@ -1189,7 +1420,7 @@ def mode_recover(args, accounts: list[Account]) -> int:
         for m in matches[:8]:
             eecho(f"  {m.sid}  {m.title!r}  {m.cwd}")
         return 2
-    return emit_recovery_prompt(matches[0])
+    return emit_recovery_prompt(matches[0], args)
 
 
 def _is_live(s: Session, now_ms: int) -> bool:
@@ -1237,7 +1468,7 @@ def mode_pick(args, accounts: list[Account]) -> int:
             eecho("cancelled.")
             return 0
         idx = int(r.stdout.decode("utf-8", "replace").split("\t", 1)[0])
-        return emit_recovery_prompt(candidates[idx - 1])
+        return emit_recovery_prompt(candidates[idx - 1], args)
 
     # Fallback: numbered list (stderr), selection via --select or stdin
     eecho(panel_open(f"summon {Term.g('·', '|')} pick",
@@ -1270,7 +1501,7 @@ def mode_pick(args, accounts: list[Account]) -> int:
     if not (1 <= idx <= len(candidates)):
         eecho(f"out of range: {idx}")
         return 2
-    return emit_recovery_prompt(candidates[idx - 1])
+    return emit_recovery_prompt(candidates[idx - 1], args)
 
 
 def mode_doctor(args, accounts: list[Account]) -> int:
@@ -1363,8 +1594,10 @@ def main():
                     "recovery picker, cwd rebind, store doctor.",
         epilog="examples:\n"
                "  summon --to mknv74              push sessions to the next account\n"
-               "  summon pick                     picker -> paste-ready recovery prompt\n"
-               "  summon recover 6577b24c         recovery prompt for one session\n"
+               "  summon pick                     picker -> distilled handover brief\n"
+               "  summon recover 6577b24c         distilled handover brief for one session\n"
+               "  summon recover 6577b24c --no-distill   plain pointer prompt, no LLM call\n"
+               "  summon recover 6577b24c --refresh      ignore cached brief, re-distill\n"
                "  summon rebind 6577b24c --cwd X:\\Maplab\\LCMap   fix cwd after folder move\n"
                "  summon doctor                   scan for broken cwd bindings\n",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1407,6 +1640,17 @@ def main():
                    help="Rebind: allow --cwd paths that don't exist on disk yet")
     p.add_argument("--json", action="store_true",
                    help="Doctor: emit findings as a JSON envelope on stdout")
+    p.add_argument("--no-distill", action="store_true",
+                   help="Recover/pick: skip the LLM handover distillation and emit "
+                        "the plain pointer prompt")
+    p.add_argument("--refresh", action="store_true",
+                   help="Recover/pick: ignore a cached handover brief and re-distill")
+    p.add_argument("--model", default=DISTILL_MODEL_DEFAULT,
+                   help=f"Recover/pick: model for the distillation call "
+                        f"(default: {DISTILL_MODEL_DEFAULT})")
+    p.add_argument("--budget", type=int, default=EXTRACT_BUDGET_DEFAULT,
+                   help=f"Recover/pick: char budget for the transcript extraction "
+                        f"fed to the distiller (default: {EXTRACT_BUDGET_DEFAULT})")
     args = p.parse_args()
 
     claude_dir = appdata_claude()
