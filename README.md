@@ -294,7 +294,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [push-gate](skills/push-gate/) | Pre-push safety gate - gitleaks + regex secret scan, forbidden-file check, no bypass |
 | [fleet-ops](skills/fleet-ops/) | Manage a fleet of concurrent Claude sessions - landing queue with test gate, pre-land scrub (experimental) |
 | [fleet-worker](skills/fleet-worker/) | Delegate tasks to cheap headless GLM (or any Anthropic-compatible) workers - per-task git worktree + isolated config, result gating, fan-out that hands winning branches to fleet-ops landing |
-| [summon](skills/summon/) | Transfer Claude Desktop Code-tab sessions between accounts - push/pull with picker |
+| [summon](skills/summon/) | Claude Desktop session toolbox - cross-account transfer, recovery picker, cwd rebind, store doctor |
 | [doc-scanner](skills/doc-scanner/) | Scan and synthesize project documentation |
 | [adr-ops](skills/adr-ops/) | Architecture Decision Records - when-to-write, canonical format, supersession lifecycle, scaffold/index/lint tools |
 | [okf-ops](skills/okf-ops/) | Open Knowledge Format - assess a doc repo's frontmatter-readiness, validate a bundle for conformance, decide per-repo adoption |

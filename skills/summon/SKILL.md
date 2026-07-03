@@ -1,6 +1,6 @@
 ---
 name: summon
-description: "Transfer Claude Desktop Code-tab sessions between Claude accounts — copy (default) or move (--move) the session metadata file so the session shows up in another account's left-hand sidebar (the session picker on the left side of Desktop's Code tab). Two natural framings: push (run while still on your current near-limit account, send sessions to the next one, then Logout/Login as the natural switch) or pull (after switching accounts, bring earlier sessions into the now-active one). Push is the recommended workflow because the Logout/Login becomes invisible — it IS the switch you were going to do anyway. Triggers on: summon, summon sessions, push sessions, pull sessions, before switching accounts, account approaching usage limit, account ran out of usage, prepare next account, mid-flight desktop sessions, claude desktop multi-account workflow, transfer claude desktop sessions across accounts, peek session, see desktop sessions across accounts. Default copy keeps the session visible in both accounts' sidebars; --move for lean cleanup. Transcript JSONLs are account-agnostic and stay where they are — both wrappers point at the same conversation. No API calls, no summarisation, full transcripts intact. The left-hand session picker is loaded at login, so a Logout/Login on the destination is required for new sessions to appear there."
+description: "Claude Desktop session toolbox: cross-account transfer, recovery picker, cwd rebind after folder moves, and a session-store doctor. Transfer (default mode): copy (default) or move (--move) the session metadata file so the session shows up in another account's left-hand sidebar — push (run while still on your current near-limit account, send sessions to the next one, then Logout/Login as the natural switch) or pull (after switching, bring earlier sessions into the now-active one); push is recommended because the Logout/Login IS the switch you were doing anyway. Toolbox modes: `summon pick` / `summon recover <id>` (picker over the whole session store that resolves the transcript JSONL — handling the wrapper-uuid vs transcript-filename trap — and emits a ready-to-paste, token-cheap recovery prompt for a new session), `summon rebind <id> --cwd <newpath>` (fix a session's recorded cwd after a project folder moves, with backup + transcript bridging), `summon doctor` (scan all sessions for broken cwd bindings and report which need rebinding). Triggers on: summon, summon sessions, push sessions, pull sessions, before switching accounts, account approaching usage limit, account ran out of usage, prepare next account, mid-flight desktop sessions, claude desktop multi-account workflow, transfer claude desktop sessions across accounts, peek session, see desktop sessions across accounts, recover session, resume old session, session picker, rebind session, moved project folder, session cwd broken, session won't reopen after folder move, broken session bindings, session doctor. Default copy keeps the session visible in both accounts' sidebars; transcript JSONLs are account-agnostic and stay where they are. No API calls, no summarisation, full transcripts intact. The left-hand session picker is loaded at login, so a Logout/Login on the destination is required for new sessions to appear there."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
@@ -9,7 +9,16 @@ metadata:
 
 # Summon
 
-Copy (or move) Claude Desktop Code-tab sessions across accounts so they're visible from the account you switch to next. Full transcripts intact; no API calls; no summarisation.
+Claude Desktop session toolbox. Four jobs, one store:
+
+| Mode | Invocation | Job |
+|------|-----------|-----|
+| **Transfer** (default) | `summon [flags]` | Copy/move sessions across accounts so they're visible from the account you switch to next |
+| **Pick / Recover** | `summon pick` · `summon recover <id>` | Find a past session, resolve its transcript, emit a paste-ready recovery prompt for a new session |
+| **Rebind** | `summon rebind <id> --cwd <newpath>` | Fix a session's recorded cwd after the project folder moved |
+| **Doctor** | `summon doctor [--json]` | Scan every session for broken cwd bindings; report which need rebinding |
+
+Full transcripts intact; no API calls; no summarisation. Transfer is documented first; the toolbox modes follow under [Toolbox modes](#toolbox-modes-pick--recover--rebind--doctor).
 
 ## When to run it
 
@@ -32,6 +41,8 @@ Each Desktop session has two halves:
 | Transcript JSONL | `~/.claude/projects/<encoded-cwd>/<cli-uuid>.jsonl` | **No** — global, shared |
 
 Summon copies (or with `--move`, relocates) the metadata wrapper into the destination account's dir. The transcript stays put — both wrappers point at the same conversation. After Logout/Login on the destination, the new entries appear in the **left-hand session picker** (Desktop's Code-tab sidebar).
+
+**The uuid-mismatch trap.** The wrapper filename uuid (`local_<uuid>.json` / `sessionId`) does **not** name the transcript — the transcript file is named by the wrapper's `cliSessionId`, a different uuid (e.g. wrapper `local_6577b24c-…` → transcript `e640a2a8-….jsonl`). And the transcript's parent dir is the *munged cwd* (`X:\Roam\LCMap\.claude\worktrees\funny-hypatia-5e54f7` → `X--Roam-LCMap--claude-worktrees-funny-hypatia-5e54f7`), which occasionally doesn't derive from the wrapper's recorded cwd at all. All toolbox modes resolve via `cliSessionId` at the expected munged path first, then fall back to scanning every project dir for `<cliSessionId>.jsonl`.
 
 ## Run
 
@@ -70,6 +81,61 @@ Mechanically identical — the file moves are the same regardless of which frami
 | `--flat` | | Flat list instead of grouped hierarchy |
 | `--select <picks>` | | Non-interactive selection: `--select "1,2,4"` or `--select all`. Replaces the picker prompt for scripted callers |
 | `--yes` | | Skip the final confirmation prompt only — selection is still required (picker prompt, piped stdin, or `--select`) |
+
+## Toolbox modes (pick / recover / rebind / doctor)
+
+Semantic exit codes across all modes: `0` ok, `2` usage/ambiguous id, `3` session or path not found, `10` doctor found broken sessions.
+
+### `summon pick` — session picker → recovery prompt
+
+Interactive picker over the **whole** session store (all accounts, default last 30 days — `--days N`/`--all` to widen, `--cwd`/`--title` to narrow). Uses `fzf` when it's on PATH and the terminal is interactive; falls back to a numbered list (`--select N` answers it non-interactively). A `●` marks sessions active in the last 10 minutes — don't recover a session that's still running.
+
+Selecting a session emits a **paste-ready recovery prompt on stdout** (context panel on stderr, so `summon pick | clip` stays clean):
+
+```
+Continue a previous Claude session.
+
+Title:      Fix overlapping photo pins with gentle displacement
+Branch:     claude/funny-hypatia-5e54f7
+Orig cwd:   X:\Roam\LCMap\.claude\worktrees\funny-hypatia-5e54f7  (missing on disk — folder moved?)
+Transcript: C:\Users\Mack\.claude\projects\X--Roam-LCMap-…\e640a2a8-….jsonl
+
+First read only the TAIL of the transcript (last ~150-200 lines) … continue the work from there in the current directory.
+```
+
+The prompt is deliberately **token-cheap**: it points the new session at the transcript file and instructs selective tail-reading — never whole-file ingestion (a long session's JSONL can be many MB).
+
+### `summon recover <id>` — same, for a known session
+
+`summon recover 6577b24c` — id is a `sessionId` or `cliSessionId`, prefix ok. Same prompt output as pick.
+
+### `summon rebind <id> --cwd <newpath>` — fix cwd after a folder move
+
+When a project folder moves (e.g. `X:\Roam\LCMap` → `X:\Maplab\LCMap`), sessions bound to the old cwd fail to restart in the Desktop UI. Rebind repairs the binding:
+
+```bash
+summon rebind 6577b24c --cwd "X:\Maplab\LCMap\.claude\worktrees\funny-hypatia-5e54f7"
+```
+
+1. **Backs up** every matching wrapper to `~/.claude/summon-backups/<timestamp>/` (outside the live store) before touching anything
+2. **Atomically rewrites** `cwd`, and rebases `originCwd`/`worktreePath` (worktree sessions record the project *root* in `originCwd` — the suffix math is handled)
+3. **Bridges the transcript**: Desktop resolves the transcript via the munged *new* cwd, so the `<cliSessionId>.jsonl` is copied (never moved) into the new munged project dir. `--no-transcript` skips this
+4. **Verifies** by re-reading the wrapper; on mismatch it restores from the backup
+5. If the same session was transfer-copied into several accounts, **all copies are rebound**
+
+`--dry-run` previews; `--force` allows a `--cwd` that doesn't exist yet. The new cwd must normally exist on disk. After a rebind, restart Desktop (or Logout/Login) so the sidebar re-reads the wrapper.
+
+Wrapper edit + backup + transcript bridge are verified against the live store (throwaway-session test, 2026-07-03). End-to-end "session reopens in the Desktop UI after rebind" — confirm on your first real rebind before bulk-rebinding.
+
+### `summon doctor` — find broken sessions
+
+Scans **every** wrapper (all accounts, all time) and reports sessions whose recorded cwd no longer exists on disk, with a ready-made `summon rebind <id> --cwd <new-location>` line per finding. Also counts transcript-missing and found-by-scan sessions. Exit `10` when anything is broken; `--json` emits a `claude-mods.summon.doctor/v1` envelope for scripted use:
+
+```bash
+summon doctor --json | jq -r '.data[] | "\(.sessionId)  \(.cwd)"'
+```
+
+Broken-cwd findings are mostly **pruned worktrees** (the session ended, the worktree was cleaned — nothing to fix unless you want to recover it, which needs no rebind: `summon recover` works regardless of cwd) and **moved project folders** (the real rebind case).
 
 ## Auto-detect rules
 
@@ -136,7 +202,7 @@ ln -s ~/.claude/skills/summon/bin/summon ~/.local/bin/summon
 copy "$env:USERPROFILE\.claude\skills\summon\bin\summon.cmd" "$env:USERPROFILE\bin\summon.cmd"
 ```
 
-Then `summon --pick` works directly from any shell.
+Then `summon pick`, `summon doctor`, etc. work directly from any shell.
 
 ## Architecture reference
 
@@ -151,3 +217,5 @@ Full file system layout, session schemas, account binding, and the validated cro
 - **Hardcoding account UUIDs** — use `--list-accounts` first, then email substring (more readable, less brittle).
 - **Treating this as a transfer for archived sessions** — it's for mid-flight work; archived sessions belong in the source account's archive view.
 - **Using `--move` for sessions you might want to access from both accounts** — copy is default precisely because multi-account workflows are the common case.
+- **Rebinding without checking the new path** — `rebind` refuses a nonexistent `--cwd` for a reason; a typo'd rebind is two edits instead of one. `--force` is for pre-creating bindings, not for skipping the check.
+- **Recovering by pasting the whole transcript** — the recovery prompt exists so the new session tail-reads the JSONL selectively. Feeding a full multi-MB transcript into a fresh session burns the context you were trying to save.

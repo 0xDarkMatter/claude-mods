@@ -13,6 +13,19 @@ Covers:
   5. Without --yes, confirming 'y' proceeds
   6. --yes with empty stdin cancels instead of auto-selecting all
   7. Non-cp1252 chars in session titles don't crash on cp1252 stdout
+
+Toolbox modes (rebind / recover / pick / doctor):
+  8.  rebind rewrites cwd + rebases originCwd/worktreePath, backs up outside
+      the store, bridges the transcript into the new munged dir, exits 0
+  9.  rebind --dry-run touches nothing
+  10. rebind with unknown id exits 3; ambiguous prefix exits 2
+  11. rebind to a nonexistent path exits 3 without --force, 0 with it
+  12. doctor flags the broken-cwd session (exit 10, --json envelope), and
+      goes healthy (exit 0) after the rebind
+  13. recover emits a paste-ready prompt on stdout; transcript found via the
+      scan fallback when the munged dir doesn't derive from the recorded cwd
+  14. recover with unknown id exits 3
+  15. pick --select N emits the recovery prompt for the Nth candidate
 """
 
 from __future__ import annotations
@@ -120,6 +133,213 @@ def with_sandbox(titles=("alpha", "beta", "gamma")):
     return tmp, env, src_ws, dest_ws
 
 
+def encode_cwd(cwd: str) -> str:
+    """Mirror of summon.py's munging: cwd -> ~/.claude/projects/ subdir name."""
+    return (cwd.replace(":", "-").replace("\\", "-")
+               .replace("/", "-").replace(".", "-"))
+
+
+def build_toolbox_sandbox(tmp: Path) -> dict:
+    """One account, three sessions exercising the toolbox modes.
+
+    sess-a  'moved'   worktree session; recorded cwd no longer exists (project
+                      moved old-root -> new-root); transcript under enc(old cwd)
+    sess-b  'healthy' cwd exists, transcript at the expected munged path
+    sess-c  'mismatch' cwd exists, but the transcript lives under a munged dir
+                      that does NOT derive from the recorded cwd (scan-fallback)
+    """
+    home = tmp / "home"
+    appdata = home / "AppData" / "Roaming"
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env["USERPROFILE"] = str(home)
+    env["APPDATA"] = str(appdata)
+    env.pop("PYTHONIOENCODING", None)
+    env.pop("TERM_ASCII", None)
+
+    cdir = claude_dir(env)
+    projects = home / ".claude" / "projects"
+    now_ms = int(time.time() * 1000)
+
+    old_root = tmp / "proj-old"                    # moved away -> missing
+    new_root = tmp / "proj-new"
+    old_wt = old_root / ".claude" / "worktrees" / "wt1"
+    new_wt = new_root / ".claude" / "worktrees" / "wt1"
+    new_wt.mkdir(parents=True)
+    good = tmp / "proj-good"
+    good.mkdir()
+
+    ws = cdir / "claude-code-sessions" / SRC_UUID / "11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    ws.mkdir(parents=True)
+
+    def wrapper(sid, cli, title, cwd, age_min, **extra):
+        d = {"sessionId": f"local_{sid}", "cliSessionId": cli, "title": title,
+             "cwd": cwd, "lastActivityAt": now_ms - age_min * 60_000,
+             "completedTurns": 7}
+        d.update(extra)
+        (ws / f"local_{sid}.json").write_text(json.dumps(d), encoding="utf-8")
+
+    wrapper("aaaa-moved", "cli-moved", "moved session", str(old_wt), 30,
+            originCwd=str(old_root), worktreePath=str(old_wt),
+            branch="claude/wt1")
+    wrapper("bbbb-healthy", "cli-healthy", "healthy session", str(good), 60)
+    wrapper("cccc-mismatch", "cli-mismatch", "mismatch session", str(good), 90)
+
+    for enc_dir, cli in ((encode_cwd(str(old_wt)), "cli-moved"),
+                         (encode_cwd(str(good)), "cli-healthy"),
+                         ("X--some-unrelated-munged-dir", "cli-mismatch")):
+        d = projects / enc_dir
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{cli}.jsonl").write_text(
+            '{"type":"user","message":{"content":"hello"}}\n', encoding="utf-8")
+
+    return {"env": env, "ws": ws, "projects": projects,
+            "old_wt": old_wt, "new_wt": new_wt, "new_root": new_root,
+            "old_root": old_root, "home": home}
+
+
+def run_mode(env: dict, argv: list[str], stdin_text: str = "") -> tuple[int, str, str]:
+    r = subprocess.run([sys.executable, str(SCRIPT)] + argv,
+                       input=stdin_text.encode("utf-8"),
+                       env=env, capture_output=True, timeout=60)
+    return (r.returncode,
+            r.stdout.decode("utf-8", "replace"),
+            r.stderr.decode("utf-8", "replace"))
+
+
+def toolbox_tests() -> None:
+    tmp = Path(tempfile.mkdtemp(prefix="summon-toolbox-"))
+    try:
+        sb = build_toolbox_sandbox(tmp)
+        env, ws = sb["env"], sb["ws"]
+        new_wt, new_root = sb["new_wt"], sb["new_root"]
+        wrapper_a = ws / "local_aaaa-moved.json"
+
+        # 9. dry-run first (order matters: before the real rebind)
+        rc, out, err = run_mode(env, ["rebind", "aaaa-moved", "--cwd", str(new_wt),
+                                      "--dry-run"])
+        data = json.loads(wrapper_a.read_text(encoding="utf-8"))
+        backups = sb["home"] / ".claude" / "summon-backups"
+        if rc == 0 and data["cwd"] == str(sb["old_wt"]) and not backups.exists():
+            ok("rebind --dry-run touches nothing")
+        else:
+            no("rebind --dry-run touches nothing",
+               f"rc={rc} cwd={data['cwd']!r} backups={backups.exists()}")
+
+        # 10a. unknown id
+        rc, _, _ = run_mode(env, ["rebind", "zzzz-nope", "--cwd", str(new_wt)])
+        if rc == 3:
+            ok("rebind unknown id exits 3")
+        else:
+            no("rebind unknown id exits 3", f"rc={rc}")
+
+        # 10b. ambiguous prefix: 'cli-' hits several cliSessionIds... use
+        # wrapper-id ambiguity instead — 'aaaa' vs 'aaaa-moved' is unique, so
+        # craft the collision on the shared '' prefix? No: use 'cli-m' which
+        # prefixes cli-moved and cli-mismatch — two distinct sessions.
+        rc, _, err = run_mode(env, ["rebind", "cli-m", "--cwd", str(new_wt)])
+        if rc == 2 and "different sessions" in err:
+            ok("rebind ambiguous prefix exits 2")
+        else:
+            no("rebind ambiguous prefix exits 2", f"rc={rc} err-tail={err[-200:]!r}")
+
+        # 11. nonexistent target path
+        ghost = tmp / "not-there-yet"
+        rc, _, _ = run_mode(env, ["rebind", "aaaa-moved", "--cwd", str(ghost)])
+        if rc == 3:
+            ok("rebind to nonexistent path exits 3 without --force")
+        else:
+            no("rebind to nonexistent path exits 3 without --force", f"rc={rc}")
+
+        # 12a. doctor pre-rebind: flags exactly the moved session, exit 10
+        rc, out, _ = run_mode(env, ["doctor", "--json"])
+        try:
+            env_doc = json.loads(out)
+        except json.JSONDecodeError:
+            env_doc = {"data": [], "meta": {}}
+        ids = [f["sessionId"] for f in env_doc.get("data", [])]
+        if (rc == 10 and ids == ["local_aaaa-moved"]
+                and env_doc["meta"].get("checked") == 3
+                and env_doc["meta"].get("schema") == "claude-mods.summon.doctor/v1"):
+            ok("doctor flags the broken cwd (exit 10, --json envelope)")
+        else:
+            no("doctor flags the broken cwd (exit 10, --json envelope)",
+               f"rc={rc} ids={ids} meta={env_doc.get('meta')}")
+
+        # 8. real rebind: wrapper rewritten, siblings rebased, backup taken,
+        #    transcript bridged into enc(new cwd)
+        rc, out, err = run_mode(env, ["rebind", "aaaa-moved", "--cwd", str(new_wt)])
+        data = json.loads(wrapper_a.read_text(encoding="utf-8"))
+        resolved_new_wt = str(new_wt.resolve())
+        resolved_new_root = str(new_root.resolve())
+        bridged = (sb["projects"] / encode_cwd(resolved_new_wt) / "cli-moved.jsonl")
+        original = (sb["projects"] / encode_cwd(str(sb["old_wt"])) / "cli-moved.jsonl")
+        backup_files = list(backups.rglob("*.json")) if backups.exists() else []
+        checks = {
+            "rc": rc == 0,
+            "cwd": data["cwd"] == resolved_new_wt,
+            "originCwd": data["originCwd"] == resolved_new_root,
+            "worktreePath": data["worktreePath"] == resolved_new_wt,
+            "backup": len(backup_files) == 1,
+            "bridged": bridged.exists(),
+            "copy-not-move": original.exists(),
+        }
+        if all(checks.values()):
+            ok("rebind rewrites wrapper + backup + transcript bridge")
+        else:
+            no("rebind rewrites wrapper + backup + transcript bridge",
+               f"failed={[k for k, v in checks.items() if not v]} rc={rc}")
+
+        # 12b. doctor post-rebind: healthy, exit 0
+        rc, out, _ = run_mode(env, ["doctor", "--json"])
+        try:
+            env_doc = json.loads(out)
+        except json.JSONDecodeError:
+            env_doc = {"data": ["unparsed"]}
+        if rc == 0 and env_doc.get("data") == []:
+            ok("doctor healthy after rebind (exit 0)")
+        else:
+            no("doctor healthy after rebind (exit 0)",
+               f"rc={rc} data={env_doc.get('data')}")
+
+        # 11b. --force allows a not-yet-existing path (rebind back and forth)
+        rc, _, _ = run_mode(env, ["rebind", "aaaa-moved", "--cwd", str(ghost), "--force"])
+        data = json.loads(wrapper_a.read_text(encoding="utf-8"))
+        if rc == 0 and data["cwd"] == str(ghost):
+            ok("rebind --force accepts a nonexistent path")
+        else:
+            no("rebind --force accepts a nonexistent path", f"rc={rc} cwd={data['cwd']!r}")
+
+        # 13. recover: prompt on stdout, scan fallback for the mismatched dir
+        rc, out, err = run_mode(env, ["recover", "cccc-mismatch"])
+        scan_path = sb["projects"] / "X--some-unrelated-munged-dir" / "cli-mismatch.jsonl"
+        if (rc == 0 and str(scan_path) in out
+                and "Continue a previous Claude session" in out
+                and "TAIL of the transcript" in out
+                and "Continue a previous" not in err):
+            ok("recover emits prompt; scan fallback finds mismatched transcript")
+        else:
+            no("recover emits prompt; scan fallback finds mismatched transcript",
+               f"rc={rc} out-head={out[:200]!r}")
+
+        # 14. recover unknown id
+        rc, _, _ = run_mode(env, ["recover", "zzzz-nope"])
+        if rc == 3:
+            ok("recover unknown id exits 3")
+        else:
+            no("recover unknown id exits 3", f"rc={rc}")
+
+        # 15. pick --select 2 -> second-newest candidate (healthy session)
+        rc, out, _ = run_mode(env, ["pick", "--select", "2"])
+        if rc == 0 and "healthy session" in out and "cli-healthy.jsonl" in out:
+            ok("pick --select 2 recovers the 2nd candidate")
+        else:
+            no("pick --select 2 recovers the 2nd candidate",
+               f"rc={rc} out-head={out[:200]!r}")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main() -> int:
     # 1. Piped selection honoured even with --yes (the original bug: --yes
     #    used to select ALL candidates, ignoring the piped picks).
@@ -212,6 +432,9 @@ def main() -> int:
                f"rc={rc} out-tail={out[-300:]!r}")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+    # 8-15. Toolbox modes: rebind / recover / pick / doctor
+    toolbox_tests()
 
     print(f"\nsummon tests: {PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0

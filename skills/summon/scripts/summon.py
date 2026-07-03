@@ -1,17 +1,26 @@
 #!/usr/bin/env python3
-"""summon — pull Claude Desktop Code-tab sessions from another account into the active one.
+"""summon — Claude Desktop session toolbox: cross-account transfer + recover/rebind/doctor.
 
-See SKILL.md for full documentation.
+Usage:   summon [MODE] [ID] [OPTIONS]
+Input:   optional MODE positional (rebind|pick|recover|doctor; omit for transfer),
+         ID = sessionId/cliSessionId prefix for rebind/recover; picker reads stdin
+Output:  transfer/pick/doctor render TTY panels; recover/pick emit a paste-ready
+         recovery prompt on stdout (context panel on stderr); doctor --json emits
+         {"data": [...], "meta": {"schema": "claude-mods.summon.doctor/v1"}}
+Stderr:  context panels for recover/pick, warnings, errors
+Exit:    0 ok, 2 usage/ambiguous id, 3 session or path not found,
+         10 doctor found broken sessions
 
-Defaults:
-  - move (not copy)
-  - last 14 days only
-  - skip remote-VM sessions (cwd starts with /sessions/)
-  - prompt for confirmation
-  - hierarchy display: Account -> Project -> Session
+Examples:
+  summon --to mknv74                          # transfer: push sessions to next account
+  summon pick                                 # fzf/numbered picker -> recovery prompt
+  summon recover 6577b24c                     # recovery prompt for one session
+  summon rebind 6577b24c --cwd X:\\Maplab\\LCMap\\.claude\\worktrees\\funny-hypatia-5e54f7
+  summon doctor                               # scan all sessions for broken cwd bindings
+  summon doctor --json | jq '.data[]'
 
-Auto-detects destination as the most-recently-active account.
-Source defaults to "all other accounts" — narrow with --from.
+Transfer mode (no positional) is documented in SKILL.md: copy by default, --move
+to relocate, destination auto-detected as the most-recently-active account.
 
 Output rendering follows docs/TERMINAL-DESIGN.md (Terminal Panel Design System).
 """
@@ -914,25 +923,471 @@ def _extract_text(content) -> str:
 
 
 # ============================================================
+#  Toolbox modes: rebind / pick / recover / doctor
+# ============================================================
+
+def eecho(*lines):
+    """echo() to stderr — context/panels for modes whose stdout is the data product."""
+    if not lines:
+        lines = ("",)
+    for line in lines:
+        try:
+            print(line, file=sys.stderr)
+        except UnicodeEncodeError:
+            enc = getattr(sys.stderr, "encoding", None) or "ascii"
+            print(str(line).encode(enc, errors="replace").decode(enc, errors="replace"),
+                  file=sys.stderr)
+
+
+def resolve_transcript(s: Session) -> tuple[Path | None, str]:
+    """Locate a session's transcript JSONL.
+
+    Returns (path, how) with how in:
+      "expected"  — at ~/.claude/projects/<enc(cwd)>/<cliSessionId>.jsonl
+      "scanned"   — found by scanning all project dirs for <cliSessionId>.jsonl
+                    (the wrapper-uuid != transcript-filename trap: the transcript
+                    is named by cliSessionId, and may live under a munged dir that
+                    doesn't derive from the wrapper's recorded cwd)
+      ""          — not found anywhere (path is None)
+    """
+    if not s.cli_id:
+        return None, ""
+    expected = s.transcript_path()
+    if expected and expected.exists():
+        return expected, "expected"
+    hits = sorted(cli_jsonl_root().glob(f"*/{s.cli_id}.jsonl"))
+    if hits:
+        return hits[0], "scanned"
+    return None, ""
+
+
+def find_wrappers_by_id(query: str, accounts: list[Account]) -> tuple[list[Session], bool]:
+    """All wrapper files for one logical session (copies may exist in several accounts).
+
+    Matches sessionId or cliSessionId, exact first, then prefix. Returns
+    (matches, ambiguous): ambiguous=True when a prefix hits MORE than one
+    distinct logical session.
+    """
+    q = query.lower().removeprefix("local_")
+    exact: list[Session] = []
+    prefix: list[Session] = []
+    for acct in accounts:
+        for s in load_sessions(acct):
+            sid = s.sid.lower().removeprefix("local_")
+            cli = s.cli_id.lower()
+            if sid == q or cli == q:
+                exact.append(s)
+            elif sid.startswith(q) or cli.startswith(q):
+                prefix.append(s)
+    matches = exact or prefix
+    logical = {s.sid for s in matches}
+    return matches, len(logical) > 1
+
+
+def _rebase_path(old_val: str, old_cwd: str, new_cwd: str) -> str:
+    """Rebase a sibling path field (originCwd/worktreePath) after cwd moves.
+
+    Worktree sessions record originCwd as the project ROOT while cwd is the
+    worktree path under it — so a plain prefix replace isn't enough:
+      old_val == old_cwd                      -> new_cwd
+      old_cwd == old_val + suffix (root case) -> strip the same suffix off new_cwd
+      old_val == old_cwd + suffix (child)     -> new_cwd + suffix
+    Anything else is left untouched.
+    """
+    if not old_val:
+        return old_val
+    if old_val == old_cwd:
+        return new_cwd
+    if old_cwd.startswith(old_val):
+        suffix = old_cwd[len(old_val):]
+        if suffix and new_cwd.endswith(suffix):
+            return new_cwd[: len(new_cwd) - len(suffix)]
+    if old_val.startswith(old_cwd):
+        return new_cwd + old_val[len(old_cwd):]
+    return old_val
+
+
+def mode_rebind(args, accounts: list[Account]) -> int:
+    """Fix a session's recorded cwd after a folder move.
+
+    Backs up each wrapper OUTSIDE the live store, atomically rewrites
+    cwd/originCwd/worktreePath, bridges the transcript into the new munged
+    project dir (Desktop resolves it via enc(cwd)), and verifies by re-read.
+    """
+    if not args.target:
+        eecho("usage: summon rebind <id> --cwd <newpath>")
+        return 2
+    if not args.cwd:
+        eecho("rebind needs --cwd <newpath> — the folder's new location")
+        return 2
+
+    new_path = Path(args.cwd)
+    if new_path.exists():
+        new_cwd = str(new_path.resolve())
+    elif args.force:
+        new_cwd = str(new_path)
+    else:
+        eecho(f"new cwd does not exist on disk: {args.cwd}",
+              "(pass --force to rebind to a not-yet-existing path)")
+        return 3
+
+    matches, ambiguous = find_wrappers_by_id(args.target, accounts)
+    if not matches:
+        eecho(f"no session matching: {args.target}")
+        return 3
+    if ambiguous:
+        eecho(f"'{args.target}' matches {len({m.sid for m in matches})} different sessions — be more specific:")
+        for m in matches[:8]:
+            eecho(f"  {m.sid}  {m.title!r}  {m.cwd}")
+        return 2
+
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    backup_root = Path.home() / ".claude" / "summon-backups" / stamp
+
+    echo(panel_open(f"summon {Term.g('·', '|')} rebind",
+                    indicator="dry-run" if args.dry_run else matches[0].sid[:14]))
+    echo(panel_blank())
+    old_cwd = matches[0].cwd
+    echo(summary_line(f"{old_cwd}"))
+    echo(summary_line(f"{Term.g('→', '->')} {new_cwd}"))
+    echo(panel_blank())
+
+    problems = 0
+    transcript_note = ""
+    for i, s in enumerate(matches):
+        is_last = i == len(matches) - 1
+        label = f"{s.account.short}/{s.path.name}"
+
+        if args.dry_run:
+            echo(leaf(0, label, meta=Term.color("meta", "would rebind"),
+                      last=is_last, depth=1))
+            continue
+
+        # 1. Backup outside the live store
+        backup_root.mkdir(parents=True, exist_ok=True)
+        backup = backup_root / f"{s.account.uuid}__{s.path.parent.name}__{s.path.name}"
+        shutil.copy2(s.path, backup)
+
+        # 2. Atomic rewrite
+        data = dict(s.data)
+        data["cwd"] = new_cwd
+        for field in ("originCwd", "worktreePath"):
+            if field in data:
+                data[field] = _rebase_path(str(data[field] or ""), s.cwd, new_cwd)
+        tmp = s.path.with_name(s.path.name + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        os.replace(tmp, s.path)
+
+        # 3. Verify by re-read
+        try:
+            reread = json.loads(s.path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            reread = {}
+        if reread.get("cwd") != new_cwd:
+            problems += 1
+            shutil.copy2(backup, s.path)  # restore from backup
+            echo(leaf(0, label, meta=Term.color("alarm", "verify FAILED — restored"),
+                      last=is_last, depth=1))
+            continue
+
+        echo(leaf(0, label, meta=Term.color("ok", "rebound"), last=is_last, depth=1))
+
+    # 4. Transcript bridge — Desktop looks in enc(new cwd) after the rebind
+    s0 = matches[0]
+    if s0.cli_id:
+        old_transcript, how = resolve_transcript(s0)  # s0.data still holds OLD cwd
+        new_dir = cli_jsonl_root() / encode_cwd(new_cwd)
+        new_transcript = new_dir / f"{s0.cli_id}.jsonl"
+        if new_transcript.exists():
+            transcript_note = "transcript already at new path"
+        elif not old_transcript:
+            transcript_note = "transcript missing everywhere — session may not reopen"
+            problems += 1
+        elif args.no_transcript:
+            transcript_note = f"transcript NOT copied (--no-transcript): {old_transcript}"
+        elif args.dry_run:
+            transcript_note = f"would copy transcript {Term.g('→', '->')} {new_transcript}"
+        else:
+            new_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(old_transcript, new_transcript)
+            transcript_note = f"transcript copied ({how}) {Term.g('→', '->')} {new_transcript}"
+
+    echo(panel_blank())
+    if transcript_note:
+        echo(summary_line(transcript_note))
+    if not args.dry_run:
+        echo(summary_line(f"backup: {backup_root}"))
+    echo(panel_blank())
+    healths = [("ok", f"{len(matches)} wrapper(s)")]
+    if problems:
+        healths.append(("alarm", f"{problems} problem(s)"))
+    echo(panel_close(healths=healths))
+    if not args.dry_run and not problems:
+        echo()
+        echo(Term.color("warn",
+             "next: restart Desktop (or Logout/Login) so the sidebar re-reads the wrapper."))
+    return 1 if problems else 0
+
+
+_RECOVERY_INSTRUCTION = (
+    "First read only the TAIL of the transcript (last ~150-200 lines) to see where "
+    "it left off — do not ingest the whole file; read earlier chunks selectively "
+    "only if something is unclear. Then: summarize the session state in a few "
+    "bullets (goal, what's done, what was in flight, blockers), and continue the "
+    "work from there in the current directory."
+)
+
+
+def emit_recovery_prompt(s: Session) -> int:
+    """Print a paste-ready recovery prompt for a new session (stdout = the prompt)."""
+    transcript, how = resolve_transcript(s)
+
+    sep = Term.g("·", "|")
+    eecho(panel_open(f"summon {Term.g('·', '|')} recover", indicator=s.account.short))
+    eecho(panel_blank())
+    eecho(summary_line(f"{s.title!r}   {s.turns}t {sep} {_ago(s.last_activity_ms)}"))
+    if how == "scanned":
+        eecho(summary_line("transcript found by scan — wrapper cwd does not derive its location"))
+    eecho(panel_blank())
+    eecho(panel_close(healths=[("ok", "prompt on stdout")] if transcript
+                      else [("alarm", "no transcript")]))
+
+    if not transcript:
+        eecho(f"no transcript found for cliSessionId {s.cli_id or '(none)'} — cannot recover")
+        return 3
+
+    cwd_note = ""
+    if s.cwd and not s.cwd.startswith("/sessions/") and not Path(s.cwd).exists():
+        cwd_note = "  (missing on disk — folder moved?)"
+
+    lines = [
+        "Continue a previous Claude session.",
+        "",
+        f"Title:      {s.title}",
+    ]
+    branch = str(s.data.get("branch") or "")
+    if branch:
+        lines.append(f"Branch:     {branch}")
+    lines.append(f"Orig cwd:   {s.cwd}{cwd_note}")
+    lines.append(f"Transcript: {transcript}")
+    lines += ["", _RECOVERY_INSTRUCTION]
+    for line in lines:
+        _print_safe(line)
+    return 0
+
+
+def mode_recover(args, accounts: list[Account]) -> int:
+    if not args.target:
+        eecho("usage: summon recover <id>   (sessionId or cliSessionId, prefix ok)")
+        return 2
+    matches, ambiguous = find_wrappers_by_id(args.target, accounts)
+    if not matches:
+        eecho(f"no session matching: {args.target}")
+        return 3
+    if ambiguous:
+        eecho(f"'{args.target}' matches {len({m.sid for m in matches})} different sessions — be more specific:")
+        for m in matches[:8]:
+            eecho(f"  {m.sid}  {m.title!r}  {m.cwd}")
+        return 2
+    return emit_recovery_prompt(matches[0])
+
+
+def _is_live(s: Session, now_ms: int) -> bool:
+    """Heuristic 'running state': wrapper touched within the last 10 minutes."""
+    recent = now_ms - 10 * 60_000
+    if s.last_activity_ms >= recent:
+        return True
+    try:
+        return int(s.path.stat().st_mtime * 1000) >= recent
+    except OSError:
+        return False
+
+
+def mode_pick(args, accounts: list[Account]) -> int:
+    """Interactive picker over the whole session store -> recovery prompt."""
+    sessions: list[Session] = []
+    for acct in accounts:
+        sessions.extend(load_sessions(acct))
+
+    days = None if args.all else (args.days if args.days is not None else 30)
+    candidates = filter_sessions(sessions, days=days,
+                                 cwd_pattern=args.cwd, title_pattern=args.title)
+    if not candidates:
+        eecho(f"no sessions match ({_window_label(days)})")
+        return 3
+
+    now_ms = int(time.time() * 1000)
+
+    # fzf path — only when genuinely interactive and not answered via --select
+    use_fzf = (not args.select and shutil.which("fzf")
+               and sys.stdin.isatty() and sys.stdout.isatty())
+    if use_fzf:
+        rows = []
+        for i, s in enumerate(candidates, 1):
+            live = "● " if _is_live(s, now_ms) else "  "
+            rows.append(f"{i}\t{live}{s.title}\t{s.cwd}\t{_ago(s.last_activity_ms)}\t{s.turns}t")
+        import subprocess
+        r = subprocess.run(
+            ["fzf", "--delimiter", "\t", "--with-nth", "2,3,4,5",
+             "--height", "60%", "--reverse",
+             "--prompt", "recover> ",
+             "--header", "● = active in last 10m — pick a session to build a recovery prompt"],
+            input="\n".join(rows).encode("utf-8"), stdout=subprocess.PIPE)
+        if r.returncode != 0 or not r.stdout.strip():
+            eecho("cancelled.")
+            return 0
+        idx = int(r.stdout.decode("utf-8", "replace").split("\t", 1)[0])
+        return emit_recovery_prompt(candidates[idx - 1])
+
+    # Fallback: numbered list (stderr), selection via --select or stdin
+    eecho(panel_open(f"summon {Term.g('·', '|')} pick",
+                     indicator=_window_label(days)))
+    eecho(panel_blank())
+    for i, s in enumerate(candidates, 1):
+        live = Term.g("●", "*") + " " if _is_live(s, now_ms) else "  "
+        eecho(leaf(i, f"{live}{s.title}", meta=f"{s.turns}t",
+                   age=_ago(s.last_activity_ms),
+                   last=(i == len(candidates)), depth=1))
+    eecho(panel_blank())
+    eecho(panel_close(hotkeys=[("#", "select"), ("blank", "cancel")]))
+
+    raw = args.select
+    if not raw:
+        try:
+            # Prompt on stderr — stdout stays clean for the recovery prompt.
+            print("recover> (number, blank to cancel): ", end="", file=sys.stderr, flush=True)
+            raw = input().strip()
+        except EOFError:
+            raw = ""
+    if not raw:
+        eecho("cancelled.")
+        return 0
+    try:
+        idx = int(raw.split(",")[0].strip())
+    except ValueError:
+        eecho(f"not a session number: {raw!r}")
+        return 2
+    if not (1 <= idx <= len(candidates)):
+        eecho(f"out of range: {idx}")
+        return 2
+    return emit_recovery_prompt(candidates[idx - 1])
+
+
+def mode_doctor(args, accounts: list[Account]) -> int:
+    """Scan every wrapper for broken cwd bindings + transcript resolution."""
+    broken: "OrderedDict[str, dict]" = OrderedDict()  # sessionId -> finding
+    transcript_missing = 0
+    transcript_scanned = 0
+    checked = 0
+    remote = 0
+
+    for acct in accounts:
+        for s in load_sessions(acct):
+            if s.is_remote:
+                remote += 1
+                continue
+            checked += 1
+            cwd_ok = bool(s.cwd) and Path(s.cwd).exists()
+            transcript, how = resolve_transcript(s)
+            if how == "scanned":
+                transcript_scanned += 1
+            if transcript is None:
+                transcript_missing += 1
+            if not cwd_ok:
+                f = broken.setdefault(s.sid, {
+                    "sessionId": s.sid,
+                    "cliSessionId": s.cli_id,
+                    "title": s.title,
+                    "cwd": s.cwd,
+                    "accounts": [],
+                    "archived": bool(s.data.get("isArchived")),
+                    "transcript": str(transcript) if transcript else None,
+                    "lastActivityAt": s.last_activity_ms,
+                })
+                if s.account.short not in f["accounts"]:
+                    f["accounts"].append(s.account.short)
+
+    findings = list(broken.values())
+
+    if args.json:
+        print(json.dumps({
+            "data": findings,
+            "meta": {"count": len(findings), "checked": checked,
+                     "remoteSkipped": remote,
+                     "transcriptMissing": transcript_missing,
+                     "transcriptFoundByScan": transcript_scanned,
+                     "schema": "claude-mods.summon.doctor/v1"},
+        }, indent=2))
+        return 10 if findings else 0
+
+    sep = Term.g("·", "|")
+    echo(panel_open(f"summon {Term.g('·', '|')} doctor",
+                    indicator=f"{checked} sessions"))
+    echo(panel_blank())
+    echo(summary_line(f"{checked} local {sep} {remote} remote skipped {sep} "
+                      f"{transcript_missing} transcript-missing {sep} "
+                      f"{transcript_scanned} found-by-scan"))
+    echo(panel_blank())
+
+    if not findings:
+        echo(section("all cwd bindings resolve", color_token="ok"))
+        echo(panel_blank())
+        echo(panel_close(healths=[("ok", "healthy")]))
+        return 0
+
+    echo(section("broken cwd bindings — recorded folder no longer exists",
+                 len(findings), color_token="alarm"))
+    findings.sort(key=lambda f: -f["lastActivityAt"])
+    for i, f in enumerate(findings):
+        is_last = i == len(findings) - 1
+        tag = "arch" if f["archived"] else ",".join(f["accounts"])
+        echo(leaf(0, f["title"], meta=Term.color("warn", tag),
+                  age=_ago(f["lastActivityAt"]), last=is_last, depth=1))
+        pipe = Term.g("│", "|")
+        echo(f"{pipe}        {Term.color('meta', f['cwd'])}")
+        short = f["sessionId"].removeprefix("local_")[:8]
+        echo(f"{pipe}        {Term.color('meta', f'summon rebind {short} --cwd <new-location>')}")
+
+    echo(panel_blank())
+    echo(panel_close(healths=[("alarm", f"{len(findings)} broken")]))
+    return 10
+
+
+# ============================================================
 #  Main
 # ============================================================
 
 def main():
     p = argparse.ArgumentParser(
-        description="Summon Claude Desktop sessions from another account.",
+        description="Claude Desktop session toolbox — cross-account transfer, "
+                    "recovery picker, cwd rebind, store doctor.",
+        epilog="examples:\n"
+               "  summon --to mknv74              push sessions to the next account\n"
+               "  summon pick                     picker -> paste-ready recovery prompt\n"
+               "  summon recover 6577b24c         recovery prompt for one session\n"
+               "  summon rebind 6577b24c --cwd X:\\Maplab\\LCMap   fix cwd after folder move\n"
+               "  summon doctor                   scan for broken cwd bindings\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    p.add_argument("mode", nargs="?", choices=["rebind", "pick", "recover", "doctor"],
+                   help="Toolbox mode; omit for cross-account transfer")
+    p.add_argument("target", nargs="?",
+                   help="Session id for rebind/recover (sessionId or cliSessionId, prefix ok)")
     p.add_argument("--to", help="Destination account (UUID prefix or email substring)")
     p.add_argument("--from", dest="from_",
                    help="Restrict source to one account (default: all non-destination accounts)")
     # Time-window filter: --days N (custom) or one of the convenience aliases.
-    # Defaults to 14 days; --all disables.
-    p.add_argument("--days", type=int, default=3, help="Time window in days (default 3)")
+    # Transfer defaults to 3 days, pick to 30; --all disables.
+    p.add_argument("--days", type=int, default=None,
+                   help="Time window in days (default: 3 for transfer, 30 for pick)")
     p.add_argument("--all", action="store_true", help="Disable time filter (any age)")
     p.add_argument("--1d", dest="window_1d", action="store_true", help="Last 24h (alias)")
     p.add_argument("--3d", dest="window_3d", action="store_true", help="Last 3 days (alias)")
     p.add_argument("--7d", dest="window_7d", action="store_true", help="Last 7 days (alias)")
     p.add_argument("--30d", dest="window_30d", action="store_true", help="Last 30 days (alias)")
-    p.add_argument("--cwd", default="", help="Substring match against cwd")
+    p.add_argument("--cwd", default="",
+                   help="Transfer/pick: substring match against cwd. "
+                        "Rebind: the folder's NEW location (full path)")
     p.add_argument("--title", default="", help="Substring match against title")
     p.add_argument("--pick", action="store_true", help=argparse.SUPPRESS)  # legacy flag — default behavior now
     p.add_argument("--move", action="store_true",
@@ -946,6 +1401,12 @@ def main():
     p.add_argument("--yes", action="store_true",
                    help="Skip the final confirmation prompt only — selection is still "
                         "required (interactively, via piped stdin, or via --select)")
+    p.add_argument("--no-transcript", action="store_true",
+                   help="Rebind: skip copying the transcript into the new munged project dir")
+    p.add_argument("--force", action="store_true",
+                   help="Rebind: allow --cwd paths that don't exist on disk yet")
+    p.add_argument("--json", action="store_true",
+                   help="Doctor: emit findings as a JSON envelope on stdout")
     args = p.parse_args()
 
     claude_dir = appdata_claude()
@@ -955,6 +1416,19 @@ def main():
     accounts = discover_accounts(claude_dir)
     if not accounts:
         sys.exit(f"No accounts with sessions under {claude_dir}/claude-code-sessions/")
+
+    # --- Toolbox modes ---
+
+    if args.mode == "rebind":
+        sys.exit(mode_rebind(args, accounts))
+    if args.mode == "recover":
+        sys.exit(mode_recover(args, accounts))
+    if args.mode == "pick":
+        sys.exit(mode_pick(args, accounts))
+    if args.mode == "doctor":
+        sys.exit(mode_doctor(args, accounts))
+    if args.target:
+        p.error("unexpected positional argument — transfer mode takes flags only")
 
     # --- Modes that exit early ---
 
@@ -1015,7 +1489,7 @@ def main():
     elif args.window_30d:
         days = 30
     else:
-        days = args.days
+        days = args.days if args.days is not None else 3
 
     candidates = filter_sessions(all_sessions, days=days,
                                  cwd_pattern=args.cwd, title_pattern=args.title)
