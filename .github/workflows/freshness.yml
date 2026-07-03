@@ -97,6 +97,15 @@ jobs:
           if [ "$rc" -eq 7 ]; then echo "::warning::r-ops live check unreachable (CRAN/crandb) — skipped"; fi
           exit 0
 
+      - name: isometric-ops cited packages vs npm registry
+        run: |
+          set +e
+          python skills/isometric-ops/scripts/check-iso-facts.py --live
+          rc=$?
+          if [ "$rc" -eq 10 ]; then echo "::error::isometric-ops drift — a cited npm package is gone or renamed"; exit 1; fi
+          if [ "$rc" -eq 7 ]; then echo "::warning::isometric-ops live check unreachable (npm registry) — skipped"; fi
+          exit 0
+
       - name: GitHub Action refs still resolve
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

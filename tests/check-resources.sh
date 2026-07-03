@@ -78,6 +78,10 @@ echo "== threejs-ops: three.js fact/staleness verifier"
 run "three-facts --offline consistent" 0 "$PY" skills/threejs-ops/scripts/check-three-facts.py --offline
 run "three-facts --help"               0 "$PY" skills/threejs-ops/scripts/check-three-facts.py --help
 
+echo "== isometric-ops: projection-constant/staleness verifier"
+run "iso-facts --offline consistent" 0 "$PY" skills/isometric-ops/scripts/check-iso-facts.py --offline
+run "iso-facts --help"               0 "$PY" skills/isometric-ops/scripts/check-iso-facts.py --help
+
 echo "== protocol: every new verifier is executable + compiles"
 for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/claude-code-ops/scripts/validate-hooks-json.py \
@@ -85,7 +89,8 @@ for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/mapbox-ops/scripts/check-mapbox-facts.py \
          skills/loop-ops/scripts/check-pricing-sync.py \
          skills/r-ops/scripts/check-r-facts.py \
-         skills/threejs-ops/scripts/check-three-facts.py; do
+         skills/threejs-ops/scripts/check-three-facts.py \
+         skills/isometric-ops/scripts/check-iso-facts.py; do
     "$PY" -m py_compile "$s" 2>/dev/null && pass "py_compile $(basename "$s")" || bad "py_compile $(basename "$s")"
 done
 bash -n skills/terraform-ops/scripts/check-action-refs.sh 2>/dev/null \

@@ -1,0 +1,1861 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>iso-studio — isometric scene composer</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1 15 4.5 8 8 1 4.5Z' fill='%23c8cdd4'/%3E%3Cpath d='M1 4.5 8 8v7L1 11.5Z' fill='%238a919b'/%3E%3Cpath d='M15 4.5 8 8v7l7-3.5Z' fill='%23565e69'/%3E%3C/svg%3E" />
+<style>
+  /* ---------------------------------------------------------------------------
+     iso-studio — a zero-dependency isometric scene composer (isometric-ops).
+     Docked control-palette aesthetic borrowed from tools/svg-brand-tuner, scaled up.
+     All state, math, render, input, palettes, and IO live in the single <script>
+     at the bottom, split into clearly commented sections for the v2 agent.
+  --------------------------------------------------------------------------- */
+  /* Quiet neutral palette, one accent. No gradients; the faintest 1px borders are the only chrome. */
+  :root {
+    --ink:#1a2229; --accent:#3d7f99; --accent-ink:#f7fafb;
+    --canvas:#f4f6f7; --card:#ffffff; --panel:#fafbfc;
+    --border:#e6eaed; --muted:#7a858c; --sel:#c8892a; --sel-soft:rgba(200,137,42,.14);
+    --danger:#b34a3f;
+  }
+  * { box-sizing: border-box; }
+  html, body { height:100%; }
+  /* Manrope renders when installed locally; the stack degrades gracefully to Inter / the
+     system UI font. No web-font <link> or data-URI embed — the app stays fully offline. */
+  body { margin:0; font-family:Manrope,"Manrope",Inter,system-ui,-apple-system,sans-serif;
+         color:var(--ink); background:var(--canvas); overflow:hidden; user-select:none;
+         font-size:12px; }
+  .app { display:flex; height:100vh; }
+
+  /* ---- left rail: asset tray ---- */
+  .tray { width:190px; flex:none; background:var(--card); border-right:1px solid var(--border);
+          display:flex; flex-direction:column; height:100vh; }
+  .tray .head { padding:14px 14px 8px; }
+  .tray h1 { font-size:15px; margin:0; letter-spacing:-.01em; }
+  .tray .ver { font-size:10px; color:var(--muted); font-weight:600; }
+  .tray .sub { font-size:11px; color:var(--muted); margin:2px 0 0; line-height:1.4; }
+  .tray .body { flex:1; overflow:auto; padding:8px 10px; }
+  .traygrid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .thumb { position:relative; border:1px solid var(--border); border-radius:8px; background:var(--panel);
+           aspect-ratio:1; display:grid; place-items:center; cursor:pointer; overflow:hidden; }
+  .thumb.sel { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent) inset; }
+  .thumb img { max-width:88%; max-height:88%; image-rendering:auto; pointer-events:none;
+               background-image:linear-gradient(45deg,#e3e9ec 25%,transparent 25%,transparent 75%,#e3e9ec 75%),
+                                linear-gradient(45deg,#e3e9ec 25%,transparent 25%,transparent 75%,#e3e9ec 75%);
+               background-size:10px 10px; background-position:0 0,5px 5px; }
+  .thumb .nm { position:absolute; left:0; right:0; bottom:0; font-size:9px; padding:2px 3px;
+               background:rgba(255,255,255,.82); color:var(--muted); white-space:nowrap;
+               overflow:hidden; text-overflow:ellipsis; }
+  .thumb .x { position:absolute; top:2px; right:2px; width:15px; height:15px; border-radius:50%;
+              border:none; background:rgba(0,0,0,.4); color:#fff; font-size:11px; line-height:15px;
+              padding:0; cursor:pointer; opacity:0; }
+  .thumb:hover .x { opacity:1; }
+  .tray .foot { padding:10px; border-top:1px solid var(--border); }
+  .empty { color:var(--muted); font-size:12px; padding:14px 6px; text-align:center; line-height:1.5; }
+
+  /* ---- center: stage ---- */
+  .stage { flex:1; position:relative; min-width:0; }
+  #cv { position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; }
+  .stage.pan #cv { cursor:grabbing; }
+  .badge { position:absolute; top:10px; left:10px; font-family:ui-monospace,monospace; font-size:11px;
+           background:rgba(255,255,255,.9); border:1px solid var(--border); border-radius:8px;
+           padding:5px 9px; line-height:1.6; pointer-events:none; color:var(--muted); }
+  .badge b { color:var(--ink); font-weight:700; }
+  .zoom { position:absolute; top:10px; right:10px; display:flex; gap:4px; align-items:center;
+          background:var(--card); border:1px solid var(--border); border-radius:999px; padding:3px; }
+  .zoom button { width:28px; height:28px; border-radius:50%; padding:0; font-size:15px; border:none;
+                 background:transparent; cursor:pointer; color:var(--ink); }
+  .zoom .lv { width:auto; min-width:48px; font-size:11px; font-variant-numeric:tabular-nums; }
+
+  /* ---- right rail: docked palettes ---- */
+  .rail { width:270px; flex:none; background:var(--card); border-left:1px solid var(--border);
+          overflow:auto; height:100vh; }
+  .pal { border-bottom:1px solid var(--border); }
+  .pal > summary { list-style:none; cursor:pointer; padding:11px 14px; font-size:11px; font-weight:700;
+                   letter-spacing:.07em; text-transform:uppercase; color:var(--muted);
+                   display:flex; justify-content:space-between; align-items:center; }
+  .pal > summary::-webkit-details-marker { display:none; }
+  .pal > summary::after { content:'▸'; font-size:10px; transition:transform .12s; }
+  .pal[open] > summary::after { transform:rotate(90deg); }
+  .pal .in { padding:2px 14px 14px; }
+  .row { display:flex; flex-direction:column; gap:4px; font-size:12px; margin-bottom:11px; }
+  .row .top { display:flex; justify-content:space-between; align-items:baseline; }
+  .row .v { font-variant-numeric:tabular-nums; color:var(--accent); font-weight:700; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .grid2 .row { margin-bottom:0; }
+  label.fld { font-size:11px; color:var(--muted); display:flex; flex-direction:column; gap:3px; }
+  input, select, button { font-family:inherit; }
+  input[type=range] { width:100%; accent-color:var(--accent); }
+  input[type=number], input[type=text], select {
+    border:1px solid var(--border); border-radius:6px; padding:6px 8px; font-size:12px; width:100%;
+    background:var(--card); color:var(--ink); }
+  /* coordinate + numeric readouts use tabular figures so digits don't jitter */
+  input[type=number] { font-variant-numeric:tabular-nums; }
+  input[type=color] { width:100%; height:30px; padding:0; border:1px solid var(--border);
+                      border-radius:6px; background:none; cursor:pointer; }
+  input[type=checkbox] { accent-color:var(--accent); }
+  .seg { display:flex; gap:5px; flex-wrap:wrap; }
+  .btn { border:1px solid var(--border); background:var(--card); color:inherit; border-radius:7px;
+         padding:6px 10px; font-size:12px; cursor:pointer; }
+  .btn:hover { border-color:var(--accent); }
+  .btn.on { background:var(--accent); border-color:var(--accent); color:var(--accent-ink); font-weight:600; }
+  .btn.wide { width:100%; text-align:center; }
+  .btn.danger { border-color:var(--danger); color:var(--danger); }
+  .btn:disabled { opacity:.4; cursor:not-allowed; }
+  .btn:disabled:hover { border-color:var(--border); }
+  .filebtn { display:inline-block; width:100%; text-align:center; }
+  input[type=file] { display:none; }
+  .hint { font-size:10px; color:var(--muted); margin-top:5px; line-height:1.5; }
+  .noseln { color:var(--muted); font-size:12px; padding:4px 0 6px; }
+
+  /* ---- hotkey legend modal ---- */
+  .modal { position:fixed; inset:0; background:rgba(10,20,30,.45); display:none; place-items:center; z-index:50; }
+  .modal.on { display:grid; }
+  .sheet { background:var(--card); border:1px solid var(--border); border-radius:12px;
+           padding:22px 26px; max-width:440px; width:90%; box-shadow:0 12px 40px rgba(20,30,40,.18); }
+  .sheet h2 { margin:0 0 14px; font-size:15px; }
+  .keys { display:grid; grid-template-columns:auto 1fr; gap:7px 16px; font-size:12.5px; }
+  .keys kbd { font-family:ui-monospace,monospace; background:var(--panel); border:1px solid var(--border);
+              border-bottom-width:2px; border-radius:5px; padding:1px 6px; font-size:11px; white-space:nowrap; }
+  .keys .d { color:var(--muted); }
+  .sheet .close { margin-top:16px; }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- ================= LEFT RAIL: ASSET TRAY ================= -->
+  <aside class="tray">
+    <div class="head">
+      <h1>iso-studio <span class="ver" id="verlabel"></span></h1>
+      <p class="sub">Compose isometric scenes. Drop, place, sort, export.</p>
+    </div>
+    <div class="body" id="trayBody">
+      <div class="empty" id="trayEmpty">
+        No assets yet.<br>Drop a PNG/SVG/WebP anywhere, paste from clipboard, or use the picker below.
+      </div>
+      <div class="traygrid" id="trayGrid"></div>
+    </div>
+    <div class="foot">
+      <label class="filebtn btn wide">Import image…<input type="file" id="fileImport" accept="image/*" multiple></label>
+      <div class="hint">Press <b>?</b> for the hotkey legend.</div>
+    </div>
+  </aside>
+
+  <!-- ================= CENTER: STAGE ================= -->
+  <main class="stage" id="stage">
+    <canvas id="cv"></canvas>
+    <div class="badge" id="badge"></div>
+    <div class="zoom" id="zoom">
+      <button id="zOut" title="Zoom out">−</button>
+      <button class="lv" id="zLv" title="Reset zoom">100%</button>
+      <button id="zIn" title="Zoom in">+</button>
+    </div>
+  </main>
+
+  <!-- ================= RIGHT RAIL: DOCKED PALETTES ================= -->
+  <aside class="rail" id="rail">
+
+    <!-- Grid palette -->
+    <details class="pal" open>
+      <summary>Grid</summary>
+      <div class="in">
+        <label class="fld">Projection
+          <select id="projType">
+            <option value="dimetric21">2:1 dimetric (game iso)</option>
+            <option value="true">true isometric</option>
+            <option value="custom">custom angle</option>
+          </select>
+        </label>
+        <div class="grid2" style="margin-top:10px">
+          <label class="fld">Tile W (px)<input type="number" id="tileW" min="4" step="2" value="64"></label>
+          <label class="fld">Tile H (px)<input type="number" id="tileH" min="2" step="1" value="32"></label>
+        </div>
+        <label class="fld" id="angleWrap" style="margin-top:10px; display:none">Ground angle (°)
+          <input type="number" id="angleDeg" min="1" max="89" step="0.001" value="26.565"></label>
+        <div class="grid2" style="margin-top:10px">
+          <label class="fld">Extent X<input type="number" id="extentX" min="1" step="1" value="16"></label>
+          <label class="fld">Extent Y<input type="number" id="extentY" min="1" step="1" value="16"></label>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <div class="lbl" style="font-size:11px;color:var(--muted);font-weight:700;margin-bottom:4px">Snap</div>
+          <div class="seg" id="snapSeg"></div>
+        </div>
+        <label style="display:flex;gap:7px;align-items:center;font-size:12px;margin-top:8px">
+          <input type="checkbox" id="gridVis" checked> Show grid + axes</label>
+        <div class="hint" id="projHint"></div>
+      </div>
+    </details>
+
+    <!-- Blockout palette (v2 feature 8) -->
+    <details class="pal" open>
+      <summary>Blockout</summary>
+      <div class="in">
+        <div class="seg" id="primSeg"></div>
+        <div class="grid2" style="margin-top:10px">
+          <label class="fld">Footprint W<input type="number" id="pW" min="1" step="1" value="1"></label>
+          <label class="fld">Footprint H<input type="number" id="pH" min="1" step="1" value="1"></label>
+        </div>
+        <label class="fld" style="margin-top:8px">Height (z-units)<input type="number" id="pHt" min="0.1" step="0.25" value="1"></label>
+        <div class="hint">Pick a primitive, then click the grid to place (Esc disarms). Blockout volumes feed the Depth / Lineart exports for ControlNet conditioning.</div>
+      </div>
+    </details>
+
+    <!-- Inspector palette -->
+    <details class="pal" open>
+      <summary>Inspector</summary>
+      <div class="in" id="inspector">
+        <div class="noseln" id="inspEmpty">Nothing selected. Click an instance on the stage.</div>
+        <div id="inspBody" style="display:none">
+          <div style="font-size:12px;font-weight:600;margin-bottom:8px" id="inspTitle"></div>
+          <div class="grid2">
+            <label class="fld">Tile X<input type="number" id="iTileX" step="1"></label>
+            <label class="fld">Tile Y<input type="number" id="iTileY" step="1"></label>
+          </div>
+          <div class="grid2" style="margin-top:8px">
+            <label class="fld">Elevation<input type="number" id="iElev" step="1"></label>
+            <label class="fld">zBias<input type="number" id="iZBias" step="1"></label>
+          </div>
+          <div class="grid2" style="margin-top:8px">
+            <label class="fld">Scale<input type="number" id="iScale" step="0.05" min="0.05"></label>
+            <label class="fld">Layer
+              <select id="iLayer"><option value="ground">ground</option><option value="props">props</option><option value="overlay">overlay</option></select>
+            </label>
+          </div>
+          <div id="inspAsset">
+            <div class="hint" style="margin-top:10px;color:var(--ink);font-weight:600">Asset defaults (all instances)</div>
+            <div class="grid2" style="margin-top:6px">
+              <label class="fld">Footprint W<input type="number" id="iFpW" step="1" min="1"></label>
+              <label class="fld">Footprint H<input type="number" id="iFpH" step="1" min="1"></label>
+            </div>
+            <div class="grid2" style="margin-top:8px">
+              <label class="fld">Anchor X (0–1)<input type="number" id="iAncX" step="0.05" min="0" max="1"></label>
+              <label class="fld">Anchor Y (0–1)<input type="number" id="iAncY" step="0.05" min="0" max="1"></label>
+            </div>
+          </div>
+          <div id="inspPrim" style="display:none">
+            <div class="hint" style="margin-top:10px;color:var(--ink);font-weight:600">Primitive</div>
+            <div class="grid2" style="margin-top:6px">
+              <label class="fld">Footprint W<input type="number" id="iPrimW" step="1" min="1"></label>
+              <label class="fld">Footprint H<input type="number" id="iPrimH" step="1" min="1"></label>
+            </div>
+            <label class="fld" style="margin-top:8px">Height (z-units)<input type="number" id="iPrimHt" step="0.25" min="0.1"></label>
+          </div>
+          <div class="grid2" style="margin-top:10px">
+            <label class="fld">Tint<input type="color" id="iTint" value="#3d7f99"></label>
+            <label class="fld">&nbsp;<button class="btn" id="iTintClear" type="button">Clear tint</button></label>
+          </div>
+          <label style="display:flex;gap:7px;align-items:center;font-size:12px;margin-top:10px">
+            <input type="checkbox" id="iFlipX"> Flip horizontally (F)</label>
+          <div class="seg" style="margin-top:12px">
+            <button class="btn" id="btnDup" title="Ctrl+D">Duplicate</button>
+            <button class="btn danger" id="btnDel" title="Del">Delete</button>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <!-- Scene palette -->
+    <details class="pal" open>
+      <summary>Scene</summary>
+      <div class="in">
+        <div class="row">
+          <div class="lbl" style="font-size:11px;color:var(--muted);font-weight:700;margin-bottom:4px">Background</div>
+          <div class="grid2">
+            <label class="fld">Colour<input type="color" id="bgColor" value="#eef4f7"></label>
+            <label class="fld" style="justify-content:flex-end">
+              <span style="display:flex;gap:6px;align-items:center;font-size:12px">
+                <input type="checkbox" id="bgTransparent"> transparent</span></label>
+          </div>
+        </div>
+        <label style="display:flex;gap:7px;align-items:center;font-size:12px;margin-top:6px">
+          <input type="checkbox" id="checker"> Transparency checkerboard</label>
+        <div class="grid2" style="margin-top:12px">
+          <label class="fld">Canvas W<input type="number" id="canvasW" placeholder="auto" min="1" step="1"></label>
+          <label class="fld">Canvas H<input type="number" id="canvasH" placeholder="auto" min="1" step="1"></label>
+        </div>
+        <div class="hint">Blank canvas size = crop-to-content on export.</div>
+        <div class="row" style="margin-top:12px">
+          <div class="lbl" style="font-size:11px;color:var(--muted);font-weight:700;margin-bottom:4px">Scene tint (three-tone)</div>
+          <select id="tintPreset"><option value="">none (native colours)</option></select>
+          <div class="hint">Tri-tone recolour of every instance: desaturate, then remap luminance through the preset's ink → left → top ramp. Per-instance Tint (Inspector) overrides it. Presets load from assets/palettes/three-tone-presets.json.</div>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <div class="lbl" style="font-size:11px;color:var(--muted);font-weight:700;margin-bottom:4px">Instances</div>
+          <div class="noseln" id="sceneStats"></div>
+        </div>
+      </div>
+    </details>
+
+    <!-- Export palette -->
+    <details class="pal" open>
+      <summary>Export</summary>
+      <div class="in">
+        <div class="lbl" style="font-size:11px;color:var(--muted);font-weight:700;margin-bottom:6px">PNG (transparent, crop-to-content)</div>
+        <div class="seg">
+          <button class="btn" data-png="1">1×</button>
+          <button class="btn" data-png="2">2×</button>
+          <button class="btn" data-png="4">4×</button>
+        </div>
+        <div class="lbl" style="font-size:11px;color:var(--muted);font-weight:700;margin:14px 0 6px">Depth map (ControlNet, near = white)</div>
+        <div class="seg">
+          <button class="btn" data-depth="1">1×</button>
+          <button class="btn" data-depth="2">2×</button>
+          <button class="btn" data-depth="4">4×</button>
+        </div>
+        <div class="lbl" style="font-size:11px;color:var(--muted);font-weight:700;margin:14px 0 6px">Lineart (ControlNet, black on white)</div>
+        <div class="seg">
+          <button class="btn" data-line="1">1×</button>
+          <button class="btn" data-line="2">2×</button>
+          <button class="btn" data-line="4">4×</button>
+        </div>
+        <div class="lbl" style="font-size:11px;color:var(--muted);font-weight:700;margin:14px 0 6px">SVG (vector scenes only)</div>
+        <button class="btn wide" id="btnSvg">Export SVG</button>
+        <div class="lbl" style="font-size:11px;color:var(--muted);font-weight:700;margin:14px 0 6px">Scene JSON (schema v1.0)</div>
+        <div class="seg">
+          <button class="btn wide" id="btnSaveScene">Save scene…</button>
+        </div>
+        <label class="filebtn btn wide" style="margin-top:8px">Load scene…<input type="file" id="fileScene" accept=".json,application/json"></label>
+        <div class="hint">Scene round-trips against assets/scene-schema.json.</div>
+      </div>
+    </details>
+
+  </aside>
+</div>
+
+<!-- ================= HOTKEY LEGEND ================= -->
+<div class="modal" id="modal">
+  <div class="sheet">
+    <h2>Keyboard & mouse</h2>
+    <div class="keys">
+      <kbd>Space</kbd>+drag <span class="d">Pan the canvas</span>
+      <kbd>Middle</kbd>-drag <span class="d">Pan the canvas</span>
+      <kbd>Wheel</kbd> <span class="d">Zoom toward cursor</span>
+      <kbd>Click</kbd> <span class="d">Select instance / place from tray</span>
+      <kbd>Drag</kbd> <span class="d">Move selection (snaps) / marquee-select</span>
+      <kbd>Shift</kbd>+click <span class="d">Add / remove from selection</span>
+      <kbd>Arrows</kbd> <span class="d">Nudge 1 tile</span>
+      <kbd>Shift</kbd>+arrows <span class="d">Nudge 1 pixel</span>
+      <kbd>Ctrl</kbd>+<kbd>D</kbd> <span class="d">Duplicate selection</span>
+      <kbd>Ctrl</kbd>+<kbd>Z</kbd> <span class="d">Undo</span>
+      <kbd>Ctrl</kbd>+<kbd>Y</kbd> <span class="d">Redo (also Ctrl+Shift+Z)</span>
+      <kbd>F</kbd> <span class="d">Flip selection horizontally</span>
+      <kbd>Del</kbd> / <kbd>Backspace</kbd> <span class="d">Delete selection</span>
+      <kbd>[</kbd> / <kbd>]</kbd> <span class="d">zBias down / up</span>
+      <kbd>Esc</kbd> <span class="d">Deselect / cancel placement</span>
+      <kbd>?</kbd> <span class="d">This legend</span>
+    </div>
+    <button class="btn wide close" id="modalClose">Close</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ===========================================================================
+   iso-studio v0.2 — single-file vanilla-JS isometric scene composer.
+   Sections:  STATE · MATH · BLOCKOUT · TINT · RENDER · COMMANDS(+history) ·
+              INPUT · SELECTION · IMPORT · PALETTES · IO · BOOT
+   v2 (features 8–11) is built in: blockout primitives + depth/lineart
+   ControlNet exports, tri-tone tint, undo/redo (command inverses recorded in
+   dispatch; drag-moves coalesced at pointer-up), SVG export. All scene
+   mutations still funnel through dispatch(type, payload) — extend COMMANDS +
+   makeInverse together when adding new mutation types.
+=========================================================================== */
+
+/* ===========================================================================
+   STATE
+=========================================================================== */
+const SCHEMA_VERSION = "1.0";
+const GENERATOR = "iso-studio 0.2.0";
+const LAYER_ORDER = { ground: 0, props: 1, overlay: 2 };
+const SNAP_STEPS = { full: 1, half: 0.5, quarter: 0.25, free: 0 };
+const PRIM_KINDS = ["box", "slab", "ramp", "cylinder"];
+// Default blockout greys (kenney-prototype-grey family): top light / left mid / right dark.
+const PRIM_TONES = { top: "#d8d6d0", left: "#a8a6a0", right: "#706e6a", ink: "rgba(43,43,49,.45)", flat: "#a8a6a0" };
+const $ = id => document.getElementById(id);
+
+// The scene model. `assets` and `instances` mirror scene-schema.json exactly.
+// View state (camera, selection, tool) is NOT part of the scene and is not saved.
+const S = {
+  projection: { type: "dimetric21", tileW: 64, tileH: 32, angleDeg: 26.565, unitElevation: 16 },
+  grid: { extentX: 16, extentY: 16, snap: "full", visible: true },
+  assets: [],        // {id, name, src, anchor:{x,y}, footprint:{w,h}, sourceW, sourceH, _img}
+  instances: [],     // {id, assetId, tile:{x,y}, elevation, layer, zBias, flipX, scale, tint?}
+  canvas: { bg: "#eef4f7", checkerboard: false, width: null, height: null },
+  palette: null,     // scene tint: preset name (string), inline token map, or null
+  meta: { name: "untitled", generator: GENERATOR },
+};
+
+// View / interaction state (ephemeral, not serialized).
+const V = {
+  cam: { x: 0, y: 0, zoom: 1 },   // pan offset (screen px) + zoom
+  sel: new Set(),                 // selected instance ids
+  trayPick: null,                 // assetId armed for click-to-place, or null
+  blockPick: null,                // primitive kind armed for click-to-place, or null
+  dpr: 1,
+  cssW: 0, cssH: 0,
+  hoverTile: null,                // {x,y} under cursor (integer)
+  drag: null,                     // active drag descriptor
+  needsRender: true,
+};
+
+let _idSeq = 1;
+const uid = pfx => `${pfx}${(_idSeq++).toString(36)}${Date.now().toString(36).slice(-3)}`;
+
+/* ===========================================================================
+   MATH  — must agree with references/coordinates-depth.md and iso-math.py.
+   Forward:  screenX=(x−y)·tileW/2 ; screenY=(x+y)·tileH/2 − z·unitZ
+   Inverse:  x=(sx/halfW+sy/halfH)/2 ; y=(sy/halfH−sx/halfW)/2
+   Draw order: (x+y) asc, elevation asc, layer asc, zBias asc.
+=========================================================================== */
+function halfW() { return S.projection.tileW / 2; }
+function halfH() { return S.projection.tileH / 2; }
+function unitZ() { return S.projection.unitElevation || S.projection.tileH; }
+
+// Tile (x,y,z) -> world screen pixels (before camera pan/zoom). Anchor subtraction is the caller's job.
+function tileToScreen(x, y, z) {
+  z = z || 0;
+  return { x: (x - y) * halfW(), y: (x + y) * halfH() - z * unitZ() };
+}
+// World screen pixels -> fractional tile on the ground plane (z=0).
+function screenToTile(sx, sy) {
+  const hw = halfW(), hh = halfH();
+  return { x: (sx / hw + sy / hh) / 2, y: (sy / hh - sx / hw) / 2 };
+}
+// Integer tile under a world screen point (within-diamond, §6 Method A).
+function pickTile(sx, sy) {
+  const t = screenToTile(sx, sy);
+  return { x: Math.floor(t.x), y: Math.floor(t.y) };
+}
+// Snap a fractional tile coordinate to the active snap grid.
+function snapTile(v) {
+  const step = SNAP_STEPS[S.grid.snap];
+  if (step === 0) return v;               // free
+  return Math.round(v / step) * step;
+}
+// Canonical depth-sort key tuple for an instance (ascending).
+function depthKey(inst) {
+  const fp = inst.primitive
+    ? { w: inst.primitive.w || 1, h: inst.primitive.h || 1 }
+    : ((getAsset(inst.assetId) || {}).footprint || { w: 1, h: 1 });
+  // Multi-tile sprites sort by their FRONTMOST ground cell (max x+y) — Strategy 1,
+  // references/coordinates-depth.md §9. For a 1×1 footprint this is just (x+y).
+  const frontSum = (inst.tile.x + fp.w - 1) + (inst.tile.y + fp.h - 1);
+  return [frontSum, inst.elevation || 0, LAYER_ORDER[inst.layer] || 0, inst.zBias || 0];
+}
+// Compare two depth-key tuples (stable sort caller adds index tiebreak).
+function cmpDepth(a, b) {
+  const ka = depthKey(a), kb = depthKey(b);
+  for (let i = 0; i < ka.length; i++) if (ka[i] !== kb[i]) return ka[i] - kb[i];
+  return 0;
+}
+
+// Convert screen (world) coords <-> viewport (canvas CSS px) coords via camera.
+function worldToView(wx, wy) { return { x: wx * V.cam.zoom + V.cam.x, y: wy * V.cam.zoom + V.cam.y }; }
+function viewToWorld(vx, vy) { return { x: (vx - V.cam.x) / V.cam.zoom, y: (vy - V.cam.y) / V.cam.zoom }; }
+
+// Keep projection invariants: dimetric enforces tileH = tileW/2 on the DERIVED axis.
+function applyProjectionConstraints() {
+  const p = S.projection;
+  if (p.type === "dimetric21") {
+    p.tileH = p.tileW / 2;
+    p.angleDeg = 26.565;
+  } else if (p.type === "true") {
+    // true iso: tileH/tileW follows tan30° = 0.57735
+    p.tileH = Math.round(p.tileW * 0.57735 * 100) / 100;
+    p.angleDeg = 30;
+  }
+  if (!p.unitElevation) p.unitElevation = p.tileH;
+}
+
+/* ===========================================================================
+   ASSET / INSTANCE LOOKUP
+=========================================================================== */
+function getAsset(id) { return S.assets.find(a => a.id === id); }
+function getInst(id) { return S.instances.find(i => i.id === id); }
+
+// Bounding box of a placed instance in WORLD pixels (for picking + marquee + crop).
+function instBounds(inst) {
+  if (inst.primitive) return primBounds(inst);
+  const a = getAsset(inst.assetId);
+  if (!a || !a._img || !a._img.complete || !a._img.naturalWidth) return null;
+  const w = a._img.naturalWidth, h = a._img.naturalHeight;
+  const sc = (inst.scale || 1);
+  const drawW = w * sc, drawH = h * sc;
+  const anc = a.anchor || { x: 0.5, y: 1 };
+  const p = tileToScreen(inst.tile.x, inst.tile.y, inst.elevation || 0);
+  // Anchor's image-space point lands on the tile origin p. flipX mirrors anchor.x.
+  const ancX = (inst.flipX ? (1 - anc.x) : anc.x) * drawW;
+  const ancY = anc.y * drawH;
+  const wx = p.x - ancX, wy = p.y - ancY;    // top-left in world space
+  return { wx, wy, drawW, drawH, w, h, sc, anc, img: a._img };
+}
+
+/* ===========================================================================
+   BLOCKOUT PRIMITIVES (v2 feature 8) — procedural flat-shaded volumes.
+   Geometry is computed in WORLD coordinates from the same tileToScreen math
+   as sprites, so primitives snap, sort, and export identically.
+=========================================================================== */
+// Face/path geometry for one primitive instance (world coords).
+function primShape(inst) {
+  const p = inst.primitive, e = inst.elevation || 0;
+  const tx = inst.tile.x, ty = inst.tile.y;
+  const w = p.w || 1, h = p.h || 1, ht = p.height != null ? p.height : 1;
+  const P = tileToScreen;
+  if (p.kind === "cylinder") {
+    // Elliptical-cap volume inscribed in the footprint. A tile-space circle of
+    // radius r maps to a screen ellipse with semi-axes r·halfW·√2 / r·halfH·√2.
+    const cx = tx + w / 2, cy = ty + h / 2, r = Math.min(w, h) / 2;
+    return { kind: "cylinder", pT: P(cx, cy, e + ht), pB: P(cx, cy, e),
+             rx: r * halfW() * Math.SQRT2, ry: r * halfH() * Math.SQRT2 };
+  }
+  if (p.kind === "ramp") {
+    // Wedge rising along +x: z = e at the x=tx edge, z = e+ht at the x=tx+w edge.
+    // flipX negates the slope axis (rises along −x: tall edge at x=tx). Because
+    // every render path (canvas beauty/flat/line, SVG, bounds) consumes this
+    // geometry, honoring flipX here covers them all. Box/slab/cylinder are
+    // symmetric under a horizontal mirror, so flipX stays a no-op for them.
+    const a = P(tx, ty, e), b = P(tx + w, ty, e), c = P(tx + w, ty + h, e), d = P(tx, ty + h, e);
+    if (inst.flipX) {
+      const a2 = P(tx, ty, e + ht), d2 = P(tx, ty + h, e + ht);
+      // The tall end face (x=tx) faces −x, away from the camera — not visible.
+      return { kind: "faces", faces: [
+        { pts: [d2, c, d], tone: "left" },      // +y side triangle (mid)
+        { pts: [a2, b, c, d2], tone: "top" },   // sloped top (light)
+      ] };
+    }
+    const b2 = P(tx + w, ty, e + ht), c2 = P(tx + w, ty + h, e + ht);
+    return { kind: "faces", faces: [
+      { pts: [b2, c2, c, b], tone: "right" },   // tall end face (dark)
+      { pts: [d, c2, c], tone: "left" },        // sloped side triangle (mid)
+      { pts: [a, b2, c2, d], tone: "top" },     // sloped top (light)
+    ] };
+  }
+  // box / slab (a slab is just a short box; the palette defaults height 0.25)
+  const b = P(tx + w, ty, e), c = P(tx + w, ty + h, e), d = P(tx, ty + h, e);
+  const a2 = P(tx, ty, e + ht), b2 = P(tx + w, ty, e + ht), c2 = P(tx + w, ty + h, e + ht), d2 = P(tx, ty + h, e + ht);
+  return { kind: "faces", faces: [
+    { pts: [b2, c2, c, b], tone: "right" },     // +x side face (dark)
+    { pts: [c2, d2, d, c], tone: "left" },      // +y side face (mid)
+    { pts: [a2, b2, c2, d2], tone: "top" },     // top face (light)
+  ] };
+}
+// World-space AABB of a primitive (same contract as image instBounds).
+function primBounds(inst) {
+  const s = primShape(inst);
+  if (s.kind === "cylinder")
+    return { wx: s.pT.x - s.rx, wy: s.pT.y - s.ry, drawW: 2 * s.rx,
+             drawH: (s.pB.y + s.ry) - (s.pT.y - s.ry), prim: true };
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const f of s.faces) for (const q of f.pts) {
+    if (q.x < minX) minX = q.x; if (q.y < minY) minY = q.y;
+    if (q.x > maxX) maxX = q.x; if (q.y > maxY) maxY = q.y;
+  }
+  return { wx: minX, wy: minY, drawW: maxX - minX, drawH: maxY - minY, prim: true };
+}
+// Draw a primitive in WORLD coordinates (caller sets the canvas transform).
+// mode: "beauty" = three tones + ink stroke; "flat" = single tones.flat fill,
+// no stroke (depth pass); "line" = white fill + black stroke (lineart pass).
+function primDrawCanvas(c, inst, tones, lw, mode) {
+  const s = primShape(inst);
+  const fillOf = t => mode === "flat" ? tones.flat : mode === "line" ? "#ffffff" : tones[t];
+  const stroke = mode === "flat" ? null : mode === "line" ? "#000000" : tones.ink;
+  c.lineWidth = lw || 1; c.lineJoin = "round";
+  if (stroke) c.strokeStyle = stroke;
+  if (s.kind === "cylinder") {
+    const { pT, pB, rx, ry } = s;
+    if (mode === "beauty") {
+      // two shaded body halves, split on the vertical axis (left mid, right dark)
+      c.beginPath();
+      c.moveTo(pT.x - rx, pT.y); c.lineTo(pB.x - rx, pB.y);
+      c.ellipse(pB.x, pB.y, rx, ry, 0, Math.PI, Math.PI / 2, true);
+      c.lineTo(pT.x, pT.y + ry);
+      c.ellipse(pT.x, pT.y, rx, ry, 0, Math.PI / 2, Math.PI, false);
+      c.closePath(); c.fillStyle = tones.left; c.fill(); if (stroke) c.stroke();
+      c.beginPath();
+      c.moveTo(pT.x + rx, pT.y); c.lineTo(pB.x + rx, pB.y);
+      c.ellipse(pB.x, pB.y, rx, ry, 0, 0, Math.PI / 2, false);
+      c.lineTo(pT.x, pT.y + ry);
+      c.ellipse(pT.x, pT.y, rx, ry, 0, Math.PI / 2, 0, true);
+      c.closePath(); c.fillStyle = tones.right; c.fill(); if (stroke) c.stroke();
+    } else {
+      // full-body silhouette (no phantom center seam in lineart / depth)
+      c.beginPath();
+      c.moveTo(pT.x - rx, pT.y); c.lineTo(pB.x - rx, pB.y);
+      c.ellipse(pB.x, pB.y, rx, ry, 0, Math.PI, 0, true);
+      c.lineTo(pT.x + rx, pT.y);
+      c.ellipse(pT.x, pT.y, rx, ry, 0, 0, Math.PI, false);
+      c.closePath(); c.fillStyle = fillOf("left"); c.fill(); if (stroke) c.stroke();
+    }
+    c.beginPath(); c.ellipse(pT.x, pT.y, rx, ry, 0, 0, 2 * Math.PI);
+    c.fillStyle = fillOf("top"); c.fill(); if (stroke) c.stroke();
+    return;
+  }
+  for (const f of s.faces) {
+    c.beginPath(); c.moveTo(f.pts[0].x, f.pts[0].y);
+    for (let i = 1; i < f.pts.length; i++) c.lineTo(f.pts[i].x, f.pts[i].y);
+    c.closePath(); c.fillStyle = fillOf(f.tone); c.fill();
+    if (stroke) c.stroke();
+  }
+}
+
+/* ===========================================================================
+   TINT (v2 feature 9) — tri-tone recolour: desaturate to luminance, then remap
+   through a 3-stop ramp [dark, mid, light]. Canvas port of the svg-brand-tuner
+   feComponentTransfer technique. Recoloured bitmaps are cached per asset+ramp
+   so the render hot path stays allocation-free.
+=========================================================================== */
+const FALLBACK_PRESETS = [
+  // Built-in copies of three presets from assets/palettes/three-tone-presets.json,
+  // used when the runtime fetch fails (file://, moved file, old server).
+  { name: "kenney-prototype-grey", ink: "#2b2b31", top: "#d8d6d0", left: "#a8a6a0", right: "#706e6a", shadow: "#4a4844", accent: "#5b9bd5", bg: "#eceae5" },
+  { name: "blueprint", ink: "#e8f2ff", top: "#5f8fd9", left: "#3f6bb0", right: "#284a85", shadow: "#152c58", accent: "#ffffff", bg: "#0f2b5c" },
+  { name: "earthy-game", ink: "#3a2a1e", top: "#e0c07a", left: "#a8823f", right: "#7a5a2e", shadow: "#4a3620", accent: "#6f9c4a", bg: "#f2e3bd" },
+];
+let PRESETS = FALLBACK_PRESETS;
+let _sceneRamp = null;              // cached [dark,mid,light] for the active scene palette
+const _instRamps = new Map();       // tint hex -> cached ramp array
+const _tintCache = new Map();       // assetId|ramp -> recoloured offscreen canvas
+
+function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+function rgbToHex(r, g, b) { return "#" + ((1 << 24) | (Math.round(r) << 16) | (Math.round(g) << 8) | Math.round(b)).toString(16).slice(1); }
+function mixHex(a, b, t) {
+  const A = hexToRgb(a), B = hexToRgb(b);
+  return rgbToHex(A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t, A[2] + (B[2] - A[2]) * t);
+}
+function presetByName(name) { return PRESETS.find(p => p.name === name) || null; }
+// Normalize S.palette (preset name string OR inline token map) to a preset-like object.
+function paletteObj() {
+  if (!S.palette) return null;
+  if (typeof S.palette === "string") return presetByName(S.palette);
+  return (S.palette.top && S.palette.left) ? S.palette : null;
+}
+function sceneRamp() {
+  if (_sceneRamp) return _sceneRamp;
+  const p = paletteObj(); if (!p) return null;
+  _sceneRamp = [p.ink || "#20242a", p.left || "#9aa2a8", p.top || "#e2e5e8"];
+  return _sceneRamp;
+}
+function instRampFor(tint) {
+  let r = _instRamps.get(tint);
+  if (!r) { r = [mixHex(tint, "#101418", 0.62), tint, mixHex(tint, "#ffffff", 0.72)]; _instRamps.set(tint, r); }
+  return r;
+}
+// Effective ramp for an instance: per-instance tint overrides the scene palette.
+function rampFor(inst) { return (inst.tint && /^#/.test(inst.tint)) ? instRampFor(inst.tint) : sceneRamp(); }
+// Effective three-tone fills for a primitive (native greys when untinted).
+function effTones(inst) {
+  if (inst.tint && /^#/.test(inst.tint)) {
+    const r = instRampFor(inst.tint);
+    return { top: r[2], left: r[1], right: r[0], ink: "rgba(16,20,24,.35)", flat: r[1] };
+  }
+  const p = paletteObj();
+  if (p) return { top: p.top, left: p.left, right: p.right, ink: p.shadow || p.ink, flat: p.left };
+  return PRIM_TONES;
+}
+// Luminance -> piecewise 3-stop ramp remap, alpha preserved.
+function recolor(img, ramp) {
+  const c = document.createElement("canvas");
+  c.width = img.naturalWidth; c.height = img.naturalHeight;
+  const x = c.getContext("2d", { willReadFrequently: true });
+  x.drawImage(img, 0, 0);
+  let id;
+  try { id = x.getImageData(0, 0, c.width, c.height); }
+  catch { return img; }               // tainted canvas (remote src) — draw untinted
+  const d = id.data, D = hexToRgb(ramp[0]), M = hexToRgb(ramp[1]), L = hexToRgb(ramp[2]);
+  for (let i = 0; i < d.length; i += 4) {
+    if (!d[i + 3]) continue;
+    const lum = (0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) / 255;
+    let A, B, t;
+    if (lum < 0.5) { A = D; B = M; t = lum * 2; } else { A = M; B = L; t = (lum - 0.5) * 2; }
+    d[i] = A[0] + (B[0] - A[0]) * t;
+    d[i + 1] = A[1] + (B[1] - A[1]) * t;
+    d[i + 2] = A[2] + (B[2] - A[2]) * t;
+  }
+  x.putImageData(id, 0, 0);
+  return c;
+}
+// Cached tinted bitmap for an asset+instance (or the raw image when untinted).
+function tintedImage(asset, inst) {
+  if (!asset || !asset._img || !asset._img.complete || !asset._img.naturalWidth) return null;
+  const ramp = rampFor(inst);
+  if (!ramp) return asset._img;
+  const key = asset.id + "|" + ramp[0] + ramp[1] + ramp[2];
+  let c = _tintCache.get(key);
+  if (!c) {
+    if (_tintCache.size > 64) _tintCache.clear();   // simple bound; keys re-warm on demand
+    c = recolor(asset._img, ramp);
+    _tintCache.set(key, c);
+  }
+  return c;
+}
+
+/* ===========================================================================
+   RENDER  — requestAnimationFrame loop, DPR-aware, no per-frame allocations
+   in the hot path beyond the depth-sorted instance list.
+=========================================================================== */
+const cv = $("cv");
+const ctx = cv.getContext("2d");
+let _sortBuf = [];   // reused array to avoid per-frame allocation churn
+
+function resizeCanvas() {
+  const st = $("stage");
+  V.cssW = st.clientWidth; V.cssH = st.clientHeight;
+  V.dpr = window.devicePixelRatio || 1;
+  cv.width = Math.round(V.cssW * V.dpr);
+  cv.height = Math.round(V.cssH * V.dpr);
+  V.needsRender = true;
+}
+
+function requestRender() { V.needsRender = true; }
+
+function drawCheckerboard() {
+  const size = 12;
+  ctx.save();
+  ctx.fillStyle = "#e8eef1"; ctx.fillRect(0, 0, V.cssW, V.cssH);
+  ctx.fillStyle = "#d3dde2";
+  for (let y = 0; y < V.cssH; y += size)
+    for (let x = ((y / size) % 2) * size; x < V.cssW; x += size * 2)
+      ctx.fillRect(x, y, size, size);
+  ctx.restore();
+}
+
+function drawGrid() {
+  if (!S.grid.visible) return;
+  const ex = S.grid.extentX, ey = S.grid.extentY;
+  ctx.save();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = "rgba(60,90,110,.22)";
+  ctx.beginPath();
+  // lines of constant tile-x and constant tile-y across the extent
+  for (let x = 0; x <= ex; x++) {
+    const a = worldToView(...toXY(tileToScreen(x, 0, 0)));
+    const b = worldToView(...toXY(tileToScreen(x, ey, 0)));
+    ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+  }
+  for (let y = 0; y <= ey; y++) {
+    const a = worldToView(...toXY(tileToScreen(0, y, 0)));
+    const b = worldToView(...toXY(tileToScreen(ex, y, 0)));
+    ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+  }
+  ctx.stroke();
+  // axes: +x (red-ish), +y (green-ish) from origin
+  const o = worldToView(...toXY(tileToScreen(0, 0, 0)));
+  const ax = worldToView(...toXY(tileToScreen(Math.min(ex, 4), 0, 0)));
+  const ay = worldToView(...toXY(tileToScreen(0, Math.min(ey, 4), 0)));
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(200,70,60,.7)"; ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.lineTo(ax.x, ax.y); ctx.stroke();
+  ctx.strokeStyle = "rgba(60,150,90,.7)"; ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.lineTo(ay.x, ay.y); ctx.stroke();
+  ctx.restore();
+}
+// tiny helper so tileToScreen results spread into worldToView cleanly
+function toXY(p) { return [p.x, p.y]; }
+
+// Highlight the hovered tile diamond (placement affordance).
+function drawHoverTile() {
+  if (!V.hoverTile) return;
+  const t = V.hoverTile;
+  const c = [
+    tileToScreen(t.x, t.y, 0),
+    tileToScreen(t.x + 1, t.y, 0),
+    tileToScreen(t.x + 1, t.y + 1, 0),
+    tileToScreen(t.x, t.y + 1, 0),
+  ].map(p => worldToView(p.x, p.y));
+  ctx.save();
+  ctx.fillStyle = (V.trayPick || V.blockPick) ? "rgba(74,163,199,.25)" : "rgba(74,163,199,.14)";
+  ctx.strokeStyle = "rgba(74,163,199,.85)"; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(c[0].x, c[0].y);
+  for (let i = 1; i < 4; i++) ctx.lineTo(c[i].x, c[i].y);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.restore();
+}
+
+// Draw one instance in WORLD coordinates (caller has applied the camera/export transform).
+function drawInstance(c2d, inst, worldLW) {
+  const hasAlpha = inst.opacity != null && inst.opacity !== 1;
+  if (hasAlpha) { c2d.save(); c2d.globalAlpha = inst.opacity; }
+  if (inst.primitive) {
+    primDrawCanvas(c2d, inst, effTones(inst), worldLW, "beauty");
+  } else {
+    const b = instBounds(inst);
+    if (b) drawInstImage(c2d, inst, b, 0, 0, tintedImage(getAsset(inst.assetId), inst) || b.img);
+  }
+  if (hasAlpha) c2d.restore();
+}
+// Blit an image instance in world coords at an optional (dx,dy) offset, honoring flipX.
+function drawInstImage(c2d, inst, b, dx, dy, img) {
+  if (inst.flipX) {
+    c2d.save();
+    c2d.translate(b.wx + dx + b.drawW, b.wy + dy);
+    c2d.scale(-1, 1);
+    c2d.drawImage(img, 0, 0, b.drawW, b.drawH);
+    c2d.restore();
+  } else {
+    c2d.drawImage(img, b.wx + dx, b.wy + dy, b.drawW, b.drawH);
+  }
+}
+
+// Alignment guides (v2 feature 10): highlight the dragged instance's row and
+// column diamond bands across the grid extent while a drag-move is live.
+function drawAlignGuides() {
+  if (!V.drag || V.drag.kind !== "move" || !V.drag.moved) return;
+  const inst = getInst(V.drag.origins[0].id); if (!inst) return;
+  const cx = Math.floor(inst.tile.x), cy = Math.floor(inst.tile.y);
+  const ex = S.grid.extentX, ey = S.grid.extentY;
+  const band = pts => {
+    ctx.beginPath();
+    const v0 = worldToView(pts[0].x, pts[0].y);
+    ctx.moveTo(v0.x, v0.y);
+    for (let i = 1; i < pts.length; i++) { const v = worldToView(pts[i].x, pts[i].y); ctx.lineTo(v.x, v.y); }
+    ctx.closePath(); ctx.fill();
+  };
+  ctx.save();
+  ctx.fillStyle = "rgba(61,127,153,.10)";
+  band([tileToScreen(cx, 0, 0), tileToScreen(cx + 1, 0, 0), tileToScreen(cx + 1, ey, 0), tileToScreen(cx, ey, 0)]);
+  band([tileToScreen(0, cy, 0), tileToScreen(ex, cy, 0), tileToScreen(ex, cy + 1, 0), tileToScreen(0, cy + 1, 0)]);
+  ctx.restore();
+}
+
+function drawSelection() {
+  if (!V.sel.size) return;
+  ctx.save();
+  ctx.strokeStyle = getCss("--sel"); ctx.lineWidth = 1.5; ctx.setLineDash([5, 3]);
+  for (const id of V.sel) {
+    const inst = getInst(id); if (!inst) continue;
+    const b = instBounds(inst); if (!b) continue;
+    const v = worldToView(b.wx, b.wy);
+    ctx.strokeRect(v.x + 0.5, v.y + 0.5, b.drawW * V.cam.zoom, b.drawH * V.cam.zoom);
+  }
+  ctx.restore();
+}
+
+function drawMarquee() {
+  if (!V.drag || V.drag.kind !== "marquee") return;
+  const d = V.drag;
+  const x = Math.min(d.x0, d.x1), y = Math.min(d.y0, d.y1);
+  const w = Math.abs(d.x1 - d.x0), h = Math.abs(d.y1 - d.y0);
+  ctx.save();
+  ctx.fillStyle = getCss("--sel-soft"); ctx.strokeStyle = getCss("--sel");
+  ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+  ctx.fillRect(x, y, w, h); ctx.strokeRect(x + 0.5, y + 0.5, w, h);
+  ctx.restore();
+}
+
+function frame() {
+  if (V.needsRender) {
+    V.needsRender = false;
+    ctx.setTransform(V.dpr, 0, 0, V.dpr, 0, 0);
+    ctx.clearRect(0, 0, V.cssW, V.cssH);
+    // background
+    if (S.canvas.checkerboard) drawCheckerboard();
+    else if (!isTransparent(S.canvas.bg)) { ctx.fillStyle = S.canvas.bg; ctx.fillRect(0, 0, V.cssW, V.cssH); }
+    drawGrid();
+    drawAlignGuides();
+    drawHoverTile();
+    // depth-sorted instance draw (painter's algorithm), under the camera transform
+    _sortBuf.length = 0;
+    for (let i = 0; i < S.instances.length; i++) _sortBuf.push(i);
+    _sortBuf.sort((ia, ib) => {
+      const c = cmpDepth(S.instances[ia], S.instances[ib]);
+      return c !== 0 ? c : ia - ib;   // stable tiebreak
+    });
+    ctx.save();
+    ctx.translate(V.cam.x, V.cam.y);
+    ctx.scale(V.cam.zoom, V.cam.zoom);
+    ctx.imageSmoothingEnabled = false;   // crisp pixel/iso art
+    for (let k = 0; k < _sortBuf.length; k++) drawInstance(ctx, S.instances[_sortBuf[k]], 1 / V.cam.zoom);
+    ctx.restore();
+    drawSelection();
+    drawMarquee();
+    updateBadge();
+  }
+  requestAnimationFrame(frame);
+}
+
+function updateBadge() {
+  const p = S.projection;
+  const proj = p.type === "dimetric21" ? "2:1 dimetric" : p.type === "true" ? "true iso" : `custom ${p.angleDeg}°`;
+  const h = V.hoverTile ? `tile <b>${V.hoverTile.x},${V.hoverTile.y}</b>` : "";
+  $("badge").innerHTML =
+    `<b>${proj}</b> · ${p.tileW}×${p.tileH}px · snap <b>${S.grid.snap}</b> · zoom <b>${Math.round(V.cam.zoom * 100)}%</b><br>${h}`;
+  $("zLv").textContent = Math.round(V.cam.zoom * 100) + "%";
+  $("sceneStats").textContent = `${S.instances.length} instance${S.instances.length === 1 ? "" : "s"}, ${S.assets.length} asset${S.assets.length === 1 ? "" : "s"}`;
+}
+
+const getCss = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const isTransparent = c => !c || c === "transparent" || c === "none";
+
+/* ===========================================================================
+   COMMANDS  — single mutation funnel. Every scene mutation goes through
+   dispatch(type, payload); dispatch records an inverse entry onto the undo
+   stack (v2 feature 10). History entries call COMMANDS directly (never
+   dispatch) so replaying them is not re-recorded. Drag-moves are coalesced
+   into one entry at pointer-up; consecutive keyboard nudges merge.
+=========================================================================== */
+const COMMANDS = {
+  addInstance(p) { S.instances.push(p.inst); return p.inst.id; },
+  removeInstances(p) { const set = new Set(p.ids); S.instances = S.instances.filter(i => !set.has(i.id)); },
+  updateInstance(p) { const i = getInst(p.id); if (i) Object.assign(i, p.patch); },
+  moveInstances(p) { for (const m of p.moves) { const i = getInst(m.id); if (i) i.tile = { x: m.x, y: m.y }; } },
+  updateAsset(p) { const a = getAsset(p.id); if (a) Object.assign(a, p.patch); },
+  addAsset(p) { S.assets.push(p.asset); },
+  removeAsset(p) { S.assets = S.assets.filter(a => a.id !== p.id); },
+  setProjection(p) { Object.assign(S.projection, p.patch); applyProjectionConstraints(); },
+  setGrid(p) { Object.assign(S.grid, p.patch); },
+  setCanvas(p) { Object.assign(S.canvas, p.patch); },
+  setPalette(p) { S.palette = p.palette || null; _sceneRamp = null; },
+  replaceScene(p) { Object.assign(S, p.scene); },
+};
+
+// --- history ---
+const H = { undo: [], redo: [], limit: 100, batch: null };   // ≥50 steps required; keep 100
+function pushHist(e) {
+  if (H.batch) { H.batch.push(e); return; }
+  H.undo.push(e);
+  if (H.undo.length > H.limit) H.undo.shift();
+  H.redo.length = 0;
+}
+// Group every entry recorded during fn() into ONE composite history step.
+function withBatch(fn) {
+  const prev = H.batch; H.batch = [];
+  try { fn(); } finally {
+    const b = H.batch; H.batch = prev;
+    if (b.length === 1) pushHist(b[0]);
+    else if (b.length) pushHist({
+      undo() { for (let i = b.length - 1; i >= 0; i--) b[i].undo(); },
+      redo() { for (const e of b) e.redo(); },
+    });
+  }
+}
+function doUndo() { const e = H.undo.pop(); if (!e) return; e.undo(); H.redo.push(e); afterHist(); }
+function doRedo() { const e = H.redo.pop(); if (!e) return; e.redo(); H.undo.push(e); afterHist(); }
+function afterHist() {
+  for (const id of [...V.sel]) if (!getInst(id)) V.sel.delete(id);   // prune dead selection
+  applyProjectionConstraints();
+  syncTray(); syncPalettes(); requestRender();
+}
+// Snapshot the listed keys of an object (deep via JSON — scene data is plain JSON).
+const pickKeys = (obj, keys) => {
+  const o = {};
+  for (const k of keys) o[k] = (typeof obj[k] === "object" && obj[k] !== null) ? JSON.parse(JSON.stringify(obj[k])) : obj[k];
+  return o;
+};
+// Build the inverse entry for a command BEFORE it is applied. Entries hold live
+// object references for add/remove (an Image can't be JSON-cloned; later edits
+// are their own entries, so replay order keeps state consistent).
+function makeInverse(type, p) {
+  switch (type) {
+    case "addInstance": {
+      const inst = p.inst;
+      return { undo() { COMMANDS.removeInstances({ ids: [inst.id] }); }, redo() { COMMANDS.addInstance({ inst }); } };
+    }
+    case "removeInstances": {
+      const set = new Set(p.ids);
+      const saved = S.instances.map((inst, idx) => ({ inst, idx })).filter(e => set.has(e.inst.id));
+      return {
+        undo() { for (const e of saved) S.instances.splice(Math.min(e.idx, S.instances.length), 0, e.inst); },
+        redo() { COMMANDS.removeInstances({ ids: p.ids }); },
+      };
+    }
+    case "updateInstance": {
+      const i = getInst(p.id); if (!i) return null;
+      const prior = pickKeys(i, Object.keys(p.patch));
+      return { undo() { const t = getInst(p.id); if (t) Object.assign(t, prior); }, redo() { COMMANDS.updateInstance(p); } };
+    }
+    case "moveInstances": {
+      const before = p.moves.map(m => { const i = getInst(m.id); return i ? { id: m.id, x: i.tile.x, y: i.tile.y } : null; }).filter(Boolean);
+      return { undo() { COMMANDS.moveInstances({ moves: before }); }, redo() { COMMANDS.moveInstances(p); } };
+    }
+    case "updateAsset": {
+      const a = getAsset(p.id); if (!a) return null;
+      const prior = pickKeys(a, Object.keys(p.patch));
+      return { undo() { const t = getAsset(p.id); if (t) Object.assign(t, prior); }, redo() { COMMANDS.updateAsset(p); } };
+    }
+    case "addAsset": {
+      const asset = p.asset;
+      return { undo() { COMMANDS.removeAsset({ id: asset.id }); }, redo() { COMMANDS.addAsset({ asset }); } };
+    }
+    case "removeAsset": {
+      const idx = S.assets.findIndex(a => a.id === p.id); if (idx < 0) return null;
+      const asset = S.assets[idx];
+      return { undo() { S.assets.splice(Math.min(idx, S.assets.length), 0, asset); }, redo() { COMMANDS.removeAsset(p); } };
+    }
+    case "setProjection": {
+      const prior = pickKeys(S.projection, Object.keys(p.patch));
+      return { undo() { Object.assign(S.projection, prior); applyProjectionConstraints(); }, redo() { COMMANDS.setProjection(p); } };
+    }
+    case "setGrid": { const prior = pickKeys(S.grid, Object.keys(p.patch)); return { undo() { Object.assign(S.grid, prior); }, redo() { COMMANDS.setGrid(p); } }; }
+    case "setCanvas": { const prior = pickKeys(S.canvas, Object.keys(p.patch)); return { undo() { Object.assign(S.canvas, prior); }, redo() { COMMANDS.setCanvas(p); } }; }
+    case "setPalette": { const prior = S.palette; return { undo() { COMMANDS.setPalette({ palette: prior }); }, redo() { COMMANDS.setPalette(p); } }; }
+    default: return null;   // replaceScene: loadScene resets history itself
+  }
+}
+function dispatch(type, payload) {
+  const fn = COMMANDS[type];
+  if (!fn) { console.warn("unknown command", type); return; }
+  const inv = makeInverse(type, payload || {});
+  const r = fn(payload || {});
+  if (inv) pushHist(inv);
+  requestRender();
+  syncPalettes();
+  return r;
+}
+
+/* ===========================================================================
+   INPUT  — pointer (pan/zoom/select/marquee/drag-move), keyboard, DnD, paste.
+=========================================================================== */
+const stageEl = $("stage");
+let _space = false;
+
+// ---- wheel zoom toward cursor ----
+cv.addEventListener("wheel", e => {
+  e.preventDefault();
+  const rect = cv.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  const before = viewToWorld(mx, my);
+  const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+  V.cam.zoom = Math.min(8, Math.max(0.15, V.cam.zoom * factor));
+  const after = viewToWorld(mx, my);
+  V.cam.x += (after.x - before.x) * V.cam.zoom;
+  V.cam.y += (after.y - before.y) * V.cam.zoom;
+  requestRender();
+}, { passive: false });
+
+// ---- pointer down ----
+cv.addEventListener("pointerdown", e => {
+  cv.setPointerCapture(e.pointerId);
+  const rect = cv.getBoundingClientRect();
+  const vx = e.clientX - rect.left, vy = e.clientY - rect.top;
+
+  // Pan: space+drag or middle button
+  if (_space || e.button === 1) {
+    V.drag = { kind: "pan", vx, vy, camx: V.cam.x, camy: V.cam.y };
+    stageEl.classList.add("pan");
+    return;
+  }
+  if (e.button !== 0) return;
+
+  const world = viewToWorld(vx, vy);
+
+  // Armed blockout-place: drop a primitive on the hovered tile.
+  if (V.blockPick) {
+    const t = pickTile(world.x, world.y);
+    placePrimitive(t.x, t.y);
+    return;
+  }
+  // Armed tray-place: drop a new instance on the hovered tile.
+  if (V.trayPick) {
+    const t = pickTile(world.x, world.y);
+    placeFromTray(V.trayPick, t.x, t.y);
+    return;
+  }
+
+  const hitId = hitTest(world.x, world.y);
+  if (hitId) {
+    if (e.shiftKey) { V.sel.has(hitId) ? V.sel.delete(hitId) : V.sel.add(hitId); }
+    else if (!V.sel.has(hitId)) { V.sel.clear(); V.sel.add(hitId); }
+    // begin drag-move of the whole selection
+    const origins = [...V.sel].map(id => { const i = getInst(id); return { id, x: i.tile.x, y: i.tile.y }; });
+    V.drag = { kind: "move", startWorld: world, origins, moved: false };
+    syncPalettes(); requestRender();
+  } else {
+    // start marquee (clears selection unless shift-adding)
+    if (!e.shiftKey) V.sel.clear();
+    V.drag = { kind: "marquee", x0: vx, y0: vy, x1: vx, y1: vy, add: e.shiftKey, base: new Set(V.sel) };
+    syncPalettes(); requestRender();
+  }
+});
+
+// ---- pointer move ----
+cv.addEventListener("pointermove", e => {
+  const rect = cv.getBoundingClientRect();
+  const vx = e.clientX - rect.left, vy = e.clientY - rect.top;
+  const world = viewToWorld(vx, vy);
+  const t = pickTile(world.x, world.y);
+  if (!V.hoverTile || V.hoverTile.x !== t.x || V.hoverTile.y !== t.y) { V.hoverTile = t; requestRender(); }
+
+  if (!V.drag) return;
+  if (V.drag.kind === "pan") {
+    V.cam.x = V.drag.camx + (vx - V.drag.vx);
+    V.cam.y = V.drag.camy + (vy - V.drag.vy);
+    requestRender();
+  } else if (V.drag.kind === "move") {
+    const dt = { x: world.x - V.drag.startWorld.x, y: world.y - V.drag.startWorld.y };
+    // translate world-pixel delta into tile-space delta directly (inverse transform, linear):
+    const dTileX = (dt.x / halfW() + dt.y / halfH()) / 2;
+    const dTileY = (dt.y / halfH() - dt.x / halfW()) / 2;
+    const moves = V.drag.origins.map(o => ({
+      id: o.id,
+      x: snapTile(o.x + dTileX),
+      y: snapTile(o.y + dTileY),
+    }));
+    if (dTileX || dTileY) V.drag.moved = true;
+    COMMANDS.moveInstances({ moves }); requestRender();
+  } else if (V.drag.kind === "marquee") {
+    V.drag.x1 = vx; V.drag.y1 = vy;
+    updateMarqueeSelection();
+    requestRender();
+  }
+});
+
+// ---- pointer up ----
+cv.addEventListener("pointerup", e => {
+  if (V.drag && V.drag.kind === "move" && V.drag.moved) {
+    // Coalesce the entire drag into ONE undoable step (origins -> final tiles).
+    const before = V.drag.origins.map(o => ({ id: o.id, x: o.x, y: o.y }));
+    const after = V.drag.origins
+      .map(o => { const i = getInst(o.id); return i ? { id: o.id, x: i.tile.x, y: i.tile.y } : null; })
+      .filter(Boolean);
+    pushHist({ undo() { COMMANDS.moveInstances({ moves: before }); }, redo() { COMMANDS.moveInstances({ moves: after }); } });
+    syncPalettes();
+  }
+  if (V.drag && V.drag.kind === "pan") stageEl.classList.remove("pan");
+  V.drag = null;
+  requestRender();   // clear alignment guides
+});
+
+function updateMarqueeSelection() {
+  const d = V.drag;
+  const x = Math.min(d.x0, d.x1), y = Math.min(d.y0, d.y1);
+  const w = Math.abs(d.x1 - d.x0), h = Math.abs(d.y1 - d.y0);
+  const sel = new Set(d.add ? d.base : []);
+  for (const inst of S.instances) {
+    const b = instBounds(inst); if (!b) continue;
+    const v = worldToView(b.wx, b.wy);
+    const bw = b.drawW * V.cam.zoom, bh = b.drawH * V.cam.zoom;
+    if (v.x < x + w && v.x + bw > x && v.y < y + h && v.y + bh > y) sel.add(inst.id);
+  }
+  V.sel = sel; syncPalettes();
+}
+
+// Topmost instance whose bounds (and opaque pixel) contain a world point.
+function hitTest(wx, wy) {
+  _sortBuf.length = 0;
+  for (let i = 0; i < S.instances.length; i++) _sortBuf.push(i);
+  _sortBuf.sort((ia, ib) => { const c = cmpDepth(S.instances[ia], S.instances[ib]); return c !== 0 ? c : ia - ib; });
+  // iterate front-to-back (reverse of draw order)
+  for (let k = _sortBuf.length - 1; k >= 0; k--) {
+    const inst = S.instances[_sortBuf[k]];
+    const b = instBounds(inst); if (!b) continue;
+    if (wx >= b.wx && wx <= b.wx + b.drawW && wy >= b.wy && wy <= b.wy + b.drawH) return inst.id;
+  }
+  return null;
+}
+
+// ---- keyboard ----
+window.addEventListener("keydown", e => {
+  const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement && document.activeElement.tagName);
+  if (e.key === " " && !typing) { _space = true; return; }
+  if (typing) return;
+
+  if (e.key === "?" || (e.shiftKey && e.key === "/")) { toggleModal(true); e.preventDefault(); return; }
+  if (e.key === "Escape") { if ($("modal").classList.contains("on")) toggleModal(false); else { V.sel.clear(); V.trayPick = null; V.blockPick = null; syncTray(); syncBlockSeg(); syncPalettes(); requestRender(); } return; }
+
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === "z" || e.key === "Z")) { e.preventDefault(); doUndo(); return; }
+  if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y" || (e.shiftKey && (e.key === "z" || e.key === "Z")))) { e.preventDefault(); doRedo(); return; }
+  if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) { e.preventDefault(); duplicateSelection(); return; }
+  if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteSelection(); return; }
+  if (e.key === "f" || e.key === "F") { e.preventDefault(); flipSelection(); return; }
+  if (e.key === "[") { e.preventDefault(); nudgeZBias(-1); return; }
+  if (e.key === "]") { e.preventDefault(); nudgeZBias(1); return; }
+
+  // arrow nudge
+  const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+  if (arrows[e.key] && V.sel.size) {
+    e.preventDefault();
+    const [dx, dy] = arrows[e.key];
+    if (e.shiftKey) nudgePixels(dx, dy);   // 1px screen nudge -> fractional tile
+    else nudgeTiles(dx, dy);               // 1 whole tile
+  }
+});
+window.addEventListener("keyup", e => { if (e.key === " ") _space = false; });
+
+// ---- drag-drop image import (anywhere on the app) ----
+["dragover", "drop"].forEach(ev => $("app").addEventListener(ev, e => e.preventDefault()));
+$("app").addEventListener("drop", e => {
+  const files = [...(e.dataTransfer.files || [])].filter(f => /^image\//.test(f.type));
+  files.forEach(readImageFile);
+  const t = e.dataTransfer.getData && e.dataTransfer.getData("text/uri-list");
+  if (!files.length && t) importImageSrc(t, "dropped");
+});
+
+// ---- clipboard paste ----
+window.addEventListener("paste", e => {
+  const items = [...(e.clipboardData && e.clipboardData.items || [])];
+  for (const it of items) {
+    if (it.type && it.type.startsWith("image/")) { const f = it.getAsFile(); if (f) readImageFile(f); }
+  }
+});
+
+// ---- file picker import ----
+$("fileImport").addEventListener("change", e => { [...e.target.files].forEach(readImageFile); e.target.value = ""; });
+
+/* ===========================================================================
+   SELECTION ACTIONS  (all funnel through dispatch/COMMANDS)
+=========================================================================== */
+function selectionInsts() { return [...V.sel].map(getInst).filter(Boolean); }
+
+function duplicateSelection() {
+  if (!V.sel.size) return;
+  const newIds = new Set();
+  withBatch(() => {   // one undo step for the whole duplicate
+    for (const inst of selectionInsts()) {
+      const copy = JSON.parse(JSON.stringify(inst));
+      copy.id = uid("i"); copy.tile = { x: inst.tile.x + 1, y: inst.tile.y + 1 };
+      dispatch("addInstance", { inst: copy }); newIds.add(copy.id);
+    }
+  });
+  V.sel = newIds; syncPalettes(); requestRender();
+}
+function deleteSelection() {
+  if (!V.sel.size) return;
+  dispatch("removeInstances", { ids: [...V.sel] });
+  V.sel.clear(); syncPalettes(); requestRender();
+}
+function flipSelection() {
+  for (const inst of selectionInsts()) dispatch("updateInstance", { id: inst.id, patch: { flipX: !inst.flipX } });
+}
+// Apply a tile-space nudge to the selection, coalescing rapid consecutive
+// nudges of the same selection into one history entry (feature 10).
+function applyNudge(dTileX, dTileY) {
+  const insts = selectionInsts(); if (!insts.length) return;
+  const before = insts.map(i => ({ id: i.id, x: i.tile.x, y: i.tile.y }));
+  const after = insts.map(i => ({ id: i.id, x: i.tile.x + dTileX, y: i.tile.y + dTileY }));
+  COMMANDS.moveInstances({ moves: after });
+  const ids = insts.map(i => i.id).join(",");
+  const top = H.undo[H.undo.length - 1];
+  if (!H.batch && !H.redo.length && top && top.nudgeIds === ids && Date.now() - top.t < 1200) {
+    top.after = after; top.t = Date.now();               // merge into the live nudge run
+  } else {
+    pushHist({
+      nudgeIds: ids, t: Date.now(), before, after,
+      undo() { COMMANDS.moveInstances({ moves: this.before }); },
+      redo() { COMMANDS.moveInstances({ moves: this.after }); },
+    });
+  }
+  requestRender(); syncPalettes();
+}
+function nudgeTiles(dx, dy) { applyNudge(dx, dy); }
+function nudgePixels(dx, dy) {
+  // 1px screen-space nudge translated to tile-space (fractional, inverse transform)
+  const dTileX = (dx / halfW() + dy / halfH()) / 2;
+  const dTileY = (dy / halfH() - dx / halfW()) / 2;
+  applyNudge(dTileX, dTileY);
+}
+function nudgeZBias(d) {
+  for (const inst of selectionInsts()) dispatch("updateInstance", { id: inst.id, patch: { zBias: (inst.zBias || 0) + d } });
+}
+
+/* ===========================================================================
+   IMPORT  — load an image into the asset library, add a tray thumbnail.
+=========================================================================== */
+function readImageFile(file) {
+  const r = new FileReader();
+  r.onload = () => importImageSrc(String(r.result), file.name.replace(/\.[^.]+$/, ""));
+  r.readAsDataURL(file);   // data URI -> self-contained scenes
+}
+function importImageSrc(src, name) {
+  const img = new Image();
+  img.onload = () => {
+    const asset = {
+      id: uid("a"),
+      name: name || "asset",
+      src,
+      anchor: { x: 0.5, y: 1 },     // anchor-at-feet default (schema default)
+      footprint: { w: 1, h: 1 },
+      sourceW: img.naturalWidth, sourceH: img.naturalHeight,
+      _img: img,
+    };
+    dispatch("addAsset", { asset });
+    syncTray();
+  };
+  img.onerror = () => alert("Could not load image: " + name);
+  img.src = src;
+}
+
+// Place a new instance of an asset at a tile.
+function placeFromTray(assetId, tx, ty) {
+  const inst = {
+    id: uid("i"), assetId,
+    tile: { x: snapTile(tx), y: snapTile(ty) },
+    elevation: 0, layer: "props", zBias: 0, flipX: false, scale: 1,
+  };
+  dispatch("addInstance", { inst });
+  V.sel.clear(); V.sel.add(inst.id);
+  syncPalettes(); requestRender();
+  // stay armed for rapid placement; Esc disarms.
+}
+
+// Place a blockout primitive (v2 feature 8) at a tile, using the palette params.
+function placePrimitive(tx, ty) {
+  const w = Math.max(1, +$("pW").value | 0), h = Math.max(1, +$("pH").value | 0);
+  const ht = Math.max(0.1, +$("pHt").value || 1);
+  const inst = {
+    id: uid("i"),
+    primitive: { kind: V.blockPick, w, h, height: ht },
+    tile: { x: snapTile(tx), y: snapTile(ty) },
+    elevation: 0, layer: "props", zBias: 0, flipX: false, scale: 1,
+  };
+  dispatch("addInstance", { inst });
+  V.sel.clear(); V.sel.add(inst.id);
+  syncPalettes(); requestRender();
+  // stay armed for rapid blockout massing; Esc disarms.
+}
+
+/* ===========================================================================
+   PALETTES  — build the tray thumbnails + wire the docked right-rail controls,
+   and keep them in sync with the scene model (syncPalettes / syncTray).
+=========================================================================== */
+function syncTray() {
+  const grid = $("trayGrid"), empty = $("trayEmpty");
+  grid.innerHTML = "";
+  empty.style.display = S.assets.length ? "none" : "block";
+  for (const a of S.assets) {
+    const el = document.createElement("div");
+    el.className = "thumb" + (V.trayPick === a.id ? " sel" : "");
+    el.innerHTML = `<img src="${a.src}" alt=""><span class="nm">${escapeHtml(a.name)}</span><button class="x" title="Remove asset">×</button>`;
+    el.onclick = ev => {
+      if (ev.target.classList.contains("x")) { removeAssetAndInstances(a.id); return; }
+      V.trayPick = (V.trayPick === a.id ? null : a.id);
+      V.blockPick = null; syncBlockSeg();   // arming is exclusive
+      syncTray(); requestRender();
+    };
+    grid.appendChild(el);
+  }
+}
+function removeAssetAndInstances(id) {
+  // remove the asset AND any instances referencing it — one undo step
+  const insts = S.instances.filter(i => i.assetId === id).map(i => i.id);
+  withBatch(() => {
+    if (insts.length) dispatch("removeInstances", { ids: insts });
+    dispatch("removeAsset", { id });
+  });
+  if (V.trayPick === id) V.trayPick = null;
+  V.sel = new Set([...V.sel].filter(sid => getInst(sid)));
+  syncTray(); syncPalettes(); requestRender();
+}
+
+// --- Blockout palette wiring (v2 feature 8) ---
+function buildBlockSeg() {
+  const seg = $("primSeg"); seg.innerHTML = "";
+  for (const k of PRIM_KINDS) {
+    const b = document.createElement("button");
+    b.className = "btn"; b.textContent = k; b.dataset.k = k;
+    b.onclick = () => {
+      V.blockPick = (V.blockPick === k ? null : k);
+      if (V.blockPick) { V.trayPick = null; syncTray(); }
+      // convenience defaults: slab reads as a thin floor plate
+      if (k === "slab" && +$("pHt").value === 1) $("pHt").value = 0.25;
+      if (k === "box" && +$("pHt").value === 0.25) $("pHt").value = 1;
+      syncBlockSeg(); requestRender();
+    };
+    seg.appendChild(b);
+  }
+  syncBlockSeg();
+}
+function syncBlockSeg() {
+  const seg = $("primSeg");
+  [...seg.children].forEach(b => b.classList.toggle("on", b.dataset.k === V.blockPick));
+}
+const escapeHtml = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// --- Grid palette wiring ---
+function buildSnapSeg() {
+  const seg = $("snapSeg"); seg.innerHTML = "";
+  ["full", "half", "quarter", "free"].forEach(m => {
+    const b = document.createElement("button");
+    b.className = "btn" + (S.grid.snap === m ? " on" : "");
+    b.textContent = m; b.dataset.m = m;
+    b.onclick = () => { dispatch("setGrid", { patch: { snap: m } }); buildSnapSeg(); };
+    seg.appendChild(b);
+  });
+}
+$("projType").onchange = e => {
+  const t = e.target.value;
+  $("angleWrap").style.display = t === "custom" ? "" : "none";
+  dispatch("setProjection", { patch: { type: t } });
+  syncProjInputs();
+};
+$("tileW").onchange = e => { dispatch("setProjection", { patch: { tileW: Math.max(4, +e.target.value || 64) } }); syncProjInputs(); };
+$("tileH").onchange = e => { dispatch("setProjection", { patch: { tileH: Math.max(2, +e.target.value || 32) } }); syncProjInputs(); };
+$("angleDeg").onchange = e => { dispatch("setProjection", { patch: { angleDeg: Math.min(89, Math.max(1, +e.target.value || 26.565)) } }); };
+$("extentX").onchange = e => dispatch("setGrid", { patch: { extentX: Math.max(1, +e.target.value | 0) } });
+$("extentY").onchange = e => dispatch("setGrid", { patch: { extentY: Math.max(1, +e.target.value | 0) } });
+$("gridVis").onchange = e => dispatch("setGrid", { patch: { visible: e.target.checked } });
+
+function syncProjInputs() {
+  const p = S.projection;
+  $("projType").value = p.type;
+  $("tileW").value = p.tileW;
+  $("tileH").value = p.tileH;
+  $("angleDeg").value = p.angleDeg;
+  $("angleWrap").style.display = p.type === "custom" ? "" : "none";
+  // derived-height fields are read-only-ish for constrained projections
+  $("tileH").disabled = (p.type !== "custom");
+  const hints = {
+    dimetric21: "2:1 dimetric (commonly called isometric in games). Tile H is locked to W/2 for clean 2px:1px stepping.",
+    true: "True isometric (30° ground axis, all faces equal). Tile H follows tan30° ≈ 0.577·W.",
+    custom: "Custom ground-axis angle. Set tile W and H freely; angle is advisory metadata.",
+  };
+  $("projHint").textContent = hints[p.type] || "";
+}
+
+// --- Scene palette wiring ---
+$("bgColor").oninput = e => dispatch("setCanvas", { patch: { bg: e.target.value } });
+$("bgTransparent").onchange = e => dispatch("setCanvas", { patch: { bg: e.target.checked ? "transparent" : $("bgColor").value } });
+$("checker").onchange = e => dispatch("setCanvas", { patch: { checkerboard: e.target.checked } });
+$("canvasW").onchange = e => dispatch("setCanvas", { patch: { width: e.target.value ? +e.target.value : null } });
+$("canvasH").onchange = e => dispatch("setCanvas", { patch: { height: e.target.value ? +e.target.value : null } });
+
+// --- Inspector palette wiring ---
+function syncPalettes() {
+  syncProjInputs();
+  // scene tint select + SVG export eligibility (v2 features 9 + 11)
+  $("tintPreset").value = (typeof S.palette === "string" && presetByName(S.palette)) ? S.palette : "";
+  const svgBtn = $("btnSvg"), svgOk = svgEligible();
+  svgBtn.disabled = !svgOk;
+  svgBtn.title = svgOk
+    ? "Compose all instances into one SVG (vector primitives + tinted <image> refs)"
+    : (S.instances.length
+        ? "Disabled: the scene contains raster (non-SVG) assets — SVG export needs every placed asset to be SVG-sourced"
+        : "Disabled: nothing placed yet");
+  // Gate on RESOLVED instances, not V.sel.size — the selection can hold stale
+  // ids mid-dispatch (e.g. during removeInstances, before the caller prunes).
+  const insts = selectionInsts();
+  const has = insts.length > 0;
+  $("inspEmpty").style.display = has ? "none" : "block";
+  $("inspBody").style.display = has ? "block" : "none";
+  if (!has) return;
+  const inst = insts[0];
+  const a = getAsset(inst.assetId);
+  const isPrim = !!inst.primitive;
+  const label = a ? a.name : (isPrim ? "blockout " + inst.primitive.kind : inst.assetId);
+  $("inspTitle").textContent = V.sel.size > 1 ? `${V.sel.size} selected (editing "${label}")` : label;
+  $("iTileX").value = inst.tile.x;
+  $("iTileY").value = inst.tile.y;
+  $("iElev").value = inst.elevation || 0;
+  $("iZBias").value = inst.zBias || 0;
+  $("iScale").value = inst.scale || 1;
+  $("iLayer").value = inst.layer || "props";
+  $("iFlipX").checked = !!inst.flipX;
+  $("inspAsset").style.display = isPrim ? "none" : "block";
+  $("inspPrim").style.display = isPrim ? "block" : "none";
+  if (isPrim) {
+    $("iPrimW").value = inst.primitive.w || 1;
+    $("iPrimH").value = inst.primitive.h || 1;
+    $("iPrimHt").value = inst.primitive.height != null ? inst.primitive.height : 1;
+  } else if (a) {
+    $("iFpW").value = (a.footprint && a.footprint.w) || 1;
+    $("iFpH").value = (a.footprint && a.footprint.h) || 1;
+    $("iAncX").value = (a.anchor && a.anchor.x) != null ? a.anchor.x : 0.5;
+    $("iAncY").value = (a.anchor && a.anchor.y) != null ? a.anchor.y : 1;
+  }
+  if (/^#[0-9a-fA-F]{6}$/.test(inst.tint || "")) $("iTint").value = inst.tint;
+}
+// Inspector inputs -> apply to ALL selected instances (position applies to primary; the rest keep relative? keep simple: apply per-field)
+function inspApply(field, val) {
+  for (const inst of selectionInsts()) {
+    if (field === "tileX") dispatch("updateInstance", { id: inst.id, patch: { tile: { x: val, y: inst.tile.y } } });
+    else if (field === "tileY") dispatch("updateInstance", { id: inst.id, patch: { tile: { x: inst.tile.x, y: val } } });
+    else if (field === "elevation") dispatch("updateInstance", { id: inst.id, patch: { elevation: val } });
+    else if (field === "zBias") dispatch("updateInstance", { id: inst.id, patch: { zBias: val } });
+    else if (field === "scale") dispatch("updateInstance", { id: inst.id, patch: { scale: Math.max(0.05, val) } });
+    else if (field === "layer") dispatch("updateInstance", { id: inst.id, patch: { layer: val } });
+    else if (field === "flipX") dispatch("updateInstance", { id: inst.id, patch: { flipX: val } });
+  }
+}
+$("iTileX").onchange = e => inspApply("tileX", +e.target.value | 0);
+$("iTileY").onchange = e => inspApply("tileY", +e.target.value | 0);
+$("iElev").onchange = e => inspApply("elevation", +e.target.value || 0);
+$("iZBias").onchange = e => inspApply("zBias", +e.target.value || 0);
+$("iScale").onchange = e => inspApply("scale", +e.target.value || 1);
+$("iLayer").onchange = e => inspApply("layer", e.target.value);
+$("iFlipX").onchange = e => inspApply("flipX", e.target.checked);
+// footprint + anchor edit the ASSET (affects every instance)
+$("iFpW").onchange = e => { const inst = selectionInsts()[0]; if (inst) { const a = getAsset(inst.assetId); dispatch("updateAsset", { id: a.id, patch: { footprint: { w: Math.max(1, +e.target.value | 0), h: (a.footprint && a.footprint.h) || 1 } } }); } };
+$("iFpH").onchange = e => { const inst = selectionInsts()[0]; if (inst) { const a = getAsset(inst.assetId); dispatch("updateAsset", { id: a.id, patch: { footprint: { w: (a.footprint && a.footprint.w) || 1, h: Math.max(1, +e.target.value | 0) } } }); } };
+$("iAncX").onchange = e => { const inst = selectionInsts()[0]; if (inst) { const a = getAsset(inst.assetId); dispatch("updateAsset", { id: a.id, patch: { anchor: { x: clamp01(+e.target.value), y: (a.anchor && a.anchor.y) != null ? a.anchor.y : 1 } } }); } };
+$("iAncY").onchange = e => { const inst = selectionInsts()[0]; if (inst) { const a = getAsset(inst.assetId); dispatch("updateAsset", { id: a.id, patch: { anchor: { x: (a.anchor && a.anchor.x) != null ? a.anchor.x : 0.5, y: clamp01(+e.target.value) } } }); } };
+const clamp01 = v => Math.min(1, Math.max(0, v || 0));
+// primitive params edit the INSTANCE's primitive object (per-instance, unlike asset defaults)
+function primPatch(k, v) {
+  for (const inst of selectionInsts())
+    if (inst.primitive) dispatch("updateInstance", { id: inst.id, patch: { primitive: Object.assign({}, inst.primitive, { [k]: v }) } });
+}
+$("iPrimW").onchange = e => primPatch("w", Math.max(1, +e.target.value | 0));
+$("iPrimH").onchange = e => primPatch("h", Math.max(1, +e.target.value | 0));
+$("iPrimHt").onchange = e => primPatch("height", Math.max(0.1, +e.target.value || 1));
+// per-instance tri-tone tint (v2 feature 9); Clear reverts to scene palette / native colours
+$("iTint").onchange = e => { for (const inst of selectionInsts()) dispatch("updateInstance", { id: inst.id, patch: { tint: e.target.value } }); };
+$("iTintClear").onclick = () => { for (const inst of selectionInsts()) dispatch("updateInstance", { id: inst.id, patch: { tint: null } }); };
+// scene-wide tint preset (v2 feature 9)
+$("tintPreset").onchange = e => dispatch("setPalette", { palette: e.target.value || null });
+function buildTintSelect() {
+  const sel = $("tintPreset");
+  const cur = (typeof S.palette === "string") ? S.palette : "";
+  sel.innerHTML = '<option value="">none (native colours)</option>' +
+    PRESETS.map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join("");
+  sel.value = presetByName(cur) ? cur : "";
+}
+$("btnDup").onclick = duplicateSelection;
+$("btnDel").onclick = deleteSelection;
+
+// --- zoom buttons ---
+$("zIn").onclick = () => { V.cam.zoom = Math.min(8, V.cam.zoom * 1.25); requestRender(); };
+$("zOut").onclick = () => { V.cam.zoom = Math.max(0.15, V.cam.zoom / 1.25); requestRender(); };
+$("zLv").onclick = () => { V.cam.zoom = 1; requestRender(); };
+
+// --- hotkey modal ---
+function toggleModal(on) { $("modal").classList.toggle("on", on); }
+$("modalClose").onclick = () => toggleModal(false);
+$("modal").onclick = e => { if (e.target === $("modal")) toggleModal(false); };
+
+/* ===========================================================================
+   IO  — PNG export (crop-to-content, transparent, 1×/2×/4×) and scene JSON
+   save/load conforming to scene-schema.json v1.0 (round-trips).
+=========================================================================== */
+
+// Compute the tight world-space bounding box of all instances (for crop-to-content).
+function contentBounds() {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, any = false;
+  for (const inst of S.instances) {
+    const b = instBounds(inst); if (!b) continue;
+    any = true;
+    minX = Math.min(minX, b.wx); minY = Math.min(minY, b.wy);
+    maxX = Math.max(maxX, b.wx + b.drawW); maxY = Math.max(maxY, b.wy + b.drawH);
+  }
+  if (!any) return null;
+  return { minX, minY, w: maxX - minX, h: maxY - minY };
+}
+
+// Shared export framing: fixed canvas size (Scene palette) wins; else tight
+// crop-to-content. Returns { W, H, ox, oy } (world offset) or null when empty.
+function exportFrame() {
+  const bounds = contentBounds();
+  if (!bounds && !(S.canvas.width && S.canvas.height)) return null;
+  let ox, oy, W, H;
+  if (S.canvas.width && S.canvas.height) {
+    W = S.canvas.width; H = S.canvas.height; ox = 0; oy = 0;
+    if (bounds) { ox = (W - bounds.w) / 2 - bounds.minX; oy = (H - bounds.h) / 2 - bounds.minY; }
+  } else {
+    W = Math.ceil(bounds.w); H = Math.ceil(bounds.h); ox = -bounds.minX; oy = -bounds.minY;
+  }
+  return { W, H, ox, oy };
+}
+// Offscreen canvas pre-scaled and pre-translated so all drawing happens in
+// pure WORLD coordinates (same code path as the live renderer).
+function makeExportCtx(f, scale) {
+  const out = document.createElement("canvas");
+  out.width = Math.max(1, Math.round(f.W * scale));
+  out.height = Math.max(1, Math.round(f.H * scale));
+  const octx = out.getContext("2d");
+  octx.imageSmoothingEnabled = false;
+  octx.scale(scale, scale);
+  octx.translate(f.ox, f.oy);
+  return { out, octx };
+}
+// Instances in canonical draw order (stable y-sort).
+function sortedInstances() {
+  return S.instances.map((_, i) => i)
+    .sort((ia, ib) => { const c = cmpDepth(S.instances[ia], S.instances[ib]); return c !== 0 ? c : ia - ib; })
+    .map(i => S.instances[i]);
+}
+
+function exportPNG(scale) {
+  const f = exportFrame();
+  if (!f) { alert("Nothing to export — place an asset first."); return; }
+  const { out, octx } = makeExportCtx(f, scale);
+  // transparent by default; honor an opaque scene bg (checkerboard is editor-only)
+  if (!S.canvas.checkerboard && !isTransparent(S.canvas.bg)) { octx.fillStyle = S.canvas.bg; octx.fillRect(-f.ox, -f.oy, f.W, f.H); }
+  for (const inst of sortedInstances()) drawInstance(octx, inst, 1.1 / scale);
+  out.toBlob(blob => downloadBlob(blob, `${(S.meta.name || "scene")}_${scale}x.png`), "image/png");
+}
+[...document.querySelectorAll("[data-png]")].forEach(b => b.onclick = () => exportPNG(+b.dataset.png));
+
+/* ---- ControlNet conditioning exports (v2 feature 8) ---- */
+// Reused scratch canvas: recolour an image to a flat silhouette of one colour.
+const _silh = document.createElement("canvas");
+const _silhCtx = _silh.getContext("2d");
+function silhouetteOf(img, color) {
+  _silh.width = img.naturalWidth || img.width;
+  _silh.height = img.naturalHeight || img.height;
+  _silhCtx.drawImage(img, 0, 0);
+  _silhCtx.globalCompositeOperation = "source-in";
+  _silhCtx.fillStyle = color;
+  _silhCtx.fillRect(0, 0, _silh.width, _silh.height);
+  _silhCtx.globalCompositeOperation = "source-over";
+  return _silh;
+}
+// Depth map: black background (far); each instance a flat grey from its
+// normalized depth scalar — near = white. Feeds ControlNet depth conditioning.
+// The EXPORT scalar folds elevation in: raising a block moves it toward the
+// ortho camera, so higher = nearer = whiter. One z-step counts unitZ/(2·halfH)
+// tile-steps of depth (0.5 at the default 64×32 / unitZ 16). This is export
+// normalization ONLY — the paint-sort key (depthKey) is deliberately untouched.
+function depthScalar(inst) {
+  return depthKey(inst)[0] + (inst.elevation || 0) * unitZ() / (2 * halfH());
+}
+function exportDepth(scale) {
+  const f = exportFrame();
+  if (!f) { alert("Nothing to export — place something first."); return; }
+  const { out, octx } = makeExportCtx(f, scale);
+  octx.fillStyle = "#000000"; octx.fillRect(-f.ox, -f.oy, f.W, f.H);
+  const insts = sortedInstances();
+  let min = Infinity, max = -Infinity;
+  for (const inst of insts) { const k = depthScalar(inst); if (k < min) min = k; if (k > max) max = k; }
+  const span = (max - min) || 1;
+  for (const inst of insts) {
+    const norm = (depthScalar(inst) - min) / span;     // 0 = far … 1 = near
+    const g = Math.round(48 + 207 * norm);             // keep geometry off pure black
+    const col = `rgb(${g},${g},${g})`;
+    if (inst.primitive) primDrawCanvas(octx, inst, { flat: col }, 1, "flat");
+    else { const b = instBounds(inst); if (b) drawInstImage(octx, inst, b, 0, 0, silhouetteOf(b.img, col)); }
+  }
+  out.toBlob(blob => downloadBlob(blob, `${(S.meta.name || "scene")}_depth_${scale}x.png`), "image/png");
+}
+// Lineart: visible edges only, black on white. Primitives render white-filled
+// + black-stroked in painter order (hidden-line removal for free); images get
+// an alpha-dilated outline. Feeds ControlNet lineart / MLSD conditioning.
+function exportLineart(scale) {
+  const f = exportFrame();
+  if (!f) { alert("Nothing to export — place something first."); return; }
+  const { out, octx } = makeExportCtx(f, scale);
+  octx.fillStyle = "#ffffff"; octx.fillRect(-f.ox, -f.oy, f.W, f.H);
+  const o = 1.4 / scale;   // outline thickness in world px (~1.4 output px)
+  for (const inst of sortedInstances()) {
+    if (inst.primitive) { primDrawCanvas(octx, inst, {}, 1.6 / scale, "line"); continue; }
+    const b = instBounds(inst); if (!b) continue;
+    const black = silhouetteOf(b.img, "#000000");
+    for (const d of [[-o, 0], [o, 0], [0, -o], [0, o], [-o, -o], [o, -o], [-o, o], [o, o]])
+      drawInstImage(octx, inst, b, d[0], d[1], black);
+    drawInstImage(octx, inst, b, 0, 0, silhouetteOf(b.img, "#ffffff"));
+  }
+  out.toBlob(blob => downloadBlob(blob, `${(S.meta.name || "scene")}_lineart_${scale}x.png`), "image/png");
+}
+[...document.querySelectorAll("[data-depth]")].forEach(b => b.onclick = () => exportDepth(+b.dataset.depth));
+[...document.querySelectorAll("[data-line]")].forEach(b => b.onclick = () => exportLineart(+b.dataset.line));
+
+/* ---- SVG export (v2 feature 11) — only when every placed instance is vector ---- */
+function svgEligible() {
+  return S.instances.length > 0 && S.instances.every(i =>
+    i.primitive || (((getAsset(i.assetId) || {}).src || "").startsWith("data:image/svg")));
+}
+// The svg-brand-tuner tri-tone filter, emitted natively into the SVG defs.
+function triToneFilterSvg(id, ramp) {
+  const D = hexToRgb(ramp[0]), M = hexToRgb(ramp[1]), L = hexToRgb(ramp[2]);
+  const tv = i => `${(D[i] / 255).toFixed(4)} ${(M[i] / 255).toFixed(4)} ${(L[i] / 255).toFixed(4)}`;
+  return `<filter id="${id}" color-interpolation-filters="sRGB"><feColorMatrix type="saturate" values="0"/>` +
+    `<feComponentTransfer><feFuncR type="table" tableValues="${tv(0)}"/><feFuncG type="table" tableValues="${tv(1)}"/>` +
+    `<feFuncB type="table" tableValues="${tv(2)}"/></feComponentTransfer></filter>`;
+}
+// Emit a primitive as SVG shapes (same primShape geometry as the canvas path).
+function primSvg(inst, tones) {
+  const s = primShape(inst), r2 = n => +n.toFixed(2);
+  const sw = ` stroke="${tones.ink}" stroke-width="1" stroke-linejoin="round"`;
+  if (s.kind === "cylinder") {
+    const { pT, pB, rx, ry } = s, RX = r2(rx), RY = r2(ry);
+    // left body half: down the left edge, base arc to bottom (ccw, sweep 0),
+    // up to the top ellipse's bottom, arc back to the left point (cw, sweep 1)
+    const left = `M ${r2(pT.x - rx)} ${r2(pT.y)} L ${r2(pB.x - rx)} ${r2(pB.y)} A ${RX} ${RY} 0 0 0 ${r2(pB.x)} ${r2(pB.y + ry)} L ${r2(pT.x)} ${r2(pT.y + ry)} A ${RX} ${RY} 0 0 1 ${r2(pT.x - rx)} ${r2(pT.y)} Z`;
+    const right = `M ${r2(pT.x + rx)} ${r2(pT.y)} L ${r2(pB.x + rx)} ${r2(pB.y)} A ${RX} ${RY} 0 0 1 ${r2(pB.x)} ${r2(pB.y + ry)} L ${r2(pT.x)} ${r2(pT.y + ry)} A ${RX} ${RY} 0 0 0 ${r2(pT.x + rx)} ${r2(pT.y)} Z`;
+    return `<path d="${left}" fill="${tones.left}"${sw}/><path d="${right}" fill="${tones.right}"${sw}/>` +
+      `<ellipse cx="${r2(pT.x)}" cy="${r2(pT.y)}" rx="${RX}" ry="${RY}" fill="${tones.top}"${sw}/>`;
+  }
+  return s.faces.map(fc =>
+    `<polygon points="${fc.pts.map(q => r2(q.x) + "," + r2(q.y)).join(" ")}" fill="${tones[fc.tone]}"${sw}/>`).join("");
+}
+function exportSVG() {
+  if (!svgEligible()) return;
+  const f = exportFrame(); if (!f) { alert("Nothing to export."); return; }
+  let defs = "", body = "";
+  const filterIds = new Map();   // ramp -> filter id (deduped)
+  for (const inst of sortedInstances()) {
+    const op = (inst.opacity != null && inst.opacity !== 1) ? ` opacity="${inst.opacity}"` : "";
+    if (inst.primitive) { body += `<g${op}>${primSvg(inst, effTones(inst))}</g>`; continue; }
+    const a = getAsset(inst.assetId), b = instBounds(inst); if (!a || !b) continue;
+    const ramp = rampFor(inst);
+    let filt = "";
+    if (ramp) {
+      const key = ramp.join("|");
+      if (!filterIds.has(key)) { const id = "tint" + filterIds.size; filterIds.set(key, id); defs += triToneFilterSvg(id, ramp); }
+      filt = ` filter="url(#${filterIds.get(key)})"`;
+    }
+    const x = +b.wx.toFixed(2), y = +b.wy.toFixed(2);
+    const w = +b.drawW.toFixed(2), h = +b.drawH.toFixed(2);
+    if (inst.flipX)
+      body += `<image href="${a.src}" x="${+(-(x + w)).toFixed(2)}" y="${y}" width="${w}" height="${h}" transform="scale(-1 1)"${filt}${op}/>`;
+    else
+      body += `<image href="${a.src}" x="${x}" y="${y}" width="${w}" height="${h}"${filt}${op}/>`;
+  }
+  const bg = (!S.canvas.checkerboard && !isTransparent(S.canvas.bg))
+    ? `<rect x="${+(-f.ox).toFixed(2)}" y="${+(-f.oy).toFixed(2)}" width="${f.W}" height="${f.H}" fill="${S.canvas.bg}"/>` : "";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${f.W}" height="${f.H}" viewBox="0 0 ${f.W} ${f.H}">` +
+    (defs ? `<defs>${defs}</defs>` : "") +
+    `<g transform="translate(${+f.ox.toFixed(2)} ${+f.oy.toFixed(2)})">${bg}${body}</g></svg>`;
+  downloadBlob(new Blob([svg], { type: "image/svg+xml" }), `${(S.meta.name || "scene")}.svg`);
+}
+$("btnSvg").onclick = exportSVG;
+
+// --- Scene JSON serialization (schema-conformant, round-trips) ---
+function sceneToJSON() {
+  const now = new Date().toISOString();
+  const scene = {
+    version: SCHEMA_VERSION,
+    meta: { name: S.meta.name || "untitled", generator: GENERATOR, modified: now },
+    projection: {
+      type: S.projection.type,
+      tileW: S.projection.tileW,
+      tileH: S.projection.tileH,
+      unitElevation: S.projection.unitElevation,
+    },
+    grid: { extentX: S.grid.extentX, extentY: S.grid.extentY, snap: S.grid.snap, visible: S.grid.visible },
+    assets: S.assets.map(a => ({
+      id: a.id, name: a.name, src: a.src,
+      anchor: { x: a.anchor.x, y: a.anchor.y },
+      footprint: { w: a.footprint.w, h: a.footprint.h },
+      ...(a.sourceW ? { sourceW: a.sourceW } : {}),
+      ...(a.sourceH ? { sourceH: a.sourceH } : {}),
+    })),
+    instances: S.instances.map(i => ({
+      id: i.id,
+      ...(i.assetId ? { assetId: i.assetId } : {}),
+      ...(i.primitive ? { primitive: {
+        kind: i.primitive.kind,
+        w: i.primitive.w || 1,
+        h: i.primitive.h || 1,
+        height: i.primitive.height != null ? i.primitive.height : 1,
+      } } : {}),
+      tile: { x: i.tile.x, y: i.tile.y },
+      elevation: i.elevation || 0,
+      layer: i.layer || "props",
+      zBias: i.zBias || 0,
+      flipX: !!i.flipX,
+      scale: i.scale || 1,
+      ...(i.tint ? { tint: i.tint } : {}),
+      ...(i.opacity != null && i.opacity !== 1 ? { opacity: i.opacity } : {}),
+    })),
+    ...(S.palette ? { palette: S.palette } : {}),
+    canvas: {
+      bg: S.canvas.bg,
+      checkerboard: !!S.canvas.checkerboard,
+      ...(S.canvas.width ? { width: S.canvas.width } : {}),
+      ...(S.canvas.height ? { height: S.canvas.height } : {}),
+    },
+  };
+  if (S.projection.type === "custom") scene.projection.angleDeg = S.projection.angleDeg;
+  return scene;
+}
+$("btnSaveScene").onclick = () => {
+  const json = JSON.stringify(sceneToJSON(), null, 2);
+  downloadBlob(new Blob([json], { type: "application/json" }), `${(S.meta.name || "scene")}.json`);
+};
+$("fileScene").addEventListener("change", e => {
+  const f = e.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = () => { try { loadScene(JSON.parse(String(r.result))); } catch (err) { alert("Invalid scene JSON: " + err.message); } };
+  r.readAsText(f); e.target.value = "";
+});
+
+function loadScene(scene) {
+  if (!scene || typeof scene !== "object") throw new Error("not an object");
+  if (!scene.version || !String(scene.version).startsWith("1.")) throw new Error("unsupported version " + scene.version);
+  if (!scene.projection) throw new Error("missing projection");
+  // rebuild the model, hydrating _img for each asset
+  S.projection = {
+    type: scene.projection.type || "dimetric21",
+    tileW: scene.projection.tileW || 64,
+    tileH: scene.projection.tileH || 32,
+    angleDeg: scene.projection.angleDeg || 26.565,
+    unitElevation: scene.projection.unitElevation || scene.projection.tileH || 16,
+  };
+  applyProjectionConstraints();
+  S.grid = Object.assign({ extentX: 16, extentY: 16, snap: "full", visible: true }, scene.grid || {});
+  S.canvas = Object.assign({ bg: "#eef4f7", checkerboard: false, width: null, height: null }, scene.canvas || {});
+  S.meta = Object.assign({ name: "untitled", generator: GENERATOR }, scene.meta || {});
+  S.assets = (scene.assets || []).map(a => {
+    const asset = {
+      id: a.id, name: a.name || a.id, src: a.src,
+      anchor: a.anchor || { x: 0.5, y: 1 },
+      footprint: a.footprint || { w: 1, h: 1 },
+      sourceW: a.sourceW, sourceH: a.sourceH, _img: new Image(),
+    };
+    asset._img.onload = requestRender;
+    asset._img.src = a.src;
+    return asset;
+  });
+  S.instances = (scene.instances || [])
+    .filter(i => i && i.tile && (i.assetId || i.primitive))   // schema: tile + anyOf(assetId|primitive)
+    .map(i => ({
+      id: i.id || uid("i"),
+      ...(i.assetId ? { assetId: i.assetId } : {}),
+      ...(i.primitive ? { primitive: {
+        kind: PRIM_KINDS.includes(i.primitive.kind) ? i.primitive.kind : "box",
+        w: i.primitive.w || 1,
+        h: i.primitive.h || 1,
+        height: i.primitive.height != null ? i.primitive.height : 1,
+      } } : {}),
+      tile: { x: i.tile.x, y: i.tile.y },
+      elevation: i.elevation || 0, layer: i.layer || "props", zBias: i.zBias || 0,
+      flipX: !!i.flipX, scale: i.scale || 1,
+      ...(i.tint ? { tint: i.tint } : {}),
+      ...(i.opacity != null ? { opacity: i.opacity } : {}),
+    }));
+  S.palette = scene.palette || null;
+  _sceneRamp = null; _tintCache.clear();     // invalidate tint caches for the new scene
+  H.undo.length = 0; H.redo.length = 0;      // a loaded scene starts a fresh history
+  V.sel.clear(); V.trayPick = null; V.blockPick = null;
+  buildTintSelect(); syncBlockSeg();
+  syncTray(); syncPalettes(); centerView(); requestRender();
+}
+
+function downloadBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/* ===========================================================================
+   BOOT
+=========================================================================== */
+function centerView() {
+  // center the origin / content in the viewport at current zoom
+  const b = contentBounds();
+  if (b) { V.cam.x = V.cssW / 2 - (b.minX + b.w / 2) * V.cam.zoom; V.cam.y = V.cssH / 2 - (b.minY + b.h / 2) * V.cam.zoom; }
+  else { V.cam.x = V.cssW / 2; V.cam.y = V.cssH / 3; }
+}
+
+function boot() {
+  $("verlabel").textContent = "v0.2";
+  applyProjectionConstraints();
+  resizeCanvas();
+  buildSnapSeg();
+  buildBlockSeg();
+  buildTintSelect();     // fallback presets first; live file may replace below
+  syncProjInputs();
+  syncTray();
+  syncPalettes();
+  $("bgColor").value = /^#/.test(S.canvas.bg) ? S.canvas.bg : "#eef4f7";
+  centerView();
+  requestRender();
+  requestAnimationFrame(frame);
+  // Load the full preset library from assets/palettes/ (served by server.mjs).
+  // Graceful fallback: on file:// or a missing file the 3 built-ins remain.
+  fetch("../palettes/three-tone-presets.json")
+    .then(r => (r.ok ? r.json() : Promise.reject()))
+    .then(j => {
+      if (j && Array.isArray(j.presets) && j.presets.length) {
+        PRESETS = j.presets;
+        _sceneRamp = null;
+        buildTintSelect();
+        requestRender();
+      }
+    })
+    .catch(() => {});
+}
+window.addEventListener("resize", () => { resizeCanvas(); requestRender(); });
+new ResizeObserver(() => { resizeCanvas(); requestRender(); }).observe($("stage"));
+boot();
+</script>
+</body>
+</html>

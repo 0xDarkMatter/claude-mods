@@ -5,6 +5,31 @@ All notable changes to claude-mods are documented here. Format follows
 [Semantic Versioning](https://semver.org/). Fuller narrative entries for
 feature releases live in the README "Recent Updates" section.
 
+## [3.5.0] - 2026-07-03
+
+### Added
+- **`isometric-ops` skill** - creation, refinement, composition, and export of
+  isometric illustrative assets for websites and games. 14 reference files carry
+  the exact projection math (true isometric 30° vs 2:1 dimetric 26.565° vs
+  pixel-neat 1:2 — with every constant derived and machine-checked), coordinate
+  transforms + y-sort depth doctrine, the tile-spec discipline that prevents
+  misaligned tilesets, SVG/CSS/three.js generation routes, pixel-art (Aseprite)
+  workflow, dual Blender ortho rigs (60° dimetric vs 54.736° true iso — a
+  distinction most tutorials gloss), engine tilemaps (Godot 4 / Unity / Phaser 3),
+  the AI pipeline (Recraft/Midjourney/Flux+LoRA with ControlNet depth/MLSD
+  structure control, upscale + vectorization ladders), asset sourcing with
+  AI-training-clause licence discipline, and a curated prompt library. Four
+  Resource-Protocol scripts: `iso-math.py` (constants, transforms, SVG grid
+  generator, per-tool transform recipes), `tile-validate.py` (AI-tile QA gate:
+  halo/bleed/anchor/palette), `sheet-pack.py` (spritesheet + JSON atlas), and a
+  `check-iso-facts.py` §7 staleness verifier (`--offline` gates PR CI on the
+  canonical constants; `--live` resolves cited npm packages weekly). Ships
+  **iso-studio**, a zero-dependency browser scene composer (snap-to-grid
+  staging, footprint-aware y-sort, control palettes, PNG/SVG/scene-JSON export,
+  and blockout-to-ControlNet depth/lineart export). Built by a file-partitioned
+  Opus/Sonnet agent workflow with per-file adversarial review against a
+  pinned-constants build brief.
+
 ## [3.4.0] - 2026-06-23
 
 ### Added

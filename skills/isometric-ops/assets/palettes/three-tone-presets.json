@@ -1,0 +1,111 @@
+{
+  "_schema": {
+    "id": "claude-mods.isometric-ops.three-tone-presets/v1",
+    "updated": "2026-07-03",
+    "doctrine": "references/style-guide.md — three-tone plane shading: the TOP plane (ground-facing-up) is lightest, one visible side plane is MID value, the other visible side plane is DARK. Apply the SAME tint/tonal family across every asset in a set and hold ONE fixed light direction for the whole scene or tileset. Do not mix top/left/right assignments within one set. Fields:",
+    "fields": {
+      "name": "kebab-case identifier, stable — safe to reference from prompts, configs, or scripts",
+      "description": "one-line: mood, genre fit, and where the palette comes from or is inspired by",
+      "ink": "hex — outline/linework stroke color (or 'none' convention marker if the style is strokeless; always a real hex here, pick the darkest neutral in the family when strokeless is intended)",
+      "top": "hex — top (roof/ground-plane) fill, lightest of the three plane tones",
+      "left": "hex — one side plane, mid tone (by convention: the side toward the light)",
+      "right": "hex — other side plane, dark tone (by convention: the side away from the light)",
+      "shadow": "hex — cast/ambient-occlusion shadow color; almost never pure black — usually a desaturated dark tint of the hue family, per style-guide.md's 'soft long shadows cast along plane angles'",
+      "accent": "hex — sparing highlight/CTA/emissive color, used at low area coverage for focal points",
+      "bg": "hex — recommended canvas/backdrop behind the asset or scene"
+    },
+    "usage": "top/left/right map directly to the plane-shading recipes in references/projection-math.md (SSR, Figma-hack, CSS/SVG plane transforms) and to references/ai-generation.md prompt color-language. left is conventionally the plane nearer the fixed light direction from style-guide.md; right is the plane away from it — swap left/right consistently across a whole set if your light comes from the other side, never per-asset.",
+    "verification": "top must be the highest-luminance fill of the three per preset (checked via WCAG relative-luminance, not raw hex-string comparison) — mirrored left/right (light-from-the-other-side) is a valid variant, top-is-not-lightest is not.",
+    "related": "references/style-guide.md (doctrine + inspiration canon), color-ops skill (OKLCH ramp construction, perceptual palette theory — this file supplies fixed instances, not the color-science derivation)"
+  },
+  "presets": [
+    {
+      "name": "kenney-prototype-grey",
+      "description": "Neutral warm-grey greybox set matching the Kenney.nl CC0 isometric prototype-tile look — for blockouts, engine wiring, and pre-art-pass level tests where color must not read as final.",
+      "ink": "#2b2b31",
+      "top": "#d8d6d0",
+      "left": "#a8a6a0",
+      "right": "#706e6a",
+      "shadow": "#4a4844",
+      "accent": "#5b9bd5",
+      "bg": "#eceae5"
+    },
+    {
+      "name": "pastel-dollhouse",
+      "description": "Soft, low-saturation warm pastels for cozy room-cutaway and dollhouse-aesthetic scenes (bedroom interiors, cafés, miniature domestic scenes).",
+      "ink": "#5a4a4e",
+      "top": "#fbe8d9",
+      "left": "#f0b8b4",
+      "right": "#c98a92",
+      "shadow": "#8e6570",
+      "accent": "#f7d154",
+      "bg": "#fdf3ea"
+    },
+    {
+      "name": "industrial-muted",
+      "description": "Desaturated steel and rust tones for warehouse, logistics, and factory-floor scenes — reads as functional infrastructure, not toyetic.",
+      "ink": "#23262b",
+      "top": "#9aa3ab",
+      "left": "#6c747c",
+      "right": "#454b52",
+      "shadow": "#2c3036",
+      "accent": "#d8862b",
+      "bg": "#c7cdd2"
+    },
+    {
+      "name": "cyberpunk-teal-violet",
+      "description": "High-contrast neon teal/violet duotone for control-room, server-room, and night-city scenes — pairs with the Grid Dynamics 'cyberpunk style, made in blender 3D' prompt scaffold.",
+      "ink": "#0c0a1a",
+      "top": "#7be6dc",
+      "left": "#3fb8d6",
+      "right": "#5a3f9e",
+      "shadow": "#241448",
+      "accent": "#ff4fd8",
+      "bg": "#120b24"
+    },
+    {
+      "name": "blueprint",
+      "description": "Monochrome cyanotype blueprint scheme — white/light-cyan linework on blueprint-blue fills, for engineering-diagram, floor-plan, and architectural-schematic renders rather than painterly illustration.",
+      "ink": "#e8f2ff",
+      "top": "#5f8fd9",
+      "left": "#3f6bb0",
+      "right": "#284a85",
+      "shadow": "#152c58",
+      "accent": "#ffffff",
+      "bg": "#0f2b5c"
+    },
+    {
+      "name": "earthy-game",
+      "description": "Warm terracotta, moss, and sand tones for stylized fantasy/adventure tile sets — floating islands, rustic villages, overworld terrain.",
+      "ink": "#3a2a1e",
+      "top": "#e0c07a",
+      "left": "#a8823f",
+      "right": "#7a5a2e",
+      "shadow": "#4a3620",
+      "accent": "#6f9c4a",
+      "bg": "#f2e3bd"
+    },
+    {
+      "name": "mono-ink",
+      "description": "Strict single-hue greyscale-with-a-whisper-of-blue for icon sets, technical diagrams, and print-safe line illustration where color must not compete with UI or text.",
+      "ink": "#111214",
+      "top": "#e4e6ea",
+      "left": "#b0b4bb",
+      "right": "#74787f",
+      "shadow": "#3a3d42",
+      "accent": "#3d7fd6",
+      "bg": "#f6f7f9"
+    },
+    {
+      "name": "brand-neutral",
+      "description": "Low-personality, high-adaptability neutral scheme for product/marketing isometric illustrations that must sit next to an arbitrary existing brand palette — swap only 'accent' to match the client brand color and the set still reads correctly.",
+      "ink": "#22242a",
+      "top": "#f2f3f5",
+      "left": "#c7cbd1",
+      "right": "#8d929b",
+      "shadow": "#565a61",
+      "accent": "#2e7dd6",
+      "bg": "#ffffff"
+    }
+  ]
+}
