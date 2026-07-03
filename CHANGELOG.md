@@ -23,12 +23,16 @@ feature releases live in the README "Recent Updates" section.
   generator, per-tool transform recipes), `tile-validate.py` (AI-tile QA gate:
   halo/bleed/anchor/palette), `sheet-pack.py` (spritesheet + JSON atlas), and a
   `check-iso-facts.py` §7 staleness verifier (`--offline` gates PR CI on the
-  canonical constants; `--live` resolves cited npm packages weekly). Ships
-  **iso-studio**, a zero-dependency browser scene composer (snap-to-grid
-  staging, footprint-aware y-sort, control palettes, PNG/SVG/scene-JSON export,
-  and blockout-to-ControlNet depth/lineart export). Built by a file-partitioned
-  Opus/Sonnet agent workflow with per-file adversarial review against a
-  pinned-constants build brief.
+  canonical constants; `--live` resolves cited npm packages weekly). The
+  companion **iso-studio** app — a zero-dependency browser scene composer
+  (snap-to-grid staging, footprint-aware y-sort, control palettes,
+  PNG/SVG/scene-JSON export, and blockout-to-ControlNet depth/lineart export)
+  — was built alongside and immediately extracted to its own repository
+  (github.com/0xDarkMatter/iso-studio) because an app with a roadmap and an
+  asset library is a product, not a skill resource; the skill routes to it via
+  `references/iso-studio.md`. Built by a file-partitioned Opus/Sonnet agent
+  workflow with per-file adversarial review against a pinned-constants build
+  brief.
 
 ## [3.4.0] - 2026-06-23
 

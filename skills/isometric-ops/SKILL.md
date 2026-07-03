@@ -1,6 +1,6 @@
 ---
 name: isometric-ops
-description: "Create, refine, compose, and export isometric illustrative assets for websites and games. Covers projection math (true isometric 30° vs 2:1 dimetric vs pixel 1:2), SVG/CSS/three.js generation, pixel-art workflow, Blender pre-render rigs, engine tilemaps (Godot/Unity/Phaser), AI generation with ControlNet structure control, asset sourcing and licences, and the bundled iso-studio scene composer (snap-to-grid staging, y-sort, blockout-to-ControlNet export). Use for: isometric, dimetric, axonometric, isometric illustration, isometric icon, isometric city, isometric room, isometric map, iso grid, isometric tiles, 2:1 tiles, tile spec, tileset, tilemap, y-sort, depth sorting, orthographic camera, SSR method, scale shear rotate, isometric CSS, isometric SVG, iso-studio, snap to grid, sprite sheet, spritesheet, atlas packing, isometric pixel art, Aseprite isometric, Blender isometric render, isometric AI generation, isometric LoRA, ControlNet isometric, isometric asset pack, Kenney isometric, isometric export."
+description: "Create, refine, compose, and export isometric illustrative assets for websites and games. Covers projection math (true isometric 30° vs 2:1 dimetric vs pixel 1:2), SVG/CSS/three.js generation, pixel-art workflow, Blender pre-render rigs, engine tilemaps (Godot/Unity/Phaser), AI generation with ControlNet structure control, asset sourcing and licences, and the companion iso-studio scene composer (standalone app: snap-to-grid staging, y-sort, blockout-to-ControlNet export). Use for: isometric, dimetric, axonometric, isometric illustration, isometric icon, isometric city, isometric room, isometric map, iso grid, isometric tiles, 2:1 tiles, tile spec, tileset, tilemap, y-sort, depth sorting, orthographic camera, SSR method, scale shear rotate, isometric CSS, isometric SVG, iso-studio, snap to grid, sprite sheet, spritesheet, atlas packing, isometric pixel art, Aseprite isometric, Blender isometric render, isometric AI generation, isometric LoRA, ControlNet isometric, isometric asset pack, Kenney isometric, isometric export."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
@@ -14,7 +14,8 @@ Create, refine, compose, and export isometric illustrative assets for websites a
 games — end to end. This skill covers the exact projection math, the vector/CSS/SVG and
 three.js generation routes, the pixel-art and Blender pre-render pipelines, engine
 tilemap integration, the AI-generation-with-structure-control workflow, asset sourcing
-with licence discipline, and the bundled **iso-studio** scene composer. Every constant is
+with licence discipline, and the companion **iso-studio** scene composer (a standalone
+app that grew out of this skill). Every constant is
 derived and machine-checked; every workflow is runnable; every claim is sourced in its
 reference file.
 
@@ -196,9 +197,10 @@ three.js scene.
 
 ### Route E — Compose a scene (iso-studio)
 
-The bundled **iso-studio** scene composer stages assets on a snap-to-grid isometric canvas
-with automatic depth sorting and a blockout-to-ControlNet export path. See §5 below for the
-launch command and status.
+The companion **iso-studio** scene composer (standalone app, local checkout
+`X:\Forge\iso-studio`) stages assets on a snap-to-grid isometric canvas with automatic
+depth sorting and a blockout-to-ControlNet export path. See §5 below for the launch
+command and status.
 
 1. **Launch** the app (§5), pick a projection, set tile width and grid extent.
 2. **Import** PNG/SVG/WebP by drag-drop, paste, or file picker; assets land in the tray.
@@ -207,7 +209,7 @@ launch command and status.
 4. **Depth** sorts automatically by `(tileX + tileY)`, then elevation, then zBias, across
    ground / props / overlay layers.
 5. **Export** PNG at 1×/2×/4× (transparent, cropped) or save the scene as JSON conforming
-   to [`assets/scene-schema.json`](assets/scene-schema.json) (version "1.0").
+   to the app repo's `scene-schema.json` (version "1.0").
 6. **Blockout → ControlNet** (v2 feature): place flat-shaded grey primitives and export a
    depth-map / lineart render that conditions the AI pipeline (Route C, step 3).
 
@@ -247,18 +249,18 @@ Pure-stdlib scripts run with `python`; Pillow scripts use PEP 723 inline metadat
 | [`palettes/three-tone-presets.json`](assets/palettes/three-tone-presets.json) | 8 three-tone presets (`kenney-prototype-grey`, `pastel-dollhouse`, `industrial-muted`, `cyberpunk-teal-violet`, `blueprint`, `earthy-game`, `mono-ink`, `brand-neutral`); top-lightest verified by WCAG luminance | Route A/B, [`style-guide.md`](references/style-guide.md) |
 | [`grids/`](assets/grids/) | Pre-generated `true-iso-{32,64,128}.svg` and `dimetric-2to1-{32,64,128}.svg` (line slope 0.5 dimetric / tan30° true iso) | Route A, backdrops |
 | [`blender-iso-rig.py`](assets/blender-iso-rig.py) | Headless Blender ortho-rig + N-direction sprite baker + optional depth/normal passes | Route D, step 2 |
-| [`scene-schema.json`](assets/scene-schema.json) | Draft-07 JSON Schema (v1.0) the iso-studio scene files validate against | Route E, save/load |
-| [`iso-studio/`](assets/iso-studio/) | The zero-dependency scene composer (`index.html` + `server.mjs`); full manual: [`iso-studio.md`](references/iso-studio.md) | Route E, §5 |
+| **iso-studio** (external) | The zero-dependency scene composer — standalone repo at `X:\Forge\iso-studio` (github.com/0xDarkMatter/iso-studio), owns `scene-schema.json` + the asset library; pointer: [`iso-studio.md`](references/iso-studio.md) | Route E, §5 |
 
-## 5. iso-studio — the scene composer
+## 5. iso-studio — the scene composer (standalone app)
 
-**iso-studio** is a zero-dependency, no-build isometric scene composer bundled with this
-skill at `assets/iso-studio/` (`index.html` + `server.mjs`, no npm deps). Launch it, then
-work the docked palettes:
+**iso-studio** is a zero-dependency, no-build isometric scene composer that grew out of
+this skill and now lives in its own repository — local checkout `X:\Forge\iso-studio`,
+remote `github.com/0xDarkMatter/iso-studio` (`index.html` + `server.mjs`, no npm deps).
+Launch it, then work the docked palettes:
 
 ```
-node assets/iso-studio/server.mjs        # then open http://localhost:4323
-PORT=8080 node assets/iso-studio/server.mjs
+node X:\Forge\iso-studio\server.mjs      # then open http://localhost:4323
+PORT=8080 node X:\Forge\iso-studio\server.mjs
 ```
 
 - **Canvas + Grid** — projection selector (2:1 dimetric / true isometric / custom angle),
@@ -273,8 +275,7 @@ PORT=8080 node assets/iso-studio/server.mjs
 - **Inspector, Scene, Export palettes** — anchor/footprint/elevation/scale/flip/zBias
   editing; background/checkerboard/canvas size; PNG export at 1×/2×/4× (crop-to-content,
   transparent), SVG export (gated — every placed asset must be SVG-sourced), and scene
-  JSON save/load conforming to [`assets/scene-schema.json`](assets/scene-schema.json)
-  (version "1.0").
+  JSON save/load conforming to the app repo's `scene-schema.json` (version "1.0").
 - **Blockout mode (signature feature)** — place flat-shaded three-tone grey primitives
   (box / slab / ramp / cylinder) and export a **depth map** and a **lineart** render sized
   to the canvas; both condition the ControlNet step of the AI pipeline
@@ -285,9 +286,10 @@ PORT=8080 node assets/iso-studio/server.mjs
 The full manual — workspace tour, projection/snap configuration, anchor-at-feet
 discipline, the complete hotkey table, the scene-JSON schema walkthrough, the
 blockout → depth/lineart → ControlNet round trip step by step, and a "known limits"
-section (depth export is per-instance flat grey, not per-face; elevation is a sort
-tiebreaker, not a depth-normalization input; `flipX` has no effect on primitives) — lives
-in [`references/iso-studio.md`](references/iso-studio.md).
+section (depth export is per-instance flat grey, elevation-aware but not per-face;
+`flipX` mirrors a ramp's slope, no-op on symmetric primitives) — lives in the app repo
+at `docs/MANUAL.md`; this skill's [`references/iso-studio.md`](references/iso-studio.md)
+is the quickstart pointer.
 
 ---
 

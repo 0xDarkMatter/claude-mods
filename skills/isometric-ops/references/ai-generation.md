@@ -214,11 +214,12 @@ asset from multiple lighting angles — consistent, interactive, and grid-aligne
 pixelation post-process here if the target is pixel art.
 
 **Lightweight alternative — iso-studio blockout export.** The Blender route is powerful
-but heavy. The bundled **iso-studio** app (`assets/iso-studio/`, launch with
-`node server.mjs`) exports a blockout **depth map** (per-instance flat grey, normalized
-near-white → far-black — massing-grade conditioning) and a **lineart render** (visible
-edges, black on white) directly from a scene composed against
-`assets/scene-schema.json` — the same dual-control idea without a full Blender rig.
+but heavy. The companion **iso-studio** app (standalone repo, local checkout
+`X:\Forge\iso-studio`, launch with `node server.mjs`) exports a blockout **depth map**
+(per-instance flat grey, elevation-aware, normalized near-white → far-black —
+massing-grade conditioning) and a **lineart render** (visible edges, black on white)
+directly from a scene composed against its `scene-schema.json` — the same dual-control
+idea without a full Blender rig.
 Stage grey primitives on the grid, export both maps at 1×/2×/4×, and feed them to the
 depth + lineart/MLSD ControlNet units exactly as in the Blender workflow above. Full
 walkthrough: [`iso-studio.md`](iso-studio.md) §"Blockout → ControlNet".

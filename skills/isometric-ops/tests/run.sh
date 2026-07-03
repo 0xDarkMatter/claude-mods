@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
-# Self-test for isometric-ops scripts + iso-studio app.
+# Self-test for isometric-ops scripts.
 #
 # Offline-deterministic (no network, no live registry calls — check-iso-facts
 # is exercised only in --offline mode). Builds throwaway tile fixtures via
 # `uv run` + Pillow, asserts documented exit codes and key output of each
-# script, greps iso-studio's index.html/server.mjs for the load-bearing
-# contract points, then cleans up. Resolves paths relative to itself so it
-# works both in the repo and once installed to ~/.claude/skills/isometric-ops/.
+# script, then cleans up. Resolves paths relative to itself so it works both
+# in the repo and once installed to ~/.claude/skills/isometric-ops/.
+#
+# The companion iso-studio app was extracted to its own repository
+# (github.com/0xDarkMatter/iso-studio) and carries its own tests/run.sh.
 #
 # Usage:   bash tests/run.sh
 # Exit:    0 all pass (including graceful skips), 1 one or more failures
 #
-# Skips gracefully (with a message, not a failure) when uv or node are
-# unavailable on this machine — see the tile-validate/sheet-pack and
-# iso-studio sections below.
+# Skips gracefully (with a message, not a failure) when uv is unavailable —
+# see the tile-validate/sheet-pack sections below.
 
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL="$(dirname "$HERE")"
 SCRIPTS="$SKILL/scripts"
-STUDIO="$SKILL/assets/iso-studio"
 
 # Pick a python that actually executes — skips the Windows Store `python3`
 # stub (an app-execution alias that exits non-zero non-interactively).
@@ -259,76 +259,6 @@ echo "-- check-iso-facts.py --"
 expect_exit "--offline -> 0" 0 $?
 jout="$("$PYTHON" "$SCRIPTS/check-iso-facts.py" --offline --json 2>/dev/null)"
 expect_has "--offline --json parses" '"data"' "$jout"
-
-# ── iso-studio: node --check + index.html contract greps ──────────────────
-echo "-- iso-studio --"
-if command -v node >/dev/null 2>&1; then
-  if [[ -f "$STUDIO/server.mjs" ]]; then
-    node --check "$STUDIO/server.mjs" >/dev/null 2>&1
-    expect_exit "node --check server.mjs" 0 $?
-  else
-    echo "  SKIP  $STUDIO/server.mjs not found"
-  fi
-else
-  echo "  SKIP  node not found — server.mjs syntax check skipped"
-fi
-
-if [[ -f "$STUDIO/index.html" ]]; then
-  HTML="$STUDIO/index.html"
-  grep -q 'SCHEMA_VERSION *= *"1\.0"' "$HTML" && ok "index.html declares SCHEMA_VERSION \"1.0\"" \
-    || no "index.html missing SCHEMA_VERSION \"1.0\""
-  grep -q 'scene\.version' "$HTML" && ok "index.html checks scene.version on load" \
-    || no "index.html does not reference scene.version"
-  for mode in full half quarter free; do
-    grep -q "$mode" "$HTML" && ok "index.html mentions snap mode '$mode'" \
-      || no "index.html missing snap mode '$mode'"
-  done
-  for kind in box slab ramp cylinder; do
-    grep -q "\"$kind\"" "$HTML" && ok "index.html mentions blockout primitive '$kind'" \
-      || no "index.html missing blockout primitive '$kind'"
-  done
-  grep -q 'Manrope' "$HTML" && ok "index.html declares Manrope font stack" \
-    || no "index.html missing Manrope font stack"
-  grep -qE 'font-family *: *Manrope' "$HTML" && ok "index.html font-family starts with Manrope" \
-    || no "index.html font-family does not lead with Manrope"
-
-  # No external network requests. Pragmatic check: strip HTML/JS comments, then
-  # look for a scheme-qualified URL that isn't the SVG/XML namespace declaration
-  # or the localhost dev-server hint.
-  "$PYTHON" - "$HTML" <<'PYEOF' >"$SB/ext_url_check.out" 2>&1
-import re, sys
-with open(sys.argv[1], encoding="utf-8") as f:
-    src = f.read()
-# strip /* */ and // and <!-- --> comments (best-effort, line-based for //)
-src = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
-src = re.sub(r"<!--.*?-->", "", src, flags=re.S)
-lines = []
-for line in src.splitlines():
-    stripped = line.strip()
-    if stripped.startswith("//"):
-        continue
-    lines.append(line)
-src = "\n".join(lines)
-urls = re.findall(r'https?://[^\s"\'<>]+', src)
-# allow the XML/SVG namespace URIs only
-allowed_prefixes = (
-    "http://www.w3.org/2000/svg",
-    "http://www.w3.org/1999/xlink",
-)
-bad = [u for u in urls if not u.startswith(allowed_prefixes)]
-if bad:
-    print("UNEXPECTED_URLS:" + ",".join(sorted(set(bad))))
-    sys.exit(1)
-print("clean")
-PYEOF
-  if [[ "$(cat "$SB/ext_url_check.out")" == "clean" ]]; then
-    ok "index.html has no external network URLs outside XML namespaces"
-  else
-    no "index.html external URL check: $(cat "$SB/ext_url_check.out")"
-  fi
-else
-  echo "  SKIP  $STUDIO/index.html not found"
-fi
 
 # ── summary ────────────────────────────────────────────────────────────────
 echo "=== $PASS passed, $FAIL failed ==="

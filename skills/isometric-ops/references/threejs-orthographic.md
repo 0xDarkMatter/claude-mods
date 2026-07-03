@@ -378,8 +378,8 @@ Why rotate the subject and not the camera:
 - The camera frustum, zoom, and pixel-per-unit calibration (§4) never change, so every
   frame lands on the same pixel grid — no per-direction re-alignment.
 - For 4-direction sets use `DIRECTIONS = 4` (90° steps); mirror-symmetric subjects can bake
-  5 and flip in-engine (`flipX`) to save frames — the `flipX` field exists in
-  `assets/scene-schema.json` for exactly this.
+  5 and flip in-engine (`flipX`) to save frames — the `flipX` field exists in the
+  iso-studio app's `scene-schema.json` for exactly this.
 
 Anchor/pivot: keep the model's **visual feet at the pivot origin** so every baked frame
 shares the feet-anchor the depth sort expects (`references/coordinates-depth.md`), and the
