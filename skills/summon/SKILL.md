@@ -68,7 +68,8 @@ Mechanically identical — the file moves are the same regardless of which frami
 | `--list-accounts` | | Show all accounts and exit |
 | `--peek <id>` | | Preview a session's last messages and exit (id prefix or full) |
 | `--flat` | | Flat list instead of grouped hierarchy |
-| `--yes` | | Skip confirmation prompt |
+| `--select <picks>` | | Non-interactive selection: `--select "1,2,4"` or `--select all`. Replaces the picker prompt for scripted callers |
+| `--yes` | | Skip the final confirmation prompt only — selection is still required (picker prompt, piped stdin, or `--select`) |
 
 ## Auto-detect rules
 

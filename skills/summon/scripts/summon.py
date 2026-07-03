@@ -329,12 +329,26 @@ def hint(text: str, width: int = 70) -> str:
     return "\n".join(out)
 
 
+def _print_safe(line: str = "") -> None:
+    """print() that survives narrow stdout encodings (e.g. Windows cp1252).
+
+    Session titles carry arbitrary Unicode (e.g. '→') that the console
+    encoding may not represent; degrade those chars to '?' instead of
+    crashing with UnicodeEncodeError.
+    """
+    try:
+        print(line)
+    except UnicodeEncodeError:
+        enc = getattr(sys.stdout, "encoding", None) or "ascii"
+        print(str(line).encode(enc, errors="replace").decode(enc, errors="replace"))
+
+
 def echo(*lines):
     if not lines:
-        print()
+        _print_safe()
         return
     for line in lines:
-        print(line)
+        _print_safe(line)
 
 
 # ============================================================
@@ -927,8 +941,11 @@ def main():
     p.add_argument("--list-accounts", action="store_true", help="List all accounts and exit")
     p.add_argument("--peek", metavar="ID", help="Preview a session's last messages and exit (id prefix or full)")
     p.add_argument("--flat", action="store_true", help="Flat list instead of grouped hierarchy")
+    p.add_argument("--select", metavar="PICKS", default="",
+                   help="Non-interactive selection: numbers like '1,2,4', or 'a'/'all' for all")
     p.add_argument("--yes", action="store_true",
-                   help="Non-interactive: select ALL candidates and proceed without prompting")
+                   help="Skip the final confirmation prompt only — selection is still "
+                        "required (interactively, via piped stdin, or via --select)")
     args = p.parse_args()
 
     claude_dir = appdata_claude()
@@ -1051,35 +1068,59 @@ def main():
 
     echo(panel_close(hotkeys=[("#", "select"), ("a", "all"), ("blank", "cancel")]))
 
-    # Selection (default) — prompt for picks unless --yes (auto-all).
-    if args.yes:
-        chosen = list(candidates)
+    # Selection — --select answers the picker non-interactively; otherwise
+    # prompt for picks (piped stdin honoured too). --yes does NOT bypass
+    # selection; it only suppresses the final confirmation below.
+    def _parse_picks(raw: str) -> list[Session]:
+        if raw.lower() in ("a", "all"):
+            return list(candidates)
+        picks: list[Session] = []
+        for tok in raw.split(","):
+            tok = tok.strip()
+            if not tok:
+                continue
+            try:
+                i = int(tok)
+            except ValueError:
+                continue
+            if i in index_map:
+                picks.append(index_map[i])
+        return picks
+
+    if args.select:
+        chosen = _parse_picks(args.select)
+        if not chosen:
+            sys.exit(f"--select {args.select!r} matched none of the listed sessions")
     else:
         print()
         prompt = Term.color("accent", "select> ") + \
                  "(numbers like '3,5,7', 'a' for all, blank to cancel): "
-        raw = input(prompt).strip()
+        try:
+            raw = input(prompt).strip()
+        except EOFError:
+            raw = ""
         if not raw:
-            print(Term.color("meta", "cancelled."))
+            echo(Term.color("meta", "cancelled."))
             return
-        chosen: list[Session] = []
-        if raw.lower() == "a":
-            chosen = list(candidates)
-        else:
-            for tok in raw.split(","):
-                tok = tok.strip()
-                if not tok:
-                    continue
-                try:
-                    i = int(tok)
-                    if i in index_map:
-                        chosen.append(index_map[i])
-                except ValueError:
-                    continue
+        chosen = _parse_picks(raw)
         if not chosen:
-            print(Term.color("meta", "nothing selected — cancelled."))
+            echo(Term.color("meta", "nothing selected — cancelled."))
             return
     candidates = chosen
+
+    # Final are-you-sure — the only prompt --yes suppresses. Dry-run touches
+    # nothing, so it skips the confirmation too.
+    if not args.yes and not args.dry_run:
+        verb = "move" if args.move else "copy"
+        confirm = Term.color("accent", "confirm> ") + \
+                  f"{verb} {len(candidates)} session(s) to {dest_short}? (y/N): "
+        try:
+            resp = input(confirm).strip().lower()
+        except EOFError:
+            resp = ""
+        if resp not in ("y", "yes"):
+            echo(Term.color("meta", "cancelled."))
+            return
 
     dest_ws = pick_destination_workspace(dest)
 
