@@ -9,12 +9,20 @@
   DATA SHAPE per session row:
     [shortId, title, projectRoot, isArchived(0|1), isRunning(0|1), isoTimestamp, worktreeName("" if none)]
   REBOUND: set of shortIds to badge as recently-rebound (optional; empty Set() is fine).
+
+  Inject a GENEROUS window (e.g. `--days 30`) — the widget has its own client-side
+  "last X" age filter (24h/3d/7d/30d/all), so the user narrows without a re-run.
+  Duplicate wrapper copies (same session transfer-copied into several accounts) are
+  deduped by shortId in the widget, newest kept — no need to dedupe at injection.
 -->
 <h2 class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Interactive picker listing Claude Desktop sessions grouped by project, with checkboxes to select sessions for recovery or cross-account summon.</h2>
 <div id="sp" style="font-family:var(--font-sans);color:var(--text-primary);border:1px solid var(--border);border-radius:12px;background:var(--surface-1);overflow:hidden">
   <div style="display:flex;gap:var(--gap-sm);align-items:center;padding:var(--pad-md);border-bottom:1px solid var(--border);flex-wrap:wrap">
     <span style="font-weight:600">🪄 Session picker</span>
     <input id="flt" type="text" placeholder="filter title / path…" style="flex:1;min-width:140px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2);color:var(--text-primary);font:inherit;font-size:13px">
+    <select id="win" title="only show sessions active in the last…" style="padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2);color:var(--text-primary);font:inherit;font-size:13px">
+      <option value="">all</option><option value="24">24h</option><option value="72">3d</option><option value="168">7d</option><option value="720">30d</option>
+    </select>
     <span id="cnt" style="font-size:12px;color:var(--text-secondary);white-space:nowrap">0 selected</span>
   </div>
   <div id="groups"></div>
@@ -53,6 +61,7 @@ const S = [
  ["00000000","Example session title","X:\\Example\\Project",0,0,"2026-01-01T00:00:00Z",""]
 ];
 // >>> END INJECT <<<
+{ const seen = new Set(); let w = 0; for (const r of S) { if (!seen.has(r[0])) { seen.add(r[0]); S[w++] = r; } } S.length = w; }
 const NOW = Date.now();
 const age = ts => { const h = (NOW - Date.parse(ts)) / 36e5; return h < 1 ? Math.round(h*60)+"m" : h < 48 ? Math.round(h)+"h" : Math.round(h/24)+"d"; };
 const groups = {};
@@ -64,7 +73,7 @@ ordered.forEach((proj, gi) => {
   det.className = "grp"; det.open = gi < 2;
   const ids = groups[proj];
   det.innerHTML = `<summary><span class="car">▶</span><input type="checkbox" class="gchk" data-g="${gi}" onclick="event.stopPropagation()"><span style="font-family:var(--font-mono);font-size:12px">${proj}</span><span style="color:var(--text-muted);font-weight:400">(${ids.length})</span></summary>` +
-    ids.map(i => { const [id,t,,arch,run,ts,wt] = S[i]; return `<label class="row" data-i="${i}" data-txt="${(t+" "+proj+" "+wt).toLowerCase().replace(/"/g,"")}">
+    ids.map(i => { const [id,t,,arch,run,ts,wt] = S[i]; return `<label class="row" data-i="${i}" data-ts="${Date.parse(ts)}" data-txt="${(t+" "+proj+" "+wt).toLowerCase().replace(/"/g,"")}">
       <input type="checkbox" class="chk" data-i="${i}" data-g="${gi}">
       <span class="ttl" title="${t.replace(/"/g,"&quot;")}">${t}</span>
       ${wt ? `<span class="badge b-wt">⌥ ${wt.replace(/-[0-9a-f]+$/,"")}</span>` : ""}
@@ -97,11 +106,23 @@ document.getElementById("sp").addEventListener("change", e => {
         .forEach(c => c.checked = e.target.checked);
   refresh();
 });
-document.getElementById("flt").addEventListener("input", e => {
-  const q = e.target.value.toLowerCase();
-  document.querySelectorAll(".row").forEach(r => r.style.display = r.dataset.txt.includes(q) ? "" : "none");
-  document.querySelectorAll(".grp").forEach(d => { if (q) d.open = true; });
-});
+const flt = document.getElementById("flt"), win = document.getElementById("win");
+function applyFilters(){
+  const q = flt.value.toLowerCase();
+  const maxH = win.value ? +win.value : Infinity;
+  document.querySelectorAll(".row").forEach(r => {
+    const show = r.dataset.txt.includes(q) && (NOW - +r.dataset.ts) / 36e5 <= maxH;
+    r.style.display = show ? "" : "none";
+  });
+  document.querySelectorAll(".grp").forEach(d => {
+    const vis = [...d.querySelectorAll(".row")].some(r => r.style.display !== "none");
+    d.style.display = vis ? "" : "none";
+    if (q) d.open = true;
+  });
+  refresh();
+}
+flt.addEventListener("input", applyFilters);
+win.addEventListener("change", applyFilters);
 document.querySelectorAll(".peek").forEach(p => p.addEventListener("click", e => {
   e.preventDefault(); e.stopPropagation();
   const [id, t] = S[+p.dataset.i];
