@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 400" font-family="sans-serif">
+  <!-- Generic, brand-agnostic architecture diagram: a grey ramp so a desaturate->
+       tone-map has real midtones to remap. Load any SVG of your own instead. -->
+  <rect x="0" y="0" width="640" height="400" fill="#f4f4f4"/>
+
+  <!-- edges -->
+  <g stroke="#9aa0a6" stroke-width="2" fill="none">
+    <path d="M160 120 H240"/>
+    <path d="M400 120 H480"/>
+    <path d="M120 160 V240"/>
+    <path d="M520 160 V240"/>
+    <path d="M200 280 H440" stroke-dasharray="6 6"/>
+  </g>
+
+  <!-- nodes: a spread of greys -->
+  <g stroke="#5f6368" stroke-width="1.5">
+    <rect x="60"  y="90"  width="100" height="60" rx="10" fill="#d9dce0"/>
+    <rect x="240" y="90"  width="160" height="60" rx="10" fill="#b7bcc2"/>
+    <rect x="480" y="90"  width="100" height="60" rx="10" fill="#d9dce0"/>
+    <rect x="70"  y="240" width="120" height="56" rx="10" fill="#8b9198"/>
+    <rect x="450" y="240" width="120" height="56" rx="10" fill="#8b9198"/>
+  </g>
+
+  <!-- accent shapes -->
+  <circle cx="320" cy="270" r="34" fill="#6b7178" stroke="#3c4043" stroke-width="2"/>
+  <path d="M320 250 l16 28 h-32 z" fill="#f4f4f4"/>
+
+  <!-- labels -->
+  <g fill="#2b2f33" font-size="14" text-anchor="middle">
+    <text x="110" y="125">Client</text>
+    <text x="320" y="125">Gateway</text>
+    <text x="530" y="125">CDN</text>
+    <text x="130" y="273">Service A</text>
+    <text x="510" y="273">Service B</text>
+    <text x="320" y="345" font-size="12" fill="#5f6368">shared queue</text>
+  </g>
+</svg>

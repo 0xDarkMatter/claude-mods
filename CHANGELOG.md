@@ -5,6 +5,25 @@ All notable changes to claude-mods are documented here. Format follows
 [Semantic Versioning](https://semver.org/). Fuller narrative entries for
 feature releases live in the README "Recent Updates" section.
 
+## [3.6.0] - 2026-07-04
+
+### Added
+- **`svg-brand-tint-ops` skill** - zero-dependency in-browser SVG studio.
+  Recolour any SVG to a brand palette via a token-driven tri-tone
+  (`feColorMatrix` desaturate → `feComponentTransfer` grey-ramp remap →
+  theme-aware CSS-filter bake), plus a from-scratch raster vectoriser
+  (PNG → SVG): a Potrace-paper geometry stage (tolerance-tube straightness,
+  penalty-DP optimal polygon, sub-pixel vertex adjustment, alphamax corners —
+  reimplemented from Selinger 2003, no GPL code) over soft-field marching
+  squares with alpha-aware palette handling (matte de-blending, anti-alias
+  fringe cull, blend-veto). B&W / posterised / colour trace modes, a
+  photographic filter stack, curated Google Fonts on SVG `<text>`, element
+  hover-inspect, before/after split, palette-from-image, and SVG/PNG export.
+  Ships a ~90-line dependency-free static server (`scripts/server.mjs`), a
+  headless trace CLI (`scripts/trace.mjs`) sharing one canonical engine with
+  the browser tool (`assets/trace-core.mjs`), a colour-math + trace + theme
+  reference, and a 22-assertion offline test suite.
+
 ## [3.5.0] - 2026-07-03
 
 ### Added

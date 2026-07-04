@@ -1,0 +1,1336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SVG Studio — vectorise · recolour · theme any SVG</title>
+<!-- UI chrome fonts. The SVG-text font is loaded separately at runtime (#svgfont). -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link id="svgfont" rel="stylesheet" href="">
+<style>
+/* Evolution 7 design tokens — light is default; petrol is a [data-theme] swap. */
+:root, [data-theme='light']{
+  color-scheme:light;
+  --bg:#e5f3f8; --bg2:#d8ecf3; --panel:#ffffff; --panel2:#f2f9fb; --raise:#e7f2f7;
+  --line:#e2e2e2; --line2:#cfd6d8;
+  --ink:#002d3c; --ink2:#3c5560; --muted:#5a6b72; --faint:#87898c;
+  --accent:#5fb2d3; --accent-ink:#002d3c; --accent-dim:#3f94b8;
+  --hot:#ff6a1f; --good:#2f8f5c; --bad:#b33a3a;
+  --grid-line:rgba(0,45,60,.07); --floor:#e9f4f8; --checker:#dceaef;
+  --glass:rgba(255,255,255,.85); --overlay:rgba(233,244,248,.62);
+  --float-shadow:0 14px 30px rgba(0,45,60,.16);
+  --shadow:0 1px 0 rgba(0,45,60,.04), 0 10px 26px rgba(0,45,60,.10);
+}
+[data-theme='petrol']{
+  color-scheme:dark;
+  --bg:#001e29; --bg2:#012632; --panel:#002d3c; --panel2:#06333f; --raise:#0d3d4c;
+  --line:#1a3d4a; --line2:#2a4d5a;
+  --ink:#e8f0f2; --ink2:#bcd2da; --muted:#9fb6be; --faint:#6d8b95;
+  --accent:#89c6de; --accent-ink:#001e29; --accent-dim:#5fb2d3;
+  --hot:#ff9159; --good:#5bb081; --bad:#e08a8a;
+  --grid-line:rgba(137,198,222,.09); --floor:#001e29; --checker:#0a2731;
+  --glass:rgba(0,30,41,.80); --overlay:rgba(0,12,16,.55);
+  --float-shadow:0 16px 32px rgba(0,0,0,.42);
+  --shadow:0 1px 0 rgba(0,0,0,.2), 0 12px 28px rgba(0,0,0,.34);
+}
+:root{
+  --radius:10px; --radius-sm:6px;
+  --mono:'JetBrains Mono',ui-monospace,'SFMono-Regular',monospace;
+  --sans:'Manrope',system-ui,-apple-system,sans-serif;
+  --display:'Manrope',system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0; font-family:var(--sans); color:var(--ink);
+  background:radial-gradient(1100px 520px at 84% -12%, rgba(95,178,211,.16), transparent 62%), var(--bg);
+  -webkit-font-smoothing:antialiased; overflow:hidden;
+}
+button,input,select{font-family:inherit; color:inherit}
+::selection{background:var(--accent); color:var(--accent-ink)}
+
+/* ─── shell ─────────────────────────────────────────────────────────── */
+.app{display:grid; grid-template-rows:auto 1fr; height:100vh}
+.topbar{
+  display:flex; align-items:center; gap:16px; padding:12px 18px;
+  border-bottom:1px solid var(--line); background:linear-gradient(var(--panel),var(--bg2));
+}
+.brand{display:flex; align-items:baseline; gap:10px; user-select:none}
+.brand .mark{
+  font-family:var(--display); font-weight:800; font-size:22px; letter-spacing:-.01em;
+  background:linear-gradient(92deg,var(--ink),var(--accent) 130%); -webkit-background-clip:text; background-clip:text; color:transparent;
+}
+.brand .dot{width:9px; height:9px; border-radius:50%; background:var(--accent); box-shadow:0 0 14px var(--accent); align-self:center}
+.brand .sub{font-size:11px; color:var(--muted); letter-spacing:.14em; text-transform:uppercase}
+.spacer{flex:1}
+.chip{
+  font-family:var(--mono); font-size:11px; color:var(--ink2); background:var(--panel2);
+  border:1px solid var(--line); border-radius:999px; padding:5px 11px; white-space:nowrap;
+}
+.chip b{color:var(--accent); font-weight:700}
+.tbtn{
+  border:1px solid var(--line2); background:var(--panel2); color:var(--ink2);
+  border-radius:10px; padding:7px 12px; font-size:12.5px; cursor:pointer; transition:.14s;
+}
+.tbtn:hover{background:var(--raise); color:var(--ink); border-color:var(--accent-dim)}
+.tbtn.on{background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:600}
+.tbtn:disabled{opacity:.4; cursor:not-allowed}
+
+.body{display:grid; grid-template-columns:372px 1fr; min-height:0}
+
+/* ─── left rail ─────────────────────────────────────────────────────── */
+.rail{
+  border-right:1px solid var(--line); background:linear-gradient(180deg,var(--bg2),var(--bg));
+  overflow-y:auto; overflow-x:hidden; padding:14px 14px 60px;
+  scrollbar-width:thin; scrollbar-color:var(--raise) transparent;
+}
+.rail::-webkit-scrollbar{width:9px}
+.rail::-webkit-scrollbar-thumb{background:var(--raise); border-radius:9px; border:2px solid var(--bg)}
+
+.acc{border:1px solid var(--line); border-radius:var(--radius); background:var(--panel); margin-bottom:10px; overflow:hidden; transition:border-color .2s}
+.acc.open{border-color:var(--line2)}
+.acc.open.hot{border-color:var(--accent-dim); box-shadow:0 0 0 1px rgba(95,178,211,.22)}
+.acc>.head{
+  display:flex; align-items:center; gap:11px; padding:13px 14px; cursor:pointer; user-select:none;
+  transition:background .15s;
+}
+.acc>.head:hover{background:var(--panel2)}
+.acc>.head .idx{font-family:var(--mono); font-size:10px; color:var(--faint); width:18px}
+.acc>.head .ttl{font-weight:600; font-size:13.5px; letter-spacing:.01em; flex:1}
+.acc>.head .meta{font-family:var(--mono); font-size:10.5px; color:var(--muted)}
+.acc>.head .chev{width:16px; height:16px; color:var(--muted); transition:transform .22s; flex:none}
+.acc.open>.head .chev{transform:rotate(90deg); color:var(--accent)}
+.acc>.wrap{display:grid; grid-template-rows:0fr; transition:grid-template-rows .24s ease}
+.acc.open>.wrap{grid-template-rows:1fr}
+.acc>.wrap>.inner{overflow:hidden; min-height:0}
+.pad{padding:4px 14px 15px}
+
+.lbl{font-size:10.5px; font-weight:700; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); margin:14px 0 8px}
+.lbl:first-child{margin-top:2px}
+.hint{font-size:11px; color:var(--faint); line-height:1.5; margin-top:7px}
+.hint code{font-family:var(--mono); color:var(--muted); font-size:10.5px}
+
+/* controls */
+.sl{margin-bottom:11px}
+.sl .top{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:3px}
+.sl .top .n{font-size:12px; color:var(--ink2)}
+.sl .top .v{font-family:var(--mono); font-size:11.5px; color:var(--accent); font-weight:700}
+input[type=range]{-webkit-appearance:none; appearance:none; width:100%; height:22px; background:transparent; cursor:pointer; margin:0}
+input[type=range]::-webkit-slider-runnable-track{height:4px; border-radius:4px; background:linear-gradient(90deg,var(--accent-dim),var(--raise))}
+input[type=range]::-moz-range-track{height:4px; border-radius:4px; background:var(--raise)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:15px; height:15px; margin-top:-5.5px; border-radius:50%; background:var(--accent); border:2px solid var(--bg); box-shadow:0 2px 6px rgba(0,0,0,.5); transition:transform .1s}
+input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.18)}
+input[type=range]::-moz-range-thumb{width:13px; height:13px; border-radius:50%; background:var(--accent); border:2px solid var(--bg)}
+
+.seg{display:flex; gap:5px; flex-wrap:wrap}
+.seg button{flex:1; min-width:fit-content; border:1px solid var(--line); background:var(--panel2); color:var(--ink2); border-radius:8px; padding:7px 8px; font-size:11.5px; cursor:pointer; transition:.13s; white-space:nowrap}
+.seg button:hover{border-color:var(--accent-dim); color:var(--ink)}
+.seg button.on{background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:600}
+
+.row{display:flex; gap:8px; align-items:center}
+.row.wrap{flex-wrap:wrap}
+.btn{border:1px solid var(--line2); background:var(--panel2); color:var(--ink); border-radius:9px; padding:9px 12px; font-size:12.5px; cursor:pointer; transition:.14s; text-align:center; flex:1}
+.btn:hover{background:var(--raise); border-color:var(--accent-dim)}
+.btn.primary{background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:700}
+.btn.primary:hover{filter:brightness(1.06)}
+.btn.ghost{background:transparent}
+.btn:disabled{opacity:.4; cursor:not-allowed}
+.btn.wide{width:100%}
+
+.filebtn{display:block; width:100%; text-align:center; border:1.5px dashed var(--line2); background:var(--panel2);
+  border-radius:11px; padding:14px; font-size:13px; cursor:pointer; color:var(--ink2); transition:.15s}
+.filebtn:hover{border-color:var(--accent); color:var(--ink); background:var(--raise)}
+input[type=file]{display:none}
+
+.toggle{display:flex; align-items:center; gap:9px; cursor:pointer; font-size:12.5px; color:var(--ink2); margin:9px 0}
+.toggle .sw{width:34px; height:19px; border-radius:999px; background:var(--raise); border:1px solid var(--line2); position:relative; transition:.16s; flex:none}
+.toggle .sw::after{content:""; position:absolute; top:1.5px; left:1.5px; width:14px; height:14px; border-radius:50%; background:var(--muted); transition:.16s}
+.toggle.on .sw{background:var(--accent); border-color:var(--accent)}
+.toggle.on .sw::after{left:16px; background:var(--accent-ink)}
+
+.swatchrow{display:flex; gap:7px; align-items:stretch}
+.swatch{flex:1; display:flex; flex-direction:column; gap:5px; align-items:center; font-size:10px; color:var(--muted); position:relative}
+.swatch input[type=color]{width:100%; height:34px; padding:0; border:1px solid var(--line2); border-radius:8px; background:none; cursor:pointer}
+.swatch input[type=color]::-webkit-color-swatch-wrapper{padding:2px}
+.swatch input[type=color]::-webkit-color-swatch{border:none; border-radius:5px}
+.swatch .x{position:absolute; top:-6px; right:-4px; width:16px; height:16px; border-radius:50%; background:var(--bad); color:#fff; border:none; font-size:10px; line-height:16px; cursor:pointer; display:none}
+.swatch:hover .x{display:block}
+.stopmini{font-family:var(--mono); font-size:9px}
+
+select{width:100%; background:var(--panel2); color:var(--ink); border:1px solid var(--line2); border-radius:9px; padding:9px 10px; font-size:12.5px; cursor:pointer}
+optgroup{background:var(--bg2); color:var(--muted); font-style:normal}
+option{background:var(--panel); color:var(--ink)}
+
+.pillcard{background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:10px 11px; font-family:var(--mono); font-size:11px; line-height:1.75; color:var(--ink2); word-break:break-all}
+.pillcard .k{color:var(--faint); user-select:none}
+.pillcard .cc{display:inline-block; width:10px; height:10px; border-radius:3px; border:1px solid var(--line2); vertical-align:-1px; margin-right:3px}
+
+/* element list */
+.elist{max-height:230px; overflow:auto; border:1px solid var(--line); border-radius:9px; background:var(--bg2)}
+.eitem{display:flex; align-items:center; gap:8px; padding:6px 9px; font-size:11.5px; cursor:pointer; border-bottom:1px solid var(--line)}
+.eitem:last-child{border-bottom:none}
+.eitem:hover,.eitem.hot{background:var(--raise)}
+.eitem .tag{font-family:var(--mono); font-size:10px; color:var(--accent); width:52px; flex:none}
+.eitem .dsc{color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1}
+.eitem .sw2{width:12px; height:12px; border-radius:3px; border:1px solid var(--line2); flex:none}
+
+/* ─── viewport ──────────────────────────────────────────────────────── */
+.stage{position:relative; min-width:0; overflow:hidden; background:var(--bg2)}
+.viewport{position:absolute; inset:0; overflow:hidden; cursor:grab}
+.viewport.grabbing{cursor:grabbing}
+.viewport.inspect{cursor:crosshair}
+.canvasbg{position:absolute; inset:0}
+/* faint isometric floor — the artwork floats above it (grid is fixed; art pans over it) */
+.canvasbg.iso{
+  background-color:var(--floor);
+  background-image:
+    repeating-linear-gradient(30deg,  var(--grid-line) 0 1px, transparent 1px 46px),
+    repeating-linear-gradient(-30deg, var(--grid-line) 0 1px, transparent 1px 46px),
+    radial-gradient(135% 100% at 50% 16%, transparent 58%, rgba(0,45,60,.05));
+}
+/* Fallout-style green CRT: scanlines + phosphor glow + vignette + faint flicker */
+.canvasbg.crt{
+  background-color:#02150b;
+  background-image:
+    repeating-linear-gradient(0deg, rgba(0,25,10,.55) 0 1px, transparent 1px 3px),
+    radial-gradient(120% 90% at 50% 50%, rgba(46,255,120,.08), transparent 68%),
+    radial-gradient(135% 100% at 50% 12%, transparent 50%, rgba(0,0,0,.62));
+  animation:crtflicker 4s steps(48) infinite;
+}
+@keyframes crtflicker{ 0%,100%{opacity:1} 47%{opacity:.98} 50%{opacity:.95} 53%{opacity:.98} }
+.canvasbg.checker{
+  background-color:var(--card);
+  background-image:
+    linear-gradient(45deg,var(--checker) 25%,transparent 25%),linear-gradient(-45deg,var(--checker) 25%,transparent 25%),
+    linear-gradient(45deg,transparent 75%,var(--checker) 75%),linear-gradient(-45deg,transparent 75%,var(--checker) 75%);
+  background-size:22px 22px; background-position:0 0,0 11px,11px -11px,-11px 0;
+}
+.gridoverlay{position:absolute; inset:0; pointer-events:none; opacity:0; transition:opacity .2s;
+  background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+  background-size:40px 40px}
+.gridoverlay.on{opacity:1}
+.layer{position:absolute; inset:0; display:grid; place-items:center; filter:drop-shadow(var(--float-shadow))}
+.inner{will-change:transform; transform-origin:center center; display:grid; place-items:center}
+#art,#artBase{display:block; overflow:visible}
+#art svg,#artBase svg{display:block; max-width:none}
+.artwrap{}
+
+.emptyState{position:absolute; inset:0; display:grid; place-items:center; text-align:center; pointer-events:none; padding:40px}
+.emptyState .big{font-family:var(--display); font-size:26px; color:var(--ink2); margin-bottom:8px}
+.emptyState .small{font-size:13px; color:var(--muted); max-width:340px; line-height:1.6}
+.dropping .viewport{outline:2px dashed var(--accent); outline-offset:-14px}
+
+.hoverbox{position:absolute; border:1.5px solid var(--hot); background:rgba(255,106,31,.12); pointer-events:none; display:none; z-index:5; border-radius:2px}
+.tip{position:absolute; z-index:6; background:var(--bg2); border:1px solid var(--line2); border-radius:8px; padding:7px 9px;
+  font-family:var(--mono); font-size:10.5px; color:var(--ink2); pointer-events:none; display:none; box-shadow:var(--shadow); max-width:260px; line-height:1.6}
+.tip b{color:var(--accent)}
+
+.divider{position:absolute; top:0; bottom:0; width:2px; background:var(--accent); z-index:7; display:none; cursor:ew-resize}
+.divider::before{content:""; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:26px; height:26px; border-radius:50%; background:var(--accent); box-shadow:0 3px 10px rgba(0,0,0,.5)}
+.divider::after{content:"◂▸"; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:11px; color:var(--accent-ink); letter-spacing:-1px}
+.split .divider{display:block}
+.split .baseWrap{display:block}
+.baseWrap{display:none}
+
+.hud{position:absolute; top:14px; right:14px; display:flex; gap:6px; align-items:center; z-index:8;
+  background:var(--glass); backdrop-filter:blur(8px); border:1px solid var(--line2); border-radius:999px; padding:4px; box-shadow:var(--shadow)}
+.hud button{width:30px; height:30px; border:none; background:transparent; color:var(--ink2); font-size:15px; cursor:pointer; border-radius:50%; transition:.12s}
+.hud button:hover{background:var(--raise); color:var(--accent)}
+.hud .lv{width:auto; min-width:52px; font-family:var(--mono); font-size:11px; border-radius:999px}
+
+.readout{position:absolute; left:14px; bottom:14px; right:14px; z-index:8; display:flex; gap:14px; align-items:center; flex-wrap:wrap;
+  background:var(--glass); backdrop-filter:blur(8px); border:1px solid var(--line2); border-radius:11px; padding:9px 13px;
+  font-family:var(--mono); font-size:11px; color:var(--ink2); box-shadow:var(--shadow)}
+.readout .k{color:var(--faint)}
+.readout .g{display:flex; gap:6px; align-items:center}
+.readout .cc{display:inline-block; width:11px; height:11px; border-radius:3px; border:1px solid var(--line2); vertical-align:-1px}
+.readout .cp{cursor:pointer; color:var(--accent)}
+
+.toast{position:fixed; right:22px; bottom:22px; transform:translateY(24px); z-index:10000;
+  background:var(--accent); color:var(--accent-ink); font-weight:600; font-size:13px; padding:11px 18px; border-radius:11px;
+  box-shadow:var(--shadow); opacity:0; transition:.24s var(--ease-out,ease); pointer-events:none}
+.toast.show{opacity:1; transform:translateY(0)}
+.busy{position:absolute; inset:0; z-index:20; display:none; place-items:center; background:var(--overlay); backdrop-filter:blur(2px)}
+.busy.on{display:grid}
+.busy .ring{width:40px; height:40px; border:3px solid var(--raise); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite}
+.busy .msg{position:absolute; margin-top:66px; font-size:12px; color:var(--ink2); font-family:var(--mono)}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* entrance */
+.acc{animation:rise .5s both}
+@keyframes rise{from{opacity:0; transform:translateY(8px)}to{opacity:1; transform:none}}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- ── top bar ─────────────────────────────────────────────────── -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="dot"></span>
+      <span class="mark">SVG&nbsp;Studio</span>
+      <span class="sub">vectorise · recolour · theme</span>
+    </div>
+    <div class="spacer"></div>
+    <span class="chip" id="srcchip">no source</span>
+    <button class="tbtn" id="undoBtn" title="Undo source change (Ctrl+Z)" disabled>↶ Undo</button>
+    <button class="tbtn" id="splitBtn" title="Before / after split">◑ Split</button>
+    <button class="tbtn" id="inspectBtn" title="Hover to inspect elements">⊹ Inspect</button>
+    <button class="tbtn" id="themeBtn" title="Light / petrol theme">◐ Theme</button>
+    <button class="tbtn" id="resetBtn" title="Reset all controls">↺ Reset</button>
+  </header>
+
+  <div class="body">
+    <!-- ── control rail ──────────────────────────────────────────── -->
+    <aside class="rail" id="rail"></aside>
+
+    <!-- ── stage ─────────────────────────────────────────────────── -->
+    <section class="stage" id="stage">
+      <div class="viewport" id="viewport">
+        <div class="canvasbg checker" id="canvasbg"></div>
+        <div class="gridoverlay" id="grid"></div>
+        <div class="layer baseWrap" id="baseWrap"><div class="inner" id="baseInner"><div id="artBase"></div></div></div>
+        <div class="layer artWrap" id="artWrap"><div class="inner" id="artInner"><div id="art"></div></div></div>
+        <div class="hoverbox" id="hoverbox"></div>
+        <div class="tip" id="tip"></div>
+        <div class="divider" id="divider"></div>
+        <div class="emptyState" id="empty">
+          <div>
+            <div class="big">Drop an SVG or PNG</div>
+            <div class="small">Vectorise a raster with the trace engine, then recolour any SVG to a brand palette. Load a sample from the <b>Source</b> panel to start.</div>
+          </div>
+        </div>
+      </div>
+      <div class="hud" id="hud"></div>
+      <div class="readout" id="readout"></div>
+      <div class="busy" id="busy"><div class="ring"></div><div class="msg" id="busymsg">working…</div></div>
+    </section>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<!-- live tone-map filter (rebuilt from ramp stops at runtime) -->
+<svg aria-hidden="true" width="0" height="0" style="position:absolute"><defs id="fxdefs"></defs></svg>
+
+<script>
+"use strict";
+/* ═══════════════════════════════════════════════════════════════════════
+   SVG STUDIO — zero-dependency designer tool.
+   Load an SVG (or trace a PNG into one), then recolour / restyle / export.
+   ═══════════════════════════════════════════════════════════════════════ */
+const $ = s => document.querySelector(s);
+const el = (t,a={},...k)=>{const n=document.createElement(t);for(const x in a){if(x==='class')n.className=a[x];else if(x==='html')n.innerHTML=a[x];else n.setAttribute(x,a[x]);}k.flat().forEach(c=>n.append(c));return n;};
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const hex2rgb=h=>{h=h.replace('#','');if(h.length===3)h=h.split('').map(c=>c+c).join('');const n=parseInt(h,16);return[(n>>16)&255,(n>>8)&255,n&255];};
+const rgb2hex=(r,g,b)=>'#'+[r,g,b].map(v=>clamp(Math.round(v),0,255).toString(16).padStart(2,'0')).join('');
+
+/* ── curated Google Fonts for SVG text ──────────────────────────────── */
+const FONTS = {
+  'Sans':    [['Manrope','400;600;700'],['Work Sans','400;600'],['Sora','400;700'],['Outfit','400;600'],['Figtree','400;600'],['Hanken Grotesk','400;600'],['Schibsted Grotesk','400;700'],['Onest','400;700']],
+  'Serif':   [['Fraunces','9..144,500;9..144,700'],['Playfair Display','500;700'],['Spectral','400;600'],['Zilla Slab','400;600'],['Bitter','400;600'],['Newsreader','400;600']],
+  'Display': [['Unbounded','400;700'],['Bricolage Grotesque','500;700'],['Instrument Serif','400'],['Syne','600;800'],['Archivo','500;700'],['Familjen Grotesk','500;700'],['Anton','400']],
+  'Mono':    [['Space Mono','400;700'],['JetBrains Mono','400;700'],['IBM Plex Mono','400;600'],['Fira Code','400;600'],['Martian Mono','400;600']],
+};
+
+/* ── brand-palette presets (examples — swap for your own) ────────────── */
+const PRESETS = {
+  'Petrol (light)': {stops:['#012836','#4fa7cd','#e7f3f8'], sat:1.55, bg:'#eef4f6'},
+  'Petrol (dark)':  {stops:['#eaf3f6','#7cc0dc','#02222e'], sat:1.4,  bg:'#08171d'},
+  'Mono ink':       {stops:['#111111','#7d7d7d','#f4f4f4'], sat:1.0,  bg:'#e9e9e6'},
+  'Blueprint':      {stops:['#eaf2ff','#4f8ff0','#0a2a63'], sat:1.5,  bg:'#0a1c40'},
+  'Coral pop':      {stops:['#00232f','#ff6a1f','#fff2ea'], sat:1.5,  bg:'#04202a'},
+  'Berry':          {stops:['#2a0f3d','#c0468f','#ffe6f2'], sat:1.7,  bg:'#150720'},
+  'Forest':         {stops:['#07231a','#3f9d6b','#e8f6ec'], sat:1.5,  bg:'#0a1f18'},
+  'Ink & sky':      {stops:['#001018','#5fb2d3','#f2fbff'], sat:1.35, bg:'#00131b'},
+  'Fallout CRT':    {stops:['#001a08','#28e24a','#c9ffcf'], sat:1.9,  bgMode:'crt', glow:'#39ff7a', glowBlur:18},
+};
+
+/* ── state ──────────────────────────────────────────────────────────── */
+const DEFAULT = {
+  // tone map
+  toneOn:true, desat:true, cif:'sRGB',
+  stops:[{c:'#012836',p:0},{c:'#4fa7cd',p:0.5},{c:'#e7f3f8',p:1}],
+  // photographic css filters
+  sat:1.55, con:1, bri:1, hue:0, inv:0, sep:0, gray:0, opa:1, blur:0,
+  shOn:false, shC:'#000000', shBlur:8, shX:0, shY:4,
+  // vector strokes / fills
+  vmode:'normal', strokeW:1.5, strokeOn:false, strokeColor:'#101010', nonScaling:false, roundJoin:false,
+  // typography
+  font:'', weight:400, sizeScale:1, tracking:0, transform:'none',
+  // geometry
+  rot:0, flipH:false, flipV:false, artScale:1, stripSize:true,
+  // canvas
+  bg:'iso', bgColor:'#0f0e14', pad:36, grid:false,
+  // trace
+  traceMode:'color', threshold:128, levels:4, colors:6, detail:0.5, smooth:0.5, despeckle:8, preblur:0, traceInvert:false, traceRes:900,
+  // view
+  zoom:1, panx:0, pany:0, split:false, splitPct:0.5,
+};
+// Safe localStorage — under file:// or a sandboxed preview, localStorage access
+// THROWS. Every access must go through this or an unguarded read aborts boot.
+const LS = {
+  get(k){ try{ return localStorage.getItem(k); }catch{ return null; } },
+  set(k,v){ try{ localStorage.setItem(k,v); }catch{} },
+  del(k){ try{ localStorage.removeItem(k); }catch{} },
+};
+let S = load();
+function load(){ try{const j=JSON.parse(LS.get('svgstudio')); return Object.assign(structuredClone(DEFAULT), j||{});}catch{ return structuredClone(DEFAULT);} }
+function save(){ try{LS.set('svgstudio', JSON.stringify(S));}catch{} }
+
+/* ── source model ───────────────────────────────────────────────────── */
+let SRC = { type:null, svg:null, raster:null, natW:0, natH:0 };  // svg = <svg> element (live), raster = Image
+let baseSize = new Map();  // text node -> base font-size px (for size scale)
+
+/* ═══ SECTIONS (accordion) ══════════════════════════════════════════ */
+let openSet; try{ openSet=new Set(JSON.parse(LS.get('svgstudio-open')||'["source","trace","tone"]')); }catch{ openSet=new Set(['source','trace','tone']); }
+
+function num(key,label,min,max,step,fmt){ return {t:'range',key,label,min,max,step,fmt}; }
+function seg(key,label,opts){ return {t:'seg',key,label,opts}; }
+function tog(key,label){ return {t:'tog',key,label}; }
+
+const SECTIONS = [
+ {id:'source', title:'Source', build:buildSource},
+ {id:'trace',  title:'Image Trace', sub:'PNG → SVG', build:buildTrace},
+ {id:'tone',   title:'Tone Map', sub:'recolour', build:buildTone},
+ {id:'filter', title:'Photographic', build:buildFilter},
+ {id:'vector', title:'Strokes & Fills', build:buildVector},
+ {id:'type',   title:'Typography', build:buildType},
+ {id:'geo',    title:'Geometry', build:buildGeo},
+ {id:'canvas', title:'Canvas', build:buildCanvas},
+ {id:'inspect',title:'Inspect', build:buildInspect},
+ {id:'export', title:'Export', build:buildExport},
+];
+
+function renderRail(){
+  const rail=$('#rail'); rail.innerHTML='';
+  SECTIONS.forEach((sec,i)=>{
+    const open=openSet.has(sec.id);
+    const acc=el('div',{class:'acc'+(open?' open':'')});
+    acc.dataset.id=sec.id;
+    const head=el('div',{class:'head'},
+      el('span',{class:'idx'},String(i+1).padStart(2,'0')),
+      el('span',{class:'ttl'},sec.title),
+      el('span',{class:'meta',id:'meta-'+sec.id},sec.sub||''),
+      el('span',{class:'chev',html:'<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>'}));
+    const inner=el('div',{class:'inner'}); const pad=el('div',{class:'pad'});
+    inner.append(pad); const wrap=el('div',{class:'wrap'}); wrap.append(inner);
+    acc.append(head,wrap);
+    head.onclick=()=>{ acc.classList.toggle('open'); if(acc.classList.contains('open'))openSet.add(sec.id);else openSet.delete(sec.id); LS.set('svgstudio-open',JSON.stringify([...openSet])); };
+    sec.build(pad);
+    rail.append(acc);
+  });
+  refreshMeta();
+}
+
+/* generic control builders --------------------------------------------- */
+function ctlRange(parent,{key,label,min,max,step,fmt}){
+  const wrap=el('div',{class:'sl'});
+  const top=el('div',{class:'top'}, el('span',{class:'n'},label), el('span',{class:'v'}));
+  const inp=el('input',{type:'range',min,max,step,id:'sl-'+key,name:key,'aria-label':label});
+  inp.value=S[key];
+  const out=top.querySelector('.v');
+  const show=()=>out.textContent=(fmt?fmt(S[key]):S[key]);
+  show();
+  inp.oninput=()=>{ S[key]=parseFloat(inp.value); show(); apply(); scheduleSave(); };
+  inp.dataset.key=key;
+  wrap.append(top,inp); parent.append(wrap); return inp;
+}
+function ctlSeg(parent,{key,label,opts}){
+  if(label) parent.append(el('div',{class:'lbl'},label));
+  const seg=el('div',{class:'seg'});
+  opts.forEach(([val,txt])=>{
+    const b=el('button',{},txt); if(S[key]===val)b.classList.add('on');
+    b.onclick=()=>{ S[key]=val; [...seg.children].forEach(c=>c.classList.remove('on')); b.classList.add('on'); apply(); refreshMeta(); scheduleSave(); rebuildDynamic(); };
+    seg.append(b);
+  });
+  parent.append(seg); return seg;
+}
+function ctlTog(parent,{key,label},after){
+  const t=el('div',{class:'toggle'+(S[key]?' on':'')}, el('span',{class:'sw'}), el('span',{},label));
+  t.onclick=()=>{ S[key]=!S[key]; t.classList.toggle('on',S[key]); apply(); if(after)after(); scheduleSave(); };
+  parent.append(t); return t;
+}
+
+/* ── Section: Source ──────────────────────────────────────────────── */
+function buildSource(p){
+  const lbl=el('label',{class:'filebtn'},'⬆  Load SVG · PNG · JPG',el('input',{type:'file',name:'source',accept:'.svg,.png,.jpg,.jpeg,.webp,.gif,image/*'}));
+  lbl.querySelector('input').onchange=e=>{const f=e.target.files[0]; if(f)loadFile(f);};
+  p.append(lbl);
+  p.append(el('div',{class:'hint'},'Or drop a file on the canvas. Rasters unlock the trace engine below.'));
+  p.append(el('div',{class:'lbl'},'Samples'));
+  const r=el('div',{class:'row wrap'});
+  const b1=el('button',{class:'btn ghost'},'◇ Sample SVG'); b1.onclick=loadSampleSVG;
+  const b2=el('button',{class:'btn ghost'},'▦ Sample raster'); b2.onclick=loadSampleRaster;
+  r.append(b1,b2); p.append(r);
+  const r2=el('div',{class:'row wrap'});
+  const b3=el('button',{class:'btn ghost'},'⤓ Paste SVG code'); b3.onclick=pasteSVG;
+  r2.append(b3); p.append(r2);
+}
+
+/* ── Section: Trace ───────────────────────────────────────────────── */
+function buildTrace(p){
+  const note=el('div',{class:'hint',id:'traceNote'},'Load a PNG/JPG to enable. Traces raster → clean vector paths you can then recolour.');
+  p.append(note);
+  ctlSeg(p,seg('traceMode','Mode',[['bw','B&W'],['poster','Steps'],['color','Color']]));
+  const dyn=el('div',{id:'traceDyn'}); p.append(dyn);
+  ctlRange(p,num('detail','Detail  (simplify)',0.2,5,0.1,v=>v.toFixed(1)+'px'));
+  ctlRange(p,num('smooth','Smoothing',0,1,0.05,v=>Math.round(v*100)+'%'));
+  ctlRange(p,num('despeckle','Despeckle  (min area)',0,120,2,v=>v+'px²'));
+  ctlRange(p,num('preblur','Pre-blur  (denoise)',0,4,0.5,v=>v.toFixed(1)));
+  ctlRange(p,num('traceRes','Resolution',300,1400,50,v=>v+'px'));
+  ctlTog(p,tog('traceInvert','Invert luminance'));
+  const btn=el('button',{class:'btn primary wide',id:'traceGo'},'✦  Trace to SVG'); btn.style.marginTop='10px';
+  btn.onclick=runTrace; p.append(btn);
+  p.append(el('div',{class:'hint'},'Marching-squares contours · Douglas–Peucker simplify · optional bézier smoothing. All in-browser, no upload.'));
+  buildTraceDyn();
+}
+function buildTraceDyn(){
+  const dyn=$('#traceDyn'); if(!dyn)return; dyn.innerHTML='';
+  if(S.traceMode==='bw') ctlRange(dyn,num('threshold','Threshold',1,254,1,v=>v));
+  else if(S.traceMode==='poster') ctlRange(dyn,num('levels','Levels',2,8,1,v=>v));
+  else ctlRange(dyn,num('colors','Colors',2,12,1,v=>v));
+}
+
+/* ── Section: Tone Map ────────────────────────────────────────────── */
+function buildTone(p){
+  ctlTog(p,tog('toneOn','Tone map on'));
+  p.append(el('div',{class:'lbl'},'Ramp  (dark → light)'));
+  const holder=el('div',{id:'stopsHolder'}); p.append(holder); renderStops(holder);
+  const r=el('div',{class:'row wrap'});
+  const add=el('button',{class:'btn ghost'},'＋ stop'); add.onclick=()=>{ if(S.stops.length>=8)return; const mid=Math.round(S.stops.length/2); S.stops.splice(mid,0,{c:'#888888',p:0.5}); normStops(); renderStops(holder); apply(); scheduleSave(); };
+  const ex=el('button',{class:'btn ghost'},'⤿ From image'); ex.onclick=paletteFromArt;
+  r.append(add,ex); p.append(r);
+  ctlTog(p,tog('desat','Desaturate first'));
+  ctlSeg(p,seg('cif','Interpolation',[['sRGB','sRGB'],['linearRGB','linear']]));
+  p.append(el('div',{class:'lbl'},'Presets'));
+  const ps=el('div',{class:'seg'});
+  Object.keys(PRESETS).forEach(name=>{ const b=el('button',{},name); b.onclick=()=>applyPreset(name); ps.append(b); });
+  p.append(ps);
+}
+function renderStops(holder){
+  holder.innerHTML='';
+  const row=el('div',{class:'swatchrow'});
+  S.stops.forEach((st,i)=>{
+    const sw=el('div',{class:'swatch'});
+    const c=el('input',{type:'color',id:'stop-'+i,name:'stop-'+i,'aria-label':'Ramp stop '+(i+1)+' colour'}); c.value=st.c;
+    c.oninput=()=>{ st.c=c.value; apply(); scheduleSave(); };
+    const lbl=el('span',{class:'stopmini'},st.c.replace('#',''));
+    c.addEventListener('input',()=>lbl.textContent=c.value.replace('#',''));
+    const x=el('button',{class:'x'},'×'); x.onclick=()=>{ if(S.stops.length<=2)return; S.stops.splice(i,1); normStops(); renderStops(holder); apply(); scheduleSave(); };
+    sw.append(c,lbl,x); row.append(sw);
+  });
+  holder.append(row);
+}
+function normStops(){ const n=S.stops.length; S.stops.forEach((s,i)=>s.p=n===1?0:i/(n-1)); }
+function applyPreset(name){ const pr=PRESETS[name];
+  S.stops=pr.stops.map((c,i)=>({c,p:i/(pr.stops.length-1)})); S.sat=pr.sat; S.toneOn=true;
+  if(pr.bgMode){ S.bg=pr.bgMode; } else { S.bg='solid'; S.bgColor=pr.bg; }
+  S.shOn=!!pr.glow; if(pr.glow){ S.shC=pr.glow; S.shBlur=pr.glowBlur||16; S.shX=0; S.shY=0; }   // phosphor bloom
+  renderRail(); apply(); syncCanvasBg(); scheduleSave(); toast('Preset · '+name);
+}
+
+/* ── Section: Photographic ────────────────────────────────────────── */
+function buildFilter(p){
+  ctlRange(p,num('sat','Saturation',0,3,0.05,v=>v.toFixed(2)));
+  ctlRange(p,num('con','Contrast',0.3,2,0.02,v=>v.toFixed(2)));
+  ctlRange(p,num('bri','Brightness',0.3,1.8,0.02,v=>v.toFixed(2)));
+  ctlRange(p,num('hue','Hue rotate',0,360,1,v=>v+'°'));
+  ctlRange(p,num('sep','Sepia',0,1,0.02,v=>Math.round(v*100)+'%'));
+  ctlRange(p,num('gray','Grayscale',0,1,0.02,v=>Math.round(v*100)+'%'));
+  ctlRange(p,num('inv','Invert',0,1,0.02,v=>Math.round(v*100)+'%'));
+  ctlRange(p,num('blur','Blur',0,8,0.1,v=>v.toFixed(1)+'px'));
+  ctlRange(p,num('opa','Opacity',0.1,1,0.02,v=>Math.round(v*100)+'%'));
+  const box=el('div',{id:'shadowBox'});
+  const sh=()=>{ box.innerHTML=''; if(!S.shOn)return;
+    const sr=el('div',{class:'swatchrow'}); const sw=el('div',{class:'swatch'});
+    const c=el('input',{type:'color',id:'shadow-color',name:'shadow-color','aria-label':'Drop shadow colour'}); c.value=S.shC; c.oninput=()=>{S.shC=c.value;apply();scheduleSave();}; sw.append(c,el('span',{class:'stopmini'},'color')); sr.append(sw); box.append(sr);
+    ctlRange(box,num('shBlur','Shadow blur',0,30,1,v=>v+'px'));
+    ctlRange(box,num('shX','Offset X',-30,30,1,v=>v));
+    ctlRange(box,num('shY','Offset Y',-30,30,1,v=>v));
+  };
+  ctlTog(p,tog('shOn','Drop shadow'),sh);   // re-render the sub-panel on toggle
+  p.append(box); sh(); box._render=sh;
+}
+
+/* ── Section: Strokes & Fills ─────────────────────────────────────── */
+function buildVector(p){
+  ctlSeg(p,seg('vmode','Render',[['normal','Normal'],['outline','Outline'],['fill','Fill only']]));
+  ctlTog(p,tog('strokeOn','Override stroke width'));
+  ctlRange(p,num('strokeW','Stroke width',0.2,8,0.1,v=>v.toFixed(1)));
+  const sr=el('div',{class:'swatchrow'}); const sw=el('div',{class:'swatch'});
+  const c=el('input',{type:'color',id:'stroke-color',name:'stroke-color','aria-label':'Outline colour'}); c.value=S.strokeColor; c.oninput=()=>{S.strokeColor=c.value;apply();scheduleSave();};
+  sw.append(c,el('span',{class:'stopmini'},'outline color')); sr.append(sw); p.append(el('div',{class:'lbl'},'Outline color'),sr);
+  ctlTog(p,tog('roundJoin','Round joins & caps'));
+  ctlTog(p,tog('nonScaling','Non-scaling stroke'));
+  p.append(el('div',{class:'hint'},'Outline / Fill-only reinterpret every shape — great for turning a filled logo into a line-art variant.'));
+}
+
+/* ── Section: Typography ──────────────────────────────────────────── */
+function buildType(p){
+  const sel=el('select',{id:'font-select',name:'font','aria-label':'SVG text font family'});
+  sel.append(el('option',{value:''},'— System default —'));
+  for(const grp in FONTS){ const og=el('optgroup',{label:grp}); FONTS[grp].forEach(([name])=>og.append(el('option',{value:name},name))); sel.append(og); }
+  sel.value=S.font;
+  sel.onchange=()=>{ S.font=sel.value; loadSvgFont(S.font); apply(); scheduleSave(); };
+  p.append(el('div',{class:'lbl'},'Font family  (curated Google Fonts)'),sel);
+  ctlRange(p,num('weight','Weight',100,900,100,v=>v));
+  ctlRange(p,num('sizeScale','Size scale',0.4,3,0.05,v=>v.toFixed(2)+'×'));
+  ctlRange(p,num('tracking','Letter spacing',-2,8,0.1,v=>v.toFixed(1)+'px'));
+  ctlSeg(p,seg('transform','Case',[['none','As-is'],['uppercase','UPPER'],['lowercase','lower'],['capitalize','Title']]));
+  p.append(el('div',{class:'hint'},'Applies to every <code>&lt;text&gt;</code> in the SVG. Because the SVG is inline, page-loaded webfonts resolve — an <code>&lt;img&gt;</code> would sandbox them.'));
+}
+
+/* ── Section: Geometry ────────────────────────────────────────────── */
+function buildGeo(p){
+  ctlRange(p,num('rot','Rotate',-180,180,1,v=>v+'°'));
+  ctlRange(p,num('artScale','Scale',0.2,3,0.05,v=>v.toFixed(2)+'×'));
+  const r=el('div',{class:'row wrap'});
+  const fh=el('button',{class:'btn ghost'+(S.flipH?' primary':'')},'⇋ Flip H'); fh.onclick=()=>{S.flipH=!S.flipH;fh.classList.toggle('primary',S.flipH);apply();scheduleSave();};
+  const fv=el('button',{class:'btn ghost'+(S.flipV?' primary':'')},'⇵ Flip V'); fv.onclick=()=>{S.flipV=!S.flipV;fv.classList.toggle('primary',S.flipV);apply();scheduleSave();};
+  r.append(fh,fv); p.append(el('div',{class:'lbl'},'Mirror'),r);
+  ctlTog(p,tog('stripSize','Strip fixed width/height'),()=>{ if(SRC.svg){applySvgSizing(); fitView();} });
+  p.append(el('div',{class:'hint'},'Stripping the root <code>width/height</code> lets the SVG scale fluidly to any container.'));
+}
+
+/* ── Section: Canvas ──────────────────────────────────────────────── */
+function buildCanvas(p){
+  ctlSeg(p,seg('bg','Background',[['iso','Iso grid'],['checker','Checker'],['crt','CRT'],['solid','Solid'],['light','Light'],['dark','Dark']]));
+  const box=el('div',{id:'bgColorBox'}); p.append(box);
+  const bc=()=>{ box.innerHTML=''; if(S.bg!=='solid')return; const sr=el('div',{class:'swatchrow'}); const sw=el('div',{class:'swatch'}); const c=el('input',{type:'color',id:'bg-color',name:'bg-color','aria-label':'Canvas background colour'}); c.value=S.bgColor; c.oninput=()=>{S.bgColor=c.value;syncCanvasBg();scheduleSave();}; sw.append(c,el('span',{class:'stopmini'},'canvas')); sr.append(sw); box.append(sr); };
+  bc(); box._render=bc;
+  ctlRange(p,num('pad','Padding',0,140,4,v=>v+'px'));
+  ctlTog(p,tog('grid','Grid overlay'),()=>syncCanvasBg());
+}
+
+/* ── Section: Inspect ─────────────────────────────────────────────── */
+function buildInspect(p){
+  p.append(el('div',{class:'hint'},'Toggle Inspect (top bar) then hover the artwork — each element highlights with its tag, id, class and colours. Click a row below to flash it.'));
+  const list=el('div',{class:'elist',id:'elist'}); p.append(list);
+  const btn=el('button',{class:'btn ghost wide'},'⟳ Rebuild element list'); btn.style.marginTop='8px'; btn.onclick=buildElementList; p.append(btn);
+  buildElementList();
+}
+
+/* ── Section: Export ──────────────────────────────────────────────── */
+function buildExport(p){
+  p.append(el('div',{class:'lbl'},'Copy'));
+  const r1=el('div',{class:'row wrap'});
+  mk(r1,'❐ CSS filter',()=>copy(cssFilterLine(),'CSS filter copied'));
+  mk(r1,'❐ Tinted SVG',()=>{ const s=exportSVGString(true); if(!s){ toast('Load an SVG (or trace a raster) first'); return; } copy(s,'Baked SVG copied'); });
+  p.append(r1);
+  const r2=el('div',{class:'row wrap'});
+  mk(r2,'❐ Design tokens',()=>copy(tokensString(),'Tokens copied'));
+  mk(r2,'❐ React snippet',()=>copy(reactSnippet(),'React snippet copied'));
+  p.append(r2);
+  p.append(el('div',{class:'lbl'},'Download'));
+  const r3=el('div',{class:'row wrap'});
+  mk(r3,'⤓ SVG',()=>{ const s=exportSVGString(true); if(!s){ toast('Load an SVG (or trace a raster) first'); return; } download(s,'svg-studio.svg','image/svg+xml'); },true);
+  p.append(r3);
+  p.append(el('div',{class:'lbl'},'PNG @'));
+  const r4=el('div',{class:'seg'});
+  [1,2,3,4].forEach(s=>{const b=el('button',{},s+'×'); b.onclick=()=>exportPNG(s); r4.append(b);});
+  p.append(r4);
+  p.append(el('div',{class:'hint'},'Baked SVG embeds the tone-map as a native <code>&lt;filter&gt;</code>. PNG rasterises that plus the photographic chain at the chosen scale.'));
+  function mk(par,txt,fn,wide){const b=el('button',{class:'btn ghost'+(wide?' wide':'')},txt); b.onclick=fn; par.append(b);}
+}
+
+/* rebuild a section's dynamic sub-controls after a mode toggle */
+function rebuildDynamic(){ buildTraceDyn(); const sb=$('#shadowBox'); if(sb&&sb._render)sb._render(); const bb=$('#bgColorBox'); if(bb&&bb._render)bb._render(); refreshMeta(); }
+function refreshMeta(){
+  const set=(id,v)=>{const m=$('#meta-'+id); if(m)m.textContent=v;};
+  set('tone', S.toneOn? S.stops.length+' stops':'off');
+  set('trace', SRC.type==='raster'?S.traceMode:'PNG→SVG');
+  set('type', S.font||'default');
+  set('canvas', S.bg);
+}
+
+/* ═══ APPLY — the render pipeline ════════════════════════════════════ */
+let raf=0;
+function apply(){ cancelAnimationFrame(raf); raf=requestAnimationFrame(applyNow); }
+function applyNow(){
+  buildToneFilter();
+  const art=$('#art'), base=$('#artBase');
+  const svg=art.querySelector('svg');
+  if(svg){
+    svg.style.filter = filterChain();
+    svg.style.transform = artTransform();
+    svg.style.opacity = S.opa;
+    applyScopedCSS();
+    applySizeScale(svg);
+  }
+  const bsvg=base.querySelector('svg');
+  if(bsvg){ bsvg.style.transform=artTransform(); bsvg.style.filter='none'; }
+  updateView();
+  updateReadout();
+}
+function filterChain(){
+  const f=[];
+  if(S.toneOn) f.push('url(#tonemap)');
+  if(S.sat!==1) f.push(`saturate(${S.sat})`);
+  if(S.con!==1) f.push(`contrast(${S.con})`);
+  if(S.bri!==1) f.push(`brightness(${S.bri})`);
+  if(S.hue) f.push(`hue-rotate(${S.hue}deg)`);
+  if(S.sep) f.push(`sepia(${S.sep})`);
+  if(S.gray) f.push(`grayscale(${S.gray})`);
+  if(S.inv) f.push(`invert(${S.inv})`);
+  if(S.blur) f.push(`blur(${S.blur}px)`);
+  if(S.shOn) f.push(`drop-shadow(${S.shX}px ${S.shY}px ${S.shBlur}px ${S.shC})`);
+  return f.length?f.join(' '):'none';
+}
+function cssFilterLine(){ return 'filter: '+filterChain()+';'; }
+function artTransform(){ return `rotate(${S.rot}deg) scale(${S.artScale*(S.flipH?-1:1)}, ${S.artScale*(S.flipV?-1:1)})`; }
+
+/* tone-map <filter> — resample stops to a smooth per-channel table */
+function buildToneFilter(){
+  const defs=$('#fxdefs');
+  const N=33, R=[],G=[],B=[];
+  const stops=[...S.stops].map(s=>({c:s.c,p:s.p})); // equal-spaced positions
+  stops.forEach((s,i)=>s.p=i/(stops.length-1));
+  for(let i=0;i<N;i++){
+    const t=i/(N-1);
+    // find segment
+    let a=0; while(a<stops.length-2 && stops[a+1].p<t) a++;
+    const s0=stops[a], s1=stops[Math.min(a+1,stops.length-1)];
+    const span=(s1.p-s0.p)||1, k=clamp((t-s0.p)/span,0,1);
+    const c0=hex2rgb(s0.c), c1=hex2rgb(s1.c);
+    R.push(((c0[0]+(c1[0]-c0[0])*k)/255).toFixed(4));
+    G.push(((c0[1]+(c1[1]-c0[1])*k)/255).toFixed(4));
+    B.push(((c0[2]+(c1[2]-c0[2])*k)/255).toFixed(4));
+  }
+  defs.innerHTML =
+    `<filter id="tonemap" color-interpolation-filters="${S.cif}" x="-20%" y="-20%" width="140%" height="140%">`+
+    (S.desat?`<feColorMatrix type="saturate" values="0"/>`:``)+
+    `<feComponentTransfer>`+
+    `<feFuncR type="table" tableValues="${R.join(' ')}"/>`+
+    `<feFuncG type="table" tableValues="${G.join(' ')}"/>`+
+    `<feFuncB type="table" tableValues="${B.join(' ')}"/>`+
+    `</feComponentTransfer></filter>`;
+}
+
+/* vector strokes / fills via a scoped <style> injected into the svg */
+/* Vector strokes/fills + typography as ONE document-level stylesheet scoped to
+   `#art svg`. A <style> INSIDE an inline SVG is NOT scoped — it leaks to every
+   SVG in the document (UI chevrons, the hidden #fxdefs). Scoping via #art keeps
+   it on the artwork only; #artBase (the split "before") stays pristine. */
+function scopedCSSRules(A){
+  let css='';
+  if(S.vmode==='outline') css+=`${A} *{fill:none !important;stroke:${S.strokeColor} !important;stroke-width:${S.strokeW}px !important;}`;
+  else if(S.vmode==='fill') css+=`${A} *{stroke:none !important;}`;
+  else if(S.strokeOn) css+=`${A} [stroke],${A} path,${A} line,${A} rect,${A} circle,${A} ellipse,${A} polygon,${A} polyline{stroke-width:${S.strokeW}px !important;}`;
+  if(S.roundJoin) css+=`${A} *{stroke-linejoin:round !important;stroke-linecap:round !important;}`;
+  if(S.nonScaling) css+=`${A} *{vector-effect:non-scaling-stroke;}`;
+  const fam=S.font?`'${S.font}',`:'';
+  css+=`${A} text,${A} tspan{`+
+    (S.font?`font-family:${fam}sans-serif !important;`:'')+
+    `font-weight:${S.weight};letter-spacing:${S.tracking}px;`+
+    (S.transform!=='none'?`text-transform:${S.transform};`:'')+`}`;
+  return css;
+}
+function applyScopedCSS(){
+  let st=document.getElementById('art-scope');
+  if(!st){ st=document.createElement('style'); st.id='art-scope'; document.head.append(st); }
+  st.textContent=scopedCSSRules('#art svg');
+}
+/* size scale — multiply each text node's base size (keeps hierarchy). Skip bare
+   inheriting tspans so they scale via their (already-scaled) parent, not twice. */
+function applySizeScale(svg){
+  svg.querySelectorAll('text,tspan').forEach(t=>{
+    if(t.tagName.toLowerCase()==='tspan' && !t.hasAttribute('font-size') && !t.style.fontSize) return;
+    if(!baseSize.has(t)){ const fs=parseFloat(getComputedStyle(t).fontSize)||16; baseSize.set(t,fs); }
+    t.style.fontSize=(baseSize.get(t)*S.sizeScale)+'px';
+  });
+}
+
+/* ═══ VIEW — zoom / pan / split ══════════════════════════════════════ */
+function updateView(){
+  const t=`translate(${S.panx}px,${S.pany}px) scale(${S.zoom})`;
+  $('#artInner').style.transform=t; $('#baseInner').style.transform=t;
+  $('#stage').classList.toggle('split',S.split);
+  const vp=$('#viewport').getBoundingClientRect();
+  const dx=vp.width*S.splitPct;
+  $('#divider').style.left=dx+'px';
+  $('#artWrap').style.clipPath=S.split?`inset(0 ${vp.width-dx}px 0 0)`:'none';
+  const zp=Math.round(S.zoom*100)+'%';
+  const lv=$('#zlv'); if(lv)lv.textContent=zp;
+  const rz=$('#roZoom'); if(rz)rz.textContent=zp;   // keep the readout zoom in sync (cheap)
+  const pad=S.pad; $('#art').style.padding=$('#artBase').style.padding=pad+'px';
+}
+function fitView(){ S.zoom=1; S.panx=0; S.pany=0; updateView(); }
+function updateReadout(){
+  const ro=$('#readout'); ro.innerHTML='';
+  const g=(k,v)=>el('span',{class:'g'},el('span',{class:'k'},k),v);
+  ro.append(g('css','')); const cssv=el('span',{class:'cp'},filterChain()); cssv.onclick=()=>copy(cssFilterLine(),'CSS filter copied'); ro.lastChild.append(cssv);
+  const ramp=el('span',{class:'g'}); ramp.append(el('span',{class:'k'},'ramp'));
+  S.stops.forEach(s=>ramp.append(el('span',{class:'cc',style:`background:${s.c}`})));
+  ro.append(ramp);
+  if(SRC.type) ro.append(g('src',`${SRC.type} ${SRC.natW||''}×${SRC.natH||''}`));
+  const pc=SRC.svg?SRC.svg.querySelectorAll('path,rect,circle,ellipse,line,polygon,polyline').length:0;
+  if(pc) ro.append(g('nodes',String(pc)));
+  const zspan=el('span',{id:'roZoom'},Math.round(S.zoom*100)+'%'); ro.append(g('zoom',zspan));
+}
+
+/* HUD + interactions */
+function buildHUD(){
+  const hud=$('#hud'); hud.innerHTML='';
+  const mk=(t,fn,cls)=>{const b=el('button',{class:cls||''},t); b.onclick=fn; hud.append(b); return b;};
+  mk('−',()=>zoomTo(S.zoom/1.25));
+  const lv=mk(Math.round(S.zoom*100)+'%',fitView,'lv'); lv.id='zlv';
+  mk('+',()=>zoomTo(S.zoom*1.25));
+  mk('⊡',fitView).title='Fit 100%';
+}
+function zoomTo(z,cx,cy){
+  z=clamp(z,0.1,12);
+  // anchor is measured from the viewport CENTRE — same origin as `pan`
+  // (the .inner is centred and transform-origin is centre). Default 0 = centre.
+  cx=cx??0; cy=cy??0;
+  const k=z/S.zoom;
+  S.panx=cx-(cx-S.panx)*k;
+  S.pany=cy-(cy-S.pany)*k;
+  S.zoom=z; updateView(); scheduleSave();
+}
+function setupViewport(){
+  const vp=$('#viewport');
+  vp.addEventListener('wheel',e=>{ if(!SRC.type)return; e.preventDefault();
+    const r=vp.getBoundingClientRect();
+    const cx=(e.clientX-r.left)-r.width/2, cy=(e.clientY-r.top)-r.height/2;  // centre-origin cursor
+    const factor=e.deltaY<0?1.12:1/1.12; const z=clamp(S.zoom*factor,0.1,12);
+    const k=z/S.zoom; S.panx=cx-(cx-S.panx)*k; S.pany=cy-(cy-S.pany)*k; S.zoom=z; updateView(); scheduleSave();
+  },{passive:false});
+  let drag=null;
+  vp.addEventListener('pointerdown',e=>{
+    if(S.split){ const r=vp.getBoundingClientRect(); if(Math.abs((e.clientX-r.left)-r.width*S.splitPct)<16){ drag={mode:'split'}; vp.setPointerCapture(e.pointerId); return; } }
+    if(inspectOn) return;
+    drag={mode:'pan',x:e.clientX,y:e.clientY,px:S.panx,py:S.pany}; vp.classList.add('grabbing'); vp.setPointerCapture(e.pointerId);
+  });
+  vp.addEventListener('pointermove',e=>{
+    if(!drag)return; const r=vp.getBoundingClientRect();
+    if(drag.mode==='split'){ S.splitPct=clamp((e.clientX-r.left)/r.width,0,1); updateView(); }
+    else{ S.panx=drag.px+(e.clientX-drag.x); S.pany=drag.py+(e.clientY-drag.y); updateView(); }
+  });
+  const end=e=>{ if(drag){drag=null; vp.classList.remove('grabbing'); scheduleSave();} };
+  vp.addEventListener('pointerup',end); vp.addEventListener('pointercancel',end);
+  // drag & drop
+  ['dragover','dragenter'].forEach(ev=>vp.addEventListener(ev,e=>{e.preventDefault();$('#stage').classList.add('dropping');}));
+  ['dragleave','drop'].forEach(ev=>vp.addEventListener(ev,e=>{e.preventDefault();$('#stage').classList.remove('dropping');}));
+  vp.addEventListener('drop',e=>{ const f=e.dataTransfer.files[0]; if(f)loadFile(f); });
+  // inspect
+  vp.addEventListener('pointermove',inspectMove);
+  vp.addEventListener('pointerleave',()=>{$('#hoverbox').style.display='none';$('#tip').style.display='none';});
+  window.addEventListener('resize',()=>updateView());
+  // keyboard
+  window.addEventListener('keydown',e=>{
+    if((e.ctrlKey||e.metaKey)&&(e.key==='z'||e.key==='Z')){ e.preventDefault(); undo(); return; }
+    if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;
+    if(e.key==='f'){fitView();} else if(e.key==='+'||e.key==='='){zoomTo(S.zoom*1.25);} else if(e.key==='-'){zoomTo(S.zoom/1.25);}
+    else if(e.key==='i'){toggleInspect();} else if(e.key==='s'){toggleSplit();}
+  });
+}
+
+/* ═══ INSPECT ════════════════════════════════════════════════════════ */
+let inspectOn=false;
+function toggleInspect(){ inspectOn=!inspectOn; $('#inspectBtn').classList.toggle('on',inspectOn); $('#viewport').classList.toggle('inspect',inspectOn); if(!inspectOn){$('#hoverbox').style.display='none';$('#tip').style.display='none';} }
+function toggleSplit(){ S.split=!S.split; $('#splitBtn').classList.toggle('on',S.split); updateView(); scheduleSave(); }
+function inspectMove(e){
+  if(!inspectOn||!SRC.svg)return;
+  const svg=$('#art').querySelector('svg'); if(!svg)return;
+  const target=document.elementFromPoint(e.clientX,e.clientY);
+  if(!target||!svg.contains(target)||target===svg){ $('#hoverbox').style.display='none';$('#tip').style.display='none'; return; }
+  highlightEl(target);
+}
+function highlightEl(target){
+  const svg=$('#art').querySelector('svg'); if(!svg||!svg.contains(target))return;
+  const vpr=$('#viewport').getBoundingClientRect(); const r=target.getBoundingClientRect();
+  const hb=$('#hoverbox'); hb.style.display='block';
+  hb.style.left=(r.left-vpr.left)+'px'; hb.style.top=(r.top-vpr.top)+'px'; hb.style.width=r.width+'px'; hb.style.height=r.height+'px';
+  const tip=$('#tip'); const fill=target.getAttribute('fill')||getComputedStyle(target).fill||'—'; const stroke=target.getAttribute('stroke')||'—';
+  tip.innerHTML=`<b>&lt;${target.tagName}&gt;</b>`+(target.id?` #${target.id}`:'')+(target.getAttribute('class')?` .${target.getAttribute('class')}`:'')+`<br>fill ${fill} · stroke ${stroke}`;
+  tip.style.display='block';
+  let tx=r.left-vpr.left, ty=r.top-vpr.top-tip.offsetHeight-8; if(ty<4)ty=r.bottom-vpr.top+8;
+  tip.style.left=clamp(tx,4,vpr.width-tip.offsetWidth-4)+'px'; tip.style.top=ty+'px';
+}
+function buildElementList(){
+  const list=$('#elist'); if(!list)return; list.innerHTML='';
+  if(!SRC.svg){ list.append(el('div',{class:'eitem'},el('span',{class:'dsc'},'No SVG loaded'))); return; }
+  const nodes=[...SRC.svg.querySelectorAll('path,rect,circle,ellipse,line,polygon,polyline,text,g[id]')].slice(0,300);
+  nodes.forEach(n=>{
+    const fill=n.getAttribute('fill')||'';
+    const item=el('div',{class:'eitem'},
+      el('span',{class:'tag'},n.tagName),
+      el('span',{class:'sw2',style:`background:${fill||'transparent'}`}),
+      el('span',{class:'dsc'},(n.id?'#'+n.id:'')+(n.getAttribute('class')?' .'+n.getAttribute('class'):'')||n.getAttribute('d')?.slice(0,24)||''));
+    item.onmouseenter=()=>{ if(SRC.svg.contains(n)) highlightEl(n); };
+    item.onmouseleave=()=>{$('#hoverbox').style.display='none';$('#tip').style.display='none';};
+    item.onclick=()=>flashEl(n);
+    list.append(item);
+  });
+}
+function flashEl(n){ const o=n.style.outline; n.style.transition='opacity .1s'; let i=0; const iv=setInterval(()=>{ n.style.opacity=(i%2?1:0.2); if(++i>5){clearInterval(iv);n.style.opacity=1;} },110); highlightEl(n); }
+
+/* ═══ SOURCE LOADING ═════════════════════════════════════════════════ */
+function loadFile(f){
+  const isSvg=/svg/i.test(f.type)||/\.svg$/i.test(f.name);
+  const rd=new FileReader();
+  if(isSvg){ rd.onload=()=>setSVG(String(rd.result)); rd.readAsText(f); }
+  else{ rd.onload=()=>setRaster(String(rd.result)); rd.readAsDataURL(f); }
+}
+/* ── source history (undo) ──────────────────────────────────────────── */
+const history=[]; const HIST_MAX=30;
+function pushHistory(){
+  let snap=null;
+  if(SRC.type==='svg' && SRC.originalText) snap={type:'svg', data:SRC.originalText};
+  else if(SRC.type==='raster' && SRC.rasterURL) snap={type:'raster', data:SRC.rasterURL};
+  if(snap){ history.push(snap); if(history.length>HIST_MAX)history.shift(); }
+  updateUndoBtn();
+}
+function undo(){
+  if(!history.length){ toast('Nothing to undo'); return; }
+  const snap=history.pop();
+  if(snap.type==='svg') setSVG(snap.data,{push:false});
+  else setRaster(snap.data,{push:false});
+  updateUndoBtn(); toast('Undo');
+}
+function updateUndoBtn(){ const b=$('#undoBtn'); if(b) b.disabled=history.length===0; }
+
+function setSVG(text,opts){
+  const doc=new DOMParser().parseFromString(text,'image/svg+xml');
+  if(doc.querySelector('parsererror')){ toast('SVG failed to parse (malformed XML)'); return; }
+  const svg=doc.querySelector('svg');
+  if(!svg){ toast('Not a valid SVG'); return; }
+  document.adoptNode(svg);
+  if(!opts||opts.push!==false) pushHistory();   // capture the outgoing source before replacing
+  SRC={type:'svg', svg, raster:null, natW:0, natH:0, originalText:text};
+  measureSVG(svg);
+  const art=$('#art'); art.innerHTML=''; art.append(svg);
+  if(!SRC.natW||!SRC.natH){ // recover true extent (%/em/no-size SVGs) from the live DOM
+    try{ const bb=svg.getBBox(); SRC.natW=SRC.natW||Math.round(bb.width); SRC.natH=SRC.natH||Math.round(bb.height); }catch{}
+    SRC.natW=SRC.natW||300; SRC.natH=SRC.natH||150;
+  }
+  const clone=svg.cloneNode(true); const base=$('#artBase'); base.innerHTML=''; base.append(clone);
+  baseSize=new Map();
+  applySvgSizing();
+  $('#empty').style.display='none';
+  srcChip(); refreshMeta(); buildElementList();
+  fitView(); apply();
+  if(S.font) loadSvgFont(S.font);
+}
+const pxLen=v=>{ const m=/^\s*([\d.]+)\s*(px)?\s*$/.exec(v||''); return m?parseFloat(m[1]):0; };  // px/unit-less only
+function measureSVG(svg){
+  let w=0,h=0; const vb=svg.getAttribute('viewBox');
+  if(vb){ const a=vb.trim().split(/[ ,]+/).map(Number); w=a[2]||0; h=a[3]||0; }
+  w=w||pxLen(svg.getAttribute('width')); h=h||pxLen(svg.getAttribute('height'));
+  SRC.natW=Math.round(w)||0; SRC.natH=Math.round(h)||0;   // 0 = unknown; setSVG recovers via getBBox
+}
+function applySvgSizing(){
+  const svg=SRC.svg; if(!svg)return;
+  if(!svg.getAttribute('viewBox')){ svg.setAttribute('viewBox',`0 0 ${SRC.natW||300} ${SRC.natH||150}`); }
+  const apply1=s=>{ if(S.stripSize){ s.removeAttribute('width'); s.removeAttribute('height'); s.style.width='min(74vw,'+ (SRC.natW*1.4)+'px)'; s.style.height='auto'; }
+    else{ s.setAttribute('width',SRC.natW); s.setAttribute('height',SRC.natH); s.style.width=''; s.style.height=''; } s.setAttribute('preserveAspectRatio','xMidYMid meet'); };
+  apply1(svg); const b=$('#artBase').querySelector('svg'); if(b)apply1(b);
+}
+function setRaster(dataURL,opts){
+  const img=new Image();
+  img.onload=()=>{
+    if(!opts||opts.push!==false) pushHistory();   // capture the outgoing source before replacing
+    SRC={type:'raster', svg:null, raster:img, natW:img.naturalWidth, natH:img.naturalHeight, rasterURL:dataURL};
+    // show the raster as an <img> wrapped in svg-less preview until traced
+    const art=$('#art'); art.innerHTML=''; const wrap=el('div',{}); const im=el('img',{src:dataURL}); im.style.maxWidth='min(74vw,'+(img.naturalWidth)+'px)'; im.style.display='block'; wrap.append(im); art.append(wrap);
+    $('#artBase').innerHTML='';
+    $('#empty').style.display='none';
+    srcChip(); refreshMeta(); openSection('trace'); fitView();
+    $('#art').querySelector('img').style.filter='none';
+    toast('Raster loaded — open Image Trace to vectorise'); traceNote();
+    updateReadout();
+  };
+  img.src=dataURL;
+}
+function traceNote(){ const n=$('#traceNote'); if(n){ n.textContent = SRC.type==='raster' ? 'Ready. Tune the mode + threshold, then Trace to SVG.' : 'Load a PNG/JPG to enable.'; } const go=$('#traceGo'); if(go)go.disabled=SRC.type!=='raster'; }
+function srcChip(){ const c=$('#srcchip'); c.innerHTML = SRC.type? `<b>${SRC.type.toUpperCase()}</b> ${SRC.natW}×${SRC.natH}` : 'no source'; }
+function openSection(id){ openSet.add(id); const acc=[...document.querySelectorAll('.acc')].find(a=>a.dataset.id===id); if(acc)acc.classList.add('open'); LS.set('svgstudio-open',JSON.stringify([...openSet])); }
+
+function loadSvgFont(name){ if(!name){ $('#svgfont').href=''; return; } const spec=Object.values(FONTS).flat().find(f=>f[0]===name); const w=spec?spec[1]:'400;700'; $('#svgfont').href=`https://fonts.googleapis.com/css2?family=${name.replace(/ /g,'+')}:wght@${w}&display=swap`; }
+
+/* samples */
+function loadSampleSVG(){ fetch('./sample.svg').then(r=>r.ok?r.text():Promise.reject()).then(setSVG).catch(()=>setSVG(FALLBACK_SVG)); }
+function loadSampleRaster(){ setRaster(makeSampleRaster()); }
+function pasteSVG(){ const t=prompt('Paste SVG markup:'); if(t&&t.includes('<svg'))setSVG(t); }
+function makeSampleRaster(){
+  const c=el('canvas'); c.width=520; c.height=360; const x=c.getContext('2d');
+  const g=x.createLinearGradient(0,0,520,360); g.addColorStop(0,'#012836'); g.addColorStop(1,'#5fb2d3'); x.fillStyle=g; x.fillRect(0,0,520,360);
+  x.fillStyle='#eef6f9'; x.beginPath(); x.arc(160,150,90,0,7); x.fill();
+  x.fillStyle='#001e29'; x.beginPath(); x.moveTo(300,60); x.lineTo(470,300); x.lineTo(300,300); x.closePath(); x.fill();
+  x.strokeStyle='#eef6f9'; x.lineWidth=14; x.beginPath(); x.arc(360,140,58,0,7); x.stroke();
+  x.fillStyle='#ff6a1f'; x.font='bold 64px sans-serif'; x.fillText('TRACE',120,320);
+  return c.toDataURL('image/png');
+}
+// Inline generic diagram — used when ./sample.svg can't be fetched (e.g. the
+// file:// preview, where fetch of a sibling file is blocked). Keeps the studio
+// looking right without the server.
+const FALLBACK_SVG=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 400" font-family="sans-serif"><rect width="640" height="400" fill="#f4f4f4"/><g stroke="#9aa0a6" stroke-width="2" fill="none"><path d="M160 120 H240"/><path d="M400 120 H480"/><path d="M120 160 V240"/><path d="M520 160 V240"/><path d="M200 280 H440" stroke-dasharray="6 6"/></g><g stroke="#5f6368" stroke-width="1.5"><rect x="60" y="90" width="100" height="60" rx="10" fill="#d9dce0"/><rect x="240" y="90" width="160" height="60" rx="10" fill="#b7bcc2"/><rect x="480" y="90" width="100" height="60" rx="10" fill="#d9dce0"/><rect x="70" y="240" width="120" height="56" rx="10" fill="#8b9198"/><rect x="450" y="240" width="120" height="56" rx="10" fill="#8b9198"/></g><circle cx="320" cy="270" r="34" fill="#6b7178" stroke="#3c4043" stroke-width="2"/><path d="M320 250 l16 28 h-32 z" fill="#f4f4f4"/><g fill="#2b2f33" font-size="14" text-anchor="middle"><text x="110" y="125">Client</text><text x="320" y="125">Gateway</text><text x="530" y="125">CDN</text><text x="130" y="273">Service A</text><text x="510" y="273">Service B</text><text x="320" y="345" font-size="12" fill="#5f6368">shared queue</text></g></svg>`;
+
+/* ═══ IMAGE TRACE (raster → vector) ══════════════════════════════════ */
+function runTrace(){
+  if(SRC.type!=='raster'){ toast('Load a raster first'); return; }
+  busy(true,'tracing…');
+  setTimeout(()=>{ try{ const svg=traceRaster(SRC.raster); setSVG(svg); toast('Traced → '+(svg.match(/<path/g)||[]).length+' paths'); }catch(err){ console.error(err); toast('Trace failed'); } finally{ busy(false); } }, 30);
+}
+function busy(on,msg){ const b=$('#busy'); b.classList.toggle('on',on); if(msg)$('#busymsg').textContent=msg; }
+
+/* Raster → vector. Mirrors trace-core.mjs (the canonical/headless engine) inline
+   so the tool stays a single self-contained file: SUPERSAMPLE for sub-pixel edges
+   → alpha-aware nearest-palette layers (k-means-refined) → interpolated iso-contours
+   → corner-preserving + faired curve fit. See references/tri-tone-and-trace.md. */
+function traceRaster(img){
+  let w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
+  const sc=Math.min(2, Math.max(1, (S.traceRes||900)/Math.max(w,h)));   // supersample (2x = quality sweet spot)
+  w=Math.max(2,Math.round(w*sc)); h=Math.max(2,Math.round(h*sc));
+  const cv=el('canvas'); cv.width=w; cv.height=h; const ctx=cv.getContext('2d',{willReadFrequently:true});
+  ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
+  ctx.drawImage(img,0,0,w,h);
+  let idata=ctx.getImageData(0,0,w,h);
+  if(S.preblur>0) idata=boxBlur(idata,w,h,Math.round(S.preblur));
+  const px=idata.data, N=w*h;
+  const lum=new Float32Array(N), opaque=new Uint8Array(N);
+  for(let i=0,j=0;i<N;i++,j+=4){ lum[i]=0.299*px[j]+0.587*px[j+1]+0.114*px[j+2]; opaque[i]=px[j+3]>=128?1:0; }
+  const layers=traceLayers(px,lum,opaque,w,h);
+  const eps=(S.detail||0.7)*sc, minA=(S.despeckle||0)*sc*sc;   // detail/area are native-relative → scale to working px
+  let body='';
+  for(const L of layers){
+    let pxArea=0; for(let i=0;i<N;i++) if(L.field[i]>=0.5) pxArea++;
+    if(pxArea<minA) continue;
+    const contours=isoContours(L.field,w,h,0.5);
+    let d='';
+    for(const poly of contours){
+      if(polyArea(poly)<0.5) continue;
+      const pts=simplify(poly,eps);
+      if(pts.length<3) continue;
+      d+=fitPath(pts,S.smooth,40,1,1.5)+' ';      // corner 40°, 1 fairing pass, Bézier fit err 1.5px
+    }
+    if(d) body+=`<path d="${d.trim()}" fill="${L.fill}" fill-rule="evenodd"/>`;
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}">${body}</svg>`;
+}
+function traceLayers(px,lum,opaque,w,h){
+  const N=w*h, layers=[];
+  if(S.traceMode==='bw'){
+    const th=S.threshold, field=new Float32Array(N);
+    for(let i=0;i<N;i++) if(opaque[i]) field[i]=(S.traceInvert?lum[i]>th:lum[i]<th)?1:0;
+    layers.push({field,fill:S.traceInvert?'#ffffff':'#111111'});
+  } else if(S.traceMode==='poster'){
+    const L=Math.max(2,Math.round(S.levels)||4);   // ≥2, never NaN
+    for(let k=1;k<L;k++){ const th=255*k/L, field=new Float32Array(N);
+      for(let i=0;i<N;i++){ if(!opaque[i])continue; let v=lum[i]; if(S.traceInvert)v=255-v; field[i]=v<th?1:0; }
+      const g=Math.round(255*(k-1)/(L-1)); layers.push({field,fill:rgb2hex(g,g,g)}); }
+    layers.reverse();
+  } else { // color — alpha-aware nearest-palette assignment (k-means refined)
+    let pal=medianCut(px,opaque,w,h,S.colors);
+    pal=kmeansRefine(px,opaque,w,h,pal,5);
+    { const preArea=new Array(pal.length).fill(0);   // merge keeps the DOMINANT cluster member
+      for(let i=0,j=0;i<N;i++,j+=4){ if(!opaque[i])continue; let b=0,bd=1e12;
+        for(let p=0;p<pal.length;p++){ const dr=px[j]-pal[p][0],dg=px[j+1]-pal[p][1],dl=px[j+2]-pal[p][2]; const dd=dr*dr+dg*dg+dl*dl; if(dd<bd){bd=dd;b=p;} } preArea[b]++; }
+      pal=mergePalette(pal,48,preArea); }   // collapse near-duplicate colours (mono over-segmentation + AA fringe)
+    const assign=new Int16Array(N), area=new Array(pal.length).fill(0);
+    for(let i=0,j=0;i<N;i++,j+=4){ if(!opaque[i]){assign[i]=-1;continue;} let best=0,bd=1e12;
+      for(let p=0;p<pal.length;p++){ const dr=px[j]-pal[p][0],dg=px[j+1]-pal[p][1],dl=px[j+2]-pal[p][2]; const dd=dr*dr+dg*dg+dl*dl; if(dd<bd){bd=dd;best=p;} }
+      assign[i]=best; area[best]++; }
+    const order=pal.map((_,i)=>i).sort((a,b)=>area[b]-area[a]);
+    for(const p of order){ if(area[p]===0)continue; if(p!==order[0]&&area[p]<(S.despeckle||0))continue;   // never drop the dominant colour
+      const field=new Float32Array(N);
+      for(let i=0;i<N;i++) if(assign[i]===p) field[i]=1; layers.push({field,fill:rgb2hex(...pal[p])}); }
+  }
+  return layers;
+}
+function boxBlur(imgData,w,h,r){
+  if(r<1)return imgData; const src=imgData.data; const out=new Uint8ClampedArray(src.length);
+  const tmp=new Uint8ClampedArray(src.length);
+  const pass=(inp,outp,horiz)=>{ for(let y=0;y<h;y++)for(let x=0;x<w;x++){ let R=0,G=0,B=0,A=0,n=0; for(let k=-r;k<=r;k++){ const xx=horiz?x+k:x, yy=horiz?y:y+k; if(xx<0||yy<0||xx>=w||yy>=h)continue; const idx=(yy*w+xx)*4; R+=inp[idx];G+=inp[idx+1];B+=inp[idx+2];A+=inp[idx+3];n++; } const o=(y*w+x)*4; outp[o]=R/n;outp[o+1]=G/n;outp[o+2]=B/n;outp[o+3]=A/n; } };
+  pass(src,tmp,true); pass(tmp,out,false);
+  return new ImageData(out,w,h);
+}
+/* interpolated iso-contours — marching squares with sub-pixel edge crossings */
+function isoContours(field,w,h,iso){
+  const val=(x,y)=>(x<0||y<0||x>=w||y>=h)?-1e6:field[y*w+x];
+  const lerp=(p,q,a,b)=>{ let t=(iso-a)/((b-a)||1e-9); if(t<0)t=0; else if(t>1)t=1; return [p[0]+(q[0]-p[0])*t, p[1]+(q[1]-p[1])*t]; };
+  const segs=[];
+  for(let y=-1;y<h;y++)for(let x=-1;x<w;x++){
+    const a=val(x,y),b=val(x+1,y),c=val(x+1,y+1),d=val(x,y+1);
+    const ci=(a>iso?8:0)|(b>iso?4:0)|(c>iso?2:0)|(d>iso?1:0);
+    if(ci===0||ci===15)continue;
+    const TL=[x,y],TR=[x+1,y],BR=[x+1,y+1],BL=[x,y+1];
+    const T=()=>lerp(TL,TR,a,b),R=()=>lerp(TR,BR,b,c),B=()=>lerp(BL,BR,d,c),L=()=>lerp(TL,BL,a,d);
+    const add=(p,q)=>{ if(Math.abs(p[0]-q[0])>1e-9||Math.abs(p[1]-q[1])>1e-9) segs.push([p[0],p[1],q[0],q[1]]); };  // skip degenerate corner segs
+    switch(ci){
+      case 1: add(B(),L()); break; case 2: add(R(),B()); break; case 3: add(R(),L()); break;
+      case 4: add(T(),R()); break; case 5: add(T(),R()); add(B(),L()); break; case 6: add(T(),B()); break;
+      case 7: add(T(),L()); break; case 8: add(L(),T()); break; case 9: add(B(),T()); break;
+      case 10: add(L(),T()); add(R(),B()); break; case 11: add(R(),T()); break;
+      case 12: add(L(),R()); break; case 13: add(B(),R()); break; case 14: add(L(),B()); break;
+    }
+  }
+  const key=(x,y)=>Math.round(x*64)+','+Math.round(y*64); const map=new Map();
+  segs.forEach((s,i)=>{ const k=key(s[0],s[1]); if(!map.has(k))map.set(k,[]); map.get(k).push(i); });
+  const used=new Uint8Array(segs.length); const contours=[];
+  for(let seed=0;seed<segs.length;seed++){
+    if(used[seed])continue; const poly=[]; let cur=seed; let guard=0;
+    while(cur!==-1 && !used[cur] && guard++<segs.length+5){
+      used[cur]=1; const s=segs[cur]; poly.push([s[0],s[1]]);
+      const cand=map.get(key(s[2],s[3])); let nxt=-1;
+      if(cand){
+        if(poly.length>=2 && cand.includes(seed)){ poly.push(poly[0].slice()); break; }   // close on segment identity
+        for(const ci of cand){ if(!used[ci]){nxt=ci;break;} }
+      }
+      if(nxt===-1){ poly.push([s[2],s[3]]); break; }
+      cur=nxt;
+    }
+    if(poly.length>=3)contours.push(poly);
+  }
+  return contours;
+}
+/* k-means (Lloyd) refinement — snaps median-cut seeds onto the true flat colours */
+function kmeansRefine(px,opaque,w,h,pal,iters){
+  const N=w*h, step=Math.max(1,Math.floor(N/30000)), K=pal.length, cur=pal.map(c=>c.slice());
+  for(let it=0;it<iters;it++){
+    const sum=Array.from({length:K},()=>[0,0,0,0]);
+    for(let i=0;i<N;i+=step){ if(!opaque[i])continue; const j=i*4,r=px[j],g=px[j+1],b=px[j+2];
+      let best=0,bd=1e12; for(let p=0;p<K;p++){ const dr=r-cur[p][0],dg=g-cur[p][1],db=b-cur[p][2]; const dd=dr*dr+dg*dg+db*db; if(dd<bd){bd=dd;best=p;} }
+      const s=sum[best]; s[0]+=r; s[1]+=g; s[2]+=b; s[3]++; }
+    let moved=0;
+    for(let p=0;p<K;p++){ if(sum[p][3]===0)continue; const nr=sum[p][0]/sum[p][3],ng=sum[p][1]/sum[p][3],nb=sum[p][2]/sum[p][3];
+      moved+=Math.abs(nr-cur[p][0])+Math.abs(ng-cur[p][1])+Math.abs(nb-cur[p][2]); cur[p]=[nr,ng,nb]; }
+    if(moved<1)break;
+  }
+  return cur.map(c=>[Math.round(c[0]),Math.round(c[1]),Math.round(c[2])]);
+}
+function polyArea(p){ let a=0; for(let i=0,n=p.length;i<n;i++){ const [x1,y1]=p[i],[x2,y2]=p[(i+1)%n]; a+=x1*y2-x2*y1; } return Math.abs(a/2); }
+/* Douglas–Peucker for CLOSED rings. isoContours emits closed contours
+   (first point == last), which degenerates open-polyline DP (zero-length chord).
+   Seed two anchors — index 0 and the farthest point from it — then DP each half
+   around the ring. Returns a clean ring (no duplicate closing point). */
+function simplify(pts,eps){
+  if(eps<=0) return pts;
+  let ring=pts;
+  if(ring.length>1 && Math.abs(ring[0][0]-ring[ring.length-1][0])<1e-6 && Math.abs(ring[0][1]-ring[ring.length-1][1])<1e-6)
+    ring=ring.slice(0,-1);
+  const n=ring.length;
+  if(n<4) return ring;
+  const at=i=>ring[i%n];
+  let far=0,dm=-1;
+  for(let i=1;i<n;i++){ const dx=ring[i][0]-ring[0][0], dy=ring[i][1]-ring[0][1]; const d=dx*dx+dy*dy; if(d>dm){dm=d;far=i;} }
+  const keep=new Uint8Array(n); keep[0]=1; keep[far]=1;
+  const dp=(a,b)=>{ const stack=[[a,b]];
+    while(stack.length){ const [s,e]=stack.pop(); if(e<=s+1)continue;
+      const A=at(s),B=at(e); const dx=B[0]-A[0],dy=B[1]-A[1]; const len=Math.hypot(dx,dy)||1;
+      let dmax=0,idx=-1;
+      for(let i=s+1;i<e;i++){ const P=at(i); const d=Math.abs((P[0]-A[0])*dy-(P[1]-A[1])*dx)/len; if(d>dmax){dmax=d;idx=i;} }
+      if(dmax>eps&&idx>-1){ keep[idx%n]=1; stack.push([s,idx],[idx,e]); }
+    }
+  };
+  dp(0,far); dp(far,n);   // n wraps to ring[0] via at()
+  const res=[]; for(let i=0;i<n;i++) if(keep[i]) res.push(ring[i]);
+  return res;
+}
+function polyPath(pts){ let d='M'+pts[0][0].toFixed(1)+' '+pts[0][1].toFixed(1); for(let i=1;i<pts.length;i++)d+='L'+pts[i][0].toFixed(1)+' '+pts[i][1].toFixed(1); return d+'Z'; }
+/* corner-split + least-squares Bézier fit (Schneider): split the ring at sharp
+   corners, fair curve vertices, then fit each smooth span with the fewest cubic
+   Béziers within `fitErr` px — clean curves, crisp corners. Same as trace-core. */
+function fitPath(pts,smooth,cornerDeg,fair,fitErr){
+  let n=pts.length; if(n<3)return polyPath(pts);
+  const cc=Math.cos((cornerDeg||42)*Math.PI/180); const corner=new Array(n);
+  for(let i=0;i<n;i++){ const p0=pts[(i-1+n)%n],p1=pts[i],p2=pts[(i+1)%n];
+    const ax=p1[0]-p0[0],ay=p1[1]-p0[1],bx=p2[0]-p1[0],by=p2[1]-p1[1];
+    const la=Math.hypot(ax,ay)||1,lb=Math.hypot(bx,by)||1; corner[i]=(ax*bx+ay*by)/(la*lb)<cc; }
+  if(fair>0){ let c=pts.map(p=>p.slice());
+    for(let it=0;it<fair;it++){ const nx=c.map(p=>p.slice());
+      for(let i=0;i<n;i++){ if(corner[i])continue; const a=c[(i-1+n)%n],b=c[(i+1)%n];
+        nx[i][0]=c[i][0]+0.5*((a[0]+b[0])/2-c[i][0]); nx[i][1]=c[i][1]+0.5*((a[1]+b[1])/2-c[i][1]); } c=nx; }
+    pts=c; }
+  let breaks=[]; for(let i=0;i<n;i++) if(corner[i]) breaks.push(i);
+  if(breaks.length===0){ let far=0,dm=-1; for(let i=1;i<n;i++){const dx=pts[i][0]-pts[0][0],dy=pts[i][1]-pts[0][1];const d=dx*dx+dy*dy;if(d>dm){dm=d;far=i;}} breaks=[0,far].sort((a,b)=>a-b); }
+  else if(breaks.length===1){ const c0=breaks[0]; let far=c0,dm=-1; for(let k=1;k<n;k++){const i=(c0+k)%n;const dx=pts[i][0]-pts[c0][0],dy=pts[i][1]-pts[c0][1];const d=dx*dx+dy*dy;if(d>dm){dm=d;far=i;}} breaks=[c0,far].sort((a,b)=>a-b); }
+  const errSq=Math.pow((fitErr||1.5)*(0.6+(smooth||0)),2), F=v=>v.toFixed(1);
+  let d='M'+F(pts[breaks[0]][0])+' '+F(pts[breaks[0]][1]);
+  for(let b=0;b<breaks.length;b++){ const a=breaks[b], e=breaks[(b+1)%breaks.length];
+    const span=[]; let i=a; while(true){ span.push(pts[i]); if(i===e)break; i=(i+1)%n; }
+    if(span.length===2){ d+='L'+F(span[1][0])+' '+F(span[1][1]); continue; }
+    for(const bz of fitCurve(span,errSq)) d+=`C${F(bz[1][0])} ${F(bz[1][1])} ${F(bz[2][0])} ${F(bz[2][1])} ${F(bz[3][0])} ${F(bz[3][1])}`; }
+  return d+'Z';
+}
+const _vs=(a,b)=>[a[0]-b[0],a[1]-b[1]],_va=(a,b)=>[a[0]+b[0],a[1]+b[1]],_vk=(a,s)=>[a[0]*s,a[1]*s],_vd=(a,b)=>a[0]*b[0]+a[1]*b[1],_vl=a=>Math.hypot(a[0],a[1]),_vn=a=>{const l=_vl(a)||1;return[a[0]/l,a[1]/l];};
+const _bz=(c,t)=>{let p=c.map(v=>v.slice());for(let r=1;r<p.length;r++)for(let i=0;i<p.length-r;i++)p[i]=[p[i][0]+(p[i+1][0]-p[i][0])*t,p[i][1]+(p[i+1][1]-p[i][1])*t];return p[0];};
+function fitCurve(points,errSq){ const n=points.length; return fitCubic(points,0,n-1,_vn(_vs(points[1],points[0])),_vn(_vs(points[n-2],points[n-1])),errSq,0); }
+function fitCubic(points,first,last,tH1,tH2,errSq,depth){
+  const nPts=last-first+1;
+  if(nPts===2){ const dist=_vl(_vs(points[last],points[first]))/3; return [[points[first],_va(points[first],_vk(tH1,dist)),_va(points[last],_vk(tH2,dist)),points[last]]]; }
+  let u=_chord(points,first,last); let curve=_genBez(points,first,last,u,tH1,tH2);
+  let m=_maxErr(points,first,last,curve,u);
+  if(m.err<errSq) return [curve];
+  if(m.err<errSq*16 && depth<20){ for(let i=0;i<4;i++){ const up=u.map((ui,k)=>_newton(curve,points[first+k],ui)); curve=_genBez(points,first,last,up,tH1,tH2); m=_maxErr(points,first,last,curve,up); if(m.err<errSq)return [curve]; u=up; } }
+  if(m.split<=first||m.split>=last||depth>22) return [curve];
+  const tHC=_vn(_vs(points[m.split-1],points[m.split+1]));
+  return fitCubic(points,first,m.split,tH1,tHC,errSq,depth+1).concat(fitCubic(points,m.split,last,[-tHC[0],-tHC[1]],tH2,errSq,depth+1));
+}
+function _chord(points,first,last){ const u=[0]; for(let i=first+1;i<=last;i++)u.push(u[u.length-1]+_vl(_vs(points[i],points[i-1]))); const tot=u[u.length-1]||1; return u.map(x=>x/tot); }
+function _genBez(points,first,last,uP,tH1,tH2){
+  const nPts=last-first+1,A=[]; for(let i=0;i<nPts;i++){const u=uP[i];A.push([_vk(tH1,3*u*(1-u)*(1-u)),_vk(tH2,3*u*u*(1-u))]);}
+  let C00=0,C01=0,C11=0,X0=0,X1=0; const p0=points[first],p3=points[last];
+  for(let i=0;i<nPts;i++){ const u=uP[i],b0=(1-u)**3,b1=3*u*(1-u)**2,b2=3*u*u*(1-u),b3=u**3;
+    C00+=_vd(A[i][0],A[i][0]);C01+=_vd(A[i][0],A[i][1]);C11+=_vd(A[i][1],A[i][1]);
+    const tmp=_vs(points[first+i],[p0[0]*(b0+b1)+p3[0]*(b2+b3),p0[1]*(b0+b1)+p3[1]*(b2+b3)]); X0+=_vd(A[i][0],tmp);X1+=_vd(A[i][1],tmp); }
+  const dCC=C00*C11-C01*C01,dCX=C00*X1-C01*X0,dXC=X0*C11-X1*C01; let aL=dCC===0?0:dXC/dCC,aR=dCC===0?0:dCX/dCC;
+  const segLen=_vl(_vs(p3,p0)),eps=1e-6*segLen; if(aL<eps||aR<eps){const dist=segLen/3;aL=dist;aR=dist;}
+  return [p0,_va(p0,_vk(tH1,aL)),_va(p3,_vk(tH2,aR)),p3];
+}
+function _maxErr(points,first,last,curve,u){ let err=0,split=Math.floor((first+last)/2); for(let i=first+1;i<last;i++){ const P=_bz(curve,u[i-first]); const dx=P[0]-points[i][0],dy=P[1]-points[i][1],d=dx*dx+dy*dy; if(d>=err){err=d;split=i;} } return {err,split}; }
+function _newton(Q,P,u){ const Q1=[_vk(_vs(Q[1],Q[0]),3),_vk(_vs(Q[2],Q[1]),3),_vk(_vs(Q[3],Q[2]),3)]; const Q2=[_vk(_vs(Q1[1],Q1[0]),2),_vk(_vs(Q1[2],Q1[1]),2)]; const Qu=_bz(Q,u),Q1u=_bz(Q1,u),Q2u=_bz(Q2,u); const num=_vd(_vs(Qu,P),Q1u),den=_vd(Q1u,Q1u)+_vd(_vs(Qu,P),Q2u); if(!den)return u; const nu=u-num/den; return (nu<0||nu>1||Number.isNaN(nu))?u:nu; }
+/* merge palette entries within `thr` (Euclidean RGB) — collapses near-duplicate
+   colours so a near-monochrome logo doesn't split into overlapping tint layers */
+function mergePalette(pal,thr,areas){
+  if(!thr||thr<=0)return pal; const keep=pal.map(()=>true), out=[];
+  for(let i=0;i<pal.length;i++){ if(!keep[i])continue; let rep=i,repA=areas?areas[i]:0;
+    for(let j=i+1;j<pal.length;j++){ if(!keep[j])continue;
+      const dr=pal[i][0]-pal[j][0],dg=pal[i][1]-pal[j][1],db=pal[i][2]-pal[j][2];
+      if(dr*dr+dg*dg+db*db<thr*thr){ keep[j]=false; if(areas&&areas[j]>repA){repA=areas[j];rep=j;} } }
+    out.push(pal[rep]); }   // keep the dominant member of each cluster
+  return out;
+}
+/* median-cut colour quantization (alpha-aware — samples opaque pixels only) */
+function medianCut(px,opaque,w,h,K){
+  const step=Math.max(1,Math.floor((w*h)/20000)); const pts=[];
+  for(let i=0;i<w*h;i+=step){ if(!opaque[i])continue; const j=i*4; pts.push([px[j],px[j+1],px[j+2]]); }
+  if(!pts.length)return [[0,0,0]];
+  let boxes=[pts];
+  while(boxes.length<K){ let bi=-1,br=-1; boxes.forEach((b,i)=>{ if(b.length<2)return; const r=chanRange(b); if(r.range>br){br=r.range;bi=i;} }); if(bi<0)break;
+    const b=boxes[bi]; const r=chanRange(b); b.sort((a,c)=>a[r.ch]-c[r.ch]); const m=b.length>>1; boxes.splice(bi,1,b.slice(0,m),b.slice(m)); }
+  return boxes.map(b=>{ const s=[0,0,0]; b.forEach(c=>{s[0]+=c[0];s[1]+=c[1];s[2]+=c[2];}); const n=b.length||1; return [Math.round(s[0]/n),Math.round(s[1]/n),Math.round(s[2]/n)]; });
+}
+function chanRange(b){ const mn=[255,255,255],mx=[0,0,0]; b.forEach(c=>{for(let k=0;k<3;k++){if(c[k]<mn[k])mn[k]=c[k];if(c[k]>mx[k])mx[k]=c[k];}}); const r=[mx[0]-mn[0],mx[1]-mn[1],mx[2]-mn[2]]; const ch=r.indexOf(Math.max(...r)); return {ch,range:r[ch]}; }
+
+/* palette from current artwork (rasterise stage → quantize) */
+function paletteFromArt(){
+  const svg=SRC.svg; if(!svg){ if(SRC.raster){ seedFromImage(SRC.raster); } else toast('Load artwork first'); return; }
+  const s=new XMLSerializer().serializeToString(svg);
+  const img=new Image(); img.onload=()=>seedFromImage(img);
+  img.onerror=()=>toast('Could not sample'); img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(s);
+}
+function seedFromImage(img){
+  const w=120,h=Math.max(1,Math.round(120*(img.naturalHeight||img.height)/(img.naturalWidth||img.width)));
+  const c=el('canvas'); c.width=w;c.height=h; const x=c.getContext('2d',{willReadFrequently:true}); x.drawImage(img,0,0,w,h);
+  const px=x.getImageData(0,0,w,h).data; const pal=medianCut(px,w,h,Math.max(3,S.stops.length));
+  pal.sort((a,b)=>(a[0]+a[1]+a[2])-(b[0]+b[1]+b[2])); // dark→light
+  S.stops=pal.slice(0,Math.max(3,S.stops.length)).map((c,i,arr)=>({c:rgb2hex(...c),p:i/(arr.length-1)}));
+  renderRail(); apply(); scheduleSave(); toast('Palette extracted');
+}
+
+/* ═══ EXPORT ═════════════════════════════════════════════════════════ */
+function exportSVGString(bake){
+  const svg=SRC.svg; if(!svg)return '';
+  const clone=svg.cloneNode(true);
+  // drop the fluid inline sizing we set for the stage; make the file self-sized
+  clone.style.removeProperty('width'); clone.style.removeProperty('height');
+  if(!clone.getAttribute('style')) clone.removeAttribute('style');
+  clone.setAttribute('width',SRC.natW); clone.setAttribute('height',SRC.natH);
+  clone.setAttribute('xmlns','http://www.w3.org/2000/svg');
+  // bake the current stroke/fill + typography look, scoped to a UNIQUE id so it
+  // cannot leak if the exported file is later inlined into a host page.
+  const id = clone.id || (clone.id='svg-studio-'+Math.random().toString(36).slice(2,8));
+  const rules=scopedCSSRules('#'+id);
+  if(rules.trim()){ const st=document.createElementNS('http://www.w3.org/2000/svg','style'); st.textContent=rules; clone.prepend(st); }
+  if(bake&&S.toneOn){
+    buildToneFilter(); const filt=$('#tonemap').cloneNode(true);
+    let defs=clone.querySelector('defs'); if(!defs){ defs=document.createElementNS('http://www.w3.org/2000/svg','defs'); clone.prepend(defs);} defs.append(filt);
+    // wrap children (except defs/style) in a tone-map filtered group
+    const g=document.createElementNS('http://www.w3.org/2000/svg','g'); g.setAttribute('filter','url(#tonemap)');
+    [...clone.childNodes].forEach(n=>{ if(n!==defs && !(n.nodeType===1 && /^(style|defs)$/i.test(n.tagName))) g.append(n); });
+    clone.append(g);
+  }
+  return '<?xml version="1.0" encoding="UTF-8"?>\n'+new XMLSerializer().serializeToString(clone);
+}
+function exportPNG(scale){
+  const svg=SRC.svg; if(!svg){ toast('Load an SVG (or trace a raster) first'); return; }
+  busy(true,'rendering png…');
+  const str=exportSVGString(true);
+  const img=new Image();
+  img.onload=()=>{
+    const W=Math.max(1,Math.round(SRC.natW*scale)), H=Math.max(1,Math.round(SRC.natH*scale));
+    const c=el('canvas'); c.width=W; c.height=H; const x=c.getContext('2d');
+    if(S.bg==='solid'){ x.fillStyle=S.bgColor; x.fillRect(0,0,W,H); }
+    else if(S.bg==='light'){ x.fillStyle='#ffffff'; x.fillRect(0,0,W,H); }
+    else if(S.bg==='dark'){ x.fillStyle='#111214'; x.fillRect(0,0,W,H); }
+    // photographic chain via canvas filter (tone-map already baked into the svg)
+    const css=[]; if(S.sat!==1)css.push(`saturate(${S.sat})`); if(S.con!==1)css.push(`contrast(${S.con})`); if(S.bri!==1)css.push(`brightness(${S.bri})`); if(S.hue)css.push(`hue-rotate(${S.hue}deg)`); if(S.sep)css.push(`sepia(${S.sep})`); if(S.gray)css.push(`grayscale(${S.gray})`); if(S.inv)css.push(`invert(${S.inv})`); if(S.blur)css.push(`blur(${S.blur*scale}px)`); if(S.opa!==1)css.push(`opacity(${S.opa})`);
+    try{ x.filter=css.length?css.join(' '):'none'; }catch{}
+    x.drawImage(img,0,0,W,H);
+    c.toBlob(b=>{ downloadBlob(b,'svg-studio@'+scale+'x.png'); busy(false); toast('PNG @'+scale+'× downloaded'); },'image/png');
+  };
+  img.onerror=()=>{ busy(false); toast('PNG render failed (tainted?)'); };
+  img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(str);
+}
+function tokensString(){ const t={ramp:S.stops.map(s=>s.c),filter:filterChain(),saturate:S.sat,contrast:S.con,brightness:S.bri}; return JSON.stringify(t,null,2); }
+function reactSnippet(){
+  buildToneFilter();
+  const rest=filterChain().replace('url(#tonemap) ','').replace('url(#tonemap)','').trim();
+  const cssRest = rest==='none' ? '' : rest;
+  const filterVal=[S.toneOn?'url(#tonemap)':'', cssRest].filter(Boolean).join(' ');
+  const feR=$('#tonemap feFuncR')?.getAttribute('tableValues')||'';
+  const feG=$('#tonemap feFuncG')?.getAttribute('tableValues')||'';
+  const feB=$('#tonemap feFuncB')?.getAttribute('tableValues')||'';
+  return `// Inject this <filter> ONCE so url(#tonemap) resolves (e.g. an inline <svg> defs).
+// Rebuild the tableValues in JS from your theme tokens on theme change — filter
+// primitives can't read CSS vars. Render the target SVG INLINE (an <img> sandboxes it).
+//
+// <svg width="0" height="0" aria-hidden="true"><defs>
+//   <filter id="tonemap" color-interpolation-filters="${S.cif}">
+//     ${S.desat?'<feColorMatrix type="saturate" values="0"/>':''}
+//     <feComponentTransfer>
+//       <feFuncR type="table" tableValues="${feR}"/>
+//       <feFuncG type="table" tableValues="${feG}"/>
+//       <feFuncB type="table" tableValues="${feB}"/>
+//     </feComponentTransfer>
+//   </filter>
+// </defs></svg>
+
+function useBrandTint(ref){
+  React.useEffect(()=>{
+    const el = ref.current; if(!el) return;
+    // To make it theme-aware, read tokens and rewrite the tableValues here:
+    //   const cs = getComputedStyle(el);
+    //   const stops = ['--ink','--accent','--canvas'].map(v => cs.getPropertyValue(v).trim());
+    //   // resample -> per-channel tableValues -> set on #tonemap feFuncR/G/B
+    el.style.filter = ${JSON.stringify(filterVal)};
+  }, []);
+}`;
+}
+
+/* ═══ helpers: clipboard / download / toast ═════════════════════════ */
+function copy(t,msg){ navigator.clipboard?.writeText(t).then(()=>toast(msg||'Copied')).catch(()=>toast('Copy failed')); }
+function download(text,name,type){ downloadBlob(new Blob([text],{type}),name); }
+function downloadBlob(blob,name){ const u=URL.createObjectURL(blob); const a=el('a',{href:u,download:name}); document.body.append(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(u),2000); }
+let toastT=0; function toast(m){ const t=$('#toast'); t.textContent=m; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),1900); }
+function syncCanvasBg(){ const bg=$('#canvasbg'); bg.className='canvasbg'; bg.style.background='';
+  if(S.bg==='iso')bg.classList.add('iso');
+  else if(S.bg==='checker')bg.classList.add('checker');
+  else if(S.bg==='crt')bg.classList.add('crt');
+  else if(S.bg==='solid')bg.style.background=S.bgColor;
+  else if(S.bg==='light')bg.style.background='#ffffff';
+  else if(S.bg==='dark')bg.style.background='#111214';
+  $('#grid').classList.toggle('on',S.grid);
+}
+let saveT=0; function scheduleSave(){ clearTimeout(saveT); saveT=setTimeout(save,400); }
+
+/* ═══ boot ═══════════════════════════════════════════════════════════ */
+function resetAll(){ if(!confirm('Reset all controls to defaults?'))return; S=structuredClone(DEFAULT); baseSize=new Map(); renderRail(); syncCanvasBg(); if(SRC.svg)applySvgSizing(); apply(); save(); toast('Reset'); }
+$('#resetBtn').onclick=resetAll;
+$('#inspectBtn').onclick=toggleInspect;
+$('#splitBtn').onclick=toggleSplit;
+$('#undoBtn').onclick=undo; updateUndoBtn();
+// chrome theme: E7 light (default) ↔ petrol dark — a token swap on <html data-theme>
+function applyChromeTheme(t){ document.documentElement.dataset.theme=t; try{localStorage.setItem('svgstudio-theme',t);}catch{} }
+$('#themeBtn').onclick=()=>applyChromeTheme(document.documentElement.dataset.theme==='petrol'?'light':'petrol');
+applyChromeTheme(LS.get('svgstudio-theme')||'light');
+
+renderRail(); buildHUD(); setupViewport(); syncCanvasBg(); apply();
+$('#splitBtn').classList.toggle('on',S.split);
+// auto-load sample so the studio is never empty on first run
+loadSampleSVG();
+</script>
+</body>
+</html>
