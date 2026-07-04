@@ -41,3 +41,7 @@ Thumbs.db
 
 # Test artifacts
 tests/*/output/
+
+# Local-only benchmark galleries (may contain third-party / client brand assets —
+# populated per-machine, surfaced by the studio's Image Trace panel; never committed)
+skills/svg-brand-tint-ops/assets/gallery/

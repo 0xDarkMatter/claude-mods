@@ -483,6 +483,14 @@ function buildTrace(p){
   const btn=el('button',{class:'btn primary wide',id:'traceGo'},'✦  Trace to SVG'); btn.style.marginTop='10px';
   btn.onclick=runTrace; p.append(btn);
   p.append(el('div',{class:'hint'},'Marching-squares contours · Douglas–Peucker simplify · optional bézier smoothing. All in-browser, no upload.'));
+  // Optional benchmark gallery — appears only when a local ./gallery/ has been
+  // populated (before/after vectorise experiments). Shipped hidden; a HEAD probe
+  // reveals it where present. Silently stays hidden in sandboxed previews (fetch
+  // blocked) and for installs without a local gallery.
+  const gal=el('a',{class:'hint',id:'benchGallery',href:'gallery/index.html',target:'_blank',rel:'noopener'},'◫  Vectorise benchmark gallery →');
+  gal.style.cssText='display:none;margin-top:8px;text-decoration:none;cursor:pointer;color:var(--accent,#6c5ce7)';
+  p.append(gal);
+  try{ fetch('gallery/index.html',{method:'HEAD'}).then(r=>{ if(r&&r.ok) gal.style.display='block'; }).catch(()=>{}); }catch(e){}
   buildTraceDyn();
 }
 function buildTraceDyn(){
