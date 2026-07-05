@@ -13,20 +13,25 @@
 //     process — that's fleet-worker. Hence two loci, one taxonomy.
 
 // --- Work class → in-process tier. Omit fields to inherit the main-loop default. ---
+// Deciders (synthesize/judge) omit `model` ON PURPOSE: inheriting keeps them on the
+// session's premium brain (Fable > Opus) — pinning 'opus' would DOWNGRADE them on a
+// Fable session. Doctrine + cost evidence: fleetflow/references/native-model-routing.md.
 const TIERS = {
-  mechanical: { model: 'haiku',  effort: 'low'    }, // format, rename, regex sweep, file-by-file transform
+  mechanical: { model: 'haiku',  effort: 'low'    }, // StructuredOutput extraction, log scans, dedup, classification, format conversion
   scout:      { model: 'sonnet', effort: 'low'    }, // find, enumerate, read-and-extract, summarize
   build:      { model: 'sonnet', effort: 'medium' }, // implement a change needing judgment
-  synthesize: { model: 'opus',   effort: 'high'   }, // merge findings, write the report, design — in-proc only
-  judge:      { model: 'opus',   effort: 'high'   }, // adversarial verify, score, gate — in-proc only
+  synthesize: { effort: 'high' },                    // merge findings, write the report, design — inherit session model
+  judge:      { effort: 'high' },                    // adversarial verify, score, gate — inherit session model
 };
 
 // route(cls[, budget]) → opts fragment for agent(). Budget-aware: when the turn's
-// tokens run low it drops one tier and forces low effort, so long "+500k" runs
-// degrade gracefully instead of stalling at the budget ceiling.
+// tokens run low it drops COLLECT stages one tier and forces low effort, so long
+// "+500k" runs degrade gracefully instead of stalling at the budget ceiling.
+// Deciders are exempt — never under-power a judge, even under budget pressure.
 function route(cls, budget) {
   const base = TIERS[cls] ?? {};                       // {} → inherit session model+effort
-  if (budget?.total && budget.remaining() < 0.15 * budget.total) {
+  const decider = cls === 'synthesize' || cls === 'judge';
+  if (!decider && budget?.total && budget.remaining() < 0.15 * budget.total) {
     const down = { opus: 'sonnet', sonnet: 'haiku', haiku: 'haiku' };
     return { model: down[base.model] ?? base.model, effort: 'low' };
   }

@@ -107,6 +107,9 @@ notional `total_cost_usd`.
 - Agents get model (`opts.model`) and effort (`opts.effort`) overrides
   per-call; guidance: omit model (inherit) unless confident, use `effort` as
   the finer lever ("reach for the effort lever before the model lever").
+  When and how to actually set them — the collect-cheap/decide-premium
+  doctrine, with the cost evidence — is
+  [native-model-routing.md](native-model-routing.md).
 
 **fleetflow port:** run/lane naming (`--run`/`--id`) is the phase/label
 analogue; the orchestrator's status tables to the user play the /workflows UI
