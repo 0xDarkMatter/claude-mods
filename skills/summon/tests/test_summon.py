@@ -617,6 +617,34 @@ def pick_json_tests() -> None:
         else:
             no("pick --json resolves transcriptPath; ISO stamps + field types sane",
                f"failed={[k for k, v in checks.items() if not v]}")
+
+        # 22d. --rich advances the schema to pick/v2 and adds display metrics
+        rc, out, _ = run_mode(env, ["pick", "--json", "--rich"])
+        try:
+            rich = json.loads(out)
+        except json.JSONDecodeError:
+            rich = {}
+        rrows = rich.get("data", [])
+        checks = {
+            "rc": rc == 0,
+            "schema": rich.get("meta", {}).get("schema") == "claude-mods.summon.pick/v2",
+            "count": len(rrows) == 3,
+            "metric-keys": all(
+                all(k in r for k in ("events", "toolCalls", "densityBuckets",
+                                     "durationMin", "sizeKB", "ctxTokens", "ctxPeak",
+                                     "ctxWindow", "ctxPct", "ctxPeakPct", "firstAsk",
+                                     "model", "effort"))
+                for r in rrows),
+            "buckets-24": all(isinstance(r.get("densityBuckets"), list)
+                              and len(r["densityBuckets"]) == 24 for r in rrows),
+            "window-standard": all(r.get("ctxWindow") in (200000, 1000000) for r in rrows),
+            "pct-bounded": all(0 <= r.get("ctxPct", -1) <= 100 for r in rrows),
+        }
+        if all(checks.values()):
+            ok("pick --json --rich emits pick/v2 with per-session display metrics")
+        else:
+            no("pick --json --rich emits pick/v2 with per-session display metrics",
+               f"failed={[k for k, v in checks.items() if not v]} rc={rc}")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

@@ -1,157 +1,207 @@
 <!--
-  summon in-chat picker widget — TEMPLATE (proven working 2026-07-03 in Claude Desktop chat)
+  summon in-chat CARD picker — TEMPLATE (default presentation for picking sessions)
 
-  How Claude uses this: run `summon pick --json`, map the envelope's sessions into the
-  `S` array below (shape documented inline), render via the show_widget tool.
-  Everything else is self-contained. Styling uses ONLY host CSS variables (light/dark safe).
-  sendPrompt(text) is a host-provided global: submits a chat message as if the user typed it.
+  How Claude uses this:
+    1. run `summon pick --json --rich --days 30`   (schema claude-mods.summon.pick/v2)
+    2. drop the envelope's `data` array into the `S` array below (shape documented
+       inline) — one object per session, keys verbatim from pick/v2
+    3. render via the show_widget tool (Tabler `ti` icons + host CSS vars are both
+       available in that context; light/dark safe)
 
-  DATA SHAPE per session row:
-    [shortId, title, projectRoot, isArchived(0|1), isRunning(0|1), isoTimestamp, worktreeName("" if none)]
-  REBOUND: set of shortIds to badge as recently-rebound (optional; empty Set() is fine).
+  Self-contained: host CSS variables only, no external assets beyond the Tabler
+  webfont the widget host already loads. sendPrompt(text) is a host global that
+  submits a chat message as if the user typed it.
 
-  Inject a GENEROUS window (e.g. `--days 30`) — the widget has its own client-side
-  "last X" age filter (24h/3d/7d/30d/all), so the user narrows without a re-run.
-  Duplicate wrapper copies (same session transfer-copied into several accounts) are
-  deduped by shortId in the widget, newest kept — no need to dedupe at injection.
+  DATA SHAPE per session (pick/v2 object — extra keys are ignored):
+    { sessionId, title, projectRoot, cwd, worktree, isArchived, isRunning,
+      lastActivityAt (ISO), turns, model, effort, events, toolCalls,
+      densityBuckets:[24], durationMin, sizeKB, ctxTokens, ctxPeak, ctxWindow,
+      ctxPct, ctxPeakPct, firstAsk }
+  `firstAsk` is the mechanical opening ask. Claude MAY overwrite it with a
+  distilled one-line summary before injecting; the widget just renders `summary`
+  if present, else `firstAsk`.
+
+  Inject a GENEROUS window (`--days 30`): the widget has its own client-side age
+  filter (24h/3d/7d/30d/all) so the user narrows without a re-run. Archived
+  sessions are hidden by default (toggle to show). Copies of one session across
+  accounts are deduped by sessionId, newest kept.
+
+  CLICK ACTIONS (all route through sendPrompt → one chat line Claude turns into
+  action; per-card recover/summon should be spawned as background chips):
+    ↗ summon   · copy this session into the other account
+    ⟳ recover  · distil a handover brief + start a fresh seeded session
+    ◉ peek     · show the session's last messages
+    ⧉ copy     · copy the sessionId to the clipboard
 -->
-<h2 class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Interactive picker listing Claude Desktop sessions grouped by project, with checkboxes to select sessions for recovery or cross-account summon.</h2>
-<div id="sp" style="font-family:var(--font-sans);color:var(--text-primary);border:1px solid var(--border);border-radius:12px;background:var(--surface-1);overflow:hidden">
-  <div style="display:flex;gap:var(--gap-sm);align-items:center;padding:var(--pad-md);border-bottom:1px solid var(--border);flex-wrap:wrap">
-    <span style="font-weight:600">🪄 Session picker</span>
-    <input id="flt" type="text" placeholder="filter title / path…" style="flex:1;min-width:140px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2);color:var(--text-primary);font:inherit;font-size:13px">
-    <select id="win" title="only show sessions active in the last…" style="padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2);color:var(--text-primary);font:inherit;font-size:13px">
-      <option value="">all</option><option value="24">24h</option><option value="72">3d</option><option value="168">7d</option><option value="720">30d</option>
-    </select>
-    <span id="cnt" style="font-size:12px;color:var(--text-secondary);white-space:nowrap">0 selected</span>
-  </div>
-  <div id="groups"></div>
-  <div style="display:flex;gap:var(--gap-sm);padding:var(--pad-md);border-top:1px solid var(--border);flex-wrap:wrap;align-items:center">
-    <button id="recover" class="act" disabled>📥 Recover selected</button>
-    <button id="summon" class="act sec" disabled>🔁 Summon to other account</button>
-    <button id="clear" class="act sec" disabled>✕ Clear</button>
-    <span style="font-size:11px;color:var(--text-muted);margin-left:auto">👁 peek shows a session's last messages</span>
+<h2 class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Interactive card picker of Claude Desktop sessions with per-session context-usage donut, activity-density strip, turns, size, and summon or recover actions.</h2>
+<style>
+.ctl{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 14px}
+.ctl input,.ctl select{font-size:13px}
+.ctl .flt{flex:1;min-width:150px}
+.seg{display:inline-flex;border:.5px solid var(--border-strong);border-radius:var(--radius);overflow:hidden}
+.seg button{border:0;background:transparent;padding:6px 11px;font-size:13px;color:var(--text-secondary);display:inline-flex;align-items:center;gap:5px;cursor:pointer}
+.seg button.on{background:var(--surface-1);color:var(--text-primary)}
+.cbx{font-size:12px;color:var(--text-secondary);display:inline-flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap}
+.deck.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.deck.list{display:flex;flex-direction:column;gap:8px}
+.card{background:var(--surface-2);border:.5px solid var(--border);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:9px}
+.card.sel{border-color:var(--border-accent);box-shadow:0 0 0 1px var(--border-accent)}
+.deck.list .card{display:grid;grid-template-columns:1fr 250px;grid-template-areas:"hd dens" "ttl stats" "sum stats" "dir dir";gap:6px 18px;align-items:center;padding:12px 16px}
+.deck.list .hd{grid-area:hd}.deck.list .ttl{grid-area:ttl}.deck.list .sum{grid-area:sum}.deck.list .dens{grid-area:dens}.deck.list .stats{grid-area:stats}.deck.list .dir{grid-area:dir}
+.deck.list .sum{-webkit-line-clamp:2}
+.hd{display:flex;align-items:center;gap:7px}
+.proj{font-size:12px;color:var(--text-secondary);font-weight:500}
+.tag{font-size:10px;border-radius:5px;padding:0 5px;border:.5px solid var(--border);color:var(--text-muted)}
+.tag.run{background:var(--bg-success);color:var(--text-success);border:0}
+.ctx{display:inline-flex;align-items:center;gap:5px}
+.ctx b{font-size:12px;font-weight:500;color:var(--text-secondary);font-family:var(--font-mono)}
+.ib{border:0;background:transparent;color:var(--text-muted);cursor:pointer;padding:3px;display:inline-flex;font-size:16px;border-radius:6px}
+.ib:hover{color:var(--text-accent);background:var(--surface-1)}
+.divx{width:.5px;height:16px;background:var(--border);margin:0 1px}
+.ttl{font-size:15px;font-weight:500;color:var(--text-primary);line-height:1.35}
+.sum{font-size:13px;color:var(--text-secondary);line-height:1.55;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
+.dens{display:flex;align-items:flex-end;gap:2px;height:30px}
+.dens i{flex:1;border-radius:1px;min-height:1px;display:block}
+.stats{display:flex;flex-wrap:wrap;gap:5px}
+.chip{font-size:11px;color:var(--text-secondary);background:var(--surface-1);border-radius:6px;padding:2px 7px;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.chip i{font-size:13px;color:var(--text-muted)}
+.dir{font-family:var(--font-mono);font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:5px}
+.foot{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:14px 0 0}
+.foot button{font-size:13px;padding:7px 13px;border-radius:var(--radius);border:.5px solid var(--border-strong);background:transparent;color:var(--text-primary);cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.foot button:disabled{opacity:.45;cursor:default}
+</style>
+<div class="ctl">
+  <input class="flt" id="flt" type="text" placeholder="filter title, project, or path…">
+  <select id="win" title="active in the last…" style="width:auto"><option value="">all</option><option value="24">24h</option><option value="72">3d</option><option value="168" selected>7d</option><option value="720">30d</option></select>
+  <select id="sort" style="width:auto">
+    <option value="recent">Most recent</option>
+    <option value="ctx">Most context used</option>
+    <option value="size">Largest size</option>
+    <option value="turns">Most turns</option>
+    <option value="msgs">Most messages</option>
+    <option value="project">Project</option>
+  </select>
+  <label class="cbx"><input type="checkbox" id="arch"> show archived</label>
+  <div class="seg">
+    <button id="bGrid" class="on" aria-label="Grid view"><i class="ti ti-layout-grid" aria-hidden="true"></i>Grid</button>
+    <button id="bList" aria-label="List view"><i class="ti ti-list" aria-hidden="true"></i>List</button>
   </div>
 </div>
-<style>
-  .act{padding:7px 14px;border-radius:var(--radius);border:1px solid var(--border-accent);background:var(--bg-accent);color:var(--text-accent);font:inherit;font-size:13px;font-weight:600;cursor:pointer}
-  .act.sec{background:var(--surface-2);border-color:var(--border);color:var(--text-secondary)}
-  .act:disabled{opacity:.45;cursor:default}
-  .grp summary{display:flex;gap:8px;align-items:center;padding:8px 12px;cursor:pointer;list-style:none;background:var(--surface-0);border-bottom:1px solid var(--border);font-size:13px;font-weight:600}
-  .grp summary::-webkit-details-marker{display:none}
-  .grp .car{transition:transform .15s;color:var(--text-muted);font-size:10px}
-  .grp[open] .car{transform:rotate(90deg)}
-  .row{display:flex;gap:8px;align-items:center;padding:6px 12px 6px 26px;border-bottom:1px solid var(--border);font-size:13px}
-  .row:hover{background:var(--surface-0)}
-  .row .ttl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .badge{font-size:10px;padding:1px 6px;border-radius:8px;white-space:nowrap}
-  .b-arch{background:var(--surface-0);color:var(--text-muted);border:1px solid var(--border)}
-  .b-run{background:var(--bg-success);color:var(--text-success)}
-  .b-wt{background:var(--surface-0);color:var(--text-secondary);border:1px solid var(--border);font-family:var(--font-mono)}
-  .b-reb{background:var(--bg-accent);color:var(--text-accent)}
-  .age{font-size:11px;color:var(--text-muted);white-space:nowrap;width:34px;text-align:right}
-  .peek{cursor:pointer;border:none;background:none;font-size:13px;opacity:.55;padding:0 2px}
-  .peek:hover{opacity:1}
-  .gchk,.row input{accent-color:var(--text-accent)}
-</style>
+<div id="deck" class="deck grid"></div>
+<div class="foot">
+  <span id="cnt" style="font-size:13px;color:var(--text-secondary)">0 selected</span>
+  <span style="flex:1"></span>
+  <button id="bRec" disabled><i class="ti ti-refresh" aria-hidden="true"></i>Recover selected</button>
+  <button id="bSum" disabled><i class="ti ti-arrow-up-right" aria-hidden="true"></i>Summon selected</button>
+  <button id="bClr" disabled><i class="ti ti-x" aria-hidden="true"></i>Clear</button>
+</div>
+<script id="D" type="application/json">
+[{"sessionId":"local_0000","title":"Example session — replace via summon pick --json --rich","projectRoot":"X:\\Example\\Project","cwd":"X:\\Example\\Project","worktree":"","isArchived":false,"isRunning":false,"lastActivityAt":"2026-01-01T00:00:00Z","turns":3,"model":"claude-opus-4-8","effort":"high","events":120,"toolCalls":22,"densityBuckets":[9,7,5,3,0,0,0,0,2,4,6,3,0,0,0,0,1,2,3,0,0,0,4,8],"durationMin":41,"sizeKB":512,"ctxTokens":90000,"ctxPeak":90000,"ctxWindow":200000,"ctxPct":45,"ctxPeakPct":45,"firstAsk":"example opening ask captured from the transcript"}]
+</script>
 <script>
-// >>> INJECT: replace with real data from `summon pick --json` <<<
-const REBOUND = new Set([]);
-const S = [
- ["00000000","Example session title","X:\\Example\\Project",0,0,"2026-01-01T00:00:00Z",""]
-];
-// >>> END INJECT <<<
-{ const seen = new Set(); let w = 0; for (const r of S) { if (!seen.has(r[0])) { seen.add(r[0]); S[w++] = r; } } S.length = w; }
-const NOW = Date.now();
-const age = ts => { const h = (NOW - Date.parse(ts)) / 36e5; return h < 1 ? Math.round(h*60)+"m" : h < 48 ? Math.round(h)+"h" : Math.round(h/24)+"d"; };
-const groups = {};
-const projKey = p => p.replace(/\//g, "\\");
-S.forEach((s,i) => { const k = projKey(s[2]); (groups[k] = groups[k] || []).push(i); });
-const gEl = document.getElementById("groups");
-const ordered = Object.keys(groups).sort((a,b) => Math.max(...groups[b].map(i=>Date.parse(S[i][5]))) - Math.max(...groups[a].map(i=>Date.parse(S[i][5]))));
-ordered.forEach((proj, gi) => {
-  const det = document.createElement("details");
-  det.className = "grp"; det.open = gi < 2;
-  const ids = groups[proj];
-  det.innerHTML = `<summary><span class="car">▶</span><input type="checkbox" class="gchk" data-g="${gi}" onclick="event.stopPropagation()"><span>${proj}</span><span style="color:var(--text-muted);font-weight:400">(${ids.length})</span></summary>` +
-    ids.map(i => { const [id,t,,arch,run,ts,wt] = S[i]; return `<label class="row" data-i="${i}" data-ts="${Date.parse(ts)}" data-txt="${(t+" "+proj+" "+wt).toLowerCase().replace(/"/g,"")}">
-      <input type="checkbox" class="chk" data-i="${i}" data-g="${gi}">
-      <span class="ttl" title="${t.replace(/"/g,"&quot;")}">${t}</span>
-      ${wt ? `<span class="badge b-wt">⌥ ${wt.replace(/-[0-9a-f]+$/,"")}</span>` : ""}
-      ${run ? `<span class="badge b-run">running</span>` : ""}
-      ${arch ? `<span class="badge b-arch">archived</span>` : ""}
-      ${REBOUND.has(id) ? `<span class="badge b-reb">✓ rebound</span>` : ""}
-      <button class="peek" data-i="${i}" title="peek last messages">👁</button>
-      <button class="peek cpy" data-id="${id}" title="copy session id ${id}">📋</button>
-      <span class="age">${age(ts)}</span>
-    </label>`; }).join("");
-  gEl.appendChild(det);
-});
-const chks = [...document.querySelectorAll(".chk")];
-const cnt = document.getElementById("cnt");
-const btns = ["recover","summon","clear"].map(id => document.getElementById(id));
-function sel(){ return chks.filter(c => c.checked).map(c => S[+c.dataset.i]); }
-function refresh(){
-  const n = sel().length;
-  const shown = chks.filter(c => c.closest(".row").style.display !== "none").length;
-  cnt.textContent = (shown < S.length ? shown + "/" + S.length + " shown · " : "") + n + " selected";
-  btns.forEach(b => b.disabled = !n);
-  document.querySelectorAll(".gchk").forEach(g => {
-    const mine = chks.filter(c => c.dataset.g === g.dataset.g);
-    const on = mine.filter(c => c.checked).length;
-    g.checked = on === mine.length && on > 0;
-    g.indeterminate = on > 0 && on < mine.length;
+(function(){
+var RAW=JSON.parse(document.getElementById('D').textContent);
+var seen={},DATA=[];
+RAW.forEach(function(s){if(!seen[s.sessionId]){seen[s.sessionId]=1;DATA.push(s);}});
+var PAL=['#7F77DD','#1D9E75','#D85A30','#378ADD','#BA7517','#D4537E','#534AB7','#0F6E56','#993C1D'];
+function projName(p){return (p||'').replace(/\//g,'\\').replace(/\\$/,'').split('\\').pop()||p;}
+function projColor(p){var h=0,n=projName(p);for(var i=0;i<n.length;i++)h=(h*31+n.charCodeAt(i))>>>0;return PAL[h%PAL.length];}
+var NOW=Date.now();
+function age(iso){var h=(NOW-Date.parse(iso))/36e5;return h<1?Math.round(h*60)+'m':h<48?Math.round(h)+'h':Math.round(h/24)+'d';}
+function nf(n){return (n||0).toLocaleString('en-US');}
+function fSize(kb){kb=kb||0;return kb>=1024?(kb/1024).toFixed(1)+' MB':kb+' KB';}
+function fDur(m){m=m||0;return m<60?m+'m':m<1440?Math.round(m/60)+'h':Math.round(m/1440)+'d';}
+function fTok(n){n=n||0;return n>=1000?Math.round(n/1000)+'k':''+n;}
+function esc(s){return (s||'').replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function shortModel(m){m=m||'';if(m.indexOf('opus')>=0)return 'Opus';if(m.indexOf('fable')>=0)return 'Fable 5';if(m.indexOf('sonnet')>=0)return 'Sonnet';if(m.indexOf('haiku')>=0)return 'Haiku';return m;}
+function ctxColor(p){return p<50?'#1D9E75':p<75?'#BA7517':'#E24B4A';}
+function donut(pct){var r=8,C=2*Math.PI*r,off=C*(1-(pct||0)/100),col=ctxColor(pct||0);
+ return '<svg width="22" height="22" viewBox="0 0 22 22" style="transform:rotate(-90deg)" aria-hidden="true">'
+ +'<circle cx="11" cy="11" r="8" fill="none" stroke="var(--border-strong)" stroke-width="3"></circle>'
+ +'<circle cx="11" cy="11" r="8" fill="none" stroke="'+col+'" stroke-width="3" stroke-linecap="round" stroke-dasharray="'+C.toFixed(1)+'" stroke-dashoffset="'+off.toFixed(1)+'"></circle></svg>';}
+function bars(b,col){b=b||[];var mx=Math.max.apply(null,b)||1;return b.map(function(v){var h=v>0?Math.max(2,Math.round(v/mx*30)):1;return '<i style="height:'+h+'px;background:'+col+';opacity:'+(v>0?1:0.18)+'"></i>';}).join('');}
+function chip(ic,val,lbl){return '<span class="chip"><i class="ti ti-'+ic+'" aria-hidden="true"></i>'+val+(lbl?'<span style="color:var(--text-muted)">'+lbl+'</span>':'')+'</span>';}
+var picked={};
+function card(s){
+  var col=projColor(s.projectRoot),body=s.summary||s.firstAsk||'',pk=picked[s.sessionId];
+  var ctxTip=fTok(s.ctxTokens)+' of '+fTok(s.ctxWindow)+' context used'+(s.ctxPeakPct>s.ctxPct?' · peak '+fTok(s.ctxPeak)+' ('+s.ctxPeakPct+'%)':'');
+  var wt=s.worktree?'<span class="tag" title="worktree '+esc(s.worktree)+'">worktree</span>':'';
+  var run=s.isRunning?'<span class="tag run">running</span>':'';
+  var arch=s.isArchived?'<span class="tag">archived</span>':'';
+  var ttl=(!s.title||s.title==='(untitled)')?'<span style="color:var(--text-muted);font-style:italic">untitled session</span>':esc(s.title);
+  return '<div class="card'+(pk?' sel':'')+'" data-id="'+esc(s.sessionId)+'">'
+   +'<div class="hd">'
+     +'<input type="checkbox" class="pk" '+(pk?'checked':'')+' aria-label="Select session" style="margin:0 2px 0 0">'
+     +'<span style="width:8px;height:8px;border-radius:50%;background:'+col+';flex:none"></span>'
+     +'<span class="proj">'+esc(projName(s.projectRoot))+'</span>'+wt+run+arch
+     +'<span style="flex:1"></span>'
+     +'<span class="ctx" title="'+ctxTip+'">'+donut(s.ctxPct)+'<b>'+fTok(s.ctxTokens)+'</b></span>'
+     +'<span class="divx"></span>'
+     +'<button class="ib act-peek" aria-label="Peek last messages" title="Peek last messages"><i class="ti ti-eye" aria-hidden="true"></i></button>'
+     +'<button class="ib act-copy" aria-label="Copy session id" title="Copy session id"><i class="ti ti-copy" aria-hidden="true"></i></button>'
+     +'<button class="ib act-summon" aria-label="Summon to other account" title="Summon → other account (copy)"><i class="ti ti-arrow-up-right" aria-hidden="true"></i></button>'
+     +'<button class="ib act-recover" aria-label="Recover: summarise and start fresh" title="Recover — summarise + fresh session"><i class="ti ti-refresh" aria-hidden="true"></i></button>'
+   +'</div>'
+   +'<div class="ttl">'+ttl+'</div>'
+   +(body?'<div class="sum">'+esc(body)+'</div>':'')
+   +'<div class="dens" title="activity density across session lifetime">'+bars(s.densityBuckets,col)+'</div>'
+   +'<div class="stats">'
+     +chip('cpu',shortModel(s.model),s.effort||'')
+     +chip('clock',age(s.lastActivityAt),'')
+     +chip('messages',nf(s.turns),'turns')
+     +chip('message-2',nf(s.events),'msgs')
+     +chip('tool',nf(s.toolCalls),'tools')
+     +chip('database',fSize(s.sizeKB),'')
+     +chip('hourglass',fDur(s.durationMin),'')
+   +'</div>'
+   +'<div class="dir" title="'+esc(s.cwd)+'"><i class="ti ti-folder" aria-hidden="true"></i>'+esc(s.cwd)+'</div>'
+   +'</div>';
+}
+var deck=document.getElementById('deck'),flt=document.getElementById('flt'),win=document.getElementById('win'),
+    sortEl=document.getElementById('sort'),archEl=document.getElementById('arch'),cnt=document.getElementById('cnt');
+function visible(){
+  var q=flt.value.toLowerCase(),maxH=win.value?+win.value:Infinity,showArch=archEl.checked;
+  return DATA.filter(function(s){
+    if(s.isArchived&&!showArch)return false;
+    if((NOW-Date.parse(s.lastActivityAt))/36e5>maxH)return false;
+    if(q){var hay=((s.title||'')+' '+(s.projectRoot||'')+' '+(s.cwd||'')+' '+(s.worktree||'')).toLowerCase();if(hay.indexOf(q)<0)return false;}
+    return true;
   });
 }
-document.getElementById("sp").addEventListener("change", e => {
-  if (e.target.classList.contains("gchk"))
-    chks.filter(c => c.dataset.g === e.target.dataset.g && c.closest(".row").style.display !== "none")
-        .forEach(c => c.checked = e.target.checked);
-  refresh();
-});
-const flt = document.getElementById("flt"), win = document.getElementById("win");
-function applyFilters(){
-  const q = flt.value.toLowerCase();
-  const maxH = win.value ? +win.value : Infinity;
-  document.querySelectorAll(".row").forEach(r => {
-    const show = r.dataset.txt.includes(q) && (NOW - +r.dataset.ts) / 36e5 <= maxH;
-    r.style.display = show ? "" : "none";
-  });
-  document.querySelectorAll(".grp").forEach(d => {
-    const vis = [...d.querySelectorAll(".row")].some(r => r.style.display !== "none");
-    d.style.display = vis ? "" : "none";
-    if (q) d.open = true;
-  });
-  refresh();
+function order(a){var m=sortEl.value,x=a.slice();
+  if(m==='ctx')x.sort(function(p,q){return (q.ctxTokens||0)-(p.ctxTokens||0);});
+  else if(m==='size')x.sort(function(p,q){return (q.sizeKB||0)-(p.sizeKB||0);});
+  else if(m==='turns')x.sort(function(p,q){return (q.turns||0)-(p.turns||0);});
+  else if(m==='msgs')x.sort(function(p,q){return (q.events||0)-(p.events||0);});
+  else if(m==='project')x.sort(function(p,q){return projName(p.projectRoot).localeCompare(projName(q.projectRoot))||(q.ctxTokens||0)-(p.ctxTokens||0);});
+  else x.sort(function(p,q){return Date.parse(q.lastActivityAt)-Date.parse(p.lastActivityAt);});
+  return x;
 }
-flt.addEventListener("input", applyFilters);
-win.addEventListener("change", applyFilters);
-document.querySelectorAll(".peek:not(.cpy)").forEach(p => p.addEventListener("click", e => {
-  e.preventDefault(); e.stopPropagation();
-  const [id, t] = S[+p.dataset.i];
-  sendPrompt(`Peek session ${id} ("${t}") — show me its last few messages via summon --peek so I can decide whether to recover it.`);
-}));
-document.querySelectorAll(".cpy").forEach(b => b.addEventListener("click", async e => {
-  e.preventDefault(); e.stopPropagation();
-  let ok = false;
-  try { await navigator.clipboard.writeText(b.dataset.id); ok = true; } catch (_) {}
-  if (!ok) {
-    const ta = document.createElement("textarea");
-    ta.value = b.dataset.id; ta.style.position = "absolute"; ta.style.left = "-9999px";
-    document.body.appendChild(ta); ta.select();
-    try { ok = document.execCommand("copy"); } catch (_) {}
-    ta.remove();
-  }
-  b.textContent = ok ? "✅" : "❌";
-  setTimeout(() => { b.textContent = "📋"; }, 900);
-}));
-function fmt(list){ return list.map(([id,t,cwd,,,,wt]) => `- ${id} "${t}" @ ${cwd}${wt ? "\\.claude\\worktrees\\" + wt : ""}`).join("\n"); }
-document.getElementById("recover").addEventListener("click", () => {
-  sendPrompt(`Recover these sessions I ticked in the picker (summon recover each — distilled handover brief + fresh-start prompt):\n${fmt(sel())}`);
-});
-document.getElementById("summon").addEventListener("click", () => {
-  sendPrompt(`Summon (copy) these sessions to my other account — run summon with --select for exactly these, show me the plan with --dry-run first:\n${fmt(sel())}`);
-});
-document.getElementById("clear").addEventListener("click", () => { chks.forEach(c => c.checked = false); refresh(); });
-refresh();
+function fmtList(list){return list.map(function(s){return '- "'+s.title+'" ('+s.sessionId+', '+s.cwd+')';}).join('\n');}
+function refreshFoot(){
+  var ids=Object.keys(picked).filter(function(k){return picked[k];}),n=ids.length;
+  cnt.textContent=n+' selected';
+  ['bRec','bSum','bClr'].forEach(function(id){document.getElementById(id).disabled=!n;});
+}
+function render(){
+  var arr=order(visible());
+  deck.innerHTML=arr.length?arr.map(card).join(''):'<div style="color:var(--text-muted);font-size:13px;padding:1rem 0">No sessions match the current filter.</div>';
+  deck.querySelectorAll('.card').forEach(function(el){
+    var s=DATA.filter(function(d){return d.sessionId===el.dataset.id;})[0];if(!s)return;
+    el.querySelector('.pk').addEventListener('change',function(){picked[s.sessionId]=this.checked;el.classList.toggle('sel',this.checked);refreshFoot();});
+    el.querySelector('.act-peek').addEventListener('click',function(){sendPrompt('Peek session '+s.sessionId+' ("'+s.title+'") — run summon --peek '+s.sessionId+' and show me its last few messages.');});
+    el.querySelector('.act-copy').addEventListener('click',function(){var b=this;navigator.clipboard&&navigator.clipboard.writeText(s.sessionId);var i=b.querySelector('i');i.className='ti ti-check';setTimeout(function(){i.className='ti ti-copy';},900);});
+    el.querySelector('.act-summon').addEventListener('click',function(){sendPrompt('Summon (copy) the "'+s.title+'" session ('+s.sessionId+') into my other account — show the plan with summon --dry-run first.');});
+    el.querySelector('.act-recover').addEventListener('click',function(){sendPrompt('Recover the "'+s.title+'" session ('+s.sessionId+', '+s.cwd+') via the summon skill'+String.fromCharCode(39)+'s recover process, and spawn it as a background chip: read its transcript, write a concise hand-off summary of where it left off and what'+String.fromCharCode(39)+'s next, then start a fresh session there seeded with that summary.');});
+  });
+  refreshFoot();
+}
+[flt,win,sortEl,archEl].forEach(function(e){e.addEventListener(e===flt?'input':'change',render);});
+document.getElementById('bGrid').addEventListener('click',function(){deck.className='deck grid';this.classList.add('on');document.getElementById('bList').classList.remove('on');});
+document.getElementById('bList').addEventListener('click',function(){deck.className='deck list';this.classList.add('on');document.getElementById('bGrid').classList.remove('on');});
+document.getElementById('bClr').addEventListener('click',function(){picked={};render();});
+document.getElementById('bRec').addEventListener('click',function(){var l=DATA.filter(function(s){return picked[s.sessionId];});sendPrompt('Recover these '+l.length+' sessions via the summon skill'+String.fromCharCode(39)+'s recover process — spawn ONE background chip per session (read transcript, distil a hand-off brief, start a fresh seeded session):\n'+fmtList(l));});
+document.getElementById('bSum').addEventListener('click',function(){var l=DATA.filter(function(s){return picked[s.sessionId];});sendPrompt('Summon (copy) these '+l.length+' sessions into my other account — run summon --select for exactly these, show the plan with --dry-run first:\n'+fmtList(l));});
+render();
+})();
 </script>

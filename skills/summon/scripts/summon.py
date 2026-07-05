@@ -47,6 +47,7 @@ import time
 import uuid as uuidlib
 from collections import OrderedDict
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
@@ -971,6 +972,105 @@ def resolve_transcript(s: Session) -> tuple[Path | None, str]:
     return None, ""
 
 
+# Boilerplate the first-ask sniffer must skip: slash-command echoes, skill
+# preambles, interrupt markers — none of which are the session's real opening ask.
+_ASK_SKIP_MARKERS = (
+    "command-name", "local-command", "Sync - Session Bootstrap",
+    "Base directory for this skill", "[Request interrupted",
+)
+
+
+def _ts_ms(value: str) -> int | None:
+    try:
+        return int(datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp() * 1000)
+    except (ValueError, AttributeError):
+        return None
+
+
+def analyze_transcript(path: Path | None, buckets: int = 24) -> dict:
+    """Stream a transcript JSONL once and derive picker display metrics.
+
+    Returns events / toolCalls / density buckets / durationMin / sizeKB /
+    ctxTokens (last-turn context occupancy, matching Claude Code's live meter) /
+    ctxPeak (max occupancy before any auto-compaction) / firstAsk. Every field
+    degrades to a zero/empty default on a missing or unreadable transcript, so
+    the picker still renders — just without the extras. One pass, so a large
+    transcript costs one linear read, never a re-scan.
+    """
+    out = {"events": 0, "toolCalls": 0, "buckets": [0] * buckets,
+           "durationMin": 0, "sizeKB": 0, "ctxTokens": 0, "ctxPeak": 0,
+           "firstAsk": ""}
+    if not path or not path.exists():
+        return out
+    try:
+        out["sizeKB"] = round(path.stat().st_size / 1024)
+    except OSError:
+        pass
+    stamps: list[int] = []
+    last_ctx = peak_ctx = 0
+    try:
+        with path.open(encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                out["events"] += 1
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                stamp = obj.get("timestamp")
+                if stamp:
+                    ms = _ts_ms(stamp)
+                    if ms:
+                        stamps.append(ms)
+                msg = obj.get("message")
+                msg = msg if isinstance(msg, dict) else {}
+                usage = msg.get("usage")
+                if isinstance(usage, dict):
+                    occ = (usage.get("input_tokens", 0)
+                           + usage.get("cache_creation_input_tokens", 0)
+                           + usage.get("cache_read_input_tokens", 0)
+                           + usage.get("output_tokens", 0))
+                    if occ:
+                        last_ctx = occ
+                        peak_ctx = max(peak_ctx, occ)
+                typ = obj.get("type")
+                if typ == "assistant":
+                    content = msg.get("content")
+                    if isinstance(content, list):
+                        out["toolCalls"] += sum(
+                            1 for p in content
+                            if isinstance(p, dict) and p.get("type") == "tool_use")
+                elif typ == "user" and not out["firstAsk"]:
+                    content = msg.get("content")
+                    if isinstance(content, str):
+                        txt = content
+                    elif isinstance(content, list):
+                        txt = "".join(p.get("text", "") for p in content
+                                      if isinstance(p, dict) and p.get("type") == "text")
+                    else:
+                        txt = ""
+                    txt = txt.strip()
+                    if txt and not txt.startswith("<") and not any(
+                            m in txt for m in _ASK_SKIP_MARKERS):
+                        out["firstAsk"] = txt[:280]
+    except OSError:
+        return out
+    out["ctxTokens"] = last_ctx
+    out["ctxPeak"] = peak_ctx
+    if stamps:
+        lo, hi = min(stamps), max(stamps)
+        span = hi - lo
+        out["durationMin"] = round(span / 60000)
+        counts = [0] * buckets
+        for ms in stamps:
+            idx = 0 if span <= 0 else min(buckets - 1, int((ms - lo) / span * buckets))
+            counts[idx] += 1
+        out["buckets"] = counts
+    return out
+
+
 def find_wrappers_by_id(query: str, accounts: list[Account]) -> tuple[list[Session], bool]:
     """All wrapper files for one logical session (copies may exist in several accounts).
 
@@ -1449,17 +1549,24 @@ def _iso_utc(ms: int) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ms / 1000))
 
 
-def pick_json(candidates: list[Session], now_ms: int) -> int:
-    """`pick --json` — the session inventory as a claude-mods.summon.pick/v1
+def pick_json(candidates: list[Session], now_ms: int, rich: bool = False) -> int:
+    """`pick --json` — the session inventory as a claude-mods.summon.pick
     envelope on stdout (JSON only; panels never touch stdout on this path).
 
-    Feeds the in-chat visual picker (assets/picker-widget.html) and any other
-    scripted caller. An empty inventory is valid data, not an error: exit 0.
+    Feeds the in-chat visual card picker (assets/picker-widget.html) and any
+    other scripted caller. An empty inventory is valid data, not an error:
+    exit 0.
+
+    With ``rich`` (``--rich``), each row gains transcript-derived display
+    metrics — context occupancy (donut), activity density (sparkline), event /
+    tool-call counts, on-disk size, duration, and the opening ask — and the
+    schema advances to pick/v2. Costs one linear transcript read per session,
+    so it's opt-in; the default v1 inventory stays metadata-only and instant.
     """
     rows = []
     for s in candidates:
         transcript = resolve_transcript(s)[0]
-        rows.append({
+        row = {
             "id": s.sid.removeprefix("local_")[:8],
             "sessionId": s.sid,
             "cliSessionId": s.cli_id,
@@ -1468,6 +1575,8 @@ def pick_json(candidates: list[Session], now_ms: int) -> int:
             "projectRoot": project_root(s.cwd),
             "worktree": worktree_name(s.cwd),
             "branch": str(s.data.get("branch") or ""),
+            "model": str(s.data.get("model") or ""),
+            "effort": str(s.data.get("effort") or ""),
             "turns": s.turns,
             "isArchived": bool(s.data.get("isArchived")),
             "isRunning": _is_live(s, now_ms),
@@ -1476,10 +1585,29 @@ def pick_json(candidates: list[Session], now_ms: int) -> int:
             "account": s.account.short,
             "accountEmail": s.account.email,
             "transcriptPath": str(transcript) if transcript else None,
-        })
+        }
+        if rich:
+            m = analyze_transcript(transcript)
+            window = 1_000_000 if m["ctxPeak"] > 200_000 else 200_000
+            row.update({
+                "events": m["events"],
+                "toolCalls": m["toolCalls"],
+                "densityBuckets": m["buckets"],
+                "durationMin": m["durationMin"],
+                "sizeKB": m["sizeKB"],
+                "ctxTokens": m["ctxTokens"],
+                "ctxPeak": m["ctxPeak"],
+                "ctxWindow": window,
+                "ctxPct": round(min(100, m["ctxTokens"] / window * 100)) if window else 0,
+                "ctxPeakPct": round(min(100, m["ctxPeak"] / window * 100)) if window else 0,
+                "firstAsk": m["firstAsk"],
+            })
+        rows.append(row)
     print(json.dumps({
         "data": rows,
-        "meta": {"count": len(rows), "schema": "claude-mods.summon.pick/v1"},
+        "meta": {"count": len(rows),
+                 "schema": "claude-mods.summon.pick/v2" if rich else
+                           "claude-mods.summon.pick/v1"},
     }, indent=2))
     return 0
 
@@ -1495,7 +1623,7 @@ def mode_pick(args, accounts: list[Account]) -> int:
                                  cwd_pattern=args.cwd, title_pattern=args.title)
 
     if args.json:
-        return pick_json(candidates, int(time.time() * 1000))
+        return pick_json(candidates, int(time.time() * 1000), rich=args.rich)
 
     if not candidates:
         eecho(f"no sessions match ({_window_label(days)})")
@@ -1696,6 +1824,11 @@ def main():
                    help="Doctor: emit findings as a JSON envelope on stdout. "
                         "Pick: emit the session inventory as a JSON envelope "
                         "(no picker; stdout is JSON only)")
+    p.add_argument("--rich", action="store_true",
+                   help="Pick --json: add transcript-derived display metrics per "
+                        "session (context occupancy, activity density, tool/event "
+                        "counts, size, duration, opening ask) — schema pick/v2. "
+                        "One transcript read per session; powers the card picker")
     p.add_argument("--no-distill", action="store_true",
                    help="Recover/pick: skip the LLM handover distillation and emit "
                         "the plain pointer prompt")
