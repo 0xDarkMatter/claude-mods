@@ -60,6 +60,12 @@ MEDIA_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".mp4", ".mov", ".webm", ".zip",
               ".7z", ".tar", ".gz", ".glb", ".psd"}
 SCRATCH_PAT = re.compile(r"^(tmp|temp|scratch|junk|old|copy|test)[-_]", re.I)
 GENERATED_PAT = re.compile(r"generated|do not edit|don'?t hand-edit|@generated", re.I)
+# The doctrine's escape hatch for large files: guard comment + section map.
+# A monster whose head carries a justification marker downgrades to info —
+# the scorer must honour the same rule it audits, or it nags forever.
+JUSTIFY_PAT = re.compile(
+    r"ARCHITECTURE:|PERF:|Sections?\s*:|single[- ]file|do not split|"
+    r"single[- ]writer|deliberately (one|large)", re.I)
 LANDMINE_PAT = re.compile(r"landmine|gotcha|pitfall|footgun|hazard|trap|don'?t", re.I)
 COMMENT_LINE = re.compile(r"^\s*(#|//|/\*|\*|<!--|--|\"\"\"|''')")
 SECTION_PAT = re.compile(r"^\s*(#|//|/\*|<!--|--)\s*.{0,8}([=─-]{4,}|SECTION|═{4,})")
@@ -252,16 +258,21 @@ class Audit:
             rel = str(p.relative_to(self.repo)).replace("\\", "/")
             head = head_lines(p, 15)
             # A line counts as comment if it matches a comment prefix OR sits
-            # inside an open triple-quoted module docstring (Python prose lines
-            # carry no prefix but ARE the contract block).
+            # inside an open block comment: Python triple-quoted docstrings and
+            # PowerShell <# ... #> blocks carry prose lines with no per-line
+            # prefix, but they ARE the contract block.
             in_doc = False
             n_comment = 0
             for l in head:
                 quotes = l.count('"""') + l.count("'''")
-                if in_doc or COMMENT_LINE.match(l) or quotes:
+                opens = quotes % 2 == 1 or ("<#" in l and "#>" not in l)
+                closes = "#>" in l and "<#" not in l
+                if in_doc or COMMENT_LINE.match(l) or quotes or "<#" in l:
                     n_comment += 1
-                if quotes % 2 == 1:
-                    in_doc = not in_doc
+                if in_doc and (closes or quotes % 2 == 1):
+                    in_doc = False
+                elif not in_doc and opens:
+                    in_doc = True
             has_contract = n_comment >= 3
             if has_contract:
                 contract_ok += 1
@@ -298,7 +309,15 @@ class Audit:
                 monsters.append((n, str(p.relative_to(self.repo)).replace("\\", "/")))
         monsters.sort(reverse=True)
         self.facts["monster_files"] = monsters[:10]
+        unjustified = []
         for n, rel in monsters[:10]:
+            head = "".join(head_lines(self.repo / rel, 40))
+            if JUSTIFY_PAT.search(head):
+                self.add("structure", "info",
+                         f"{n}-line file carries a justification marker — verify "
+                         "the section map and the enforcing gate still hold", rel)
+                continue
+            unjustified.append(n)
             if n >= MONSTER_CRIT:
                 self.add("structure", "crit",
                          f"{n}-line file — split by responsibility (refactor-ops) "
@@ -308,7 +327,7 @@ class Audit:
                 self.add("structure", "warn",
                          f"{n}-line file — needs section markers now, a split "
                          "or a written justification before it grows", rel)
-        score -= min(3.0, sum(1.0 if n >= MONSTER_CRIT else 0.5 for n, _ in monsters))
+        score -= min(3.0, sum(1.0 if n >= MONSTER_CRIT else 0.5 for n in unjustified))
         junk = []
         for p in self.repo.iterdir():
             if p.is_file():

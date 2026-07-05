@@ -123,6 +123,16 @@ GR="$(get 'd["data"]["grade"]')"
 "$PY" "$DOCTOR" --repo "$TMP" --strict >/dev/null 2>&1 \
     && ok "remediated repo passes --strict (grade $GR)" || no "strict pass" "grade $GR exit $?"
 
+# 11. justified monster (guard marker in head) downgrades crit -> info
+{ echo "# ARCHITECTURE: single-file by design — Sections: A · B · C"
+  "$PY" -c "print('\n'.join('y = %d' % i for i in range(1700)))"; } > src/justified.py
+git add -A; git commit -qm "feat: justified monster"
+OUT="$(run_json)"
+[ "$(get 'sum(1 for f in d["data"]["findings"] if "justified.py" in f["path"] and f["severity"]=="crit")')" = "0" ] \
+    && [ "$(get 'sum(1 for f in d["data"]["findings"] if "justified.py" in f["path"] and "justification marker" in f["msg"])')" = "1" ] \
+    && ok "justification marker downgrades monster crit -> info" \
+    || no "justified monster" "severity wrong"
+
 echo
 echo "repo-doctor tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ] && exit 0 || exit 1

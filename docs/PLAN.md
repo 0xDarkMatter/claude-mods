@@ -24,6 +24,23 @@
 
 Counts are enforced by the CI doc-drift gate (see roadmap) — if this table rots, CI fails.
 
+## Docs Map
+
+One line per canonical doc; update in the same commit as any docs/ change.
+
+| Doc | Why you'd read it |
+|-----|-------------------|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Component model + skill-vs-rule-vs-agent split — read before structural changes |
+| [SKILL-CREATION-PROTOCOL.md](SKILL-CREATION-PROTOCOL.md) | THE sequenced lifecycle for building a skill — start here |
+| [SKILL-SUBAGENT-REFERENCE.md](SKILL-SUBAGENT-REFERENCE.md) | Legal frontmatter fields + subagent decision frameworks |
+| [SKILL-RESOURCE-PROTOCOL.md](SKILL-RESOURCE-PROTOCOL.md) | Contract for skill scripts/assets — streams, exit codes, verifiers |
+| [TERMINAL-DESIGN.md](TERMINAL-DESIGN.md) | Terminal Panel Design System for TTY output |
+| [WORKFLOWS.md](WORKFLOWS.md) | 10 workflow patterns from Anthropic best practices |
+| [RESERVED-COMMANDS.md](RESERVED-COMMANDS.md) | Command names that collide with Claude Code built-ins |
+| [AUTO-MODE-CLASSIFIER.md](AUTO-MODE-CLASSIFIER.md) | The two-gate auto-mode permission model behind loop-engineering |
+
+Subdirs: `archive/` (completed-migration records, retired) · `references/` (vendored guides).
+
 ---
 
 ## Active Roadmap (June 2026 strategic review)

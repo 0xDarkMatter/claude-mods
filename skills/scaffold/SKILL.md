@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Edit Write Bash Glob Grep Agent"
 metadata:
   author: claude-mods
-  related-skills: docker-ops, ci-cd-ops, testing-ops, python-env, typescript-ops
+  related-skills: docker-ops, ci-cd-ops, testing-ops, python-env, typescript-ops, repo-doctor
 ---
 
 # Scaffold
@@ -437,6 +437,9 @@ Project setup complete? Add these:
 │
 └─ Documentation
    ├─ [ ] README.md (project description, setup, usage)
+   ├─ [ ] AGENTS.md — seed from the repo-doctor skill's
+   │      assets/AGENTS-template.md (Landmines section is mandatory;
+   │      doctrine: rules/agentic-quality.md)
    ├─ [ ] CONTRIBUTING.md
    └─ [ ] API documentation (OpenAPI, godoc, rustdoc)
 ```

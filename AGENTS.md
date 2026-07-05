@@ -59,6 +59,7 @@ On "INIT:" message at session start:
 | `skills/pigeon/` | Inter-session pmail - send, read, reply, broadcast, search across projects |
 | `skills/auto-skill/` | Auto-detect skill-worthy workflows; Stop hook suggests after complex sessions. `/auto-skill on/off/status` to toggle |
 | `skills/supply-chain-defense/` | Behavioural-first dependency security - Socket.dev depscore MCP, exposure-check (IOC match across npm/pnpm/yarn/bun/PyPI/Composer/Cargo/Go/RubyGems + extensions), integrity-audit (persistence), scan-extensions, install/manifest hooks. Paired with `rules/supply-chain.md` |
+| `skills/repo-doctor/` | Agentic-quality auditor - scores any repo (entry docs, comments, structure, gates, doc-pairing) with --json + --strict CI gate; monorepo-structure + comment-doctrine references. Paired with `rules/agentic-quality.md` |
 
 ## Quick Reference
 
@@ -98,5 +99,6 @@ Requires Sonnet 4+ or Opus 4+.
 ## Testing
 
 ```bash
-cd tests && just test
+just check        # THE gate: validate + doc-drift + resource contracts + skill suites
+just check-fast   # same minus the per-skill behavioural suites
 ```

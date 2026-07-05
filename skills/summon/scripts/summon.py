@@ -33,6 +33,13 @@ Transfer mode (no positional) is documented in SKILL.md: copy by default, --move
 to relocate, destination auto-detected as the most-recently-active account.
 
 Output rendering follows docs/TERMINAL-DESIGN.md (Terminal Panel Design System).
+
+Deliberately single-file: skill scripts ship as self-contained portable units
+(docs/SKILL-RESOURCE-PROTOCOL.md) — do not split into a package. Navigate by
+the `# ===` section headers — Sections: DESIGN(term) · Path discovery ·
+Account discovery · Sessions · Grouping · Listing · Picker · Workspace
+selection · Operate · Peek · Transcript/Distill · Modes (transfer / pick /
+recover / rebind / doctor) · CLI entry.
 """
 
 from __future__ import annotations
