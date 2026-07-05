@@ -20,6 +20,7 @@ Usage: ff-spawn.sh --run NAME --id ID --brain BRAIN --prompt-file FILE
   --id ID          lane id within the run ([a-z0-9-]+)
   --brain BRAIN    glm | codex | sonnet | opus | haiku | fable
   --prompt-file F  packet file (guard preamble is prepended unless --no-guard)
+  --phase NAME     progress-group label (default: build) - display only
   --worktree       give the worker its own worktree lane (branch fleetflow/RUN/ID)
   --base BRANCH    worktree base (default: main, falls back to HEAD)
   --repo PATH      repo root (default: git toplevel of cwd)
@@ -42,10 +43,11 @@ EOF
 err() { echo "ff-spawn: $*" >&2; }
 
 RUN="" ID="" BRAIN="" PROMPT_FILE="" WORKTREE=0 BASE="main" REPO=""
-MAX_TURNS=100 SCHEMA="" GUARD=1 FORCE=0 DRYRUN=0
+MAX_TURNS=100 SCHEMA="" GUARD=1 FORCE=0 DRYRUN=0 PHASE="build"
 while [ $# -gt 0 ]; do
   case "$1" in
     --run) RUN="${2:-}"; shift 2 ;;
+    --phase) PHASE="${2:-}"; shift 2 ;;
     --id) ID="${2:-}"; shift 2 ;;
     --brain) BRAIN="${2:-}"; shift 2 ;;
     --prompt-file) PROMPT_FILE="${2:-}"; shift 2 ;;
@@ -121,8 +123,9 @@ if [ "$WORKTREE" = 1 ]; then
   fi
 fi
 
-jq -nc --arg k "$KEY" --arg id "$ID" --arg b "$BRAIN" \
-  '{type:"started",key:$k,id:$id,brain:$b}' >> "$JOURNAL"
+# phase is display metadata only - deliberately NOT part of the cache key
+jq -nc --arg k "$KEY" --arg id "$ID" --arg b "$BRAIN" --arg p "$PHASE" \
+  '{type:"started",key:$k,id:$id,brain:$b,phase:$p}' >> "$JOURNAL"
 
 # --- launch -------------------------------------------------------------------
 ART="$RUNDIR/$ID.result.json"

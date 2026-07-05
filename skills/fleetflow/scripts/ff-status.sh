@@ -54,6 +54,7 @@ emit() {
   lanes="[]"
   for id in $(jq -r 'select(.type=="started") | .id' "$RUNDIR/journal.jsonl" | awk '!seen[$0]++'); do
     brain="$(jq -r --arg id "$id" 'select(.id==$id) | .brain' "$RUNDIR/journal.jsonl" | head -1)"
+    phase="$(jq -r --arg id "$id" 'select(.type=="started" and .id==$id) | .phase // "build"' "$RUNDIR/journal.jsonl" | head -1)"
     rc="$(jq -r --arg id "$id" 'select(.type=="result" and .id==$id) | .rc' "$RUNDIR/journal.jsonl" | tail -1)"
     art="$(jq -r --arg id "$id" 'select(.type=="result" and .id==$id) | .artifact' "$RUNDIR/journal.jsonl" | tail -1)"
     if [ -z "$rc" ]; then state="running"; finished=0
@@ -95,10 +96,10 @@ emit() {
 
     lanes="$(jq -nc --argjson L "$lanes" \
       --arg id "$id" --arg brain "$brain" --arg state "$state" --arg activity "$activity" \
-      --arg last_c "$last_c" --arg etail "$etail" --arg art "${art:-}" \
+      --arg last_c "$last_c" --arg etail "$etail" --arg art "${art:-}" --arg phase "${phase:-build}" \
       --argjson started "$started" --argjson elapsed "$elapsed" \
       --argjson commits "${commits:-0}" --argjson tools "${tools:-0}" --argjson tokens "${tokens:-0}" \
-      '$L + [{id:$id,brain:$brain,state:$state,started:$started,elapsed_s:$elapsed,
+      '$L + [{id:$id,brain:$brain,phase:$phase,state:$state,started:$started,elapsed_s:$elapsed,
               commits:$commits,tools:$tools,tokens:$tokens,activity:$activity,
               last_commit:$last_c,artifact:$art,err_tail:$etail}]')"
   done

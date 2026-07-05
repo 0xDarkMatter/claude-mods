@@ -78,6 +78,13 @@ check "collect: codex schema-valid JSON" 0 bash "$S/ff-collect.sh" --run r1 --id
 printf 'not json' > "$REPO/.fleetflow/r1/cx.last.txt"
 check "collect: codex schema-invalid fails" 10 bash "$S/ff-collect.sh" --run r1 --id cx --repo "$REPO" --schema
 
+# --- phases --------------------------------------------------------------------------
+check "spawn: --phase accepted" 0 bash "$S/ff-spawn.sh" --run r1 --id ver --brain opus --phase verify --prompt-file "$PKT" --repo "$REPO" --dry-run
+bash "$S/ff-status.sh" --run r1 --repo "$REPO" 2>/dev/null | jq -e '.lanes[] | select(.id=="ver") | .phase=="verify"' >/dev/null \
+  && ok "status: phase propagates" || bad "status: phase missing"
+bash "$S/ff-status.sh" --run r1 --repo "$REPO" 2>/dev/null | jq -e '.lanes[] | select(.id=="a") | .phase=="build"' >/dev/null \
+  && ok "status: default phase is build" || bad "status: default phase wrong"
+
 # --- status feed --------------------------------------------------------------------
 check "status: no args" 2 bash "$S/ff-status.sh"
 check "status: watch without out" 2 bash "$S/ff-status.sh" --run r1 --repo "$REPO" --watch 3
