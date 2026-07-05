@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# Offline behavioural suite for the fleetflow skill scripts.
+# Self-contained: builds a throwaway git repo, exercises spawn/collect/doctor
+# via --dry-run (no network, no workers). Exits nonzero on any failure.
+set -u
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+S="$HERE/../scripts"
+PASS=0; FAILN=0
+ok()   { PASS=$((PASS+1)); echo "  PASS  $1"; }
+bad()  { FAILN=$((FAILN+1)); echo "  FAIL  $1"; }
+check() { # desc, expected-rc, cmd...
+  local desc="$1" want="$2"; shift 2
+  "$@" >/dev/null 2>&1; local got=$?
+  [ "$got" = "$want" ] && ok "$desc (exit $want)" || bad "$desc: wanted $want got $got"
+}
+
+command -v jq >/dev/null 2>&1 || { echo "SKIP: jq unavailable on this platform"; exit 0; }
+command -v git >/dev/null 2>&1 || { echo "SKIP: git unavailable"; exit 0; }
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+REPO="$TMP/repo"
+mkdir -p "$REPO" && git -C "$REPO" init -q -b main
+git -C "$REPO" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+PKT="$TMP/packet.txt"; echo "Do the thing. FINAL REPLY: one line." > "$PKT"
+
+# --- syntax + help ------------------------------------------------------------
+for s in ff-spawn.sh ff-collect.sh ff-doctor.sh; do
+  bash -n "$S/$s" 2>/dev/null && ok "syntax $s" || bad "syntax $s"
+  bash "$S/$s" --help 2>/dev/null | grep -q "EXAMPLES" && ok "$s --help has EXAMPLES" || bad "$s --help lacks EXAMPLES"
+  check "$s --help exits 0" 0 bash "$S/$s" --help
+done
+
+# --- usage validation -----------------------------------------------------------
+check "spawn: no args" 2 bash "$S/ff-spawn.sh"
+check "spawn: bad brain" 2 bash "$S/ff-spawn.sh" --run r1 --id a --brain gpt9 --prompt-file "$PKT" --repo "$REPO"
+check "spawn: bad run name" 2 bash "$S/ff-spawn.sh" --run "R 1" --id a --brain glm --prompt-file "$PKT" --repo "$REPO"
+check "spawn: missing prompt file" 2 bash "$S/ff-spawn.sh" --run r1 --id a --brain glm --prompt-file "$TMP/nope" --repo "$REPO"
+check "collect: no args" 2 bash "$S/ff-collect.sh" --repo "$REPO"
+check "doctor: bad flag" 2 bash "$S/ff-doctor.sh" --frobnicate
+
+# --- dry-run lifecycle -----------------------------------------------------------
+check "spawn: dry-run ok" 0 bash "$S/ff-spawn.sh" --run r1 --id a --brain sonnet --prompt-file "$PKT" --repo "$REPO" --dry-run
+[ -f "$REPO/.fleetflow/r1/a.result.json" ] && ok "artifact written" || bad "artifact missing"
+[ -f "$REPO/.fleetflow/r1/journal.jsonl" ] && ok "journal exists" || bad "journal missing"
+N_STARTED="$(jq -r 'select(.type=="started")|.key' "$REPO/.fleetflow/r1/journal.jsonl" | wc -l)"
+N_RESULT="$(jq -r 'select(.type=="result")|.key' "$REPO/.fleetflow/r1/journal.jsonl" | wc -l)"
+[ "$N_STARTED" -ge 1 ] && [ "$N_RESULT" -ge 1 ] && ok "journal has started+result" || bad "journal records missing"
+grep -q '^v2:' <(jq -r '.key' "$REPO/.fleetflow/r1/journal.jsonl") && ok "keys carry v2: prefix" || bad "key prefix wrong"
+grep -qs '^\.fleetflow/$' "$REPO/.git/info/exclude" && ok ".fleetflow gitignored via info/exclude" || bad "info/exclude not updated"
+[ -f "$REPO/.fleetflow/r1/main-baseline.txt" ] && ok "escape baseline snapshotted" || bad "baseline missing"
+grep -q "relative to cwd" "$REPO/.fleetflow/r1/a.prompt.txt" && ok "guard preamble injected" || bad "guard preamble absent"
+
+# resume: identical packet -> cache hit (exit 3); --force -> re-run (exit 0)
+check "spawn: cache hit on identical packet" 3 bash "$S/ff-spawn.sh" --run r1 --id a --brain sonnet --prompt-file "$PKT" --repo "$REPO" --dry-run
+check "spawn: --force re-runs" 0 bash "$S/ff-spawn.sh" --run r1 --id a --brain sonnet --prompt-file "$PKT" --repo "$REPO" --dry-run --force
+echo "changed" >> "$PKT"
+check "spawn: changed packet re-runs" 0 bash "$S/ff-spawn.sh" --run r1 --id a --brain sonnet --prompt-file "$PKT" --repo "$REPO" --dry-run
+
+# worktree lane creation
+check "spawn: worktree lane" 0 bash "$S/ff-spawn.sh" --run r1 --id lane --brain sonnet --prompt-file "$PKT" --repo "$REPO" --dry-run --worktree
+git -C "$REPO" show-ref --verify --quiet refs/heads/fleetflow/r1/lane && ok "lane branch created" || bad "lane branch missing"
+[ -d "$REPO/.fleetflow/r1/wt-lane" ] && ok "lane worktree created" || bad "lane worktree missing"
+
+# --- collect gating ---------------------------------------------------------------
+check "collect: dry-run result passes" 0 bash "$S/ff-collect.sh" --run r1 --id a --repo "$REPO"
+OUT="$(bash "$S/ff-collect.sh" --run r1 --id a --repo "$REPO" 2>/dev/null)"
+[ "$OUT" = "DRYRUN" ] && ok "collect prints final text" || bad "collect text wrong: '$OUT'"
+jq -nc '{is_error:true,result:"boom"}' > "$REPO/.fleetflow/r1/bad.result.json"
+jq -nc '{type:"result",key:"v2:x",id:"bad",brain:"sonnet",rc:0,artifact:"x"}' >> "$REPO/.fleetflow/r1/journal.jsonl"
+check "collect: is_error=true fails gate" 10 bash "$S/ff-collect.sh" --run r1 --id bad --repo "$REPO"
+check "collect: missing artifact" 3 bash "$S/ff-collect.sh" --run r1 --id ghost --repo "$REPO"
+# codex-style artifact: last.txt path with schema validation
+printf '{"verdict":"ok"}' > "$REPO/.fleetflow/r1/cx.last.txt"
+check "collect: codex last-message passes" 0 bash "$S/ff-collect.sh" --run r1 --id cx --repo "$REPO"
+check "collect: codex schema-valid JSON" 0 bash "$S/ff-collect.sh" --run r1 --id cx --repo "$REPO" --schema
+printf 'not json' > "$REPO/.fleetflow/r1/cx.last.txt"
+check "collect: codex schema-invalid fails" 10 bash "$S/ff-collect.sh" --run r1 --id cx --repo "$REPO" --schema
+
+# --- escape guard ------------------------------------------------------------------
+check "escape guard: clean main" 0 bash "$S/ff-collect.sh" --check-main-clean --run r1 --repo "$REPO"
+echo rogue > "$REPO/rogue.txt"
+check "escape guard: detects new file" 12 bash "$S/ff-collect.sh" --check-main-clean --run r1 --repo "$REPO"
+rm "$REPO/rogue.txt"
+check "escape guard: clean again" 0 bash "$S/ff-collect.sh" --check-main-clean --run r1 --repo "$REPO"
+
+# --- doctor (offline only; never hits network) ---------------------------------------
+bash "$S/ff-doctor.sh" --offline >/dev/null 2>&1; RC=$?
+[ "$RC" = 0 ] || [ "$RC" = 10 ] && ok "doctor --offline runs (rc=$RC)" || bad "doctor --offline rc=$RC"
+bash "$S/ff-doctor.sh" --offline 2>/dev/null | grep -qE "^bin-jq	ok" && ok "doctor TSV output" || bad "doctor TSV output missing"
+
+echo "=== $PASS passed, $FAILN failed ==="
+[ "$FAILN" = 0 ] || exit 1
+exit 0
