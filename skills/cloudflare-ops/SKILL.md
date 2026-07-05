@@ -13,7 +13,9 @@ when_to_use: "Building, configuring, or deploying Cloudflare Workers; writing or
 
 Cloudflare Workers + Wrangler: runtime patterns, bindings, local dev, secrets, deploy, CI/CD, observability.
 
-**Version context (verified 2026-06):** Wrangler **v4.x** · config is **`wrangler.jsonc`** (Cloudflare's recommended format for new projects — some newer features are JSON-config-only; `wrangler.toml` still works and is widespread in older repos) · deploy command is **`wrangler deploy`** (the old **`wrangler publish` is deprecated** — see [gotchas](#common-gotchas)). Workers can now **serve static assets**, which is the current direction for full-stack and static sites over Pages (see [Workers vs Pages](#workers-vs-pages-decision)).
+> Ecosystem facts verified as of 2026-07.
+
+**Version context (verified 2026-07):** Wrangler **v4.x** · config is **`wrangler.jsonc`** (Cloudflare's recommended format for new projects — some newer features are JSON-config-only; `wrangler.toml` still works and is widespread in older repos) · deploy command is **`wrangler deploy`** (the old **`wrangler publish` is deprecated** — see [gotchas](#common-gotchas)). Workers can now **serve static assets**, which is the current direction for full-stack and static sites over Pages (see [Workers vs Pages](#workers-vs-pages-decision)).
 
 ## Reference Files
 
@@ -178,3 +180,20 @@ wrangler tail                    # stream live logs from the deployed Worker
 2. Auth: `wrangler login` (OAuth) for local; **API token** for CI.
 3. Copy [assets/wrangler.jsonc.template](assets/wrangler.jsonc.template), strip the bindings you don't need, fill in IDs.
 4. `wrangler dev` → `wrangler deploy`.
+
+## Staleness verifier
+
+This skill encodes fast-moving facts (Wrangler major line, recommended `compatibility_date`, `wrangler.jsonc` config convention). [`scripts/check-cloudflare-facts.py`](scripts/check-cloudflare-facts.py) guards them against silent drift:
+
+```bash
+# Structural (PR CI, no network): every catalogued fact's prose_token is still
+# named in this skill's prose (incl. the jsonc template), and the currency
+# note still carries a year.
+python scripts/check-cloudflare-facts.py --offline        # exit 0 consistent, 10 drift
+
+# Live (freshness job, never blocks a PR): wrangler still resolves on npm and
+# its latest major matches the documented v4.x line.
+python scripts/check-cloudflare-facts.py --live            # exit 10 major drift, 7 npm unreachable
+```
+
+The canonical fact set lives in [`assets/cloudflare-facts.json`](assets/cloudflare-facts.json); when the Wrangler major, the recommended compatibility_date, or the config convention changes, update it to match or `--offline` fails CI.

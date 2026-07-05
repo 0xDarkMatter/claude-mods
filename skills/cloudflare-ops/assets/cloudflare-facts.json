@@ -1,0 +1,21 @@
+{
+  "_comment": "Canonical fast-moving facts the cloudflare-ops skill encodes: the Wrangler major line, the recommended compatibility_date, and the config filename convention. scripts/check-cloudflare-facts.py asserts each is still stated in the prose + a dated currency note (--offline), and probes npm for Wrangler major drift (--live). Edit deliberately: a change here is a skill-content decision, not housekeeping.",
+  "schema": "claude-mods.cloudflare-ops.facts/v1",
+  "as_of": "2026-07-05",
+  "wrangler": {
+    "documented_major": 4,
+    "prose_token": "v4.x",
+    "live": {"source": "npm", "product": "wrangler", "compare": "major"},
+    "_comment": "Wrangler v4.x is the skill's assumed major line. --live flags drift if npm's latest wrangler dist-tag leaves major 4 (a 5.x would be a breaking-change release warranting a skill review)."
+  },
+  "compatibility_date": {
+    "documented": "2026-06-01",
+    "prose_token": "2026-06-01",
+    "_comment": "The compatibility_date the skill's jsonc skeleton recommends users pin. Offline-only: it is a deliberate runtime pin, not a live registry fact."
+  },
+  "config_format": {
+    "documented": "wrangler.jsonc",
+    "prose_token": "wrangler.jsonc",
+    "_comment": "The recommended config filename for new projects (Cloudflare's direction; some newer features are JSON-config-only). Offline-only."
+  }
+}
