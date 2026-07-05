@@ -4,12 +4,22 @@
 // <canvas> ImageData) and in Node (fed decoded pixels), so the tool and the
 // headless accuracy harness share ONE implementation — no drift.
 //
+// ARCHITECTURE: deliberately single-file — the browser tool (index.html, via
+// dynamic import()) and the headless CLI/bench harness load this ONE module,
+// and claude-mods vendors this exact file as a skill asset (hash-compared on
+// sync). Splitting it into sub-modules re-opens the engine-drift hole this
+// file exists to close and breaks the single-asset sync. Do not split.
+//
 //   import { traceImage } from './trace-core.mjs';
 //   const svg = traceImage({ data, width, height }, { mode:'color', colors:8 });
 //
 // `data` is RGBA bytes (Uint8ClampedArray|Uint8Array|number[]), length w*h*4.
 // Returns an SVG string. No DOM, no canvas, no network.
+//
+// Sections (grep "=== NAME ==="): KNOBS · RESOLUTION · PIPELINE · LAYERING ·
+// GRADIENTS · FIELDS & PALETTE · GEOMETRY · POTRACE
 
+// === KNOBS ===
 export const DEFAULTS = {
   mode: 'color',      // 'color' | 'bw' | 'poster'
   colors: 6,          // color mode: palette size
@@ -77,8 +87,170 @@ export const DEFAULTS = {
                       // their own fill. Needs two distinct bordering colours, so isolated legit
                       // marks (dots, ®, faint hairlines on plain background) are never touched.
   sliverMax: 500,     // FIX 6: max contour area (working px²) eligible for the veto
+  // ── v5: gradient-aware vectorization (native SVG gradient fills) ─────────
+  gradFit: true,      // detect smooth colour ramps, emit <linearGradient> fills (colour mode)
+  gradSlopeMin: 0.12, // ramp map: min colour slope (RGB-Euclid per working px; below = flat).
+                      // Low enough for gentle designer sweeps on 1200px+ sources
+                      // (edge's swirls are ~0.2/px); noise stays excluded by the
+                      // coherence + span + relative gates, flat art by the guard
+  gradSlopeMax: 25,   // ramp map: max slope (above = hard edge / AA)
+  gradCohMin: 0.55,   // ramp map: min structure-tensor coherence (rejects isotropic noise)
+  gradMinArea: 500,   // min region area (working px²) to consider fitting
+  gradSpanMin: 40,    // min total colour travel along the fitted profile (else it's flat)
+  gradResidMax: 9,    // max mean |c − profile(t)| (RGB units) to accept a region
+  gradGain: 0.8,      // relative gate: resid must be ≤ gain × the error flat BANDS
+                      // at the same colour budget would achieve (mean distance to
+                      // the nearest stop colour). Rejects linear fits on radial/
+                      // conic ramps and noise-triggered false regions — a gradient
+                      // is only emitted where it provably beats quantization
+  gradMaxStops: 12,   // stop-count cap after RDP simplification of the profile
+  gradOverlay: true,  // fit an alpha-faded radial OVERLAY on a region's residual
+                      // field (base linear + alpha radial = how designers author
+                      // 2-D colour fields; a single 1-D gradient can't express
+                      // them). Kept only when it provably cuts the residual.
+  gradGrow: true,     // BFS-grow accepted regions into adjacent px matching the
+                      // profile prediction, refit, re-gate (absorbs the sub-
+                      // slope-threshold remainder of very gentle ramps — trello)
+  palRescue: true,    // v6: after merge/cull, if a large opaque mass (>=0.8%)
+                      // sits >40 RGB from EVERY surviving palette colour, the
+                      // pipeline deleted (or never had) a real tone — median-cut
+                      // that mass back into <=3 rescue entries. Native/downsampled
+                      // regime only (despeckle <= 4): at 2x supersample the culled
+                      // AA clouds are fat enough to re-trigger this, and re-adding
+                      // them regresses flat logos (apc, saxton).
 };
 
+// === RESOLUTION ===
+/* ── working-resolution targeting (supersample OR downsample) ──────────────
+   What governs trace quality is the WORKING RESOLUTION the marching-squares +
+   Potrace stage runs at (source_long_edge × superF) — and the feature sizes,
+   in working px, at that resolution — NOT the supersample factor itself. The
+   engine's px-space knobs are tuned at a ~640px working long edge (320px
+   sources × 2). So the goal is to land the working long edge inside that tuned
+   BAND, whichever way that means resampling:
+
+     • source < WORK_MIN  → supersample UP to the floor. A 320px logo has
+                            sub-pixel strokes at native res; 2× lanczos recovers
+                            them. (Can't invent detail past ~2×, hence the low-res
+                            warning the UI surfaces.)
+     • source in-band     → trace at NATIVE (superF≈1). Already resolved;
+                            upsampling only bloats path counts and is slower.
+     • source > WORK_MAX  → downsample DOWN to the ceiling (superF < 1). A 2000px+
+                            source is already detailed; tracing it at full native
+                            chases the AA/JPEG staircase (path explosion + noise)
+                            and costs ~(L/WORK_MAX)² more. Clamping the working
+                            res DOWN bounds both. This is exactly why the naive
+                            "clamp superF ≥ 1" is wrong at the top end.
+
+   superF = clamp(target/L, SUPER_MIN, SUPER_MAX), target = clamp(L, WORK_MIN,
+   WORK_MAX). Callers scale every geometry knob by sK = max(superF,1)/2 (see
+   trace.mjs): at superF ≥ 1 that's the native-anchored superF/2 (unchanged,
+   tuned); when downsampling it FLOORS at the native-tuning value, because the
+   downsampled working image re-bands its AA to ~1.5 working px — the same
+   tolerances a clean native source wants. despeckle/detail stay native-anchored
+   (×superF, ×superF²): they're output-px semantics (a speck is a speck in the
+   final SVG regardless of working res). */
+export const WORK_MIN = 640;    // working-res floor  — the engine's tuned reference long edge
+export const WORK_MAX = 1400;   // working-res ceiling — bounds cost + AA-noise tracing on hi-res
+export const SUPER_MAX = 4;     // never upsample past 4× (past ~2–3× invents nothing)
+export const SUPER_MIN = 0.2;   // never downsample past 0.2× (gigapixel guard)
+export function pickSuperF(w, h) {
+  const L = Math.max(1, w, h);
+  const target = clamp(L, WORK_MIN, WORK_MAX);
+  return clamp(target / L, SUPER_MIN, SUPER_MAX);
+}
+/* Human-facing recommendation for the UI / CLI: regime + working long edge +
+   whether to warn about a source too low-res to trace crisply. The thresholds
+   here are SOURCE-resolution guidance (what the user controls, in round numbers),
+   deliberately distinct from the engine's working-res clamp band above. */
+export function traceResInfo(w, h) {
+  const L = Math.max(1, w, h);
+  const superF = pickSuperF(w, h);
+  const workLong = Math.round(L * superF);
+  const warnLowRes = L < 500;
+  let regime, message;
+  if (L < 500)        { regime = 'low';   message = `Low-res (${L}px): supersampled ${superF.toFixed(2)}× to ~${workLong}px, but detail is source-limited. For best results, use 1000px+.`; }
+  else if (L < 1000)  { regime = 'fair';  message = `${L}px → ${workLong}px working. Good; 1000px+ gives the crispest edges.`; }
+  else if (L <= 2000) { regime = 'ideal'; message = `${L}px → ${workLong}px working. Ideal resolution for tracing.`; }
+  else                { regime = 'high';  message = `High-res (${L}px): downsampled to ~${workLong}px working (${superF.toFixed(2)}×) to bound cost and keep edges clean.`; }
+  return { superF, workLong, regime, warnLowRes, message };
+}
+
+/* ── buildTraceOpts: single source of truth for the tuned recipe ───────────
+   The ~35-key `sK`-scaled options block, previously copy-pasted across every
+   caller (scripts/trace.mjs, assets/index.html, bench/gallery-gen.mjs). For a
+   COLOR-mode build it is byte-identical to that duplicated block — see
+   tests/opts-golden.mjs, which asserts this reproduces the FROZEN literal in
+   bench/grad-metric.mjs for superF ∈ {0.3646, 1, 2}. The bw/poster-only knobs
+   (threshold/levels/invert) are added ONLY when a caller sets them, so a
+   color build omits them exactly like the frozen block (traceImage's DEFAULTS
+   then supply 128/4/false). bench/acceptance.mjs is intentionally excluded
+   (its `superF/2` — no `Math.max(superF,1)` floor — is a deliberate frozen
+   calibration divergence for superF<1 sources; do not migrate it here). */
+export function buildTraceOpts(superF, overrides = {}) {
+  const sK = Math.max(superF, 1) / 2;
+  const base = {
+    mode: overrides.mode ?? 'color',
+    colors: overrides.colors ?? 6,
+    smooth: overrides.smooth ?? 0.5,
+    mergeDist: overrides.mergeDist ?? 48,
+    despeckle: (overrides.despeckle ?? 4) * superF * superF,
+    cornerDeg: 40, fair: 1, fitErr: 1.5,
+    detail: (overrides.detail ?? 0.35) * superF,   // only used on the non-potrace path
+    smoothPx: 1,
+    // Band-limit before quantization when DOWNSAMPLING a hi-res source. An
+    // interpolated downscale leaves thin intermediate-colour fringes on hard edges;
+    // on a noisy near-mono background kmeans seeds those as spurious near-duplicate
+    // ink layers (a JPEG "white" split into two whites → path explosion). A radius-1
+    // pre-blur (anti-alias-before-decimation) dissolves them. No-op when up/native-
+    // sampling (superF ≥ 1), so low/mid sources are unchanged.
+    preblur: overrides.preblur ?? (superF < 1 ? 1 : 0),
+    // field/palette machinery (engine defaults; restated so the caller's config is explicit)
+    softField: true, alphaField: true, fringeCull: true, matteAnchor: true, demat: true,
+    straightRun: false, runTol: 0.75, fringeAreaRatio: 0.25,
+    matteDilate: Math.ceil(3 * sK),                    // matte-halo border band (working px, sK-scaled)
+    matteField: true, polarize: true, interiorGuard: true,
+    minFlat: Math.round(16 * sK * sK),                 // 2x-reference px² (area → sK²)
+    fieldSharp: 1.0,
+    sharpR: Math.max(1, Math.round(2 * sK)),
+    minLoop: 0,
+    blendVeto: true, isoArea: true,
+    // Potrace-style global geometry stage — px-space knobs are specified at the
+    // 2x-supersample reference scale and scaled by sK so a different factor
+    // behaves identically in native px (and floors at the native tuning when the
+    // source is downsampled — see pickSuperF above)
+    potrace: true,
+    tubeTol: 1.0 * sK,
+    alphaMax: 1.0,
+    cornerBox: 1.0 * sK,
+    adjustR: 0.75 * sK,
+    chamferMax: 4.5 * sK,
+    axisSnap: true, snapDeg: 0.75, snap45Deg: 0.4,
+    minSeg: 0.2 * sK,
+    optiCurve: true, optTol: 0.2 * sK,
+  };
+  // Named overrides are already folded into `base` above (and despeckle/detail
+  // are superF-scaled there) — do NOT re-spread raw `overrides`, or a caller
+  // passing despeckle/detail would clobber the scaled value with its raw input.
+  // bw/poster-only knobs are added just-in-time so a color build omits them.
+  if (overrides.threshold !== undefined) base.threshold = overrides.threshold;
+  if (overrides.levels !== undefined) base.levels = overrides.levels;
+  if (overrides.invert !== undefined) base.invert = overrides.invert;
+  return { ...base, ...(overrides._raw || {}) };
+}
+
+// Quality presets — a small, curated slice of the 61-knob surface for the 95%
+// case. Base overrides (pre-superF-scaling); pass through buildTraceOpts.
+export const QUALITY = {
+  draft:    { colors: 6,  detail: 0.6,  smooth: 0.6, despeckle: 6 },
+  balanced: { colors: 8,  detail: 0.4,  smooth: 0.5, despeckle: 4 },
+  max:      { colors: 14, detail: 0.25, smooth: 0.4, despeckle: 3 },
+};
+export function resolveQuality(name) {
+  return QUALITY[name] || QUALITY.balanced;
+}
+
+// === PIPELINE ===
 /* ── main ────────────────────────────────────────────────────────────── */
 export function traceImage(image, opts = {}) {
   const o = { ...DEFAULTS, ...opts };
@@ -88,16 +260,104 @@ export function traceImage(image, opts = {}) {
     for (const k of ['colors','threshold','levels','detail','smooth','cornerDeg','fair','fitErr','mergeDist','smoothPx','despeckle','preblur','alphaCut','fringeDist','fringeAreaRatio','runTol']) o[k] = num(o[k], DEFAULTS[k]); }
   const w = image.width, h = image.height;
   let px = image.data;
-  if (o.preblur > 0) px = boxBlur(px, w, h, Math.round(o.preblur));
+  const N = w * h;
+
+  // v7 (local detail-zone gate) — computed on the ORIGINAL raster, before the
+  // detail-smearing preblur. In the DOWNSAMPLED regime (o.despeckle < 4 ⇔
+  // superF < 1) a hi-res source carries genuine fine structure — engraved
+  // hatching, banner filigree — as thin dark strokes packed densely; flat art
+  // has only isolated boundary edges. Distinguish them by SUSTAINED edge
+  // density (a wordmark edge is one line through a window; a hatch field packs
+  // it). texZone marks the high-density areas and gates three detail savers:
+  //   1. skip the preblur there (blur smears hatching into fuzzy low-tone noise),
+  //   2. keep the thin contours FIX 11 (sub-px fringe drop) would discard,
+  //   3. bypass the sliver veto (real fine structure, not phantom slivers).
+  // Flat art — even downsampled — has no such zones, so all three stay fully
+  // active on it and the acceptance guard is the proof.
+  let texZone = null;
+  const inTex = poly => {
+    if (!texZone) return false;
+    let sx = 0, sy = 0;
+    for (const pt of poly) { sx += pt[0]; sy += pt[1]; }
+    const cx = Math.min(w - 1, Math.max(0, Math.round(sx / poly.length)));
+    const cy = Math.min(h - 1, Math.max(0, Math.round(sy / poly.length)));
+    return texZone[cy * w + cx] === 1;
+  };
+  if (o.despeckle < 4) {
+    const ET = o._texET != null ? o._texET : 14;         // luma step marking a working-px edge
+    const aCut = o.alphaCut, lumAt = j => 0.299 * px[j] + 0.587 * px[j + 1] + 0.114 * px[j + 2];
+    const edge = new Uint8Array(N);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = y * w + x, j = i * 4;
+      if (px[j + 3] < aCut) continue;
+      const l = lumAt(j);
+      if ((x + 1 < w && px[j + 7] >= aCut && Math.abs(l - lumAt(j + 4)) > ET) ||
+          (y + 1 < h && px[j + w * 4 + 3] >= aCut && Math.abs(l - lumAt(j + w * 4)) > ET)) edge[i] = 1;
+    }
+    const W1 = w + 1;
+    const sat = new Int32Array(W1 * (h + 1));             // summed-area table → O(1) window fraction
+    for (let y = 0; y < h; y++) { let row = 0; for (let x = 0; x < w; x++) {
+      row += edge[y * w + x];
+      sat[(y + 1) * W1 + (x + 1)] = sat[y * W1 + (x + 1)] + row; } }
+    const R = o._texR != null ? o._texR : 16, FRAC = o._texFRAC != null ? o._texFRAC : 0.06;  // window half-size; min edge-fill for texture
+    texZone = new Uint8Array(N);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const x0 = Math.max(0, x - R), y0 = Math.max(0, y - R), x1 = Math.min(w, x + R + 1), y1 = Math.min(h, y + R + 1);
+      const cnt = sat[y1 * W1 + x1] - sat[y0 * W1 + x1] - sat[y1 * W1 + x0] + sat[y0 * W1 + x0];
+      if (cnt >= FRAC * (x1 - x0) * (y1 - y0)) texZone[y * w + x] = 1;
+    }
+  }
+
+  // preblur — but keep the detail zones SHARP. Blurring engraved hatching /
+  // filigree spreads its thin dark strokes into a fuzzy mid field the 12-colour
+  // quantiser reads as a light flat, dropping the tone (GTA banner -> near-white).
+  if (o.preblur > 0) {
+    const blurred = boxBlur(px, w, h, Math.round(o.preblur));
+    if (texZone) {
+      const out = new Uint8ClampedArray(px.length);
+      for (let i = 0, j = 0; i < N; i++, j += 4) {
+        const s = texZone[i] ? px : blurred;
+        out[j] = s[j]; out[j + 1] = s[j + 1]; out[j + 2] = s[j + 2]; out[j + 3] = s[j + 3];
+      }
+      px = out;
+    } else px = blurred;
+  }
   const matte = o.matteField ? estimateMatte(px, w * h) : null;  // FIX 1 (from ORIGINAL px, pre-demat)
   if (o.demat) px = dematte(px, w * h);                 // CHANGE 0: strip matte contamination from AA pixels
-
-  const N = w * h;
   const lum = new Float32Array(N);
   const opaque = new Uint8Array(N);
   for (let i = 0, j = 0; i < N; i++, j += 4) {
     lum[i] = 0.299 * px[j] + 0.587 * px[j + 1] + 0.114 * px[j + 2];
     opaque[i] = px[j + 3] >= o.alphaCut ? 1 : 0;
+  }
+
+  // v5: gradient regions (colour mode) — detected on the demat'd source. When a
+  // region passes the residual gate its flat bands are dropped and replaced by
+  // ONE path with a native <linearGradient>. Flat art yields no regions → this
+  // is a no-op and the pipeline below is byte-identical.
+  let gradRegions = null, gradFitU = null, gradGeomU = null, gradInsertAt = -1, gradPredIdx = null;
+  const gradUnder = [];                                  // underlay paths (below the gradients)
+  if (o.gradFit && o.mode === 'color') {
+    const regs = detectGradientRegions(px, opaque, w, h, o);
+    if (regs.length) {
+      gradRegions = regs;
+      // per-px index of the TOPMOST region covering it (regions paint in order,
+      // so a later fitMask wins) — the colour-conditional replacement gate asks
+      // "what would the gradient paint here?"
+      gradPredIdx = new Int16Array(N).fill(-1);
+      regs.forEach((R, ri) => { for (let i = 0; i < N; i++) if (R.fitMask[i]) gradPredIdx[i] = ri; });
+      // union of FIT masks — the replacement test asks "is this loop's content
+      // the ramp itself?" (fitMask), NOT "is it under the painted geometry":
+      // the geometry deliberately extends under foreign glyphs (geometry-only
+      // holes), and those glyphs' own flat layers must survive on top.
+      gradFitU = new Uint8Array(N);
+      for (const R of regs) for (let i = 0; i < N; i++) if (R.fitMask[i]) gradFitU[i] = 1;
+      // union of painted geometry — loops fully inside it may be discarded
+      // outright; partially-covered ramp loops become UNDERLAY (painted below
+      // the gradient) so imperfect coverage can never leave a white hole.
+      gradGeomU = new Uint8Array(N);
+      for (const R of regs) for (let i = 0; i < N; i++) if (R.geom[i]) gradGeomU[i] = 1;
+    }
   }
 
   const layers = buildLayers(px, lum, opaque, w, h, o, matte);
@@ -126,13 +386,19 @@ export function traceImage(image, opts = {}) {
   };
   for (const L of layers) {
     let iso = 0.5, tRaw = 0.5;
+    // v6: texture layers (hatching/photo tone) legitimately live at low mean
+    // membership — their conserving level sits well under the 0.32 floor that
+    // protects crisp flat art, so clamping there under-covers the whole zone.
+    // Downsampled regime only (despeckle < 4): at 2x supersample a low-iso
+    // texture layer paints phantom blobs on flat logos (afic, clean-energy).
+    const isoLo = (L.tex && o.despeckle < 4) ? 0.15 : 0.32;
     if (o.isoArea) {
       if (L.fieldUn) {
         // FIX 7: two regimes in one layer. The gated field is coverage-true
         // (iso 0.5 is exact); the ungated field wants its own conserving level
         // t*. Rescale the ungated field so t* maps to 0.5 and take the max —
         // equivalent to a per-region iso, in a single marching-squares cut.
-        const t = Math.max(0.32, Math.min(0.6, consLevel(L.fieldUn)));
+        const t = Math.max(isoLo, Math.min(0.6, consLevel(L.fieldUn)));
         const sc = 0.5 / t;
         const F = L.field, U = L.fieldUn;
         for (let i = 0; i < F.length; i++) {
@@ -143,7 +409,7 @@ export function traceImage(image, opts = {}) {
         iso = 0.5; tRaw = t;                            // 0.5 minus a hair: blur+unsharp+fit shave ~0.02 of ramp
       } else {
         const t = consLevel(L.field);
-        iso = Math.max(0.32, Math.min(0.6, t));
+        iso = Math.max(isoLo, Math.min(0.6, t));
         tRaw = t;
       }
     }
@@ -192,7 +458,7 @@ export function traceImage(image, opts = {}) {
     if (pts.length < 3) return '';
     return fitPath(pts, o.smooth, o.cornerDeg, o.fair, o.fitErr);
   };
-  let body = '';
+  const bodyParts = [];
   const polyPerim = poly => {
     let s = 0;
     for (let i = 0, n = poly.length; i < n; i++) {
@@ -223,27 +489,130 @@ export function traceImage(image, opts = {}) {
       const sa = polySigned(poly);
       if (Math.abs(sa) > refA) { refA = Math.abs(sa); refSign = Math.sign(sa); }
     }
+    // v5 pre-pass: OUTER loops ≥70% inside a fitted region's RAMP content are
+    // the flat BANDS the gradient replaces (plus any hole ring whose replaced
+    // outer contains it — an orphan hole would paint solid under evenodd).
+    // Replaced loops fully inside the painted geometry (≥99.5%) are DISCARDED;
+    // the rest become UNDERLAY painted beneath the gradients, so imperfect
+    // geometry coverage can never leave a white hole — the original band shows
+    // through exactly where the gradient doesn't paint. Pre-pass, because holes
+    // can precede their outer in scan order.
+    let dropSet = null;
+    if (gradFitU) {
+      const dOut = [];
+      for (const poly of contours) {
+        if (Math.sign(polySigned(poly)) !== refSign) continue;
+        const frac = maskFrac(poly, w, h, gradFitU);
+        if (o._bandHook) o._bandHook({ fill: L.fill, area: Math.round(polyArea(poly)), frac: +frac.toFixed(3), at: [Math.round(poly[0][0]), Math.round(poly[0][1])] });
+        // ≥0.7 in ramp content → replaced outright. In the conditional band
+        // below, replace only when the fitted gradients EXPLAIN the loop's
+        // source px at least as well as its flat fill would — an overlap gate
+        // alone lets a band at frac ~0.65 paint over the gradient and re-band
+        // the ramp, while a glyph on a ramp (its px NOT ramp-explained) stays.
+        // Underlay-all keeps every replaced loop painted beneath the gradients.
+        if (frac >= 0.7 ||
+            (frac >= 0.45 && L.rgb && loopGradExplained(poly, w, h, px, gradPredIdx, gradRegions, L.rgb, L.field, iso))) dOut.push(poly);
+      }
+      if (dOut.length) {
+        dropSet = new Set(dOut);
+        if (gradInsertAt < 0) gradInsertAt = bodyParts.length;
+        for (const poly of contours) {
+          if (dropSet.has(poly)) continue;
+          if (Math.sign(polySigned(poly)) !== refSign &&
+              dOut.some(dp => pointInPoly(poly[0][0], poly[0][1], dp))) dropSet.add(poly);
+        }
+        // underlay: everything replaced, minus loops the geometry fully covers
+        let du = '';
+        for (const poly of dropSet) {
+          // NO skip: coverage by construction — every replaced loop paints beneath the
+          // gradients. A skipped "fully covered" loop was the source of unpaintable
+          // pinholes whenever any later mechanism notched the covering geometry.
+          const pd = fitOne(poly);
+          if (pd) du += pd + ' ';
+        }
+        if (du) gradUnder.push(`<path d="${du.trim()}" fill="${L.fill}" fill-rule="evenodd"/>`);
+      }
+    }
     for (const poly of contours) {
+      if (dropSet && dropSet.has(poly)) continue;        // v5: replaced by gradient fill
       const A = polyArea(poly);
       if (A < minLoop) continue;                         // discard sliver contours
       if (A < 300 && Math.sign(polySigned(poly)) === refSign &&
-          2 * A / polyPerim(poly) < 1.1) continue;       // FIX 11
-      if (vetoOn) smalls.push(poly);
+          2 * A / polyPerim(poly) < 1.1 && !inTex(poly)) continue;   // FIX 11 (v7: kept in detail zones)
+      if (vetoOn && !inTex(poly)) smalls.push(poly);     // v7: detail-zone contours bypass the sliver veto (real fine structure, not phantom slivers)
       else keep.push(poly);
     }
     if (smalls.length) sliverVetoPass(smalls, keep, extras, k, preps, compTop, srcFlat, bgRGB, w, h, o);
+    let part = '';
     let d = '';
     for (const poly of keep) { const pd = fitOne(poly); if (pd) d += pd + ' '; }
-    if (d) body += `<path d="${d.trim()}" fill="${L.fill}" fill-rule="evenodd"/>`;
+    if (d) part += `<path d="${d.trim()}" fill="${L.fill}" fill-rule="evenodd"/>`;
     for (const ex of extras) {
       let dd = '';
       for (const poly of ex.polys) { const pd = fitOne(poly); if (pd) dd += pd + ' '; }
-      if (dd) body += `<path d="${dd.trim()}" fill="${ex.fill}" fill-rule="evenodd"/>`;
+      if (dd) part += `<path d="${dd.trim()}" fill="${ex.fill}" fill-rule="evenodd"/>`;
     }
+    bodyParts.push(part);
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}">${body}</svg>`;
+
+  // v5: emit each fitted gradient region — geometry from its (alpha-weighted,
+  // blurred) mask through the same contour+fit machinery, fill = the gradient.
+  let defs = '';
+  const gradParts = [];
+  if (gradRegions) {
+    const rr = Math.max(0, Math.round(o.smoothPx));
+    gradRegions.forEach((R, gi) => {
+      const raw = new Float32Array(N);
+      for (let i = 0; i < N; i++) if (R.geom[i]) raw[i] = px[i * 4 + 3] / 255;
+      const fld = rr > 0 ? blurField(raw, w, h, rr) : raw;
+      const contours = isoContours(fld, w, h, 0.5);
+      let d = '';
+      for (const poly of contours) {
+        if (polyArea(poly) < Math.max(minLoop, 8)) continue;
+        const pd = fitOne(poly);
+        if (pd) d += pd + ' ';
+      }
+      if (!d) return;
+      const id = `grad${gi}`;
+      const sx = v => Math.round(v * 100) / 100;
+      const stopStr = (off, rgb) =>
+        `<stop offset="${Math.round(off * 1000) / 1000}" stop-color="${rgb2hex(Math.round(rgb[0]), Math.round(rgb[1]), Math.round(rgb[2]))}"/>`;
+      if (R.type === 'radial') {
+        // radius = tmax; a stop at profile position t sits at radius tmin+off·range,
+        // so its SVG offset is that radius / tmax (SVG radial offsets are radius/r)
+        defs += `<radialGradient id="${id}" gradientUnits="userSpaceOnUse" ` +
+          `cx="${sx(R.cx)}" cy="${sx(R.cy)}" r="${sx(R.tmax)}">`;
+        for (const s of R.stops)
+          defs += stopStr((R.tmin + s.off * (R.tmax - R.tmin)) / (R.tmax || 1e-9), s.rgb);
+        defs += `</radialGradient>`;
+      } else {
+        defs += `<linearGradient id="${id}" gradientUnits="userSpaceOnUse" ` +
+          `x1="${sx(R.ux * R.tmin)}" y1="${sx(R.uy * R.tmin)}" x2="${sx(R.ux * R.tmax)}" y2="${sx(R.uy * R.tmax)}">`;
+        for (const s of R.stops) defs += stopStr(s.off, s.rgb);
+        defs += `</linearGradient>`;
+      }
+      gradParts.push(`<path d="${d.trim()}" fill="url(#${id})" fill-rule="evenodd"/>`);
+      // alpha-faded radial overlay: same geometry, painted immediately on top
+      if (R.overlay) {
+        const ov = R.overlay, oid = `grad${gi}o`;
+        defs += `<radialGradient id="${oid}" gradientUnits="userSpaceOnUse" ` +
+          `cx="${sx(ov.cx)}" cy="${sx(ov.cy)}" r="${sx(ov.r)}">`;
+        for (const s of ov.stops)
+          defs += `<stop offset="${Math.round(s.off * 1000) / 1000}" stop-color="${rgb2hex(Math.round(s.rgb[0]), Math.round(s.rgb[1]), Math.round(s.rgb[2]))}" stop-opacity="${Math.round(s.a * 1000) / 1000}"/>`;
+        defs += `</radialGradient>`;
+        gradParts.push(`<path d="${d.trim()}" fill="url(#${oid})" fill-rule="evenodd"/>`);
+      }
+    });
+  }
+  let body;
+  if (gradParts.length) {
+    const at = gradInsertAt < 0 ? 0 : gradInsertAt;      // paint at the z of the first replaced band
+    body = bodyParts.slice(0, at).join('') + gradUnder.join('') + gradParts.join('') + bodyParts.slice(at).join('');
+  } else body = bodyParts.join('');                      // no accepted gradients → underlay never emitted
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}">${defs ? `<defs>${defs}</defs>` : ''}${body}</svg>`;
 }
 
+// === LAYERING ===
 /* ── layering per mode ───────────────────────────────────────────────── */
 // Each layer is a hard binary membership, then BLURRED into a smooth 0..1
 // coverage field. isoContours cuts the blurred field at 0.5 → sub-pixel-smooth
@@ -293,7 +662,61 @@ function buildLayers(px, lum, opaque, w, h, o, matte) {
       const st = flatStats(px, opaque, w, h, pal);
       pal = pal.map((c, p) => st.flatCnt[p] >= o.minFlat ? st.flatMean[p].map(Math.round) : c);
     }
+    if (o.palRescue && o.despeckle <= 4) {          // v6: rescue tones the pipeline deleted / never seeded
+      const RD2 = 40 * 40;
+      const mask = new Uint8Array(N);
+      let miss = 0, opq = 0;
+      for (let i = 0, j = 0; i < N; i++, j += 4) {
+        if (!opaque[i]) continue;
+        opq++;
+        let bd = 1e12;
+        for (let p = 0; p < pal.length; p++) {
+          const dr = px[j] - pal[p][0], dg = px[j + 1] - pal[p][1], db = px[j + 2] - pal[p][2];
+          const dd = dr * dr + dg * dg + db * db;
+          if (dd < bd) bd = dd;
+        }
+        if (bd > RD2) { mask[i] = 1; miss++; }
+      }
+      if (miss >= 0.008 * opq) {
+        const add = [];
+        const far = (c, k, t2) => {
+          const dr = c[0] - k[0], dg = c[1] - k[1], db = c[2] - k[2];
+          return dr * dr + dg * dg + db * db > t2;
+        };
+        for (const c of medianCut(px, mask, w, h, 3)) {
+          // far from every survivor (RD), and not a near-twin of an already-
+          // accepted rescue entry (medianCut on a narrow miss-mass can emit
+          // ~7-unit duplicates; genuinely distinct rescue tones stay)
+          if (!(pal.every(k => far(c, k, RD2)) && add.every(k => far(c, k, 20 * 20))))
+            continue;
+          // and not a BLEND of two survivors (on their RGB segment): that is
+          // exactly the fringe colour cull removed on purpose — re-admitting
+          // it as a rescue paints pale AA debris over real tones (nasa)
+          let onSeg = false;
+          for (let a = 0; a < pal.length && !onSeg; a++)
+            for (let b = a + 1; b < pal.length; b++)
+              if (ptSegDist3(c, pal[a], pal[b]) <= 45) { onSeg = true; break; }
+          if (!onSeg) add.push(c);
+        }
+        if (add.length) pal = pal.concat(add);
+      }
+    }
     if (o._palHook) o._palHook('cull', pal.map(c => c.slice()));
+    // v6: texture layers — entries carrying real mass but (near-)zero flat
+    // interiors are unresolvable fine structure (engraved hatching, photo
+    // texture). Unsharpening their membership re-shatters the hatch speckle
+    // into micro-contours the despeckle machinery drops, and the zone falls
+    // through to the light layer beneath — so for these layers keep the plain
+    // blur but SKIP the unsharp. Flat-logo layers have solid flat interiors
+    // and are untouched.
+    let texLayer = null;
+    if (o.fieldSharp > 0) {
+      const st = flatStats(px, opaque, w, h, pal);
+      let opq = 0;
+      for (let i = 0; i < N; i++) if (opaque[i]) opq++;
+      texLayer = pal.map((_, p) => st.area[p] >= 0.005 * opq &&
+        st.flatCnt[p] / Math.max(1, st.area[p]) < 0.02);
+    }
     const assign = new Int16Array(N), area = new Array(pal.length).fill(0);
     for (let i = 0, j = 0; i < N; i++, j += 4) {
       if (!opaque[i]) { assign[i] = -1; continue; }
@@ -354,6 +777,17 @@ function buildLayers(px, lum, opaque, w, h, o, matte) {
       }
     }
     const order = pal.map((_, i) => i).sort((a, b) => area[b] - area[a]);
+    // FIX 12 (coverage guarantee): the blend veto (FIX 4) is per-layer local, but
+    // the invariant it can break is global — on dense palettes (gradient art
+    // flat-traced at 12+ colours) the blend segments of OTHER ink pairs criss-
+    // cross RGB space so thickly that a flat region's true colour sits within
+    // veto range of some pair for EVERY layer; each layer zeroes it and nobody
+    // paints it (white hole). Smoothing is deferred so all raw fields coexist:
+    // track the best surviving claim and the best vetoed claim per px, and where
+    // no layer claims majority membership, restore the strongest vetoed claim.
+    const emitted = [];
+    const rescueOn = o.blendVeto && o.softField && (pal.length >= 2 || o.alphaField || matte);
+    let claimMax = null, vetoBest = null, vetoWho = null;
     for (const p of order) {
       if (area[p] === 0) continue;                              // truly empty (all-transparent entry)
       if (p !== order[0] && area[p] < o.despeckle) continue;    // never drop the dominant colour → never a blank SVG
@@ -364,8 +798,32 @@ function buildLayers(px, lum, opaque, w, h, o, matte) {
         raw = new Float32Array(N);
         for (let i = 0; i < N; i++) if (assign[i] === p) raw[i] = 1;
       }
-      const L = { field: smooth(raw), fill: rgb2hex(...pal[p]), rgb: pal[p].slice() };
-      if (raw.rawUn) L.fieldUn = smooth(raw.rawUn);
+      if (rescueOn) {
+        if (!claimMax) claimMax = new Float32Array(N);
+        for (let i = 0; i < N; i++) if (raw[i] > claimMax[i]) claimMax[i] = raw[i];
+        if (raw.vetoed) {
+          if (!vetoBest) { vetoBest = new Float32Array(N); vetoWho = new Int16Array(N).fill(-1); }
+          const vB = raw.vetoed, k = emitted.length;
+          for (let i = 0; i < N; i++) if (vB[i] > vetoBest[i]) { vetoBest[i] = vB[i]; vetoWho[i] = k; }
+        }
+      }
+      emitted.push({ p, raw });
+    }
+    if (vetoBest) {
+      let rescued = 0;
+      for (let i = 0; i < N; i++) {
+        if (vetoWho[i] < 0 || claimMax[i] >= 0.5) continue;     // unvetoed, or someone claims it
+        if (vetoBest[i] <= claimMax[i]) continue;
+        emitted[vetoWho[i]].raw[i] = vetoBest[i];
+        rescued++;
+      }
+      if (o._rescueHook) o._rescueHook(rescued);
+    }
+    for (const { p, raw } of emitted) {
+      const tex = texLayer && texLayer[p];
+      const soft = f => tex ? (r > 0 ? blurField(f, w, h, r) : f) : smooth(f);  // v6: no unsharp on texture layers
+      const L = { field: soft(raw), fill: rgb2hex(...pal[p]), rgb: pal[p].slice(), tex };
+      if (raw.rawUn) L.fieldUn = soft(raw.rawUn);
       if (collinNear && collinNear.isCollin[p]) L.selfNear = collinNear[p];
       layers.push(L);
     }
@@ -540,6 +998,828 @@ function sliverVetoPass(smalls, keep, extras, k, preps, compTop, srcFlat, bg, w,
   }
 }
 
+// === GRADIENTS ===
+/* ═════════════════════ v5: gradient-aware vectorization ═════════════════════
+   A flat quantizing tracer can only BAND a smooth colour ramp. This stage
+   detects ramp regions on the source and emits each as ONE path filled with a
+   native SVG <linearGradient> (multi-stop, sampled from the source profile) —
+   visually exact at any zoom and far smaller than the bands it replaces.
+
+   Pipeline (colour mode only, all gates conservative so flat art is untouched):
+     1. RAMP MAP — per-pixel colour slope (RGB-Euclid central differences) and
+        structure-tensor coherence. A ramp px has slope in [gradSlopeMin,
+        gradSlopeMax] (excludes flat AND hard edges) and coherence ≥ gradCohMin
+        (a true ramp has one dominant direction; sensor/JPEG noise is isotropic
+        and fails the test). Morphological close bridges banding plateaus.
+     2. REGIONS — connected components ≥ gradMinArea. Enclosed opaque holes are
+        classified: holes whose colour FITS the ramp profile (saturated-clip
+        plateaus at the ramp's extreme) are ABSORBED into the fit; foreign
+        holes (a glyph on the disc) join the geometry only, so the gradient
+        paints underneath and the glyph's own flat layer covers it — no seams.
+     3. FIT — per-channel linear least squares c(x,y) ≈ a + bx + cy; the
+        gradient axis u is the dominant eigenvector of GᵀG (G = the 3×2 slope
+        matrix); the colour profile along t = u·p is binned, giving multi-stop
+        colours; stops are RDP-simplified. Accept iff mean residual ≤
+        gradResidMax AND total colour travel ≥ gradSpanMin.
+     4. EMIT — region geometry from its (blurred) mask via the standard
+        marching-squares + fit machinery; fill = url(#gradN), userSpaceOnUse
+        coordinates along u. Flat-band loops covered ≥70% by a fitted region
+        are dropped (the gradient replaces them); everything else unchanged. */
+function detectGradientRegions(px, opaque, w, h, o) {
+  const N = w * h;
+  // 1) per-channel central differences → structure tensor (summed over channels)
+  const Jxx = new Float32Array(N), Jyy = new Float32Array(N), Jxy = new Float32Array(N);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      if (!opaque[i] || !opaque[i - 1] || !opaque[i + 1] || !opaque[i - w] || !opaque[i + w]) continue;
+      const j = i * 4;
+      let xx = 0, yy = 0, xy = 0;
+      for (let c = 0; c < 3; c++) {
+        const gx = (px[j + 4 + c] - px[j - 4 + c]) / 2;
+        const gy = (px[j + w * 4 + c] - px[j - w * 4 + c]) / 2;
+        xx += gx * gx; yy += gy * gy; xy += gx * gy;
+      }
+      Jxx[i] = xx; Jyy[i] = yy; Jxy[i] = xy;
+    }
+  }
+  const Bxx = blurField(Jxx, w, h, 2), Byy = blurField(Jyy, w, h, 2), Bxy = blurField(Jxy, w, h, 2);
+  const ramp = new Uint8Array(N);
+  const sMin2 = o.gradSlopeMin * o.gradSlopeMin, sMax2 = o.gradSlopeMax * o.gradSlopeMax;
+  for (let i = 0; i < N; i++) {
+    if (!opaque[i]) continue;
+    const tr = Bxx[i] + Byy[i];
+    if (tr < sMin2 || tr > sMax2) continue;
+    const d = Bxx[i] - Byy[i];
+    const coh = Math.sqrt(d * d + 4 * Bxy[i] * Bxy[i]) / (tr + 1e-9);
+    if (coh >= o.gradCohMin) ramp[i] = 1;
+  }
+  // morphological close (dilate 2, erode 2) — bridges thin plateau gaps
+  const morph = (src, grow) => {
+    let cur = src;
+    for (let pass = 0; pass < 2; pass++) {
+      const nx = new Uint8Array(N);
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        let hit = cur[i];
+        for (let dy = -1; dy <= 1 && hit === (grow ? 0 : 1); dy++) for (let dx = -1; dx <= 1; dx++) {
+          const xx = x + dx, yy = y + dy;
+          if (xx < 0 || yy < 0 || xx >= w || yy >= h) { if (!grow) { hit = 0; break; } continue; }
+          if (grow ? cur[yy * w + xx] : !cur[yy * w + xx]) { hit = grow ? 1 : 0; break; }
+        }
+        nx[i] = hit;
+      }
+      cur = nx;
+    }
+    return cur;
+  };
+  let closed = morph(ramp, true);          // dilate ×2
+  closed = morph(closed, false);           // erode ×2
+  // 2) connected components (8-neighbour flood fill)
+  const comp = new Int32Array(N).fill(-1);
+  const compArea = [];
+  const stack = new Int32Array(N);
+  for (let seed = 0; seed < N; seed++) {
+    if (!closed[seed] || comp[seed] >= 0) continue;
+    const id = compArea.length;
+    let top = 0, area = 0;
+    stack[top++] = seed; comp[seed] = id;
+    while (top > 0) {
+      const i = stack[--top]; area++;
+      const x = i % w, y = (i / w) | 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const xx = x + dx, yy = y + dy;
+        if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+        const k = yy * w + xx;
+        if (closed[k] && comp[k] < 0) { comp[k] = id; stack[top++] = k; }
+      }
+    }
+    compArea.push(area);
+  }
+  // 3) fit components, then MERGE compatible fragments (one physical ramp split
+  // by glyph rings / clip plateaus refits as one region: one gradient, no seams)
+  const buildRegion = (core) => {
+    let x0 = w, y0 = h, x1 = 0, y1 = 0, coreN = 0;
+    for (let i = 0; i < N; i++) if (core[i]) {
+      coreN++;
+      const x = i % w, y = (i / w) | 0;
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+    if (!coreN) return null;
+    // enclosed holes: complement CCs inside the bbox not reaching the bbox border
+    const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+    const hole = new Int32Array(bw * bh).fill(-2);      // -2 unvisited, -1 border-connected, ≥0 hole id
+    const holes = [];                                    // arrays of image indices
+    const hstack = new Int32Array(bw * bh);
+    for (let by = 0; by < bh; by++) for (let bx = 0; bx < bw; bx++) {
+      const bi = by * bw + bx;
+      if (hole[bi] !== -2 || core[(y0 + by) * w + (x0 + bx)]) continue;
+      // flood this complement component (4-neighbour), noting border contact
+      let top = 0, touches = false;
+      const members = [];
+      hstack[top++] = bi; hole[bi] = -3;                 // -3 = in-progress
+      while (top > 0) {
+        const b = hstack[--top];
+        members.push(b);
+        const bx2 = b % bw, by2 = (b / bw) | 0;
+        if (bx2 === 0 || by2 === 0 || bx2 === bw - 1 || by2 === bh - 1) touches = true;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = bx2 + dx, ny = by2 + dy;
+          if (nx < 0 || ny < 0 || nx >= bw || ny >= bh) continue;
+          const nb = ny * bw + nx;
+          if (hole[nb] !== -2 || core[(y0 + ny) * w + (x0 + nx)]) continue;
+          hole[nb] = -3; hstack[top++] = nb;
+        }
+      }
+      const hid = touches ? -1 : holes.length;
+      for (const b of members) hole[b] = hid;
+      if (!touches) holes.push(members.map(b => (y0 + (b / bw | 0)) * w + (x0 + b % bw)));
+    }
+    // linear LSQ over the core
+    const fitLin = (mask) => {
+      let n = 0, Sx = 0, Sy = 0, Sxx = 0, Sxy = 0, Syy = 0;
+      const Sc = [0, 0, 0], Scx = [0, 0, 0], Scy = [0, 0, 0];
+      for (let i = 0; i < N; i++) {
+        if (!mask[i]) continue;
+        const x = i % w, y = (i / w) | 0, j = i * 4;
+        n++; Sx += x; Sy += y; Sxx += x * x; Sxy += x * y; Syy += y * y;
+        for (let c = 0; c < 3; c++) { Sc[c] += px[j + c]; Scx[c] += px[j + c] * x; Scy[c] += px[j + c] * y; }
+      }
+      if (n < 16) return null;
+      // solve [n Sx Sy; Sx Sxx Sxy; Sy Sxy Syy] · [a b c]ᵀ = [Sc Scx Scy]ᵀ per channel
+      const A = [[n, Sx, Sy], [Sx, Sxx, Sxy], [Sy, Sxy, Syy]];
+      const det3 = (M) =>
+        M[0][0] * (M[1][1] * M[2][2] - M[1][2] * M[2][1]) -
+        M[0][1] * (M[1][0] * M[2][2] - M[1][2] * M[2][0]) +
+        M[0][2] * (M[1][0] * M[2][1] - M[1][1] * M[2][0]);
+      const D = det3(A);
+      if (Math.abs(D) < 1e-6) return null;
+      const coef = [];
+      for (let c = 0; c < 3; c++) {
+        const B = [Sc[c], Scx[c], Scy[c]], col = [];
+        for (let k = 0; k < 3; k++) {
+          const M = A.map(r => r.slice());
+          M[0][k] = B[0]; M[1][k] = B[1]; M[2][k] = B[2];
+          col.push(det3(M) / D);
+        }
+        coef.push(col);                                  // [a, b, c] for this channel
+      }
+      // gradient axis: dominant eigenvector of GᵀG, G = [[bR,cR],[bG,cG],[bB,cB]]
+      let mxx = 0, mxy = 0, myy = 0;
+      for (let c = 0; c < 3; c++) { mxx += coef[c][1] * coef[c][1]; mxy += coef[c][1] * coef[c][2]; myy += coef[c][2] * coef[c][2]; }
+      const lam = (mxx + myy) / 2 + Math.sqrt(((mxx - myy) / 2) ** 2 + mxy * mxy);
+      let ux = mxy, uy = lam - mxx;
+      if (Math.abs(ux) < 1e-12 && Math.abs(uy) < 1e-12) { ux = mxx >= myy ? 1 : 0; uy = mxx >= myy ? 0 : 1; }
+      const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
+      return { ux, uy, n };
+    };
+    const profile = (mask, tOf) => {                     // binned colour profile along t(x,y)
+      let tmin = Infinity, tmax = -Infinity;
+      for (let i = 0; i < N; i++) {
+        if (!mask[i]) continue;
+        const t = tOf(i % w, (i / w) | 0);
+        if (t < tmin) tmin = t; if (t > tmax) tmax = t;
+      }
+      if (!(tmax - tmin > 1e-6)) return null;
+      const NB = 48, bins = Array.from({ length: NB }, () => [0, 0, 0, 0]);
+      const bof = t => Math.min(NB - 1, Math.max(0, Math.floor((t - tmin) / (tmax - tmin) * NB)));
+      for (let i = 0; i < N; i++) {
+        if (!mask[i]) continue;
+        const j = i * 4, b = bins[bof(tOf(i % w, (i / w) | 0))];
+        b[0] += px[j]; b[1] += px[j + 1]; b[2] += px[j + 2]; b[3]++;
+      }
+      const prof = [];                                   // [tNorm, r, g, b] per non-empty bin
+      for (let b = 0; b < NB; b++) if (bins[b][3] > 0)
+        prof.push([(b + 0.5) / NB, bins[b][0] / bins[b][3], bins[b][1] / bins[b][3], bins[b][2] / bins[b][3]]);
+      if (prof.length < 2) return null;
+      const evalAt = (tn) => {                           // piecewise-linear profile colour at tNorm
+        if (tn <= prof[0][0]) return prof[0];
+        if (tn >= prof[prof.length - 1][0]) return prof[prof.length - 1];
+        let lo = 0, hi = prof.length - 1;
+        while (hi - lo > 1) { const m = (lo + hi) >> 1; if (prof[m][0] <= tn) lo = m; else hi = m; }
+        const a = prof[lo], b = prof[hi], f = (tn - a[0]) / (b[0] - a[0] || 1e-9);
+        return [tn, a[1] + f * (b[1] - a[1]), a[2] + f * (b[2] - a[2]), a[3] + f * (b[3] - a[3])];
+      };
+      const residOf = (mask2) => {
+        let s = 0, n = 0;
+        for (let i = 0; i < N; i++) {
+          if (!mask2[i]) continue;
+          const j = i * 4;
+          const tn = (tOf(i % w, (i / w) | 0) - tmin) / (tmax - tmin);
+          const p = evalAt(tn);
+          s += (Math.abs(px[j] - p[1]) + Math.abs(px[j + 1] - p[2]) + Math.abs(px[j + 2] - p[3])) / 3;
+          n++;
+        }
+        return n ? s / n : Infinity;
+      };
+      return { tmin, tmax, prof, evalAt, residOf, tOf };
+    };
+    // radial centre search: coarse grid over the bbox expanded 1× each side,
+    // then pattern-search refine — on subsampled region px for speed.
+    const fitRadialCentre = (mask) => {
+      const idx = [];
+      const stride = Math.max(1, Math.floor(coreN / 30000));
+      let c = 0;
+      for (let i = 0; i < N; i++) { if (!mask[i]) continue; if (c++ % stride === 0) idx.push(i); }
+      if (idx.length < 32) return null;
+      const NB = 24;
+      const evalC = (cx, cy) => {
+        let rmin = Infinity, rmax = -Infinity;
+        for (const i of idx) {
+          const r = Math.hypot((i % w) - cx, ((i / w) | 0) - cy);
+          if (r < rmin) rmin = r; if (r > rmax) rmax = r;
+        }
+        if (!(rmax - rmin > 1e-6)) return Infinity;
+        const bins = Array.from({ length: NB }, () => [0, 0, 0, 0]);
+        for (const i of idx) {
+          const r = Math.hypot((i % w) - cx, ((i / w) | 0) - cy);
+          const b = bins[Math.min(NB - 1, Math.floor((r - rmin) / (rmax - rmin) * NB))];
+          const j = i * 4;
+          b[0] += px[j]; b[1] += px[j + 1]; b[2] += px[j + 2]; b[3]++;
+        }
+        let s = 0, n = 0;
+        for (const i of idx) {
+          const r = Math.hypot((i % w) - cx, ((i / w) | 0) - cy);
+          const b = bins[Math.min(NB - 1, Math.floor((r - rmin) / (rmax - rmin) * NB))];
+          if (!b[3]) continue;
+          const j = i * 4;
+          s += (Math.abs(px[j] - b[0] / b[3]) + Math.abs(px[j + 1] - b[1] / b[3]) + Math.abs(px[j + 2] - b[2] / b[3])) / 3;
+          n++;
+        }
+        return n ? s / n : Infinity;
+      };
+      const bwX = x1 - x0 + 1, bwY = y1 - y0 + 1;
+      let best = null, bestR = Infinity;
+      for (let gy = 0; gy < 7; gy++) for (let gx = 0; gx < 7; gx++) {
+        const cx = x0 - bwX + (gx / 6) * 3 * bwX;
+        const cy = y0 - bwY + (gy / 6) * 3 * bwY;
+        const r = evalC(cx, cy);
+        if (r < bestR) { bestR = r; best = [cx, cy]; }
+      }
+      if (!best) return null;
+      let step = Math.max(bwX, bwY) / 4;
+      while (step > 1.5) {
+        let moved = false;
+        for (const [dx, dy] of [[step, 0], [-step, 0], [0, step], [0, -step]]) {
+          const r = evalC(best[0] + dx, best[1] + dy);
+          if (r < bestR) { bestR = r; best = [best[0] + dx, best[1] + dy]; moved = true; }
+        }
+        if (!moved) step /= 2;
+      }
+      return { cx: best[0], cy: best[1] };
+    };
+    // ── model selection: linear vs radial by core residual (hysteresis toward
+    // the simpler linear model — radial must win by ≥15%) ──
+    const lin = fitLin(core);
+    if (!lin) return null;
+    const tLin = (x, y) => lin.ux * x + lin.uy * y;
+    let P = profile(core, tLin);
+    if (!P) return null;
+    const residLin = P.residOf(core);
+    let type = 'linear', rad = null;
+    {
+      const rc = fitRadialCentre(core);
+      if (rc) {
+        const tRad = (x, y) => Math.hypot(x - rc.cx, y - rc.cy);
+        const PR = profile(core, tRad);
+        // radial wins only when clearly better AND decisively good in absolute
+        // terms: a marginal radial (resid ~4-5) fits its px slightly better
+        // than linear yet paints its full geometry worse (measured on
+        // instagram's fragments) — prefer the simpler model unless the radial
+        // fit is near-exact.
+        const rr = PR ? PR.residOf(core) : Infinity;
+        if (PR && rr < 0.85 * residLin && rr <= 3.0) { type = 'radial'; rad = rc; P = PR; }
+      }
+    }
+    // absorb holes that FIT the profile (clip plateaus); others are geometry-only.
+    // The absorb bar is anchored to the CORE fit's own quality — a loose bar
+    // (measured) lets a fragment swallow a foreign colour strip that then
+    // renders as extrapolated ramp, which is exactly the artefact we're here
+    // to eliminate.
+    const coreResid = P.residOf(core);
+    const absorbBar = Math.max(3.5, 1.3 * coreResid);
+    const fitMask = new Uint8Array(core);
+    const geomOnly = [];
+    for (const hpx of holes) {
+      let opq = 0;
+      for (const i of hpx) if (opaque[i]) opq++;
+      if (opq < 0.6 * hpx.length) continue;              // transparent hole — stays a hole
+      let s = 0, n = 0;
+      for (const i of hpx) {
+        if (!opaque[i]) continue;
+        const j = i * 4;
+        const tn = (P.tOf(i % w, (i / w) | 0) - P.tmin) / (P.tmax - P.tmin);
+        const p = P.evalAt(Math.max(0, Math.min(1, tn)));
+        s += (Math.abs(px[j] - p[1]) + Math.abs(px[j + 1] - p[2]) + Math.abs(px[j + 2] - p[3])) / 3;
+        n++;
+      }
+      if (n && s / n <= absorbBar) { for (const i of hpx) if (opaque[i]) fitMask[i] = 1; }
+      else geomOnly.push(hpx);
+    }
+    // refit + regate on the absorbed mask (radial: re-refine from the found centre)
+    let lin2 = lin;
+    if (type === 'linear') {
+      lin2 = fitLin(fitMask) || lin;
+      P = profile(fitMask, (x, y) => lin2.ux * x + lin2.uy * y) || P;
+    } else {
+      P = profile(fitMask, (x, y) => Math.hypot(x - rad.cx, y - rad.cy)) || P;
+    }
+    let resid = P.residOf(fitMask);
+    let span = 0;
+    for (let k = 1; k < P.prof.length; k++)
+      span += Math.hypot(P.prof[k][1] - P.prof[k - 1][1], P.prof[k][2] - P.prof[k - 1][2], P.prof[k][3] - P.prof[k - 1][3]);
+    if (resid > o.gradResidMax || span < o.gradSpanMin) return null;
+    // stops: RDP-simplify the profile in (t, rgb) space (eps 1.5 ≈ visually
+    // exact; stops are ~35 bytes each, far cheaper than the fidelity they buy)
+    let stops = rdpStops(P.prof, 1.0, o.gradMaxStops);
+    // relative gate: flat bands at the same colour budget would land every px on
+    // its nearest stop colour — the gradient must beat that decisively, else the
+    // fit is wrong for this region (radial/conic ramp, or a noise region whose
+    // "bands" are all one colour anyway).
+    let bandResid = 0;
+    {
+      let s = 0, n = 0;
+      for (let i = 0; i < N; i++) {
+        if (!fitMask[i]) continue;
+        const j = i * 4;
+        let best = Infinity;
+        for (const st of stops) {
+          const d = (Math.abs(px[j] - st.rgb[0]) + Math.abs(px[j + 1] - st.rgb[1]) + Math.abs(px[j + 2] - st.rgb[2])) / 3;
+          if (d < best) best = d;
+        }
+        s += best; n++;
+      }
+      bandResid = n ? s / n : 0;
+      if (o._gradHook) o._gradHook({ type, area: coreN, resid: +resid.toFixed(2), bandResid: +bandResid.toFixed(2), span: Math.round(span), stops: stops.length });
+      // verdict deferred: a gate-failing region may still be RESCUED by the
+      // alpha overlay below (2-D fields — the flame body — fail a 1-D gate by
+      // construction yet stack to well under it). Hard resid ceiling still holds.
+      if (resid > o.gradGain * bandResid && !(o.gradOverlay && resid <= o.gradResidMax)) return null;
+    }
+    // ── fit-driven region GROWING ─────────────────────────────────────────
+    // The ramp map only admits px whose local slope is detectable; a very
+    // gentle ramp (trello: span ~51 over 1200px, ~0.05/px) leaves most of its
+    // surface "flat" and therefore banded next to a perfectly fitted region.
+    // The accepted fit knows better: BFS-grow the mask into adjacent opaque px
+    // whose colour matches the profile's prediction, REFIT on the grown mask,
+    // repeat, then re-check the fit — revert wholesale if growth degraded it.
+    if (o.gradGrow) {
+      const pre = { fitMask: fitMask.slice(), P, lin2, resid, stops, rad };
+      let grewTotal = 0;
+      for (let round = 0; round < 3; round++) {
+        const bar = Math.max(4, 1.5 * resid);
+        const qd = [];
+        for (let i = 0; i < N; i++) {
+          if (!fitMask[i]) continue;
+          const x = i % w, y = (i / w) | 0;
+          if (x > 0 && !fitMask[i - 1]) qd.push(i - 1);
+          if (x < w - 1 && !fitMask[i + 1]) qd.push(i + 1);
+          if (y > 0 && !fitMask[i - w]) qd.push(i - w);
+          if (y < h - 1 && !fitMask[i + w]) qd.push(i + w);
+        }
+        const tried = new Uint8Array(N);
+        let grew = 0;
+        while (qd.length) {
+          const i = qd.pop();
+          if (tried[i] || fitMask[i] || !opaque[i]) continue;
+          tried[i] = 1;
+          const j = i * 4;
+          const tn = (P.tOf(i % w, (i / w) | 0) - P.tmin) / (P.tmax - P.tmin);
+          const p = P.evalAt(Math.max(0, Math.min(1, tn)));
+          const d = (Math.abs(px[j] - p[1]) + Math.abs(px[j + 1] - p[2]) + Math.abs(px[j + 2] - p[3])) / 3;
+          if (d > bar) continue;
+          fitMask[i] = 1; grew++;
+          const x = i % w, y = (i / w) | 0;
+          if (x > 0) qd.push(i - 1);
+          if (x < w - 1) qd.push(i + 1);
+          if (y > 0) qd.push(i - w);
+          if (y < h - 1) qd.push(i + w);
+        }
+        if (!grew) break;
+        grewTotal += grew;
+        // refit on the grown mask (linear: new axis; radial: centre kept)
+        if (type === 'linear') {
+          const l3 = fitLin(fitMask);
+          if (l3) {
+            const P3 = profile(fitMask, (x, y) => l3.ux * x + l3.uy * y);
+            if (P3) { lin2 = l3; P = P3; }
+          }
+        } else {
+          const P3 = profile(fitMask, P.tOf);
+          if (P3) P = P3;
+        }
+        resid = P.residOf(fitMask);
+      }
+      if (grewTotal > 0) {
+        // radial centre was fitted on the PRE-growth fragment; the grown mask
+        // can be much larger — re-search and keep whichever centre fits better
+        if (type === 'radial') {
+          const rc2 = fitRadialCentre(fitMask);
+          if (rc2) {
+            const P4 = profile(fitMask, (x, y) => Math.hypot(x - rc2.cx, y - rc2.cy));
+            if (P4) {
+              const r4 = P4.residOf(fitMask);
+              if (r4 < resid) { rad = rc2; P = P4; resid = r4; }
+            }
+          }
+        }
+        // re-gate the grown region end-to-end; revert if growth hurt the fit
+        stops = rdpStops(P.prof, 1.0, o.gradMaxStops);
+        let s = 0, n = 0;
+        for (let i = 0; i < N; i++) {
+          if (!fitMask[i]) continue;
+          const j = i * 4;
+          let best = Infinity;
+          for (const st of stops) {
+            const d = (Math.abs(px[j] - st.rgb[0]) + Math.abs(px[j + 1] - st.rgb[1]) + Math.abs(px[j + 2] - st.rgb[2])) / 3;
+            if (d < best) best = d;
+          }
+          s += best; n++;
+        }
+        const bandResid2 = n ? s / n : 0;
+        // keep growth when the grown fit passes the gate OR (rescue path) at
+        // least didn't degrade the fit — the overlay still gets its chance
+        if (resid > o.gradResidMax || (resid > o.gradGain * bandResid2 && resid > pre.resid + 0.1)) {
+          fitMask.set(pre.fitMask); P = pre.P; lin2 = pre.lin2; resid = pre.resid; stops = pre.stops; rad = pre.rad;
+        } else {
+          bandResid = bandResid2;
+          if (o._gradHook) o._gradHook({ grown: grewTotal, resid: +resid.toFixed(2) });
+        }
+      }
+    }
+    // ── px-level outlier veto ─────────────────────────────────────────────
+    // Orientation clustering can smuggle a small FOREIGN patch into a big
+    // region through a corridor (measured: a purple globe patch inside a pale
+    // flame region — painted near-white). A few hundred foreign px can't move
+    // a big region's mean residual, so gates never see them. Strip every px
+    // the accepted model can't explain; micro-holes vanish under the geometry
+    // blur, real patches become notches exposing the correct layers beneath.
+    {
+      const clean = Math.max(24, 4 * resid);
+      let kept = 0, total = 0;
+      const strip = [];
+      for (let i = 0; i < N; i++) {
+        if (!fitMask[i]) continue;
+        total++;
+        const j = i * 4;
+        const tn = (P.tOf(i % w, (i / w) | 0) - P.tmin) / (P.tmax - P.tmin);
+        const p = P.evalAt(Math.max(0, Math.min(1, tn)));
+        if ((Math.abs(px[j] - p[1]) + Math.abs(px[j + 1] - p[2]) + Math.abs(px[j + 2] - p[3])) / 3 > clean) strip.push(i);
+        else kept++;
+      }
+      if (strip.length && kept >= 0.6 * total) {
+        for (const i of strip) fitMask[i] = 0;
+        resid = P.residOf(fitMask);
+        if (o._gradHook) o._gradHook({ stripped: strip.length, resid: +resid.toFixed(2) });
+      }
+    }
+    // ── alpha-faded radial OVERLAY on the residual field ─────────────────
+    // A 2-D designer field (base linear + radial bloom) can't be expressed by
+    // one 1-D gradient. Where the accepted base leaves structured residual,
+    // fit: c ≈ (1−a(r))·base + a(r)·C(r), radial about the residual's peak.
+    // Per radius-bin the optimal (1−a) is Σ(dc·dA)/Σ(dA²) on centred samples —
+    // closed form, no search. Kept only if it decisively cuts the residual.
+    let overlay = null;
+    if (o.gradOverlay && resid >= 1.5) {
+      const base = new Float32Array(3 * N);              // per-px base colour (only mask px used)
+      const rmag = new Float32Array(N);
+      for (let i = 0; i < N; i++) {
+        if (!fitMask[i]) continue;
+        const tn = (P.tOf(i % w, (i / w) | 0) - P.tmin) / (P.tmax - P.tmin);
+        const p = P.evalAt(Math.max(0, Math.min(1, tn)));
+        const j = i * 4;
+        base[i * 3] = p[1]; base[i * 3 + 1] = p[2]; base[i * 3 + 2] = p[3];
+        rmag[i] = (Math.abs(px[j] - p[1]) + Math.abs(px[j + 1] - p[2]) + Math.abs(px[j + 2] - p[3])) / 3;
+      }
+      const rblur = blurField(rmag, w, h, 4);
+      let pk = -1, pkv = -1;
+      for (let i = 0; i < N; i++) if (fitMask[i] && rblur[i] > pkv) { pkv = rblur[i]; pk = i; }
+      if (pk >= 0 && pkv >= 1.0) {
+        const ocx = pk % w, ocy = (pk / w) | 0;
+        let rMax = 0;
+        for (let i = 0; i < N; i++) {
+          if (!fitMask[i]) continue;
+          const r = Math.hypot((i % w) - ocx, ((i / w) | 0) - ocy);
+          if (r > rMax) rMax = r;
+        }
+        const NB = 32;
+        const S = Array.from({ length: NB }, () => ({ n: 0, c: [0, 0, 0], A: [0, 0, 0], cc: 0, cA: 0, AA: 0 }));
+        const bof = i => Math.min(NB - 1, Math.floor(Math.hypot((i % w) - ocx, ((i / w) | 0) - ocy) / (rMax || 1) * NB));
+        for (let i = 0; i < N; i++) {                    // pass 1: means
+          if (!fitMask[i]) continue;
+          const b = S[bof(i)], j = i * 4;
+          b.n++;
+          for (let c = 0; c < 3; c++) { b.c[c] += px[j + c]; b.A[c] += base[i * 3 + c]; }
+        }
+        for (const b of S) if (b.n) for (let c = 0; c < 3; c++) { b.c[c] /= b.n; b.A[c] /= b.n; }
+        for (let i = 0; i < N; i++) {                    // pass 2: centred cross-moments
+          if (!fitMask[i]) continue;
+          const b = S[bof(i)], j = i * 4;
+          for (let c = 0; c < 3; c++) {
+            const dc = px[j + c] - b.c[c], dA = base[i * 3 + c] - b.A[c];
+            b.cc += dc * dc; b.cA += dc * dA; b.AA += dA * dA;
+          }
+        }
+        const st2 = [];
+        for (let bi = 0; bi < NB; bi++) {
+          const b = S[bi];
+          if (!b.n) { st2.push(null); continue; }
+          let oneMa = b.AA > 1e-9 ? b.cA / b.AA : 1;     // optimal (1−a)
+          oneMa = Math.max(0, Math.min(1, oneMa));
+          const a = 1 - oneMa;
+          let C;
+          if (a < 0.03) C = b.c.slice();
+          else C = [0, 1, 2].map(c => clamp((b.c[c] - oneMa * b.A[c]) / a, 0, 255));
+          st2.push({ off: (bi + 0.5) / NB, rgb: C, a });
+        }
+        // fill gaps, decimate to ≤ gradMaxStops uniformly
+        const filled = st2.filter(Boolean);
+        if (filled.length >= 3) {
+          const step = Math.max(1, Math.ceil(filled.length / o.gradMaxStops));
+          const stops2 = filled.filter((_, k) => k % step === 0 || k === filled.length - 1);
+          // measure the stacked residual
+          const evalO = (off) => {
+            if (off <= stops2[0].off) return stops2[0];
+            if (off >= stops2[stops2.length - 1].off) return stops2[stops2.length - 1];
+            let lo = 0, hi = stops2.length - 1;
+            while (hi - lo > 1) { const m = (lo + hi) >> 1; if (stops2[m].off <= off) lo = m; else hi = m; }
+            const A2 = stops2[lo], B2 = stops2[hi], f = (off - A2.off) / (B2.off - A2.off || 1e-9);
+            return { rgb: [0, 1, 2].map(c => A2.rgb[c] + f * (B2.rgb[c] - A2.rgb[c])), a: A2.a + f * (B2.a - A2.a) };
+          };
+          // PER-BIN VETO: a radius ring crosses the whole region — where its
+          // population is mixed (part flame, part globe) the solved (C, a) is
+          // a ring-mean that paints garbage over the minority content
+          // (measured: pale dot on firefox's purple globe). Zero the alpha of
+          // every bin the overlay makes WORSE than the base, then re-measure.
+          {
+            const eb = new Float64Array(NB), ea = new Float64Array(NB), en = new Float64Array(NB);
+            for (let i = 0; i < N; i++) {
+              if (!fitMask[i]) continue;
+              const j = i * 4;
+              const off = Math.hypot((i % w) - ocx, ((i / w) | 0) - ocy) / (rMax || 1);
+              const bi = Math.min(NB - 1, Math.floor(off * NB));
+              const ov = evalO(off);
+              let e0 = 0, e1 = 0;
+              for (let c = 0; c < 3; c++) {
+                e0 += Math.abs(px[j + c] - base[i * 3 + c]);
+                e1 += Math.abs(px[j + c] - ((1 - ov.a) * base[i * 3 + c] + ov.a * ov.rgb[c]));
+              }
+              eb[bi] += e0; ea[bi] += e1; en[bi]++;
+            }
+            for (let bi = 0; bi < NB; bi++)
+              if (en[bi] && ea[bi] >= eb[bi]) { const s = stops2.find(st => Math.abs(st.off - (bi + 0.5) / NB) < 0.5 / NB); if (s) s.a = 0; }
+          }
+          let s2 = 0, n2 = 0;
+          for (let i = 0; i < N; i++) {
+            if (!fitMask[i]) continue;
+            const j = i * 4;
+            const ov = evalO(Math.hypot((i % w) - ocx, ((i / w) | 0) - ocy) / (rMax || 1));
+            let e = 0;
+            for (let c = 0; c < 3; c++)
+              e += Math.abs(px[j + c] - ((1 - ov.a) * base[i * 3 + c] + ov.a * ov.rgb[c]));
+            s2 += e / 3; n2++;
+          }
+          const resid2 = n2 ? s2 / n2 : Infinity;
+          if (resid2 <= 0.85 * resid && resid2 + 0.15 < resid) {
+            overlay = { cx: ocx, cy: ocy, r: rMax, stops: stops2, resid2: +resid2.toFixed(2) };
+            if (o._gradHook) o._gradHook({ overlay: true, resid: +resid.toFixed(2), resid2: overlay.resid2 });
+          }
+        }
+      }
+    }
+    // final verdict: a gate-failing region survives ONLY when the stacked
+    // base+overlay result passes the relative gate the base alone failed
+    const finalResid = overlay ? overlay.resid2 : resid;
+    if (finalResid > o.gradGain * bandResid) return null;
+    // geometry mask = fitMask only. Foreign enclosed content (a glyph, another
+    // ink's territory) stays a HOLE: painting the ramp under it assumed the
+    // foreign layer paints later, which fails when its layer sits earlier in
+    // the z-order (measured: a flame region's filled hole painting pale over
+    // firefox's purple globe). Seam coverage under the hole's AA ring is the
+    // underlay's job now.
+    const geom = new Uint8Array(fitMask);
+    return {
+      fitMask, geom, area: coreN, type, overlay,
+      ux: lin2.ux, uy: lin2.uy, cx: rad ? rad.cx : 0, cy: rad ? rad.cy : 0,
+      tmin: P.tmin, tmax: P.tmax, stops, resid, span, x0, y0, x1, y1,
+    };
+  };
+  // A connected ramp field can span SEVERAL distinct physical gradients that
+  // touch along soft boundaries (edge's swirls): the single 1-D fit fails, so
+  // on failure split the component by dominant gradient ORIENTATION (2-means on
+  // the structure tensor's doubled angle — two gradients meeting = two
+  // orientation populations), re-extract CCs per side, and recurse.
+  const trySplit = (core, coreN, depth) => {
+    const R = buildRegion(core);
+    if (R) return [R];
+    if (depth >= 2 || coreN < 2 * o.gradMinArea) return [];
+    // per-px doubled-angle unit vector, straight from the blurred tensor
+    const seeds = [[1, 0], [-1, 0]];                     // will re-seed from extremes
+    const vx = new Float32Array(N), vy = new Float32Array(N);
+    let sMinX = 2, sMinI = -1, sMaxX = -2, sMaxI = -1;
+    for (let i = 0; i < N; i++) {
+      if (!core[i]) continue;
+      const d = Bxx[i] - Byy[i], m = Math.hypot(d, 2 * Bxy[i]) || 1e-9;
+      vx[i] = d / m; vy[i] = 2 * Bxy[i] / m;
+      if (vx[i] < sMinX) { sMinX = vx[i]; sMinI = i; }
+      if (vx[i] > sMaxX) { sMaxX = vx[i]; sMaxI = i; }
+    }
+    if (sMinI < 0 || sMaxI < 0) return [];
+    seeds[0] = [vx[sMaxI], vy[sMaxI]]; seeds[1] = [vx[sMinI], vy[sMinI]];
+    const lab = new Uint8Array(N);
+    for (let it = 0; it < 8; it++) {
+      const acc = [[0, 0, 0], [0, 0, 0]];
+      for (let i = 0; i < N; i++) {
+        if (!core[i]) continue;
+        const d0 = (vx[i] - seeds[0][0]) ** 2 + (vy[i] - seeds[0][1]) ** 2;
+        const d1 = (vx[i] - seeds[1][0]) ** 2 + (vy[i] - seeds[1][1]) ** 2;
+        const l = d1 < d0 ? 1 : 0;
+        lab[i] = l; acc[l][0] += vx[i]; acc[l][1] += vy[i]; acc[l][2]++;
+      }
+      if (!acc[0][2] || !acc[1][2]) return [];
+      for (let l = 0; l < 2; l++) {
+        const m = Math.hypot(acc[l][0], acc[l][1]) || 1e-9;
+        seeds[l] = [acc[l][0] / m, acc[l][1] / m];
+      }
+    }
+    // re-extract CCs per side; recurse on each big-enough piece
+    const out = [];
+    for (let side = 0; side < 2; side++) {
+      const seen = new Uint8Array(N);
+      for (let seed = 0; seed < N; seed++) {
+        if (!core[seed] || lab[seed] !== side || seen[seed]) continue;
+        const piece = new Uint8Array(N);
+        let top = 0, area = 0;
+        stack[top++] = seed; seen[seed] = 1;
+        while (top > 0) {
+          const i = stack[--top]; piece[i] = 1; area++;
+          const x = i % w, y = (i / w) | 0;
+          for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+            const xx = x + dx, yy = y + dy;
+            if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+            const k = yy * w + xx;
+            if (core[k] && lab[k] === side && !seen[k]) { seen[k] = 1; stack[top++] = k; }
+          }
+        }
+        // split pieces face a higher area bar: a fragment born from splitting a
+        // complex field must be substantial to justify its own gradient fill
+        // (marginal slivers regress quality — measured on trello)
+        if (area >= 2 * o.gradMinArea) out.push(...trySplit(piece, area, depth + 1));
+      }
+    }
+    return out;
+  };
+  const regions = [];
+  for (let id = 0; id < compArea.length; id++) {
+    if (compArea[id] < o.gradMinArea) continue;
+    const core = new Uint8Array(N);
+    for (let i = 0; i < N; i++) if (comp[i] === id) core[i] = 1;
+    regions.push(...trySplit(core, compArea[id], 0));
+  }
+  // merge pass: greedily union nearby accepted regions when the union refits
+  // ESSENTIALLY AS WELL as the fragments did separately — true fragments of one
+  // physical gradient merge (one fill, no seams; gaps become absorbed holes),
+  // while structurally different neighbours stay apart. The tolerance is
+  // anchored to each fragment's ORIGINAL residual watermark (resid0), never to
+  // the merged result — otherwise each merge re-baselines the bar and the pass
+  // ratchets itself into one giant mediocre fit (measured on instagram: six
+  // resid<1.4 fragments swallowed into a resid-4.8 mega-region, MAE 5.6→16.5).
+  for (const R of regions) R.resid0 = R.resid;
+  let mergedFlag = regions.length > 1;
+  while (mergedFlag) {
+    mergedFlag = false;
+    outer:
+    for (let a = 0; a < regions.length; a++) {
+      for (let b = a + 1; b < regions.length; b++) {
+        const A = regions[a], B = regions[b];
+        if (A.x0 > B.x1 + 12 || B.x0 > A.x1 + 12 || A.y0 > B.y1 + 12 || B.y0 > A.y1 + 12) continue;
+        const u = new Uint8Array(N);
+        for (let i = 0; i < N; i++) if (A.fitMask[i] || B.fitMask[i]) u[i] = 1;
+        const M = buildRegion(u);
+        const bar = Math.min(3.0, Math.max(A.resid0, B.resid0) + 0.25);
+        if (M && M.resid <= bar) {
+          M.resid0 = Math.max(A.resid0, B.resid0);
+          regions[a] = M; regions.splice(b, 1); mergedFlag = true; break outer;
+        }
+      }
+    }
+  }
+  return regions;
+}
+// RDP simplification of the binned profile → gradient stops [{off, rgb}]
+function rdpStops(prof, eps, maxStops) {
+  const n = prof.length;
+  const keep = new Uint8Array(n); keep[0] = 1; keep[n - 1] = 1;
+  const stack = [[0, n - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop();
+    if (b <= a + 1) continue;
+    const A = prof[a], B = prof[b];
+    const dt = B[0] - A[0] || 1e-9;
+    let worst = 0, wi = -1;
+    for (let i = a + 1; i < b; i++) {
+      const f = (prof[i][0] - A[0]) / dt;
+      let d = 0;
+      for (let c = 1; c <= 3; c++) d = Math.max(d, Math.abs(prof[i][c] - (A[c] + f * (B[c] - A[c]))));
+      if (d > worst) { worst = d; wi = i; }
+    }
+    if (worst > eps && wi > 0) { keep[wi] = 1; stack.push([a, wi], [wi, b]); }
+  }
+  let stops = [];
+  for (let i = 0; i < n; i++) if (keep[i])
+    stops.push({ off: prof[i][0], rgb: [prof[i][1], prof[i][2], prof[i][3]] });
+  while (stops.length > maxStops) {                      // enforce cap: drop least-important interior stop
+    let worst = 1, wi = -1;
+    for (let i = 1; i < stops.length - 1; i++) {
+      const A = stops[i - 1], B = stops[i + 1];
+      const f = (stops[i].off - A.off) / (B.off - A.off || 1e-9);
+      let d = 0;
+      for (let c = 0; c < 3; c++) d = Math.max(d, Math.abs(stops[i].rgb[c] - (A.rgb[c] + f * (B.rgb[c] - A.rgb[c]))));
+      if (wi < 0 || d < worst) { worst = d; wi = i; }
+    }
+    stops.splice(wi, 1);
+  }
+  // offsets stay in full-t-range units (bin centres ∈ (0,1)): the SVG axis is
+  // emitted at tmin→tmax, and SVG clamps outside the first/last stop — which
+  // matches the profile's edge behaviour exactly.
+  return stops;
+}
+// v5 colour-conditional replacement: the fitted gradient's colour at (x, y)
+// for region R — the same projection + stop interpolation the SVG renderer
+// applies (base gradient only; the alpha overlay can only improve on it, so
+// judging against the base alone is conservative).
+function gradStopColor(R, x, y) {
+  const t = R.type === 'radial' ? Math.hypot(x - R.cx, y - R.cy) : R.ux * x + R.uy * y;
+  let tn = (t - R.tmin) / ((R.tmax - R.tmin) || 1e-9);
+  tn = tn < 0 ? 0 : tn > 1 ? 1 : tn;
+  const st = R.stops;
+  if (tn <= st[0].off) return st[0].rgb;
+  if (tn >= st[st.length - 1].off) return st[st.length - 1].rgb;
+  let lo = 0, hi = st.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (st[m].off <= tn) lo = m; else hi = m; }
+  const A = st[lo], B = st[hi], f = (tn - A.off) / ((B.off - A.off) || 1e-9);
+  return [A.rgb[0] + f * (B.rgb[0] - A.rgb[0]), A.rgb[1] + f * (B.rgb[1] - A.rgb[1]), A.rgb[2] + f * (B.rgb[2] - A.rgb[2])];
+}
+// Does the fitted gradient explain this loop's source pixels at least as well
+// as the loop's own flat fill? Sampled over the loop's interior px that the
+// LAYER ITSELF paints (ownField ≥ iso) and a region's fitMask covers (same
+// row-scan as maskFrac). Decides replacement for loops only PARTLY covered by
+// ramp content: an area-overlap gate alone lets a flat band sneak just under
+// the bar and paint OVER the gradient, re-banding the ramp (firefox globe at
+// frac 0.64 vs the 0.7 gate). Restricting to own px is load-bearing: a RING
+// loop's raw interior is dominated by its holes' foreign px (a white ring
+// around a ramp lens reads "explained" from the lens px alone and its drop
+// takes the lens hole with it — measured on instagram).
+function loopGradExplained(poly, w, h, px, predIdx, regions, flat, ownField, iso) {
+  const [, y0, , y1] = polyBounds(poly);
+  const yA = Math.max(0, Math.ceil(y0)), yB = Math.min(h - 1, Math.floor(y1));
+  const step = Math.max(1, Math.floor((yB - yA) / 48));
+  let ePred = 0, eFlat = 0, n = 0;
+  for (let y = yA; y <= yB; y += step) {
+    const xs = [];
+    for (let i = 0, m = poly.length; i < m; i++) {
+      const a = poly[i], b = poly[(i + 1) % m];
+      if ((a[1] <= y && b[1] > y) || (b[1] <= y && a[1] > y))
+        xs.push(a[0] + (y - a[1]) / (b[1] - a[1]) * (b[0] - a[0]));
+    }
+    xs.sort((p, q) => p - q);
+    for (let s = 0; s + 1 < xs.length; s += 2) {
+      const xa = Math.max(0, Math.ceil(xs[s])), xb = Math.min(w - 1, Math.floor(xs[s + 1]));
+      for (let x = xa; x <= xb; x++) {
+        const i = y * w + x, ri = predIdx[i];
+        if (ri < 0 || ownField[i] < iso) continue;
+        const j = i * 4, p = gradStopColor(regions[ri], x, y);
+        ePred += (Math.abs(px[j] - p[0]) + Math.abs(px[j + 1] - p[1]) + Math.abs(px[j + 2] - p[2])) / 3;
+        eFlat += (Math.abs(px[j] - flat[0]) + Math.abs(px[j + 1] - flat[1]) + Math.abs(px[j + 2] - flat[2])) / 3;
+        n++;
+      }
+    }
+  }
+  return n >= 64 && ePred <= eFlat;
+}
+// sampled fraction of a polygon's interior covered by `mask` (row-scan, subsampled)
+function maskFrac(poly, w, h, mask) {
+  const [x0, y0, x1, y1] = polyBounds(poly);
+  const yA = Math.max(0, Math.ceil(y0)), yB = Math.min(h - 1, Math.floor(y1));
+  const step = Math.max(1, Math.floor((yB - yA) / 48));
+  let inMask = 0, tot = 0;
+  for (let y = yA; y <= yB; y += step) {
+    const xs = [];
+    for (let i = 0, n = poly.length; i < n; i++) {
+      const a = poly[i], b = poly[(i + 1) % n];
+      if ((a[1] <= y && b[1] > y) || (b[1] <= y && a[1] > y))
+        xs.push(a[0] + (y - a[1]) / (b[1] - a[1]) * (b[0] - a[0]));
+    }
+    xs.sort((p, q) => p - q);
+    for (let m = 0; m + 1 < xs.length; m += 2) {
+      const xa = Math.max(0, Math.ceil(xs[m])), xb = Math.min(w - 1, Math.floor(xs[m + 1]));
+      for (let x = xa; x <= xb; x++) { tot++; if (mask[y * w + x]) inMask++; }
+    }
+  }
+  return tot ? inMask / tot : 0;
+}
+
+// === FIELDS & PALETTE ===
 /* ── FIX 1: matte estimate (pre-demat pixels) ─────────────────────────────
    Mean colour of low-alpha pixels (the matte the AA was blended toward);
    white fallback for binary-alpha cutouts. null when the image is opaque. */
@@ -616,11 +1896,23 @@ export function flatStats(px, opaque, w, h, pal) {
    Entries closer than TIGHT always merge; entries within `thr` merge only when
    at least one of the pair lacks a flat interior (an AA cluster). Two REAL inks
    48 units apart (apc's overlap blues, tear's charcoal/grey) both survive.
-   The representative is the flat-richer (then larger-area) member. */
+   The representative is the flat-richer (then larger-area) member.
+
+   Bridge guard (resolution robustness): the loop head `i` may itself be a
+   non-real AA-blend colour sitting BETWEEN two real inks (e.g. a mid purple
+   between a light and a dark purple square). Without a guard, each real ink in
+   turn is "within thr of a non-real head" and gets absorbed — silently merging
+   two genuinely distinct inks THROUGH the blend. This is resolution-sensitive:
+   a 1px palette wobble can tip a real ink just under thr at one supersample and
+   just over it at another, so the same logo loses a colour at superF=1 that it
+   keeps at superF=2. Fix: never swallow a real ink `j` into a cluster whose
+   current representative is ALSO real and farther than TIGHT away. Two real
+   inks always survive as separate entries, whatever bridges them. */
 function mergePaletteSmart(pal, thr, st, minFlat) {
   if (!thr || thr <= 0) return pal;
   const TIGHT = Math.min(20, thr);
   const keep = pal.map(() => true), out = [];
+  const real = p => st.flatCnt[p] >= minFlat;
   for (let i = 0; i < pal.length; i++) {
     if (!keep[i]) continue;
     let rep = i;
@@ -628,12 +1920,15 @@ function mergePaletteSmart(pal, thr, st, minFlat) {
       if (!keep[j]) continue;
       const dr = pal[i][0] - pal[j][0], dg = pal[i][1] - pal[j][1], db = pal[i][2] - pal[j][2];
       const d2 = dr * dr + dg * dg + db * db;
-      const mergeable = d2 < TIGHT * TIGHT ||
+      let mergeable = d2 < TIGHT * TIGHT ||
         (d2 < thr * thr && (st.flatCnt[i] < minFlat || st.flatCnt[j] < minFlat));
+      // two real, distinct inks never collapse together (even bridged by a
+      // non-real head): if j is real and the cluster's rep is already real and
+      // they're more than TIGHT apart, keep j separate.
+      if (mergeable && d2 >= TIGHT * TIGHT && real(j) && real(rep)) mergeable = false;
       if (mergeable) {
         keep[j] = false;
-        const better = (st.flatCnt[j] >= minFlat) !== (st.flatCnt[rep] >= minFlat)
-          ? (st.flatCnt[j] >= minFlat) : st.area[j] > st.area[rep];
+        const better = real(j) !== real(rep) ? real(j) : st.area[j] > st.area[rep];
         if (better) rep = j;
       }
     }
@@ -828,7 +2123,15 @@ function softMembership(px, opaque, N, pal, p, useAlpha, matte, blendVeto, colli
         const eOwn = mC ? ptSegDist3(pix, P, mC) : Infinity;
         const lim = Math.min(0.5 * eOwn, 0.5 * dp, 20);
         for (const [A, B] of pairs) {
-          if (ptSegDist3(pix, A, B) < lim) { if (m >= 0.4) m = 0; if (mUn >= 0.4) mUn = 0; break; }
+          if (ptSegDist3(pix, A, B) < lim) {
+            if (m >= 0.4) {          // FIX 12: keep the pre-veto claim so the cross-layer
+              if (!raw.vetoed) raw.vetoed = new Float32Array(N);  // rescue can restore it if
+              raw.vetoed[i] = useAlpha ? m * (a8 / 255) : m;      // NO layer claims this px
+              m = 0;
+            }
+            if (mUn >= 0.4) mUn = 0;
+            break;
+          }
         }
       }
     }
@@ -926,6 +2229,8 @@ function cullFringe(px, opaque, w, h, pal, o, matteEst) {
     }
   }
   const matteRef = matte || matteEst;                 // FIX 2b can use the FIX 1 matte even w/o dilate mask
+  let opaqueN = 0;
+  for (let i = 0; i < N; i++) if (opaque[i]) opaqueN++;
   while (pal.length >= 3 || (matteRef && pal.length >= 2)) {
     const K = pal.length, area = new Array(K).fill(0), border = new Array(K).fill(0);
     let st = null;
@@ -992,6 +2297,13 @@ function cullFringe(px, opaque, w, h, pal, o, matteEst) {
         if (onSeg) {
           if (fa < o.minFlat) isFringe = true;              // pure AA cloud — always cull
           else isFringe = flatAdjFrac(f) >= 0.3;            // ambiguous — cull only if interstitial
+          // v6 mass veto, DOWNSAMPLED REGIME ONLY (o.despeckle < 4 ⇔ superF < 1
+          // under the 4·superF² caller convention): in a downsampled hi-res
+          // image AA bands are thin, so an entry carrying 1.5%+ of the opaque
+          // canvas is a tone-bearing surface (engraved hatching, photo texture)
+          // whose average tone the survivors can't reproduce. At 2× supersample
+          // (flat 320px logos) AA clouds are proportionally fat — never exempt.
+          if (isFringe && o.despeckle < 4 && area[f] >= 0.015 * opaqueN) isFringe = false;
         } else if (matteRef) {
           // FIX 8: lanczos-undershoot rim ("invented darker underlayer"). A weak
           // entry whose colour extrapolates a real ink BEYOND its endpoint on the
@@ -1054,6 +2366,7 @@ function cullFringe(px, opaque, w, h, pal, o, matteEst) {
   return pal;
 }
 
+// === GEOMETRY ===
 /* ── v2 CHANGE 3: greedy maximal-straight-run collapse ───────────────────
    After DP simplify, replace the ring with a maximal-straight-run polygon:
    from anchor i find the furthest j (cyclic) such that EVERY intermediate
@@ -1352,6 +2665,7 @@ function newton(Q, P, u) {
   return (nu < 0 || nu > 1 || Number.isNaN(nu)) ? u : nu;
 }
 
+// === POTRACE ===
 /* ═════════════════════ v3: Potrace-style global geometry stage ═════════════════════
    Implemented from the PAPER: Selinger, "Potrace: a polygon-based tracing algorithm"
    (2003), https://potrace.sourceforge.net/potrace.pdf — no GPL code consulted.

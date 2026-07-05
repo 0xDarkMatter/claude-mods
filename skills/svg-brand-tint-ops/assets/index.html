@@ -318,13 +318,45 @@ option{background:var(--panel); color:var(--ink)}
 /* ═══════════════════════════════════════════════════════════════════════
    SVG STUDIO — zero-dependency designer tool.
    Load an SVG (or trace a PNG into one), then recolour / restyle / export.
+
+   ARCHITECTURE: classic script (not ES modules), ONE file — "open
+   index.html" straight from disk must keep working, and ES module loading
+   fails on file:// (CORS). Do not split this file, convert the script to
+   type="module", or add a bundler. The canonical engine (trace-core.mjs)
+   is a progressive enhancement via dynamic import() under http(s); the
+   inline trace mirror keeps file:// fully functional (see TRACE).
+
+   Sections (grep "=== NAME ==="): HELPERS · DATA · STATE · RAIL · APPLY ·
+   VIEW · INSPECT · SOURCE · TRACE · EXPORT · UTIL · BOOT
    ═══════════════════════════════════════════════════════════════════════ */
+// === HELPERS ===
 const $ = s => document.querySelector(s);
 const el = (t,a={},...k)=>{const n=document.createElement(t);for(const x in a){if(x==='class')n.className=a[x];else if(x==='html')n.innerHTML=a[x];else n.setAttribute(x,a[x]);}k.flat().forEach(c=>n.append(c));return n;};
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const hex2rgb=h=>{h=h.replace('#','');if(h.length===3)h=h.split('').map(c=>c+c).join('');const n=parseInt(h,16);return[(n>>16)&255,(n>>8)&255,n&255];};
 const rgb2hex=(r,g,b)=>'#'+[r,g,b].map(v=>clamp(Math.round(v),0,255).toString(16).padStart(2,'0')).join('');
 
+/* ── working-resolution recommendation (mirrors trace-core.mjs pickSuperF /
+   traceResInfo; index.html is a self-contained mirror of the engine) ──────────
+   The trace quality is governed by the WORKING resolution (source long edge ×
+   resample), tuned around a [640,1400]px band: supersample a low-res source UP
+   to the floor, trace an in-band source at native, downsample a >1400px source
+   DOWN to the ceiling. S.traceRes is that working-long-edge target. */
+const WORK_MIN=640, WORK_MAX=1400, TRACE_SUPER_MIN=0.2, TRACE_SUPER_MAX=4;
+function recoWorkingRes(L){ return Math.round(clamp(L,WORK_MIN,WORK_MAX)); }
+function traceReco(w,h){
+  const L=Math.max(1,w,h), target=recoWorkingRes(L);
+  const superF=clamp(target/L,TRACE_SUPER_MIN,TRACE_SUPER_MAX), workLong=Math.round(L*superF);
+  const warn=L<500;
+  let regime,msg;
+  if(L<500)        { regime='low';   msg=`Low-res (${L}px) — traced at ~${workLong}px, but detail is source-limited. For best results, use 1000px+.`; }
+  else if(L<1000)  { regime='fair';  msg=`${L}px source. Good — 1000px+ gives the crispest edges.`; }
+  else if(L<=2000) { regime='ideal'; msg=`${L}px source — ideal resolution for tracing.`; }
+  else             { regime='high';  msg=`High-res (${L}px) — traced at a capped ~${workLong}px working res for speed and clean edges.`; }
+  return {target,superF,workLong,regime,warn,msg};
+}
+
+// === DATA ===
 /* ── curated Google Fonts for SVG text ──────────────────────────────── */
 const FONTS = {
   'Sans':    [['Manrope','400;600;700'],['Work Sans','400;600'],['Sora','400;700'],['Outfit','400;600'],['Figtree','400;600'],['Hanken Grotesk','400;600'],['Schibsted Grotesk','400;700'],['Onest','400;700']],
@@ -346,6 +378,7 @@ const PRESETS = {
   'Fallout CRT':    {stops:['#001a08','#28e24a','#c9ffcf'], sat:1.9,  bgMode:'crt', glow:'#39ff7a', glowBlur:18},
 };
 
+// === STATE ===
 /* ── state ──────────────────────────────────────────────────────────── */
 const DEFAULT = {
   // tone map
@@ -382,6 +415,7 @@ function save(){ try{LS.set('svgstudio', JSON.stringify(S));}catch{} }
 let SRC = { type:null, svg:null, raster:null, natW:0, natH:0 };  // svg = <svg> element (live), raster = Image
 let baseSize = new Map();  // text node -> base font-size px (for size scale)
 
+// === RAIL ===
 /* ═══ SECTIONS (accordion) ══════════════════════════════════════════ */
 let openSet; try{ openSet=new Set(JSON.parse(LS.get('svgstudio-open')||'["source","trace","tone"]')); }catch{ openSet=new Set(['source','trace','tone']); }
 
@@ -478,11 +512,13 @@ function buildTrace(p){
   ctlRange(p,num('smooth','Smoothing',0,1,0.05,v=>Math.round(v*100)+'%'));
   ctlRange(p,num('despeckle','Despeckle  (min area)',0,120,2,v=>v+'px²'));
   ctlRange(p,num('preblur','Pre-blur  (denoise)',0,4,0.5,v=>v.toFixed(1)));
-  ctlRange(p,num('traceRes','Resolution',300,1400,50,v=>v+'px'));
+  const rsInp=ctlRange(p,num('traceRes','Working res  (target)',300,1400,50,v=>v+'px'));
+  rsInp.addEventListener('input',updateTraceReco);
+  const reco=el('div',{class:'hint',id:'traceReco'}); reco.style.display='none'; reco.style.marginTop='2px'; p.append(reco);
   ctlTog(p,tog('traceInvert','Invert luminance'));
   const btn=el('button',{class:'btn primary wide',id:'traceGo'},'✦  Trace to SVG'); btn.style.marginTop='10px';
   btn.onclick=runTrace; p.append(btn);
-  p.append(el('div',{class:'hint'},'Marching-squares contours · Douglas–Peucker simplify · optional bézier smoothing. All in-browser, no upload.'));
+  p.append(el('div',{class:'hint',id:'traceHint'},traceHintText()));
   // Optional benchmark gallery — appears only when a local ./gallery/ has been
   // populated (before/after vectorise experiments). Shipped hidden; a HEAD probe
   // reveals it where present. Silently stays hidden in sandboxed previews (fetch
@@ -652,6 +688,7 @@ function refreshMeta(){
   set('canvas', S.bg);
 }
 
+// === APPLY ===
 /* ═══ APPLY — the render pipeline ════════════════════════════════════ */
 let raf=0;
 function apply(){ cancelAnimationFrame(raf); raf=requestAnimationFrame(applyNow); }
@@ -749,6 +786,7 @@ function applySizeScale(svg){
   });
 }
 
+// === VIEW ===
 /* ═══ VIEW — zoom / pan / split ══════════════════════════════════════ */
 function updateView(){
   const t=`translate(${S.panx}px,${S.pany}px) scale(${S.zoom})`;
@@ -834,6 +872,7 @@ function setupViewport(){
   });
 }
 
+// === INSPECT ===
 /* ═══ INSPECT ════════════════════════════════════════════════════════ */
 let inspectOn=false;
 function toggleInspect(){ inspectOn=!inspectOn; $('#inspectBtn').classList.toggle('on',inspectOn); $('#viewport').classList.toggle('inspect',inspectOn); if(!inspectOn){$('#hoverbox').style.display='none';$('#tip').style.display='none';} }
@@ -874,6 +913,7 @@ function buildElementList(){
 }
 function flashEl(n){ const o=n.style.outline; n.style.transition='opacity .1s'; let i=0; const iv=setInterval(()=>{ n.style.opacity=(i%2?1:0.2); if(++i>5){clearInterval(iv);n.style.opacity=1;} },110); highlightEl(n); }
 
+// === SOURCE ===
 /* ═══ SOURCE LOADING ═════════════════════════════════════════════════ */
 function loadFile(f){
   const isSvg=/svg/i.test(f.type)||/\.svg$/i.test(f.name);
@@ -940,18 +980,33 @@ function setRaster(dataURL,opts){
   img.onload=()=>{
     if(!opts||opts.push!==false) pushHistory();   // capture the outgoing source before replacing
     SRC={type:'raster', svg:null, raster:img, natW:img.naturalWidth, natH:img.naturalHeight, rasterURL:dataURL};
+    // auto-target the recommended working resolution for this source size
+    S.traceRes=traceReco(img.naturalWidth,img.naturalHeight).target;
+    const rs=$('#sl-traceRes'); if(rs){ rs.value=S.traceRes; const v=rs.parentElement&&rs.parentElement.querySelector('.v'); if(v)v.textContent=S.traceRes+'px'; }
     // show the raster as an <img> wrapped in svg-less preview until traced
     const art=$('#art'); art.innerHTML=''; const wrap=el('div',{}); const im=el('img',{src:dataURL}); im.style.maxWidth='min(74vw,'+(img.naturalWidth)+'px)'; im.style.display='block'; wrap.append(im); art.append(wrap);
     $('#artBase').innerHTML='';
     $('#empty').style.display='none';
     srcChip(); refreshMeta(); openSection('trace'); fitView();
     $('#art').querySelector('img').style.filter='none';
-    toast('Raster loaded — open Image Trace to vectorise'); traceNote();
+    toast('Raster loaded — open Image Trace to vectorise'); traceNote(); updateTraceReco();
     updateReadout();
   };
   img.src=dataURL;
 }
-function traceNote(){ const n=$('#traceNote'); if(n){ n.textContent = SRC.type==='raster' ? 'Ready. Tune the mode + threshold, then Trace to SVG.' : 'Load a PNG/JPG to enable.'; } const go=$('#traceGo'); if(go)go.disabled=SRC.type!=='raster'; }
+function traceNote(){ const n=$('#traceNote'); if(n){ n.textContent = SRC.type==='raster' ? 'Ready. Tune the mode + threshold, then Trace to SVG.' : 'Load a PNG/JPG to enable.'; } const go=$('#traceGo'); if(go)go.disabled=SRC.type!=='raster'; updateTraceReco(); }
+/* Resolution hint + low-res warning, driven by the loaded raster's real size and
+   the current working-res target. Green = ideal, red = low-res warning, muted otherwise. */
+function updateTraceReco(){
+  const box=$('#traceReco'); if(!box) return;
+  if(SRC.type!=='raster'||!SRC.natW){ box.style.display='none'; return; }
+  const L=Math.max(SRC.natW,SRC.natH), reco=traceReco(SRC.natW,SRC.natH);
+  const cur=S.traceRes||reco.target, workNow=Math.round(clamp(cur/L,TRACE_SUPER_MIN,TRACE_SUPER_MAX)*L);
+  const col=reco.warn?'var(--bad)':reco.regime==='ideal'?'var(--good)':'var(--muted)';
+  const icon=reco.warn?'⚠':reco.regime==='ideal'?'✓':'◈';
+  box.style.display='block';
+  box.innerHTML=`<b style="color:${col}">${icon}</b> ${reco.msg} <span style="color:var(--faint)">· working ≈ ${workNow}px (rec ${reco.target}px)</span>`;
+}
 function srcChip(){ const c=$('#srcchip'); c.innerHTML = SRC.type? `<b>${SRC.type.toUpperCase()}</b> ${SRC.natW}×${SRC.natH}` : 'no source'; }
 function openSection(id){ openSet.add(id); const acc=[...document.querySelectorAll('.acc')].find(a=>a.dataset.id===id); if(acc)acc.classList.add('open'); LS.set('svgstudio-open',JSON.stringify([...openSet])); }
 
@@ -975,27 +1030,50 @@ function makeSampleRaster(){
 // looking right without the server.
 const FALLBACK_SVG=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 400" font-family="sans-serif"><rect width="640" height="400" fill="#f4f4f4"/><g stroke="#9aa0a6" stroke-width="2" fill="none"><path d="M160 120 H240"/><path d="M400 120 H480"/><path d="M120 160 V240"/><path d="M520 160 V240"/><path d="M200 280 H440" stroke-dasharray="6 6"/></g><g stroke="#5f6368" stroke-width="1.5"><rect x="60" y="90" width="100" height="60" rx="10" fill="#d9dce0"/><rect x="240" y="90" width="160" height="60" rx="10" fill="#b7bcc2"/><rect x="480" y="90" width="100" height="60" rx="10" fill="#d9dce0"/><rect x="70" y="240" width="120" height="56" rx="10" fill="#8b9198"/><rect x="450" y="240" width="120" height="56" rx="10" fill="#8b9198"/></g><circle cx="320" cy="270" r="34" fill="#6b7178" stroke="#3c4043" stroke-width="2"/><path d="M320 250 l16 28 h-32 z" fill="#f4f4f4"/><g fill="#2b2f33" font-size="14" text-anchor="middle"><text x="110" y="125">Client</text><text x="320" y="125">Gateway</text><text x="530" y="125">CDN</text><text x="130" y="273">Service A</text><text x="510" y="273">Service B</text><text x="320" y="345" font-size="12" fill="#5f6368">shared queue</text></g></svg>`;
 
+// === TRACE ===
 /* ═══ IMAGE TRACE (raster → vector) ══════════════════════════════════ */
+/* Canonical engine (trace-core.mjs) — loaded as an ES module at boot. When the
+   import resolves (any http(s) serve), interactive traces run the shared v5
+   engine: soft-field palette + matte machinery, Potrace-style global geometry,
+   native <linearGradient>/<radialGradient> fills. Under file:// a sibling-module
+   import is blocked (CORS) → ENGINE stays null and the inline mirror below keeps
+   the tool fully self-contained. */
+let ENGINE=null;
+import('./trace-core.mjs').then(m=>{ ENGINE=m; const hn=$('#traceHint'); if(hn)hn.textContent=traceHintText(); }).catch(()=>{});
+function traceHintText(){
+  return ENGINE
+    ? 'v5 engine · soft-field palette · Potrace-style geometry · native gradient fills. All in-browser, no upload.'
+    : 'Marching-squares contours · Douglas–Peucker simplify · optional bézier smoothing. All in-browser, no upload.';
+}
 function runTrace(){
   if(SRC.type!=='raster'){ toast('Load a raster first'); return; }
   busy(true,'tracing…');
-  setTimeout(()=>{ try{ const svg=traceRaster(SRC.raster); setSVG(svg); toast('Traced → '+(svg.match(/<path/g)||[]).length+' paths'); }catch(err){ console.error(err); toast('Trace failed'); } finally{ busy(false); } }, 30);
+  setTimeout(()=>{ try{ const svg=traceRaster(SRC.raster); setSVG(svg); toast('Traced → '+(svg.match(/<path/g)||[]).length+' paths · '+(ENGINE?'v5 engine':'inline')); }catch(err){ console.error(err); toast('Trace failed'); } finally{ busy(false); } }, 30);
 }
 function busy(on,msg){ const b=$('#busy'); b.classList.toggle('on',on); if(msg)$('#busymsg').textContent=msg; }
 
-/* Raster → vector. Mirrors trace-core.mjs (the canonical/headless engine) inline
-   so the tool stays a single self-contained file: SUPERSAMPLE for sub-pixel edges
+/* Raster → vector. When ENGINE resolved, defers to trace-core.mjs (the canonical
+   v5 engine). The inline mirror below is the file:// fallback so the tool stays a
+   single self-contained file: SUPERSAMPLE for sub-pixel edges
    → alpha-aware nearest-palette layers (k-means-refined) → interpolated iso-contours
    → corner-preserving + faired curve fit. See references/tri-tone-and-trace.md. */
 function traceRaster(img){
   let w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
-  const sc=Math.min(2, Math.max(1, (S.traceRes||900)/Math.max(w,h)));   // supersample (2x = quality sweet spot)
+  // S.traceRes is the TARGET WORKING long edge — resample toward it either way:
+  // supersample a low-res source up, downsample a hi-res source down (sc<1). The
+  // old min-1 clamp traced a 2000px source at full native → path explosion + noise.
+  const sc=clamp((S.traceRes||900)/Math.max(w,h), TRACE_SUPER_MIN, TRACE_SUPER_MAX);
   w=Math.max(2,Math.round(w*sc)); h=Math.max(2,Math.round(h*sc));
   const cv=el('canvas'); cv.width=w; cv.height=h; const ctx=cv.getContext('2d',{willReadFrequently:true});
   ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
   ctx.drawImage(img,0,0,w,h);
   let idata=ctx.getImageData(0,0,w,h);
-  if(S.preblur>0) idata=boxBlur(idata,w,h,Math.round(S.preblur));
+  if(ENGINE) return ENGINE.traceImage(idata, engineOpts(sc));   // canonical path (preblur handled in-engine)
+  // band-limit before quantization when downsampling (sc<1): the interpolated
+  // downscale leaves thin edge fringes a noisy background would seed as spurious
+  // near-duplicate layers. Radius-1 min dissolves them; no-op when up/native-sampling.
+  const pre=sc<1 ? Math.max(S.preblur||0, 1) : (S.preblur||0);
+  if(pre>0) idata=boxBlur(idata,w,h,Math.round(pre));
   const px=idata.data, N=w*h;
   const lum=new Float32Array(N), opaque=new Uint8Array(N);
   for(let i=0,j=0;i<N;i++,j+=4){ lum[i]=0.299*px[j]+0.587*px[j+1]+0.114*px[j+2]; opaque[i]=px[j+3]>=128?1:0; }
@@ -1016,6 +1094,19 @@ function traceRaster(img){
     if(d) body+=`<path d="${d.trim()}" fill="${L.fill}" fill-rule="evenodd"/>`;
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}">${body}</svg>`;
+}
+/* Options for ENGINE.traceImage — delegates to the engine's own buildTraceOpts
+   (single source of truth; see assets/trace-core.mjs) with the studio's resample
+   factor `sc` as superF. Raw S.despeckle/S.detail are passed through UNSCALED —
+   buildTraceOpts scales them internally (×sc², ×sc). Gradient fitting (gradFit…)
+   stays on engine DEFAULTS: ON. */
+function engineOpts(sc){
+  return ENGINE.buildTraceOpts(sc, {
+    mode:S.traceMode, colors:S.colors, smooth:S.smooth, mergeDist:48,
+    despeckle:S.despeckle, detail:S.detail,
+    threshold:S.threshold, levels:S.levels, invert:S.traceInvert,
+    preblur:S.preblur,
+  });
 }
 function traceLayers(px,lum,opaque,w,h){
   const N=w*h, layers=[];
@@ -1222,12 +1313,15 @@ function paletteFromArt(){
 function seedFromImage(img){
   const w=120,h=Math.max(1,Math.round(120*(img.naturalHeight||img.height)/(img.naturalWidth||img.width)));
   const c=el('canvas'); c.width=w;c.height=h; const x=c.getContext('2d',{willReadFrequently:true}); x.drawImage(img,0,0,w,h);
-  const px=x.getImageData(0,0,w,h).data; const pal=medianCut(px,w,h,Math.max(3,S.stops.length));
+  const px=x.getImageData(0,0,w,h).data;
+  const opq=new Uint8Array(w*h); for(let i=0;i<w*h;i++) opq[i]=px[i*4+3]>=128?1:0;
+  const pal=medianCut(px,opq,w,h,Math.max(3,S.stops.length));
   pal.sort((a,b)=>(a[0]+a[1]+a[2])-(b[0]+b[1]+b[2])); // dark→light
   S.stops=pal.slice(0,Math.max(3,S.stops.length)).map((c,i,arr)=>({c:rgb2hex(...c),p:i/(arr.length-1)}));
   renderRail(); apply(); scheduleSave(); toast('Palette extracted');
 }
 
+// === EXPORT ===
 /* ═══ EXPORT ═════════════════════════════════════════════════════════ */
 function exportSVGString(bake){
   const svg=SRC.svg; if(!svg)return '';
@@ -1308,6 +1402,7 @@ function useBrandTint(ref){
 }`;
 }
 
+// === UTIL ===
 /* ═══ helpers: clipboard / download / toast ═════════════════════════ */
 function copy(t,msg){ navigator.clipboard?.writeText(t).then(()=>toast(msg||'Copied')).catch(()=>toast('Copy failed')); }
 function download(text,name,type){ downloadBlob(new Blob([text],{type}),name); }
@@ -1324,6 +1419,7 @@ function syncCanvasBg(){ const bg=$('#canvasbg'); bg.className='canvasbg'; bg.st
 }
 let saveT=0; function scheduleSave(){ clearTimeout(saveT); saveT=setTimeout(save,400); }
 
+// === BOOT ===
 /* ═══ boot ═══════════════════════════════════════════════════════════ */
 function resetAll(){ if(!confirm('Reset all controls to defaults?'))return; S=structuredClone(DEFAULT); baseSize=new Map(); renderRail(); syncCanvasBg(); if(SRC.svg)applySvgSizing(); apply(); save(); toast('Reset'); }
 $('#resetBtn').onclick=resetAll;
