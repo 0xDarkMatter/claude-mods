@@ -94,6 +94,11 @@ bash "$S/ff-status.sh" --run r1 --repo "$REPO" 2>/dev/null | jq -e '.lanes[] | s
   && ok "status: dry-run lane state done" || bad "status: lane state wrong"
 [ -f "$HERE/../assets/ff-monitor.html" ] && grep -q "status.json" "$HERE/../assets/ff-monitor.html" \
   && ok "monitor asset present + polls status.json" || bad "monitor asset missing"
+# torn-write guard: an empty/missing-lanes payload is treated as a fetch miss
+grep -q "torn-write guard" "$HERE/../assets/ff-monitor.html" \
+  && ok "monitor: empty-lanes torn-write guard present" || bad "monitor: torn-write guard missing"
+grep -q "d.lanes.length === 0" "$HERE/../assets/ff-monitor.html" \
+  && ok "monitor: guards on empty lanes array" || bad "monitor: empty-lanes guard logic missing"
 
 # --- escape guard ------------------------------------------------------------------
 check "escape guard: clean main" 0 bash "$S/ff-collect.sh" --check-main-clean --run r1 --repo "$REPO"
