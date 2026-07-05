@@ -1,6 +1,7 @@
 ---
 name: color-ops
 description: "Color for developers - color spaces, accessibility contrast, palette generation, CSS color functions, design tokens, dark mode, and CVD simulation. Use for: color, colour, palette, contrast, accessibility, WCAG, APCA, OKLCH, OKLAB, HSL, color picker, color-mix, dark mode colors, design tokens, color system, color scale, color ramp, gradient, CVD, color blind, gamut, P3, sRGB, color naming, color harmony, color temperature, semantic colors."
+when_to_use: "Use when making color decisions for UI or design — e.g. 'generate an accessible palette', 'hit WCAG or APCA contrast targets', 'convert to OKLCH / pick a color space', 'build dark-mode and design-token color scales'. Covers contrast, CVD, gamut (P3/sRGB), and CSS color-mix."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:

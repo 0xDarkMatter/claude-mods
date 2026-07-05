@@ -1,6 +1,7 @@
 ---
 name: asus-router-ops
 description: "ASUS router configuration and hardening - Asuswrt-Merlin firmware, security hardening, encrypted DNS (DoT/DoH), VPN (WireGuard/OpenVPN), guest networks, VLAN/IoT isolation, AiMesh, AiProtection, JFFS scripts, QoS. Use for: asus router, asuswrt, merlin, asuswrt-merlin, router hardening, DNS Director, AiProtection, AiMesh, guest network, VPN Director, wireguard router, openvpn router, nvram, jffs, DoT, DoH, port forwarding, IoT isolation."
+when_to_use: "Use when configuring or hardening an ASUS router (stock Asuswrt or Asuswrt-Merlin) — e.g. 'harden my ASUS router', 'set up WireGuard or DoT', 'isolate IoT on a VLAN', 'configure AiMesh or guest networking'. Covers VPN Director, AiProtection, DNS, and JFFS scripts."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
@@ -9,6 +10,8 @@ metadata:
 ---
 
 # ASUS Router Operations
+
+> Facts verified as of 2026-07.
 
 Authoritative guidance for configuring and hardening ASUS routers — stock **Asuswrt** and **Asuswrt-Merlin** firmware — via the web UI and SSH/nvram. Covers security hardening, encrypted DNS, VPN, network segmentation, AiMesh, AiProtection, and JFFS scripting.
 

@@ -1,6 +1,7 @@
 ---
 name: craftcms-ops
 description: "Craft CMS 5 development - content modeling, Twig templating, element queries, GraphQL, plugins, and the Craft 4-to-5 Matrix-as-entries change. Use for: craft cms, craftcms, craft 5, twig, pixel & tonic, matrix field, entry types, sections, element query, eager loading, blitz, project config, headless craft, craft graphql, craft plugin, craft 4 to 5 upgrade."
+when_to_use: "Use when building on Craft CMS 5 — e.g. 'model content with Matrix-as-entries', 'write a Twig template or element query', 'set up headless Craft with GraphQL', 'migrate Craft 4 to 5'. Covers sections, entry types, eager loading, project config, and plugins."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
@@ -9,6 +10,8 @@ metadata:
 ---
 
 # Craft CMS Operations
+
+> Facts verified as of 2026-07.
 
 Authoritative reference for **Craft CMS 5.x** development: content modeling, Twig templating, element-query optimization, GraphQL/headless setups, plugin development, and the Craft 4 → 5 migration. Craft is a self-hosted PHP application built on Yii 2, backed by MySQL or PostgreSQL.
 

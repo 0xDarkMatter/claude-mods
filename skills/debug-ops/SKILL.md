@@ -1,6 +1,7 @@
 ---
 name: debug-ops
 description: "Systematic debugging methodology, language-specific debuggers, and common scenario playbooks. Use for: debug, debugging, bug, crash, hang, memory leak, race condition, deadlock, bisect, reproduce, root cause, breakpoint, profiling, performance issue, segfault, stack trace, core dump."
+when_to_use: "Use when chasing a bug, crash, hang, or perf regression and want a systematic method — e.g. 'reproduce this crash reliably', 'bisect to the regressing commit', 'diagnose a memory leak or deadlock', 'read this stack trace / core dump'. Covers root-cause playbooks and language-specific debuggers."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
