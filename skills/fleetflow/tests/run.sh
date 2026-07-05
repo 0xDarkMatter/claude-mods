@@ -26,7 +26,7 @@ git -C "$REPO" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
 PKT="$TMP/packet.txt"; echo "Do the thing. FINAL REPLY: one line." > "$PKT"
 
 # --- syntax + help ------------------------------------------------------------
-for s in ff-spawn.sh ff-collect.sh ff-doctor.sh ff-status.sh ff-run.sh; do
+for s in ff-spawn.sh ff-collect.sh ff-doctor.sh ff-status.sh ff-run.sh ff-clean.sh; do
   bash -n "$S/$s" 2>/dev/null && ok "syntax $s" || bad "syntax $s"
   bash "$S/$s" --help 2>/dev/null | grep -q "EXAMPLES" && ok "$s --help has EXAMPLES" || bad "$s --help lacks EXAMPLES"
   check "$s --help exits 0" 0 bash "$S/$s" --help
@@ -186,6 +186,36 @@ jq -e '.packets[]|select(.id=="e")|.effort=="high"' "$REPO/.fleetflow/r3/manifes
 CRT="$TMP/ffcache"; CDP="$TMP/cdp.txt"; echo "cache test. FINAL REPLY: c" > "$CDP"
 FLEETFLOW_CACHE_ROOT="$CRT" bash "$S/ff-spawn.sh" --run r4 --id c --brain sonnet --prompt-file "$CDP" --repo "$REPO" --dry-run >/dev/null 2>&1
 [ -d "$CRT/r4-c" ] && ok "spawn: cache dir created under FLEETFLOW_CACHE_ROOT" || bad "spawn: cache dir not redirected to FLEETFLOW_CACHE_ROOT"
+
+# --- ff-clean.sh (feature 8): autoclean lanes + cache --------------------------
+check "ff-clean: usage -> 2" 2 bash "$S/ff-clean.sh"
+check "ff-clean: no such run -> 2" 2 bash "$S/ff-clean.sh" --run ghost --repo "$REPO"
+# fresh run, cache redirected, three DISTINCT-prompt worktree lanes (distinct so
+# they don't cache-hit and skip worktree creation)
+CLEANROOT="$TMP/cleancache"
+for lid in cleanlane keeplane dirtlane; do
+  echo "clean-$lid task. FINAL REPLY: $lid" > "$TMP/clean-$lid.txt"
+  FLEETFLOW_CACHE_ROOT="$CLEANROOT" bash "$S/ff-spawn.sh" --run rc --id "$lid" --brain sonnet \
+    --prompt-file "$TMP/clean-$lid.txt" --repo "$REPO" --dry-run --worktree >/dev/null 2>&1
+done
+# keeplane gets a real commit (must survive every clean); dirtlane gets untracked junk
+( cd "$REPO/.fleetflow/rc/wt-keeplane" && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m "real work" )
+echo "junk" > "$REPO/.fleetflow/rc/wt-dirtlane/junk.txt"
+[ -d "$CLEANROOT/rc-cleanlane" ] && ok "ff-clean: setup created cache dir" || bad "ff-clean: setup cache dir missing"
+# no --force: cleanlane removed, dirtlane kept (dirty), keeplane kept (1 commit).
+# pass the SAME FLEETFLOW_CACHE_ROOT to ff-clean so it finds the redirected dirs.
+CL="$(FLEETFLOW_CACHE_ROOT="$CLEANROOT" bash "$S/ff-clean.sh" --run rc --repo "$REPO" 2>/dev/null)"
+printf '%s' "$CL" | awk -F'\t' '$1=="cleanlane"&&$2=="removed"{f=1} END{exit !f}' && ok "ff-clean: removes zero-commit clean lane" || bad "ff-clean: clean lane not removed"
+printf '%s' "$CL" | awk -F'\t' '$1=="dirtlane"&&$2=="kept"&&$3~/dirty/{f=1} END{exit !f}' && ok "ff-clean: keeps dirty zero-commit lane (no --force)" || bad "ff-clean: dirty lane mishandled"
+printf '%s' "$CL" | awk -F'\t' '$1=="keeplane"&&$2=="kept"&&$3~/1 commits/{f=1} END{exit !f}' && ok "ff-clean: keeps committed lane" || bad "ff-clean: committed lane mishandled"
+[ -d "$REPO/.fleetflow/rc/wt-cleanlane" ] && bad "ff-clean: clean worktree dir remains" || ok "ff-clean: clean worktree removed"
+git -C "$REPO" show-ref --verify --quiet refs/heads/fleetflow/rc/keeplane && ok "ff-clean: committed branch preserved" || bad "ff-clean: keeper branch deleted"
+# --force: dirtlane now removed; keeplane STILL kept (committed lanes are never force-removed)
+CL2="$(FLEETFLOW_CACHE_ROOT="$CLEANROOT" bash "$S/ff-clean.sh" --run rc --repo "$REPO" --force 2>/dev/null)"
+printf '%s' "$CL2" | awk -F'\t' '$1=="dirtlane"&&$2=="removed"{f=1} END{exit !f}' && ok "ff-clean: --force removes dirty zero-commit lane" || bad "ff-clean: --force dirty mishandled"
+printf '%s' "$CL2" | awk -F'\t' '$1=="keeplane"&&$2=="kept"{f=1} END{exit !f}' && ok "ff-clean: --force still keeps committed lane" || bad "ff-clean: --force removed committed lane!"
+[ -d "$CLEANROOT/rc-cleanlane" ] || [ -d "$CLEANROOT/rc-dirtlane" ] || [ -d "$CLEANROOT/rc-keeplane" ] \
+  && bad "ff-clean: cache dir remains" || ok "ff-clean: cache dirs removed"
 
 echo "=== $PASS passed, $FAILN failed ==="
 [ "$FAILN" = 0 ] || exit 1
