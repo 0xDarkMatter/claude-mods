@@ -52,6 +52,12 @@ OpenAI's agent harness, non-interactive. Flag map (codex-cli 0.125.0):
 - **Character**: a genuinely different model *and* toolchain — its highest
   value in fleetflow is dissent (refuter/judge lanes) and independent second
   implementations, not bulk mechanical work (GLM is cheaper there).
+- **Skill-loading quirk** (observed 2026-07-05): codex reads Claude-format
+  skills from `~/.agents/skills/` at session start and rejects any whose
+  description exceeds **1024 chars** (`failed to load skill … exceeds maximum
+  length`) — non-fatal (logged to stderr, run continues), so don't gate on a
+  clean stderr; `ff-collect` correctly ignores it. Keep skill descriptions
+  ≤1024 chars if you want codex workers to load them.
 
 ## 3. Anthropic workers (`claude -p`)
 

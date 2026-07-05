@@ -95,6 +95,24 @@ plan packets → ff-doctor → ff-spawn (×N, background) → ff-collect (gate) 
 5. **Land** through fleet-ops (sequential, test-gated). Delete lanes and
    `.fleetflow/<run>/` after landing.
 
+**Inter-worker communication is hub-and-spoke, by design.** Workers never talk
+to each other — no shared memory, no message bus, no sideband files (lanes are
+isolated worktrees). The only channel is the native tool's: a worker's FINAL
+REPLY returns through `ff-collect` to the orchestrator, which embeds it in a
+later packet (the `prevResult`-into-next-prompt handoff; see
+[insights §3/§7](references/native-workflow-insights.md)). A judge packet is
+just the collected builder outputs pasted in. If a stage needs *all* sibling
+results, that is a barrier — collect everything first, then compose. (True
+peer-to-peer between long-lived workers is out of scope; that's what a message
+bus like pigeon is for.)
+
+**Clean-room / benchmark runs get their own target repo.** Lanes are worktrees
+*of some repo* — don't graft a build experiment onto an unrelated repo's object
+store. Seed a standalone repo (e.g. under `X:\Benching`), and **vendor any
+external spec INTO it** (`spec/…`) so packets reference it by *relative* path —
+the guard preamble forbids workers building absolute paths, and Codex's
+sandbox is confined to the lane, so out-of-repo specs are unreadable anyway.
+
 **Resume.** The journal (`.fleetflow/<run>/journal.jsonl`) uses the native
 tool's mechanism: each spawn is keyed by a content hash of
 `(brain, prompt, opts)`. Re-running `ff-spawn` with an unchanged packet returns
