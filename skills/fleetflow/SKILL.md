@@ -65,6 +65,18 @@ Two guardrails carried over verbatim from the native tool's doctrine: reach for
 the **effort lever before the model lever**, and a cheap rubber-stamp verifier is
 worse than none.
 
+**The same routing applies INSIDE native Workflow scripts — and it defaults
+wrong.** A 7-day session audit (2026-06-28..07-05) found 75% of 10.1M subagent
+output tokens ran on Fable/Opus, including 729 StructuredOutput extract/verdict
+calls, because `agent()` inherits the session model unless overridden and nobody
+sets overrides. Doctrine: **the stage that decides stays premium (omit the
+override — inherit); the stages that collect go cheap** —
+`{ model: 'haiku', effort: 'low' }` for extraction/classification/log scans,
+`{ model: 'sonnet' }` for finder/reviewer sweeps. When unsure, inherit: a wrong
+cheap answer that survives verification costs more than it saves. Mechanism,
+routing table, and before/after snippets:
+[references/native-model-routing.md](references/native-model-routing.md).
+
 ## The run lifecycle
 
 ```
@@ -227,6 +239,10 @@ semantic exit codes (`0` ok, `2` usage, `3` cached/missing, `7` unreachable,
 - [references/worker-contracts.md](references/worker-contracts.md) — per-brain
   launch/collect/auth contracts (GLM env knobs, full `codex exec` flag map,
   Anthropic alias notes) and the Fable/Opus orchestrator probe.
+- [references/native-model-routing.md](references/native-model-routing.md) —
+  per-stage `opts.model`/`opts.effort` routing for native Workflow scripts: the
+  cost evidence, the collect-cheap/decide-premium table, caveats (aliases, fork
+  inheritance, effort = reasoning depth).
 
 ## See Also
 

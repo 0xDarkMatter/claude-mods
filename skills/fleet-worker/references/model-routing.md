@@ -36,13 +36,15 @@ processes. The taxonomy below assigns each work class a tier **and** a locus.
 | **mechanical** | format, rename, regex sweep, file-by-file transform | fleet-worker (GLM) or in-proc | `haiku` / GLM-4.5-Air | low |
 | **scout** | find, enumerate, read-and-extract, summarize | in-proc (fleet-worker if very wide) | `sonnet` / GLM-5.2 | low |
 | **build** | implement a change needing judgment | in-proc | `sonnet`→`opus` | medium |
-| **synthesize** | merge findings, write the report, design | **in-proc only** | `opus` | high |
-| **judge** | adversarial verify, score, gate a finding | **in-proc only** | `opus` | high–max |
+| **synthesize** | merge findings, write the report, design | **in-proc only** | inherit (session = Fable/Opus) | high |
+| **judge** | adversarial verify, score, gate a finding | **in-proc only** | inherit (session = Fable/Opus) | high–max |
 
 Two rules of thumb that keep this honest:
 
 - **Never under-power a judge.** A cheap verifier that rubber-stamps is worse than no
-  verifier — it launders bad findings as confirmed. Judges and synthesis stay on Opus.
+  verifier — it launders bad findings as confirmed. Judges and synthesis inherit the
+  session model — omit `opts.model` rather than pinning `'opus'`, which would
+  *downgrade* the decider on a Fable session.
 - **Effort is a finer knob than model.** Dropping a mechanical stage to `effort: 'low'` on
   the *same* model often saves more than is worth a model switch, with no quality cliff.
   Reach for the effort lever before the model lever.
@@ -123,6 +125,9 @@ while (budget.total && budget.remaining() > 50_000) {
 
 ## See also
 
+- [`fleetflow/references/native-model-routing.md`](../../fleetflow/references/native-model-routing.md)
+  — the in-process half in depth: cost evidence (7-day audit), full mechanism
+  (`opts.model`/`opts.effort`, `meta.phases[].model`, fork inheritance), caveats
 - [`assets/route.js`](../assets/route.js) — the paste-in helper
 - SKILL.md *"architecture crux"* — the process-global-provider constraint this is built on
 - [`fleet-ops`](../../fleet-ops/SKILL.md) — test-gated landing for the provider-worker branches

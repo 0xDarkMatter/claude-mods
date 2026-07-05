@@ -127,8 +127,8 @@ routing needs a separate process, which is fleet-worker. Hence two loci:
 | **mechanical** | fleet-worker (GLM) or in-proc | `haiku` / GLM-4.5-Air | low |
 | **scout** | in-proc (fleet-worker if wide) | `sonnet` / GLM-5.2 | low |
 | **build** | in-proc | `sonnet`→`opus` | medium |
-| **synthesize** | in-proc only | `opus` | high |
-| **judge** | in-proc only | `opus` | high–max |
+| **synthesize** | in-proc only | inherit (session = Fable/Opus) | high |
+| **judge** | in-proc only | inherit (session = Fable/Opus) | high–max |
 
 **Locus rule:** shell out to fleet-worker only for a **large (≈12+), independent,
 file-mutating, cost-dominant** fan-out you can **gate before landing**; everything
