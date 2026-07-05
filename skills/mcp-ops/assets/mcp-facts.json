@@ -1,0 +1,44 @@
+{
+  "_comment": "Canonical fast-moving facts the mcp-ops skill encodes. scripts/check-mcp-facts.py asserts the skill prose still names these SDK packages + spec URL and still carries a dated currency note (--offline), and probes the npm/PyPI registries + the spec URL for drift (--live). Edit deliberately: a change here is a skill-content decision, not housekeeping.",
+  "schema": "claude-mods.mcp-ops.facts/v1",
+  "as_of": "2026-07-05",
+  "spec": {
+    "url": "https://spec.modelcontextprotocol.io",
+    "prose_token": "spec.modelcontextprotocol.io",
+    "_comment": "The MCP specification URL cited in See Also. --offline asserts the token is named in the skill prose; --live expects the URL to answer HTTP 200 (after redirects)."
+  },
+  "packages": {
+    "@modelcontextprotocol/sdk": {
+      "registry": "npm",
+      "role": "TypeScript SDK",
+      "sampled_major": 1,
+      "track_major": true,
+      "prose_token": "@modelcontextprotocol/sdk",
+      "_comment": "The official TS SDK. --live flags drift if the latest dist-tag leaves major 1 (a 2.x would be an API-break release warranting a skill review)."
+    },
+    "@modelcontextprotocol/inspector": {
+      "registry": "npm",
+      "role": "MCP Inspector (dev/debug UI)",
+      "sampled_major": 0,
+      "track_major": false,
+      "prose_token": "@modelcontextprotocol/inspector",
+      "_comment": "The interactive inspector invoked via `npx`. Only resolution is checked live (0.x versioning is chatty); a 404 means it was renamed/removed."
+    },
+    "mcp": {
+      "registry": "pypi",
+      "role": "Python SDK (FastMCP ships inside as mcp.server.fastmcp)",
+      "sampled_major": 1,
+      "track_major": true,
+      "prose_token": "mcp[cli]",
+      "_comment": "The official Python SDK on PyPI, installed via `uv add mcp[cli]`. --live flags drift if the latest release leaves major 1."
+    },
+    "fastmcp": {
+      "registry": "pypi",
+      "role": "FastMCP high-level framework (gofastmcp.com)",
+      "sampled_major": 2,
+      "track_major": true,
+      "prose_token": "fastmcp",
+      "_comment": "The standalone FastMCP package (FastMCP 2 +). Named in prose as FastMCP and via gofastmcp.com; matched case-insensitively."
+    }
+  }
+}

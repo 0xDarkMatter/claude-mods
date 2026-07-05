@@ -12,6 +12,8 @@ metadata:
 
 Comprehensive patterns for building, testing, and deploying Model Context Protocol servers in Python and TypeScript.
 
+> Ecosystem facts verified as of 2026-07.
+
 ## MCP Architecture Quick Reference
 
 ```
@@ -306,6 +308,23 @@ async def get_valid_token() -> str:
 | `references/resources-prompts.md` | ~550 | Resource URIs, static/dynamic resources, templates, prompts, subscriptions |
 | `references/transport-auth.md` | ~550 | stdio/SSE/HTTP transports, session management, OAuth2, rate limiting, TLS |
 | `references/testing-debugging.md` | ~550 | MCP Inspector, unit/integration testing, protocol debugging, CI, performance |
+
+## Staleness verifier
+
+This skill encodes fast-moving facts (the MCP SDK package names + spec URL). [`scripts/check-mcp-facts.py`](scripts/check-mcp-facts.py) guards them against silent drift:
+
+```bash
+# Structural (PR CI, no network): every catalogued package's prose_token is
+# still named in this skill's prose, the spec URL is still cited, and the
+# currency note still carries a year.
+python scripts/check-mcp-facts.py --offline        # exit 0 consistent, 10 drift
+
+# Live (freshness job, never blocks a PR): each SDK still resolves on
+# npm/PyPI, no tracked major has moved off the sampled major, spec URL 200.
+python scripts/check-mcp-facts.py --live            # exit 10 drift, 7 registries unreachable
+```
+
+The canonical fact set lives in [`assets/mcp-facts.json`](assets/mcp-facts.json); when you add or drop a package, update it to match or `--offline` fails CI.
 
 ## See Also
 
