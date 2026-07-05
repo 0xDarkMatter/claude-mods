@@ -12,6 +12,8 @@
 #             10 structural failure
 set -u
 
+FF_VERSION="1.1.0"
+
 usage() {
   cat <<'EOF'
 Usage: ff-doctor.sh [--offline | --live]
@@ -53,6 +55,31 @@ for s in ff-spawn.sh ff-collect.sh ff-status.sh; do
   if bash -n "$HERE/$s" 2>/dev/null; then say "syntax-$s" ok "parses"; else say "syntax-$s" fail "syntax error"; FAIL=1; fi
 done
 [ -f "$HERE/../assets/guard-preamble.txt" ] && say "guard-preamble" ok "present" || { say "guard-preamble" fail "missing"; FAIL=1; }
+
+# --- install-sync: repo copy vs the installed copy at $HOME/.claude/skills ---
+# version-skew guard. Only compares when an installed copy exists AND is a
+# different directory from the one being run (running from the install itself
+# trivially matches). Drift is advisory, never a hard fail.
+INST="$HOME/.claude/skills/fleetflow/scripts"
+if [ -d "$INST" ]; then
+  INST_ABS="$(cd "$INST" 2>/dev/null && pwd)"
+  if [ -n "$INST_ABS" ] && [ "$INST_ABS" != "$HERE" ]; then
+    DIFF=0
+    for s in ff-spawn.sh ff-collect.sh ff-status.sh ff-doctor.sh ff-run.sh ff-clean.sh; do
+      [ -f "$HERE/$s" ] || continue            # not shipped here; skip
+      if [ ! -f "$INST/$s" ]; then DIFF=1; break; fi
+      h1="$(sha256sum "$HERE/$s" | cut -d' ' -f1)"
+      h2="$(sha256sum "$INST/$s" | cut -d' ' -f1)"
+      [ "$h1" = "$h2" ] || { DIFF=1; break; }
+    done
+    if [ "$DIFF" = 0 ]; then say "install-sync" ok "repo and installed copies match"
+    else say "install-sync" advisory "repo and installed copies differ - re-run install"; fi
+  else
+    say "install-sync" ok "running from the installed copy"
+  fi
+else
+  say "install-sync" advisory "no installed copy at $INST"
+fi
 
 [ "$MODE" = "live" ] || { [ "$FAIL" = 0 ] && exit 0 || exit 10; }
 
