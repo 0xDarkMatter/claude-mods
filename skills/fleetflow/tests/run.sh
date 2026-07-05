@@ -26,7 +26,7 @@ git -C "$REPO" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
 PKT="$TMP/packet.txt"; echo "Do the thing. FINAL REPLY: one line." > "$PKT"
 
 # --- syntax + help ------------------------------------------------------------
-for s in ff-spawn.sh ff-collect.sh ff-doctor.sh ff-status.sh; do
+for s in ff-spawn.sh ff-collect.sh ff-doctor.sh ff-status.sh ff-run.sh; do
   bash -n "$S/$s" 2>/dev/null && ok "syntax $s" || bad "syntax $s"
   bash "$S/$s" --help 2>/dev/null | grep -q "EXAMPLES" && ok "$s --help has EXAMPLES" || bad "$s --help lacks EXAMPLES"
   check "$s --help exits 0" 0 bash "$S/$s" --help
@@ -106,6 +106,41 @@ check "escape guard: clean again" 0 bash "$S/ff-collect.sh" --check-main-clean -
 bash "$S/ff-doctor.sh" --offline >/dev/null 2>&1; RC=$?
 [ "$RC" = 0 ] || [ "$RC" = 10 ] && ok "doctor --offline runs (rc=$RC)" || bad "doctor --offline rc=$RC"
 bash "$S/ff-doctor.sh" --offline 2>/dev/null | grep -qE "^bin-jq	ok" && ok "doctor TSV output" || bad "doctor TSV output missing"
+
+# --- manifest (feature 1): created on first spawn, append, idempotent -----------
+M="$REPO/.fleetflow/r1/manifest.json"
+[ -f "$M" ] && ok "manifest created on first spawn" || bad "manifest not created"
+jq -e '.run=="r1" and .base=="main" and (.created_by|startswith("ff-spawn/"))' "$M" >/dev/null \
+  && ok "manifest header fields" || bad "manifest header wrong"
+# lane 'a' was spawned several times (cache-hit, --force, changed) yet stays 1 entry
+NA="$(jq '[.packets[]|select(.id=="a")]|length' "$M")"
+[ "$NA" = "1" ] && ok "manifest packet idempotent (one entry per id)" || bad "manifest has $NA 'a' entries"
+# every packet carries the Wave-1 fields the brief requires
+jq -e '.packets[]|select(.id=="a")|has("effort") and has("key") and has("max_turns") and has("worktree")' "$M" >/dev/null \
+  && ok "manifest packet has effort+key+max_turns+worktree" || bad "manifest packet fields missing"
+# ff-status surfaces the manifest summary
+bash "$S/ff-status.sh" --run r1 --repo "$REPO" 2>/dev/null | jq -e '.manifest.packet_count >= 1' >/dev/null \
+  && ok "status: surfaces manifest.packet_count" || bad "status: manifest summary missing"
+
+# --- ff-run.sh (feature 2): whole-run resume + status alias ---------------------
+check "ff-run: no subcommand -> 2" 2 bash "$S/ff-run.sh"
+check "ff-run: bad subcommand -> 2" 2 bash "$S/ff-run.sh" frobnicate --run r1 --repo "$REPO"
+check "ff-run: resume missing run -> 2" 2 bash "$S/ff-run.sh" resume --run nope --repo "$REPO"
+check "ff-run: resume no manifest -> 2" 2 bash "$S/ff-run.sh" resume --run r1 --repo "$TMP"
+# fresh run, two DISTINCT packets so replay order is unambiguous
+PA="$TMP/r2-a.txt"; echo "do A. FINAL REPLY: a" > "$PA"
+PB="$TMP/r2-b.txt"; echo "do B. FINAL REPLY: b" > "$PB"
+bash "$S/ff-spawn.sh" --run r2 --id a --brain sonnet --prompt-file "$PA" --repo "$REPO" --dry-run >/dev/null 2>&1
+bash "$S/ff-spawn.sh" --run r2 --id b --brain sonnet --prompt-file "$PB" --repo "$REPO" --dry-run >/dev/null 2>&1
+# resume re-spawns both -> both cache-hit -> exit 0; ids return in manifest order
+RR="$(bash "$S/ff-run.sh" resume --run r2 --repo "$REPO" 2>/dev/null)"; RC=$?
+[ "$RC" = "0" ] && ok "ff-run: all-cached resume exits 0" || bad "ff-run: resume rc=$RC"
+printf '%s' "$RR" | jq -e 'length==2 and .[0].id=="a" and .[1].id=="b" and all(.[]; .status=="cached")' >/dev/null \
+  && ok "ff-run: resume preserves packet order (no reorder drift)" || bad "ff-run: resume order wrong: $RR"
+# status subcommand == ff-status (compare stable fields; generated_at differs by design)
+SA="$(bash "$S/ff-run.sh" status --run r2 --repo "$REPO" 2>/dev/null | jq -c '{run,lanes:[.lanes[].id]}')"
+SB="$(bash "$S/ff-status.sh" --run r2 --repo "$REPO" 2>/dev/null | jq -c '{run,lanes:[.lanes[].id]}')"
+[ "$SA" = "$SB" ] && ok "ff-run status aliases ff-status" || bad "ff-run status != ff-status"
 
 echo "=== $PASS passed, $FAILN failed ==="
 [ "$FAILN" = 0 ] || exit 1
