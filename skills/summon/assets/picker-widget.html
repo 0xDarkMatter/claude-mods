@@ -192,7 +192,7 @@ function render(){
     el.querySelector('.act-peek').addEventListener('click',function(){sendPrompt('Peek session '+s.sessionId+' ("'+s.title+'") — run summon --peek '+s.sessionId+' and show me its last few messages.');});
     el.querySelector('.act-copy').addEventListener('click',function(){var b=this;navigator.clipboard&&navigator.clipboard.writeText(s.sessionId);var i=b.querySelector('i');i.className='ti ti-check';setTimeout(function(){i.className='ti ti-copy';},900);});
     el.querySelector('.act-summon').addEventListener('click',function(){sendPrompt('Summon (copy) the "'+s.title+'" session ('+s.sessionId+') into my other account — show the plan with summon --dry-run first.');});
-    el.querySelector('.act-recover').addEventListener('click',function(){sendPrompt('Recover the "'+s.title+'" session ('+s.sessionId+', '+s.cwd+') via the summon skill'+String.fromCharCode(39)+'s recover process, and spawn it as a background chip: read its transcript, write a concise hand-off summary of where it left off and what'+String.fromCharCode(39)+'s next, then start a fresh session there seeded with that summary.');});
+    el.querySelector('.act-recover').addEventListener('click',function(){sendPrompt('Recover the "'+s.title+'" session ('+s.sessionId+', '+s.cwd+'): spawn ONE background chip whose cwd is the PROJECT ROOT of that path (drop any \\.claude\\worktrees\\... suffix). That chip IS the recovered session — it reads the original transcript, writes a concise hand-off summary, and resumes the work in place in the project folder. It must NOT spawn any further chip and must NOT open the worktree folder as a separate session (the worktree path is reference-only, for locating the branch and in-progress changes).');});
   });
   refreshFoot();
 }
@@ -200,7 +200,7 @@ function render(){
 document.getElementById('bGrid').addEventListener('click',function(){deck.className='deck grid';this.classList.add('on');document.getElementById('bList').classList.remove('on');});
 document.getElementById('bList').addEventListener('click',function(){deck.className='deck list';this.classList.add('on');document.getElementById('bGrid').classList.remove('on');});
 document.getElementById('bClr').addEventListener('click',function(){picked={};render();});
-document.getElementById('bRec').addEventListener('click',function(){var l=DATA.filter(function(s){return picked[s.sessionId];});sendPrompt('Recover these '+l.length+' sessions via the summon skill'+String.fromCharCode(39)+'s recover process — spawn ONE background chip per session (read transcript, distil a hand-off brief, start a fresh seeded session):\n'+fmtList(l));});
+document.getElementById('bRec').addEventListener('click',function(){var l=DATA.filter(function(s){return picked[s.sessionId];});sendPrompt('Recover these '+l.length+' sessions — spawn ONE background chip per session, each with its cwd set to the PROJECT ROOT (drop any \\.claude\\worktrees\\... suffix). Each chip IS its recovered session: read the original transcript, distil a hand-off brief, and resume the work in place in the project folder. No chip may spawn a further chip or open a worktree folder as a separate session:\n'+fmtList(l));});
 document.getElementById('bSum').addEventListener('click',function(){var l=DATA.filter(function(s){return picked[s.sessionId];});sendPrompt('Summon (copy) these '+l.length+' sessions into my other account — run summon --select for exactly these, show the plan with --dry-run first:\n'+fmtList(l));});
 render();
 })();
