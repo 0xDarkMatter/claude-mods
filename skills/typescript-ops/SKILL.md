@@ -12,6 +12,13 @@ metadata:
 
 Comprehensive TypeScript skill covering the type system, generics, and production patterns.
 
+> Ecosystem facts verified as of 2026-07.
+
+**Staleness check:** `python scripts/check-typescript-facts.py --offline` asserts the
+catalogued version-bearing facts (TypeScript major, zod, valibot) are still named in the
+prose and the dated currency note above is present; run `--live` to confirm each package's
+npm major still matches the documented major. Catalog: `assets/typescript-facts.json`.
+
 ## Type Narrowing Decision Tree
 
 ```

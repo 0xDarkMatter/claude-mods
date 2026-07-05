@@ -1,0 +1,27 @@
+{
+  "_comment": "Canonical fast-moving facts the typescript-ops skill encodes. scripts/check-typescript-facts.py asserts SKILL.md + references name these consistently (--offline) and probes the npm registry for major-version drift (--live). Edit deliberately: a change here is a skill-content decision, not housekeeping.",
+  "schema": "claude-mods.typescript-ops.facts/v1",
+  "as_of": "2026-07-05",
+  "registry": "https://registry.npmjs.org",
+  "currency_note": "> Ecosystem facts verified as of 2026-07.",
+  "packages": [
+    {
+      "name": "typescript",
+      "documented_major": 4,
+      "role": "language",
+      "where": "references/config-strict.md (useUnknownInCatchVariables, TS 4.4+); references/type-system.md (in/out variance annotations, TypeScript 4.7+). The skill never anchors a TS 5 feature, so its newest documented floor is the 4.x line."
+    },
+    {
+      "name": "zod",
+      "documented_major": 3,
+      "role": "runtime validation (default choice)",
+      "where": "SKILL.md (Runtime Validation); references/ecosystem.md (z.infer, z.discriminatedUnion, z.coerce). z.object/.infer/.discriminatedUnion/.coerce are the Zod 3+ surface."
+    },
+    {
+      "name": "valibot",
+      "documented_major": 0,
+      "role": "runtime validation (tree-shakeable alt)",
+      "where": "references/ecosystem.md (v.pipe, v.InferOutput, v.safeParse, v.picklist). Valibot shipped as 0.x through the period this skill was written."
+    }
+  ]
+}
