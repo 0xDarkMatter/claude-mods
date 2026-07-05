@@ -213,8 +213,8 @@ option{background:var(--panel); color:var(--ink)}
 .gridoverlay.on{opacity:1}
 .layer{position:absolute; inset:0; display:grid; place-items:center; filter:drop-shadow(var(--float-shadow))}
 .inner{will-change:transform; transform-origin:center center; display:grid; place-items:center}
-#art,#artBase{display:block; overflow:visible}
-#art svg,#artBase svg{display:block; max-width:none}
+#art,#artBase,#mesh{display:block; overflow:visible}
+#art svg,#artBase svg,#mesh svg{display:block; max-width:none}
 .artwrap{}
 
 .emptyState{position:absolute; inset:0; display:grid; place-items:center; text-align:center; pointer-events:none; padding:40px}
@@ -233,6 +233,11 @@ option{background:var(--panel); color:var(--ink)}
 .split .divider{display:block}
 .split .baseWrap{display:block}
 .baseWrap{display:none}
+/* vector-mesh overlay layer — its OWN .layer (not inside #art) so the tone-map /
+   photographic filter chain and the .layer drop-shadow never touch the wireframe;
+   pointer-events off so Inspect's elementFromPoint still reads the artwork under it. */
+.meshWrap{display:none; pointer-events:none; filter:none}
+.meshWrap.on{display:grid}
 
 .hud{position:absolute; top:14px; right:14px; display:flex; gap:6px; align-items:center; z-index:8;
   background:var(--glass); backdrop-filter:blur(8px); border:1px solid var(--line2); border-radius:999px; padding:4px; box-shadow:var(--shadow)}
@@ -276,6 +281,7 @@ option{background:var(--panel); color:var(--ink)}
     <span class="chip" id="srcchip">no source</span>
     <button class="tbtn" id="undoBtn" title="Undo source change (Ctrl+Z)" disabled>↶ Undo</button>
     <button class="tbtn" id="splitBtn" title="Before / after split">◑ Split</button>
+    <button class="tbtn" id="meshBtn" title="Vector mesh — cycle: off / overlay / mesh only (M)">◈ Mesh</button>
     <button class="tbtn" id="inspectBtn" title="Hover to inspect elements">⊹ Inspect</button>
     <button class="tbtn" id="themeBtn" title="Light / petrol theme">◐ Theme</button>
     <button class="tbtn" id="resetBtn" title="Reset all controls">↺ Reset</button>
@@ -292,6 +298,7 @@ option{background:var(--panel); color:var(--ink)}
         <div class="gridoverlay" id="grid"></div>
         <div class="layer baseWrap" id="baseWrap"><div class="inner" id="baseInner"><div id="artBase"></div></div></div>
         <div class="layer artWrap" id="artWrap"><div class="inner" id="artInner"><div id="art"></div></div></div>
+        <div class="layer meshWrap" id="meshWrap"><div class="inner" id="meshInner"><div id="mesh"></div></div></div>
         <div class="hoverbox" id="hoverbox"></div>
         <div class="tip" id="tip"></div>
         <div class="divider" id="divider"></div>
@@ -327,7 +334,7 @@ option{background:var(--panel); color:var(--ink)}
    inline trace mirror keeps file:// fully functional (see TRACE).
 
    Sections (grep "=== NAME ==="): HELPERS · DATA · STATE · RAIL · APPLY ·
-   VIEW · INSPECT · SOURCE · TRACE · EXPORT · UTIL · BOOT
+   VIEW · INSPECT · MESH · SOURCE · TRACE · EXPORT · UTIL · BOOT
    ═══════════════════════════════════════════════════════════════════════ */
 // === HELPERS ===
 const $ = s => document.querySelector(s);
@@ -352,7 +359,7 @@ function traceReco(w,h){
   if(L<500)        { regime='low';   msg=`Low-res (${L}px) — traced at ~${workLong}px, but detail is source-limited. For best results, use 1000px+.`; }
   else if(L<1000)  { regime='fair';  msg=`${L}px source. Good — 1000px+ gives the crispest edges.`; }
   else if(L<=2000) { regime='ideal'; msg=`${L}px source — ideal resolution for tracing.`; }
-  else             { regime='high';  msg=`High-res (${L}px) — traced at a capped ~${workLong}px working res for speed and clean edges.`; }
+  else             { regime='high';  msg=`High-res (${L}px) — traced at a capped ~${workLong}px working res for speed. Raise Trace res toward native for max fidelity (slower).`; }
   return {target,superF,workLong,regime,warn,msg};
 }
 
@@ -633,7 +640,7 @@ function buildGeo(p){
   const fh=el('button',{class:'btn ghost'+(S.flipH?' primary':'')},'⇋ Flip H'); fh.onclick=()=>{S.flipH=!S.flipH;fh.classList.toggle('primary',S.flipH);apply();scheduleSave();};
   const fv=el('button',{class:'btn ghost'+(S.flipV?' primary':'')},'⇵ Flip V'); fv.onclick=()=>{S.flipV=!S.flipV;fv.classList.toggle('primary',S.flipV);apply();scheduleSave();};
   r.append(fh,fv); p.append(el('div',{class:'lbl'},'Mirror'),r);
-  ctlTog(p,tog('stripSize','Strip fixed width/height'),()=>{ if(SRC.svg){applySvgSizing(); fitView();} });
+  ctlTog(p,tog('stripSize','Strip fixed width/height'),()=>{ if(SRC.svg){applySvgSizing(); fitView(); rebuildMesh();} });
   p.append(el('div',{class:'hint'},'Stripping the root <code>width/height</code> lets the SVG scale fluidly to any container.'));
 }
 
@@ -705,6 +712,8 @@ function applyNow(){
   }
   const bsvg=base.querySelector('svg');
   if(bsvg){ bsvg.style.transform=artTransform(); bsvg.style.filter='none'; }
+  const msvg=$('#mesh').querySelector('svg');
+  if(msvg) msvg.style.transform=artTransform();   // geometry (rot/flip/scale) tracks the art; filters never do
   updateView();
   updateReadout();
 }
@@ -790,16 +799,18 @@ function applySizeScale(svg){
 /* ═══ VIEW — zoom / pan / split ══════════════════════════════════════ */
 function updateView(){
   const t=`translate(${S.panx}px,${S.pany}px) scale(${S.zoom})`;
-  $('#artInner').style.transform=t; $('#baseInner').style.transform=t;
+  $('#artInner').style.transform=t; $('#baseInner').style.transform=t; $('#meshInner').style.transform=t;
   $('#stage').classList.toggle('split',S.split);
   const vp=$('#viewport').getBoundingClientRect();
   const dx=vp.width*S.splitPct;
   $('#divider').style.left=dx+'px';
-  $('#artWrap').style.clipPath=S.split?`inset(0 ${vp.width-dx}px 0 0)`:'none';
+  const clip=S.split?`inset(0 ${vp.width-dx}px 0 0)`:'none';
+  $('#artWrap').style.clipPath=clip; $('#meshWrap').style.clipPath=clip;   // mesh clips with the "after" side
   const zp=Math.round(S.zoom*100)+'%';
   const lv=$('#zlv'); if(lv)lv.textContent=zp;
   const rz=$('#roZoom'); if(rz)rz.textContent=zp;   // keep the readout zoom in sync (cheap)
-  const pad=S.pad; $('#art').style.padding=$('#artBase').style.padding=pad+'px';
+  const pad=S.pad; $('#art').style.padding=$('#artBase').style.padding=$('#mesh').style.padding=pad+'px';
+  updateMeshScale();
 }
 function fitView(){ S.zoom=1; S.panx=0; S.pany=0; updateView(); }
 function updateReadout(){
@@ -868,7 +879,7 @@ function setupViewport(){
     if((e.ctrlKey||e.metaKey)&&(e.key==='z'||e.key==='Z')){ e.preventDefault(); undo(); return; }
     if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;
     if(e.key==='f'){fitView();} else if(e.key==='+'||e.key==='='){zoomTo(S.zoom*1.25);} else if(e.key==='-'){zoomTo(S.zoom/1.25);}
-    else if(e.key==='i'){toggleInspect();} else if(e.key==='s'){toggleSplit();}
+    else if(e.key==='i'){toggleInspect();} else if(e.key==='s'){toggleSplit();} else if(e.key==='m'){toggleMesh();}
   });
 }
 
@@ -912,6 +923,118 @@ function buildElementList(){
   });
 }
 function flashEl(n){ const o=n.style.outline; n.style.transition='opacity .1s'; let i=0; const iv=setInterval(()=>{ n.style.opacity=(i%2?1:0.2); if(++i>5){clearInterval(iv);n.style.opacity=1;} },110); highlightEl(n); }
+
+// === MESH ===
+/* ═══ VECTOR MESH — Illustrator-style wireframe + anchor squares ═════
+   Three-state toggle (#meshBtn): 0 artwork · 1 artwork + mesh overlay · 2 mesh
+   only. The mesh is a stroked CLONE of the displayed svg living in its own layer
+   (#meshWrap) so the tone-map/photographic filter chain on #art never touches it.
+   Strokes stay 1px on screen via vector-effect:non-scaling-stroke; node squares
+   stay MESH_NODE_PX on screen via ONE inherited --mk CSS var (the inverse of the
+   user-unit→screen scale), refreshed on zoom by updateMeshScale(). Ephemeral view
+   state like Inspect — not persisted in S. */
+const MESH_STROKE='#4a90d9', MESH_NODE_FILL='#ffffff', MESH_NODE_STROKE='#1d3d5c';
+const MESH_NODE_PX=5;          // on-screen node square size (px), zoom-invariant
+const MESH_MAX_NODES=20000;    // marker cap — a dense trace can carry 10k+ anchors
+let meshState=0;
+
+/* Absolute endpoint of every command in a path `d` — the anchor points.
+   Handles M/L/H/V/C/S/Q/T/A/Z, absolute + relative; control points are skipped
+   (Illustrator marks anchors, not handles). The trace engine emits M/L/C/Z. */
+function pathAnchors(d){
+  const pts=[]; if(!d) return pts;
+  let x=0,y=0,sx=0,sy=0, m;
+  const cmds=/([MmLlHhVvCcSsQqTtAaZz])([^MmLlHhVvCcSsQqTtAaZz]*)/g;
+  const NUM=/-?(?:\d*\.\d+|\d+\.?\d*)(?:[eE][+-]?\d+)?/g;
+  const STEP={m:2,l:2,t:2,h:1,v:1,c:6,s:4,q:4,a:7};
+  while((m=cmds.exec(d))!==null){
+    const low=m[1].toLowerCase(), rel=(m[1]===low);
+    if(low==='z'){ x=sx; y=sy; continue; }
+    const v=(m[2].match(NUM)||[]).map(Number), step=STEP[low];
+    for(let i=0;i+step<=v.length;i+=step){
+      if(low==='h') x=rel?x+v[i]:v[i];
+      else if(low==='v') y=rel?y+v[i]:v[i];
+      else { const ex=v[i+step-2], ey=v[i+step-1]; x=rel?x+ex:ex; y=rel?y+ey:ey; }
+      if(low==='m'&&i===0){ sx=x; sy=y; }
+      pts.push([x,y]);
+    }
+  }
+  return pts;
+}
+
+/* Wireframe twin of `srcSvg`: every shape restyled fill:none + thin stroke, plus
+   square anchor markers. Styling is INLINE per element — a <style> inside an
+   inline SVG leaks document-wide (same trap scopedCSSRules documents). Marker
+   rects use CSS transform translate(user units) + scale(var(--mk)) so a single
+   var update rescales every node; markers append to each shape's PARENT so group
+   transforms keep them glued to their path. */
+function buildMeshSvg(srcSvg){
+  const NS='http://www.w3.org/2000/svg';
+  const mesh=srcSvg.cloneNode(true);
+  mesh.removeAttribute('id');
+  mesh.querySelectorAll('style,script,defs,filter').forEach(n=>n.remove());
+  const line='fill:none;stroke:'+MESH_STROKE+';stroke-width:1;stroke-linejoin:round;vector-effect:non-scaling-stroke;opacity:1;filter:none';
+  mesh.querySelectorAll('path,rect,circle,ellipse,line,polygon,polyline,text,tspan,image')
+    .forEach(s=>{ s.removeAttribute('filter'); s.setAttribute('style',line); });
+  const groups=new Map();          // parent -> marker <g>, appended LAST = nodes on top
+  let count=0;
+  const put=(parent,ax,ay)=>{
+    if(count>=MESH_MAX_NODES||!isFinite(ax)||!isFinite(ay))return; count++;
+    let g=groups.get(parent); if(!g){ g=document.createElementNS(NS,'g'); groups.set(parent,g); }
+    const r=document.createElementNS(NS,'rect');
+    r.setAttribute('x',-2.5); r.setAttribute('y',-2.5); r.setAttribute('width',5); r.setAttribute('height',5);
+    r.setAttribute('style','fill:'+MESH_NODE_FILL+';stroke:'+MESH_NODE_STROKE+';stroke-width:1;vector-effect:non-scaling-stroke;'
+      +'transform:translate('+ax+'px,'+ay+'px) scale(var(--mk,1))');   // px == user units in svg CSS transforms
+    g.append(r);
+  };
+  mesh.querySelectorAll('path').forEach(p=>{ const par=p.parentNode; pathAnchors(p.getAttribute('d')).forEach(a=>put(par,a[0],a[1])); });
+  mesh.querySelectorAll('polygon,polyline').forEach(p=>{ const par=p.parentNode;
+    const v=((p.getAttribute('points')||'').match(/-?(?:\d*\.\d+|\d+\.?\d*)(?:[eE][+-]?\d+)?/g)||[]).map(Number);
+    for(let i=0;i+1<v.length;i+=2)put(par,v[i],v[i+1]); });
+  mesh.querySelectorAll('line').forEach(l=>{ const par=l.parentNode;
+    put(par,+l.getAttribute('x1')||0,+l.getAttribute('y1')||0); put(par,+l.getAttribute('x2')||0,+l.getAttribute('y2')||0); });
+  mesh.querySelectorAll('rect').forEach(rc=>{ const par=rc.parentNode;   // marker rects aren't attached yet — only artwork rects match
+    const x=+rc.getAttribute('x')||0, y=+rc.getAttribute('y')||0, w=+rc.getAttribute('width')||0, h=+rc.getAttribute('height')||0;
+    if(w&&h){ put(par,x,y); put(par,x+w,y); put(par,x+w,y+h); put(par,x,y+h); } });
+  groups.forEach((g,parent)=>parent.append(g));
+  return mesh;
+}
+
+function toggleMesh(){
+  if(meshState===0 && !$('#art').querySelector('svg')){ toast('Load an SVG (or trace a raster) first'); return; }
+  meshState=(meshState+1)%3;
+  syncMeshUI(); rebuildMesh();
+}
+function syncMeshUI(){
+  const b=$('#meshBtn');
+  b.classList.toggle('on',meshState>0);
+  b.textContent = meshState===2?'◈ Mesh only' : meshState===1?'◈ Mesh over' : '◈ Mesh';
+  $('#meshWrap').classList.toggle('on',meshState>0);
+  $('#artWrap').style.visibility = meshState===2?'hidden':'';
+}
+/* Rebuild the wireframe from the CURRENTLY displayed svg — call after any source
+   change (setSVG / trace / undo / stripSize). No-op while the mesh is off. */
+function rebuildMesh(){
+  const host=$('#mesh'); host.innerHTML='';
+  if(meshState===0) return;
+  const src=$('#art').querySelector('svg');
+  if(!src){ meshState=0; syncMeshUI(); return; }   // raster-only source — nothing to mesh
+  const m=buildMeshSvg(src);
+  m.style.filter='none'; m.style.opacity=1;
+  m.style.transform=artTransform();
+  host.append(m);
+  updateView();
+}
+/* --mk = inverse of the user-unit→screen scale, so node squares render
+   MESH_NODE_PX regardless of viewport zoom / artScale / viewBox fit.
+   getScreenCTM folds all of those in; hypot(a,b) is rotation-safe. */
+function updateMeshScale(){
+  if(meshState===0)return;
+  const ms=$('#mesh').querySelector('svg'); if(!ms)return;
+  const ctm=ms.getScreenCTM(); if(!ctm)return;
+  const k=Math.hypot(ctm.a,ctm.b)||1;
+  ms.style.setProperty('--mk',(MESH_NODE_PX/5)/k);   // marker rects are 5 user units at scale 1
+}
 
 // === SOURCE ===
 /* ═══ SOURCE LOADING ═════════════════════════════════════════════════ */
@@ -959,6 +1082,7 @@ function setSVG(text,opts){
   $('#empty').style.display='none';
   srcChip(); refreshMeta(); buildElementList();
   fitView(); apply();
+  rebuildMesh();   // the wireframe mirrors the CURRENT svg (trace / undo / paste)
   if(S.font) loadSvgFont(S.font);
 }
 const pxLen=v=>{ const m=/^\s*([\d.]+)\s*(px)?\s*$/.exec(v||''); return m?parseFloat(m[1]):0; };  // px/unit-less only
@@ -991,6 +1115,7 @@ function setRaster(dataURL,opts){
     $('#art').querySelector('img').style.filter='none';
     toast('Raster loaded — open Image Trace to vectorise'); traceNote(); updateTraceReco();
     updateReadout();
+    rebuildMesh();   // raster preview has no vectors — clears + disarms the mesh
   };
   img.src=dataURL;
 }
@@ -1425,6 +1550,7 @@ function resetAll(){ if(!confirm('Reset all controls to defaults?'))return; S=st
 $('#resetBtn').onclick=resetAll;
 $('#inspectBtn').onclick=toggleInspect;
 $('#splitBtn').onclick=toggleSplit;
+$('#meshBtn').onclick=toggleMesh;
 $('#undoBtn').onclick=undo; updateUndoBtn();
 // chrome theme: E7 light (default) ↔ petrol dark — a token swap on <html data-theme>
 function applyChromeTheme(t){ document.documentElement.dataset.theme=t; try{localStorage.setItem('svgstudio-theme',t);}catch{} }

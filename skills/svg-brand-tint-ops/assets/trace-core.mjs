@@ -135,12 +135,25 @@ export const DEFAULTS = {
                             warning the UI surfaces.)
      • source in-band     → trace at NATIVE (superF≈1). Already resolved;
                             upsampling only bloats path counts and is slower.
-     • source > WORK_MAX  → downsample DOWN to the ceiling (superF < 1). A 2000px+
-                            source is already detailed; tracing it at full native
-                            chases the AA/JPEG staircase (path explosion + noise)
-                            and costs ~(L/WORK_MAX)² more. Clamping the working
-                            res DOWN bounds both. This is exactly why the naive
-                            "clamp superF ≥ 1" is wrong at the top end.
+     • source > WORK_MAX  → downsample DOWN to the ceiling (superF < 1). This is
+                            a COST/STABILITY bound, NOT a quality optimum: measured
+                            fidelity improves monotonically all the way to native
+                            (GTA 3840 MAE@1400 3.09 at the ceiling → 1.28 native;
+                            holds even on JPEG-noisy sources), and native traces
+                            yield the FEWEST near-duplicate layers — the fringe
+                            layers come from the interpolated downsample itself
+                            (which preblur then fights), not from native AA. The
+                            ceiling stands because (a) cost ≈ working pixels (GTA
+                            native 42s vs 5.5s at 1400) and (b) the frozen bench
+                            tuning is only guard-stable in-band: WORK_MAX 1500/
+                            1600/1800 broke the acceptance guard non-monotonically
+                            at colors=12 (maddocks recall resonance, afic phantom
+                            explosion, gta anomaly). Callers wanting max fidelity
+                            on a clean hi-res source can force superF=1 (--super 1)
+                            and pay the time. Full validation sweep:
+                            references/ai-upscale-investigation.md §5. The naive
+                            "clamp superF ≥ 1" is still wrong at the top end —
+                            on cost, not quality.
 
    superF = clamp(target/L, SUPER_MIN, SUPER_MAX), target = clamp(L, WORK_MIN,
    WORK_MAX). Callers scale every geometry knob by sK = max(superF,1)/2 (see
@@ -151,7 +164,7 @@ export const DEFAULTS = {
    (×superF, ×superF²): they're output-px semantics (a speck is a speck in the
    final SVG regardless of working res). */
 export const WORK_MIN = 640;    // working-res floor  — the engine's tuned reference long edge
-export const WORK_MAX = 1400;   // working-res ceiling — bounds cost + AA-noise tracing on hi-res
+export const WORK_MAX = 1400;   // working-res ceiling — cost + bench-guard-stability bound (not a quality optimum; see block above)
 export const SUPER_MAX = 4;     // never upsample past 4× (past ~2–3× invents nothing)
 export const SUPER_MIN = 0.2;   // never downsample past 0.2× (gigapixel guard)
 export function pickSuperF(w, h) {
@@ -172,7 +185,7 @@ export function traceResInfo(w, h) {
   if (L < 500)        { regime = 'low';   message = `Low-res (${L}px): supersampled ${superF.toFixed(2)}× to ~${workLong}px, but detail is source-limited. For best results, use 1000px+.`; }
   else if (L < 1000)  { regime = 'fair';  message = `${L}px → ${workLong}px working. Good; 1000px+ gives the crispest edges.`; }
   else if (L <= 2000) { regime = 'ideal'; message = `${L}px → ${workLong}px working. Ideal resolution for tracing.`; }
-  else                { regime = 'high';  message = `High-res (${L}px): downsampled to ~${workLong}px working (${superF.toFixed(2)}×) to bound cost and keep edges clean.`; }
+  else                { regime = 'high';  message = `High-res (${L}px): downsampled to ~${workLong}px working (${superF.toFixed(2)}×) to bound cost. Forcing native (super 1) gives the highest fidelity, slower.`; }
   return { superF, workLong, regime, warnLowRes, message };
 }
 
