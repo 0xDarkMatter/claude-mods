@@ -7,90 +7,100 @@
 <style>
   :root { color-scheme: light dark;
     --bg:#fafaf8; --card:#fff; --border:#e4e2dd; --text:#1a1a17; --muted:#8a887f;
-    --run:#378add; --ok:#1d9e75; --bad:#e24b4a; --cache:#b4b2a9; }
+    --run:#378add; --ok:#1d9e75; --bad:#e24b4a; --idle:#d3d1c7; }
   @media (prefers-color-scheme: dark) { :root {
-    --bg:#1c1c1a; --card:#262624; --border:#3a3936; --text:#ececea; --muted:#8f8d85; } }
+    --bg:#1c1c1a; --card:#262624; --border:#3a3936; --text:#ececea; --muted:#8f8d85; --idle:#444441; } }
   * { box-sizing:border-box; margin:0; }
-  body { background:var(--bg); color:var(--text); padding:20px;
-    font:14px/1.5 "Segoe UI", "Helvetica Neue", ui-sans-serif, sans-serif; }
-  .shell { max-width:760px; margin:0 auto; }
-  .head { background:var(--card); border:1px solid var(--border); border-radius:12px;
-    padding:14px 18px; margin-bottom:14px; }
-  .head h1 { font-size:16px; font-weight:500; }
-  .meta { color:var(--muted); font-size:13px; margin-top:2px; display:flex; gap:14px; }
-  .pips { display:flex; gap:4px; margin-top:10px; }
-  .pip { width:22px; height:6px; border-radius:3px; background:var(--border); }
-  .pip.run { background:var(--run); animation:pulse 1.2s ease-in-out infinite; }
-  .pip.done { background:var(--ok); } .pip.failed { background:var(--bad); }
-  @keyframes pulse { 50% { opacity:.35 } }
-  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:12px; }
-  .agent { background:var(--card); border:1px solid var(--border); border-radius:12px; }
-  .agent summary { list-style:none; cursor:pointer; padding:12px 14px; }
+  body { background:var(--bg); color:var(--text); padding:16px;
+    font:12px/1.45 "Segoe UI", "Helvetica Neue", ui-sans-serif, sans-serif; }
+  .mono { font-family:ui-monospace, "Cascadia Code", Consolas, monospace; }
+  .shell { max-width:720px; margin:0 auto; }
+  .head { background:var(--card); border:1px solid var(--border); border-radius:8px;
+    padding:10px 12px; margin-bottom:10px; }
+  .head-row { display:flex; align-items:baseline; gap:10px; }
+  .head h1 { font-size:13px; font-weight:600; letter-spacing:.01em; }
+  .meta { color:var(--muted); font-size:11px; margin-left:auto; }
+  .sq-row { display:flex; gap:3px; margin-top:8px; }
+  .sq { width:8px; height:8px; border-radius:1.5px; background:var(--idle); }
+  .sq.running { background:var(--run); animation:pulse 1.1s ease-in-out infinite; }
+  .sq.done { background:var(--ok); } .sq.failed { background:var(--bad); }
+  @keyframes pulse { 50% { opacity:.3 } }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:8px; }
+  .agent { background:var(--card); border:1px solid var(--border); border-radius:8px; }
+  .agent summary { list-style:none; cursor:pointer; padding:8px 10px; }
   .agent summary::-webkit-details-marker { display:none; }
-  .row1 { display:flex; align-items:center; gap:8px; }
-  .dot { width:9px; height:9px; border-radius:50%; flex:none; }
-  .dot.running { background:var(--run); animation:pulse 1.2s ease-in-out infinite; }
-  .dot.done { background:var(--ok); } .dot.failed { background:var(--bad); }
-  .id { font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .brain { margin-left:auto; font-size:11px; color:var(--muted); border:1px solid var(--border);
-    border-radius:9px; padding:1px 8px; flex:none; }
-  .stats { display:flex; gap:14px; color:var(--muted); font-size:12px; margin-top:6px; }
-  .detail { border-top:1px solid var(--border); padding:10px 14px; font-size:12px;
-    color:var(--muted); display:grid; gap:6px; }
-  .detail b { color:var(--text); font-weight:500; }
-  .act { font-family:ui-monospace, Consolas, monospace; font-size:11px;
-    overflow-wrap:anywhere; }
+  .row1 { display:flex; align-items:center; gap:7px; }
+  .row1 .sq { flex:none; }
+  .id { font-weight:600; font-size:12px; }
+  .brain { margin-left:auto; font-size:10px; color:var(--muted); text-transform:uppercase;
+    letter-spacing:.06em; }
+  .cols { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:4px; margin-top:7px;
+    font-size:11px; color:var(--muted); }
+  .cols b { display:block; color:var(--text); font-weight:500; font-size:11px; }
+  .detail { border-top:1px solid var(--border); padding:7px 10px; font-size:11px;
+    color:var(--muted); display:grid; gap:4px; }
+  .detail .k { color:var(--text); }
   .err { color:var(--bad); }
-  .foot { color:var(--muted); font-size:12px; margin-top:12px; text-align:right; }
+  .foot { color:var(--muted); font-size:10px; margin-top:10px; display:flex;
+    justify-content:space-between; }
 </style>
 </head>
 <body>
 <div class="shell">
   <div class="head">
-    <h1 id="run">fleetflow</h1>
-    <div class="meta"><span id="agents"></span><span id="elapsed"></span></div>
-    <div class="pips" id="pips"></div>
+    <div class="head-row"><h1 id="run">fleetflow</h1><span class="meta mono" id="meta"></span></div>
+    <div class="sq-row" id="sqs"></div>
   </div>
   <div class="grid" id="grid"></div>
-  <div class="foot" id="foot">waiting for status.json…</div>
+  <div class="foot mono"><span id="foot">waiting for status.json…</span><span id="ts"></span></div>
 </div>
 <script>
-const fmt = s => s >= 3600 ? Math.floor(s/3600)+"h "+Math.floor(s%3600/60)+"m"
-  : s >= 60 ? Math.floor(s/60)+"m "+(s%60)+"s" : s+"s";
+const fmt = s => s >= 3600 ? Math.floor(s/3600)+"h"+String(Math.floor(s%3600/60)).padStart(2,"0")+"m"
+  : s >= 60 ? Math.floor(s/60)+"m"+String(s%60).padStart(2,"0")+"s" : s+"s";
+const tok = n => !n ? "—" : n >= 1e6 ? (n/1e6).toFixed(1)+"M" : n >= 1e3 ? (n/1e3).toFixed(1)+"k" : String(n);
 const esc = t => (t||"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const open = new Set();
+let misses = 0;
 async function tick() {
   let d;
-  try { d = await (await fetch("status.json?t="+Date.now())).json(); }
-  catch (e) { document.getElementById("foot").textContent = "status.json unreachable — is ff-status --watch running?"; return; }
-  document.getElementById("run").textContent = "fleetflow — " + d.run;
+  try { d = await (await fetch("status.json?t="+Date.now())).json(); misses = 0; }
+  catch (e) {
+    if (++misses >= 3) document.getElementById("foot").textContent =
+      "status.json unreachable — is ff-status --watch running?";
+    return;
+  }
   const lanes = d.lanes || [];
   const running = lanes.filter(l => l.state === "running").length;
-  document.getElementById("agents").textContent =
-    lanes.length + " agent" + (lanes.length === 1 ? "" : "s") + (running ? " · " + running + " running" : " · all finished");
+  document.getElementById("run").textContent = d.run;
   const oldest = Math.min(...lanes.map(l => l.started).filter(Boolean));
-  document.getElementById("elapsed").textContent = oldest ? fmt(d.generated_at - oldest) : "";
-  document.getElementById("pips").innerHTML =
-    lanes.map(l => `<div class="pip ${l.state === "running" ? "run" : l.state}"></div>`).join("");
+  document.getElementById("meta").textContent =
+    lanes.length + " agents · " + (running ? running + " running" : "finished") +
+    (oldest ? " · " + fmt(d.generated_at - oldest) : "");
+  document.getElementById("sqs").innerHTML =
+    lanes.map(l => `<div class="sq ${l.state}" title="${esc(l.id)}"></div>`).join("");
   document.getElementById("grid").innerHTML = lanes.map(l => `
     <details class="agent" data-id="${esc(l.id)}" ${open.has(l.id) ? "open" : ""}>
       <summary>
-        <div class="row1"><span class="dot ${l.state}"></span>
-          <span class="id">${esc(l.id)}</span><span class="brain">${esc(l.brain)}</span></div>
-        <div class="stats"><span>${fmt(l.elapsed_s)}</span>
-          <span>${l.tools || 0} tools</span><span>${l.commits || 0} commits</span>
-          ${l.tokens ? `<span>${l.tokens >= 1e6 ? (l.tokens/1e6).toFixed(1)+"M" : (l.tokens/1000).toFixed(1)+"k"} tok</span>` : ""}</div>
+        <div class="row1"><span class="sq ${l.state}"></span>
+          <span class="id mono">${esc(l.id)}</span><span class="brain mono">${esc(l.brain)}</span></div>
+        <div class="cols mono">
+          <span><b>${fmt(l.elapsed_s)}</b>time</span>
+          <span><b>${l.tools || "—"}</b>tools</span>
+          <span><b>${l.commits || "—"}</b>commits</span>
+          <span><b>${tok(l.tokens)}</b>tokens</span>
+        </div>
       </summary>
-      <div class="detail">
-        <div class="act"><b>activity</b> ${esc(l.activity)}</div>
-        ${l.last_commit ? `<div><b>last commit</b> ${esc(l.last_commit)}</div>` : ""}
+      <div class="detail mono">
+        <div><span class="k">act</span> ${esc(l.activity)}</div>
+        ${l.last_commit ? `<div><span class="k">git</span> ${esc(l.last_commit)}</div>` : ""}
         ${l.err_tail ? `<div class="err">${esc(l.err_tail)}</div>` : ""}
-        <div><b>artifact</b> ${esc((l.artifact||"pending").split(/[\\/]/).pop())}</div>
+        <div><span class="k">out</span> ${esc((l.artifact||"pending").split(/[\\/]/).pop())}</div>
       </div>
     </details>`).join("");
   document.querySelectorAll("details.agent").forEach(el =>
     el.addEventListener("toggle", () => el.open ? open.add(el.dataset.id) : open.delete(el.dataset.id)));
-  document.getElementById("foot").textContent = "updated " + new Date().toLocaleTimeString();
+  document.getElementById("foot").textContent = d.repo;
+  document.getElementById("ts").textContent = new Date().toLocaleTimeString();
 }
 tick(); setInterval(tick, 2500);
 </script>
