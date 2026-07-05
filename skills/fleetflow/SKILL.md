@@ -224,6 +224,7 @@ default the script-author follows, not an option — and real runs routinely hit
 | [scripts/ff-status.sh](scripts/ff-status.sh) | run status as JSON (lane state, elapsed, commits, tools, tokens, activity, manifest summary); `--watch N --out status.json` feeds the live monitor |
 | [scripts/ff-run.sh](scripts/ff-run.sh) | `resume --run NAME` replays every manifest packet through ff-spawn in order (unchanged = cached, changed/new = live); `status --run NAME` aliases ff-status |
 | [scripts/ff-clean.sh](scripts/ff-clean.sh) | `--run NAME [--force]` reclaims zero-commit lanes (worktree remove + branch -D), keeps committed lanes, removes the run's cache dirs; reports locked ACL-litter dirs |
+| [scripts/ff-import.sh](scripts/ff-import.sh) | `--wf DIR --run NAME` imports a native Claude Code Workflow run dir (`wf_*/`) — completed agents become lanes (prompt + result envelope + journal + manifest), started-only agents are flagged incomplete; native keys are terminal, not replayable |
 
 **Live monitor** ([assets/ff-monitor.html](assets/ff-monitor.html)): a
 zero-dependency page reproducing the native /workflows progress surface — run
@@ -244,6 +245,29 @@ moment-in-time render by design, re-emitted rather than self-updating.
 All follow the Skill Resource Protocol: stdout is data, chatter on stderr,
 semantic exit codes (`0` ok, `2` usage, `3` cached/missing, `7` unreachable,
 `10` worker failed, `12` escape detected), `--help` with EXAMPLES.
+
+## Importing a native Workflow run
+
+`ff-import --wf <wf_*/> --run <name>` reads a native Claude Code Workflow run
+directory — its `journal.jsonl` (`started`/`result` records with `v2:` hash
+keys and `agentId`) plus per-agent `agent-<id>.jsonl` transcripts — and lands
+each completed agent as a fleetflow lane: the agent's first user-role message
+(string content or content-array-with-text-blocks, both handled) becomes
+`<id>.prompt.txt`, its native `result` object becomes `<id>.result.json`
+(`{is_error:false, result:<native-result>|tojson}`), and a `native`-brain
+packet is appended to the manifest (`imported_from: <DIR>`) for provenance.
+Agents with a `started` but no `result` get a prompt file only and are
+reported `incomplete` on stdout's TSV — respawn candidates.
+
+**Caveat — imported results are terminal facts, not a replayable cache.** The
+native `v2:` keys are content hashes of the *native* `(prompt, opts)` call, not
+fleetflow's `sha256(brain+prompt+opts)`, and `native` is not a spawnable brain
+— so `ff-run resume` **skips** native packets rather than replaying them (it
+reports each `imported` and exits 0). The native script's control flow
+(pipeline/barrier/loop) is not recovered either. To continue from an imported
+result, spawn a fresh lane with a real brain and paste the imported result into
+its packet (the hub-and-spoke handoff). Use import for salvage, provenance, and
+visual continuity in the monitor — not to resume native work in place.
 
 ## References
 
