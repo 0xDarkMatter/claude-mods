@@ -58,6 +58,13 @@ OpenAI's agent harness, non-interactive. Flag map (codex-cli 0.125.0):
   `index.lock: Permission denied` under `--full-auto`. `ff-spawn` fixes this
   by passing `--add-dir <absolute-git-dir>` for codex worktree lanes; if you
   launch codex by hand, add it yourself (or use a full clone as the lane).
+- **Sandbox litter gotcha** (observed 2026-07-05): codex's sandbox creates
+  pytest temp/cache dirs (`.pytest-tmp/`, `pytest-cache-files-*/`) with
+  AppContainer ACLs that survive the run and resist unelevated deletion —
+  even `takeown` + `icacls /reset` fail. Consequences: `git worktree remove`
+  leaves a husk, and moving the repo needs a copy-around (`robocopy /XD`).
+  Mitigations: have codex packets run pytest with `-p no:cacheprovider` and a
+  tmp dir inside the lane, or plan on one elevated `Remove-Item` at cleanup.
 - **Skill-loading quirk** (observed 2026-07-05): codex reads Claude-format
   skills from `~/.agents/skills/` at session start and rejects any whose
   description exceeds **1024 chars** (`failed to load skill … exceeds maximum
