@@ -1,0 +1,23 @@
+{
+  "_comment": "Canonical fast-moving facts the tailwind-ops skill encodes. scripts/check-tailwind-facts.py asserts SKILL.md + references name these consistently (--offline) and probes the npm registry for major-version drift (--live). Edit deliberately: a change here is a skill-content decision, not housekeeping. documented_major is the major the skill's prose commits to (tailwindcss 4) or the current tracked major for ecosystem packages the prose names without pinning a version.",
+  "schema": "claude-mods.tailwind-ops.facts/v1",
+  "as_of": "2026-07-05",
+  "tailwind_major": 4,
+  "version_gates": {
+    "_comment": "Tailwind v4 CSS-first directives the skill centers on. --offline asserts each token is named in SKILL.md/references prose; a missing token means the prose stopped teaching a v4 feature it claims.",
+    "css_first_theme": "@theme",
+    "plugin_directive": "@plugin",
+    "config_directive": "@config",
+    "v4_import": "@import \"tailwindcss\"",
+    "v4_major": "v4"
+  },
+  "packages": {
+    "tailwindcss":                     { "documented_major": 4, "prose": ["tailwindcss"],                    "role": "core (v4 CSS-first engine)" },
+    "@tailwindcss/postcss":            { "documented_major": 4, "prose": ["@tailwindcss/postcss"],           "role": "PostCSS plugin (v4)" },
+    "@tailwindcss/vite":               { "documented_major": 4, "prose": ["@tailwindcss/vite"],              "role": "Vite plugin (v4, faster)" },
+    "@tailwindcss/upgrade":            { "documented_major": 4, "prose": ["@tailwindcss/upgrade"],           "role": "v3->v4 codemod CLI" },
+    "@tailwindcss/typography":         { "documented_major": 0, "prose": ["@tailwindcss/typography"],        "role": "prose content plugin" },
+    "@tailwindcss/forms":              { "documented_major": 0, "prose": ["@tailwindcss/forms"],             "role": "form reset plugin" },
+    "@tailwindcss/container-queries":  { "documented_major": 0, "prose": ["@tailwindcss/container-queries"], "role": "container-queries plugin (v3; native in v4)" }
+  }
+}

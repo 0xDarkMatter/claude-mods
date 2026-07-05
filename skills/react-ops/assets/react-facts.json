@@ -1,0 +1,28 @@
+{
+  "_comment": "Canonical fast-moving facts the react-ops skill encodes. scripts/check-react-facts.py asserts SKILL.md + references name these consistently (--offline) and probes the npm registry for major-version drift (--live). Edit deliberately: a change here is a skill-content decision, not housekeeping. documented_major is the major the skill's prose commits to (react/react-dom/next) or the current tracked major for ecosystem libs the prose names without pinning a version.",
+  "schema": "claude-mods.react-ops.facts/v1",
+  "as_of": "2026-07-05",
+  "react_major": 19,
+  "version_gates": {
+    "_comment": "React 19 APIs the skill centers on. --offline asserts each token is named in SKILL.md/references prose; a missing token means the skill stopped teaching a React 19 feature it claims.",
+    "use": "use(",
+    "actions": "Actions",
+    "use_action_state": "useActionState",
+    "use_form_status": "useFormStatus",
+    "use_optimistic": "useOptimistic",
+    "react_compiler": "React Compiler"
+  },
+  "packages": {
+    "react":              { "documented_major": 19, "prose": ["react"],              "role": "core (React 19)" },
+    "react-dom":          { "documented_major": 19, "prose": ["react-dom"],          "role": "DOM host (useFormStatus, createRoot)" },
+    "next":               { "documented_major": 16, "prose": ["Next.js"],            "role": "App Router / RSC host" },
+    "zustand":            { "documented_major": 5,  "prose": ["Zustand"],            "role": "client state" },
+    "jotai":              { "documented_major": 2,  "prose": ["Jotai"],              "role": "atomic client state" },
+    "@reduxjs/toolkit":   { "documented_major": 2,  "prose": ["Redux Toolkit"],      "role": "complex client state" },
+    "@tanstack/react-query": { "documented_major": 5, "prose": ["TanStack Query"],   "role": "server state" },
+    "react-hook-form":    { "documented_major": 7,  "prose": ["React Hook Form"],    "role": "form state" },
+    "zod":                { "documented_major": 4,  "prose": ["Zod"],                "role": "schema validation" },
+    "@testing-library/react": { "documented_major": 16, "prose": ["@testing-library/react"], "role": "component testing" },
+    "vitest":             { "documented_major": 4,  "prose": ["vitest"],             "role": "test runner" }
+  }
+}

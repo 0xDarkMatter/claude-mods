@@ -12,6 +12,8 @@ metadata:
 
 Comprehensive Vue 3 reference covering Composition API, Pinia, Vue Router, Nuxt 3, and testing — production patterns with TypeScript throughout.
 
+> Vue 3 / Nuxt 3 ecosystem facts verified as of 2026-07.
+
 ---
 
 ## Reactivity Decision Tree
@@ -450,6 +452,25 @@ What rendering strategy does my app need?
 | [./references/state-routing.md](./references/state-routing.md) | Pinia advanced patterns (plugins, SSR, store composition), Vue Router (guards, meta typing, scroll behavior, transitions) |
 | [./references/nuxt.md](./references/nuxt.md) | Nuxt 3 data fetching, server routes, middleware, plugins, modules, SEO, deployment, Nuxt Content |
 | [./references/testing.md](./references/testing.md) | Vitest setup, Vue Test Utils, Pinia/Router testing, composable testing, MSW, Playwright, Nuxt test utils |
+
+## Staleness Verifier
+
+This skill encodes fast-moving facts (the Vue 3 minor-version gates, the Nuxt 3
+meta-framework, the ecosystem package stack). [`scripts/check-vue-facts.py`](scripts/check-vue-facts.py)
+guards them against silent drift — internal consistency in PR CI, live
+major-version drift in the scheduled freshness job:
+
+```bash
+# Structural (PR CI, no network): every catalogued package + Vue version gate is
+# still named in this skill's prose, and the currency note still carries a year.
+python3 skills/vue-ops/scripts/check-vue-facts.py --offline        # exit 0 consistent, 10 drift
+
+# Live (weekly freshness job, never blocks a PR): is any documented major
+# now behind npm's latest dist-tag? (e.g. Nuxt 4 while the prose says Nuxt 3.)
+python3 skills/vue-ops/scripts/check-vue-facts.py --live           # exit 10 a major moved ahead, 7 npm unreachable
+```
+
+The canonical fact list lives in [`assets/vue-facts.json`](assets/vue-facts.json); when you add or drop a recommendation or the prose stops naming one, update it to match or `--offline` fails CI.
 
 ---
 
