@@ -1,6 +1,7 @@
 ---
 name: api-design-ops
 description: "API design patterns for REST, gRPC, and GraphQL. Use for: api design, REST, gRPC, GraphQL, protobuf, schema design, api versioning, pagination, rate limiting, error format, OpenAPI, API authentication, JWT, OAuth2, API gateway, webhook, idempotency."
+when_to_use: "Use when designing an API's contract and shape across REST, gRPC, or GraphQL — e.g. 'how should I version this API', 'design pagination and error envelopes (RFC 7807)', 'GraphQL vs gRPC tradeoffs', 'add idempotency keys to POST'. Reach for rest-ops to implement a specific REST endpoint, auth-ops for login/token flows."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
