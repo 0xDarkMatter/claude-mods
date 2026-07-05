@@ -12,13 +12,13 @@
 
 > *A comprehensive extension toolkit that transforms Claude Code into a specialized development powerhouse.*
 
-**claude-mods** is a production-ready plugin that extends Claude Code with 99 specialized skills, 3 expert agents, 13 output styles, 13 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
+**claude-mods** is a production-ready plugin that extends Claude Code with 100 specialized skills, 3 expert agents, 13 output styles, 13 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
 
 Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms), claude-mods fills critical gaps in Claude Code's capabilities: persistent session state that survives across machines, on-demand expert knowledge for specialized domains, token-efficient modern CLI tools (10-100x faster than traditional alternatives), and proven workflow patterns for TDD, code review, and feature development. The toolkit implements Anthropic's [recommended patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), ensuring your development context never vanishes when sessions end.
 
 From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
 
-**3 agents. 99 skills. 13 styles. 13 hooks. 8 rules. One install.**
+**3 agents. 100 skills. 13 styles. 13 hooks. 9 rules. One install.**
 
 ## Recent Updates
 
@@ -300,6 +300,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [fleet-worker](skills/fleet-worker/) | Delegate tasks to cheap headless GLM (or any Anthropic-compatible) workers - per-task git worktree + isolated config, result gating, fan-out that hands winning branches to fleet-ops landing |
 | [summon](skills/summon/) | Claude Desktop session toolbox - cross-account transfer, recovery picker, cwd rebind, store doctor |
 | [doc-scanner](skills/doc-scanner/) | Scan and synthesize project documentation |
+| [repo-doctor](skills/repo-doctor/) | Audit any repo against the agentic-quality doctrine - entry docs, comment contracts, structure, enforcement gates, doc-pairing; scorer with --json + CI --strict, plus comment-doctrine / entry-docs / monorepo-structure references |
 | [adr-ops](skills/adr-ops/) | Architecture Decision Records - when-to-write, canonical format, supersession lifecycle, scaffold/index/lint tools |
 | [okf-ops](skills/okf-ops/) | Open Knowledge Format - assess a doc repo's frontmatter-readiness, validate a bundle for conformance, decide per-repo adoption |
 | [project-planner](skills/project-planner/) | Track stale plans, suggest session commands |
@@ -411,6 +412,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [supply-chain.md](rules/supply-chain.md) | Behavioural-first dependency hygiene - scan before adding, day-zero cooldown, OIDC audit, persistence-hook awareness |
 | [worktree-boundaries.md](rules/worktree-boundaries.md) | Never touch other sessions' worktrees - no rm -rf, no git add -A sweeping gitlinks |
 | [loop-engineering.md](rules/loop-engineering.md) | Graduated-autonomy discipline for scheduled/autonomous agent loops - L1→L2→L3, scheduler-not-session, escalation gate, kill switch + budget; companion to loop-ops |
+| [agentic-quality.md](rules/agentic-quality.md) | Code, comments, and structure that survive the session - cold-agent test, comment doctrine (contract blocks, WHY-only, guard comments), entry-doc standard, file-size discipline, docs indexing + pairing; companion to repo-doctor |
 
 ### Tools & Hooks
 

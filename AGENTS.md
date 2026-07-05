@@ -4,8 +4,8 @@
 
 This is **claude-mods** - a collection of custom extensions for Claude Code:
 - **3 expert agents** for pure context-isolation/worker roles (git-agent, firecrawl-expert, project-organizer) - every domain-knowledge agent became an `-ops` skill (v3.0, skills-first)
-- **2 commands** for session management (/sync, /save)
-- **99 skills** for CLI tools, patterns, workflows, and development tasks (incl. `svg-brand-tint-ops` for zero-dep in-browser SVG brand-recolour + Potrace-stage raster vectorising, `r-ops` for tidyverse-first modern R / data analysis, `loop-ops` for outer-loop design discipline, `ffmpeg-ops` for probe-first media processing and EDL-driven editing, `supply-chain-defense` for behavioural-first dependency security, `prompt-injection-defense` for instruction-integrity scanning, `pypi-ops` for OIDC Trusted Publishing to PyPI, `net-ops` for network troubleshooting, `windows-ops` / `mac-ops` for workstation diagnostics, `fleet-worker` for cheap parallel worker delegation)
+- **3 commands** for session management and git orchestration (/sync, /save, /git-ops)
+- **100 skills** for CLI tools, patterns, workflows, and development tasks (incl. `repo-doctor` for agentic-quality repo audits, `svg-brand-tint-ops` for zero-dep in-browser SVG brand-recolour + Potrace-stage raster vectorising, `r-ops` for tidyverse-first modern R / data analysis, `loop-ops` for outer-loop design discipline, `ffmpeg-ops` for probe-first media processing and EDL-driven editing, `supply-chain-defense` for behavioural-first dependency security, `prompt-injection-defense` for instruction-integrity scanning, `pypi-ops` for OIDC Trusted Publishing to PyPI, `net-ops` for network troubleshooting, `windows-ops` / `mac-ops` for workstation diagnostics, `fleet-worker` for cheap parallel worker delegation)
 - **13 output styles** for response personality (Vesper, Spartan, Mentor, Executive, Pair, Atlas, Coach, Harbour, Meridian, Noir, Roast, Sage, Scout)
 - **13 hooks** for pre-commit linting, post-edit formatting, dangerous command warnings, uv enforcement, dependency-install + manifest-edit supply-chain advisories, hidden-Unicode scanning (session-start + pre-commit), live config-change + worktree guards, mid-session peer-writer guard + touched-files ledger, and pmail notifications - security set auto-wired via plugin hooks.json
 - **Pigeon** inter-session messaging (`pigeon send/read/reply`) - SQLite-backed pmail at `~/.claude/pmail.db`
@@ -34,7 +34,7 @@ cd claude-mods && ./scripts/install.sh  # or .\scripts\install.ps1 on Windows
 | `skills/` | Skill definitions with SKILL.md |
 | `output-styles/` | Response personalities (13 styles incl. vesper, atlas, noir, roast, scout) |
 | `hooks/` | Working hook scripts (lint, format, safety, pmail) |
-| `rules/` | Claude Code rules (7 files: cli-tools, commit-style, naming-conventions, prompt-injection, skill-agent-updates, supply-chain, worktree-boundaries) |
+| `rules/` | Claude Code rules (9 files: agentic-quality, cli-tools, commit-style, loop-engineering, naming-conventions, prompt-injection, skill-agent-updates, supply-chain, worktree-boundaries) |
 | `tools/` | Modern CLI toolkit documentation |
 | `tests/` | Validation scripts + justfile |
 | `scripts/` | Install scripts |

@@ -5,6 +5,26 @@ All notable changes to claude-mods are documented here. Format follows
 [Semantic Versioning](https://semver.org/). Fuller narrative entries for
 feature releases live in the README "Recent Updates" section.
 
+## [Unreleased]
+
+### Added
+- **`agentic-quality` rule** - cross-repo doctrine for code, comments, docs, and
+  structure that survive the session: the cold-agent test, comment doctrine
+  (contract blocks, WHY-only inline, guard comments, section markers,
+  format-at-site, citations), entry-doc standard (AGENTS.md + Landmines,
+  CLAUDE.md deltas-only, nesting policy), file-size discipline, docs indexing,
+  doc-commit pairing, and monorepo directives. Grounded in a 10-repo audit.
+- **`repo-doctor` skill** - read-only auditor scoring any repo against the
+  doctrine across six weighted dimensions (entry docs, docs health, comments,
+  structure, enforcement, doc pairing) with a TTY panel, `--json` envelope
+  (`claude-mods.repo-doctor/v1`), and `--strict` CI gate. Ships four references
+  (comment-doctrine, entry-docs, monorepo-structure, scoring-rubric), AGENTS.md +
+  docs-index templates, and a 10-assertion offline suite.
+
+### Fixed
+- AGENTS.md / docs/PLAN.md command counts (2 → 3; the `/git-ops` command was
+  never counted) and the stale AGENTS.md rules-directory listing.
+
 ## [3.6.0] - 2026-07-04
 
 ### Added
