@@ -12,22 +12,28 @@
 #             12 escape detected
 set -u
 
+FF_VERSION="1.1.0"
+
 usage() {
   cat <<'EOF'
-Usage: ff-collect.sh --run NAME --id ID [--repo PATH] [--schema]
+Usage: ff-collect.sh --run NAME --id ID [--repo PATH] [--schema] [--repair]
        ff-collect.sh --check-main-clean [--repo PATH] [--run NAME]
 
   --run NAME           run name
   --id ID              lane id to gate
   --repo PATH          repo root (default: git toplevel of cwd)
   --schema             the lane used a JSON schema: require the final text to
-                       parse as JSON
+                       parse as JSON (markdown code fences are stripped first)
+  --repair             on --schema failure: save the bad output to
+                       <run>/<id>.invalid.txt and respawn a <id>-repair lane
+                       (one attempt); print the repaired text on success
   --check-main-clean   escape guard - compare the MAIN checkout's git status
                        against the run's baseline; exit 12 on new entries
 
 EXAMPLES
   ff-collect.sh --run audit --id ts-refresh
   ff-collect.sh --run audit --id dissent-1 --schema
+  ff-collect.sh --run audit --id verdict --schema --repair
   ff-collect.sh --check-main-clean --run audit
 EOF
 }

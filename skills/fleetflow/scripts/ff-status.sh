@@ -11,6 +11,8 @@
 # Exit codes: 0 ok | 2 usage
 set -u
 
+FF_VERSION="1.1.0"
+
 usage() {
   cat <<'EOF'
 Usage: ff-status.sh --run NAME [--repo PATH] [--out FILE] [--watch SECONDS]
@@ -103,8 +105,13 @@ emit() {
               commits:$commits,tools:$tools,tokens:$tokens,activity:$activity,
               last_commit:$last_c,artifact:$art,err_tail:$etail}]')"
   done
+  local manifest="null"
+  if [ -f "$RUNDIR/manifest.json" ]; then
+    manifest="$(jq -c '{packet_count:(.packets|length), phases:(.phases // [])}' "$RUNDIR/manifest.json" 2>/dev/null)"
+  fi
   jq -nc --arg run "$RUN" --arg repo "$REPO" --argjson now "$now" --argjson lanes "$lanes" \
-    '{run:$run,repo:$repo,generated_at:$now,lanes:$lanes}'
+    --argjson manifest "${manifest:-null}" \
+    '{run:$run,repo:$repo,generated_at:$now,lanes:$lanes,manifest:$manifest}'
 }
 
 if [ -n "$WATCH" ]; then
