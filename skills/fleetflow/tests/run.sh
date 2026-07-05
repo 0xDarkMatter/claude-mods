@@ -142,6 +142,51 @@ SA="$(bash "$S/ff-run.sh" status --run r2 --repo "$REPO" 2>/dev/null | jq -c '{r
 SB="$(bash "$S/ff-status.sh" --run r2 --repo "$REPO" 2>/dev/null | jq -c '{run,lanes:[.lanes[].id]}')"
 [ "$SA" = "$SB" ] && ok "ff-run status aliases ff-status" || bad "ff-run status != ff-status"
 
+# --- schema fence-strip (feature 3) --------------------------------------------
+# a result whose text is fenced JSON must still validate (--schema strips fences)
+jq -nc '{is_error:false,result:"```json\n{\"verdict\":\"ok\"}\n```"}' > "$REPO/.fleetflow/r1/fence.result.json"
+jq -nc '{type:"result",key:"v2:fence",id:"fence",brain:"sonnet",rc:0,artifact:"x"}' >> "$REPO/.fleetflow/r1/journal.jsonl"
+FOUT="$(bash "$S/ff-collect.sh" --run r1 --id fence --repo "$REPO" --schema 2>/dev/null)"; FRC=$?
+[ "$FRC" = "0" ] && ok "collect: fence-strip lets fenced JSON validate" || bad "collect: fence-strip failed rc=$FRC"
+printf '%s' "$FOUT" | jq -e '.verdict=="ok"' >/dev/null && ok "collect: fence-strip returns inner JSON" || bad "collect: fence-strip output wrong"
+
+# --- schema --repair seam (feature 3) ------------------------------------------
+# bad result + FLEETFLOW_REPAIR_DRYRUN: do_repair saves <id>.invalid.txt and
+# respawns a <id>-repair lane. The dry-run lane replies "DRYRUN" (not JSON), so
+# the repair gate fails -> exit 10; we assert the SEAM fired, not a happy path.
+jq -nc '{is_error:false,result:"this is not json"}' > "$REPO/.fleetflow/r1/rp.result.json"
+jq -nc '{type:"result",key:"v2:rp",id:"rp",brain:"sonnet",rc:0,artifact:"x"}' >> "$REPO/.fleetflow/r1/journal.jsonl"
+FLEETFLOW_REPAIR_DRYRUN=1 bash "$S/ff-collect.sh" --run r1 --id rp --repo "$REPO" --schema --repair >/dev/null 2>&1; RPRC=$?
+[ "$RPRC" = "10" ] && ok "collect: --repair exits 10 when corrected output invalid" || bad "collect: --repair rc=$RPRC (want 10)"
+[ -f "$REPO/.fleetflow/r1/rp.invalid.txt" ] && ok "collect: --repair saved <id>.invalid.txt" || bad "collect: invalid.txt missing"
+NREP="$(jq -r 'select(.type=="result" and .id=="rp-repair")|.id' "$REPO/.fleetflow/r1/journal.jsonl" | wc -l | tr -d ' ')"
+[ "$NREP" -ge 1 ] && ok "collect: --repair respawned rp-repair lane" || bad "collect: no repair lane spawned"
+grep -q 'corrected JSON' "$REPO/.fleetflow/r1/rp-repair.prompt-src.txt" 2>/dev/null \
+  && ok "collect: --repair lane got the corrective prompt" || bad "collect: repair prompt missing"
+
+# --- FF_VERSION in journal (feature 4) -----------------------------------------
+grep -q '"v":"1.1.0"' "$REPO/.fleetflow/r1/journal.jsonl" && ok "journal records FF_VERSION 1.1.0" || bad "journal missing FF_VERSION"
+# every operational script pins the same version (version-skew spine)
+VS=0
+for s in ff-spawn.sh ff-collect.sh ff-status.sh ff-doctor.sh ff-run.sh; do
+  grep -q '^FF_VERSION="1.1.0"$' "$S/$s" || VS=1
+done
+[ "$VS" = "0" ] && ok "all scripts pin FF_VERSION=1.1.0" || bad "version skew across scripts"
+
+# --- effort lever (feature 5): effort is part of the cache key ------------------
+EP="$TMP/effort.txt"; echo "effort test. FINAL REPLY: e" > "$EP"
+check "spawn: effort lane first run -> 0" 0 bash "$S/ff-spawn.sh" --run r3 --id e --brain sonnet --prompt-file "$EP" --repo "$REPO" --dry-run
+check "spawn: effort lane identical -> cached" 3 bash "$S/ff-spawn.sh" --run r3 --id e --brain sonnet --prompt-file "$EP" --repo "$REPO" --dry-run
+# changing ONLY the effort must bust the cache (effort is baked into the OPTS key)
+check "spawn: effort change -> cache miss" 0 bash "$S/ff-spawn.sh" --run r3 --id e --brain sonnet --prompt-file "$EP" --repo "$REPO" --dry-run --effort high
+jq -e '.packets[]|select(.id=="e")|.effort=="high"' "$REPO/.fleetflow/r3/manifest.json" >/dev/null \
+  && ok "manifest records effort=high" || bad "manifest effort field wrong"
+
+# --- cache/tmp redirect (feature 7) --------------------------------------------
+CRT="$TMP/ffcache"; CDP="$TMP/cdp.txt"; echo "cache test. FINAL REPLY: c" > "$CDP"
+FLEETFLOW_CACHE_ROOT="$CRT" bash "$S/ff-spawn.sh" --run r4 --id c --brain sonnet --prompt-file "$CDP" --repo "$REPO" --dry-run >/dev/null 2>&1
+[ -d "$CRT/r4-c" ] && ok "spawn: cache dir created under FLEETFLOW_CACHE_ROOT" || bad "spawn: cache dir not redirected to FLEETFLOW_CACHE_ROOT"
+
 echo "=== $PASS passed, $FAILN failed ==="
 [ "$FAILN" = 0 ] || exit 1
 exit 0
