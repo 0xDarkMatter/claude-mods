@@ -72,7 +72,7 @@ The script prints a structured report and exits with:
 | **ripgrep** (required) | Regex fallback layer + forbidden-file scan | Usually pre-installed; `winget install BurntSushi.ripgrep.MSVC` / `brew install ripgrep` |
 | **git** ≥ 2.30 | Core operations | Standard |
 
-Both secret layers must pass: gitleaks detects known token formats with a maintained corpus; the regex layer catches generic `password = "..."` / DSN / connection-string patterns that gitleaks may miss. See `references/secret-patterns.txt` for the regex corpus.
+Both secret layers must pass: gitleaks detects known token formats with a maintained corpus; the regex layer catches generic `password = "..."` / DSN / connection-string patterns that gitleaks may miss. See `references/secret-patterns.txt` for the regex corpus. Gitleaks runs with `references/gitleaks-config.toml` (default rule set + an allowlist for public-by-design tokens, e.g. Mapbox `pk.*`); if that file is absent, the scan falls back to gitleaks' built-in default config.
 
 ## Trigger phrases
 
@@ -103,4 +103,5 @@ The regex layer filters common false positives automatically (env-var references
 | `scripts/preflight.sh` | Main orchestration (Steps 1–8) |
 | `scripts/scan-secrets.sh` | Gitleaks + regex layer (Step 6) |
 | `references/secret-patterns.txt` | Regex corpus + false-positive filter words |
+| `references/gitleaks-config.toml` | Gitleaks config: default rules + public-token allowlist (used by `scan-secrets.sh` when present) |
 | `assets/` | (empty; reserved for future report templates) |

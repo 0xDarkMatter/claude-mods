@@ -401,13 +401,6 @@ command -v delta >/dev/null 2>&1 && git diff --cached | delta || git diff --cach
 
 ---
 
-## Reference Files
-
-For framework-specific checks, see:
-- `framework-checks.md` - React, TypeScript, Python, Go, Rust, Vue, SQL patterns
-
----
-
 ## Integration
 
 | Command | Relationship |

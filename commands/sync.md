@@ -288,8 +288,8 @@ Run `/auto-skill` to capture a workflow, or `auto-skill clear` to dismiss.
 | Category | Items |
 |----------|-------|
 | **Commands** | /save, /sync, /review, /testgen... |
-| **Skills** | 30 available |
-| **Agents** | 23 available |
+| **Skills** | N available |
+| **Agents** | N available |
 
 ## Next Steps
 

@@ -3,7 +3,7 @@
 **Goal**: A centralized repository of custom Claude Code commands, agents, and skills that enhance Claude Code's native capabilities with persistent session state, specialized expert agents, and streamlined workflows.
 
 **Created**: 2025-11-27
-**Last Updated**: 2026-06-10
+**Last Updated**: 2026-07-05
 **Status**: Active Development
 
 > Historical record of what shipped lives in [CHANGELOG.md](../CHANGELOG.md) and the
@@ -33,9 +33,9 @@ Counts are enforced by the CI doc-drift gate (see roadmap) — if this table rot
 - [x] README skill/hook/rule tables match disk (24 missing skills added)
 - [x] Remove ghost references (`rules/thinking.md`, `docs/DASH.md`)
 - [x] Rename `tests/skills/functional/git-workflow.*` → `git-cli-tools.*`
-- [ ] `CHANGELOG.md` (keep-a-changelog format, seeded from Recent Updates)
-- [ ] CI: doc-drift gate (counts on disk vs README claims, ghost-link check)
-- [ ] CI: run every `skills/*/tests/run.sh` behavioural suite
+- [x] `CHANGELOG.md` (keep-a-changelog format, seeded from Recent Updates)
+- [x] CI: doc-drift gate (counts on disk vs README claims, ghost-link check)
+- [x] CI: run every `skills/*/tests/run.sh` behavioural suite
 
 ### Phase 2 — Skills-first restructure (v3.0)
 
