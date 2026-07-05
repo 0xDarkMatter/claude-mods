@@ -26,7 +26,7 @@ git -C "$REPO" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
 PKT="$TMP/packet.txt"; echo "Do the thing. FINAL REPLY: one line." > "$PKT"
 
 # --- syntax + help ------------------------------------------------------------
-for s in ff-spawn.sh ff-collect.sh ff-doctor.sh ff-status.sh ff-run.sh ff-clean.sh; do
+for s in ff-spawn.sh ff-collect.sh ff-doctor.sh ff-status.sh ff-run.sh ff-clean.sh ff-import.sh; do
   bash -n "$S/$s" 2>/dev/null && ok "syntax $s" || bad "syntax $s"
   bash "$S/$s" --help 2>/dev/null | grep -q "EXAMPLES" && ok "$s --help has EXAMPLES" || bad "$s --help lacks EXAMPLES"
   check "$s --help exits 0" 0 bash "$S/$s" --help
@@ -173,7 +173,7 @@ grep -q 'corrected JSON' "$REPO/.fleetflow/r1/rp-repair.prompt-src.txt" 2>/dev/n
 grep -q '"v":"1.1.0"' "$REPO/.fleetflow/r1/journal.jsonl" && ok "journal records FF_VERSION 1.1.0" || bad "journal missing FF_VERSION"
 # every operational script pins the same version (version-skew spine)
 VS=0
-for s in ff-spawn.sh ff-collect.sh ff-status.sh ff-doctor.sh ff-run.sh; do
+for s in ff-spawn.sh ff-collect.sh ff-status.sh ff-doctor.sh ff-run.sh ff-clean.sh ff-import.sh; do
   grep -q '^FF_VERSION="1.1.0"$' "$S/$s" || VS=1
 done
 [ "$VS" = "0" ] && ok "all scripts pin FF_VERSION=1.1.0" || bad "version skew across scripts"
@@ -243,6 +243,54 @@ printf '%s\n' \
 bash "$S/ff-status.sh" --run r5 --repo "$REPO" 2>/dev/null \
   | jq -e '.lanes[]|select(.id=="z")|.state=="done"' >/dev/null \
   && ok "status: result-last lane is still done (no regression)" || bad "status: result-last state wrong"
+
+# --- ff-import.sh (feature B): native Workflow run import ------------------------
+# build a synthetic native wf_ dir: journal.jsonl (started/result keyed by
+# agentId) + two agent transcripts (one string content, one content-array).
+WFD="$TMP/wf_ab12cd34-ef"; mkdir -p "$WFD"
+printf '%s\n' \
+  '{"type":"started","key":"v2:aaaa","agentId":"a01cb5f01fadf5610"}' \
+  '{"type":"result","key":"v2:aaaa","agentId":"a01cb5f01fadf5610","result":{"verdict":"ok","score":7}}' \
+  '{"type":"started","key":"v2:bbbb","agentId":"a02deadbeef00000"}' \
+  > "$WFD/journal.jsonl"
+jq -nc '{type:"user",message:{role:"user",content:"Refute the claim that X is safe."}}' \
+  > "$WFD/agent-a01cb5f01fadf5610.jsonl"
+jq -nc '{type:"user",message:{role:"user",content:[{type:"text",text:"Find any bugs in module Y."}]}}' \
+  > "$WFD/agent-a02deadbeef00000.jsonl"
+IMP="$(bash "$S/ff-import.sh" --wf "$WFD" --run imp1 --repo "$REPO" 2>/dev/null)"; IRC=$?
+[ "$IRC" = "0" ] && ok "ff-import: exits 0 on import" || bad "ff-import: rc=$IRC"
+printf '%s' "$IMP" | awk -F'\t' '$1=="a01cb5f01fadf5610"&&$2=="imported"{f=1} END{exit !f}' \
+  && ok "ff-import: completed agent reported imported" || bad "ff-import: imported TSV wrong"
+printf '%s' "$IMP" | awk -F'\t' '$1=="a02deadbeef00000"&&$2=="incomplete"{f=1} END{exit !f}' \
+  && ok "ff-import: started-only agent reported incomplete" || bad "ff-import: incomplete TSV wrong"
+PC="$(printf '%s' "$IMP" | awk -F'\t' '$1=="a01cb5f01fadf5610"{print $3}')"
+[ -n "$PC" ] && [ "$PC" -gt 0 ] 2>/dev/null && ok "ff-import: prompt_chars > 0" || bad "ff-import: prompt_chars wrong ($PC)"
+IRD="$REPO/.fleetflow/imp1"
+[ -f "$IRD/a01cb5f01fadf5610.prompt.txt" ] && ok "ff-import: wrote prompt.txt (completed)" || bad "ff-import: prompt.txt missing"
+grep -q "Refute the claim" "$IRD/a01cb5f01fadf5610.prompt.txt" && ok "ff-import: prompt extracted (string content)" || bad "ff-import: string-content prompt wrong"
+grep -q "Find any bugs" "$IRD/a02deadbeef00000.prompt.txt" && ok "ff-import: prompt extracted (content array)" || bad "ff-import: array-content prompt wrong"
+[ -f "$IRD/a01cb5f01fadf5610.result.json" ] && ok "ff-import: wrote result.json (completed)" || bad "ff-import: result.json missing"
+[ ! -f "$IRD/a02deadbeef00000.result.json" ] && ok "ff-import: incomplete agent has no result.json" || bad "ff-import: incomplete got result.json"
+jq -e '.is_error==false and (.result|fromjson|.verdict=="ok" and .score==7)' "$IRD/a01cb5f01fadf5610.result.json" >/dev/null \
+  && ok "ff-import: result.json wraps native result (tojson)" || bad "ff-import: result.json shape wrong"
+NJ="$IRD/journal.jsonl"
+[ "$(jq -r 'select(.type=="result" and .id=="a01cb5f01fadf5610")|.brain' "$NJ")" = "native" ] \
+  && ok "ff-import: journal result brain=native" || bad "ff-import: journal brain wrong"
+# phase lives on the started record (same convention as ff-spawn), not the result
+[ "$(jq -r 'select(.type=="started" and .id=="a01cb5f01fadf5610")|.phase' "$NJ")" = "imported" ] \
+  && ok "ff-import: journal phase=imported" || bad "ff-import: journal phase wrong"
+[ -z "$(jq -r 'select(.type=="result" and .id=="a02deadbeef00000")' "$NJ")" ] \
+  && ok "ff-import: incomplete agent has no result record" || bad "ff-import: incomplete got a result record"
+jq -e --arg wf "$WFD" '.packets[]|select(.id=="a01cb5f01fadf5610")|.brain=="native" and .imported_from==$wf' "$IRD/manifest.json" >/dev/null \
+  && ok "ff-import: manifest packet brain=native + imported_from" || bad "ff-import: manifest packet wrong"
+# nothing to import -> exit 3
+WFE="$TMP/wf_empty"; mkdir -p "$WFE"; : > "$WFE/journal.jsonl"
+check "ff-import: empty wf journal -> 3" 3 bash "$S/ff-import.sh" --wf "$WFE" --run imp2 --repo "$REPO"
+# ff-run resume SKIPS imported native packets (terminal, not replayable)
+RRN="$(bash "$S/ff-run.sh" resume --run imp1 --repo "$REPO" 2>/dev/null)"; RCRR=$?
+[ "$RCRR" = "0" ] && ok "ff-run: resume skips native packets (exit 0)" || bad "ff-run: resume on imported run rc=$RCRR"
+printf '%s' "$RRN" | jq -e 'any(.[]; .id=="a01cb5f01fadf5610" and .status=="imported")' >/dev/null \
+  && ok "ff-run: native packet reported imported (skipped)" || bad "ff-run: native packet not skipped"
 
 echo "=== $PASS passed, $FAILN failed ==="
 [ "$FAILN" = 0 ] || exit 1

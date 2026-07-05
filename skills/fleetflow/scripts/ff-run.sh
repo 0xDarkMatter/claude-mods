@@ -87,6 +87,15 @@ i=0
 while [ "$i" -lt "$N" ]; do
   pid="$(printf '%s' "$PACKETS" | jq -r ".[$i].id")"
   pbrain="$(printf '%s' "$PACKETS" | jq -r ".[$i].brain")"
+  # imported native packets are terminal facts, not replayable ("native" is not a
+  # spawnable brain - ff-spawn rejects it). ff-run resume SKIPS them; to continue
+  # from an imported result, spawn a fresh lane with a real brain. See ff-import.
+  if [ "$pbrain" = "native" ]; then
+    err "  $((i+1))   $(printf '%-23s' "$pid")  native     imported (skipped)"
+    RESULTS="$(jq -nc --argjson R "$RESULTS" --arg id "$pid" --arg s "imported" --argjson rc 0 \
+      '$R + [{id:$id,status:$s,rc:$rc}]')"
+    i=$((i+1)); continue
+  fi
   pphase="$(printf '%s' "$PACKETS" | jq -r ".[$i].phase // \"build\"")"
   ppf="$(printf '%s' "$PACKETS" | jq -r ".[$i].prompt_file")"
   pwt="$(printf '%s' "$PACKETS" | jq -r ".[$i].worktree // false")"
