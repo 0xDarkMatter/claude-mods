@@ -18,7 +18,7 @@ Built on the [Agent Skills specification](https://agentskills.io/specification) 
 
 From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
 
-**3 agents. 100 skills. 13 styles. 13 hooks. 14 rules. One install.**
+**3 agents. 101 skills. 13 styles. 13 hooks. 14 rules. One install.**
 
 ## Recent Updates
 
@@ -298,6 +298,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [push-gate](skills/push-gate/) | Pre-push safety gate - gitleaks + regex secret scan, forbidden-file check, no bypass |
 | [fleet-ops](skills/fleet-ops/) | Manage a fleet of concurrent Claude sessions - landing queue with test gate, pre-land scrub (experimental) |
 | [fleet-worker](skills/fleet-worker/) | Delegate tasks to cheap headless GLM (or any Anthropic-compatible) workers - per-task git worktree + isolated config, result gating, fan-out that hands winning branches to fleet-ops landing |
+| [fleetflow](skills/fleetflow/) | Orchestrate a heterogeneous worker fleet - GLM (z.ai), Codex (OpenAI), and Anthropic Sonnet/Opus/Haiku process workers under a Fable/Opus orchestrator, porting the native Workflow tool's patterns (hash-keyed journal resume, pipeline-vs-barrier, adversarial verify, judge panels) with an escape guard baked in; ff-spawn / ff-collect / ff-doctor scripts |
 | [summon](skills/summon/) | Claude Desktop session toolbox - cross-account transfer, recovery picker, cwd rebind, store doctor |
 | [doc-scanner](skills/doc-scanner/) | Scan and synthesize project documentation |
 | [repo-doctor](skills/repo-doctor/) | Audit any repo against the agentic-quality doctrine - entry docs, comment contracts, structure, enforcement gates, doc-pairing; scorer with --json + CI --strict, plus comment-doctrine / entry-docs / monorepo-structure references |
