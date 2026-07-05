@@ -49,7 +49,7 @@ if command -v codex >/dev/null; then say "bin-codex" ok "$(codex --version 2>/de
 FW="${FLEETFLOW_FLEET_WORKER:-$HOME/.claude/skills/fleet-worker/scripts/fleet-worker}"
 if [ -f "$FW" ]; then say "fleet-worker" ok "$FW"; else say "fleet-worker" advisory "not installed - glm brain unavailable"; fi
 
-for s in ff-spawn.sh ff-collect.sh; do
+for s in ff-spawn.sh ff-collect.sh ff-status.sh; do
   if bash -n "$HERE/$s" 2>/dev/null; then say "syntax-$s" ok "parses"; else say "syntax-$s" fail "syntax error"; FAIL=1; fi
 done
 [ -f "$HERE/../assets/guard-preamble.txt" ] && say "guard-preamble" ok "present" || { say "guard-preamble" fail "missing"; FAIL=1; }

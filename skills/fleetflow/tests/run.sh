@@ -26,7 +26,7 @@ git -C "$REPO" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
 PKT="$TMP/packet.txt"; echo "Do the thing. FINAL REPLY: one line." > "$PKT"
 
 # --- syntax + help ------------------------------------------------------------
-for s in ff-spawn.sh ff-collect.sh ff-doctor.sh; do
+for s in ff-spawn.sh ff-collect.sh ff-doctor.sh ff-status.sh; do
   bash -n "$S/$s" 2>/dev/null && ok "syntax $s" || bad "syntax $s"
   bash "$S/$s" --help 2>/dev/null | grep -q "EXAMPLES" && ok "$s --help has EXAMPLES" || bad "$s --help lacks EXAMPLES"
   check "$s --help exits 0" 0 bash "$S/$s" --help
@@ -77,6 +77,16 @@ check "collect: codex last-message passes" 0 bash "$S/ff-collect.sh" --run r1 --
 check "collect: codex schema-valid JSON" 0 bash "$S/ff-collect.sh" --run r1 --id cx --repo "$REPO" --schema
 printf 'not json' > "$REPO/.fleetflow/r1/cx.last.txt"
 check "collect: codex schema-invalid fails" 10 bash "$S/ff-collect.sh" --run r1 --id cx --repo "$REPO" --schema
+
+# --- status feed --------------------------------------------------------------------
+check "status: no args" 2 bash "$S/ff-status.sh"
+check "status: watch without out" 2 bash "$S/ff-status.sh" --run r1 --repo "$REPO" --watch 3
+bash "$S/ff-status.sh" --run r1 --repo "$REPO" 2>/dev/null | jq -e '.lanes | length >= 2' >/dev/null \
+  && ok "status: emits lanes JSON" || bad "status: JSON invalid"
+bash "$S/ff-status.sh" --run r1 --repo "$REPO" 2>/dev/null | jq -e '.lanes[] | select(.id=="a") | .state=="done"' >/dev/null \
+  && ok "status: dry-run lane state done" || bad "status: lane state wrong"
+[ -f "$HERE/../assets/ff-monitor.html" ] && grep -q "status.json" "$HERE/../assets/ff-monitor.html" \
+  && ok "monitor asset present + polls status.json" || bad "monitor asset missing"
 
 # --- escape guard ------------------------------------------------------------------
 check "escape guard: clean main" 0 bash "$S/ff-collect.sh" --check-main-clean --run r1 --repo "$REPO"

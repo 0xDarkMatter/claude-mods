@@ -143,8 +143,12 @@ else
     codex)
       command -v codex >/dev/null || { err "codex CLI not found"; exit 5; }
       ART="$RUNDIR/$ID.last.txt"
+      # a worktree's git metadata lives in the MAIN repo's .git - outside the
+      # codex sandbox's writable root - so git commit fails without this carve-out
+      GITDIR=""; [ "$WORKTREE" = 1 ] && GITDIR="$(git -C "$REPO" rev-parse --absolute-git-dir)"
       ( cd "$WORKDIR" && \
         codex exec --full-auto --ephemeral --color never --json \
+          ${GITDIR:+--add-dir "$GITDIR"} \
           ${FLEETFLOW_CODEX_MODEL:+-m "$FLEETFLOW_CODEX_MODEL"} \
           ${SCHEMA:+--output-schema "$SCHEMA"} \
           -o "$ART" - < "$SENT" \
