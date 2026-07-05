@@ -3,25 +3,25 @@
   "schema": "claude-mods.typescript-ops.facts/v1",
   "as_of": "2026-07-05",
   "registry": "https://registry.npmjs.org",
-  "currency_note": "> Ecosystem facts verified as of 2026-07.",
+  "currency_note": "> Ecosystem facts verified as of 2026-07-05 (TypeScript 6, Zod 4, Valibot 1).",
   "packages": [
     {
       "name": "typescript",
-      "documented_major": 4,
+      "documented_major": 6,
       "role": "language",
-      "where": "references/config-strict.md (useUnknownInCatchVariables, TS 4.4+); references/type-system.md (in/out variance annotations, TypeScript 4.7+). The skill never anchors a TS 5 feature, so its newest documented floor is the 4.x line."
+      "where": "SKILL.md (Modern Language Features 5.x -> 6.0: satisfies, standard decorators, const type params, using, inferred predicates; TS 6.0 defaults section); references/config-strict.md (strict default in 6.0, removed module/moduleResolution options). Historical feature floors (TS 4.4+, 4.7+) remain as floors, not currency anchors."
     },
     {
       "name": "zod",
-      "documented_major": 3,
+      "documented_major": 4,
       "role": "runtime validation (default choice)",
-      "where": "SKILL.md (Runtime Validation); references/ecosystem.md (z.infer, z.discriminatedUnion, z.coerce). z.object/.infer/.discriminatedUnion/.coerce are the Zod 3+ surface."
+      "where": "SKILL.md (Runtime Validation (Zod 4): top-level z.email(), unified error param, zod/mini); references/ecosystem.md (z.uuid/z.email top-level formats, unified error param, discriminatedUnion, coerce)."
     },
     {
       "name": "valibot",
-      "documented_major": 0,
+      "documented_major": 1,
       "role": "runtime validation (tree-shakeable alt)",
-      "where": "references/ecosystem.md (v.pipe, v.InferOutput, v.safeParse, v.picklist). Valibot shipped as 0.x through the period this skill was written."
+      "where": "references/ecosystem.md (stable since 1.0; v.pipe, v.InferOutput, v.safeParse, v.picklist)."
     }
   ]
 }

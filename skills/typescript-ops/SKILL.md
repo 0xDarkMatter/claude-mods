@@ -12,7 +12,7 @@ metadata:
 
 Comprehensive TypeScript skill covering the type system, generics, and production patterns.
 
-> Ecosystem facts verified as of 2026-07.
+> Ecosystem facts verified as of 2026-07-05 (TypeScript 6, Zod 4, Valibot 1).
 
 **Staleness check:** `python scripts/check-typescript-facts.py --offline` asserts the
 catalogued version-bearing facts (TypeScript major, zod, valibot) are still named in the
@@ -162,21 +162,57 @@ type StringKeys<T> = {
 
 **Deep dive**: Load `./references/generics-patterns.md` for advanced type-level programming, recursive types, template literal types.
 
+## Modern Language Features (TypeScript 5.x → 6.0)
+
+| Feature | Since | What It Gives You |
+|---------|-------|-------------------|
+| `satisfies` operator | 4.9 | Check a value against a type without widening it |
+| Standard (TC39) decorators | 5.0 | `@decorator` on classes/methods without `experimentalDecorators` |
+| `const` type parameters | 5.0 | `function f<const T>(x: T)` infers literal types without `as const` at call sites |
+| `using` declarations | 5.2 | Explicit resource management (`Symbol.dispose`), auto-cleanup at scope exit |
+| Inferred type predicates | 5.5 | `arr.filter(x => x !== null)` narrows without a hand-written `x is T` guard |
+| `verbatimModuleSyntax` | 5.0 | Enforces `import type` for type-only imports — replaces `importsNotUsedAsValues` |
+
+```typescript
+// const type parameters (5.0) - literal inference without as const
+function routes<const T extends readonly string[]>(paths: T): T { return paths; }
+const r = routes(["/home", "/about"]); // readonly ["/home", "/about"], not string[]
+
+// using declarations (5.2) - deterministic cleanup
+function readConfig() {
+    using file = openFile("config.json"); // file[Symbol.dispose]() runs at scope exit
+    return parse(file.contents);
+}
+
+// Inferred type predicates (5.5) - no manual guard needed
+const names = ["a", null, "b"].filter(x => x !== null); // string[], not (string | null)[]
+```
+
+### TypeScript 6.0 (Current Major)
+
+TS 6.0 is the last release on the JavaScript-based compiler — it exists to bridge to the
+native (Go) compiler in TS 7, so its headline is stricter, modernised defaults:
+
+- **`strict: true` is the default** — a tsconfig that never set it now gets full strict checks
+- **Defaults modernised**: `module: esnext`, `target: es2025`; `es2025` lib ships types for Temporal, `Map.getOrInsert`, `RegExp.escape`
+- **Legacy options removed**: `moduleResolution: classic`; `module: amd/umd/system/none`; minimum `target` is now ES2015 (`es5` deprecated)
+- **Interop always on**: `esModuleInterop` / `allowSyntheticDefaultImports` can no longer be disabled
+- New `--stableTypeOrdering` flag eases 6.0 → 7.0 migration diffing
+
 ## tsconfig Quick Reference
 
 ```jsonc
 {
     "compilerOptions": {
-        // Strict mode (always enable)
+        // Strict mode (default in TS 6; state it explicitly anyway)
         "strict": true,               // Enables all strict checks
         "noUncheckedIndexedAccess": true,  // arr[0] is T | undefined
 
-        // Module system
+        // Module system (TS 6 defaults to module: esnext; interop is always on)
         "module": "esnext",           // or "nodenext" for Node
         "moduleResolution": "bundler", // or "nodenext"
-        "esModuleInterop": true,
 
-        // Output
+        // Output (TS 6 defaults target to es2025; min supported is es2015)
         "target": "es2022",
         "outDir": "dist",
         "declaration": true,          // Generate .d.ts
@@ -230,16 +266,16 @@ getUser(userId);   // OK
 getUser(orderId);  // Error: OrderId not assignable to UserId
 ```
 
-## Runtime Validation (Zod)
+## Runtime Validation (Zod 4)
 
 ```typescript
 import { z } from "zod";
 
-// Define schema
+// Define schema (Zod 4: string formats are top-level - z.email(), not z.string().email())
 const UserSchema = z.object({
     id: z.number(),
     name: z.string().min(1),
-    email: z.string().email(),
+    email: z.email(),
     role: z.enum(["admin", "user"]),
     settings: z.object({
         theme: z.enum(["light", "dark"]).default("light"),
@@ -253,6 +289,11 @@ type User = z.infer<typeof UserSchema>;
 const user = UserSchema.parse(untrustedData);       // throws on invalid
 const result = UserSchema.safeParse(untrustedData);  // returns { success, data/error }
 ```
+
+**Zod 4 changes to know** (if you learned Zod 3): string formats moved to the top level
+(`z.email()`, `z.uuid()`, `z.url()` — the `z.string().email()` method form is deprecated);
+error customisation unified under a single `error` param (`invalid_type_error` /
+`required_error` dropped); much faster parsing and a tree-shakeable `zod/mini` entry point.
 
 ## Reference Files
 

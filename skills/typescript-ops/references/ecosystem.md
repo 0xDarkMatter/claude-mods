@@ -17,16 +17,16 @@
 
 ### Use Zod for Schema Validation with Type Inference
 
-Zod is the most widely adopted runtime validation library. Define a schema once; infer the TypeScript type from it.
+Zod is the most widely adopted runtime validation library. Define a schema once; infer the TypeScript type from it. As of Zod 4, string formats are top-level functions (`z.email()`, `z.uuid()`, `z.url()`) — the Zod 3 method forms (`z.string().email()`) are deprecated.
 
 ```typescript
 import { z } from 'zod';
 
-// Define schema
+// Define schema (Zod 4 syntax)
 const UserSchema = z.object({
-  id: z.string().uuid(),
+  id: z.uuid(),
   name: z.string().min(1).max(100),
-  email: z.string().email(),
+  email: z.email(),
   age: z.number().int().min(0).max(150).optional(),
   role: z.enum(['admin', 'user', 'moderator']),
   createdAt: z.coerce.date(),
@@ -68,6 +68,10 @@ const EvenNumberSchema = z.number().refine(
   { message: 'Number must be even' }
 );
 
+// Custom error messages (Zod 4: one unified `error` param replaces
+// invalid_type_error / required_error / errorMap)
+const AgeSchema = z.number({ error: 'Age must be a number' }).int().min(0);
+
 // Discriminated union (Zod version)
 const ApiResponseSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('success'), data: z.unknown() }),
@@ -78,7 +82,7 @@ type ApiResponse = z.infer<typeof ApiResponseSchema>;
 
 ### Use Valibot as a Tree-Shakeable Alternative
 
-Valibot has an almost identical API to Zod but is tree-shakeable by design, resulting in much smaller bundles for edge/browser deployments.
+Valibot (stable since 1.0) covers the same ground as Zod but is tree-shakeable by design, resulting in much smaller bundles for edge/browser deployments. Zod 4's `zod/mini` entry point narrows the gap, but valibot's pipe composition remains the smallest-bundle option.
 
 ```typescript
 import * as v from 'valibot';
@@ -183,7 +187,7 @@ export const appRouter = t.router({
       }),
 
     create: t.procedure
-      .input(z.object({ name: z.string(), email: z.string().email() }))
+      .input(z.object({ name: z.string(), email: z.email() }))
       .mutation(async ({ input }) => {
         return await db.user.create({ data: input });
       }),
