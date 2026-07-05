@@ -1,5 +1,5 @@
 {
-  "_comment": "Canonical fast-moving facts the vue-ops skill encodes. scripts/check-vue-facts.py asserts SKILL.md + references name these consistently (--offline) and probes the npm registry for major-version drift (--live). Edit deliberately: a change here is a skill-content decision, not housekeeping. documented_major is the major the skill's prose commits to (vue 3, nuxt 3) or the current tracked major for ecosystem libs the prose names without pinning a version.",
+  "_comment": "Canonical fast-moving facts the vue-ops skill encodes. scripts/check-vue-facts.py asserts SKILL.md + references name these consistently (--offline) and probes the npm registry for major-version drift (--live). Edit deliberately: a change here is a skill-content decision, not housekeeping. documented_major is the major the skill's prose commits to (vue 3, nuxt 4) or the current tracked major for ecosystem libs the prose names without pinning a version.",
   "schema": "claude-mods.vue-ops.facts/v1",
   "as_of": "2026-07-05",
   "vue_major": 3,
@@ -8,11 +8,11 @@
     "define_model": "Vue 3.4",
     "define_options": "Vue 3.3",
     "use_template_ref": "Vue 3.5",
-    "nuxt_major": "Nuxt 3"
+    "nuxt_major": "Nuxt 4"
   },
   "packages": {
     "vue":               { "documented_major": 3, "prose": ["Vue 3"],              "role": "core (Composition API, <script setup>)" },
-    "nuxt":              { "documented_major": 3, "prose": ["Nuxt 3"],             "role": "meta-framework (SSR/SSG/ISR, App Router host)" },
+    "nuxt":              { "documented_major": 4, "prose": ["Nuxt 4"],             "role": "meta-framework (SSR/SSG/ISR, app/ srcDir host)" },
     "pinia":             { "documented_major": 3, "prose": ["pinia"],              "role": "store" },
     "vue-router":        { "documented_major": 5, "prose": ["vue-router"],         "role": "routing" },
     "@vueuse/core":      { "documented_major": 14, "prose": ["VueUse"],            "role": "composable collection" },

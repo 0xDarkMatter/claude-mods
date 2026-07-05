@@ -1,6 +1,6 @@
 ---
 name: vue-ops
-description: "Vue 3 development patterns, Composition API, Pinia state management, Vue Router, and Nuxt 3. Use for: vue, vuejs, composition api, pinia, vue router, nuxt, nuxt3, script setup, composable, reactive, defineProps, defineEmits, defineModel, v-model, provide inject, vue3."
+description: "Vue 3 development patterns, Composition API, Pinia state management, Vue Router, and Nuxt 4. Use for: vue, vuejs, composition api, pinia, vue router, nuxt, nuxt4, nuxt3, script setup, composable, reactive, defineProps, defineEmits, defineModel, v-model, provide inject, vue3."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
@@ -10,9 +10,9 @@ metadata:
 
 # Vue Operations
 
-Comprehensive Vue 3 reference covering Composition API, Pinia, Vue Router, Nuxt 3, and testing — production patterns with TypeScript throughout.
+Comprehensive Vue 3 reference covering Composition API, Pinia, Vue Router, Nuxt 4, and testing — production patterns with TypeScript throughout.
 
-> Vue 3 / Nuxt 3 ecosystem facts verified as of 2026-07.
+> Vue 3 / Nuxt 4 ecosystem facts verified as of 2026-07-05.
 
 ---
 
@@ -367,7 +367,11 @@ declare module 'vue-router' {
 
 ---
 
-## Nuxt 3 Decision Tree
+## Nuxt 4 Decision Tree
+
+Nuxt 4's flagship change over Nuxt 3 is the `app/` source directory (app code separated
+from `server/` and root config — see [./references/nuxt.md](./references/nuxt.md)); the
+rendering strategies below are unchanged.
 
 ```
 What rendering strategy does my app need?
@@ -450,12 +454,12 @@ What rendering strategy does my app need?
 |------|-------------|
 | [./references/composition-api.md](./references/composition-api.md) | Composables, provide/inject, template refs, custom directives, Teleport, Suspense, slots, transitions, v-model deep patterns |
 | [./references/state-routing.md](./references/state-routing.md) | Pinia advanced patterns (plugins, SSR, store composition), Vue Router (guards, meta typing, scroll behavior, transitions) |
-| [./references/nuxt.md](./references/nuxt.md) | Nuxt 3 data fetching, server routes, middleware, plugins, modules, SEO, deployment, Nuxt Content |
+| [./references/nuxt.md](./references/nuxt.md) | Nuxt 4 directory structure, data fetching, server routes, middleware, plugins, modules, SEO, deployment, Nuxt Content |
 | [./references/testing.md](./references/testing.md) | Vitest setup, Vue Test Utils, Pinia/Router testing, composable testing, MSW, Playwright, Nuxt test utils |
 
 ## Staleness Verifier
 
-This skill encodes fast-moving facts (the Vue 3 minor-version gates, the Nuxt 3
+This skill encodes fast-moving facts (the Vue 3 minor-version gates, the Nuxt 4
 meta-framework, the ecosystem package stack). [`scripts/check-vue-facts.py`](scripts/check-vue-facts.py)
 guards them against silent drift — internal consistency in PR CI, live
 major-version drift in the scheduled freshness job:
@@ -466,7 +470,7 @@ major-version drift in the scheduled freshness job:
 python3 skills/vue-ops/scripts/check-vue-facts.py --offline        # exit 0 consistent, 10 drift
 
 # Live (weekly freshness job, never blocks a PR): is any documented major
-# now behind npm's latest dist-tag? (e.g. Nuxt 4 while the prose says Nuxt 3.)
+# now behind npm's latest dist-tag? (e.g. Nuxt 5 while the prose says Nuxt 4.)
 python3 skills/vue-ops/scripts/check-vue-facts.py --live           # exit 10 a major moved ahead, 7 npm unreachable
 ```
 

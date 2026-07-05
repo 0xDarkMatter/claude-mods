@@ -1,17 +1,50 @@
-# Nuxt 3 Reference
+# Nuxt 4 Reference
 
-Production patterns for Nuxt 3: rendering modes, data fetching, server routes, middleware, plugins, modules, SEO, deployment, and Nuxt Content.
+Production patterns for Nuxt 4: directory structure, rendering modes, data fetching, server routes, middleware, plugins, modules, SEO, deployment, and Nuxt Content.
 
 ---
 
 ## Architecture Overview
 
-Nuxt 3 is built on:
+Nuxt 4 is built on:
 - **Nitro** — universal server engine (runs on Node, Cloudflare Workers, Deno, Bun, etc.)
 - **Vite** — fast dev server and build tool
-- **Vue 3** — Composition API throughout
+- **Vue 3** — Composition API throughout (Nuxt 4.4+ ships Vue Router v5)
 - **Auto-imports** — no need to import `ref`, `computed`, `useFetch`, etc. — Nuxt imports them automatically
-- **File-based routing** — `pages/` directory maps to routes
+- **File-based routing** — `app/pages/` directory maps to routes
+
+---
+
+## Directory Structure (the Nuxt 4 change)
+
+Application code lives under `app/` (the srcDir); server code and config stay at the root. This separates app-environment code from server-environment code — faster dev-server boot, better IDE type inference per environment.
+
+```
+my-app/
+├── app/                  # srcDir — everything that runs in the Vue app
+│   ├── assets/
+│   ├── components/
+│   ├── composables/
+│   ├── layouts/
+│   ├── middleware/       # route middleware (client navigation)
+│   ├── pages/
+│   ├── plugins/
+│   ├── utils/
+│   ├── app.vue
+│   └── error.vue
+├── public/
+├── server/               # stays at root — Nitro (api/, routes/, middleware/)
+├── shared/               # code shared by app/ and server/ — import via #shared
+├── nuxt.config.ts
+└── package.json
+```
+
+Key rules:
+- **`~/` and `@/` resolve to `app/`**, not the project root. Helpers that sat at root level and were imported with `~/` need to move into `app/` (or `shared/`) or get an explicit alias.
+- **`shared/`** is the sanctioned home for code both environments import (types, validators, constants) via the `#shared` alias — server code must not import from `app/`.
+- **Auto-imports scan `app/`** — `app/composables/`, `app/components/`, `app/utils/` work exactly as their root-level Nuxt 3 counterparts did.
+
+**Nuxt 3 differences**: in Nuxt 3 all of these directories sat at the project root and `~/` pointed to the root. Nuxt 4 auto-detects the old flat layout and keeps working with it, so migration is mechanical — move the app directories (plus `app.vue` / `error.vue`) into `app/` and fix any `~/` imports that referenced root-level files.
 
 ---
 
@@ -61,12 +94,17 @@ export default defineNuxtConfig({
 
 ### useFetch — SSR-safe primary fetching
 
+Nuxt 4 semantics: `data`/`error` default to `undefined` (Nuxt 3 used `null`), results are
+shallow-reactive by default (`deep: false`), requests sharing a key are deduplicated and
+their state is cleaned up when the last consuming component unmounts. The `pending` ref is
+deprecated — branch on `status` (`'idle' | 'pending' | 'success' | 'error'`) instead.
+
 ```vue
 <script setup lang="ts">
 interface Post { id: number; title: string; body: string }
 
 // Automatically de-duplicates on server/client, serializes for hydration
-const { data: post, pending, error, refresh } = await useFetch<Post>(
+const { data: post, status, error, refresh } = await useFetch<Post>(
   '/api/posts/1',
   {
     key: 'post-1',                      // deduplicate key (auto-generated if omitted)
@@ -146,11 +184,11 @@ try {
 ```vue
 <script setup lang="ts">
 // lazy: true — don't block render, data loads async
-const { data: comments, pending } = useFetch('/api/comments', { lazy: true })
+const { data: comments, status } = useFetch('/api/comments', { lazy: true })
 </script>
 
 <template>
-  <div v-if="pending" class="skeleton">Loading comments...</div>
+  <div v-if="status === 'pending'" class="skeleton">Loading comments...</div>
   <CommentList v-else :comments="comments" />
 </template>
 ```
@@ -204,7 +242,7 @@ import { z } from 'zod'
 
 const CreateUserSchema = z.object({
   name: z.string().min(2).max(100),
-  email: z.string().email(),
+  email: z.email(),
   role: z.enum(['user', 'admin']).default('user'),
 })
 
@@ -588,7 +626,7 @@ useHead({
 ### Error page (error.vue)
 
 ```vue
-<!-- error.vue — root level, replaces app.vue on error -->
+<!-- app/error.vue — replaces app.vue on error -->
 <script setup lang="ts">
 const props = defineProps<{
   error: {
@@ -747,8 +785,12 @@ export default defineNuxtConfig({
 
 ### Querying content
 
+> The examples below use the Nuxt Content v2 `queryContent()` API. Nuxt Content v3
+> replaces it with typed collections (`content.config.ts` + `queryCollection()`); check
+> which major the project uses before reaching for either API.
+
 ```vue
-<!-- pages/blog/[slug].vue -->
+<!-- app/pages/blog/[slug].vue -->
 <script setup lang="ts">
 const route = useRoute()
 
