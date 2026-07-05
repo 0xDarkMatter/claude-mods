@@ -10,6 +10,8 @@ metadata:
 
 # mac-ops
 
+> Verified as of 2026-07 — content assumes macOS 13 (Ventura) and later (`.ips` panic format on macOS 12+, universal SSH on macOS 13+).
+
 ## Helps with
 
 Slow Mac that used to be fast — bloat accumulation across the four startup mechanisms (Login Items, `~/Library/LaunchAgents`, `/Library/LaunchAgents`, `/Library/LaunchDaemons`). The same machine still boots fast once those are inventoried and trimmed.
