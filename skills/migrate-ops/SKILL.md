@@ -12,6 +12,8 @@ metadata:
 
 Comprehensive migration skill covering framework upgrades, language version bumps, dependency auditing, breaking change detection, codemods, and rollback strategies.
 
+> Ecosystem facts verified as of 2026-07.
+
 ## Migration Strategy Decision Tree
 
 ```
@@ -267,6 +269,22 @@ Migration failed or caused issues — how to roll back?
 | `references/framework-upgrades.md` | React 18→19, Next.js Pages→App Router, Vue 2→3, Laravel 10→11, Angular, Django upgrade paths | ~700 |
 | `references/language-upgrades.md` | Python 3.9→3.13, Node 18→22, TypeScript 4→5, Go 1.20→1.23, Rust 2021→2024, PHP 8.1→8.4 | ~600 |
 | `references/dependency-management.md` | Audit tools, update strategies, lock files, monorepo deps, supply chain security | ~550 |
+
+## Staleness verifier
+
+This skill hardcodes specific framework/language target versions (React 19, Laravel 11, Python 3.12, Node 22, TypeScript 5, Go 1.22, Rust 2024, PHP 8.4). [`scripts/check-migrate-facts.py`](scripts/check-migrate-facts.py) guards them against silent drift:
+
+```bash
+# Structural (PR CI, no network): every catalogued target version still appears
+# where it is recorded (description vs body), and the currency note carries a year.
+python scripts/check-migrate-facts.py --offline        # exit 0 consistent, 10 drift
+
+# Live (freshness job, never blocks a PR): each target is resolved against
+# endoflife.date (python/nodejs/laravel/php/go) and npm (react/typescript).
+python scripts/check-migrate-facts.py --live            # exit 10 a target lags latest, 7 unreachable
+```
+
+The canonical target-version list lives in [`assets/migrate-facts.json`](assets/migrate-facts.json); when you change a recommended target, update it to match or `--offline` fails CI. A `--live` drift means the skill is naming an older target than the ecosystem's current stable — review, don't auto-rewrite.
 
 ## See Also
 

@@ -1,0 +1,64 @@
+{
+  "_comment": "Canonical fast-moving facts the migrate-ops skill encodes: the framework/language target versions it hardcodes in its description and body. scripts/check-migrate-facts.py asserts each claim still appears where recorded + a dated currency note (--offline), and resolves the current versions via endoflife.date + npm to flag lag (--live). Edit deliberately: a change here is a skill-content decision, not housekeeping.",
+  "schema": "claude-mods.migrate-ops.facts/v1",
+  "as_of": "2026-07-05",
+  "claims": [
+    {
+      "label": "React",
+      "version": "19",
+      "where": ["description", "body"],
+      "pattern": "react[^\\n]*\\b19\\b",
+      "live": {"source": "npm", "product": "react", "compare": "major", "documented": "19"}
+    },
+    {
+      "label": "Laravel",
+      "version": "11",
+      "where": ["description", "body"],
+      "pattern": "laravel[^\\n]*\\b11\\b",
+      "live": {"source": "endoflife", "product": "laravel", "compare": "major", "documented": "11"}
+    },
+    {
+      "label": "Python",
+      "version": "3.12",
+      "where": ["description", "body"],
+      "pattern": "python[^\\n]*3\\.12\\b",
+      "live": {"source": "endoflife", "product": "python", "compare": "line", "documented": "3.12"}
+    },
+    {
+      "label": "Node",
+      "version": "22",
+      "where": ["description", "body"],
+      "pattern": "node[^\\n]*\\b22\\b",
+      "live": {"source": "endoflife", "product": "nodejs", "compare": "major", "documented": "22"}
+    },
+    {
+      "label": "TypeScript",
+      "version": "5",
+      "where": ["description", "body"],
+      "pattern": "typescript[^\\n]*\\b5\\b",
+      "live": {"source": "npm", "product": "typescript", "compare": "major", "documented": "5"}
+    },
+    {
+      "label": "Go",
+      "version": "1.22",
+      "where": ["description", "body"],
+      "pattern": "go[^\\n]*1\\.22\\b",
+      "live": {"source": "endoflife", "product": "go", "compare": "line", "documented": "1.22"}
+    },
+    {
+      "label": "Rust",
+      "version": "2024",
+      "where": ["description", "body"],
+      "pattern": "rust[^\\n]*2024\\b",
+      "live": null,
+      "_comment": "Rust 2024 is an EDITION (reached stable with Rust 1.85), not a semver major tracked on endoflife.date's product list. Live-checked nowhere; offline-only."
+    },
+    {
+      "label": "PHP",
+      "version": "8.4",
+      "where": ["description", "body"],
+      "pattern": "php[^\\n]*8\\.4\\b",
+      "live": {"source": "endoflife", "product": "php", "compare": "line", "documented": "8.4"}
+    }
+  ]
+}
