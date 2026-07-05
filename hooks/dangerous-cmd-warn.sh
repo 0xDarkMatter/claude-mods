@@ -18,10 +18,17 @@
 #   2 = block with message (dangerous command detected)
 
 INPUT="$1"
-
-if [[ -z "$INPUT" ]]; then
-  exit 0
+# Modern Claude Code delivers the tool call as JSON on stdin
+# ({"tool_input":{"command":"..."}}); older configs pass it as $TOOL_INPUT/$1.
+# Support both so the hook works regardless of harness version.
+if [[ -z "$INPUT" && ! -t 0 ]]; then
+  RAW="$(cat 2>/dev/null)"
+  if [[ -n "$RAW" ]] && command -v jq >/dev/null 2>&1; then
+    INPUT="$(printf '%s' "$RAW" | jq -r '.tool_input.command // .tool_input // empty' 2>/dev/null)"
+  fi
+  [[ -z "$INPUT" ]] && INPUT="$RAW"
 fi
+[[ -z "$INPUT" ]] && exit 0
 
 # -------------------------------------------------------------------
 # Dangerous patterns and their risk descriptions
