@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fleetflow monitor</title>
+<style>
+  :root { color-scheme: light dark;
+    --bg:#fafaf8; --card:#fff; --border:#e4e2dd; --text:#1a1a17; --muted:#8a887f;
+    --run:#378add; --ok:#1d9e75; --bad:#e24b4a; --cache:#b4b2a9; }
+  @media (prefers-color-scheme: dark) { :root {
+    --bg:#1c1c1a; --card:#262624; --border:#3a3936; --text:#ececea; --muted:#8f8d85; } }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--text); padding:20px;
+    font:14px/1.5 "Segoe UI", "Helvetica Neue", ui-sans-serif, sans-serif; }
+  .shell { max-width:760px; margin:0 auto; }
+  .head { background:var(--card); border:1px solid var(--border); border-radius:12px;
+    padding:14px 18px; margin-bottom:14px; }
+  .head h1 { font-size:16px; font-weight:500; }
+  .meta { color:var(--muted); font-size:13px; margin-top:2px; display:flex; gap:14px; }
+  .pips { display:flex; gap:4px; margin-top:10px; }
+  .pip { width:22px; height:6px; border-radius:3px; background:var(--border); }
+  .pip.run { background:var(--run); animation:pulse 1.2s ease-in-out infinite; }
+  .pip.done { background:var(--ok); } .pip.failed { background:var(--bad); }
+  @keyframes pulse { 50% { opacity:.35 } }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:12px; }
+  .agent { background:var(--card); border:1px solid var(--border); border-radius:12px; }
+  .agent summary { list-style:none; cursor:pointer; padding:12px 14px; }
+  .agent summary::-webkit-details-marker { display:none; }
+  .row1 { display:flex; align-items:center; gap:8px; }
+  .dot { width:9px; height:9px; border-radius:50%; flex:none; }
+  .dot.running { background:var(--run); animation:pulse 1.2s ease-in-out infinite; }
+  .dot.done { background:var(--ok); } .dot.failed { background:var(--bad); }
+  .id { font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .brain { margin-left:auto; font-size:11px; color:var(--muted); border:1px solid var(--border);
+    border-radius:9px; padding:1px 8px; flex:none; }
+  .stats { display:flex; gap:14px; color:var(--muted); font-size:12px; margin-top:6px; }
+  .detail { border-top:1px solid var(--border); padding:10px 14px; font-size:12px;
+    color:var(--muted); display:grid; gap:6px; }
+  .detail b { color:var(--text); font-weight:500; }
+  .act { font-family:ui-monospace, Consolas, monospace; font-size:11px;
+    overflow-wrap:anywhere; }
+  .err { color:var(--bad); }
+  .foot { color:var(--muted); font-size:12px; margin-top:12px; text-align:right; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="head">
+    <h1 id="run">fleetflow</h1>
+    <div class="meta"><span id="agents"></span><span id="elapsed"></span></div>
+    <div class="pips" id="pips"></div>
+  </div>
+  <div class="grid" id="grid"></div>
+  <div class="foot" id="foot">waiting for status.json…</div>
+</div>
+<script>
+const fmt = s => s >= 3600 ? Math.floor(s/3600)+"h "+Math.floor(s%3600/60)+"m"
+  : s >= 60 ? Math.floor(s/60)+"m "+(s%60)+"s" : s+"s";
+const esc = t => (t||"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const open = new Set();
+async function tick() {
+  let d;
+  try { d = await (await fetch("status.json?t="+Date.now())).json(); }
+  catch (e) { document.getElementById("foot").textContent = "status.json unreachable — is ff-status --watch running?"; return; }
+  document.getElementById("run").textContent = "fleetflow — " + d.run;
+  const lanes = d.lanes || [];
+  const running = lanes.filter(l => l.state === "running").length;
+  document.getElementById("agents").textContent =
+    lanes.length + " agent" + (lanes.length === 1 ? "" : "s") + (running ? " · " + running + " running" : " · all finished");
+  const oldest = Math.min(...lanes.map(l => l.started).filter(Boolean));
+  document.getElementById("elapsed").textContent = oldest ? fmt(d.generated_at - oldest) : "";
+  document.getElementById("pips").innerHTML =
+    lanes.map(l => `<div class="pip ${l.state === "running" ? "run" : l.state}"></div>`).join("");
+  document.getElementById("grid").innerHTML = lanes.map(l => `
+    <details class="agent" data-id="${esc(l.id)}" ${open.has(l.id) ? "open" : ""}>
+      <summary>
+        <div class="row1"><span class="dot ${l.state}"></span>
+          <span class="id">${esc(l.id)}</span><span class="brain">${esc(l.brain)}</span></div>
+        <div class="stats"><span>${fmt(l.elapsed_s)}</span>
+          <span>${l.tools || 0} tools</span><span>${l.commits || 0} commits</span>
+          ${l.tokens ? `<span>${l.tokens >= 1e6 ? (l.tokens/1e6).toFixed(1)+"M" : (l.tokens/1000).toFixed(1)+"k"} tok</span>` : ""}</div>
+      </summary>
+      <div class="detail">
+        <div class="act"><b>activity</b> ${esc(l.activity)}</div>
+        ${l.last_commit ? `<div><b>last commit</b> ${esc(l.last_commit)}</div>` : ""}
+        ${l.err_tail ? `<div class="err">${esc(l.err_tail)}</div>` : ""}
+        <div><b>artifact</b> ${esc((l.artifact||"pending").split(/[\\/]/).pop())}</div>
+      </div>
+    </details>`).join("");
+  document.querySelectorAll("details.agent").forEach(el =>
+    el.addEventListener("toggle", () => el.open ? open.add(el.dataset.id) : open.delete(el.dataset.id)));
+  document.getElementById("foot").textContent = "updated " + new Date().toLocaleTimeString();
+}
+tick(); setInterval(tick, 2500);
+</script>
+</body>
+</html>

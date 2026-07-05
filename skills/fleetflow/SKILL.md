@@ -173,6 +173,16 @@ The ones to actually use:
 | [scripts/ff-doctor.sh](scripts/ff-doctor.sh) | `--offline` structural preflight; `--live` probes GLM endpoint, Codex auth, Anthropic models, reports orchestrator tier (fable/opus) |
 | [scripts/ff-spawn.sh](scripts/ff-spawn.sh) | uniform spawner: worktree lane + guard preamble + journal + per-brain launch (GLM via fleet-worker, Codex via `codex exec`, Anthropic via `claude -p`) |
 | [scripts/ff-collect.sh](scripts/ff-collect.sh) | per-brain result gate; `--check-main-clean` escape guard |
+| [scripts/ff-status.sh](scripts/ff-status.sh) | run status as JSON (lane state, elapsed, commits, tools, tokens, activity); `--watch N --out status.json` feeds the live monitor |
+
+**Live monitor** ([assets/ff-monitor.html](assets/ff-monitor.html)): a
+zero-dependency page reproducing the native /workflows progress surface — run
+header with per-lane pips, an agent grid with state dots, elapsed/tools/
+commits/tokens, and expandable per-agent detail (activity, last commit, error
+tail, artifact). Wire-up: copy it into the run dir as `index.html`, run
+`ff-status --watch 3 --out <rundir>/status.json`, serve the run dir with any
+static server, open in a browser/preview panel. It polls `status.json` every
+2.5s.
 
 All follow the Skill Resource Protocol: stdout is data, chatter on stderr,
 semantic exit codes (`0` ok, `2` usage, `3` cached/missing, `7` unreachable,

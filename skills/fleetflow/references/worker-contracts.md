@@ -52,6 +52,12 @@ OpenAI's agent harness, non-interactive. Flag map (codex-cli 0.125.0):
 - **Character**: a genuinely different model *and* toolchain — its highest
   value in fleetflow is dissent (refuter/judge lanes) and independent second
   implementations, not bulk mechanical work (GLM is cheaper there).
+- **Worktree-lane commit gotcha** (observed 2026-07-05): a git worktree's
+  metadata (index, refs) lives in the MAIN repo's `.git/` — outside the codex
+  sandbox's writable root — so `git commit` inside a lane fails with
+  `index.lock: Permission denied` under `--full-auto`. `ff-spawn` fixes this
+  by passing `--add-dir <absolute-git-dir>` for codex worktree lanes; if you
+  launch codex by hand, add it yourself (or use a full clone as the lane).
 - **Skill-loading quirk** (observed 2026-07-05): codex reads Claude-format
   skills from `~/.agents/skills/` at session start and rejects any whose
   description exceeds **1024 chars** (`failed to load skill … exceeds maximum
