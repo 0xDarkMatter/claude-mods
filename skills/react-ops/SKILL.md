@@ -12,6 +12,8 @@ metadata:
 
 Comprehensive React skill covering hooks, component architecture, state management, Server Components, and performance optimization.
 
+> React 19 ecosystem facts verified as of 2026-07.
+
 ## Hook Selection Decision Tree
 
 ```
@@ -264,6 +266,25 @@ Does this component need...?
 | `./references/server-components.md` | RSC architecture, Server Actions, Next.js App Router, caching, streaming, metadata |
 | `./references/performance.md` | React.memo, code splitting, virtualization, React Compiler, Web Vitals, profiling |
 | `./references/testing.md` | RTL queries, user-event, MSW, renderHook, Vitest setup, accessibility testing |
+
+## Staleness Verifier
+
+This skill encodes fast-moving facts (the React 19 API surface, the ecosystem
+package stack). [`scripts/check-react-facts.py`](scripts/check-react-facts.py)
+guards them against silent drift — internal consistency in PR CI, live
+major-version drift in the scheduled freshness job:
+
+```bash
+# Structural (PR CI, no network): every catalogued package + React 19 gate is
+# still named in this skill's prose, and the currency note still carries a year.
+python3 skills/react-ops/scripts/check-react-facts.py --offline        # exit 0 consistent, 10 drift
+
+# Live (weekly freshness job, never blocks a PR): is any documented major
+# now behind npm's latest dist-tag?
+python3 skills/react-ops/scripts/check-react-facts.py --live           # exit 10 a major moved ahead, 7 npm unreachable
+```
+
+The canonical fact list lives in [`assets/react-facts.json`](assets/react-facts.json); when you add or drop a recommendation or the prose stops naming one, update it to match or `--offline` fails CI.
 
 ## See Also
 
