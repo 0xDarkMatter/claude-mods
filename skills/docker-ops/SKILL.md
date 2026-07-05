@@ -1,6 +1,7 @@
 ---
 name: docker-ops
 description: "Docker containerization patterns, Dockerfile best practices, multi-stage builds, and Docker Compose. Use for: docker, Dockerfile, docker-compose, container, image, multi-stage build, docker build, docker run, .dockerignore, health check, distroless, scratch image, BuildKit, layer caching, container security."
+when_to_use: "Use when building, running, or composing Docker containers — e.g. 'write an efficient multi-stage Dockerfile', 'set up docker-compose for local dev', 'optimize layer caching and .dockerignore', 'harden a distroless image'. For Kubernetes/ECS orchestration on top of containers, use container-orchestration."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
