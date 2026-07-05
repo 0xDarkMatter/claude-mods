@@ -1,6 +1,7 @@
 ---
 name: astro-ops
 description: "Astro framework patterns, islands architecture, content collections, rendering strategies, and deployment. Use for: astro, islands architecture, content collections, astro cloudflare, view transitions, partial hydration, astrojs, SSG, SSR, hybrid rendering, astro adapter."
+when_to_use: "Use when building or deploying an Astro site — e.g. 'which rendering mode: SSG, SSR, or hybrid', 'add a React island with client:load', 'set up content collections', 'deploy Astro to Cloudflare/Vercel'. Covers islands architecture, view transitions, and adapters; not general React/Next.js work."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
@@ -9,6 +10,8 @@ metadata:
 ---
 
 # Astro Operations
+
+> Facts verified as of 2026-07.
 
 Comprehensive patterns for Astro framework development: islands architecture, content collections, rendering strategies, view transitions, and multi-platform deployment.
 
