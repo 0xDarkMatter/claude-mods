@@ -574,6 +574,71 @@ cmd_land() {
   land_one "$branch" && rebase_others "$branch"
 }
 
+# Batch-land every landable lane in one pass. Default: READY lanes only
+# (daemon semantics — a session signalled it's done). --running also includes
+# RUNNING lanes, for the git-ops "land all" path where landability was vetted
+# out of band (clean, ahead, not a live writer) before the branches were
+# tracked. Lands OLDEST-BRANCH-FIRST so the sequence is stable and explainable,
+# rebases the remaining lanes after each land, and CONTINUES past a lane that
+# conflicts or fails — reporting a one-shot summary at the end rather than
+# aborting the whole batch on the first bad lane.
+cmd_land_all() {
+  local include_running=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --running|--include-running) include_running=1; shift ;;
+      *) echo "usage: fleet land --all [--running]" >&2; exit 1 ;;
+    esac
+  done
+  ensure_fleet_dir
+
+  # Collect candidate lanes with their tip-commit time, so we can order them.
+  local candidates=() f b state ts
+  for f in "$LANES_DIR"/*; do
+    [[ -f "$f" ]] || continue
+    b=$(decode_lane "$(basename "$f")")
+    state=$(head -n1 "$f")
+    case "$state" in
+      READY)   : ;;
+      RUNNING) [[ $include_running -eq 1 ]] || continue ;;
+      *)       continue ;;
+    esac
+    git rev-parse --verify "refs/heads/$b" >/dev/null 2>&1 || continue
+    ts=$(git log -1 --format=%ct "$b" 2>/dev/null || echo 0)
+    candidates+=("$ts"$'\t'"$b")
+  done
+
+  if [[ ${#candidates[@]} -eq 0 ]]; then
+    local scope; scope=$([[ $include_running -eq 1 ]] && echo "RUNNING/READY" || echo "READY")
+    log "land --all: no landable lanes ($scope)"
+    cmd_fleet
+    return 0
+  fi
+
+  # Oldest-commit-first — a stable, explainable landing order.
+  local ordered
+  ordered=$(printf '%s\n' "${candidates[@]}" | sort -n)
+
+  local landed=0 conflict=0 failed=0
+  while IFS=$'\t' read -r ts b; do
+    [[ -z "$b" ]] && continue
+    if land_one "$b"; then
+      rebase_others "$b"
+      landed=$((landed+1))
+    else
+      case "$(lane_state "$b")" in
+        CONFLICT) conflict=$((conflict+1)) ;;
+        *)        failed=$((failed+1)) ;;
+      esac
+    fi
+  done <<< "$ordered"
+
+  log "land --all: $landed landed, $conflict conflict, $failed failed"
+  cmd_fleet
+  # Non-zero exit when anything didn't land, so orchestrators can branch on it.
+  [[ $((conflict + failed)) -eq 0 ]]
+}
+
 cmd_stop() {
   if [[ ! -f "$PID_FILE" ]]; then
     echo "no daemon running (no $PID_FILE)" >&2
@@ -674,7 +739,8 @@ case "${1:-}" in
   start)        shift; cmd_start "$@" ;;
   stop)         cmd_stop ;;
   status|fleet) shift; cmd_fleet "$@" ;;
-  land)         shift; cmd_land "$@" ;;
+  land)         shift
+                if [[ "${1:-}" == "--all" ]]; then shift; cmd_land_all "$@"; else cmd_land "$@"; fi ;;
   revert)       shift; cmd_revert "$@" ;;
   scrub-check)  shift; cmd_scrub_check "$@" ;;
   ""|-h|--help)
@@ -688,6 +754,8 @@ Usage:
   fleet stop                  Signal the running daemon to exit cleanly
   fleet status                One-shot status view
   fleet land <branch>         Manual land + rebase others
+  fleet land --all [--running]  Batch-land all READY lanes (oldest-first);
+                              --running also lands vetted RUNNING lanes
   fleet revert <branch>       Revert merge commit on $BASE_BRANCH
   fleet scrub-check <branch>  Dry-run forbidden-pattern check
 

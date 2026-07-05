@@ -73,6 +73,24 @@ git -C "$REPO" log --oneline main | grep -q "merge: fleet/task-a" && ok "merge c
 echo "-- one-shot revert --"
 bash "$FLEET" revert fleet/task-a >/dev/null 2>&1; ee "revert slashed branch" 0 $?
 
+echo "-- land --all batch-lands READY lanes oldest-first --"
+# 'plain' is still tracked (RUNNING from the initial track). Add a second lane,
+# mark both READY, and batch-land in one pass.
+mk_lane "feat/batch-b" d.txt
+bash "$FLEET" track feat/batch-b >/dev/null 2>&1
+( cd "$SB/wt-plain"        && bash "$REPO/.claude/fleet/signal.sh" READY ) >/dev/null 2>&1
+( cd "$SB/wt-feat_batch-b" && bash "$REPO/.claude/fleet/signal.sh" READY ) >/dev/null 2>&1
+bash "$FLEET" land --all >/dev/null 2>&1; ee "land --all exits 0 (all READY landed)" 0 $?
+case "$(head -n1 "$REPO/.claude/fleet/lanes/plain" 2>/dev/null)" in
+  LANDED) ok "land --all landed 'plain'";; *) no "'plain' not LANDED after land --all";; esac
+case "$(head -n1 "$REPO/.claude/fleet/lanes/feat%2Fbatch-b" 2>/dev/null)" in
+  LANDED) ok "land --all landed feat/batch-b";; *) no "feat/batch-b not LANDED after land --all";; esac
+git -C "$REPO" log --oneline main | grep -q "merge: plain"        && ok "merge: plain on main"        || no "no merge: plain on main"
+git -C "$REPO" log --oneline main | grep -q "merge: feat/batch-b" && ok "merge: feat/batch-b on main" || no "no merge: feat/batch-b on main"
+# A RUNNING lane (feat/foo, not signalled READY) must be left untouched by the default batch.
+case "$(head -n1 "$REPO/.claude/fleet/lanes/feat%2Ffoo" 2>/dev/null)" in
+  RUNNING) ok "land --all left RUNNING feat/foo untouched";; *) no "land --all wrongly touched RUNNING lane";; esac
+
 echo "-- scrub gate still works on a slashed branch --"
 wt="$SB/wt-feat_foo"
 echo "TODO_SCRUB leftover" >> "$wt/b.txt"

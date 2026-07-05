@@ -107,5 +107,44 @@ else
   echo "  SKIP  worktree-guard.sh not found (hooks/ unavailable in this layout)"
 fi
 
+echo "-- land-all: classification of mixed branches --"
+LA="$SKILL/scripts/land-all.sh"
+bash -n "$LA" && ok "land-all.sh syntax OK" || no "land-all.sh syntax error"
+R="$SB/LA"; mkrepo "$R"; cd "$R"
+# LANDABLE: ahead, clean, no worktree, recent commit
+git checkout -q -b feat/land-me; echo x > x; git add -A; git commit -qm land; git checkout -q main
+# MERGED: merged into trunk
+git checkout -q -b feat/merged; echo m > m; git add -A; git commit -qm m; git checkout -q main
+git merge -q --no-ff -m "merge: feat/merged" feat/merged
+# NOTHING-AHEAD: points at trunk → ancestor → folds into MERGED
+git branch feat/at-trunk main
+# STALE: ahead but last commit older than --recent-days (fixed past ISO date;
+# relative dates like "30 days ago" aren't accepted by GIT_COMMITTER_DATE on all gits)
+git checkout -q -b feat/stale; echo s > s; git add -A
+GIT_AUTHOR_DATE="2020-01-01T00:00:00" GIT_COMMITTER_DATE="2020-01-01T00:00:00" git commit -qm stale
+git checkout -q main
+# WIP: worktree, ahead, dirty tracked file
+git worktree add -q "$SB/wt-wip" -b feat/wip main >/dev/null 2>&1
+echo more > "$SB/wt-wip/x2"; git -C "$SB/wt-wip" add -A; git -C "$SB/wt-wip" commit -qm ahead
+echo dirty >> "$SB/wt-wip/f"    # f is tracked (from mkrepo) → unstaged change
+
+# --active-window 0 disables live-writer detection so fresh worktrees don't all read ACTIVE.
+OUT="$(bash "$LA" "$R" --porcelain --active-window 0 --recent-days 7)"
+sof(){ printf '%s\n' "$OUT" | awk -F'\t' -v b="$1" '$2==b{print $1}'; }
+[ "$(sof feat/land-me)" = LANDABLE ] && ok "feat/land-me → LANDABLE"     || no "land-me got [$(sof feat/land-me)]"
+[ "$(sof feat/merged)"  = MERGED   ] && ok "feat/merged → MERGED"        || no "merged got [$(sof feat/merged)]"
+[ "$(sof feat/at-trunk)" = MERGED  ] && ok "nothing-ahead → MERGED"      || no "at-trunk got [$(sof feat/at-trunk)]"
+[ "$(sof feat/stale)"   = STALE    ] && ok "feat/stale → STALE"          || no "stale got [$(sof feat/stale)]"
+[ "$(sof feat/wip)"     = WIP      ] && ok "feat/wip → WIP"              || no "wip got [$(sof feat/wip)]"
+badnf=$(printf '%s\n' "$OUT" | awk -F'\t' 'NF!=7{c++} END{print c+0}')
+[ "$badnf" = 0 ] && ok "porcelain 7 fields/line" || no "porcelain NF!=7 on $badnf line(s)"
+
+echo "-- land-all: exit 1 when LANDABLE exists; live-writer → ACTIVE --"
+bash "$LA" "$R" --active-window 0 >/dev/null 2>&1; [ $? -eq 1 ] && ok "exit 1 (landable available)" || no "expected exit 1"
+# A wide active window makes the freshly-written feat/wip worktree read as a live writer.
+OUT2="$(bash "$LA" "$R" --porcelain --active-window 3600 --recent-days 7)"
+a2=$(printf '%s\n' "$OUT2" | awk -F'\t' '$2=="feat/wip"{print $1}')
+[ "$a2" = ACTIVE ] && ok "fresh worktree → ACTIVE (live-writer guard)" || no "expected ACTIVE got [$a2]"
+
 echo "=== $P passed, $F failed ==="
 [ $F -eq 0 ]

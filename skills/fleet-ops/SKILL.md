@@ -48,6 +48,8 @@ fleet start                 Run the landing daemon (writes pid to .claude/fleet/
 fleet stop                  Signal the running daemon to exit cleanly
 fleet status                One-shot fleet status panel
 fleet land <branch>         Manual land + rebase others
+fleet land --all [--running]  Batch-land all READY lanes oldest-first (--running
+                            also lands vetted RUNNING lanes; used by git-ops "land all")
 fleet revert <branch>       Revert merge commit on main
 fleet scrub-check <branch>  Dry-run forbidden-pattern check
 ```
@@ -180,8 +182,11 @@ Zero-config works for the common case.
 ## Future work
 
 - **JSONL activity log** — currently plain text. Switch when a TUI, `--json` output, or `log-ops` integration earns the cost.
-- **`--batch` mode** — land all READY lanes in one go, test once at end.
 - **`TaskCompleted` hook bridge** — auto-`signal.sh READY` when an agent-team task completes with green tests.
+
+Shipped since first release:
+
+- **`fleet land --all [--running]`** — batch-land all READY (or vetted RUNNING) lanes oldest-first, rebasing the rest after each and reporting once. Drives the `git-ops` "land all" front-door (`scripts/land-all.sh` discovers + classifies; fleet-ops executes).
 
 ## References
 
