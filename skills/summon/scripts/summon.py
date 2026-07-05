@@ -9,7 +9,9 @@ Output:  transfer/pick/doctor render TTY panels; recover/pick emit a paste-ready
          Unfinished / Open decisions / Key context) + transcript pointer, cached
          at <transcript>.handover.md; falls back to the plain pointer prompt when
          the `claude` CLI is unavailable or --no-distill is set. doctor --json
-         emits {"data": [...], "meta": {"schema": "claude-mods.summon.doctor/v1"}}
+         emits {"data": [...], "meta": {"schema": "claude-mods.summon.doctor/v1"}};
+         pick --json emits the session inventory as
+         {"data": [...], "meta": {"schema": "claude-mods.summon.pick/v1"}}
 Stderr:  context panels for recover/pick, distillation progress, warnings, errors
 Exit:    0 ok (including the non-distilled fallback — worker unavailability is
          advisory, never fatal), 2 usage/ambiguous id, 3 session or path not
@@ -18,6 +20,7 @@ Exit:    0 ok (including the non-distilled fallback — worker unavailability is
 Examples:
   summon --to mknv74                          # transfer: push sessions to next account
   summon pick                                 # fzf/numbered picker -> distilled handover
+  summon pick --json | jq '.data[]'           # machine-readable session inventory
   summon recover 6577b24c                     # distilled handover brief for one session
   summon recover 6577b24c --refresh           # ignore cached brief, re-distill
   summon recover 6577b24c --no-distill        # plain pointer prompt, no LLM call
@@ -1434,6 +1437,53 @@ def _is_live(s: Session, now_ms: int) -> bool:
         return False
 
 
+def _cwd_broken(s: Session) -> bool:
+    """Doctor's broken-binding check: recorded cwd no longer exists on disk."""
+    return not (bool(s.cwd) and Path(s.cwd).exists())
+
+
+def _iso_utc(ms: int) -> str:
+    """Epoch-ms -> ISO-8601 Z, '' for the unset 0."""
+    if not ms:
+        return ""
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ms / 1000))
+
+
+def pick_json(candidates: list[Session], now_ms: int) -> int:
+    """`pick --json` — the session inventory as a claude-mods.summon.pick/v1
+    envelope on stdout (JSON only; panels never touch stdout on this path).
+
+    Feeds the in-chat visual picker (assets/picker-widget.html) and any other
+    scripted caller. An empty inventory is valid data, not an error: exit 0.
+    """
+    rows = []
+    for s in candidates:
+        transcript = resolve_transcript(s)[0]
+        rows.append({
+            "id": s.sid.removeprefix("local_")[:8],
+            "sessionId": s.sid,
+            "cliSessionId": s.cli_id,
+            "title": s.title,
+            "cwd": s.cwd,
+            "projectRoot": project_root(s.cwd),
+            "worktree": worktree_name(s.cwd),
+            "branch": str(s.data.get("branch") or ""),
+            "turns": s.turns,
+            "isArchived": bool(s.data.get("isArchived")),
+            "isRunning": _is_live(s, now_ms),
+            "brokenCwd": _cwd_broken(s),
+            "lastActivityAt": _iso_utc(s.last_activity_ms),
+            "account": s.account.short,
+            "accountEmail": s.account.email,
+            "transcriptPath": str(transcript) if transcript else None,
+        })
+    print(json.dumps({
+        "data": rows,
+        "meta": {"count": len(rows), "schema": "claude-mods.summon.pick/v1"},
+    }, indent=2))
+    return 0
+
+
 def mode_pick(args, accounts: list[Account]) -> int:
     """Interactive picker over the whole session store -> recovery prompt."""
     sessions: list[Session] = []
@@ -1443,6 +1493,10 @@ def mode_pick(args, accounts: list[Account]) -> int:
     days = None if args.all else (args.days if args.days is not None else 30)
     candidates = filter_sessions(sessions, days=days,
                                  cwd_pattern=args.cwd, title_pattern=args.title)
+
+    if args.json:
+        return pick_json(candidates, int(time.time() * 1000))
+
     if not candidates:
         eecho(f"no sessions match ({_window_label(days)})")
         return 3
@@ -1518,7 +1572,7 @@ def mode_doctor(args, accounts: list[Account]) -> int:
                 remote += 1
                 continue
             checked += 1
-            cwd_ok = bool(s.cwd) and Path(s.cwd).exists()
+            cwd_ok = not _cwd_broken(s)
             transcript, how = resolve_transcript(s)
             if how == "scanned":
                 transcript_scanned += 1
@@ -1639,7 +1693,9 @@ def main():
     p.add_argument("--force", action="store_true",
                    help="Rebind: allow --cwd paths that don't exist on disk yet")
     p.add_argument("--json", action="store_true",
-                   help="Doctor: emit findings as a JSON envelope on stdout")
+                   help="Doctor: emit findings as a JSON envelope on stdout. "
+                        "Pick: emit the session inventory as a JSON envelope "
+                        "(no picker; stdout is JSON only)")
     p.add_argument("--no-distill", action="store_true",
                    help="Recover/pick: skip the LLM handover distillation and emit "
                         "the plain pointer prompt")
