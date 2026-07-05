@@ -2,7 +2,9 @@
 
 Essential security patterns for rapid triage during code review and audit.
 
-## OWASP Top 10 Quick Reference
+## OWASP Top 10 (2021) Quick Reference
+
+> A newer OWASP revision may exist — re-verify the current list at owasp.org.
 
 | Rank | Vulnerability | Prevention |
 |------|--------------|------------|
