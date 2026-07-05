@@ -87,7 +87,12 @@ Servers declare what they support during initialization:
 
 ## FastMCP Server Setup (Python)
 
-FastMCP is the recommended high-level API for Python MCP servers.
+FastMCP is the recommended high-level API for Python MCP servers. Two variants exist:
+the frozen 1.x-era version bundled in the official SDK (`from mcp.server.fastmcp import
+FastMCP`, used below) and the actively developed standalone `fastmcp` package at major 3
+(`from fastmcp import FastMCP`). The decorator surface shown here works on both; on
+standalone FastMCP 3, transport configuration moves out of the constructor to serve time,
+and `ctx.set_state()`/`ctx.get_state()` are async.
 
 ### Basic Server
 

@@ -3,9 +3,9 @@
   "schema": "claude-mods.mcp-ops.facts/v1",
   "as_of": "2026-07-05",
   "spec": {
-    "url": "https://spec.modelcontextprotocol.io",
-    "prose_token": "spec.modelcontextprotocol.io",
-    "_comment": "The MCP specification URL cited in See Also. --offline asserts the token is named in the skill prose; --live expects the URL to answer HTTP 200 (after redirects)."
+    "url": "https://modelcontextprotocol.io/specification/latest",
+    "prose_token": "modelcontextprotocol.io/specification",
+    "_comment": "The MCP specification URL cited in See Also (moved off the spec. subdomain, which stopped resolving by 2026-07). --offline asserts the token is named in the skill prose; --live expects the URL to answer HTTP 200 (after redirects)."
   },
   "packages": {
     "@modelcontextprotocol/sdk": {
@@ -35,10 +35,10 @@
     "fastmcp": {
       "registry": "pypi",
       "role": "FastMCP high-level framework (gofastmcp.com)",
-      "sampled_major": 2,
+      "sampled_major": 3,
       "track_major": true,
       "prose_token": "fastmcp",
-      "_comment": "The standalone FastMCP package (FastMCP 2 +). Named in prose as FastMCP and via gofastmcp.com; matched case-insensitively."
+      "_comment": "The standalone FastMCP package, documented at major 3 (constructor identity-only, async ctx state, fastmcp meta namespace). Named in prose as FastMCP and via gofastmcp.com; matched case-insensitively."
     }
   }
 }

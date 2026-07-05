@@ -16,7 +16,7 @@
 
 ### Enable the Full Strict Suite
 
-`"strict": true` is shorthand for enabling all individual strict flags at once. Always enable it.
+`"strict": true` is shorthand for enabling all individual strict flags at once. Always enable it. Since TypeScript 6.0 it is the **default** — a tsconfig that never set `strict` now gets the full suite, so a project upgrading to TS 6 may surface long-hidden errors; set `"strict": false` only as a deliberate, temporary migration step.
 
 ```json
 {
@@ -243,15 +243,14 @@ const y: string = legacyApi.getValue();
     "moduleResolution": "Bundler"
   }
 }
-
-// For browser projects with no bundler (rare)
-{
-  "compilerOptions": {
-    "module": "ESNext",
-    "moduleResolution": "Classic"  // avoid - use Bundler or Node16
-  }
-}
 ```
+
+**TypeScript 6.0 removals**: `moduleResolution: "Classic"` and `module: "amd" / "umd" /
+"system" / "none"` were removed outright, and `esModuleInterop` /
+`allowSyntheticDefaultImports` can no longer be set to `false` (the safe interop behaviour
+is always on). Defaults are now `module: "esnext"` and `target: "es2025"`; the minimum
+`target` is ES2015. If a legacy tsconfig names any removed option, migrate to `Bundler`
+or `Node16`/`NodeNext` before upgrading.
 
 ### Understand ESM vs CJS Interop Issues
 

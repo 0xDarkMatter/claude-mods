@@ -12,38 +12,38 @@
     },
     {
       "label": "Laravel",
-      "version": "11",
+      "version": "13",
       "where": ["description", "body"],
-      "pattern": "laravel[^\\n]*\\b11\\b",
-      "live": {"source": "endoflife", "product": "laravel", "compare": "major", "documented": "11"}
+      "pattern": "laravel[^\\n]*\\b13\\b",
+      "live": {"source": "endoflife", "product": "laravel", "compare": "major", "documented": "13"}
     },
     {
       "label": "Python",
-      "version": "3.12",
+      "version": "3.14",
       "where": ["description", "body"],
-      "pattern": "python[^\\n]*3\\.12\\b",
-      "live": {"source": "endoflife", "product": "python", "compare": "line", "documented": "3.12"}
+      "pattern": "python[^\\n]*3\\.14\\b",
+      "live": {"source": "endoflife", "product": "python", "compare": "line", "documented": "3.14"}
     },
     {
       "label": "Node",
-      "version": "22",
+      "version": "26",
       "where": ["description", "body"],
-      "pattern": "node[^\\n]*\\b22\\b",
-      "live": {"source": "endoflife", "product": "nodejs", "compare": "major", "documented": "22"}
+      "pattern": "node[^\\n]*\\b26\\b",
+      "live": {"source": "endoflife", "product": "nodejs", "compare": "major", "documented": "26"}
     },
     {
       "label": "TypeScript",
-      "version": "5",
+      "version": "6",
       "where": ["description", "body"],
-      "pattern": "typescript[^\\n]*\\b5\\b",
-      "live": {"source": "npm", "product": "typescript", "compare": "major", "documented": "5"}
+      "pattern": "typescript[^\\n]*\\b6\\b",
+      "live": {"source": "npm", "product": "typescript", "compare": "major", "documented": "6"}
     },
     {
       "label": "Go",
-      "version": "1.22",
+      "version": "1.26",
       "where": ["description", "body"],
-      "pattern": "go[^\\n]*1\\.22\\b",
-      "live": {"source": "endoflife", "product": "go", "compare": "line", "documented": "1.22"}
+      "pattern": "go[^\\n]*1\\.26\\b",
+      "live": {"source": "endoflife", "product": "go", "compare": "line", "documented": "1.26"}
     },
     {
       "label": "Rust",
@@ -51,14 +51,14 @@
       "where": ["description", "body"],
       "pattern": "rust[^\\n]*2024\\b",
       "live": null,
-      "_comment": "Rust 2024 is an EDITION (reached stable with Rust 1.85), not a semver major tracked on endoflife.date's product list. Live-checked nowhere; offline-only."
+      "_comment": "Rust 2024 is an EDITION (reached stable with Rust 1.85), not a semver major tracked on endoflife.date's product list. Still the newest edition as of 2026-07 (next expected 2027). Live-checked nowhere; offline-only."
     },
     {
       "label": "PHP",
-      "version": "8.4",
+      "version": "8.5",
       "where": ["description", "body"],
-      "pattern": "php[^\\n]*8\\.4\\b",
-      "live": {"source": "endoflife", "product": "php", "compare": "line", "documented": "8.4"}
+      "pattern": "php[^\\n]*8\\.5\\b",
+      "live": {"source": "endoflife", "product": "php", "compare": "line", "documented": "8.5"}
     }
   ]
 }

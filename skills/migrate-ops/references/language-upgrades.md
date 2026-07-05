@@ -4,7 +4,7 @@ Detailed upgrade paths for major programming language version transitions.
 
 ---
 
-## Python 3.9 to 3.13
+## Python 3.9 to 3.14
 
 ### Python 3.10 (from 3.9)
 
@@ -140,6 +140,34 @@ rg "typing\.re\." .
 python3.13t script.py  # if built with --disable-gil
 ```
 
+### Python 3.14 (from 3.13)
+
+**Key Features Gained:**
+- Deferred evaluation of annotations by default (PEP 649/749) — inspect via `annotationlib`; `from __future__ import annotations` is no longer needed
+- Template strings / t-strings (PEP 750)
+- Free-threaded build officially supported (PEP 779 — still a separate build, no longer "experimental")
+- Multiple interpreters in the stdlib (`concurrent.interpreters`, PEP 734)
+- Zstandard compression (`compression.zstd`, PEP 784)
+- Safe external debugger interface (`sys.remote_exec`)
+
+**Breaking Changes:**
+- `asyncio.get_event_loop()` no longer creates a new event loop — use `asyncio.run()` or `get_running_loop()`
+- Long-deprecated `ast` aliases (`ast.Num`, `ast.Str`, `ast.Bytes`, ...) removed — use `ast.Constant`
+- Annotation-introspection code that reads `__annotations__` eagerly may see deferred semantics — migrate to `annotationlib`
+
+**Migration Commands:**
+```bash
+# Find eager-annotation assumptions
+rg "from __future__ import annotations" .   # now redundant (harmless to keep)
+rg "__annotations__" .                       # candidates for annotationlib
+
+# Find event-loop creation via the removed pattern
+rg "asyncio\.get_event_loop\(\)" .
+
+# Modernize syntax to the new floor
+pyupgrade --py314-plus **/*.py
+```
+
 ### Python Version Upgrade Summary
 
 | From → To | Key Action | Biggest Risk |
@@ -148,10 +176,11 @@ python3.13t script.py  # if built with --disable-gil
 | 3.10 → 3.11 | Replace `toml` with `tomllib`, enjoy speed boost | `smtpd` removal |
 | 3.11 → 3.12 | Remove `distutils`/`imp`, adopt type syntax | `distutils` full removal, sqlite3 adapter changes |
 | 3.12 → 3.13 | Remove deprecated stdlib modules | Large number of removed stdlib modules |
+| 3.13 → 3.14 | Adopt deferred annotations + t-strings | `asyncio.get_event_loop()` no longer creates a loop |
 
 ---
 
-## Node.js 18 to 22
+## Node.js 18 to 26
 
 ### Node.js 20 (from 18)
 
@@ -233,16 +262,48 @@ node --experimental-require-module app.js
 # Replace: chokidar/nodemon → node --watch
 ```
 
+### Node.js 24 (from 22)
+
+**Key Features Gained:**
+- `require()` of ESM modules enabled by default (no flag)
+- V8 13.6 — `Float16Array`, `RegExp.escape`, `Error.isError`, explicit resource management (`await using`)
+- `URLPattern` as a global
+- Permission model stable (flag renamed to `--permission`)
+- npm 11, Undici 7
+
+**Breaking Changes:**
+- Windows native builds drop MSVC (ClangCL toolchain) — affects native-addon build pipelines
+- Assorted deprecated API removals (`url.parse()` further discouraged — use `URL`)
+
+**Migration Commands:**
+```bash
+nvm install 24
+nvm use 24
+# FROM node:24-alpine
+
+npm rebuild                      # native modules against new ABI
+rg "require\(['\"]\./.*\.mjs" .  # spots that relied on require(esm) flags
+```
+
+### Node.js 26 (from 24)
+
+Node 26 is the Current line (April 2026); it enters Active LTS in October 2026. For
+production, upgrade LTS-to-LTS: 22 → 24 now, 24 → 26 once 26 is LTS. The mechanics are
+the same as every even-major bump: rebuild native modules, re-run the test suite on the
+new V8, and update `FROM node:26` images plus CI matrices when you cut over.
+
 ### Node.js Version Upgrade Summary
 
 | From → To | Key Action | Biggest Risk |
 |-----------|-----------|--------------|
 | 18 → 20 | Rebuild native modules, test URL parsing | Stricter URL validation, loader hooks off-thread |
 | 20 → 22 | Rebuild native modules, check glibc version | Native module compatibility, header validation |
+| 22 → 24 | Adopt require(esm), permission model | Native-addon toolchain change on Windows |
+| 24 → 26 | LTS-to-LTS bump when 26 enters LTS (Oct 2026) | Riding the Current line before LTS |
 
 ---
 
-## TypeScript 4.x to 5.x
+## TypeScript 4.x to 6.0
 
 ### TypeScript 5.0 (from 4.9)
 
@@ -295,27 +356,65 @@ rg '"suppressExcessPropertyErrors"' tsconfig.json
 | **5.6** | Iterator helper methods, `--noUncheckedSideEffectImports` |
 | **5.7** | `--rewriteRelativeImportExtensions`, `--target es2024` |
 
+### TypeScript 6.0 (from 5.x)
+
+The last release on the JavaScript-based compiler — 6.0 modernises defaults as the
+bridge to the native (Go) compiler in TypeScript 7.
+
+**Key Features Gained:**
+- `es2025` target/lib with types for Temporal, `Map.getOrInsert`, `RegExp.escape`
+- Better inference for `this`-less functions; `#/` subpath-import support
+- `--stableTypeOrdering` flag to ease 6.0 → 7.0 migration diffing
+- Large-monorepo `tsc --watch` rebuilds significantly faster
+
+**Breaking Changes:**
+- `strict: true` is now the **default** — configs that never set it surface new errors
+- Defaults changed: `module: esnext`, `target: es2025`
+- Removed: `moduleResolution: classic`; `module: amd/umd/system/none`; minimum `target` is ES2015 (`es5` deprecated)
+- `esModuleInterop` / `allowSyntheticDefaultImports` can no longer be set to `false`
+- Namespace-with-class merging requires explicit `export`
+
+**Migration Commands:**
+```bash
+npm install -D typescript@6
+
+# Find options 6.0 removed or hard-wires
+rg '"moduleResolution":\s*"classic"' tsconfig.json
+rg '"module":\s*"(amd|umd|system|none)"' tsconfig.json
+rg '"esModuleInterop":\s*false' tsconfig.json
+rg '"target":\s*"es5"' -i tsconfig.json
+
+# Surface the strict-by-default delta before committing to it
+npx tsc --noEmit
+```
+
 ### Migration Strategy
 
 ```
 TypeScript version upgrade approach:
 │
-├─ Minor version (5.x → 5.y)
+├─ Minor version (x.y → x.z)
 │  └─ Generally safe, just update and fix new errors
-│     npm install -D typescript@5.y
+│     npm install -D typescript@latest
 │     npx tsc --noEmit
 │
-└─ Major version (4.x → 5.x)
-   ├─ 1. Update tsconfig.json (remove deleted options)
-   ├─ 2. Install typescript@5
-   ├─ 3. Run tsc --noEmit, fix errors
-   ├─ 4. Decide on decorator strategy (legacy vs ECMAScript)
-   └─ 5. Consider adopting moduleResolution: "bundler"
+├─ Major version (4.x → 5.x)
+│  ├─ 1. Update tsconfig.json (remove deleted options)
+│  ├─ 2. Install typescript@5
+│  ├─ 3. Run tsc --noEmit, fix errors
+│  ├─ 4. Decide on decorator strategy (legacy vs ECMAScript)
+│  └─ 5. Consider adopting moduleResolution: "bundler"
+│
+└─ Major version (5.x → 6.0)
+   ├─ 1. Set strict: true explicitly and fix errors BEFORE upgrading
+   ├─ 2. Replace removed module/moduleResolution options
+   ├─ 3. Install typescript@6, run tsc --noEmit
+   └─ 4. Pin the target you actually ship (defaults moved to es2025)
 ```
 
 ---
 
-## Go 1.20 to 1.23
+## Go 1.20 to 1.26
 
 ### Go 1.21 (from 1.20)
 
@@ -403,6 +502,27 @@ rg "\.Stop\(\)" . --glob "*.go"  # Review timer stop behavior
 rg "\.Reset\(" . --glob "*.go"   # Review timer reset behavior
 ```
 
+### Go 1.24 – 1.26 (from 1.23)
+
+**Key Features Gained:**
+- **1.24**: generic type aliases; `tool` directives in go.mod (tracked tool deps); `os.Root` (filesystem-scoped file access); Swiss-table map implementation (runtime perf); `weak` package; `runtime.AddCleanup` (successor to `SetFinalizer`)
+- **1.25**: container-aware `GOMAXPROCS` (respects cgroup CPU limits); `testing/synctest` for concurrent-code tests; experimental green-tea GC
+- **1.26**: current stable line — as with every Go release, review the release notes for `go vet`/runtime deltas; language changes remain rare and gated on the `go` directive
+
+**Breaking Changes:**
+- Effectively none at the language level (Go 1 compatibility promise); behavior deltas are gated on the `go` directive version in go.mod, so bumps activate deliberately
+
+**Migration Commands:**
+```bash
+go mod edit -go=1.26
+go mod tidy
+go vet ./...
+govulncheck ./...
+
+# Adopt tool directives (1.24+) — replaces tools.go pattern
+go get -tool golang.org/x/tools/cmd/stringer
+```
+
 ### Go Version Upgrade Summary
 
 | From → To | Key Action | Biggest Risk |
@@ -410,6 +530,7 @@ rg "\.Reset\(" . --glob "*.go"   # Review timer reset behavior
 | 1.20 → 1.21 | Update go.mod toolchain, adopt slog | Toolchain directive in go.mod |
 | 1.21 → 1.22 | Enjoy loop variable fix, adopt enhanced routing | Loop variable semantics (usually fixes bugs) |
 | 1.22 → 1.23 | Replace x/exp packages, adopt iterators | Timer/Ticker behavior change |
+| 1.23 → 1.26 | Bump go directive stepwise, adopt tool directives + os.Root | Runtime perf deltas (Swiss maps, GC) in hot paths |
 
 ---
 
@@ -471,7 +592,7 @@ cargo doc --no-deps  # check documentation builds
 
 ---
 
-## PHP 8.1 to 8.4
+## PHP 8.1 to 8.5
 
 ### PHP 8.2 (from 8.1)
 
@@ -580,6 +701,30 @@ vendor/bin/rector process src --set php84
 rg "function \w+\([^)]*\w+ \$\w+ = null" src/ --glob "*.php"
 ```
 
+### PHP 8.5 (from 8.4)
+
+**Key Features Gained:**
+- Pipe operator `|>` for left-to-right call chaining
+- `array_first()` and `array_last()`
+- `#[\NoDiscard]` attribute (warn when a return value is ignored)
+- Fatal errors now include backtraces
+- `clone with` — update readonly/other properties during clone
+
+**Breaking Changes:**
+- Minor-release discipline: mostly new deprecations rather than removals; run the suite with deprecations surfaced (`error_reporting(E_ALL)`) before and after
+
+**Migration Commands:**
+```bash
+vendor/bin/rector process src --set php85
+
+# Adopt the pipe operator where nested calls hurt readability
+# Old: trim(strtolower($name))
+# New: $name |> strtolower(...) |> trim(...)
+
+# Replace reset()/end() misuse for first/last element
+rg "\breset\(|\bend\(" src/ --glob "*.php"   # candidates for array_first/array_last
+```
+
 ### PHP Version Upgrade Summary
 
 | From → To | Key Action | Biggest Risk |
@@ -587,6 +732,7 @@ rg "function \w+\([^)]*\w+ \$\w+ = null" src/ --glob "*.php"
 | 8.1 → 8.2 | Fix dynamic properties, deprecation warnings | Dynamic properties deprecated |
 | 8.2 → 8.3 | Adopt typed constants, #[Override] | array_sum/array_product behavior |
 | 8.3 → 8.4 | Adopt property hooks, asymmetric visibility | Implicit nullable deprecation |
+| 8.4 → 8.5 | Adopt pipe operator, array_first/array_last | New deprecations surfacing in dependencies |
 
 ---
 

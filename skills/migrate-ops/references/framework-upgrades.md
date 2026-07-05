@@ -325,7 +325,7 @@ npm test
 
 ---
 
-## Laravel 10 to 11
+## Laravel 10 to 13
 
 ### Pre-Upgrade Checklist
 
@@ -429,6 +429,30 @@ php artisan config:show
 
 # Verify routes
 php artisan route:list
+```
+
+### Continuing to Laravel 12 and 13
+
+Upgrade one major at a time (11 → 12 → 13); both steps are deliberately light.
+
+**Laravel 12** (Feb 2025) — maintenance-focused: minimal breaking changes, dependency
+bumps, and new starter kits (React/Vue/Livewire). Most apps upgrade by updating
+`composer.json` constraints and re-running the suite.
+
+**Laravel 13** (Mar 2026) — stability-first with an AI/DX push:
+- **Requires PHP 8.3+** (supports through PHP 8.5) — upgrade the runtime first
+- Default cache and Redis key prefixes now use hyphenated suffixes — irrelevant if your
+  config files already pin these values, breaking if you shared a store across versions
+- New (opt-in): first-party Laravel AI SDK, native PHP attributes across models/jobs/
+  controllers/authorization, `Queue::route(...)` class-based queue routing, query-builder
+  vector similarity search (pgvector)
+- Laravel Shift remains the automated PR-based upgrade path
+
+```bash
+# Per major: bump constraint, update, test
+composer require laravel/framework:^13.0 --with-all-dependencies
+php artisan config:show cache   # verify key-prefix expectations
+php artisan test
 ```
 
 ---
