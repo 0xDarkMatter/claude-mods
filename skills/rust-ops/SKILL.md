@@ -12,6 +12,13 @@ metadata:
 
 Comprehensive Rust skill covering ownership, async, error handling, and the production ecosystem.
 
+> Ecosystem facts verified as of 2026-07.
+
+**Staleness check:** `python scripts/check-rust-facts.py --offline` asserts the
+catalogued version-bearing facts (tokio, axum, serde) are still named in the prose
+and the dated currency note above is present; run `--live` to confirm each crate's
+crates.io major still matches the documented major. Catalog: `assets/rust-facts.json`.
+
 ## Ownership Quick Reference
 
 ```
