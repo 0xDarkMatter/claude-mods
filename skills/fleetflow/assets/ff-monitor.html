@@ -25,15 +25,23 @@
   .sq.running { background:var(--run); animation:pulse 1.1s ease-in-out infinite; }
   .sq.done { background:var(--ok); } .sq.failed { background:var(--bad); }
   @keyframes pulse { 50% { opacity:.3 } }
+  .phase { margin-bottom:10px; }
+  .phase-h { display:flex; align-items:center; gap:8px; padding:2px 2px 6px;
+    font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; }
+  .phase-h .sq-row { margin:0; }
   .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:8px; }
   .agent { background:var(--card); border:1px solid var(--border); border-radius:8px; }
   .agent summary { list-style:none; cursor:pointer; padding:8px 10px; }
   .agent summary::-webkit-details-marker { display:none; }
   .row1 { display:flex; align-items:center; gap:7px; }
   .row1 .sq { flex:none; }
+  .chip { width:15px; height:15px; border-radius:3.5px; flex:none; display:flex;
+    align-items:center; justify-content:center; color:#fff; font-size:9px;
+    font-weight:700; font-family:ui-monospace, Consolas, monospace; }
   .id { font-weight:600; font-size:12px; }
-  .brain { margin-left:auto; font-size:10px; color:var(--muted); text-transform:uppercase;
+  .brain { font-size:10px; color:var(--muted); text-transform:uppercase;
     letter-spacing:.06em; }
+  .row1 .sq.state { margin-left:auto; }
   .cols { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:4px; margin-top:7px;
     font-size:11px; color:var(--muted); }
   .cols b { display:block; color:var(--text); font-weight:500; font-size:11px; }
@@ -51,7 +59,7 @@
     <div class="head-row"><h1 id="run">fleetflow</h1><span class="meta mono" id="meta"></span></div>
     <div class="sq-row" id="sqs"></div>
   </div>
-  <div class="grid" id="grid"></div>
+  <div id="phases"></div>
   <div class="foot mono"><span id="foot">waiting for status.json…</span><span id="ts"></span></div>
 </div>
 <script>
@@ -78,11 +86,16 @@ async function tick() {
     (oldest ? " · " + fmt(d.generated_at - oldest) : "");
   document.getElementById("sqs").innerHTML =
     lanes.map(l => `<div class="sq ${l.state}" title="${esc(l.id)}"></div>`).join("");
-  document.getElementById("grid").innerHTML = lanes.map(l => `
+  const BRAIN = { glm:["G","#7f77dd"], codex:["C","#0f6e56"], sonnet:["S","#d85a30"],
+    opus:["O","#ba7517"], haiku:["H","#d4537e"], fable:["F","#378add"] };
+  const card = l => {
+    const [ltr, col] = BRAIN[l.brain] || ["?", "#888780"];
+    return `
     <details class="agent" data-id="${esc(l.id)}" ${open.has(l.id) ? "open" : ""}>
       <summary>
-        <div class="row1"><span class="sq ${l.state}"></span>
-          <span class="id mono">${esc(l.id)}</span><span class="brain mono">${esc(l.brain)}</span></div>
+        <div class="row1"><span class="chip" style="background:${col}">${ltr}</span>
+          <span class="id mono">${esc(l.id)}</span><span class="brain mono">${esc(l.brain)}</span>
+          <span class="sq state ${l.state}"></span></div>
         <div class="cols mono">
           <span><b>${fmt(l.elapsed_s)}</b>time</span>
           <span><b>${l.tools || "—"}</b>tools</span>
@@ -96,7 +109,17 @@ async function tick() {
         ${l.err_tail ? `<div class="err">${esc(l.err_tail)}</div>` : ""}
         <div><span class="k">out</span> ${esc((l.artifact||"pending").split(/[\\/]/).pop())}</div>
       </div>
-    </details>`).join("");
+    </details>`; };
+  const phases = [];
+  lanes.forEach(l => { const p = l.phase || "build"; if (!phases.includes(p)) phases.push(p); });
+  document.getElementById("phases").innerHTML = phases.map(p => {
+    const pl = lanes.filter(l => (l.phase || "build") === p);
+    return `<div class="phase">
+      <div class="phase-h mono"><span>${esc(p)}</span>
+        <div class="sq-row">${pl.map(l => `<div class="sq ${l.state}"></div>`).join("")}</div>
+        <span>${pl.filter(l => l.state !== "running").length}/${pl.length}</span></div>
+      <div class="grid">${pl.map(card).join("")}</div>
+    </div>`; }).join("");
   document.querySelectorAll("details.agent").forEach(el =>
     el.addEventListener("toggle", () => el.open ? open.add(el.dataset.id) : open.delete(el.dataset.id)));
   document.getElementById("foot").textContent = d.repo;
