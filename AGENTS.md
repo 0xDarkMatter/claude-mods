@@ -34,7 +34,7 @@ cd claude-mods && ./scripts/install.sh  # or .\scripts\install.ps1 on Windows
 | `skills/` | Skill definitions with SKILL.md |
 | `output-styles/` | Response personalities (13 styles incl. vesper, atlas, noir, roast, scout) |
 | `hooks/` | Working hook scripts (lint, format, safety, pmail) |
-| `rules/` | Claude Code rules (9 files: agentic-quality, cli-tools, commit-style, loop-engineering, naming-conventions, prompt-injection, skill-agent-updates, supply-chain, worktree-boundaries) |
+| `rules/` | Claude Code rules (14 files: agentic-quality, cli-tools, commit-style, dev-servers, loop-engineering, modern-tools, naming-conventions, prompt-injection, public-posts, release-review, shell-preference, skill-agent-updates, supply-chain, worktree-boundaries) |
 | `tools/` | Modern CLI toolkit documentation |
 | `tests/` | Validation scripts + justfile |
 | `scripts/` | Install scripts |

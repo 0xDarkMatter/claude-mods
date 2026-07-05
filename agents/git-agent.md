@@ -45,7 +45,6 @@ git branch <new-branch>
 gh pr create, gh issue create
 gh pr merge --squash (with checks passing)
 gh pr comment, gh issue comment
-gh release create
 ```
 
 **Before T2 writes:**
@@ -69,6 +68,7 @@ git checkout -- <file> (discard changes)
 git stash clear, git stash drop
 git merge (into main/master)
 gh pr merge --rebase
+gh release create (public one-way publish — rules/release-review.md requires explicit human approval)
 ```
 
 **T3 Preflight Report Format:**
@@ -155,7 +155,9 @@ When asked to create a release or tag:
 2. Determine version bump (from orchestrator context or commit analysis)
 3. Create tag: `git tag -a v{version} -m "Release v{version}"`
 4. If requested, push tag: `git push origin v{version}`
-5. If requested, create GitHub release: `gh release create v{version} --generate-notes`
+5. STOP before `gh release create` — it is T3 (rules/release-review.md): surface the tag
+   diff URL, proposed release notes, and the exact command; publish only after the
+   orchestrator relays explicit human approval
 6. Report: version, changelog summary
 
 ### Changelog Generation

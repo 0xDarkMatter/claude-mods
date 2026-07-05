@@ -18,7 +18,7 @@ Built on the [Agent Skills specification](https://agentskills.io/specification) 
 
 From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
 
-**3 agents. 100 skills. 13 styles. 13 hooks. 9 rules. One install.**
+**3 agents. 100 skills. 13 styles. 13 hooks. 14 rules. One install.**
 
 ## Recent Updates
 
@@ -413,6 +413,11 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [worktree-boundaries.md](rules/worktree-boundaries.md) | Never touch other sessions' worktrees - no rm -rf, no git add -A sweeping gitlinks |
 | [loop-engineering.md](rules/loop-engineering.md) | Graduated-autonomy discipline for scheduled/autonomous agent loops - L1→L2→L3, scheduler-not-session, escalation gate, kill switch + budget; companion to loop-ops |
 | [agentic-quality.md](rules/agentic-quality.md) | Code, comments, and structure that survive the session - cold-agent test, comment doctrine (contract blocks, WHY-only, guard comments), entry-doc standard, file-size discipline, docs indexing + pairing; companion to repo-doctor |
+| [dev-servers.md](rules/dev-servers.md) | Never start local dev servers ad-hoc - register them under a process-compose + portless stack with a port registry; template rule (adapt paths), companion to process-compose-ops/portless-ops |
+| [modern-tools.md](rules/modern-tools.md) | Which-tool enforcement when generating commands - default modern (uv, fd, rg, sd), footnote legacy; companion to cli-tools.md |
+| [public-posts.md](rules/public-posts.md) | Preview-before-send for public surfaces - quote the verbatim draft and wait for explicit approval before gh comments, PRs, or any external post |
+| [release-review.md](rules/release-review.md) | Never auto-publish GitHub releases - push commit+tag, stop, surface the diff for human review before gh release create |
+| [shell-preference.md](rules/shell-preference.md) | User-facing commands are PowerShell-native by default (WSL is the bash exception) - includes bash-to-PowerShell translation table |
 
 ### Tools & Hooks
 
