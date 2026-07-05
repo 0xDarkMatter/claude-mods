@@ -57,9 +57,14 @@ emit() {
   for id in $(jq -r 'select(.type=="started") | .id' "$RUNDIR/journal.jsonl" | awk '!seen[$0]++'); do
     brain="$(jq -r --arg id "$id" 'select(.id==$id) | .brain' "$RUNDIR/journal.jsonl" | head -1)"
     phase="$(jq -r --arg id "$id" 'select(.type=="started" and .id==$id) | .phase // "build"' "$RUNDIR/journal.jsonl" | head -1)"
+    # state derives from the LAST journal record for this id: a respawn appends a
+    # fresh "started" AFTER an old "result", which means the lane is running again.
+    # last-result-wins (tail -1 of result records) would wrongly show done/failed.
+    last_type="$(jq -r --arg id "$id" 'select(.id==$id) | .type' "$RUNDIR/journal.jsonl" | tail -1)"
     rc="$(jq -r --arg id "$id" 'select(.type=="result" and .id==$id) | .rc' "$RUNDIR/journal.jsonl" | tail -1)"
     art="$(jq -r --arg id "$id" 'select(.type=="result" and .id==$id) | .artifact' "$RUNDIR/journal.jsonl" | tail -1)"
-    if [ -z "$rc" ]; then state="running"; finished=0
+    if [ "$last_type" = "started" ]; then state="running"; finished=0
+    elif [ -z "$rc" ]; then state="running"; finished=0
     elif [ "$rc" = "0" ]; then state="done"; finished=$(mtime "$art")
     else state="failed"; finished=$(mtime "$art"); fi
     started=$(mtime "$RUNDIR/$id.prompt.txt")

@@ -217,6 +217,28 @@ printf '%s' "$CL2" | awk -F'\t' '$1=="keeplane"&&$2=="kept"{f=1} END{exit !f}' &
 [ -d "$CLEANROOT/rc-cleanlane" ] || [ -d "$CLEANROOT/rc-dirtlane" ] || [ -d "$CLEANROOT/rc-keeplane" ] \
   && bad "ff-clean: cache dir remains" || ok "ff-clean: cache dirs removed"
 
+# --- state derivation (feature C): last journal record wins -----------------------
+# a respawn appends "started" AFTER an old "result" -> the lane is running again,
+# NOT done/failed (the last-result-wins bug this fixes).
+RD5="$REPO/.fleetflow/r5"; mkdir -p "$RD5"
+: > "$RD5/z.prompt.txt"   # mtime source for elapsed
+printf '%s\n' \
+  '{"type":"started","key":"v2:z","id":"z","brain":"sonnet","phase":"build","v":"1.1.0"}' \
+  '{"type":"result","key":"v2:z","id":"z","brain":"sonnet","rc":0,"artifact":"x"}' \
+  '{"type":"started","key":"v2:z","id":"z","brain":"sonnet","phase":"build","v":"1.1.0"}' \
+  > "$RD5/journal.jsonl"
+bash "$S/ff-status.sh" --run r5 --repo "$REPO" 2>/dev/null \
+  | jq -e '.lanes[]|select(.id=="z")|.state=="running"' >/dev/null \
+  && ok "status: respawned lane (started,result,started) is running" || bad "status: respawned lane state wrong"
+# regression guard: same lane with result-last is still done (common path unchanged)
+printf '%s\n' \
+  '{"type":"started","key":"v2:z","id":"z","brain":"sonnet","phase":"build","v":"1.1.0"}' \
+  '{"type":"result","key":"v2:z","id":"z","brain":"sonnet","rc":0,"artifact":"x"}' \
+  > "$RD5/journal.jsonl"
+bash "$S/ff-status.sh" --run r5 --repo "$REPO" 2>/dev/null \
+  | jq -e '.lanes[]|select(.id=="z")|.state=="done"' >/dev/null \
+  && ok "status: result-last lane is still done (no regression)" || bad "status: result-last state wrong"
+
 echo "=== $PASS passed, $FAILN failed ==="
 [ "$FAILN" = 0 ] || exit 1
 exit 0
