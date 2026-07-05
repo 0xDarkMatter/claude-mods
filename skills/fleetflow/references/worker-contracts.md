@@ -109,11 +109,15 @@ judge", applied to yourself).
 
 ```
 <repo>/.fleetflow/<run>/
-├── journal.jsonl        # started/result records, v2 content-hash keys
+├── journal.jsonl        # started/result records, v2 content-hash keys (v: FF_VERSION)
+├── manifest.json        # orchestrator plan: {run,base,created_by,phases[],packets[]}
+├── main-baseline.txt    # main-checkout status snapshot (escape-guard baseline)
 ├── <id>.prompt.txt      # guard preamble + packet (what was actually sent)
 ├── <id>.result.json     # claude JSON envelope (glm/anthropic brains)
 ├── <id>.last.txt        # codex last-message (codex brain)
 ├── <id>.events.jsonl    # codex --json event stream (codex brain)
+├── <id>.transcript.jsonl# archived session transcript (claude-brain lanes; best-effort)
+├── <id>.invalid.txt     # last failed schema output (only when --repair ran)
 ├── <id>.err             # stderr
 └── wt-<id>/             # the lane worktree (branch fleetflow/<run>/<id>)
 ```
@@ -121,3 +125,44 @@ judge", applied to yourself).
 `.fleetflow/` sits at the repo top (never under `.claude/` — Claude Code's
 sensitive-file guard fires there before `bypassPermissions`) and must be
 gitignored; `ff-spawn` appends it to `.git/info/exclude` if absent.
+
+## 6. Effort lever, cache redirect, transcript archiving (Wave 1)
+
+**Effort lever** (`ff-spawn --effort low|medium|high|max`). Default unset =
+inherit the brain's own. The mapping (effort IS part of the cache-key OPTS
+string, so changing only effort is a cache miss):
+
+| Brain | How effort is applied |
+|---|---|
+| glm (fleet-worker) | `FLEET_WORKER_EFFORT=<v>` in the worker env |
+| codex (`codex exec`) | `-c model_reasoning_effort="<v>"` |
+| sonnet/opus/haiku/fable | `claude -p --settings '{"effortLevel":"<v>"}'` |
+
+Doctrine (carried from the native tool): reach for the effort lever before the
+model lever. Effort is recorded in the manifest packet, so `ff-run resume`
+replays each lane at its captured effort.
+
+**Cache & tmp redirect.** Every worker launch exports `UV_CACHE_DIR`,
+`TMPDIR`, `TMP`, `TEMP` into the worker env pointing at
+`${FLEETFLOW_CACHE_ROOT:-$HOME/.fleet-worker/cache}/<run>-<id>/` (created
+pre-launch). This keeps uv/pytest cache and codex sandbox litter OUT of the
+repo and lanes — the AppContainer-ACL'd dirs codex leaves behind resist
+unelevated deletion and would otherwise block `git worktree remove` (the
+`sandbox litter gotcha`, §2). Set `FLEETFLOW_CACHE_ROOT` once for the whole run
+and pass the same value to `ff-clean` so it can reclaim the dirs.
+
+**Transcript archiving** (best-effort, never fails the lane). After a
+non-dry-run claude-brain lane, the session transcript is copied to
+`<rundir>/<id>.transcript.jsonl`:
+
+- **glm**: newest `projects/*/*.jsonl` under the worker's isolated config dir
+  (`FLEET_WORKER_CONFIG_DIR`, default `$HOME/.fleet-worker/cfg-ff-<id>`).
+- **sonnet/opus/haiku/fable**: the result envelope's `session_id` resolves to
+  `$HOME/.claude/projects/<encoded-workdir>/<session_id>.jsonl`, where the
+  encoding is per-char `[:\\/.]` → `-` (verified empirically: `C:\Users\Mack`
+  → `C--Users-Mack`). Falls back to a `<session_id>.jsonl` search across all
+  project dirs if the encoded path misses.
+
+If the source transcript can't be found, the lane logs a `transcript source
+not found ... skipped (non-fatal)` warning and continues — the transcript is a
+convenience for inspection/audit, not a gate.

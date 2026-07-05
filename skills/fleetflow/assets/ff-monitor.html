@@ -70,14 +70,20 @@ const esc = t => (t||"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&
 const open = new Set();
 let misses = 0;
 async function tick() {
-  let d;
-  try { d = await (await fetch("status.json?t="+Date.now())).json(); misses = 0; }
-  catch (e) {
+  let d = null;
+  try { d = await (await fetch("status.json?t="+Date.now())).json(); }
+  catch (e) { d = null; }
+  // torn-write guard: ff-status rewrites status.json via status.json.tmp -> mv,
+  // so a reader can catch a transient {"lanes":[]} (or an unparseable shard)
+  // mid-replace. Treat an empty/missing-lanes payload like a fetch miss - keep
+  // the previous render and count it toward the 3-miss warning.
+  if (!d || !Array.isArray(d.lanes) || d.lanes.length === 0) {
     if (++misses >= 3) document.getElementById("foot").textContent =
-      "status.json unreachable — is ff-status --watch running?";
+      "status.json empty or unreachable — torn write, or ff-status --watch not running?";
     return;
   }
-  const lanes = d.lanes || [];
+  misses = 0;
+  const lanes = d.lanes;
   const running = lanes.filter(l => l.state === "running").length;
   document.getElementById("run").textContent = d.run;
   const oldest = Math.min(...lanes.map(l => l.started).filter(Boolean));

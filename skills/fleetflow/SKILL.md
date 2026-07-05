@@ -127,11 +127,35 @@ sandbox is confined to the lane, so out-of-repo specs are unreadable anyway.
 
 **Resume.** The journal (`.fleetflow/<run>/journal.jsonl`) uses the native
 tool's mechanism: each spawn is keyed by a content hash of
-`(brain, prompt, opts)`. Re-running `ff-spawn` with an unchanged packet returns
-the cached result instantly (exit 3 + path); change the prompt and only that
-lane re-runs. Corollary (same reason the native tool bans `Date.now()`): keep
-timestamps and random values OUT of packet prompts, or the key changes and the
-cache never hits.
+`(brain, prompt, opts)` — and `opts` includes `--effort`, so changing only the
+effort lever is a cache miss (a different run). Re-running `ff-spawn` with an
+unchanged packet returns the cached result instantly (exit 3 + path); change
+the prompt and only that lane re-runs. Corollary (same reason the native tool
+bans `Date.now()`): keep timestamps and random values OUT of packet prompts, or
+the key changes and the cache never hits.
+
+**Manifest & resume.** Each spawn also upserts a packet into
+`.fleetflow/<run>/manifest.json` (`{run, base, created_by, phases[], packets[]}`,
+one entry per id — idempotent — carrying `{id, brain, phase, prompt_file,
+worktree, max_turns, effort, schema, key}`). It is the orchestrator-side plan,
+distinct from the per-spawn journal: it records *what was intended* so a whole
+run can be replayed. `ff-run.sh resume --run NAME` snapshots the manifest's
+packets once, then replays each through `ff-spawn` in manifest order — unchanged
+packets cache-hit (`"cached"`), changed or new ones run live; per-lane summary
+to stderr, a JSON result list on stdout, exit 0 if all ok/cached, 10 if any
+lane failed. `ff-run status --run NAME` is an alias for `ff-status`. Snapshots
+matter: ff-spawn re-orders the live manifest on each upsert (remove-then-append),
+so the replay reads from a frozen copy. When you're done,
+`ff-clean.sh --run NAME [--force]` reclaims zero-commit lanes (worktree + branch
+deleted), keeps committed ones, and removes the run's cache dirs.
+
+**Cache & tmp redirect.** Workers' `UV_CACHE_DIR`, `TMPDIR`, `TMP`, and `TEMP`
+are pointed at `${FLEETFLOW_CACHE_ROOT:-$HOME/.fleet-worker/cache}/<run>-<id>/`
+(created before launch), so pytest/uv litter and codex's AppContainer-ACL'd
+sandbox dirs land OUTSIDE the repo and lanes — never inside a worktree that
+`git worktree remove` later needs to delete. Set `FLEETFLOW_CACHE_ROOT` once for
+the whole run and pass the same value to `ff-clean` so it can find and remove
+those dirs.
 
 ## Patterns ported from the native Workflow tool
 
@@ -208,8 +232,11 @@ default the script-author follows, not an option — and real runs routinely hit
 |---|---|
 | [scripts/ff-doctor.sh](scripts/ff-doctor.sh) | `--offline` structural preflight; `--live` probes GLM endpoint, Codex auth, Anthropic models, reports orchestrator tier (fable/opus) |
 | [scripts/ff-spawn.sh](scripts/ff-spawn.sh) | uniform spawner: worktree lane + guard preamble + journal + per-brain launch (GLM via fleet-worker, Codex via `codex exec`, Anthropic via `claude -p`) |
-| [scripts/ff-collect.sh](scripts/ff-collect.sh) | per-brain result gate; `--check-main-clean` escape guard |
-| [scripts/ff-status.sh](scripts/ff-status.sh) | run status as JSON (lane state, elapsed, commits, tools, tokens, activity); `--watch N --out status.json` feeds the live monitor |
+| [scripts/ff-collect.sh](scripts/ff-collect.sh) | per-brain result gate; strips ```json fences before `--schema` validation; `--repair` respawns a `<id>-repair` lane on validation failure; `--check-main-clean` escape guard |
+| [scripts/ff-status.sh](scripts/ff-status.sh) | run status as JSON (lane state, elapsed, commits, tools, tokens, activity, manifest summary); `--watch N --out status.json` feeds the live monitor |
+| [scripts/ff-run.sh](scripts/ff-run.sh) | `resume --run NAME` replays every manifest packet through ff-spawn in order (unchanged = cached, changed/new = live); `status --run NAME` aliases ff-status |
+| [scripts/ff-clean.sh](scripts/ff-clean.sh) | `--run NAME [--force]` reclaims zero-commit lanes (worktree remove + branch -D), keeps committed lanes, removes the run's cache dirs; reports locked ACL-litter dirs |
+| [scripts/ff-import.sh](scripts/ff-import.sh) | `--wf DIR --run NAME` imports a native Claude Code Workflow run dir (`wf_*/`) — completed agents become lanes (prompt + result envelope + journal + manifest), started-only agents are flagged incomplete; native keys are terminal, not replayable |
 
 **Live monitor** ([assets/ff-monitor.html](assets/ff-monitor.html)): a
 zero-dependency page reproducing the native /workflows progress surface — run
@@ -230,6 +257,29 @@ moment-in-time render by design, re-emitted rather than self-updating.
 All follow the Skill Resource Protocol: stdout is data, chatter on stderr,
 semantic exit codes (`0` ok, `2` usage, `3` cached/missing, `7` unreachable,
 `10` worker failed, `12` escape detected), `--help` with EXAMPLES.
+
+## Importing a native Workflow run
+
+`ff-import --wf <wf_*/> --run <name>` reads a native Claude Code Workflow run
+directory — its `journal.jsonl` (`started`/`result` records with `v2:` hash
+keys and `agentId`) plus per-agent `agent-<id>.jsonl` transcripts — and lands
+each completed agent as a fleetflow lane: the agent's first user-role message
+(string content or content-array-with-text-blocks, both handled) becomes
+`<id>.prompt.txt`, its native `result` object becomes `<id>.result.json`
+(`{is_error:false, result:<native-result>|tojson}`), and a `native`-brain
+packet is appended to the manifest (`imported_from: <DIR>`) for provenance.
+Agents with a `started` but no `result` get a prompt file only and are
+reported `incomplete` on stdout's TSV — respawn candidates.
+
+**Caveat — imported results are terminal facts, not a replayable cache.** The
+native `v2:` keys are content hashes of the *native* `(prompt, opts)` call, not
+fleetflow's `sha256(brain+prompt+opts)`, and `native` is not a spawnable brain
+— so `ff-run resume` **skips** native packets rather than replaying them (it
+reports each `imported` and exits 0). The native script's control flow
+(pipeline/barrier/loop) is not recovered either. To continue from an imported
+result, spawn a fresh lane with a real brain and paste the imported result into
+its packet (the hub-and-spoke handoff). Use import for salvage, provenance, and
+visual continuity in the monitor — not to resume native work in place.
 
 ## References
 
