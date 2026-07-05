@@ -1,0 +1,27 @@
+{
+  "_comment": "Canonical fast-moving facts the rust-ops skill encodes. scripts/check-rust-facts.py asserts SKILL.md + references name these consistently (--offline) and probes crates.io for major-version drift (--live). Edit deliberately: a change here is a skill-content decision, not housekeeping.",
+  "schema": "claude-mods.rust-ops.facts/v1",
+  "as_of": "2026-07-05",
+  "registry": "https://crates.io/api/v1/crates",
+  "currency_note": "> Ecosystem facts verified as of 2026-07.",
+  "packages": [
+    {
+      "name": "tokio",
+      "documented_major": 1,
+      "role": "async runtime (dominant)",
+      "where": "SKILL.md (#[tokio::main], tokio::join!/select!, mpsc/oneshot/broadcast/watch channels); references/async-tokio.md. The #[tokio::main]/#[tokio::test] + tokio::join! surface is the Tokio 1.x API."
+    },
+    {
+      "name": "axum",
+      "documented_major": 0,
+      "role": "HTTP server (tower-based)",
+      "where": "SKILL.md (async decision tree: 'axum (tower-based)'); references/ecosystem.md (axum::Router, axum::serve, extractors). Axum has shipped as 0.x throughout."
+    },
+    {
+      "name": "serde",
+      "documented_major": 1,
+      "role": "serialization",
+      "where": "SKILL.md (#[derive(Serialize, Deserialize)], serde_json::to_string); references/ecosystem.md. The derive + serde_json surface is the Serde 1.x API."
+    }
+  ]
+}
