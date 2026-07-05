@@ -12,6 +12,8 @@ metadata:
 
 Orchestrator for security auditing. Detects project stack inline, dispatches three parallel audit agents (dependency, SAST, auth/config review), consolidates into a severity-ranked OWASP-mapped report.
 
+> Findings map to the **OWASP Top 10 (2021)** revision; a newer revision may exist — re-verify the current list at owasp.org.
+
 ## Architecture
 
 ```
@@ -36,7 +38,7 @@ User requests security audit or mentions security concern
     |       |       +---> Session, CSRF, CORS, CSP, JWT, OAuth, rate limiting, env vars
     |       |       +---> Report: finding, severity, OWASP category, remediation
     |       |
-    |       +---> Consolidate: deduplicate, rank by severity, map to OWASP Top 10
+    |       +---> Consolidate: deduplicate, rank by severity, map to OWASP Top 10 (2021)
     |
     +---> T3: Remediate (dispatch general-purpose + skill preload, foreground + confirm)
             +---> Agent proposes specific fixes

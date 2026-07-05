@@ -1,6 +1,6 @@
-# OWASP Top 10 Detailed Guide
+# OWASP Top 10 (2021) Detailed Guide
 
-In-depth coverage of OWASP Top 10 2021 vulnerabilities.
+In-depth coverage of OWASP Top 10 (2021) vulnerabilities; a newer revision may exist — re-verify the current list at owasp.org.
 
 ## A01: Broken Access Control
 
