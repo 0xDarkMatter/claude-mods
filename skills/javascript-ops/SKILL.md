@@ -144,7 +144,7 @@ Node.js event loop PHASES (libuv):
 | `Promise.withResolvers()` | ES2024 | Deferred pattern |
 | `ArrayBuffer.prototype.resize()` | ES2024 | Grow/shrink buffer in-place |
 | `String.prototype.isWellFormed()` | ES2024 | Check valid Unicode |
-| `import assert { type: 'json' }` | ES2024 | Import attributes |
+| `import x from './f.json' with { type: 'json' }` | ES2024 | Import attributes (`assert {…}` is the deprecated legacy syntax) |
 | `Set.prototype.union(other)` | ES2025 | Set algebra methods |
 | `Set.prototype.intersection(other)` | ES2025 | Set algebra methods |
 | `Set.prototype.difference(other)` | ES2025 | Set algebra methods |
