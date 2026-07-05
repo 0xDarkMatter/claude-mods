@@ -79,6 +79,16 @@ emit() {
       tokens="$(jq -r '.usage.output_tokens // 0' "$RUNDIR/$id.result.json" 2>/dev/null | head -1)"
       tools="$(jq -r '.num_turns // 0' "$RUNDIR/$id.result.json" 2>/dev/null | head -1)"
       [ -n "$tokens" ] || tokens=0; [ -n "$tools" ] || tools=0
+    elif [ "$state" = "running" ]; then
+      # claude -p persists its session transcript inside the worker's isolated
+      # config dir as it runs - the only live signal a claude-brain lane emits
+      T="$(ls -t "${FLEETFLOW_CFG_BASE:-$HOME/.fleet-worker}/cfg-ff-$id/projects"/*/*.jsonl 2>/dev/null | head -1)"
+      if [ -n "$T" ]; then
+        tools="$(grep -c '"type":"tool_use"' "$T" 2>/dev/null | tr -d ' ')"
+        last_tool="$(grep -o '"name":"[A-Za-z_]*"' "$T" 2>/dev/null | tail -1 | cut -d'"' -f4)"
+        [ -z "$last_tool" ] || activity="live: $last_tool"
+        tokens="$(grep -o '"output_tokens":[0-9]*' "$T" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')"
+      fi
     fi
     [ -n "$activity" ] || activity="${last_c:-working}"
     etail="$(grep -v '^\s*$' "$RUNDIR/$id.err" 2>/dev/null | tail -1 | head -c 160)"
