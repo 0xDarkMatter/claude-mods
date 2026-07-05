@@ -143,6 +143,30 @@ The ones to actually use:
   `--output-schema` is native; Claude workers get the schema embedded in the
   prompt and validated at collect time).
 
+## Default posture: verify by default, scale to the ask
+
+The native tool's fan-outs look "automatic" because its doctrine makes them the
+default the script-author follows, not an option — and real runs routinely hit
+30–50 agents on large tasks. fleetflow adopts the same posture:
+
+- **Every run gets a verify phase unless you state why not.** Minimum: one
+  refuter per build lane (cross-provider) + a judge for anything with more
+  than one candidate. A run that skips verification is the exception and says
+  so in its summary.
+- **Scale the fan-out to the ask, not to caution.** Mechanical batch → one
+  lane per file-disjoint packet, however many that is. Discovery/audit →
+  loop-until-dry rounds, not a fixed small N. Verification typically adds
+  0.5–1.5× the build-lane count on top. 20–50 lanes on a big task is the
+  pattern working, not a smell — the native tool budgets 1000 agent calls per
+  run for exactly this reason.
+- **Throttle in waves, don't shrink the plan.** The native engine queues past
+  `min(16, cores−2)` concurrent; fleetflow's orchestrator does the same
+  manually — spawn in waves of ≤4–6 per provider (endpoint quota binds first),
+  collect as lanes finish, keep the total plan intact. Bound each lane
+  (`--max-turns`), never the ambition.
+- **No silent caps** (native rule, verbatim): if you sample, top-N, or skip,
+  say so in the run summary.
+
 ## Safety — the cage, not the model
 
 - **Isolation:** every mutating worker gets its own worktree lane *and* (GLM)
