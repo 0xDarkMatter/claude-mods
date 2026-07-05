@@ -12,6 +12,8 @@ metadata:
 
 Comprehensive Tailwind CSS patterns covering layout, responsive design, components, dark mode, animations, and v4 migration.
 
+> Tailwind v4 ecosystem facts verified as of 2026-07.
+
 ## Layout Decision Tree
 
 ```
@@ -466,6 +468,25 @@ dialog[open] {
 | `references/component-patterns.md` | Cards, buttons, forms, navigation, modals, tables, alerts, badges, avatars, dropdowns, tooltips, skeleton loaders, accessibility | ~700 |
 | `references/v4-migration.md` | CSS-first config, @theme, @plugin, removed utilities, container queries, @starting-style, migration steps, breaking changes | ~500 |
 | `references/configuration.md` | Theme config (v3+v4), colors, spacing, typography, plugins, @layer, @apply, custom variants, dark mode, container queries | ~500 |
+
+## Staleness Verifier
+
+This skill encodes fast-moving facts (the Tailwind v4 CSS-first directives, the
+`@tailwindcss/*` package set, the v3→v4 migration). [`scripts/check-tailwind-facts.py`](scripts/check-tailwind-facts.py)
+guards them against silent drift — internal consistency in PR CI, live
+major-version drift in the scheduled freshness job:
+
+```bash
+# Structural (PR CI, no network): every catalogued package + v4 directive gate
+# is still named in this skill's prose, and the currency note carries a year.
+python3 skills/tailwind-ops/scripts/check-tailwind-facts.py --offline        # exit 0 consistent, 10 drift
+
+# Live (weekly freshness job, never blocks a PR): is any documented major now
+# behind npm's latest dist-tag? (e.g. tailwindcss 5 while the prose says v4.)
+python3 skills/tailwind-ops/scripts/check-tailwind-facts.py --live           # exit 10 a major moved ahead, 7 npm unreachable
+```
+
+The canonical fact list lives in [`assets/tailwind-facts.json`](assets/tailwind-facts.json); when you add or drop a package or the prose stops naming one, update it to match or `--offline` fails CI.
 
 ## See Also
 
