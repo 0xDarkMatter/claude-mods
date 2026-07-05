@@ -12,7 +12,7 @@ metadata:
 
 Comprehensive patterns for building, testing, and deploying Model Context Protocol servers in Python and TypeScript.
 
-> Ecosystem facts verified as of 2026-07.
+> Ecosystem facts verified as of 2026-07-05 (standalone FastMCP at major 3).
 
 ## MCP Architecture Quick Reference
 
@@ -141,6 +141,28 @@ uv add mcp[cli]
 # Run with: uv run python server.py
 # Or:       uv run mcp run server.py
 ```
+
+**Two Python FastMCPs — know which you're on.** The official `mcp` SDK bundles a frozen
+1.x-era FastMCP (`from mcp.server.fastmcp import FastMCP`, used in the samples above —
+stable, minimal). The standalone `fastmcp` package (gofastmcp.com) is where active
+development happens and is at **major 3**: same decorator surface, plus auth, proxying,
+OpenAPI generation, and a test client. To use it:
+
+```bash
+uv add fastmcp
+```
+
+```python
+from fastmcp import FastMCP   # standalone FastMCP 3 — not mcp.server.fastmcp
+
+mcp = FastMCP("my-server")    # v3: constructor is identity/behaviour only;
+                              # transport config moved to run()/serve time
+```
+
+FastMCP 3 breaking changes (from 2.x): 16 deprecated constructor kwargs removed
+(transport settings now passed at serve time), `ui=` replaced by `app=`,
+`ctx.set_state()`/`ctx.get_state()` are now async with session-scoped persistence, and
+the metadata namespace changed from `_fastmcp` to `fastmcp`.
 
 ## TypeScript SDK Quick Start
 
@@ -328,7 +350,7 @@ The canonical fact set lives in [`assets/mcp-facts.json`](assets/mcp-facts.json)
 
 ## See Also
 
-- **MCP Specification**: https://spec.modelcontextprotocol.io
+- **MCP Specification**: https://modelcontextprotocol.io/specification/latest (the old spec.modelcontextprotocol.io subdomain no longer resolves)
 - **Python SDK**: https://github.com/modelcontextprotocol/python-sdk
 - **TypeScript SDK**: https://github.com/modelcontextprotocol/typescript-sdk
 - **Official MCP Servers**: https://github.com/modelcontextprotocol/servers
