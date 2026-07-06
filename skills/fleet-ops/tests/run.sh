@@ -68,7 +68,11 @@ echo "-- land records state and merges --"
 bash "$FLEET" land fleet/task-a >/dev/null 2>&1; ee "land slashed branch" 0 $?
 case "$(head -n1 "$REPO/.claude/fleet/lanes/fleet%2Ftask-a" 2>/dev/null)" in
   LANDED) ok "lane state LANDED recorded";; *) no "LANDED not recorded";; esac
-git -C "$REPO" log --oneline main | grep -q "merge: fleet/task-a" && ok "merge commit on main" || no "no merge commit"
+# Never assert via `git log | grep -q` here: under `set -o pipefail`, grep -q
+# exits at the first match and git log dies with SIGPIPE (141), flaking the
+# pipeline non-zero even when the merge commit exists. Capture, then match.
+main_log="$(git -C "$REPO" log --oneline main)"
+case "$main_log" in *"merge: fleet/task-a"*) ok "merge commit on main";; *) no "no merge commit";; esac
 
 echo "-- one-shot revert --"
 bash "$FLEET" revert fleet/task-a >/dev/null 2>&1; ee "revert slashed branch" 0 $?
@@ -85,8 +89,9 @@ case "$(head -n1 "$REPO/.claude/fleet/lanes/plain" 2>/dev/null)" in
   LANDED) ok "land --all landed 'plain'";; *) no "'plain' not LANDED after land --all";; esac
 case "$(head -n1 "$REPO/.claude/fleet/lanes/feat%2Fbatch-b" 2>/dev/null)" in
   LANDED) ok "land --all landed feat/batch-b";; *) no "feat/batch-b not LANDED after land --all";; esac
-git -C "$REPO" log --oneline main | grep -q "merge: plain"        && ok "merge: plain on main"        || no "no merge: plain on main"
-git -C "$REPO" log --oneline main | grep -q "merge: feat/batch-b" && ok "merge: feat/batch-b on main" || no "no merge: feat/batch-b on main"
+main_log="$(git -C "$REPO" log --oneline main)"   # captured, not piped — see SIGPIPE note above
+case "$main_log" in *"merge: plain"*)        ok "merge: plain on main";;        *) no "no merge: plain on main";; esac
+case "$main_log" in *"merge: feat/batch-b"*) ok "merge: feat/batch-b on main";; *) no "no merge: feat/batch-b on main";; esac
 # A RUNNING lane (feat/foo, not signalled READY) must be left untouched by the default batch.
 case "$(head -n1 "$REPO/.claude/fleet/lanes/feat%2Ffoo" 2>/dev/null)" in
   RUNNING) ok "land --all left RUNNING feat/foo untouched";; *) no "land --all wrongly touched RUNNING lane";; esac
