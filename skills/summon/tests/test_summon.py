@@ -47,6 +47,10 @@ Pick --json (the in-chat visual picker's data feed):
       get worktree ""; brokenCwd flags the session whose recorded cwd is gone;
       transcriptPath is resolved (scan fallback included) and ISO timestamps
       parse
+
+In-chat picker asset:
+  23. assets/picker-widget.html exists, carries the <script id="D"> injection
+      block + sendPrompt wiring, and is cited from SKILL.md
 """
 
 from __future__ import annotations
@@ -649,6 +653,31 @@ def pick_json_tests() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def asset_tests() -> None:
+    """In-chat picker asset: present, injectable, and cited from SKILL.md.
+
+    The injection marker is the `<script id="D">` JSON block (the original
+    `>>> INJECT <<<` comment was replaced when the card picker was rebuilt
+    in 551292e) — keep this assertion in sync with SKILL.md's render step.
+    """
+    name = "picker-widget.html asset present + <script id=\"D\"> block + cited from SKILL.md"
+    asset = HERE.parent / "assets" / "picker-widget.html"
+    skill = HERE.parent / "SKILL.md"
+    checks = {}
+    checks["asset exists"] = asset.is_file()
+    if checks["asset exists"]:
+        html = asset.read_text(encoding="utf-8")
+        checks["script id=D block"] = '<script id="D"' in html
+        checks["sendPrompt wiring"] = "sendPrompt" in html
+    checks["cited from SKILL.md"] = (
+        skill.is_file() and "assets/picker-widget.html" in skill.read_text(encoding="utf-8")
+    )
+    if all(checks.values()):
+        ok(name)
+    else:
+        no(name, f"failed={[k for k, v in checks.items() if not v]}")
+
+
 def main() -> int:
     # 1. Piped selection honoured even with --yes (the original bug: --yes
     #    used to select ALL candidates, ignoring the piped picks).
@@ -753,6 +782,9 @@ def main() -> int:
 
     # 21-22. pick --json: envelope, clean stdout, worktree split, brokenCwd
     pick_json_tests()
+
+    # 23. In-chat picker asset: present + injectable + cited from SKILL.md
+    asset_tests()
 
     print(f"\nsummon tests: {PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0

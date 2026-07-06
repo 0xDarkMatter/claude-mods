@@ -11,32 +11,21 @@
 # no real LLM call is ever made by this suite), the pick --json inventory
 # envelope, and the in-chat picker asset (present + cited from SKILL.md).
 #
+# All checks live in test_summon.py so its pass/fail summary IS the whole
+# suite — no shell-level checks that could fail outside the counter.
+#
 # Usage:   bash tests/run.sh
 # Exit:    0 all pass, 1 one or more failures
 
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FAILED=0
-
-# --- In-chat picker asset: file present, INJECT block intact, cited from SKILL.md
-ASSET="$HERE/../assets/picker-widget.html"
-if [[ -f "$ASSET" ]] \
-    && grep -q ">>> INJECT" "$ASSET" \
-    && grep -q "sendPrompt" "$ASSET" \
-    && grep -q "assets/picker-widget.html" "$HERE/../SKILL.md"; then
-  echo "  PASS  picker-widget.html asset present + INJECT block + cited from SKILL.md"
-else
-  echo "  FAIL  picker-widget.html asset present + INJECT block + cited from SKILL.md"
-  FAILED=1
-fi
 
 # Pick a python that actually executes — skips the Windows Store python3 stub.
 PYTHON=""
 for c in python python3 py; do
   if command -v "$c" >/dev/null 2>&1 && "$c" -c "" >/dev/null 2>&1; then PYTHON="$c"; break; fi
 done
-[[ -z "$PYTHON" ]] && { echo "no working python found — skipping python suite" >&2; exit "$FAILED"; }
+[[ -z "$PYTHON" ]] && { echo "no working python found" >&2; exit 1; }
 
-"$PYTHON" "$HERE/test_summon.py" || FAILED=1
-exit "$FAILED"
+exec "$PYTHON" "$HERE/test_summon.py"
