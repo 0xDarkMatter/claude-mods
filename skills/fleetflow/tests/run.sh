@@ -6,6 +6,9 @@ set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 S="$HERE/../scripts"
+# heal the runner's own PATH too, or the jq guard below self-skips on hosts
+# with a stale env snapshot (the exact failure _env.sh exists to fix)
+[ -f "$S/_env.sh" ] && . "$S/_env.sh"
 PASS=0; FAILN=0
 ok()   { PASS=$((PASS+1)); echo "  PASS  $1"; }
 bad()  { FAILN=$((FAILN+1)); echo "  FAIL  $1"; }
