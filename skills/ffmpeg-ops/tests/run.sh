@@ -95,7 +95,10 @@ echo "-- gen-luts --"
 out="$("$PYTHON" "$S/gen-luts.py" --variants warm_filmic --size 17 --out-dir "$SB/luts" 2>/dev/null)"; rc=$?
 expect_exit "gen-luts size 17 -> 0" 0 "$rc"
 [[ -f "$SB/luts/warm_filmic.cube" ]] && ok "cube file written" || no "cube file written"
-head -5 "$SB/luts/warm_filmic.cube" | grep -q "LUT_3D_SIZE 17" && ok "cube header size" || no "cube header size"
+# Captured, not `head | grep -q`: under `set -o pipefail` grep -q's early exit
+# SIGPIPEs the producer (141) and flakes the assert even on a match.
+cube_hdr="$(head -5 "$SB/luts/warm_filmic.cube")"
+expect_has "cube header size" "LUT_3D_SIZE 17" "$cube_hdr"
 rows="$(grep -cE '^[0-9]' "$SB/luts/warm_filmic.cube")"
 [[ "$rows" == "4913" ]] && ok "cube row count 17^3" || no "cube row count (want 4913 got $rows)"
 out="$("$PYTHON" "$S/gen-luts.py" --variants neutral709 --size 17 --out-dir "$SB/luts" --json 2>/dev/null)"
@@ -174,7 +177,10 @@ else
   expect_exit "quality self-compare -> 0" 0 $?
   out="$("$PYTHON" "$S/quality-compare.py" "$FIX" "$FIX" --metrics ssim --json 2>/dev/null)"
   expect_has "ssim of identical ~1" '"all": 1' "$out"
-  if ffmpeg -hide_banner -filters 2>/dev/null | grep -q libvmaf; then
+  # Captured, not `-filters | grep -q`: under pipefail a SIGPIPE'd ffmpeg (141)
+  # would silently take the no-vmaf branch even when libvmaf is present.
+  filter_list="$(ffmpeg -hide_banner -filters 2>/dev/null)"
+  if grep -q libvmaf <<<"$filter_list"; then
     "$PYTHON" "$S/quality-compare.py" "$FIX" "$FIX" --metrics vmaf --min-vmaf 95 >/dev/null 2>&1
     expect_exit "vmaf self-compare above threshold -> 0" 0 $?
   else

@@ -62,7 +62,10 @@ done
 py="$here/scripts/screenshot_map.py"
 if [ -f "$py" ]; then
   "$PY" -m py_compile "$py" && ok "py_compile clean" || bad "py_compile failed"
-  head -25 "$py" | grep -Eq '^(# )?Examples:' && ok "has Examples block" || bad "no Examples block"
+  # Captured, not `head | grep -q`: under `set -o pipefail` grep -q's early exit
+  # SIGPIPEs the producer (141) and flakes the assert even on a match.
+  py_head="$(head -25 "$py")"
+  grep -Eq '^(# )?Examples:' <<<"$py_head" && ok "has Examples block" || bad "no Examples block"
   "$PY" "$py" --help >/dev/null 2>&1 && ok "--help exits 0" || bad "--help nonzero"
   # USAGE (exit 2) on a file:// URL — happens before the playwright import, so this is offline-safe
   "$PY" "$py" "file:///tmp/x.html" /tmp/o.png >/dev/null 2>&1
@@ -76,7 +79,8 @@ facts="$here/scripts/check-mapbox-facts.py"
 if [ -f "$facts" ]; then
   ok "resource present: scripts/check-mapbox-facts.py"
   "$PY" -m py_compile "$facts" && ok "facts: py_compile clean" || bad "facts: py_compile failed"
-  head -30 "$facts" | grep -Eq '^# +Examples:' && ok "facts: has Examples block" || bad "facts: no Examples block"
+  facts_head="$(head -30 "$facts")"   # captured, not piped — see SIGPIPE note above
+  grep -Eq '^# +Examples:' <<<"$facts_head" && ok "facts: has Examples block" || bad "facts: no Examples block"
   "$PY" "$facts" --help >/dev/null 2>&1 && ok "facts: --help exits 0" || bad "facts: --help nonzero"
   # Offline mode must pass on the skill's own content (internal consistency).
   "$PY" "$facts" --offline >/dev/null 2>&1 && ok "facts: --offline consistent (exit 0)" || bad "facts: --offline found drift"

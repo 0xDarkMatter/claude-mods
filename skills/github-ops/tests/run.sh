@@ -43,7 +43,12 @@ bash -n "$SP" && ok "sp: bash -n clean" || no "sp: bash -n"
 
 bash "$SP" --help >/dev/null 2>&1; expect "sp: --help" 0 $?
 # --help must advertise EXAMPLES so the tool is discoverable.
-if bash "$SP" --help 2>&1 | grep -q "Examples:"; then ok "sp: --help has EXAMPLES"
+# Never assert via `producer | grep -q` in this suite: under `set -o pipefail`,
+# grep -q exits at the first match and the producer dies with SIGPIPE (141),
+# flaking the pipeline non-zero even when the pattern is present. Capture the
+# output once, then grep the variable (a here-string can't SIGPIPE).
+sp_help="$(bash "$SP" --help 2>&1)"
+if grep -q "Examples:" <<<"$sp_help"; then ok "sp: --help has EXAMPLES"
 else no "sp: --help missing EXAMPLES"; fi
 
 bash "$SP" --frobnicate >/dev/null 2>&1; expect "sp: unknown flag -> usage" 2 $?
@@ -76,12 +81,16 @@ else no "sp: SECURITY.md.template asset missing/empty"; fi
 # Read-only guarantee. The ONLY executor in this script is `runner gh api …`
 # (every -X PUT/PATCH lives inside an emitted *_cmd string, never executed). Assert
 # no `runner gh api` invocation carries a mutating verb.
-if grep -E 'runner gh api' "$SP" | grep -Eq '\-X (PUT|PATCH|POST|DELETE)'; then
+sp_api_calls="$(grep -E 'runner gh api' "$SP")"   # captured, not piped — see SIGPIPE note above
+if grep -Eq '\-X (PUT|PATCH|POST|DELETE)' <<<"$sp_api_calls"; then
   no "sp: found an executed mutating gh api call (must be read-only)"
 else ok "sp: no executed mutating gh api call (read-only)"; fi
 # And every mutating verb that DOES appear must be inside a quoted command string
 # (assigned to a *_cmd var), proving it is emitted-as-text only.
-if grep -nE '\-X (PUT|PATCH|POST|DELETE)' "$SP" | grep -vqE '_cmd='; then
+# Inverted greps (-v) need the emptiness guard: an empty capture would feed the
+# here-string's single empty line to grep -v, which would wrongly match.
+sp_mut="$(grep -nE '\-X (PUT|PATCH|POST|DELETE)' "$SP")"
+if [ -n "$sp_mut" ] && grep -vqE '_cmd=' <<<"$sp_mut"; then
   no "sp: a mutating verb appears outside an emitted *_cmd string"
 else ok "sp: all mutating verbs are emitted text only"; fi
 
@@ -93,10 +102,11 @@ RS="$SCRIPTS/repo-scorecard.sh"
 bash -n "$RS" && ok "rs: bash -n clean" || no "rs: bash -n"
 
 bash "$RS" --help >/dev/null 2>&1; expect "rs: --help" 0 $?
-if bash "$RS" --help 2>&1 | grep -q "Examples:"; then ok "rs: --help has EXAMPLES"
+rs_help="$(bash "$RS" --help 2>&1)"   # captured, not piped — see SIGPIPE note above
+if grep -q "Examples:" <<<"$rs_help"; then ok "rs: --help has EXAMPLES"
 else no "rs: --help missing EXAMPLES"; fi
 # The scoring rubric must be documented in the header (transparent, auditable).
-if bash "$RS" --help 2>&1 | grep -q "SCORING MODEL"; then ok "rs: --help documents SCORING MODEL"
+if grep -q "SCORING MODEL" <<<"$rs_help"; then ok "rs: --help documents SCORING MODEL"
 else no "rs: --help missing SCORING MODEL"; fi
 
 bash "$RS" --frobnicate >/dev/null 2>&1; expect "rs: unknown flag -> usage" 2 $?
@@ -121,18 +131,20 @@ else no "rs: does not reference check-issues.sh"; fi
 # Read-only guarantee: no executed mutating gh verb anywhere. Every gh call must
 # be a GET (the remediation pointers it prints are text, not executed). Assert no
 # `gh api -X PUT/PATCH/POST/DELETE` and no `gh repo edit`/`gh release create` etc.
-if grep -E '\bgh (api )?-X (PUT|PATCH|POST|DELETE)' "$RS" | grep -vqE '^\s*#'; then
+rs_mut="$(grep -E '\bgh (api )?-X (PUT|PATCH|POST|DELETE)' "$RS")"   # captured — SIGPIPE note above
+if [ -n "$rs_mut" ] && grep -vqE '^\s*#' <<<"$rs_mut"; then
   no "rs: found an executed mutating gh -X call (must be read-only)"
 else ok "rs: no executed mutating gh -X call (read-only)"; fi
 # Belt-and-braces: every `runner gh …` (the only network executor) is a read-only
 # subcommand — `gh api <GET path>` or `gh repo list`. No mutating subcommand runs.
-if grep -nE 'runner gh ' "$RS" | grep -Evq 'runner gh (api|repo list)'; then
+rs_runner="$(grep -nE 'runner gh ' "$RS")"
+if [ -n "$rs_runner" ] && grep -Evq 'runner gh (api|repo list)' <<<"$rs_runner"; then
   no "rs: a 'runner gh' call uses a non-read-only subcommand"
 else ok "rs: every executed 'runner gh' is read-only (api / repo list)"; fi
 # And mutating gh subcommands, where they appear, are inside printed fix strings only
 # (the remediation pointers), never executed. Verify they sit on addfix/echo lines.
-if grep -nE 'gh (release create|repo edit|release delete|secret set|pr merge)' "$RS" \
-     | grep -vqE 'addfix|→'; then
+rs_ghsub="$(grep -nE 'gh (release create|repo edit|release delete|secret set|pr merge)' "$RS")"
+if [ -n "$rs_ghsub" ] && grep -vqE 'addfix|→' <<<"$rs_ghsub"; then
   no "rs: a mutating gh subcommand appears outside a printed remediation string"
 else ok "rs: mutating gh subcommands only appear as printed remediation text"; fi
 
@@ -156,7 +168,7 @@ if [ -f "$LIBTERM" ]; then
     "$(term_mark unknown)" "$(term_header hdr)" "$TERM_ARROW" \
     "$(term_panel_open github-ops PANEL meta)" "$(term_panel_line body)" \
     "$(term_section "" sect 3)" "$(term_panel_close hk "$(term_health warning x)")"')"
-  if printf '%s' "$marks" | LC_ALL=C grep -q '[^[:print:][:cntrl:]]'; then
+  if LC_ALL=C grep -q '[^[:print:][:cntrl:]]' <<<"$marks"; then
     no "term.sh TERM_ASCII=1 still emits non-ASCII bytes"
   else ok "term.sh TERM_ASCII=1 primitives are pure ASCII"; fi
   # A fallback that silently drops the glyph (empty) is a bug, not a fallback.
