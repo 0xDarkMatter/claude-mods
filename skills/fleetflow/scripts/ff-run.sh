@@ -11,6 +11,7 @@
 #
 # Exit codes: 0 all ok/cached | 2 usage | 10 a lane failed
 set -u
+. "$(dirname "${BASH_SOURCE[0]}")/_env.sh"
 
 FF_VERSION="1.1.0"
 

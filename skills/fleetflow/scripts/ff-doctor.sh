@@ -11,6 +11,7 @@
 # Exit codes: 0 all required checks ok | 2 usage | 7 live probe unreachable
 #             10 structural failure
 set -u
+. "$(dirname "${BASH_SOURCE[0]}")/_env.sh"
 
 FF_VERSION="1.1.0"
 
