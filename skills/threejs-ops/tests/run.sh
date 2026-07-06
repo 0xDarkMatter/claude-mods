@@ -62,7 +62,10 @@ done
 facts="$here/scripts/check-three-facts.py"
 if [ -f "$facts" ]; then
   "$PY" -m py_compile "$facts" && ok "facts: py_compile clean" || bad "facts: py_compile failed"
-  head -35 "$facts" | grep -Eq '^# +Examples:' && ok "facts: has Examples block" || bad "facts: no Examples block"
+  # Captured, not `head | grep -q`: under `set -o pipefail` grep -q's early exit
+  # SIGPIPEs the producer (141) and flakes the assert even on a match.
+  facts_head="$(head -35 "$facts")"
+  grep -Eq '^# +Examples:' <<<"$facts_head" && ok "facts: has Examples block" || bad "facts: no Examples block"
   "$PY" "$facts" --help >/dev/null 2>&1 && ok "facts: --help exits 0" || bad "facts: --help nonzero"
   # Offline mode must pass on the skill's own content (internal consistency).
   "$PY" "$facts" --offline >/dev/null 2>&1 && ok "facts: --offline consistent (exit 0)" || bad "facts: --offline found inconsistency"

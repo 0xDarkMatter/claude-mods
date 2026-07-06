@@ -39,7 +39,11 @@ PF="$SCRIPTS/publish-preflight.sh"
 bash "$PF" --help >/dev/null 2>&1;  expect_exit "--help" 0 $?
 bash "$PF" --bogus >/dev/null 2>&1; expect_exit "bad flag -> 2" 2 $?
 # --build is wired (the actual build is network/backend-dependent, not exercised offline)
-bash "$PF" --help 2>&1 | grep -q -- '--build' && ok "--help documents --build" || no "--help missing --build"
+# Captured, not `--help | grep -q`: under `set -o pipefail` grep -q's early exit
+# SIGPIPEs the producer (141) and flakes the assert even on a match. See
+# skills/fleet-ops/tests/run.sh for the pattern.
+pf_help="$(bash "$PF" --help 2>&1)"
+expect_has "--help documents --build" "--build" "$pf_help"
 mkdir -p "$SB/empty"
 bash "$PF" "$SB/empty" >/dev/null 2>&1; expect_exit "no pyproject -> 3" 3 $?
 
