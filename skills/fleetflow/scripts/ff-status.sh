@@ -10,6 +10,7 @@
 #
 # Exit codes: 0 ok | 2 usage
 set -u
+. "$(dirname "${BASH_SOURCE[0]}")/_env.sh"
 
 FF_VERSION="1.1.0"
 

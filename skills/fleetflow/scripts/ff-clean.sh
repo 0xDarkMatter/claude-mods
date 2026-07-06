@@ -13,6 +13,7 @@
 #
 # Exit codes: 0 done (incl. some locked lanes) | 2 usage / no such run
 set -u
+. "$(dirname "${BASH_SOURCE[0]}")/_env.sh"
 
 FF_VERSION="1.1.0"
 

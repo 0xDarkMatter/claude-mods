@@ -9,6 +9,7 @@
 # Exit codes: 0 ok | 2 usage | 3 cache hit (cached artifact path on stdout)
 #             5 missing dependency | 10 worker failed
 set -u
+. "$(dirname "${BASH_SOURCE[0]}")/_env.sh"
 
 FF_VERSION="1.1.0"
 

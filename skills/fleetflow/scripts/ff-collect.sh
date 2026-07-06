@@ -11,6 +11,7 @@
 # Exit codes: 0 pass | 2 usage | 3 artifact missing | 10 gate failed
 #             12 escape detected
 set -u
+. "$(dirname "${BASH_SOURCE[0]}")/_env.sh"
 
 FF_VERSION="1.1.0"
 

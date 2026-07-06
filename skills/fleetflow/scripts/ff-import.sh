@@ -21,6 +21,7 @@
 # stdout: one TSV line per agent: id<TAB>imported|incomplete<TAB>prompt_chars.
 # stderr: chatter. Exit: 0 ok | 2 usage/bad dir | 3 nothing to import.
 set -u
+. "$(dirname "${BASH_SOURCE[0]}")/_env.sh"
 
 FF_VERSION="1.1.0"
 
