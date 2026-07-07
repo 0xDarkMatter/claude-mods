@@ -200,14 +200,19 @@ if [ -f "$ROUTE" ] && command -v node >/dev/null 2>&1; then
 
 const S=JSON.stringify; let P=0,F=0;
 const eq=(n,g,w)=>{ if(S(g)===S(w)){P++} else {F++;console.error("ROUTE FAIL "+n+" got "+S(g)+" want "+S(w))} };
-eq("judge",route("judge"),{model:"opus",effort:"high"});
+// Deciders (judge/synthesize) omit model: they INHERIT the session's premium brain
+// (Fable > Opus); pinning would DOWNGRADE on a Fable session. See native-model-routing.md.
+eq("judge inherits model",route("judge"),{effort:"high"});
+eq("synthesize inherits model",route("synthesize"),{effort:"high"});
 eq("scout",route("scout"),{model:"sonnet",effort:"low"});
 eq("unknown->inherit",route("nope"),{});
 const low={total:100000,remaining:()=>10000};
-eq("judge low-budget",route("judge",low),{model:"sonnet",effort:"low"});
-eq("scout low-budget",route("scout",low),{model:"haiku",effort:"low"});
+// Deciders are EXEMPT from budget degradation — never under-power a judge under pressure.
+eq("judge exempt under low budget",route("judge",low),{effort:"high"});
+eq("synthesize exempt under low budget",route("synthesize",low),{effort:"high"});
+eq("scout degrades one tier",route("scout",low),{model:"haiku",effort:"low"});
 const okb={total:100000,remaining:()=>50000};
-eq("judge healthy",route("judge",okb),{model:"opus",effort:"high"});
+eq("judge healthy budget",route("judge",okb),{effort:"high"});
 eq("fw yes",useFleetWorker({items:30,selfContained:true,mutatesFiles:true}),true);
 eq("fw small",useFleetWorker({items:3,selfContained:true,mutatesFiles:true}),false);
 eq("fw shared",useFleetWorker({items:30,selfContained:false,mutatesFiles:true}),false);
@@ -215,7 +220,7 @@ eq("fw read-only",useFleetWorker({items:30,selfContained:true,mutatesFiles:false
 process.exit(F?1:0);
 TEST
   } > "$RT"
-  node "$RT" >/dev/null 2>&1; ee "route()/useFleetWorker() logic (10 cases)" 0 $?
+  node "$RT" >/dev/null 2>&1; ee "route()/useFleetWorker() logic (12 cases)" 0 $?
 else
   ok "route.js helper test (SKIP — node unavailable or asset absent)"
 fi
