@@ -1,6 +1,7 @@
 ---
 name: r-ops
 description: "Modern R for data analysis and statistics — tidyverse-first (dplyr, tidyr, ggplot2, native |> pipe), with base R and data.table as alternatives. Triggers on: R, Rstats, tidyverse, dplyr, tidyr, ggplot2, pivot/join/group, data.table, purrr map, broom, renv, Quarto."
+when_to_use: "Use for any R question — wrangling, visualization, modeling, time series — or when reviewing/modernizing R code to current (2024+) idioms."
 license: MIT
 compatibility: "R >= 4.1 (native |> pipe); tidyverse 2.0; Quarto"
 allowed-tools: "Read Write Bash"
