@@ -48,13 +48,14 @@ SUMMON_PY_RC=0
 # pass) — that is the rot mode this guard exists to catch: a docstring/map
 # format change that yields zero names.
 #
-# Strict name-equality matching is intentionally NOT used: the docstring and
-# the banner headers carry different labels for several sections
-# ("DESIGN(term)"↔"DESIGN", "Modes (…)"↔"Toolbox modes", "CLI entry"↔"Main")
-# and the map lists "Transcript/Distill" with no banner of its own, so a
-# name gate would false-fail on the current file. The count gate is the
-# mechanical structural-sync check that stays green and still catches every
-# add/remove mutation.
+# Matching is STRICT on alias-resolved first-token keys (upgraded from a
+# count gate per adversarial review — counts stay 14/13 under a rename, so
+# structural drift slipped by). The docstring and banners carry different
+# labels for a few sections ("DESIGN(term)"↔"DESIGN:", "Modes (…)"↔"Toolbox
+# modes:", "CLI entry"↔"Main"), so those are an explicit alias table, and
+# "Transcript/Distill" (implemented inline, banner-less) is an explicit
+# exception. Anything else that diverges — including a rename on either
+# side — is drift.
 GP=0; GF=0
 ok(){ GP=$((GP+1)); printf '  PASS  %s\n' "$1"; }
 no(){ GF=$((GF+1)); printf '  FAIL  %s\n' "$1"; }
@@ -79,28 +80,34 @@ ban_sections="$(awk '
 ' "$SRC")"
 bc="$(printf '%s\n' "$ban_sections" | grep -c . || true)"
 
-# Expected counts — the docstring lists one more conceptual section than the
-# body has banners ("Transcript/Distill" is implemented inline, banner-less).
-# Bump EXPECT_DOC when the 'Sections:' map grows; EXPECT_BAN when a banner is
-# added or removed. Both move together whenever the file's outline changes.
-EXPECT_DOC=14
-EXPECT_BAN=13
+# Normalize a section label to its comparison key: first token, with any
+# "(...)" suffix and trailing ":" stripped ("DESIGN(term)" -> "DESIGN",
+# "Toolbox modes: rebind…" -> "Toolbox").
+norm_key() { awk '{ t=$1; sub(/\(.*$/,"",t); sub(/:$/,"",t); print t }'; }
+doc_keys="$(printf '%s\n' "$doc_sections" | norm_key | sed \
+  -e 's/^Modes$/Toolbox/' \
+  -e 's/^CLI$/Main/' \
+  | grep -v '^Transcript' | sort -u)"
+ban_keys="$(printf '%s\n' "$ban_sections" | norm_key | sort -u)"
 
-# forward direction (the map side): the declared section count is stable
 if [[ "$dc" -eq 0 ]]; then
-  no "section-map (docstring) EMPTY PARSE: 0 sections — 'Sections:' line missing or unparseable (expected $EXPECT_DOC)"
-elif [[ "$dc" -eq "$EXPECT_DOC" ]]; then
-  ok "section-map (docstring): $dc sections declared (expected $EXPECT_DOC)"
+  no "section-map (docstring) EMPTY PARSE: 0 sections — 'Sections:' line missing or unparseable"
+elif [[ "$bc" -eq 0 ]]; then
+  no "section-map (body) EMPTY PARSE: 0 banners — banner format changed"
+elif [[ "$doc_keys" == "$ban_keys" ]]; then
+  ok "section-map: docstring ($dc) <-> banners ($bc) match after alias resolution"
 else
-  no "section-map (docstring) DRIFT: parsed $dc, expected $EXPECT_DOC"
+  diverged="$(comm -3 <(printf '%s\n' "$doc_keys") <(printf '%s\n' "$ban_keys") | tr -d '\t' | paste -sd', ' -)"
+  no "section-map DRIFT — docstring and banners disagree on: ${diverged:-<unknown>}"
 fi
-# reverse direction (the body side): the banner section count is stable
-if [[ "$bc" -eq 0 ]]; then
-  no "section-map (body) EMPTY PARSE: 0 banners — banner format changed (expected $EXPECT_BAN)"
-elif [[ "$bc" -eq "$EXPECT_BAN" ]]; then
-  ok "section-map (body): $bc banner sections (expected $EXPECT_BAN)"
+
+# Boxed-banner parity: each banner is a 3-line box (=== / title / ===); an
+# odd ruler-line count means a box's closing line was deleted.
+rulers="$(grep -cE '^# ={20,}$' "$SRC" || true)"
+if (( rulers > 0 && rulers % 2 == 0 )); then
+  ok "section-map: $rulers banner ruler lines (even — boxes intact)"
 else
-  no "section-map (body) DRIFT: parsed $bc, expected $EXPECT_BAN"
+  no "section-map: ruler-line count $rulers (odd or zero) — a banner box is broken"
 fi
 
 echo "=== section-map drift gate: $GP passed, $GF failed ==="
