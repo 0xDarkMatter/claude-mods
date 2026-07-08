@@ -34,6 +34,51 @@ has "index ships the iso-contour tracer" "isoContours" "$idx"
 has "index has the Image Trace panel" "Image Trace" "$idx"
 [[ -f "$SAMPLE" ]] && ok "sample.svg present" || no "sample.svg missing"
 
+# --- section-map drift gate (assets/index.html: guard comment ↔ // === markers) ---
+# index.html is a deliberately single-file studio; its top <script> guard
+# comment lists the `// === NAME ===` banner sections so the file is
+# navigable. This gate keeps the guard list and the body markers in sync
+# bidirectionally and FAILS LOUDLY if either side parses to zero names — the
+# classic rot mode where a guard-comment/marker format change silently yields
+# an empty list and the check would otherwise vacuously pass.
+map_names="$(awk '
+  /Sections \(grep/ { cap=1; sub(/.*:[[:space:]]*/,"",$0); blob=blob $0 " "; if ($0 ~ /\*\//) cap=0; next }
+  cap { if ($0 ~ /\*\//) { cap=0; next } blob=blob $0 " " }
+  END { gsub(/·/,"\n",blob); n=split(blob,a,"\n");
+        for (i=1;i<=n;i++){ s=a[i]; sub(/^[[:space:]]+/,"",s); sub(/[[:space:]]+$/,"",s); if (s!="") print s } }
+' "$INDEX")"
+mark_names="$(grep -E '^// === .* ===$' "$INDEX" | sed -E 's|^// === (.*) ===$|\1|')"
+dc="$(printf '%s\n' "$map_names"  | grep -c . || true)"
+mc="$(printf '%s\n' "$mark_names" | grep -c . || true)"
+# empty-parse guard: either side unparseable is a hard fail (never a silent pass)
+if [[ "$dc" -gt 0 && "$mc" -gt 0 ]]; then
+  ok "section-map parses (guard=$dc names, body=$mc markers)"
+else
+  no "section-map EMPTY PARSE (guard=$dc, body=$mc) — guard comment or marker format changed"
+fi
+# forward: every guard-listed section has a matching // === marker
+fwd_miss=""
+while IFS= read -r n; do
+  [[ -z "$n" ]] && continue
+  grep -Fxq -- "$n" <<< "$mark_names" || fwd_miss="$fwd_miss $n"
+done <<< "$map_names"
+if [[ -z "$fwd_miss" ]]; then
+  ok "forward: every guard-listed section has a // === marker"
+else
+  no "forward: guard sections with no marker:${fwd_miss}"
+fi
+# reverse: every // === marker is present in the guard list
+rev_miss=""
+while IFS= read -r n; do
+  [[ -z "$n" ]] && continue
+  grep -Fxq -- "$n" <<< "$map_names" || rev_miss="$rev_miss $n"
+done <<< "$mark_names"
+if [[ -z "$rev_miss" ]]; then
+  ok "reverse: every // === marker is listed in the guard comment"
+else
+  no "reverse: body markers missing from guard:${rev_miss}"
+fi
+
 # ── runtime: needs node + curl ─────────────────────────────────────────────
 if ! command -v node >/dev/null 2>&1; then echo "  SKIP  node not found — runtime checks skipped"; echo "=== $PASS passed, $FAIL failed ==="; [[ "$FAIL" -eq 0 ]] || exit 1; exit 0; fi
 if ! command -v curl >/dev/null 2>&1; then echo "  SKIP  curl not found — runtime checks skipped"; echo "=== $PASS passed, $FAIL failed ==="; [[ "$FAIL" -eq 0 ]] || exit 1; exit 0; fi
