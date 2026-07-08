@@ -208,6 +208,15 @@ default the script-author follows, not an option — and real runs routinely hit
 - **Isolation:** every mutating worker gets its own worktree lane *and* (GLM)
   its own `CLAUDE_CONFIG_DIR`. Codex workers run `--full-auto` (sandboxed,
   workspace-write) confined to their lane via `-C`.
+- **Codex lanes cannot `git commit` (learned 2026-07-08, codex-cli 0.142):**
+  a worktree's git metadata (`HEAD.lock`/`index.lock`) lives under the MAIN
+  repo's `.git/worktrees/`, outside the lane the sandbox confines Codex to —
+  commits die with a lock-permission error after the work itself succeeded.
+  Convention: Codex packets say "DO NOT COMMIT — leave changes in the working
+  tree", the worker reports `FILES_CHANGED`, and the **orchestrator reviews
+  the diff and commits**. (GLM/Anthropic `claude -p` workers are unaffected
+  and may self-commit.) Tightens the gate as a side effect: nothing a Codex
+  lane produces lands without an orchestrator diff review.
 - **Escape guard (learned 2026-07-05, incident):** a worker CAN escape its
   worktree by writing absolute paths — a GLM worker once wrote its output into
   the main checkout while its own lane stayed clean. Two mechanical defenses,
