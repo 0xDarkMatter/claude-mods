@@ -1,6 +1,6 @@
 ---
 name: prompt-injection-defense
-description: "Defend the agent against adversarial Unicode it obeys but a human can't see: bidi/Trojan Source, tag-char smuggling, zero-width text, homoglyphs. Triggers on: prompt injection, zero-width space, Trojan Source, ASCII smuggling, poisoned CLAUDE.md, MCP tool poisoning, is this file safe."
+description: "Defend the agent against adversarial Unicode it obeys but a human can't see: bidi/Trojan Source, tag-char smuggling, zero-width text, homoglyphs. Triggers on: prompt injection, scan for hidden unicode, hidden characters, zero-width space, Trojan Source, ASCII smuggling, poisoned CLAUDE.md, MCP tool poisoning, is this file safe."
 license: MIT
 allowed-tools: "Read Edit Write Bash Grep Glob Agent WebFetch"
 metadata:
