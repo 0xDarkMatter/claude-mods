@@ -33,7 +33,7 @@
     ◉ peek     · show the session's last messages
     ⧉ copy     · copy the sessionId to the clipboard
 -->
-<h2 class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Interactive card picker of Claude Desktop sessions with per-session context-usage donut, activity-density strip, turns, size, and summon or recover actions.</h2>
+<h2 class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Interactive card picker of Claude Desktop sessions with per-session context-usage gauge, activity-density strip, turns, size, and summon or recover actions.</h2>
 <style>
 .ctl{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 14px}
 .ctl input,.ctl select{font-size:13px}
@@ -49,19 +49,20 @@
 .deck.list .card{display:grid;grid-template-columns:1fr 250px;grid-template-areas:"hd dens" "ttl stats" "sum stats" "dir dir";gap:6px 18px;align-items:center;padding:12px 16px}
 .deck.list .hd{grid-area:hd}.deck.list .ttl{grid-area:ttl}.deck.list .sum{grid-area:sum}.deck.list .dens{grid-area:dens}.deck.list .stats{grid-area:stats}.deck.list .dir{grid-area:dir}
 .deck.list .sum{-webkit-line-clamp:2}
-/* header is a single non-wrapping row; .proj must be the shrinker (min-width:0
-   + ellipsis) so a long project name truncates instead of pushing the ctx
-   donut and action icons past the card's right border. Icons are sized small
-   on purpose — four of them share a half-width grid card. */
-.hd{display:flex;align-items:center;gap:6px;min-width:0}
+/* Header overflow discipline (a half-width grid card is ~250-300px, so space
+   is tight): .proj is the shrinker (min-width:0 + ellipsis); the action icons
+   are grouped in .acts with margin-left:auto so they hug the right edge; and
+   .hd may WRAP (row-gap) as a hard backstop — icons drop to a second line
+   rather than ever spilling past the border. Context lives as a chip in the
+   stats row (not the header) to keep the header light. */
+.hd{display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;row-gap:6px}
 .proj{font-size:12px;color:var(--text-secondary);font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tag{font-size:10px;border-radius:5px;padding:0 5px;border:.5px solid var(--border);color:var(--text-muted);flex:none}
 .tag.run{background:var(--bg-success);color:var(--text-success);border:0}
-.ctx{display:inline-flex;align-items:center;gap:4px;flex:none}
-.ctx b{font-size:11px;font-weight:500;color:var(--text-secondary);font-family:var(--font-mono)}
+.acts{display:inline-flex;align-items:center;gap:2px;margin-left:auto;flex:none}
 .ib{border:0;background:transparent;color:var(--text-muted);cursor:pointer;padding:2px;display:inline-flex;font-size:13px;border-radius:5px;flex:none}
 .ib:hover{color:var(--text-accent);background:var(--surface-1)}
-.divx{width:.5px;height:14px;background:var(--border);margin:0 1px;flex:none}
+.cchip i{font-size:13px}
 .ttl{font-size:15px;font-weight:500;color:var(--text-primary);line-height:1.35}
 .sum{font-size:13px;color:var(--text-secondary);line-height:1.55;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
 .dens{display:flex;align-items:flex-end;gap:2px;height:30px}
@@ -119,10 +120,6 @@ function fTok(n){n=n||0;return n>=1000?Math.round(n/1000)+'k':''+n;}
 function esc(s){return (s||'').replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 function shortModel(m){m=m||'';if(m.indexOf('opus')>=0)return 'Opus';if(m.indexOf('fable')>=0)return 'Fable 5';if(m.indexOf('sonnet')>=0)return 'Sonnet';if(m.indexOf('haiku')>=0)return 'Haiku';return m;}
 function ctxColor(p){return p<50?'#1D9E75':p<75?'#BA7517':'#E24B4A';}
-function donut(pct){var r=6,C=2*Math.PI*r,off=C*(1-(pct||0)/100),col=ctxColor(pct||0);
- return '<svg width="18" height="18" viewBox="0 0 18 18" style="transform:rotate(-90deg)" aria-hidden="true">'
- +'<circle cx="9" cy="9" r="6" fill="none" stroke="var(--border-strong)" stroke-width="2.5"></circle>'
- +'<circle cx="9" cy="9" r="6" fill="none" stroke="'+col+'" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="'+C.toFixed(1)+'" stroke-dashoffset="'+off.toFixed(1)+'"></circle></svg>';}
 function bars(b,col){b=b||[];var mx=Math.max.apply(null,b)||1;return b.map(function(v){var h=v>0?Math.max(2,Math.round(v/mx*30)):1;return '<i style="height:'+h+'px;background:'+col+';opacity:'+(v>0?1:0.18)+'"></i>';}).join('');}
 function chip(ic,val,lbl){return '<span class="chip"><i class="ti ti-'+ic+'" aria-hidden="true"></i>'+val+(lbl?'<span style="color:var(--text-muted)">'+lbl+'</span>':'')+'</span>';}
 var picked={};
@@ -138,18 +135,18 @@ function card(s){
      +'<input type="checkbox" class="pk" '+(pk?'checked':'')+' aria-label="Select session" style="margin:0 2px 0 0">'
      +'<span style="width:8px;height:8px;border-radius:50%;background:'+col+';flex:none"></span>'
      +'<span class="proj">'+esc(projName(s.projectRoot))+'</span>'+wt+run+arch
-     +'<span style="flex:1"></span>'
-     +'<span class="ctx" title="'+ctxTip+'">'+donut(s.ctxPct)+'<b>'+fTok(s.ctxTokens)+'</b></span>'
-     +'<span class="divx"></span>'
-     +'<button class="ib act-peek" aria-label="Peek last messages" title="Peek last messages"><i class="ti ti-eye" aria-hidden="true"></i></button>'
-     +'<button class="ib act-copy" aria-label="Copy session id" title="Copy session id"><i class="ti ti-copy" aria-hidden="true"></i></button>'
-     +'<button class="ib act-summon" aria-label="Summon to other account" title="Summon → other account (copy)"><i class="ti ti-arrow-up-right" aria-hidden="true"></i></button>'
-     +'<button class="ib act-recover" aria-label="Recover: summarise and start fresh" title="Recover — summarise + fresh session"><i class="ti ti-refresh" aria-hidden="true"></i></button>'
+     +'<span class="acts">'
+       +'<button class="ib act-peek" aria-label="Peek last messages" title="Peek last messages"><i class="ti ti-eye" aria-hidden="true"></i></button>'
+       +'<button class="ib act-copy" aria-label="Copy session id" title="Copy session id"><i class="ti ti-copy" aria-hidden="true"></i></button>'
+       +'<button class="ib act-summon" aria-label="Summon to other account" title="Summon → other account (copy)"><i class="ti ti-arrow-up-right" aria-hidden="true"></i></button>'
+       +'<button class="ib act-recover" aria-label="Recover: summarise and start fresh" title="Recover — summarise + fresh session"><i class="ti ti-refresh" aria-hidden="true"></i></button>'
+     +'</span>'
    +'</div>'
    +'<div class="ttl">'+ttl+'</div>'
    +(body?'<div class="sum">'+esc(body)+'</div>':'')
    +'<div class="dens" title="activity density across session lifetime">'+bars(s.densityBuckets,col)+'</div>'
    +'<div class="stats">'
+     +'<span class="chip cchip" title="'+ctxTip+'"><i class="ti ti-gauge" aria-hidden="true" style="color:'+ctxColor(s.ctxPct)+'"></i>'+fTok(s.ctxTokens)+'<span style="color:var(--text-muted)">'+s.ctxPct+'%</span></span>'
      +chip('cpu',shortModel(s.model),s.effort||'')
      +chip('clock',age(s.lastActivityAt),'')
      +chip('messages',nf(s.turns),'turns')
