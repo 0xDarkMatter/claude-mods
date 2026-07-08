@@ -1,13 +1,13 @@
 ---
 name: claude-code-ops
-description: "Claude Code internals - hooks, skills, subagents, headless mode, and debugging, current as of June 2026. Use for: hooks, hook events, hook not firing, PreToolUse, PostToolUse, SessionStart, Stop hook, hook script, stdin JSON contract, tool validation, audit logging, skill frontmatter, SKILL.md, skill not loading, skill not triggering, disable-model-invocation, context fork, dynamic context injection, skill description budget, headless, claude -p, CLI automation, --print, output-format, stream-json, json-schema structured output, CI/CD scripting, bare mode, background agents, debug, troubleshoot, not working, agent not found, plugin not loading, claude plugin validate, /doctor, --safe-mode, MCP server not connecting, settings precedence, extension architecture, which extension type, agent vs skill vs command vs hook, where to put a skill, extension scope, plugin design, authoring an agent, writing a skill description."
-when_to_use: "Use for questions about Claude Code itself — e.g. 'my hook isn't firing', 'why won't this skill trigger', 'run claude headless in CI', 'plugin fails to validate', 'which settings file wins', 'should this be an agent or a skill', 'how do I design this extension'."
+description: "Claude Code internals - hooks, skill frontmatter, headless mode, and extension debugging, current as of June 2026. Triggers: hooks, hook events, hook not firing, PreToolUse/PostToolUse/SessionStart, skill frontmatter, SKILL.md, skill not triggering, headless, claude -p, CI/CD scripting, plugin validate, MCP server not connecting, agent vs skill vs command vs hook."
+when_to_use: "Use for questions about Claude Code itself - e.g. my hook is not firing, why won't this skill trigger, run claude headless in CI, plugin fails to validate, should this be an agent or a skill."
 license: MIT
 compatibility: "Claude Code CLI v2.1.x (June 2026 docs)"
 allowed-tools: "Bash Read Grep"
 metadata:
   author: claude-mods
-  related-skills: "mcp-ops, setperms"
+  related-skills: "mcp-ops, setperms, parallel-ops"
 ---
 
 # Claude Code Internals
