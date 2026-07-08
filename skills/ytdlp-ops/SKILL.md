@@ -7,7 +7,7 @@ compatibility: "yt-dlp 2025.x+ (releases near-monthly; run the verifier FIRST wh
 allowed-tools: "Read Write Edit Bash Glob Grep"
 metadata:
   author: claude-mods
-  related-skills: ffmpeg-ops, cutcraft, debug-ops
+  related-skills: ffmpeg-ops, debug-ops
 ---
 
 # yt-dlp Operations

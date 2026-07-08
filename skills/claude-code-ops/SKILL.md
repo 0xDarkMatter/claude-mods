@@ -7,7 +7,7 @@ compatibility: "Claude Code CLI v2.1.x (June 2026 docs)"
 allowed-tools: "Bash Read Grep"
 metadata:
   author: claude-mods
-  related-skills: "mcp-ops, setperms, dsp-launch"
+  related-skills: "mcp-ops, setperms"
 ---
 
 # Claude Code Internals

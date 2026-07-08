@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: claude-code-hooks, claude-code-debug, typescript-ops, python-fastapi-ops
+  related-skills: claude-code-ops, typescript-ops, python-fastapi-ops
 ---
 
 # MCP Operations

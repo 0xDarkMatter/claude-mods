@@ -32,6 +32,9 @@ jobs:
       - name: Doc-drift gate (docs must match disk)
         run: bash tests/doc-drift.sh
 
+      - name: Executable-bit gate (tracked scripts must be executable)
+        run: bash tests/check-exec-bits.sh
+
       - name: Run skill behavioural test suites
         run: bash tests/run-skill-tests.sh
 

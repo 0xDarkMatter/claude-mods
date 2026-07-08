@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: debug-ops, network-tools
+  related-skills: debug-ops
 ---
 
 # Network Operations
