@@ -123,15 +123,23 @@ GR="$(get 'd["data"]["grade"]')"
 "$PY" "$DOCTOR" --repo "$TMP" --strict >/dev/null 2>&1 \
     && ok "remediated repo passes --strict (grade $GR)" || no "strict pass" "grade $GR exit $?"
 
-# 11. justified monster (guard marker in head) downgrades crit -> info
-{ echo "# ARCHITECTURE: single-file by design — Sections: A · B · C"
+# 11-13. large-file escape hatch requires both guard and section map
+{ echo '"""Deliberately single-file; do not split this portable script."""'
+  printf '# === INPUT ===\n# === PROCESSING ===\n# === OUTPUT ===\n'
   "$PY" -c "print('\n'.join('y = %d' % i for i in range(1700)))"; } > src/justified.py
+{ printf '# === INPUT ===\n# === PROCESSING ===\n# === OUTPUT ===\n'
+  "$PY" -c "print('\n'.join('z = %d' % i for i in range(1700)))"; } > src/map-only.py
+"$PY" -c "print('\n'.join('b = %d' % i for i in range(1700)))" > src/bare.py
 git add -A; git commit -qm "feat: justified monster"
 OUT="$(run_json)"
-[ "$(get 'sum(1 for f in d["data"]["findings"] if "justified.py" in f["path"] and f["severity"]=="crit")')" = "0" ] \
-    && [ "$(get 'sum(1 for f in d["data"]["findings"] if "justified.py" in f["path"] and "justification marker" in f["msg"])')" = "1" ] \
-    && ok "justification marker downgrades monster crit -> info" \
+[ "$(get 'sum(1 for f in d["data"]["findings"] if "justified.py" in f["path"] and f["dim"]=="structure" and f["severity"]=="info")')" = "1" ] \
+    && ok "guard + map downgrades monster crit -> info" \
     || no "justified monster" "severity wrong"
+[ "$(get 'sum(1 for f in d["data"]["findings"] if "map-only.py" in f["path"] and f["severity"]=="warn" and "guard comment" in f["msg"])')" = "1" ] \
+    && ok "map-only monster warns for missing guard" \
+    || no "map-only monster" "severity or message wrong"
+[ "$(get 'sum(1 for f in d["data"]["findings"] if "bare.py" in f["path"] and f["severity"]=="crit")')" = "1" ] \
+    && ok "bare monster remains crit" || no "bare monster" "severity wrong"
 
 echo
 echo "repo-doctor tests: $pass passed, $fail failed"
