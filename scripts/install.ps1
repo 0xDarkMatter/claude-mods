@@ -211,11 +211,16 @@ foreach ($eventProperty in $desired.hooks.PSObject.Properties) {
         $missingHooks = @()
         foreach ($hook in @($group.hooks)) {
             $command = $hook.command.Replace('${CLAUDE_PLUGIN_ROOT}/hooks', (Join-Path $claudeDir "hooks"))
-            $hookPath = $command -replace '^bash "', '' -replace '"$', ''
+            # Dedup on the script NAME under hooks/, not the resolved path: a
+            # hook wired by a plugin install carries the
+            # ${CLAUDE_PLUGIN_ROOT}/hooks/ form and must still count as
+            # already-wired (mixed-method double-fire). Separator-tolerant:
+            # Join-Path yields \hooks while plugin form uses /hooks.
+            $hookName = ($command -replace '^.*hooks[/\\]', '') -replace '"$', ''
             $alreadyWired = $false
             foreach ($existingGroup in $eventGroups) {
                 foreach ($existingHook in @($existingGroup.hooks)) {
-                    if ($existingHook.command -and $existingHook.command.Contains($hookPath)) {
+                    if ($existingHook.command -and ($existingHook.command.Contains("hooks/$hookName") -or $existingHook.command.Contains("hooks\$hookName"))) {
                         $alreadyWired = $true
                     }
                 }

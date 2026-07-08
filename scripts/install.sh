@@ -228,13 +228,19 @@ for file in "$PROJECT_ROOT/hooks"/*.sh; do
     make_executable "$CLAUDE_DIR/hooks/$(basename "$file")"
 done
 
-if command -v jq >/dev/null 2>&1; then
+# Capability probe, not existence probe: walk/1 needs jq >= 1.6, and a 1.5 jq
+# passes `command -v` then crashes mid-install under set -e, leaving hooks
+# copied but settings.json unwired (adversarial-review finding, 2026-07).
+if echo '{}' | jq -e 'walk(.) | true' >/dev/null 2>&1; then
     settings_path="$CLAUDE_DIR/settings.json"
     [ -f "$settings_path" ] || printf '{}\n' > "$settings_path"
     tmp_settings="$(mktemp)"
     jq --arg hook_dir "$CLAUDE_DIR/hooks" --slurpfile desired "$PROJECT_ROOT/hooks/hooks.json" '
-      def installed_path:
-        .command | sub("^bash \\\""; "") | sub("\\\"$"; "");
+      # Dedup on the script NAME under hooks/, not the resolved path: a hook
+      # wired by a plugin install carries the ${CLAUDE_PLUGIN_ROOT}/hooks/
+      # form and must still count as already-wired (mixed-method double-fire).
+      def script_name:
+        .command | sub("^.*hooks[/\\\\]"; "") | sub("\\\"$"; "");
       ($desired[0]
         | walk(if type == "string" then gsub("\\$\\{CLAUDE_PLUGIN_ROOT\\}/hooks"; $hook_dir) else . end)
       ) as $wanted
@@ -245,8 +251,8 @@ if command -v jq >/dev/null 2>&1; then
             |
             ($group.hooks | map(
               . as $hook
-              | ($hook | installed_path) as $path
-              | select(any($existing[]; contains($path)) | not)
+              | ($hook | script_name) as $name
+              | select(any($existing[]; contains("hooks/" + $name) or contains("hooks\\" + $name)) | not)
             )) as $missing
             | if ($missing | length) > 0 then
                 .hooks[$event.key] = ((.hooks[$event.key] // []) + [($group | .hooks = $missing)])
@@ -257,7 +263,7 @@ if command -v jq >/dev/null 2>&1; then
     mv "$tmp_settings" "$settings_path"
     echo -e "  ${GREEN}Security and peer-guard hooks wired in settings.json${NC}"
 else
-    echo -e "  ${YELLOW}jq not found, skipping hook wiring (plugin installs unaffected)${NC}"
+    echo -e "  ${YELLOW}jq with walk/1 (>=1.6) not available, skipping hook wiring (plugin installs unaffected)${NC}"
 fi
 echo ""
 
