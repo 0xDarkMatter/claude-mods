@@ -419,7 +419,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [modern-tools.md](rules/modern-tools.md) | Which-tool enforcement when generating commands - default modern (uv, fd, rg, sd), footnote legacy; companion to cli-tools.md |
 | [public-posts.md](rules/public-posts.md) | Preview-before-send for public surfaces - quote the verbatim draft and wait for explicit approval before gh comments, PRs, or any external post |
 | [release-review.md](rules/release-review.md) | Never auto-publish GitHub releases - push commit+tag, stop, surface the diff for human review before gh release create |
-| [shell-preference.md](rules/shell-preference.md) | User-facing commands are PowerShell-native by default (WSL is the bash exception) - includes bash-to-PowerShell translation table |
+| [shell-preference.md](rules/shell-preference.md) | Speak the user's shell, never assume bash - shell-detection signals plus a worked PowerShell 5.1 example with the bash-to-PowerShell translation table |
 
 ### Tools & Hooks
 

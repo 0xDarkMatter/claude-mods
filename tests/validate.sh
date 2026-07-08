@@ -297,10 +297,10 @@ validate_description_budget() {
     echo ""
     echo "=== Validating Skill Description Budget ==="
 
-    # Ship in warn mode while the 26 known offenders are trimmed; flipping to fail is a one-word change.
+    # Flipped to fail 2026-07 after the great trim (catalog 55.4k -> 34.2k chars, 0 offenders).
     # The cap combines description + when_to_use because Claude Code loads both, so moving text between
     # fields does not reduce the per-session cost.
-    DESC_BUDGET_MODE="warn" # warn|fail
+    DESC_BUDGET_MODE="fail" # warn|fail
 
     local skills_dir="$PROJECT_DIR/skills"
     local hard_cap=700
