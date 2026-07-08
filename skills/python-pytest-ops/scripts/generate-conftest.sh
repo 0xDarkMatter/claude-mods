@@ -1,8 +1,45 @@
 #!/bin/bash
-# Generate conftest.py boilerplate
-# Usage: ./generate-conftest.sh [--async] [--db] [--api]
+# Generate a pytest conftest.py with optional async/db/api fixture blocks.
+#
+# Usage:   generate-conftest.sh [--async] [--db] [--api]
+# Input:   optional flags selecting fixture blocks; writes ./tests/conftest.py
+# Output:  the generated conftest.py file plus a one-line summary on stdout
+# Stderr:  none (the overwrite confirmation prompt is read from the tty)
+# Exit:    0 ok (also --help, and when an existing file is kept at the prompt)
+#
+# Examples:
+#   generate-conftest.sh
+#   generate-conftest.sh --async --db
+#   generate-conftest.sh --api
 
 set -e
+
+# --help / -h: print usage to stdout and exit 0 before any side effects (so the
+# prompt never fires and no file is touched). Behavior-preserving for all other
+# invocations — only -h/--help short-circuits here.
+for _arg in "$@"; do
+  case "$_arg" in
+    -h|--help)
+      cat <<'EOF'
+Usage: generate-conftest.sh [--async] [--db] [--api]
+
+Generate ./tests/conftest.py with optional fixture blocks. If a conftest.py
+already exists, it prompts for confirmation (default: keep the existing file).
+
+Options:
+  --async   include async fixtures (event_loop, async_client)
+  --db      include database fixtures (db_engine, db_session)
+  --api     include API test fixtures (app, client, authenticated_client)
+
+Examples:
+  generate-conftest.sh
+  generate-conftest.sh --async --db
+  generate-conftest.sh --api
+EOF
+      exit 0
+      ;;
+  esac
+done
 
 OUTPUT="tests/conftest.py"
 
@@ -67,7 +104,7 @@ if [[ -n "$DB" ]]; then
     cat >> "$OUTPUT" << 'DB_IMPORTS'
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-ASYNC_IMPORTS
+DB_IMPORTS
 fi
 
 # Add API imports if needed
@@ -75,7 +112,7 @@ if [[ -n "$API" ]]; then
     cat >> "$OUTPUT" << 'API_IMPORTS'
 from fastapi.testclient import TestClient
 # or: from flask.testing import FlaskClient
-ASYNC_IMPORTS
+API_IMPORTS
 fi
 
 # Add base fixtures
@@ -227,3 +264,5 @@ echo "Options used:"
 [[ -n "$ASYNC" ]] && echo "  --async: Async fixtures included"
 [[ -n "$DB" ]] && echo "  --db: Database fixtures included"
 [[ -n "$API" ]] && echo "  --api: API fixtures included"
+
+exit 0
