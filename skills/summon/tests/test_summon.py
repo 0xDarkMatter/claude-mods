@@ -51,6 +51,13 @@ Pick --json (the in-chat visual picker's data feed):
 In-chat picker asset:
   23. assets/picker-widget.html exists, carries the <script id="D"> injection
       block + sendPrompt wiring, and is cited from SKILL.md
+
+Widget builder (summon widget -> finished card-picker HTML):
+  24. replaces the <script id="D"> payload, drops 0-turn stubs by default
+      (--include-stubs keeps them), honours --limit, keeps only whitelisted
+      keys, emits one session object per line, downsamples density 24->12
+      (--full-density keeps 24), sets the window <select>, and holds the HTML
+      under the byte budget (capping with a stderr note under a tight --max-kb)
 """
 
 from __future__ import annotations
@@ -653,6 +660,163 @@ def pick_json_tests() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def build_widget_sandbox(tmp: Path) -> dict:
+    """One account, three real sessions + one 0-turn stub, all stale (not
+    running), transcripts present — the fixture for the widget builder tests."""
+    home = tmp / "home"
+    appdata = home / "AppData" / "Roaming"
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env["USERPROFILE"] = str(home)
+    env["APPDATA"] = str(appdata)
+    env.pop("PYTHONIOENCODING", None)
+    env.pop("TERM_ASCII", None)
+
+    cdir = claude_dir(env)
+    projects = home / ".claude" / "projects"
+    now_ms = int(time.time() * 1000)
+
+    ws = cdir / "claude-code-sessions" / SRC_UUID / "11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    ws.mkdir(parents=True)
+    proj = tmp / "proj"
+    proj.mkdir()
+
+    # (sid, cli, title, turns, age_min) — newest first; ages > 10m so none live.
+    specs = [
+        ("w0", "cli-w0", "widget alpha", 5, 20),
+        ("w1", "cli-w1", "widget beta", 3, 30),
+        ("w2", "cli-w2", "widget gamma", 9, 40),
+        ("wstub", "cli-wstub", "empty stub", 0, 50),  # 0-turn -> dropped by default
+    ]
+    for sid, cli, title, turns, age in specs:
+        (ws / f"local_{sid}.json").write_text(json.dumps({
+            "sessionId": f"local_{sid}", "cliSessionId": cli, "title": title,
+            "cwd": str(proj), "lastActivityAt": now_ms - age * 60_000,
+            "completedTurns": turns, "model": "claude-opus-4-8", "effort": "high",
+        }), encoding="utf-8")
+
+    enc_dir = projects / encode_cwd(str(proj))
+    enc_dir.mkdir(parents=True)
+    for _, cli, *_ in specs:
+        (enc_dir / f"{cli}.jsonl").write_text(
+            '{"type":"user","message":{"content":"hello there"},"timestamp":"2026-07-01T00:00:00Z"}\n'
+            '{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}],'
+            '"usage":{"input_tokens":100,"output_tokens":50}},"timestamp":"2026-07-01T00:05:00Z"}\n',
+            encoding="utf-8")
+
+    # Backdate wrapper mtimes past the 10-minute liveness window (the stub must
+    # read as NOT running so it is dropped by default).
+    stale = time.time() - 3600
+    for f in ws.glob("local_*.json"):
+        os.utime(f, (stale, stale))
+
+    return {"env": env, "ws": ws, "proj": proj, "projects": projects}
+
+
+def _widget_data_array(html: str):
+    """Extract + parse the injected <script id="D"> JSON array; also return the
+    raw block so line-formatting can be asserted."""
+    start = '<script id="D" type="application/json">'
+    i = html.find(start)
+    j = html.find("</script>", i + len(start)) if i >= 0 else -1
+    if i < 0 or j < 0:
+        return "", None
+    block = html[i + len(start):j]
+    try:
+        return block, json.loads(block)
+    except json.JSONDecodeError:
+        return block, None
+
+
+def widget_tests() -> None:
+    """24. summon widget: one-shot finished card-picker HTML.
+
+    Asserts the builder replaces the <script id="D"> payload, drops 0-turn
+    stubs by default (--include-stubs keeps them), honours --limit, keeps only
+    the whitelisted keys, emits one session object per line, sets the window
+    <select>, and holds the assembled HTML under the byte budget (capping with
+    a stderr note when it can't).
+    """
+    mod = _load_summon_module()
+    allowed = set(mod.WIDGET_KEYS)
+    tmp = Path(tempfile.mkdtemp(prefix="summon-widget-"))
+    try:
+        sb = build_widget_sandbox(tmp)
+        env = sb["env"]
+        out_html = tmp / "w.html"
+
+        # A) default run: placeholder replaced, stub dropped, keys whitelisted,
+        #    one-object-per-line, window set, under budget, mirror written.
+        rc, out, err = run_mode(env, ["widget", "--out", str(out_html)])
+        block, arr = _widget_data_array(out)
+        ids = [r["sessionId"] for r in arr] if arr else []
+        data_lines = [ln for ln in block.splitlines() if ln.strip().startswith("{")]
+        checks = {
+            "rc": rc == 0,
+            "parses": arr is not None,
+            "placeholder-gone": "local_0000" not in out,
+            "payload-present": "widget alpha" in out,
+            "stub-dropped": "local_wstub" not in ids,
+            "three-real": ids == ["local_w0", "local_w1", "local_w2"],
+            "keys-whitelisted": arr is not None and all(set(r).issubset(allowed) for r in arr),
+            "dead-keys-gone": arr is not None and all(
+                "cliSessionId" not in r and "transcriptPath" not in r
+                and "branch" not in r for r in arr),
+            "one-per-line": arr is not None and len(data_lines) == len(arr),
+            "window-30d": '<option value="720" selected>' in out,
+            "under-budget": len(out.encode("utf-8")) <= 28 * 1024,
+            "mirror-written": out_html.is_file() and "widget alpha" in out_html.read_text(encoding="utf-8"),
+            "stdout-not-stderr": "widget alpha" not in err,
+        }
+        if all(checks.values()):
+            ok("widget builds finished HTML: stub-drop, whitelist, 1/line, budget")
+        else:
+            no("widget builds finished HTML: stub-drop, whitelist, 1/line, budget",
+               f"failed={[k for k, v in checks.items() if not v]} rc={rc} err-tail={err[-200:]!r}")
+
+        # B) --limit caps the session count.
+        rc, out, _ = run_mode(env, ["widget", "--limit", "2", "--out", str(out_html)])
+        _, arr = _widget_data_array(out)
+        if rc == 0 and arr is not None and len(arr) == 2 and [r["sessionId"] for r in arr] == ["local_w0", "local_w1"]:
+            ok("widget --limit caps to the N most-recently-active sessions")
+        else:
+            no("widget --limit caps to the N most-recently-active sessions",
+               f"rc={rc} n={len(arr) if arr else None}")
+
+        # C) --include-stubs keeps the 0-turn session.
+        rc, out, _ = run_mode(env, ["widget", "--include-stubs", "--out", str(out_html)])
+        _, arr = _widget_data_array(out)
+        if rc == 0 and arr is not None and "local_wstub" in [r["sessionId"] for r in arr]:
+            ok("widget --include-stubs keeps 0-turn sessions")
+        else:
+            no("widget --include-stubs keeps 0-turn sessions",
+               f"rc={rc} ids={[r['sessionId'] for r in arr] if arr else None}")
+
+        # D) density downsampled to <=12 by default, full 24 with --full-density.
+        rc, out, _ = run_mode(env, ["widget", "--out", str(out_html)])
+        _, arr = _widget_data_array(out)
+        default_ds = len(arr[0]["densityBuckets"]) if arr else -1
+        rc2, out2, _ = run_mode(env, ["widget", "--full-density", "--out", str(out_html)])
+        _, arr2 = _widget_data_array(out2)
+        full_ds = len(arr2[0]["densityBuckets"]) if arr2 else -1
+        if rc == 0 and rc2 == 0 and default_ds == 12 and full_ds == 24:
+            ok("widget downsamples density 24->12 (default); --full-density keeps 24")
+        else:
+            no("widget downsamples density 24->12 (default); --full-density keeps 24",
+               f"default={default_ds} full={full_ds}")
+
+        # E) a tight budget forces capping with a stderr note (never spools).
+        rc, out, err = run_mode(env, ["widget", "--max-kb", "0.001", "--out", str(out_html)])
+        _, arr = _widget_data_array(out)
+        if rc == 0 and arr is not None and len(arr) == 1 and "capped" in err:
+            ok("widget honours --max-kb: caps to fit + notes the cap on stderr")
+        else:
+            no("widget honours --max-kb: caps to fit + notes the cap on stderr",
+               f"rc={rc} n={len(arr) if arr else None} err-tail={err[-200:]!r}")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def asset_tests() -> None:
     """In-chat picker asset: present, injectable, and cited from SKILL.md.
 
@@ -785,6 +949,9 @@ def main() -> int:
 
     # 23. In-chat picker asset: present + injectable + cited from SKILL.md
     asset_tests()
+
+    # 24. summon widget: one-shot finished card-picker HTML builder
+    widget_tests()
 
     print(f"\nsummon tests: {PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0

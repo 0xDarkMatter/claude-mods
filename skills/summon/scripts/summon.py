@@ -11,7 +11,12 @@ Output:  transfer/pick/doctor render TTY panels; recover/pick emit a paste-ready
          the `claude` CLI is unavailable or --no-distill is set. doctor --json
          emits {"data": [...], "meta": {"schema": "claude-mods.summon.doctor/v1"}};
          pick --json emits the session inventory as
-         {"data": [...], "meta": {"schema": "claude-mods.summon.pick/v1"}}
+         {"data": [...], "meta": {"schema": "claude-mods.summon.pick/v1"}};
+         widget emits FINISHED, self-contained card-picker HTML on stdout (pass
+         it straight to show_widget) — the rich inventory pre-trimmed and
+         injected into assets/picker-widget.html under a hard byte budget, one
+         session object per line; a copy is written to --out (default
+         <temp>/claude/summon-widget.html)
 Stderr:  context panels for recover/pick, distillation progress, warnings, errors
 Exit:    0 ok (including the non-distilled fallback — worker unavailability is
          advisory, never fatal), 2 usage/ambiguous id, 3 session or path not
@@ -21,6 +26,7 @@ Examples:
   summon --to mknv74                          # transfer: push sessions to next account
   summon pick                                 # fzf/numbered picker -> distilled handover
   summon pick --json | jq '.data[]'           # machine-readable session inventory
+  summon widget --days 30                      # finished in-chat card-picker HTML on stdout
   summon recover 6577b24c                     # distilled handover brief for one session
   summon recover 6577b24c --refresh           # ignore cached brief, re-distill
   summon recover 6577b24c --no-distill        # plain pointer prompt, no LLM call
@@ -39,7 +45,7 @@ Deliberately single-file: skill scripts ship as self-contained portable units
 the `# ===` section headers — Sections: DESIGN(term) · Path discovery ·
 Account discovery · Sessions · Grouping · Listing · Picker · Workspace
 selection · Operate · Peek · Transcript/Distill · Modes (transfer / pick /
-recover / rebind / doctor) · CLI entry.
+recover / rebind / doctor) · Widget (card-picker builder) · CLI entry.
 """
 
 from __future__ import annotations
@@ -50,6 +56,7 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 import time
 import uuid as uuidlib
 from collections import OrderedDict
@@ -1556,19 +1563,19 @@ def _iso_utc(ms: int) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ms / 1000))
 
 
-def pick_json(candidates: list[Session], now_ms: int, rich: bool = False) -> int:
-    """`pick --json` — the session inventory as a claude-mods.summon.pick
-    envelope on stdout (JSON only; panels never touch stdout on this path).
+def session_rows(candidates: list[Session], now_ms: int, rich: bool = False) -> list[dict]:
+    """Build the pick inventory rows for a set of sessions (in-process).
 
-    Feeds the in-chat visual card picker (assets/picker-widget.html) and any
-    other scripted caller. An empty inventory is valid data, not an error:
-    exit 0.
+    The single source of truth for a session's machine-readable shape — shared
+    by ``pick --json`` (which wraps these in an envelope) and ``widget`` (which
+    trims them and injects them into the card-picker template). Keeping it one
+    function means the widget builder never has to shell out to ``pick`` or
+    re-read a transcript that ``pick`` already read.
 
-    With ``rich`` (``--rich``), each row gains transcript-derived display
-    metrics — context occupancy (donut), activity density (sparkline), event /
-    tool-call counts, on-disk size, duration, and the opening ask — and the
-    schema advances to pick/v2. Costs one linear transcript read per session,
-    so it's opt-in; the default v1 inventory stays metadata-only and instant.
+    With ``rich`` each row gains transcript-derived display metrics (context
+    occupancy, activity density, event/tool counts, size, duration, opening
+    ask) at the cost of one linear transcript read per session; without it the
+    rows are metadata-only and instant.
     """
     rows = []
     for s in candidates:
@@ -1610,6 +1617,21 @@ def pick_json(candidates: list[Session], now_ms: int, rich: bool = False) -> int
                 "firstAsk": m["firstAsk"],
             })
         rows.append(row)
+    return rows
+
+
+def pick_json(candidates: list[Session], now_ms: int, rich: bool = False) -> int:
+    """`pick --json` — the session inventory as a claude-mods.summon.pick
+    envelope on stdout (JSON only; panels never touch stdout on this path).
+
+    Feeds the in-chat visual card picker (assets/picker-widget.html) and any
+    other scripted caller. An empty inventory is valid data, not an error:
+    exit 0.
+
+    With ``rich`` (``--rich``) the schema advances to pick/v2 and each row
+    gains transcript-derived display metrics (see ``session_rows``).
+    """
+    rows = session_rows(candidates, now_ms, rich)
     print(json.dumps({
         "data": rows,
         "meta": {"count": len(rows),
@@ -1691,6 +1713,227 @@ def mode_pick(args, accounts: list[Account]) -> int:
         eecho(f"out of range: {idx}")
         return 2
     return emit_recovery_prompt(candidates[idx - 1], args)
+
+
+# ============================================================
+#  Widget (in-chat card-picker builder)
+# ============================================================
+#
+# WHY THIS MODE EXISTS — do not "simplify" the trimming away.
+# The in-chat card picker renders assets/picker-widget.html via the host's
+# show_widget tool. show_widget accepts ONLY inline widget_code (no file path)
+# and its CSP blocks any fetch, so the session data MUST be inlined into the
+# HTML. The naive flow (pick --json --rich -> hand-assemble template+data ->
+# Read the file back to inline it) is expensive and fragile: --rich for ~75
+# sessions is >100 KB (it spools to a tool-results file), and once injected as
+# ONE long JSON line the assembled file trips the 25k-token Read cap AND can't
+# be paginated (Read is line-based; the megaline is indivisible). This mode
+# does the whole job in one command: build the rich inventory in-process, trim
+# it to what the template consumes, inject it ONE-OBJECT-PER-LINE (so Read can
+# paginate the assembled file), and hold the result under a hard byte budget so
+# it never spools and never trips the Read cap. The agent's whole job becomes:
+# run it, pass its stdout straight to show_widget.
+
+# The only keys the card-picker template consumes (its header documents the
+# shape). Everything else session_rows() emits — id, cliSessionId, branch,
+# account, accountEmail, brokenCwd, transcriptPath — is dead weight in the
+# widget and is dropped so the payload stays under budget.
+WIDGET_KEYS = (
+    "sessionId", "title", "projectRoot", "cwd", "worktree", "isArchived",
+    "isRunning", "lastActivityAt", "turns", "model", "effort", "events",
+    "toolCalls", "densityBuckets", "durationMin", "sizeKB", "ctxTokens",
+    "ctxPeak", "ctxWindow", "ctxPct", "ctxPeakPct", "firstAsk",
+)
+WIDGET_FIRSTASK_CAP = 120        # chars — the card clamps to 2-3 lines anyway
+WIDGET_BUDGET_KB_DEFAULT = 28    # assembled HTML ceiling (~<15k tokens)
+WIDGET_LIMIT_DEFAULT = 24        # most-recently-active sessions kept
+
+# days -> the <select id="win"> option value the template ships with.
+_WIN_OPTION = {None: "", 1: "24", 3: "72", 7: "168", 30: "720"}
+
+
+def _is_stub(s: Session, now_ms: int) -> bool:
+    """A 0-turn, not-currently-running session — an empty shell, not real work."""
+    return s.turns < 1 and not _is_live(s, now_ms)
+
+
+def _downsample_pairs(buckets: list[int]) -> list[int]:
+    """24 activity buckets -> 12 by summing adjacent pairs.
+
+    The widget's bars() renders whatever length it's handed (bar width is
+    flex:1), so 12 renders identically to 24, at half the payload bytes.
+    """
+    out = [buckets[i] + buckets[i + 1] for i in range(0, len(buckets) - 1, 2)]
+    if len(buckets) % 2:
+        out.append(buckets[-1])
+    return out
+
+
+def _trim_widget_row(row: dict, *, full_density: bool) -> dict:
+    """Whitelist keys, clamp firstAsk, downsample density — the per-row shrink."""
+    out = {k: row[k] for k in WIDGET_KEYS if k in row}
+    ask = out.get("firstAsk") or ""
+    if len(ask) > WIDGET_FIRSTASK_CAP:
+        out["firstAsk"] = ask[:WIDGET_FIRSTASK_CAP].rstrip() + "…"
+    if not full_density:
+        b = out.get("densityBuckets") or []
+        if len(b) > 12:
+            out["densityBuckets"] = _downsample_pairs(b)
+    return out
+
+
+def _widget_data_block(rows: list[dict]) -> str:
+    """The injected JSON array, ONE SESSION OBJECT PER LINE.
+
+    Newline-delimited-inside-the-array so the assembled file has no
+    un-splittable megaline and line-based Read can paginate it (the failure the
+    manual flow hit). ensure_ascii keeps stdout safe on cp1252 consoles.
+    """
+    if not rows:
+        return "[]"
+    return "[\n" + ",\n".join(json.dumps(r) for r in rows) + "\n]"
+
+
+def _asset_template() -> Path:
+    """assets/picker-widget.html, resolved relative to this script.
+
+    scripts/summon.py -> ../assets/picker-widget.html holds in both the repo
+    and the installed ~/.claude/skills/summon/ copy.
+    """
+    return Path(__file__).resolve().parent.parent / "assets" / "picker-widget.html"
+
+
+def _inject_widget_data(template_html: str, data_block: str) -> str:
+    """Replace the <script id="D"> payload with data_block."""
+    start = '<script id="D" type="application/json">'
+    i = template_html.find(start)
+    if i < 0:
+        raise ValueError('template missing the <script id="D"> marker')
+    after = i + len(start)
+    j = template_html.find("</script>", after)
+    if j < 0:
+        raise ValueError('template <script id="D"> block is not closed')
+    return template_html[:after] + "\n" + data_block + "\n" + template_html[j:]
+
+
+def _set_widget_window(html: str, days: int | None) -> str:
+    """Move the ``selected`` attribute onto the <select id="win"> option that
+    matches --days, so the widget opens on the same window that was injected.
+    Non-standard windows leave the template's default (7d) untouched."""
+    if days not in _WIN_OPTION:
+        return html
+    val = _WIN_OPTION[days]
+    m = re.search(r'(<select id="win"[^>]*>)(.*?)(</select>)', html, re.S)
+    if not m:
+        return html
+    head, body, tail = m.group(1), m.group(2), m.group(3)
+    body = body.replace(" selected", "")
+    body = re.sub(r'(<option value="' + re.escape(val) + r'")', r'\1 selected',
+                  body, count=1)
+    return html[:m.start()] + head + body + tail + html[m.end():]
+
+
+def _assemble_widget(trimmed: list[dict], days: int | None, limit: int,
+                     budget_bytes: int, template_html: str) -> tuple[str, int, list[str]]:
+    """Inject rows into the template, dropping the oldest until the assembled
+    HTML fits budget_bytes. Returns (html, effective_count, notes)."""
+    notes: list[str] = []
+    eff = min(limit, len(trimmed))
+    while True:
+        html = _set_widget_window(
+            _inject_widget_data(template_html, _widget_data_block(trimmed[:eff])),
+            days)
+        if len(html.encode("utf-8")) <= budget_bytes or eff <= 1:
+            break
+        eff -= 1
+    if eff < min(limit, len(trimmed)):
+        notes.append(
+            f"capped to {eff} session(s) to stay under the "
+            f"{budget_bytes // 1024} KB HTML budget (--limit was {limit}); "
+            "widen with --max-kb or narrow with --cwd/--title/--days")
+    return html, eff, notes
+
+
+def mode_widget(args, accounts: list[Account]) -> int:
+    """`summon widget` — emit the FINISHED, self-contained card-picker HTML.
+
+    One command replacing the manual pick --json --rich -> assemble -> Read-back
+    -> trim -> inline dance. stdout is the HTML (feed it straight to
+    show_widget); stderr carries the summary, the written path, and any capping
+    note; a copy is also written to --out (default %TEMP%/claude/…) so the agent
+    can Read it without re-running.
+    """
+    try:
+        template_html = _asset_template().read_text(encoding="utf-8")
+    except OSError as e:
+        eecho(f"cannot read widget template {_asset_template()}: {e}")
+        return 3
+
+    sessions: list[Session] = []
+    for acct in accounts:
+        sessions.extend(load_sessions(acct))
+    days = None if args.all else (args.days if args.days is not None else 30)
+    candidates = filter_sessions(sessions, days=days,
+                                 cwd_pattern=args.cwd, title_pattern=args.title)
+    now_ms = int(time.time() * 1000)
+
+    n_all = len(candidates)
+    if not args.include_stubs:
+        candidates = [s for s in candidates if not _is_stub(s, now_ms)]
+    dropped = n_all - len(candidates)
+
+    limit = max(1, args.limit)
+    # Cap BEFORE the rich pass so we read at most `limit` transcripts, never all.
+    rows = session_rows(candidates[:limit], now_ms, rich=True)
+    trimmed = [_trim_widget_row(r, full_density=args.full_density) for r in rows]
+
+    budget_bytes = max(4096, round(args.max_kb * 1024))
+    html, eff, notes = _assemble_widget(trimmed, days, limit, budget_bytes,
+                                        template_html)
+
+    out_path: Path | None = Path(args.out) if args.out else _default_widget_out()
+    if out_path is not None:
+        try:
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = out_path.with_name(out_path.name + ".tmp")
+            tmp.write_text(html, encoding="utf-8")
+            os.replace(tmp, out_path)
+        except OSError as e:
+            eecho(f"warning: could not write widget HTML to {out_path}: {e}")
+            out_path = None
+
+    # --- stderr summary (stdout is the data product) ---
+    sep = Term.g("·", "|")
+    kb = round(len(html.encode("utf-8")) / 1024, 1)
+    eecho(panel_open(f"summon {Term.g('·', '|')} widget",
+                     indicator=f"{eff} card(s) {sep} {kb} KB"))
+    eecho(panel_blank())
+    summary = (f"{len(trimmed)} of {n_all} session(s) {sep} {_window_label(days)}"
+               + (f" {sep} {dropped} stub(s) dropped" if dropped else ""))
+    eecho(summary_line(summary))
+    for note in notes:
+        eecho(summary_line(note))
+    if out_path is not None:
+        eecho(summary_line(f"written: {out_path}"))
+    eecho(panel_blank())
+    eecho(panel_close(healths=[("ok", "HTML on stdout")]))
+    eecho()
+    eecho(Term.color("meta",
+          "next: pass this HTML straight to the show_widget tool (no manual "
+          "injection, no key-trimming, no Read-back — it's already finished)."))
+
+    # stdout = the finished HTML. Write UTF-8 bytes so a cp1252 console can't
+    # mangle the template's glyphs.
+    try:
+        sys.stdout.buffer.write(html.encode("utf-8"))
+        sys.stdout.buffer.write(b"\n")
+    except (AttributeError, OSError):
+        _print_safe(html)
+    return 0
+
+
+def _default_widget_out() -> Path:
+    return Path(tempfile.gettempdir()) / "claude" / "summon-widget.html"
 
 
 def mode_doctor(args, accounts: list[Account]) -> int:
@@ -1784,6 +2027,7 @@ def main():
         epilog="examples:\n"
                "  summon --to mknv74              push sessions to the next account\n"
                "  summon pick                     picker -> distilled handover brief\n"
+               "  summon widget --days 30         finished in-chat card-picker HTML on stdout\n"
                "  summon recover 6577b24c         distilled handover brief for one session\n"
                "  summon recover 6577b24c --no-distill   plain pointer prompt, no LLM call\n"
                "  summon recover 6577b24c --refresh      ignore cached brief, re-distill\n"
@@ -1791,7 +2035,8 @@ def main():
                "  summon doctor                   scan for broken cwd bindings\n",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("mode", nargs="?", choices=["rebind", "pick", "recover", "doctor"],
+    p.add_argument("mode", nargs="?",
+                   choices=["rebind", "pick", "recover", "doctor", "widget"],
                    help="Toolbox mode; omit for cross-account transfer")
     p.add_argument("target", nargs="?",
                    help="Session id for rebind/recover (sessionId or cliSessionId, prefix ok)")
@@ -1847,6 +2092,20 @@ def main():
     p.add_argument("--budget", type=int, default=EXTRACT_BUDGET_DEFAULT,
                    help=f"Recover/pick: char budget for the transcript extraction "
                         f"fed to the distiller (default: {EXTRACT_BUDGET_DEFAULT})")
+    p.add_argument("--limit", type=int, default=WIDGET_LIMIT_DEFAULT,
+                   help=f"Widget: cap to the N most-recently-active sessions "
+                        f"(default: {WIDGET_LIMIT_DEFAULT})")
+    p.add_argument("--include-stubs", action="store_true",
+                   help="Widget: keep 0-turn, not-running sessions (dropped by default)")
+    p.add_argument("--full-density", action="store_true",
+                   help="Widget: keep the full 24-bucket activity histogram "
+                        "(default downsamples to 12 to shrink the payload)")
+    p.add_argument("--max-kb", type=float, default=WIDGET_BUDGET_KB_DEFAULT,
+                   help=f"Widget: assembled-HTML byte ceiling in KB, so it never "
+                        f"spools or trips the Read cap (default: {WIDGET_BUDGET_KB_DEFAULT})")
+    p.add_argument("--out", metavar="PATH",
+                   help="Widget: also write the assembled HTML here "
+                        "(default: <temp>/claude/summon-widget.html)")
     args = p.parse_args()
 
     claude_dir = appdata_claude()
@@ -1865,6 +2124,8 @@ def main():
         sys.exit(mode_recover(args, accounts))
     if args.mode == "pick":
         sys.exit(mode_pick(args, accounts))
+    if args.mode == "widget":
+        sys.exit(mode_widget(args, accounts))
     if args.mode == "doctor":
         sys.exit(mode_doctor(args, accounts))
     if args.target:
