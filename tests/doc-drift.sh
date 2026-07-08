@@ -3,10 +3,11 @@
 #
 # Checks:
 #   1. Component counts on disk vs claims in README.md header, AGENTS.md
-#      overview bullets, and docs/PLAN.md inventory table
+#      overview bullets, docs/PLAN.md inventory table, and selected README prose
 #   2. Every skill directory has a row in a README skill table
 #   3. Every repo-relative markdown link in README.md / AGENTS.md resolves
 #      to an existing file or directory (no ghost references)
+#   4. Skill frontmatter references only skills that exist on disk
 #
 # Exit 0 = clean, exit 1 = drift detected.
 set -u
@@ -43,6 +44,23 @@ else
     [ "$r_hooks"  = "$hooks_disk"  ] || err "README header: $r_hooks hooks claimed, $hooks_disk on disk"
     [ "$r_rules"  = "$rules_disk"  ] || err "README header: $r_rules rules claimed, $rules_disk on disk"
 fi
+
+# --- Selected README prose count claims -------------------------------------
+# These five known count-bearing patterns are intentionally exhaustive; newly
+# introduced prose patterns must be added explicitly if they should be gated.
+check_readme_prose() { # $1=regex $2=disk-count $3=label
+    local line claim
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        claim="$(echo "$line" | grep -oE '[0-9]+' | head -1)"
+        [ "$claim" = "$2" ] || err "README.md: $claim $3 claimed, $2 on disk"
+    done < <(grep -E "$1" README.md || true)
+}
+check_readme_prose '[0-9]+ specialized skills' "$skills_disk" "specialized skills"
+check_readme_prose '[0-9]+ on-demand skills' "$skills_disk" "on-demand skills"
+check_readme_prose 'Custom skills \([0-9]+\)' "$skills_disk" "custom skills"
+check_readme_prose 'Slash commands \([0-9]+\)' "$commands_disk" "slash commands"
+check_readme_prose 'Expert subagents \([0-9]+\)' "$agents_disk" "expert subagents"
 
 # --- AGENTS.md overview bullets ---------------------------------------------
 check_agents_md() { # $1=regex $2=disk-count $3=label
@@ -90,6 +108,34 @@ for doc in README.md AGENTS.md; do
         [ -e "$path" ] || err "$doc: link target does not exist: $path"
     done < <(grep -oE '\]\((skills|agents|hooks|rules|output-styles|commands|docs|tools|tests|scripts)/[^)]*\)' "$doc" \
              | sed -E 's/^\]\(//; s/\)$//')
+done
+
+# --- 4. Skill frontmatter ghost references ---------------------------------
+# These are Claude-Code-bundled skills, not skills shipped by this repo.
+# Keep this allowlist narrow: every other unknown reference is a failure.
+external_skills="frontend-design"
+
+for skill_file in skills/*/SKILL.md; do
+    while IFS= read -r refs; do
+        refs="${refs#*:}"
+        refs="${refs#"${refs%%[![:space:]]*}"}"
+        refs="${refs%"${refs##*[![:space:]]}"}"
+        refs="${refs#\"}"; refs="${refs%\"}"
+        IFS=',' read -ra names <<< "$refs"
+        for name in "${names[@]}"; do
+            name="${name#"${name%%[![:space:]]*}"}"
+            name="${name%"${name##*[![:space:]]}"}"
+            [ -z "$name" ] && continue
+            case " $external_skills " in *" $name "*) continue ;; esac
+            [ -d "skills/$name" ] || err "$skill_file: unknown skill reference '$name'"
+        done
+    done < <(awk '
+        NR == 1 && $0 == "---" { frontmatter=1; next }
+        frontmatter && $0 == "---" { exit }
+        frontmatter && /^metadata:/ { metadata=1; next }
+        metadata && /^[^ ]/ { metadata=0 }
+        metadata && /^  (related-skills|depends-on):/ { print }
+    ' "$skill_file")
 done
 
 echo
