@@ -23,7 +23,7 @@ echo ""
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-CLAUDE_DIR="$HOME/.claude"
+CLAUDE_DIR="${CLAUDE_DIR:-$HOME/.claude}"
 
 # Detect Windows (Git Bash / MINGW / MSYS) — chmod is a no-op on NTFS
 IS_WINDOWS=false
@@ -37,7 +37,7 @@ make_executable() {
 }
 
 # Ensure ~/.claude directories exist
-for dir in commands skills agents rules output-styles; do
+for dir in commands skills agents rules output-styles hooks; do
     mkdir -p "$CLAUDE_DIR/$dir"
 done
 
@@ -214,6 +214,50 @@ if [ -d "$PROJECT_ROOT/output-styles" ]; then
         cp "$file" "$CLAUDE_DIR/output-styles/"
         echo -e "  ${GREEN}$(basename "$file")${NC}"
     done
+fi
+echo ""
+
+# =============================================================================
+# HOOKS - Copy scripts and merge plugin-equivalent wiring into settings.json
+# =============================================================================
+echo -e "${BLUE}Installing hooks...${NC}"
+
+for file in "$PROJECT_ROOT/hooks"/*.sh; do
+    [ -f "$file" ] || continue
+    cp "$file" "$CLAUDE_DIR/hooks/"
+    make_executable "$CLAUDE_DIR/hooks/$(basename "$file")"
+done
+
+if command -v jq >/dev/null 2>&1; then
+    settings_path="$CLAUDE_DIR/settings.json"
+    [ -f "$settings_path" ] || printf '{}\n' > "$settings_path"
+    tmp_settings="$(mktemp)"
+    jq --arg hook_dir "$CLAUDE_DIR/hooks" --slurpfile desired "$PROJECT_ROOT/hooks/hooks.json" '
+      def installed_path:
+        .command | sub("^bash \\\""; "") | sub("\\\"$"; "");
+      ($desired[0]
+        | walk(if type == "string" then gsub("\\$\\{CLAUDE_PLUGIN_ROOT\\}/hooks"; $hook_dir) else . end)
+      ) as $wanted
+      | .hooks = (.hooks // {})
+      | reduce ($wanted.hooks | to_entries[]) as $event (.;
+          reduce $event.value[] as $group (.;
+            ([.hooks[$event.key][]?.hooks[]?.command // ""]) as $existing
+            |
+            ($group.hooks | map(
+              . as $hook
+              | ($hook | installed_path) as $path
+              | select(any($existing[]; contains($path)) | not)
+            )) as $missing
+            | if ($missing | length) > 0 then
+                .hooks[$event.key] = ((.hooks[$event.key] // []) + [($group | .hooks = $missing)])
+              else . end
+          )
+        )
+    ' "$settings_path" > "$tmp_settings"
+    mv "$tmp_settings" "$settings_path"
+    echo -e "  ${GREEN}Security and peer-guard hooks wired in settings.json${NC}"
+else
+    echo -e "  ${YELLOW}jq not found, skipping hook wiring (plugin installs unaffected)${NC}"
 fi
 echo ""
 

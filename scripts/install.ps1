@@ -20,10 +20,14 @@ Write-Host ""
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Split-Path -Parent $scriptDir
-$claudeDir = "$env:USERPROFILE\.claude"
+if ($env:CLAUDE_DIR) {
+    $claudeDir = $env:CLAUDE_DIR
+} else {
+    $claudeDir = "$env:USERPROFILE\.claude"
+}
 
 # Ensure ~/.claude directories exist
-$dirs = @("commands", "skills", "agents", "rules", "output-styles")
+$dirs = @("commands", "skills", "agents", "rules", "output-styles", "hooks")
 foreach ($dir in $dirs) {
     $path = Join-Path $claudeDir $dir
     if (-not (Test-Path $path)) {
@@ -174,6 +178,64 @@ if (Test-Path $stylesDir) {
         Write-Host "  $($_.Name)" -ForegroundColor Green
     }
 }
+Write-Host ""
+
+# =============================================================================
+# HOOKS - Copy scripts and merge plugin-equivalent wiring into settings.json
+# =============================================================================
+Write-Host "Installing hooks..." -ForegroundColor Cyan
+
+$hooksDir = Join-Path $projectRoot "hooks"
+Get-ChildItem -Path $hooksDir -Filter "*.sh" | ForEach-Object {
+    Copy-Item $_.FullName -Destination "$claudeDir\hooks\" -Force
+}
+
+$settingsPath = Join-Path $claudeDir "settings.json"
+if (Test-Path $settingsPath) {
+    $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
+} else {
+    $settings = [PSCustomObject]@{}
+}
+if (-not $settings.PSObject.Properties["hooks"]) {
+    $settings | Add-Member -MemberType NoteProperty -Name hooks -Value ([PSCustomObject]@{})
+}
+
+$desired = Get-Content (Join-Path $hooksDir "hooks.json") -Raw | ConvertFrom-Json
+foreach ($eventProperty in $desired.hooks.PSObject.Properties) {
+    $eventName = $eventProperty.Name
+    if (-not $settings.hooks.PSObject.Properties[$eventName]) {
+        $settings.hooks | Add-Member -MemberType NoteProperty -Name $eventName -Value @()
+    }
+    $eventGroups = @($settings.hooks.$eventName)
+    foreach ($group in @($eventProperty.Value)) {
+        $missingHooks = @()
+        foreach ($hook in @($group.hooks)) {
+            $command = $hook.command.Replace('${CLAUDE_PLUGIN_ROOT}/hooks', (Join-Path $claudeDir "hooks"))
+            $hookPath = $command -replace '^bash "', '' -replace '"$', ''
+            $alreadyWired = $false
+            foreach ($existingGroup in $eventGroups) {
+                foreach ($existingHook in @($existingGroup.hooks)) {
+                    if ($existingHook.command -and $existingHook.command.Contains($hookPath)) {
+                        $alreadyWired = $true
+                    }
+                }
+            }
+            if (-not $alreadyWired) {
+                $copy = $hook.PSObject.Copy()
+                $copy.command = $command
+                $missingHooks += $copy
+            }
+        }
+        if ($missingHooks.Count -gt 0) {
+            $newGroup = $group.PSObject.Copy()
+            $newGroup.hooks = $missingHooks
+            $eventGroups += $newGroup
+        }
+    }
+    $settings.hooks.$eventName = $eventGroups
+}
+$settings | ConvertTo-Json -Depth 20 | Set-Content $settingsPath -Encoding UTF8
+Write-Host "  Security and peer-guard hooks wired in settings.json" -ForegroundColor Green
 Write-Host ""
 
 # =============================================================================
