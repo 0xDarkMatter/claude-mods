@@ -1,6 +1,6 @@
 ---
 name: threejs-ops
-description: "Application/game-scale three.js — ES modules + import maps (UMD builds are dead), GLTF asset pipeline (DRACO/KTX2/meshopt, gltf-transform, gltfpack, CC0 sources), AnimationMixer crossfading, game loops (fixed timestep, dt clamp), physics (@dimforge/rapier3d vs cannon-es), react-three-fiber + drei, and scale (InstancedMesh, LOD, draw-call budgets, disposal, boids/steering). Use for: three.js app, three.js game, import map, three.min.js, UMD, GLTFLoader, DRACOLoader, KTX2Loader, meshopt, gltf-transform, gltfpack, glb optimize, CC0 models, Quaternius, Kenney, Poly Pizza, AnimationMixer, crossfade, animation blending, skeletal animation, morph targets, game loop, fixed timestep, rapier, rapier3d, cannon-es, character controller, kinematic body, react-three-fiber, r3f, drei, InstancedMesh, LOD, frustum culling, draw calls, dispose geometry, WebGL memory leak, WebGPURenderer, TSL, boids, steering, waypoint, NPC ambient life."
+description: "Application/game-scale three.js: ES modules, GLTF pipeline (DRACO/KTX2/meshopt), AnimationMixer, physics (rapier/cannon-es), react-three-fiber, and performance at scale (InstancedMesh, LOD, draw calls). Triggers on: three.js, GLTFLoader, r3f, game loop, WebGL memory leak, boids."
 license: MIT
 compatibility: "Web three.js r150+ (ES modules only — UMD builds removed in r160). check-three-facts.py is stdlib-only Python 3.10+."
 metadata:

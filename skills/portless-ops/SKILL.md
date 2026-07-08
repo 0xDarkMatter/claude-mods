@@ -1,6 +1,6 @@
 ---
 name: portless-ops
-description: "Portless local-dev HTTPS proxy operations and integration. Use for: portless setup, named .localhost or custom-TLD URLs (axiom.lab, myapp.test), portless alias for externally-managed services, replacing Caddy/nginx for local dev, HTTP/2 dev servers, local CA generation and trust, portless service install (boot persistence on Windows/macOS/Linux), portless monorepo orchestration, Tailscale/Funnel dev sharing, git-worktree subdomain routing, portless.json configuration, agent-friendly URL discovery via portless get <name>, MCP-integration patterns, OAuth-with-portless TLD selection (.dev/.test for Google/Apple compliance), Vite/Next.js/Astro framework port injection, Windows openssl PATH gotcha, curl-vs-browser cert handling, custom TLD pitfalls (.local/.dev/.localhost), troubleshooting EADDRINUSE, /etc/hosts auto-sync, portless trust system store integration."
+description: "Portless local-dev HTTPS proxy: replaces port numbers with named URLs (Caddy/nginx alternative for local dev). Triggers on: portless, local https proxy, named localhost URL, custom TLD, portless alias, portless.json, local CA trust, boot persistence, monorepo routing, Tailscale dev sharing."
 license: MIT
 allowed-tools: "Read Write Bash Edit"
 metadata:
@@ -28,7 +28,7 @@ This SKILL.md adds **operational patterns** we've validated in production (Windo
 | Naming | `<name>.<tld>` shape — one TLD per proxy | per-service distinct TLDs (not supported) |
 | Process spawning | when invoked as `portless myapp <cmd>` | crash recovery, restart policy, health checks |
 
-**Key shape constraint:** portless always renders `<alias-name>.<tld>`. You can't have `0x.axiom` and `axiom.lab` in the same proxy because TLD is per-instance. Aliases like `portless alias 0x.axiom 8108` get the TLD appended → `0x.axiom.lab`.
+**Key shape constraint:** portless always renders `<alias-name>.<tld>`. You can't mix two TLDs in one proxy because TLD is per-instance — a dotted alias like `portless alias api.<app> 8108` gets the TLD appended → `api.<app>.<tld>`.
 
 ## Install
 
@@ -45,6 +45,7 @@ Record the pinned version in your repo. Upgrades are explicit PRs.
 ## CLI Quick Reference
 
 ```bash
+# example values — substitute your own (TLD, app name, ports)
 # Proxy lifecycle
 portless proxy start --tld lab --port 443   # HTTPS proxy on 443, *.lab routes
 portless proxy start --tld test --port 1355 # Non-privileged port for testing
@@ -75,13 +76,13 @@ portless service uninstall
 The common pattern: a process supervisor (Process Compose, PM2, Docker) runs your dev servers on fixed ports. Portless just routes named URLs to those ports.
 
 ```bash
-# Started by Process Compose, listening on 8108
-# Now make it reachable at https://axiom.lab
-portless alias axiom 8108
+# Started by Process Compose, listening on <your-port>
+# Now make it reachable at https://<your-app>.<your-tld>
+portless alias <your-app> <your-port>
 ```
 
 Decoupling means:
-- Restart the dev server (`pm2 restart axiom`, `process-compose process restart axiom`) → portless keeps routing transparently
+- Restart the dev server (`pm2 restart <your-app>`, `process-compose process restart <your-app>`) → portless keeps routing transparently
 - Swap one supervisor for another → portless layer is untouched
 
 **Source of truth pattern:** keep alias registration in your supervisor config. Example `scripts/install.ps1`:
@@ -157,13 +158,13 @@ Get-ScheduledTask | Where-Object {
 
 ### curl vs browser cert handling
 
-curl on Windows uses its own bundled CA store, not the system one. So `curl https://axiom.lab/` returns code 000 (cert untrusted) even after `portless trust`. Browsers work fine because they use the system store.
+curl on Windows uses its own bundled CA store, not the system one. So `curl https://<your-app>.<your-tld>/` returns code 000 (cert untrusted) even after `portless trust`. Browsers work fine because they use the system store.
 
 Test from curl with `-k` (skip verify), or `--cacert ~/.portless/ca.pem`:
 
 ```bash
-curl -k https://axiom.lab/        # quick test
-curl --cacert ~/.portless/ca.pem https://axiom.lab/   # proper
+curl -k https://<your-app>.<your-tld>/        # quick test
+curl --cacert ~/.portless/ca.pem https://<your-app>.<your-tld>/   # proper
 ```
 
 ## Common Errors
