@@ -1,23 +1,54 @@
-# Shell Preference — PowerShell by default (WSL is the exception)
+# Shell Preference — speak the user's shell, never assume bash
 
 Companion to [cli-tools.md](cli-tools.md) and [modern-tools.md](modern-tools.md). Those pick *which tool*;
 this picks *which shell syntax* to hand the user.
 
+> **Portability note:** the worked example below is the **author's** setup — Windows
+> PowerShell 5.1 on Windows. It ships as one concrete instance of the pattern, not as
+> universal law. Treat it as a template: if your interactive shell differs (zsh, fish,
+> bash, pwsh 7, cmd), replace that example's table with your own shell's syntax. The
+> pattern — detect the user's shell, hand them native commands — is the portable part.
+
 ## The rule
 
-**On this machine the user ALWAYS uses Windows PowerShell. Every command you give the user to run must be
-PowerShell-native — never bash — UNLESS the current work is inside WSL (a Linux shell), where bash is the default.**
+**Hand the user commands native to THEIR interactive shell — never assume bash.** Bash
+is one shell, not the default of the universe. Before emitting a user-facing command,
+infer which shell the user pastes into and use that shell's syntax.
 
-The user's PowerShell is **Windows PowerShell 5.1**: no `&&`/`||` chaining, no `export`, no `\` line-continuation,
-no unix coreutils. Generate accordingly.
+A command in the wrong shell syntax errors on paste (e.g. `&&` is not a valid separator
+in every shell) and is pure friction every time. Speaking the user's own shell avoids
+that — the whole point of this rule.
 
-## Why this matters
+How to tell which shell the user runs, in rough priority:
 
-The user flagged this emphatically after being handed bash one-liners that errored on paste
-(`The token '&&' is not a valid statement separator in this version`). Bash syntax in their terminal is pure
-friction every time. They use PowerShell for everything except explicit WSL/Linux work.
+| Signal | Reads as |
+|---|---|
+| The user says so (`I'm on pwsh`, `use zsh`) | authoritative — use it |
+| OS / platform (Windows → PowerShell or cmd; macOS/Linux → bash, zsh, fish) | strong default |
+| cwd style (`X:\…` / `C:\Users\…` → Windows; `/home/…`, `/mnt/…` → WSL/Linux) | corroborating |
+| Commands that already ran cleanly this session | corroborating |
 
-## How to apply — bash → PowerShell
+When the signals conflict or you can't tell, **ask once** rather than guess.
+
+This governs **user-facing commands** — what the user pastes into their terminal. The
+assistant's own `Bash` tool runs Git Bash internally and may keep using bash for its own
+execution; that's invisible to the user and fine.
+
+## The same principle, applied to WSL
+
+When the work is explicitly inside **WSL** / a Linux shell — the user says so, the cwd
+is a WSL path like `/home/…` or `/mnt/…`, or the task is clearly Linux — the user's
+interactive shell there is **bash**, so hand them bash. This isn't a special case bolted
+on; it's the same rule (speak their shell) applied to a shell that happens not to be the
+host's default.
+
+## Worked example: a Windows PowerShell 5.1 user
+
+The author of this plugin pastes into **Windows PowerShell 5.1**. Generate against its
+limits: no `&&`/`||` chaining, no `export`, no `\` line-continuation, no unix coreutils.
+The table below is the bash → PowerShell translation that keeps paste-error friction to
+zero for that one user. **If your shell differs, replace this whole section with your own
+table** — see the portability note above.
 
 | Don't give the user | Give instead |
 |---|---|
@@ -31,17 +62,6 @@ friction every time. They use PowerShell for everything except explicit WSL/Linu
 | `$(cmd)` | `(cmd)` (or `$(cmd)` works too, but `(cmd)` is idiomatic) |
 | `VAR=x cmd` (inline env) | `$env:VAR='x'; cmd` |
 
-**Interactive-prompt lines** (e.g. `keeper get` asking for a master password): tell the user to run that line
-**alone**, because a multi-line paste feeds the following lines into the prompt.
-
-## The WSL exception
-
-When the work is explicitly in **WSL** / a Linux shell (the user says so, the cwd is a WSL path like
-`/home/...` or `/mnt/...`, or the task is clearly Linux), **bash is the default there** — give bash commands.
-Default to PowerShell whenever it's the normal Windows terminal.
-
-## Scope
-
-This governs **user-facing commands** — what the user pastes into their terminal. The assistant's own `Bash`
-tool runs Git Bash internally and may keep using bash for its own execution; that's invisible to the user and
-fine. The rule is about what you *hand the user to run*.
+**Interactive-prompt lines** (e.g. `keeper get` asking for a master password): tell the
+user to run that line **alone**, because a multi-line paste feeds the following lines
+into the prompt.
