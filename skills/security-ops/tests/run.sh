@@ -65,6 +65,29 @@ expect_lacks 'removed eval trigger is no longer reported' 'eval_case.py' "$mutat
 expect_has 'mutation retains independent secret finding' 'hardcoded_secret.py' "$mutated_out"
 expect_has 'mutation retains independent pickle finding' 'unsafe_deserialization.py' "$mutated_out"
 
+printf '%s\n' '-- fail-loud when scan engine (rg) is absent --'
+# A security scanner that reports "clean" because rg is missing is a false
+# all-clear — it must refuse (exit 5), never exit 0. The scanner hits its
+# `command -v rg` guard before it needs any other tool, so a shim of the
+# standard bin dirs minus rg is enough to trip it. Skip-guarded: if the shim
+# can't be built (e.g. Windows symlink quirks) we don't fail the suite —
+# CI (Linux) builds it cleanly and runs the real assertion.
+RGSHIM="$SB/rgless"; mkdir -p "$RGSHIM"
+for _d in /usr/bin /bin /usr/local/bin; do
+  [ -d "$_d" ] || continue
+  for _f in "$_d"/*; do
+    _b="$(basename "$_f")"
+    [ "$_b" = "rg" ] && continue
+    [ -e "$RGSHIM/$_b" ] || ln -sf "$_f" "$RGSHIM/$_b" 2>/dev/null
+  done
+done
+if [ -x "$RGSHIM/bash" ] && ! PATH="$RGSHIM" command -v rg >/dev/null 2>&1; then
+  PATH="$RGSHIM" bash "$SCAN" "$BAD" >"$SB/norg.out" 2>/dev/null
+  expect_exit 'refuses (exit 5) when rg is absent — no false clean' "$?" 5
+else
+  printf '  SKIP  rg-absent shim unavailable on this host (CI runs it for real)\n'
+fi
+
 printf '\n=== %d passed, %d failed ===\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]] || exit 1
 exit 0

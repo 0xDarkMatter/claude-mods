@@ -12,8 +12,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Install jq + ripgrep + gitleaks (security suites need them)
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq ripgrep
+          # gitleaks: fetch the release binary (not in apt) so push-gate's
+          # scan-secrets.sh and its suite run for real instead of skipping.
+          GL_VER=8.21.2
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GL_VER}/gitleaks_${GL_VER}_linux_x64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin gitleaks
+          gitleaks version && rg --version | head -1
 
       - name: Install Claude Code (for authoritative plugin validation)
         run: npm install -g @anthropic-ai/claude-code

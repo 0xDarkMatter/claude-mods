@@ -43,6 +43,14 @@ fi
 
 DIR="${1:-.}"
 
+# rg is the scan engine. A security scanner that silently reports "clean"
+# because its engine is missing is worse than useless — refuse loudly (exit 5)
+# rather than let a rg-less environment produce a false all-clear.
+if ! command -v rg >/dev/null 2>&1; then
+    printf 'security-scan.sh: ripgrep (rg) not installed — cannot scan. Install rg; refusing to report a false clean.\n' >&2
+    exit 5
+fi
+
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
 GREEN='\033[0;32m'
