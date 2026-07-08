@@ -60,12 +60,25 @@ MEDIA_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".mp4", ".mov", ".webm", ".zip",
               ".7z", ".tar", ".gz", ".glb", ".psd"}
 SCRATCH_PAT = re.compile(r"^(tmp|temp|scratch|junk|old|copy|test)[-_]", re.I)
 GENERATED_PAT = re.compile(r"generated|do not edit|don'?t hand-edit|@generated", re.I)
-# The doctrine's escape hatch for large files: guard comment + section map.
-# A monster whose head carries a justification marker downgrades to info —
-# the scorer must honour the same rule it audits, or it nags forever.
-JUSTIFY_PAT = re.compile(
-    r"ARCHITECTURE:|PERF:|Sections?\s*:|single[- ]file|do not split|"
-    r"single[- ]writer|deliberately (one|large)", re.I)
+# Deliberateness signals for justified large files. Extend this list when the
+# doctrine adopts another unambiguous way to say that a file must stay whole.
+# Signals require INTENT wording — bare nouns like "one file"/"single file"
+# match innocent prose ("reads one file per call") and wrongly bless real
+# monsters (adversarial-review finding, 2026-07).
+LARGE_FILE_GUARD_SIGNALS = (
+    "do not split", "don't split", "never split", "must not be split",
+    "deliberately single-file", "deliberately single file",
+    "deliberately one file",
+)
+LARGE_FILE_GUARD_PAT = re.compile(
+    "|".join(re.escape(signal) for signal in LARGE_FILE_GUARD_SIGNALS), re.I)
+# Keep marker syntax in lockstep with the comments dim's SECTION_PAT or the
+# two dims contradict each other on the same body: accept any >=3-char run of
+# = or ═ around the name, not only the exact ===.
+LARGE_FILE_SECTION_PAT = re.compile(
+    r"^\s*(?:#|//|;|<!--)\s*[=═]{3,}\s+\w[\w .-]*\s+[=═]{3,}", re.M)
+BOXED_SECTION_PAT = re.compile(
+    r"(?m)^\s*#\s*=+\s*$\n^\s*#\s+\w[^\n]*$\n^\s*#\s*=+\s*$")
 LANDMINE_PAT = re.compile(r"landmine|gotcha|pitfall|footgun|hazard|trap|don'?t", re.I)
 COMMENT_LINE = re.compile(r"^\s*(#|//|/\*|\*|<!--|--|\"\"\"|''')")
 SECTION_PAT = re.compile(r"^\s*(#|//|/\*|<!--|--)\s*.{0,8}([=─-]{4,}|SECTION|═{4,})")
@@ -100,6 +113,27 @@ def commits_since_touch(repo: Path, rel: str) -> int | None:
         return None
     n = git(repo, "rev-list", "--count", "HEAD", f"^{last}")
     return int(n) if n.isdigit() else None
+
+
+def large_file_signals(path: Path) -> tuple[bool, bool]:
+    """Return (guard comment, section map) for a deliberately large file."""
+    try:
+        body = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False, False
+
+    # Phrases only count inside comments/docstrings, never executable strings.
+    comment_regions = re.findall(
+        r"<!--.*?-->|/\*.*?\*/|'''[\s\S]*?'''|\"\"\"[\s\S]*?\"\"\"|"
+        r"(?m:^\s*(?:#|//|;).*?$)",
+        body,
+        flags=re.S,
+    )
+    has_guard = any(LARGE_FILE_GUARD_PAT.search(region) for region in comment_regions)
+    marker_count = (len(LARGE_FILE_SECTION_PAT.findall(body))
+                    + len(BOXED_SECTION_PAT.findall(body)))
+    has_map = marker_count >= 3
+    return has_guard, has_map
 
 
 def iter_source_files(repo: Path):
@@ -309,15 +343,22 @@ class Audit:
                 monsters.append((n, str(p.relative_to(self.repo)).replace("\\", "/")))
         monsters.sort(reverse=True)
         self.facts["monster_files"] = monsters[:10]
-        unjustified = []
+        penalties = []
         for n, rel in monsters[:10]:
-            head = "".join(head_lines(self.repo / rel, 40))
-            if JUSTIFY_PAT.search(head):
+            has_guard, has_map = large_file_signals(self.repo / rel)
+            if has_guard and has_map:
                 self.add("structure", "info",
-                         f"{n}-line file carries a justification marker — verify "
-                         "the section map and the enforcing gate still hold", rel)
+                         f"{n}-line large file with guard comment + section map — "
+                         "verify its mechanical gate exists", rel)
                 continue
-            unjustified.append(n)
+            if has_guard or has_map:
+                missing = "section map" if has_guard else "guard comment"
+                self.add("structure", "warn",
+                         f"{n}-line large file has only half its justification — "
+                         f"missing {missing}", rel)
+                penalties.append(0.5)
+                continue
+            penalties.append(1.0 if n >= MONSTER_CRIT else 0.5)
             if n >= MONSTER_CRIT:
                 self.add("structure", "crit",
                          f"{n}-line file — split by responsibility (refactor-ops) "
@@ -327,7 +368,7 @@ class Audit:
                 self.add("structure", "warn",
                          f"{n}-line file — needs section markers now, a split "
                          "or a written justification before it grows", rel)
-        score -= min(3.0, sum(1.0 if n >= MONSTER_CRIT else 0.5 for n in unjustified))
+        score -= min(3.0, sum(penalties))
         junk = []
         for p in self.repo.iterdir():
             if p.is_file():

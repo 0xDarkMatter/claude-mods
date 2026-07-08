@@ -51,7 +51,7 @@ the scorer only checks the two mechanically-checkable proxies.
 | Check | Threshold | Why | Fix |
 |---|---|---|---|
 | Monster files | warn ≥800, crit ≥1500 (generated files exempt via header detection) | #1 agent friction in 3 of 4 audited clusters; a 9,560-line file is grep-only territory | Split (refactor-ops), OR guard comment + section map + invariant gate (the justified-monster route) |
-| Justified monster | downgraded to info when the first 40 lines carry a justification marker (`ARCHITECTURE:`, `PERF:`, `Sections:`, "single-file", "single-writer", "do not split") | The scorer honours the doctrine's own escape hatch — a justified file shouldn't nag forever; the info reminds you to verify the map + gate still hold | Keep the marker honest: if the gate is gone, the justification is a lie — split or restore the gate |
+| Justified monster | guard comment plus at least three `=== NAME ===` comment markers → info; only one signal → warn naming the missing half | The scorer honours the doctrine's own escape hatch — a justified file shouldn't nag forever; the info reminds you to verify the mechanical gate still holds | Keep the marker honest: if the gate is gone, the justification is a lie — split or restore the gate |
 | Repo-root junk | warn; media >1 MB or scratch-pattern names | Root is the first thing every agent lists; junk destroys signal | docs/screenshots/, dev/, scratchpad, or delete |
 
 ## enforcement (weight 1.5)
