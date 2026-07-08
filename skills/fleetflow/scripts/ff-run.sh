@@ -61,10 +61,12 @@ command -v git >/dev/null || { err "git required"; exit 2; }
 [ -n "$REPO" ] || REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || true
 [ -n "$REPO" ] && [ -d "$REPO" ] || { err "not in a git repo (or --repo invalid)"; exit 2; }
 
-# status = alias for ff-status (hand off and let it own exit codes)
+# status = alias for ff-status (hand off and let it own exit codes).
+# exec THROUGH bash: a direct exec needs the +x bit, which zip installs and
+# mode-dropping checkouts lose — Git Bash fakes modes, so only Linux notices.
 if [ "$MODE" = "status" ]; then
-  if [ -n "$REPO" ]; then exec "$HERE/ff-status.sh" --run "$RUN" --repo "$REPO"; fi
-  exec "$HERE/ff-status.sh" --run "$RUN"
+  if [ -n "$REPO" ]; then exec bash "$HERE/ff-status.sh" --run "$RUN" --repo "$REPO"; fi
+  exec bash "$HERE/ff-status.sh" --run "$RUN"
 fi
 
 RUNDIR="$REPO/.fleetflow/$RUN"
