@@ -3,7 +3,7 @@
 **Goal**: A centralized repository of custom Claude Code commands, agents, and skills that enhance Claude Code's native capabilities with persistent session state, specialized expert agents, and streamlined workflows.
 
 **Created**: 2025-11-27
-**Last Updated**: 2026-07-05
+**Last Updated**: 2026-07-09
 **Status**: Active Development
 
 > Historical record of what shipped lives in [CHANGELOG.md](../CHANGELOG.md) and the
@@ -39,7 +39,7 @@ One line per canonical doc; update in the same commit as any docs/ change.
 | [RESERVED-COMMANDS.md](RESERVED-COMMANDS.md) | Command names that collide with Claude Code built-ins |
 | [AUTO-MODE-CLASSIFIER.md](AUTO-MODE-CLASSIFIER.md) | The two-gate auto-mode permission model behind loop-engineering |
 
-Subdirs: `archive/` (completed-migration records, retired) · `references/` (vendored guides).
+Subdirs: `archive/` (completed-migration records, retired) · `references/` (vendored guides) · `plans/` (dated build specs for named execution waves, e.g. QUALITY-2026-07.md).
 
 ---
 
@@ -80,6 +80,31 @@ Subdirs: `archive/` (completed-migration records, retired) · `references/` (ven
 - [x] fleet-ops v2: repositioned as landing discipline (queue, test gate,
       scrub, revert) on top of native agent teams / background agents; new
       `fleet track` registers natively-spawned branches
+
+### Phase 4 — Fleetflow quality wave (2026-07)
+
+Full build spec: [docs/plans/QUALITY-2026-07.md](plans/QUALITY-2026-07.md).
+Theme: subtraction and enforcement, not addition.
+
+- [x] Phase 0 — closed the loop (README count fixes, plan committed, CI green)
+- [x] Phase 1 — enforcement gates: description-budget gate (700 hard cap),
+      section-map drift gates (summon, svg-brand-tint-ops), doc-drift
+      extensions (prose counts, frontmatter ghost refs), repo-doctor
+      guard-comment recognition, hook wiring on script installs
+- [x] Phase 2 — consolidation: `parallel-ops` router shipped, 22-skill
+      description trim, portability sanitization (process-compose-ops,
+      portless-ops, shell-preference.md), dsp-launch retirement,
+      description-budget gate flipped WARN→FAIL
+- [ ] Phase 3 — robustness floor: push-gate test suite, verifier-wrap suites,
+      security-sensitive suites (security-ops, pigeon, leveldb-ops),
+      remaining test backlog, protocol backfill on 2025-12-21 scaffold batch
+      (R6 within Phase 3 is done — see below)
+- [x] R6 — docs truth pass: AGENTS.md refresh, this inventory update,
+      test-floor policy in SKILL-CREATION-PROTOCOL.md, full-suite-gate note
+      in fleet-ops, baseline-before-closeout note in fleetflow
+- [ ] Deferred follow-ons — skill-telemetry, marketplace submission,
+      claude-mods-local formalization, push-cadence advisory (wave's Phase 4,
+      not this repo's Phase 4 heading)
 
 ---
 

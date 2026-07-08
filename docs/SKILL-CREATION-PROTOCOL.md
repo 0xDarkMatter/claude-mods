@@ -89,6 +89,20 @@ Add `tests/run.sh` — an **offline, self-contained** behavioural suite that exi
 on any failure and prints a skip message (exit 0) on unsupported platforms. Pattern after
 [`skills/supply-chain-defense/tests/run.sh`](../skills/supply-chain-defense/tests/run.sh).
 
+**Test floor (non-negotiable):** every NEW skill ships **at least one** smoke assertion
+in `tests/run.sh` — structure/frontmatter checks alone (already required by Step 6's
+gate) don't count. If nothing else, assert the skill's primary script runs and exits 0
+on its documented happy path.
+
+**If your suite asserts on the skill's own frontmatter shape** (e.g. requiring
+`when_to_use:` to exist, or a specific `metadata` key), **say so in a comment right next
+to that assertion**. A later trim/cleanup lane edits SKILL.md bodies and frontmatter
+without necessarily reading every skill's test suite — an unstated contract is what let
+a 2026-07 description-trim pass delete `r-ops`'s `when_to_use` field and break CI, because
+the field's own suite required it and nothing at the edit site said so (fixed in
+17c8a3a). The comment is the fix: state the contract where the assertion lives, not just
+in the trim commit that later re-discovers it.
+
 No registration needed: [`tests/run-skill-tests.sh`](../tests/run-skill-tests.sh) globs
 `skills/*/tests/run.sh` and runs them all in CI. If the skill ships a verifier script,
 also add an offline-mode assertion to [`tests/check-resources.sh`](../tests/check-resources.sh)

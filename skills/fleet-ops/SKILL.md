@@ -74,7 +74,7 @@ N > 1 on one shared working tree           → REFUSE. Worktrees or separate clo
 1. **Scrub** — `git diff main...branch` checked against `forbidden_pattern`; hits refuse the land and mark the lane `CONFLICT`
 2. **Clean-base check** — refuses if `main` has uncommitted tracked changes
 3. **Merge** — `--no-ff` with message `merge: <branch>` (this message is what `fleet revert` finds later)
-4. **Test gate** — runs `test_cmd` if set; on failure, hard-resets the merge and marks the lane `FAILED`. If unset, trusts `signal.sh`'s log gate (refused READY on failing logs)
+4. **Test gate** — runs `test_cmd` if set; on failure, hard-resets the merge and marks the lane `FAILED`. If unset, trusts `signal.sh`'s log gate (refused READY on failing logs). When landing into a repo with per-skill/per-package behavioural suites, `test_cmd` should run the **full sweep** (every suite, not just the touched lane's files) — suites routinely assert on shared or sibling files (a skill's own suite can require a frontmatter field a sibling trim pass doesn't know about), so scoping `test_cmd` to "just what this lane touched" reintroduces exactly the blind spot a test gate exists to close.
 5. **Rebase others** — every still-active lane is rebased onto the new `main` (in its own worktree if it has one); a rebase conflict marks that lane `CONFLICT`
 
 `fleet revert <branch>` finds the `merge: <branch>` commit on `main` and runs `git revert -m 1` — one command to back out a bad landing.
