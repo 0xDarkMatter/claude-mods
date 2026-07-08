@@ -262,12 +262,42 @@ validate_skills() {
     done < <(find "$skills_dir" -mindepth 1 -maxdepth 1 -type d -print0)
 }
 
+# Fallback frontmatter measurer: counts the FULL value of a top-level field,
+# including block scalars (|, >, |-, >-) and indented continuation lines.
+# get_yaml_field reads only the first physical line, which measured a folded
+# description as 2 chars ('>-') and silently dropped a real over-cap skill
+# from the warn list (adversarial-review finding, 2026-07).
+frontmatter_field_len() { # $1=file $2=field -> prints char count
+    awk -v key="$2" '
+        BEGIN { fm=0; infield=0; len=0 }
+        /^---[ \t]*$/ { fmc++; if (fmc==2) exit; fm=1; next }
+        !fm { next }
+        /^[A-Za-z0-9_-]+:/ {
+            infield=0
+            if (index($0, key ":") == 1) {
+                infield=1
+                val=$0; sub(/^[A-Za-z0-9_-]+:[ \t]*/, "", val)
+                if (val != "" && val !~ /^[|>][+-]?[ \t]*$/) len+=length(val)
+            }
+            next
+        }
+        infield && /^[ \t]+[^ \t]/ {
+            line=$0; sub(/^[ \t]+/, "", line)
+            if (len>0) len+=1
+            len+=length(line); next
+        }
+        infield && /^[ \t]*$/ { next }
+        { infield=0 }
+        END { print len }
+    ' "$1"
+}
+
 # Validate the session-wide cost of skill descriptions
 validate_description_budget() {
     echo ""
     echo "=== Validating Skill Description Budget ==="
 
-    # Ship in warn mode while the 18 known offenders are trimmed; flipping to fail is a one-word change.
+    # Ship in warn mode while the 26 known offenders are trimmed; flipping to fail is a one-word change.
     # The cap combines description + when_to_use because Claude Code loads both, so moving text between
     # fields does not reduce the per-session cost.
     DESC_BUDGET_MODE="warn" # warn|fail
@@ -285,10 +315,21 @@ validate_description_budget() {
         return
     fi
 
+    # Probe by importing yaml, not `command -v`: on Windows the python3 name
+    # resolves to the Microsoft Store app-execution-alias stub, which exists
+    # on PATH but does not run Python (adversarial-review finding, 2026-07).
+    local python_bin=""
+    for candidate in python3 python; do
+        if "$candidate" -c 'import yaml' >/dev/null 2>&1; then
+            python_bin="$candidate"
+            break
+        fi
+    done
+
     local python_status=1
-    if command -v python3 >/dev/null 2>&1; then
+    if [[ -n "$python_bin" ]]; then
         set +e
-        budget_rows=$(python3 - "$skills_dir" 2>/dev/null <<'PY'
+        budget_rows=$("$python_bin" - "$skills_dir" 2>/dev/null <<'PY'
 import pathlib
 import sys
 
@@ -323,10 +364,22 @@ PY
             [[ "$(basename "$skill_subdir")" == _* ]] && continue
             skill_file="$skill_subdir/SKILL.md"
             [[ -f "$skill_file" ]] || continue
-            description=$(get_yaml_field "$skill_file" "description" || true)
-            when_to_use=$(get_yaml_field "$skill_file" "when_to_use" || true)
-            budget_rows+="$(printf '%s\t%s' "$(basename "$skill_subdir")" "$((${#description} + ${#when_to_use}))")"$'\n'
+            description=$(frontmatter_field_len "$skill_file" "description" || echo 0)
+            when_to_use=$(frontmatter_field_len "$skill_file" "when_to_use" || echo 0)
+            budget_rows+="$(printf '%s\t%s' "$(basename "$skill_subdir")" "$((description + when_to_use))")"$'\n'
         done < <(find "$skills_dir" -mindepth 1 -maxdepth 1 -type d -print0)
+    fi
+
+    # Windows python prints \r\n; a stray \r inside $((...)) is a syntax error.
+    budget_rows=${budget_rows//$'\r'/}
+
+    # A measurement that yields zero rows is a broken scan (interpreter stub,
+    # malformed frontmatter across the board, wrong dir) — never a PASS.
+    local row_count
+    row_count=$(grep -c . <<< "$budget_rows" || true)
+    if ((row_count == 0)); then
+        log_fail "description budget self-check failed - measured zero skills (broken parser or path?)"
+        return
     fi
 
     while IFS=$'\t' read -r name combined_len; do
