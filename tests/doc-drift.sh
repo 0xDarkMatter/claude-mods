@@ -49,12 +49,16 @@ fi
 # These five known count-bearing patterns are intentionally exhaustive; newly
 # introduced prose patterns must be added explicitly if they should be gated.
 check_readme_prose() { # $1=regex $2=disk-count $3=label
-    local line claim
+    local line claim matched=0
     while IFS= read -r line; do
         [ -n "$line" ] || continue
+        matched=$((matched + 1))
         claim="$(echo "$line" | grep -oE '[0-9]+' | head -1)"
         [ "$claim" = "$2" ] || err "README.md: $claim $3 claimed, $2 on disk"
     done < <(grep -E "$1" README.md || true)
+    # Zero matches = the count-bearing line was deleted or reworded, which is
+    # drift too — a guard that finds nothing to check must not stay silent.
+    [ "$matched" -ge 1 ] || err "README.md: prose pattern for '$3' matched no lines (deleted/reworded?)"
 }
 check_readme_prose '[0-9]+ specialized skills' "$skills_disk" "specialized skills"
 check_readme_prose '[0-9]+ on-demand skills' "$skills_disk" "on-demand skills"

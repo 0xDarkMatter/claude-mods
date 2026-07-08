@@ -29,9 +29,22 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 2
 
 findings=0
+candidates=0
 while read -r mode object stage path; do
     case "$path" in
-        skills/*/scripts/*.sh|skills/*/scripts/*.py|skills/*/scripts/*.mjs)
+        skills/*/scripts/*)
+            # A "script" is: known script extension, OR extensionless with a
+            # shebang (e.g. introspect/scripts/cc-session). Data/doc files and
+            # .gitkeep placeholders are not scripts.
+            base="${path##*/}"
+            is_script=0
+            case "$base" in
+                *.sh|*.py|*.mjs|*.js) is_script=1 ;;
+                *.*|.*) ;; # other extensions / dotfiles: not gated
+                *) head -c 2 -- "$path" 2>/dev/null | grep -q '^#!' && is_script=1 ;;
+            esac
+            [ "$is_script" -eq 1 ] || continue
+            candidates=$((candidates + 1))
             if [ "$mode" != "100755" ]; then
                 echo "$path"
                 findings=$((findings + 1))
@@ -40,8 +53,15 @@ while read -r mode object stage path; do
     esac
 done < <(git ls-files -s -- skills)
 
+# Empty candidate list means the scan itself is broken (not in a repo, path
+# typo, git missing) — a gate that checked nothing must not report clean.
+if [ "$candidates" -eq 0 ]; then
+    echo "check-exec-bits: self-check failed — zero candidate scripts found (broken scan?)" >&2
+    exit 2
+fi
+
 if [ "$findings" -eq 0 ]; then
-    echo "check-exec-bits: clean" >&2
+    echo "check-exec-bits: clean ($candidates scripts checked)" >&2
     exit 0
 fi
 
