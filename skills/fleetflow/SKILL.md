@@ -223,6 +223,14 @@ default the script-author follows, not an option — and real runs routinely hit
   both defaults: the guard preamble's *relative-paths-only* clause, and
   `ff-collect.sh --check-main-clean` after every run (exit 12 = escape
   detected; stop, `git stash push -u` to salvage, investigate).
+- **Baseline-before-closeout (learned 2026-07-08, exit 12 false positive):**
+  `--check-main-clean` compares `main` against whatever it was when the check
+  runs — if the orchestrator makes its own edits to `main` (docs, PLAN.md,
+  closeout commits) between spawning lanes and running the check, those
+  self-made edits look identical to an escaped worker's writes. Snapshot a
+  clean-`main` baseline (`git status --short` / a commit sha) **before** any
+  orchestrator-authored closeout edit, so the check compares against the
+  pre-spawn state, not a moving target the orchestrator itself just moved.
 - **Permission posture:** workers run non-interactive
   (`bypassPermissions` default; `FLEETFLOW_PERMISSION_MODE=dontAsk` + allowlist
   when the orchestrator session is in auto mode — a `bypassPermissions` child

@@ -5,7 +5,7 @@
 This is **claude-mods** - a collection of custom extensions for Claude Code:
 - **3 expert agents** for pure context-isolation/worker roles (git-agent, firecrawl-expert, project-organizer) - every domain-knowledge agent became an `-ops` skill (v3.0, skills-first)
 - **3 commands** for session management and git orchestration (/sync, /save, /git-ops)
-- **102 skills** for CLI tools, patterns, workflows, and development tasks (incl. `parallel-ops` for routing across the parallel/recurring-agent-work skill family, `fleetflow` for heterogeneous GLM/Codex/Anthropic worker fleets, `repo-doctor` for agentic-quality repo audits, `svg-brand-tint-ops` for zero-dep in-browser SVG brand-recolour + Potrace-stage raster vectorising, `r-ops` for tidyverse-first modern R / data analysis, `loop-ops` for outer-loop design discipline, `ffmpeg-ops` for probe-first media processing and EDL-driven editing, `supply-chain-defense` for behavioural-first dependency security, `prompt-injection-defense` for instruction-integrity scanning, `pypi-ops` for OIDC Trusted Publishing to PyPI, `net-ops` for network troubleshooting, `windows-ops` / `mac-ops` for workstation diagnostics, `fleet-worker` for cheap parallel worker delegation)
+- **102 skills** for CLI tools, patterns, workflows, and development tasks (incl. `parallel-ops` as the router for the parallel/recurring-agent-work family — fleet-ops, fleet-worker, fleetflow, loop-ops, iterate, spawn — read it first when that family is ambiguous; `fleetflow` for heterogeneous GLM/Codex/Anthropic worker fleets; `repo-doctor` for agentic-quality repo audits; `svg-brand-tint-ops` for zero-dep in-browser SVG brand-recolour + Potrace-stage raster vectorising; `r-ops` for tidyverse-first modern R / data analysis; `loop-ops` for outer-loop design discipline; `ffmpeg-ops` for probe-first media processing and EDL-driven editing; `supply-chain-defense` for behavioural-first dependency security; `prompt-injection-defense` for instruction-integrity scanning; `pypi-ops` for OIDC Trusted Publishing to PyPI; `net-ops` for network troubleshooting; `windows-ops` / `mac-ops` for workstation diagnostics; `fleet-worker` for cheap parallel worker delegation)
 - **13 output styles** for response personality (Vesper, Spartan, Mentor, Executive, Pair, Atlas, Coach, Harbour, Meridian, Noir, Roast, Sage, Scout)
 - **13 hooks** for pre-commit linting, post-edit formatting, dangerous command warnings, uv enforcement, dependency-install + manifest-edit supply-chain advisories, hidden-Unicode scanning (session-start + pre-commit), live config-change + worktree guards, mid-session peer-writer guard + touched-files ledger, and pmail notifications - security set auto-wired via plugin hooks.json
 - **Pigeon** inter-session messaging (`pigeon send/read/reply`) - SQLite-backed pmail at `~/.claude/pmail.db`
@@ -60,6 +60,10 @@ On "INIT:" message at session start:
 | `skills/auto-skill/` | Auto-detect skill-worthy workflows; Stop hook suggests after complex sessions. `/auto-skill on/off/status` to toggle |
 | `skills/supply-chain-defense/` | Behavioural-first dependency security - Socket.dev depscore MCP, exposure-check (IOC match across npm/pnpm/yarn/bun/PyPI/Composer/Cargo/Go/RubyGems + extensions), integrity-audit (persistence), scan-extensions, install/manifest hooks. Paired with `rules/supply-chain.md` |
 | `skills/repo-doctor/` | Agentic-quality auditor - scores any repo (entry docs, comments, structure, gates, doc-pairing) with --json + --strict CI gate; monorepo-structure + comment-doctrine references. Paired with `rules/agentic-quality.md` |
+| `skills/parallel-ops/` | Router for the parallel/recurring-agent-work family (fleet-ops, fleet-worker, fleetflow, loop-ops, iterate, spawn) - read first when it's unclear which one owns a fan-out/schedule/delegation ask |
+| `skills/fleetflow/` | Heterogeneous GLM/Codex/Anthropic worker fleets from one session; escape guard + baseline-before-closeout discipline documented in-skill |
+| `tests/validate.sh` | Frontmatter + naming gate; enforces the description-budget cap (combined description+when_to_use, hard-fails over budget) |
+| `tests/doc-drift.sh` | Counts-on-disk vs docs gate; also checks section-map markers and skill-frontmatter ghost references (related-skills/depends-on naming a skill not on disk) |
 
 ## Quick Reference
 
@@ -95,6 +99,27 @@ On "INIT:" message at session start:
 | `"false"` | Disabled, all tools loaded upfront |
 
 Requires Sonnet 4+ or Opus 4+.
+
+## Landmines
+
+- **A skill's own test suite can assert on its own frontmatter shape** (e.g.
+  `r-ops/tests/run.sh` requires `when_to_use:` to exist). A trim/edit pass
+  touching only the SKILL.md body can still break CI if it drops a field a
+  sibling suite polices — read the skill's `tests/run.sh` before removing any
+  frontmatter field, not just the SKILL.md itself.
+- **The landing gate must run the FULL per-skill suite sweep** (`skills/*/tests/run.sh`,
+  all of them), never just the touched lanes' — suites assert on shared/sibling
+  files, so a change in one skill can silently break another's gate.
+- **Executable bit on commit**: scripts under `skills/*/scripts/` and `hooks/*.sh`
+  must be tracked `100755`. Git on Windows won't set this for you — `tests/check-exec-bits.sh`
+  gates it; a script that "works locally" but fails `bash foo.sh` for another
+  contributor is almost always a missing exec bit, not a logic bug.
+- **Coupled golden fixtures**: some skill tests compare output against a fixture
+  file colocated in the same `tests/` dir — editing the skill's output format
+  without regenerating the fixture is a silent, not loud, break (diff the fixture,
+  don't just eyeball the code change).
+- Never touch `.claude/worktrees/` or any repo's git worktree state (see
+  `rules/worktree-boundaries.md`) — it looks orphaned and isn't.
 
 ## Testing
 
