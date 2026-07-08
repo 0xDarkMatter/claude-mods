@@ -1,8 +1,45 @@
-#!/bin/bash
-# Quick security scan using grep patterns
-# Usage: ./security-scan.sh [directory]
+#!/usr/bin/env bash
+# Scan source files for security-sensitive grep patterns.
+#
+# Usage:   security-scan.sh [DIRECTORY]
+# Input:   Optional directory argument; defaults to the current directory.
+# Output:  Findings as plain file:line:match records on stdout.
+# Stderr:  Progress banners, check status, summaries, and usage errors.
+# Exit:    0 clean, 2 usage error, 10 findings present.
+#
+# Examples:
+#   security-scan.sh .
+#   security-scan.sh src > findings.txt
 
-set -e
+set -uo pipefail
+
+usage() {
+    cat <<'EOF'
+Usage: security-scan.sh [DIRECTORY]
+
+Scan source files for security-sensitive grep patterns. DIRECTORY defaults to .
+Findings are written to stdout; progress and summaries are written to stderr.
+
+Exit codes:
+  0   scan completed with no findings
+  2   usage error
+  10  scan completed with findings
+
+EXAMPLES
+  security-scan.sh .
+  security-scan.sh src > findings.txt
+EOF
+}
+
+case "${1:-}" in
+    --help|-h) usage; exit 0 ;;
+    -*) printf 'security-scan.sh: unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
+esac
+if [[ $# -gt 1 ]]; then
+    printf 'security-scan.sh: expected at most one directory\n' >&2
+    usage >&2
+    exit 2
+fi
 
 DIR="${1:-.}"
 
@@ -11,8 +48,7 @@ YELLOW='\033[1;33m'
 GREEN='\033[0;32m'
 NC='\033[0m'
 
-echo "=== Security Scan: $DIR ==="
-echo ""
+printf '=== Security Scan: %s ===\n\n' "$DIR" >&2
 
 ISSUES=0
 
@@ -21,20 +57,18 @@ check_pattern() {
     local pattern="$2"
     local type="$3"
 
-    echo -n "Checking: $name... "
+    printf 'Checking: %s... ' "$name" >&2
 
     if rg -l "$pattern" "$DIR" --type "$type" 2>/dev/null | head -5 | grep -q .; then
-        echo -e "${RED}FOUND${NC}"
+        printf '%bFOUND%b\n' "$RED" "$NC" >&2
         rg -n "$pattern" "$DIR" --type "$type" 2>/dev/null | head -10
-        echo ""
         ISSUES=$((ISSUES + 1))
     else
-        echo -e "${GREEN}OK${NC}"
+        printf '%bOK%b\n' "$GREEN" "$NC" >&2
     fi
 }
 
-# Python checks
-echo "--- Python Security Checks ---"
+printf '%s\n' '--- Python Security Checks ---' >&2
 check_pattern "Hardcoded secrets" "(password|secret|api_key|token)\s*=\s*['\"][^'\"]{8,}['\"]" "py"
 check_pattern "SQL injection (f-strings)" "execute\(f['\"]" "py"
 check_pattern "SQL injection (format)" "execute\(.*\.format\(" "py"
@@ -46,44 +80,37 @@ check_pattern "shell=True" "subprocess.*shell\s*=\s*True" "py"
 check_pattern "MD5 hashing" "hashlib\.md5\(" "py"
 check_pattern "SHA1 hashing" "hashlib\.sha1\(" "py"
 
-echo ""
-
-# JavaScript checks
-echo "--- JavaScript Security Checks ---"
+printf '\n%s\n' '--- JavaScript Security Checks ---' >&2
 check_pattern "innerHTML" "\.innerHTML\s*=" "js"
 check_pattern "eval() usage" "\beval\s*\(" "js"
 check_pattern "document.write" "document\.write\(" "js"
 
-echo ""
+printf '\n%s\n' '--- General Security Checks ---' >&2
 
-# General checks
-echo "--- General Security Checks ---"
-
-echo -n "Checking: .env files in git... "
+printf 'Checking: .env files in git... ' >&2
 if git ls-files | grep -E "\.env$|\.env\." | grep -q .; then
-    echo -e "${RED}FOUND${NC}"
+    printf '%bFOUND%b\n' "$RED" "$NC" >&2
     git ls-files | grep -E "\.env$|\.env\."
     ISSUES=$((ISSUES + 1))
 else
-    echo -e "${GREEN}OK${NC}"
+    printf '%bOK%b\n' "$GREEN" "$NC" >&2
 fi
 
-echo -n "Checking: TODO/FIXME security items... "
+printf 'Checking: TODO/FIXME security items... ' >&2
 if rg -i "TODO.*security|FIXME.*security|HACK.*security" "$DIR" 2>/dev/null | head -5 | grep -q .; then
-    echo -e "${YELLOW}FOUND${NC}"
+    printf '%bFOUND%b\n' "$YELLOW" "$NC" >&2
     rg -i "TODO.*security|FIXME.*security|HACK.*security" "$DIR" 2>/dev/null | head -10
     ISSUES=$((ISSUES + 1))
 else
-    echo -e "${GREEN}OK${NC}"
+    printf '%bOK%b\n' "$GREEN" "$NC" >&2
 fi
 
-echo ""
-echo "=== Summary ==="
-if [ $ISSUES -eq 0 ]; then
-    echo -e "${GREEN}No issues found!${NC}"
+printf '\n%s\n' '=== Summary ===' >&2
+if [[ $ISSUES -eq 0 ]]; then
+    printf '%bNo issues found!%b\n' "$GREEN" "$NC" >&2
     exit 0
-else
-    echo -e "${RED}Found $ISSUES potential security issues${NC}"
-    echo "Review the findings above and address any real vulnerabilities."
-    exit 1
 fi
+
+printf '%bFound %d potential security issues%b\n' "$RED" "$ISSUES" "$NC" >&2
+printf '%s\n' 'Review the findings above and address any real vulnerabilities.' >&2
+exit 10
