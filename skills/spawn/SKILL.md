@@ -6,7 +6,6 @@ compatibility: "Requires internet access for WebSearch/WebFetch to research offi
 allowed-tools: "Read Write Bash WebSearch WebFetch AskUserQuestion"
 metadata:
   author: claude-mods
-  related-skills: ""
 ---
 
 # Spawn - Expert Agent Generator
