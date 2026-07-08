@@ -262,6 +262,146 @@ validate_skills() {
     done < <(find "$skills_dir" -mindepth 1 -maxdepth 1 -type d -print0)
 }
 
+# Fallback frontmatter measurer: counts the FULL value of a top-level field,
+# including block scalars (|, >, |-, >-) and indented continuation lines.
+# get_yaml_field reads only the first physical line, which measured a folded
+# description as 2 chars ('>-') and silently dropped a real over-cap skill
+# from the warn list (adversarial-review finding, 2026-07).
+frontmatter_field_len() { # $1=file $2=field -> prints char count
+    awk -v key="$2" '
+        BEGIN { fm=0; infield=0; len=0 }
+        /^---[ \t]*$/ { fmc++; if (fmc==2) exit; fm=1; next }
+        !fm { next }
+        /^[A-Za-z0-9_-]+:/ {
+            infield=0
+            if (index($0, key ":") == 1) {
+                infield=1
+                val=$0; sub(/^[A-Za-z0-9_-]+:[ \t]*/, "", val)
+                if (val != "" && val !~ /^[|>][+-]?[ \t]*$/) len+=length(val)
+            }
+            next
+        }
+        infield && /^[ \t]+[^ \t]/ {
+            line=$0; sub(/^[ \t]+/, "", line)
+            if (len>0) len+=1
+            len+=length(line); next
+        }
+        infield && /^[ \t]*$/ { next }
+        { infield=0 }
+        END { print len }
+    ' "$1"
+}
+
+# Validate the session-wide cost of skill descriptions
+validate_description_budget() {
+    echo ""
+    echo "=== Validating Skill Description Budget ==="
+
+    # Ship in warn mode while the 26 known offenders are trimmed; flipping to fail is a one-word change.
+    # The cap combines description + when_to_use because Claude Code loads both, so moving text between
+    # fields does not reduce the per-session cost.
+    DESC_BUDGET_MODE="warn" # warn|fail
+
+    local skills_dir="$PROJECT_DIR/skills"
+    local hard_cap=700
+    local soft_budget=35000
+    local catalog_total=0
+    local name
+    local combined_len
+    local budget_rows
+
+    if [[ ! -d "$skills_dir" ]]; then
+        log_warn "skills/ directory not found"
+        return
+    fi
+
+    # Probe by importing yaml, not `command -v`: on Windows the python3 name
+    # resolves to the Microsoft Store app-execution-alias stub, which exists
+    # on PATH but does not run Python (adversarial-review finding, 2026-07).
+    local python_bin=""
+    for candidate in python3 python; do
+        if "$candidate" -c 'import yaml' >/dev/null 2>&1; then
+            python_bin="$candidate"
+            break
+        fi
+    done
+
+    local python_status=1
+    if [[ -n "$python_bin" ]]; then
+        set +e
+        budget_rows=$("$python_bin" - "$skills_dir" 2>/dev/null <<'PY'
+import pathlib
+import sys
+
+import yaml
+
+skills_dir = pathlib.Path(sys.argv[1])
+for skill_dir in sorted(path for path in skills_dir.iterdir() if path.is_dir() and not path.name.startswith("_")):
+    skill_file = skill_dir / "SKILL.md"
+    if not skill_file.is_file():
+        continue
+    lines = skill_file.read_text(encoding="utf-8-sig").splitlines()
+    markers = [index for index, line in enumerate(lines) if line.strip() == "---"]
+    if len(markers) < 2:
+        continue
+    frontmatter = yaml.safe_load("\n".join(lines[markers[0] + 1:markers[1]])) or {}
+    description = str(frontmatter.get("description") or "")
+    when_to_use = str(frontmatter.get("when_to_use") or "")
+    print(f"{skill_dir.name}\t{len(description) + len(when_to_use)}")
+PY
+        )
+        python_status=$?
+        set -e
+    fi
+
+    if ((python_status != 0)); then
+        local skill_subdir
+        local skill_file
+        local description
+        local when_to_use
+        budget_rows=""
+        while IFS= read -r -d '' skill_subdir; do
+            [[ "$(basename "$skill_subdir")" == _* ]] && continue
+            skill_file="$skill_subdir/SKILL.md"
+            [[ -f "$skill_file" ]] || continue
+            description=$(frontmatter_field_len "$skill_file" "description" || echo 0)
+            when_to_use=$(frontmatter_field_len "$skill_file" "when_to_use" || echo 0)
+            budget_rows+="$(printf '%s\t%s' "$(basename "$skill_subdir")" "$((description + when_to_use))")"$'\n'
+        done < <(find "$skills_dir" -mindepth 1 -maxdepth 1 -type d -print0)
+    fi
+
+    # Windows python prints \r\n; a stray \r inside $((...)) is a syntax error.
+    budget_rows=${budget_rows//$'\r'/}
+
+    # A measurement that yields zero rows is a broken scan (interpreter stub,
+    # malformed frontmatter across the board, wrong dir) — never a PASS.
+    local row_count
+    row_count=$(grep -c . <<< "$budget_rows" || true)
+    if ((row_count == 0)); then
+        log_fail "description budget self-check failed - measured zero skills (broken parser or path?)"
+        return
+    fi
+
+    while IFS=$'\t' read -r name combined_len; do
+        [[ -z "$name" ]] && continue
+        catalog_total=$((catalog_total + combined_len))
+
+        if ((combined_len > hard_cap)); then
+            if [[ "$DESC_BUDGET_MODE" == "fail" ]]; then
+                log_fail "$name - description + when_to_use is $combined_len chars (hard cap: $hard_cap)"
+            else
+                log_warn "$name - description + when_to_use is $combined_len chars (hard cap: $hard_cap)"
+            fi
+        fi
+    done <<< "$budget_rows"
+
+    if ((catalog_total > soft_budget)); then
+        log_warn "Skill catalog descriptions total $catalog_total chars (soft budget: $soft_budget)"
+    else
+        log_pass "Skill catalog descriptions total $catalog_total chars (soft budget: $soft_budget)"
+    fi
+}
+
 # Validate rules (optional YAML frontmatter with optional paths field)
 validate_rules() {
     echo ""
@@ -465,6 +605,7 @@ main() {
     validate_agents
     validate_commands
     validate_skills
+    validate_description_budget
     validate_rules
     validate_settings
     validate_plugin
