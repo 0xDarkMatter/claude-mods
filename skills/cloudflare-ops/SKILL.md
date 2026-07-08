@@ -1,12 +1,11 @@
 ---
 name: cloudflare-ops
-description: "Cloudflare Workers + Wrangler edge-platform operations - Workers runtime, bindings, local dev, secrets, deploy/CI, Pages-vs-Workers, observability. Use for: cloudflare, workers, wrangler, cloudflare pages, KV, D1, R2, durable objects, queues, hyperdrive, workers ai, vectorize, wrangler.toml, wrangler.jsonc, wrangler deploy, wrangler dev, wrangler secret, bindings, compatibility_date, static assets, edge functions, cron triggers, tail workers, gradual deployments."
+description: "Cloudflare Workers + Wrangler edge ops: runtime, bindings, local dev, secrets, deploy/CI, Pages-vs-Workers. Triggers on: cloudflare workers, wrangler, wrangler deploy, wrangler.toml, KV, D1, R2, durable objects, queues, vectorize, compatibility_date, edge functions."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
   related-skills: "terraform-ops, nginx-ops"
-when_to_use: "Building, configuring, or deploying Cloudflare Workers; writing or fixing wrangler config; choosing or wiring a binding (KV/D1/R2/DO/Queues/Hyperdrive/AI/Vectorize); deciding Workers vs Pages; setting up local dev, secrets, or CI/CD for the edge; debugging deploy errors, CPU limits, or bundling."
 ---
 
 # Cloudflare Operations

@@ -1,6 +1,6 @@
 ---
 name: process-compose-ops
-description: "Process Compose orchestration for non-containerized local services. Use for: process-compose.yaml schema, replacing PM2/supervisord/Foreman, health checks (readiness_probe, liveness_probe), restart policies (always/exit_on_failure/no), process dependencies (depends_on conditions), TUI navigation and shortcuts (F4 maximize, Tab panes, r/s/t process control), REST API and MCP server integration, headless mode (-t=false for daemons), per-process and consolidated logging (log_location), cron and interval scheduling (availability.schedule), namespace grouping for multi-stack composition, environment variable handling (env files, secrets), Windows Task Scheduler boot persistence, supply-chain verified single-binary install, multi-replica processes, foreground/serial execution patterns, dry-run validation, project update (hot reload without restart), process restart/stop/start via CLI or TUI, log tailing and follow modes, shutdown timeouts and signals, agent-friendly MCP tools for process control."
+description: "Process Compose orchestration for non-containerized local services: process-compose.yaml schema, health checks, restart policies, dependencies, TUI/REST/MCP control, scheduling, and boot persistence. Use as a PM2/supervisord/Foreman replacement for local dev service management."
 license: MIT
 allowed-tools: "Read Write Bash Edit"
 metadata:
@@ -107,18 +107,18 @@ process-compose up -f config.yaml -t=false # Headless (no TUI)
 process-compose up -f config.yaml --dry-run  # Validate config without starting
 process-compose down                       # Stop all processes + project
 
-# Inspection (against running PC)
-process-compose -p 8888 process list       # all processes + status
-process-compose -p 8888 process logs <name> --follow
-process-compose -p 8888 attach             # TUI for running project
+# Inspection (against running PC)  (example values — substitute your own port/dir)
+process-compose -p <your-pc-port> process list       # all processes + status
+process-compose -p <your-pc-port> process logs <name> --follow
+process-compose -p <your-pc-port> attach             # TUI for running project
 
 # Process control
-process-compose -p 8888 process restart <name>
-process-compose -p 8888 process stop <name>
-process-compose -p 8888 process start <name>
+process-compose -p <your-pc-port> process restart <name>
+process-compose -p <your-pc-port> process stop <name>
+process-compose -p <your-pc-port> process start <name>
 
 # Reload config without stopping (hot update)
-process-compose -p 8888 project update -f config.yaml
+process-compose -p <your-pc-port> project update -f config.yaml
 
 # Standalone inspection (no running PC)
 process-compose info                       # config home info
@@ -165,15 +165,15 @@ Default API port is 8080. Common collisions:
 
 | Port 8080 user | Workaround |
 |---|---|
-| Dagu dashboard | Use `-p 8888` until Dagu decommissioned |
-| Tomcat / Spring Boot dev | Use `-p 8888` |
+| Dagu dashboard | Use `-p <your-pc-port>` until Dagu decommissioned |
+| Tomcat / Spring Boot dev | Use `-p <your-pc-port>` |
 | Other dev tool defaults | Pick anything free in 8000–9999 range |
 
 If you change the API port, every subsequent CLI call needs `-p <port>`:
 
 ```bash
-process-compose -p 8888 process list
-process-compose -p 8888 process logs axiom --follow
+process-compose -p <your-pc-port> process list
+process-compose -p <your-pc-port> process logs axiom --follow
 ```
 
 ## Windows Boot Persistence Pattern
@@ -182,7 +182,7 @@ Task Scheduler runs with minimal PATH. Use a wrapper script that sets PATH expli
 
 ```powershell
 # scripts/boot-start.ps1
-$root = "X:\00_Orchestration\compose-portless"
+$root = "<your-process-compose-dir>"
 $pcExe = "$root\bin\process-compose.exe"
 
 # Explicit PATH for managed services (Python, uv, Git tools, cloudflared, etc.)
@@ -204,7 +204,7 @@ if (Test-Path $envFile) {
 }
 
 # Launch headless
-& $pcExe -p 8888 -t=false -L "$root\logs\process-compose.log" up -f "$root\process-compose.yaml"
+& $pcExe -p <your-pc-port> -t=false -L "$root\logs\process-compose.log" up -f "$root\process-compose.yaml"
 ```
 
 Register as a Task Scheduler entry with `LogonType S4U` (runs at boot, no password, no interactive logon needed):
@@ -235,18 +235,18 @@ Register-ScheduledTask -TaskName "ProcessCompose-Boot" `
 process-compose up --dry-run -f process-compose.yaml
 
 # Hot-reload after editing config
-process-compose -p 8888 project update -f process-compose.yaml
+process-compose -p <your-pc-port> project update -f process-compose.yaml
 
 # Restart one service after code change
-process-compose -p 8888 process restart axiom
+process-compose -p <your-pc-port> process restart axiom
 
 # Watch logs of a misbehaving service
-process-compose -p 8888 process logs axiom --follow
+process-compose -p <your-pc-port> process logs axiom --follow
 
 # Stop one service temporarily for debugging
-process-compose -p 8888 process stop axiom
+process-compose -p <your-pc-port> process stop axiom
 # Now run it manually with your debugger, then:
-process-compose -p 8888 process start axiom
+process-compose -p <your-pc-port> process start axiom
 ```
 
 ## When to Use Process Compose vs Alternatives
@@ -262,7 +262,7 @@ process-compose -p 8888 process start axiom
 
 ## Worked Example
 
-See `X:\00_Orchestration\compose-portless\` for an 11-process production stack:
+See `<your-process-compose-dir>\` for an 11-process production stack:
 - `process-compose.yaml` — health-checked services with depends_on chains
 - `scripts/boot-start.ps1` — PATH-aware boot wrapper
 - `docs/MIGRATION-LOG.md` — full migration from PM2 + Caddy, every gotcha documented
@@ -278,7 +278,7 @@ BAD:  put secrets in process-compose.yaml (commits to git)
 GOOD: source from gitignored .env in boot wrapper
 
 BAD:  use API port 8080 (clashes with Dagu, Tomcat, others)
-GOOD: -p 8888 (or any free port), document the choice
+GOOD: -p <your-pc-port> (or any free port), document the choice
 
 BAD:  ignore readiness_probe and just hope services come up
 GOOD: configure http_get probe on a real endpoint; depends_on uses process_healthy

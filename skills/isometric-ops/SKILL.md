@@ -1,6 +1,6 @@
 ---
 name: isometric-ops
-description: "Create, refine, compose, and export isometric illustrative assets for websites and games. Covers projection math (true isometric 30° vs 2:1 dimetric vs pixel 1:2), SVG/CSS/three.js generation, pixel-art workflow, Blender pre-render rigs, engine tilemaps (Godot/Unity/Phaser), AI generation with ControlNet structure control, asset sourcing and licences, and the companion iso-studio scene composer (standalone app: snap-to-grid staging, y-sort, blockout-to-ControlNet export). Use for: isometric, dimetric, axonometric, isometric illustration, isometric icon, isometric city, isometric room, isometric map, iso grid, isometric tiles, 2:1 tiles, tile spec, tileset, tilemap, y-sort, depth sorting, orthographic camera, SSR method, scale shear rotate, isometric CSS, isometric SVG, iso-studio, snap to grid, sprite sheet, spritesheet, atlas packing, isometric pixel art, Aseprite isometric, Blender isometric render, isometric AI generation, isometric LoRA, ControlNet isometric, isometric asset pack, Kenney isometric, isometric export."
+description: "Create, refine, compose, and export isometric/dimetric assets for web and games: projection math, SVG/CSS/three.js generation, pixel-art and Blender workflows, engine tilemaps, ControlNet AI generation, and the iso-studio composer. Triggers on: isometric, dimetric, tileset, y-sort."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:

@@ -1,7 +1,6 @@
 ---
 name: r-ops
-description: "Modern R operations for data analysis, statistics, and reproducible work. Use for: R, Rstats, tidyverse, dplyr, tidyr, ggplot2, the native pipe |>, tibbles, data wrangling (filter/mutate/summarise/group_by/across/joins/pivot), reading and writing data (readr, readxl, arrow/Parquet, DBI/dbplyr databases, data.table::fread, rvest scraping), strings (stringr) and regex, dates/times (lubridate), factors (forcats), iteration and functional programming (purrr map family, list-columns), statistics and modeling (t.test/lm/glm, formulas, broom, tidymodels), high-performance data.table, time series (tsibble/fable, zoo/xts), and project workflow (renv, Quarto, here, testthat, styler, RStudio/Posit Projects). Covers tidyverse-first idioms with base R and data.table as named alternatives."
-when_to_use: "Use for any R / Rstats work — tidyverse data wrangling, statistics, ggplot2 visualization, or reproducible analysis — e.g. 'rewrite this in dplyr/tidyverse', 'how do I pivot/join/group these', 'plot this with ggplot2', 'fit a model and tidy it with broom', 'speed this up with data.table', 'set up an renv + Quarto project'. Leads with modern idioms (native |>, .by=, across, purrr map); names base R / data.table where they win."
+description: "Modern R for data analysis and statistics — tidyverse-first (dplyr, tidyr, ggplot2, native |> pipe), with base R and data.table as alternatives. Triggers on: R, Rstats, tidyverse, dplyr, tidyr, ggplot2, pivot/join/group, data.table, purrr map, broom, renv, Quarto."
 license: MIT
 compatibility: "R >= 4.1 (native |> pipe); tidyverse 2.0; Quarto"
 allowed-tools: "Read Write Bash"

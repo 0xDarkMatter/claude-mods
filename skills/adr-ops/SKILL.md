@@ -1,7 +1,6 @@
 ---
 name: adr-ops
-description: "Author, index, and lint Architecture Decision Records — append-only project memory that recovers the WHY behind a system's shape. Scaffold the next sequential ADR, enforce the canonical frontmatter + section format, manage supersession with bidirectional integrity, and treat the directory as the index. Triggers on: adr, architecture decision record, decision record, decision log, why was this decided, record this decision, supersede an adr, adr template, adr lint, adr index, docs/adr, append-only decision, new adr, next adr number."
-when_to_use: "Use when a change constrains future options, seriously weighed alternatives, or has rationale the code can't show — e.g. 'record this as an ADR', 'why did we decide X', 'add a decision record', 'supersede ADR-007', 'lint our ADRs', 'what's the next ADR number'."
+description: "Author, index, and lint Architecture Decision Records — append-only memory that recovers the WHY behind a system's shape. Triggers on: adr, architecture decision record, decision log, record this decision, supersede an adr, why was this decided, adr template, next adr number."
 license: MIT
 allowed-tools: "Read Write Edit Bash Glob Grep"
 metadata:

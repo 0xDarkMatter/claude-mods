@@ -1,7 +1,6 @@
 ---
 name: repo-doctor
-description: "Audit any repo against the agentic-quality doctrine (rules/agentic-quality.md) — score entry docs, docs indexing, comment contracts, structure, enforcement gates, and doc-commit pairing, then map every finding to its fix. Read-only scorer with TTY panel and --json envelope, plus deep references on comment doctrine, entry-doc anatomy (AGENTS.md vs CLAUDE.md, nesting), and large-monorepo structure. Triggers on: repo doctor, repo audit, repo health, audit this repo, code quality audit, agentic quality, is this repo agent-friendly, agent-ready, rate this repo, score this repo, doc drift, stale AGENTS.md, monster files, comment quality, commenting standards, repo structure review, monorepo structure, how should I structure this monorepo, nested CLAUDE.md, docs index, 00_INDEX."
-when_to_use: "Use to assess or improve how well a repo supports agentic development — e.g. 'audit this repo', 'is this codebase agent-friendly?', 'score our repos', 'why do agents struggle here?', 'how should this monorepo be structured?' — or before adopting the agentic-quality doctrine in an existing project. Not for diff-level review (use review/code-review) or code-smell hunting (use techdebt)."
+description: "Audit any repo against the agentic-quality doctrine — score entry docs, structure, and enforcement gates, then map each finding to its fix. Triggers on: repo doctor, repo audit, agentic quality, is this repo agent-friendly, doc drift, stale AGENTS.md, monorepo structure, nested CLAUDE.md."
 license: MIT
 allowed-tools: "Read Bash Glob Grep Agent"
 metadata:

@@ -1,22 +1,6 @@
 ---
 name: mapbox-ops
-description: >-
-  Advanced Mapbox GL JS toolkit for the WEB (mapbox-gl-js v3, not native/iOS):
-  build production map experiences — custom markers, thematic dataviz, 3D,
-  terrain, cinematic camera, style composition, performance, and hard-won
-  gotchas. Use for Mapbox GL JS work: custom markers, addImage / updateImage,
-  icon-image, SVG / canvas markers, icon-anchor / icon-offset, symbol layers,
-  geojson layers, clustering, feature-state hover /
-  select, queryRenderedFeatures, style expressions (interpolate / step / match /
-  case, zoom-outermost rule), line-dasharray, line casing, line-gradient,
-  hillshade, contours, setTerrain, raster-dem, fill-extrusion 3D buildings,
-  heatmap, choropleth / data-join, proportional symbols, basemap palette
-  recolour, setPaintProperty, v3 Standard style / slots / setConfigProperty /
-  lightPreset, style switcher / library, text labels / text-optional, popups,
-  flyTo / easeTo / freeCameraOptions camera animation, setStyle re-add,
-  map.resize, WebGL teardown, three.js custom layer / CustomLayerInterface /
-  threebox / animated 3D objects or models on the map,
-  or headless Playwright map verification.
+description: "Mapbox GL JS v3 (web) toolkit: custom markers, symbol/geojson layers, clustering, style expressions, 3D terrain/fill-extrusion, heatmaps, choropleths, camera animation, and performance gotchas. Use for any Mapbox GL JS work — markers, layers, style, 3D, or headless map verification."
 license: MIT
 compatibility: "Web mapbox-gl-js v3.x. screenshot_map.py needs Python 3.10+ and Playwright (chromium); check-mapbox-facts.py is stdlib-only Python 3.10+."
 metadata:

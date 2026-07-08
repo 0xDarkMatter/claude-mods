@@ -1,7 +1,6 @@
 ---
 name: prompt-injection-defense
-description: "Defend the agent's instruction surface against adversarial content - hidden-Unicode prompt injection (Trojan Source bidi reordering, U+E0000 tag-block ASCII smuggling, zero-width text), homoglyph confusables, and poisoned context that a human reviewer can't see but the model obeys. Scan CLAUDE.md / AGENTS.md / SKILL.md / .cursorrules and MCP tool descriptions; sanitize fetched web pages, issue/PR bodies, and dependency READMEs before they enter context. Triggers on: prompt injection, hidden unicode, invisible characters, zero-width space, bidi override, Trojan Source, ASCII smuggling, tag characters, homoglyph, confusable, unicode steganography, poisoned CLAUDE.md, malicious tool description, MCP tool poisoning, instruction injection, jailbreak in file, is this file safe, sanitize untrusted content, scan for hidden text."
-when_to_use: "Use when vetting external CLAUDE.md / AGENTS.md / SKILL.md files or MCP tool descriptions, sanitizing fetched web pages or issue/PR bodies before they enter context, or asked 'is this file safe' / 'scan for hidden text'."
+description: "Defend the agent against adversarial Unicode it obeys but a human can't see: bidi/Trojan Source, tag-char smuggling, zero-width text, homoglyphs. Triggers on: prompt injection, scan for hidden unicode, hidden characters, zero-width space, Trojan Source, ASCII smuggling, poisoned CLAUDE.md, MCP tool poisoning, is this file safe."
 license: MIT
 allowed-tools: "Read Edit Write Bash Grep Glob Agent WebFetch"
 metadata:

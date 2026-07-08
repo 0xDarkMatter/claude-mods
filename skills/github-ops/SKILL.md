@@ -1,7 +1,6 @@
 ---
 name: github-ops
-description: "GitHub remote operations — repo creation, metadata (description/homepage/topics), releases, README 'Recent Updates' enforcement, issue / PR management with preview-before-send discipline, and read-only repo security-posture auditing. Companion to git-ops (local) and push-gate (pre-push safety). Three modes: new (first publish), update (subsequent release), audit (read-only checklist), plus atomic operations for issues and PRs. Triggers on: push to github, publish repo, ship release, cut release, gh release, set topics, repo description, github metadata, recent updates section, audit github repo, repo visibility, make repo public, gh repo create, gh issue, gh pr, create issue, comment on issue, close issue, triage issue, create PR, review PR, merge PR, pre-merge check, pr checks, security posture, dependabot, secret scanning, code scanning, branch protection, SECURITY.md, is this repo secure, audit repo security."
-when_to_use: "Use when the user asks to publish a repo, cut a GitHub release, set repo description/topics, audit a repo, or manage issues and PRs with gh — e.g. 'comment on issue #4', 'merge the PR', 'make the repo public'."
+description: "GitHub remote operations: repo creation, metadata, releases, issue/PR management with preview-before-send, and read-only security auditing. Triggers on: push to github, ship release, gh release, audit github repo, gh issue, gh pr, merge PR, branch protection, secret scanning, SECURITY.md."
 license: MIT
 allowed-tools: "Read Write Edit Bash Glob Grep"
 metadata:

@@ -1,7 +1,6 @@
 ---
 name: svg-brand-tint-ops
-description: "Recolour, vectorise, and theme ANY SVG to a brand palette with a live zero-dependency studio that emits a copy-paste CSS filter. Triggers on: recolour svg, brand tint an svg, theme an svg, duotone svg, tri-tone svg, feComponentTransfer duotone/tri-tone, recolour a diagram, cloudcraft/draw.io/figma svg to brand, svg css filter, theme-aware svg, tone map svg, brand-tint a diagram export, tint an icon set, png to svg, png to vector, raster to vector, image trace, vectorise a logo, trace a png to svg, threshold vectorization, illustrator image trace."
-when_to_use: "Use when a designer or dev needs to recolour / duotone / tri-tone an SVG to brand colours, turn a raster (PNG/JPG) into vector paths, or bake a theme-aware SVG tint into an app — e.g. 'recolour this CloudCraft/draw.io/Figma export to our petrol palette', 'make a duotone of this logo', 'convert this PNG to SVG', 'trace this image to vector', 'give me the CSS filter to theme these icons'."
+description: "Recolour, vectorise, and theme any SVG to a brand palette with a zero-dependency studio that emits a copy-paste CSS filter. Triggers on: recolour svg, brand tint an svg, duotone svg, recolour a diagram, cloudcraft/draw.io/figma svg to brand, svg css filter, png to svg, vectorise a logo, image trace."
 license: MIT
 metadata:
   author: claude-mods

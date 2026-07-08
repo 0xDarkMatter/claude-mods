@@ -1,7 +1,6 @@
 ---
 name: okf-ops
-description: "Assess, validate, and adopt the Open Knowledge Format (OKF) across markdown+frontmatter knowledge bases. Use to scan a doc repo for OKF-readiness (how frontmatter-consistent it already is), validate a bundle for conformance, find good OKF-adoption candidates among many repos, or migrate a frontmatter-heavy repo onto OKF. Triggers on: OKF, open knowledge format, knowledge bundle, knowledge base format, assess docs, doc repo readiness, frontmatter conformance, validate frontmatter, type frontmatter, markdown knowledge base, adopt OKF, is this repo OKF-ready, index.md log.md."
-when_to_use: "Use when deciding whether/how to adopt OKF in a repo, scanning one or many doc trees for frontmatter consistency, or validating an OKF bundle — e.g. 'how OKF-ready is this repo', 'check this bundle conforms', 'which of my repos are good OKF candidates', 'validate the frontmatter in docs/'."
+description: "Assess, validate, and adopt the Open Knowledge Format (OKF) across markdown+frontmatter knowledge bases. Triggers on: OKF, open knowledge format, knowledge bundle, frontmatter conformance, validate frontmatter, markdown knowledge base, adopt OKF, is this repo OKF-ready, index.md log.md."
 license: MIT
 compatibility: "Python 3.8+. PyYAML used if present; falls back to a built-in parser otherwise."
 allowed-tools: "Read Bash Glob Grep"

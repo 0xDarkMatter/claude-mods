@@ -1,6 +1,6 @@
 ---
 name: mac-ops
-description: "Comprehensive macOS workstation operations — diagnose kernel panics, identify failing drives, audit launchd startup items, decode wake reasons, triage TCC permission denials, manage APFS snapshots, recover from no-boot. Use for: Mac is slow, slow bootup, won't boot, kernel panic, kernel_task hot, mds_stores CPU, photoanalysisd, cloudd, login loop, gray screen, sleep wake failure, drive failing, IO errors, APFS snapshots eating space, Time Machine local snapshots, Spotlight indexing, launchd, LaunchAgent, LaunchDaemon, login items, TCC permissions, Full Disk Access, Screen Recording denied, Gatekeeper, quarantine, com.apple.quarantine, app is damaged, helper tool, /Library/PrivilegedHelperTools, pmset, wake reasons, dark wake, sysdiagnose, panic.ips, DiagnosticReports, configuration profile, MDM profile, remote diagnostics over SSH."
+description: "macOS workstation diagnostics: kernel panics, failing drives, launchd startup audit, wake reasons, TCC denials, APFS snapshots. Triggers on: mac is slow, won't boot, kernel panic, login loop, drive failing, launchd, TCC permissions, Full Disk Access, Gatekeeper, sysdiagnose."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
