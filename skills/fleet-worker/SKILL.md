@@ -1,7 +1,6 @@
 ---
 name: fleet-worker
-description: "Delegate tool-using, multi-step agent tasks to a cheaper headless Claude Code worker on a cheaper model — Anthropic Sonnet/Haiku or a non-Anthropic endpoint (GLM via z.ai by default) — a 'grunt worker' an Opus orchestrator fans out in parallel and verifies. Each worker is a real `claude -p` carrying Claude Code's full tool harness (Read/Write/Edit/Bash/Glob/Grep/Task) but a cheaper brain, isolated in its own git worktree + CLAUDE_CONFIG_DIR. Pairs with fleet-ops for test-gated landing. Triggers on: fleet-worker, delegate to GLM, spin up a GLM worker, cheap parallel agent, grunt worker, offload to glm, headless GLM, z.ai worker, GLM-5.2 worker, sonnet worker, haiku worker, cheap coding agent, fan out workers, non-Anthropic model in Claude Code, ANTHROPIC_BASE_URL worker."
-when_to_use: "Use when you have independent, well-scoped, tool-using subtasks (refactors, test-writing, doc edits, mechanical multi-file changes) that don't need Opus-level judgment, and you want them done cheaply in parallel while the orchestrator reviews and gates the results before they land. Not for tasks needing the orchestrator's conversation context or expensive-if-wrong unreviewed changes."
+description: "One cheap headless Claude Code worker on a cheaper brain (GLM via z.ai, or Sonnet/Haiku) - full tool harness, isolated git worktree + CLAUDE_CONFIG_DIR - fanned out and gated by an Opus orchestrator. Triggers: fleet-worker, GLM worker, grunt worker, cheap parallel agent, offload to GLM, sonnet worker, haiku worker."
 license: MIT
 allowed-tools: "Read Bash Glob Grep AskUserQuestion"
 metadata:

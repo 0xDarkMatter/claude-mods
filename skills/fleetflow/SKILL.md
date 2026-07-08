@@ -1,7 +1,7 @@
 ---
 name: fleetflow
-description: "Orchestrate a heterogeneous worker fleet — GLM (z.ai), Codex (OpenAI), and Anthropic Sonnet/Opus/Haiku — from one Claude session, porting the native Workflow tool's proven patterns (phases, pipeline-vs-barrier, adversarial verify, judge panels, hash-keyed journal resume) to OS-process workers that can run DIFFERENT provider brains. Triggers on: fleetflow, heterogeneous fleet, mixed-model fleet, codex worker, orchestrate glm and codex, cross-provider fan-out, multi-provider workers, workflow across providers, codex second opinion, fable orchestrator, mixed fleet, cross-model verify."
-when_to_use: "Use when a fan-out wants DIFFERENT brains per work class — e.g. 'fan this backlog out to GLM and Codex workers', 'mixed fleet with cross-model adversarial verify', 'Codex second opinion on each lane'. Same-provider in-process fan-out → native Workflow tool; one cheap worker → fleet-worker; landing branches → fleet-ops."
+description: "Heterogeneous cross-provider fleet - GLM (z.ai), Codex (OpenAI), Anthropic Sonnet/Opus/Haiku - from one session, porting the native Workflow tool's patterns (adversarial verify, judge panels, journal resume) to OS-process workers. Triggers: fleetflow, heterogeneous/mixed-model fleet, codex worker, cross-provider fan-out, cross-model verify."
+when_to_use: "Use when a fan-out wants DIFFERENT brains per work class - e.g. 'fan this backlog out to GLM and Codex workers', 'mixed fleet with cross-model adversarial verify', 'Codex second opinion on each lane'."
 license: MIT
 allowed-tools: "Read Write Edit Bash Glob Grep Task"
 metadata:

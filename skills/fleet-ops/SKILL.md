@@ -1,6 +1,6 @@
 ---
 name: fleet-ops
-description: "Landing discipline for parallel work. Native primitives (agent teams, background agents, worktree isolation) spawn and run parallel sessions — fleet-ops governs how their branches LAND: a sequential landing queue with test gate, pre-land scrub, auto-rebase of remaining lanes, fleet status across worktrees, one-shot revert. Triggers on: landing queue, land branches, merge queue, test gate, parallel work landing, integrate worktrees, land parallel branches, merge multiple branches, branch queue, land agent team work, land background agent branches, fleet status, sequential merge."
+description: "Landing discipline for parallel work: sequential test-gated landing queue, pre-land scrub, auto-rebase of in-flight lanes, fleet status, one-shot revert. Native primitives spawn; fleet-ops lands. Triggers: landing queue, land branches, merge queue, test gate, fleet status, land agent-team/background-agent branches, sequential merge."
 license: MIT
 allowed-tools: "Read Bash Glob Grep AskUserQuestion"
 metadata:
