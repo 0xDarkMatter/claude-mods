@@ -1,17 +1,55 @@
 #!/usr/bin/env bash
-# Generate FastAPI endpoint boilerplate
+# Generate FastAPI endpoint boilerplate (Pydantic models + CRUD router) to stdout.
 #
-# Usage: scaffold-api.sh <resource_name>
-# Example: scaffold-api.sh user
+# Usage:   scaffold-api.sh <resource_name>
+# Input:   one positional arg — a singular resource name (e.g. "user", "order")
+# Output:  a complete FastAPI module (models + APIRouter CRUD endpoints) on stdout;
+#          redirect into a file to use it (the script emits to stdout and never
+#          opens a file itself, so it cannot clobber a user's project)
+# Stderr:  usage and error messages only
+# Exit:    0 ok, 2 usage (missing resource / unknown flag)
+#
+# Examples:
+#   scaffold-api.sh user > routers/user.py
+#   scaffold-api.sh order | tee routers/orders.py
 
-set -euo pipefail
+set -uo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: scaffold-api.sh <resource_name>
+
+Generate FastAPI endpoint boilerplate — Pydantic Create/Update/Response models
+plus an APIRouter with list/create/get/update/delete CRUD endpoints — printed to
+stdout. Redirect into a module file to use it.
+
+Arguments:
+  resource_name   a singular resource name, e.g. "user" or "order"
+
+Exit codes: 0 ok, 2 usage (missing resource / unknown flag).
+
+Examples:
+  scaffold-api.sh user > routers/user.py
+  scaffold-api.sh order | tee routers/orders.py
+EOF
+}
+
+# Flags first: --help short-circuits; any unknown flag is a hard usage error.
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --) shift; break ;;
+    -*) echo "scaffold-api.sh: unknown option: $1" >&2; usage >&2; exit 2 ;;
+    *) break ;;
+  esac
+done
 
 RESOURCE="${1:-}"
 
 if [[ -z "$RESOURCE" ]]; then
-    echo "Usage: scaffold-api.sh <resource_name>"
-    echo "Example: scaffold-api.sh user"
-    exit 1
+  echo "scaffold-api.sh: resource name required" >&2
+  usage >&2
+  exit 2
 fi
 
 # Convert to different cases
