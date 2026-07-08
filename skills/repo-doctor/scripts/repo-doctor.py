@@ -62,14 +62,21 @@ SCRATCH_PAT = re.compile(r"^(tmp|temp|scratch|junk|old|copy|test)[-_]", re.I)
 GENERATED_PAT = re.compile(r"generated|do not edit|don'?t hand-edit|@generated", re.I)
 # Deliberateness signals for justified large files. Extend this list when the
 # doctrine adopts another unambiguous way to say that a file must stay whole.
+# Signals require INTENT wording — bare nouns like "one file"/"single file"
+# match innocent prose ("reads one file per call") and wrongly bless real
+# monsters (adversarial-review finding, 2026-07).
 LARGE_FILE_GUARD_SIGNALS = (
-    "do not split", "deliberately single-file", "deliberately single file",
-    "single-file", "single file", "one file",
+    "do not split", "don't split", "never split", "must not be split",
+    "deliberately single-file", "deliberately single file",
+    "deliberately one file",
 )
 LARGE_FILE_GUARD_PAT = re.compile(
     "|".join(re.escape(signal) for signal in LARGE_FILE_GUARD_SIGNALS), re.I)
+# Keep marker syntax in lockstep with the comments dim's SECTION_PAT or the
+# two dims contradict each other on the same body: accept any >=3-char run of
+# = or ═ around the name, not only the exact ===.
 LARGE_FILE_SECTION_PAT = re.compile(
-    r"^\s*(?:#|//|;|<!--)\s*===\s+\w[\w .-]*\s+===", re.M)
+    r"^\s*(?:#|//|;|<!--)\s*[=═]{3,}\s+\w[\w .-]*\s+[=═]{3,}", re.M)
 BOXED_SECTION_PAT = re.compile(
     r"(?m)^\s*#\s*=+\s*$\n^\s*#\s+\w[^\n]*$\n^\s*#\s*=+\s*$")
 LANDMINE_PAT = re.compile(r"landmine|gotcha|pitfall|footgun|hazard|trap|don'?t", re.I)

@@ -141,6 +141,34 @@ OUT="$(run_json)"
 [ "$(get 'sum(1 for f in d["data"]["findings"] if "bare.py" in f["path"] and f["severity"]=="crit")')" = "1" ] \
     && ok "bare monster remains crit" || no "bare monster" "severity wrong"
 
+# 14-16. adversarial-review regressions (GLM refuter, 2026-07)
+# guard-only (no map) -> WARN: discriminates the two-signal branch from the
+# old guard-alone justification logic, which would have fully excused it.
+{ echo '"""Deliberately single-file; do not split this portable script."""'
+  "$PY" -c "print('\n'.join('g = %d' % i for i in range(1700)))"; } > src/guard-only.py
+# innocent prose + markers -> must stay CRIT (bare "one file" is not intent)
+{ echo '# reads one file per call and caches the result'
+  printf '# === INPUT ===\n# === PROCESSING ===\n# === OUTPUT ===\n'
+  "$PY" -c "print('\n'.join('p = %d' % i for i in range(1700)))"; } > src/prose-trap.py
+# 4-equals markers + guard -> INFO (marker-pattern parity with comments dim)
+{ echo '"""Deliberately single-file; do not split."""'
+  printf '# ==== INPUT ====\n# ==== PROCESSING ====\n# ==== OUTPUT ====\n'
+  "$PY" -c "print('\n'.join('w = %d' % i for i in range(1700)))"; } > src/wide-markers.py
+git add -A; git commit -qm "feat: refuter regression fixtures"
+OUT="$(run_json)"
+[ "$(get 'sum(1 for f in d["data"]["findings"] if "guard-only.py" in f["path"] and f["severity"]=="warn" and "map" in f["msg"].lower())')" = "1" ] \
+    && ok "guard-only monster warns for missing map (pins new branch)" \
+    || no "guard-only monster" "severity or message wrong"
+# prose is not a guard -> map-only WARN branch; the defended regression is
+# "never INFO" (no false blessing from bare 'one file' prose).
+[ "$(get 'sum(1 for f in d["data"]["findings"] if "prose-trap.py" in f["path"] and f["dim"]=="structure" and f["severity"]=="warn" and "guard" in f["msg"])')" = "1" ] \
+    && [ "$(get 'sum(1 for f in d["data"]["findings"] if "prose-trap.py" in f["path"] and f["dim"]=="structure" and f["severity"]=="info")')" = "0" ] \
+    && ok "innocent 'one file' prose does not excuse a monster" \
+    || no "prose-trap monster" "false downgrade"
+[ "$(get 'sum(1 for f in d["data"]["findings"] if "wide-markers.py" in f["path"] and f["severity"]=="info")')" = "1" ] \
+    && ok "4-equals markers count as a section map" \
+    || no "wide-markers monster" "marker pattern too narrow"
+
 echo
 echo "repo-doctor tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ] && exit 0 || exit 1
