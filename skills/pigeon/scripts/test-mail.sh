@@ -1,17 +1,59 @@
 #!/bin/bash
-# test-mail.sh - Test harness for mail-ops
-# Outputs: number of passing test cases
-# Each test prints PASS/FAIL and we count PASSes at the end
+# test-mail.sh - Integration test harness for pigeon mail-ops (mail-db.sh + the
+# check-mail.sh delivery hook).
+#
+# Outputs: the passing-case count on the final line; exits 0 on a fully green
+# run, 1 if any assertion FAILed (see the tail). Machine-readable last line.
+#
+# RUNTIME / TIMEOUT — this is a HEAVYWEIGHT suite, not a unit test. Every one of
+# its ~90 assertions shells out to a fresh `bash mail-db.sh <cmd>`, and each of
+# those spawns git + sqlite3 + sed a handful of times. On Windows/Git-Bash that
+# is ~0.8s per call, so the whole suite legitimately takes 1-2 MINUTES. It is
+# NOT hung when it is slow. Invoke it with a generous timeout (>=180s); a short
+# `timeout 15` will kill it mid-run and look exactly like an indefinite hang
+# (rc=124) even though it would have completed. That false "hang" is why callers
+# must budget real wall-clock, not evidence the script blocks.
+#
+# HERMETIC — the suite is fully self-contained so it is safe headless in CI and
+# cannot be perturbed by (or perturb) a live pigeon session:
+#   * stdin is closed (exec </dev/null) so no read/cat can ever block on a TTY;
+#   * it runs from a throwaway cwd named "claude-mods" so project identity, the
+#     /tmp/pigeon_signal_* file, and the .claude/pigeon.disable toggle all live
+#     in an isolated namespace — no cross-session signal-file races (a live
+#     check-mail hook clearing the shared signal used to flake the hook tests),
+#     and it no longer writes .claude/ into the real repo.
 
 set -uo pipefail
 
-MAIL_DB="$HOME/.claude/pmail.db"
-MAIL_SCRIPT="$(dirname "$0")/mail-db.sh"
-HOOK_SCRIPT="$(dirname "$0")/../../hooks/check-mail.sh"
-# Resolve relative to repo root if needed
+# Never block on stdin: this suite runs headless in CI with stdin closed, and a
+# stray interactive read (e.g. mail-db's `read_body` cat path) would hang it.
+exec </dev/null
+
+# Resolve script paths to ABSOLUTE before we change directory below — otherwise
+# the cd would break the relative "$(dirname "$0")" lookups.
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MAIL_SCRIPT="$SELF_DIR/mail-db.sh"
+HOOK_SCRIPT="$SELF_DIR/../../hooks/check-mail.sh"
 if [ ! -f "$HOOK_SCRIPT" ]; then
-  HOOK_SCRIPT="$(cd "$(dirname "$0")/../../.." && pwd)/hooks/check-mail.sh"
+  HOOK_SCRIPT="$(cd "$SELF_DIR/../../.." && pwd)/hooks/check-mail.sh"
 fi
+
+# Sandbox everything under one throwaway dir, removed on exit:
+#   * HOME  -> so the global DB ("$HOME/.claude/pmail.db") is a private copy.
+#     Without this, the `rm -f "$MAIL_DB"` clean-slate below would delete the
+#     caller's REAL pmail.db when the suite is run without a HOME override.
+#   * cwd   -> a dir literally named "claude-mods" so project identity resolves
+#     to that name (the assertions expect it) while its /tmp/pigeon_signal_*
+#     hash is unique to this run. mail-db.sh and check-mail.sh both derive
+#     identity from $PWD the same way, so they agree inside this sandbox and it
+#     stays hermetic against any concurrently-running pigeon session's hook.
+TEST_WORKDIR="$(mktemp -d)"
+trap 'rm -rf "$TEST_WORKDIR"' EXIT
+export HOME="$TEST_WORKDIR/home"
+mkdir -p "$HOME" "$TEST_WORKDIR/claude-mods"
+cd "$TEST_WORKDIR/claude-mods"
+
+MAIL_DB="$HOME/.claude/pmail.db"
 
 PASS=0
 FAIL=0
@@ -199,7 +241,13 @@ result=$(bash "$MAIL_SCRIPT" read 2>&1)
 assert_contains "special chars preserved" "special chars" "$result"
 
 # T17: Very long message body (1000+ chars)
-long_body=$(python3 -c "print('x' * 2000)" 2>/dev/null || printf '%0.s.' $(seq 1 2000))
+# Pure-bash body generation via `printf -v` + brace expansion — spawns no
+# external process. The previous `python3 -c` call is a Windows headless
+# LANDMINE: `python3` there resolves to the Microsoft Store App-Execution-Alias
+# stub (a reparse-point shim), which can block instead of failing fast, so a
+# CI runner without real Python could stall here. Never reintroduce an external
+# interpreter for something bash can do itself.
+printf -v long_body 'x%.0s' {1..2000}
 bash "$MAIL_SCRIPT" send "claude-mods" "long msg" "$long_body" >/dev/null 2>&1
 result=$(bash "$MAIL_SCRIPT" count)
 assert "long message accepted" "1" "$result"
@@ -233,7 +281,7 @@ assert_empty "hook silent when no mail" "$result"
 bash "$MAIL_SCRIPT" send "claude-mods" "Hook test" "Should trigger hook" >/dev/null 2>&1
 clear_cooldown
 result=$(bash "$HOOK_SCRIPT" 2>&1)
-assert_contains "hook shows INCOMING MAIL" "INCOMING MAIL" "$result"
+assert_contains "hook shows INCOMING PMAIL" "INCOMING PMAIL" "$result"
 assert_contains "hook shows subject" "Hook test" "$result"
 assert_contains "hook shows body" "Should trigger hook" "$result"
 # Signal cleared after first delivery, so second call is silent
@@ -482,7 +530,7 @@ echo "=== Hook ==="
 # T52: Hook delivers without auto-read
 bash "$MAIL_SCRIPT" send "claude-mods" "hook test" "testing hook" >/dev/null 2>&1
 result1=$(bash "$HOOK_SCRIPT" 2>&1)
-assert_contains "hook delivers message" "INCOMING MAIL" "$result1"
+assert_contains "hook delivers message" "INCOMING PMAIL" "$result1"
 
 # T53: Signal cleared after delivery, second call silent
 result2=$(bash "$HOOK_SCRIPT" 2>&1)
@@ -620,11 +668,16 @@ assert_empty "hook silent when disabled" "$result"
 rm -f .claude/pigeon.disable
 clear_cooldown
 result=$(bash "$HOOK_SCRIPT" 2>&1)
-assert_contains "hook works after re-enable" "INCOMING MAIL" "$result"
+assert_contains "hook works after re-enable" "INCOMING PMAIL" "$result"
 
 echo ""
 echo "=== Results ==="
 echo "Passed: $PASS / $TOTAL"
 echo "Failed: $FAIL / $TOTAL"
 echo ""
+# Machine-readable last line: the passing-case count.
 echo "$PASS"
+
+# Propagate real failures as a non-zero exit — the previous final `echo` masked
+# every FAIL behind exit 0, so a broken suite still looked green to any caller.
+[ "$FAIL" -eq 0 ] || exit 1
