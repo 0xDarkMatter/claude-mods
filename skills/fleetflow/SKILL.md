@@ -1,6 +1,6 @@
 ---
 name: fleetflow
-description: "Heterogeneous cross-provider fleet - GLM (z.ai), Codex (OpenAI), Anthropic Sonnet/Opus/Haiku - from one session, porting the native Workflow tool's patterns (adversarial verify, judge panels, journal resume) to OS-process workers. Triggers: fleetflow, heterogeneous/mixed-model fleet, codex worker, cross-provider fan-out, cross-model verify."
+description: "Heterogeneous cross-provider fleet - GLM (z.ai), Codex (OpenAI), Grok (xAI), Anthropic Sonnet/Opus/Haiku - from one session, porting the native Workflow tool's patterns (adversarial verify, judge panels, journal resume) to OS-process workers. Triggers: fleetflow, heterogeneous/mixed-model fleet, codex worker, grok worker, cross-provider fan-out, cross-model verify."
 when_to_use: "Use when a fan-out wants DIFFERENT brains per work class - e.g. 'fan this backlog out to GLM and Codex workers', 'mixed fleet with cross-model adversarial verify', 'Codex second opinion on each lane'."
 license: MIT
 allowed-tools: "Read Write Edit Bash Glob Grep Task"
@@ -24,6 +24,7 @@ workers**, where each worker gets its own env block — and therefore its own br
 |---|---|---|
 | **GLM-5.2 / GLM-4.5-Air** | `claude -p` → z.ai endpoint | Claude Code tools, cheap brain (via `fleet-worker`) |
 | **Codex** (GPT-class) | `codex exec` | OpenAI's own agent harness — a genuinely different toolchain *and* model |
+| **Grok** (xAI grok-4.5) | `grok -p` | xAI's own agentic CLI — a different provider, model, *and* toolchain (like Codex); `GROK_DEPLOYMENT_KEY` auth |
 | **Sonnet / Haiku** | `claude -p --model sonnet\|haiku` | Claude Code tools, host auth |
 | **Opus** | `claude -p --model opus` | reserve for verify/judge lanes |
 
@@ -51,14 +52,14 @@ Codex refuter catches what three same-model skeptics miss).
 ## Model routing (work class × brain)
 
 Extends [fleet-worker's routing convention](../fleet-worker/references/model-routing.md)
-with the Codex column and the orchestrator rule:
+with the Codex/Grok columns and the orchestrator rule:
 
 | Work class | Brain | Why |
 |---|---|---|
 | **mechanical** (batch edits, verifier clones, backfills) | GLM-5.2, Haiku | proven cheap; gate catches misses |
 | **scout** (survey, inventory, locate) | Sonnet, GLM-5.2 | breadth over depth |
-| **build** (scoped features, refactors) | Sonnet, Codex | Codex = independent harness; good second implementation for judge panels |
-| **verify / judge** | Opus + one cross-provider dissenter (Codex or GLM) | *never under-power a judge*; diversity beats redundancy |
+| **build** (scoped features, refactors) | Sonnet, Codex, Grok | Codex/Grok = independent harnesses; good second implementations for judge panels |
+| **verify / judge** | Opus + one cross-provider dissenter (Codex, Grok, or GLM) | *never under-power a judge*; diversity beats redundancy |
 | **synthesize / land decisions** | orchestrator (Fable > Opus) | needs the conversation's context |
 
 Two guardrails carried over verbatim from the native tool's doctrine: reach for
@@ -207,7 +208,10 @@ default the script-author follows, not an option — and real runs routinely hit
 
 - **Isolation:** every mutating worker gets its own worktree lane *and* (GLM)
   its own `CLAUDE_CONFIG_DIR`. Codex workers run `--full-auto` (sandboxed,
-  workspace-write) confined to their lane via `-C`.
+  workspace-write) confined to their lane via `-C`. Grok workers run
+  `--always-approve` (autonomous tools), confined by the lane worktree — no
+  config-dir isolation needed (no Claude OAuth to collide with; auth is the
+  `GROK_DEPLOYMENT_KEY` env var, read from env, never written to disk).
 - **Codex lanes cannot `git commit` (learned 2026-07-08, codex-cli 0.142):**
   a worktree's git metadata (`HEAD.lock`/`index.lock`) lives under the MAIN
   repo's `.git/worktrees/`, outside the lane the sandbox confines Codex to —
@@ -247,8 +251,8 @@ default the script-author follows, not an option — and real runs routinely hit
 
 | Script | Purpose |
 |---|---|
-| [scripts/ff-doctor.sh](scripts/ff-doctor.sh) | `--offline` structural preflight; `--live` probes GLM endpoint, Codex auth, Anthropic models, reports orchestrator tier (fable/opus) |
-| [scripts/ff-spawn.sh](scripts/ff-spawn.sh) | uniform spawner: worktree lane + guard preamble + journal + per-brain launch (GLM via fleet-worker, Codex via `codex exec`, Anthropic via `claude -p`) |
+| [scripts/ff-doctor.sh](scripts/ff-doctor.sh) | `--offline` structural preflight; `--live` probes GLM endpoint, Codex auth, Grok key, Anthropic models, reports orchestrator tier (fable/opus) |
+| [scripts/ff-spawn.sh](scripts/ff-spawn.sh) | uniform spawner: worktree lane + guard preamble + journal + per-brain launch (GLM via fleet-worker, Codex via `codex exec`, Grok via `grok -p`, Anthropic via `claude -p`) |
 | [scripts/ff-collect.sh](scripts/ff-collect.sh) | per-brain result gate; strips ```json fences before `--schema` validation; `--repair` respawns a `<id>-repair` lane on validation failure; `--check-main-clean` escape guard |
 | [scripts/ff-status.sh](scripts/ff-status.sh) | run status as JSON (lane state, elapsed, commits, tools, tokens, activity, manifest summary); `--watch N --out status.json` feeds the live monitor |
 | [scripts/ff-run.sh](scripts/ff-run.sh) | `resume --run NAME` replays every manifest packet through ff-spawn in order (unchanged = cached, changed/new = live); `status --run NAME` aliases ff-status |
@@ -304,8 +308,9 @@ visual continuity in the monitor — not to resume native work in place.
   — the extraction: journal format on disk, resume semantics, control-flow
   doctrine, quality patterns, caps and budget spine, with evidence.
 - [references/worker-contracts.md](references/worker-contracts.md) — per-brain
-  launch/collect/auth contracts (GLM env knobs, full `codex exec` flag map,
-  Anthropic alias notes) and the Fable/Opus orchestrator probe.
+  launch/collect/auth contracts (GLM env knobs, full `codex exec` flag map, the
+  Grok `grok -p` headless/schema/auth contract, Anthropic alias notes) and the
+  Fable/Opus orchestrator probe.
 - [references/native-model-routing.md](references/native-model-routing.md) —
   per-stage `opts.model`/`opts.effort` routing for native Workflow scripts: the
   cost evidence, the collect-cheap/decide-premium table, caveats (aliases, fork

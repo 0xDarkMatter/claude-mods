@@ -22,7 +22,7 @@ you need, and stop reading here.
 |---|---|---|
 | Parallel subtasks run by your session's OWN provider and model tier, in-process | native Workflow tool / `Agent` subagents (`isolation: worktree`) | not a fleet skill at all — no dedicated skill needed |
 | Work done by a CHEAPER brain than your session (GLM/Haiku/Sonnet-under-Opus) — one subtask or a whole fan-out, all one brain type | [fleet-worker](../fleet-worker/) | [fleetflow](../fleetflow/) is overkill when every worker runs the same brain |
-| DIFFERENT brains per work class in one run, or cross-provider dissent in verify (e.g. Codex refutes GLM) | [fleetflow](../fleetflow/) | [fleet-worker](../fleet-worker/) runs one brain type per run (any provider, but not mixed) |
+| DIFFERENT brains per work class in one run, or cross-provider dissent in verify (e.g. Codex or Grok refutes GLM) | [fleetflow](../fleetflow/) | [fleet-worker](../fleet-worker/) runs one brain type per run (any provider, but not mixed). Also the home for a **Grok** (xAI) worker — its own binary, not a `claude -p` brain |
 | Work that RECURS on a schedule across sessions — cron, routine, unattended ticks | [loop-ops](../loop-ops/) | [iterate](../iterate/) is one continuous session, not a schedule |
 | Drive ONE mechanical metric to a target in one continuous session (even a long overnight one) | [iterate](../iterate/) | [loop-ops](../loop-ops/) is the scheduler *around* sessions, not the session itself |
 | Land/merge branches that parallel work produced | [fleet-ops](../fleet-ops/) | the terminus for every branch-producing row above (in-process subagents and prompt authoring produce no branches) |
@@ -63,7 +63,7 @@ land or inner + outer.
 
 - [fleet-ops](../fleet-ops/) — landing discipline: test-gated queue, pre-land scrub, auto-rebase, revert
 - [fleet-worker](../fleet-worker/) — one cheap headless worker (GLM, Sonnet, Haiku) fanned out and gated
-- [fleetflow](../fleetflow/) — heterogeneous cross-provider fleet (GLM + Codex + Anthropic)
+- [fleetflow](../fleetflow/) — heterogeneous cross-provider fleet (GLM + Codex + Grok + Anthropic)
 - [loop-ops](../loop-ops/) — outer-loop design: risk tiers, kill switch, scheduling
 - [iterate](../iterate/) — autonomous single-metric improvement loop
 - [spawn](../spawn/) — generates expert-agent prompt files (authoring, not runtime)

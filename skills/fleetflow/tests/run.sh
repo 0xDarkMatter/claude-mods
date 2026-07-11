@@ -81,6 +81,36 @@ check "collect: codex schema-valid JSON" 0 bash "$S/ff-collect.sh" --run r1 --id
 printf 'not json' > "$REPO/.fleetflow/r1/cx.last.txt"
 check "collect: codex schema-invalid fails" 10 bash "$S/ff-collect.sh" --run r1 --id cx --repo "$REPO" --schema
 
+# --- grok brain (non-Anthropic worker: grok -p envelope, no is_error) ----------
+GKP="$TMP/grok-packet.txt"; echo "grok task. FINAL REPLY: one line." > "$GKP"
+check "spawn: grok brain accepted (dry-run)" 0 bash "$S/ff-spawn.sh" --run rg --id g --brain grok --prompt-file "$GKP" --repo "$REPO" --dry-run
+jq -e '.text=="DRYRUN" and .stopReason=="EndTurn" and (has("is_error")|not)' "$REPO/.fleetflow/rg/g.result.json" >/dev/null \
+  && ok "spawn: grok dry-run stub is a grok envelope (text+stopReason, no is_error)" || bad "spawn: grok stub shape wrong"
+jq -e '.packets[]|select(.id=="g")|.brain=="grok"' "$REPO/.fleetflow/rg/manifest.json" >/dev/null \
+  && ok "manifest records brain=grok" || bad "manifest grok brain wrong"
+check "collect: grok envelope passes gate" 0 bash "$S/ff-collect.sh" --run rg --id g --repo "$REPO"
+GOUT="$(bash "$S/ff-collect.sh" --run rg --id g --repo "$REPO" 2>/dev/null)"
+[ "$GOUT" = "DRYRUN" ] && ok "collect: grok prints .text" || bad "collect: grok text wrong: '$GOUT'"
+# grok --schema lane prefers the already-parsed .structuredOutput
+jq -nc '{text:"ignored prose",stopReason:"EndTurn",structuredOutput:{verdict:"ok"}}' > "$REPO/.fleetflow/rg/gs.result.json"
+jq -nc '{type:"result",key:"v2:gs",id:"gs",brain:"grok",rc:0,artifact:"x"}' >> "$REPO/.fleetflow/rg/journal.jsonl"
+GSOUT="$(bash "$S/ff-collect.sh" --run rg --id gs --repo "$REPO" --schema 2>/dev/null)"; GSRC=$?
+{ [ "$GSRC" = "0" ] && printf '%s' "$GSOUT" | jq -e '.verdict=="ok"' >/dev/null; } \
+  && ok "collect: grok --schema returns structuredOutput" || bad "collect: grok structuredOutput wrong (rc=$GSRC out=$GSOUT)"
+# grok schema fallback: no structuredOutput, .text carries fenced JSON
+jq -nc '{text:"```json\n{\"verdict\":\"fb\"}\n```",stopReason:"EndTurn"}' > "$REPO/.fleetflow/rg/gf.result.json"
+jq -nc '{type:"result",key:"v2:gf",id:"gf",brain:"grok",rc:0,artifact:"x"}' >> "$REPO/.fleetflow/rg/journal.jsonl"
+GFOUT="$(bash "$S/ff-collect.sh" --run rg --id gf --repo "$REPO" --schema 2>/dev/null)"; GFRC=$?
+{ [ "$GFRC" = "0" ] && printf '%s' "$GFOUT" | jq -e '.verdict=="fb"' >/dev/null; } \
+  && ok "collect: grok --schema falls back to fenced .text" || bad "collect: grok fallback wrong (rc=$GFRC)"
+# grok empty-text envelope fails the gate
+jq -nc '{text:"",stopReason:"EndTurn"}' > "$REPO/.fleetflow/rg/ge.result.json"
+jq -nc '{type:"result",key:"v2:ge",id:"ge",brain:"grok",rc:0,artifact:"x"}' >> "$REPO/.fleetflow/rg/journal.jsonl"
+check "collect: grok empty text fails gate" 10 bash "$S/ff-collect.sh" --run rg --id ge --repo "$REPO"
+# ff-doctor surfaces a bin-grok structural check
+bash "$S/ff-doctor.sh" --offline 2>/dev/null | grep -qE "^bin-grok	(ok|advisory)" \
+  && ok "doctor: reports bin-grok check" || bad "doctor: bin-grok check missing"
+
 # --- phases --------------------------------------------------------------------------
 check "spawn: --phase accepted" 0 bash "$S/ff-spawn.sh" --run r1 --id ver --brain opus --phase verify --prompt-file "$PKT" --repo "$REPO" --dry-run
 bash "$S/ff-status.sh" --run r1 --repo "$REPO" 2>/dev/null | jq -e '.lanes[] | select(.id=="ver") | .phase=="verify"' >/dev/null \

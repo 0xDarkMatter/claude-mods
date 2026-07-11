@@ -48,6 +48,8 @@ for bin in git jq sha256sum; do
 done
 if command -v claude >/dev/null; then say "bin-claude" ok "found"; else say "bin-claude" fail "missing"; FAIL=1; fi
 if command -v codex >/dev/null; then say "bin-codex" ok "$(codex --version 2>/dev/null | head -1)"; else say "bin-codex" advisory "missing - codex brain unavailable"; fi
+GROK="${FLEETFLOW_GROK_BIN:-grok}"
+if command -v "$GROK" >/dev/null; then say "bin-grok" ok "$("$GROK" --version 2>/dev/null | head -1)"; else say "bin-grok" advisory "missing - grok brain unavailable"; fi
 
 FW="${FLEETFLOW_FLEET_WORKER:-$HOME/.claude/skills/fleet-worker/scripts/fleet-worker}"
 if [ -f "$FW" ]; then say "fleet-worker" ok "$FW"; else say "fleet-worker" advisory "not installed - glm brain unavailable"; fi
@@ -101,6 +103,17 @@ if command -v codex >/dev/null; then
     say "codex-auth" ok "$(timeout 30 codex login status 2>&1 | head -1)"
   else
     say "codex-auth" unreachable "not logged in (codex login)"; UNREACH=1
+  fi
+fi
+
+# grok auth is the GROK_DEPLOYMENT_KEY env var (no login-status subcommand exists,
+# and OAuth on some accounts lacks chat entitlement). We probe key PRESENCE, not
+# validity - a real chat call would burn quota. Only when the binary is installed.
+if command -v "$GROK" >/dev/null; then
+  if [ -n "${GROK_DEPLOYMENT_KEY:-}" ]; then
+    say "grok-auth" ok "GROK_DEPLOYMENT_KEY set"
+  else
+    say "grok-auth" unreachable "GROK_DEPLOYMENT_KEY not set (deployment key required)"; UNREACH=1
   fi
 fi
 

@@ -37,7 +37,7 @@ What **none** of them do — and what fleet-ops is for:
 
 A **lane** = one branch (or worktree), one unit of work. Lane status: `RUNNING | READY | CONFLICT | LANDED | FAILED`.
 
-Fleet-ops doesn't care who produced the branch — an agent-team teammate, a background agent's auto-worktree, a `claude -p` headless run, or a human. If it's a branch with commits, it can be a lane.
+Fleet-ops doesn't care who produced the branch — an agent-team teammate, a background agent's auto-worktree, a `claude -p` headless run, a fleetflow worker of any provider (GLM, Codex, or Grok), or a human. If it's a branch with commits, it can be a lane. Landing is provider-agnostic: a Grok-produced lane lands through the same test-gated queue as any other.
 
 ## CLI surface
 

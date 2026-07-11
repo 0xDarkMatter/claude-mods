@@ -72,7 +72,68 @@ OpenAI's agent harness, non-interactive. Flag map (codex-cli 0.125.0):
   clean stderr; `ff-collect` correctly ignores it. Keep skill descriptions
   ≤1024 chars if you want codex workers to load them.
 
-## 3. Anthropic workers (`claude -p`)
+## 3. Grok workers (`grok -p`)
+
+xAI's **Grok Build CLI** (`grok`, alias `agent`; v0.2.93 verified) — an agentic
+coding TUI, a direct Claude Code peer, but a **non-Anthropic** worker: its own
+binary and protocol, **not** a `claude -p` wrapper. Verified against
+`grok --help` + live headless runs 2026-07-11.
+
+- **Launch** (headless, one turn, prints + exits):
+  `grok --prompt-file <f> --output-format json --always-approve --max-turns N
+  [-m MODEL] [--reasoning-effort EFFORT] [--json-schema '<SCHEMA-STRING>']`.
+  `-p/--single "<prompt>"` is the inline-prompt equivalent of `--prompt-file`.
+  ff-spawn runs it from the lane worktree (`cd`), so grok's own `-w/--worktree`
+  is deliberately unused — the cage is fleetflow's worktree, one owner per tree.
+- **Autonomous tools:** `--always-approve` auto-approves *all* tool executions —
+  the codex `--full-auto` analog and a **blast-radius flag**; safe only because
+  the lane worktree + escape guard bound it. Granular alternative:
+  `--permission-mode dontAsk` + `--allow <RULE>` (mirrors Claude Code
+  `--allowedTools`; modes: `default|acceptEdits|auto|dontAsk|bypassPermissions|plan`).
+- **Structured output:** `--json-schema '<schema>'` takes the schema as a JSON
+  **string** (not a file path), implies `--output-format json`, and surfaces an
+  **already-parsed `.structuredOutput`** field — grok validates server-side, so
+  ff-collect prefers it over re-parsing `.text`. ff-spawn passes the schema
+  out-of-band (like codex's `--output-schema`), not appended to the prompt.
+- **Envelope** (`--output-format json`): `{text, stopReason, sessionId,
+  requestId, thought, structuredOutput?}` — **no `is_error`**. A clean turn ends
+  `stopReason:"EndTurn"`.
+- **Auth:** the `GROK_DEPLOYMENT_KEY` env var **only** — grok has no
+  config/auth/key subcommand to store a deployment key (`~/.grok/auth.json`
+  holds OAuth tokens, and OAuth lacked chat entitlement on the test account, so
+  the `xai-…` deployment key is the working path). ff-spawn reads it from the
+  **inherited environment** — never written to disk, args (`ps`-safe), or logs.
+  Config home is `~/.grok/`; **no per-worker config-dir isolation needed** (like
+  codex, grok has no Claude OAuth to collide with).
+- **Gate** (`ff-collect`): rc was already gated by ff-spawn (a failed grok run
+  exits nonzero + writes stderr), so the content gate is **envelope parses AND
+  non-empty `.text`** (or `.structuredOutput` for `--schema` lanes). `stopReason`
+  is informational — *not* hard-gated, because an agentic tool-turn can end on a
+  terminal reason other than `EndTurn`.
+- **Models:** `grok models` lists available IDs (test account: `grok-4.5`, the
+  default). `-m`/`FLEETFLOW_GROK_MODEL` overrides.
+- **Character:** a genuinely different **provider** (xAI), model, *and* harness —
+  its highest fleetflow value is **cross-provider dissent** (refuter/judge lanes)
+  and independent second implementations, same role codex plays.
+- **fleetflow env knobs:** `FLEETFLOW_GROK_BIN` (default `grok`; point at
+  `…/grok.exe` when it isn't on PATH), `FLEETFLOW_GROK_MODEL` (model override).
+- **Transcript archiving is not wired for grok** (its session store under
+  `~/.grok/` isn't a verified path); `ff-spawn`'s archive step skips grok with a
+  `transcript source not found … (non-fatal)` note — the lane still passes.
+- **Programmatic surface (beyond `-p`)**, for tighter SDK integration than a
+  one-shot headless call: `grok agent stdio` (drive over stdio — the SDK path),
+  `grok agent headless` (over the Grok WebSocket relay), `grok agent serve`
+  (WebSocket server, `--bind` default `127.0.0.1:2419`, `--secret`/
+  `GROK_AGENT_SECRET`), `grok agent leader` (one shared backend for multiple
+  clients; `--leader`/`--no-leader`, `--leader-socket`). fleetflow uses plain
+  headless `grok -p`; the relay/serve/leader modes are for embedding grok as a
+  long-lived backend, out of scope for hub-and-spoke lanes.
+- **MCP:** `grok mcp add|list|remove|doctor` — grok is an MCP *client* like
+  Claude Code, so a lane can be given MCP servers via its `~/.grok` config.
+- **Terms:** deployment-key usage bills to your xAI account/plan — verify its
+  terms as you would codex's ChatGPT-plan billing.
+
+## 4. Anthropic workers (`claude -p`)
 
 - Launch: `claude -p --model <sonnet|haiku|opus> --output-format json
   --max-turns N --permission-mode <mode> "PROMPT" > result.json` from the lane
@@ -88,7 +149,7 @@ OpenAI's agent harness, non-interactive. Flag map (codex-cli 0.125.0):
   subscription-authed orchestrator stays interactive; if a scheduler drives
   fleetflow runs, put the workers (or the whole run) on an API key.
 
-## 4. Orchestrator: Fable if available, Opus if not
+## 5. Orchestrator: Fable if available, Opus if not
 
 The orchestrator is the session invoking this skill — its model is chosen when
 the session starts (`/model`, or the `model` field in settings), not by a
@@ -105,7 +166,7 @@ accordingly. Never route the orchestrator to GLM/Codex — synthesis and judging
 stay on the strongest available brain (the native tool's "never under-power a
 judge", applied to yourself).
 
-## 5. Uniform result layout
+## 6. Uniform result layout
 
 ```
 <repo>/.fleetflow/<run>/
@@ -113,7 +174,8 @@ judge", applied to yourself).
 ├── manifest.json        # orchestrator plan: {run,base,created_by,phases[],packets[]}
 ├── main-baseline.txt    # main-checkout status snapshot (escape-guard baseline)
 ├── <id>.prompt.txt      # guard preamble + packet (what was actually sent)
-├── <id>.result.json     # claude JSON envelope (glm/anthropic brains)
+├── <id>.result.json     # claude JSON envelope (glm/anthropic brains) OR
+│                        #   grok envelope {text,stopReason,…} (grok brain)
 ├── <id>.last.txt        # codex last-message (codex brain)
 ├── <id>.events.jsonl    # codex --json event stream (codex brain)
 ├── <id>.transcript.jsonl# archived session transcript (claude-brain lanes; best-effort)
@@ -126,7 +188,7 @@ judge", applied to yourself).
 sensitive-file guard fires there before `bypassPermissions`) and must be
 gitignored; `ff-spawn` appends it to `.git/info/exclude` if absent.
 
-## 6. Effort lever, cache redirect, transcript archiving (Wave 1)
+## 7. Effort lever, cache redirect, transcript archiving (Wave 1)
 
 **Effort lever** (`ff-spawn --effort low|medium|high|max`). Default unset =
 inherit the brain's own. The mapping (effort IS part of the cache-key OPTS
@@ -136,6 +198,7 @@ string, so changing only effort is a cache miss):
 |---|---|
 | glm (fleet-worker) | `FLEET_WORKER_EFFORT=<v>` in the worker env |
 | codex (`codex exec`) | `-c model_reasoning_effort="<v>"` |
+| grok (`grok -p`) | `--reasoning-effort <v>` (alias `--effort`) |
 | sonnet/opus/haiku/fable | `claude -p --settings '{"effortLevel":"<v>"}'` |
 
 Doctrine (carried from the native tool): reach for the effort lever before the

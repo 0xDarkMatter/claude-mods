@@ -22,7 +22,7 @@ Usage: ff-spawn.sh --run NAME --id ID --brain BRAIN --prompt-file FILE
 
   --run NAME       run name (groups lanes; [a-z0-9-]+)
   --id ID          lane id within the run ([a-z0-9-]+)
-  --brain BRAIN    glm | codex | sonnet | opus | haiku | fable
+  --brain BRAIN    glm | codex | grok | sonnet | opus | haiku | fable
   --prompt-file F  packet file (guard preamble is prepended unless --no-guard)
   --phase NAME     progress-group label (default: build) - display only
   --worktree       give the worker its own worktree lane (branch fleetflow/RUN/ID)
@@ -73,7 +73,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-case "$BRAIN" in glm|codex|sonnet|opus|haiku|fable) ;; *) err "invalid --brain '$BRAIN'"; exit 2 ;; esac
+case "$BRAIN" in glm|codex|grok|sonnet|opus|haiku|fable) ;; *) err "invalid --brain '$BRAIN'"; exit 2 ;; esac
 case "$EFFORT" in ""|low|medium|high|max) ;; *) err "invalid --effort '$EFFORT' (low|medium|high|max)"; exit 2 ;; esac
 echo "$RUN" | grep -qE '^[a-z0-9-]+$' || { err "invalid --run"; exit 2; }
 echo "$ID"  | grep -qE '^[a-z0-9-]+$' || { err "invalid --id"; exit 2; }
@@ -104,7 +104,10 @@ if [ "$GUARD" = 1 ]; then
   [ -f "$PRE" ] && { cat "$PRE" >> "$SENT"; echo >> "$SENT"; }
 fi
 cat "$PROMPT_FILE" >> "$SENT"
-if [ -n "$SCHEMA" ] && [ "$BRAIN" != "codex" ]; then
+# codex and grok take a native structured-output flag (--output-schema /
+# --json-schema), so their schema is passed out-of-band, not appended to the
+# prompt. Every other brain gets the schema embedded and validated at collect.
+if [ -n "$SCHEMA" ] && [ "$BRAIN" != "codex" ] && [ "$BRAIN" != "grok" ]; then
   { echo; echo "FINAL REPLY MUST be a single JSON object valid against this schema:";
     cat "$SCHEMA"; } >> "$SENT"
 fi
@@ -204,7 +207,13 @@ archive_transcript() {
 }
 
 if [ "$DRYRUN" = 1 ]; then
-  jq -nc '{is_error:false,result:"DRYRUN"}' > "$ART"
+  # the stub must match the brain's real envelope so collect can gate it:
+  # grok emits {text,stopReason,...} (no is_error); every other brain here
+  # collects via the claude-style {is_error,result} envelope.
+  case "$BRAIN" in
+    grok) jq -nc '{text:"DRYRUN",stopReason:"EndTurn"}' > "$ART" ;;
+    *)    jq -nc '{is_error:false,result:"DRYRUN"}' > "$ART" ;;
+  esac
 else
   case "$BRAIN" in
     glm)
@@ -232,6 +241,24 @@ else
           ${SCHEMA:+--output-schema "$SCHEMA"} \
           -o "$ART" - < "$SENT" \
       ) > "$RUNDIR/$ID.events.jsonl" 2> "$ERRF" || RC=$?
+      ;;
+    grok)
+      # xAI's Grok Build CLI - a NON-Anthropic worker (own binary + protocol,
+      # NOT a claude -p wrapper). Auth is the GROK_DEPLOYMENT_KEY env var, read
+      # from the inherited environment - never written to disk or args.
+      GROK="${FLEETFLOW_GROK_BIN:-grok}"
+      command -v "$GROK" >/dev/null || { err "grok CLI not found ($GROK)"; exit 5; }
+      # --always-approve = codex --full-auto analog: autonomous tool use, headless.
+      # --json-schema takes the schema STRING (not a path) and implies json output,
+      # surfacing an already-parsed .structuredOutput field (see ff-collect).
+      ( cd "$WORKDIR" && \
+        UV_CACHE_DIR="$CACHE_DIR" TMPDIR="$CACHE_DIR" TMP="$CACHE_DIR" TEMP="$CACHE_DIR" \
+        "$GROK" --prompt-file "$SENT" --output-format json --always-approve \
+          --max-turns "$MAX_TURNS" \
+          ${FLEETFLOW_GROK_MODEL:+-m "$FLEETFLOW_GROK_MODEL"} \
+          ${EFFORT:+--reasoning-effort "$EFFORT"} \
+          ${SCHEMA:+--json-schema "$(cat "$SCHEMA")"} \
+      ) > "$ART" 2> "$ERRF" || RC=$?
       ;;
     sonnet|opus|haiku|fable)
       command -v claude >/dev/null || { err "claude CLI not found"; exit 5; }

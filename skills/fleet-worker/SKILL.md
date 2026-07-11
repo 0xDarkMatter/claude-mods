@@ -19,6 +19,14 @@ to a cheaper model via env — a cheaper Anthropic model (Sonnet/Haiku) or a
 non-Anthropic endpoint. GLM-5.2 on z.ai is the default worked example; the
 mechanism is provider- and model-agnostic (any Anthropic-compatible endpoint).
 
+> **Want to offload to Grok (xAI's `grok` CLI)? That's not this skill.** Every
+> fleet-worker brain is a `claude -p` process pointed at an **Anthropic-compatible**
+> endpoint. Grok Build CLI is its **own binary and protocol** (`grok -p`, auth via
+> `GROK_DEPLOYMENT_KEY`), not a `claude -p` wrapper — so it can't ride fleet-worker's
+> launcher. Grok is a first-class worker in **[fleetflow](../fleetflow/)** instead
+> (alongside Codex), which spawns heterogeneous OS-process workers of different
+> binaries. Use fleetflow for a Grok lane or any mixed-provider fan-out.
+
 **This is the spawning layer. [`fleet-ops`](../fleet-ops/) is the landing layer.**
 fleet-worker produces branches cheaply; fleet-ops lands them through a test gate
 with your review. See [references/fleet-ops-handoff.md](references/fleet-ops-handoff.md).

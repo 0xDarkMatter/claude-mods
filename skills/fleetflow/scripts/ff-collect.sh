@@ -3,7 +3,9 @@
 #
 # Per-brain success semantics: Claude-harness brains (glm/sonnet/opus/haiku/
 # fable) gate on the JSON envelope's is_error; codex gates on a non-empty
-# last-message (plus JSON validity when a schema was used). The escape guard
+# last-message (plus JSON validity when a schema was used); grok gates on a
+# parseable envelope with non-empty .text (its envelope has no is_error - a
+# failed grok run exits nonzero, which ff-spawn already caught). The escape guard
 # compares the main checkout's status against the baseline snapshotted at
 # first spawn — new entries mean a worker wrote outside its lane.
 # stdout: the worker's final text (data). stderr: chatter.
@@ -128,6 +130,35 @@ JOURNAL="$RUNDIR/journal.jsonl"
 BRAIN=""
 [ -f "$JOURNAL" ] && \
   BRAIN="$(jq -r --arg id "$ID" 'select(.type=="result" and .id==$id) | .brain' "$JOURNAL" 2>/dev/null | tail -1)"
+
+if [ "$BRAIN" = "grok" ]; then
+  # grok's headless envelope is {text, stopReason, sessionId, ...} with NO
+  # is_error field. rc was already gated by ff-spawn (a failed run exits nonzero
+  # and writes stderr), so the content gate here is: envelope parses AND produced
+  # non-empty output. stopReason is informational (EndTurn = a clean turn); we do
+  # NOT hard-gate on it, because an agentic tool-turn can end on other reasons.
+  ART="$RUNDIR/$ID.result.json"
+  [ -s "$ART" ] || { err "grok result missing/empty: $ART"; exit 3; }
+  jq -e 'type=="object"' "$ART" >/dev/null 2>&1 || { err "grok envelope unparseable: $ART"; exit 10; }
+  if [ "$SCHEMA" = 1 ]; then
+    # --json-schema makes grok emit an already-parsed .structuredOutput - prefer it
+    # over re-parsing .text (grok did the validation server-side).
+    SO="$(jq -c 'if has("structuredOutput") then .structuredOutput else empty end' "$ART" 2>/dev/null)"
+    if [ -n "$SO" ]; then printf '%s\n' "$SO"; exit 0; fi
+    # fallback: no structuredOutput (schema not passed natively) - .text may hold fenced JSON
+    CLEAN="$(jq -r '.text // empty' "$ART" | strip_fences)"
+    if ! printf '%s' "$CLEAN" | json_ok; then
+      [ "$REPAIR" = 1 ] && do_repair "$CLEAN" "$JQERR"
+      err "grok final output not valid JSON (schema lane): $JQERR"; exit 10
+    fi
+    printf '%s\n' "$CLEAN"
+    exit 0
+  fi
+  TEXT="$(jq -r '.text // empty' "$ART")"
+  [ -n "$TEXT" ] || { err "grok produced empty text"; exit 10; }
+  printf '%s\n' "$TEXT"
+  exit 0
+fi
 
 if [ "$BRAIN" = "codex" ] || { [ -z "$BRAIN" ] && [ -f "$RUNDIR/$ID.last.txt" ]; }; then
   ART="$RUNDIR/$ID.last.txt"
