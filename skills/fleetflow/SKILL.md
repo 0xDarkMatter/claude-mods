@@ -267,7 +267,9 @@ tail, artifact). Wire-up: copy it into the run dir as `index.html`, run
 `ff-status --watch 3 --out <rundir>/status.json`, serve the run dir with any
 static server, open in a browser/preview panel. It polls `status.json` every
 2.5s. Live claude-brain lanes are introspected via the session transcript in
-their isolated config dir; codex lanes via their `--json` event stream.
+their isolated config dir; codex lanes via their `--json` event stream; grok
+lanes via their `--output-format streaming-json` NDJSON event stream
+(`thought`/`text`/`end` events).
 
 **Two surfaces, like the native tool.** The served monitor is the *live*
 grid (the Background-tasks panel analogue). In-chat, the orchestrator emits a

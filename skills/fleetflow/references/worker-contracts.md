@@ -98,6 +98,19 @@ binary and protocol, **not** a `claude -p` wrapper. Verified against
 - **Envelope** (`--output-format json`): `{text, stopReason, sessionId,
   requestId, thought, structuredOutput?}` — **no `is_error`**. A clean turn ends
   `stopReason:"EndTurn"`.
+- **Output modes** (`--output-format`, verified live 2026-07-11): `plain` (text
+  only, the default), `json` (the single buffered envelope above), and
+  `streaming-json` — **NDJSON**, one event object per line streamed as it
+  generates: `{"type":"thought","data":"…"}` (reasoning tokens),
+  `{"type":"text","data":"…"}` (answer tokens), terminated by
+  `{"type":"end","stopReason","sessionId","requestId"}`. This is grok's analog of
+  `claude -p --output-format stream-json`. **ff-collect gates on the buffered
+  `json` envelope** (a whole-turn result is what a lane's success is judged on);
+  **`streaming-json` is the live-progress source** — the codex `--json`
+  event-stream analog the live monitor consumes. Consumer note: it interleaves
+  `thought` and `text`, so filter `type=="text"` for answer-only, and read
+  `structuredOutput` off the terminal event (not a `thought`) on `--json-schema`
+  lanes.
 - **Auth:** the `GROK_DEPLOYMENT_KEY` env var **only** — grok has no
   config/auth/key subcommand to store a deployment key (`~/.grok/auth.json`
   holds OAuth tokens, and OAuth lacked chat entitlement on the test account, so
