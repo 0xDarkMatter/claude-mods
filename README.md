@@ -12,13 +12,13 @@
 
 > *A comprehensive extension toolkit that transforms Claude Code into a specialized development powerhouse.*
 
-**claude-mods** is a production-ready plugin that extends Claude Code with 102 specialized skills, 3 expert agents, 13 output styles, 13 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
+**claude-mods** is a production-ready plugin that extends Claude Code with 103 specialized skills, 3 expert agents, 13 output styles, 13 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
 
 Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms), claude-mods fills critical gaps in Claude Code's capabilities: persistent session state that survives across machines, on-demand expert knowledge for specialized domains, token-efficient modern CLI tools (10-100x faster than traditional alternatives), and proven workflow patterns for TDD, code review, and feature development. The toolkit implements Anthropic's [recommended patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), ensuring your development context never vanishes when sessions end.
 
 From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
 
-**3 agents. 102 skills. 13 styles. 13 hooks. 14 rules. One install.**
+**3 agents. 103 skills. 13 styles. 13 hooks. 14 rules. One install.**
 
 ## Recent Updates
 
@@ -88,7 +88,7 @@ Claude Code is powerful out of the box, but it has gaps. This toolkit fills them
 
 - **Session continuity** — Tasks vanish when sessions end. We fix that with `/save` and `/sync`, implementing Anthropic's [recommended pattern](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) for long-running agents.
 
-- **Expert-level knowledge on demand** — 102 on-demand skills covering React, TypeScript, Python, Go, Rust, PostgreSQL, and more, plus 3 specialized agents reserved for genuine context-isolation/worker roles (git operations, web scraping, project reorganization). Skills-first: knowledge loads when relevant instead of living in heavyweight agent prompts.
+- **Expert-level knowledge on demand** — 103 on-demand skills covering React, TypeScript, Python, Go, Rust, PostgreSQL, and more, plus 3 specialized agents reserved for genuine context-isolation/worker roles (git operations, web scraping, project reorganization). Skills-first: knowledge loads when relevant instead of living in heavyweight agent prompts.
 
 - **Modern CLI tools** — Stop using `grep`, `find`, and `cat`. Our rules automatically prefer `ripgrep`, `fd`, `eza`, and `bat` — 10-100x faster and token-efficient.
 
@@ -113,7 +113,7 @@ claude-mods/
 ├── .claude-plugin/     # Plugin metadata
 ├── agents/             # Expert subagents (3)
 ├── commands/           # Slash commands (3)
-├── skills/             # Custom skills (102)
+├── skills/             # Custom skills (103)
 ├── output-styles/      # Response personalities
 ├── hooks/              # Hook examples & docs
 ├── rules/              # Claude Code rules
@@ -208,6 +208,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [javascript-ops](skills/javascript-ops/) | JavaScript/Node.js async patterns, modules, ES2024+, runtime internals |
 | [r-ops](skills/r-ops/) | Modern R - tidyverse-first data analysis, dplyr/tidyr wrangling, ggplot2, stats/modeling (broom, tidymodels), data.table, time series, renv/Quarto workflow |
 | [react-ops](skills/react-ops/) | React hooks, Server Components, state management, performance, testing |
+| [rembg-ops](skills/rembg-ops/) | Transparent-PNG cutouts / background removal for flat illustration, sticker, cartoon and avatar art - rembg (isnet-anime) plus a deterministic fallback ladder (flat-bg colour-key, alpha-binarise, colour-aware offset-shadow strip) for the pale/translucent/baked-shadow cases ML drops; auto method + contact-sheet triage |
 | [vue-ops](skills/vue-ops/) | Vue 3 Composition API, Pinia, Vue Router, Nuxt 3 |
 | [astro-ops](skills/astro-ops/) | Astro islands, content collections, rendering strategies, deployment |
 | [laravel-ops](skills/laravel-ops/) | Laravel Eloquent, architecture, authentication, testing with Pest |
