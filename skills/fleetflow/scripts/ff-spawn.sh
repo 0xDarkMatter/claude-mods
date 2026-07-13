@@ -219,8 +219,11 @@ else
     glm)
       FW="${FLEETFLOW_FLEET_WORKER:-$HOME/.claude/skills/fleet-worker/scripts/fleet-worker}"
       [ -f "$FW" ] || { err "fleet-worker launcher not found ($FW)"; exit 5; }
+      # env(1) carries the assignments: a ${VAR:+NAME=val} expansion is NOT an
+      # assignment prefix (bash parses prefixes before expansion), so without
+      # env the expanded NAME=val word execs as a command -> rc 127.
       ( cd "$WORKDIR" && \
-        FLEET_WORKER_CONFIG_DIR="$CFGD" \
+        env FLEET_WORKER_CONFIG_DIR="$CFGD" \
         UV_CACHE_DIR="$CACHE_DIR" TMPDIR="$CACHE_DIR" TMP="$CACHE_DIR" TEMP="$CACHE_DIR" \
         ${EFFORT:+FLEET_WORKER_EFFORT="$EFFORT"} \
         bash "$FW" --output-format json --max-turns "$MAX_TURNS" "$(cat "$SENT")" \
