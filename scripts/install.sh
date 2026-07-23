@@ -266,6 +266,25 @@ if echo '{}' | jq -e 'walk(.) | true' >/dev/null 2>&1; then
 else
     echo -e "  ${YELLOW}jq with walk/1 (>=1.6) not available, skipping hook wiring (plugin installs unaffected)${NC}"
 fi
+
+# STATUSLINE - add ONLY if the user has none. A statusline is a whole-config
+# key; we never clobber one the user already set, and we touch nothing else.
+statusline_tpl="$PROJECT_ROOT/templates/settings.json"
+if command -v jq >/dev/null 2>&1 && [ -f "$statusline_tpl" ]; then
+    settings_path="$CLAUDE_DIR/settings.json"
+    [ -f "$settings_path" ] || printf '{}\n' > "$settings_path"
+    if [ "$(jq 'has("statusLine")' "$settings_path" 2>/dev/null)" = "true" ]; then
+        echo -e "  ${GREEN}Existing statusline preserved${NC}"
+    else
+        tmp_settings="$(mktemp)"
+        if jq --slurpfile tpl "$statusline_tpl" '.statusLine = $tpl[0].statusLine' "$settings_path" > "$tmp_settings"; then
+            mv "$tmp_settings" "$settings_path"
+            echo -e "  ${GREEN}Context-usage statusline added to settings.json${NC}"
+        else
+            rm -f "$tmp_settings"
+        fi
+    fi
+fi
 echo ""
 
 # =============================================================================

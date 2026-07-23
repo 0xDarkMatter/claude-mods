@@ -240,6 +240,22 @@ foreach ($eventProperty in $desired.hooks.PSObject.Properties) {
     }
     $settings.hooks.$eventName = $eventGroups
 }
+
+# STATUSLINE - add ONLY if the user has none. A statusline is a whole-config
+# key; we never clobber one the user already set, and we touch nothing else.
+if (-not $settings.PSObject.Properties["statusLine"]) {
+    $statuslineTemplate = Join-Path $projectRoot "templates\settings.json"
+    if (Test-Path $statuslineTemplate) {
+        $tpl = Get-Content $statuslineTemplate -Raw | ConvertFrom-Json
+        if ($tpl.PSObject.Properties["statusLine"]) {
+            $settings | Add-Member -MemberType NoteProperty -Name statusLine -Value $tpl.statusLine
+            Write-Host "  Context-usage statusline added to settings.json" -ForegroundColor Green
+        }
+    }
+} else {
+    Write-Host "  Existing statusline preserved" -ForegroundColor Green
+}
+
 $settings | ConvertTo-Json -Depth 20 | Set-Content $settingsPath -Encoding UTF8
 Write-Host "  Security and peer-guard hooks wired in settings.json" -ForegroundColor Green
 Write-Host ""
