@@ -7,8 +7,18 @@
 # Usage:
 #   Linux/macOS:       ./scripts/install.sh
 #   Windows Git Bash:  bash scripts/install.sh
+#   Opt into the statusline: add --statusline
 
 set -e
+
+# --statusline is opt-in: off by default so a shared install never changes the
+# user's prompt UI without being asked.
+WANT_STATUSLINE=false
+for arg in "$@"; do
+    case "$arg" in
+        --statusline) WANT_STATUSLINE=true ;;
+    esac
+done
 
 BLUE='\033[0;34m'
 GREEN='\033[0;32m'
@@ -267,14 +277,17 @@ else
     echo -e "  ${YELLOW}jq with walk/1 (>=1.6) not available, skipping hook wiring (plugin installs unaffected)${NC}"
 fi
 
-# STATUSLINE - add ONLY if the user has none. A statusline is a whole-config
-# key; we never clobber one the user already set, and we touch nothing else.
+# STATUSLINE - opt-in only (--statusline). Even when opted in we add it ONLY if
+# the user has none: a statusline is a whole-config key, so we never clobber one
+# the user already set, and we touch nothing else.
 statusline_tpl="$PROJECT_ROOT/templates/settings.json"
-if command -v jq >/dev/null 2>&1 && [ -f "$statusline_tpl" ]; then
+if ! $WANT_STATUSLINE; then
+    echo -e "  ${YELLOW}Statusline skipped (re-run with --statusline to install it)${NC}"
+elif command -v jq >/dev/null 2>&1 && [ -f "$statusline_tpl" ]; then
     settings_path="$CLAUDE_DIR/settings.json"
     [ -f "$settings_path" ] || printf '{}\n' > "$settings_path"
     if [ "$(jq 'has("statusLine")' "$settings_path" 2>/dev/null)" = "true" ]; then
-        echo -e "  ${GREEN}Existing statusline preserved${NC}"
+        echo -e "  ${GREEN}Existing statusline preserved (remove it first to use the claude-mods one)${NC}"
     else
         tmp_settings="$(mktemp)"
         if jq --slurpfile tpl "$statusline_tpl" '.statusLine = $tpl[0].statusLine' "$settings_path" > "$tmp_settings"; then

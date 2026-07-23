@@ -6,10 +6,19 @@
     Copies commands, skills, agents, and rules to the global Claude Code config.
     Handles cleanup of deprecated items and command-to-skill migrations.
 
+.PARAMETER Statusline
+    Opt in to installing the context-usage statusline. Off by default so a
+    shared install never changes the user's prompt UI without being asked.
+
 .NOTES
     Run from the claude-mods directory:
     .\scripts\install.ps1
+    .\scripts\install.ps1 -Statusline
 #>
+
+param(
+    [switch]$Statusline
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -241,19 +250,24 @@ foreach ($eventProperty in $desired.hooks.PSObject.Properties) {
     $settings.hooks.$eventName = $eventGroups
 }
 
-# STATUSLINE - add ONLY if the user has none. A statusline is a whole-config
-# key; we never clobber one the user already set, and we touch nothing else.
-if (-not $settings.PSObject.Properties["statusLine"]) {
-    $statuslineTemplate = Join-Path $projectRoot "templates\settings.json"
-    if (Test-Path $statuslineTemplate) {
-        $tpl = Get-Content $statuslineTemplate -Raw | ConvertFrom-Json
-        if ($tpl.PSObject.Properties["statusLine"]) {
-            $settings | Add-Member -MemberType NoteProperty -Name statusLine -Value $tpl.statusLine
-            Write-Host "  Context-usage statusline added to settings.json" -ForegroundColor Green
+# STATUSLINE - opt-in only (-Statusline). Even when opted in we add it ONLY if
+# the user has none: a statusline is a whole-config key, so we never clobber
+# one the user already set, and we touch nothing else.
+if ($Statusline) {
+    if (-not $settings.PSObject.Properties["statusLine"]) {
+        $statuslineTemplate = Join-Path $projectRoot "templates\settings.json"
+        if (Test-Path $statuslineTemplate) {
+            $tpl = Get-Content $statuslineTemplate -Raw | ConvertFrom-Json
+            if ($tpl.PSObject.Properties["statusLine"]) {
+                $settings | Add-Member -MemberType NoteProperty -Name statusLine -Value $tpl.statusLine
+                Write-Host "  Context-usage statusline added to settings.json" -ForegroundColor Green
+            }
         }
+    } else {
+        Write-Host "  Existing statusline preserved (remove it first to use the claude-mods one)" -ForegroundColor Green
     }
 } else {
-    Write-Host "  Existing statusline preserved" -ForegroundColor Green
+    Write-Host "  Statusline skipped (re-run with -Statusline to install it)" -ForegroundColor DarkGray
 }
 
 $settings | ConvertTo-Json -Depth 20 | Set-Content $settingsPath -Encoding UTF8
