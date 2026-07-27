@@ -145,8 +145,12 @@ set_lane_state() {
 
 scrub_diff() {
   # echoes hits (one per line) for given branch's diff vs base. Empty = clean.
+  # ADDED lines only ('+…', not the '+++' file header): deletion lines, context
+  # lines, and @@ hunk-header function-context must not trip the gate — removing
+  # a forbidden marker is a fix, and a marker merely NEAR an edit is not one
+  # (both false-positived here, 2026-07).
   local branch=$1
-  git diff "$BASE_BRANCH"..."$branch" 2>/dev/null | grep -nE "$FORBIDDEN_PATTERN" || true
+  git diff "$BASE_BRANCH"..."$branch" 2>/dev/null | grep -E '^\+' | grep -vE '^\+\+\+ ' | grep -nE "$FORBIDDEN_PATTERN" || true
 }
 
 refuse_if_shared_tree() {

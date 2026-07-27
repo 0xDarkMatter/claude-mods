@@ -105,6 +105,17 @@ printf 'TODO_%s leftover\n' 'SCRUB' >> "$wt/b.txt"
 git -C "$wt" -c user.email=w@t -c user.name=w commit -aqm "oops debug marker"
 bash "$FLEET" scrub-check feat/foo >/dev/null 2>&1; ee "scrub-check flags forbidden pattern" 1 $?
 
+echo "-- scrub gate ignores deletions and context (added lines only) --"
+# Regression (2026-07): scrub_diff grepped the raw diff, so a branch REMOVING a
+# forbidden marker (a '-' line), or a marker landing in a hunk header / context
+# line near an unrelated edit, false-refused. Only '+' lines are violations.
+printf 'TODO_%s cleanup-me\n' 'SCRUB' >> "$REPO/f"
+git -C "$REPO" commit -qam "main carries a marker"
+mk_lane "chore/descrub" e.txt   # branches off main, so it inherits the marker
+grep -v "cleanup-me" "$SB/wt-chore_descrub/f" > "$SB/wt-chore_descrub/f.tmp" && mv "$SB/wt-chore_descrub/f.tmp" "$SB/wt-chore_descrub/f"
+git -C "$SB/wt-chore_descrub" -c user.email=w@t -c user.name=w commit -qam "remove stale marker"
+bash "$FLEET" scrub-check chore/descrub >/dev/null 2>&1; ee "scrub-check passes marker REMOVAL" 0 $?
+
 echo "-- signal.sh log gate: exit codes and summaries, not prose --"
 # Regression (Ledger, 2026-07): a GREEN run whose stderr prints "failed"/"error"
 # prose, or whose test NAMES contain "error", must not be refused. Verdict order
