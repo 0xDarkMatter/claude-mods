@@ -98,7 +98,10 @@ case "$(head -n1 "$REPO/.claude/fleet/lanes/feat%2Ffoo" 2>/dev/null)" in
 
 echo "-- scrub gate still works on a slashed branch --"
 wt="$SB/wt-feat_foo"
-echo "TODO_SCRUB leftover" >> "$wt/b.txt"
+# Marker built via printf so this source file never contains the contiguous
+# forbidden token — otherwise any later diff hunk near this line drags it into
+# a hunk header / context line and scrub-check false-positives on run.sh itself.
+printf 'TODO_%s leftover\n' 'SCRUB' >> "$wt/b.txt"
 git -C "$wt" -c user.email=w@t -c user.name=w commit -aqm "oops debug marker"
 bash "$FLEET" scrub-check feat/foo >/dev/null 2>&1; ee "scrub-check flags forbidden pattern" 1 $?
 
