@@ -26,6 +26,48 @@ if [[ ! -f "$LANE_FILE" ]]; then
   exit 2
 fi
 
+# === LOG VERDICT ===
+# Pass/fail from a test log, structured-signals-first. Grepping the whole log
+# for "failed|error" false-positives on any suite that exercises failure paths
+# (a PASSING run legitimately prints "email ... failed: No such module" to
+# stderr, and a passing test NAMED "...error..." trips the word too — both hit
+# on the Ledger repo, 2026-07). Order of trust:
+#   1. exit code — authoritative (explicit arg, or a trailing "exit code: N"
+#      line the lane appended to the log)
+#   2. runner summary line (vitest/jest "Tests ...", pytest "=== N passed ===",
+#      cargo "test result:", go "FAIL"/"ok")
+#   3. anchored fallback: count-shaped failure mentions ("N failed") only —
+#      never a bare word-grep over the full log
+# Returns: 0 = pass, 1 = fail, 2 = no structured summary found.
+log_summary_verdict() {
+  local log=$1 line
+
+  # vitest ("  Tests  2 failed | 10 passed (12)") / jest ("Tests: 2 failed, ...").
+  # "Test Files" (vitest) deliberately not matched — the "Tests" line is the verdict.
+  line=$(grep -E '^[[:space:]]*Tests(:|[[:space:]])' "$log" | tail -n1 || true)
+  if [[ -n "$line" ]]; then
+    grep -qE '[1-9][0-9]*[[:space:]]+fail' <<<"$line" && return 1 || return 0
+  fi
+
+  # pytest short summary: "==== 2 failed, 10 passed in 1.2s ===="
+  line=$(grep -E '^=+ .*[0-9]+ (passed|failed|error).* =+$' "$log" | tail -n1 || true)
+  if [[ -n "$line" ]]; then
+    grep -qE '[1-9][0-9]*[[:space:]]+(failed|error)' <<<"$line" && return 1 || return 0
+  fi
+
+  # cargo: "test result: ok. ..." / "test result: FAILED. ..." (last suite wins)
+  line=$(grep -E '^test result: ' "$log" | tail -n1 || true)
+  if [[ -n "$line" ]]; then
+    case "$line" in "test result: ok."*) return 0;; *) return 1;; esac
+  fi
+
+  # go test: per-package "FAIL"/"--- FAIL:" lines, "ok  <pkg>" on pass
+  if grep -qE '^(FAIL|--- FAIL:)' "$log"; then return 1; fi
+  if grep -qE '^ok[[:space:]]' "$log"; then return 0; fi
+
+  return 2
+}
+
 STATE=${1:-}
 case "$STATE" in
   READY)
@@ -35,13 +77,41 @@ case "$STATE" in
       exit 1
     fi
     LOG=${2:-}
+    RC=${3:-}
+    if [[ -n "$RC" && ! "$RC" =~ ^[0-9]+$ ]]; then
+      echo "signal.sh ERROR: exit-code arg '$RC' is not numeric" >&2; exit 1
+    fi
     if [[ -n "$LOG" ]]; then
       [[ -f "$LOG" ]] || { echo "signal.sh ERROR: test log '$LOG' not found" >&2; exit 1; }
-      # crude pass detection — works for pytest, jest, go test, cargo test, mocha
-      if grep -qiE "(failed|error|fail:)" "$LOG" && ! grep -qiE "0 (failed|errors)" "$LOG"; then
-        echo "signal.sh REFUSE: test log '$LOG' shows failures" >&2
-        grep -iE "(failed|error)" "$LOG" | head -5 >&2
-        exit 1
+      # No explicit exit-code arg → accept an "exit code: N" line lanes append
+      # to the log (the workaround two lanes independently invented; now contract).
+      if [[ -z "$RC" ]]; then
+        RC=$(grep -iE '^[[:space:]]*exit code:[[:space:]]*[0-9]+' "$LOG" | tail -n1 | grep -oE '[0-9]+' | tail -n1 || true)
+      fi
+      if [[ -n "$RC" ]]; then
+        if (( RC != 0 )); then
+          echo "signal.sh REFUSE: test command exited $RC (log '$LOG')" >&2
+          tail -n 10 "$LOG" >&2
+          exit 1
+        fi
+        # exit 0 is authoritative — no log grep can overrule it
+      elif log_summary_verdict "$LOG"; then
+        : # structured summary says pass
+      else
+        v=$?
+        if (( v == 1 )); then
+          echo "signal.sh REFUSE: test log '$LOG' summary shows failures" >&2
+          grep -E '^[[:space:]]*Tests(:|[[:space:]])|^=+ .*=+$|^test result: |^(FAIL|--- FAIL:)' "$LOG" | tail -n 5 >&2
+          exit 1
+        fi
+        # No exit code, no recognized summary → anchored fallback: refuse only
+        # on count-shaped failure lines ("2 failed", "1 failing", "3 errors"),
+        # never on prose containing the bare words.
+        if grep -qiE '\b[1-9][0-9]*[[:space:]]+(failed|failing|errors?)\b' "$LOG"; then
+          echo "signal.sh REFUSE: test log '$LOG' shows failures" >&2
+          grep -iE '\b[1-9][0-9]*[[:space:]]+(failed|failing|errors?)\b' "$LOG" | head -5 >&2
+          exit 1
+        fi
       fi
     fi
     { echo "READY"; [[ -n "$LOG" ]] && echo "log=$LOG"; } > "$LANE_FILE"
@@ -57,7 +127,7 @@ case "$STATE" in
     echo "signal: $BRANCH → RUNNING"
     ;;
   *)
-    echo "usage: signal.sh READY [test-log]   |   CONFLICT [reason]   |   RUNNING" >&2
+    echo "usage: signal.sh READY [test-log] [exit-code]   |   CONFLICT [reason]   |   RUNNING" >&2
     exit 1
     ;;
 esac
