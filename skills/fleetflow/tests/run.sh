@@ -43,6 +43,22 @@ check "spawn: missing prompt file" 2 bash "$S/ff-spawn.sh" --run r1 --id a --bra
 check "collect: no args" 2 bash "$S/ff-collect.sh" --repo "$REPO"
 check "doctor: bad flag" 2 bash "$S/ff-doctor.sh" --frobnicate
 
+# --- codex windows.sandbox override (2026-07-27 elevation-hang guard) ------------
+# the flag itself can't be exercised offline (no codex binary), so gate the two
+# things that CAN rot: the value validation, and the wiring into `codex exec`.
+FLEETFLOW_CODEX_WINDOWS_SANDBOX=bogus \
+  check "spawn: rejects bad windows-sandbox value" 2 \
+  bash "$S/ff-spawn.sh" --run r0 --id ws --brain codex --prompt-file "$PKT" --repo "$REPO" --dry-run
+FLEETFLOW_CODEX_WINDOWS_SANDBOX=bogus \
+  check "spawn: windows-sandbox value ignored for non-codex brains" 0 \
+  bash "$S/ff-spawn.sh" --run r0 --id ws --brain sonnet --prompt-file "$PKT" --repo "$REPO" --dry-run
+grep -q 'windows\.sandbox="\$CODEX_WINSANDBOX"' "$S/ff-spawn.sh" \
+  && ok "spawn: windows.sandbox override wired into codex exec" \
+  || bad "spawn: windows.sandbox override missing from codex exec"
+grep -q 'FLEETFLOW_CODEX_WINDOWS_SANDBOX-unelevated' "$S/ff-spawn.sh" \
+  && ok "spawn: windows.sandbox defaults to unelevated" \
+  || bad "spawn: windows.sandbox default is not unelevated"
+
 # --- dry-run lifecycle -----------------------------------------------------------
 check "spawn: dry-run ok" 0 bash "$S/ff-spawn.sh" --run r1 --id a --brain sonnet --prompt-file "$PKT" --repo "$REPO" --dry-run
 [ -f "$REPO/.fleetflow/r1/a.result.json" ] && ok "artifact written" || bad "artifact missing"
@@ -276,6 +292,141 @@ printf '%s\n' \
 bash "$S/ff-status.sh" --run r5 --repo "$REPO" 2>/dev/null \
   | jq -e '.lanes[]|select(.id=="z")|.state=="done"' >/dev/null \
   && ok "status: result-last lane is still done (no regression)" || bad "status: result-last state wrong"
+
+# --- stall detection (2026-07-27 incident: 2.7h hang reported as running) --------
+# Two lanes spawned at the same instant; only one is still writing. elapsed_s
+# cannot tell them apart - last_activity_s must.
+check "status: rejects non-integer FLEETFLOW_STALL_SECONDS" 2 \
+  env FLEETFLOW_STALL_SECONDS=abc bash "$S/ff-status.sh" --run r5 --repo "$REPO"
+bash "$S/ff-status.sh" --run r5 --repo "$REPO" 2>/dev/null \
+  | jq -e '.lanes[]|has("last_activity_s") and has("stalled")' >/dev/null \
+  && ok "status: every lane carries last_activity_s + stalled" || bad "status: stall fields missing"
+bash "$S/ff-status.sh" --run r5 --repo "$REPO" 2>/dev/null | jq -e '.stall_seconds==600' >/dev/null \
+  && ok "status: default stall threshold is 600s" || bad "status: stall_seconds default wrong"
+
+NOWS="$(date +%s)"
+if touch -d "@$NOWS" "$TMP/.touchprobe" 2>/dev/null; then
+  RD6="$REPO/.fleetflow/r6"; mkdir -p "$RD6"
+  printf '%s\n' \
+    '{"type":"started","key":"v2:w","id":"wedged","brain":"codex","phase":"build","v":"1.1.0"}' \
+    '{"type":"started","key":"v2:v","id":"livewire","brain":"codex","phase":"build","v":"1.1.0"}' \
+    > "$RD6/journal.jsonl"
+  : > "$RD6/wedged.prompt.txt"; : > "$RD6/livewire.prompt.txt"
+  EV='{"type":"item.completed","item":{"type":"command_execution","command":"ls"}}'
+  echo "$EV" > "$RD6/wedged.events.jsonl"; echo "$EV" > "$RD6/livewire.events.jsonl"
+  # both spawned 2.7h ago; wedged went silent 160s in, livewire is writing now
+  touch -d "@$((NOWS-9720))" "$RD6/wedged.prompt.txt" "$RD6/livewire.prompt.txt"
+  touch -d "@$((NOWS-9560))" "$RD6/wedged.events.jsonl"
+  ST6="$(bash "$S/ff-status.sh" --run r6 --repo "$REPO" 2>/dev/null)"
+  printf '%s' "$ST6" | jq -e '.lanes[]|select(.id=="wedged")|.state=="stalled" and .stalled==true' >/dev/null \
+    && ok "status: silent running lane reports stalled" || bad "status: silent lane not stalled"
+  printf '%s' "$ST6" | jq -e '.lanes[]|select(.id=="wedged")|.last_activity_s>9000 and .last_activity_s<10000' >/dev/null \
+    && ok "status: stalled lane last_activity_s tracks the silence, not elapsed" \
+    || bad "status: stalled last_activity_s wrong"
+  printf '%s' "$ST6" | jq -e '.lanes[]|select(.id=="livewire")|.state=="running" and .stalled==false and .last_activity_s<120' >/dev/null \
+    && ok "status: same-age lane still writing stays running" || bad "status: live lane misreported"
+  # threshold is honoured in both directions
+  FLEETFLOW_STALL_SECONDS=99999 bash "$S/ff-status.sh" --run r6 --repo "$REPO" 2>/dev/null \
+    | jq -e '.lanes[]|select(.id=="wedged")|.state=="running"' >/dev/null \
+    && ok "status: raised threshold un-stalls the lane" || bad "status: threshold not honoured (raise)"
+  FLEETFLOW_STALL_SECONDS=1 bash "$S/ff-status.sh" --run r6 --repo "$REPO" 2>/dev/null \
+    | jq -e '[.lanes[]|select(.stalled)]|length==2' >/dev/null \
+    && ok "status: lowered threshold stalls both lanes" || bad "status: threshold not honoured (lower)"
+  # a finished lane is never stalled, however long it has been silent
+  FLEETFLOW_STALL_SECONDS=1 bash "$S/ff-status.sh" --run r5 --repo "$REPO" 2>/dev/null \
+    | jq -e '.lanes[]|select(.id=="z")|.state=="done" and .stalled==false' >/dev/null \
+    && ok "status: done lane never stalls" || bad "status: done lane wrongly stalled"
+
+  # --- no live stream => no verdict (the false-positive guard) -------------------
+  # A brain whose artifact/stderr are created at launch and untouched until exit
+  # (grok --output-format json; any claude lane whose transcript we can't locate)
+  # looks silent from birth. Flagging that stalled would condemn every healthy
+  # long lane, so those report live_signal=false and are never stalled.
+  RD7="$REPO/.fleetflow/r7"; mkdir -p "$RD7/wt-son"
+  printf '%s\n' \
+    '{"type":"started","key":"v2:s","id":"son","brain":"sonnet","phase":"build","v":"1.1.0"}' \
+    '{"type":"started","key":"v2:g","id":"grk","brain":"grok","phase":"build","v":"1.1.0"}' \
+    > "$RD7/journal.jsonl"
+  for lid in son grk; do : > "$RD7/$lid.prompt.txt"; : > "$RD7/$lid.err"; : > "$RD7/$lid.result.json"; done
+  touch -d "@$((NOWS-1200))" "$RD7"/son.* "$RD7"/grk.*
+  # HOME is redirected so the host-transcript lookup can't reach the real one
+  ST7="$(HOME="$TMP/fakehome" bash "$S/ff-status.sh" --run r7 --repo "$REPO" 2>/dev/null)"
+  printf '%s' "$ST7" | jq -e '.lanes[]|select(.id=="grk")|.state=="running" and .stalled==false and .live_signal==false' >/dev/null \
+    && ok "status: grok lane with no live stream never stalls" || bad "status: grok lane false-stalled"
+  printf '%s' "$ST7" | jq -e '.lanes[]|select(.id=="son")|.state=="running" and .live_signal==false' >/dev/null \
+    && ok "status: unlocatable claude transcript reports live_signal=false" \
+    || bad "status: claude lane without transcript misreported"
+  printf '%s' "$ST7" | jq -e '.lanes[]|select(.id=="son")|.last_activity_s>1000' >/dev/null \
+    && ok "status: uncovered lane still reports last_activity_s" || bad "status: last_activity_s not reported"
+
+  # a worktree'd claude lane IS covered: its host transcript is unambiguous
+  ENC="$(printf '%s' "$RD7/wt-son" | sed 's#[:\\/.]#-#g')"
+  mkdir -p "$TMP/fakehome/.claude/projects/$ENC"
+  printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit"}]}}\n' \
+    > "$TMP/fakehome/.claude/projects/$ENC/sess.jsonl"
+  HOME="$TMP/fakehome" bash "$S/ff-status.sh" --run r7 --repo "$REPO" 2>/dev/null \
+    | jq -e '.lanes[]|select(.id=="son")|.live_signal==true and .stalled==false and .activity=="live: Edit"' >/dev/null \
+    && ok "status: worktree claude lane picks up its live host transcript" \
+    || bad "status: host transcript lookup failed"
+  touch -d "@$((NOWS-1200))" "$TMP/fakehome/.claude/projects/$ENC/sess.jsonl"
+  HOME="$TMP/fakehome" bash "$S/ff-status.sh" --run r7 --repo "$REPO" 2>/dev/null \
+    | jq -e '.lanes[]|select(.id=="son")|.state=="stalled" and .stalled==true' >/dev/null \
+    && ok "status: silent claude transcript does stall" || bad "status: silent claude lane not stalled"
+else
+  echo "  SKIP  stall detection (touch -d @epoch unsupported here)"
+fi
+# --- --exit-stalled: a watchdog exit code, never a change to the data ----------
+check "status: --exit-stalled exits 0 when nothing is stalled" 0 \
+  bash "$S/ff-status.sh" --run r1 --repo "$REPO" --exit-stalled
+if touch -d "@$NOWS" "$TMP/.touchprobe" 2>/dev/null; then
+  check "status: --exit-stalled exits 14 on a stalled lane" 14 \
+    bash "$S/ff-status.sh" --run r6 --repo "$REPO" --exit-stalled
+  SO="$(bash "$S/ff-status.sh" --run r6 --repo "$REPO" --exit-stalled 2>/dev/null)"
+  printf '%s' "$SO" | jq -e '.lanes|length==2' >/dev/null \
+    && ok "status: --exit-stalled still emits the full JSON" || bad "status: --exit-stalled ate the data"
+fi
+
+# --- reap anchors (ff-spawn proc records + ff-clean --reap) --------------------
+jq -e 'select(.type=="proc" and .id=="a") | has("pid") and has("winpid") and has("at")' \
+  "$REPO/.fleetflow/r1/journal.jsonl" >/dev/null 2>&1 \
+  && ok "spawn: journals a proc reap anchor" || bad "spawn: no proc reap anchor"
+# the proc record must not hijack state derivation (it is not state-bearing)
+RD8="$REPO/.fleetflow/r8"; mkdir -p "$RD8"; : > "$RD8/z.prompt.txt"
+printf '%s\n' \
+  '{"type":"started","key":"v2:z","id":"z","brain":"sonnet","phase":"build","v":"1.1.0"}' \
+  '{"type":"proc","id":"z","brain":"sonnet","pid":1,"winpid":2,"at":1}' \
+  '{"type":"result","key":"v2:z","id":"z","brain":"sonnet","rc":0,"artifact":"x"}' \
+  '{"type":"proc","id":"z","brain":"sonnet","pid":3,"winpid":4,"at":2}' > "$RD8/journal.jsonl"
+bash "$S/ff-status.sh" --run r8 --repo "$REPO" 2>/dev/null \
+  | jq -e '.lanes[]|select(.id=="z")|.state=="done"' >/dev/null \
+  && ok "status: trailing proc record does not hijack lane state" \
+  || bad "status: proc record broke state derivation"
+check "clean: --reap on a run with no anchors is a no-op, not an error" 0 \
+  bash "$S/ff-clean.sh" --run r8 --repo "$REPO" --reap
+grep -q 'join \[char\]9' "$S/ff-clean.sh" \
+  && ok "clean: reap emits TSV via [char]9 (PS single quotes eat backtick-t)" \
+  || bad "clean: reap tab emission is escape-fragile"
+
+# --- ff-doctor windows.sandbox tripwire ---------------------------------------
+grep -q 'codex debug prompt-input' "$S/ff-doctor.sh" \
+  && ok "doctor: sandbox tripwire uses the config-only probe" \
+  || bad "doctor: tripwire probe missing"
+# code lines only - the guard comment names `codex sandbox` to explain the ban
+grep -vE '^[[:space:]]*#' "$S/ff-doctor.sh" | grep -q 'codex sandbox' \
+  && bad "doctor: must NOT invoke codex sandbox (provisioning is machine-global)" \
+  || ok "doctor: never provisions a sandbox"
+bash "$S/ff-doctor.sh" --offline 2>/dev/null | grep -qE "^codex-winsandbox-mode	(ok|advisory)" \
+  && ok "doctor: reports which windows.sandbox mode lanes will get" \
+  || echo "  SKIP  doctor: winsandbox-mode check (non-Windows host)"
+
+# monitor renders stalled distinctly from running
+grep -q '\.sq\.stalled' "$HERE/../assets/ff-monitor.html" \
+  && ok "monitor: stalled pip has its own style" || bad "monitor: stalled pip style missing"
+grep -q 'l\.stalled' "$HERE/../assets/ff-monitor.html" \
+  && ok "monitor: renders the stalled flag" || bad "monitor: stalled flag unused"
+grep -q 'inflight' "$HERE/../assets/ff-monitor.html" \
+  && ok "monitor: stalled lanes excluded from the finished tally" \
+  || bad "monitor: stalled lanes counted as finished"
 
 # --- ff-import.sh (feature B): native Workflow run import ------------------------
 # build a synthetic native wf_ dir: journal.jsonl (started/result keyed by

@@ -20,11 +20,17 @@ FF_VERSION="1.1.0"
 usage() {
   cat <<'EOF'
 Usage: ff-clean.sh --run NAME [--repo PATH] [--force]
+       ff-clean.sh --run NAME --reap [--force]
 
   --run NAME      run name under <repo>/.fleetflow/
   --repo PATH     repo root (default: git toplevel of cwd)
   --force         also remove DIRTY zero-commit lanes (committed lanes are
-                  ALWAYS kept - land or branch them first, then clean)
+                  ALWAYS kept - land or branch them first, then clean).
+                  With --reap, actually terminate the orphans.
+  --reap          report worker processes still alive from this run instead of
+                  touching lanes. Report-only unless --force. Windows only -
+                  identifies orphans by walking up to the reap anchors ff-spawn
+                  journalled, so a Codex you started yourself is never a match.
 
   Lanes with commits are never removed (their work would be lost); clean only
   after ff-collect has gated them and the orchestrator has landed/branched the
@@ -34,18 +40,21 @@ EXAMPLES
   ff-clean.sh --run currency
   ff-clean.sh --run currency --force
   ff-clean.sh --run currency --repo /path/to/repo | column -t
+  ff-clean.sh --run currency --reap             # list this run's stray workers
+  ff-clean.sh --run currency --reap --force     # and kill them
 EOF
 }
 
 err() { echo "ff-clean: $*" >&2; }
 emit() { printf '%s\t%s\t%s\n' "$1" "$2" "$3"; }   # id <TAB> status <TAB> detail
 
-RUN="" REPO="" FORCE=0
+RUN="" REPO="" FORCE=0 REAP=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --run) RUN="${2:-}"; shift 2 ;;
     --repo) REPO="${2:-}"; shift 2 ;;
     --force) FORCE=1; shift ;;
+    --reap) REAP=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) err "unknown argument: $1"; usage >&2; exit 2 ;;
   esac
@@ -102,6 +111,69 @@ clean_cache() {
   if rm -rf "$c" 2>>"$RUNDIR/$id.clean.err"; then err "cache removed: $c"
   else err "cache locked (needs elevation): $c"; fi
 }
+
+# --- reap: kill worker processes the wrapper left behind -----------------------
+# TaskStop (or killing the background Bash task) kills ff-spawn, not the worker:
+# on 2026-07-27 five codex.exe / codex-code-mode-host.exe survived a lane kill.
+# Reaping by image name alone would also kill the user's own interactive Codex,
+# so we match by ANCESTRY instead: every candidate must descend from a WINPID
+# ff-spawn journalled for this run. `at` bounds PID reuse - a process that
+# started before its anchor cannot be that anchor's child.
+# Windows-only by nature (Win32_Process); elsewhere the POSIX process group dies
+# with the wrapper, so there is nothing to reap.
+reap_run() {
+  local anchors since ps1 out
+  anchors="$(jq -r 'select(.type=="proc" and .winpid != null) | .winpid' "$RUNDIR/journal.jsonl" 2>/dev/null \
+             | awk 'NF && !seen[$0]++' | paste -sd, -)"
+  since="$(jq -r 'select(.type=="proc") | .at' "$RUNDIR/journal.jsonl" 2>/dev/null | sort -n | head -1)"
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) ;;
+    *) err "--reap is Windows-only (elsewhere the worker dies with its process group)"; return 0 ;;
+  esac
+  if [ -z "$anchors" ]; then
+    err "no reap anchors journalled for '$RUN' (run predates ff-spawn's proc records)"
+    return 0
+  fi
+  command -v powershell.exe >/dev/null || { err "powershell.exe not found - cannot enumerate processes"; return 0; }
+  err "reaping run '$RUN': anchors=[$anchors] since=$since force=$FORCE"
+  # PowerShell does the walk: one CIM snapshot, index by ProcessId, climb each
+  # codex* process's parent chain (bounded) looking for an anchor.
+  ps1="\$ErrorActionPreference='Stop'
+\$anchors = @($anchors)
+\$since = [DateTimeOffset]::FromUnixTimeSeconds($since).UtcDateTime
+\$map = @{}
+Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | ForEach-Object { \$map[[int]\$_.ProcessId] = \$_ }
+foreach (\$p in @(\$map.Values)) {
+  if (\$p.Name -notlike 'codex*') { continue }
+  if (\$p.CreationDate -and \$p.CreationDate.ToUniversalTime() -lt \$since) { continue }
+  \$cur = \$p; \$hops = 0; \$hit = \$false
+  while (\$cur -ne \$null -and \$hops -lt 12) {
+    if (\$anchors -contains [int]\$cur.ParentProcessId) { \$hit = \$true; break }
+    \$cur = \$map[[int]\$cur.ParentProcessId]; \$hops++
+  }
+  if (-not \$hit) { continue }
+  \$status = 'alive'
+  if ('$FORCE' -eq '1') {
+    try { Stop-Process -Id \$p.ProcessId -Force -ErrorAction Stop; \$status = 'killed' }
+    catch { \$status = 'kill-failed' }
+  }
+  # [char]9, not a backtick escape: PowerShell single-quoted strings do NOT
+  # process \` sequences, so '{0}\`t{1}' emits a literal backtick-t (caught in test).
+  (\$p.ProcessId, \$p.Name, \$status) -join [char]9
+}"
+  out="$(powershell.exe -NoProfile -NonInteractive -Command "$ps1" 2>/dev/null | tr -d '\r')"
+  if [ -z "$out" ]; then
+    err "no surviving worker processes from this run"
+  else
+    printf '%s\n' "$out"
+    [ "$FORCE" = 1 ] || err "report only - re-run with --force to terminate"
+  fi
+}
+
+if [ "$REAP" = 1 ]; then
+  reap_run
+  exit 0
+fi
 
 NLANES="$(list_lane_ids | wc -l | tr -d ' ')"
 err "cleaning run '$RUN': $NLANES lane(s); FORCE=$FORCE; base=$BASE; cache=$CACHE_ROOT"
