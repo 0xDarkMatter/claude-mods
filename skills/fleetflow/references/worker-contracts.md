@@ -106,11 +106,26 @@ binary and protocol, **not** a `claude -p` wrapper. Verified against
   `{"type":"end","stopReason","sessionId","requestId"}`. This is grok's analog of
   `claude -p --output-format stream-json`. **ff-collect gates on the buffered
   `json` envelope** (a whole-turn result is what a lane's success is judged on);
-  **`streaming-json` is the live-progress source** — the codex `--json`
-  event-stream analog the live monitor consumes. Consumer note: it interleaves
-  `thought` and `text`, so filter `type=="text"` for answer-only, and read
-  `structuredOutput` off the terminal event (not a `thought`) on `--json-schema`
-  lanes.
+  `streaming-json` *would be* the live-progress source — the codex `--json`
+  event-stream analog. Consumer note: it interleaves `thought` and `text`, so
+  filter `type=="text"` for answer-only, and read `structuredOutput` off the
+  terminal event (not a `thought`) on `--json-schema` lanes.
+  - **NOT WIRED UP — status as of 2026-07-27.** `ff-spawn` launches grok with
+    `--output-format json`, so **no `<id>.events.jsonl` is ever written for a
+    grok lane**. Consequences: the live monitor shows a grok lane with no tools
+    and no activity until it exits, and `ff-status` reports
+    `live_signal: false` for it, so grok lanes are outside stall detection
+    (their silence proves nothing — see ff-status's stall block). An earlier
+    version of this file, and of SKILL.md, implied the monitor already consumed
+    grok's stream; it never has.
+  - **What adopting it costs.** `--output-format` takes one value, so switching
+    to `streaming-json` means `$ART` must be *reconstructed* from the NDJSON —
+    join `type=="text"` `.data` for `text`, take `stopReason`/`sessionId`/
+    `requestId`/`structuredOutput` off the terminal `end` event — because
+    `ff-collect`'s grok gate parses the buffered envelope. That changes the gate's
+    input, so it should not be attempted on the strength of this note alone: the
+    event shape above was verified 2026-07-11 and has not been re-checked since.
+    Re-verify against a live one-turn run first, then change both sides together.
 - **Auth:** the `GROK_DEPLOYMENT_KEY` env var **only** — grok has no
   config/auth/key subcommand to store a deployment key (`~/.grok/auth.json`
   holds OAuth tokens, and OAuth lacked chat entitlement on the test account, so

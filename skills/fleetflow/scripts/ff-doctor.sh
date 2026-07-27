@@ -4,8 +4,9 @@
 # --offline (default): structural checks only - binaries, sibling launchers,
 #   script syntax. CI-safe, no network.
 # --live: additionally probe each provider - GLM endpoint (via fleet-doctor),
-#   Codex auth, Anthropic model availability - and report which orchestrator
-#   tier is available (fable > opus).
+#   Codex auth, Anthropic model availability - plus the codex windows.sandbox
+#   tripwire (config-only, no sandbox provisioned) - and report which
+#   orchestrator tier is available (fable > opus).
 # stdout: one TSV line per check: name<TAB>status<TAB>detail. stderr: chatter.
 #
 # Exit codes: 0 all required checks ok | 2 usage | 7 live probe unreachable
@@ -53,6 +54,23 @@ if command -v "$GROK" >/dev/null; then say "bin-grok" ok "$("$GROK" --version 2>
 
 FW="${FLEETFLOW_FLEET_WORKER:-$HOME/.claude/skills/fleet-worker/scripts/fleet-worker}"
 if [ -f "$FW" ]; then say "fleet-worker" ok "$FW"; else say "fleet-worker" advisory "not installed - glm brain unavailable"; fi
+
+# --- which windows.sandbox mode will codex lanes actually get? -----------------
+# Config read only (no execution) - the behavioural tripwire is in --live below.
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    WSB_EFF="${FLEETFLOW_CODEX_WINDOWS_SANDBOX-unelevated}"
+    WSB_HOST="$(sed -n '/^\[windows\]/,/^\[/p' "$HOME/.codex/config.toml" 2>/dev/null \
+                | sed -n 's/^[[:space:]]*sandbox[[:space:]]*=[[:space:]]*"\{0,1\}\([a-z]*\)"\{0,1\}.*/\1/p' | head -1)"
+    if [ -z "$WSB_EFF" ]; then
+      say "codex-winsandbox-mode" advisory "override disabled - lanes defer to config.toml (${WSB_HOST:-unset}); elevated there = headless hang"
+    elif [ "$WSB_EFF" = "elevated" ]; then
+      say "codex-winsandbox-mode" advisory "FLEETFLOW_CODEX_WINDOWS_SANDBOX=elevated re-arms the headless UAC trap"
+    else
+      say "codex-winsandbox-mode" ok "lanes pinned $WSB_EFF (host config: ${WSB_HOST:-unset})"
+    fi
+    ;;
+esac
 
 for s in ff-spawn.sh ff-collect.sh ff-status.sh; do
   if bash -n "$HERE/$s" 2>/dev/null; then say "syntax-$s" ok "parses"; else say "syntax-$s" fail "syntax error"; FAIL=1; fi
@@ -105,6 +123,41 @@ if command -v codex >/dev/null; then
     say "codex-auth" unreachable "not logged in (codex login)"; UNREACH=1
   fi
 fi
+
+# --- codex windows.sandbox tripwire (guards the 2026-07-27 elevation hang) -----
+# ff-spawn pins `-c windows.sandbox=unelevated` so a headless lane never waits on
+# a UAC prompt nobody can approve. That guard fails SILENTLY if codex renames or
+# drops the key: `-c` accepts unknown dotted keys without complaint (verified -
+# `-c nosuch.key=x` exits 0), so the flag would degrade to an inert no-op and
+# lanes would hang again with no signal. We therefore probe the OPPOSITE: feed a
+# deliberately invalid value and require codex to reject it, naming the key.
+# Rejection proves the key still exists and is still typed; silent acceptance
+# means the guard has gone inert and this check is the only thing that will say so.
+#
+# `codex debug prompt-input` is the probe carrier ON PURPOSE: it only loads and
+# validates config (~1.2s, no network, no model call, no API tokens) and - unlike
+# `codex sandbox` - it does NOT provision a Windows sandbox. Sandbox provisioning
+# is machine-global (~/.codex/.sandbox*) and is the very thing that can trigger
+# the elevation helper, so a preflight check must never invoke it. Do not
+# "simplify" this to a sandbox or exec call.
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    if command -v codex >/dev/null; then
+      WSB_ERR="$(timeout 60 codex debug prompt-input -c windows.sandbox=ff-doctor-invalid 2>&1 >/dev/null)"
+      WSB_RC=$?
+      if [ "$WSB_RC" = 124 ]; then
+        say "codex-winsandbox" unreachable "config probe timed out"; UNREACH=1
+      elif [ "$WSB_RC" != 0 ] && printf '%s' "$WSB_ERR" | grep -q 'windows\.sandbox'; then
+        say "codex-winsandbox" ok "key recognised - elevation guard live"
+      elif [ "$WSB_RC" != 0 ]; then
+        say "codex-winsandbox" advisory "probe failed for another reason: $(printf '%s' "$WSB_ERR" | head -1)"
+      else
+        say "codex-winsandbox" fail "codex accepts an invalid windows.sandbox - ff-spawn's elevation guard is INERT (key renamed/removed?)"
+        FAIL=1
+      fi
+    fi
+    ;;
+esac
 
 # grok auth is the GROK_DEPLOYMENT_KEY env var (no login-status subcommand exists,
 # and OAuth on some accounts lacks chat entitlement). We probe key PRESENCE, not

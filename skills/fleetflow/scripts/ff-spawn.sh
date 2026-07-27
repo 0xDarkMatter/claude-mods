@@ -39,6 +39,13 @@ Usage: ff-spawn.sh --run NAME --id ID --brain BRAIN --prompt-file FILE
   --force          ignore a journal cache hit and re-run
   --dry-run        do not launch a worker; write a stub result (for tests/planning)
 
+ENV (codex brain)
+  FLEETFLOW_CODEX_MODEL            model passed to `codex exec -m`
+  FLEETFLOW_CODEX_WINDOWS_SANDBOX  windows.sandbox override, Windows hosts only
+                                   (default: unelevated - `elevated` needs a UAC
+                                   approval no headless lane can give). Set empty
+                                   to pass nothing and defer to ~/.codex/config.toml.
+
 EXAMPLES
   ff-spawn.sh --run audit --id ts-refresh --brain glm --worktree \
               --prompt-file packets/ts.txt
@@ -75,6 +82,32 @@ done
 
 case "$BRAIN" in glm|codex|grok|sonnet|opus|haiku|fable) ;; *) err "invalid --brain '$BRAIN'"; exit 2 ;; esac
 case "$EFFORT" in ""|low|medium|high|max) ;; *) err "invalid --effort '$EFFORT' (low|medium|high|max)"; exit 2 ;; esac
+
+# --- Windows/Codex elevation trap (incident 2026-07-27, run bkv2p2) ------------
+# codex-cli's `elevated` Windows sandbox mode provisions its AppContainer through
+# a setup helper launched via ShellExecuteExW - i.e. a UAC prompt. In a HEADLESS
+# fleet there is no approver, so Windows cancels the launch (error 1223 =
+# ERROR_CANCELLED, surfaced as `orchestrator_helper_launch_canceled`) and the
+# lane HANGS instead of failing fast: two lanes sat at state=running for 2.7h
+# with dead event streams. The provisioning cache (~/.codex/.sandbox*) is why
+# earlier lanes in the same session survive - any invalidation, or a race between
+# concurrently-provisioning lanes, re-triggers the elevation request.
+# Fleet lanes therefore pin `unelevated` PER INVOCATION. Deliberately NOT a write
+# to the user's ~/.codex/config.toml: interactive Codex keeps whatever mode they
+# chose. Escape hatches: FLEETFLOW_CODEX_WINDOWS_SANDBOX=elevated to opt back in,
+# or ="" (empty) to pass nothing and defer to the global config.
+# DO NOT remove this flag as "redundant" - it is the whole fix.
+CODEX_WINSANDBOX=""
+if [ "$BRAIN" = "codex" ]; then
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) CODEX_WINSANDBOX="${FLEETFLOW_CODEX_WINDOWS_SANDBOX-unelevated}" ;;
+  esac
+  # the binary accepts exactly these two values for windows.sandbox
+  case "$CODEX_WINSANDBOX" in
+    ""|elevated|unelevated) ;;
+    *) err "invalid FLEETFLOW_CODEX_WINDOWS_SANDBOX '$CODEX_WINSANDBOX' (elevated|unelevated)"; exit 2 ;;
+  esac
+fi
 echo "$RUN" | grep -qE '^[a-z0-9-]+$' || { err "invalid --run"; exit 2; }
 echo "$ID"  | grep -qE '^[a-z0-9-]+$' || { err "invalid --id"; exit 2; }
 [ -f "$PROMPT_FILE" ] || { err "prompt file not found: $PROMPT_FILE"; exit 2; }
@@ -165,6 +198,27 @@ fi
 jq -nc --arg k "$KEY" --arg id "$ID" --arg b "$BRAIN" --arg p "$PHASE" --arg v "$FF_VERSION" \
   '{type:"started",key:$k,id:$id,brain:$b,phase:$p,v:$v}' >> "$JOURNAL"
 
+# --- reap anchor (2026-07-27: TaskStop left 5 orphaned codex.exe alive) --------
+# Killing the wrapper does NOT kill the worker: `codex exec` spawns codex.exe and
+# codex-code-mode-host.exe as descendants, and they survive. Journal THIS
+# process's ids so ff-clean --reap can identify that subtree afterwards - $$ is
+# ff-spawn, the worker is always below it.
+#
+# Both ids are recorded because they live in different namespaces: the PID bash
+# reports is a Cygwin id, useless to taskkill/Stop-Process, which need the
+# Windows PID. `ps -W` is the only place the two appear side by side. Windows
+# does not reparent orphans, so a dead ff-spawn's WINPID still identifies its
+# subtree - which is exactly the post-kill case reaping has to handle. `at`
+# guards against PID reuse: a process older than the spawn cannot be ours.
+REAP_WINPID=""
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*) REAP_WINPID="$(ps -W 2>/dev/null | awk -v p=$$ '$1==p {print $4; exit}')" ;;
+esac
+jq -nc --arg id "$ID" --arg b "$BRAIN" --argjson pid "$$" --arg w "${REAP_WINPID:-}" \
+  --argjson at "$(date +%s)" \
+  '{type:"proc",id:$id,brain:$b,pid:$pid,
+    winpid:(if $w=="" then null else ($w|tonumber) end),at:$at}' >> "$JOURNAL"
+
 # --- launch -------------------------------------------------------------------
 ART="$RUNDIR/$ID.result.json"
 ERRF="$RUNDIR/$ID.err"
@@ -238,6 +292,7 @@ else
       ( cd "$WORKDIR" && \
         UV_CACHE_DIR="$CACHE_DIR" TMPDIR="$CACHE_DIR" TMP="$CACHE_DIR" TEMP="$CACHE_DIR" \
         codex exec --full-auto --ephemeral --color never --json \
+          ${CODEX_WINSANDBOX:+-c windows.sandbox="$CODEX_WINSANDBOX"} \
           ${GITDIR:+--add-dir "$GITDIR"} \
           ${FLEETFLOW_CODEX_MODEL:+-m "$FLEETFLOW_CODEX_MODEL"} \
           ${EFFORT:+-c "model_reasoning_effort=$EFFORT"} \

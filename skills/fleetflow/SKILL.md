@@ -12,7 +12,7 @@ metadata:
 
 # fleetflow
 
-> Facts verified as of 2026-07 (Claude Code Workflow tool, codex-cli 0.125, fleet-worker GLM-5.2/z.ai).
+> Facts verified as of 2026-07 (Claude Code Workflow tool, codex-cli 0.144, fleet-worker GLM-5.2/z.ai).
 
 Claude Code's native **Workflow tool** is a superb orchestration harness with one
 structural limit: every agent it spawns runs **in-process**, so they all share one
@@ -199,7 +199,10 @@ default the script-author follows, not an option — and real runs routinely hit
 - **Throttle in waves, don't shrink the plan.** The native engine queues past
   `min(16, cores−2)` concurrent; fleetflow's orchestrator does the same
   manually — spawn in waves of ≤4–6 per provider (endpoint quota binds first),
-  collect as lanes finish, keep the total plan intact. Bound each lane
+  collect as lanes finish, keep the total plan intact. **Codex on Windows is
+  the exception: ≤2–3 concurrent.** Its binding constraint isn't endpoint quota
+  but the machine-global sandbox-provisioning helper — lanes provisioning at
+  once race each other into the elevation trap (see Safety). Bound each lane
   (`--max-turns`), never the ambition.
 - **No silent caps** (native rule, verbatim): if you sample, top-N, or skip,
   say so in the run summary.
@@ -221,6 +224,73 @@ default the script-author follows, not an option — and real runs routinely hit
   the diff and commits**. (GLM/Anthropic `claude -p` workers are unaffected
   and may self-commit.) Tightens the gate as a side effect: nothing a Codex
   lane produces lands without an orchestrator diff review.
+- **Codex on Windows must never depend on an elevation prompt (learned
+  2026-07-27, codex-cli 0.144.1, run `bkv2p2`):** codex-cli's `elevated`
+  Windows sandbox mode provisions its AppContainer through a setup helper
+  launched with `ShellExecuteExW` — a UAC dialog. Headless, nobody can approve
+  it, so Windows cancels the launch (error `1223` = `ERROR_CANCELLED`, surfaced
+  as `orchestrator_helper_launch_canceled`) and the lane **hangs instead of
+  failing fast** — two lanes burned 2.7h. `ff-spawn` pins
+  `-c windows.sandbox="unelevated"` **per invocation** on Windows hosts
+  (`FLEETFLOW_CODEX_WINDOWS_SANDBOX` overrides it; empty passes nothing and
+  defers to the global config). Deliberately *not* an edit to the user's
+  `~/.codex/config.toml` — interactive Codex keeps whatever mode they chose.
+  Provisioning caches under `~/.codex/.sandbox`, `.sandbox-bin`,
+  `.sandbox-secrets`, which is why ten lanes can succeed and the eleventh
+  wedges: any cache invalidation — or two lanes provisioning at once —
+  re-triggers the prompt. **`ff-doctor --live` guards the guard:** `codex -c`
+  accepts unknown dotted keys silently, so if codex ever renames or drops
+  `windows.sandbox` the pin degrades to an inert no-op and lanes hang again with
+  no signal. The doctor therefore feeds it a deliberately *invalid* value and
+  requires codex to reject it — rejection proves the key is still live. It rides
+  on `codex debug prompt-input` (config load only, ~1.2s, no network, no model
+  call) rather than `codex sandbox`, because sandbox provisioning is
+  machine-global and is the very thing being guarded against; a preflight must
+  never trigger it.
+- **A stalled lane is indistinguishable from a working one — trust
+  `last_activity_s`, not `state: running`.** Through the whole 2.7h hang
+  `ff-status` reported both lanes `running` with `elapsed_s` climbing
+  normally; the only tell was that their `<run>/<id>.events.jsonl` mtimes had
+  frozen ~160s after spawn. `ff-status` now measures that silence for every
+  lane and flips it to `state: "stalled"` (plus `stalled: true`) past
+  `FLEETFLOW_STALL_SECONDS` (default 600); the monitor draws those lanes as a
+  *frozen* amber pip captioned with the silence, not the elapsed clock. Before
+  assuming a long wave is progressing:
+  `ff-status.sh --run <name> | jq '.lanes[]|select(.stalled)|{id,last_activity_s}'`.
+- **Know what the stall detector covers — `live_signal` tells you.** A stall can
+  only be proven where the brain writes *while it works*: codex's `--json` event
+  stream, or a claude/glm session transcript. Artifact and `.err` files are
+  created by the shell redirect at launch and untouched until exit, so they
+  cannot distinguish work from a wedge — an early build of this detector counted
+  them and flagged every healthy 10-minute sonnet lane as stalled. Uncovered
+  today: **grok** (`--output-format json` buffers to exit) and **claude lanes
+  spawned without `--worktree`** (their transcript dir is shared with sibling
+  lanes and the orchestrator's own session, so attributing it would be worse than
+  reporting nothing). Those report `live_signal: false`, and their `stalled:
+  false` means *cannot tell*, never *healthy* — one more reason to spawn mutating
+  workers with `--worktree`, which makes them fully covered.
+- **Killing a lane leaves orphans — reap them.** `TaskStop` (or killing the
+  background Bash task) kills the *wrapper*, not the worker's children; the
+  2026-07-27 cleanup left five live `codex.exe` / `codex-code-mode-host.exe`
+  processes. `ff-spawn` now journals a `proc` reap anchor (its own PID **and**
+  WINPID) per lane, so `ff-clean` can find that subtree afterwards — report
+  first, kill second:
+
+  ```bash
+  bash scripts/ff-clean.sh --run <name> --reap
+  ```
+
+  Add `--force` to terminate. It matches by **ancestry** (walking up to a
+  journalled anchor), never by image name, so a Codex *you* started is never
+  collateral. The blunt fallback, if the run predates the anchors:
+
+  ```powershell
+  Get-Process codex,codex-code-mode-host -ErrorAction SilentlyContinue | Stop-Process -Force
+  ```
+
+  — but that kills every Codex on the box. Either way, `taskkill /PID` on the
+  PIDs `ps -W` prints does **not** work: those are Cygwin PIDs, and Windows
+  needs the WINPID from the same table's fourth column.
 - **Escape guard (learned 2026-07-05, incident):** a worker CAN escape its
   worktree by writing absolute paths — a GLM worker once wrote its output into
   the main checkout while its own lane stayed clean. Two mechanical defenses,
@@ -241,8 +311,11 @@ default the script-author follows, not an option — and real runs routinely hit
   is hard-denied there as *Create Unsafe Agents*). Same doctrine as
   fleet-worker; see its Permission posture section.
 - **Bounds:** `--max-turns` per worker (default 100), concurrency ≤ 4–6 per
-  provider (endpoint quota is the binding constraint), wall-clock patience via
-  the orchestrator's background-task notifications — never poll-sleep.
+  provider (endpoint quota is the binding constraint) but ≤ 2–3 for Codex on
+  Windows (the sandbox helper is machine-global, not per-lane), wall-clock
+  patience via the orchestrator's background-task notifications — never
+  poll-sleep. Patience is not indefinite: a wave that has been quiet gets a
+  stall check, not more waiting.
 - **Terms:** a subscription-authed orchestrator must stay interactive;
   API-key-authed sessions may be automated. Codex usage bills to the ChatGPT
   plan. Verify your own plans' terms (fleet-worker "Know your terms" applies).
@@ -251,12 +324,12 @@ default the script-author follows, not an option — and real runs routinely hit
 
 | Script | Purpose |
 |---|---|
-| [scripts/ff-doctor.sh](scripts/ff-doctor.sh) | `--offline` structural preflight; `--live` probes GLM endpoint, Codex auth, Grok key, Anthropic models, reports orchestrator tier (fable/opus) |
-| [scripts/ff-spawn.sh](scripts/ff-spawn.sh) | uniform spawner: worktree lane + guard preamble + journal + per-brain launch (GLM via fleet-worker, Codex via `codex exec`, Grok via `grok -p`, Anthropic via `claude -p`) |
+| [scripts/ff-doctor.sh](scripts/ff-doctor.sh) | `--offline` structural preflight (+ which `windows.sandbox` mode codex lanes will get); `--live` probes GLM endpoint, Codex auth, Grok key, Anthropic models, the `windows.sandbox` key tripwire, and reports orchestrator tier (fable/opus) |
+| [scripts/ff-spawn.sh](scripts/ff-spawn.sh) | uniform spawner: worktree lane + guard preamble + journal + per-brain launch (GLM via fleet-worker, Codex via `codex exec`, Grok via `grok -p`, Anthropic via `claude -p`); pins `windows.sandbox=unelevated` for Codex on Windows |
 | [scripts/ff-collect.sh](scripts/ff-collect.sh) | per-brain result gate; strips ```json fences before `--schema` validation; `--repair` respawns a `<id>-repair` lane on validation failure; `--check-main-clean` escape guard |
-| [scripts/ff-status.sh](scripts/ff-status.sh) | run status as JSON (lane state, elapsed, commits, tools, tokens, activity, manifest summary); `--watch N --out status.json` feeds the live monitor |
+| [scripts/ff-status.sh](scripts/ff-status.sh) | run status as JSON (lane state `running`/`stalled`/`done`/`failed`, elapsed, `last_activity_s` + `stalled` + `live_signal` stall detector, commits, tools, tokens, activity, manifest summary); `--watch N --out status.json` feeds the live monitor; `--exit-stalled` exits 14 so a watchdog can branch without parsing |
 | [scripts/ff-run.sh](scripts/ff-run.sh) | `resume --run NAME` replays every manifest packet through ff-spawn in order (unchanged = cached, changed/new = live); `status --run NAME` aliases ff-status |
-| [scripts/ff-clean.sh](scripts/ff-clean.sh) | `--run NAME [--force]` reclaims zero-commit lanes (worktree remove + branch -D), keeps committed lanes, removes the run's cache dirs; reports locked ACL-litter dirs |
+| [scripts/ff-clean.sh](scripts/ff-clean.sh) | `--run NAME [--force]` reclaims zero-commit lanes (worktree remove + branch -D), keeps committed lanes, removes the run's cache dirs; reports locked ACL-litter dirs. `--reap [--force]` finds worker processes the wrapper left alive, matched by ancestry to the run's journalled anchors |
 | [scripts/ff-import.sh](scripts/ff-import.sh) | `--wf DIR --run NAME` imports a native Claude Code Workflow run dir (`wf_*/`) — completed agents become lanes (prompt + result envelope + journal + manifest), started-only agents are flagged incomplete; native keys are terminal, not replayable |
 
 **Live monitor** ([assets/ff-monitor.html](assets/ff-monitor.html)): a
@@ -266,10 +339,22 @@ commits/tokens, and expandable per-agent detail (activity, last commit, error
 tail, artifact). Wire-up: copy it into the run dir as `index.html`, run
 `ff-status --watch 3 --out <rundir>/status.json`, serve the run dir with any
 static server, open in a browser/preview panel. It polls `status.json` every
-2.5s. Live claude-brain lanes are introspected via the session transcript in
-their isolated config dir; codex lanes via their `--json` event stream; grok
-lanes via their `--output-format streaming-json` NDJSON event stream
-(`thought`/`text`/`end` events).
+2.5s. Live claude-brain lanes are introspected via their session transcript (GLM:
+the isolated config dir; Anthropic brains: `~/.claude/projects/<encoded-workdir>/`,
+worktree lanes only); codex lanes via their `--json` event stream. **Grok lanes
+have no live stream**: `ff-spawn` launches grok with `--output-format json`, which
+buffers the whole turn and writes once at exit, so a grok lane shows no tools and
+no activity until it finishes. Grok *does* offer `--output-format streaming-json`
+(NDJSON `thought`/`text`/`end`), but it is one flag — adopting it for live
+progress means reconstructing the buffered envelope `ff-collect` gates on, from an
+event shape this repo has not re-verified. Until that is done and verified, grok
+is deliberately outside live introspection and stall coverage. Those streams
+double as the stall signal: a lane
+whose stream has been silent past the threshold renders as a **frozen amber pip**
+captioned with the silence (`2h39m silent`) instead of a pulsing blue one, and
+never counts toward a phase's finished fraction. Lanes with no live stream
+(`live_signal: false`) keep rendering as running — the monitor cannot show a
+verdict the data doesn't support.
 
 **Two surfaces, like the native tool.** The served monitor is the *live*
 grid (the Background-tasks panel analogue). In-chat, the orchestrator emits a
@@ -279,7 +364,8 @@ moment-in-time render by design, re-emitted rather than self-updating.
 
 All follow the Skill Resource Protocol: stdout is data, chatter on stderr,
 semantic exit codes (`0` ok, `2` usage, `3` cached/missing, `7` unreachable,
-`10` worker failed, `12` escape detected), `--help` with EXAMPLES.
+`10` worker failed, `12` escape detected, `14` lane stalled), `--help` with
+EXAMPLES.
 
 ## Importing a native Workflow run
 
