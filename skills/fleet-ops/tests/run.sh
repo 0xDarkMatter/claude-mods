@@ -102,5 +102,52 @@ echo "TODO_SCRUB leftover" >> "$wt/b.txt"
 git -C "$wt" -c user.email=w@t -c user.name=w commit -aqm "oops debug marker"
 bash "$FLEET" scrub-check feat/foo >/dev/null 2>&1; ee "scrub-check flags forbidden pattern" 1 $?
 
+echo "-- signal.sh log gate: exit codes and summaries, not prose --"
+# Regression (Ledger, 2026-07): a GREEN run whose stderr prints "failed"/"error"
+# prose, or whose test NAMES contain "error", must not be refused. Verdict order
+# under test: exit-code arg > "exit code: N" log line > runner summary > anchored
+# count fallback. Uses feat/foo's worktree (clean tree, still a registered lane).
+SIGWT="$SB/wt-feat_foo"
+green_log="$SB/green-vitest.log"
+cat > "$green_log" <<'EOF'
+stderr | email to ledger@ev7.com.au failed: No such module "queue"
+ v src/mail.test.ts > logs an error when sending fails
+ v src/mail.test.ts > surfaces the failed delivery to the caller
+ Test Files  3 passed (3)
+      Tests  42 passed (42)
+   Start at  10:00:00
+EOF
+( cd "$SIGWT" && bash "$REPO/.claude/fleet/signal.sh" READY "$green_log" ) >/dev/null 2>&1
+ee "green vitest log with 'failed' prose passes" 0 $?
+
+red_log="$SB/red-vitest.log"
+cat > "$red_log" <<'EOF'
+ x src/mail.test.ts > sends the digest
+ Test Files  1 failed | 2 passed (3)
+      Tests  2 failed | 40 passed (42)
+EOF
+( cd "$SIGWT" && bash "$REPO/.claude/fleet/signal.sh" READY "$red_log" ) >/dev/null 2>&1
+ee "failing vitest summary refused" 1 $?
+
+# Exit code is authoritative in BOTH directions: rc=0 overrules scary prose
+# with no recognizable summary; rc=1 overrules a log that looks clean.
+prose_log="$SB/prose.log"
+printf 'connection error simulated: retry failed as expected\nall scenarios ok\n' > "$prose_log"
+( cd "$SIGWT" && bash "$REPO/.claude/fleet/signal.sh" READY "$prose_log" 0 ) >/dev/null 2>&1
+ee "rc=0 arg passes despite prose" 0 $?
+( cd "$SIGWT" && bash "$REPO/.claude/fleet/signal.sh" READY "$prose_log" 1 ) >/dev/null 2>&1
+ee "rc=1 arg refused despite clean-looking log" 1 $?
+
+# The lane-appended "exit code: N" line (the workaround that exposed the bug).
+printf 'connection error simulated: retry failed as expected\nexit code: 0\n' > "$prose_log"
+( cd "$SIGWT" && bash "$REPO/.claude/fleet/signal.sh" READY "$prose_log" ) >/dev/null 2>&1
+ee "'exit code: 0' log line passes" 0 $?
+
+# pytest failing summary still caught without any exit code.
+py_red="$SB/red-pytest.log"
+printf '=========== 2 failed, 10 passed in 1.24s ===========\n' > "$py_red"
+( cd "$SIGWT" && bash "$REPO/.claude/fleet/signal.sh" READY "$py_red" ) >/dev/null 2>&1
+ee "failing pytest summary refused" 1 $?
+
 echo "=== $PASS passed, $FAIL failed ==="
 [ "$FAIL" -eq 0 ] || exit 1

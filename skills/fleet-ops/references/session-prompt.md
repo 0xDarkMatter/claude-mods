@@ -25,9 +25,10 @@ Setup:
 Rules:
   - Only modify files within SCOPE. If you need to go outside, STOP and ask.
   - Make atomic commits with conventional commit messages as you go.
-  - Run TESTS before finishing.
+  - Run TESTS before finishing, capturing the log AND the exit code:
+      <test-cmd> 2>&1 | tee <path-to-test-log>; rc=${PIPESTATUS[0]}
   - When tests pass and you're ready to land, run:
-      bash .claude/fleet/signal.sh READY <path-to-test-log>
+      bash .claude/fleet/signal.sh READY <path-to-test-log> $rc
   - If you hit a conflict, scope creep, or any unresolvable issue, run:
       bash .claude/fleet/signal.sh CONFLICT "<one-line reason>"
     then stop and explain.
@@ -47,7 +48,7 @@ Begin.
 | `TASK` | `Add JWT middleware with refresh token support` |
 | `TESTS` | `pytest tests/test_auth.py 2>&1 | tee tests/test_auth.log` |
 
-The tee'd log is what `signal.sh READY` reads to verify tests passed.
+The tee'd log plus the exit code (`${PIPESTATUS[0]}` — tee's own exit is always 0) is what `signal.sh READY` uses to verify tests passed. The exit code is the authoritative verdict; the log is evidence.
 
 ## Native-spawn note
 
@@ -67,4 +68,4 @@ If two lanes silently edit the same file, the queue's auto-rebase will throw a c
 | Rust | `cargo test --lib X 2>&1 \| tee tests/test_X.log` |
 | Just | `just test-X 2>&1 \| tee tests/test_X.log` |
 
-`signal.sh` does crude pass detection — it works fine for these. If your test runner has unusual output, write a small grep-friendly summary line at the end.
+`signal.sh` trusts, in order: the exit-code argument, a trailing `exit code: N` line in the log, a recognized runner summary line (vitest/jest `Tests …`, pytest `=== N passed ===`, cargo `test result:`, go `FAIL`/`ok`), and only then a count-anchored fallback (`N failed`). If your runner's output is unusual and you can't pass the exit code, append `echo "exit code: $rc" >> <log>` — it never word-greps prose, so stderr lines like `… failed: No such module` in a green run won't false-refuse.

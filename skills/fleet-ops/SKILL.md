@@ -96,9 +96,11 @@ To stop early: `fleet stop` (SIGTERM, 5s grace, then SIGKILL). On next `fleet st
 `signal.sh` deploys to `.claude/fleet/signal.sh` on `init`/`track`. Working sessions call:
 
 ```bash
-bash .claude/fleet/signal.sh READY <test-log>     # refuses dirty trees and failing logs
+bash .claude/fleet/signal.sh READY <test-log> <exit-code>   # refuses dirty trees and failing runs
 bash .claude/fleet/signal.sh CONFLICT "<reason>"
 ```
+
+The `<exit-code>` (the test command's own `$?` / `${PIPESTATUS[0]}`) is the authoritative verdict — pass it whenever you have it. Without it, `signal.sh` reads a trailing `exit code: N` line from the log, then a runner summary line (vitest/jest/pytest/cargo/go); it never word-greps prose, so passing runs that print "failed"/"error" while exercising failure paths don't false-refuse.
 
 ## First-class user interaction (HARD RULE)
 

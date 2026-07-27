@@ -59,10 +59,11 @@ For each lane, open a Claude session pointing at that worktree (or that clone). 
 Each session works in isolation, commits atomically, runs tests, and signals when ready:
 
 ```bash
-bash .claude/fleet/signal.sh READY tests/test_auth.log
+pytest tests/test_auth.py 2>&1 | tee tests/test_auth.log; rc=${PIPESTATUS[0]}
+bash .claude/fleet/signal.sh READY tests/test_auth.log $rc
 ```
 
-`signal.sh` will refuse if the lane has uncommitted changes or if the test log shows failures.
+`signal.sh` will refuse if the lane has uncommitted changes or if the test run failed — the exit code is the authoritative verdict (falling back to runner summary lines in the log when no code is available; it never word-greps prose).
 
 ### 3. Run the daemon
 
