@@ -52,6 +52,7 @@ fleet land --all [--running]  Batch-land all READY lanes oldest-first (--running
                             also lands vetted RUNNING lanes; used by git-ops "land all")
 fleet revert <branch>       Revert merge commit on main
 fleet scrub-check <branch>  Dry-run forbidden-pattern check
+fleet config                Print the RESOLVED config — check the test gate is on
 ```
 
 ## Entry paths
@@ -74,7 +75,7 @@ N > 1 on one shared working tree           → REFUSE. Worktrees or separate clo
 1. **Scrub** — `git diff main...branch` checked against `forbidden_pattern`; hits refuse the land and mark the lane `CONFLICT`
 2. **Clean-base check** — refuses if `main` has uncommitted tracked changes
 3. **Merge** — `--no-ff` with message `merge: <branch>` (this message is what `fleet revert` finds later)
-4. **Test gate** — runs `test_cmd` if set; on failure, hard-resets the merge and marks the lane `FAILED`. If unset, trusts `signal.sh`'s log gate (refused READY on failing logs). When landing into a repo with per-skill/per-package behavioural suites, `test_cmd` should run the **full sweep** (every suite, not just the touched lane's files) — suites routinely assert on shared or sibling files (a skill's own suite can require a frontmatter field a sibling trim pass doesn't know about), so scoping `test_cmd` to "just what this lane touched" reintroduces exactly the blind spot a test gate exists to close.
+4. **Test gate** — runs `test_cmd` if set; on failure, hard-resets the merge and marks the lane `FAILED`. If unset, trusts `signal.sh`'s log gate (refused READY on failing logs). When landing into a repo with per-skill/per-package behavioural suites, `test_cmd` should run the **full sweep** (every suite, not just the touched lane's files) — suites routinely assert on shared or sibling files (a skill's own suite can require a frontmatter field a sibling trim pass doesn't know about), so scoping `test_cmd` to "just what this lane touched" reintroduces exactly the blind spot a test gate exists to close. **Confirm the gate is actually armed with `fleet config` before trusting it** — and watch the land log for `running test_cmd: …` rather than `no test_cmd set`.
 5. **Rebase others** — every still-active lane is rebased onto the new `main` (in its own worktree if it has one); a rebase conflict marks that lane `CONFLICT`
 
 `fleet revert <branch>` finds the `merge: <branch>` commit on `main` and runs `git revert -m 1` — one command to back out a bad landing.
@@ -166,18 +167,52 @@ That's why the default `worktree_root` is `.fleet-worktrees/` at the repo top. (
 
 ## Configuration
 
-Optional `.claude/fleet/config` (key=value, no quotes):
+Optional `.claude/fleet/config`, one `key=value` per line:
 
 ```
 mode=auto                            # auto | worktree | branch
 worktree_root=.fleet-worktrees       # keep outside .claude/ — see "Headless agent compatibility"
-test_cmd=                            # if set, daemon runs this; else trust signal log
+test_cmd=npm run check               # if set, land runs it post-merge; else trust signal log
 forbidden_pattern=TODO_SCRUB|XXX
 base_branch=main
 poll_interval=5
+icons=unicode                        # unicode | ascii (same as FLEET_ASCII=1)
 ```
 
 Zero-config works for the common case.
+
+**Grammar.** The file is *parsed*, not `source`d — it cannot execute code, and it is
+not bash:
+
+| Rule | Detail |
+|---|---|
+| Keys | Case-insensitive — `test_cmd` and `TEST_CMD` both work. Whitespace around the key and `=` is ignored. |
+| Values with spaces | Need **no quoting**. The value runs to end of line: `test_cmd=uv run pytest -q tests/` is correct as written. |
+| Quotes | Optional. `test_cmd="uv run pytest -q"` works; one layer of matching `"…"` or `'…'` is stripped. |
+| Comments | A whole line starting with `#`, or a trailing ` # …` on an **unquoted** value. Quote the value to keep a literal `#`: `forbidden_pattern="TODO|#nolint"`. |
+| Blank lines | Ignored. |
+| Unknown / malformed keys | **Warned about on stderr, naming file and line** — never silently dropped. |
+
+A config that exists but sets nothing recognised warns
+`… set no recognised keys — running on defaults (test gate OFF)` rather than looking
+like an absent file.
+
+**`test_cmd` is the test gate.** When set, `fleet land` runs it *after* the merge
+commit and `git reset --hard HEAD^` on a non-zero exit, dropping the lane to `FAILED`;
+the log shows `running test_cmd: …`. When unset, the log says `no test_cmd set in
+.claude/fleet/config` and landing trusts signal.sh's weaker log gate. Worked example:
+
+```
+test_cmd=uv run pytest -q --maxfail=1
+base_branch=main
+```
+
+> Fixed 2026-07-28: config keys never reached the script (documented lowercase, read
+> UPPERCASE; and unquoted spaced values aren't bash assignments, with the error
+> swallowed by `2>/dev/null`). Every landing before that date was gated by signal.sh
+> alone — `test_cmd` had never run, on any repo. If you relied on it, you had no test
+> gate. `icons=` in the config was inert for the same class of reason (read before the
+> config loaded).
 
 `fleet init`/`fleet track` append `.claude/fleet/` and `.fleet-worktrees/` to `.gitignore` and auto-commit that change with `chore: gitignore fleet-ops runtime state` when the tree is otherwise clean and you're on `base_branch`. If either condition fails, it prints an `ACTION REQUIRED` message — commit `.gitignore` yourself before landing.
 
@@ -197,5 +232,5 @@ Shipped since first release:
 
 ## Scripts
 
-- `scripts/fleet.sh` — main CLI (init, track, start/stop, status, land, revert, scrub-check)
+- `scripts/fleet.sh` — main CLI (init, track, start/stop, status, land, revert, scrub-check, config)
 - `scripts/signal.sh` — branch-aware signaler (deployed to `.claude/fleet/signal.sh`)

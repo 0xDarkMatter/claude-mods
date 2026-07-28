@@ -163,5 +163,137 @@ printf '=========== 2 failed, 10 passed in 1.24s ===========\n' > "$py_red"
 ( cd "$SIGWT" && bash "$REPO/.claude/fleet/signal.sh" READY "$py_red" ) >/dev/null 2>&1
 ee "failing pytest summary refused" 1 $?
 
+echo "-- config parsing: every documented form must actually reach the script --"
+# Regression (2026-07-28): .claude/fleet/config was `source`d, so (a) documented
+# lowercase keys set shell vars the UPPERCASE-reading script never looked at, and
+# (b) an unquoted value with spaces isn't a bash assignment at all — the error was
+# swallowed by 2>/dev/null. Net effect: `fleet land` never ran a test gate, ever.
+# These assertions pin the parser to the grammar SKILL.md documents.
+
+CREPO="$SB/cfgrepo"; mkdir -p "$CREPO"
+git -C "$CREPO" init -q -b main
+git -C "$CREPO" config user.email t@t; git -C "$CREPO" config user.name t
+git -C "$CREPO" config core.autocrlf false
+echo base > "$CREPO/f"; git -C "$CREPO" add -A; git -C "$CREPO" commit -qm init
+mkdir -p "$CREPO/.claude/fleet"
+CFG="$CREPO/.claude/fleet/config"
+cd "$CREPO"
+
+# Resolved value of one key, via the `fleet config` dump (stdout is data-only).
+cfg_get(){ bash "$FLEET" config 2>/dev/null | sed -n "s/^$1=//p"; }
+eq(){ [ "$2" = "$3" ] && ok "$1" || no "$1 (want [$2] got [$3])"; }
+
+rm -f "$CFG"
+eq "absent config → test_cmd empty (defaults)" "" "$(cfg_get test_cmd)"
+eq "absent config → base_branch default"       "main" "$(cfg_get base_branch)"
+
+printf 'test_cmd=echo hi\n' > "$CFG"
+eq "lowercase key reaches TEST_CMD" "echo hi" "$(cfg_get test_cmd)"
+
+printf 'TEST_CMD=echo hi\n' > "$CFG"
+eq "UPPERCASE key reaches TEST_CMD" "echo hi" "$(cfg_get test_cmd)"
+
+# The exact form that used to parse as "run `-m` with test_cmd in its env".
+printf 'test_cmd=uv run pytest -q --maxfail=1 tests/\n' > "$CFG"
+eq "unquoted value WITH SPACES survives" "uv run pytest -q --maxfail=1 tests/" "$(cfg_get test_cmd)"
+
+printf 'test_cmd="npm run check -- --fast"\n' > "$CFG"
+eq "double-quoted value with spaces, quotes stripped" "npm run check -- --fast" "$(cfg_get test_cmd)"
+printf "test_cmd='npm run check'\n" > "$CFG"
+eq "single-quoted value with spaces, quotes stripped" "npm run check" "$(cfg_get test_cmd)"
+
+# Comments, blanks, indentation, and the trailing-comment annotation used in the
+# SKILL.md example block — a verbatim copy of the docs must work.
+cat > "$CFG" <<'EOF'
+# fleet-ops config
+
+  mode=worktree                # auto | worktree | branch
+test_cmd=make check
+
+poll_interval=9
+EOF
+eq "comment + blank lines ignored, mode parsed" "worktree" "$(cfg_get mode)"
+eq "trailing ' # comment' stripped from unquoted value" "make check" "$(cfg_get test_cmd)"
+eq "indented key parsed"                        "9" "$(cfg_get poll_interval)"
+
+# Quoting is how you keep a literal '#' — forbidden_pattern is the real case.
+printf 'forbidden_pattern="TODO_MARK|#nolint"\n' > "$CFG"
+eq "quoted value keeps literal #" 'TODO_MARK|#nolint' "$(cfg_get forbidden_pattern)"
+
+# Failures must be LOUD. A config that yields nothing is not an absent config.
+printf 'tets_cmd=echo hi\n' > "$CFG"
+warn="$(bash "$FLEET" config 2>&1 >/dev/null)"
+case "$warn" in *"unrecognised key 'tets_cmd'"*) ok "typo'd key warns by name";; *) no "typo'd key silently ignored";; esac
+case "$warn" in *"set no recognised keys"*) ok "no-recognised-keys config warns";; *) no "no warning for inert config";; esac
+# fleet.sh cds to the repo root, so $CONFIG (and every warning) is root-relative.
+case "$warn" in *".claude/fleet/config"*) ok "warning names the config file";; *) no "warning omits file path";; esac
+eq "inert config keeps defaults" "" "$(cfg_get test_cmd)"
+
+printf 'this is not a key value line\ntest_cmd=echo hi\n' > "$CFG"
+warn="$(bash "$FLEET" config 2>&1 >/dev/null)"
+case "$warn" in *"not a key=value line"*) ok "malformed line warns";; *) no "malformed line silent";; esac
+eq "malformed line doesn't stop later keys" "echo hi" "$(cfg_get test_cmd)"
+
+printf 'poll_interval=soon\n' > "$CFG"
+warn="$(bash "$FLEET" config 2>&1 >/dev/null)"
+case "$warn" in *"poll_interval must be an integer"*) ok "non-numeric poll_interval warns";; *) no "non-numeric poll_interval silent";; esac
+eq "non-numeric poll_interval keeps default" "5" "$(cfg_get poll_interval)"
+
+# CRLF-authored config (Windows editors) must not leave \r glued to the value.
+printf 'test_cmd=echo hi\r\nbase_branch=main\r\n' > "$CFG"
+eq "CRLF config parsed without trailing CR" "echo hi" "$(cfg_get test_cmd)"
+
+# `icons=` is read by term_init, which used to run BEFORE the config loaded.
+# Only the ascii direction is asserted: term.sh also auto-selects ASCII on a
+# non-UTF8 locale, so a "unicode" assertion would flake in CI.
+printf 'icons=ascii\n' > "$CFG"
+eq "icons key parsed" "ascii" "$(cfg_get icons)"
+bash "$FLEET" track main >/dev/null 2>&1 || true
+icon_out="$(env -u TERM_ASCII -u FLEET_ASCII bash "$FLEET" status 2>&1)"
+case "$icon_out" in *"│"*) no "icons=ascii still emitted unicode tree glyphs";; *) ok "icons=ascii reaches term_init (no unicode glyphs)";; esac
+rm -f "$CREPO/.claude/fleet/lanes/main"
+
+echo "-- test gate: test_cmd actually runs and actually blocks the merge --"
+# End-to-end proof of the whole point of the fix. The gate command is written
+# UNQUOTED WITH SPACES — the exact form that silently no-op'd before.
+printf 'test_cmd=grep -q ok ./gate.txt\n' > "$CFG"
+
+mk_cfg_lane(){  # branch, file
+  git -C "$CREPO" branch "$1" main
+  git -C "$CREPO" worktree add -q "$SB/cwt-$1" "$1"
+  echo "$1" > "$SB/cwt-$1/$2"
+  git -C "$SB/cwt-$1" add -A
+  git -C "$SB/cwt-$1" -c user.email=w@t -c user.name=w commit -qm "work $1"
+}
+
+# Red: gate fails → merge must be undone and the lane marked FAILED.
+echo bad > "$CREPO/gate.txt"
+mk_cfg_lane red-lane r.txt
+before="$(git -C "$CREPO" rev-parse main)"
+bash "$FLEET" track red-lane >/dev/null 2>&1
+land_out="$(bash "$FLEET" land red-lane 2>&1)"; rc=$?
+ee "land exits non-zero when test_cmd fails" 1 $rc
+case "$land_out" in *"running test_cmd: grep -q ok ./gate.txt"*) ok "log shows the test_cmd being run";; *) no "no 'running test_cmd' log line — gate did not run";; esac
+eq "failed gate hard-resets the merge" "$before" "$(git -C "$CREPO" rev-parse main)"
+case "$(head -n1 "$CREPO/.claude/fleet/lanes/red-lane" 2>/dev/null)" in
+  FAILED) ok "lane marked FAILED after gate failure";; *) no "lane not FAILED after gate failure";; esac
+
+# Green: gate passes → normal land.
+echo ok > "$CREPO/gate.txt"
+mk_cfg_lane green-lane g.txt
+bash "$FLEET" track green-lane >/dev/null 2>&1
+bash "$FLEET" land green-lane >/dev/null 2>&1; ee "land succeeds when test_cmd passes" 0 $?
+case "$(head -n1 "$CREPO/.claude/fleet/lanes/green-lane" 2>/dev/null)" in
+  LANDED) ok "lane LANDED after gate passes";; *) no "lane not LANDED after passing gate";; esac
+cfg_log="$(git -C "$CREPO" log --oneline main)"   # captured, not piped — SIGPIPE note above
+case "$cfg_log" in *"merge: green-lane"*) ok "merge commit kept after passing gate";; *) no "merge commit missing";; esac
+
+# Absent test_cmd still falls through to signal.sh's log gate, and says so.
+rm -f "$CFG"
+mk_cfg_lane nogate-lane n.txt
+bash "$FLEET" track nogate-lane >/dev/null 2>&1
+land_out="$(bash "$FLEET" land nogate-lane 2>&1)"
+case "$land_out" in *"no test_cmd set in"*) ok "absent test_cmd names the config path";; *) no "absent test_cmd message unclear";; esac
+
 echo "=== $PASS passed, $FAIL failed ==="
 [ "$FAIL" -eq 0 ] || exit 1
