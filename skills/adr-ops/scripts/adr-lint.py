@@ -10,6 +10,8 @@ supersession bidirectionality.
 Usage:   adr-lint.py [--dir DIR] [--repo-root DIR] [--strict] [--json]
 Input:   argv flags only (no stdin).
 Output:  stdout = findings (plain table, or --json envelope). Data only.
+         Both streams are pinned to UTF-8 at import so a finding quoting a
+         non-ASCII title, path, or field cannot break the exit contract.
 Stderr:  headers, the yq/PyYAML fallback notice, errors.
 Exit:    0 conformant, 2 usage, 3 dir not found, 4 a file's frontmatter
          unparseable, 10 findings present (errors; or warnings too under --strict)
@@ -37,6 +39,19 @@ import sys
 from pathlib import Path
 
 
+# Windows consoles default to cp1252; force UTF-8 so em-dashes/arrows in findings
+# don't raise UnicodeEncodeError or print mojibake (matches the repo's standard
+# fix). Load-bearing here, not cosmetic: findings quote ADR titles, touches:
+# entries, filenames, and raw field values, and the crash fired mid-list AFTER
+# linting — truncating the findings and exiting 1, so a caller branching on the
+# documented 0/10 misread a dirty repo as clean.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+    except (AttributeError, ValueError):
+        pass
+
+
 class Term:
     """Tiny ANSI helper mirroring skills/_lib/term.sh (term.sh is bash-only; per
     TERMINAL-DESIGN.md §9 the Python port is inline with matching keys/glyphs).
@@ -55,9 +70,13 @@ class Term:
                    "na": "dim", "unknown": "yellow"}
 
     def __init__(self, stream=sys.stdout):
-        # ASCII fallback: explicit env, OR the bound stream can't encode UTF (e.g. a
-        # Windows cp1252 pipe) — mirrors term.sh's non-UTF-locale rule and prevents a
-        # UnicodeEncodeError when a glyph hits a legacy codec.
+        # ASCII fallback: explicit env, OR the bound stream can't encode UTF —
+        # mirrors term.sh's non-UTF-locale rule and prevents a UnicodeEncodeError
+        # when a glyph hits a legacy codec. The module-level reconfigure above
+        # runs first, so the encoding arm no longer fires on a Windows cp1252 pipe
+        # (the stream really is UTF-8 by then); it still covers a caller that binds
+        # Term to its own stream. TERM_ASCII stays the operator control for
+        # "give me ASCII anyway".
         enc = (getattr(stream, "encoding", "") or "").lower()
         self.ascii = (
             os.environ.get("TERM_ASCII") == "1"

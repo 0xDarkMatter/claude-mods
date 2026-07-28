@@ -325,6 +325,93 @@ expect_has  "touching names the ADR" "ADR-001" "$out"
 out="$("$PYTHON" "$TOUCHING" --dir "$TCH" --json src/auth.py 2>/dev/null)"
 expect_has "touching json envelope schema" "claude-mods.adr-ops.touching/v1" "$out"
 
+# ── non-Latin-1 text must not break the exit contract (regression) ──────────
+# Both Python tools print ADR titles / touches: entries / field values verbatim.
+# On Windows those streams default to cp1252 whenever redirected, so a title
+# carrying an em dash or an arrow raised UnicodeEncodeError *after* the work was
+# done: the traceback replaced the findings and the process exited 1, making a
+# governed path look ungoverned and a dirty repo look clean. PYTHONIOENCODING is
+# pinned to cp1252 here so the regression is reproduced deterministically on every
+# platform, not just on a Windows box — the import-time reconfigure must win over
+# it. Assert the documented codes AND that the text actually survives.
+echo "-- non-Latin-1 titles --"
+U8="$SB/utf8"; mkdir -p "$U8/src"; : > "$U8/src/auth.py"
+cat > "$U8/ADR-001-write-path.md" <<'EOF'
+---
+status: accepted
+date: 2026-01-01
+supersedes: []
+superseded-by: []
+touches:
+  - "src/auth.py"
+---
+
+# ADR-001: Propose→Approve Is The Only Chat→Profile Write Path
+
+## Decision (one sentence)
+
+Writes reach the profile only via propose→approve — never a direct chat write.
+
+## Context
+C — an em dash lives here too.
+
+## Alternatives considered
+A.
+
+## Consequences
+### Positive
+- G.
+
+## See also
+- x
+EOF
+
+out="$(PYTHONIOENCODING=cp1252 "$PYTHON" "$TOUCHING" --dir "$U8" src/auth.py 2>/dev/null)"; rc=$?
+expect_exit "touching: non-Latin-1 title still exits 10" 10 "$rc"
+expect_has  "touching: non-Latin-1 title survives to stdout" "Chat→Profile" "$out"
+
+out="$(PYTHONIOENCODING=cp1252 "$PYTHON" "$TOUCHING" --dir "$U8" --json src/auth.py 2>/dev/null)"; rc=$?
+expect_exit "touching --json: non-Latin-1 title still exits 10" 10 "$rc"
+expect_has  "touching --json: envelope intact" "claude-mods.adr-ops.touching/v1" "$out"
+
+# A conformant record with a non-Latin-1 title lints clean -> 0.
+PYTHONIOENCODING=cp1252 "$PYTHON" "$LINT" --dir "$U8" --repo-root "$U8" >/dev/null 2>&1
+expect_exit "lint: non-Latin-1 title lints clean -> 0" 0 $?
+
+# A finding that QUOTES non-Latin-1 text must still reach stdout, and still exit 10.
+cat > "$U8/ADR-002-boundary.md" <<'EOF'
+---
+status: accepted
+date: 2026-01-01
+supersedes: ["ADR-001 → replaced"]
+superseded-by: []
+touches:
+  - "src/auth.py"
+---
+
+# ADR-002: Chat→Profile Boundary
+
+## Decision (one sentence)
+
+The boundary is one-way.
+
+## Context
+C.
+
+## Alternatives considered
+A.
+
+## Consequences
+### Positive
+- G.
+
+## See also
+- x
+EOF
+out="$(PYTHONIOENCODING=cp1252 "$PYTHON" "$LINT" --dir "$U8" --repo-root "$U8" 2>/dev/null)"; rc=$?
+expect_exit "lint: finding quoting non-Latin-1 text still exits 10" 10 "$rc"
+expect_has  "lint: non-Latin-1 finding survives to stdout" "ADR-001 → replaced" "$out"
+
 # ── adr-init.sh: bootstrap, refuse populated, dry-run ──────────────────────
 echo "-- adr-init --"
 INITD="$SB/init"
