@@ -21,14 +21,7 @@ LOG="$FLEET_DIR/activity.log"
 CONFIG="$FLEET_DIR/config"
 PID_FILE="$FLEET_DIR/daemon.pid"
 
-# Shared terminal-output helpers (see docs/TERMINAL-DESIGN.md).
-# shellcheck source=../../_lib/term.sh
-. "$SCRIPT_DIR/../../_lib/term.sh"
-# Honor legacy FLEET_ASCII alongside TERM_ASCII.
-[[ "${FLEET_ASCII:-}" == "1" || "${icons:-}" == "ascii" ]] && export TERM_ASCII=1
-term_init
-
-# defaults (overridable via .claude/fleet/config: key=value, no quotes)
+# defaults (overridable via .claude/fleet/config — see load_config below)
 MODE="auto"
 # Default worktree root sits at repo top, NOT under .claude/. Claude Code's
 # headless mode (--dangerously-skip-permissions) bypasses prompts but still
@@ -40,7 +33,118 @@ TEST_CMD=""
 FORBIDDEN_PATTERN="TODO_SCRUB|XXX[^a-z]|FIXME_BEFORE_LAND"
 BASE_BRANCH="main"
 POLL_INTERVAL=5
-[[ -f "$CONFIG" ]] && source "$CONFIG" 2>/dev/null || true
+ICONS="${icons:-}"   # env seed; config `icons=ascii` overrides below
+
+# === CONFIG ===================================================================
+# The config is PARSED, never `source`d. Two reasons, both learned the hard way
+# (2026-07: every documented key had been a silent no-op since the file shipped):
+#
+#   1. `source` binds the key's own case — the file documents lowercase keys
+#      (`test_cmd=`), the script reads UPPERCASE (`$TEST_CMD`), so a sourced
+#      config set a variable nothing ever read. `fleet land` therefore never ran
+#      a test gate on any repo; it always fell through to signal.sh's log gate.
+#   2. `source` is bash, so an unquoted value containing spaces
+#      (`test_cmd=python -m pytest`) is not an assignment at all — bash reads it
+#      as "run `-m` with test_cmd exported". It fails, and the old `2>/dev/null`
+#      swallowed the error, making a broken config indistinguishable from none.
+#
+# Parsing also means the config can't execute code, which a `source`d file could.
+# Keys are matched case-insensitively so configs written either way keep working.
+# NEVER silence this parser: a config that yields nothing must say so.
+
+config_warn() {
+  local msg="[$(date '+%H:%M:%S')] fleet config: $*"
+  echo "$msg" >&2
+  # activity.log may not exist yet (ensure_fleet_dir runs later) — best effort.
+  [[ -d "$FLEET_DIR" ]] && echo "$msg" >> "$LOG" 2>/dev/null
+  return 0
+}
+
+# Strip leading and trailing whitespace. bash 3.2-safe (macOS ships 3.2).
+config_trim() {
+  local s=$1
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
+# Parse key=value lines. Grammar (documented identically in SKILL.md):
+#   - one key=value per line; whitespace around key and '=' is ignored
+#   - value runs to end of line, so spaces need NO quoting
+#   - optional surrounding "…" or '…' is stripped (protects a literal trailing #)
+#   - unquoted values lose a trailing ` # comment`; quoted values keep everything
+#   - '#' at line start = comment; blank lines ignored
+load_config() {
+  local file=$1
+  [[ -f "$file" ]] || return 0
+  if [[ ! -r "$file" ]]; then
+    config_warn "$file exists but is not readable — using defaults"
+    return 0
+  fi
+
+  local recognised=0 lineno=0 line key val
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    lineno=$((lineno + 1))
+    line="${line%$'\r'}"                 # CRLF configs (Windows editors)
+    line="$(config_trim "$line")"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+
+    if [[ "$line" != *=* ]]; then
+      config_warn "$file:$lineno — not a key=value line, ignored: $line"
+      continue
+    fi
+    key="$(config_trim "${line%%=*}")"
+    key="$(printf '%s' "$key" | tr '[:upper:]' '[:lower:]')"
+    val="$(config_trim "${line#*=}")"
+
+    case "$val" in
+      # Quoted: value is everything up to the closing quote; rest is discarded.
+      \"*) val="${val#\"}"; val="${val%%\"*}" ;;
+      \'*) val="${val#\'}"; val="${val%%\'*}" ;;
+      # Unquoted: drop a trailing ` # comment` (matches shell intuition, and the
+      # SKILL.md example block is annotated that way — a verbatim copy must work).
+      *)   val="${val%%[[:space:]]#*}"; val="$(config_trim "$val")" ;;
+    esac
+
+    case "$key" in
+      mode)              MODE="$val" ;;
+      worktree_root)     WORKTREE_ROOT="$val" ;;
+      test_cmd)          TEST_CMD="$val" ;;
+      forbidden_pattern) FORBIDDEN_PATTERN="$val" ;;
+      base_branch)       BASE_BRANCH="$val" ;;
+      icons)             ICONS="$val" ;;
+      poll_interval)
+        if [[ "$val" =~ ^[0-9]+$ ]]; then
+          POLL_INTERVAL="$val"
+        else
+          config_warn "$file:$lineno — poll_interval must be an integer, got '$val' (keeping $POLL_INTERVAL)"
+          continue
+        fi
+        ;;
+      *)
+        config_warn "$file:$lineno — unrecognised key '$key' (ignored)"
+        continue
+        ;;
+    esac
+    recognised=$((recognised + 1))
+  done < "$file"
+
+  if [[ $recognised -eq 0 ]]; then
+    config_warn "$file set no recognised keys — running on defaults (test gate OFF)"
+  fi
+  return 0
+}
+load_config "$CONFIG"
+# === END CONFIG ===============================================================
+
+# Shared terminal-output helpers (see docs/TERMINAL-DESIGN.md).
+# Sourced AFTER the config so `icons=ascii` in the config can reach term_init —
+# when this ran first, that documented key was read before it was ever set.
+# shellcheck source=../../_lib/term.sh
+. "$SCRIPT_DIR/../../_lib/term.sh"
+# Honor legacy FLEET_ASCII alongside TERM_ASCII.
+if [[ "${FLEET_ASCII:-}" == "1" || "$ICONS" == "ascii" ]]; then export TERM_ASCII=1; fi
+term_init
 
 # Icons resolved through the shared term lib (term_state_icon).
 ICON_RUNNING="$(term_state_icon RUNNING)"
@@ -473,6 +577,28 @@ cmd_fleet() {
   esac
 }
 
+cmd_config() {
+  # Print the RESOLVED config — the observability that was missing while every
+  # documented key was a silent no-op. stdout is data only (key=value, parseable);
+  # advice and warnings go to stderr.
+  if [[ -f "$CONFIG" ]]; then
+    echo "# source: $CONFIG" >&2
+  else
+    echo "# source: none ($CONFIG absent) — all defaults" >&2
+  fi
+  echo "mode=$MODE"
+  echo "worktree_root=$WORKTREE_ROOT"
+  echo "test_cmd=$TEST_CMD"
+  echo "forbidden_pattern=$FORBIDDEN_PATTERN"
+  echo "base_branch=$BASE_BRANCH"
+  echo "poll_interval=$POLL_INTERVAL"
+  echo "icons=$ICONS"
+  if [[ -z "$TEST_CMD" ]]; then
+    echo "WARNING: no test_cmd — 'fleet land' will not run a test gate" >&2
+  fi
+  return 0
+}
+
 cmd_scrub_check() {
   local branch=${1:-}
   [[ -z "$branch" ]] && { echo "usage: fleet scrub-check <branch>" >&2; exit 1; }
@@ -505,7 +631,7 @@ land_one() {
   git checkout "$BASE_BRANCH"
   if git merge "$branch" --no-ff -m "merge: $branch"; then
     if [[ -n "$TEST_CMD" ]]; then
-      log "running tests: $TEST_CMD"
+      log "running test_cmd: $TEST_CMD"
       if eval "$TEST_CMD" >>"$LOG" 2>&1; then
         log "PASS: $branch landed ✓"
       else
@@ -515,7 +641,7 @@ land_one() {
         return 1
       fi
     else
-      log "no test_cmd set — trusting signal.sh's log gate"
+      log "no test_cmd set in $CONFIG — trusting signal.sh's log gate"
     fi
     set_lane_state "$branch" "LANDED"
     git branch -d "$branch" 2>/dev/null || git branch -D "$branch" 2>/dev/null || true
@@ -747,6 +873,7 @@ case "${1:-}" in
                 if [[ "${1:-}" == "--all" ]]; then shift; cmd_land_all "$@"; else cmd_land "$@"; fi ;;
   revert)       shift; cmd_revert "$@" ;;
   scrub-check)  shift; cmd_scrub_check "$@" ;;
+  config)       shift; cmd_config "$@" ;;
   ""|-h|--help)
     cat <<EOF
 fleet-ops — landing discipline for parallel work (queue + test gate)
@@ -762,8 +889,9 @@ Usage:
                               --running also lands vetted RUNNING lanes
   fleet revert <branch>       Revert merge commit on $BASE_BRANCH
   fleet scrub-check <branch>  Dry-run forbidden-pattern check
+  fleet config                Print resolved config (is the test gate actually on?)
 
-Config (optional): $CONFIG
+Config (optional): $CONFIG  — key=value per line, values need no quoting
 EOF
     ;;
   *) echo "unknown subcommand: $1" >&2; exit 1 ;;
