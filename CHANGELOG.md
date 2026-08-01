@@ -7,21 +7,19 @@ feature releases live in the README "Recent Updates" section.
 
 ## [Unreleased]
 
-### Added
-- **`fleetflow` skill** - heterogeneous worker-fleet orchestration: GLM (z.ai),
-  Codex (OpenAI `codex exec`), and Anthropic Sonnet/Opus/Haiku workers as
-  isolated OS processes under a Fable-or-Opus orchestrator session. Ports the
-  native Workflow tool's internals — extracted from its tool spec and on-disk
-  run dirs (`wf_*/journal.jsonl`) into `references/native-workflow-insights.md`:
-  hash-keyed (`v2:sha256`) journal replay for resume, pipeline-vs-barrier
-  doctrine, adversarial verify / judge panel / loop-until-dry patterns, the
-  workers-return-data prompting contract, and the no-silent-caps rule. Ships
-  `ff-spawn` (uniform spawner: worktree lane + guard preamble + journal +
-  per-brain launch), `ff-collect` (per-brain gate + `--check-main-clean`
-  escape guard, born from a real worker-escape incident), `ff-doctor`
-  (`--offline`/`--live` provider probes incl. the Fable/Opus orchestrator
-  detection), a per-brain contracts reference (full `codex exec` flag map,
-  GLM auth-isolation, Anthropic alias notes), and a 41-assertion offline suite.
+### Removed
+- **`fleetflow` skill extracted to its own repo** (`X:\Forge\fleetflow`) with
+  full history via `git subtree split` (36+ commits) — an app with a live
+  service (the machine-wide dashboard at `https://fleetflow.lab`), its own
+  server (`ff-serve.py` + `ff-aggregate.py` + `ff-archive.sh`, recovered from
+  the authoring session's transcript after the 2026-08-01 installer incident
+  destroyed the unversioned machine-local copies), and a growing surface is a
+  product, not a skill resource (the iso-studio rule). Still invocable as
+  `/fleetflow`: `~/.claude/skills/fleetflow` is now a junction to the repo,
+  and the `fleetflow` Process Compose service runs from the repo directly.
+  Skill count 103 → 102. The never-released "Added" entry for fleetflow that
+  previously sat in this section travels with the extraction — its narrative
+  lives in the new repo's README and git history.
 - **`agentic-quality` rule** - cross-repo doctrine for code, comments, docs, and
   structure that survive the session: the cold-agent test, comment doctrine
   (contract blocks, WHY-only inline, guard comments, section markers,

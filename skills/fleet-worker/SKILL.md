@@ -23,9 +23,10 @@ mechanism is provider- and model-agnostic (any Anthropic-compatible endpoint).
 > fleet-worker brain is a `claude -p` process pointed at an **Anthropic-compatible**
 > endpoint. Grok Build CLI is its **own binary and protocol** (`grok -p`, auth via
 > `GROK_DEPLOYMENT_KEY`), not a `claude -p` wrapper — so it can't ride fleet-worker's
-> launcher. Grok is a first-class worker in **[fleetflow](../fleetflow/)** instead
-> (alongside Codex), which spawns heterogeneous OS-process workers of different
-> binaries. Use fleetflow for a Grok lane or any mixed-provider fan-out.
+> launcher. Grok is a first-class worker in **fleetflow** instead (alongside
+> Codex), which spawns heterogeneous OS-process workers of different binaries —
+> now its own repo at `X:\Forge\fleetflow`, mounted as the `/fleetflow` skill.
+> Use fleetflow for a Grok lane or any mixed-provider fan-out.
 
 **This is the spawning layer. [`fleet-ops`](../fleet-ops/) is the landing layer.**
 fleet-worker produces branches cheaply; fleet-ops lands them through a test gate

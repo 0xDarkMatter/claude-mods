@@ -125,7 +125,7 @@ while (budget.total && budget.remaining() > 50_000) {
 
 ## See also
 
-- [`fleetflow/references/native-model-routing.md`](../../fleetflow/references/native-model-routing.md)
+- `fleetflow` `references/native-model-routing.md` (own repo — `X:\Forge\fleetflow`, mounted at `~/.claude/skills/fleetflow`)
   — the in-process half in depth: cost evidence (7-day audit), full mechanism
   (`opts.model`/`opts.effort`, `meta.phases[].model`, fork inheritance), caveats
 - [`assets/route.js`](../assets/route.js) — the paste-in helper
