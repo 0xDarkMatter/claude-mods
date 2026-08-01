@@ -331,6 +331,7 @@ default the script-author follows, not an option — and real runs routinely hit
 | [scripts/ff-run.sh](scripts/ff-run.sh) | `resume --run NAME` replays every manifest packet through ff-spawn in order (unchanged = cached, changed/new = live); `status --run NAME` aliases ff-status |
 | [scripts/ff-clean.sh](scripts/ff-clean.sh) | `--run NAME [--force]` reclaims zero-commit lanes (worktree remove + branch -D), keeps committed lanes, removes the run's cache dirs; reports locked ACL-litter dirs. `--reap [--force]` finds worker processes the wrapper left alive, matched by ancestry to the run's journalled anchors |
 | [scripts/ff-import.sh](scripts/ff-import.sh) | `--wf DIR --run NAME` imports a native Claude Code Workflow run dir (`wf_*/`) — completed agents become lanes (prompt + result envelope + journal + manifest), started-only agents are flagged incomplete; native keys are terminal, not replayable |
+| [scripts/ff-serve.py](scripts/ff-serve.py) | machine-wide dashboard server: discovers every fleetflow run (live + historical, across repos) by scanning the roots in `~/.fleetflow/roots.txt` for `.fleetflow/<run>/journal.jsonl`, serves [assets/ff-dashboard.html](assets/ff-dashboard.html) at `/` plus `/api/aggregate.json` / `/api/refresh` / `/api/health`; per-run state comes from `ff-status.sh` (never reimplemented). One process by design — request-driven, non-blocking rebuilds, no detachable watcher to die silently. Run it as a supervised service (e.g. Process Compose + a probe on `/api/health`) |
 
 **Live monitor** ([assets/ff-monitor.html](assets/ff-monitor.html)): a
 zero-dependency page reproducing the native /workflows progress surface — run
@@ -361,6 +362,12 @@ captioned with the silence (`2h39m silent`) instead of a pulsing blue one, and
 never counts toward a phase's finished fraction. Lanes with no live stream
 (`live_signal: false`) keep rendering as running — the monitor cannot show a
 verdict the data doesn't support.
+
+**Machine-wide dashboard** ([scripts/ff-serve.py](scripts/ff-serve.py) +
+[assets/ff-dashboard.html](assets/ff-dashboard.html)): where the live monitor
+watches ONE run dir, the dashboard aggregates EVERY run on the machine —
+live and archived, across repos — behind a single always-on service. Same
+layout doctrine as the monitor: pinned summary, cards beneath.
 
 **Two surfaces, like the native tool.** The served monitor is the *live*
 grid (the Background-tasks panel analogue). In-chat, the orchestrator emits a
