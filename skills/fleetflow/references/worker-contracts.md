@@ -161,7 +161,73 @@ binary and protocol, **not** a `claude -p` wrapper. Verified against
 - **Terms:** deployment-key usage bills to your xAI account/plan — verify its
   terms as you would codex's ChatGPT-plan billing.
 
-## 4. Anthropic workers (`claude -p`)
+## 4. Pi workers (`pi -p`)
+
+earendil-works **Pi** (`@earendil-works/pi-coding-agent`; 0.83.0 verified
+2026-08-01, local install `X:\Agents\Pi` driven via `FLEETFLOW_PI_BIN=X:/Agents/Pi/pi.cmd`).
+A minimal agent harness fronting **15+ providers / hundreds of models** — which
+makes it the fleet's **wildcard brain**: gemini, deepseek, zai, groq, mistral,
+openrouter… are `FLEETFLOW_PI_PROVIDER`/`FLEETFLOW_PI_MODEL` env changes, not
+new brain code. Also a genuinely third *harness* (its own read/bash/edit/write
+toolchain), so it doubles as cross-harness dissent alongside codex and grok.
+
+- **Launch**: `pi -p --mode json --no-extensions --no-skills
+  [--provider P] [--model M] [--thinking L] < packet > <id>.events.jsonl`
+  from the lane worktree, with `PI_CODING_AGENT_DIR` pointed at the lane's
+  isolated config dir (the GLM `CLAUDE_CONFIG_DIR` analog).
+  - Prompt goes via **stdin, never argv** — `-p` merges piped stdin into the
+    initial prompt (docs/usage.md), and the launcher is usually a `.cmd` shim,
+    so an argv prompt would die on cmd.exe's ~8K command-line cap.
+  - `--no-extensions --no-skills` because discovery loads behavior *outside*
+    the cache key's hash — same packet must mean same run. A packet that wants
+    a specific skill says so in its prompt (or the spawn adds `--skill <path>`,
+    which is additive even with `--no-skills`).
+- **Envelope**: pi's `--mode json` emits an **NDJSON event stream** (session
+  header, then `agent_start`/`turn_*`/`message_*`/`tool_execution_*`, ending in
+  `agent_end` with the full message list). **ff-spawn distills that stream into
+  a claude-style `{is_error, result, usage, num_turns, total_cost_usd,
+  modelUsage}` envelope** at `<id>.result.json`: last assistant message's text
+  → `result`; `stopReason` `error`/`aborted` (or no assistant reply) →
+  `is_error`; pi usage `{input,output,cacheRead,cacheWrite,cost.total}` summed
+  across assistant turns → claude usage names. So **ff-collect and ff-status
+  need no pi branch at all** — pi lanes ride the default claude-envelope gate
+  and the finished-lane reader unchanged. Keep it that way.
+- **Live signal**: the raw stream at `<id>.events.jsonl` is written as pi
+  works, so pi lanes are **fully covered by the stall detector** (like codex).
+  Pi's events carry no timestamps → any future density strip would be
+  `"sequence"` basis, like codex's; live token/tool introspection is not parsed
+  today (totals arrive at finish via the distilled envelope).
+- **No sandbox, no turn cap.** Pi executes tools directly with the user's
+  permissions (its security doc is explicit that it has no sandbox) — GLM-class
+  posture: the cage is the worktree lane + guard preamble + escape guard. And
+  pi has **no `--max-turns` equivalent**, so bounds are the stall detector and
+  orchestrator wall-clock patience. Pi *can* self-commit (no codex-style git
+  lock problem).
+- **No headless trust prompt** (docs/security.md): non-interactive modes never
+  ask; untrusted project resources are silently skipped under the default
+  `defaultProjectTrust: "ask"`. No UAC-style hang risk.
+- **Auth**: provider API-key env vars **only** — the isolated
+  `PI_CODING_AGENT_DIR` means the host's `~/.pi/agent/auth.json` (OAuth/login
+  store) never reaches a lane. Keys per provider: `GEMINI_API_KEY`,
+  `ZAI_API_KEY`, `DEEPSEEK_API_KEY`, `GROQ_API_KEY`, `OPENAI_API_KEY`,
+  `ANTHROPIC_API_KEY`, `XAI_API_KEY`, `MISTRAL_API_KEY`, `OPENROUTER_API_KEY`,
+  `CEREBRAS_API_KEY`, … (full list: `pi --help`). `ff-doctor --live` probes key
+  *presence* for the configured provider, not validity.
+- **Effort lever**: fleetflow `--effort low|medium|high` maps 1:1 onto pi
+  `--thinking`; `max` → `xhigh` (pi also has `off`/`minimal` below the fleet
+  scale). Provider support varies by model; unsupported levels are pi's
+  problem to clamp, not ours.
+- **Transcripts**: pi persists sessions under
+  `<PI_CODING_AGENT_DIR>/sessions/<path-slug>/<uuid>.jsonl`; the lane dir is
+  isolated, so ff-spawn's archive step takes the newest one. `pi --export
+  <session.jsonl>` renders it to HTML if a human wants to read a lane.
+- **fleetflow env knobs**: `FLEETFLOW_PI_BIN` (default `pi`; point at the local
+  install's `pi.cmd`), `FLEETFLOW_PI_PROVIDER`, `FLEETFLOW_PI_MODEL`.
+- **Terms**: pure API-key billing per provider — no subscription-automation
+  question (unlike codex/Anthropic-subscription workers). The usual per-provider
+  rate limits are the concurrency binding constraint.
+
+## 5. Anthropic workers (`claude -p`)
 
 - Launch: `claude -p --model <sonnet|haiku|opus> --output-format json
   --max-turns N --permission-mode <mode> "PROMPT" > result.json` from the lane
@@ -177,7 +243,7 @@ binary and protocol, **not** a `claude -p` wrapper. Verified against
   subscription-authed orchestrator stays interactive; if a scheduler drives
   fleetflow runs, put the workers (or the whole run) on an API key.
 
-## 5. Orchestrator: Fable if available, Opus if not
+## 6. Orchestrator: Fable if available, Opus if not
 
 The orchestrator is the session invoking this skill — its model is chosen when
 the session starts (`/model`, or the `model` field in settings), not by a
@@ -194,7 +260,7 @@ accordingly. Never route the orchestrator to GLM/Codex — synthesis and judging
 stay on the strongest available brain (the native tool's "never under-power a
 judge", applied to yourself).
 
-## 6. Uniform result layout
+## 7. Uniform result layout
 
 ```
 <repo>/.fleetflow/<run>/
@@ -216,7 +282,7 @@ judge", applied to yourself).
 sensitive-file guard fires there before `bypassPermissions`) and must be
 gitignored; `ff-spawn` appends it to `.git/info/exclude` if absent.
 
-## 7. Effort lever, cache redirect, transcript archiving (Wave 1)
+## 8. Effort lever, cache redirect, transcript archiving (Wave 1)
 
 **Effort lever** (`ff-spawn --effort low|medium|high|max`). Default unset =
 inherit the brain's own. The mapping (effort IS part of the cache-key OPTS

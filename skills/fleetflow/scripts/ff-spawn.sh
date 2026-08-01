@@ -22,7 +22,7 @@ Usage: ff-spawn.sh --run NAME --id ID --brain BRAIN --prompt-file FILE
 
   --run NAME       run name (groups lanes; [a-z0-9-]+)
   --id ID          lane id within the run ([a-z0-9-]+)
-  --brain BRAIN    glm | codex | grok | sonnet | opus | haiku | fable
+  --brain BRAIN    glm | codex | grok | pi | sonnet | opus | haiku | fable
   --prompt-file F  packet file (guard preamble is prepended unless --no-guard)
   --phase NAME     progress-group label (default: build) - display only
   --worktree       give the worker its own worktree lane (branch fleetflow/RUN/ID)
@@ -38,6 +38,16 @@ Usage: ff-spawn.sh --run NAME --id ID --brain BRAIN --prompt-file FILE
   --no-guard       skip the guard preamble injection
   --force          ignore a journal cache hit and re-run
   --dry-run        do not launch a worker; write a stub result (for tests/planning)
+
+ENV (pi brain)
+  FLEETFLOW_PI_BIN                 pi launcher (default: pi on PATH; point at a
+                                   local install's pi.cmd, e.g. X:/Agents/Pi/pi.cmd)
+  FLEETFLOW_PI_PROVIDER            provider passed to `pi --provider` (pi's
+                                   wildcard slot: gemini, deepseek, zai, groq, ...)
+  FLEETFLOW_PI_MODEL               model passed to `pi --model`
+                                   NOTE: lanes get an ISOLATED PI_CODING_AGENT_DIR,
+                                   so ~/.pi/agent/auth.json does NOT apply - the
+                                   provider's API key env var is the only auth.
 
 ENV (codex brain)
   FLEETFLOW_CODEX_MODEL            model passed to `codex exec -m`
@@ -92,7 +102,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-case "$BRAIN" in glm|codex|grok|sonnet|opus|haiku|fable) ;; *) err "invalid --brain '$BRAIN'"; exit 2 ;; esac
+case "$BRAIN" in glm|codex|grok|pi|sonnet|opus|haiku|fable) ;; *) err "invalid --brain '$BRAIN'"; exit 2 ;; esac
 case "$EFFORT" in ""|low|medium|high|max) ;; *) err "invalid --effort '$EFFORT' (low|medium|high|max)"; exit 2 ;; esac
 
 # --- Windows/Codex elevation trap (incident 2026-07-27, run bkv2p2) ------------
@@ -159,7 +169,20 @@ fi
 
 # --- journal: hash-keyed replay cache (native Workflow pattern) --------------
 # effort is part of the key (different effort = a different run), per Wave 1.
-OPTS="turns=$MAX_TURNS|wt=$WORKTREE|schema=$( [ -n "$SCHEMA" ] && basename "$SCHEMA" )|effort=$EFFORT"
+# The env-selected model is part of the key too (added 2026-08-01): for codex/
+# grok/pi the model comes from FLEETFLOW_* env, not the prompt, so without it
+# two pi lanes on DIFFERENT providers running the same packet collided into one
+# cache entry (found benching pi across google/openai/zai). Anthropic brains
+# don't need it - their model IS the brain name, already hashed. NB: this
+# invalidates pre-2026-08 journal keys for codex/grok lanes (they gain the
+# "|model=" suffix) - old runs replay live once, then re-cache.
+KEY_MODEL=""
+case "$BRAIN" in
+  codex) KEY_MODEL="${FLEETFLOW_CODEX_MODEL:-}" ;;
+  grok)  KEY_MODEL="${FLEETFLOW_GROK_MODEL:-}" ;;
+  pi)    KEY_MODEL="${FLEETFLOW_PI_PROVIDER:-}/${FLEETFLOW_PI_MODEL:-}" ;;
+esac
+OPTS="turns=$MAX_TURNS|wt=$WORKTREE|schema=$( [ -n "$SCHEMA" ] && basename "$SCHEMA" )|effort=$EFFORT|model=$KEY_MODEL"
 KEY="v2:$( { printf '%s\n' "$BRAIN"; cat "$SENT"; printf '%s' "$OPTS"; } | sha256sum | cut -d' ' -f1)"
 JOURNAL="$RUNDIR/journal.jsonl"
 
@@ -206,9 +229,26 @@ if [ "$WORKTREE" = 1 ]; then
   fi
 fi
 
-# phase is display metadata only - deliberately NOT part of the cache key
+# phase is display metadata only - deliberately NOT part of the cache key.
+#
+# The exact model is journalled because for codex and grok it is otherwise
+# UNRECOVERABLE after the fact: their event streams carry no model field, so the
+# id exists only in this process's environment and dies with it. Claude-brain
+# workers self-report theirs in result.json's modelUsage, but recording it here
+# too means every lane can answer "what actually ran" the same way. Also display
+# metadata, also deliberately out of the cache key.
+SPAWN_MODEL=""
+case "$BRAIN" in
+  codex) SPAWN_MODEL="${FLEETFLOW_CODEX_MODEL:-}" ;;
+  grok)  SPAWN_MODEL="${FLEETFLOW_GROK_MODEL:-}" ;;
+  pi)    SPAWN_MODEL="${FLEETFLOW_PI_PROVIDER:+$FLEETFLOW_PI_PROVIDER/}${FLEETFLOW_PI_MODEL:-}" ;;
+  fable) SPAWN_MODEL="claude-fable-5" ;;
+  *)     SPAWN_MODEL="$BRAIN" ;;
+esac
 jq -nc --arg k "$KEY" --arg id "$ID" --arg b "$BRAIN" --arg p "$PHASE" --arg v "$FF_VERSION" \
-  '{type:"started",key:$k,id:$id,brain:$b,phase:$p,v:$v}' >> "$JOURNAL"
+  --arg m "$SPAWN_MODEL" \
+  '{type:"started",key:$k,id:$id,brain:$b,phase:$p,v:$v,
+    model:(if $m=="" then null else $m end)}' >> "$JOURNAL"
 
 # --- reap anchor (2026-07-27: TaskStop left 5 orphaned codex.exe alive) --------
 # Killing the wrapper does NOT kill the worker: `codex exec` spawns codex.exe and
@@ -252,6 +292,11 @@ archive_transcript() {
   case "$BRAIN" in
     glm)
       src="$(ls -t "$CFGD"/projects/*/*.jsonl 2>/dev/null | head -1)"
+      ;;
+    pi)
+      # pi persists sessions under <PI_CODING_AGENT_DIR>/sessions/<path-slug>/<uuid>.jsonl;
+      # the lane's dir is isolated, so the newest session there is unambiguously ours
+      src="$(ls -t "$CFGD"/sessions/*/*.jsonl 2>/dev/null | head -1)"
       ;;
     sonnet|opus|haiku|fable)
       sid="$(jq -r '.session_id // empty' "$ART" 2>/dev/null)"
@@ -329,6 +374,69 @@ else
           ${EFFORT:+--reasoning-effort "$EFFORT"} \
           ${SCHEMA:+--json-schema "$(cat "$SCHEMA")"} \
       ) > "$ART" 2> "$ERRF" || RC=$?
+      ;;
+    pi)
+      # earendil-works Pi (@earendil-works/pi-coding-agent) - one harness
+      # fronting 15+ providers, which makes this brain the fleet's WILDCARD
+      # slot: gemini/deepseek/zai/groq/... are env changes, not new brain code.
+      # Posture is GLM-class: NO sandbox, so the cage is the worktree lane +
+      # guard preamble; and pi has NO --max-turns equivalent, so bounds are the
+      # stall detector + orchestrator wall-clock patience. Headless pi never
+      # shows a trust prompt (docs/security.md) - no UAC-style hang risk.
+      PI="${FLEETFLOW_PI_BIN:-pi}"
+      # -f fallback: bash executes a .cmd shim fine, but its `command -v`/-x
+      # tests reject one (no exec bit on NTFS), so a path-shaped FLEETFLOW_PI_BIN
+      # is checked for existence instead.
+      command -v "$PI" >/dev/null || [ -f "$PI" ] || { err "pi CLI not found ($PI - set FLEETFLOW_PI_BIN)"; exit 5; }
+      # fleetflow effort -> pi --thinking (pi also has off/minimal below, xhigh above)
+      PI_THINK=""
+      case "$EFFORT" in low|medium|high) PI_THINK="$EFFORT" ;; max) PI_THINK="xhigh" ;; esac
+      # - prompt via STDIN, never argv: $PI is usually a .cmd shim and cmd.exe
+      #   caps the command line at ~8K chars; a guard-preamble packet exceeds it.
+      # - --no-extensions/--no-skills: discovery loads behavior OUTSIDE the
+      #   cache key's hash - same packet must mean same run.
+      # - PI_CODING_AGENT_DIR: per-lane config/session isolation (the analog of
+      #   GLM's CLAUDE_CONFIG_DIR). Consequence: ~/.pi/agent/auth.json does NOT
+      #   apply - the provider's API key env var is the lane's only auth.
+      ( cd "$WORKDIR" && \
+        env PI_CODING_AGENT_DIR="$CFGD" \
+        UV_CACHE_DIR="$CACHE_DIR" TMPDIR="$CACHE_DIR" TMP="$CACHE_DIR" TEMP="$CACHE_DIR" \
+        "$PI" -p --mode json --no-extensions --no-skills \
+          ${FLEETFLOW_PI_PROVIDER:+--provider "$FLEETFLOW_PI_PROVIDER"} \
+          ${FLEETFLOW_PI_MODEL:+--model "$FLEETFLOW_PI_MODEL"} \
+          ${PI_THINK:+--thinking "$PI_THINK"} \
+        < "$SENT" \
+      ) > "$RUNDIR/$ID.events.jsonl" 2> "$ERRF" || RC=$?
+      # Distill the event stream into a claude-style envelope so ff-collect's
+      # default gate and ff-status's finished-lane reader work UNCHANGED ("one
+      # implementation of lane state"). The stream stays on disk as the live
+      # stall signal, exactly like codex's. Field mapping (docs/session-format.md):
+      # pi usage {input,output,cacheRead,cacheWrite,cost.total} -> claude usage
+      # names; stopReason error/aborted (or no assistant reply at all) -> is_error.
+      jq -s '
+        ([.[] | select(.type=="agent_end")] | last) as $end
+        | (($end.messages // []) | map(select(.role=="assistant"))) as $as
+        | ($as | last) as $fin
+        | ($as | map(.usage // {})) as $us
+        | (($fin.content // []) | map(select(.type=="text") | .text) | join("\n")) as $text
+        | {is_error: (($fin == null) or ($fin.stopReason == "error") or ($fin.stopReason == "aborted")),
+           result: (if $fin == null then "no assistant reply (see events/.err)"
+                    else ($fin.errorMessage // $text) end),
+           usage: {input_tokens: ($us | map(.input // 0) | add // 0),
+                   output_tokens: ($us | map(.output // 0) | add // 0),
+                   cache_read_input_tokens: ($us | map(.cacheRead // 0) | add // 0),
+                   cache_creation_input_tokens: ($us | map(.cacheWrite // 0) | add // 0)},
+           num_turns: ($as | length),
+           total_cost_usd: (($us | map(.cost.total // 0) | add // 0) as $c
+                            | if $c > 0 then $c else null end),
+           modelUsage: (if ($fin.model // "") != ""
+                        then {(($fin.provider // "pi") + "/" + $fin.model):
+                              {outputTokens: ($us | map(.output // 0) | add // 0)}}
+                        else {} end)}
+      ' "$RUNDIR/$ID.events.jsonl" > "$ART" 2>> "$ERRF" || { [ "$RC" = 0 ] && RC=10; }
+      # an error-flagged envelope must fail the spawn even on a clean exit,
+      # or the journal would cache it as a replayable success
+      [ "$RC" = 0 ] && [ "$(jq -r '.is_error' "$ART" 2>/dev/null)" = "true" ] && RC=10
       ;;
     sonnet|opus|haiku|fable)
       command -v claude >/dev/null || { err "claude CLI not found"; exit 5; }

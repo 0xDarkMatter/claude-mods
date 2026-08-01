@@ -51,6 +51,9 @@ if command -v claude >/dev/null; then say "bin-claude" ok "found"; else say "bin
 if command -v codex >/dev/null; then say "bin-codex" ok "$(codex --version 2>/dev/null | head -1)"; else say "bin-codex" advisory "missing - codex brain unavailable"; fi
 GROK="${FLEETFLOW_GROK_BIN:-grok}"
 if command -v "$GROK" >/dev/null; then say "bin-grok" ok "$("$GROK" --version 2>/dev/null | head -1)"; else say "bin-grok" advisory "missing - grok brain unavailable"; fi
+PIBIN="${FLEETFLOW_PI_BIN:-pi}"
+# -f fallback matches ff-spawn: bash runs a .cmd shim but command -v rejects it
+if command -v "$PIBIN" >/dev/null || [ -f "$PIBIN" ]; then say "bin-pi" ok "pi $("$PIBIN" --version 2>/dev/null | head -1)"; else say "bin-pi" advisory "missing - pi brain unavailable (set FLEETFLOW_PI_BIN)"; fi
 
 FW="${FLEETFLOW_FLEET_WORKER:-$HOME/.claude/skills/fleet-worker/scripts/fleet-worker}"
 if [ -f "$FW" ]; then say "fleet-worker" ok "$FW"; else say "fleet-worker" advisory "not installed - glm brain unavailable"; fi
@@ -167,6 +170,38 @@ if command -v "$GROK" >/dev/null; then
     say "grok-auth" ok "GROK_DEPLOYMENT_KEY set"
   else
     say "grok-auth" unreachable "GROK_DEPLOYMENT_KEY not set (deployment key required)"; UNREACH=1
+  fi
+fi
+
+# pi lanes run with an ISOLATED PI_CODING_AGENT_DIR (ff-spawn), so the host's
+# ~/.pi/agent/auth.json never applies - the provider's API key env var is the
+# lane's ONLY auth. Probe key PRESENCE for the configured provider, not
+# validity (a real call would burn quota, same doctrine as grok-auth).
+if command -v "$PIBIN" >/dev/null || [ -f "$PIBIN" ]; then
+  PIPROV="${FLEETFLOW_PI_PROVIDER:-}"
+  if [ -z "$PIPROV" ]; then
+    say "pi-auth" advisory "FLEETFLOW_PI_PROVIDER not set - pi lanes would use pi's default provider with no key check"
+  else
+    case "$PIPROV" in
+      anthropic)  PIKEY="ANTHROPIC_API_KEY" ;;
+      openai)     PIKEY="OPENAI_API_KEY" ;;
+      google)     PIKEY="GEMINI_API_KEY" ;;
+      zai)        PIKEY="ZAI_API_KEY" ;;
+      groq)       PIKEY="GROQ_API_KEY" ;;
+      xai)        PIKEY="XAI_API_KEY" ;;
+      deepseek)   PIKEY="DEEPSEEK_API_KEY" ;;
+      mistral)    PIKEY="MISTRAL_API_KEY" ;;
+      openrouter) PIKEY="OPENROUTER_API_KEY" ;;
+      cerebras)   PIKEY="CEREBRAS_API_KEY" ;;
+      *)          PIKEY="" ;;
+    esac
+    if [ -z "$PIKEY" ]; then
+      say "pi-auth" advisory "no env-key mapping for provider '$PIPROV' - lane auth unverified"
+    elif [ -n "$(eval "printf '%s' \"\${$PIKEY:-}\"")" ]; then
+      say "pi-auth" ok "$PIKEY set (provider $PIPROV)"
+    else
+      say "pi-auth" unreachable "$PIKEY not set (provider $PIPROV; host auth.json does not reach lanes)"; UNREACH=1
+    fi
   fi
 fi
 

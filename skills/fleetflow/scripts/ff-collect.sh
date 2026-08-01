@@ -5,7 +5,10 @@
 # fable) gate on the JSON envelope's is_error; codex gates on a non-empty
 # last-message (plus JSON validity when a schema was used); grok gates on a
 # parseable envelope with non-empty .text (its envelope has no is_error - a
-# failed grok run exits nonzero, which ff-spawn already caught). The escape guard
+# failed grok run exits nonzero, which ff-spawn already caught). pi needs no
+# branch here AT ALL: ff-spawn distills its event stream into the same
+# claude-style {is_error,result,...} envelope, so pi lanes ride the default
+# gate below - keep it that way rather than adding a pi case. The escape guard
 # compares the main checkout's status against the baseline snapshotted at
 # first spawn — new entries mean a worker wrote outside its lane.
 # stdout: the worker's final text (data). stderr: chatter.

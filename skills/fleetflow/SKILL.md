@@ -25,6 +25,7 @@ workers**, where each worker gets its own env block — and therefore its own br
 | **GLM-5.2 / GLM-4.5-Air** | `claude -p` → z.ai endpoint | Claude Code tools, cheap brain (via `fleet-worker`) |
 | **Codex** (GPT-class) | `codex exec` | OpenAI's own agent harness — a genuinely different toolchain *and* model |
 | **Grok** (xAI grok-4.5) | `grok -p` | xAI's own agentic CLI — a different provider, model, *and* toolchain (like Codex); `GROK_DEPLOYMENT_KEY` auth |
+| **Pi** (wildcard: gemini/deepseek/zai/groq/…) | `pi -p` | earendil-works Pi — one harness fronting 15+ providers; `FLEETFLOW_PI_PROVIDER`/`_MODEL` pick the brain, provider API-key env auth ([contract §4](references/worker-contracts.md)) |
 | **Sonnet / Haiku** | `claude -p --model sonnet\|haiku` | Claude Code tools, host auth |
 | **Opus** | `claude -p --model opus` | reserve for verify/judge lanes |
 
@@ -59,7 +60,8 @@ with the Codex/Grok columns and the orchestrator rule:
 | **mechanical** (batch edits, verifier clones, backfills) | GLM-5.2, Haiku | proven cheap; gate catches misses |
 | **scout** (survey, inventory, locate) | Sonnet, GLM-5.2 | breadth over depth |
 | **build** (scoped features, refactors) | Sonnet, Codex, Grok | Codex/Grok = independent harnesses; good second implementations for judge panels |
-| **verify / judge** | Opus + one cross-provider dissenter (Codex, Grok, or GLM) | *never under-power a judge*; diversity beats redundancy |
+| **verify / judge** | Opus + one cross-provider dissenter (Codex, Grok, GLM, or Pi) | *never under-power a judge*; diversity beats redundancy |
+| **wildcard / third-opinion** (a provider none of the fixed brains cover) | Pi (`FLEETFLOW_PI_PROVIDER=gemini\|deepseek\|…`) | one integration, 15+ providers; no sandbox and no turn cap — worktree + stall detector are the bounds |
 | **synthesize / land decisions** | orchestrator (Fable > Opus) | needs the conversation's context |
 
 Two guardrails carried over verbatim from the native tool's doctrine: reach for
@@ -325,7 +327,7 @@ default the script-author follows, not an option — and real runs routinely hit
 | Script | Purpose |
 |---|---|
 | [scripts/ff-doctor.sh](scripts/ff-doctor.sh) | `--offline` structural preflight (+ which `windows.sandbox` mode codex lanes will get); `--live` probes GLM endpoint, Codex auth, Grok key, Anthropic models, the `windows.sandbox` key tripwire, and reports orchestrator tier (fable/opus) |
-| [scripts/ff-spawn.sh](scripts/ff-spawn.sh) | uniform spawner: worktree lane + guard preamble + journal + per-brain launch (GLM via fleet-worker, Codex via `codex exec`, Grok via `grok -p`, Anthropic via `claude -p`); pins `windows.sandbox=unelevated` for Codex on Windows |
+| [scripts/ff-spawn.sh](scripts/ff-spawn.sh) | uniform spawner: worktree lane + guard preamble + journal + per-brain launch (GLM via fleet-worker, Codex via `codex exec`, Grok via `grok -p`, Pi via `pi -p` stdin + event-stream distillation, Anthropic via `claude -p`); pins `windows.sandbox=unelevated` for Codex on Windows |
 | [scripts/ff-collect.sh](scripts/ff-collect.sh) | per-brain result gate; strips ```json fences before `--schema` validation; `--repair` respawns a `<id>-repair` lane on validation failure; `--check-main-clean` escape guard |
 | [scripts/ff-status.sh](scripts/ff-status.sh) | run status as JSON (lane state `running`/`stalled`/`done`/`failed`, elapsed, `last_activity_s` + `stalled` + `live_signal` stall detector, commits, tools, tokens, activity, manifest summary); `--watch N --out status.json` feeds the live monitor; `--exit-stalled` exits 14 so a watchdog can branch without parsing |
 | [scripts/ff-run.sh](scripts/ff-run.sh) | `resume --run NAME` replays every manifest packet through ff-spawn in order (unchanged = cached, changed/new = live); `status --run NAME` aliases ff-status |
