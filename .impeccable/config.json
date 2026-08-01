@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "flat-type-hierarchy",
+        "value": "*",
+        "files": [
+          "skills/fleetflow/assets/ff-monitor.html"
+        ],
+        "createdAt": "2026-08-01T01:03:58.091Z",
+        "reason": "Dense terminal-style monitor grid; hierarchy via weight/color/case, tight type scale is intentional"
+      }
+    ]
+  }
+}

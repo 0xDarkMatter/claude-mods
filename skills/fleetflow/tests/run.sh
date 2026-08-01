@@ -428,6 +428,21 @@ grep -q 'inflight' "$HERE/../assets/ff-monitor.html" \
   && ok "monitor: stalled lanes excluded from the finished tally" \
   || bad "monitor: stalled lanes counted as finished"
 
+# monitor: tethered header + sort/size controls
+grep -q 'position:sticky' "$HERE/../assets/ff-monitor.html" \
+  && ok "monitor: run header is tethered (sticky)" || bad "monitor: sticky header missing"
+grep -q '"ff.sort"' "$HERE/../assets/ff-monitor.html" \
+  && grep -q '|| "active"' "$HERE/../assets/ff-monitor.html" \
+  && ok "monitor: sort control defaults to active-first" \
+  || bad "monitor: active-first sort default missing"
+grep -q 'STATE_RANK' "$HERE/../assets/ff-monitor.html" \
+  && ok "monitor: active sort ranks running before stalled/failed/done" \
+  || bad "monitor: state-rank sort missing"
+grep -q 'data-size="s"' "$HERE/../assets/ff-monitor.html" \
+  && grep -q '"ff.size"' "$HERE/../assets/ff-monitor.html" \
+  && ok "monitor: card-size control present + persisted" \
+  || bad "monitor: card-size control missing"
+
 # --- ff-import.sh (feature B): native Workflow run import ------------------------
 # build a synthetic native wf_ dir: journal.jsonl (started/result keyed by
 # agentId) + two agent transcripts (one string content, one content-array).

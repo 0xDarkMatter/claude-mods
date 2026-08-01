@@ -336,7 +336,13 @@ default the script-author follows, not an option — and real runs routinely hit
 zero-dependency page reproducing the native /workflows progress surface — run
 header with square per-lane pips, a mono/technical agent grid, elapsed/tools/
 commits/tokens, and expandable per-agent detail (activity, last commit, error
-tail, artifact). Wire-up: copy it into the run dir as `index.html`, run
+tail, artifact). The run header is **tethered** (sticky) so the summary stays
+in view while the agent grid scrolls beneath it, and it carries two segmented
+controls (persisted in localStorage): **sort** — `active` (default: running,
+then stalled, then failed, then done, so in-flight lanes float to the top),
+`name`, `tokens` — applied within each phase group while the header pip strip
+keeps arrival order; and **card size** — `S` (dense grid, stat columns hidden),
+`M` (default), `L` (one full-width card per row). Wire-up: copy it into the run dir as `index.html`, run
 `ff-status --watch 3 --out <rundir>/status.json`, serve the run dir with any
 static server, open in a browser/preview panel. It polls `status.json` every
 2.5s. Live claude-brain lanes are introspected via their session transcript (GLM:
@@ -360,7 +366,12 @@ verdict the data doesn't support.
 grid (the Background-tasks panel analogue). In-chat, the orchestrator emits a
 compact *snapshot* card at phase boundaries (spawn, phase change, all-done) —
 chat-widget sandboxes cannot poll localhost, so the inline card is a
-moment-in-time render by design, re-emitted rather than self-updating.
+moment-in-time render by design, re-emitted rather than self-updating. A
+snapshot card follows the monitor's layout doctrine: the run summary (name,
+totals, per-lane strip) sits in a header pinned via `position: sticky` at the
+card's top, with agent/lane cards listed vertically beneath it ordered
+active-first — so when the card is tall enough to scroll in a side panel, the
+summary never scrolls out of view.
 
 All follow the Skill Resource Protocol: stdout is data, chatter on stderr,
 semantic exit codes (`0` ok, `2` usage, `3` cached/missing, `7` unreachable,
