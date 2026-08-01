@@ -35,6 +35,14 @@ EOF
 
 err() { echo "ff-run: $*" >&2; }
 
+# main() wrapper - parse-before-execute guard (incident 2026-08-01; see the
+# matching comment in ff-spawn.sh). bash parses script files incrementally
+# during execution, so a concurrent edit or skills sync rewriting this file
+# while a multi-minute resume loop is running kills the run with a phantom
+# syntax error. main() forces a full parse up front. Body deliberately NOT
+# re-indented. DO NOT unwrap this as a "simplification".
+main() {
+
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SPAWN="$HERE/ff-spawn.sh"
 
@@ -134,3 +142,7 @@ err "  summary: $RAN ran, $CACHED cached, $FAILED failed"
 printf '%s\n' "$RESULTS"
 [ "$ANY_FAIL" = 1 ] && exit 10
 exit 0
+
+}
+
+main "$@"

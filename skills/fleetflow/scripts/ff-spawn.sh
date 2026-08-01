@@ -57,6 +57,18 @@ EOF
 
 err() { echo "ff-spawn: $*" >&2; }
 
+# main() wrapper - parse-before-execute guard (incident 2026-08-01, run
+# atdw-sync, lane verify-cli-2). bash parses script files INCREMENTALLY during
+# execution: when this file was rewritten mid-run (a concurrent session edit +
+# a repo->global skills sync), the resuming parser read shifted bytes and a
+# 5-minute lane died with a phantom "line 457: syntax error" AFTER its worker
+# succeeded - in a 341-line file, with `bash -n` passing. Wrapping the whole
+# procedural body in main() forces bash to parse the entire file up front, so
+# a mid-run file replacement can no longer kill a running lane.
+# Body is deliberately NOT re-indented (keeps the diff/blame readable).
+# DO NOT unwrap this as a "simplification".
+main() {
+
 RUN="" ID="" BRAIN="" PROMPT_FILE="" WORKTREE=0 BASE="main" REPO=""
 MAX_TURNS=100 SCHEMA="" GUARD=1 FORCE=0 DRYRUN=0 PHASE="build" EFFORT=""
 while [ $# -gt 0 ]; do
@@ -339,3 +351,7 @@ jq -nc --arg k "$KEY" --arg id "$ID" --arg b "$BRAIN" --arg a "$ART" --argjson r
 echo "$ART"
 if [ "$RC" -ne 0 ]; then err "worker exited rc=$RC (see $ERRF)"; exit 10; fi
 exit 0
+
+}
+
+main "$@"
