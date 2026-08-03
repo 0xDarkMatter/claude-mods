@@ -242,7 +242,7 @@ Three further guards, all on the irreversible direction:
    on its own, and it unregisters the worktree instead of leaving a stale
    administrative entry behind.
 2. **Re-verify immediately before deleting.** Classification reads a session
-   index with a ~30s TTL; a session can wake between the table and the delete,
+   index with a long TTL (15 min); a session can wake between the table and the delete,
    so each SAFE row is re-checked with a fresh liveness read and a fresh dirty
    check, and skipped if either changed.
 3. **`--all-repos` can never remove.** It reports counts for sibling repos and

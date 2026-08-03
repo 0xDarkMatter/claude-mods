@@ -1174,7 +1174,7 @@ prune_remove_safe() {
     [[ -z "$p" ]] && continue
 
     # Re-verify immediately before deleting. Classification read a session index
-    # with a ~30s TTL; a session can wake between the table and the delete, and
+    # with a long TTL (15 min); a session can wake between the table and the delete, and
     # this is the one operation where being one poll behind destroys data.
     fresh=$(lane_owner "$br" --fresh)
     if [[ -n "$fresh" && "$(sfield "$fresh" 7)" == "1" ]]; then

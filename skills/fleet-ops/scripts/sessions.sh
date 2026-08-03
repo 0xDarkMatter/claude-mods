@@ -49,7 +49,9 @@ OUTPUT (TSV columns)
 ENVIRONMENT
   FLEET_SESSION_STORE       override the session-store directory
   FLEET_SESSION_LIVE_SECS   liveness window in seconds (default 600)
-  FLEET_SESSION_CACHE_TTL   index cache lifetime in seconds (default 30)
+  FLEET_SESSION_CACHE_TTL   index cache lifetime in seconds (default 900).
+                            Long by design — no gate reads cached liveness;
+                            they all use `owner --fresh`.
   FLEET_SESSION_NOCACHE     set to any value to force a fresh scan
 
 EXAMPLES
@@ -119,7 +121,15 @@ norm_path() {
 # status` and the land gate call this repeatedly; uncached, five calls blew a
 # 2-minute timeout during development. TTL is short because the only field that
 # decays is liveness.
-CACHE_TTL=${FLEET_SESSION_CACHE_TTL:-30}
+# TTL is long ON PURPOSE. Nothing that DECIDES anything reads a cached liveness
+# value: `session_land_gate` and `prune_remove_safe` both call `owner --fresh`,
+# which re-reads the single owning wrapper and bypasses this cache entirely.
+# Cached rows feed display only (status annotations, `fleet main`, prune
+# classification — and the SAFE bucket is re-verified fresh before deletion).
+# A short TTL therefore bought no correctness and cost ~41s: a cold scan walks
+# the whole store, so at TTL=30 nearly every `fleet status` paid for one
+# (measured 2026-08-03: 47.1s cold vs 6.0s warm on an 11-worktree repo).
+CACHE_TTL=${FLEET_SESSION_CACHE_TTL:-900}
 cache_file() {
     local base="${TMPDIR:-/tmp}"
     printf '%s/fleet-sessions-%s.tsv' "${base%/}" "${UID:-$(id -u 2>/dev/null || echo 0)}"
