@@ -34,6 +34,12 @@ FORBIDDEN_PATTERN="TODO_SCRUB|XXX[^a-z]|FIXME_BEFORE_LAND"
 BASE_BRANCH="main"
 POLL_INTERVAL=5
 ICONS="${icons:-}"   # env seed; config `icons=ascii` overrides below
+# Session awareness (see scripts/sessions.sh). Enrichment only: when the session
+# store is unreadable — a terminal-only machine, no jq, a non-Desktop host —
+# every check below degrades to "no info" and landing behaves exactly as it did
+# before this existed. It must never become a hard dependency.
+SESSION_CHECK="on"
+SESSION_LIVE_SECS=600
 
 # === CONFIG ===================================================================
 # The config is PARSED, never `source`d. Two reasons, both learned the hard way
@@ -113,6 +119,15 @@ load_config() {
       forbidden_pattern) FORBIDDEN_PATTERN="$val" ;;
       base_branch)       BASE_BRANCH="$val" ;;
       icons)             ICONS="$val" ;;
+      session_check)     SESSION_CHECK="$val" ;;
+      session_live_secs)
+        if [[ "$val" =~ ^[0-9]+$ ]]; then
+          SESSION_LIVE_SECS="$val"
+        else
+          config_warn "$file:$lineno — session_live_secs must be an integer, got '$val' (keeping $SESSION_LIVE_SECS)"
+          continue
+        fi
+        ;;
       poll_interval)
         if [[ "$val" =~ ^[0-9]+$ ]]; then
           POLL_INTERVAL="$val"
@@ -206,6 +221,13 @@ ensure_fleet_dir() {
   mkdir -p "$LANES_DIR"
   [[ -f "$FLEET_DIR/signal.sh" ]] || cp "$SCRIPT_DIR/signal.sh" "$FLEET_DIR/signal.sh"
   chmod +x "$FLEET_DIR/signal.sh" 2>/dev/null || true
+  # sessions.sh ships alongside signal.sh so a lane session — which only ever
+  # sees .claude/fleet/, never the installed skill dir — can resolve MAIN's
+  # address when it signals READY. Refreshed every time so a skill update
+  # propagates (signal.sh is deliberately NOT overwritten: a repo may have
+  # customised it).
+  cp -f "$SCRIPT_DIR/sessions.sh" "$FLEET_DIR/sessions.sh" 2>/dev/null || true
+  chmod +x "$FLEET_DIR/sessions.sh" 2>/dev/null || true
   # Auto-ignore fleet-ops runtime state in git so it doesn't show as "dirty"
   # or get committed. Two paths:
   #   .claude/fleet/      — lanes/, daemon.pid, activity.log, signal.sh, config
@@ -413,6 +435,7 @@ fleet_view_panel() {
   local total active
   local state_buckets state_counts
   __fleet_bucket
+  load_session_index
   local daemon_state
   daemon_state=$(__fleet_daemon_state)
 
@@ -464,7 +487,13 @@ fleet_view_panel() {
       [[ "$state" == "CONFLICT" || "$state" == "FAILED" ]] && head_kind="CONFLICT"
       rail=$(term_rail "$ahead" "$head_kind")
 
-      term_leaf_line "$c_conn" "$branch" "$rail" "${meta:-}" "$age"
+      local own; own=$(owner_annotation "$branch")
+      local shown_meta="${meta:-}"
+      if [[ -n "$own" ]]; then
+        # ASCII separator on purpose — this row must survive TERM_ASCII=1.
+        [[ -n "$shown_meta" ]] && shown_meta="$shown_meta - $own" || shown_meta="$own"
+      fi
+      term_leaf_line "$c_conn" "$branch" "$rail" "$shown_meta" "$age"
       c_idx=$((c_idx+1))
     done <<< "$lines"
     term_panel_vert
@@ -482,6 +511,7 @@ fleet_view_verbose() {
   local total active
   local state_buckets state_counts
   __fleet_bucket
+  load_session_index
   local daemon_state
   daemon_state=$(__fleet_daemon_state)
   local now=$(date +%s)
@@ -558,6 +588,13 @@ fleet_view_verbose() {
         "$(term_color dim "$TERM_TREE_VERT")" \
         "$(term_color dim "$meta")"
     fi
+    local own_v; own_v=$(owner_annotation "$branch")
+    if [[ -n "$own_v" ]]; then
+      printf '%s   %s owner:     %s\n' \
+        "$(term_color dim "$TERM_TREE_VERT")" \
+        "$(term_color dim "$TERM_TREE_VERT")" \
+        "$own_v"
+    fi
     term_panel_vert
   done
 
@@ -580,6 +617,59 @@ cmd_fleet() {
   esac
 }
 
+# MAIN = the one session per repo that coordinates: it lands, deploys, and
+# triages. Everyone else is a lane. This is not a new idea — worktree-boundaries
+# doctrine already says the base checkout is the integration tree and must not
+# host a writing session — `fleet main` just makes the role addressable, so a
+# lane can say "I'm ready, come land me" instead of writing a file and hoping.
+#
+# Resolution is by cwd (the session sitting in the repo root IS the coordinator),
+# with an explicit pin in .claude/fleet/main to override when the heuristic is
+# wrong or several sessions share the root.
+cmd_main() {
+  local sub=${1:-show}
+  local pin="$FLEET_DIR/main"
+  case "$sub" in
+    show|"")
+      local row; row=$(main_session_row)
+      if [[ -z "$row" ]]; then
+        echo "no MAIN session resolved for this repo" >&2
+        if ! session_enabled; then
+          echo "  (session awareness is off or sessions.sh is missing)" >&2
+        else
+          echo "  no session's cwd matches $REPO_ROOT — open one there, or pin with:" >&2
+          echo "  fleet main claim <sessionId>" >&2
+        fi
+        return 3
+      fi
+      # stdout is data: sessionId first so `fleet main show | cut -f1` addresses it
+      printf '%s\t%s\t%s\t%s\n' \
+        "$(sfield "$row" 2)" "$(sfield "$row" 3)" \
+        "$([[ "$(sfield "$row" 7)" == "1" ]] && echo live || echo idle)" \
+        "$(sfield "$row" 5)"
+      [[ -f "$pin" ]] && echo "(pinned via $pin)" >&2
+      return 0
+      ;;
+    claim)
+      ensure_fleet_dir
+      local id=${2:-}
+      if [[ -z "$id" ]]; then
+        local row; row=$(main_session_row)
+        id=$(sfield "$row" 2)
+        [[ -z "$id" ]] && { echo "fleet main claim: could not auto-resolve a session; pass a sessionId" >&2; return 3; }
+      fi
+      printf '# MAIN coordinator session for this repo (fleet main release to clear)\n%s\n' "$id" > "$pin"
+      echo "MAIN pinned: $id" >&2
+      printf '%s\n' "$id"
+      ;;
+    release)
+      if [[ -f "$pin" ]]; then rm -f "$pin"; echo "MAIN pin cleared" >&2
+      else echo "no MAIN pin to clear" >&2; fi
+      ;;
+    *) echo "usage: fleet main [show|claim [<sessionId>]|release]" >&2; return 2 ;;
+  esac
+}
+
 cmd_config() {
   # Print the RESOLVED config — the observability that was missing while every
   # documented key was a silent no-op. stdout is data only (key=value, parseable);
@@ -596,8 +686,21 @@ cmd_config() {
   echo "base_branch=$BASE_BRANCH"
   echo "poll_interval=$POLL_INTERVAL"
   echo "icons=$ICONS"
+  echo "session_check=$SESSION_CHECK"
+  echo "session_live_secs=$SESSION_LIVE_SECS"
   if [[ -z "$TEST_CMD" ]]; then
     echo "WARNING: no test_cmd — 'fleet land' will not run a test gate" >&2
+  fi
+  # Same observability lesson as test_cmd: say plainly whether the gate is armed,
+  # rather than letting an unavailable store look like a passing check.
+  if session_enabled; then
+    if [[ -n "$(main_session_row)" ]]; then
+      echo "# session awareness: ON (store readable)" >&2
+    else
+      echo "# session awareness: ON but no sessions resolved — store missing, jq missing, or terminal-only host" >&2
+    fi
+  else
+    echo "# session awareness: OFF — 'fleet land' will not check for live lane owners" >&2
   fi
   return 0
 }
@@ -615,8 +718,108 @@ cmd_scrub_check() {
   echo "OK: $branch (no forbidden patterns)"
 }
 
+# === SESSION AWARENESS ========================================================
+# Answers "who owns this lane, and are they still writing?" by reading the
+# Claude Desktop session store off disk (scripts/sessions.sh explains why disk
+# and not the ccd_session_mgmt MCP tools — those exist only inside Desktop and
+# cannot be called from a script at all).
+#
+# EVERY function here is best-effort. sessions.sh exits 3 when the store or jq
+# is missing, and fleet.sh runs under `set -e`, so each call MUST be guarded
+# with `|| true`. An unguarded call would turn "this machine has no Desktop
+# store" into "fleet land crashes".
+
+SESSIONS_SH="$SCRIPT_DIR/sessions.sh"
+
+session_enabled() {
+  [[ "$(printf '%s' "$SESSION_CHECK" | tr '[:upper:]' '[:lower:]')" != "off" ]] \
+    && [[ -f "$SESSIONS_SH" ]]
+}
+
+# TSV row for the session owning $1, or empty. $2=--fresh forces an
+# authoritative liveness read (used by the land gate).
+lane_owner() {
+  session_enabled || return 0
+  local branch=$1 fresh=${2:-}
+  FLEET_SESSION_LIVE_SECS="$SESSION_LIVE_SECS" \
+    bash "$SESSIONS_SH" owner $fresh "$branch" 2>/dev/null || true
+}
+
+# TSV row for this repo's MAIN/coordinator session, or empty.
+main_session_row() {
+  session_enabled || return 0
+  FLEET_SESSION_LIVE_SECS="$SESSION_LIVE_SECS" \
+    bash "$SESSIONS_SH" main 2>/dev/null || true
+}
+
+# Column accessors: 1=branch 2=sessionId 3=title 4=lastActivityMs 5=cwd
+#                   6=archived 7=live
+sfield() { printf '%s' "$1" | cut -f"$2"; }
+
+# Status views resolve an owner per lane. Doing that with one sessions.sh call
+# each would re-pay process spawn N times, so the whole index is pulled once per
+# fleet.sh invocation and queried in-memory.
+SESSION_INDEX_CACHE=""
+SESSION_INDEX_LOADED=0
+load_session_index() {
+  session_enabled || return 0
+  [[ $SESSION_INDEX_LOADED -eq 1 ]] && return 0
+  SESSION_INDEX_LOADED=1
+  SESSION_INDEX_CACHE=$(FLEET_SESSION_LIVE_SECS="$SESSION_LIVE_SECS" \
+    bash "$SESSIONS_SH" index 2>/dev/null || true)
+  return 0
+}
+
+# "title<TAB>live" for the newest session owning $1, or empty.
+owner_brief() {
+  [[ -z "$SESSION_INDEX_CACHE" ]] && return 0
+  printf '%s\n' "$SESSION_INDEX_CACHE" \
+    | awk -F'\t' -v w="$1" '$1 == w { print $4"\t"$3"\t"$7 }' \
+    | sort -k1,1nr | head -n1 | cut -f2,3
+}
+
+# One-line owner annotation for a lane row: "· owned by 'X' (live)" or empty.
+owner_annotation() {
+  local b=$1 brief title live
+  brief=$(owner_brief "$b")
+  [[ -z "$brief" ]] && return 0
+  title=$(printf '%s' "$brief" | cut -f1)
+  live=$(printf '%s' "$brief" | cut -f2)
+  [[ ${#title} -gt 28 ]] && title="${title:0:25}..."
+  # Deliberately ASCII: this string lands inside panel rows that must survive
+  # FLEET_ASCII=1 and non-UTF-8 Windows consoles (SKILL.md "Compatibility").
+  if [[ "$live" == "1" ]]; then
+    printf '%s' "$(term_color yellow "[live]") $title"
+  else
+    printf '%s' "$(term_color dim "[idle]") $title"
+  fi
+}
+
+# The gate itself. Refuses to land a lane whose owning session is still live —
+# landing under a session that is mid-turn means merging a branch it may still
+# be committing to, and then rebasing its worktree out from under it.
+# Returns 0 = safe to land, 1 = refuse.
+session_land_gate() {
+  local branch=$1
+  session_enabled || return 0
+  local row; row=$(lane_owner "$branch" --fresh)
+  [[ -z "$row" ]] && return 0            # unknown owner → no opinion → allow
+  local live; live=$(sfield "$row" 7)
+  [[ "$live" != "1" ]] && return 0       # idle → allow
+  local title; title=$(sfield "$row" 3)
+  local id;    id=$(sfield "$row" 2)
+  log "REFUSE LAND: $branch is owned by a LIVE session — '$title' ($id)"
+  log "  that session was active within ${SESSION_LIVE_SECS}s and may still be committing."
+  log "  wait for it to finish, or override with: session_check=off (or FLEET_SKIP_SESSION_CHECK=1)"
+  return 1
+}
+# === END SESSION AWARENESS ====================================================
+
 land_one() {
   local branch=$1
+  if [[ -z "${FLEET_SKIP_SESSION_CHECK:-}" ]]; then
+    session_land_gate "$branch" || { set_lane_state "$branch" "CONFLICT" "owning session still live"; return 1; }
+  fi
   local hits
   hits=$(scrub_diff "$branch")
   if [[ -n "$hits" ]]; then
@@ -877,6 +1080,9 @@ case "${1:-}" in
   revert)       shift; cmd_revert "$@" ;;
   scrub-check)  shift; cmd_scrub_check "$@" ;;
   config)       shift; cmd_config "$@" ;;
+  main)         shift; cmd_main "$@" ;;
+  owner)        shift; [[ -z "${1:-}" ]] && { echo "usage: fleet owner <branch>" >&2; exit 1; }
+                lane_owner "$1" --fresh ;;
   ""|-h|--help)
     cat <<EOF
 fleet-ops — landing discipline for parallel work (queue + test gate)
@@ -893,6 +1099,10 @@ Usage:
   fleet revert <branch>       Revert merge commit on $BASE_BRANCH
   fleet scrub-check <branch>  Dry-run forbidden-pattern check
   fleet config                Print resolved config (is the test gate actually on?)
+  fleet main [show|claim|release]
+                              The coordinator session for this repo (lands,
+                              deploys, triages). Lanes address it to hand off.
+  fleet owner <branch>        Which session owns a lane, and is it still live?
 
 Config (optional): $CONFIG  — key=value per line, values need no quoting
 EOF

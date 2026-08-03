@@ -331,5 +331,117 @@ bash "$FLEET" track nogate-lane >/dev/null 2>&1
 land_out="$(bash "$FLEET" land nogate-lane 2>&1)"
 case "$land_out" in *"no test_cmd set in"*) ok "absent test_cmd names the config path";; *) no "absent test_cmd message unclear";; esac
 
+# -- session awareness: the live-owner land gate -------------------------------
+# Guards the hazard that motivated it: landing a lane while the session that
+# owns it is still writing. The store is faked (FLEET_SESSION_STORE) so the
+# suite stays offline and never depends on the developer's real Desktop state.
+echo "-- session awareness (live-owner gate) --"
+if ! command -v jq >/dev/null 2>&1; then
+  echo "  SKIP  session-awareness tests (jq not installed)"
+else
+SESSIONS="$SKILL/scripts/sessions.sh"
+export FLEET_SESSION_NOCACHE=1     # the index cache would leak between cases
+
+bash "$SESSIONS" --help >/dev/null 2>&1; ee "sessions.sh --help" 0 $?
+
+# Unavailable store must be advisory (exit 3, empty stdout), never a hard error.
+so="$(FLEET_SESSION_STORE=/nonexistent-store bash "$SESSIONS" index 2>/dev/null)"; sx=$?
+ee "absent store exits 3" 3 $sx
+[ -z "$so" ] && ok "absent store emits no stdout" || no "absent store wrote to stdout"
+
+SREPO="$SB/srepo"; mkdir -p "$SREPO"
+git -C "$SREPO" init -q -b main
+git -C "$SREPO" config user.email t@t; git -C "$SREPO" config user.name t
+git -C "$SREPO" config core.autocrlf false
+echo base > "$SREPO/f"; git -C "$SREPO" add -A; git -C "$SREPO" commit -qm init
+
+STORE="$SB/store/acct/ws"; mkdir -p "$STORE"
+export FLEET_SESSION_STORE="$SB/store"
+# Desktop records NATIVE paths (X:\repo), and cmd_main normalises git's toplevel
+# the same way before comparing. The fixture must therefore store the path in
+# that same native form, or the MAIN cwd match can never fire on Windows.
+SREPO_NATIVE="$(cygpath -m "$SREPO" 2>/dev/null || printf '%s' "$SREPO")"
+# Wrapper shape mirrors Desktop's: writtenBranches is what actually names a
+# lane, and lastActivityAt (epoch ms) is what liveness is computed from.
+mk_session(){ # id, title, cwd, ageSecs, branch, writtenBranch
+  local ms=$(( ($(date +%s) - $4) * 1000 ))
+  cat > "$STORE/$1.json" <<JSON
+{"sessionId":"$1","title":"$2","cwd":"$3","lastActivityAt":$ms,
+ "isArchived":false,"branch":"$5","writtenBranches":["$6"]}
+JSON
+}
+
+mk_lane_in(){ # repo, branch, file
+  local wt="$SB/swt-$2"
+  git -C "$1" branch "$2" main
+  git -C "$1" worktree add -q "$wt" "$2"
+  echo "$2" > "$wt/$3"; git -C "$wt" add -A
+  git -C "$wt" -c user.email=w@t -c user.name=w commit -qm "work $2"
+}
+
+cd "$SREPO"
+
+# A lane whose owner is LIVE (active 5s ago).
+mk_lane_in "$SREPO" hot-lane h.txt
+mk_session local_hot "Hot session" "$SREPO/wt" 5 claude/hot hot-lane
+row="$(bash "$SESSIONS" owner hot-lane 2>/dev/null)"
+case "$row" in *local_hot*) ok "owner resolves via writtenBranches";; *) no "owner did not resolve";; esac
+[ "$(printf '%s' "$row" | cut -f7)" = "1" ] && ok "recent session reads live" || no "recent session not live"
+
+bash "$FLEET" track hot-lane >/dev/null 2>&1
+bash "$FLEET" land hot-lane >/dev/null 2>&1; lx=$?
+[ "$lx" -ne 0 ] && ok "land REFUSED while owner is live (exit $lx)" || no "land proceeded despite live owner"
+case "$(head -n1 "$SREPO/.claude/fleet/lanes/hot-lane" 2>/dev/null)" in
+  CONFLICT) ok "refused lane marked CONFLICT";; *) no "refused lane not marked CONFLICT";; esac
+case "$(git -C "$SREPO" log --oneline main)" in
+  *"merge: hot-lane"*) no "live-owner lane was merged anyway";; *) ok "no merge commit created";; esac
+
+# Explicit override lands it.
+FLEET_SKIP_SESSION_CHECK=1 bash "$FLEET" land hot-lane >/dev/null 2>&1
+ee "override lands despite live owner" 0 $?
+
+# A lane whose owner went idle (2h ago) lands normally.
+mk_lane_in "$SREPO" cold-lane c2.txt
+mk_session local_cold "Cold session" "$SREPO/wt2" 7200 claude/cold cold-lane
+[ "$(bash "$SESSIONS" owner cold-lane 2>/dev/null | cut -f7)" = "0" ] \
+  && ok "stale session reads idle" || no "stale session still reads live"
+bash "$FLEET" track cold-lane >/dev/null 2>&1
+bash "$FLEET" land cold-lane >/dev/null 2>&1; ee "idle owner does not block landing" 0 $?
+
+# MAIN resolves to the session sitting in the repo ROOT, not a worktree.
+mk_session local_boss "Coordinator" "$SREPO_NATIVE" 30 main main
+mrow="$(bash "$FLEET" main show 2>/dev/null)"
+case "$mrow" in *local_boss*) ok "fleet main resolves the repo-root session";; *) no "fleet main did not resolve ($mrow)";; esac
+bash "$FLEET" main claim local_hot >/dev/null 2>&1
+case "$(bash "$FLEET" main show 2>/dev/null)" in
+  *local_hot*) ok "explicit pin overrides the cwd heuristic";; *) no "pin did not override";; esac
+bash "$FLEET" main release >/dev/null 2>&1
+case "$(bash "$FLEET" main show 2>/dev/null)" in
+  *local_boss*) ok "release restores heuristic resolution";; *) no "release did not restore heuristic";; esac
+
+# Status annotates lanes with their owner's liveness, in ASCII.
+mk_lane_in "$SREPO" shown-lane s.txt
+mk_session local_shown "Shown session" "$SREPO/wt3" 5 claude/shown shown-lane
+bash "$FLEET" track shown-lane >/dev/null 2>&1
+sv="$(bash "$FLEET" status 2>&1)"
+case "$sv" in *"[live]"*) ok "status annotates a live owner";; *) no "status missing [live] annotation";; esac
+# Whole panel, not just the annotated row. This was row-scoped because fleet's
+# summary line and footer authored a literal U+00B7 that survived TERM_ASCII=1;
+# those now interpolate $TERM_DOT, so the entire session-aware panel — chrome,
+# summary, footer and owner annotations alike — must come out ASCII-pure.
+ascii_pure "session-aware status panel" "$sv"
+
+# Session awareness off = the pre-existing behaviour, exactly.
+printf 'session_check=off\n' > "$SREPO/.claude/fleet/config"
+mk_lane_in "$SREPO" offcheck-lane o.txt
+mk_session local_off "Off session" "$SREPO/wt4" 5 claude/off offcheck-lane
+bash "$FLEET" track offcheck-lane >/dev/null 2>&1
+bash "$FLEET" land offcheck-lane >/dev/null 2>&1; ee "session_check=off restores old behaviour" 0 $?
+rm -f "$SREPO/.claude/fleet/config"
+
+unset FLEET_SESSION_STORE FLEET_SESSION_NOCACHE
+cd "$REPO"
+fi
+
 echo "=== $PASS passed, $FAIL failed ==="
 [ "$FAIL" -eq 0 ] || exit 1

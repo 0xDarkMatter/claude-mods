@@ -68,6 +68,46 @@ log_summary_verdict() {
   return 2
 }
 
+# === HANDOFF TO MAIN ==========================================================
+# Writing a lane file tells the QUEUE. It does not tell the human, and it does
+# not tell the coordinator session — which may be idle in another window with no
+# reason to poll. This prints the address of the MAIN session plus the exact
+# message to deliver, so the lane's agent can hand off explicitly.
+#
+# The script deliberately does NOT send anything. Delivery differs per surface:
+#   - Desktop Claude  -> mcp__ccd_session_mgmt__send_message (an MCP tool; a
+#                        shell script cannot invoke it, and it prompts the user
+#                        by design). The AGENT sends it.
+#   - anywhere else   -> pigeon, which is a real CLI and works in a terminal and
+#                        for non-Claude harnesses.
+# Resolving the address is the part a script can do well; sending is not.
+announce_main() {
+  local state=$1 detail=${2:-}
+  local sessions="$MAIN_REPO_ROOT/.claude/fleet/sessions.sh"
+  [[ -f "$sessions" ]] || return 0
+  local row; row=$(bash "$sessions" main 2>/dev/null) || return 0
+  [[ -z "$row" ]] && return 0
+
+  local id title live
+  id=$(printf '%s' "$row" | cut -f2)
+  title=$(printf '%s' "$row" | cut -f3)
+  live=$(printf '%s' "$row" | cut -f7)
+
+  {
+    echo
+    echo "handoff -> MAIN: '$title' ($id)$([[ "$live" == "1" ]] && echo ' [live]' || echo ' [idle]')"
+    echo "  If you are a Claude Desktop session, deliver this now with"
+    echo "  mcp__ccd_session_mgmt__send_message to session_id $id:"
+    echo
+    echo "    lane $BRANCH is $state${detail:+ ($detail)}. Requesting land via fleet-ops."
+    echo
+    echo "  Not on Desktop (terminal, headless, or a non-Claude harness)?"
+    echo "  Use the portable bus instead:"
+    echo "    pigeon send $(basename "$MAIN_REPO_ROOT") \"lane $BRANCH $state\" \"Requesting land.\""
+  } >&2
+}
+# === END HANDOFF ==============================================================
+
 STATE=${1:-}
 case "$STATE" in
   READY)
@@ -116,11 +156,15 @@ case "$STATE" in
     fi
     { echo "READY"; [[ -n "$LOG" ]] && echo "log=$LOG"; } > "$LANE_FILE"
     echo "signal: $BRANCH → READY"
+    announce_main READY "tests green"
     ;;
   CONFLICT)
     REASON=${2:-"unspecified"}
     { echo "CONFLICT"; echo "reason=$REASON"; } > "$LANE_FILE"
     echo "signal: $BRANCH → CONFLICT ($REASON)"
+    # A CONFLICT is exactly the case where silence costs most: the lane cannot
+    # land itself and MAIN is the only session that can triage it.
+    announce_main CONFLICT "$REASON"
     ;;
   RUNNING)
     echo "RUNNING" > "$LANE_FILE"

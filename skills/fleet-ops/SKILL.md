@@ -103,6 +103,81 @@ bash .claude/fleet/signal.sh CONFLICT "<reason>"
 
 The `<exit-code>` (the test command's own `$?` / `${PIPESTATUS[0]}`) is the authoritative verdict — pass it whenever you have it. Without it, `signal.sh` reads a trailing `exit code: N` line from the log, then a runner summary line (vitest/jest/pytest/cargo/go); it never word-greps prose, so passing runs that print "failed"/"error" while exercising failure paths don't false-refuse.
 
+## Session awareness — MAIN, lane owners, and the live-owner gate
+
+Lane state files say *what* a lane is. They never say *who* is driving it. Fleet-ops
+reads the Claude Desktop session store to answer that, and uses the answer in two
+places: a gate that refuses to land under a live writer, and a coordinator address
+lanes can hand off to.
+
+### MAIN — one coordinator per repo
+
+**MAIN is the session whose cwd is the repo root.** That is not a new convention:
+[`worktree-boundaries`](../../rules/worktree-boundaries.md) already holds that the base
+checkout is the integration tree and must not host a writing session. `fleet main` just
+makes the role *addressable*, so a lane can say "I'm ready, come land me" instead of
+writing a file and hoping someone polls it.
+
+```
+fleet main                  Show the coordinator (sessionId, title, live|idle, cwd)
+fleet main claim [<id>]     Pin explicitly — for when several sessions share the root
+fleet main release          Clear the pin, fall back to the cwd heuristic
+fleet owner <branch>        Who owns this lane, and are they still writing?
+```
+
+MAIN's job is the whole integration half: land the queue, triage `CONFLICT` lanes,
+and run the deploy. Lanes build and signal; MAIN integrates. Note that deploying is
+maintainer-gated regardless — see [`deploy-gating`](../../rules/deploy-gating.md); MAIN
+being "the one that deploys" describes *which session prepares it*, never an
+authorisation to ship unattended.
+
+### The live-owner gate
+
+`fleet land` refuses a lane whose owning session was active within
+`session_live_secs` (default 600). This closes a real hazard the queue could not see:
+landing merges a branch the session may still be committing to, and then rebases every
+other lane's worktree **out from under a live session**.
+
+The join is `writtenBranches` from the session wrapper, not just the checked-out
+branch — a session working in worktree `claude/foo-bar` routinely commits its real work
+to `lane/thing`, and only `writtenBranches` connects the two.
+
+Override with `session_check=off` in config, or `FLEET_SKIP_SESSION_CHECK=1` for one
+run. `fleet config` states plainly whether the gate is armed — the same observability
+lesson as `test_cmd`.
+
+### Where each channel works (verified 2026-08-03)
+
+| Channel | Desktop | Terminal / headless | Non-Claude worker (Codex, GLM, Grok) |
+|---|---|---|---|
+| Lane state files (`signal.sh`) | ✅ | ✅ | ✅ |
+| Session store on disk (`sessions.sh`) | ✅ | ✅ (store is machine-local, not app-bound) | ✅ |
+| `ccd_session_mgmt` MCP tools | ✅ | ❌ **absent entirely** | ❌ |
+| `pigeon` | ✅ | ✅ | ✅ |
+
+**`ccd_session_mgmt` is Desktop-only, and this is not a configuration matter.** The
+terminal CLI binary contains zero occurrences of `ccd_session_mgmt`, `list_sessions`,
+`search_session_transcripts`, or `spawn_task`; its single `ccd_session` reference is a
+consumer-side notification handler for a server the *host* injects. Desktop's
+`app.asar` carries all of them. `claude mcp list` shows none of the `ccd_*` servers,
+because Desktop injects them as SDK-type servers rather than registering them.
+
+Two consequences that shape everything above:
+
+1. **A script can never call these tools.** They are MCP tools, so only the agent can
+   invoke them. `sessions.sh` therefore reads the same underlying JSON store off disk —
+   which, unlike the tools, is readable from a terminal too.
+2. **The read tools are ungated; the write tools prompt.** `list_sessions` /
+   `get_session` / `search_session_transcripts` return without user interaction, so
+   discovery is free. `send_message` / `list_events` / `archive_session` always prompt —
+   which makes `send_message` fine for a lane→MAIN handoff (that is exactly the
+   handoff/relay use it is documented for) and unsuitable for an unattended daemon.
+
+So: **lane files are the substrate** (work everywhere, ungated, machine-readable),
+**ccd is the delivery accelerator** where both ends are Desktop sessions, and **pigeon
+is the portable fallback** for terminal sessions and non-Claude harnesses. `signal.sh`
+prints the right one for your surface after every `READY` and `CONFLICT`.
+
 ## First-class user interaction (HARD RULE)
 
 When this skill surfaces a decision point, **always use the `AskUserQuestion` tool**. Plain markdown numbered lists are not acceptable for these branches.
@@ -111,6 +186,7 @@ When this skill surfaces a decision point, **always use the `AskUserQuestion` to
 |---------|----------|------------------------------|
 | Multiple parallel-work requests, no lanes yet | Spawn natively or manual lanes? | Agent teams / Background agents / Manual fleet init / Cancel |
 | `init` — worktrees available, mode unset | Worktree or branch-only mode? | Worktrees / Branches only / Cancel |
+| Land refused — owning session live | `<name>`'s session is still writing | Wait and retry / Message that session / Override and land |
 | Lane → `CONFLICT` (rebase fail) | Lane `<name>` has rebase conflict | Resolve in lane / Skip & continue / Revert lane / Untrack |
 | Lane → `FAILED` (post-merge tests red) | Tests broke after `<name>` merged | Auto-revert / Investigate first / Accept failure |
 | Pre-land scrub hits | Forbidden patterns in `<name>` diff | Block landing / Override (note reason) / Open to edit |
@@ -177,6 +253,8 @@ forbidden_pattern=TODO_SCRUB|XXX
 base_branch=main
 poll_interval=5
 icons=unicode                        # unicode | ascii (same as FLEET_ASCII=1)
+session_check=on                     # on | off — refuse to land under a live owner
+session_live_secs=600                # how recently active counts as "still writing"
 ```
 
 Zero-config works for the common case.
@@ -232,5 +310,6 @@ Shipped since first release:
 
 ## Scripts
 
-- `scripts/fleet.sh` — main CLI (init, track, start/stop, status, land, revert, scrub-check, config)
-- `scripts/signal.sh` — branch-aware signaler (deployed to `.claude/fleet/signal.sh`)
+- `scripts/fleet.sh` — main CLI (init, track, start/stop, status, land, revert, scrub-check, config, main, owner)
+- `scripts/signal.sh` — branch-aware signaler (deployed to `.claude/fleet/signal.sh`); prints the MAIN handoff after READY/CONFLICT
+- `scripts/sessions.sh` — branch → owning-session resolver, read off the Desktop session store on disk (deployed alongside signal.sh so lane sessions can resolve MAIN). Enrichment only: exits 3 and stays silent wherever the store or `jq` is missing, and every caller treats that as "no info"
