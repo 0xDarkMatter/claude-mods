@@ -53,6 +53,8 @@ fleet land --all [--running]  Batch-land all READY lanes oldest-first (--running
 fleet revert <branch>       Revert merge commit on main
 fleet scrub-check <branch>  Dry-run forbidden-pattern check
 fleet config                Print the RESOLVED config — check the test gate is on
+fleet prune [--remove]      Classify finished lane worktrees; DRY RUN by default
+fleet prune --all-repos     Sibling-repo backlog counts (report-only, never removes)
 ```
 
 ## Entry paths
@@ -64,7 +66,7 @@ Work to be spawned manually                → fleet init <names...> (creates br
 N > 1 on one shared working tree           → REFUSE. Worktrees or separate clones first.
 ```
 
-**Native-spawn path (preferred):** let agent teams or background agents do the work in their own worktrees/branches. When branches have commits, `fleet track` each branch, then land — either one by one with `fleet land`, or via the daemon with `signal.sh READY` gates. Fleet-ops merges *branches*; it never deletes or relocates a worktree that a native session owns (worktree cleanup belongs to agent view / `claude rm`).
+**Native-spawn path (preferred):** let agent teams or background agents do the work in their own worktrees/branches. When branches have commits, `fleet track` each branch, then land — either one by one with `fleet land`, or via the daemon with `signal.sh READY` gates. Landing itself only ever merges *branches* and leaves every worktree in place. Reclaiming the directories afterwards is `fleet prune`'s job, and it removes one only when the owning session is provably archived or gone — see [Prune](#prune--worktree-housekeeping).
 
 **Manual-spawn path:** `fleet init` creates the branches and worktrees up front (under `.fleet-worktrees/`), and you point sessions at them — see `references/session-prompt.md` for the lane brief to hand each session.
 
@@ -178,6 +180,83 @@ So: **lane files are the substrate** (work everywhere, ungated, machine-readable
 is the portable fallback** for terminal sessions and non-Claude harnesses. `signal.sh`
 prints the right one for your surface after every `READY` and `CONFLICT`.
 
+## Prune — worktree housekeeping
+
+Landing a lane retires the *branch*. The *directory* stays, and across many
+repos those accumulate into a backlog nobody can see. `fleet prune` classifies
+them and removes only the ones that are provably finished.
+
+```
+fleet prune                  Classify and print. Changes NOTHING. (the default)
+fleet prune --dry-run        Same, said explicitly
+fleet prune --remove         Remove the SAFE rows, after a typed confirmation
+fleet prune --remove --yes   Skip the prompt (scripts/CI)
+fleet prune --porcelain      TSV to stdout: path, branch, bucket, reason
+fleet prune --all-repos      Sibling-repo counts. Report-only, always
+```
+
+**Dry run is the default, and that is deliberate.** Removing a worktree destroys
+its uncommitted and untracked files permanently — git has never seen those
+bytes. Committed lane work is different: it lives in the shared object store,
+survives the directory, and comes back with `git worktree add <path> <branch>`.
+Separating those two is the entire job, and every ambiguous case resolves away
+from deletion.
+
+### Buckets — first match wins, and the order is the safety argument
+
+| # | Condition | Bucket |
+|---|---|---|
+| 1 | primary / git-locked / the tree you invoked from | **KEEP** |
+| 1b | git reports the directory gone | **REVIEW** (that's `git worktree prune`'s job) |
+| 2 | owning session is LIVE | **KEEP** |
+| 3 | session store unreadable, or `session_check=off` | **REVIEW** |
+| 4 | detached HEAD | **REVIEW** |
+| 5 | uncommitted or untracked changes | **REVIEW** |
+| 6 | commits not yet in `base_branch` | **REVIEW** |
+| 7 | merged + clean + owner archived or absent | **SAFE** |
+| 8 | anything else (incl. merged + clean but owner still open) | **REVIEW** |
+
+Only **SAFE** is ever removable. **KEEP** means one thing — hands off, not yours
+to judge. Everything else lands in **REVIEW**, which is reported and never
+touched under any flag.
+
+Rule 3 is the one that matters most on a non-Desktop host: *"the store says
+nobody owns this"* is evidence of abandonment, while *"the store could not be
+read"* is no evidence at all — and an empty index looks identical to both. When
+the store or `jq` is missing, **nothing can be classified SAFE** and prune
+degrades to a pure report. It never fails, and it never guesses.
+
+### Why `.claude/worktrees/` gets extra care
+
+Those directories are Claude Code's own session worktrees, and
+[`worktree-boundaries`](../../rules/worktree-boundaries.md) is blunt about them:
+*they may look orphaned and aren't*. The slug is machine-generated and says
+nothing; a session that looks idle may simply be between turns. Prune marks them
+`!` in the table, and — because SAFE already requires a readable store plus an
+archived-or-absent owner — one can only be removed on positive evidence, never
+on the absence of a signal.
+
+Three further guards, all on the irreversible direction:
+
+1. **`git worktree remove`, never `rm -rf`.** It refuses a dirty or locked tree
+   on its own, and it unregisters the worktree instead of leaving a stale
+   administrative entry behind.
+2. **Re-verify immediately before deleting.** Classification reads a session
+   index with a ~30s TTL; a session can wake between the table and the delete,
+   so each SAFE row is re-checked with a fresh liveness read and a fresh dirty
+   check, and skipped if either changed.
+3. **`--all-repos` can never remove.** It reports counts for sibling repos and
+   stops there. Acting on another repo means running `fleet prune` inside it,
+   where that repo's own base branch and config apply — so a single command can
+   never sweep the machine.
+
+### Seeing the backlog
+
+`fleet status` adds one line when a repo has prunable worktrees
+(`! 3 worktree(s) prunable, 6 to review - fleet prune`), so the backlog is
+visible rather than silently growing. Turn it off with `prune_hint=off` in
+config or `FLEET_NO_PRUNE_HINT=1`.
+
 ## First-class user interaction (HARD RULE)
 
 When this skill surfaces a decision point, **always use the `AskUserQuestion` tool**. Plain markdown numbered lists are not acceptable for these branches.
@@ -187,6 +266,7 @@ When this skill surfaces a decision point, **always use the `AskUserQuestion` to
 | Multiple parallel-work requests, no lanes yet | Spawn natively or manual lanes? | Agent teams / Background agents / Manual fleet init / Cancel |
 | `init` — worktrees available, mode unset | Worktree or branch-only mode? | Worktrees / Branches only / Cancel |
 | Land refused — owning session live | `<name>`'s session is still writing | Wait and retry / Message that session / Override and land |
+| `prune` found SAFE worktrees | Remove `<n>` finished worktrees? | Remove them / Show the table again / Leave as-is |
 | Lane → `CONFLICT` (rebase fail) | Lane `<name>` has rebase conflict | Resolve in lane / Skip & continue / Revert lane / Untrack |
 | Lane → `FAILED` (post-merge tests red) | Tests broke after `<name>` merged | Auto-revert / Investigate first / Accept failure |
 | Pre-land scrub hits | Forbidden patterns in `<name>` diff | Block landing / Override (note reason) / Open to edit |
@@ -209,10 +289,12 @@ For non-branching status updates ("here's what happened, here's what landed"), p
 | Pre-land regex scrub (forbidden patterns) | ✅ |
 | One-shot revert | ✅ `fleet revert <branch>` |
 
+| Pruning finished lane worktrees | ✅ `fleet prune` — dry-run by default, removes only provably-finished trees |
+
 | Out of scope | Why |
 |------|-----|
 | Spawning / monitoring sessions | Native: agent teams, `claude --bg`, agent view. Fleet-ops never launches a session. |
-| Deleting native session worktrees | Owned by agent view / `claude rm`. Fleet-ops merges branches only. |
+| Deleting worktrees a session still owns | `fleet prune` removes only what is merged, clean, and owned by an archived-or-absent session. Anything live, dirty, unmerged, or unattributable is reported, never removed — and cross-repo removal is impossible by design. |
 | Multiple sessions on one shared working tree | Git limitation. Skill detects and refuses with worktree pointer. |
 | Uncommitted work at signal time | `signal.sh` rejects dirty lanes. The queue needs an immutable commit. |
 | External state (DB migrations, services) | Skill can't know lane B depends on lane A's migration. Order manually via `fleet land`. |
@@ -255,6 +337,7 @@ poll_interval=5
 icons=unicode                        # unicode | ascii (same as FLEET_ASCII=1)
 session_check=on                     # on | off — refuse to land under a live owner
 session_live_secs=600                # how recently active counts as "still writing"
+prune_hint=on                        # on | off — show the prunable backlog in `fleet status`
 ```
 
 Zero-config works for the common case.
@@ -310,6 +393,6 @@ Shipped since first release:
 
 ## Scripts
 
-- `scripts/fleet.sh` — main CLI (init, track, start/stop, status, land, revert, scrub-check, config, main, owner)
+- `scripts/fleet.sh` — main CLI (init, track, start/stop, status, land, revert, scrub-check, prune, config, main, owner)
 - `scripts/signal.sh` — branch-aware signaler (deployed to `.claude/fleet/signal.sh`); prints the MAIN handoff after READY/CONFLICT
 - `scripts/sessions.sh` — branch → owning-session resolver, read off the Desktop session store on disk (deployed alongside signal.sh so lane sessions can resolve MAIN). Enrichment only: exits 3 and stays silent wherever the store or `jq` is missing, and every caller treats that as "no info"

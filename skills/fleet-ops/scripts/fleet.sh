@@ -2,11 +2,38 @@
 # fleet-ops — landing discipline for parallel work: sequential landing queue
 # with test gate, pre-land scrub, auto-rebase, one-shot revert.
 # Spawning/monitoring parallel sessions is native Claude Code territory
-# (agent teams, claude --bg / agent view); this script only governs landing.
+# (agent teams, claude --bg / agent view); this script governs landing, and
+# reclaiming the worktrees afterwards.
+#
+# SECTION MAP (grep the `=== NAME ===` banners to jump):
+#   CONFIG              parse .claude/fleet/config — parsed, never sourced
+#   lane state          encode/decode lane files, state read/write, scrub
+#   init / track        create or register lanes
+#   status views        fleet_view_panel, fleet_view_verbose, cmd_main, cmd_config
+#   SESSION AWARENESS   who owns a lane, and are they still writing (sessions.sh)
+#   PRUNE               worktree housekeeping — the only part that DELETES
+#   landing             land_one, rebase_others, cmd_land, cmd_land_all, revert
+#   daemon              cmd_start / cmd_stop, PID file lifecycle
+#   dispatch            the subcommand case at the bottom
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT=""
+
+# Where the user actually invoked us from, captured BEFORE the cd below.
+# `fleet prune` needs it: the cd lands us in the main checkout no matter which
+# worktree we were called from, so without this the invoking worktree looks
+# like any other removal candidate and could be deleted out from under the
+# caller's own shell.
+#
+# cygpath -m is not cosmetic here. Git Bash's `pwd` yields "/x/Forge/repo" while
+# `git worktree list` yields "X:/Forge/repo"; string-comparing those two never
+# matches, and the guard silently stops guarding. Converting to git's own
+# mixed form is what makes the comparison mean anything on Windows.
+INVOKED_FROM="$(pwd -P 2>/dev/null || pwd)"
+if command -v cygpath >/dev/null 2>&1; then
+  INVOKED_FROM="$(cygpath -m "$INVOKED_FROM" 2>/dev/null || printf '%s' "$INVOKED_FROM")"
+fi
 
 # Resolve repo root via git, so fleet works from any worktree.
 # cd to it once so all relative paths below resolve correctly.
@@ -40,6 +67,9 @@ ICONS="${icons:-}"   # env seed; config `icons=ascii` overrides below
 # before this existed. It must never become a hard dependency.
 SESSION_CHECK="on"
 SESSION_LIVE_SECS=600
+# Whether `fleet status` surfaces the prunable-worktree backlog. On by default:
+# the whole point is that an unswept backlog is invisible otherwise.
+PRUNE_HINT="on"
 
 # === CONFIG ===================================================================
 # The config is PARSED, never `source`d. Two reasons, both learned the hard way
@@ -120,6 +150,7 @@ load_config() {
       base_branch)       BASE_BRANCH="$val" ;;
       icons)             ICONS="$val" ;;
       session_check)     SESSION_CHECK="$val" ;;
+      prune_hint)        PRUNE_HINT="$val" ;;
       session_live_secs)
         if [[ "$val" =~ ^[0-9]+$ ]]; then
           SESSION_LIVE_SECS="$val"
@@ -499,6 +530,7 @@ fleet_view_panel() {
     term_panel_vert
   done
 
+  prune_status_hint
   __fleet_footer "$active" "$daemon_state"
   echo ""
 }
@@ -598,6 +630,7 @@ fleet_view_verbose() {
     term_panel_vert
   done
 
+  prune_status_hint
   __fleet_footer "$active" "$daemon_state"
   echo ""
 }
@@ -688,6 +721,7 @@ cmd_config() {
   echo "icons=$ICONS"
   echo "session_check=$SESSION_CHECK"
   echo "session_live_secs=$SESSION_LIVE_SECS"
+  echo "prune_hint=$PRUNE_HINT"
   if [[ -z "$TEST_CMD" ]]; then
     echo "WARNING: no test_cmd — 'fleet land' will not run a test gate" >&2
   fi
@@ -761,13 +795,33 @@ sfield() { printf '%s' "$1" | cut -f"$2"; }
 # fleet.sh invocation and queried in-memory.
 SESSION_INDEX_CACHE=""
 SESSION_INDEX_LOADED=0
+# 1 only when sessions.sh returned 0 — i.e. the store was actually READ.
+# The distinction matters to `fleet prune`: "the store says no session owns this
+# branch" is evidence of abandonment, while "the store could not be read" is no
+# evidence at all, and the two are indistinguishable from an empty index alone.
+# Anything that can't tell them apart must not classify a worktree removable.
+SESSION_STORE_OK=0
 load_session_index() {
   session_enabled || return 0
   [[ $SESSION_INDEX_LOADED -eq 1 ]] && return 0
   SESSION_INDEX_LOADED=1
+  local rc=0
   SESSION_INDEX_CACHE=$(FLEET_SESSION_LIVE_SECS="$SESSION_LIVE_SECS" \
-    bash "$SESSIONS_SH" index 2>/dev/null || true)
+    bash "$SESSIONS_SH" index 2>/dev/null) || rc=$?
+  [[ $rc -eq 0 ]] && SESSION_STORE_OK=1
   return 0
+}
+
+# Full TSV row of the newest session owning branch $1, from the in-memory index.
+# Same tie-break as sessions.sh's own `owner`: non-archived outranks archived
+# (col 6 asc), then newest activity (col 4 desc) — a branch reused after its
+# original session was archived belongs to whoever is using it now.
+owner_row_cached() {
+  [[ -z "$SESSION_INDEX_CACHE" ]] && return 0
+  printf '%s\n' "$SESSION_INDEX_CACHE" \
+    | awk -F'\t' -v w="$1" '$1 == w' \
+    | sort -t"$(printf '\t')" -k6,6n -k4,4nr \
+    | head -n1
 }
 
 # "title<TAB>live" for the newest session owning $1, or empty.
@@ -814,6 +868,600 @@ session_land_gate() {
   return 1
 }
 # === END SESSION AWARENESS ====================================================
+
+# === PRUNE ====================================================================
+# Worktree housekeeping. This is the ONLY part of fleet-ops that deletes
+# anything, so read rules/worktree-boundaries.md before changing a line of it.
+#
+# THE HAZARD, stated plainly: a worktree that looks orphaned frequently is not.
+# `.claude/worktrees/<slug>` names are machine-generated and say nothing about
+# whether anyone is using them, and a session that looks idle may simply be
+# between turns. Removing a worktree destroys its UNCOMMITTED and UNTRACKED
+# files permanently — git has never seen those bytes and cannot give them back.
+# COMMITTED lane work is different: it lives in the shared object store and
+# survives the directory, recoverable with
+#     git worktree add <path> <branch>
+# Separating "committed and already in base" from everything else is therefore
+# the classifier's entire job, and every ambiguous case resolves away from
+# deletion.
+#
+# CLASSIFICATION — first match wins, and the ORDER is the safety argument:
+#
+#   1  primary / locked / the caller's own tree   KEEP    structurally untouchable
+#   1b git says the directory is gone             REVIEW  git's own bookkeeping —
+#                                                         `git worktree prune`
+#   2  owning session is LIVE                     KEEP    someone is writing here
+#   3  session store unreadable, or awareness     REVIEW  no evidence of anything
+#      switched off                                       => nothing can be SAFE
+#   4  detached HEAD                              REVIEW  no branch to attribute
+#   5  uncommitted or untracked changes           REVIEW  removal would destroy them
+#   6  commits not yet in <base>                  REVIEW  unintegrated work
+#   7  merged + clean + owner archived or absent  SAFE    finished and recoverable
+#   8  anything else                              REVIEW  default deny
+#
+# Rule 6 deliberately folds together two readings that cannot both apply to one
+# row — "unmerged commits => KEEP" and "unmerged with no live owner => REVIEW".
+# Neither is ever removed, so the choice is purely about which bucket the
+# operator is asked to look at, and an abandoned unmerged lane is exactly the
+# backlog this command exists to surface. KEEP is therefore reserved for one
+# meaning only: hands off, not yours to judge.
+
+PRUNE_ROWS=""   # accumulated TSV: path \t branch \t bucket \t reason
+
+# Normalise a path for comparison: forward slashes, no trailing slash,
+# lowercased (Windows paths are case-insensitive and git's casing of the drive
+# letter does not always match the shell's).
+prune_norm() {
+  local p=${1//\\//}
+  p=${p%/}
+  printf '%s' "$p" | tr '[:upper:]' '[:lower:]'
+}
+
+# Changed + untracked entry count. UNTRACKED counts on purpose: those are
+# precisely the files git cannot recover, and `git worktree remove` refuses a
+# tree containing them anyway.
+prune_dirty_count() {
+  git -C "$1" status --porcelain 2>/dev/null | grep -c '.' || true
+}
+
+prune_row() {
+  PRUNE_ROWS="${PRUNE_ROWS}$1"$'\t'"$2"$'\t'"$3"$'\t'"$4"$'\n'
+}
+
+# A shell path and a git path are not the same string on Windows: the shell says
+# /tmp/x or /c/Users/x, git says C:/Users/x. Comparing them raw NEVER matches,
+# which silently turns a guard into a no-op rather than into an error — the
+# failure mode that hid both the invoked-from guard and repo discovery until a
+# test caught them. Convert to git's mixed form before any such comparison.
+# (INVOKED_FROM does the same thing inline at the top of this file, because it
+# has to be captured before any function is defined.)
+prune_native() {
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -m "$1" 2>/dev/null || printf '%s' "$1"
+  else
+    printf '%s' "$1"
+  fi
+}
+
+# Prune must work in a repo that has never run `fleet init`, so it cannot assume
+# .claude/fleet/ exists — and `log`'s `tee -a` into a missing directory fails,
+# which under `set -e` kills the whole command (it did: a store-unavailable
+# dry run exited 1 instead of reporting). Always to stderr; append to the
+# activity log only when there is one. Prune never creates that directory
+# itself: a command whose default is "change nothing" must not leave state.
+prune_log() {
+  local msg="[$(date '+%H:%M:%S')] $*"
+  echo "$msg" >&2
+  [[ -d "$FLEET_DIR" ]] && echo "$msg" >> "$LOG" 2>/dev/null
+  return 0
+}
+
+# Is this path one of Claude Code's own native session worktrees? Those are the
+# highest-risk rows: the directory name is meaningless, and the owning session
+# is often still open. They are never removable on a guess — only when the store
+# was readable AND it says the owner is archived or gone, which rules 3 and 7
+# already require. The flag exists to mark them loudly in the table and to
+# trigger the re-verify before removal.
+prune_is_native() {
+  case "$(prune_norm "$1")" in */.claude/worktrees/*) return 0 ;; *) return 1 ;; esac
+}
+
+# prune_emit <repo> <base> <path> <branch> <detached> <locked> <gone> <merged_list>
+prune_emit() {
+  local repo=$1 base=$2 wt=$3 br=$4 det=$5 locked=$6 gone=$7 merged_list=$8
+  local wtn here
+  wtn=$(prune_norm "$wt")
+  here=$(prune_norm "$INVOKED_FROM")
+
+  # 1 — structurally untouchable
+  if [[ $locked -eq 1 ]]; then
+    prune_row "$wt" "${br:-<detached>}" KEEP "locked by git"; return 0
+  fi
+  if [[ "$wtn" == "$here" || "$here" == "$wtn"/* ]]; then
+    prune_row "$wt" "${br:-<detached>}" KEEP "you are standing in it"; return 0
+  fi
+  # git itself says the directory is gone. Nothing to lose and nothing to
+  # classify — but this is git's own bookkeeping, so send it to git's own tool
+  # rather than silently reporting a vanished tree as "clean".
+  if [[ $gone -eq 1 ]]; then
+    prune_row "$wt" "${br:-<detached>}" REVIEW "directory missing - run 'git worktree prune'"; return 0
+  fi
+
+  # 2 — a live owner outranks every other consideration
+  local orow="" olive="0" oarch="0" otitle=""
+  if [[ -n "$br" && $SESSION_STORE_OK -eq 1 ]]; then
+    orow=$(owner_row_cached "$br")
+    if [[ -n "$orow" ]]; then
+      olive=$(sfield "$orow" 7); oarch=$(sfield "$orow" 6); otitle=$(sfield "$orow" 3)
+    fi
+  fi
+  if [[ "$olive" == "1" ]]; then
+    prune_row "$wt" "$br" KEEP "live session: ${otitle:-?}"; return 0
+  fi
+
+  # 3 — no session evidence at all. "The store says nobody owns this" is
+  #     evidence of abandonment; "the store could not be read" is not, and an
+  #     empty index looks identical to both. Degrade, never guess.
+  if [[ $SESSION_STORE_OK -ne 1 ]]; then
+    prune_row "$wt" "${br:-<detached>}" REVIEW "no session info - cannot prove abandoned"; return 0
+  fi
+
+  # 4 — detached HEAD: no branch, so nothing to attribute an owner to
+  if [[ $det -eq 1 || -z "$br" ]]; then
+    prune_row "$wt" "<detached>" REVIEW "detached HEAD - no branch to attribute"; return 0
+  fi
+
+  local is_merged=0
+  if printf '%s\n' "$merged_list" | grep -qxF -- "$br"; then is_merged=1; fi
+
+  # 5 — uncommitted or untracked work: the only bytes git cannot give back
+  local dirty
+  dirty=$(prune_dirty_count "$wt")
+  if [[ "${dirty:-0}" -gt 0 ]]; then
+    local mstate="unmerged"
+    [[ $is_merged -eq 1 ]] && mstate="merged"
+    prune_row "$wt" "$br" REVIEW "$mstate but DIRTY - $dirty uncommitted/untracked"; return 0
+  fi
+
+  # 6 — committed but not yet in base
+  local ahead
+  ahead=$(git -C "$repo" rev-list --count "$base..$br" 2>/dev/null || echo 0)
+  if [[ $is_merged -ne 1 || "${ahead:-0}" != "0" ]]; then
+    local who="no owner in store"
+    if [[ -n "$orow" ]]; then
+      if [[ "$oarch" == "1" ]]; then who="owner archived"; else who="owner idle"; fi
+    fi
+    prune_row "$wt" "$br" REVIEW "unmerged - ${ahead:-?} ahead of $base ($who)"; return 0
+  fi
+
+  # 7 — merged, clean, and nobody is coming back for it
+  if [[ -z "$orow" ]]; then
+    prune_row "$wt" "$br" SAFE "merged + clean, no session owns it"; return 0
+  fi
+  if [[ "$oarch" == "1" ]]; then
+    prune_row "$wt" "$br" SAFE "merged + clean, owner archived"; return 0
+  fi
+
+  # 8 — default deny. Merged and clean, but a non-archived session still owns
+  #     the branch: idle now, and free to wake up. Not ours to remove.
+  prune_row "$wt" "$br" REVIEW "merged + clean, but owner still open: ${otitle:-?}"
+}
+
+# prune_classify <repo> <base>  — fills PRUNE_ROWS. The PRIMARY worktree is
+# skipped entirely: it is the integration tree, not a lane, and listing it would
+# only add a row that can never be actioned.
+prune_classify() {
+  local repo=$1 base=$2
+  PRUNE_ROWS=""
+  load_session_index
+
+  local merged_list
+  merged_list=$(git -C "$repo" branch --merged "$base" 2>/dev/null \
+                | sed -e 's/^[*+ ]*//' -e 's/[[:space:]]*$//' || true)
+
+  local raw
+  raw=$(git -C "$repo" worktree list --porcelain 2>/dev/null || true)
+  [[ -z "$raw" ]] && return 0
+
+  # Porcelain records are blank-line separated. Command substitution ate the
+  # trailing newlines, so append one blank line to flush the final record.
+  local line wt="" br="" det=0 locked=0 gone=0 first=1
+  while IFS= read -r line; do
+    case "$line" in
+      worktree\ *) wt=${line#worktree }; br=""; det=0; locked=0; gone=0 ;;
+      branch\ *)   br=${line#branch }; br=${br#refs/heads/} ;;
+      detached)    det=1 ;;
+      locked*)     locked=1 ;;
+      prunable*)   gone=1 ;;
+      bare)        locked=1 ;;
+      "")
+        if [[ -n "$wt" ]]; then
+          [[ $first -eq 1 ]] || prune_emit "$repo" "$base" "$wt" "$br" "$det" "$locked" "$gone" "$merged_list"
+          first=0
+        fi
+        wt=""
+        ;;
+    esac
+  done <<< "$raw"$'\n'
+  return 0
+}
+
+prune_count() {
+  [[ -z "$PRUNE_ROWS" ]] && { printf '0'; return 0; }
+  printf '%s' "$PRUNE_ROWS" | awk -F'\t' -v b="$1" 'NF && $3==b {n++} END{print n+0}'
+}
+
+# The base branch to classify against in an arbitrary repo. This repo's
+# configured base is meaningless next door, so resolve per-repo.
+prune_base_for() {
+  local r=$1 b
+  for b in "$BASE_BRANCH" main master; do
+    git -C "$r" rev-parse --verify --quiet "refs/heads/$b" >/dev/null 2>&1 && { printf '%s' "$b"; return 0; }
+  done
+  git -C "$r" rev-parse --abbrev-ref HEAD 2>/dev/null || printf 'main'
+}
+
+prune_render() {
+  local total safe review keep
+  safe=$(prune_count SAFE); review=$(prune_count REVIEW); keep=$(prune_count KEEP)
+  total=$((safe + review + keep))
+
+  echo ""
+  term_panel_open fleet "fleet prune" "$TERM_GLYPH_BRANCH $BASE_BRANCH"
+  term_panel_vert
+  if [[ $total -eq 0 ]]; then
+    term_panel_line "no lane worktrees - nothing to classify"
+    term_panel_vert
+    term_panel_close "$(term_hotkey '?' help)" "$(term_health healthy "clean")"
+    echo ""
+    return 0
+  fi
+  term_summary_line "$total worktree(s), $safe safe, $review review, $keep keep"
+  term_panel_vert
+
+  local b n rows p br bucket reason label short mark
+  for b in SAFE REVIEW KEEP; do
+    n=$(prune_count "$b")
+    [[ $n -eq 0 ]] && continue
+    case "$b" in
+      SAFE)   term_section READY    "SAFE"   "$n" ;;
+      REVIEW) term_section CONFLICT "REVIEW" "$n" ;;
+      KEEP)   term_section RUNNING  "KEEP"   "$n" ;;
+    esac
+    rows=$(printf '%s' "$PRUNE_ROWS" | awk -F'\t' -v want="$b" 'NF && $3==want')
+    while IFS=$'\t' read -r p br bucket reason; do
+      [[ -z "$p" ]] && continue
+      short=${p##*/}
+      # ASCII-only marker: these rows must survive TERM_ASCII=1 on a non-UTF-8
+      # Windows console (SKILL.md "Compatibility").
+      mark="  "
+      prune_is_native "$p" && mark="! "
+      label="$mark$short"
+      printf '%s   %s %-30s %-26s %s\n' \
+        "$(term_color dim "$TERM_TREE_VERT")" \
+        "$(term_color dim "$TERM_TREE_BRANCH$TERM_PANEL_HRULE")" \
+        "$(term_truncate "$label" 30)" \
+        "$(term_truncate "$br" 26)" \
+        "$(term_color dim "$reason")"
+    done <<< "$rows"
+    term_panel_vert
+  done
+
+  local health
+  if [[ $safe -gt 0 ]]; then health="$(term_health pending "$safe removable")"
+  else health="$(term_health healthy "nothing removable")"; fi
+  term_panel_close "$(term_hotkey '?' help)" "$health"
+  echo ""
+  # '!' marks a native .claude/worktrees/ lane — see rules/worktree-boundaries.md
+  if printf '%s' "$PRUNE_ROWS" | cut -f1 | grep -qi '/\.claude/worktrees/'; then
+    echo "  ! = Claude Code session worktree (.claude/worktrees/) - owned by a session, not by you" >&2
+  fi
+  return 0
+}
+
+prune_recovery_note() {
+  echo "  Committed lane work is NOT destroyed by removal - it lives in the shared" >&2
+  echo "  object store and comes back with:  git worktree add <path> <branch>" >&2
+  echo "  Only uncommitted/untracked files are unrecoverable, which is why anything" >&2
+  echo "  dirty is REVIEW and never SAFE." >&2
+}
+
+prune_remove_safe() {
+  local removed=0 skipped=0 failed=0
+  local p br bucket reason rows fresh dirty
+  rows=$(printf '%s' "$PRUNE_ROWS" | awk -F'\t' 'NF && $3=="SAFE"')
+  while IFS=$'\t' read -r p br bucket reason; do
+    [[ -z "$p" ]] && continue
+
+    # Re-verify immediately before deleting. Classification read a session index
+    # with a ~30s TTL; a session can wake between the table and the delete, and
+    # this is the one operation where being one poll behind destroys data.
+    fresh=$(lane_owner "$br" --fresh)
+    if [[ -n "$fresh" && "$(sfield "$fresh" 7)" == "1" ]]; then
+      prune_log "SKIP $p - owning session went LIVE since classification"
+      skipped=$((skipped + 1)); continue
+    fi
+    dirty=$(prune_dirty_count "$p")
+    if [[ "${dirty:-0}" -gt 0 ]]; then
+      prune_log "SKIP $p - became dirty since classification ($dirty entries)"
+      skipped=$((skipped + 1)); continue
+    fi
+
+    # `git worktree remove`, never `rm -rf`: it refuses a dirty or locked tree
+    # (a third independent guard), and it also unregisters the worktree so the
+    # repo is not left with a stale administrative entry.
+    # stderr is captured rather than appended to $LOG: the log directory may not
+    # exist (see prune_log), and a failed redirect would fail the command itself
+    # — turning "could not remove" into an unexplained crash.
+    local err=""
+    if err=$(git -C "$REPO_ROOT" worktree remove "$p" 2>&1); then
+      prune_log "removed worktree: $p (branch $br)"
+      removed=$((removed + 1))
+    else
+      prune_log "FAILED to remove $p - left in place: ${err:-unknown error}"
+      failed=$((failed + 1))
+    fi
+  done <<< "$rows"
+
+  prune_log "prune: $removed removed, $skipped skipped, $failed failed"
+  [[ $removed -gt 0 ]] && prune_recovery_note
+  [[ $failed -eq 0 ]]
+}
+
+# Sibling-repo sweep. REPORT ONLY, and that is a design constraint, not a
+# limitation: a single command must never be able to sweep worktrees across the
+# machine. Acting on another repo means running `fleet prune` inside it, where
+# that repo's own base branch, config, and lane state apply — and where its own
+# session is the one taking the risk.
+PRUNE_REPOS=()      # discovered repo dirs
+PRUNE_ROOTS_USED="" # human-readable roots, for the header
+PRUNE_TRUNCATED=0   # repos dropped by the cap — reported, never silent
+
+prune_discover_repos() {
+  local roots=()
+  if [[ $# -gt 0 ]]; then
+    roots=("$@")
+  elif [[ -n "${FLEET_PRUNE_ROOTS:-}" ]]; then
+    # ';'-separated, NOT ':' — a Windows root is "X:/Forge" and would split.
+    local IFS=';' r
+    for r in $FLEET_PRUNE_ROOTS; do [[ -n "$r" ]] && roots+=("$r"); done
+  else
+    # Default: this repo's siblings. Broader than that is opt-in via --root,
+    # because "scan the whole drive" is a different and much slower promise.
+    roots=("$(dirname "$REPO_ROOT")")
+  fi
+  PRUNE_ROOTS_USED="${roots[*]}"
+
+  local max=${FLEET_PRUNE_MAX_REPOS:-60}
+  local root d seen=0
+  PRUNE_REPOS=(); PRUNE_TRUNCATED=0
+  for root in "${roots[@]}"; do
+    root=${root%/}
+    [[ -d "$root" ]] || { echo "fleet prune: root not a directory: $root" >&2; continue; }
+    # One and two levels deep only. Deeper is a full-drive walk, and a nested
+    # `.git` two levels down is already an unusual layout.
+    for d in "$root"/*/ "$root"/*/*/; do
+      [[ -d "$d" ]] || continue
+      d=${d%/}
+      # A `.git` FILE (not dir) means the dir is itself a worktree or submodule
+      # — it has no worktrees of its own to prune.
+      [[ -d "$d/.git" ]] || continue
+      # …and a `.git` DIR is not proof either. If it isn't a valid repo, git
+      # silently WALKS UP and answers for the enclosing repo instead, so the
+      # parent's worktrees get counted a second time under the child's name
+      # (caught by `tests/sample-project`, whose stub .git did exactly this).
+      # Require the dir to be its own toplevel.
+      local top dn
+      top=$(git -C "$d" rev-parse --show-toplevel 2>/dev/null) || continue
+      dn=$(prune_native "$d")
+      [[ "$(prune_norm "$top")" == "$(prune_norm "$dn")" ]] || continue
+      if [[ $seen -ge $max ]]; then PRUNE_TRUNCATED=$((PRUNE_TRUNCATED + 1)); continue; fi
+      # Store git's own form so downstream paths match `git worktree list`.
+      PRUNE_REPOS+=("$dn"); seen=$((seen + 1))
+    done
+  done
+  return 0
+}
+
+# repo \t total \t safe \t review \t keep — stdout is data only.
+prune_all_repos_porcelain() {
+  prune_discover_repos "$@"
+  local repo base s rv k
+  for repo in ${PRUNE_REPOS[@]+"${PRUNE_REPOS[@]}"}; do
+    base=$(prune_base_for "$repo")
+    prune_classify "$repo" "$base"
+    s=$(prune_count SAFE); rv=$(prune_count REVIEW); k=$(prune_count KEEP)
+    printf '%s\t%s\t%s\t%s\t%s\n' "$repo" "$((s + rv + k))" "$s" "$rv" "$k"
+  done
+  [[ $PRUNE_TRUNCATED -gt 0 ]] && \
+    echo "fleet prune: capped; $PRUNE_TRUNCATED repos skipped (raise FLEET_PRUNE_MAX_REPOS)" >&2
+  return 0
+}
+
+prune_all_repos() {
+  prune_discover_repos "$@"
+  local roots="$PRUNE_ROOTS_USED" truncated=$PRUNE_TRUNCATED
+  local n=0
+  for _ in ${PRUNE_REPOS[@]+"${PRUNE_REPOS[@]}"}; do n=$((n + 1)); done
+
+  echo ""
+  term_panel_open fleet "fleet prune --all-repos" "report only"
+  term_panel_vert
+  if [[ $n -eq 0 ]]; then
+    term_panel_line "no git repositories found under: $roots"
+    term_panel_vert
+    term_panel_close "$(term_hotkey '?' help)" "$(term_health unknown "0 repos")"
+    echo ""
+    return 0
+  fi
+  term_summary_line "$n repo(s) under $roots"
+  term_panel_vert
+
+  local repo base s rv k tot grand_safe=0 grand_rev=0
+  for repo in ${PRUNE_REPOS[@]+"${PRUNE_REPOS[@]}"}; do
+    base=$(prune_base_for "$repo")
+    prune_classify "$repo" "$base"
+    s=$(prune_count SAFE); rv=$(prune_count REVIEW); k=$(prune_count KEEP)
+    tot=$((s + rv + k))
+    [[ $tot -eq 0 ]] && continue
+    grand_safe=$((grand_safe + s)); grand_rev=$((grand_rev + rv))
+    printf '%s   %s %-34s %s\n' \
+      "$(term_color dim "$TERM_TREE_VERT")" \
+      "$(term_color dim "$TERM_TREE_BRANCH$TERM_PANEL_HRULE")" \
+      "$(term_truncate "${repo##*/}" 34)" \
+      "$(term_color dim "$tot worktrees, $s safe, $rv review, $k keep")"
+  done
+  term_panel_vert
+  term_panel_close "$(term_hotkey '?' help)" "$(term_health pending "$grand_safe safe, $grand_rev review")"
+  echo ""
+
+  # No silent caps: if the sweep was bounded, say so. A truncated sweep that
+  # reads as a complete one is worse than no sweep.
+  [[ $truncated -gt 0 ]] && \
+    echo "  NOTE: repo cap reached; $truncated more skipped (raise FLEET_PRUNE_MAX_REPOS)" >&2
+  echo "  Report only. To act on a repo, run 'fleet prune' inside it - cross-repo" >&2
+  echo "  removal is deliberately impossible from here." >&2
+  return 0
+}
+
+prune_usage() {
+  cat <<EOF
+fleet prune — classify (and optionally remove) finished lane worktrees
+
+  fleet prune                  Classify and print. Changes NOTHING. (default)
+  fleet prune --dry-run        Same as above, said explicitly.
+  fleet prune --remove         Remove the SAFE rows, after a typed confirmation.
+  fleet prune --remove --yes   Remove without prompting (scripts/CI).
+  fleet prune --all-repos      Sibling-repo counts only; never removes.
+  fleet prune --root <dir>     Extra sweep root for --all-repos (repeatable).
+  fleet prune --porcelain      TSV to stdout, no panel. Report-only.
+                               path<TAB>branch<TAB>bucket<TAB>reason
+                               (with --all-repos: repo<TAB>total<TAB>safe<TAB>review<TAB>keep)
+
+Buckets:
+  SAFE    merged into $BASE_BRANCH, clean, and the owning session is archived or
+          gone from the session store. Removable; committed work is recoverable.
+  REVIEW  reported, never removed: dirty, unmerged, detached, or no session
+          info at all. Your call.
+  KEEP    a live session owns it, git has it locked, or it is the tree you are
+          standing in. Not touched under any flag.
+
+Without a readable Claude session store (or with session_check=off) NOTHING can
+be classified SAFE — abandonment cannot be proven, so nothing is removable.
+EOF
+}
+
+cmd_prune() {
+  local do_remove=0 assume_yes=0 all_repos=0 porcelain=0
+  local roots=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run|-n) do_remove=0; shift ;;
+      --remove)     do_remove=1; shift ;;
+      --yes|-y)     assume_yes=1; shift ;;
+      --porcelain)  porcelain=1; shift ;;
+      --all-repos)  all_repos=1; shift ;;
+      --root)
+        [[ -z "${2:-}" ]] && { echo "fleet prune: --root needs a directory" >&2; return 2; }
+        roots+=("$2"); shift 2 ;;
+      -h|--help)    prune_usage; return 0 ;;
+      *) echo "fleet prune: unknown flag '$1'" >&2; prune_usage >&2; return 2 ;;
+    esac
+  done
+
+  # --porcelain is report-only by construction: a machine-readable mode that
+  # could also delete is one typo away from an unattended sweep.
+  if [[ $porcelain -eq 1 && $do_remove -eq 1 ]]; then
+    echo "fleet prune: --porcelain is report-only; drop --remove or drop --porcelain" >&2
+    return 2
+  fi
+
+  if [[ $all_repos -eq 1 ]]; then
+    if [[ $do_remove -eq 1 ]]; then
+      echo "fleet prune: --all-repos is report-only; run 'fleet prune --remove' inside the repo you mean" >&2
+      return 2
+    fi
+    if [[ $porcelain -eq 1 ]]; then
+      prune_all_repos_porcelain ${roots[@]+"${roots[@]}"}
+    else
+      prune_all_repos ${roots[@]+"${roots[@]}"}
+    fi
+    return 0
+  fi
+
+  prune_classify "$REPO_ROOT" "$BASE_BRANCH"
+
+  if [[ $porcelain -eq 1 ]]; then
+    # stdout is DATA ONLY: path \t branch \t bucket \t reason
+    printf '%s' "$PRUNE_ROWS"
+    return 0
+  fi
+
+  prune_render
+
+  if [[ $SESSION_STORE_OK -ne 1 ]]; then
+    if session_enabled; then
+      echo "  session store unreadable (no store, no jq, or terminal-only host) -" >&2
+    else
+      echo "  session awareness is OFF (session_check=off) -" >&2
+    fi
+    echo "  every worktree degraded to REVIEW and nothing can be removed." >&2
+  fi
+
+  local safe_n; safe_n=$(prune_count SAFE)
+
+  if [[ $do_remove -eq 0 ]]; then
+    if [[ $safe_n -gt 0 ]]; then
+      echo "  DRY RUN - nothing changed. To remove the $safe_n SAFE worktree(s):" >&2
+      echo "    fleet prune --remove" >&2
+      prune_recovery_note
+    fi
+    return 0
+  fi
+
+  if [[ $safe_n -eq 0 ]]; then
+    prune_log "prune: nothing classified SAFE - nothing to remove"
+    return 0
+  fi
+
+  # Explicit confirmation. Two independent gates, because the failure mode is
+  # unrecoverable: --remove has to be typed, and then so does the word.
+  if [[ $assume_yes -ne 1 ]]; then
+    if [[ ! -t 0 ]]; then
+      echo "fleet prune --remove: no terminal to confirm on." >&2
+      echo "  Re-run interactively, or pass --yes if you have already reviewed the table." >&2
+      return 2
+    fi
+    printf 'Remove %d SAFE worktree(s)? Type "remove" to confirm: ' "$safe_n" >&2
+    local answer=""
+    read -r answer || true
+    if [[ "$answer" != "remove" ]]; then
+      echo "aborted - nothing removed" >&2
+      return 1
+    fi
+  fi
+
+  prune_remove_safe
+}
+
+# Status-panel hint, so a growing backlog is visible instead of silent. Runs the
+# same classifier `fleet prune` does — one pass, and only for lane worktrees.
+# Off with prune_hint=off in config or FLEET_NO_PRUNE_HINT=1.
+prune_status_hint() {
+  [[ -n "${FLEET_NO_PRUNE_HINT:-}" ]] && return 0
+  [[ "$(printf '%s' "$PRUNE_HINT" | tr '[:upper:]' '[:lower:]')" == "off" ]] && return 0
+  prune_classify "$REPO_ROOT" "$BASE_BRANCH" || return 0
+  local safe review
+  safe=$(prune_count SAFE); review=$(prune_count REVIEW)
+  [[ "$safe" -eq 0 && "$review" -eq 0 ]] && return 0
+  local msg="$safe worktree(s) prunable"
+  [[ "$review" -gt 0 ]] && msg="$msg, $review to review"
+  # ASCII on purpose: this row is asserted for ASCII purity under TERM_ASCII=1,
+  # and it renders on the same non-UTF-8 Windows consoles the panel supports.
+  term_panel_line "$(term_mark warn) $(term_color dim "$msg - fleet prune")"
+  return 0
+}
+# === END PRUNE ================================================================
 
 land_one() {
   local branch=$1
@@ -1079,6 +1727,7 @@ case "${1:-}" in
                 if [[ "${1:-}" == "--all" ]]; then shift; cmd_land_all "$@"; else cmd_land "$@"; fi ;;
   revert)       shift; cmd_revert "$@" ;;
   scrub-check)  shift; cmd_scrub_check "$@" ;;
+  prune)        shift; cmd_prune "$@" ;;
   config)       shift; cmd_config "$@" ;;
   main)         shift; cmd_main "$@" ;;
   owner)        shift; [[ -z "${1:-}" ]] && { echo "usage: fleet owner <branch>" >&2; exit 1; }
@@ -1098,6 +1747,10 @@ Usage:
                               --running also lands vetted RUNNING lanes
   fleet revert <branch>       Revert merge commit on $BASE_BRANCH
   fleet scrub-check <branch>  Dry-run forbidden-pattern check
+  fleet prune [--remove]      Classify finished lane worktrees. DRY RUN by
+                              default; --remove deletes only the SAFE ones,
+                              after a typed confirmation. --all-repos reports
+                              sibling repos and can never remove.
   fleet config                Print resolved config (is the test gate actually on?)
   fleet main [show|claim|release]
                               The coordinator session for this repo (lands,

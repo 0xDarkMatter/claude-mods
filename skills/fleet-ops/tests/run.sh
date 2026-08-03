@@ -443,5 +443,153 @@ unset FLEET_SESSION_STORE FLEET_SESSION_NOCACHE
 cd "$REPO"
 fi
 
+# -- prune: worktree housekeeping ---------------------------------------------
+# `prune` is the only fleet-ops command that DELETES, and the deletion is
+# unrecoverable for uncommitted files. Every case below is a guard on that one
+# direction: what must never be removed, and what must degrade to report-only
+# when the evidence isn't there. Same offline discipline as the block above —
+# the session store is faked via FLEET_SESSION_STORE, so the suite never reads
+# or perturbs real Desktop state.
+echo "-- prune (classification, dry-run default, removal safety) --"
+if ! command -v jq >/dev/null 2>&1; then
+  echo "  SKIP  prune tests (jq not installed)"
+else
+export FLEET_SESSION_NOCACHE=1
+
+PREPO="$SB/prepo"; mkdir -p "$PREPO"
+git -C "$PREPO" init -q -b main
+git -C "$PREPO" config user.email t@t; git -C "$PREPO" config user.name t
+git -C "$PREPO" config core.autocrlf false
+echo base > "$PREPO/f"; git -C "$PREPO" add -A; git -C "$PREPO" commit -qm init
+
+PSTORE="$SB/pstore/acct/ws"; mkdir -p "$PSTORE"
+export FLEET_SESSION_STORE="$SB/pstore"
+
+# isArchived is a JSON boolean, so $7 is the literal true/false — an archived
+# owner is what separates "finished" from "idle but still open".
+mk_psession(){ # id title cwd ageSecs branch writtenBranch archived
+  local ms=$(( ($(date +%s) - $4) * 1000 ))
+  cat > "$PSTORE/$1.json" <<JSON
+{"sessionId":"$1","title":"$2","cwd":"$3","lastActivityAt":$ms,
+ "isArchived":$7,"branch":"$5","writtenBranches":["$6"]}
+JSON
+}
+
+# A lane worktree with one commit. Optionally merged into main; optionally left
+# holding an UNTRACKED file, which is exactly the unrecoverable case.
+mk_pwt(){ # shortname branch merged(y|n) dirty(y|n)
+  local wt="$SB/pwt-$1"
+  git -C "$PREPO" branch "$2" main
+  git -C "$PREPO" worktree add -q "$wt" "$2"
+  echo "$2" > "$wt/$1.txt"
+  git -C "$wt" add -A
+  git -C "$wt" -c user.email=w@t -c user.name=w commit -qm "work $2"
+  [ "$3" = y ] && git -C "$PREPO" merge -q --no-ff -m "merge: $2" "$2"
+  [ "$4" = y ] && echo scratch > "$wt/UNSAVED.txt"
+  return 0
+}
+
+# Bucket for a worktree, read from --porcelain. Asserting on TSV rather than on
+# the rendered panel keeps these tests about classification, not layout.
+pb(){ bash "$FLEET" prune --porcelain 2>/dev/null \
+      | awk -F'\t' -v n="/pwt-$1	" 'index($1 "\t", n){print $3; exit}'; }
+
+cd "$PREPO"
+
+mk_pwt live     lane/p-live     y n
+mk_pwt arch     lane/p-arch     y n
+mk_pwt dirtyone lane/p-dirty    y y
+mk_pwt unmerged lane/p-unmerged n n
+
+mk_psession local_plive "Live lane"  "$SB/pwt-live"     5    claude/plive lane/p-live     false
+mk_psession local_parch "Done lane"  "$SB/pwt-arch"     7200 claude/parch lane/p-arch     true
+mk_psession local_pdirt "Dirty lane" "$SB/pwt-dirtyone" 7200 claude/pdirt lane/p-dirty    true
+
+[ "$(pb live)"     = KEEP   ] && ok "live owner => KEEP"                       || no "live owner not KEEP"
+[ "$(pb arch)"     = SAFE   ] && ok "archived owner + merged + clean => SAFE"  || no "archived+merged+clean not SAFE"
+[ "$(pb dirtyone)" = REVIEW ] && ok "merged but dirty => REVIEW"               || no "dirty worktree not REVIEW"
+[ "$(pb unmerged)" = REVIEW ] && ok "unmerged => REVIEW"                       || no "unmerged not REVIEW"
+
+# Dry run is the DEFAULT, not a flag you have to remember.
+bash "$FLEET" prune >/dev/null 2>&1; ee "bare 'prune' exits 0" 0 $?
+[ -d "$SB/pwt-arch" ] && ok "bare 'prune' is a dry run - removed nothing" || no "bare 'prune' DELETED a worktree"
+bash "$FLEET" prune --dry-run >/dev/null 2>&1; ee "--dry-run exits 0" 0 $?
+[ -d "$SB/pwt-arch" ] && ok "--dry-run removed nothing" || no "--dry-run DELETED a worktree"
+
+# Removal needs a confirmation that a pipe cannot supply.
+bash "$FLEET" prune --remove </dev/null >/dev/null 2>&1; ee "--remove refuses without a tty" 2 $?
+[ -d "$SB/pwt-arch" ] && ok "refused --remove removed nothing" || no "refused --remove still DELETED"
+bash "$FLEET" prune --porcelain --remove >/dev/null 2>&1; ee "--porcelain --remove refused" 2 $?
+
+# No session store = no evidence of abandonment = nothing is removable. This is
+# the degradation path on any non-Desktop or jq-less host, so it has to be the
+# safe direction, not a crash and not a free pass.
+sout="$(FLEET_SESSION_STORE=/nonexistent-store bash "$FLEET" prune --porcelain 2>/dev/null)"
+nsafe=$(printf '%s' "$sout" | awk -F'\t' 'NF && $3=="SAFE"' | wc -l)
+nother=$(printf '%s' "$sout" | awk -F'\t' 'NF && $3!="REVIEW"' | wc -l)
+[ "$nsafe" -eq 0 ]  && ok "store unavailable => nothing classified SAFE"   || no "store unavailable produced $nsafe SAFE rows"
+[ "$nother" -eq 0 ] && ok "store unavailable => everything REVIEW"         || no "store unavailable left $nother non-REVIEW rows"
+FLEET_SESSION_STORE=/nonexistent-store bash "$FLEET" prune --remove --yes >/dev/null 2>&1
+ee "store unavailable + --remove --yes still exits 0" 0 $?
+[ -d "$SB/pwt-arch" ] && ok "store unavailable => --remove --yes removed nothing" || no "removed a worktree with NO session info"
+
+# session_check=off is the same story by a different route.
+mkdir -p "$PREPO/.claude/fleet"
+printf 'session_check=off\n' > "$PREPO/.claude/fleet/config"
+offsafe=$(bash "$FLEET" prune --porcelain 2>/dev/null | awk -F'\t' 'NF && $3=="SAFE"' | wc -l)
+[ "$offsafe" -eq 0 ] && ok "session_check=off => nothing SAFE" || no "session_check=off produced $offsafe SAFE rows"
+rm -f "$PREPO/.claude/fleet/config"
+
+# --all-repos is report-only by construction: one command must never be able to
+# sweep worktrees across the machine.
+bash "$FLEET" prune --all-repos --remove >/dev/null 2>&1; ee "--all-repos --remove refused" 2 $?
+bash "$FLEET" prune --all-repos --root "$SB" >/dev/null 2>&1; ee "--all-repos reports" 0 $?
+[ -d "$SB/pwt-arch" ] && ok "--all-repos removed nothing" || no "--all-repos DELETED a worktree"
+arows="$(bash "$FLEET" prune --all-repos --porcelain --root "$SB" 2>/dev/null)"
+case "$arows" in *"prepo"*) ok "--all-repos --porcelain reports per-repo counts";; *) no "--all-repos --porcelain missed prepo";; esac
+# A worktree's .git is a FILE, so worktrees must never be discovered as repos
+# in their own right (they would re-report the parent's worktrees).
+case "$arows" in *"pwt-"*) no "--all-repos discovered a worktree as a repo";; *) ok "--all-repos skips worktrees, counts repos";; esac
+
+# The tree you invoked from is never a candidate, even when every other signal
+# says removable — otherwise prune deletes the shell it is running in.
+mk_pwt stand lane/p-stand y n
+mk_psession local_pstand "Gone lane" "$SB/pwt-stand" 7200 claude/pstand lane/p-stand true
+[ "$(pb stand)" = SAFE ] && ok "control: p-stand is SAFE seen from the repo root" || no "p-stand control case is not SAFE"
+standb="$(cd "$SB/pwt-stand" && bash "$FLEET" prune --porcelain 2>/dev/null \
+          | awk -F'\t' -v n="/pwt-stand	" 'index($1 "\t", n){print $3}')"
+[ "$standb" = KEEP ] && ok "the worktree you invoked from is KEEP, never SAFE" || no "invoking worktree classified '$standb'"
+
+# Now actually remove, and check the blast radius was exactly the SAFE rows.
+bash "$FLEET" prune --remove --yes >/dev/null 2>&1; ee "--remove --yes exits 0" 0 $?
+[ -d "$SB/pwt-arch" ]     && no "SAFE worktree was not removed"        || ok "SAFE worktree removed"
+[ -d "$SB/pwt-live" ]     && ok "live-owner worktree survived"         || no "live-owner worktree was REMOVED"
+[ -d "$SB/pwt-dirtyone" ] && ok "dirty worktree survived"              || no "dirty worktree was REMOVED"
+[ -d "$SB/pwt-unmerged" ] && ok "unmerged worktree survived"           || no "unmerged worktree was REMOVED"
+[ -f "$SB/pwt-dirtyone/UNSAVED.txt" ] && ok "untracked file in a dirty lane untouched" || no "untracked lane file destroyed"
+
+# The recovery claim printed in the output is real: committed lane work lives in
+# the object store and the worktree comes back. If this ever fails, the message
+# is lying to the operator about how safe removal is.
+git -C "$PREPO" worktree add -q "$SB/pwt-arch" lane/p-arch >/dev/null 2>&1
+[ -f "$SB/pwt-arch/arch.txt" ] && ok "removed lane recovers via 'git worktree add'" || no "removed lane did NOT recover"
+
+# The backlog has to be visible from the panel, or it just grows silently.
+bash "$FLEET" track lane/p-unmerged >/dev/null 2>&1
+hint="$(bash "$FLEET" status 2>&1)"
+case "$hint" in *prunable*) ok "status surfaces the prunable backlog";; *) no "status shows no prune hint";; esac
+if printf '%s\n' "$hint" | grep -F 'prunable' | LC_ALL=C grep -q '[^[:print:][:cntrl:]]'; then
+  no "prune hint row emits non-ASCII under TERM_ASCII=1"
+else ok "prune hint row is ASCII-pure under TERM_ASCII=1"; fi
+printf 'prune_hint=off\n' > "$PREPO/.claude/fleet/config"
+case "$(bash "$FLEET" status 2>&1)" in
+  *prunable*) no "prune_hint=off did not suppress the hint";;
+  *)          ok "prune_hint=off suppresses the hint";; esac
+rm -f "$PREPO/.claude/fleet/config"
+
+unset FLEET_SESSION_STORE FLEET_SESSION_NOCACHE
+cd "$REPO"
+fi
+
 echo "=== $PASS passed, $FAIL failed ==="
 [ "$FAIL" -eq 0 ] || exit 1
