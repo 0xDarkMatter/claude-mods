@@ -70,6 +70,11 @@ TERM_ARROW=""
 # ASCII-safe so authored footer/summary strings stay pure under TERM_ASCII=1.
 TERM_DOT=""
 
+# Continuation ellipsis (… / ...) — for "sweeping org …" progress lines and the
+# truncation marker in term_truncate. Registered rather than authored inline for
+# the same reason as TERM_DOT: a literal U+2026 survives TERM_ASCII=1.
+TERM_ELLIPSIS=""
+
 # Spinner frame banks (set by term_init; arrays keep order).
 TERM_SPIN_WORKING=()
 TERM_SPIN_HEARTBEAT=()
@@ -125,6 +130,7 @@ term_init() {
     TERM_GLYPH_TIP="(i)"
     TERM_ARROW="->"
     TERM_DOT="|"
+    TERM_ELLIPSIS="..."
     TERM_SPIN_WORKING=('|' '/' '-' '\')
     TERM_SPIN_HEARTBEAT=('.' ':' '*' ':')
   else
@@ -146,6 +152,7 @@ term_init() {
     TERM_GLYPH_TIP="💡"
     TERM_ARROW="→"
     TERM_DOT="·"
+    TERM_ELLIPSIS="…"
     TERM_SPIN_WORKING=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
     TERM_SPIN_HEARTBEAT=('·' '∙' '•' '●' '•' '∙')
   fi
@@ -290,7 +297,10 @@ term_truncate() {
   local text=$1 max=$2
   local len=${#text}
   if [[ $len -le $max ]]; then printf '%s' "$text"; return; fi
-  local ell="…"
+  # Registered glyph, not a literal — TERM_ASCII=1 must swap it. The ASCII marker
+  # stays two dots (not $TERM_ELLIPSIS's three): it is the truncation cue, and a
+  # third dot would eat another column of the name it is already shortening.
+  local ell="$TERM_ELLIPSIS"
   [[ "$TERM_ASCII_MODE" -eq 1 ]] && ell=".."
   local elllen=${#ell}
   printf '%s%s' "${text:0:$((max - elllen))}" "$ell"

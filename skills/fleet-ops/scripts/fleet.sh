@@ -395,7 +395,10 @@ __fleet_daemon_state() {
 __fleet_footer() {
   local active=$1 daemon_state=$2
   local hotkeys
-  hotkeys="$(term_hotkey R refresh) · $(term_hotkey L land) · $(term_hotkey '?' help)"
+  # Separators come from term.sh ($TERM_DOT), never an authored U+00B7. A literal
+  # middle dot bypasses the ASCII-fallback registry, so it survives TERM_ASCII=1
+  # and mojibakes on non-UTF-8 consoles. tests/check-resources.sh gates this.
+  hotkeys="$(term_hotkey R refresh) ${TERM_DOT} $(term_hotkey L land) ${TERM_DOT} $(term_hotkey '?' help)"
   local healths
   healths="$(term_health "$daemon_state" "daemon")"
   [[ "$active" -gt 0 ]] && healths="$healths  $(term_health pending "$active active")"
@@ -435,7 +438,7 @@ fleet_view_panel() {
   fi
 
   term_panel_vert
-  term_summary_line "$total $([ "$total" -eq 1 ] && echo lane || echo lanes) · $active active"
+  term_summary_line "$total $([ "$total" -eq 1 ] && echo lane || echo lanes) ${TERM_DOT} $active active"
   term_panel_vert
 
   local i
@@ -484,7 +487,7 @@ fleet_view_verbose() {
   local now=$(date +%s)
 
   echo ""
-  term_panel_open fleet "fleet · verbose" "$TERM_GLYPH_BRANCH $BASE_BRANCH"
+  term_panel_open fleet "fleet ${TERM_DOT} verbose" "$TERM_GLYPH_BRANCH $BASE_BRANCH"
 
   if [[ $total -eq 0 ]]; then
     term_panel_vert
@@ -496,7 +499,7 @@ fleet_view_verbose() {
   fi
 
   term_panel_vert
-  term_summary_line "$total $([ "$total" -eq 1 ] && echo lane || echo lanes) · $active active"
+  term_summary_line "$total $([ "$total" -eq 1 ] && echo lane || echo lanes) ${TERM_DOT} $active active"
   term_panel_vert
 
   for f in "$LANES_DIR"/*; do
@@ -633,7 +636,7 @@ land_one() {
     if [[ -n "$TEST_CMD" ]]; then
       log "running test_cmd: $TEST_CMD"
       if eval "$TEST_CMD" >>"$LOG" 2>&1; then
-        log "PASS: $branch landed ✓"
+        log "PASS: $branch landed"
       else
         log "FAIL: tests failed — reverting $branch"
         git reset --hard HEAD^

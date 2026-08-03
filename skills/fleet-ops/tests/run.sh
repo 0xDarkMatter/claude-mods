@@ -96,6 +96,41 @@ case "$main_log" in *"merge: feat/batch-b"*) ok "merge: feat/batch-b on main";; 
 case "$(head -n1 "$REPO/.claude/fleet/lanes/feat%2Ffoo" 2>/dev/null)" in
   RUNNING) ok "land --all left RUNNING feat/foo untouched";; *) no "land --all wrongly touched RUNNING lane";; esac
 
+echo "-- TERM_ASCII=1 renders the WHOLE panel in ASCII, not just the tree rail --"
+# Regression: `fleet status` leaked a literal U+00B7 (0xC2 0xB7) from the summary
+# line and the footer hotkeys under TERM_ASCII=1 — those separators were authored
+# inline instead of coming from term.sh's $TERM_DOT, so the ASCII registry never
+# saw them and non-UTF-8 Windows consoles mojibaked. Assert the ENTIRE emission,
+# every view: a single-glyph check (the old "no │" test) cannot catch a sibling.
+# FORCE_COLOR=1 keeps the ANSI path live so color codes can't hide a glyph.
+# Lanes here span RUNNING + LANDED, so sections, rails, leaf rows, the summary
+# line and the footer are all exercised in one shot.
+ascii_pure() { # label, output
+  local dirty
+  dirty="$(printf '%s' "$2" | LC_ALL=C grep -o '[^[:print:][:cntrl:]]' | LC_ALL=C sort -u | tr -d '\n')"
+  if [ -n "$dirty" ]; then
+    no "$1 emits non-ASCII under TERM_ASCII=1 ($(printf '%s' "$dirty" | od -An -c | tr -s ' '))"
+  else ok "$1 is pure ASCII under TERM_ASCII=1"; fi
+}
+ascii_pure "status panel"   "$(TERM_ASCII=1 FORCE_COLOR=1 bash "$FLEET" status 2>&1)"
+ascii_pure "verbose panel"  "$(TERM_ASCII=1 FORCE_COLOR=1 bash "$FLEET" status --verbose 2>&1)"
+# FLEET_ASCII is the legacy alias SKILL.md advertises as the mojibake fix — it
+# must reach exactly the same registry, or the documented remedy is a lie.
+ascii_pure "status (FLEET_ASCII=1)" "$(env -u TERM_ASCII FLEET_ASCII=1 FORCE_COLOR=1 bash "$FLEET" status 2>&1)"
+# Empty state renders a different branch of the panel (tip glyph, no sections).
+EREPO="$SB/empty"; mkdir -p "$EREPO"
+git -C "$EREPO" init -q -b main
+git -C "$EREPO" config user.email t@t; git -C "$EREPO" config user.name t
+git -C "$EREPO" config core.autocrlf false
+echo e > "$EREPO/f"; git -C "$EREPO" add -A
+git -C "$EREPO" -c user.email=t@t -c user.name=t commit -qm init
+ascii_pure "empty-state panel" "$(cd "$EREPO" && TERM_ASCII=1 FORCE_COLOR=1 bash "$FLEET" status 2>&1)"
+# Guard the other direction too: without TERM_ASCII the panel must still use the
+# Unicode glyphs, or "pure ASCII" would pass trivially by rendering nothing.
+uni_out="$(cd "$REPO" && env -u TERM_ASCII -u FLEET_ASCII LC_ALL=en_US.UTF-8 bash "$FLEET" status 2>&1)"
+case "$uni_out" in *"$(printf '\xc2\xb7')"*) ok "unicode mode still renders the U+00B7 separator";;
+  *) no "unicode mode lost its separator (ASCII fallback leaked into UTF-8 output)";; esac
+
 echo "-- scrub gate still works on a slashed branch --"
 wt="$SB/wt-feat_foo"
 # Marker built via printf so this source file never contains the contiguous
@@ -249,8 +284,9 @@ eq "CRLF config parsed without trailing CR" "echo hi" "$(cfg_get test_cmd)"
 printf 'icons=ascii\n' > "$CFG"
 eq "icons key parsed" "ascii" "$(cfg_get icons)"
 bash "$FLEET" track main >/dev/null 2>&1 || true
-icon_out="$(env -u TERM_ASCII -u FLEET_ASCII bash "$FLEET" status 2>&1)"
-case "$icon_out" in *"│"*) no "icons=ascii still emitted unicode tree glyphs";; *) ok "icons=ascii reaches term_init (no unicode glyphs)";; esac
+# Asserts the whole panel, not just the tree rail: `icons=ascii` is the config
+# route into term_init, so it must deliver the same ASCII purity TERM_ASCII=1 does.
+ascii_pure "icons=ascii panel" "$(env -u TERM_ASCII -u FLEET_ASCII FORCE_COLOR=1 bash "$FLEET" status 2>&1)"
 rm -f "$CREPO/.claude/fleet/lanes/main"
 
 echo "-- test gate: test_cmd actually runs and actually blocks the merge --"

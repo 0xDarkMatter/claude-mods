@@ -115,9 +115,9 @@ if [[ "$JSON_MODE" -eq 1 ]]; then
 elif panel_enabled; then
     hostname_short=$(scutil --get LocalHostName 2>/dev/null | head -c 30 || hostname -s | head -c 30)
     echo ""
-    term_panel_open mac-ops "mac-ops · quickrun" "$hostname_short"
+    term_panel_open mac-ops "mac-ops ${TERM_DOT} quickrun" "$hostname_short"
     term_panel_vert
-    term_summary_line "$((TOTAL_PASS+TOTAL_FAIL+TOTAL_WARN+TOTAL_INFO)) checks across 5 audits · $TOTAL_FAIL fail · $TOTAL_WARN warn"
+    term_summary_line "$((TOTAL_PASS+TOTAL_FAIL+TOTAL_WARN+TOTAL_INFO)) checks across 5 audits ${TERM_DOT} $TOTAL_FAIL fail ${TERM_DOT} $TOTAL_WARN warn"
     term_panel_vert
 
     if [[ "${#ALL_FAILS[@]}" -gt 0 ]]; then
@@ -165,7 +165,7 @@ elif panel_enabled; then
     health_state="healthy"
     [[ "$TOTAL_WARN" -gt 0 ]] && health_state="warning"
     [[ "$TOTAL_FAIL" -gt 0 ]] && health_state="critical"
-    right_health="$(term_health "$health_state" "$TOTAL_FAIL fail · $TOTAL_WARN warn")"
+    right_health="$(term_health "$health_state" "$TOTAL_FAIL fail ${TERM_DOT} $TOTAL_WARN warn")"
     term_panel_close "" "$right_health"
     echo ""
 

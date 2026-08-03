@@ -401,7 +401,7 @@ fi
 # ---- Fleet sweep ----------------------------------------------------------
 if [ -n "$ORG" ]; then
   valid_owner "$ORG" || { echo "repo-scorecard: invalid owner '$ORG'" >&2; exit "$EX_USAGE"; }
-  echo "$(term_color dim "repo-scorecard: sweeping $ORG …")" >&2
+  echo "$(term_color dim "repo-scorecard: sweeping $ORG ${TERM_ELLIPSIS}")" >&2
   list="$(runner gh repo list "$ORG" --no-archived --limit 200 --json nameWithOwner,visibility 2>/dev/null)" \
     || skip "gh repo list failed for $ORG (not authed / offline / rate-limited?)"
   [ -n "$list" ] || skip "no repos returned for $ORG"

@@ -141,9 +141,9 @@ panel_render() {
     local indicator="${2:-}"
 
     echo ""
-    term_panel_open mac-ops "mac-ops · $tag" "$indicator"
+    term_panel_open mac-ops "mac-ops ${TERM_DOT} $tag" "$indicator"
     term_panel_vert
-    term_summary_line "$((PASS_COUNT+FAIL_COUNT+WARN_COUNT+INFO_COUNT)) checks · $FAIL_COUNT fail · $WARN_COUNT warn"
+    term_summary_line "$((PASS_COUNT+FAIL_COUNT+WARN_COUNT+INFO_COUNT)) checks ${TERM_DOT} $FAIL_COUNT fail ${TERM_DOT} $WARN_COUNT warn"
     term_panel_vert
 
     # Render in order: fail, warn, pass (count only), info (count only)
@@ -202,7 +202,7 @@ panel_render() {
     [[ "$WARN_COUNT" -gt 0 ]] && health_state="warning"
     [[ "$FAIL_COUNT" -gt 0 ]] && health_state="critical"
     local right_health
-    right_health="$(term_health "$health_state" "$FAIL_COUNT fail · $WARN_COUNT warn")"
+    right_health="$(term_health "$health_state" "$FAIL_COUNT fail ${TERM_DOT} $WARN_COUNT warn")"
     term_panel_close "" "$right_health"
     echo ""
 

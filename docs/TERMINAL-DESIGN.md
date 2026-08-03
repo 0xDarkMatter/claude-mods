@@ -132,6 +132,17 @@ Default width: **10 pips** = clean 10% increments. Override only when the data h
 | ---- | ------- | ----- |
 | tip  | `💡`     | `(i)` |
 
+#### Text separators
+
+Authored strings mix glyphs with prose, which is exactly where an unregistered
+literal hides. Interpolate the variable; never type the character.
+
+| Role      | Unicode | ASCII | Variable         | Use for                                  |
+| --------- | ------- | ----- | ---------------- | ---------------------------------------- |
+| separator | `·`     | `\|`   | `$TERM_DOT`      | joining hotkeys/labels, `N lanes · N active` |
+| pointer   | `→`     | `->`  | `$TERM_ARROW`    | `problem → remedy` leads                     |
+| ellipsis  | `…`     | `...` | `$TERM_ELLIPSIS` | `sweeping org …` progress, truncation marker |
+
 #### Spinners (live mode only)
 
 Three families, each with a different role:
@@ -615,7 +626,7 @@ Every glyph has a registered ASCII proxy:
 ```
 +-- [F] fleet -------------------------------- (b) main ---*
 |
-+-- 4 lanes · 3 active
++-- 4 lanes | 3 active
 |
 +-- RUNNING (2)
 |   +-- feat/oauth-pkce       *-*-*-@      M4 ?1      12m
@@ -628,7 +639,7 @@ Every glyph has a registered ASCII proxy:
 +-- CONFLICT (1)
 |   `-- feat/audit-log        *-*-X        blocked    17m
 |
-`-- R refresh · L land · ? help ---- (+) daemon  (.) 17m ---*
+`-- R refresh | L land | ? help ---- (+) daemon  (.) 17m ---*
 ```
 
 Same skeleton. Rounded corners (`╭ ╰`) collapse to `+`. Rail dots (`● ◉ ⊗`) become `* @ X`. Health bullets (`•`) become `(+) (.) (!)`. The grid survives.
@@ -765,6 +776,11 @@ term_spinner_frame family tick           # working / heartbeat → glyph
 # Edge cases
 term_truncate    "text" max_cols         # ellipsis-truncate
 term_term_width                          # current cols
+
+# Text-level glyphs — interpolate, never type the literal (TERM_ASCII=1 swaps these)
+$TERM_DOT                                # · / |    separator
+$TERM_ARROW                              # → / ->   pointer
+$TERM_ELLIPSIS                           # … / ...  continuation
 ```
 
 ### Registries
