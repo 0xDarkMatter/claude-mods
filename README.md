@@ -244,7 +244,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [rest-ops](skills/rest-ops/) | HTTP methods, status codes, REST quick reference |
 | [sql-ops](skills/sql-ops/) | CTEs, window functions, JOIN patterns, indexing |
 | [postgres-ops](skills/postgres-ops/) | PostgreSQL operations, optimization, schema design, replication, monitoring |
-| [sqlite-ops](skills/sqlite-ops/) | SQLite schemas, Python sqlite3/aiosqlite patterns |
+| [sqlite-ops](skills/sqlite-ops/) | Engine-agnostic SQLite: query plans, covering indexes, WAL/locking, schema, FTS5/JSON, hosts (Python, node:sqlite, better-sqlite3, Bun, D1, libSQL) |
 | [claude-api-ops](skills/claude-api-ops/) | Build on Claude - Messages API, tool use, prompt caching, structured outputs, batches, Agent SDK |
 | [mcp-ops](skills/mcp-ops/) | MCP server development, FastMCP, transports, tool design, testing |
 
