@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Edit Write Bash Glob Grep Agent TaskCreate TaskUpdate"
 metadata:
   author: claude-mods
-  related-skills: debug-ops, monitoring-ops, testing-ops, code-stats, postgres-ops
+  related-skills: debug-ops, monitoring-ops, testing-ops, code-stats, postgres-ops, sqlite-ops
 ---
 
 # Performance Operations
@@ -81,6 +81,7 @@ Gather context from T1 diagnosis, then dispatch a `general-purpose` agent preloa
 | TypeScript/JavaScript (backend, package.json + server) | general-purpose | `skills/javascript-ops/SKILL.md` + perf-ops references | clinic flame/doctor/bubbleprof, 0x |
 | TypeScript/JavaScript (frontend, bundle issues) | general-purpose | `skills/typescript-ops/SKILL.md` + perf-ops references | webpack-bundle-analyzer, Lighthouse, source-map-explorer |
 | SQL / PostgreSQL | general-purpose | `skills/postgres-ops/SKILL.md` + perf-ops references | EXPLAIN ANALYZE, pg_stat_statements, pgbench |
+| SQL / SQLite, Cloudflare D1, libSQL/Turso (`*.db`, `*.sqlite`, `wrangler.toml` with a d1_databases binding) | general-purpose | `skills/sqlite-ops/SKILL.md` + perf-ops references | EXPLAIN QUERY PLAN, `sqlite-ops/scripts/eqp-triage.py`, `sqlite3 .timer/.stats`, `wrangler d1 insights`, `sql_duration_ms` + `rows_read` |
 | General / unknown / CLI benchmarking | general-purpose | perf-ops references | hyperfine, perf, strace |
 
 **Dispatch template (T2):**
@@ -309,4 +310,5 @@ Load reference files when deeper tool-specific guidance is needed beyond what th
 | `testing-ops` | Performance regression tests in CI, benchmark suites |
 | `code-stats` | Identify complex code that may be performance-sensitive |
 | `postgres-ops` | PostgreSQL-specific query optimization, indexing, EXPLAIN |
+| `sqlite-ops` | SQLite/D1/libSQL query plans, covering indexes, rows-read economics, `eqp-triage.py` |
 | `container-orchestration` | Resource limits, pod scaling, container performance |

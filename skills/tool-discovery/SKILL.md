@@ -44,7 +44,7 @@ Is this a reference/lookup task?
 | **rest-ops** | http methods, status codes |
 | **sql-ops** | cte, window functions |
 | **postgres-ops** | postgresql, postgres, EXPLAIN ANALYZE, vacuum, pgbouncer, JSONB, RLS, replication |
-| **sqlite-ops** | sqlite, aiosqlite |
+| **sqlite-ops** | sqlite, EXPLAIN QUERY PLAN, covering index, rows_read, D1, wrangler d1, node:sqlite, better-sqlite3, bun:sqlite, aiosqlite, libsql, fts5 |
 | **tailwind-ops** | tailwind, tw classes, dark mode, responsive |
 | **mcp-ops** | mcp server, fastmcp, tool handler, transport |
 | **react-ops** | react, hooks, useState, next.js, RSC, zustand |

@@ -1,6 +1,22 @@
 # SQLite Schema Patterns
 
-Common schema designs for state management, caching, logging, and deduplication.
+Ready-made table designs for state, caching, logging, queues, sessions, and search.
+Engine-agnostic SQL — these run on any host, including D1 and libSQL.
+
+**Before using any of these**, read the three rules they assume
+([`schema-design.md`](schema-design.md) has the depth):
+
+- Add **`STRICT`** to every `CREATE TABLE` below unless you need dynamic typing — the
+  recipes omit it only to stay readable on pre-3.37 engines.
+- `PRAGMA foreign_keys = ON` must be set on **every connection**, or `REFERENCES` does
+  nothing.
+- Timestamps here use ISO-8601 text (`datetime('now')`), which sorts correctly and compares
+  as text. Pick one convention per database and stick to it.
+
+Related: [`schema-design.md`](schema-design.md) (affinity, STRICT, generated columns),
+[`migration-patterns.md`](migration-patterns.md) (changing these later),
+[`feature-modules.md`](feature-modules.md) (FTS5 depth),
+[`query-performance.md`](query-performance.md) (whether the indexes below actually get used).
 
 ## State/Config Storage
 
