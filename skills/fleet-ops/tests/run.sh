@@ -22,6 +22,14 @@ ok(){ PASS=$((PASS+1)); printf '  PASS  %s\n' "$1"; }
 no(){ FAIL=$((FAIL+1)); printf '  FAIL  %s\n' "$1"; }
 ee(){ [ "$2" = "$3" ] && ok "$1 (exit $3)" || no "$1 (want $2 got $3)"; }
 
+# Every land needs an ARMED test gate: fleet.sh REFUSES to land when no
+# test_cmd resolves, because an unarmed gate used to merge without running
+# anything. Fixtures that are not themselves about the gate arm it with a
+# trivially-passing command, so they exercise the path they actually mean to
+# test rather than tripping the refusal. The refusal itself is asserted
+# explicitly further down ("absent test_cmd").
+arm_gate(){ mkdir -p "$1/.claude/fleet"; printf 'test_cmd=true\n' > "$1/.claude/fleet/config"; }
+
 echo "=== fleet-ops self-test ==="
 
 REPO="$SB/repo"; mkdir -p "$REPO"
@@ -29,6 +37,7 @@ git -C "$REPO" init -q -b main
 git -C "$REPO" config user.email t@t; git -C "$REPO" config user.name t
 git -C "$REPO" config core.autocrlf false
 echo base > "$REPO/f"; git -C "$REPO" add -A; git -C "$REPO" commit -qm init
+arm_gate "$REPO"
 
 # Create branch $1 with one commit touching unique file $2, in its own worktree.
 mk_lane(){
@@ -324,12 +333,28 @@ case "$(head -n1 "$CREPO/.claude/fleet/lanes/green-lane" 2>/dev/null)" in
 cfg_log="$(git -C "$CREPO" log --oneline main)"   # captured, not piped — SIGPIPE note above
 case "$cfg_log" in *"merge: green-lane"*) ok "merge commit kept after passing gate";; *) no "merge commit missing";; esac
 
-# Absent test_cmd still falls through to signal.sh's log gate, and says so.
+# Absent test_cmd REFUSES the land. It used to fall through to signal.sh's log
+# gate, which verifies nothing when a lane signalled READY without a test log —
+# so the branch merged having run zero tests, reported only as a log line. The
+# config is gitignored in most repos, so "absent" is the fresh-clone/git-clean
+# case, not an exotic one. Assert the refusal AND that nothing moved.
 rm -f "$CFG"
 mk_cfg_lane nogate-lane n.txt
 bash "$FLEET" track nogate-lane >/dev/null 2>&1
-land_out="$(bash "$FLEET" land nogate-lane 2>&1)"
-case "$land_out" in *"no test_cmd set in"*) ok "absent test_cmd names the config path";; *) no "absent test_cmd message unclear";; esac
+before_nogate="$(git -C "$CREPO" rev-parse main)"
+land_out="$(bash "$FLEET" land nogate-lane 2>&1)"; rc=$?
+ee "absent test_cmd refuses the land" 1 $rc
+case "$land_out" in *"UNARMED"*) ok "refusal says the gate is unarmed";; *) no "refusal message unclear";; esac
+case "$land_out" in *".claude/fleet/config"*) ok "refusal names the config path";; *) no "refusal omits the config path";; esac
+eq "refused land leaves the base branch untouched" "$before_nogate" "$(git -C "$CREPO" rev-parse main)"
+case "$(git -C "$CREPO" log --oneline main)" in
+  *"merge: nogate-lane"*) no "unarmed gate merged anyway";; *) ok "no merge commit from an unarmed gate";; esac
+# The lane is NOT marked CONFLICT: an unarmed gate is a repo-level fault, not
+# the lane's, so a human isn't left undoing state that was never wrong.
+case "$(head -n1 "$CREPO/.claude/fleet/lanes/nogate-lane" 2>/dev/null)" in
+  CONFLICT) no "refusal wrongly marked the lane CONFLICT";; *) ok "refusal leaves lane state alone";; esac
+# The daemon must refuse to start too, rather than spin refusing every poll.
+bash "$FLEET" start >/dev/null 2>&1; ee "daemon refuses to start unarmed" 1 $?
 
 # -- session awareness: the live-owner land gate -------------------------------
 # Guards the hazard that motivated it: landing a lane while the session that
@@ -354,6 +379,10 @@ git -C "$SREPO" init -q -b main
 git -C "$SREPO" config user.email t@t; git -C "$SREPO" config user.name t
 git -C "$SREPO" config core.autocrlf false
 echo base > "$SREPO/f"; git -C "$SREPO" add -A; git -C "$SREPO" commit -qm init
+# These cases are about WHO owns a lane, not about the gate — arm it so the
+# live-owner logic is what decides, rather than the unarmed-gate refusal
+# (which fires first, by design, being the cheaper check).
+arm_gate "$SREPO"
 
 STORE="$SB/store/acct/ws"; mkdir -p "$STORE"
 export FLEET_SESSION_STORE="$SB/store"
@@ -432,12 +461,14 @@ case "$sv" in *"[live]"*) ok "status annotates a live owner";; *) no "status mis
 ascii_pure "session-aware status panel" "$sv"
 
 # Session awareness off = the pre-existing behaviour, exactly.
-printf 'session_check=off\n' > "$SREPO/.claude/fleet/config"
+# test_cmd stays set: turning the SESSION check off must not also disarm the
+# TEST gate — they are independent, and this case is only about the former.
+printf 'session_check=off\ntest_cmd=true\n' > "$SREPO/.claude/fleet/config"
 mk_lane_in "$SREPO" offcheck-lane o.txt
 mk_session local_off "Off session" "$SREPO/wt4" 5 claude/off offcheck-lane
 bash "$FLEET" track offcheck-lane >/dev/null 2>&1
 bash "$FLEET" land offcheck-lane >/dev/null 2>&1; ee "session_check=off restores old behaviour" 0 $?
-rm -f "$SREPO/.claude/fleet/config"
+arm_gate "$SREPO"
 
 unset FLEET_SESSION_STORE FLEET_SESSION_NOCACHE
 cd "$REPO"
