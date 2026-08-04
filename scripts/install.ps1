@@ -105,17 +105,25 @@ $renamedSkills = @(
 foreach ($oldSkill in $renamedSkills) {
     $oldPath = "$claudeDir\skills\$oldSkill"
     if (Test-Path $oldPath) {
-        Remove-Item -Path $oldPath -Recurse -Force
-        $newName = $oldSkill -replace '-patterns$', '-ops'
-        Write-Host "  Removed renamed: $oldSkill (now $newName)" -ForegroundColor Red
+        try {
+            Remove-Item -Path $oldPath -Recurse -Force -ErrorAction Stop
+            $newName = $oldSkill -replace '-patterns$', '-ops'
+            Write-Host "  Removed renamed: $oldSkill (now $newName)" -ForegroundColor Red
+        } catch {
+            Write-Host "  WARNING: could not remove $oldPath ($($_.Exception.Message)) - continuing" -ForegroundColor Yellow
+        }
     }
 }
 
 Write-Host "Cleaning up deprecated items..." -ForegroundColor Yellow
 foreach ($item in $deprecated) {
     if (Test-Path $item) {
-        Remove-Item -Path $item -Recurse -Force
-        Write-Host "  Removed: $item" -ForegroundColor Red
+        try {
+            Remove-Item -Path $item -Recurse -Force -ErrorAction Stop
+            Write-Host "  Removed: $item" -ForegroundColor Red
+        } catch {
+            Write-Host "  WARNING: could not remove $item ($($_.Exception.Message)) - continuing" -ForegroundColor Yellow
+        }
     }
 }
 Write-Host ""
@@ -137,18 +145,75 @@ Get-ChildItem -Path $commandsDir -Filter "*.md" | ForEach-Object {
 Write-Host ""
 
 # =============================================================================
-# SKILLS - Copy all skill directories
+# SKILLS - Merge-sync each skill directory (NEVER delete-then-copy)
+#
+# A registered service can hold a skill dir as its CWD (e.g. Process Compose
+# "fleetflow" runs python ff-serve.py with CWD ~/.claude/skills/fleetflow),
+# which locks the directory handle on Windows. On 2026-08-01 the old
+# Remove-Item pass half-deleted that dir (destroying machine-local unversioned
+# files) before failing, then aborted the run, leaving every skill after it
+# unsynced. So: file-level overwrite copy (works while the dir is locked),
+# dest-only files are reported but never deleted, and a failure on one skill
+# continues to the next.
 # =============================================================================
 Write-Host "Installing skills..." -ForegroundColor Cyan
 
 $skillsDir = Join-Path $projectRoot "skills"
-Get-ChildItem -Path $skillsDir -Directory | ForEach-Object {
-    $dest = "$claudeDir\skills\$($_.Name)"
-    if (Test-Path $dest) {
-        Remove-Item -Path $dest -Recurse -Force
+$failedSkills = @()
+foreach ($skill in (Get-ChildItem -Path $skillsDir -Directory)) {
+    $src = $skill.FullName
+    $dest = "$claudeDir\skills\$($skill.Name)"
+    try {
+        if (-not (Test-Path $dest)) {
+            Copy-Item -Path $src -Destination $dest -Recurse -Force -ErrorAction Stop
+            Write-Host "  $($skill.Name)/" -ForegroundColor Green
+            continue
+        }
+
+        # Merge copy: overwrite file-by-file so a locked destination still syncs.
+        $srcRel = @{}
+        $fileErrors = @()
+        foreach ($f in (Get-ChildItem -Path $src -Recurse -File)) {
+            $rel = $f.FullName.Substring($src.Length + 1)
+            $srcRel[$rel] = $true
+            try {
+                $destFile = Join-Path $dest $rel
+                $destFileDir = Split-Path -Parent $destFile
+                if (-not (Test-Path $destFileDir)) {
+                    New-Item -ItemType Directory -Path $destFileDir -Force -ErrorAction Stop | Out-Null
+                }
+                Copy-Item -Path $f.FullName -Destination $destFile -Force -ErrorAction Stop
+            } catch {
+                $fileErrors += "$rel ($($_.Exception.Message))"
+            }
+        }
+
+        # Dest-only files are machine-local (unversioned) or stale. Surface
+        # them, never delete them - deleting is the 2026-08-01 data loss.
+        $destOnly = @(Get-ChildItem -Path $dest -Recurse -File | Where-Object {
+            -not $srcRel.ContainsKey($_.FullName.Substring($dest.Length + 1))
+        })
+
+        if ($fileErrors.Count -gt 0) {
+            $failedSkills += $skill.Name
+            Write-Host "  $($skill.Name)/ - $($fileErrors.Count) file(s) failed to sync:" -ForegroundColor Red
+            foreach ($e in $fileErrors) { Write-Host "    $e" -ForegroundColor Red }
+        } elseif ($destOnly.Count -gt 0) {
+            Write-Host "  $($skill.Name)/ (kept $($destOnly.Count) dest-only file(s) not in repo)" -ForegroundColor Yellow
+            foreach ($f in $destOnly) {
+                Write-Host "    $($f.FullName.Substring($dest.Length + 1))" -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "  $($skill.Name)/" -ForegroundColor Green
+        }
+    } catch {
+        $failedSkills += $skill.Name
+        Write-Host "  WARNING: $($skill.Name)/ failed to sync ($($_.Exception.Message)) - continuing" -ForegroundColor Red
     }
-    Copy-Item $_.FullName -Destination $dest -Recurse -Force
-    Write-Host "  $($_.Name)/" -ForegroundColor Green
+}
+if ($failedSkills.Count -gt 0) {
+    Write-Host ""
+    Write-Host "  $($failedSkills.Count) skill(s) had sync failures: $($failedSkills -join ', ')" -ForegroundColor Red
 }
 Write-Host ""
 
