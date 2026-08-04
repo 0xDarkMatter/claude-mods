@@ -266,12 +266,19 @@ ensure_fleet_dir() {
   #                         Claude lane sessions can write there)
   if git rev-parse --git-dir >/dev/null 2>&1; then
     [[ -f .gitignore ]] || touch .gitignore
+    # Accept the `dir/*` form as already-ignoring, not just `dir/`. A repo that
+    # wants to track ONE file in here (e.g. a `config.example` so the landing
+    # gate survives a fresh clone) MUST write `.claude/fleet/*` plus a `!`
+    # negation — git cannot re-include a file whose parent DIRECTORY is
+    # excluded. An exact-match grep does not see that as ignored, so it appended
+    # a bare `.claude/fleet/` and auto-committed it, re-excluding the directory
+    # and quietly undoing the repo's intent.
     local appended=0
-    if ! grep -qxF '.claude/fleet/' .gitignore 2>/dev/null; then
+    if ! grep -qxE '\.claude/fleet/\*?' .gitignore 2>/dev/null; then
       echo '.claude/fleet/' >> .gitignore
       appended=1
     fi
-    if ! grep -qxF '.fleet-worktrees/' .gitignore 2>/dev/null; then
+    if ! grep -qxE '\.fleet-worktrees/\*?' .gitignore 2>/dev/null; then
       echo '.fleet-worktrees/' >> .gitignore
       appended=1
     fi
@@ -319,6 +326,31 @@ refuse_if_shared_tree() {
     log "       Use worktrees, separate clones, or set mode=branch in $CONFIG to override"
     return 1
   fi
+}
+
+# The landing gate must be ARMED, or absent LOUDLY — never silently absent.
+#
+# TEST_CMD comes from $CONFIG, which repos routinely gitignore along with the
+# rest of .claude/fleet/ (lane state is machine-local). So a `git clean`, a
+# fresh clone, or a new worktree leaves it EMPTY. Until 2026-08-04 that case
+# fell through to signal.sh's log gate — which verifies nothing at all when a
+# lane signalled READY without a test log. The branch merged to $BASE_BRANCH
+# having run zero tests, and the only trace was one line in activity.log.
+#
+# That is the dangerous shape: not "landing fails" but "landing SUCCEEDS having
+# tested nothing". A gate that degrades to no gate is worse than one that
+# breaks, because nothing reports the loss. Refuse instead.
+#
+# Deliberately does NOT touch lane state: an unarmed gate is a repo-level fault,
+# not the lane's, and marking every lane CONFLICT would leave a human to undo
+# state that was never wrong. Callers refuse BEFORE mutating anything.
+require_test_cmd() {
+  [[ -n "$TEST_CMD" ]] && return 0
+  log "REFUSE: no test_cmd resolved from $CONFIG — the landing gate is UNARMED"
+  log "        Landing now would merge without running any tests."
+  log "        Set test_cmd in $CONFIG (some repos ship $CONFIG.example — copy it),"
+  log "        then confirm with: fleet config"
+  return 1
 }
 
 cmd_init() {
@@ -1465,6 +1497,9 @@ prune_status_hint() {
 
 land_one() {
   local branch=$1
+  # Cheapest refusal first, and BEFORE the merge below — an unarmed gate must
+  # never reach a state where $BASE_BRANCH has already moved.
+  require_test_cmd || return 1
   if [[ -z "${FLEET_SKIP_SESSION_CHECK:-}" ]]; then
     session_land_gate "$branch" || { set_lane_state "$branch" "CONFLICT" "owning session still live"; return 1; }
   fi
@@ -1484,18 +1519,17 @@ land_one() {
   log "LANDING: $branch"
   git checkout "$BASE_BRANCH"
   if git merge "$branch" --no-ff -m "merge: $branch"; then
-    if [[ -n "$TEST_CMD" ]]; then
-      log "running test_cmd: $TEST_CMD"
-      if eval "$TEST_CMD" >>"$LOG" 2>&1; then
-        log "PASS: $branch landed"
-      else
-        log "FAIL: tests failed — reverting $branch"
-        git reset --hard HEAD^
-        set_lane_state "$branch" "FAILED" "tests failed post-merge"
-        return 1
-      fi
+    # No "$TEST_CMD is empty" branch here by design: require_test_cmd above
+    # guarantees it is set, so the gate always runs. The old else-branch
+    # ("trusting signal.sh's log gate") is what let untested merges through.
+    log "running test_cmd: $TEST_CMD"
+    if eval "$TEST_CMD" >>"$LOG" 2>&1; then
+      log "PASS: $branch landed"
     else
-      log "no test_cmd set in $CONFIG — trusting signal.sh's log gate"
+      log "FAIL: tests failed — reverting $branch"
+      git reset --hard HEAD^
+      set_lane_state "$branch" "FAILED" "tests failed post-merge"
+      return 1
     fi
     set_lane_state "$branch" "LANDED"
     git branch -d "$branch" 2>/dev/null || git branch -D "$branch" 2>/dev/null || true
@@ -1668,6 +1702,10 @@ daemon_cleanup() {
 cmd_start() {
   ensure_fleet_dir
   refuse_if_shared_tree || exit 1
+  # Fail fast rather than starting an unattended daemon that would refuse every
+  # lane on every poll — the loudest moment to report an unarmed gate is before
+  # anything is running.
+  require_test_cmd || exit 1
 
   # Refuse if a daemon is already running
   if [[ -f "$PID_FILE" ]]; then
