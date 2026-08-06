@@ -429,6 +429,51 @@ case "$(git -C "$SREPO" log --oneline main)" in
 FLEET_SKIP_SESSION_CHECK=1 bash "$FLEET" land hot-lane >/dev/null 2>&1
 ee "override lands despite live owner" 0 $?
 
+# -- self-ownership exemption --------------------------------------------------
+# The gate protects against a CONCURRENT writer, and the session doing the
+# landing is not one. It must therefore land its own lane WITHOUT an override,
+# or every lane session's only escape is disarming the gate wholesale — which
+# also disarms it for the peers it genuinely protects.
+mk_lane_in "$SREPO" self-lane s.txt
+mk_session local_selfy "This very session" "$SREPO/wt3" 5 claude/selfy self-lane
+bash "$FLEET" track self-lane >/dev/null 2>&1
+
+# Self unresolvable → no exemption. The fail-safe direction: an unknown
+# identity must never satisfy an exemption.
+( unset CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_SESSION_ID CLAUDE_SESSION_ID
+  bash "$FLEET" land self-lane >/dev/null 2>&1 ); lx=$?
+[ "$lx" -ne 0 ] && ok "unresolvable self does not exempt (exit $lx)" || no "unresolved self landed anyway"
+
+# `sessions.sh self` believes an id only when the store has a wrapper for it.
+sid="$(CLAUDE_CODE_HOST_SESSION_ID=local_selfy bash "$SESSIONS" self 2>/dev/null)"
+[ "$sid" = "local_selfy" ] && ok "self resolves from local_<id> form" || no "self did not resolve ($sid)"
+sid="$(CLAUDE_CODE_HOST_SESSION_ID=selfy bash "$SESSIONS" self 2>/dev/null)"
+[ "$sid" = "local_selfy" ] && ok "self resolves from bare id form" || no "bare id did not resolve ($sid)"
+sid="$(CLAUDE_CODE_HOST_SESSION_ID=local_nosuch bash "$SESSIONS" self 2>/dev/null)"; sx=$?
+[ -z "$sid" ] && [ "$sx" -eq 3 ] && ok "unknown id resolves to nothing" || no "unknown id was believed ($sid)"
+# Both vars set to DIFFERENT ids — the Desktop shape exactly. The chain must
+# try each candidate, not stop at the first one that happens to be set.
+sid="$(CLAUDE_CODE_SESSION_ID=cli-only CLAUDE_CODE_HOST_SESSION_ID=local_selfy \
+  bash "$SESSIONS" self 2>/dev/null)"
+[ "$sid" = "local_selfy" ] && ok "resolves when a non-matching id is also set" || no "first-set-wins regression ($sid)"
+
+# The exemption itself: owner live, owner is self, no peers → lands clean.
+CLAUDE_CODE_HOST_SESSION_ID=local_selfy bash "$FLEET" land self-lane >/dev/null 2>&1
+ee "self-owned live lane lands without override" 0 $?
+case "$(git -C "$SREPO" log --oneline main)" in
+  *"merge: self-lane"*) ok "self-owned lane actually merged";; *) no "no merge commit for self-owned lane";; esac
+
+# A LIVE PEER on the same branch is the real hazard — refuses even though self
+# also owns it. This is the line between a narrow exemption and a blunt one.
+mk_lane_in "$SREPO" shared-lane sh.txt
+mk_session local_selfy2 "This very session" "$SREPO/wt4" 5 claude/selfy2 shared-lane
+mk_session local_peer   "A peer session"    "$SREPO/wt5" 5 claude/peer   shared-lane
+bash "$FLEET" track shared-lane >/dev/null 2>&1
+CLAUDE_CODE_HOST_SESSION_ID=local_selfy2 bash "$FLEET" land shared-lane >/dev/null 2>&1; lx=$?
+[ "$lx" -ne 0 ] && ok "live PEER still blocks a self-owned lane (exit $lx)" || no "peer-owned lane landed"
+case "$(git -C "$SREPO" log --oneline main)" in
+  *"merge: shared-lane"*) no "lane with live peer was merged";; *) ok "no merge while a peer is live";; esac
+
 # A lane whose owner went idle (2h ago) lands normally.
 mk_lane_in "$SREPO" cold-lane c2.txt
 mk_session local_cold "Cold session" "$SREPO/wt2" 7200 claude/cold cold-lane

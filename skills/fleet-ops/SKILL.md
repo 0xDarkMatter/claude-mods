@@ -144,9 +144,23 @@ The join is `writtenBranches` from the session wrapper, not just the checked-out
 branch — a session working in worktree `claude/foo-bar` routinely commits its real work
 to `lane/thing`, and only `writtenBranches` connects the two.
 
+**Self-ownership is exempt.** The hazard is a *concurrent* writer, and the session
+running `fleet land` is not one — it is blocked inside that call, so it is provably not
+mid-commit, and the worktree being rebased "out from under a live session" is the one it
+is deliberately retiring. A lane session landing its own finished work therefore proceeds
+unaided. Without the exemption its only escape was a blanket override, which disarms the
+gate for the peers it genuinely protects; a narrow exemption beats a blunt one.
+
+It stays conservative in both directions. Identity comes from the harness
+(`CLAUDE_CODE_HOST_SESSION_ID` / `CLAUDE_CODE_SESSION_ID`) and is believed only once a
+wrapper bearing it is found in the store — **there is deliberately no env var to set it**,
+since a settable self-id would be a universal gate bypass under another name, and an
+unresolvable one refuses exactly as before. Self must also be the **only** live owner:
+a second live session writing the same branch refuses, naming the peer.
+
 Override with `session_check=off` in config, or `FLEET_SKIP_SESSION_CHECK=1` for one
-run. `fleet config` states plainly whether the gate is armed — the same observability
-lesson as `test_cmd`.
+run. `fleet config` states plainly whether the gate is armed *and* whether self-identity
+resolved — the same observability lesson as `test_cmd`.
 
 ### Where each channel works (verified 2026-08-03)
 

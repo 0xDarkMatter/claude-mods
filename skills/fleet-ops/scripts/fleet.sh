@@ -762,6 +762,14 @@ cmd_config() {
   if session_enabled; then
     if [[ -n "$(main_session_row)" ]]; then
       echo "# session awareness: ON (store readable)" >&2
+      # Whether THIS session can be recognised decides if it can land its own
+      # lane unaided; unresolvable self is a silent fallback to refusing, so
+      # state it rather than letting it look like a gate misfire.
+      if [[ -n "$(bash "$SESSIONS_SH" self 2>/dev/null)" ]]; then
+        echo "#   self-identity: resolved — this session can land lanes it owns" >&2
+      else
+        echo "#   self-identity: UNRESOLVED — landing a lane this session owns will refuse" >&2
+      fi
     else
       echo "# session awareness: ON but no sessions resolved — store missing, jq missing, or terminal-only host" >&2
     fi
@@ -881,9 +889,52 @@ owner_annotation() {
   fi
 }
 
+# Is session id $1 the session running THIS script? Empty/unresolvable self is
+# always false — an unknown identity must never satisfy an exemption.
+SELF_SESSION_ID=""
+SELF_SESSION_LOADED=0
+session_is_self() {
+  session_enabled || return 1
+  if [[ $SELF_SESSION_LOADED -eq 0 ]]; then
+    SELF_SESSION_LOADED=1
+    SELF_SESSION_ID=$(bash "$SESSIONS_SH" self 2>/dev/null) || SELF_SESSION_ID=""
+  fi
+  [[ -n "$SELF_SESSION_ID" && "$1" == "$SELF_SESSION_ID" ]]
+}
+
+# Every OTHER live session that also owns branch $1 (excluding session $2), as
+# "id<TAB>title" rows. Liveness is re-read per candidate rather than taken from
+# the cached index — same standard as `owner --fresh`, because this decides a
+# refusal, and the index cache has a 15-minute TTL.
+peer_live_owners() {
+  local branch=$1 self=$2 row id
+  load_session_index
+  [[ -z "$SESSION_INDEX_CACHE" ]] && return 0
+  while IFS= read -r row; do
+    [[ -z "$row" ]] && continue
+    id=$(sfield "$row" 2)
+    [[ "$id" == "$self" ]] && continue
+    [[ "$(bash "$SESSIONS_SH" live "$id" 2>/dev/null)" == "1" ]] || continue
+    printf '%s\t%s\n' "$id" "$(sfield "$row" 3)"
+  done < <(printf '%s\n' "$SESSION_INDEX_CACHE" | awk -F'\t' -v w="$branch" '$1 == w')
+  return 0
+}
+
 # The gate itself. Refuses to land a lane whose owning session is still live —
 # landing under a session that is mid-turn means merging a branch it may still
 # be committing to, and then rebasing its worktree out from under it.
+#
+# SELF-OWNERSHIP IS EXEMPT, and the reason is the whole design: that hazard is
+# about a CONCURRENT writer. A session landing its own lane is not one — it is
+# blocked inside this very call, so it is provably not mid-commit, and
+# "rebasing its worktree out from under it" describes the tree it is
+# deliberately retiring. Before this exemption, a lane session that finished
+# its work could only land it with a blanket override, which disarms the gate
+# for the peers it genuinely protects. A narrow exemption beats a blunt one.
+#
+# It stays conservative in both directions: unresolvable self never matches,
+# and self must be the ONLY live owner. A second live session writing the same
+# branch is the real hazard, and refuses exactly as before.
 # Returns 0 = safe to land, 1 = refuse.
 session_land_gate() {
   local branch=$1
@@ -894,6 +945,21 @@ session_land_gate() {
   [[ "$live" != "1" ]] && return 0       # idle → allow
   local title; title=$(sfield "$row" 3)
   local id;    id=$(sfield "$row" 2)
+  if session_is_self "$id"; then
+    local peers pid ptitle
+    peers=$(peer_live_owners "$branch" "$id")
+    if [[ -z "$peers" ]]; then
+      log "landing own lane: $branch is owned by THIS session ($id) — not a concurrent writer"
+      return 0
+    fi
+    # Self plus someone else: the someone else is the hazard, so say who.
+    log "REFUSE LAND: $branch is owned by this session AND another LIVE session:"
+    while IFS=$'\t' read -r pid ptitle; do
+      [[ -n "$pid" ]] && log "    '$ptitle' ($pid)"
+    done <<< "$peers"
+    log "  a peer may still be committing to it — coordinate before landing."
+    return 1
+  fi
   log "REFUSE LAND: $branch is owned by a LIVE session — '$title' ($id)"
   log "  that session was active within ${SESSION_LIVE_SECS}s and may still be committing."
   log "  wait for it to finish, or override with: session_check=off (or FLEET_SKIP_SESSION_CHECK=1)"
