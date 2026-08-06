@@ -227,18 +227,25 @@ session_live_now() {
 # the store — so an unset, stale, or invented value resolves to nothing and the
 # gate keeps its full strength. Unresolvable self is the SAFE direction.
 self_session_id() {
-    local raw=${CLAUDE_CODE_SESSION_ID:-${CLAUDE_CODE_HOST_SESSION_ID:-${CLAUDE_SESSION_ID:-}}}
-    [[ -n "$raw" ]] || return 3
     local sd; sd=$(store_dir) || return 3
-    # The harness may hand us either the bare uuid or the store's `local_<uuid>`
-    # form; the store filename is always the latter. Try as-given first so a
-    # future id shape that isn't uuid-based still resolves.
-    local cand f
-    for cand in "$raw" "local_$raw"; do
-        f=$(find "$sd" -name "${cand}.json" -type f 2>/dev/null | head -n1)
-        [[ -n "$f" ]] || continue
-        basename "$f" .json
-        return 0
+    # EVERY candidate is tried, not just the first one that is set. Inside
+    # Desktop both CLAUDE_CODE_SESSION_ID and CLAUDE_CODE_HOST_SESSION_ID are
+    # populated with DIFFERENT ids — the former is the CLI session, the latter
+    # the host session the store is keyed by — so a first-set-wins chain
+    # resolves nothing on exactly the surface this matters most on.
+    local raw cand f
+    for raw in "${CLAUDE_CODE_HOST_SESSION_ID:-}" "${CLAUDE_CODE_SESSION_ID:-}" \
+               "${CLAUDE_SESSION_ID:-}"; do
+        [[ -n "$raw" ]] || continue
+        # The harness may hand us the bare uuid or the store's `local_<uuid>`
+        # form; the filename is always the latter. Try as-given first so a
+        # future id shape that isn't uuid-based still resolves.
+        for cand in "$raw" "local_$raw"; do
+            f=$(find "$sd" -name "${cand}.json" -type f 2>/dev/null | head -n1)
+            [[ -n "$f" ]] || continue
+            basename "$f" .json
+            return 0
+        done
     done
     return 3
 }
