@@ -41,6 +41,9 @@ USAGE
                                   any gate that must not act on stale data.
   $SELF main                      The MAIN/coordinator session for this repo
   $SELF live <sessionId>          1 if that session is live, else 0
+  $SELF self                      The CALLING session's own store id, if it can
+                                  be resolved and verified against the store.
+                                  Exit 3 (silent) when it cannot.
   $SELF --help
 
 OUTPUT (TSV columns)
@@ -207,6 +210,39 @@ session_live_now() {
     if (( la > 0 && (now_ms - la) <= LIVE_SECS * 1000 )); then printf '1'; else printf '0'; fi
 }
 
+# --- self --------------------------------------------------------------------
+# Which session is CALLING this script.
+#
+# WHY THIS EXISTS: the live-owner gate protects against landing a lane while a
+# session is still committing to it. When the session running `fleet land` is
+# itself that owner, the hazard is absent — it is blocked inside the land call
+# and cannot be mid-commit — but the gate could not tell the two apart, so a
+# lane session landing its own work always tripped it. Self-identity is what
+# separates "a PEER is writing" (refuse) from "I am the writer" (proceed).
+#
+# DELIBERATELY NOT OVERRIDABLE. There is no FLEET_SELF_SESSION_ID or equivalent:
+# a settable self-id would be a universal gate bypass wearing a different name
+# (export it to the owner's id and every refusal disappears). The id comes from
+# the harness, and is only believed once a wrapper file bearing it is found in
+# the store — so an unset, stale, or invented value resolves to nothing and the
+# gate keeps its full strength. Unresolvable self is the SAFE direction.
+self_session_id() {
+    local raw=${CLAUDE_CODE_SESSION_ID:-${CLAUDE_CODE_HOST_SESSION_ID:-${CLAUDE_SESSION_ID:-}}}
+    [[ -n "$raw" ]] || return 3
+    local sd; sd=$(store_dir) || return 3
+    # The harness may hand us either the bare uuid or the store's `local_<uuid>`
+    # form; the store filename is always the latter. Try as-given first so a
+    # future id shape that isn't uuid-based still resolves.
+    local cand f
+    for cand in "$raw" "local_$raw"; do
+        f=$(find "$sd" -name "${cand}.json" -type f 2>/dev/null | head -n1)
+        [[ -n "$f" ]] || continue
+        basename "$f" .json
+        return 0
+    done
+    return 3
+}
+
 # --- owner -------------------------------------------------------------------
 # Newest activity wins; a non-archived session outranks an archived one, since a
 # branch reused after its original session was archived belongs to the new one.
@@ -283,5 +319,6 @@ case "${1:---help}" in
     main)           cmd_main; exit $? ;;
     live)           shift; [[ -z "${1:-}" ]] && { echo "usage: $SELF live <sessionId>" >&2; exit 2; }
                     session_live_now "$1"; echo; exit 0 ;;
+    self)           self_session_id || exit 3; exit 0 ;;
     *)              echo "$SELF: unknown command '$1'" >&2; usage >&2; exit 2 ;;
 esac
