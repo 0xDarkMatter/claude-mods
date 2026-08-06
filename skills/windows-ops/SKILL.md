@@ -1,6 +1,6 @@
 ---
 name: windows-ops
-description: "Comprehensive Windows workstation operations - diagnose slow boot, identify failing drives, decode BSOD crashes, manage startup apps, audit event logs. Use for: Windows is slow, slow bootup, won't boot, blue screen, BSOD, kernel crash, drive failing, SMART errors, disk errors, Event 41, Event 129, storahci reset, BugCheck, CRITICAL_PROCESS_DIED, crash dump, MEMORY.DMP, minidump, msconfig, services.msc, registry Run keys, StartupApproved, scheduled tasks at logon, slow login, high CPU at boot, Adobe startup, Docker startup, disable startup app, unexplained UAC prompt, what asked for admin, elevation prompt, prefetch forensics, BAM, process attribution, Security 4688."
+description: "Comprehensive Windows workstation operations - diagnose slow boot, identify failing drives, decode BSOD crashes, manage startup apps, audit event logs. Use for: Windows is slow, slow bootup, won't boot, blue screen, BSOD, kernel crash, drive failing, SMART errors, disk errors, Event 41, Event 129, storahci reset, BugCheck, CRITICAL_PROCESS_DIED, crash dump, MEMORY.DMP, minidump, msconfig, services.msc, registry Run keys, StartupApproved, scheduled tasks at logon, slow login, high CPU at boot, Adobe startup, Docker startup, disable startup app, unexplained UAC prompt, what asked for admin, elevation prompt, prefetch forensics, BAM, process attribution, Security 4688. A drive letter alone does not identify the owning skill: mapped network drive, Disconnected mapping, UNC path, SMB, \\\\server\\share, NAS, Synology, net use — hand those to net-ops."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
@@ -53,6 +53,7 @@ The most common diagnostic failure: treating symptoms in isolation. "Slow boot" 
 Walk down the layers in order. Each rung has a binary outcome:
 
 ```
+0. Is it even local?  — a "drive" that is a network mapping belongs to net-ops
 1. Hardware errors    — WHEA-Logger events (CPU/RAM/PCIe-level faults)
 2. Storage health     — disk events 7/52/153/154, storahci 129 (controller reset)
 3. Crash record       — Event 41 (Kernel-Power) + BugCheck code + dump files
@@ -65,6 +66,19 @@ Walk down the layers in order. Each rung has a binary outcome:
 The most interesting failures cluster at rung 2 (storage) and rung 5 (startup bloat). The least interesting (but most-treated) is rung 6.
 
 ## Workflow
+
+### 0. Disambiguate the drive letter first
+
+A user saying "drive Z: is broken" cannot know whether that is a failing physical disk (this skill) or an SMB/name-resolution fault (`net-ops`) — the drive letter looks identical either way. Settle it before running anything else:
+
+```powershell
+Get-SmbMapping                            # network mappings + Status (Connected / Disconnected / Unavailable)
+Get-PSDrive -PSProvider FileSystem | Where-Object DisplayRoot   # non-empty DisplayRoot = UNC-backed
+```
+
+**If the letter appears in either result, it is a network mapping — stop here and hand off to `net-ops` (`scripts/windows/smb-audit.ps1`).** Do not run the physical-disk ladder: `disk-health.ps1` and `drive-dependencies.ps1` only see local disks, so they will report a clean bill of health on a drive that is genuinely broken, which is worse than reporting nothing.
+
+Everything below assumes a local, physically-attached drive.
 
 ### 1. Run the comprehensive audit
 
@@ -254,6 +268,7 @@ Use `scripts/event-search.ps1` for common patterns (events in time window, by pr
 
 | Symptom | First check | Common cause |
 |---------|-------------|--------------|
+| Mapped drive shows `Disconnected` / UNC path unreachable | Is this a network mapping? `Get-SmbMapping` | Hand to `net-ops` — not a local storage fault |
 | Slow boot, used to be fast | `startup-audit.ps1` | Bloat accumulation (Docker, Adobe CC, Electron apps) |
 | Slow boot, getting worse | `disk-health.ps1` | Failing drive — Windows waiting on probe timeouts |
 | Random freezes + hard restarts | `disk-health.ps1` + `crash-triage.ps1` | storahci resets cascading into kernel hang |
@@ -295,7 +310,7 @@ Output follows the claude-mods diagnostic convention:
 
 ## What This Skill Doesn't Cover
 
-- **Network diagnostics** → use `net-ops`
+- **Network diagnostics, including anything storage-shaped that turns out to live on the network** → use `net-ops`. Concretely: a mapped network drive, a mapping stuck `Disconnected` / `Unavailable`, a UNC path (`\\server\share`) that won't open, SMB itself, a NAS or Synology box, `net use` failures, and "access is denied" on a share. A drive letter does not make it local.
 - **Specific application performance profiling** → use `perf-ops`
 - **Source-code-level debugging** → use `debug-ops`
 - **Kernel dump file analysis with WinDbg** — too specialised for this skill; covered by reference doc pointers only
@@ -306,6 +321,7 @@ Output follows the claude-mods diagnostic convention:
 
 | When | Use |
 |------|-----|
+| The failing "drive" is a network mapping / NAS share (SMB, UNC, `Disconnected`) | `net-ops` owns it — `scripts/windows/smb-audit.ps1` for the mapping + SMB/LAN ladder |
 | Need to triage a remote Windows box | `net-ops` reverse-probe pattern adapts directly |
 | Crash is networking-related | Combine with `net-ops` for DNS / VPN driver issues |
 | Multiple machines exhibit same pattern | Run `health-audit.ps1` on each, diff the outputs |

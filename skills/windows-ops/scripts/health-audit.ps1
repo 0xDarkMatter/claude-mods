@@ -237,6 +237,25 @@ try {
     }
 } catch {}
 
+# Network mappings — SIGNPOST ONLY, deliberately not diagnosed here.
+# A drive letter alone doesn't say whether a fault is local storage or SMB,
+# and every check above only sees physically-attached disks. Listing the
+# mappings stops the audit reading as "all drives healthy" when the user's
+# broken Z: is a NAS share this skill never looked at. Diagnosis belongs to
+# net-ops (scripts/windows/smb-audit.ps1) — keep this to ONE row, no verdict.
+try {
+    $mappings = @(Get-SmbMapping -ErrorAction SilentlyContinue)
+    if ($mappings.Count -gt 0) {
+        $shown = ($mappings | Select-Object -First 3 |
+            ForEach-Object { "$($_.LocalPath) -> $($_.RemotePath) ($($_.Status))" }) -join ', '
+        if ($mappings.Count -gt 3) { $shown += ", +$($mappings.Count - 3) more" }
+        $noun = if ($mappings.Count -eq 1) { 'mapping' } else { 'mappings' }
+        Add-Finding -Level info -Category 'network' -Subject 'Network mappings' `
+            -Detail "$($mappings.Count) network $noun`: $shown - not diagnosed here, see net-ops" `
+            -Data @{ count = $mappings.Count }
+    }
+} catch {}
+
 # ─────────────────────────────────────────────────────────────────────
 # Section: Crash history
 # ─────────────────────────────────────────────────────────────────────
