@@ -20,7 +20,35 @@ Field guide to known causes of network weirdness on Windows, macOS, and Linux. O
 - `10.211.x.x` → Cisco AnyConnect (varies by enterprise)
 - `10.5.0.x` → NordVPN
 
-**Fix:** `scripts/windows/nrpt-clean.ps1 -Apply` (preserves Tailscale rules).
+**Fix:** `scripts/windows/nrpt-clean.ps1 -Apply` (preserves Tailscale rules). **Only for orphans** — if the VPN is live and wanted, this is the wrong tool; see W1b.
+
+## W1b. LIVE VPN Catch-All Swallowing LAN Names (ProtonVPN/WireGuard pattern)
+
+**Frequency:** Common on any box that runs a privacy VPN *and* has LAN services (NAS, mapped drives, printers).
+
+**Mechanism:** Same NRPT `Namespace='.'` rule as W1, but the VPN is **connected and doing its job** — internet DNS works fine through the tunnel. The casualty is the LAN: the catch-all captures **single-label** hostnames (`NAS`) too, sends them to the in-tunnel resolver (NXDOMAIN), and the NRPT match suppresses the LLMNR/NetBIOS broadcast fallback those names rely on. ProtonVPN's DNS-leak-protection additionally blocks UDP/53 egress to the LAN router — proven by a raw UdpClient query timing out while ICMP and TCP to the same router succeed — so there is no fallback resolver at all. Mapped drives show `Disconnected`; the host is perfectly reachable by IP (ICMP, TCP/445, TCP/5000 all fine).
+
+**Detection:**
+```powershell
+Get-DnsClientNrptPolicy -Effective | Where-Object Namespace -eq '.'   # rule present
+Get-NetAdapter | Where-Object Status -eq 'Up'                          # VPN interface Up = LIVE, not orphan
+scripts/windows/smb-audit.ps1                                          # full audit + verdict
+```
+Use `nslookup NAS` (honest `Non-existent domain`) rather than `Resolve-DnsName NAS`, whose single-label failure text — `"The filename, directory name, or volume label syntax is incorrect"` — is misleading.
+
+**Fix (coexistence — do NOT run nrpt-clean.ps1 on a live VPN's rule):**
+1. Pin the name in HOSTS (admin): `Add-Content $env:windir\System32\drivers\etc\hosts "192.168.50.11  NAS"` — HOSTS is consulted before NRPT/DNS, so it wins regardless of VPN state.
+2. Or remap by IP **plus** a credential keyed to the IP: `cmdkey /add:192.168.50.11 /user:<user> /pass` — without the cmdkey step you hit W1c.
+
+## W1c. Credential Manager Target Keyed to Hostname, Not IP
+
+**Frequency:** Bites exactly when working around W1b by remapping to the raw IP.
+
+**Mechanism:** Credential Manager keys stored credentials on the **target string**. A credential stored for target `NAS` does not apply to `\\192.168.50.11\vault`, so the IP-based remap returns `System error 5 / Access is denied` — which looks like a share-permission problem but is a credential-lookup miss.
+
+**Detection:** `cmdkey /list` — compare the `Target:` entries against the host form actually in the UNC path (hostname vs IP).
+
+**Fix:** `cmdkey /add:<ip> /user:<user> /pass:<pw>`, or keep using the hostname and fix resolution instead (W1b's HOSTS pin keeps the existing credential valid).
 
 ## W2. AV WFP Hooks (ESET / Kaspersky / Bitdefender / Norton)
 

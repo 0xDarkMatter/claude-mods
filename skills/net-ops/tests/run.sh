@@ -94,6 +94,32 @@ if [[ -f "$TERMLIB" ]]; then
         bash -c '! printf "%s" "$1" | LC_ALL=C grep -q "[^[:print:][:cntrl:]]"' _ "$prim"
 fi
 
+# ---------------------------------------------------------------------------
+echo
+echo "--- smb-audit.ps1 structural tests (OS-independent, static) ---"
+# ---------------------------------------------------------------------------
+# Windows-only at runtime, so on mac/linux we assert the contract statically:
+# comment-block help, -Json mode, semantic exit codes, and the guard rails
+# the SKILL text promises (live-VPN vs orphan distinction, credential check).
+SMB="$root/scripts/windows/smb-audit.ps1"
+smb_src="$(cat "$SMB")"
+assert "smb-audit has comment-based help with EXAMPLEs" \
+    bash -c 'grep -q "^\.SYNOPSIS" <<<"$0" && grep -qc "^\.EXAMPLE" <<<"$0"' "$smb_src"
+assert "smb-audit documents exit codes incl. domain signal 10" \
+    bash -c 'grep -q "10 audit ran and found" <<<"$0"' "$smb_src"
+assert "smb-audit ships -Json with schema id" \
+    contains "$smb_src" 'claude-mods.net-ops.smb-audit/v1'
+assert "smb-audit checks EFFECTIVE NRPT policy" \
+    contains "$smb_src" 'Get-DnsClientNrptPolicy -Effective'
+assert "smb-audit distinguishes live VPN from orphan rule" \
+    contains "$smb_src" 'ORPHANED'
+assert "smb-audit inspects credential targets via cmdkey" \
+    contains "$smb_src" 'cmdkey /list'
+assert "smb-audit probes TCP/445" \
+    contains "$smb_src" '445'
+assert "smb-audit warns about misleading Resolve-DnsName single-label error" \
+    contains "$smb_src" 'volume label syntax'
+
 # Determine the local OS probe for testing
 case "$(uname -s)" in
     Darwin) probe="$root/scripts/macos/probe.sh"; audit="$root/scripts/macos/dns-audit.sh" ;;

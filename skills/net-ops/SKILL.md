@@ -1,6 +1,6 @@
 ---
 name: net-ops
-description: "Cross-platform network troubleshooting (Windows, macOS, Linux) via local or remote shell. Use for: DNS broken, can't resolve hostnames, nslookup/dig works but apps fail, NRPT, WFP, scutil, /etc/resolver, systemd-resolved, /etc/resolv.conf, NetworkManager, VPN DNS leak residue (ProtonVPN/Mullvad/WireGuard/AnyConnect), AV/firewall blocking DNS or DoH, Tailscale DNS interaction, intermittent connectivity, remote diagnostics over SSH."
+description: "Cross-platform network troubleshooting (Windows, macOS, Linux) via local or remote shell. Use for: DNS broken, can't resolve hostnames, nslookup/dig works but apps fail, NRPT, WFP, scutil, /etc/resolver, systemd-resolved, /etc/resolv.conf, NetworkManager, VPN DNS leak residue (ProtonVPN/Mullvad/WireGuard/AnyConnect), AV/firewall blocking DNS or DoH, Tailscale DNS interaction, intermittent connectivity, remote diagnostics over SSH, mapped network drive Disconnected, SMB share unreachable, \\\\server\\share, NAS by hostname fails but IP works, single-label hostname, LLMNR/NetBIOS, VPN blocks LAN DNS, System error 5 on net use."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
@@ -32,12 +32,35 @@ Walk down the layers in order. **Do not skip rungs.** Each rung has a binary out
 1. Link layer        — interface up, valid IP, gateway present
 2. IP reachability   — ping public IPs over ICMP
 3. Socket reach.     — TCP/443 + UDP/53 to known destinations (raw socket DNS)
+3.5 LAN services     — parallel track: mapped drives, SMB, mDNS/.local,
+                       single-label hostnames (see below — internet OK ≠ LAN OK)
 4. DNS infrastructure — bypass tool: nslookup / dig @<server>
 5. OS resolver path  — the hook layer (most interesting on modern systems)
 6. Application       — real HTTP request to a real hostname
 ```
 
 The most common mistake: jumping to rung 6 ("HTTPS doesn't work, must be a cert / proxy") when rung 5 is the actual problem (an orphan VPN DNS rule on Windows, a stale `/etc/resolver/` file on macOS, a misconfigured systemd-resolved on Linux). Discipline prevents this.
+
+## The LAN Services Track (Rung 3.5)
+
+Rungs 1–6 are framed around reaching the *public internet*. A mapped drive showing `Disconnected` while browsing works fine is a different fault domain: **local-network service reachability**. Symptoms: SMB shares, printers, `\\NAS\share`, `.local` names, single-label hostnames.
+
+The load-bearing concept is the **single-label hostname resolution path**:
+
+```
+HOSTS file → NRPT match → DNS (suffix search) → LLMNR → NetBIOS-NS
+```
+
+An NRPT `.` catch-all (live VPN or orphan) short-circuits everything below it: the single-label name goes to the VPN resolver (NXDOMAIN) **and** the LLMNR/NetBIOS broadcast fallback that LAN names normally rely on is suppressed. VPN DNS-leak-protection often also blocks UDP/53 to the LAN router, so there's no fallback resolver either. Full chain, per-OS tools, and the credential-target gotcha: `references/diagnostic-ladder.md` (rung 3.5).
+
+**One-shot audit:** `scripts/windows/smb-audit.ps1` walks every mapped drive through mapping state → resolution mechanism → ICMP/TCP-445 → credential targeting → NRPT/leak-protection detection, and emits a verdict naming the fix.
+
+**VPN + LAN coexistence — decision rule.** Is the VPN *live and wanted*?
+
+- **Yes** → do NOT touch the NRPT rule. Pin the name in the HOSTS file (consulted before NRPT, so it wins regardless of VPN state; needs admin), or remap by IP *and* add a credential keyed to that IP (`cmdkey /add:<ip>`).
+- **No** (VPN gone, rule orphaned) → `scripts/windows/nrpt-clean.ps1 -Apply`.
+
+**`nrpt-clean.ps1` must never be pointed at a live VPN's catch-all** — it exists for orphans only. Deleting a wanted VPN's rule breaks its DNS routing and the client will just re-create it.
 
 ## Workflow
 
@@ -66,6 +89,7 @@ The interesting failures are almost always rung 5. Per-OS deep-dive scripts:
 | OS | Script | What it does |
 |---|---|---|
 | Windows | `scripts/windows/nrpt-audit.ps1` | Dump NRPT rules with attribution + registry forensics |
+| Windows (LAN/SMB) | `scripts/windows/smb-audit.ps1` | Mapped-drive audit: resolution mechanism, reachability, credential targets, NRPT/leak-protection, verdict |
 | macOS | `scripts/macos/dns-audit.sh` | Dump scutil --dns, /etc/resolver/*, mDNSResponder state, profiles |
 | Linux | `scripts/linux/dns-audit.sh` | Dump systemd-resolved status, resolv.conf chain, NM config, NSS order |
 
@@ -90,6 +114,9 @@ Repair scripts default to **dry-run** and protect known-good config (Tailscale M
 | Linux | `dig` works, `getent hosts` fails | systemd-resolved misconfigured | `resolvectl status` |
 | Linux | DNS works on some apps, not others | NSS order in `/etc/nsswitch.conf` excludes `resolve` | `grep ^hosts /etc/nsswitch.conf` |
 | All | DNS suddenly broken after sleep/wake | VPN client failed disconnect cleanup | OS-specific (see above) |
+| Windows | Mapped drive `Disconnected`, host pings by IP but not by name, VPN active | NRPT `.` catch-all swallowing single-label names (+ suppressing LLMNR/NetBIOS fallback) | `Get-DnsClientNrptPolicy -Effective \| ? Namespace -eq '.'` |
+| Windows | `net view \\<ip>` returns `System error 5` while the same share worked by hostname | Credential Manager target keyed to hostname, not IP | `cmdkey /list` |
+| All | LAN hosts reachable by IP but router's DNS times out on UDP/53 while TCP to it succeeds | VPN DNS-leak-protection egress filter | `scripts/windows/smb-audit.ps1` (LAN DNS EGRESS section) |
 
 ## SSH Transport Patterns
 
@@ -143,7 +170,8 @@ After a few sessions, certain symptom triplets become instantly diagnosable. See
 - `scripts/ssh-bootstrap.sh` — establish SSH session, auto-detect target OS, emit usable invocation
 - `scripts/windows/probe.ps1` — full layered diagnostic for Windows
 - `scripts/windows/nrpt-audit.ps1` — NRPT forensics with attribution
-- `scripts/windows/nrpt-clean.ps1` — safe NRPT cleanup (protects Tailscale)
+- `scripts/windows/nrpt-clean.ps1` — safe NRPT cleanup (orphans ONLY — never point it at a live VPN's catch-all; protects Tailscale)
+- `scripts/windows/smb-audit.ps1` — mapped-drive / SMB / LAN-name audit with per-drive verdicts (`-DriveLetter Z -FallbackIp 'NAS=192.168.50.11'`, `-Json`)
 - `scripts/macos/probe.sh` — full layered diagnostic for macOS
 - `scripts/macos/dns-audit.sh` — scutil + /etc/resolver + profile + mDNSResponder dump
 - `scripts/macos/resolver-clean.sh` — remove orphan /etc/resolver/* files

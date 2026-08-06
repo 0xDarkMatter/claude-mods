@@ -72,7 +72,47 @@ Checked `C:\Program Files\Proton\VPN\Install.log.txt`: Proton VPN installation c
 4. **The `Comment` field on NRPT rules is gold.** VPN clients tend to write self-identifying strings. Read them before assuming malice.
 5. **Interface-switch ineffective = OS-layer cause.** When wifi → ethernet doesn't fix it, the diagnostic search space contracts dramatically.
 
-## Case 2: Template for Future Entries
+## Case 2: The NAS That Vanished by Name (Windows, live ProtonVPN)
+
+### Initial Report
+
+> "Mapped drive Z: → \\NAS\vault shows Disconnected." (TITAN, 2026-08-06; the NAS is a Synology DiskStation at 192.168.50.11.)
+
+Internet was fine — which is exactly why the existing rungs 1–6 couldn't express the fault: every rung is framed around reaching the public internet. This case created the rung 3.5 LAN-services track.
+
+### Diagnostic Path
+
+**Rung 3.5 (LAN reachability by IP):** The LAN itself was completely healthy — ICMP to 192.168.50.11 OK, TCP/445 OK, TCP/5000 OK (DSM login page title "NAS - Synology DiskStation"). So the host is up and serving SMB; only the *name* is dead.
+
+**Name resolution:** `Resolve-DnsName NAS` failed with `"The filename, directory name, or volume label syntax is incorrect"` — a misleading error that reads like a typo in the command. `nslookup NAS` gave the honest `Non-existent domain`. (Lesson banked: prefer nslookup for single-label diagnosis.)
+
+**NRPT:** `Get-DnsClientNrptPolicy -Effective` showed a catch-all `Namespace='.'` → NameServers `10.2.0.1` — ProtonVPN's in-tunnel DNS gateway, installed by the live WireGuard session (interface metric lower than Ethernet). The catch-all captures single-label names too, and the NRPT match suppresses the LLMNR/NetBIOS-NS broadcast fallback that bare `NAS` relied on before the VPN.
+
+**Fallback resolver check:** a raw UdpClient DNS query to the LAN router (192.168.50.1) on UDP/53 **timed out**, while ICMP and TCP to the same router succeeded — ProtonVPN's DNS-leak-protection blocks UDP/53 egress to anything but the tunnel resolver. So no fallback resolver existed either.
+
+### The False Lead
+
+"Just remap by IP": `\\192.168.50.11\vault` returned `System error 5 / Access is denied`. Looks like a permissions problem; isn't. The Credential Manager entry was keyed to target `NAS` (the hostname), and credentials don't apply across target forms. `cmdkey /list` exposed it.
+
+### The Answer
+
+The VPN was **live and wanted** — so `nrpt-clean.ps1` (built for *orphan* rules from disconnected VPNs) was the wrong tool. The correct fix is coexistence: pin the name in the HOSTS file, which is consulted before NRPT/DNS and therefore wins regardless of VPN state:
+
+```powershell
+Add-Content $env:windir\System32\drivers\etc\hosts "192.168.50.11  NAS"   # admin
+```
+
+Drive reconnected by name; existing `NAS`-keyed credential kept working; VPN untouched.
+
+### Lessons
+
+1. **"Internet OK" proves nothing about LAN names.** Mapped drives / SMB / single-label hostnames are their own track (rung 3.5) with their own resolution chain: HOSTS → NRPT → DNS suffix search → LLMNR → NetBIOS-NS.
+2. **An NRPT `.` catch-all short-circuits everything below it** — including the broadcast fallbacks. And leak protection can remove the LAN router as a fallback resolver too. Two independent mechanisms, one symptom.
+3. **Live vs orphan decides the fix.** Orphan rule → nrpt-clean.ps1. Live wanted VPN → HOSTS pin or IP-remap + matching `cmdkey` target. Never delete a live VPN's catch-all.
+4. **`System error 5` after an IP remap is a credential-target miss, not permissions.** Check `cmdkey /list` before touching share ACLs.
+5. **Don't trust `Resolve-DnsName`'s single-label error text.** `nslookup` tells the truth.
+
+## Case 3: Template for Future Entries
 
 When you diagnose a new case worth remembering, add a section here with:
 - Initial report (verbatim if possible)
