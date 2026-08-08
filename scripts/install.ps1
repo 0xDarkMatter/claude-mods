@@ -436,6 +436,54 @@ if ((Test-Path $settingsPath) -and (Select-String -Path $settingsPath -Pattern "
 Write-Host ""
 
 # =============================================================================
+# LINE ENDINGS - Strip CRs from every installed shell script
+#
+# bash refuses CRLF: `$'\r': command not found`, and a `#!/bin/bash\r` shebang
+# exits 127 ("No such file or directory"). .gitattributes pins *.sh to LF at
+# checkout, but a clone that predates it (or any tool that rewrote endings)
+# still carries CRLF - on 2026-08-08 that broke the installed
+# ~/.claude/hooks/pre-commit-unicode-scan.sh and with it the repo's own
+# pre-commit gate. Normalizing here makes the installed copy runnable
+# regardless of the source tree's line endings.
+# =============================================================================
+Write-Host "Normalizing shell-script line endings..." -ForegroundColor Cyan
+
+$crFixed = 0
+foreach ($d in @("hooks", "skills", "pigeon", "auto-skill")) {
+    $root = Join-Path $claudeDir $d
+    if (-not (Test-Path $root)) { continue }
+    foreach ($f in (Get-ChildItem -Path $root -Recurse -File)) {
+        $isShell = $f.Name -match '\.sh(\.template)?$'
+        if (-not $isShell -and -not $f.Extension) {
+            # Extension-less files are shell iff they open with a shebang.
+            try {
+                $fs = [System.IO.File]::OpenRead($f.FullName)
+                $buf = New-Object byte[] 2
+                $n = $fs.Read($buf, 0, 2)
+                $fs.Close()
+                $isShell = ($n -eq 2 -and $buf[0] -eq 0x23 -and $buf[1] -eq 0x21)
+            } catch { $isShell = $false }
+        }
+        if (-not $isShell) { continue }
+        try {
+            $raw = [System.IO.File]::ReadAllText($f.FullName)
+            if ($raw.Contains("`r")) {
+                [System.IO.File]::WriteAllText($f.FullName, ($raw -replace "`r", ""))
+                $crFixed++
+            }
+        } catch {
+            Write-Host "  WARNING: could not normalize $($f.FullName) ($($_.Exception.Message))" -ForegroundColor Yellow
+        }
+    }
+}
+if ($crFixed -gt 0) {
+    Write-Host "  Converted $crFixed script(s) from CRLF to LF" -ForegroundColor Green
+} else {
+    Write-Host "  All shell scripts already LF" -ForegroundColor Green
+}
+Write-Host ""
+
+# =============================================================================
 # SUMMARY
 # =============================================================================
 Write-Host "================================================================" -ForegroundColor Cyan
