@@ -86,6 +86,12 @@ echo "== isometric-ops: projection-constant/staleness verifier"
 run "iso-facts --offline consistent" 0 "$PY" skills/isometric-ops/scripts/check-iso-facts.py --offline
 run "iso-facts --help"               0 "$PY" skills/isometric-ops/scripts/check-iso-facts.py --help
 
+echo "== hono-ops: Hono fact/staleness verifier + route-inventory contract"
+run "hono-facts --offline consistent" 0 "$PY" skills/hono-ops/scripts/check-hono-facts.py --offline
+run "hono-facts --help"               0 "$PY" skills/hono-ops/scripts/check-hono-facts.py --help
+run "route-inventory --help"          0 "$PY" skills/hono-ops/scripts/route-inventory.py --help
+run "route-inventory fixture scan"    0 "$PY" skills/hono-ops/scripts/route-inventory.py skills/hono-ops/tests/fixtures/sample-app.ts
+
 echo "== protocol: every new verifier is executable + compiles"
 for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/claude-code-ops/scripts/validate-hooks-json.py \
@@ -94,7 +100,9 @@ for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/loop-ops/scripts/check-pricing-sync.py \
          skills/r-ops/scripts/check-r-facts.py \
          skills/threejs-ops/scripts/check-three-facts.py \
-         skills/isometric-ops/scripts/check-iso-facts.py; do
+         skills/isometric-ops/scripts/check-iso-facts.py \
+         skills/hono-ops/scripts/check-hono-facts.py \
+         skills/hono-ops/scripts/route-inventory.py; do
     "$PY" -m py_compile "$s" 2>/dev/null && pass "py_compile $(basename "$s")" || bad "py_compile $(basename "$s")"
 done
 bash -n skills/terraform-ops/scripts/check-action-refs.sh 2>/dev/null \

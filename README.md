@@ -12,13 +12,13 @@
 
 > *A comprehensive extension toolkit that transforms Claude Code into a specialized development powerhouse.*
 
-**claude-mods** is a production-ready plugin that extends Claude Code with 102 specialized skills, 3 expert agents, 13 output styles, 13 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
+**claude-mods** is a production-ready plugin that extends Claude Code with 103 specialized skills, 3 expert agents, 13 output styles, 13 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
 
 Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms), claude-mods fills critical gaps in Claude Code's capabilities: persistent session state that survives across machines, on-demand expert knowledge for specialized domains, token-efficient modern CLI tools (10-100x faster than traditional alternatives), and proven workflow patterns for TDD, code review, and feature development. The toolkit implements Anthropic's [recommended patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), ensuring your development context never vanishes when sessions end.
 
 From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
 
-**3 agents. 102 skills. 13 styles. 13 hooks. 14 rules. One install.**
+**3 agents. 103 skills. 13 styles. 13 hooks. 14 rules. One install.**
 
 ## Recent Updates
 
@@ -88,7 +88,7 @@ Claude Code is powerful out of the box, but it has gaps. This toolkit fills them
 
 - **Session continuity** — Tasks vanish when sessions end. We fix that with `/save` and `/sync`, implementing Anthropic's [recommended pattern](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) for long-running agents.
 
-- **Expert-level knowledge on demand** — 102 on-demand skills covering React, TypeScript, Python, Go, Rust, PostgreSQL, and more, plus 3 specialized agents reserved for genuine context-isolation/worker roles (git operations, web scraping, project reorganization). Skills-first: knowledge loads when relevant instead of living in heavyweight agent prompts.
+- **Expert-level knowledge on demand** — 103 on-demand skills covering React, TypeScript, Python, Go, Rust, PostgreSQL, and more, plus 3 specialized agents reserved for genuine context-isolation/worker roles (git operations, web scraping, project reorganization). Skills-first: knowledge loads when relevant instead of living in heavyweight agent prompts.
 
 - **Modern CLI tools** — Stop using `grep`, `find`, and `cat`. Our rules automatically prefer `ripgrep`, `fd`, `eza`, and `bat` — 10-100x faster and token-efficient.
 
@@ -113,7 +113,7 @@ claude-mods/
 ├── .claude-plugin/     # Plugin metadata
 ├── agents/             # Expert subagents (3)
 ├── commands/           # Slash commands (3)
-├── skills/             # Custom skills (102)
+├── skills/             # Custom skills (103)
 ├── output-styles/      # Response personalities
 ├── hooks/              # Hook examples & docs
 ├── rules/              # Claude Code rules
@@ -214,6 +214,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [laravel-ops](skills/laravel-ops/) | Laravel Eloquent, architecture, authentication, testing with Pest |
 | [craftcms-ops](skills/craftcms-ops/) | Craft CMS 5 - entries/sections/fields, Matrix-as-entries, Twig, element queries, GraphQL, plugins |
 | [payloadcms-ops](skills/payloadcms-ops/) | Payload CMS 3 (Next.js-native) - collections/globals, Local API, access control, hooks, fields |
+| [hono-ops](skills/hono-ops/) | Hono v4 on Cloudflare Workers - app composition + sub-app mounting, middleware ordering/auth boundaries, typed errors + onError, zValidator vs hand-rolled validation, SPA co-serving, hc RPC vs typed clients, vitest-pool-workers testing, streaming/SSE/WebSockets; route-inventory + middleware-order linter, staleness verifier |
 | [cli-ops](skills/cli-ops/) | Production CLI tool patterns - agentic workflows, stream separation, exit codes |
 | [bash-ops](skills/bash-ops/) | Defensive Bash - strict mode, traps, safe argument parsing, semantic exit codes, shellcheck, CI scripts |
 | [cypress-ops](skills/cypress-ops/) | Cypress e2e + component testing - data-test selectors, cy.intercept, cy.session, Test Replay, flake diagnosis |

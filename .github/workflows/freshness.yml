@@ -115,6 +115,15 @@ jobs:
           if [ "$rc" -eq 7 ]; then echo "::warning::isometric-ops live check unreachable (npm registry) — skipped"; fi
           exit 0
 
+      - name: hono-ops packages vs npm registry (existence + hono major)
+        run: |
+          set +e
+          python skills/hono-ops/scripts/check-hono-facts.py --live
+          rc=$?
+          if [ "$rc" -eq 10 ]; then echo "::error::hono-ops drift — a named npm package is gone, or hono shipped a major past v4"; exit 1; fi
+          if [ "$rc" -eq 7 ]; then echo "::warning::hono-ops live check unreachable (npm registry) — skipped"; fi
+          exit 0
+
       - name: GitHub Action refs still resolve
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

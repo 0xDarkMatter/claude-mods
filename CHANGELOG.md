@@ -76,6 +76,23 @@ feature releases live in the README "Recent Updates" section.
   the decision tree and body gain an IAP branch + quick reference, and
   cloudflare-ops cross-points to the new Access reference.
 
+- **`hono-ops` skill** - Hono v4 on Cloudflare Workers, distilled from a
+  production multi-tenant Worker (one app, 6+ mounted sub-apps, ~1350 tests):
+  app composition with typed `Bindings`/`Variables` and sub-app mounting,
+  middleware ordering as the security topology (auth middleware that builds a
+  scoped per-request world; bearer-auth surfaces mounted *outside* the session
+  boundary), typed errors → one `onError` mapping, the JSON-404-vs-SPA-shell
+  split, zValidator vs hand-rolled validation trade-offs, SPA co-serving via
+  the static assets binding, `hc` RPC vs hand-rolled typed clients,
+  vitest-pool-workers testing (migrations, JWT harness, workerd version lag),
+  streaming/SSE/WebSockets, and the Workers gotchas (detached fetch "Illegal
+  invocation", immutable headers, per-colo `caches`, `waitUntil`). Eight
+  references, a commented composition-root starter template, a
+  `route-inventory.py` scanner with a middleware-order linter (exit 10 =
+  routes that bypass a later-registered middleware), a `check-hono-facts.py`
+  staleness verifier (offline in PR CI, live in the freshness workflow), and
+  a 50-assertion offline suite.
+
 
 ### Removed
 - **`fleetflow` skill extracted to its own repo** (`X:\Forge\fleetflow`) with
