@@ -66,9 +66,15 @@ feature releases live in the README "Recent Updates" section.
   adapters and CLI schema generation, DB-backed sessions with cookie caching,
   email/password + social providers, passkey/2FA/organization plugins, Hono
   and framework mounting, and choosing it vs hand-rolled vs a hosted IdP.
-  Frontmatter triggers extended (cloudflare access, zero trust, identity-aware
-  proxy, AUD tag, service auth, better auth), decision tree gains an IAP
-  branch, and cloudflare-ops cross-points to the new Access reference.
+  Facts verified against live Cloudflare docs and better-auth.com (2026-08):
+  Access token claims incl. the ~1KB `custom`-claim trim, service-token
+  `common_name` verification, `/cdn-cgi/access/logout`, the SPA
+  302-to-IdP/CORS trap, and Better Auth's session options
+  (`expiresIn`/`updateAge`/`cookieCache`), plugin catalog (incl. sso/scim),
+  and migration guides. Frontmatter triggers extended (cloudflare access,
+  zero trust, identity-aware proxy, AUD tag, service auth, better auth),
+  the decision tree and body gain an IAP branch + quick reference, and
+  cloudflare-ops cross-points to the new Access reference.
 
 
 ### Removed

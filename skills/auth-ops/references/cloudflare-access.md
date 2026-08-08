@@ -1,6 +1,6 @@
 # Identity-Aware Proxies (Cloudflare Access)
 
-Deep-dive reference for identity-aware proxy (IAP) authentication, worked through Cloudflare Access (Zero Trust). The patterns — verify the proxy's signed identity assertion, close every path around the proxy, layer app authorization on top — generalize to any IAP (Google IAP, AWS Verified Access, Pomerium, oauth2-proxy).
+Deep-dive reference for identity-aware proxy (IAP) authentication, worked through Cloudflare Access (Zero Trust). The patterns — verify the proxy's signed identity assertion, close every path around the proxy, layer app authorization on top — generalize to any IAP (Google IAP, AWS Verified Access, Pomerium, oauth2-proxy). Access-specific facts (claims, endpoints) verified against Cloudflare docs as of 2026-08.
 
 ## The Model
 
@@ -61,6 +61,33 @@ Setup sequence (order matters — the AUD tag doesn't exist until the app does):
 ```
 
 One application per hostname is the natural multi-tenant shape: each tenant hostname gets its own Access app, its own AUD, and its own policy set — onboarding a tenant is dashboard config plus data, no code change.
+
+Access apps and policies are also manageable as infrastructure-as-code (Terraform `cloudflare_zero_trust_access_application` / `cloudflare_zero_trust_access_policy`) — worth it once you have more than a couple of apps, so the policy set is reviewable and reproducible.
+
+## What's in the Token
+
+Two token shapes arrive at the origin, depending on how the caller authenticated (verified against Cloudflare docs, 2026-08):
+
+**Identity-based login** (IdP or one-time PIN):
+
+| Claim | Contents |
+|-------|----------|
+| `aud` | **Array** of application AUD tags |
+| `email` | The authenticated email, verified by the IdP / OTP flow |
+| `iss` | `https://<team-domain>` |
+| `exp` / `iat` / `nbf` | Standard timing claims |
+| `type` | `app` (application token) or `org` (global session token) |
+| `sub` | Access user UUID — unique per email per account, but **regenerated** if the user is removed and re-added to the Zero Trust org |
+| `identity_nonce` | Cache key for the identity endpoint (below) |
+| `country` | Country the user authenticated from |
+| `custom` | Custom SAML attributes / OIDC claims, **best-effort only** (see warning) |
+
+**Service-token authentication** (Service Auth policy): same envelope, but `common_name` carries the service token's Client ID and `sub` is an **empty string** — there is no user. Origins can verify service-auth callers with the same JWKS + issuer + AUD check, then branch on `common_name` instead of `email`.
+
+Two claims deserve suspicion:
+
+- **`custom` is trimmed.** Access drops configured custom claims once the serialized `custom` claim exceeds roughly 1 KB — groups first, since they're usually largest. A user in many IdP groups can silently receive a token *without* their groups while colleagues keep theirs. **Never make authorization decisions on `custom`/groups claims from the JWT**; if you need full identity (all groups), call `GET /cdn-cgi/access/get-identity` on the protected hostname with the user's `CF_Authorization` cookie. Better: keep roles in your own user store (next section) and ignore `custom` entirely.
+- **`email` vs `sub` as the join key.** Email is human-meaningful and survives org remove/re-add; `sub` is opaque and doesn't. Most apps key their user store on canonicalized email — fine, as long as you canonicalize (trim + lower-case) everywhere.
 
 ## Verifying the JWT at the Origin
 
@@ -166,7 +193,7 @@ Generalized, for any IAP:
 |------------|---------------------------|
 | Cloudflare Workers | `workers_dev = false`; routes only on protected hostnames |
 | Origin server behind Cloudflare | Firewall the origin to Cloudflare IP ranges + authenticated origin pulls (mTLS); otherwise anyone who finds the origin IP bypasses Access entirely |
-| `cloudflared` tunnel | Best case — the origin has no public inbound at all; only the tunnel reaches it |
+| `cloudflared` tunnel | Best case — the origin has no public inbound at all; only the tunnel reaches it. Cloudflare's docs treat JWT validation as optional for tunnel-connected origins; verify anyway — defense in depth costs one function call |
 | Google IAP / AWS ALB + OIDC | Security groups / ingress rules so only the load balancer reaches the backends; verify the signed-identity header (`x-goog-iap-jwt-assertion` etc.), not the plain email header |
 | Kubernetes + oauth2-proxy / Pomerium | NetworkPolicy so app pods accept traffic only from the proxy |
 
@@ -210,7 +237,7 @@ Webhooks, ingest endpoints, and machine callers can't complete a human login. Th
 
 | Policy type | Mechanism | Use when |
 |-------------|-----------|----------|
-| **Service Auth** | Caller presents Access **service token** headers (`CF-Access-Client-Id` / `CF-Access-Client-Secret`); Access validates them and still issues a (non-identity) JWT | The caller is yours to configure — internal services, partner systems that can send custom headers |
+| **Service Auth** | Caller presents Access **service token** headers (`CF-Access-Client-Id` / `CF-Access-Client-Secret`); Access validates them and issues a JWT whose `common_name` is the token's Client ID (see [What's in the Token](#whats-in-the-token)) — verifiable at the origin with the same JWKS check | The caller is yours to configure — internal services, partner systems that can send custom headers |
 | **Bypass** | Access waves the route through entirely (optionally restricted by IP) | Third-party webhook senders you can't give headers to (Stripe, GitHub) — their signature scheme is then the only gate |
 
 **At the origin**, mount bearer-token routes **outside** the human-auth middleware — not as an `if` inside it:
@@ -230,6 +257,19 @@ The bearer key is the real gate on these routes — treat it accordingly:
 - For third-party webhooks behind a Bypass policy, verify the sender's HMAC signature (Stripe-Signature etc.) — Bypass means the edge does nothing for you.
 
 Keeping machine routes outside `/api/*` (rather than exempting paths inside the middleware) makes the security model auditable: the route table *is* the policy.
+
+**Paths that never traverse the proxy at all** deserve the same audit: Worker cron triggers, queue consumers, and service-binding calls from other Workers arrive with **no Access header** — they invoke your code from inside the platform. Don't route internal invocations through the request-auth middleware (they'd 403), and don't let shared handlers assume an authenticated user exists. Give internal entry points their own explicit identity convention (a system principal with a fixed, minimal scope) so audit trails and scoping still hold.
+
+## Sessions, Logout, and the SPA Problem
+
+Access issues two `CF_Authorization` cookies: a **global session token** on the team domain (so one login covers many apps) and a per-app **application token** on the protected hostname (the JWT your origin verifies). Session duration is configured per application; admins can revoke a user's sessions from the Zero Trust dashboard, and `https://<hostname>/cdn-cgi/access/logout` ends the session for that app — wire your app's "log out" link to it, since your origin has no session of its own to destroy.
+
+The classic operational trap is the **SPA whose Access session expires mid-use**: the page is already loaded, and a background `fetch()` to the API doesn't get a clean 401 — Access answers with a **302 redirect to the IdP login**, which the browser's CORS machinery turns into an opaque failure the SPA can't interpret. Two mitigations:
+
+- **Detect and reload.** Treat a redirected/opaque or HTML response from an API route as "session expired" and trigger a full-page navigation, letting Access run its login flow and land the user back in the app.
+- **Managed OAuth (newer Access feature).** When enabled, Access returns `401` + a `WWW-Authenticate` header pointing at RFC 8414 OAuth discovery metadata for non-browser clients, and issues **opaque** (non-JWT) access tokens via a standard authorization-code flow. This is the intended path for API clients and agents that can't follow interactive redirects — check current Cloudflare docs before building on it.
+
+Keep API responses JSON even for auth failures your *own* middleware generates (verified-JWT-but-no-user → JSON 403, never a redirect), so the only redirect source is Access itself.
 
 ## The Local-Dev Problem
 
@@ -277,6 +317,10 @@ Mixed audiences on one app is normal: an IdP Allow policy for staff plus an OTP 
 | `SKIP_AUTH`-style dev flag | Ships to production eventually | Doubly gated dev stub (env var in gitignored file + loopback-only hostname), pinned by a test |
 | Auto-provisioning users from OTP logins | Mailbox control alone mints an account | Auto-provision only from IdP-backed staff-domain emails, audited |
 | Case-sensitive email matching | Same person, two identities; lookup misses | Canonicalize (trim + lower-case) before every lookup and store |
+| Authorizing on the JWT's `custom`/groups claims | Access trims `custom` at ~1 KB, groups first — some users silently lose the claim | Roles in your own user store; full identity via `/cdn-cgi/access/get-identity` if you must read groups |
+| SPA treats every API failure as JSON | Expired Access session → 302 to IdP → opaque CORS failure, not a 401 | Detect redirected/opaque/HTML responses and full-page reload (or use Managed OAuth for API clients) |
+| Cron/queue/service-binding handlers reuse request-auth code | Internal invocations have no Access header — either 403s or, worse, an accidental unauthenticated path | Separate internal entry points with an explicit system identity |
+| App "logout" only clears app state | The Access session survives; next request logs straight back in | Send the browser to `/cdn-cgi/access/logout` on the protected hostname |
 
 ## See Also
 

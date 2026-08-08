@@ -2,7 +2,7 @@
 
 Deep-dive reference for [Better Auth](https://www.better-auth.com) — the framework-agnostic TypeScript authentication library: owned auth (your database, your users table) with batteries included (social login, passkeys, 2FA, organizations) via a plugin system.
 
-> **Freshness note:** Better Auth moves fast — plugin names, option shapes, and adapter APIs change between minor versions. The patterns below are architectural and stable; **verify exact API signatures against the current Better Auth docs (better-auth.com/docs) before applying specifics.** Where this file and the live docs disagree, the live docs win.
+> **Freshness note:** Better Auth moves fast — plugin names, option shapes, and adapter APIs change between minor versions. The patterns below are architectural and stable, and specifics were verified against better-auth.com/docs as of 2026-08 — but **re-verify exact API signatures against the current docs before applying them.** Where this file and the live docs disagree, the live docs win. The docs ship an `llms.txt` index (`better-auth.com/llms.txt`) — fetch it to enumerate current pages before deep-diving.
 
 ## Where It Sits
 
@@ -30,11 +30,13 @@ Who are your users, and who should own the credential risk?
 │     ├─ Your DB, your schema, no per-MAU bill
 │     └─ You own uptime and patching of the auth path
 │
-├─ Compliance/enterprise-sales pressure (SOC2 checklists name the IdP),
-│  or a team with no capacity to own auth code?
+├─ Compliance/enterprise-sales pressure (the buyer's checklist names a
+│  vendor), or a team with no capacity to own auth code?
 │  └─ Hosted IdP (Auth0/Clerk/WorkOS)
-│     ├─ Fastest to enterprise SSO (SAML, SCIM)
-│     └─ Costs scale per-MAU; user data lives with the vendor
+│     ├─ Someone else's pager owns the auth path
+│     ├─ Costs scale per-MAU; user data lives with the vendor
+│     └─ Note: enterprise SSO alone no longer forces this — Better Auth
+│        ships sso (SAML/OIDC) + SCIM plugins; the trade is ownership
 │
 └─ Unusual auth model no library expresses (exotic tokens, research)?
    └─ Hand-rolled on the primitives in jwt-sessions.md / implementation.md
@@ -111,9 +113,10 @@ Schema management is CLI-driven: the Better Auth CLI can **generate** the schema
 Better Auth's default is **database-backed sessions with a cookie** — the `jwt-sessions.md` "session" column, not the JWT column:
 
 - Sign-in creates a session row; the browser holds an httpOnly, secure session cookie.
-- Every request resolves cookie → session row → user. Revocation is immediate (delete the row); there's no stateless-token revocation problem.
-- Expiration is a sliding window (long-lived session, refreshed while active) — bounded by configurable session/expiry options.
-- **Cookie cache**: an optional short-lived signed cookie carrying the session data, so most requests skip the DB read and only re-validate against the database every few minutes. This is the latency escape hatch for serverless/edge — with immediate-revocation traded down to "within the cache window."
+- Every request resolves cookie → session row → user. Revocation is immediate (delete the row); there's no stateless-token revocation problem. The API ships revocation at three granularities — one session (`revokeSession`), all-but-current (`revokeOtherSessions`), and all (`revokeSessions`) — plus `revokeOtherSessions: true` on password change, which should be your default there.
+- Expiration is a sliding window: sessions live `expiresIn` (default 7 days) and are re-extended once older than `updateAge` (default 1 day) — so an active user never logs in again, an idle one ages out.
+- **Cookie cache** (`session.cookieCache`): an optional short-lived signed cookie carrying the session data (`enabled`, `maxAge`, an encoding `strategy`, auto-`refreshCache`, and a `version` string that bulk-invalidates all cached sessions when bumped). Most requests skip the DB read and only re-validate on cache expiry. This is the latency escape hatch for serverless/edge — with immediate-revocation traded down to "within the cache window."
+- **Secondary storage** takes over session reads by default when configured; `storeSessionInDatabase` keeps the DB copy too, and `preserveSessionInDatabase` retains revoked-session rows for audit.
 - A JWT plugin exists for handing tokens to *other* services (a separate API consuming identity), not as a replacement for the cookie session between your SPA and your server.
 
 Server-side session access is the integration point for everything else in your app:
@@ -149,8 +152,13 @@ Plugins are the differentiating layer. Each has a server half (routes + schema) 
 | **twoFactor** | TOTP + backup codes (OTP-on-login) | Enable/verify flows, recovery codes; gate it on your risk model |
 | **organization** | Orgs/teams, membership, roles, invitations | The multi-tenant building block — org rows, member rows with roles, invitation email hooks; pair with your data-layer tenant scoping (`authorization.md`) — the plugin manages *membership*, your queries must still enforce *scope* |
 | **admin** | User administration (list, ban, impersonate) | Impersonation should stay audited — log the real admin identity on writes |
-| **magicLink** | Email magic-link sign-in | You send the email; the library handles token issue/verify |
-| API keys / bearer / JWT plugins | Machine callers and token handoff to other services | Keep machine routes structurally separate from human session routes (same doctrine as `cloudflare-access.md` service-auth section) |
+| **magicLink** / **emailOTP** | Email magic-link or emailed-code sign-in | You send the email; the library handles token issue/verify |
+| **sso** / **scim** | Enterprise SAML/OIDC SSO and SCIM user provisioning | The plugins that let a self-hosted Better Auth answer enterprise-IT checklists — the capability that used to force a hosted IdP |
+| **oidcProvider** / **oauthProvider** / **mcp** | Your app *issues* tokens — act as an OIDC/OAuth provider (including for MCP clients) | Turns the app into the IdP for its own satellite services |
+| **apiKey** / **bearer** / **jwt** | Machine callers and token handoff to other services | Keep machine routes structurally separate from human session routes (same doctrine as `cloudflare-access.md` service-auth section) |
+| **genericOAuth** | Any OIDC-conformant provider not built in | For long-tail IdPs |
+
+The full catalog is considerably larger (40+ official plugins: username, anonymous, phoneNumber, multiSession, oneTap, oneTimeToken, deviceAuthorization, captcha, haveIBeenPwned breached-password checks, siwe, payments integrations like stripe/polar, openAPI, test-utils, …) — enumerate the current list via the docs' llms.txt rather than from memory.
 
 Plugin doctrine: add the server plugin, add its client counterpart, re-run schema generation, and let the plugin own its flow end-to-end — don't hand-build a parallel 2FA/passkey path beside it.
 
@@ -159,14 +167,17 @@ Plugin doctrine: add the server plugin, add its client counterpart, re-run schem
 Better Auth speaks fetch-standard `Request`/`Response`, so any framework that exposes those integrates the same way: **route `/api/auth/*` to `auth.handler`, and read the session in middleware for everything else.**
 
 ```typescript
-// Hono (Workers/Node/Bun) — the shape, verify signatures against current docs
+// Hono (Workers/Node/Bun) — verified against the official integration docs 2026-08
 import { Hono } from 'hono';
 import { auth } from './auth';
 
 const app = new Hono();
 
+// 0. If the frontend is on another origin: CORS middleware BEFORE the routes,
+//    with credentials: true (and credentials: 'include' on the client fetch).
+
 // 1. Mount the auth routes — GET and POST both reach the handler
-app.on(['GET', 'POST'], '/api/auth/*', (c) => auth.handler(c.req.raw));
+app.on(['POST', 'GET'], '/api/auth/*', (c) => auth.handler(c.req.raw));
 
 // 2. Session middleware for your app routes
 app.use('/api/*', async (c, next) => {
@@ -177,6 +188,8 @@ app.use('/api/*', async (c, next) => {
 });
 ```
 
+Cross-origin cookie shape, when the SPA and API live on different hosts: same-site subdomains → enable `crossSubDomainCookies` and keep `SameSite=Lax`; genuinely different domains → `sameSite: "none"` + `secure: true` cookie attributes (and accept the third-party-cookie fragility that entails — a shared parent domain is the saner architecture, per `jwt-sessions.md`).
+
 Framework notes (details per current docs):
 
 - **Next.js**: a catch-all route handler (`app/api/auth/[...all]/route.ts`) exporting the handler's GET/POST; session via `auth.api.getSession({ headers: headers() })` in server components/actions. Treat proper session checks in data-access code — not just in `middleware.ts` — as the real gate (Next middleware alone has been bypassable; CVE-2025-29927).
@@ -185,6 +198,18 @@ Framework notes (details per current docs):
 - **Serverless/edge (Workers)**: works — pair with an edge-resident DB or secondary storage so session reads aren't cross-region; enable cookie caching.
 
 One rule regardless of framework: the auth config object lives in **one** module; handler mounting and session reads both import it. Two `betterAuth()` instances with drifted config is a subtle way to break sessions.
+
+## Extending the User Model
+
+The user/session tables are extensible from config (`user.additionalFields`-style options): declare extra fields, re-run schema generation, and the server types pick them up; the client can infer them via the type-inference plugin so `session.user` stays end-to-end typed. Use this for *identity-adjacent* fields (display name, locale, onboarding flags). Keep *authorization* data (roles, tenant membership) in your own domain tables keyed by user id — mixing authz into the auth library's schema couples your permission model to its migrations.
+
+## Migrating In
+
+Official migration guides exist for Auth0, Clerk, NextAuth/Auth.js, Supabase Auth, and WorkOS — start there. The architectural points that make migrations tractable:
+
+- **Password hashes import.** The password hashing functions are configurable, so existing bcrypt/argon2 hashes can be verified as-is (or verified-then-rehashed on first login) instead of forcing a global reset.
+- **Users/accounts map cleanly**: exported users become `user` rows; per-provider identities become `account` rows. Social-login users need no secret material at all — only the provider linkage.
+- **Sessions don't migrate.** Plan for a one-time global re-login at cutover; communicate it.
 
 ## Operational Notes
 

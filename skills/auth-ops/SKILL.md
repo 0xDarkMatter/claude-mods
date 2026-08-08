@@ -298,6 +298,22 @@ Set-Cookie: __Host-session=abc123;
 - [ ] Handle platform vs cross-platform authenticators
 - [ ] Provide fallback auth method
 
+## Identity-Aware Proxy Quick Reference
+
+When authn is delegated to a proxy edge (Cloudflare Access, Google IAP, oauth2-proxy), two invariants carry the whole model:
+
+1. **Verify the assertion.** The proxy's identity header is a signed JWT — verify signature + issuer + per-application audience against the proxy's JWKS on every request. Never trust the plain email convenience headers.
+2. **Close every path around the proxy.** The header is only meaningful if the proxy is the *only* way to reach the origin (`workers_dev = false`, firewalled origin, or tunnel). An open origin makes any header forgeable.
+
+```
+Proxy edge (authn) ──JWT header──> Origin verifies JWT ──> app user lookup ──> role/scope binding
+     │                                  │ 403 on any failure     │ 403 if no row     (server-side)
+     └ IdP / OTP login, sessions        └ cached JWKS,           └ proxy admits ≠ app authorizes
+       rate limits, bot defense           refetch on unknown kid
+```
+
+Machine routes (webhooks, ingest) get Service-Auth/Bypass at the edge + bearer keys at the origin, mounted outside the human-auth middleware. Full treatment: `references/cloudflare-access.md`.
+
 ## Common Gotchas
 
 | Gotcha | Why It's Dangerous | Fix |
@@ -318,6 +334,8 @@ Set-Cookie: __Host-session=abc123;
 | Not validating JWT `aud` claim | Token meant for Service A accepted by Service B | Always validate `aud` matches your service identifier |
 | Session fixation | Attacker sets session ID before login, then hijacks it | Regenerate session ID after authentication |
 | Hardcoded secrets in code | Secrets leak via source control | Use environment variables or secret managers (Vault, AWS SSM) |
+| Trusting an identity-aware proxy's plain email header | Headers are attacker-settable on any unproxied path | Verify the proxy's signed JWT (sig + issuer + audience); close every path around the proxy |
+| Auth-library middleware as the only session check | Framework middleware can be bypassed (Next.js CVE-2025-29927 class) | Re-check the session in the data-access layer / route handlers |
 
 ## Reference Files
 
@@ -327,8 +345,8 @@ Set-Cookie: __Host-session=abc123;
 | `references/oauth2-oidc.md` | OAuth2 flows, OIDC, provider integration, social login | ~700 |
 | `references/authorization.md` | RBAC, ABAC, ReBAC, RLS, multi-tenant, audit logging | ~600 |
 | `references/implementation.md` | Password hashing, MFA, rate limiting, API keys, reset flows | ~550 |
-| `references/cloudflare-access.md` | Identity-aware proxies via Cloudflare Access: app/policy anatomy, JWT verification, closed-origin precondition, service auth, local dev | ~290 |
-| `references/better-auth.md` | Better Auth library: server/client setup, adapters, sessions, social login, passkey/2FA/organization plugins, Hono integration | ~220 |
+| `references/cloudflare-access.md` | Identity-aware proxies via Cloudflare Access: app/policy anatomy, token claims, JWT verification, closed-origin precondition, service auth, sessions/logout/SPA, local dev | ~330 |
+| `references/better-auth.md` | Better Auth library: server/client setup, adapters, session model, social login, plugin catalog (passkey/2FA/org/SSO), Hono integration, migration | ~240 |
 
 ## See Also
 
