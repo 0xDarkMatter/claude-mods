@@ -88,8 +88,11 @@ feature releases live in the README "Recent Updates" section.
   streaming/SSE/WebSockets, Durable Objects (Hono-in-a-DO, hibernated
   WebSockets, alarms, vs RPC methods), OpenAPI (`@hono/zod-openapi`
   schema-first vs annotations vs skipping it), CORS + a production middleware
-  stack, and the Workers gotchas (detached fetch "Illegal invocation",
-  immutable headers, per-colo `caches`, `waitUntil`). Ten references, two
+  stack, `hono/jsx` SSR (jsxRenderer layouts, Suspense streaming, the
+  don't-grow-a-SPA-here scope guard), Node/Bun/Deno adapter deltas with a
+  Workers→Node porting checklist, and the Workers gotchas (detached fetch
+  "Illegal invocation", immutable headers, per-colo `caches`, `waitUntil`).
+  Twelve references, two
   commented starter templates (composition root + vitest-pool-workers
   config), a `route-inventory.py` scanner with three registration-order
   lints (exit 10: `bypass` = route dodges a later middleware, `duplicate` =

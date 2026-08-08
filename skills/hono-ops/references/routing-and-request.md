@@ -110,8 +110,9 @@ deleteCookie(c, 'session_hint', { path: '/' });   // path must match the set
 ## HTML / JSX
 
 `hono/jsx` renders server-side JSX (`c.html(<Page/>)`) with zero client
-runtime — fine for small server-rendered pages and emails from the same Worker.
-For an actual SPA, build it separately and serve via the assets binding
-(workers-runtime.md); don't grow a JSX app inside an API Worker past a page or
-two. `hono/html` offers a `html` template literal with auto-escaping for
-one-off snippets — never string-concatenate HTML with user input.
+runtime — the full treatment (setup, `jsxRenderer` layouts, async/Suspense
+streaming, `raw()` escaping rules, and the don't-grow-a-SPA-here scope guard)
+is **jsx-ssr.md**. For an actual SPA, build it separately and serve via the
+assets binding (workers-runtime.md). `hono/html` offers a `html` template
+literal with auto-escaping for one-off snippets — never string-concatenate
+HTML with user input.

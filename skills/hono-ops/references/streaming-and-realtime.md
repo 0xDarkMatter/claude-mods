@@ -88,8 +88,8 @@ Reality check before shipping that:
   after upgrade there is no per-message auth — bind identity to the socket at
   accept and treat the connection as a session.
 - The `upgradeWebSocket` import is per-runtime (`hono/cloudflare-workers`,
-  `hono/deno`, `hono/bun`) — the one non-portable seam in an otherwise portable
-  app.
+  `hono/deno`, `hono/bun`, `@hono/node-ws`) — one of the few non-portable
+  seams; the full per-runtime map is runtime-adapters.md.
 
 ## Proxying and Worker-to-Worker (service bindings)
 

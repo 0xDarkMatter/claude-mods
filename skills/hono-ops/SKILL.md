@@ -15,8 +15,8 @@ discipline, typed errors, validation at the HTTP boundary, SPA co-serving, RPC
 clients, and testing under vitest-pool-workers. Patterns here are distilled from a
 production multi-tenant Worker (one Hono app, 6+ mounted sub-apps, ~1350 tests).
 
-> Verified against Hono v4 (2026). Hono also runs on Bun/Deno/Node — this skill is
-> Workers-first; non-Workers deltas are noted where they matter.
+> Verified against Hono v4 (2026). Workers-first; the Node/Bun/Deno deltas and
+> porting checklist live in references/runtime-adapters.md.
 
 **Staleness check:** `python scripts/check-hono-facts.py --offline` asserts the
 version-bearing facts (Hono major, `@hono/zod-validator`,
@@ -55,6 +55,12 @@ What are you doing with Hono?
 │
 ├─ OpenAPI docs from routes (@hono/zod-openapi)
 │  └─ references/openapi.md
+│
+├─ Server-rendered HTML / JSX / HTML emails
+│  └─ references/jsx-ssr.md
+│
+├─ Running or porting to Node / Bun / Deno
+│  └─ references/runtime-adapters.md
 │
 ├─ Typed client (hc RPC vs hand-rolled)
 │  └─ references/rpc-clients.md
@@ -258,6 +264,8 @@ per-cron branching): [references/workers-runtime.md](references/workers-runtime.
 | [references/streaming-and-realtime.md](references/streaming-and-realtime.md) | `stream`/`streamText`/`streamSSE`, WebSockets (plain Worker vs Durable Object hibernation), proxying, service bindings |
 | [references/durable-objects.md](references/durable-objects.md) | Routing into DOs, a Hono app per object, hibernated WebSockets, alarms, Hono-in-DO vs RPC methods |
 | [references/openapi.md](references/openapi.md) | `@hono/zod-openapi` schema-first routes, swagger/Scalar UI, `hono-openapi` annotations, when to skip OpenAPI entirely |
+| [references/jsx-ssr.md](references/jsx-ssr.md) | `hono/jsx` server rendering, `jsxRenderer` layouts, async components + Suspense streaming, `raw()` escaping rules, the SPA-scope guard (HonoX ladder) |
+| [references/runtime-adapters.md](references/runtime-adapters.md) | Node (`@hono/node-server`) / Bun / Deno deltas — env, static files, WebSockets, cron — plus the Workers→Node porting checklist |
 
 **Starter assets:**
 

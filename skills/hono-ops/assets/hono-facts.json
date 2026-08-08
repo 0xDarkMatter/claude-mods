@@ -18,5 +18,9 @@
   "zod_openapi": {
     "prose_token": "@hono/zod-openapi",
     "package": "@hono/zod-openapi"
+  },
+  "node_server": {
+    "prose_token": "@hono/node-server",
+    "package": "@hono/node-server"
   }
 }
