@@ -22,7 +22,7 @@ Cloudflare Workers + Wrangler: runtime patterns, bindings, local dev, secrets, d
 |------|--------|
 | [references/bindings.md](references/bindings.md) | Every binding (KV/D1/R2/DO/Queues/Hyperdrive/AI/Vectorize/Service/Analytics Engine) — config block, runtime API, when to reach for each, consistency model |
 | [references/workers-runtime.md](references/workers-runtime.md) | Runtime APIs, handlers (fetch/scheduled/queue/email/tail), CORS, caching, streaming, WebSockets, Durable Objects deep-dive, limits |
-| [references/workers-runtime-gotchas.md](references/workers-runtime-gotchas.md) | Production footguns: detached `fetch` ("Illegal invocation"), per-colo `caches` vs KV vs D1, `waitUntil` semantics + outbox pattern, testing cron handlers, test-workerd lagging production, Email Service account states, Smart Placement |
+| [references/workers-runtime-gotchas.md](references/workers-runtime-gotchas.md) | Production footguns: detached `fetch` ("Illegal invocation"), per-colo `caches` vs KV vs D1, `waitUntil` semantics + outbox pattern, testing cron handlers, test-workerd lagging production, Email Service account states, Smart Placement, `wrangler dev` host rewriting |
 | [references/deploy-and-cicd.md](references/deploy-and-cicd.md) | `wrangler deploy`, environments, secrets, Workers Builds, GitHub Actions + OIDC/API-token, gradual deployments, rollbacks, observability |
 | [assets/wrangler.jsonc.template](assets/wrangler.jsonc.template) | Commented, current `wrangler.jsonc` covering all common bindings + assets |
 
@@ -161,7 +161,7 @@ wrangler tail                    # stream live logs from the deployed Worker
 
 ## Common Gotchas
 
-Runtime-level footguns that pass tests and ship — detached `fetch` ("Illegal invocation"), per-colo `caches`, `waitUntil` guarantees, cron testing, the test workerd lagging production, Email Service account states, Smart Placement — each with symptom/why/fix: [references/workers-runtime-gotchas.md](references/workers-runtime-gotchas.md).
+Runtime-level footguns that pass tests and ship — detached `fetch` ("Illegal invocation"), per-colo `caches`, `waitUntil` guarantees, cron testing, the test workerd lagging production, Email Service account states, Smart Placement, `wrangler dev` rewriting the request host — each with symptom/why/fix: [references/workers-runtime-gotchas.md](references/workers-runtime-gotchas.md).
 
 | Gotcha | Detail | Fix |
 |--------|--------|-----|

@@ -286,3 +286,39 @@ falls back to default placement when it wouldn't win.
 of colos, which makes the per-colo `caches` API (gotcha 2) behave much closer to a
 shared cache — one more reason the short-TTL `caches` pattern holds up in a
 Smart-Placed Worker that would fragment badly in a default-placed one.
+
+## 8. `wrangler dev` rewrites the request host to your `[[routes]]` pattern
+
+**Symptom:** everything works when deployed, but locally every request misbehaves in
+a host-shaped way — tenant resolution picks the production tenant, a dev-only auth
+shim never activates, every `/api/*` returns 403 as if the local affordance were
+absent. Nothing errors; the Worker just behaves like production.
+
+**Why:** `wrangler dev` simulates the deployed origin. When the config declares
+`[[routes]]` (or `routes`/`route` in jsonc), a local request to
+`http://localhost:8787` arrives at your `fetch` handler with the URL rewritten to the
+**production hostname** — `new URL(request.url).hostname` is `app.example.com`, not
+`localhost`. Any logic keyed off the host silently takes the production branch:
+multi-tenant host→tenant resolution, hostname-gated dev shims, host-conditional
+CORS/redirects.
+
+**Fix:** override the simulated origin with `dev.host` (CLI: `--local-upstream`).
+It's dev-only config — `wrangler deploy` ignores it:
+
+```toml
+# wrangler.toml — LOCAL DEV ONLY, ignored by deploy
+[dev]
+host = "localhost"
+```
+
+```jsonc
+// wrangler.jsonc
+{ "dev": { "host": "localhost" } }
+```
+
+Leave a guard comment on the block: it *looks* deletable ("why is there a dev host
+override?"), and removing it re-breaks every host-keyed code path locally in the
+silent way described above. If your host-keyed logic includes a security affordance
+(a dev-only identity shim), make its gate fail closed — require the loopback host
+*and* an explicit opt-in flag, so a wrong simulated origin disables the shim rather
+than enabling it against production-shaped requests.

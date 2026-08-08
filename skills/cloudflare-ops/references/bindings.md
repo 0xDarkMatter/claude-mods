@@ -37,7 +37,7 @@ const list = await env.CACHE.list({ prefix: "user:" });
 await env.CACHE.delete("key");
 ```
 
-- **Eventually consistent**: a write propagates globally in up to ~60s. Reading your own write from another colo may return stale. Not a database — a cache/config store.
+- **Eventually consistent**: a write propagates globally in up to ~60s. Reading your own write from another colo may return stale. Not a database — a cache/config store. Choosing between KV, the per-colo `caches` API, and D1: [workers-runtime-gotchas.md](workers-runtime-gotchas.md#2-caches-is-per-colo--not-a-kv-substitute).
 - Reads fast (cached at edge); writes + `list` are comparatively expensive. Use TTLs; avoid hot `list` in the request path.
 - CLI: `wrangler kv namespace create CACHE`, `wrangler kv key put --binding=CACHE k v`.
 

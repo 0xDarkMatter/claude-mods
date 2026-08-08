@@ -18,8 +18,11 @@ feature releases live in the README "Recent Updates" section.
   self-guarding jobs), the test workerd lagging production (stub-passes /
   binding-fails, `wrangler dev` smoke → post-deploy log check ladder), Email
   Service's two account states + the `E_SENDER_NOT_VERIFIED` silent-failure
-  trap, and Smart Placement (run near the data; concentrates the per-colo
-  cache). SKILL.md reference index + Common Gotchas pointer updated.
+  trap, Smart Placement (run near the data; concentrates the per-colo cache),
+  and `wrangler dev` rewriting the request host to the `[[routes]]` pattern
+  (host-keyed logic silently takes the production branch locally; `dev.host` /
+  `--local-upstream`). SKILL.md reference index + Common Gotchas pointer
+  updated.
 
 ### Removed
 - **`fleetflow` skill extracted to its own repo** (`X:\Forge\fleetflow`) with
