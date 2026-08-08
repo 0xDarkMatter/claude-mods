@@ -1,0 +1,45 @@
+# Line-ending policy — pinned so a Windows clone with core.autocrlf=true cannot
+# corrupt scripts on checkout.
+#
+# WHY THIS EXISTS: bash treats a trailing CR as part of the token. A CRLF
+# `set -euo pipefail` parses as `pipefail\r` => "invalid option name", and a CRLF
+# shebang makes `env` search for a program literally named `bash\r` => "No such
+# file or directory". Diagnosed 2026-08-07: 136 of 157 tracked *.sh files were
+# CRLF on disk while every git blob was clean LF, which broke
+# skills/fleet-ops/scripts/fleet.sh outright and therefore the whole landing gate.
+#
+# The corruption grew on every `git checkout` — files written by an agent's
+# Write/Edit tool are LF, files materialised by git were not. Nothing in the
+# repo's own history was ever wrong; only the working tree.
+#
+# DEBUGGING NOTE: MSYS `sed` silently strips CR on read and will tell you a file
+# is clean when it is not. Use binary-safe checks:
+#   tr -cd '\r' < file | wc -c        # non-zero => CRLF on disk
+#   head -1 file | cat -A             # shows ^M before $
+#
+# Default: normalise to LF in the repo AND in the working tree, on every platform.
+* text=auto eol=lf
+
+# Executed by bash — MUST be LF on disk everywhere, including Windows.
+*.sh text eol=lf
+
+# Executed by PowerShell. Windows PowerShell 5.1 prefers CRLF, and CRLF is
+# harmless to pwsh 7, so these are pinned the other way deliberately. Unrelated
+# to the separate WinPS 5.1 encoding issue (non-ASCII in string literals needs a
+# UTF-8 BOM or ASCII) — that is an encoding problem, not a line-ending one.
+*.ps1  text eol=crlf
+*.psm1 text eol=crlf
+*.psd1 text eol=crlf
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# Belt and braces: never let git guess on these.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.woff  binary
+*.woff2 binary
+*.pdf  binary
+*.zip  binary
