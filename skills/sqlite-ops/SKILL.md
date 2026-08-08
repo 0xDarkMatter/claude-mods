@@ -1,6 +1,6 @@
 ---
 name: sqlite-ops
-description: "SQLite across every host and engine - query performance, concurrency, schema, feature modules, operations. Triggers on: sqlite, slow query, EXPLAIN QUERY PLAN, query plan, SCAN vs SEARCH, covering index, index not used, rows read, rows_read, sql_duration_ms, ANALYZE, sqlite_stat1, LIKE performance, database is locked, SQLITE_BUSY, WAL, busy_timeout, STRICT tables, type affinity, foreign_keys, VACUUM, integrity_check, fts5, trigram, json_extract, D1, cloudflare d1, wrangler d1, node:sqlite, better-sqlite3, bun:sqlite, aiosqlite, libsql, turso, migration."
+description: "SQLite across every host and engine - query performance, concurrency, schema, feature modules, operations. Triggers on: sqlite, slow query, EXPLAIN QUERY PLAN, query plan, SCAN vs SEARCH, covering index, index not used, rows read, rows_read, sql_duration_ms, ANALYZE, sqlite_stat1, LIKE performance, database is locked, SQLITE_BUSY, WAL, busy_timeout, STRICT tables, type affinity, foreign_keys, VACUUM, integrity_check, fts5, trigram, json_extract, D1, cloudflare d1, wrangler d1, node:sqlite, better-sqlite3, bun:sqlite, aiosqlite, libsql, turso, migration, d1 batch, read replication, sessions api, d1 bookmark, migration timeout."
 license: MIT
 compatibility: "Guidance is engine-agnostic (SQLite 3.x semantics). Examples are labelled by host: sqlite3 CLI, Python sqlite3/aiosqlite, node:sqlite/better-sqlite3/bun:sqlite, Cloudflare D1 via wrangler, libSQL/Turso. scripts/eqp-triage.py needs Python 3.8+ (stdlib only)."
 allowed-tools: "Read Write Bash"
