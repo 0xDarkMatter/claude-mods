@@ -250,6 +250,10 @@ statement, 100 bound parameters — see [`d1-edge.md`](d1-edge.md)); a remote ap
 [Time Travel](d1-edge.md#time-travel) gives you a 30-day undo that local SQLite does not,
 so take a bookmark before applying.
 
+One more remote-apply trap: `--remote` can **report a timeout while the migration actually
+landed**, and blindly re-running is the mistake — verify the schema state read-only first
+([`d1-production-patterns.md`](d1-production-patterns.md#migration-apply-can-time-out-yet-still-land)).
+
 ```python
 # aiosqlite - same logic, awaited. Run migrations at startup, before serving.
 async def migrate(conn, directory: str) -> None:

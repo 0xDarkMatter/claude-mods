@@ -267,7 +267,10 @@ wrangler d1 time-travel info <db>                                      # 30-day 
 ```
 
 `./references/d1-edge.md` covers those plus the rows-read economics, the verified limits
-table, the error catalogue, and import/export.
+table, the error catalogue, and import/export. For the production incident patterns —
+a timed-out `migrations apply --remote` that landed anyway, `batch()` treating a 0-row
+scoped UPDATE as success, and the opt-in-to-replica rollout shape for read replication —
+see `./references/d1-production-patterns.md`.
 
 ## Operations
 
@@ -322,6 +325,8 @@ python3 scripts/eqp-triage.py --db app.db --sql "SELECT ..." --json | jq '.data[
 | `VACUUM` to "speed things up" | Rewrites the whole file, needs 2x space, holds a lock | `PRAGMA optimize` / targeted index work |
 | Trusting one cold run | 1.5–1.7x first-run penalty is routine | Median of 10+, report the range |
 | Inlining literals to dodge a parameter cap | That is how injection happens | Chunk the work; keep bound parameters |
+| Re-running a timed-out remote migration | The apply may have landed; the error was about the response | Verify schema state read-only first — `./references/d1-production-patterns.md` |
+| Reading a committed `batch()` as per-statement success | A conditional UPDATE matching 0 rows is not an error | Check `meta.changes`; 0 on a scoped write = 403/conflict |
 
 ## Reference files
 
@@ -329,6 +334,7 @@ python3 scripts/eqp-triage.py --db app.db --sql "SELECT ..." --json | jq '.data[
 |---|---|
 | `./references/query-performance.md` | Any slow statement: EQP, index design, ANALYZE, planner defeats, measurement method |
 | `./references/d1-edge.md` | Cloudflare D1: rows-read economics, `d1 insights`, Sessions API/replication, Time Travel, limits, errors |
+| `./references/d1-production-patterns.md` | Running D1 in production: verifying a timed-out migration, `batch()` 0-row write verification, the opt-in-to-replica replication rollout |
 | `./references/concurrency-durability.md` | Locking, WAL, busy_timeout, transaction modes, checkpointing, durability |
 | `./references/schema-design.md` | Affinity, STRICT, foreign keys, generated columns, `WITHOUT ROWID`, constraints |
 | `./references/schema-patterns.md` | Ready-made table designs: state, cache, event log, queue, session, dedup |

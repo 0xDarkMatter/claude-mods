@@ -127,8 +127,8 @@ done
 
 # ── references exist and are cited ──────────────────────────────────────────
 echo "-- references --"
-for ref in query-performance d1-edge concurrency-durability schema-design \
-           schema-patterns migration-patterns feature-modules hosts \
+for ref in query-performance d1-edge d1-production-patterns concurrency-durability \
+           schema-design schema-patterns migration-patterns feature-modules hosts \
            async-patterns operations testing; do
   if [[ -f "$R/$ref.md" ]]; then ok "reference exists: $ref.md"; else no "reference MISSING: $ref.md"; fi
   # SKILL-RESOURCE-PROTOCOL: an uncited reference is dead weight the router never finds.
