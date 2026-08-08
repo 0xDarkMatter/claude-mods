@@ -1,0 +1,26 @@
+{
+  "schema": "claude-mods.hono-ops.facts/v1",
+  "as_of": "2026-08-08",
+  "comment": "Version-bearing external facts this skill states as current. check-hono-facts.py --offline asserts each prose_token is still named in the skill prose; --live asserts the npm package still resolves and (where documented_major is set) its latest major still matches.",
+  "hono": {
+    "prose_token": "Hono v4",
+    "package": "hono",
+    "documented_major": "4"
+  },
+  "zod_validator": {
+    "prose_token": "@hono/zod-validator",
+    "package": "@hono/zod-validator"
+  },
+  "pool_workers": {
+    "prose_token": "@cloudflare/vitest-pool-workers",
+    "package": "@cloudflare/vitest-pool-workers"
+  },
+  "zod_openapi": {
+    "prose_token": "@hono/zod-openapi",
+    "package": "@hono/zod-openapi"
+  },
+  "node_server": {
+    "prose_token": "@hono/node-server",
+    "package": "@hono/node-server"
+  }
+}
