@@ -1,6 +1,6 @@
 ---
 name: cloudflare-ops
-description: "Cloudflare Workers + Wrangler edge ops: runtime, bindings, local dev, secrets, deploy/CI, Pages-vs-Workers. Triggers on: cloudflare workers, wrangler, wrangler deploy, wrangler.toml, KV, D1, R2, durable objects, queues, vectorize, compatibility_date, edge functions, illegal invocation, waitUntil, caches API, smart placement, email service, vitest-pool-workers."
+description: "Cloudflare Workers + Wrangler edge ops: runtime, bindings, local dev, secrets, deploy/CI, Pages-vs-Workers. Triggers on: cloudflare workers, wrangler, wrangler deploy, wrangler.toml, KV, D1, R2, durable objects, queues, vectorize, compatibility_date, edge functions, illegal invocation, waitUntil, caches API, smart placement, email service, vitest-pool-workers, wrangler dev host."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
