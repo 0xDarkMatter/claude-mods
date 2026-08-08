@@ -1,7 +1,7 @@
 ---
 name: auth-ops
-description: "Authentication and authorization patterns - JWT, OAuth2, sessions, RBAC, ABAC, passkeys, MFA, identity-aware proxies, and Better Auth. Use for: authentication, authorization, jwt, oauth, oauth2, session, login, rbac, abac, passkey, mfa, totp, api key, token, auth, cookie, csrf, cors credentials, bearer token, refresh token, oidc, cloudflare access, zero trust, identity-aware proxy, Cf-Access-Jwt-Assertion, AUD tag, access policy, service auth, better auth, better-auth."
-when_to_use: "Use when implementing authentication or authorization — e.g. 'add JWT login with refresh tokens', 'set up OAuth2 + PKCE', 'choose RBAC vs ABAC', 'add passkeys or MFA', 'put an app behind Cloudflare Access', 'set up Better Auth'. Covers sessions, cookies, token flows, access-control models, and identity-aware proxies; reach for api-design-ops for the surrounding API shape."
+description: "Authentication and authorization patterns - JWT, OAuth2, sessions, RBAC, ABAC, passkeys, MFA, identity-aware proxies, and Better Auth. Use for: authentication, jwt, oauth2, session, login, rbac, abac, passkey, mfa, totp, api key, token, cookie, csrf, bearer token, refresh token, oidc, cloudflare access, zero trust, Cf-Access-Jwt-Assertion, AUD tag, service auth, better auth."
+when_to_use: "Use when implementing authentication or authorization - e.g. 'add JWT login with refresh tokens', 'set up OAuth2 + PKCE', 'RBAC vs ABAC', 'add passkeys or MFA', 'put an app behind Cloudflare Access', 'set up Better Auth'. Covers sessions, cookies, token flows, and access-control models."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
