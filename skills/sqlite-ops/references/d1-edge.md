@@ -365,6 +365,11 @@ const [a, b] = await env.DB.batch([
 each individually. A batch's cost is the *sum* of its statements' rows read. `d1 insights`
 sorted by `sum`/`reads` will surface these even when your own instrumentation cannot.
 
+Batching has a *correctness* trap as well as this observability one: the batch rolls back
+on a SQL error, but a conditional `UPDATE` matching 0 rows is **not** an error — see
+[`d1-production-patterns.md`](d1-production-patterns.md#batch-and-the-0-row-conditional-write)
+for the pre-check / post-verify / compensate shape.
+
 ---
 
 ## Sessions API and read replication
@@ -420,6 +425,11 @@ that is how you verify replication is doing anything.
 **When replication does not help:** write-heavy workloads (all writes hit the primary
 anyway), single-region traffic, and workloads that require the absolute latest data on every
 read.
+
+For the production rollout shape — default every request to `first-primary` and let only an
+enumerated allowlist of display-only GETs touch a replica, so a misclassified route degrades
+to slower rather than staler — see
+[`d1-production-patterns.md`](d1-production-patterns.md#read-replication-opt-in-to-replica-never-opt-out).
 
 ---
 
@@ -577,6 +587,10 @@ An unverified-until-deploy conclusion is a legitimate deliverable: "this index i
 to cut the statement from 171 ms to ~7 ms based on a read-only proof; applying it needs a
 gated deploy" beats applying it to find out.
 
+And when the maintainer's `--remote` apply reports a timeout: the migration may have landed
+anyway — verify schema state read-only before re-running
+([`d1-production-patterns.md`](d1-production-patterns.md#migration-apply-can-time-out-yet-still-land)).
+
 ---
 
 ## libSQL and Turso
@@ -602,6 +616,7 @@ optionality, and the vast majority of application SQL never needs a vendor exten
 ## See also
 
 - [`query-performance.md`](query-performance.md) — the engine-level analysis this builds on
+- [`d1-production-patterns.md`](d1-production-patterns.md) — incident-derived procedures: timed-out migrations, `batch()` 0-row writes, the replication rollout
 - [`hosts.md`](hosts.md) — the D1 driver API alongside the other hosts
 - [`migration-patterns.md`](migration-patterns.md) — wrangler migrations and the deploy gate
 - [`feature-modules.md`](feature-modules.md) — why FTS5 on D1 is recorded as unknown

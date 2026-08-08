@@ -24,6 +24,22 @@ feature releases live in the README "Recent Updates" section.
   `--local-upstream`). SKILL.md reference index + Common Gotchas pointer
   updated.
 
+### Changed
+- **`sqlite-ops`** — new `references/d1-production-patterns.md`: three
+  incident-derived Cloudflare D1 patterns (symptom → why → procedure) mined from
+  a production multi-tenant Worker. (1) `wrangler d1 migrations apply --remote`
+  can time out yet still apply — verify remote schema state read-only before
+  re-running; (2) `.batch()` rolls back on SQL error but a scoped
+  UPDATE/DELETE matching 0 rows is NOT an error — check `meta.changes`,
+  post-verify, compensate; treat 0 changes as 403/conflict, never success;
+  (3) read replication via the Sessions API as opt-in-to-replica — default
+  `first-primary`, replica only for allowlisted display-only GETs, bookmark
+  cookie for read-your-writes, so a misclassified route degrades to slower,
+  never staler. Cross-linked from `d1-edge.md` (batching, Sessions API, deploy
+  gate) and `migration-patterns.md`; indexed in SKILL.md with two new gotcha
+  rows; the reference-wiring test now gates the new file.
+
+
 ### Removed
 - **`fleetflow` skill extracted to its own repo** (`X:\Forge\fleetflow`) with
   full history via `git subtree split` (36+ commits) — an app with a live
