@@ -53,6 +53,23 @@ feature releases live in the README "Recent Updates" section.
   into `tests/check-resources.sh` (offline, PR CI) and `freshness.yml`
   (live) - it previously ran only in the skill's own suite.
 
+- **`auth-ops` skill: two new references.** `references/cloudflare-access.md`
+  — identity-aware proxies worked through Cloudflare Access: app/policy
+  anatomy (team domain, per-hostname AUD tags, IdP vs one-time-PIN policies),
+  origin-side `Cf-Access-Jwt-Assertion` verification with jose (cached JWKS,
+  kid-triggered refetch), the closed-origin trust precondition
+  (`workers_dev = false` generalized to any IAP), fail-closed identity → user
+  → scope layering, Service Auth/Bypass for bearer-token machine routes, and
+  the local-dev tunnel-or-doubly-gated-stub problem. `references/better-auth.md`
+  — the Better Auth TypeScript library at the architectural level (explicit
+  verify-against-current-docs note): server instance + client pairing, database
+  adapters and CLI schema generation, DB-backed sessions with cookie caching,
+  email/password + social providers, passkey/2FA/organization plugins, Hono
+  and framework mounting, and choosing it vs hand-rolled vs a hosted IdP.
+  Frontmatter triggers extended (cloudflare access, zero trust, identity-aware
+  proxy, AUD tag, service auth, better auth), decision tree gains an IAP
+  branch, and cloudflare-ops cross-points to the new Access reference.
+
 
 ### Removed
 - **`fleetflow` skill extracted to its own repo** (`X:\Forge\fleetflow`) with

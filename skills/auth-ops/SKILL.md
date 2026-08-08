@@ -1,12 +1,12 @@
 ---
 name: auth-ops
-description: "Authentication and authorization patterns - JWT, OAuth2, sessions, RBAC, ABAC, passkeys, and MFA. Use for: authentication, authorization, jwt, oauth, oauth2, session, login, rbac, abac, passkey, mfa, totp, api key, token, auth, cookie, csrf, cors credentials, bearer token, refresh token, oidc."
-when_to_use: "Use when implementing authentication or authorization — e.g. 'add JWT login with refresh tokens', 'set up OAuth2 + PKCE', 'choose RBAC vs ABAC', 'add passkeys or MFA'. Covers sessions, cookies, token flows, and access-control models; reach for api-design-ops for the surrounding API shape."
+description: "Authentication and authorization patterns - JWT, OAuth2, sessions, RBAC, ABAC, passkeys, MFA, identity-aware proxies, and Better Auth. Use for: authentication, authorization, jwt, oauth, oauth2, session, login, rbac, abac, passkey, mfa, totp, api key, token, auth, cookie, csrf, cors credentials, bearer token, refresh token, oidc, cloudflare access, zero trust, identity-aware proxy, Cf-Access-Jwt-Assertion, AUD tag, access policy, service auth, better auth, better-auth."
+when_to_use: "Use when implementing authentication or authorization — e.g. 'add JWT login with refresh tokens', 'set up OAuth2 + PKCE', 'choose RBAC vs ABAC', 'add passkeys or MFA', 'put an app behind Cloudflare Access', 'set up Better Auth'. Covers sessions, cookies, token flows, access-control models, and identity-aware proxies; reach for api-design-ops for the surrounding API shape."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: security-ops, api-design-ops, postgres-ops
+  related-skills: security-ops, api-design-ops, postgres-ops, cloudflare-ops
 ---
 
 # Auth Operations
@@ -44,11 +44,17 @@ What are you building?
 │     ├─ Delegate identity to trusted providers
 │     └─ Best for: consumer apps, social login
 │
-└─ Passwordless authentication?
-   └─ Passkeys (WebAuthn) or Magic Links
-      ├─ Passkeys: phishing-resistant, biometric/hardware
-      ├─ Magic links: email-based, time-limited
-      └─ Best for: high-security, modern UX
+├─ Passwordless authentication?
+│  └─ Passkeys (WebAuthn) or Magic Links
+│     ├─ Passkeys: phishing-resistant, biometric/hardware
+│     ├─ Magic links: email-based, time-limited
+│     └─ Best for: high-security, modern UX
+│
+└─ Internal tool / staff app with an existing IdP?
+   └─ Identity-aware proxy (Cloudflare Access)
+      ├─ Authn enforced at the edge, before your origin
+      ├─ Origin verifies the proxy's signed JWT (never a bare header)
+      └─ Best for: admin panels, partner portals, not consumer signup
 ```
 
 ## JWT Quick Reference
@@ -321,9 +327,12 @@ Set-Cookie: __Host-session=abc123;
 | `references/oauth2-oidc.md` | OAuth2 flows, OIDC, provider integration, social login | ~700 |
 | `references/authorization.md` | RBAC, ABAC, ReBAC, RLS, multi-tenant, audit logging | ~600 |
 | `references/implementation.md` | Password hashing, MFA, rate limiting, API keys, reset flows | ~550 |
+| `references/cloudflare-access.md` | Identity-aware proxies via Cloudflare Access: app/policy anatomy, JWT verification, closed-origin precondition, service auth, local dev | ~290 |
+| `references/better-auth.md` | Better Auth library: server/client setup, adapters, sessions, social login, passkey/2FA/organization plugins, Hono integration | ~220 |
 
 ## See Also
 
 - **security-ops** - Broader security patterns: OWASP, headers, input validation, encryption
 - **api-design-ops** - API design including authentication endpoints, rate limiting
 - **postgres-ops** - Row-level security (RLS) policies for database authorization
+- **cloudflare-ops** - Workers runtime, wrangler config, secrets, deploy mechanics behind an Access-fronted origin
