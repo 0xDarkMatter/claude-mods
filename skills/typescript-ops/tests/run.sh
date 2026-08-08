@@ -36,9 +36,9 @@ has 'description:'        "$doc" "frontmatter has description"
 has 'license: MIT'        "$doc" "frontmatter declares license"
 has 'author: claude-mods' "$doc" "frontmatter declares metadata.author"
 
-# ── references: the 5 documented files exist ───────────────────────────────
+# ── references: the 6 documented files exist ───────────────────────────────
 echo "-- references present --"
-EXPECT=(type-system utility-types generics-patterns config-strict ecosystem)
+EXPECT=(type-system utility-types generics-patterns config-strict ts7-native-compiler ecosystem)
 for r in "${EXPECT[@]}"; do
   f="$REF/$r.md"
   [[ -f "$f" ]] && ok "$r.md present" || no "$r.md missing"

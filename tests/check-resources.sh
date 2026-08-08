@@ -57,6 +57,10 @@ echo "== mapbox-ops: fact/staleness verifier"
 run "mapbox-ops --offline consistent" 0 "$PY" skills/mapbox-ops/scripts/check-mapbox-facts.py --offline
 run "mapbox-ops --help"               0 "$PY" skills/mapbox-ops/scripts/check-mapbox-facts.py --help
 
+echo "== typescript-ops: fact/staleness verifier"
+run "typescript-ops --offline consistent" 0 "$PY" skills/typescript-ops/scripts/check-typescript-facts.py --offline
+run "typescript-ops --help"               0 "$PY" skills/typescript-ops/scripts/check-typescript-facts.py --help
+
 echo "== fleet-worker: doctor (preflight + staleness) verifier"
 run "fleet-doctor --offline consistent" 0 bash skills/fleet-worker/scripts/fleet-doctor.sh --offline
 run "fleet-doctor --help"               0 bash skills/fleet-worker/scripts/fleet-doctor.sh --help

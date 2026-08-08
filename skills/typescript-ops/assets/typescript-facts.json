@@ -1,15 +1,15 @@
 {
   "_comment": "Canonical fast-moving facts the typescript-ops skill encodes. scripts/check-typescript-facts.py asserts SKILL.md + references name these consistently (--offline) and probes the npm registry for major-version drift (--live). Edit deliberately: a change here is a skill-content decision, not housekeeping.",
   "schema": "claude-mods.typescript-ops.facts/v1",
-  "as_of": "2026-07-05",
+  "as_of": "2026-08-08",
   "registry": "https://registry.npmjs.org",
-  "currency_note": "> Ecosystem facts verified as of 2026-07-05 (TypeScript 6, Zod 4, Valibot 1).",
+  "currency_note": "> Ecosystem facts verified as of 2026-08-08 (TypeScript 7, Zod 4, Valibot 1).",
   "packages": [
     {
       "name": "typescript",
-      "documented_major": 6,
+      "documented_major": 7,
       "role": "language",
-      "where": "SKILL.md (Modern Language Features 5.x -> 6.0: satisfies, standard decorators, const type params, using, inferred predicates; TS 6.0 defaults section); references/config-strict.md (strict default in 6.0, removed module/moduleResolution options). Historical feature floors (TS 4.4+, 4.7+) remain as floors, not currency anchors."
+      "where": "SKILL.md (Modern Language Features 5.x -> 6.0: satisfies, standard decorators, const type params, using, inferred predicates; TS 6.0 bridge section; TS 7 native-compiler section); references/ts7-native-compiler.md (no JS API on 7.0.x, dual-install bin ambiguity, ecosystem lockout until 7.1, benchmarked adoption); references/config-strict.md (strict default in 6.0, removed module/moduleResolution options). Historical feature floors (TS 4.4+, 4.7+) remain as floors, not currency anchors."
     },
     {
       "name": "zod",
