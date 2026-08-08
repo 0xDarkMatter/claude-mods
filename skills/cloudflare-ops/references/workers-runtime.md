@@ -68,7 +68,7 @@ async fetch(request, env, ctx) {
 }
 ```
 
-The Cache API is per-colo (not global). For global caching use Cloudflare's CDN/Cache Rules at the zone level, or KV for app-controlled cache.
+The Cache API is per-colo (not global). For global caching use Cloudflare's CDN/Cache Rules at the zone level, or KV for app-controlled cache. Per-colo semantics, the caches-vs-KV-vs-D1 decision, and a production short-TTL pattern: [workers-runtime-gotchas.md](workers-runtime-gotchas.md#2-caches-is-per-colo--not-a-kv-substitute).
 
 ## Streaming
 

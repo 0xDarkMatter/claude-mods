@@ -7,6 +7,20 @@ feature releases live in the README "Recent Updates" section.
 
 ## [Unreleased]
 
+### Added
+- **`cloudflare-ops`: `workers-runtime-gotchas` reference** - battle-tested
+  Workers runtime footguns mined from a production multi-tenant Worker, each
+  with symptom/why/fix: detached `fetch` ("Illegal invocation" — shipped three
+  times before the guard-comment pattern), per-colo `caches` vs KV vs D1
+  (short-TTL read-collapse worked example), `waitUntil` as latency
+  optimisation with the D1 outbox + cron re-drain as the guarantee, testing
+  cron `scheduled()` handlers under vitest-pool-workers (thin dispatcher,
+  self-guarding jobs), the test workerd lagging production (stub-passes /
+  binding-fails, `wrangler dev` smoke → post-deploy log check ladder), Email
+  Service's two account states + the `E_SENDER_NOT_VERIFIED` silent-failure
+  trap, and Smart Placement (run near the data; concentrates the per-colo
+  cache). SKILL.md reference index + Common Gotchas pointer updated.
+
 ### Removed
 - **`fleetflow` skill extracted to its own repo** (`X:\Forge\fleetflow`) with
   full history via `git subtree split` (36+ commits) — an app with a live
