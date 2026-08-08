@@ -110,6 +110,13 @@ Requires Sonnet 4+ or Opus 4+.
 - **The landing gate must run the FULL per-skill suite sweep** (`skills/*/tests/run.sh`,
   all of them), never just the touched lanes' — suites assert on shared/sibling
   files, so a change in one skill can silently break another's gate.
+- **Line endings**: `.gitattributes` pins `*.sh` (and, via `* text=auto eol=lf`,
+  every file git detects as text) to LF — bash dies on CRLF (`$'\r': command not
+  found`, shebang exit 127). A checkout that predates the pin still carries CRLF
+  until its files are re-smudged (delete + `git checkout -- .`), and
+  `scripts/install.ps1` strips CRs from installed shell scripts as a backstop.
+  Extension-less shebang scripts ride on git's text-detection heuristic — if one
+  ever reads as binary (e.g. embedded NUL), pin it in `.gitattributes` explicitly.
 - **Executable bit on commit**: scripts under `skills/*/scripts/` and `hooks/*.sh`
   must be tracked `100755`. Git on Windows won't set this for you — `tests/check-exec-bits.sh`
   gates it; a script that "works locally" but fails `bash foo.sh` for another
