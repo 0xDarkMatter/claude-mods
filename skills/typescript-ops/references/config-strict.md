@@ -281,10 +281,13 @@ Set `"type": "module"` in `package.json` to use ESM, or use `.mts`/`.cts` file e
 
 ### Configure Paths in tsconfig.json
 
+Write `paths` entries tsconfig-relative (`./src/*`) and omit `baseUrl` entirely:
+it has been unnecessary for `paths` since TS 4.1, and TypeScript 7 hard-errors on
+it (TS5102 — see `ts7-native-compiler.md`).
+
 ```json
 {
   "compilerOptions": {
-    "baseUrl": ".",
     "paths": {
       "@/*":         ["./src/*"],
       "@components/*": ["./src/components/*"],
@@ -332,7 +335,8 @@ node -r tsconfig-paths/register dist/index.js
 const { register } = require('tsconfig-paths');
 const tsConfig = require('./tsconfig.json');
 register({
-  baseUrl: tsConfig.compilerOptions.baseUrl,
+  // tsconfig has no baseUrl (TS 7 errors on it) — anchor at the config's own dir
+  baseUrl: __dirname,
   paths: tsConfig.compilerOptions.paths,
 });
 require('./dist/index.js');

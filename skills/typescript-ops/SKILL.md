@@ -1,6 +1,6 @@
 ---
 name: typescript-ops
-description: "TypeScript type system, generics, utility types, strict mode, and ecosystem patterns. Use for: typescript, ts, type, generic, utility type, Partial, Pick, Omit, Record, Exclude, Extract, ReturnType, Parameters, keyof, typeof, infer, mapped type, conditional type, template literal type, discriminated union, type guard, type assertion, type narrowing, tsconfig, strict mode, declaration file, zod, valibot."
+description: "TypeScript type system, generics, utility types, strict mode, and ecosystem patterns. Use for: typescript, ts, type, generic, utility type, Partial, Pick, Omit, Record, Exclude, Extract, ReturnType, Parameters, keyof, typeof, infer, mapped type, conditional type, template literal type, discriminated union, type guard, type assertion, type narrowing, tsconfig, strict mode, declaration file, zod, valibot, typescript 7, tsgo, native compiler."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
@@ -239,9 +239,8 @@ and the go/no-go checklist.
         "declaration": true,          // Generate .d.ts
         "sourceMap": true,
 
-        // Paths
-        "baseUrl": ".",
-        "paths": { "@/*": ["src/*"] },
+        // Paths — tsconfig-relative; don't add baseUrl (TS 7 hard-errors on it, TS5102)
+        "paths": { "@/*": ["./src/*"] },
 
         // Strictness extras
         "noUnusedLocals": true,
