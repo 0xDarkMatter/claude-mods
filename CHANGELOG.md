@@ -85,13 +85,17 @@ feature releases live in the README "Recent Updates" section.
   split, zValidator vs hand-rolled validation trade-offs, SPA co-serving via
   the static assets binding, `hc` RPC vs hand-rolled typed clients,
   vitest-pool-workers testing (migrations, JWT harness, workerd version lag),
-  streaming/SSE/WebSockets, and the Workers gotchas (detached fetch "Illegal
-  invocation", immutable headers, per-colo `caches`, `waitUntil`). Eight
-  references, a commented composition-root starter template, a
-  `route-inventory.py` scanner with a middleware-order linter (exit 10 =
-  routes that bypass a later-registered middleware), a `check-hono-facts.py`
-  staleness verifier (offline in PR CI, live in the freshness workflow), and
-  a 50-assertion offline suite.
+  streaming/SSE/WebSockets, Durable Objects (Hono-in-a-DO, hibernated
+  WebSockets, alarms, vs RPC methods), OpenAPI (`@hono/zod-openapi`
+  schema-first vs annotations vs skipping it), CORS + a production middleware
+  stack, and the Workers gotchas (detached fetch "Illegal invocation",
+  immutable headers, per-colo `caches`, `waitUntil`). Ten references, two
+  commented starter templates (composition root + vitest-pool-workers
+  config), a `route-inventory.py` scanner with three registration-order
+  lints (exit 10: `bypass` = route dodges a later middleware, `duplicate` =
+  dead re-registration, `shadowed` = unreachable route), a
+  `check-hono-facts.py` staleness verifier (offline in PR CI, live in the
+  freshness workflow), and a 60-assertion offline suite.
 
 
 ### Removed

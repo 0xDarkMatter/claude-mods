@@ -14,5 +14,9 @@
   "pool_workers": {
     "prose_token": "@cloudflare/vitest-pool-workers",
     "package": "@cloudflare/vitest-pool-workers"
+  },
+  "zod_openapi": {
+    "prose_token": "@hono/zod-openapi",
+    "package": "@hono/zod-openapi"
   }
 }

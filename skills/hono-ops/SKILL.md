@@ -50,11 +50,17 @@ What are you doing with Hono?
 ├─ Streaming / SSE / WebSockets / proxying / service bindings
 │  └─ references/streaming-and-realtime.md
 │
+├─ Durable Objects (Hono in a DO, hibernated WS, alarms)
+│  └─ references/durable-objects.md
+│
+├─ OpenAPI docs from routes (@hono/zod-openapi)
+│  └─ references/openapi.md
+│
 ├─ Typed client (hc RPC vs hand-rolled)
 │  └─ references/rpc-clients.md
 │
 ├─ Testing (app.request, pool-workers, middleware isolation)
-│  └─ references/testing.md
+│  └─ references/testing.md + assets/vitest.config.template.ts
 │
 ├─ Starting a new Worker from scratch
 │  └─ assets/worker-template.ts (commented composition-root skeleton)
@@ -200,9 +206,13 @@ in isolation, and the workerd-version-lag trap:
 
 `scripts/route-inventory.py` statically scans a Hono TypeScript source tree and
 lists every route, middleware registration, and `app.route()` mount with
-`file:line` — plus `--check`, a middleware-order linter that flags handlers
-registered *before* a middleware whose path pattern covers them (those handlers
-silently bypass it: the #1 Hono ordering bug).
+`file:line` — plus `--check`, three registration-order lints (every finding is
+a consequence of Hono matching in registration order):
+
+- **bypass** — a route registered *before* a middleware whose pattern covers it
+  (it silently skips that middleware: the #1 Hono ordering bug)
+- **duplicate** — the same `(method, path)` registered twice (the second is dead)
+- **shadowed** — a route after an earlier broader same-method route (never matches)
 
 ```bash
 # Inventory a Worker's HTTP surface (TSV: kind, method, path, file:line)
@@ -211,11 +221,11 @@ python skills/hono-ops/scripts/route-inventory.py src/
 # JSON envelope for downstream tooling
 python skills/hono-ops/scripts/route-inventory.py --json src/ | jq '.data[] | select(.kind=="mount")'
 
-# Lint middleware ordering: exit 10 = findings (routes that dodge a later middleware)
+# Lint registration order: exit 10 = findings (each carries an `issue` field in --json)
 python skills/hono-ops/scripts/route-inventory.py --check src/
 ```
 
-Exit codes: `0` clean, `2` usage, `3` path not found, `10` order findings
+Exit codes: `0` clean, `2` usage, `3` path not found, `10` findings
 (`--check`). Regex-based on purpose — it needs no TypeScript compiler API and
 works on any checkout.
 
@@ -246,12 +256,18 @@ per-cron branching): [references/workers-runtime.md](references/workers-runtime.
 | [references/rpc-clients.md](references/rpc-clients.md) | `hc<AppType>` RPC client, chained-route inference requirement, when a hand-rolled typed client is the better call |
 | [references/workers-runtime.md](references/workers-runtime.md) | SPA/static assets from one Worker, `scheduled()` + queue handlers beside `fetch`, `waitUntil`, `caches`, detached fetch |
 | [references/streaming-and-realtime.md](references/streaming-and-realtime.md) | `stream`/`streamText`/`streamSSE`, WebSockets (plain Worker vs Durable Object hibernation), proxying, service bindings |
+| [references/durable-objects.md](references/durable-objects.md) | Routing into DOs, a Hono app per object, hibernated WebSockets, alarms, Hono-in-DO vs RPC methods |
+| [references/openapi.md](references/openapi.md) | `@hono/zod-openapi` schema-first routes, swagger/Scalar UI, `hono-openapi` annotations, when to skip OpenAPI entirely |
 
-**Starter asset:** [assets/worker-template.ts](assets/worker-template.ts) — a
-commented composition-root skeleton (typed env, security headers, auth
-middleware, bearer sub-app, 404 split, `onError`, cron) with adapt-points
-marked. Copy it as the seed of a new Worker; every section cross-refs the
-reference that explains it.
+**Starter assets:**
+
+- [assets/worker-template.ts](assets/worker-template.ts) — commented
+  composition-root skeleton (typed env, security headers, auth middleware,
+  bearer sub-app, 404 split, `onError`, cron) with adapt-points marked. Copy it
+  as the seed of a new Worker.
+- [assets/vitest.config.template.ts](assets/vitest.config.template.ts) —
+  vitest-pool-workers config (D1 migrations into the test DB, isolation,
+  worktree excludes, the compatibility-date pin) ready to adapt.
 
 ## See Also
 

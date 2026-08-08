@@ -36,7 +36,8 @@ const res2 = await app.fetch(
 ## vitest-pool-workers: real bindings inside workerd
 
 `@cloudflare/vitest-pool-workers` runs the test file *inside* the Workers
-runtime, with real D1/KV/R2/DO bindings.
+runtime, with real D1/KV/R2/DO bindings. (A ready-to-adapt copy of the config
+below ships as this skill's `assets/vitest.config.template.ts`.)
 
 ```typescript
 // vitest.config.ts

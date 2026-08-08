@@ -59,7 +59,8 @@ for ref in "$here"/references/*.md; do
 done
 
 # 4. Every SKILL.md-cited bundled resource exists on disk
-for res in assets/worker-template.ts assets/hono-facts.json \
+for res in assets/worker-template.ts assets/vitest.config.template.ts \
+           assets/hono-facts.json \
            scripts/route-inventory.py scripts/check-hono-facts.py \
            tests/fixtures/sample-app.ts; do
   [ -f "$here/$res" ] && ok "resource present: $res" || bad "missing resource: $res"
@@ -79,25 +80,34 @@ ec 2 "route-inventory: bad flag -> 2"  "$PY" "$inv" --bogus "$fixture"
 ec 3 "route-inventory: missing path -> 3" "$PY" "$inv" /no/such/path
 ec 0 "route-inventory: fixture inventory ok" "$PY" "$inv" "$fixture"
 
-# Behaviour: the fixture registers exactly 15 things; assert the count and a few
+# Behaviour: the fixture registers exactly 18 things; assert the count and a few
 # load-bearing rows (a mount, the custom method, chained-app attribution).
 # CONTRACT: tests/fixtures/sample-app.ts and these numbers move together.
 out="$("$PY" "$inv" "$fixture" 2>/dev/null)"
-[ "$(printf '%s\n' "$out" | wc -l)" = "15" ] && ok "route-inventory: 15 rows" || bad "route-inventory: row count != 15"
+[ "$(printf '%s\n' "$out" | wc -l)" = "18" ] && ok "route-inventory: 18 rows" || bad "route-inventory: row count != 18"
 printf '%s\n' "$out" | grep -q "mount	-	/api/time" && ok "route-inventory: mount row" || bad "route-inventory: mount row missing"
 printf '%s\n' "$out" | grep -q "route	PURGE	/api/cache" && ok "route-inventory: on() custom method" || bad "route-inventory: on() row missing"
 printf '%s\n' "$out" | grep -q "route	GET	/posts/:id	chained" && ok "route-inventory: chained attribution" || bad "route-inventory: chained attribution wrong"
 
 # --json envelope parses with the documented schema (stdout is data-only)
 "$PY" "$inv" --json "$fixture" 2>/dev/null \
-  | "$PY" -c 'import json,sys; d=json.load(sys.stdin); assert d["meta"]["schema"]=="claude-mods.hono-ops.route-inventory/v1"; assert d["meta"]["count"]==15' \
+  | "$PY" -c 'import json,sys; d=json.load(sys.stdin); assert d["meta"]["schema"]=="claude-mods.hono-ops.route-inventory/v1"; assert d["meta"]["count"]==18' \
   && ok "route-inventory: --json envelope parses" || bad "route-inventory: --json envelope broken"
 
-# --check flags exactly the fixture's one deliberate pre-middleware route
-ec 10 "route-inventory: --check finds order issue -> 10" "$PY" "$inv" --check "$fixture"
+# --check flags exactly the fixture's three deliberate baits: one bypass
+# (/api/health before the /api/* middleware), one duplicate (GET /api/me twice),
+# one shadowed (/api/reports/daily under the earlier /api/reports/* wildcard).
+ec 10 "route-inventory: --check finds issues -> 10" "$PY" "$inv" --check "$fixture"
 chk="$("$PY" "$inv" --check "$fixture" 2>/dev/null)"
-[ "$(printf '%s\n' "$chk" | grep -c '^finding')" = "1" ] && ok "route-inventory: exactly 1 finding" || bad "route-inventory: finding count != 1"
-printf '%s\n' "$chk" | grep -q "/api/health" && ok "route-inventory: finding names /api/health" || bad "route-inventory: wrong finding"
+[ "$(printf '%s\n' "$chk" | grep -c '^finding')" = "3" ] && ok "route-inventory: exactly 3 findings" || bad "route-inventory: finding count != 3"
+printf '%s\n' "$chk" | grep -q "/api/health.*bypasses" && ok "route-inventory: bypass finding" || bad "route-inventory: bypass finding missing"
+printf '%s\n' "$chk" | grep -q "/api/me.*duplicate of" && ok "route-inventory: duplicate finding" || bad "route-inventory: duplicate finding missing"
+printf '%s\n' "$chk" | grep -q "/api/reports/daily.*shadowed by" && ok "route-inventory: shadowed finding" || bad "route-inventory: shadowed finding missing"
+# Capture first: --check exits 10, and under pipefail that would sink the pipe.
+chk_json="$("$PY" "$inv" --check --json "$fixture" 2>/dev/null)"
+printf '%s' "$chk_json" \
+  | "$PY" -c 'import json,sys; d=json.load(sys.stdin); assert sorted(f["issue"] for f in d["data"])==["bypass","duplicate","shadowed"]' \
+  && ok "route-inventory: --check --json issue fields" || bad "route-inventory: --check --json issue fields wrong"
 
 # 6. check-hono-facts.py — staleness verifier contract (§7), offline-safe
 verifier="$here/scripts/check-hono-facts.py"
@@ -121,10 +131,14 @@ sed 's/Hono v4/Hono v99/' "$here/assets/hono-facts.json" > "$tmp/drift.json"
 ec 10 "verifier: drifted token -> 10" "$PY" "$verifier" --offline --catalog "$tmp/drift.json"
 rm -rf "$tmp"
 
-# 7. Template sanity: the starter names the load-bearing sections
+# 7. Template sanity: the starters name their load-bearing sections
 tmpl="$here/assets/worker-template.ts"
 for marker in "securityHeaders" "app.onError" "satisfies ExportedHandler" "not_found" "timingSafeEqual"; do
-  grep -qF "$marker" "$tmpl" && ok "template carries: $marker" || bad "template missing: $marker"
+  grep -qF "$marker" "$tmpl" && ok "worker template carries: $marker" || bad "worker template missing: $marker"
+done
+vtmpl="$here/assets/vitest.config.template.ts"
+for marker in "defineWorkersConfig" "readD1Migrations" "isolatedStorage" "compatibilityDate"; do
+  grep -qF "$marker" "$vtmpl" && ok "vitest template carries: $marker" || bad "vitest template missing: $marker"
 done
 
 echo "hono-ops tests: $pass passed, $fail failed" >&2

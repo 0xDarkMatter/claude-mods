@@ -10,17 +10,20 @@ Output:  stdout, data only.
                   "claude-mods.hono-ops.route-inventory/v1"}}
          --check: findings only (same TSV/JSON shape, kind=finding)
 Stderr:  headers, progress, warnings, errors
-Exit:    0 ok/clean, 2 usage, 3 path not found, 10 --check found routes that
-         bypass a later-registered middleware (confirm each is deliberate)
+Exit:    0 ok/clean, 2 usage, 3 path not found, 10 --check produced findings
+         (confirm each is deliberate)
 
 Notes:   Pure-regex static analysis (no TypeScript compiler API required — the
          native TS 7 toolchain ships none). Per-file: `app.route()` mounts are
          listed but sub-app files are not expanded into their mount prefix.
-         The --check linter flags handlers registered BEFORE a middleware whose
-         path pattern covers them — those handlers silently skip it (Hono
-         matches in registration order). A flagged route is either the #1 Hono
-         ordering bug or a deliberate pre-auth exception; the linter's job is
-         to make you say which.
+         The --check linter runs three registration-order lints (Hono matches
+         in registration order; each finding carries an `issue` field in
+         --json): `bypass` — a route registered before a middleware whose
+         pattern covers it silently skips that middleware; `duplicate` — the
+         same (method, path) registered twice, second is dead; `shadowed` — a
+         route after an earlier broader same-method route can never match. A
+         bypass is either the #1 Hono ordering bug or a deliberate pre-auth
+         exception; the linter's job is to make you say which.
 
 Examples:
   route-inventory.py src/
@@ -145,31 +148,63 @@ def scan_file(path: Path, root: Path) -> list[dict]:
     return entries
 
 
+def _finding(r: dict, issue: str, detail: str) -> dict:
+    return {"kind": "finding", "issue": issue, "method": r["method"], "path": r["path"],
+            "app": r["app"], "file": r["file"], "line": r["line"], "detail": detail}
+
+
 def check_order(entries: list[dict]) -> list[dict]:
-    """Flag routes registered before a same-file, same-app middleware that covers them."""
+    """Three lints per (file, app) group, all consequences of Hono matching in
+    registration order:
+      bypass    - a route/mount registered BEFORE a middleware whose pattern
+                  covers it (the middleware silently never runs for it)
+      duplicate - the exact same (method, path) route registered twice
+                  (the second registration is dead - first match wins)
+      shadowed  - a route registered AFTER an earlier same-method (or ALL)
+                  route whose broader pattern covers its path (dead route)
+    Mounts are excluded from duplicate/shadowed: two sub-apps on one base path
+    is a legitimate Hono pattern (matching falls through across mounts)."""
     findings: list[dict] = []
     by_file_app: dict[tuple, list[dict]] = {}
     for e in entries:
         by_file_app.setdefault((e["file"], e["app"]), []).append(e)
     for group in by_file_app.values():
         middlewares = [e for e in group if e["kind"] == "middleware" and e["path"] != "?"]
-        routes = [e for e in group if e["kind"] in ("route", "mount") and e["path"] not in ("?", "-")]
+        covered = [e for e in group if e["kind"] in ("route", "mount") and e["path"] not in ("?", "-")]
+        routes = [e for e in group if e["kind"] == "route" and e["path"] not in ("?", "-")]
+
         for mw in middlewares:
             rx = pattern_to_regex(mw["path"])
-            for r in routes:
+            for r in covered:
                 if r["line"] < mw["line"] and rx.match(r["path"]):
-                    findings.append({
-                        "kind": "finding",
-                        "method": r["method"],
-                        "path": r["path"],
-                        "app": r["app"],
-                        "file": r["file"],
-                        "line": r["line"],
-                        "detail": (
-                            f"registered before middleware use('{mw['path']}') at "
-                            f"{mw['file']}:{mw['line']} - this {r['kind']} bypasses it"
-                        ),
-                    })
+                    findings.append(_finding(r, "bypass",
+                        f"registered before middleware use('{mw['path']}') at "
+                        f"{mw['file']}:{mw['line']} - this {r['kind']} bypasses it"))
+
+        seen: dict[tuple, dict] = {}
+        for r in routes:
+            key = (r["method"], r["path"])
+            if key in seen:
+                first = seen[key]
+                findings.append(_finding(r, "duplicate",
+                    f"duplicate of {first['method']} {first['path']} at "
+                    f"{first['file']}:{first['line']} - this registration is dead (first match wins)"))
+            else:
+                seen[key] = r
+
+        for later in routes:
+            for earlier in routes:
+                if earlier["line"] >= later["line"] or earlier["path"] == later["path"]:
+                    continue
+                if earlier["method"] != later["method"] and earlier["method"] != "ALL":
+                    continue
+                if ("*" in earlier["path"] or ":" in earlier["path"]) \
+                        and pattern_to_regex(earlier["path"]).match(later["path"]):
+                    findings.append(_finding(later, "shadowed",
+                        f"shadowed by earlier {earlier['method']} '{earlier['path']}' at "
+                        f"{earlier['file']}:{earlier['line']} - this route can never match"))
+                    break
+    findings.sort(key=lambda f: (f["file"], f["line"]))
     return findings
 
 
@@ -227,8 +262,9 @@ def main() -> int:
             print(f"{r['kind']}\t{r['method']}\t{r['path']}\t{r['app']}\t{loc}{tail}")
 
     if args.check and rows:
-        print(f"{len(rows)} route(s) bypass a later-registered middleware - confirm each is deliberate",
-              file=sys.stderr)
+        issues = ", ".join(f"{n} {k}" for k, n in sorted(
+            (k, sum(1 for r in rows if r.get("issue") == k)) for k in {r.get("issue") for r in rows}))
+        print(f"{len(rows)} finding(s) ({issues}) - confirm each is deliberate", file=sys.stderr)
         return 10
     return 0
 

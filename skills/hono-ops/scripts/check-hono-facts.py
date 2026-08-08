@@ -50,7 +50,7 @@ EX_UNAVAILABLE = 7
 EX_DRIFT = 10
 
 SCHEMA = "claude-mods.hono-ops.facts/v1"
-FACT_KEYS = ("hono", "zod_validator", "pool_workers")
+FACT_KEYS = ("hono", "zod_validator", "pool_workers", "zod_openapi")
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_CATALOG = HERE.parent / "assets" / "hono-facts.json"

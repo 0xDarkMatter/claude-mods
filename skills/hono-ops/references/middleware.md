@@ -160,11 +160,51 @@ app.use('*', securityHeaders());   // registered FIRST = outermost = sees every 
 - Roll out CSP as `content-security-policy-report-only` first; enforce after the
   report stream is quiet.
 
-## Built-in middleware worth knowing
+## CORS — usually needed less than you think
 
-Hono ships `hono/cors`, `hono/logger`, `hono/secure-headers`, `hono/etag`,
-`hono/compress` (not useful on Workers — the platform compresses),
-`hono/bearer-auth`, `hono/jwt`, `hono/cookie` (helpers: `getCookie`/`setCookie`/
-`deleteCookie`). Use them for the generic 80%; write your own (as above) when
-the behaviour is a product decision (which headers, which auth failure shape) —
-a 20-line middleware you fully own beats configuring around a generic one.
+A SPA served from the **same Worker** (workers-runtime.md) is same-origin — it
+needs **no CORS at all**. Configure CORS only when a *different* origin
+genuinely calls the API (another product's frontend, a partner site,
+localhost dev against a deployed API):
+
+```typescript
+import { cors } from 'hono/cors';
+
+app.use('/api/*', cors({
+  origin: ['https://app.example.com', 'https://staging.example.com'], // exact allowlist
+  credentials: true,                    // cookies/bearer across origins
+  allowHeaders: ['content-type', 'authorization'],
+  maxAge: 86400,                        // cache preflights a day
+}));
+```
+
+- Register it **before** the auth middleware so preflight `OPTIONS` (which
+  carries no credentials) is answered by the CORS layer, not 403'd by auth.
+- `credentials: true` forbids `origin: '*'` — the browser rejects the combo.
+  Use the exact allowlist, or a function `(origin) => allowed(origin) ? origin : null`.
+- An origin function must return the origin string to allow, `null`/`''` to
+  deny — returning `'*'` from it re-introduces the wildcard bug.
+- CORS is browser policy, not security: a curl caller ignores it entirely.
+  Auth still does the gating.
+
+## The production middleware stack
+
+The layers a production Worker actually wants, outermost first:
+
+| Layer | Package / shape | Note |
+|---|---|---|
+| Security headers | own 20-liner (above) or `hono/secure-headers` | Own it once product decides CSP |
+| Request id | `hono/request-id` → `c.get('requestId')` | Include it in every error log line |
+| CORS | `hono/cors` on the cross-origin pattern only | See above; skip for same-origin SPA |
+| Body limit | `hono/body-limit` `({ maxSize: 1024 * 1024 })` | Before any route that parses bodies; upload routes set their own cap |
+| Timeout | `hono/timeout` on slow upstream-calling patterns | Converts a hung upstream into a 504 |
+| Auth | own (this file) | The boundary |
+| Rate limiting | Workers rate-limit binding (`c.env.LIMITER.limit({ key })`) or a DO counter per key | Key on the *verified* identity, not IP alone |
+| Logging | `hono/logger` in dev; structured `console.log` JSON in prod | Workers Logs indexes JSON fields |
+
+Also in the box: `hono/etag`, `hono/jwt`, `hono/bearer-auth`, `hono/cache`
+(wraps the per-colo `caches` API — same per-colo caveats, workers-runtime.md).
+`hono/compress` is a no-op cost on Workers — the platform already compresses.
+Use built-ins for the generic 80%; write your own when the behaviour is a
+product decision (which headers, which auth-failure shape) — a 20-line
+middleware you fully own beats configuring around a generic one.

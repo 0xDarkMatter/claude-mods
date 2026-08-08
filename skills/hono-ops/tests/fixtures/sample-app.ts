@@ -20,6 +20,15 @@ app.patch('/api/things/:id', (c) => c.json({}));
 app.delete('/api/things/:id', (c) => c.json({ ok: true }));
 app.on('PURGE', '/api/cache', (c) => c.json({ ok: true }));
 
+// Deliberate --check bait: the exact same (method, path) registered twice —
+// the second registration is dead (first match wins) => `duplicate` finding.
+app.get('/api/me', (c) => c.json({ dup: true }));
+
+// Deliberate --check bait: the broad wildcard route above the specific one —
+// the specific route can never match => `shadowed` finding.
+app.get('/api/reports/*', (c) => c.json({ report: 'any' }));
+app.get('/api/reports/daily', (c) => c.json({ report: 'daily' }));
+
 app.route('/api/time', timeApi);
 app.route('/vesper', vesper);
 
