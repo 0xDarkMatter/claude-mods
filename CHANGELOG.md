@@ -83,6 +83,10 @@ feature releases live in the README "Recent Updates" section.
 ### Fixed
 - AGENTS.md / docs/PLAN.md command counts (2 → 3; the `/git-ops` command was
   never counted) and the stale AGENTS.md rules-directory listing.
+- `typescript-ops` tsconfig examples no longer recommend `baseUrl` (a hard
+  error under TypeScript 7, TS5102); `paths` entries are tsconfig-relative
+  and the frontmatter description now triggers on "typescript 7 / tsgo /
+  native compiler".
 
 ## [3.6.0] - 2026-07-04
 
