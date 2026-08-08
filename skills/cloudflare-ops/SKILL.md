@@ -26,6 +26,8 @@ Cloudflare Workers + Wrangler: runtime patterns, bindings, local dev, secrets, d
 | [references/deploy-and-cicd.md](references/deploy-and-cicd.md) | `wrangler deploy`, environments, secrets, Workers Builds, GitHub Actions + OIDC/API-token, gradual deployments, rollbacks, observability |
 | [assets/wrangler.jsonc.template](assets/wrangler.jsonc.template) | Commented, current `wrangler.jsonc` covering all common bindings + assets |
 
+> Access / Zero Trust auth patterns (verifying `Cf-Access-Jwt-Assertion`, AUD tags, service auth, closed origins) → **auth-ops** skill, `references/cloudflare-access.md`.
+
 ## Workers vs Pages Decision
 
 Cloudflare added static-asset hosting to Workers; a single Worker now serves a static site, a full-stack app, or an API + SPA. **For new projects, default to Workers with static assets.** Pages still works and isn't deprecated, but Workers has the broader, faster-moving feature set (Durable Objects, Cron Triggers, Queues, richer observability) and is where Cloudflare's investment goes.
