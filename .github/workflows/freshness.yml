@@ -79,6 +79,15 @@ jobs:
           if [ "$rc" -eq 7 ]; then echo "::warning::mapbox-ops live check unreachable — skipped"; fi
           exit 0
 
+      - name: typescript-ops packages vs npm registry (typescript/zod/valibot majors)
+        run: |
+          set +e
+          python skills/typescript-ops/scripts/check-typescript-facts.py --live
+          rc=$?
+          if [ "$rc" -eq 10 ]; then echo "::error::typescript-ops drift — a package's latest npm major moved past the documented major"; exit 1; fi
+          if [ "$rc" -eq 7 ]; then echo "::warning::typescript-ops live check unreachable (npm registry) — skipped"; fi
+          exit 0
+
       - name: threejs-ops packages vs npm registry (existence + three major)
         run: |
           set +e

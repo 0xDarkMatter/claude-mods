@@ -39,6 +39,20 @@ feature releases live in the README "Recent Updates" section.
   gate) and `migration-patterns.md`; indexed in SKILL.md with two new gotcha
   rows; the reference-wiring test now gates the new file.
 
+- **`typescript-ops`: TS 7 native-compiler reference**
+  (`references/ts7-native-compiler.md`) - fresh adoption knowledge for the
+  Go-native `typescript@7` (stable since 2026-07-08): the no-JS-API break
+  (`require('typescript')` throws MODULE_NOT_FOUND on 7.0.x; AST-free /
+  alt-parser / alias workarounds), the dual-install `tsc` bin ambiguity
+  (explicit compiler paths while a `typescript5` fallback alias exists),
+  the embedded-language ecosystem lockout until 7.1+ (vue-tsc, svelte-check,
+  Astro, MDX pinned to TS 6), and a measured 12.1x production adoption with
+  a go/no-go checklist. Point-in-time sections are marked verify-on-apply.
+  SKILL.md gains a TS 7 section, the facts catalog moves typescript's
+  documented major 6 -> 7, and the skill's staleness verifier is now wired
+  into `tests/check-resources.sh` (offline, PR CI) and `freshness.yml`
+  (live) - it previously ran only in the skill's own suite.
+
 
 ### Removed
 - **`fleetflow` skill extracted to its own repo** (`X:\Forge\fleetflow`) with
@@ -69,6 +83,10 @@ feature releases live in the README "Recent Updates" section.
 ### Fixed
 - AGENTS.md / docs/PLAN.md command counts (2 → 3; the `/git-ops` command was
   never counted) and the stale AGENTS.md rules-directory listing.
+- `typescript-ops` tsconfig examples no longer recommend `baseUrl` (a hard
+  error under TypeScript 7, TS5102); `paths` entries are tsconfig-relative
+  and the frontmatter description now triggers on "typescript 7 / tsgo /
+  native compiler".
 
 ## [3.6.0] - 2026-07-04
 

@@ -1,6 +1,6 @@
 ---
 name: typescript-ops
-description: "TypeScript type system, generics, utility types, strict mode, and ecosystem patterns. Use for: typescript, ts, type, generic, utility type, Partial, Pick, Omit, Record, Exclude, Extract, ReturnType, Parameters, keyof, typeof, infer, mapped type, conditional type, template literal type, discriminated union, type guard, type assertion, type narrowing, tsconfig, strict mode, declaration file, zod, valibot."
+description: "TypeScript type system, generics, utility types, strict mode, and ecosystem patterns. Use for: typescript, ts, type, generic, utility type, Partial, Pick, Omit, Record, Exclude, Extract, ReturnType, Parameters, keyof, typeof, infer, mapped type, conditional type, template literal type, discriminated union, type guard, type assertion, type narrowing, tsconfig, strict mode, declaration file, zod, valibot, typescript 7, tsgo, native compiler."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
@@ -12,7 +12,7 @@ metadata:
 
 Comprehensive TypeScript skill covering the type system, generics, and production patterns.
 
-> Ecosystem facts verified as of 2026-07-05 (TypeScript 6, Zod 4, Valibot 1).
+> Ecosystem facts verified as of 2026-08-08 (TypeScript 7, Zod 4, Valibot 1).
 
 **Staleness check:** `python scripts/check-typescript-facts.py --offline` asserts the
 catalogued version-bearing facts (TypeScript major, zod, valibot) are still named in the
@@ -188,7 +188,7 @@ function readConfig() {
 const names = ["a", null, "b"].filter(x => x !== null); // string[], not (string | null)[]
 ```
 
-### TypeScript 6.0 (Current Major)
+### TypeScript 6.0 (The Bridge Release)
 
 TS 6.0 is the last release on the JavaScript-based compiler — it exists to bridge to the
 native (Go) compiler in TS 7, so its headline is stricter, modernised defaults:
@@ -198,6 +198,27 @@ native (Go) compiler in TS 7, so its headline is stricter, modernised defaults:
 - **Legacy options removed**: `moduleResolution: classic`; `module: amd/umd/system/none`; minimum `target` is now ES2015 (`es5` deprecated)
 - **Interop always on**: `esModuleInterop` / `allowSyntheticDefaultImports` can no longer be disabled
 - New `--stableTypeOrdering` flag eases 6.0 → 7.0 migration diffing
+
+### TypeScript 7 (Current Major — Native Compiler)
+
+TS 7 is the Go-native rewrite (formerly `tsgo`), stable on npm since 2026-07-08.
+Same checking semantics, ~8–16× faster typechecks — but the package ships **only a
+`bin/tsc` shim, no JavaScript compiler API**: `require('typescript')` throws
+`MODULE_NOT_FOUND` on 7.0.x (the API returns in 7.1+). Consequences that gate
+adoption:
+
+- Repo tooling using the TS programmatic API (`ts.createSourceFile`, custom lint
+  scripts, codemods, typescript-eslint) must go AST-free, switch parser, or pin an alias
+- Tools typechecking embedded languages (vue-tsc, svelte-check, Astro, MDX) are
+  pinned to TS 6 until they port to the 7.1+ API — a real stack-selection input
+- A tsconfig already on TS 6 defaults adopts directly (the 6.0 bridge is skippable);
+  `baseUrl` is a hard error (TS5102)
+- Running a `typescript5` fallback alias alongside 7 makes bare `npx tsc` ambiguous —
+  scripts must use explicit compiler paths during the soak
+
+**Deep dive**: Load `./references/ts7-native-compiler.md` for the no-JS-API workarounds,
+dual-install bin ambiguity, ecosystem lockout table, measured adoption benchmarks (12.1×),
+and the go/no-go checklist.
 
 ## tsconfig Quick Reference
 
@@ -218,9 +239,8 @@ native (Go) compiler in TS 7, so its headline is stricter, modernised defaults:
         "declaration": true,          // Generate .d.ts
         "sourceMap": true,
 
-        // Paths
-        "baseUrl": ".",
-        "paths": { "@/*": ["src/*"] },
+        // Paths — tsconfig-relative; don't add baseUrl (TS 7 hard-errors on it, TS5102)
+        "paths": { "@/*": ["./src/*"] },
 
         // Strictness extras
         "noUnusedLocals": true,
@@ -305,6 +325,7 @@ Load these for deep-dive topics. Each is self-contained.
 | `./references/generics-patterns.md` | Generic constraints, conditional types, mapped types, template literals, recursive types |
 | `./references/utility-types.md` | All built-in utility types with examples, custom utility types |
 | `./references/config-strict.md` | tsconfig deep dive, strict mode migration, project references, monorepo setup |
+| `./references/ts7-native-compiler.md` | Adopting the TS 7 native (Go) compiler: no JS API, bin ambiguity, ecosystem lockout, benchmarked go/no-go |
 | `./references/ecosystem.md` | Zod/Valibot, type-safe API clients, ORM types, testing with Vitest |
 
 ## See Also
