@@ -1,5 +1,5 @@
 ---
-name: Executive
+name: executive
 description: High-level summaries for non-technical stakeholders - decisions, impact, timelines
 keep-coding-instructions: true
 ---

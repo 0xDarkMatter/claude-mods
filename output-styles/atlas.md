@@ -1,5 +1,5 @@
 ---
-name: Atlas
+name: atlas
 description: Strategic advisor. Sees the big picture, thinks in systems.
 keep-coding-instructions: true
 ---

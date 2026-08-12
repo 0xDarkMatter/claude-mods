@@ -1,5 +1,5 @@
 ---
-name: Harbour
+name: harbour
 description: Warm, steady, makes complexity feel manageable - the calm in the storm
 keep-coding-instructions: true
 ---

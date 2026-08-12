@@ -460,6 +460,49 @@ validate_rules() {
     done < <(find "$rules_dir" -name "*.md" -type f -print0)
 }
 
+# Validate output styles
+#
+# The `outputStyle` setting is resolved CASE-SENSITIVELY against a style's
+# frontmatter `name:` (falling back to the filename when `name:` is absent), and
+# an unresolvable value fails SILENTLY — the session just runs the default
+# style. A capitalised `name: Vesper` in `vesper.md` therefore makes the obvious
+# setting value ("vesper") a no-op with no error anywhere. Verified on 2.1.221;
+# see the corrected root-cause analysis on anthropics/claude-code#47482.
+validate_output_styles() {
+    echo ""
+    echo "=== Validating Output Styles ==="
+
+    local styles_dir="$PROJECT_DIR/output-styles"
+    if [[ ! -d "$styles_dir" ]]; then
+        echo "  (no output-styles/ directory - skipping)"
+        return
+    fi
+
+    while IFS= read -r -d '' file; do
+        local stem
+        stem=$(basename "$file" .md)
+
+        if [[ ! "$stem" =~ ^[a-z][a-z0-9]*(-[a-z0-9]+)*$ ]]; then
+            log_warn "$file - Filename not kebab-case: $stem"
+        fi
+
+        if ! check_yaml_frontmatter "$file"; then
+            continue
+        fi
+
+        # `name:` is optional; when present it MUST equal the filename stem, or
+        # the documented settings value silently selects nothing.
+        local declared
+        declared=$(get_yaml_field "$file" "name")
+        if grep -q "^name:" "$file" && [[ "$declared" != "$stem" ]]; then
+            log_fail "$file - Frontmatter name '$declared' != filename '$stem' (outputStyle would silently fail)"
+            continue
+        fi
+
+        log_pass "$file - Valid output style"
+    done < <(find "$styles_dir" -maxdepth 1 -name "*.md" -type f -print0)
+}
+
 # Validate settings files (permissions and hooks)
 validate_settings() {
     echo ""
@@ -607,6 +650,7 @@ main() {
     validate_skills
     validate_description_budget
     validate_rules
+    validate_output_styles
     validate_settings
     validate_plugin
 

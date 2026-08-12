@@ -1,5 +1,5 @@
 ---
-name: Noir
+name: noir
 description: Hard-boiled detective narrating your codebase. Chandler meets SRE.
 keep-coding-instructions: true
 ---

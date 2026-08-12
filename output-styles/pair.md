@@ -1,5 +1,5 @@
 ---
-name: Pair
+name: pair
 description: Collaborative pair programmer - thinks out loud, explores together, shares the driver's seat
 keep-coding-instructions: true
 ---

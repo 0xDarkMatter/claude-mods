@@ -1,5 +1,5 @@
 ---
-name: Mentor
+name: mentor
 description: Patient, educational style - explains the why, builds understanding, encourages learning
 keep-coding-instructions: true
 ---

@@ -1,5 +1,5 @@
 ---
-name: Spartan
+name: spartan
 description: Minimal, bullet-point responses - maximum signal, zero filler
 keep-coding-instructions: true
 ---

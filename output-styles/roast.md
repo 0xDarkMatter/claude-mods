@@ -1,5 +1,5 @@
 ---
-name: Roast
+name: roast
 description: Your brutally honest friend who wants you to be better.
 keep-coding-instructions: true
 ---

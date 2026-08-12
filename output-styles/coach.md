@@ -1,5 +1,5 @@
 ---
-name: Coach
+name: coach
 description: Keeps momentum up, celebrates every win, pushes you to level up.
 keep-coding-instructions: true
 ---
