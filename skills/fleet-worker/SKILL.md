@@ -16,7 +16,7 @@ Opus orchestrator (this session) fan workers out in parallel, then verify and
 land their work. The worker keeps Claude Code's *entire tool harness*
 (Read/Write/Edit/Bash/Glob/Grep/Task/MCP/hooks) — only the **brain** is swapped
 to a cheaper model via env — a cheaper Anthropic model (Sonnet/Haiku) or a
-non-Anthropic endpoint. GLM-5.2 on z.ai is the default worked example; the
+non-Anthropic endpoint. GLM-5.3 on z.ai is the default worked example; the
 mechanism is provider- and model-agnostic (any Anthropic-compatible endpoint).
 
 > **Want to offload to Grok (xAI's `grok` CLI)? That's not this skill.** Every
@@ -89,7 +89,7 @@ same on-demand, progressively-disclosed procedural knowledge your orchestrator h
 | Var | Default | Purpose |
 |---|---|---|
 | `FLEET_WORKER_BASE_URL` | `https://api.z.ai/api/anthropic` | Anthropic-compatible endpoint |
-| `FLEET_WORKER_MODEL` | `GLM-5.2` | main model (opus+sonnet mapping) |
+| `FLEET_WORKER_MODEL` | `GLM-5.3` | main model (opus+sonnet mapping); 5.3 reasoning levels are low/high/max via `FLEET_WORKER_EFFORT` (thinking cannot be disabled on 5.3) |
 | `FLEET_WORKER_SMALL_MODEL` | `GLM-4.5-Air` | background/cheap model (haiku mapping) |
 | `FLEET_WORKER_CONFIG_DIR` | `~/.fleet-worker/cfg` | isolated config dir — **one per parallel worker** |
 | `FLEET_WORKER_EFFORT` | `high` | seeded `effortLevel` in the worker's settings |
@@ -133,7 +133,7 @@ routing needs a separate process, which is fleet-worker. Hence two loci:
 | Work class | Locus | Model | Effort |
 |---|---|---|---|
 | **mechanical** | fleet-worker (GLM) or in-proc | `haiku` / GLM-4.5-Air | low |
-| **scout** | in-proc (fleet-worker if wide) | `sonnet` / GLM-5.2 | low |
+| **scout** | in-proc (fleet-worker if wide) | `sonnet` / GLM-5.3 | low |
 | **build** | in-proc | `sonnet`→`opus` | medium |
 | **synthesize** | in-proc only | inherit (session = Fable/Opus) | high |
 | **judge** | in-proc only | inherit (session = Fable/Opus) | high–max |

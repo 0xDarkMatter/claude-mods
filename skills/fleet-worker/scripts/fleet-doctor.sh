@@ -158,7 +158,7 @@ fi
 if [ "$MODE" = "live" ]; then
   command -v curl >/dev/null 2>&1 || { echo "fleet-doctor.sh: curl required for --live" >&2; exit "$EXIT_MISSING_DEP"; }
   url="${FLEET_WORKER_BASE_URL:-${def_url:-https://api.z.ai/api/anthropic}}"
-  model="${FLEET_WORKER_MODEL:-${def_model:-GLM-5.2}}"
+  model="${FLEET_WORKER_MODEL:-${def_model:-GLM-5.3}}"
   # Resolve key without echoing it.
   key=""
   if [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]; then key="$ANTHROPIC_AUTH_TOKEN"

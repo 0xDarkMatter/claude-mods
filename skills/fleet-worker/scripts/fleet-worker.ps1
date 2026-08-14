@@ -13,7 +13,7 @@
 # Config (env, all optional - defaults target the z.ai GLM Coding Plan):
 #   FLEET_WORKER_CONFIG_DIR   isolated CLAUDE_CONFIG_DIR (default ~/.fleet-worker/cfg)
 #   FLEET_WORKER_BASE_URL     Anthropic-compatible endpoint (default z.ai)
-#   FLEET_WORKER_MODEL        main model      (default GLM-5.2)
+#   FLEET_WORKER_MODEL        main model      (default GLM-5.3)
 #   FLEET_WORKER_SMALL_MODEL  background model (default GLM-4.5-Air)
 #   FLEET_WORKER_EFFORT       seeded effortLevel (default high)
 #   FLEET_WORKER_PERMISSION_MODE  worker --permission-mode (default bypassPermissions).
@@ -76,7 +76,7 @@ if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
 
 $env:ANTHROPIC_BASE_URL          = if ($env:FLEET_WORKER_BASE_URL) { $env:FLEET_WORKER_BASE_URL } else { 'https://api.z.ai/api/anthropic' }
 $env:ANTHROPIC_AUTH_TOKEN        = $key
-$env:ANTHROPIC_DEFAULT_OPUS_MODEL   = if ($env:FLEET_WORKER_MODEL) { $env:FLEET_WORKER_MODEL } else { 'GLM-5.2' }
+$env:ANTHROPIC_DEFAULT_OPUS_MODEL   = if ($env:FLEET_WORKER_MODEL) { $env:FLEET_WORKER_MODEL } else { 'GLM-5.3' }
 $env:ANTHROPIC_DEFAULT_SONNET_MODEL = $env:ANTHROPIC_DEFAULT_OPUS_MODEL
 $env:ANTHROPIC_DEFAULT_HAIKU_MODEL  = if ($env:FLEET_WORKER_SMALL_MODEL) { $env:FLEET_WORKER_SMALL_MODEL } else { 'GLM-4.5-Air' }
 
