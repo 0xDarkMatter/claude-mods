@@ -47,3 +47,7 @@ tests/*/output/
 skills/svg-brand-tint-ops/assets/gallery/
 .claude/fleet/
 .fleet-worktrees/
+
+# Session-local state and scratch (nothing under these is ever tracked)
+.claude/
+/dev/
