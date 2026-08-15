@@ -140,7 +140,8 @@ feature releases live in the README "Recent Updates" section.
 
 ### Removed
 
-- **`fleetflow` skill extracted to its own repo** (`X:\Forge\fleetflow`) with
+- **`fleetflow` skill extracted to its own repo**
+  ([github.com/0xDarkMatter/fleetflow](https://github.com/0xDarkMatter/fleetflow)) with
   full history via `git subtree split` (36+ commits) — an app with a live
   service (the machine-wide dashboard at `https://fleetflow.lab`), its own
   server (`ff-serve.py` + `ff-aggregate.py` + `ff-archive.sh`, recovered from
