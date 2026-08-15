@@ -70,7 +70,7 @@ case "$out" in *SEKRET-AAA*) no "worker leaked key to its own output";; *) ok "w
 P="$(cat "$PROBE")"
 eh "isolated CLAUDE_CONFIG_DIR set" "CONFIG=$CFG" "$P"
 eh "z.ai base url set"              "BASE=https://api.z.ai/api/anthropic" "$P"
-eh "sonnet maps to GLM-5.2"         "SONNET=GLM-5.2" "$P"
+eh "sonnet maps to GLM-5.3"         "SONNET=GLM-5.3" "$P"
 eh "haiku maps to GLM-4.5-Air"      "HAIKU=GLM-4.5-Air" "$P"
 eh "key reached claude via env"     "TOKEN=SEKRET-AAA" "$P"
 eh "bakes flags + forwards args"    "ARGS=-p --model sonnet --permission-mode bypassPermissions --output-format json do a thing" "$P"

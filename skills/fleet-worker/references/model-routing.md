@@ -34,7 +34,7 @@ processes. The taxonomy below assigns each work class a tier **and** a locus.
 | Work class | Examples | Locus | Model | Effort |
 |---|---|---|---|---|
 | **mechanical** | format, rename, regex sweep, file-by-file transform | fleet-worker (GLM) or in-proc | `haiku` / GLM-4.5-Air | low |
-| **scout** | find, enumerate, read-and-extract, summarize | in-proc (fleet-worker if very wide) | `sonnet` / GLM-5.2 | low |
+| **scout** | find, enumerate, read-and-extract, summarize | in-proc (fleet-worker if very wide) | `sonnet` / GLM-5.3 | low |
 | **build** | implement a change needing judgment | in-proc | `sonnet`→`opus` | medium |
 | **synthesize** | merge findings, write the report, design | **in-proc only** | inherit (session = Fable/Opus) | high |
 | **judge** | adversarial verify, score, gate a finding | **in-proc only** | inherit (session = Fable/Opus) | high–max |

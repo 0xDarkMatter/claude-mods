@@ -20,7 +20,7 @@ Contents: [1 Purpose](#1-purpose--scope) · [2 Facts](#2-established-facts) ·
 
 `fleet-worker` is a thin launcher around the `claude` binary (Claude Code CLI). It
 injects environment variables that point Claude Code at an **Anthropic-compatible
-endpoint** (default: z.ai, model **GLM-5.2**), then runs `claude -p` (headless /
+endpoint** (default: z.ai, model **GLM-5.3**), then runs `claude -p` (headless /
 print mode). The result is a headless Claude Code agent whose *brain* is the
 cheaper model but which retains Claude Code's full tool harness — Read, Write,
 Edit, Bash, Glob, Grep, in-process subagents (Task), MCP, hooks.
@@ -45,7 +45,7 @@ feature (Claude Code's native Task subagents cannot be repointed per-agent — �
   `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL` mapping vars. This is Claude
   Code's documented custom-endpoint mechanism (the same one used for Bedrock /
   Vertex / LLM gateways).
-- Default models: **GLM-5.2** (flagship reasoning model, ~3–15 s/call, large
+- Default models: **GLM-5.3** (flagship reasoning model, ~3–15 s/call, large
   context, effort levels) and **GLM-4.5-Air** (smaller, faster, used for the
   haiku-mapped background calls).
 - Verified against Claude Code 2.x. The key is supplied at spawn time from the
@@ -63,7 +63,7 @@ ORCHESTRATOR — Claude Code on Opus (real api.anthropic.com)
                          ▼
 WORKER — claude -p (headless)
   CLAUDE_CONFIG_DIR = isolated   (no host OAuth!)
-  ANTHROPIC_BASE_URL = <endpoint>      model: GLM-5.2 (via sonnet/opus mapping)
+  ANTHROPIC_BASE_URL = <endpoint>      model: GLM-5.3 (via sonnet/opus mapping)
   Brain: GLM   Tools: Claude Code's own harness (Read/Write/Edit/Bash/Task/MCP)
 ```
 
@@ -124,7 +124,7 @@ sonnet --permission-mode "$FLEET_WORKER_PERMISSION_MODE" "$@" </dev/null`
 (default `bypassPermissions`; override per §9).
 
 Notes:
-- **`--model sonnet`** maps to `FLEET_WORKER_MODEL` (default GLM-5.2). Mapping
+- **`--model sonnet`** maps to `FLEET_WORKER_MODEL` (default GLM-5.3). Mapping
   opus+sonnet → main model means whatever tier the harness requests internally,
   you get the main model; background/cheap calls hit the haiku-mapped small model.
 - **`</dev/null`** avoids the ~3 s "no stdin data received" stall when the prompt
