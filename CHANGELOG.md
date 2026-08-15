@@ -7,7 +7,10 @@ feature releases live in the README "Recent Updates" section.
 
 ## [Unreleased]
 
+## [3.7.0] - 2026-08-15
+
 ### Added
+
 - **`cloudflare-ops`: `workers-runtime-gotchas` reference** - battle-tested
   Workers runtime footguns mined from a production multi-tenant Worker, each
   with symptom/why/fix: detached `fetch` ("Illegal invocation" — shipped three
@@ -24,7 +27,57 @@ feature releases live in the README "Recent Updates" section.
   `--local-upstream`). SKILL.md reference index + Common Gotchas pointer
   updated.
 
+- **`hono-ops` skill** - Hono v4 on Cloudflare Workers, distilled from a
+  production multi-tenant Worker (one app, 6+ mounted sub-apps, ~1350 tests):
+  app composition with typed `Bindings`/`Variables` and sub-app mounting,
+  middleware ordering as the security topology (auth middleware that builds a
+  scoped per-request world; bearer-auth surfaces mounted *outside* the session
+  boundary), typed errors → one `onError` mapping, the JSON-404-vs-SPA-shell
+  split, zValidator vs hand-rolled validation trade-offs, SPA co-serving via
+  the static assets binding, `hc` RPC vs hand-rolled typed clients,
+  vitest-pool-workers testing (migrations, JWT harness, workerd version lag),
+  streaming/SSE/WebSockets, Durable Objects (Hono-in-a-DO, hibernated
+  WebSockets, alarms, vs RPC methods), OpenAPI (`@hono/zod-openapi`
+  schema-first vs annotations vs skipping it), CORS + a production middleware
+  stack, `hono/jsx` SSR (jsxRenderer layouts, Suspense streaming, the
+  don't-grow-a-SPA-here scope guard), Node/Bun/Deno adapter deltas with a
+  Workers→Node porting checklist, and the Workers gotchas (detached fetch
+  "Illegal invocation", immutable headers, per-colo `caches`, `waitUntil`).
+  Twelve references, two
+  commented starter templates (composition root + vitest-pool-workers
+  config), a `route-inventory.py` scanner with three registration-order
+  lints (exit 10: `bypass` = route dodges a later middleware, `duplicate` =
+  dead re-registration, `shadowed` = unreachable route), a
+  `check-hono-facts.py` staleness verifier (offline in PR CI, live in the
+  freshness workflow), and a 60-assertion offline suite.
+
+- **`agentic-quality` rule** - cross-repo doctrine for code, comments, docs, and
+  structure that survive the session: the cold-agent test, comment doctrine
+  (contract blocks, WHY-only inline, guard comments, section markers,
+  format-at-site, citations), entry-doc standard (AGENTS.md + Landmines,
+  CLAUDE.md deltas-only, nesting policy), file-size discipline, docs indexing,
+  doc-commit pairing, and monorepo directives. Grounded in a 10-repo audit.
+
+- **`repo-doctor` skill** - read-only auditor scoring any repo against the
+  doctrine across six weighted dimensions (entry docs, docs health, comments,
+  structure, enforcement, doc pairing) with a TTY panel, `--json` envelope
+  (`claude-mods.repo-doctor/v1`), and `--strict` CI gate. Ships four references
+  (comment-doctrine, entry-docs, monorepo-structure, scoring-rubric), AGENTS.md +
+  docs-index templates, and a 10-assertion offline suite.
+
+- **`rembg-ops` skill** - transparent-PNG cutouts for flat illustration,
+  sticker, and avatar art, with a deterministic fallback ladder past rembg's
+  ML failure modes so batch jobs degrade predictably on non-photographic input.
+
+- **Context-aware statusline template** - `templates/settings.json` ships a
+  statusline; `install.ps1` wires it merge-if-absent, opt-in via flag.
+
+- **`CONTRIBUTING.md`** - issue-first for non-trivial PRs, Conventional
+  Commits, the `just check` gate, and the no-translations policy (fast-moving
+  docs make committed translations stale within days).
+
 ### Changed
+
 - **`sqlite-ops`** — new `references/d1-production-patterns.md`: three
   incident-derived Cloudflare D1 patterns (symptom → why → procedure) mined from
   a production multi-tenant Worker. (1) `wrangler d1 migrations apply --remote`
@@ -76,32 +129,17 @@ feature releases live in the README "Recent Updates" section.
   the decision tree and body gain an IAP branch + quick reference, and
   cloudflare-ops cross-points to the new Access reference.
 
-- **`hono-ops` skill** - Hono v4 on Cloudflare Workers, distilled from a
-  production multi-tenant Worker (one app, 6+ mounted sub-apps, ~1350 tests):
-  app composition with typed `Bindings`/`Variables` and sub-app mounting,
-  middleware ordering as the security topology (auth middleware that builds a
-  scoped per-request world; bearer-auth surfaces mounted *outside* the session
-  boundary), typed errors → one `onError` mapping, the JSON-404-vs-SPA-shell
-  split, zValidator vs hand-rolled validation trade-offs, SPA co-serving via
-  the static assets binding, `hc` RPC vs hand-rolled typed clients,
-  vitest-pool-workers testing (migrations, JWT harness, workerd version lag),
-  streaming/SSE/WebSockets, Durable Objects (Hono-in-a-DO, hibernated
-  WebSockets, alarms, vs RPC methods), OpenAPI (`@hono/zod-openapi`
-  schema-first vs annotations vs skipping it), CORS + a production middleware
-  stack, `hono/jsx` SSR (jsxRenderer layouts, Suspense streaming, the
-  don't-grow-a-SPA-here scope guard), Node/Bun/Deno adapter deltas with a
-  Workers→Node porting checklist, and the Workers gotchas (detached fetch
-  "Illegal invocation", immutable headers, per-colo `caches`, `waitUntil`).
-  Twelve references, two
-  commented starter templates (composition root + vitest-pool-workers
-  config), a `route-inventory.py` scanner with three registration-order
-  lints (exit 10: `bypass` = route dodges a later middleware, `duplicate` =
-  dead re-registration, `shadowed` = unreachable route), a
-  `check-hono-facts.py` staleness verifier (offline in PR CI, live in the
-  freshness workflow), and a 60-assertion offline suite.
+- **fleet-ops landing wave** - session-aware landing gate with a
+  self-ownership exemption, `MAIN` role for the integration checkout,
+  `fleet prune` for stale worktree housekeeping, config now reaching the
+  script, a higher session-cache TTL, and refusal to land when the test gate
+  is unarmed rather than passing vacuously.
 
+- **fleet-worker default model** - GLM-5.2 -> GLM-5.3 (verified live
+  2026-08-14).
 
 ### Removed
+
 - **`fleetflow` skill extracted to its own repo** (`X:\Forge\fleetflow`) with
   full history via `git subtree split` (36+ commits) — an app with a live
   service (the machine-wide dashboard at `https://fleetflow.lab`), its own
@@ -114,26 +152,13 @@ feature releases live in the README "Recent Updates" section.
   Skill count 103 → 102. The never-released "Added" entry for fleetflow that
   previously sat in this section travels with the extraction — its narrative
   lives in the new repo's README and git history.
-- **`agentic-quality` rule** - cross-repo doctrine for code, comments, docs, and
-  structure that survive the session: the cold-agent test, comment doctrine
-  (contract blocks, WHY-only inline, guard comments, section markers,
-  format-at-site, citations), entry-doc standard (AGENTS.md + Landmines,
-  CLAUDE.md deltas-only, nesting policy), file-size discipline, docs indexing,
-  doc-commit pairing, and monorepo directives. Grounded in a 10-repo audit.
-- **`repo-doctor` skill** - read-only auditor scoring any repo against the
-  doctrine across six weighted dimensions (entry docs, docs health, comments,
-  structure, enforcement, doc pairing) with a TTY panel, `--json` envelope
-  (`claude-mods.repo-doctor/v1`), and `--strict` CI gate. Ships four references
-  (comment-doctrine, entry-docs, monorepo-structure, scoring-rubric), AGENTS.md +
-  docs-index templates, and a 10-assertion offline suite.
 
 ### Fixed
-- AGENTS.md / docs/PLAN.md command counts (2 → 3; the `/git-ops` command was
-  never counted) and the stale AGENTS.md rules-directory listing.
-- `typescript-ops` tsconfig examples no longer recommend `baseUrl` (a hard
-  error under TypeScript 7, TS5102); `paths` entries are tsconfig-relative
-  and the frontmatter description now triggers on "typescript 7 / tsgo /
-  native compiler".
+
+- **Output styles** - frontmatter `name:` now matches each filename in all
+  13 styles. `outputStyle` resolves case-sensitively against `name:` and fails
+  silently on mismatch, so every capitalised name made the documented setting
+  value a no-op; a validate.sh gate now blocks the drift returning.
 
 ## [3.6.0] - 2026-07-04
 
