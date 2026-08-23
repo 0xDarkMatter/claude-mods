@@ -113,7 +113,7 @@ echo "-- smoke classification (seamed) --"
 out="$(CM_YTDLP_INSTALLED=2026.06.01 CM_YTDLP_LATEST=2026.06.01 \
        CM_YTDLP_SMOKE_ERR='ERROR: [youtube] jNQXAC9IVRw: No supported JavaScript runtime found, please install deno' \
        bash "$V" --live --json 2>/dev/null)"; rc=$?
-expect_exit "no-JS-runtime smoke -> 0 (advisory, not drift)" 0 "$rc"
+expect_exit "no-JS-runtime smoke -> 7 (advisory, not drift)" 7 "$rc"
 expect_has "smoke marked skipped-no-jsruntime" '"smoke": "skipped-no-jsruntime"' "$out"
 expect_has "js_runtime reported missing" '"js_runtime": "missing"' "$out"
 case "$out" in *DRIFT*) no "no-JS-runtime must not record DRIFT";; *) ok "no-JS-runtime records no DRIFT";; esac
@@ -128,7 +128,36 @@ expect_exit "real extractor break -> 10 (drift)" 10 $?
 CM_YTDLP_INSTALLED=2026.06.01 CM_YTDLP_LATEST=2026.06.01 \
   CM_YTDLP_SMOKE_ERR='ERROR: HTTP Error 429: Too Many Requests' \
   bash "$V" --live >/dev/null 2>&1
-expect_exit "bot-challenge/429 -> 0 (advisory)" 0 $?
+expect_exit "bot-challenge/429 -> 7 (advisory)" 7 $?
+
+# (c2) THE REGRESSION GUARD. Verbatim stderr from a GitHub-hosted runner (run
+#      32614850020) - note the CURLY apostrophe U+2019 in "you’re". The old
+#      pattern "confirm you'?re not a bot" matched only the ASCII apostrophe, so
+#      this exact text fell through to DRIFT and red-failed the weekly freshness
+#      job. Do not "tidy" this string - the codepoint IS the test.
+out="$(env CM_YTDLP_INSTALLED=2026.06.01 CM_YTDLP_LATEST=2026.06.01 CM_YTDLP_SMOKE_ERR="ERROR: [youtube] jNQXAC9IVRw: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication." bash "$V" --live --json 2>/dev/null)"; rc=$?
+expect_exit "curly-apostrophe bot-check -> 7 (advisory)" 7 "$rc"
+expect_has "curly-apostrophe bot-check marked blocked" '"smoke": "blocked"' "$out"
+case "$out" in *DRIFT*) no "curly-apostrophe bot-check must not record DRIFT";; *) ok "curly-apostrophe bot-check records no DRIFT";; esac
+
+# (c3) the ASCII-apostrophe form of the same message must still classify blocked
+out="$(env CM_YTDLP_INSTALLED=2026.06.01 CM_YTDLP_LATEST=2026.06.01 "CM_YTDLP_SMOKE_ERR=ERROR: [youtube] jNQXAC9IVRw: Sign in to confirm you're not a bot." bash "$V" --live --json 2>/dev/null)"; rc=$?
+expect_exit "ASCII-apostrophe bot-check -> 7 (advisory)" 7 "$rc"
+expect_has "ASCII-apostrophe bot-check marked blocked" '"smoke": "blocked"' "$out"
+
+# (c4) "This video is unavailable" - also observed from the runner's datacenter
+#      IP (the second probe target in that same debug run); not extractor drift.
+out="$(env CM_YTDLP_INSTALLED=2026.06.01 CM_YTDLP_LATEST=2026.06.01 "CM_YTDLP_SMOKE_ERR=ERROR: [youtube] BaW_jenozKc: This video is unavailable" bash "$V" --live --json 2>/dev/null)"; rc=$?
+expect_exit "video-unavailable -> 7 (advisory)" 7 "$rc"
+expect_has "video-unavailable marked blocked" '"smoke": "blocked"' "$out"
+
+# (c5) an UNRECOGNISED failure degrades to advisory, never DRIFT. This is the
+#      inversion that stops the next reworded YouTube message re-opening this
+#      bug: drift needs positive evidence; an unreadable failure is not evidence.
+out="$(env CM_YTDLP_INSTALLED=2026.06.01 CM_YTDLP_LATEST=2026.06.01 "CM_YTDLP_SMOKE_ERR=ERROR: [youtube] jNQXAC9IVRw: Some brand new message nobody has seen before" bash "$V" --live --json 2>/dev/null)"; rc=$?
+expect_exit "unclassified smoke failure -> 7 (advisory, not drift)" 7 "$rc"
+expect_has "unclassified marked fail-unclassified" '"smoke": "fail-unclassified"' "$out"
+case "$out" in *DRIFT*) no "unclassified failure must not record DRIFT";; *) ok "unclassified failure records no DRIFT";; esac
 
 # (d) smoke success (empty seam) -> pass, exit 0
 out="$(CM_YTDLP_INSTALLED=2026.06.01 CM_YTDLP_LATEST=2026.06.01 CM_YTDLP_SMOKE_ERR='' \

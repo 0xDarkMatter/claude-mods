@@ -29,8 +29,11 @@ bash skills/ytdlp-ops/scripts/check-ytdlp-version.sh --live          # vs latest
 bash skills/ytdlp-ops/scripts/check-ytdlp-version.sh --live --json | jq '.data.days_behind'
 ```
 
-Exit `10` = installed build is >60 days behind latest (or a smoke extraction
-failed) → update before any other triage:
+Exit `10` = installed build is >60 days behind latest, a documented flag
+vanished from `yt-dlp --help`, or the smoke extraction hit an extractor-internal
+error → update before any other triage. Exit `7` is advisory: the check ran but
+could not verify extraction (YouTube bot-gated our IP, no JS runtime, or an
+unrecognised failure) — common from datacenter IPs such as CI runners:
 
 ```bash
 uv tool upgrade yt-dlp        # pip/uv-managed install (preferred)
@@ -306,7 +309,7 @@ Follows the [Skill Resource Protocol](../../docs/SKILL-RESOURCE-PROTOCOL.md):
 
 | Script | Job | Worked invocation |
 |---|---|---|
-| `check-ytdlp-version.sh` | Staleness verifier: `--offline` structural (CI gate), `--live` = installed-version age vs latest GitHub release + documented-flag existence in `yt-dlp --help` + metadata-only smoke extraction | `check-ytdlp-version.sh --live --json \| jq '.data.days_behind'` — exit 10 = >60 days behind, a documented flag vanished, or smoke failed; 7 = network/API unreachable (advisory) |
+| `check-ytdlp-version.sh` | Staleness verifier: `--offline` structural (CI gate), `--live` = installed-version age vs latest GitHub release + documented-flag existence in `yt-dlp --help` + metadata-only smoke extraction | `check-ytdlp-version.sh --live --json \| jq '.data.days_behind'` — exit 10 = >60 days behind, a documented flag vanished, or an extractor-internal smoke failure; 7 = advisory (network/API unreachable, or the smoke test was blocked/unverifiable — normal on a bot-gated datacenter IP) |
 
 ## References
 

@@ -66,8 +66,8 @@ jobs:
           python -m pip install --quiet yt-dlp
           bash skills/ytdlp-ops/scripts/check-ytdlp-version.sh --live
           rc=$?
-          if [ "$rc" -eq 10 ]; then echo "::error::ytdlp-ops: yt-dlp >60 days behind latest release or smoke extraction failed (extractor drift)"; exit 1; fi
-          if [ "$rc" -eq 7 ]; then echo "::warning::ytdlp-ops live check unavailable (network/API/yt-dlp) — skipped"; fi
+          if [ "$rc" -eq 10 ]; then echo "::error::ytdlp-ops: yt-dlp >60 days behind latest release, a documented flag vanished, or the smoke extraction hit an extractor-internal error (real drift)"; exit 1; fi
+          if [ "$rc" -eq 7 ]; then echo "::warning::ytdlp-ops live check advisory (network/API/yt-dlp unavailable, or the smoke test could not verify extraction — YouTube bot-gates this runner IP) — not a failure"; fi
           exit 0
 
       - name: mapbox-ops facts vs live (style URLs + GL JS major)

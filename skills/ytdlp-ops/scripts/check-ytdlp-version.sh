@@ -10,11 +10,31 @@
 #   from the GitHub API (yt-dlp versions are dates); >60 days behind = drift
 #   (exit 10). (2) flag drift — every core flag the skill documents must still
 #   exist in `yt-dlp --help`; renamed/removed = drift. (3) a metadata-only
-#   smoke extraction (--simulate; nothing downloaded); failure while the API
-#   was demonstrably reachable = drift, EXCEPT an IP bot-challenge/429 which is
-#   classified "blocked" and only warns (datacenter IPs hit this). Network/API/
-#   yt-dlp unavailable = exit 7 (advisory — the scheduled workflow skips,
-#   never blocks a PR).
+#   smoke extraction (--simulate; nothing downloaded).
+#
+#   Smoke classification is DRIFT-ON-POSITIVE-EVIDENCE, not drift-by-default:
+#     pass                -> extraction worked (exit 0)
+#     blocked             -> YouTube refused us (bot-check / sign-in / 429 /
+#                            "this video is unavailable") — advisory, exit 7
+#     skipped-no-jsruntime-> no deno/node to solve the nsig challenge — advisory
+#     fail                -> yt-dlp's OWN extractor internals errored
+#                            ("unable to extract", "please report this issue",
+#                            nsig/signature) — the only smoke DRIFT (exit 10)
+#     fail-unclassified   -> anything else — advisory, exit 7, and the raw first
+#                            stderr line is printed so the next reader
+#                            classifies from real output rather than guessing
+#
+#   WHY the inversion: this check runs on a GitHub-hosted runner, whose source
+#   IP is an Azure datacenter range that YouTube bot-gates. From there it is
+#   IMPOSSIBLE to distinguish "the extractor broke" from "our IP is blocked",
+#   and a verifier that cries wolf every Monday gets ignored — which is strictly
+#   worse than one that under-reports (SKILL-RESOURCE-PROTOCOL §7: a live check
+#   must never block on environmental noise). The smoke test therefore has real
+#   teeth only from a residential IP; in CI treat a "blocked" result as "not
+#   tested", not as "verified healthy".
+#
+#   Network/API/yt-dlp unavailable = exit 7 (advisory — the scheduled workflow
+#   warns and moves on; live checks never gate a PR).
 #
 # Usage:   check-ytdlp-version.sh [--offline | --live] [--no-smoke] [--json] [-q]
 # Input:   none (inspects the skill's own files; --live also yt-dlp + GitHub API).
@@ -23,8 +43,11 @@
 # Output:  stdout = findings ("DRIFT:"/"STRUCT:" lines), or with --json one
 #          envelope (schema claude-mods.ytdlp-ops.version-check/v1)
 # Stderr:  progress, warnings
-# Exit:    0 clean, 2 usage, 7 network/API/yt-dlp unavailable (--live; advisory),
-#          10 drift (>60 days behind latest, smoke failed, or structural finding)
+# Exit:    0 clean, 2 usage, 7 advisory (--live: network/API/yt-dlp unavailable,
+#          or the smoke test could not verify extraction — blocked / no JS
+#          runtime / unclassified failure), 10 drift (>60 days behind latest,
+#          a documented flag vanished, an extractor-internal smoke failure, or
+#          a structural finding)
 #
 # Examples:
 #   check-ytdlp-version.sh --offline
@@ -58,6 +81,24 @@ SKILL_MD="$SKILL_DIR/SKILL.md"
 
 FINDINGS=()
 INSTALLED=""; LATEST=""; DAYS_BEHIND=""; SMOKE_RESULT="skipped"; JS_RUNTIME="unknown"
+ADVISORY=0
+
+# Smoke-failure classification. Order matters: BLOCK is tested before DRIFT.
+#
+# BLOCK_RE — YouTube refusing US, not yt-dlp failing. Every alternative below was
+# copied from real GitHub-hosted-runner output (run 32614850020), never guessed.
+# Deliberately apostrophe-free: the message is "Sign in to confirm you<U+2019>re
+# not a bot" with a CURLY apostrophe (U+2019), and the old pattern
+# "confirm you'?re not a bot" only matched the ASCII one — that single codepoint
+# is what red-failed this job weekly. Matching "not a bot" survives whichever
+# quote character YouTube ships next.
+BLOCK_RE="not a bot|sign in to confirm|HTTP Error 429|too many requests|this video is unavailable"
+
+# DRIFT_RE — positive evidence the EXTRACTOR broke. These are yt-dlp's own
+# internal error strings (not YouTube's user-facing prose), so they are stable
+# to match on, which is why drift is a whitelist and everything else is advisory.
+DRIFT_RE="unable to extract|failed to extract|please report this issue|nsig|signature extraction"
+
 emit()    { [[ "$QUIET" -eq 1 ]] || printf '%s\n' "$1" >&2; }
 finding() { FINDINGS+=("$1"); }
 
@@ -220,11 +261,12 @@ live_checks() {
     if [[ "$smoke_rc" -eq 0 ]]; then
       SMOKE_RESULT="pass"
       JS_RUNTIME="present"
-    elif grep -qiE "confirm you'?re not a bot|HTTP Error 429|too many requests" <<<"$smoke_err"; then
+    elif grep -qiE "$BLOCK_RE" <<<"$smoke_err"; then
       # IP-reputation challenge (datacenter IPs hit this), NOT extractor drift —
       # treating it as drift would make the scheduled job flaky-red (§7).
       SMOKE_RESULT="blocked"
-      emit "   warn: smoke extraction blocked by an IP challenge (bot-check/429) — not drift; skipped"
+      ADVISORY=1
+      emit "   warn: smoke extraction blocked by YouTube (bot-check/sign-in/429) — not drift; skipped"
     elif grep -q "No supported JavaScript runtime" <<<"$smoke_err"; then
       # YouTube now requires a JS runtime (deno/node) to extract formats. On a
       # runner without one the extraction fails for an ENVIRONMENT reason, not
@@ -234,10 +276,22 @@ live_checks() {
       # the weekly freshness job.
       SMOKE_RESULT="skipped-no-jsruntime"
       JS_RUNTIME="missing"
+      ADVISORY=1
       emit "   warn: no JS runtime (deno/node) — smoke extraction skipped, not drift; install deno or pass --js-runtimes node"
-    else
+    elif grep -qiE "$DRIFT_RE" <<<"$smoke_err"; then
+      # POSITIVE evidence of extractor breakage: these are yt-dlp's OWN internal
+      # failure strings, not YouTube's prose, so they are stable to match on.
       SMOKE_RESULT="fail"
-      finding "DRIFT: smoke extraction failed ($SMOKE_URL) with the network reachable — extractor broken; update yt-dlp"
+      finding "DRIFT: smoke extraction failed ($SMOKE_URL) with an extractor-internal error — extractor broken; update yt-dlp"
+    else
+      # Unrecognised failure. We CANNOT tell "extractor broke" from "our IP is
+      # blocked" here, and a weekly false red gets the whole job ignored — so
+      # this is advisory (§7), never exit 10. The first stderr line is echoed so
+      # the next reader classifies from real output instead of guessing.
+      SMOKE_RESULT="fail-unclassified"
+      ADVISORY=1
+      emit "   warn: smoke extraction failed with an unrecognised error — advisory, not drift."
+      emit "         raw: $(printf '%s' "$smoke_err" | grep -m1 -i "^ERROR" || printf '%s' "$smoke_err" | head -1)"
     fi
     # Smoke PASSED but yt-dlp still warned about a missing JS runtime: formats
     # were thinned. Record the environment state without treating it as drift.
@@ -270,6 +324,10 @@ else
 fi
 
 if [[ "${#FINDINGS[@]}" -eq 0 ]]; then
+  if [[ "$ADVISORY" -eq 1 ]]; then
+    emit "check-ytdlp-version ($MODE): clean, but the smoke test could not verify extraction (advisory)"
+    exit "$EXIT_UNAVAILABLE"
+  fi
   emit "check-ytdlp-version ($MODE): clean"
   exit "$EXIT_OK"
 fi
