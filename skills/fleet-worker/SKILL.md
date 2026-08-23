@@ -25,7 +25,8 @@ mechanism is provider- and model-agnostic (any Anthropic-compatible endpoint).
 > `GROK_DEPLOYMENT_KEY`), not a `claude -p` wrapper — so it can't ride fleet-worker's
 > launcher. Grok is a first-class worker in **fleetflow** instead (alongside
 > Codex), which spawns heterogeneous OS-process workers of different binaries —
-> now its own repo at `X:\Forge\fleetflow`, mounted as the `/fleetflow` skill.
+> now its own repo at [0xDarkMatter/fleetflow](https://github.com/0xDarkMatter/fleetflow),
+> mounted as the `/fleetflow` skill.
 > Use fleetflow for a Grok lane or any mixed-provider fan-out.
 
 **This is the spawning layer. [`fleet-ops`](../fleet-ops/) is the landing layer.**
