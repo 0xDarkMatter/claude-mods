@@ -56,7 +56,7 @@ Flag breakdown:
 | `/BYTES /NP` | Cleaner log output for parsing. |
 | `/LOG:path /TEE` | Log to file + console. |
 
-Robocopy exits with a bitmask (>=8 means errors). The skill's `scripts/recover-clone.ps1` wraps this with proper exit-code translation and failed-files extraction.
+Robocopy exits with a bitmask (>=8 means errors). The skill's `scripts/copy-tree.ps1` wraps this with proper exit-code translation and failed-files extraction.
 
 ### Tier 2: Image-level recovery with ddrescue
 
@@ -85,11 +85,68 @@ ddrescue -d -r3 -R /dev/sdX recovery.img mapfile
 - `-r3` three retries on remaining bad blocks
 - `-R` reverse direction (sometimes recovers what forward couldn't)
 
-Then mount the image and copy files out:
-```bash
-sudo losetup -P -f recovery.img        # Linux
-# (Windows: mount via tools like OSFMount; the image is the raw device)
+The skill wraps both passes in `scripts/rescue-image.ps1`, which adds the parts
+you only discover the hard way:
+
+```powershell
+scripts/rescue-image.ps1 -ListDevices                              # map devices FIRST
+scripts/rescue-image.ps1 -Device /dev/sdX1 -Image R:\rescue.img    # first pass
+scripts/rescue-image.ps1 -Device /dev/sdX1 -Image R:\rescue.img -Pass retry
 ```
+
+**Why a supervisor is not optional under Cygwin.** Some hard read errors reach
+ddrescue as `EACCES` ("Permission denied") instead of `EIO`, because Windows
+returns a misleading error code for the raw device. ddrescue treats that as fatal
+and exits — in one measured recovery, about every 9 minutes while otherwise
+sustaining 70 MB/s. It is not a permissions fault and elevation does not prevent
+it. The mapfile makes relaunching free, so the script simply relaunches until the
+pass completes. Left unsupervised, the same run stops after the first few minutes
+and looks finished.
+
+**Choosing the environment.** A Linux live USB is the cleanest ddrescue host, but
+it costs a power cycle — and a drive that has already failed once may never spin
+up again. When the device is currently readable, prefer an in-session route
+(Cygwin) over rebooting to a "better" environment you may not get to use.
+
+### Tier 2b: Getting files back out of the image
+
+Windows cannot natively mount a raw *partition* image: `Mount-DiskImage` handles
+VHD/VHDX/ISO only, and the usual "append a VHD footer" trick fails because a
+partition image has no partition table — Windows presents an uninitialised disk
+rather than a volume. Third-party volume mounters work but are another install.
+
+7-Zip reads NTFS as an archive format — read-only, no driver, no mount, nothing
+written to the image — and it is usually already present:
+
+```powershell
+scripts/extract-image.ps1 -Image R:\rescue.img -Plan                     # what's in there
+scripts/extract-image.ps1 -Image R:\rescue.img -Dest R:\out -Include 'Users\*'
+scripts/extract-image.ps1 -Image R:\rescue.img -Dest R:\out -Verify      # what didn't make it
+```
+
+Run `-Verify` before trusting a resumed extraction. 7-Zip's `-aos` skips files
+that already **exist**, not files that are **complete**, so a write interrupted by
+a crash or an unmounted destination is treated as done on the next attempt.
+`-Verify` catches those by size.
+
+**Expect large files to fail wholesale.** A single unreadable sector fails the
+entire file it belongs to, so a small number of unrecovered regions can cost
+disproportionately — in one recovery, 30 GB of unread sectors made ~1.3 TB of
+large files unextractable while 99.6% of the drive imaged cleanly. If the missing
+files matter, that is the argument for a Tier 2 retry pass before discarding the
+source drive.
+
+### Credential exports found on recovered media
+
+Password managers export to **plaintext** CSV/XML by design. If a rescue turns up
+`*_export.csv` or similar, treat every credential in it as compromised and rotate
+it — do not treat deletion as remediation. You cannot prove the bytes are gone:
+overwrite-in-place is defeated by SSD wear-levelling, copy-on-write filesystems,
+and any snapshot or backup that captured the file. Rotation is the control that
+actually works; deletion only limits further exposure.
+
+`extract-image.ps1` excludes common export filenames by default so a bulk
+extraction cannot silently re-create them on a new volume.
 
 ### Tier 3: Professional data recovery
 

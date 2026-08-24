@@ -55,5 +55,79 @@ case "$cout" in *$'\033'*) ok "common.ps1 colorizes under FORCE_COLOR";; *) no "
 # The [TAG] text stays literal/greppable (color is amplification, not the signal).
 case "$cout" in *'[PASS]'*) ok "common.ps1 keeps the [PASS] tag literal";; *) no "common.ps1 lost the [PASS] tag";; esac
 
+# ── copy-tree: non-destructive default + guard rails ──────────────────────────
+# The whole point of the Copy/Rescue/Mirror split is that the DEFAULT never
+# deletes. A regression here silently turns a copy into a mass deletion, so it
+# is asserted structurally rather than left to review.
+echo "-- copy-tree --"
+CT="$SCRIPTS/copy-tree.ps1"
+[ -f "$CT" ] && ok "copy-tree.ps1 present" || no "copy-tree.ps1 missing"
+grep -q "Mode = 'Copy'" "$CT" && ok "default mode is Copy (additive)" || no "default mode is not Copy"
+# /MIR must be reachable ONLY through the Mirror preset.
+mir_lines="$(grep -c "'/MIR'" "$CT" || true)"
+[ "$mir_lines" = "1" ] && ok "/MIR appears once (Mirror preset only)" || no "/MIR appears $mir_lines times — expected 1"
+grep -q "Mirror = \$true" "$CT" && ok "Mirror preset flags destructive mode" || no "Mirror preset missing"
+# Every mode must pin /R and /W — robocopy's defaults (/R:1000000 /W:30) look
+# like a hang on the first locked file.
+grep -q '"/R:\$retries"' "$CT" && ok "retries pinned explicitly" || no "retries not pinned"
+grep -q '"/W:\$wait"' "$CT" && ok "wait pinned explicitly" || no "wait not pinned"
+# Partial (some files failed) must stay distinguishable from fatal.
+grep -q 'exit 10' "$CT" && ok "partial failure exits 10, not 1" || no "partial failure does not exit 10"
+# Failed-file extraction needs the reason line, which robocopy puts AFTER the
+# ERROR line — -Context 0,1 is load-bearing, not cosmetic.
+grep -q 'Context 0,1' "$CT" && ok "error extraction captures the reason line" || no "error extraction drops the reason line"
+grep -q 'Group-Object path' "$CT" && ok "failures deduped per file (retries log twice)" || no "failures not deduped"
+
+if [ -n "$PWSH" ]; then
+  WCT="$(winpath "$CT")"
+  # Guard rails, exercised for real: usage and not-found must not be exit 0.
+  "$PWSH" -NoProfile -File "$WCT" >/dev/null 2>&1; rc=$?
+  [ "$rc" = "2" ] && ok "no args -> exit 2 (usage)" || no "no args -> exit $rc, expected 2"
+  "$PWSH" -NoProfile -File "$WCT" "$(winpath "$HERE")/__nope__" "$(winpath "$HERE")/__out__" >/dev/null 2>&1; rc=$?
+  [ "$rc" = "3" ] && ok "missing source -> exit 3" || no "missing source -> exit $rc, expected 3"
+fi
+
+# ── rescue-image / extract-image: Tier 2 tooling ──────────────────────────────
+# These wrap external binaries that may be absent, so the structural assertions
+# below carry most of the weight — they encode the two bugs that cost real hours.
+echo "-- tier 2 imaging --"
+RI="$SCRIPTS/rescue-image.ps1"
+XI="$SCRIPTS/extract-image.ps1"
+[ -f "$RI" ] && ok "rescue-image.ps1 present" || no "rescue-image.ps1 missing"
+[ -f "$XI" ] && ok "extract-image.ps1 present" || no "extract-image.ps1 missing"
+
+# Excludes MUST be -xr! with bare names. The '*\name\*' form matches nothing at
+# the image root, which is exactly where the junk dirs live.
+grep -q '\-xr!\$e' "$XI" && ok "extract excludes use -xr! (recursive)" || no "extract excludes not -xr!"
+# Strip comments first — the LANDMINE note documents the bad form on purpose,
+# and matching it there would fail the test for saying the right thing.
+if grep -v '^\s*#' "$XI" | grep -q "'\*\\\\.*\\\\\*'"; then
+  no "extract still has a '*\\name\\*' exclude pattern in code"
+else ok "no wildcard-wrapped exclude patterns in code"; fi
+
+# Progress must never be measured by walking the destination tree.
+grep -q 'AvailableFreeSpace' "$XI" && ok "extract measures progress O(1) via free space" || no "extract lost the O(1) progress metric"
+grep -q 'Get-ChildItem .*-Recurse' "$XI" && no "extract walks the destination tree (does not scale)" || ok "extract does not walk the destination tree"
+
+# Supervisors must not capture a child's stream (blocks after the child exits).
+for f in "$RI" "$XI"; do
+  n="$(basename "$f")"
+  grep -q 'Start-Process' "$f" && ok "$n launches children via Start-Process" || no "$n does not use Start-Process"
+  grep -qi 'watchdog' "$f" && ok "$n has a stall watchdog" || no "$n has no watchdog"
+done
+
+# Agnostic: no machine-specific paths or identifiers may ship in the skill.
+if grep -qiE 'X:\\\\Tools|OLDDATA|VeraCrypt|HGST|rescue-diag' "$RI" "$XI"; then
+  no "tier-2 scripts contain machine-specific references"
+else ok "tier-2 scripts are environment-agnostic"; fi
+
+if [ -n "$PWSH" ]; then
+  for f in "$RI" "$XI"; do
+    n="$(basename "$f")"
+    "$PWSH" -NoProfile -File "$(winpath "$f")" >/dev/null 2>&1; rc=$?
+    [ "$rc" = "2" ] && ok "$n no args -> exit 2 (usage)" || no "$n no args -> exit $rc, expected 2"
+  done
+fi
+
 echo "=== $PASS passed, $FAIL failed ==="
 [ "$FAIL" -eq 0 ] || exit 1

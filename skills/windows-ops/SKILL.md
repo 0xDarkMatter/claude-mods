@@ -107,7 +107,11 @@ Produces a verdict block: hardware errors, storage health per disk, recent crash
 | Re-enable previously disabled | `scripts/safe-disable-startup.ps1 -Name <pattern> -Enable` |
 | Set service to Manual (admin) | `Set-Service <name> -StartupType Manual; Stop-Service <name>` |
 | Disable scheduled task | `Disable-ScheduledTask -TaskName <name>` |
-| Safe clone from failing drive | `scripts/recover-clone.ps1 -Source <path> -Destination <path>` — robocopy with `/R:0` to avoid pounding bad sectors |
+| Copy a folder tree, never stopping on errors | `scripts/copy-tree.ps1 <src> <dst>` — additive, one retry per file, readable failed-files log; exit 10 = some files failed |
+| Safe clone from failing drive | `scripts/copy-tree.ps1 <src> <dst> -Mode Rescue` — robocopy with `/R:0 /W:0 /MT:1` so retries do not pound bad sectors |
+| Mirror a folder (DELETES extras at destination) | `scripts/copy-tree.ps1 <src> <dst> -Mode Mirror` — prompts unless `-Force` |
+| Drive too damaged for file-level copy | `scripts/rescue-image.ps1 -ListDevices` then `-Device <dev> -Image <path>` — ddrescue, supervised, resumable via mapfile |
+| Get files back out of a rescue image | `scripts/extract-image.ps1 -Image <img> -Plan` then `-Extract -Dest <dir> -Include <pat>` — 7-Zip, read-only, no mount needed |
 
 All disables are reversible — the StartupApproved registry mechanism flips one byte; re-enabling is the inverse.
 
@@ -355,7 +359,7 @@ A user reports "my PC takes minutes to boot and crashes sometimes." Running `scr
 │   ├── [crash] 2026-05-15 00:57                BugCheck=0x0 — hard power loss
 │   ├── [crash] 2026-05-11 00:12                BugCheck=0x0 — power button held
 │   └── [crash] Pattern                         2 unclean shutdowns — investigate PSU
-│   │   ▲ back up + disconnect Disk 1 (Y) — see recover-clone.ps1 and drive-deps.ps1
+│   │   ▲ back up + disconnect Disk 1 (Y) — see copy-tree.ps1 and drive-deps.ps1
 │
 ├── warn (2) · pass (7) · info (4)
 │
@@ -390,7 +394,7 @@ Pip bars show how many times over threshold each indicator runs. Before disconne
 ╰── B back · ? help ────────────────────────────────────────────────── • safe ───●
 ```
 
-Three commands, three panels, complete decision tree. Then the same loop: `crash-triage.ps1` decodes the most recent crash with a T-relative pre-crash timeline; `safe-disable-startup.ps1 -List` panel-displays every Run-key / StartupFolder entry grouped by state; `recover-clone.ps1 -Source Y:\important -Destination Z:\rescue` clones with `robocopy /R:0` so retries don't accelerate the drive's death; `boot-perf.ps1` quantifies boot duration with capacity pip bars.
+Three commands, three panels, complete decision tree. Then the same loop: `crash-triage.ps1` decodes the most recent crash with a T-relative pre-crash timeline; `safe-disable-startup.ps1 -List` panel-displays every Run-key / StartupFolder entry grouped by state; `copy-tree.ps1 Y:\important Z:\rescue -Mode Rescue` clones with `robocopy /R:0 /W:0 /MT:1` so retries don't accelerate the drive's death; `boot-perf.ps1` quantifies boot duration with capacity pip bars.
 
 The data was always there in the System log — this skill just asks for it correctly *and renders it like a proper instrument*.
 
@@ -405,7 +409,7 @@ scripts/health-audit.ps1                            # diagnose
 scripts/disk-health.ps1 -DriveLetter Y              # drill into suspect
 scripts/crash-triage.ps1                            # decode most recent crash
 scripts/drive-dependencies.ps1 -DriveLetter Y       # verify safe to disconnect
-scripts/recover-clone.ps1 -Source Y:\ -Destination Z:\rescue  # salvage data
+scripts/copy-tree.ps1 Y:\ Z:\rescue -Mode Rescue     # salvage data
 scripts/safe-disable-startup.ps1 -List              # audit startup state
 scripts/safe-disable-startup.ps1 -Name 'Adobe*','Granola','MuseHub'  # cull bloat
 Set-Service AdobeARMservice -StartupType Manual     # service-tier (admin)
