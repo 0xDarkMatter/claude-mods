@@ -37,7 +37,7 @@
 
 .PARAMETER FallbackIp
     'HOST=IP' pairs giving a last-known IP for hosts that no longer
-    resolve, e.g. -FallbackIp 'NAS=192.168.50.11'. Used for the
+    resolve, e.g. -FallbackIp 'NAS=192.168.1.50'. Used for the
     ICMP/TCP-445 reachability test when every resolution mechanism fails
     and the DNS client cache has no stale answer to reuse.
 
@@ -54,8 +54,8 @@
     Audit every mapped drive.
 
 .EXAMPLE
-    scripts/windows/smb-audit.ps1 -DriveLetter Z -FallbackIp 'NAS=192.168.50.11'
-    Audit Z: and, if 'NAS' no longer resolves, probe 192.168.50.11 directly.
+    scripts/windows/smb-audit.ps1 -DriveLetter Z -FallbackIp 'NAS=192.168.1.50'
+    Audit Z: and, if 'NAS' no longer resolves, probe 192.168.1.50 directly.
 
 .EXAMPLE
     scripts/windows/smb-audit.ps1 -Json | jq '.data.verdicts[]'
@@ -119,7 +119,7 @@ function Row($tag, $label, $detail = "") {
 $fallbackMap = @{}
 foreach ($pair in $FallbackIp) {
     if ($pair -notmatch '^([^=]+)=(\d{1,3}(\.\d{1,3}){3})$') {
-        [Console]::Error.WriteLine("Bad -FallbackIp entry '$pair' — expected HOST=IPv4, e.g. NAS=192.168.50.11")
+        [Console]::Error.WriteLine("Bad -FallbackIp entry '$pair' — expected HOST=IPv4, e.g. NAS=192.168.1.50")
         exit $EXIT_USAGE
     }
     $fallbackMap[$Matches[1].ToUpper()] = $Matches[2]
@@ -359,7 +359,7 @@ foreach ($m in $mappings) {
 
     # -- credential targeting -------------------------------------------------
     # Credential Manager keys on the TARGET string. A credential stored for
-    # 'NAS' does NOT apply to '\\192.168.50.11\...' — remapping by IP then
+    # 'NAS' does NOT apply to '\\192.168.1.50\...' — remapping by IP then
     # fails with "System error 5 / Access is denied", which looks like a
     # permissions problem but is a credential-target-keying mismatch.
     $credForHost = $credTargets | Where-Object { $_ -ieq $remoteHost } | Select-Object -First 1

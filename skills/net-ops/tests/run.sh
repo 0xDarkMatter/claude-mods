@@ -120,6 +120,139 @@ assert "smb-audit probes TCP/445" \
 assert "smb-audit warns about misleading Resolve-DnsName single-label error" \
     contains "$smb_src" 'volume label syntax'
 
+# ---------------------------------------------------------------------------
+echo
+echo "--- nextdns-audit.ps1 / nextdns-boot-fix.ps1 structural tests (OS-independent) ---"
+# ---------------------------------------------------------------------------
+# Windows-only at runtime. Statically assert the contract AND the load-bearing
+# doctrine, because the whole value of these two scripts is that they stop the
+# next reader chasing the two false leads that cost the original investigation
+# an hour each: adapter DNS, and port-53 ownership.
+NDA="$root/scripts/windows/nextdns-audit.ps1"
+NDF="$root/scripts/windows/nextdns-boot-fix.ps1"
+assert "nextdns-audit exists"    test -f "$NDA"
+assert "nextdns-boot-fix exists" test -f "$NDF"
+nda_src="$(cat "$NDA")"
+ndf_src="$(cat "$NDF")"
+
+assert "nextdns-audit has comment-based help with EXAMPLEs" \
+    bash -c 'grep -q "^\.SYNOPSIS" <<<"$0" && grep -q "^\.EXAMPLE" <<<"$0"' "$nda_src"
+assert "nextdns-audit documents exit codes incl. domain signal 10" \
+    bash -c 'grep -q "10 audit ran and found" <<<"$0"' "$nda_src"
+assert "nextdns-audit ships -Json with schema id" \
+    contains "$nda_src" 'claude-mods.net-ops.nextdns-audit/v1'
+assert "nextdns-audit uses test.nextdns.io as ground truth (not adapter config)" \
+    contains "$nda_src" 'test.nextdns.io'
+assert "nextdns-audit keys the verdict on clientName" \
+    contains "$nda_src" 'nextdns-windows'
+assert "nextdns-audit labels adapter DNS a red herring" \
+    contains "$nda_src" 'RED HERRING'
+assert "nextdns-audit states NextDNS never binds port 53" \
+    contains "$nda_src" 'never binds 53'
+assert "nextdns-audit inspects the per-user config scope" \
+    contains "$nda_src" 'user.config'
+assert "nextdns-audit checks for absent machine-wide config" \
+    contains "$nda_src" 'HKLM:\SOFTWARE\NextDNS'
+assert "nextdns-audit measures the boot->logon exposure window" \
+    contains "$nda_src" 'exposureWindowSec'
+assert "nextdns-audit warns that DelayedAutostart is the wrong lever" \
+    contains "$nda_src" 'LENGTHENS'
+assert "nextdns-audit offers -SkipNetwork for no-egress boxes" \
+    contains "$nda_src" 'SkipNetwork'
+
+assert "nextdns-boot-fix has comment-based help with EXAMPLEs" \
+    bash -c 'grep -q "^\.SYNOPSIS" <<<"$0" && grep -q "^\.EXAMPLE" <<<"$0"' "$ndf_src"
+assert "nextdns-boot-fix documents exit codes incl. pending signal 10" \
+    bash -c 'grep -q "10 dry run" <<<"$0"' "$ndf_src"
+assert "nextdns-boot-fix defaults to dry run (-Apply gates writes)" \
+    contains "$ndf_src" 'DRY RUN'
+assert "nextdns-boot-fix supports -Remove" \
+    contains "$ndf_src" '$Remove'
+assert "nextdns-boot-fix registers a logon-triggered task" \
+    contains "$ndf_src" 'New-ScheduledTaskTrigger -AtLogOn'
+assert "nextdns-boot-fix uses the correct settings cmdlet name" \
+    contains "$ndf_src" 'New-ScheduledTaskSettingsSet'
+assert "nextdns-boot-fix runs unelevated (LeastPrivilege / Limited)" \
+    contains "$ndf_src" 'Limited'
+assert "nextdns-boot-fix installs outside the repo (worktrees are disposable)" \
+    contains "$ndf_src" 'LOCALAPPDATA'
+assert "nextdns-boot-fix waits for interception before flushing" \
+    contains "$ndf_src" 'interception confirmed'
+assert "nextdns-boot-fix flushes via Clear-DnsClientCache with ipconfig fallback" \
+    bash -c 'grep -q "Clear-DnsClientCache" <<<"$0" && grep -q "ipconfig /flushdns" <<<"$0"' "$ndf_src"
+assert "nextdns-boot-fix records WHY delayed start is rejected" \
+    contains "$ndf_src" 'WRONG DIRECTION'
+
+# --- nextdns-doh-setup.ps1: the machine-scope alternative ---
+NDD="$root/scripts/windows/nextdns-doh-setup.ps1"
+assert "nextdns-doh-setup exists" test -f "$NDD"
+ndd_src="$(cat "$NDD")"
+assert "nextdns-doh-setup has comment-based help with EXAMPLEs" \
+    bash -c 'grep -q "^\.SYNOPSIS" <<<"$0" && grep -q "^\.EXAMPLE" <<<"$0"' "$ndd_src"
+assert "nextdns-doh-setup documents exit codes" \
+    bash -c 'grep -q "10 dry run" <<<"$0"' "$ndd_src"
+assert "nextdns-doh-setup defaults to dry run" \
+    contains "$ndd_src" 'DRY RUN'
+assert "nextdns-doh-setup ships a -Rollback path" \
+    contains "$ndd_src" '$Rollback'
+assert "nextdns-doh-setup ships a -VerifyOnly path" \
+    contains "$ndd_src" '$VerifyOnly'
+assert "nextdns-doh-setup refuses to apply unelevated" \
+    contains "$ndd_src" 'needs an ELEVATED PowerShell'
+assert "nextdns-doh-setup validates the profile id" \
+    contains "$ndd_src" 'ValidatePattern'
+# The single most important doctrine in the file: the IP is not the profile.
+assert "nextdns-doh-setup states the anycast IP does NOT select the profile" \
+    contains "$ndd_src" 'DOES NOT SELECT YOUR PROFILE'
+assert "nextdns-doh-setup disables UDP fallback (silent-unfiltered guard)" \
+    contains "$ndd_src" 'AllowFallbackToUdp $false'
+assert "nextdns-doh-setup records that a wrong profile id fails silently" \
+    contains "$ndd_src" 'FAILS SILENTLY'
+assert "nextdns-doh-setup verifies via test.nextdns.io rather than trusting config" \
+    contains "$ndd_src" 'test.nextdns.io'
+assert "nextdns-doh-setup writes an on-disk breadcrumb for future readers" \
+    contains "$ndd_src" 'README-dns-setup.md'
+assert "nextdns-doh-setup handles the tray-client conflict" \
+    contains "$ndd_src" 'KeepClient'
+assert "nextdns-doh-setup flags the now-redundant logon flush task" \
+    contains "$ndd_src" 'nextdns-boot-fix.ps1 -Remove -Apply'
+assert "nextdns-doh-setup is honest that the -Apply path is unverified" \
+    contains "$ndd_src" 'NOT executed by its author'
+# REGRESSION GUARD (bit for real on first live -Apply, 2026-08-24): the original
+# verification tested for an EMPTY clientName and so reported [FAIL] on a perfectly
+# good machine-scope setup. NextDNS always returns a clientName; for the Windows
+# resolver it is 'unknown-doh'. The predicate must key on "is it the tray app?",
+# never on emptiness.
+assert "nextdns-doh-setup knows 'unknown-doh' is the healthy machine-scope value" \
+    contains "$ndd_src" 'unknown-doh'
+assert "nextdns-doh-setup verification does NOT test for an empty clientName" \
+    bash -c '! grep -q -- "-not \$e.clientName" <<<"$0"' "$ndd_src"
+assert "nextdns-doh-setup keys verification on clientName -ne nextdns-windows" \
+    contains "$ndd_src" '$e.clientName -ne ' "'nextdns-windows'"
+assert "nextdns-doh-setup breadcrumb teaches the profile-pinning check, not just DOH" \
+    contains "$ndd_src" 'prove the PROFILE, not just the encryption'
+
+# The SKILL text and culprit catalog must carry the pattern, not just the scripts.
+skill_src="$(cat "$root/SKILL.md")"
+culprits_src="$(cat "$root/references/common-culprits.md")"
+cases_src="$(cat "$root/references/case-studies.md")"
+assert "SKILL.md documents the interception-layer adapter-DNS trap" \
+    contains "$skill_src" 'Interception-Layer DNS Clients'
+assert "SKILL.md lists nextdns-audit in the scripts index" \
+    contains "$skill_src" 'nextdns-audit.ps1'
+assert "SKILL.md lists nextdns-boot-fix in the scripts index" \
+    contains "$skill_src" 'nextdns-boot-fix.ps1'
+assert "SKILL.md description carries the flush-every-reboot trigger" \
+    contains "$skill_src" 'flushdns needed after every reboot'
+assert "common-culprits has the W4b boot-order entry" \
+    contains "$culprits_src" 'W4b. NextDNS Boot-Order Profile Inheritance'
+assert "common-culprits W4 no longer misattributes a 127.0.0.1:53 proxy to NextDNS" \
+    contains "$culprits_src" 'NOT NextDNS (v3.x)'
+assert "common-culprits records the rejected-fix table" \
+    contains "$culprits_src" 'Fixes that do NOT work'
+assert "case-studies has the NextDNS case with its false leads" \
+    contains "$cases_src" 'The Profile That Only Existed After Logon'
+
 # Determine the local OS probe for testing
 case "$(uname -s)" in
     Darwin) probe="$root/scripts/macos/probe.sh"; audit="$root/scripts/macos/dns-audit.sh" ;;

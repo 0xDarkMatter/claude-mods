@@ -37,14 +37,14 @@ scripts/windows/smb-audit.ps1                                          # full au
 Use `nslookup NAS` (honest `Non-existent domain`) rather than `Resolve-DnsName NAS`, whose single-label failure text — `"The filename, directory name, or volume label syntax is incorrect"` — is misleading.
 
 **Fix (coexistence — do NOT run nrpt-clean.ps1 on a live VPN's rule):**
-1. Pin the name in HOSTS (admin): `Add-Content $env:windir\System32\drivers\etc\hosts "192.168.50.11  NAS"` — HOSTS is consulted before NRPT/DNS, so it wins regardless of VPN state.
-2. Or remap by IP **plus** a credential keyed to the IP: `cmdkey /add:192.168.50.11 /user:<user> /pass` — without the cmdkey step you hit W1c.
+1. Pin the name in HOSTS (admin): `Add-Content $env:windir\System32\drivers\etc\hosts "192.168.1.50  NAS"` — HOSTS is consulted before NRPT/DNS, so it wins regardless of VPN state.
+2. Or remap by IP **plus** a credential keyed to the IP: `cmdkey /add:192.168.1.50 /user:<user> /pass` — without the cmdkey step you hit W1c.
 
 ## W1c. Credential Manager Target Keyed to Hostname, Not IP
 
 **Frequency:** Bites exactly when working around W1b by remapping to the raw IP.
 
-**Mechanism:** Credential Manager keys stored credentials on the **target string**. A credential stored for target `NAS` does not apply to `\\192.168.50.11\vault`, so the IP-based remap returns `System error 5 / Access is denied` — which looks like a share-permission problem but is a credential-lookup miss.
+**Mechanism:** Credential Manager keys stored credentials on the **target string**. A credential stored for target `NAS` does not apply to `\\192.168.1.50\vault`, so the IP-based remap returns `System error 5 / Access is denied` — which looks like a share-permission problem but is a credential-lookup miss.
 
 **Detection:** `cmdkey /list` — compare the `Target:` entries against the host form actually in the UNC path (hostname vs IP).
 
@@ -72,7 +72,7 @@ Use `nslookup NAS` (honest `Non-existent domain`) rather than `Resolve-DnsName N
 
 **Fix (if confirmed unwanted):** `Set-Service SharedAccess -StartupType Disabled; Stop-Service SharedAccess -Force`
 
-## W4. Local 127.0.0.1:53 Proxy (NextDNS / AdGuard / Pi-hole client / Cloudflare WARP)
+## W4. Local 127.0.0.1:53 Proxy (AdGuard / Pi-hole client / Cloudflare WARP)
 
 **Frequency:** Increasing as DoH-via-proxy adoption grows.
 
@@ -82,6 +82,129 @@ Use `nslookup NAS` (honest `Non-existent domain`) rather than `Resolve-DnsName N
 ```powershell
 Set-DnsClientServerAddress -InterfaceAlias Ethernet -ServerAddresses 1.1.1.1,8.8.8.8
 ```
+
+**NOT NextDNS (v3.x).** This entry used to list NextDNS and that was wrong — it cost an
+investigation an hour. The NextDNS Windows client v3.x does **not** bind port 53 and does
+**not** run a loopback proxy. It intercepts DNS in the kernel with a WFP callout driver
+(`NextDNSEngine.sys`). Consequences, all counter-intuitive:
+
+- `Get-NetUDPEndpoint -LocalPort 53` shows **nothing** owned by NextDNS. Its service has no
+  UDP endpoints at all — only an outbound TCP/443 session to its DoH upstream.
+- Querying `127.0.0.1` **times out by design.** That timeout is not the fault.
+- Whoever *does* hold `0.0.0.0:53` (usually `SharedAccess`/ICS for the Hyper-V Default
+  Switch — see W3) is **unrelated**. Do not go after it.
+- Adapter DNS is **cosmetic** while interception is live: `Get-DnsClientServerAddress` can
+  read the DHCP router address while every query leaves over DoH.
+
+Ground truth for "who is actually answering" is never the adapter config — it is
+`https://<random>.test.nextdns.io/`, which returns `protocol`, `profile`, and `clientName`.
+`clientName: nextdns-windows` means the client owns the query path right now.
+
+## W4b. NextDNS Boot-Order Profile Inheritance (per-user config vs boot-time service)
+
+**Frequency:** Every boot, on any box where the NextDNS Windows client is configured
+per-user and the LAN router runs its own (stricter) NextDNS profile.
+
+**Symptom:** After every reboot the PC resolves through the **router's** NextDNS profile
+instead of its own, so whatever that profile blocks is broken — classically AI endpoints
+(`chatgpt.com` → `No such host is known`, taking any AI coding CLI with it). A bare
+`ipconfig /flushdns` fixes it completely, and it comes back on the next boot.
+
+**Mechanism — a config *scope* mismatch, not a network race:**
+
+| When | What happens |
+|---|---|
+| Boot | `NextDNSService` starts (Automatic, LocalSystem) with **no profile ID** |
+| Boot → logon | Nothing intercepts. DNS goes to the DHCP resolver = **the router** = its stricter profile. Blocks/NXDOMAIN get **cached** |
+| Logon | `NextDNS.exe` (tray) starts from a Run key and hands `Enabled` + `Configuration` to the service |
+| After | Interception is correct — but the **poisoned cache entries survive their TTL** |
+
+The profile ID lives **only** in the per-user tray config
+(`%LOCALAPPDATA%\NextDNS\NextDNS.exe_Url_*\*\user.config`, .NET `MachineToLocalUser`
+scope). There is no `HKLM:\SOFTWARE\NextDNS`. A LocalSystem service starting at boot
+therefore cannot know which profile to use until a user logs in.
+
+**The discriminator that tells you which fault you have.** Once resolution is failing, ask
+whether the resolver path is wrong *or* merely the cache is stale:
+
+```powershell
+$r = -join ((1..20) | % { '0123456789abcdefghijklmnopqrstuvwxyz'[(Get-Random -Max 36)] })
+(Invoke-WebRequest "https://$r.test.nextdns.io/" -UseBasicParsing).Content
+```
+
+- `clientName: nextdns-windows` → config is **already correct**; you have a **stale cache**.
+  Flush. Do **not** reconfigure anything.
+- anything else → interception genuinely inactive; the router profile is live.
+
+**Detection (one shot):** `scripts/windows/nextdns-audit.ps1` — reports install state,
+config scope, the measured boot→tray exposure window, and the effective profile, with a
+verdict. Exit 10 when the exposure pattern is present.
+
+**Fix:** `scripts/windows/nextdns-boot-fix.ps1 -Apply` — installs a per-user **logon**
+scheduled task that waits until the NextDNS DoH upstream is established, then flushes the
+cache once. No elevation needed (`Clear-DnsClientCache` and `ipconfig /flushdns` both work
+unelevated). Because the surviving fault is a stale cache, invalidating it once after
+interception is up is the whole remedy.
+
+**Fixes that do NOT work, and why — check these off before proposing them:**
+
+| Candidate | Verdict |
+|---|---|
+| `NextDNSService` → Automatic (Delayed Start) | **Backwards.** The race is against *user logon*, not link-up. Delaying the service lengthens the unprotected window. |
+| Add a service dependency on the network stack | Irrelevant — the missing prerequisite is the tray handing over a profile, not the network being up. |
+| Pin static adapter DNS at the client's resolver | There **is** no local resolver (see W4). Adapter DNS is cosmetic under WFP interception. |
+| Chase whoever holds `0.0.0.0:53` | Unrelated (W3). |
+| Change the router's profile | Out of scope when the router config is deliberate — the bug is this PC inheriting it. |
+
+**Machine-scope alternative (removes the window instead of cleaning up after it).**
+Needs admin, and is the better architecture if you want the boot window itself to be
+correct: point the OS resolver at the profile-specific NextDNS DoH endpoint, which is
+machine scope and applies before any logon.
+
+```powershell
+# Profile-pinned DoH template — the profile is carried in the URL path, so this needs
+# no "Linked IP" and survives a dynamic WAN address.
+Add-DnsClientDohServerAddress -ServerAddress 45.90.28.0 `
+    -DohTemplate 'https://dns.nextdns.io/<profile-id>' -AllowFallbackToUdp $false -AutoUpgrade $true
+Set-DnsClientServerAddress -InterfaceAlias Ethernet -ServerAddresses 45.90.28.0
+```
+
+Verify the endpoint before committing to it — an RFC 8484 GET returning `RCODE=0` proves
+the profile answers:
+
+```powershell
+# base64url-encoded DNS query for one A record; expect HTTP 200 and RCODE 0
+Invoke-WebRequest "https://dns.nextdns.io/<profile-id>?dns=<b64url>" -Headers @{Accept='application/dns-message'}
+```
+
+**Automated:** `scripts/windows/nextdns-doh-setup.ps1 -ProfileId <id> -Apply` (elevated) does
+all of the above, disables the conflicting tray client, writes a breadcrumb README to
+`%LOCALAPPDATA%\net-ops\`, verifies via `test.nextdns.io`, and supports `-Rollback -Apply`.
+
+**The silent-failure mode you must design around.** Measured 2026-08-24, same names queried
+three ways over DoH:
+
+| name | `/<profile>` | no path (Linked-IP) | bogus profile |
+|---|---|---|---|
+| `doubleclick.net` | 1 answer | 6 answers | 6 answers |
+| `google-analytics.com` | 1 answer | 6 answers | 6 answers |
+
+The path changes the answer — that *is* the profile selection. But a **bogus profile ID did
+not error**; it returned unfiltered results identical to no profile at all. So a typo, or a
+fallback to plain DNS against the anycast IP, yields working-but-unfiltered DNS that
+announces nothing. Two mitigations, both mandatory: set `-AllowFallbackToUdp $false` so a DoH
+failure breaks loudly, and **verify after applying** rather than assuming.
+
+Caveats worth knowing before you reach for this:
+- **Plain UDP/53 to a NextDNS anycast IP does *not* pin your profile** — unauthenticated
+  anycast relies on "Linked IP", which breaks on a dynamic WAN address. Only the DoH
+  template's URL path pins it deterministically.
+- Profile-encoded NextDNS **IPv6** (`2a07:a8c0::<id>`) is useless on an IPv4-only egress —
+  test reachability first rather than assuming.
+- Running this **and** the NextDNS client together means two things claim the DNS path.
+  Pick one: if you go machine-scope DoH, disable the client's interception.
+- Many routers drop outbound UDP/53 to third-party resolvers while leaving 443 alone, so
+  DoH is often the *only* path that works anyway — verify with `TcpClient` on 443.
 
 ## W5. Consumer Router DoH IP Blocking (also affects macOS, Linux)
 

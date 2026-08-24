@@ -1,6 +1,6 @@
 ---
 name: net-ops
-description: "Cross-platform network troubleshooting (Windows, macOS, Linux) via local or remote shell. Use for: DNS broken, can't resolve hostnames, nslookup/dig works but apps fail, NRPT, WFP, scutil, /etc/resolver, systemd-resolved, /etc/resolv.conf, NetworkManager, VPN DNS leak residue (ProtonVPN/Mullvad/WireGuard/AnyConnect), AV/firewall blocking DNS or DoH, Tailscale DNS interaction, intermittent connectivity, remote diagnostics over SSH, mapped network drive Disconnected, SMB share unreachable, \\\\server\\share, NAS by hostname fails but IP works, single-label hostname, LLMNR/NetBIOS, VPN blocks LAN DNS, System error 5 on net use."
+description: "Cross-platform network troubleshooting (Windows, macOS, Linux) via local or remote shell. Use for: DNS broken, can't resolve hostnames, nslookup/dig works but apps fail, NRPT, WFP, scutil, /etc/resolver, systemd-resolved, /etc/resolv.conf, NetworkManager, VPN DNS leak residue (ProtonVPN/Mullvad/WireGuard/AnyConnect), AV/firewall blocking DNS or DoH, Tailscale DNS interaction, intermittent connectivity, remote diagnostics over SSH, mapped network drive Disconnected, SMB share unreachable, \\\\server\\share, NAS by hostname fails but IP works, single-label hostname, LLMNR/NetBIOS, VPN blocks LAN DNS, System error 5 on net use, NextDNS, DoH client, ipconfig /flushdns needed after every reboot, DNS breaks on boot until flushed, wrong DNS profile after reboot, inheriting router DNS profile, chatgpt.com won't resolve, DNS filtering blocks AI sites, boot-order DNS race, WFP DNS interception, DoH profile pinning."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
@@ -62,6 +62,39 @@ An NRPT `.` catch-all (live VPN or orphan) short-circuits everything below it: t
 
 **`nrpt-clean.ps1` must never be pointed at a live VPN's catch-all** — it exists for orphans only. Deleting a wanted VPN's rule breaks its DNS routing and the client will just re-create it.
 
+## Interception-Layer DNS Clients (the adapter-DNS trap)
+
+Modern DNS-filtering clients (NextDNS v3.x, and increasingly others) do **not** bind port 53
+and do **not** run a loopback proxy. They install a **WFP callout driver** and rewrite queries
+to DoH in the kernel. This inverts three habits that are otherwise reliable:
+
+| Habit | Why it misleads here |
+|---|---|
+| Read adapter DNS to learn the resolver | **Cosmetic.** It can show the DHCP router address while every query leaves over DoH. |
+| `Get-NetUDPEndpoint -LocalPort 53` to find the proxy | Returns **nothing** for the client. Whoever holds `0.0.0.0:53` (often `SharedAccess`/ICS) is unrelated. |
+| Query `127.0.0.1` to test the local resolver | Times out **by design**. There is no local resolver. |
+
+**Ground truth is a query, not a config dump.** Ask the provider what it sees:
+
+```powershell
+$r = -join ((1..20) | % { '0123456789abcdefghijklmnopqrstuvwxyz'[(Get-Random -Max 36)] })
+(Invoke-WebRequest "https://$r.test.nextdns.io/" -UseBasicParsing).Content
+```
+
+`clientName: nextdns-windows` means the client owns the query path *right now*.
+
+**The boot-order failure this enables.** When the client's profile is stored **per-user** but
+its service starts at **boot**, the service has no profile until the tray hands one over at
+**logon**. In that gap DNS resolves via DHCP — often a router running a stricter profile — and
+Windows **caches** those answers. Interception then self-corrects; the cache does not. Symptom:
+`ipconfig /flushdns` fixes things after every reboot, forever.
+
+That "flush alone fixes it" observation is diagnostic gold — it proves the resolver config is
+already correct and only the cache is stale, which rules out every reconfiguration-style fix
+(delayed start, service dependencies, static adapter DNS). Audit with
+`scripts/windows/nextdns-audit.ps1`; remedy with `scripts/windows/nextdns-boot-fix.ps1 -Apply`.
+Full pattern, rejected alternatives, and the machine-scope DoH option: `references/common-culprits.md` (W4, W4b).
+
 ## Workflow
 
 ### 1. Identify the target OS
@@ -90,6 +123,7 @@ The interesting failures are almost always rung 5. Per-OS deep-dive scripts:
 |---|---|---|
 | Windows | `scripts/windows/nrpt-audit.ps1` | Dump NRPT rules with attribution + registry forensics |
 | Windows (LAN/SMB) | `scripts/windows/smb-audit.ps1` | Mapped-drive audit: resolution mechanism, reachability, credential targets, NRPT/leak-protection, verdict |
+| Windows (NextDNS) | `scripts/windows/nextdns-audit.ps1` | NextDNS client: config scope, boot→logon exposure window, effective profile, verdict |
 | macOS | `scripts/macos/dns-audit.sh` | Dump scutil --dns, /etc/resolver/*, mDNSResponder state, profiles |
 | Linux | `scripts/linux/dns-audit.sh` | Dump systemd-resolved status, resolv.conf chain, NM config, NSS order |
 
@@ -100,6 +134,8 @@ Repair scripts default to **dry-run** and protect known-good config (Tailscale M
 | OS | Repair script |
 |---|---|
 | Windows | `scripts/windows/nrpt-clean.ps1` (removes orphan NRPT catch-alls, protects Tailscale) |
+| Windows | `scripts/windows/nextdns-boot-fix.ps1` (logon task: flush once after NextDNS interception is confirmed) |
+| Windows | `scripts/windows/nextdns-doh-setup.ps1` (machine-scope: point the OS resolver at a profile-pinned DoH template; needs admin) |
 | macOS | `scripts/macos/resolver-clean.sh` (removes orphan `/etc/resolver/*` from disconnected VPNs) |
 | Linux | `scripts/linux/resolved-reset.sh` (resets systemd-resolved per-link config) |
 
@@ -109,6 +145,8 @@ Repair scripts default to **dry-run** and protect known-good config (Tailscale M
 |---|---|---|---|
 | Windows | `nslookup` works, browsers fail | Orphan NRPT catch-all (VPN residue) | `Get-DnsClientNrptRule \| Where Namespace -eq '.'` |
 | Windows | Public DoH resolver IPs blocked on 443, other 443 works | AV "Encrypted DNS Detection" | `Get-CimInstance -Ns root/SecurityCenter2 -Class AntiVirusProduct` |
+| Windows | `ipconfig /flushdns` fixes DNS after **every** reboot, then it breaks again | DNS-filtering client whose profile is per-user while its service starts at boot — the boot→logon gap resolves via the router and Windows caches those answers (NextDNS: W4b) | `scripts/windows/nextdns-audit.ps1` |
+| Windows | A DoH client is "started" yet nothing owns `:53` and `127.0.0.1` times out | Working as designed — modern clients (NextDNS v3.x) intercept via a WFP kernel driver, never bind 53; adapter DNS is cosmetic | `https://<random>.test.nextdns.io/` → read `clientName` |
 | macOS | `dig` works, browsers fail | Stale `/etc/resolver/*` from disconnected VPN | `ls /etc/resolver/ && scutil --dns \| head -40` |
 | macOS | All DNS fails post-VPN install | Configuration profile with DNS override | `profiles list -type configuration` |
 | Linux | `dig` works, `getent hosts` fails | systemd-resolved misconfigured | `resolvectl status` |
@@ -171,7 +209,10 @@ After a few sessions, certain symptom triplets become instantly diagnosable. See
 - `scripts/windows/probe.ps1` — full layered diagnostic for Windows
 - `scripts/windows/nrpt-audit.ps1` — NRPT forensics with attribution
 - `scripts/windows/nrpt-clean.ps1` — safe NRPT cleanup (orphans ONLY — never point it at a live VPN's catch-all; protects Tailscale)
-- `scripts/windows/smb-audit.ps1` — mapped-drive / SMB / LAN-name audit with per-drive verdicts (`-DriveLetter Z -FallbackIp 'NAS=192.168.50.11'`, `-Json`)
+- `scripts/windows/smb-audit.ps1` — mapped-drive / SMB / LAN-name audit with per-drive verdicts (`-DriveLetter Z -FallbackIp 'NAS=192.168.1.50'`, `-Json`)
+- `scripts/windows/nextdns-audit.ps1` — NextDNS client audit: config scope, boot→logon exposure window, effective profile via `test.nextdns.io` (`-SkipNetwork`, `-Json`)
+- `scripts/windows/nextdns-boot-fix.ps1` — installs a per-user logon task that flushes the DNS cache once NextDNS interception is confirmed (dry-run by default; `-Apply`, `-Remove`)
+- `scripts/windows/nextdns-doh-setup.ps1` — machine-scope alternative: points the Windows DNS Client at a profile-pinned NextDNS DoH template so DNS is correct from boot, disables the conflicting tray client, writes an on-disk breadcrumb, verifies, and rolls back (`-Apply`, `-Rollback`, `-VerifyOnly`; needs admin)
 - `scripts/macos/probe.sh` — full layered diagnostic for macOS
 - `scripts/macos/dns-audit.sh` — scutil + /etc/resolver + profile + mDNSResponder dump
 - `scripts/macos/resolver-clean.sh` — remove orphan /etc/resolver/* files

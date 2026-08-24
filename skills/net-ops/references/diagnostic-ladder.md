@@ -91,7 +91,7 @@ Privacy VPNs (ProtonVPN confirmed; Mullvad similar) don't just install the NRPT 
 
 ### The credential-target-keying trap
 
-Windows Credential Manager keys stored credentials on the **target string**. A credential stored for target `NAS` does not apply to `\\192.168.50.11\vault` — so the obvious workaround "just remap by IP" fails with `System error 5 / Access is denied`, which reads as a permissions problem but isn't. Check with `cmdkey /list`; fix with `cmdkey /add:192.168.50.11 /user:<user> /pass:<pw>` (or pin the hostname in HOSTS and keep using the name, which also keeps the existing credential valid).
+Windows Credential Manager keys stored credentials on the **target string**. A credential stored for target `NAS` does not apply to `\\192.168.1.50\vault` — so the obvious workaround "just remap by IP" fails with `System error 5 / Access is denied`, which reads as a permissions problem but isn't. Check with `cmdkey /list`; fix with `cmdkey /add:192.168.1.50 /user:<user> /pass:<pw>` (or pin the hostname in HOSTS and keep using the name, which also keeps the existing credential valid).
 
 ### Fix decision rule (VPN + LAN coexistence)
 
