@@ -537,6 +537,35 @@ Resolve-DnsName doubleclick.net -Type A | Where-Object Type -eq 'A'
 **1 answer = pinned to your profile. ~6 answers = unfiltered** (you fell back to plain DNS
 against the anycast IP, i.e. Linked-IP matching, or the profile ID is wrong).
 
+## Maintenance - run this if anything seems off
+
+``````powershell
+scripts\windows\nextdns-doh-setup.ps1 -Doctor
+``````
+
+Read-only, no admin. Checks the template, UDP fallback, **every physical adapter**,
+tray-client conflicts, the live encrypted path, and profile pinning. Exit 0 = healthy.
+
+### The failure this design is exposed to: THE ROAMING GAP
+
+The DoH template is machine-wide, but **the DNS server and the DoH key are per-adapter.**
+An adapter that was never configured uses whatever DNS its network hands out - on a
+filtered LAN that is the router's profile, i.e. the exact problem this setup exists to
+avoid. Nothing errors; DNS quietly changes profile.
+
+All physical adapters were configured with ``-AllAdapters``. What still needs action:
+
+| Event | What to do |
+|---|---|
+| New dock / USB NIC / added card | Re-run with ``-AllAdapters`` - a brand-new adapter is uncovered |
+| Windows feature update | Run ``-Doctor``; updates sometimes reset network config |
+| NextDNS client reinstalled | ``-Doctor`` flags the conflict; two things claiming DNS is a bug |
+| Changing NextDNS profile | Re-run ``-Apply`` with the new ``-ProfileId`` |
+| NIC driver reinstall / ``netsh int ip reset`` | Re-run - the DoH key is keyed by adapter GUID |
+
+VPN tunnels (Tailscale), Hyper-V/WSL vSwitches and Bluetooth PAN are deliberately NOT
+configured - they manage their own resolution and touching them breaks things.
+
 ## Undo
 
 Run from the ``net-ops`` skill in claude-mods, ELEVATED:
