@@ -57,6 +57,25 @@
 .PARAMETER InterfaceAlias
     Adapter to configure. Default: the connected non-virtual adapter.
 
+.PARAMETER SetPerInterface
+    ALSO write the per-interface DoH registry key, so the Settings GUI reports
+    "DNS over HTTPS: On" instead of "Off".
+
+    Strongly recommended. Registering a template with -AutoUpgrade (what this script
+    does by default) makes DoH genuinely work, but it does NOT create the per-interface
+    key that Settings > Network & internet > Ethernet > DNS server assignment reads.
+    The GUI therefore displays "Off" while traffic is in fact encrypted. Both readings
+    are correct about different mechanisms - but the discrepancy is dangerous:
+
+      - Someone checking Settings months later sees "Off" and concludes DoH is broken.
+      - Worse, opening that dialog and pressing Save while it reads "Off" can write an
+        explicit per-interface DISABLE and silently switch DNS back to plaintext.
+
+    Writes DohFlags=1 (QWORD) - "automatic template", i.e. use the template already
+    registered in the known-DoH-servers table. It deliberately does NOT write a
+    per-interface DohTemplate: the global table owns the template (and therefore the
+    profile), and duplicating it in two places invites them to disagree.
+
 .PARAMETER KeepClient
     Do NOT disable the NextDNS tray client. Only for deliberate testing - leaving
     both active means two things fight over DNS.
@@ -76,8 +95,9 @@
     Dry run - show exactly what would change.
 
 .EXAMPLE
-    scripts/windows/nextdns-doh-setup.ps1 -ProfileId abc123 -Apply
-    Apply, then verify. MUST be run from an ELEVATED PowerShell.
+    scripts/windows/nextdns-doh-setup.ps1 -ProfileId abc123 -Apply -SetPerInterface
+    Recommended form: apply, make the Settings GUI agree, then verify.
+    MUST be run from an ELEVATED PowerShell.
 
 .EXAMPLE
     scripts/windows/nextdns-doh-setup.ps1 -VerifyOnly
@@ -108,6 +128,7 @@ param(
     [string] $ProfileId,
     [string] $ServerAddress  = '45.90.28.0',
     [string] $InterfaceAlias,
+    [switch] $SetPerInterface,
     [switch] $KeepClient,
     [switch] $Apply,
     [switch] $Rollback,
@@ -188,6 +209,16 @@ try {
         Set-DnsClientServerAddress -InterfaceAlias $InterfaceAlias -ResetServerAddresses
         Say 'PASS' 'Adapter DNS reset to DHCP'
 
+        # Remove any per-interface DoH key we wrote (both families - the setup may have
+        # been applied against a v4 or v6 server address).
+        $guid = (Get-NetAdapter -Name $InterfaceAlias -ErrorAction SilentlyContinue).InterfaceGuid
+        if ($guid) {
+            foreach ($leaf in 'Doh','Doh6') {
+                $k = "HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\InterfaceSpecificParameters\$guid\DohInterfaceSettings\$leaf\$ServerAddress"
+                if (Test-Path $k) { Remove-Item $k -Recurse -Force; Say 'PASS' "Removed per-interface DoH key ($leaf\$ServerAddress)" }
+            }
+        }
+
         try { Remove-DnsClientDohServerAddress -ServerAddress $ServerAddress -ErrorAction Stop; Say 'PASS' "Removed DoH template for $ServerAddress" }
         catch { Say 'INFO' "No DoH template to remove for $ServerAddress" }
 
@@ -219,7 +250,11 @@ try {
     Say 'INFO' "DoH template   : $template        (<- the PATH is what selects the profile)"
     Say 'INFO' 'UDP fallback   : DISABLED (a DoH failure must break loudly, never silently go unfiltered)'
     Say 'INFO' ("NextDNS client : {0}" -f $(if ($KeepClient) { 'left running (NOT recommended - both will fight)' } else { 'will be stopped + tray autostart removed' }))
+    Say 'INFO' ("Per-interface  : {0}" -f $(if ($SetPerInterface) { 'DohFlags=1 will be written -> Settings will show DoH On' } else { 'NOT written -> Settings will show "Off" even though DoH works' }))
     Say 'INFO' "Breadcrumb     : $BreadcrumbPath"
+    if (-not $SetPerInterface) {
+        Say 'WARN' 'Without -SetPerInterface the Settings GUI reports DoH "Off". That is misleading, and pressing Save in that dialog can silently disable encryption. Recommended: add -SetPerInterface.'
+    }
 
     Head 'PRE-FLIGHT'
     # Prove the endpoint answers for THIS profile before depending on it.
@@ -254,6 +289,20 @@ try {
 
     Set-DnsClientServerAddress -InterfaceAlias $InterfaceAlias -ServerAddresses $ServerAddress
     Say 'PASS' "Adapter '$InterfaceAlias' DNS -> $ServerAddress"
+
+    if ($SetPerInterface) {
+        # The Settings GUI reads this key, NOT the known-servers table. Without it the
+        # GUI shows "Off" while DoH is genuinely working - see the -SetPerInterface help.
+        # DohFlags=1 (QWORD) = "automatic template": use the template already registered
+        # above. No per-interface DohTemplate is written on purpose - one source of truth.
+        $guid = (Get-NetAdapter -Name $InterfaceAlias).InterfaceGuid
+        $leaf = if ($ServerAddress -match ':') { 'Doh6' } else { 'Doh' }
+        $key  = "HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\InterfaceSpecificParameters\$guid\DohInterfaceSettings\$leaf\$ServerAddress"
+        New-Item -Path $key -Force | Out-Null
+        New-ItemProperty -Path $key -Name 'DohFlags' -Value 1 -PropertyType QWord -Force | Out-Null
+        Say 'PASS' "Wrote per-interface DohFlags=1 ($leaf\$ServerAddress) -> Settings will report DoH On"
+        $script:PerIfKey = $key
+    }
 
     if (-not $KeepClient) {
         $svc = Get-Service NextDNSService -ErrorAction SilentlyContinue
@@ -358,6 +407,21 @@ Restores DHCP DNS, removes the template, re-enables the NextDNS client.
     Say 'PASS' "Wrote breadcrumb $BreadcrumbPath"
 
     Head 'VERIFICATION'
+    # Does the GUI agree with reality? Report both, because a mismatch is the failure
+    # mode this script exists to prevent.
+    $guid2 = (Get-NetAdapter -Name $InterfaceAlias).InterfaceGuid
+    $seen = $false
+    foreach ($leaf in 'Doh','Doh6') {
+        $k = "HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\InterfaceSpecificParameters\$guid2\DohInterfaceSettings\$leaf\$ServerAddress"
+        if (Test-Path $k) {
+            $seen = $true
+            Say 'PASS' ("Settings GUI will report DoH ON  (DohFlags={0} at {1}\{2})" -f (Get-ItemProperty $k).DohFlags, $leaf, $ServerAddress)
+        }
+    }
+    if (-not $seen) {
+        Say 'WARN' 'Settings GUI will still report DoH "Off" (no per-interface key). Encryption works regardless - but re-run with -SetPerInterface so the GUI stops contradicting reality.'
+    }
+
     Start-Sleep -Seconds 3
     $e = Get-EffectiveProfile
     if (-not $e) {

@@ -231,6 +231,30 @@ assert "nextdns-doh-setup keys verification on clientName -ne nextdns-windows" \
     contains "$ndd_src" '$e.clientName -ne ' "'nextdns-windows'"
 assert "nextdns-doh-setup breadcrumb teaches the profile-pinning check, not just DOH" \
     contains "$ndd_src" 'prove the PROFILE, not just the encryption'
+# --- -SetPerInterface: make the Settings GUI agree with reality ---
+# Registering a template with AutoUpgrade makes DoH WORK but leaves the GUI reading
+# "Off", because the GUI reads a per-interface key instead of the known-servers table.
+# That mismatch is the hazard: pressing Save in that dialog can silently disable
+# encryption. DohFlags=1 (QWORD) = "automatic template" - verified against a working
+# public implementation, not guessed.
+assert "nextdns-doh-setup offers -SetPerInterface" \
+    contains "$ndd_src" '$SetPerInterface'
+assert "nextdns-doh-setup writes DohFlags as a QWORD" \
+    contains "$ndd_src" "-PropertyType QWord"
+assert "nextdns-doh-setup uses DohFlags value 1 (automatic template)" \
+    contains "$ndd_src" "-Name 'DohFlags' -Value 1"
+assert "nextdns-doh-setup targets the interface-specific DoH path" \
+    contains "$ndd_src" 'DohInterfaceSettings'
+assert "nextdns-doh-setup handles both Doh and Doh6 families" \
+    contains "$ndd_src" "'Doh','Doh6'"
+assert "nextdns-doh-setup does NOT duplicate DohTemplate per-interface" \
+    bash -c '! grep -q "Name .DohTemplate." <<<"$0"' "$ndd_src"
+assert "nextdns-doh-setup warns when applying without -SetPerInterface" \
+    contains "$ndd_src" 'Settings GUI reports DoH "Off"'
+assert "nextdns-doh-setup rollback removes the per-interface key" \
+    contains "$ndd_src" 'Removed per-interface DoH key'
+assert "nextdns-doh-setup verification reports what the GUI will show" \
+    contains "$ndd_src" 'Settings GUI will report DoH ON'
 
 # The SKILL text and culprit catalog must carry the pattern, not just the scripts.
 skill_src="$(cat "$root/SKILL.md")"
