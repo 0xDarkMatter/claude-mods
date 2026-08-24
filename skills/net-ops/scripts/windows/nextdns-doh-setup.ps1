@@ -57,6 +57,41 @@
 .PARAMETER InterfaceAlias
     Adapter to configure. Default: the connected non-virtual adapter.
 
+.PARAMETER AllAdapters
+    Configure EVERY physical adapter, not just one. Strongly recommended.
+
+    THE ROAMING GAP: this configuration is per-adapter. An adapter you did not
+    configure keeps using whatever DNS its network hands out - so switching from
+    Ethernet to Wi-Fi, plugging into a second NIC, or using a dock silently drops
+    you onto the local network's resolver, which on a filtered LAN is exactly the
+    router profile this setup exists to escape. Nothing fails; DNS just quietly
+    changes profile.
+
+    Physical adapters are identified by HardwareInterface, which excludes VPN
+    tunnels (Tailscale), Hyper-V/WSL vSwitches and Bluetooth PAN - all of which
+    manage their own resolution and must not be touched.
+
+    Disconnected adapters are configured too: the setting persists until link-up,
+    so Wi-Fi is already correct the first time you use it.
+
+    A genuinely new adapter (a dock or USB NIC seen for the first time) is still
+    unconfigured until you re-run. -Doctor detects that.
+
+.PARAMETER Doctor
+    Read-only health check; needs no elevation. Audits template integrity, UDP
+    fallback, per-adapter coverage, tray-client conflict, the live encrypted path,
+    and profile pinning - then prints a verdict. Exit 10 if anything is wrong.
+
+    Pinning is checked by comparing what the system resolver returns for -ProbeName
+    against the configured template and against the no-path (Linked-IP) endpoint.
+    That is self-calibrating, so it needs no hardcoded expected answers: encryption
+    alone never proves you are on the right profile.
+
+.PARAMETER ProbeName
+    Name used for the -Doctor pinning comparison. Default: doubleclick.net. Pick a
+    name your profile treats differently from an unfiltered resolver; if the
+    template and unfiltered endpoint agree, the check reports inconclusive.
+
 .PARAMETER SetPerInterface
     ALSO write the per-interface DoH registry key, so the Settings GUI reports
     "DNS over HTTPS: On" instead of "Off".
@@ -95,9 +130,13 @@
     Dry run - show exactly what would change.
 
 .EXAMPLE
-    scripts/windows/nextdns-doh-setup.ps1 -ProfileId abc123 -Apply -SetPerInterface
-    Recommended form: apply, make the Settings GUI agree, then verify.
-    MUST be run from an ELEVATED PowerShell.
+    scripts/windows/nextdns-doh-setup.ps1 -ProfileId abc123 -Apply -SetPerInterface -AllAdapters
+    Recommended form: cover every physical adapter (no roaming gap), make the
+    Settings GUI agree, then verify. MUST be run from an ELEVATED PowerShell.
+
+.EXAMPLE
+    scripts/windows/nextdns-doh-setup.ps1 -Doctor
+    Read-only health check: coverage, pinning, conflicts. No elevation needed.
 
 .EXAMPLE
     scripts/windows/nextdns-doh-setup.ps1 -VerifyOnly
@@ -128,11 +167,14 @@ param(
     [string] $ProfileId,
     [string] $ServerAddress  = '45.90.28.0',
     [string] $InterfaceAlias,
+    [switch] $AllAdapters,
     [switch] $SetPerInterface,
     [switch] $KeepClient,
     [switch] $Apply,
     [switch] $Rollback,
-    [switch] $VerifyOnly
+    [switch] $VerifyOnly,
+    [switch] $Doctor,
+    [string] $ProbeName = 'doubleclick.net'
 )
 
 $EXIT_OK = 0; $EXIT_ERROR = 1; $EXIT_USAGE = 2; $EXIT_PENDING = 10
@@ -143,6 +185,34 @@ function Head { param([string]$N) Write-Output ""; Write-Output "--- $N ---" }
 function Test-Elevated {
     ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
     ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# Physical NICs only. HardwareInterface is the clean discriminator: it excludes
+# Tailscale, Hyper-V/WSL vSwitches, Bluetooth PAN and WAN miniports, all of which
+# either manage their own resolution or never carry ordinary traffic.
+function Get-PhysicalAdapters {
+    Get-NetAdapter | Where-Object { $_.HardwareInterface -and $_.InterfaceDescription -notmatch 'Bluetooth' }
+}
+
+function Get-DohKeyPath {
+    param([string]$Guid, [string]$Server)
+    $leaf = if ($Server -match ':') { 'Doh6' } else { 'Doh' }
+    "HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\InterfaceSpecificParameters\$Guid\DohInterfaceSettings\$leaf\$Server"
+}
+
+# Count A records for a name over a specific DoH template. Used to prove PROFILE
+# pinning rather than mere encryption - see the -Doctor help.
+function Get-DohAnswerCount {
+    param([string]$Template, [string]$Name)
+    try {
+        $b = New-Object System.Collections.Generic.List[byte]
+        $b.AddRange([byte[]]@(0xAB,0xCD,0x01,0x00,0x00,0x01,0x00,0x00,0x00,0x00,0x00,0x00))
+        foreach ($l in $Name.Split('.')) { $b.Add([byte]$l.Length); $b.AddRange([System.Text.Encoding]::ASCII.GetBytes($l)) }
+        $b.Add(0); $b.AddRange([byte[]]@(0x00,0x01,0x00,0x01))
+        $q = [Convert]::ToBase64String($b.ToArray()).TrimEnd('=').Replace('+','-').Replace('/','_')
+        $r = Invoke-WebRequest "$Template`?dns=$q" -Headers @{Accept='application/dns-message'} -UseBasicParsing -TimeoutSec 15
+        ($r.Content[6] * 256) + $r.Content[7]
+    } catch { -1 }
 }
 
 # Ground truth: ask NextDNS what it sees. Never infer the active profile from
@@ -160,6 +230,73 @@ $BreadcrumbPath = Join-Path $BreadcrumbDir 'README-dns-setup.md'
 
 try {
     Write-Output "=== net-ops :: NextDNS machine-scope DoH setup ==="
+
+    # ---------------------------------------------------------------- doctor
+    if ($Doctor) {
+        $findings = 0
+        Head 'TEMPLATE'
+        $tpl = Get-DnsClientDohServerAddress -ServerAddress $ServerAddress -ErrorAction SilentlyContinue
+        if (-not $tpl) {
+            Say 'FAIL' "No DoH template registered for $ServerAddress - machine-scope setup is not installed."; $findings++
+        } else {
+            Say 'PASS' ("Template: {0}" -f $tpl.DohTemplate)
+            if ($tpl.AllowFallbackToUdp) {
+                Say 'FAIL' 'AllowFallbackToUdp is TRUE - a DoH failure will silently drop to plaintext AND lose profile pinning.'; $findings++
+            } else { Say 'PASS' 'UDP fallback disabled (failures break loudly rather than going unfiltered)' }
+        }
+
+        Head 'ADAPTER COVERAGE'
+        # THE roaming gap. Config is per-adapter, so an unconfigured NIC silently
+        # falls back to whatever DNS its network hands out - typically the router.
+        foreach ($a in Get-PhysicalAdapters) {
+            $dns  = (Get-DnsClientServerAddress -InterfaceIndex $a.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue).ServerAddresses
+            $hasK = Test-Path (Get-DohKeyPath $a.InterfaceGuid $ServerAddress)
+            $ok   = ($dns -contains $ServerAddress) -and $hasK
+            $desc = "{0} [{1}] dns={2} doh-key={3}" -f $a.Name, $a.Status, $(if ($dns) { $dns -join ',' } else { 'DHCP' }), $hasK
+            if ($ok) { Say 'PASS' $desc }
+            else {
+                Say 'WARN' ($desc + '  <- NOT covered: this adapter would use its network''s DNS')
+                $findings++
+            }
+        }
+
+        Head 'CLIENT CONFLICT'
+        $svc = Get-Service NextDNSService -ErrorAction SilentlyContinue
+        $tp  = Get-Process NextDNS -ErrorAction SilentlyContinue
+        if ($svc -and ($svc.Status -eq 'Running' -or $tp)) {
+            Say 'FAIL' 'NextDNS tray client is active alongside machine-scope DoH - two things are claiming the DNS path.'; $findings++
+        } else { Say 'PASS' 'No tray-client conflict' }
+
+        Head 'EFFECTIVE PATH'
+        $e = Get-EffectiveProfile
+        if (-not $e) { Say 'WARN' 'Could not reach test.nextdns.io'; $findings++ }
+        else {
+            Say 'INFO' ("protocol={0} profile={1} clientName={2}" -f $e.protocol, $e.profile, $e.clientName)
+            if ($e.protocol -ne 'DOH') { Say 'FAIL' 'Traffic is NOT encrypted.'; $findings++ }
+            elseif ($e.clientName -eq 'nextdns-windows') { Say 'FAIL' 'Going via the tray client, not the OS resolver.'; $findings++ }
+            else { Say 'PASS' 'Encrypted DoH via the OS resolver' }
+        }
+
+        Head 'PROFILE PINNING'
+        # Encryption != correct profile. Compare what the system resolver returns
+        # against the configured template and against the no-path (Linked-IP)
+        # endpoint. Self-calibrating, so it needs no hardcoded expected values.
+        if ($tpl) {
+            $sys  = @(Resolve-DnsName $ProbeName -Type A -ErrorAction SilentlyContinue | Where-Object Type -eq 'A').Count
+            $pin  = Get-DohAnswerCount $tpl.DohTemplate $ProbeName
+            $unf  = Get-DohAnswerCount 'https://dns.nextdns.io' $ProbeName
+            Say 'INFO' ("{0}: system={1}  via-template={2}  unfiltered={3}" -f $ProbeName, $sys, $pin, $unf)
+            if ($pin -lt 0) { Say 'WARN' 'Could not query the template directly; pinning unproven.'; $findings++ }
+            elseif ($sys -eq $pin -and $pin -ne $unf) { Say 'PASS' 'System resolver matches the profile-pinned endpoint, and differs from unfiltered.' }
+            elseif ($pin -eq $unf) { Say 'INFO' 'Template and unfiltered agree on this name - inconclusive; try -ProbeName with a name your profile treats differently.' }
+            else { Say 'FAIL' 'System resolver does NOT match the pinned endpoint - queries may be unfiltered.'; $findings++ }
+        }
+
+        Head 'VERDICT'
+        if ($findings -eq 0) { Say 'PASS' 'Healthy: encrypted, profile-pinned, and every physical adapter is covered.' }
+        else { Say 'WARN' ("{0} finding(s). Re-run with -Apply -SetPerInterface -AllAdapters to close adapter gaps." -f $findings) }
+        exit $(if ($findings) { $EXIT_PENDING } else { $EXIT_OK })
+    }
 
     # ---------------------------------------------------------------- verify
     if ($VerifyOnly) {
@@ -193,6 +330,11 @@ try {
     $adapter = Get-NetAdapter -Name $InterfaceAlias -ErrorAction SilentlyContinue
     if (-not $adapter) { Write-Error "Unknown adapter '$InterfaceAlias'."; exit $EXIT_USAGE }
 
+    # -AllAdapters closes the roaming gap: config is per-adapter, so any NIC left
+    # unconfigured silently uses whatever DNS its network hands out. Disconnected
+    # adapters are configured too - the setting persists until link-up.
+    $Targets = if ($AllAdapters) { @(Get-PhysicalAdapters) } else { @($adapter) }
+
     $current = (Get-DnsClientServerAddress -InterfaceAlias $InterfaceAlias -AddressFamily IPv4).ServerAddresses -join ', '
 
     # -------------------------------------------------------------- rollback
@@ -206,16 +348,18 @@ try {
         if (-not $Apply) { Write-Output ""; Say 'WARN' 'DRY RUN - nothing changed.'; Say 'INFO' 'Re-run with -Rollback -Apply.'; exit $EXIT_PENDING }
         if (-not (Test-Elevated)) { Write-Error 'Rollback needs an ELEVATED PowerShell.'; exit $EXIT_USAGE }
 
-        Set-DnsClientServerAddress -InterfaceAlias $InterfaceAlias -ResetServerAddresses
-        Say 'PASS' 'Adapter DNS reset to DHCP'
-
-        # Remove any per-interface DoH key we wrote (both families - the setup may have
-        # been applied against a v4 or v6 server address).
-        $guid = (Get-NetAdapter -Name $InterfaceAlias -ErrorAction SilentlyContinue).InterfaceGuid
-        if ($guid) {
+        # Roll back EVERY physical adapter, not just the selected one: -AllAdapters may
+        # have configured several, and leaving one pinned to a removed template would
+        # break DNS on that NIC.
+        foreach ($a in Get-PhysicalAdapters) {
+            $dns = (Get-DnsClientServerAddress -InterfaceIndex $a.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue).ServerAddresses
+            if ($dns -contains $ServerAddress) {
+                Set-DnsClientServerAddress -InterfaceAlias $a.Name -ResetServerAddresses
+                Say 'PASS' ("Adapter '{0}' DNS reset to DHCP" -f $a.Name)
+            }
             foreach ($leaf in 'Doh','Doh6') {
-                $k = "HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\InterfaceSpecificParameters\$guid\DohInterfaceSettings\$leaf\$ServerAddress"
-                if (Test-Path $k) { Remove-Item $k -Recurse -Force; Say 'PASS' "Removed per-interface DoH key ($leaf\$ServerAddress)" }
+                $k = "HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\InterfaceSpecificParameters\$($a.InterfaceGuid)\DohInterfaceSettings\$leaf\$ServerAddress"
+                if (Test-Path $k) { Remove-Item $k -Recurse -Force; Say 'PASS' ("Removed per-interface DoH key ({0}, {1})" -f $a.Name, $leaf) }
             }
         }
 
@@ -245,7 +389,14 @@ try {
     $template = "https://dns.nextdns.io/$ProfileId"
 
     Head 'PLAN'
-    Say 'INFO' "Adapter        : $InterfaceAlias  (currently: $current)"
+    Say 'INFO' ("Adapters       : {0}" -f (($Targets | ForEach-Object { "$($_.Name) [$($_.Status)]" }) -join ', '))
+    if (-not $AllAdapters) {
+        $uncovered = @(Get-PhysicalAdapters | Where-Object { $_.Name -ne $InterfaceAlias })
+        if ($uncovered) {
+            Say 'WARN' ("Roaming gap: {0} will NOT be covered and would use their network's DNS. Add -AllAdapters." -f (($uncovered | ForEach-Object { $_.Name }) -join ', '))
+        }
+    }
+    Say 'INFO' "Current DNS    : $current  (on $InterfaceAlias)"
     Say 'INFO' "DNS server     : $ServerAddress   (a label for the template - it does NOT select the profile)"
     Say 'INFO' "DoH template   : $template        (<- the PATH is what selects the profile)"
     Say 'INFO' 'UDP fallback   : DISABLED (a DoH failure must break loudly, never silently go unfiltered)'
@@ -287,21 +438,20 @@ try {
         Say 'PASS' "Registered DoH template for $ServerAddress"
     }
 
-    Set-DnsClientServerAddress -InterfaceAlias $InterfaceAlias -ServerAddresses $ServerAddress
-    Say 'PASS' "Adapter '$InterfaceAlias' DNS -> $ServerAddress"
+    foreach ($t in $Targets) {
+        Set-DnsClientServerAddress -InterfaceAlias $t.Name -ServerAddresses $ServerAddress
+        Say 'PASS' ("Adapter '{0}' [{1}] DNS -> {2}" -f $t.Name, $t.Status, $ServerAddress)
 
-    if ($SetPerInterface) {
-        # The Settings GUI reads this key, NOT the known-servers table. Without it the
-        # GUI shows "Off" while DoH is genuinely working - see the -SetPerInterface help.
-        # DohFlags=1 (QWORD) = "automatic template": use the template already registered
-        # above. No per-interface DohTemplate is written on purpose - one source of truth.
-        $guid = (Get-NetAdapter -Name $InterfaceAlias).InterfaceGuid
-        $leaf = if ($ServerAddress -match ':') { 'Doh6' } else { 'Doh' }
-        $key  = "HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\InterfaceSpecificParameters\$guid\DohInterfaceSettings\$leaf\$ServerAddress"
-        New-Item -Path $key -Force | Out-Null
-        New-ItemProperty -Path $key -Name 'DohFlags' -Value 1 -PropertyType QWord -Force | Out-Null
-        Say 'PASS' "Wrote per-interface DohFlags=1 ($leaf\$ServerAddress) -> Settings will report DoH On"
-        $script:PerIfKey = $key
+        if ($SetPerInterface) {
+            # The Settings GUI reads this key, NOT the known-servers table. Without it the
+            # GUI shows "Off" while DoH is genuinely working - see the -SetPerInterface help.
+            # DohFlags=1 (QWORD) = "automatic template": use the template already registered
+            # above. No per-interface DohTemplate is written on purpose - one source of truth.
+            $key = Get-DohKeyPath $t.InterfaceGuid $ServerAddress
+            New-Item -Path $key -Force | Out-Null
+            New-ItemProperty -Path $key -Name 'DohFlags' -Value 1 -PropertyType QWord -Force | Out-Null
+            Say 'PASS' ("  per-interface DohFlags=1 written for '{0}'" -f $t.Name)
+        }
     }
 
     if (-not $KeepClient) {

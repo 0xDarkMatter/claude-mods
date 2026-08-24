@@ -255,6 +255,34 @@ assert "nextdns-doh-setup rollback removes the per-interface key" \
     contains "$ndd_src" 'Removed per-interface DoH key'
 assert "nextdns-doh-setup verification reports what the GUI will show" \
     contains "$ndd_src" 'Settings GUI will report DoH ON'
+# --- roaming gap + maintenance ---
+# The config is PER-ADAPTER, so any NIC left unconfigured silently uses its
+# network's DNS - on a filtered LAN that is the router profile the whole setup
+# exists to escape. -AllAdapters closes it; -Doctor detects it.
+assert "nextdns-doh-setup offers -AllAdapters" \
+    contains "$ndd_src" '$AllAdapters'
+assert "nextdns-doh-setup offers -Doctor" \
+    contains "$ndd_src" '$Doctor'
+assert "nextdns-doh-setup selects physical NICs via HardwareInterface" \
+    contains "$ndd_src" 'HardwareInterface'
+assert "nextdns-doh-setup excludes virtual/tunnel adapters from -AllAdapters" \
+    contains "$ndd_src" 'Bluetooth'
+assert "nextdns-doh-setup documents the roaming gap" \
+    contains "$ndd_src" 'THE ROAMING GAP'
+assert "nextdns-doh-setup warns about uncovered adapters in the plan" \
+    contains "$ndd_src" 'Roaming gap:'
+assert "nextdns-doh-setup doctor audits per-adapter coverage" \
+    contains "$ndd_src" 'ADAPTER COVERAGE'
+assert "nextdns-doh-setup doctor detects a tray-client conflict" \
+    contains "$ndd_src" 'CLIENT CONFLICT'
+assert "nextdns-doh-setup doctor flags AllowFallbackToUdp being re-enabled" \
+    contains "$ndd_src" 'AllowFallbackToUdp is TRUE'
+# Pinning must be self-calibrating: comparing system vs template vs unfiltered
+# needs no hardcoded answers, so it cannot rot when a profile's lists change.
+assert "nextdns-doh-setup doctor proves pinning by comparison, not hardcoded values" \
+    contains "$ndd_src" 'unfiltered='
+assert "nextdns-doh-setup rollback covers every physical adapter" \
+    contains "$ndd_src" 'foreach ($a in Get-PhysicalAdapters)'
 
 # The SKILL text and culprit catalog must carry the pattern, not just the scripts.
 skill_src="$(cat "$root/SKILL.md")"
