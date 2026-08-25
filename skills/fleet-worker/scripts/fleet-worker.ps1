@@ -70,8 +70,11 @@ fleet-worker: no API key resolved. Provide one of:
 '@
   exit 5
 }
-if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
-  Write-Error "fleet-worker: 'claude' (Claude Code) not found on PATH"; exit 5
+# FLEET_WORKER_CLAUDE_BIN mirrors the bash launcher: the claude binary to exec
+# (default: claude), so a caller that validated an override runs that binary.
+$claudeBin = if ($env:FLEET_WORKER_CLAUDE_BIN) { $env:FLEET_WORKER_CLAUDE_BIN } else { 'claude' }
+if (-not (Get-Command $claudeBin -ErrorAction SilentlyContinue)) {
+  Write-Error "fleet-worker: '$claudeBin' (Claude Code) not found on PATH"; exit 5
 }
 
 $env:ANTHROPIC_BASE_URL          = if ($env:FLEET_WORKER_BASE_URL) { $env:FLEET_WORKER_BASE_URL } else { 'https://api.z.ai/api/anthropic' }
@@ -97,5 +100,5 @@ if ($permMode -eq 'dontAsk') {
   }
 }
 
-claude -p --model sonnet --permission-mode $permMode @args
+& $claudeBin -p --model sonnet --permission-mode $permMode @args
 exit $LASTEXITCODE

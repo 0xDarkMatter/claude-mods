@@ -20,6 +20,9 @@
 #   FLEET_WORKER_MODEL        main model      (default GLM-5.3)
 #   FLEET_WORKER_SMALL_MODEL  background model (default GLM-4.5-Air)
 #   FLEET_WORKER_EFFORT       seeded effortLevel (default high)
+#   FLEET_WORKER_CLAUDE_BIN   claude binary to exec (default: claude); lets a
+#                             caller that validated an override run that same
+#                             binary here (fleetflow doctor/spawn parity)
 #   FLEET_WORKER_PERMISSION_MODE  worker --permission-mode (default bypassPermissions).
 #                             Use dontAsk + an allowlist to spawn FROM an auto-mode
 #                             orchestrator - a bypassPermissions launch is hard-denied
@@ -79,8 +82,13 @@ MSG
   exit "$EXIT_MISSING_DEP"
 fi
 
-command -v claude >/dev/null 2>&1 || {
-  echo "fleet-worker: 'claude' (Claude Code) not found on PATH" >&2; exit "$EXIT_MISSING_DEP"; }
+# FLEET_WORKER_CLAUDE_BIN: the claude binary to exec (default: claude).
+# fleetflow's ff-spawn forwards its FLEETFLOW_CLAUDE_BIN here so the binary the
+# doctor validated is the one the lane runs - a hardcoded `claude` let a valid
+# override pass preflight and then fail spawn (codex review, 2026-08-25).
+CLAUDE_BIN="${FLEET_WORKER_CLAUDE_BIN:-claude}"
+command -v "$CLAUDE_BIN" >/dev/null 2>&1 || {
+  echo "fleet-worker: '$CLAUDE_BIN' (Claude Code) not found on PATH" >&2; exit "$EXIT_MISSING_DEP"; }
 
 # --- Endpoint + model mapping ------------------------------------------------
 export ANTHROPIC_BASE_URL="${FLEET_WORKER_BASE_URL:-https://api.z.ai/api/anthropic}"
@@ -115,4 +123,4 @@ fi
 # `--model sonnet` resolves to $FLEET_WORKER_MODEL via the mapping above.
 # `</dev/null` avoids the ~3s "no stdin data received" wait when the prompt is
 # passed as an argument.
-exec claude -p --model sonnet --permission-mode "$PERM_MODE" "$@" </dev/null
+exec "$CLAUDE_BIN" -p --model sonnet --permission-mode "$PERM_MODE" "$@" </dev/null

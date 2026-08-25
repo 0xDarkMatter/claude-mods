@@ -95,6 +95,7 @@ same on-demand, progressively-disclosed procedural knowledge your orchestrator h
 | `FLEET_WORKER_CONFIG_DIR` | `~/.fleet-worker/cfg` | isolated config dir — **one per parallel worker** |
 | `FLEET_WORKER_EFFORT` | `high` | seeded `effortLevel` in the worker's settings |
 | `FLEET_WORKER_PERMISSION_MODE` | `bypassPermissions` | worker `--permission-mode`; use `dontAsk` + an allowlist to spawn from an auto-mode orchestrator (see *Permission posture*) |
+| `FLEET_WORKER_CLAUDE_BIN` | `claude` | claude binary to exec; callers that preflight-validated an override (fleetflow's `FLEETFLOW_CLAUDE_BIN`) forward it here so the validated binary is the one that runs |
 
 Point `FLEET_WORKER_BASE_URL`/`FLEET_WORKER_MODEL` at any other Anthropic-compatible
 gateway (this is the documented Claude Code custom-endpoint mechanism) to drive a
