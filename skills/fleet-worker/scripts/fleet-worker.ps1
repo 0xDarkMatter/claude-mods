@@ -35,6 +35,12 @@ if ($args.Count -ge 1 -and ($args[0] -eq '-Help' -or $args[0] -eq '--help' -or $
     ForEach-Object { if ($_ -match '^#') { $_ -replace '^# ?', '' } else { return } }
   exit 0
 }
+if ($args.Count -ge 1 -and $args[0] -eq '--capabilities') {
+  # Machine-readable handshake, mirrors the bash launcher: one token per line,
+  # exit 0, APPEND-ONLY (callers match exact tokens). Before key resolution.
+  'claude-bin-override'
+  exit 0
+}
 
 # Auth isolation (LOAD-BEARING; see references/fleet-worker-spec.md sec 4): a dedicated
 # config dir => the worker inherits no host Claude.ai OAuth account, so our token

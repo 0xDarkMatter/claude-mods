@@ -7,7 +7,7 @@
 # (Read/Write/Edit/Bash/Glob/Grep/Task) but a cheaper "grunt" brain - fanned
 # out and verified by an Opus orchestrator. See ../SKILL.md.
 #
-# Usage:   fleet-worker [--help] [claude-flags...] "PROMPT"
+# Usage:   fleet-worker [--help|--capabilities] [claude-flags...] "PROMPT"
 #          fleet-worker [claude-flags...] < prompt.txt
 # Input:   prompt as the final positional arg, or piped on stdin
 # Output:  whatever `claude -p` emits (text, or --output-format json/stream-json)
@@ -42,6 +42,14 @@ EXIT_OK=0; EXIT_USAGE=2; EXIT_MISSING_DEP=5
 
 case "${1:-}" in
   -h|--help) awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"; exit "$EXIT_OK" ;;
+  --capabilities)
+    # Machine-readable handshake for callers (fleetflow ff-doctor/ff-spawn):
+    # one capability token per line, exit 0. APPEND-ONLY - callers match
+    # exact tokens, so never rename one. Handled BEFORE key resolution so a
+    # capability probe needs no auth and can never reach the exec. This
+    # replaces textual grep, which a comment could spoof (codex review,
+    # 2026-08-25).
+    printf 'claude-bin-override\n'; exit "$EXIT_OK" ;;
 esac
 
 # --- Auth isolation (LOAD-BEARING; see references/fleet-worker-spec.md sec 4) ------
