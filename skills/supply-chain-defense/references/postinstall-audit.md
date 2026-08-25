@@ -116,8 +116,8 @@ post-install scanning with tamper detection. GuardDog is the closest and is wire
 
 ```powershell
 $py  = (Get-Command python).Source
-$arg = '"C:\Users\Mack\.claude\skills\supply-chain-defense\scripts\postinstall-audit.py"' +
-       ' --root X:/Forge --root X:/DnD --root X:/Forma --root X:/Homelab --root X:/Lab' +
+$arg = '"C:\Users\<you>\.claude\skills\supply-chain-defense\scripts\postinstall-audit.py"' +
+       ' --root D:/code --root D:/lab' +
        ' --json'
 $action  = New-ScheduledTaskAction -Execute $py -Argument $arg `
             -WorkingDirectory "$env:USERPROFILE"

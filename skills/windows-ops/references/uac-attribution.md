@@ -1,7 +1,7 @@
 # UAC Attribution — who asked for elevation?
 
 How to attribute an unexplained UAC prompt to its caller, in the moment and after
-the fact. Distilled from the TITAN gsudo incident (2026-06-11): an unexplained
+the fact. Distilled from a real gsudo incident (2026-06-11): an unexplained
 gsudo UAC prompt was traced to `npx` auto-installing the npm package `sd@0.0.3`
 (a 20-line `sudo` wrapper) when the Rust `sd` wasn't found in a project prefix —
 the package ran `sudo <args>`, and `sudo` on PATH was gsudo's alias.

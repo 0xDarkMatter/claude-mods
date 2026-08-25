@@ -349,7 +349,7 @@ Output follows the claude-mods diagnostic convention:
 A user reports "my PC takes minutes to boot and crashes sometimes." Running `scripts/health-audit.ps1` produces a panel that follows the [Terminal Panel Design System](../../docs/TERMINAL-DESIGN.md):
 
 ```
-╭── 🩺 windows-ops · health-audit ──────────────────────────────────────────── TITAN ───●
+╭── 🩺 windows-ops · health-audit ──────────────────────────────────────────── WORKSTATION ───●
 │
 ├── 4 disks · 1 failing · 2 unclean shutdowns
 │

@@ -198,7 +198,7 @@ three.js scene.
 ### Route E — Compose a scene (iso-studio)
 
 The companion **iso-studio** scene composer (standalone app, local checkout
-`X:\Forge\iso-studio`) stages assets on a snap-to-grid isometric canvas with automatic
+github.com/0xDarkMatter/iso-studio) stages assets on a snap-to-grid isometric canvas with automatic
 depth sorting and a blockout-to-ControlNet export path. See §5 below for the launch
 command and status.
 
@@ -249,18 +249,18 @@ Pure-stdlib scripts run with `python`; Pillow scripts use PEP 723 inline metadat
 | [`palettes/three-tone-presets.json`](assets/palettes/three-tone-presets.json) | 8 three-tone presets (`kenney-prototype-grey`, `pastel-dollhouse`, `industrial-muted`, `cyberpunk-teal-violet`, `blueprint`, `earthy-game`, `mono-ink`, `brand-neutral`); top-lightest verified by WCAG luminance | Route A/B, [`style-guide.md`](references/style-guide.md) |
 | [`grids/`](assets/grids/) | Pre-generated `true-iso-{32,64,128}.svg` and `dimetric-2to1-{32,64,128}.svg` (line slope 0.5 dimetric / tan30° true iso) | Route A, backdrops |
 | [`blender-iso-rig.py`](assets/blender-iso-rig.py) | Headless Blender ortho-rig + N-direction sprite baker + optional depth/normal passes | Route D, step 2 |
-| **iso-studio** (external) | The zero-dependency scene composer — standalone repo at `X:\Forge\iso-studio` (github.com/0xDarkMatter/iso-studio), owns `scene-schema.json` + the asset library; pointer: [`iso-studio.md`](references/iso-studio.md) | Route E, §5 |
+| **iso-studio** (external) | The zero-dependency scene composer — standalone repo at github.com/0xDarkMatter/iso-studio, owns `scene-schema.json` + the asset library; pointer: [`iso-studio.md`](references/iso-studio.md) | Route E, §5 |
 
 ## 5. iso-studio — the scene composer (standalone app)
 
 **iso-studio** is a zero-dependency, no-build isometric scene composer that grew out of
-this skill and now lives in its own repository — local checkout `X:\Forge\iso-studio`,
+this skill and now lives in its own repository — clone it wherever you keep checkouts,
 remote `github.com/0xDarkMatter/iso-studio` (`index.html` + `server.mjs`, no npm deps).
 Launch it, then work the docked palettes:
 
 ```
-node X:\Forge\iso-studio\server.mjs      # then open http://localhost:4323
-PORT=8080 node X:\Forge\iso-studio\server.mjs
+node <iso-studio>/server.mjs            # then open http://localhost:4323
+PORT=8080 node <iso-studio>/server.mjs
 ```
 
 - **Canvas + Grid** — projection selector (2:1 dimetric / true isometric / custom angle),

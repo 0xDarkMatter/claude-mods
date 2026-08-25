@@ -55,7 +55,7 @@ table** — see the portability note above.
 | `export NAME=value` | `$env:NAME = "value"` |
 | `cmd1 && cmd2` | two separate lines (PS 5.1 has **no** `&&`). `;` runs sequentially but does **not** stop on failure |
 | `cmd1 \`<newline>` continuation | one line, or backtick `` ` `` continuation |
-| `cd /x/Roam/BlockLab` | `cd X:\Roam\BlockLab` |
+| `cd /d/code/myapp` | `cd D:\code\myapp` |
 | `grep PAT file` | `Select-String -Path file -Pattern 'PAT'` |
 | `jq '.x' f.json` | `Get-Content f.json \| ConvertFrom-Json \| % { $_.x }` |
 | `cat` / `cut -d= -f2` | `Get-Content` / `.Split('=')[1]` |

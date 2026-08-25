@@ -42,7 +42,7 @@ Each Desktop session has two halves:
 
 Summon copies (or with `--move`, relocates) the metadata wrapper into the destination account's dir. The transcript stays put — both wrappers point at the same conversation. After Logout/Login on the destination, the new entries appear in the **left-hand session picker** (Desktop's Code-tab sidebar).
 
-**The uuid-mismatch trap.** The wrapper filename uuid (`local_<uuid>.json` / `sessionId`) does **not** name the transcript — the transcript file is named by the wrapper's `cliSessionId`, a different uuid (e.g. wrapper `local_6577b24c-…` → transcript `e640a2a8-….jsonl`). And the transcript's parent dir is the *munged cwd* (`X:\Roam\LCMap\.claude\worktrees\funny-hypatia-5e54f7` → `X--Roam-LCMap--claude-worktrees-funny-hypatia-5e54f7`), which occasionally doesn't derive from the wrapper's recorded cwd at all. All toolbox modes resolve via `cliSessionId` at the expected munged path first, then fall back to scanning every project dir for `<cliSessionId>.jsonl`.
+**The uuid-mismatch trap.** The wrapper filename uuid (`local_<uuid>.json` / `sessionId`) does **not** name the transcript — the transcript file is named by the wrapper's `cliSessionId`, a different uuid (e.g. wrapper `local_6577b24c-…` → transcript `e640a2a8-….jsonl`). And the transcript's parent dir is the *munged cwd* (`D:\code\myapp\.claude\worktrees\funny-hypatia-5e54f7` → `D--code-myapp--claude-worktrees-funny-hypatia-5e54f7`), which occasionally doesn't derive from the wrapper's recorded cwd at all. All toolbox modes resolve via `cliSessionId` at the expected munged path first, then fall back to scanning every project dir for `<cliSessionId>.jsonl`.
 
 ## Run
 
@@ -124,7 +124,7 @@ Branch: claude/funny-hypatia-5e54f7
 ## Key context
 …
 
-Full transcript at C:\Users\Mack\.claude\projects\X--Roam-LCMap-…\e640a2a8-….jsonl (session 6577b24c-…, branch claude/funny-hypatia-5e54f7); consult it only if something specific is missing.
+Full transcript at C:\Users\<you>\.claude\projects\D--code-myapp-…\e640a2a8-….jsonl (session 6577b24c-…, branch claude/funny-hypatia-5e54f7); consult it only if something specific is missing.
 ```
 
 **Degrade, never hard-fail**: if the `claude` CLI is absent from PATH, or the call fails/times out (60s), recover falls back to the classic non-distilled pointer prompt (Title/Branch/Orig cwd/Transcript + tail-reading instruction) with a stderr warning and **exit 0** — worker unavailability is advisory, not an error. `--no-distill` forces the fallback (no LLM call at all).
@@ -138,10 +138,10 @@ Full transcript at C:\Users\Mack\.claude\projects\X--Roam-LCMap-…\e640a2a8-…
 
 ### `summon rebind <id> --cwd <newpath>` — fix cwd after a folder move
 
-When a project folder moves (e.g. `X:\Roam\LCMap` → `X:\Maplab\LCMap`), sessions bound to the old cwd fail to restart in the Desktop UI. Rebind repairs the binding:
+When a project folder moves (e.g. `D:\code\myapp` → `D:\archive\myapp`), sessions bound to the old cwd fail to restart in the Desktop UI. Rebind repairs the binding:
 
 ```bash
-summon rebind 6577b24c --cwd "X:\Maplab\LCMap\.claude\worktrees\funny-hypatia-5e54f7"
+summon rebind 6577b24c --cwd "D:\archive\myapp\.claude\worktrees\funny-hypatia-5e54f7"
 ```
 
 1. **Backs up** every matching wrapper to `~/.claude/summon-backups/<timestamp>/` (outside the live store) before touching anything
@@ -149,7 +149,7 @@ summon rebind 6577b24c --cwd "X:\Maplab\LCMap\.claude\worktrees\funny-hypatia-5e
 3. **Bridges the transcript**: Desktop resolves the transcript via the munged *new* cwd, so the `<cliSessionId>.jsonl` is copied (never moved) into the new munged project dir. `--no-transcript` skips this
 4. **Verifies** by re-reading the wrapper; on mismatch it restores from the backup
 5. If the same session was transfer-copied into several accounts, **all copies are rebound**
-6. When the new cwd is inside a `.claude\worktrees\` path, prints a reminder that **git worktree links break on folder moves** — run `git worktree repair <new-worktree-path>` from the repo root (verified fix 2026-07-03 on X:\Maplab\LCMap)
+6. When the new cwd is inside a `.claude\worktrees\` path, prints a reminder that **git worktree links break on folder moves** — run `git worktree repair <new-worktree-path>` from the repo root (verified fix 2026-07-03)
 
 `--dry-run` previews; `--force` allows a `--cwd` that doesn't exist yet. The new cwd must normally exist on disk. After a rebind, restart Desktop (or Logout/Login) so the sidebar re-reads the wrapper.
 
@@ -199,15 +199,15 @@ The template is deliberately self-contained: host CSS variables + the host's Tab
 Output follows the [Terminal Panel Design System](../../docs/TERMINAL-DESIGN.md) (panel header, body with `│` rail, footer, ASCII fallback when stdout isn't UTF-8). The candidate hierarchy is **Account → Project → Session**, with sessions globally numbered for picker selection (`3, 5, 7`).
 
 ```
-╭── 🪄 summon ──────────────────────────────────────────────── → mknv74 ───●
+╭── 🪄 summon ──────────────────────────────────────────────── → other-account ───●
 │
 ├── 4 sessions · from 1 account · last 3d
 │
 ├── dev@example.com (4)
-│   ├── X:\Projects\Axiom (2)
+│   ├── D:\code\project-one (2)
 │   │   ├──  1. train-fasttext                    30t            16h
 │   │   └──  2. make-doom-for-mips                64t            16h
-│   └── X:\Work\client-site (2)
+│   └── D:\work\client-site (2)
 │       ├──  3. timekeeper                        35t            16h
 │       └──  4. agency-os                         17t            16h
 │

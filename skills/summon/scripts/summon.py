@@ -23,7 +23,7 @@ Exit:    0 ok (including the non-distilled fallback — worker unavailability is
          found, 10 doctor found broken sessions
 
 Examples:
-  summon --to mknv74                          # transfer: push sessions to next account
+  summon --to other-account                   # transfer: push sessions to next account
   summon pick                                 # fzf/numbered picker -> distilled handover
   summon pick --json | jq '.data[]'           # machine-readable session inventory
   summon widget --days 30                      # finished in-chat card-picker HTML on stdout
@@ -31,7 +31,7 @@ Examples:
   summon recover 6577b24c --refresh           # ignore cached brief, re-distill
   summon recover 6577b24c --no-distill        # plain pointer prompt, no LLM call
   summon recover 6577b24c --model haiku       # distill with a different model
-  summon rebind 6577b24c --cwd X:\\Maplab\\LCMap\\.claude\\worktrees\\funny-hypatia-5e54f7
+  summon rebind 6577b24c --cwd D:\\archive\\myapp\\.claude\\worktrees\\funny-hypatia-5e54f7
   summon doctor                               # scan all sessions for broken cwd bindings
   summon doctor --json | jq '.data[]'
 
@@ -409,7 +409,7 @@ def encode_cwd(cwd: str) -> str:
     """Convert cwd to ~/.claude/projects/ subdir name.
 
     Each ':', '\\', '/', '.' becomes '-'; consecutive separators stay consecutive.
-    'X:\\Forge\\Axiom\\.claude\\worktrees\\foo' -> 'X--Forge-Axiom--claude-worktrees-foo'
+    'D:\\code\\myapp\\.claude\\worktrees\\foo' -> 'D--code-myapp--claude-worktrees-foo'
     """
     return (cwd
             .replace(":", "-")
@@ -2025,13 +2025,13 @@ def main():
         description="Claude Desktop session toolbox — cross-account transfer, "
                     "recovery picker, cwd rebind, store doctor.",
         epilog="examples:\n"
-               "  summon --to mknv74              push sessions to the next account\n"
+               "  summon --to other-account       push sessions to the next account\n"
                "  summon pick                     picker -> distilled handover brief\n"
                "  summon widget --days 30         finished in-chat card-picker HTML on stdout\n"
                "  summon recover 6577b24c         distilled handover brief for one session\n"
                "  summon recover 6577b24c --no-distill   plain pointer prompt, no LLM call\n"
                "  summon recover 6577b24c --refresh      ignore cached brief, re-distill\n"
-               "  summon rebind 6577b24c --cwd X:\\Maplab\\LCMap   fix cwd after folder move\n"
+               "  summon rebind 6577b24c --cwd D:\\archive\\myapp   fix cwd after folder move\n"
                "  summon doctor                   scan for broken cwd bindings\n",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

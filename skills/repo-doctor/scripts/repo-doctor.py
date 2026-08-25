@@ -26,7 +26,7 @@ Dimensions scored (0-5 each, weighted into the grade):
 
 Examples:
   repo-doctor.py                          # audit the cwd, human panel
-  repo-doctor.py --repo X:/DnD/Simulacra  # audit another repo
+  repo-doctor.py --repo D:/code/other-repo  # audit another repo
   repo-doctor.py --json | jq .data.grade  # machine-readable
   repo-doctor.py --strict                 # exit 10 if grade < B (CI gate)
   repo-doctor.py --top 15                 # show 15 findings instead of 10
@@ -507,7 +507,7 @@ def main() -> int:
                     "(rules/agentic-quality.md). Read-only.",
         epilog="EXAMPLES:\n"
                "  repo-doctor.py\n"
-               "  repo-doctor.py --repo X:/DnD/Simulacra --json\n"
+               "  repo-doctor.py --repo D:/code/other-repo --json\n"
                "  repo-doctor.py --strict   # CI gate: exit 10 below grade B\n",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--repo", default=".", help="repo path (default: cwd)")

@@ -19,7 +19,7 @@ A common pattern: a web service + a worker daemon that talks to the same DB or q
 processes:
   webapp:
     command: "uv run python manage.py serve --port 8000"
-    working_dir: "X:/Forge/MyApp"
+    working_dir: "D:/code/MyApp"
     readiness_probe:
       http_get: { host: localhost, port: 8000, path: / }
       initial_delay_seconds: 10
@@ -27,7 +27,7 @@ processes:
 
   worker:
     command: "uv run python -m myapp.worker"
-    working_dir: "X:/Forge/MyApp"
+    working_dir: "D:/code/MyApp"
     depends_on:
       webapp:
         condition: process_healthy

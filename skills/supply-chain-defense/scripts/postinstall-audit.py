@@ -27,7 +27,7 @@ Exit:    0 clean, 2 usage, 3 root-not-found, 5 missing-dep (--deep w/o engine
 
 Examples:
   postinstall-audit.py --root ~/code
-  postinstall-audit.py --root X:/Forge --root X:/Lab --json | jq '.data.findings[]'
+  postinstall-audit.py --root D:/code --root D:/lab --json | jq '.data.findings[]'
   postinstall-audit.py --root . --min-severity high --findings-only
   postinstall-audit.py --root . --deep          # confirm flags with GuardDog
   postinstall-audit.py --root . --live          # registry-unpublished check
@@ -370,7 +370,7 @@ def main():
         description="Behavioural scan of installed npm/PyPI packages (post-install gap).",
         epilog="Examples:\n"
                "  postinstall-audit.py --root ~/code\n"
-               "  postinstall-audit.py --root X:/Forge --json | jq '.data.findings[]'\n"
+               "  postinstall-audit.py --root D:/code --json | jq '.data.findings[]'\n"
                "  postinstall-audit.py --root . --deep --min-severity high\n",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--root", action="append", default=None, metavar="DIR")

@@ -320,7 +320,7 @@ function New-TermPanelOpen {
     .PARAMETER Subtitle
         Optional subtitle after the name (e.g. 'health-audit').
     .PARAMETER Indicator
-        Optional right-side context indicator (e.g. 'TITAN', 'Y / Disk 1').
+        Optional right-side context indicator (e.g. 'WORKSTATION', 'Y / Disk 1').
     #>
     [CmdletBinding()]
     param(

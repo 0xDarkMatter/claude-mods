@@ -215,7 +215,7 @@ pixelation post-process here if the target is pixel art.
 
 **Lightweight alternative — iso-studio blockout export.** The Blender route is powerful
 but heavy. The companion **iso-studio** app (standalone repo, local checkout
-`X:\Forge\iso-studio`, launch with `node server.mjs`) exports a blockout **depth map**
+github.com/0xDarkMatter/iso-studio, launch with `node server.mjs`) exports a blockout **depth map**
 (per-instance flat grey, elevation-aware, normalized near-white → far-black —
 massing-grade conditioning) and a **lineart render** (visible edges, black on white)
 directly from a scene composed against its `scene-schema.json` — the same dual-control

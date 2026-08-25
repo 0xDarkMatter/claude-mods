@@ -27,7 +27,7 @@ REPO_ROOT=""
 # caller's own shell.
 #
 # cygpath -m is not cosmetic here. Git Bash's `pwd` yields "/x/Forge/repo" while
-# `git worktree list` yields "X:/Forge/repo"; string-comparing those two never
+# `git worktree list` yields "D:/code/repo"; string-comparing those two never
 # matches, and the guard silently stops guarding. Converting to git's own
 # mixed form is what makes the comparison mean anything on Windows.
 INVOKED_FROM="$(pwd -P 2>/dev/null || pwd)"
@@ -1320,7 +1320,7 @@ prune_discover_repos() {
   if [[ $# -gt 0 ]]; then
     roots=("$@")
   elif [[ -n "${FLEET_PRUNE_ROOTS:-}" ]]; then
-    # ';'-separated, NOT ':' — a Windows root is "X:/Forge" and would split.
+    # ';'-separated, NOT ':' — a Windows root is "D:/code" and would split.
     local IFS=';' r
     for r in $FLEET_PRUNE_ROOTS; do [[ -n "$r" ]] && roots+=("$r"); done
   else

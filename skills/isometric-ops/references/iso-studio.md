@@ -7,7 +7,7 @@ extracted so the plugin stays lean while the app evolves on its own release cade
 
 | | |
 |---|---|
-| Local checkout | `X:\Forge\iso-studio` |
+| Local checkout | wherever you cloned it — see Repository below |
 | Repository | `https://github.com/0xDarkMatter/iso-studio` |
 | Launch | `node server.mjs` → http://localhost:4323 (`PORT` env overrides) |
 | Manual | `docs/MANUAL.md` in the app repo — workspace tour, hotkeys, scene schema, known limits |
@@ -44,6 +44,6 @@ shipping sheets with [`sheet-pack.py`](../scripts/sheet-pack.py).
 If the local checkout is missing, clone it:
 
 ```
-git clone https://github.com/0xDarkMatter/iso-studio X:\Forge\iso-studio
-node X:\Forge\iso-studio\server.mjs
+git clone https://github.com/0xDarkMatter/iso-studio
+node iso-studio/server.mjs
 ```

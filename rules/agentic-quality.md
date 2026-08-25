@@ -32,8 +32,8 @@ Three non-negotiables:
 
 ## Why this matters
 
-A 2026-07 audit of 10 active repos on this machine found the single best (GlyphWeb,
-4.8/5) and one of the weakest (Simulacra, 3.2/5) were built by the same developer with
+A 2026-07 audit of 10 active repos on this machine found the single best
+(4.8/5) and one of the weakest (3.2/5) were built by the same developer with
 the same tooling in the same month. The difference was never effort — it was whether the
 conventions below were *applied as-you-go* vs deferred. The recurring failures, every
 one of them expensive for agents: 9,560-line files navigable only by grep; docs lagging

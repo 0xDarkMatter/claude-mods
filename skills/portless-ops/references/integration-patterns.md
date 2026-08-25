@@ -129,12 +129,12 @@ Portless auto-detects git worktrees and prepends the branch name as a subdomain:
 
 ```bash
 # Main worktree
-cd X:/Forge/myapp
+cd D:/code/myapp
 portless run next dev
 # → https://myapp.test
 
 # Linked worktree on branch "fix-ui"
-cd X:/Forge/myapp/.worktrees/fix-ui
+cd D:/code/myapp/.worktrees/fix-ui
 portless run next dev
 # → https://fix-ui.myapp.test
 ```
