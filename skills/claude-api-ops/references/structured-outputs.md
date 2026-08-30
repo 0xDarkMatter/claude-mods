@@ -7,8 +7,9 @@ Two related features, same constrained-sampling mechanism:
 | **JSON outputs** | `output_config: {"format": {...}}` | Claude's response text (guaranteed valid JSON matching your schema) |
 | **Strict tool use** | `strict: true` on a tool definition | The `input` of tool calls |
 
-They can be combined in one request. Supported on Opus 4.8/4.7/4.6/4.5,
-Sonnet 4.6/4.5, Haiku 4.5 - **NOT Fable 5**. On Fable 5, enforce output shape
+They can be combined in one request. Supported on Fable 5, Opus 5, Sonnet 5, and
+the legacy Opus 4.8/4.7/4.6/4.5 and Sonnet 4.6/4.5 line; Haiku 4.5 needs its dated
+id (`claude-haiku-4-5-20251001`). Where a model lacks support, enforce output shape
 via system-prompt instructions (the documented prefill replacement for that
 model) or strict tool use instead.
 
@@ -25,7 +26,7 @@ import json, anthropic
 
 client = anthropic.Anthropic()
 response = client.messages.create(
-    model="claude-opus-4-8",
+    model="claude-opus-5",
     max_tokens=16000,
     messages=[{"role": "user",
                "content": "Extract: John Smith (john@example.com) wants the Enterprise plan."}],
@@ -53,7 +54,7 @@ cURL shape:
 
 ```json
 {
-  "model": "claude-opus-4-8",
+  "model": "claude-opus-5",
   "max_tokens": 1024,
   "output_config": {
     "format": {"type": "json_schema", "schema": { ... }}
@@ -74,7 +75,7 @@ class ContactInfo(BaseModel):
     demo_requested: bool
 
 response = client.messages.parse(
-    model="claude-opus-4-8",
+    model="claude-opus-5",
     max_tokens=16000,
     messages=[{"role": "user", "content": "Extract: Jane Doe (jane@co.com), Enterprise, wants a demo."}],
     output_format=ContactInfo,          # parse() convenience kwarg
@@ -94,7 +95,7 @@ const ContactInfo = z.object({
 });
 
 const response = await client.messages.parse({
-  model: "claude-opus-4-8",
+  model: "claude-opus-5",
   max_tokens: 16000,
   output_config: { format: zodOutputFormat(ContactInfo) },
   messages: [{ role: "user", content: "Extract: ..." }],
@@ -179,7 +180,7 @@ target shape as `input_schema`. Decision now:
 | Valid *parameters* for a real action/function | tool + `strict: true` |
 | Extraction **while thinking is enabled** | `output_config.format` — forced `tool_choice` is a 400 with thinking on |
 | Extraction mid-agentic-loop (model also has other tools) | A strict "report/record" tool keeps the loop uniform |
-| Legacy prefill (`{"name": "` assistant prefill) | Dead on 4.6+ models (400) — migrate to `output_config.format` |
+| Legacy prefill (`{"name": "` assistant prefill) | Dead on Opus 4.7+ models (400) — migrate to `output_config.format` |
 
 ## Thinking interplay
 
@@ -187,6 +188,6 @@ target shape as `input_schema`. Decision now:
   thinks, then the final text block conforms to the schema.
 - Forced tool extraction does **not** work with thinking
   (`tool_choice: any/tool` + thinking = 400). This is the main reason to
-  prefer `output_config.format` for extraction on 4.6+ models.
+  prefer `output_config.format` for extraction on current models.
 - Effort and format coexist in `output_config`:
   `output_config={"effort": "medium", "format": {...}}`.

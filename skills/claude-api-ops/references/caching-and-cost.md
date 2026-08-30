@@ -18,7 +18,7 @@ tools + system together.
 
 ```python
 response = client.messages.create(
-    model="claude-opus-4-8",
+    model="claude-opus-5",
     max_tokens=16000,
     system=[{
         "type": "text",
@@ -32,7 +32,7 @@ response = client.messages.create(
 
 ```typescript
 const response = await client.messages.create({
-  model: "claude-opus-4-8",
+  model: "claude-opus-5",
   max_tokens: 16000,
   system: [{ type: "text", text: LARGE_STABLE_PROMPT,
              cache_control: { type: "ephemeral" } }],
@@ -44,7 +44,7 @@ Simplest option — top-level auto-caching (caches the last cacheable block, no
 per-block markers):
 
 ```python
-client.messages.create(model="claude-opus-4-8", max_tokens=16000,
+client.messages.create(model="claude-opus-5", max_tokens=16000,
                        cache_control={"type": "ephemeral"},
                        system=big_doc, messages=[...])
 ```
@@ -61,8 +61,12 @@ Rules:
 |---|---:|
 | Opus 4.6 / 4.5, Haiku 4.5 | 4096 |
 | Opus 4.7 | 2048 |
-| Opus 4.8, Sonnet 4.6, Sonnet 4.5 | 1024 |
-| Fable 5 | 512 |
+| Sonnet 5, Opus 4.8, Sonnet 4.6, Sonnet 4.5 | 1024 |
+| Opus 5, Fable 5 | 512 |
+
+Note the shape: the newest models cache *sooner* (512) while Haiku 4.5 — the
+cheapest model, and the one you'd most want to cache in bulk — needs the largest
+prefix (4096). Sizing a shared prefix for Haiku covers every other model too.
 
 ### Pricing & break-even
 
@@ -179,7 +183,7 @@ for result in client.messages.batches.results(batch.id):
 const batch = await client.messages.batches.create({
   requests: [{
     custom_id: "request-1",
-    params: { model: "claude-sonnet-4-6", max_tokens: 1024,
+    params: { model: "claude-sonnet-5", max_tokens: 1024,
               messages: [{ role: "user", content: "Summarize..." }] },
   }],
 });
@@ -212,10 +216,10 @@ Worked example, 10M input + 1M output tokens/day:
 
 | Strategy | Cost/day |
 |---|---|
-| Everything Opus 4.8 | 10×$5 + 1×$25 = **$75** |
-| Everything Sonnet 4.6 | 10×$3 + 1×$15 = **$45** |
-| Route: 80% Haiku, 15% Sonnet, 5% Opus | ≈ 8×$1 + 1.5×$3 + 0.5×$5 + (output pro-rata ≈ $6.5) = **~$21.5** |
-| Same + cached system prompts (70% of input cached) | **~$8-10** |
+| Everything Opus 5 | 10×$5 + 1×$25 = **$75** |
+| Everything Sonnet 5 | 10×$2 + 1×$10 = **$30** |
+| Route: 80% Haiku, 15% Sonnet, 5% Opus | input 8×$1 + 1.5×$2 + 0.5×$5 = $13.5; output 0.8×$5 + 0.15×$10 + 0.05×$25 = $6.75 = **~$20** |
+| Same + cached system prompts (70% of input cached at ~0.1x) | input → ~$5 = **~$12** |
 | Same + batchable share moved to Batches | **lower still (50% off that share)** |
 
 Patterns:
@@ -234,8 +238,8 @@ Patterns:
 
 ```python
 count = client.messages.count_tokens(
-    model="claude-opus-4-8", system=system, tools=tools, messages=messages)
-est_input_cost = count.input_tokens * 5.00 / 1_000_000   # Opus 4.8 input rate
+    model="claude-opus-5", system=system, tools=tools, messages=messages)
+est_input_cost = count.input_tokens * 5.00 / 1_000_000   # Opus 5 input rate
 ```
 
 - Free endpoint; counts include tools and system.

@@ -61,13 +61,17 @@ echo "-- negative --"
 cp -r "$SKILL" "$SB/copy"
 # Append the date suffix SKILL.md explicitly forbids ("Never append date
 # suffixes"). The verifier's DATE_SUFFIX_RE must flag it as VALIDATION drift.
-# Target the table cell uniquely (the prose never pairs "Opus 4.8 |" with the
-# backticked id) so the edit is surgical.
+# Target the table cell uniquely (the prose never pairs "Opus 5 |" with the
+# backticked id) so the edit is surgical. If the lineup changes and this string
+# stops matching, the copy stays clean and the exit-4 assertion below fails loudly
+# rather than silently passing on an unmodified file.
 "$PYTHON" - "$SB/copy/SKILL.md" <<'PY'
 import pathlib, sys
 p = pathlib.Path(sys.argv[1])
 t = p.read_text(encoding="utf-8")
-t = t.replace("Opus 4.8 | `claude-opus-4-8`", "Opus 4.8 | `claude-opus-4-8-20251114`")
+src = "Opus 5 | `claude-opus-5`"
+assert src in t, "negative-test fixture no longer matches SKILL.md model table"
+t = t.replace(src, "Opus 5 | `claude-opus-5-20260724`")
 p.write_text(t, encoding="utf-8")
 PY
 "$PYTHON" "$SB/copy/scripts/check-model-table.py" --offline >"$SB/neg.out" 2>&1

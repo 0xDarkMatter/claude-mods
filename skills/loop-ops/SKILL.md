@@ -310,7 +310,7 @@ is the source of truth — run its `check-model-table.py` if you suspect drift).
 
 ```bash
 python scripts/loop-estimate.py --pattern pr-watch --cadence 10m --model claude-haiku-4-5
-python scripts/loop-estimate.py --pattern ci-watch --cadence 15m --model claude-sonnet-4-6 --days 30 --json
+python scripts/loop-estimate.py --pattern ci-watch --cadence 15m --model claude-sonnet-5 --days 30 --json
 python scripts/loop-estimate.py --list-models      # the pricing table + its as-of date
 ```
 

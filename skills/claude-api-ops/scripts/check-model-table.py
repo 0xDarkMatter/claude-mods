@@ -104,7 +104,7 @@ MODELS_API = "https://api.anthropic.com/v1/models?limit=1000"
 ANTHROPIC_VERSION = "2023-06-01"
 
 # A well-formed alias id: claude-<word>-<digit>... and NO date suffix.
-# Accepts claude-opus-4-8, claude-fable-5, claude-sonnet-4-6, claude-haiku-4-5.
+# Accepts claude-opus-5, claude-fable-5, claude-sonnet-5, claude-haiku-4-5.
 ID_RE = re.compile(r"^claude-[a-z]+-\d+(?:-\d+)?$")
 # A date suffix looks like an 8-digit run (e.g. -20251114).
 DATE_SUFFIX_RE = re.compile(r"-\d{8}$")

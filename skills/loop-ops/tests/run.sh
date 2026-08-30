@@ -219,12 +219,12 @@ out="$("$PYTHON" "$COST" --pattern pr-watch --cadence 10m --model claude-haiku-4
 expect_exit "loop-estimate -> 0" 0 "$rc"
 expect_has  "prints a daily cost" "cost/day:" "$out"
 expect_has  "derives runs/day from 10m" "144 runs/day" "$out"
-out="$("$PYTHON" "$COST" --pattern ci-watch --cadence 15m --model claude-sonnet-4-6 --json 2>/dev/null)"
+out="$("$PYTHON" "$COST" --pattern ci-watch --cadence 15m --model claude-sonnet-5 --json 2>/dev/null)"
 expect_has "cost json schema" "claude-mods.loop-ops.estimate/v1" "$out"
 expect_has "cost json carries runs_per_day" "runs_per_day" "$out"
 out="$("$PYTHON" "$COST" --list-models 2>/dev/null)"; rc=$?
 expect_exit "list-models -> 0" 0 "$rc"
-expect_has  "list-models shows a model" "claude-opus-4-8" "$out"
+expect_has  "list-models shows a model" "claude-opus-5" "$out"
 # cron cadence parses
 "$PYTHON" "$COST" --pattern daily-scan --cadence '*/10 * * * *' --model claude-haiku-4-5 >/dev/null 2>&1
 expect_exit "cron cadence -> 0" 0 $?
@@ -233,16 +233,16 @@ out="$("$PYTHON" "$COST" --pattern custom --cadence weird --runs-per-day 5 --mod
 expect_exit "runs-per-day override -> 0" 0 "$rc"
 expect_has  "uses the override" "5 runs/day" "$out"
 # caching: a fast loop (10m -> 1h TTL) projects a cached saving
-out="$("$PYTHON" "$COST" --pattern ci-watch --cadence 10m --model claude-sonnet-4-6 2>&1)"
+out="$("$PYTHON" "$COST" --pattern ci-watch --cadence 10m --model claude-sonnet-5 2>&1)"
 expect_has "fast loop shows a cached projection" "cached/" "$out"
 # caching: a slow loop (6h > 1h TTL) is not cache-beneficial
-out="$("$PYTHON" "$COST" --pattern daily-scan --cadence 6h --model claude-opus-4-8 2>&1)"
+out="$("$PYTHON" "$COST" --pattern daily-scan --cadence 6h --model claude-opus-5 2>&1)"
 expect_has "slow loop: caching not beneficial" "not beneficial" "$out"
 # --no-cache suppresses the cached projection
-out="$("$PYTHON" "$COST" --pattern ci-watch --cadence 10m --model claude-sonnet-4-6 --no-cache 2>&1)"
+out="$("$PYTHON" "$COST" --pattern ci-watch --cadence 10m --model claude-sonnet-5 --no-cache 2>&1)"
 case "$out" in *"cached/"*) no "--no-cache still showed caching";; *) ok "--no-cache suppresses caching";; esac
 # json caching block present for a cacheable loop
-out="$("$PYTHON" "$COST" --pattern ci-watch --cadence 5m --model claude-sonnet-4-6 --json 2>/dev/null)"
+out="$("$PYTHON" "$COST" --pattern ci-watch --cadence 5m --model claude-sonnet-5 --json 2>/dev/null)"
 expect_has "cost json carries caching block" '"caching"' "$out"
 
 # ── loop-doctor: preflight (offline budget, live binary), json ─────────────

@@ -22,8 +22,8 @@ model tier.
 
 Examples:
   loop-estimate.py --pattern pr-watch --cadence 10m --model claude-haiku-4-5
-  loop-estimate.py --pattern ci-watch --cadence 15m --model claude-sonnet-4-6 --days 30 --json
-  loop-estimate.py --pattern daily-scan --cadence 6h --model claude-opus-4-8   # too slow to cache
+  loop-estimate.py --pattern ci-watch --cadence 15m --model claude-sonnet-5 --days 30 --json
+  loop-estimate.py --pattern daily-scan --cadence 6h --model claude-opus-5   # too slow to cache
   loop-estimate.py --list-models
 """
 from __future__ import annotations
@@ -51,8 +51,8 @@ CACHE_READ = 0.1        # read any cached entry
 # ignored (caching-and-cost.md). A loop whose static prefix is smaller can't cache.
 MIN_PREFIX = {
     "claude-fable-5": 512,
-    "claude-opus-4-8": 1024,
-    "claude-sonnet-4-6": 1024,
+    "claude-opus-5": 512,
+    "claude-sonnet-5": 1024,
     "claude-haiku-4-5": 4096,
 }
 DEFAULT_MIN_PREFIX = 1024

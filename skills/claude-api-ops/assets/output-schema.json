@@ -1,6 +1,6 @@
 {
-  "_comment": "Canonical structured-outputs request body for the Anthropic Messages API. Pass the `output_config` object below in client.messages.create(...). This is the current `output_config.format` shape — NOT the deprecated top-level `output_format` param. Adapt `schema.properties` and `required` to your data; keep `additionalProperties: false` so the model can't add stray keys. Supported on Opus 4.8/4.7/4.6/4.5, Sonnet 4.6/4.5, Haiku 4.5 — NOT Fable 5 (use system-prompt instructions or strict tool use there).",
-  "model": "claude-opus-4-8",
+  "_comment": "Canonical structured-outputs request body for the Anthropic Messages API. Pass the `output_config` object below in client.messages.create(...). This is the current `output_config.format` shape — NOT the deprecated top-level `output_format` param. Adapt `schema.properties` and `required` to your data; keep `additionalProperties: false` so the model can't add stray keys. Supported on Fable 5, Opus 5, Sonnet 5, and the legacy Opus 4.8/4.7/4.6/4.5 and Sonnet 4.6/4.5 line; Haiku 4.5 requires its dated id claude-haiku-4-5-20251001.",
+  "model": "claude-opus-5",
   "max_tokens": 1024,
   "messages": [
     {

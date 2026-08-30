@@ -59,7 +59,7 @@ Gotchas:
   `none` are compatible with thinking. To force a tool while thinking, prompt
   for it instead, or disable thinking for that call.
 - `any`/`tool` add more tool-use system-prompt tokens than `auto`/`none` (e.g.
-  410 vs 290 on Opus 4.8).
+  410 vs 290 on Opus 5).
 - Changing `tool_choice` between requests does **not** invalidate the
   tools+system prompt cache (message cache only).
 
@@ -100,7 +100,7 @@ messages = [{"role": "user", "content": user_input}]
 
 while True:
     response = client.messages.create(
-        model="claude-opus-4-8",
+        model="claude-opus-5",
         max_tokens=16000,
         tools=tools,
         messages=messages,
@@ -144,7 +144,7 @@ const messages: Anthropic.MessageParam[] = [{ role: "user", content: userInput }
 
 while (true) {
   const response = await client.messages.create({
-    model: "claude-opus-4-8", max_tokens: 16000, tools, messages,
+    model: "claude-opus-5", max_tokens: 16000, tools, messages,
   });
 
   if (response.stop_reason === "end_turn") break;
@@ -218,7 +218,7 @@ def get_weather(location: str, unit: str = "celsius") -> str:
     return f"22°C and sunny in {location}"
 
 runner = client.beta.messages.tool_runner(
-    model="claude-opus-4-8", max_tokens=16000,
+    model="claude-opus-5", max_tokens=16000,
     tools=[get_weather],
     messages=[{"role": "user", "content": "Weather in Paris?"}],
 )
@@ -241,7 +241,7 @@ const getWeather = betaZodTool({
 });
 
 const finalMessage = await client.beta.messages.toolRunner({
-  model: "claude-opus-4-8", max_tokens: 16000,
+  model: "claude-opus-5", max_tokens: 16000,
   tools: [getWeather],
   messages: [{ role: "user", content: "Weather in Paris?" }],
 });

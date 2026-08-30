@@ -9,7 +9,7 @@ Run:  pip install anthropic   (then: export ANTHROPIC_API_KEY=sk-...)
       python agentic-loop.py
 
 Copy this file and adapt the >>> ADAPT marks for your own tools.
-Reflects the current API (model claude-opus-4-8, typed content blocks).
+Reflects the current API (model claude-opus-5, typed content blocks).
 """
 # The Anthropic SDK accepts plain dict literals for tools/messages at runtime
 # (as the official docs show), but its strict TypedDict stubs over-narrow them.
@@ -20,7 +20,7 @@ import anthropic
 
 client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from the environment
 
-MODEL = "claude-opus-4-8"  # >>> ADAPT: pick a tier (see the skill's model table)
+MODEL = "claude-opus-5"  # >>> ADAPT: pick a tier (see the skill's model table)
 
 
 # --- 1. Define your tool(s) ------------------------------------------------

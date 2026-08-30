@@ -22,18 +22,18 @@ and the API rejects the request.
 
 | Param | Type | Required | Notes |
 |---|---|---|---|
-| `model` | string | yes | Exact alias ID, e.g. `claude-opus-4-8` — no date suffixes |
+| `model` | string | yes | Exact alias ID, e.g. `claude-opus-5` — no date suffixes |
 | `max_tokens` | int | yes | Hard output cap. Default sensibly: ~16000 non-streaming, ~64000 streaming, ~256 classification |
 | `messages` | array | yes | Alternating `user`/`assistant` turns; first must be `user`. Consecutive same-role messages are merged |
 | `system` | string \| block[] | no | System prompt. Block-list form required for `cache_control` |
 | `tools` | array | no | Custom + server tool definitions (see tool-use.md) |
 | `tool_choice` | object | no | `auto` (default) / `any` / `tool` / `none` |
-| `thinking` | object | no | `{"type": "adaptive"}` on 4.6+; `{"type": "enabled", "budget_tokens": N}` legacy models only |
+| `thinking` | object | no | Adaptive; **on by default** on Fable 5 / Opus 5 / Sonnet 5. `{"type": "enabled", "budget_tokens": N}` 400s on Opus 4.7+ |
 | `output_config` | object | no | `{"effort": "...", "format": {...}, "task_budget": {...}}` |
 | `stop_sequences` | string[] | no | Custom stop strings |
 | `stream` | bool | no | SSE streaming |
 | `metadata` | object | no | `{"user_id": "..."}` — opaque end-user id for abuse detection |
-| `temperature` / `top_p` / `top_k` | number | no | **Removed on Fable 5 / Opus 4.8 / 4.7 (400).** On other 4.x: at most one of temperature/top_p |
+| `temperature` / `top_p` / `top_k` | number | no | **Removed on Opus 4.7 and later (400)** — Opus 5, Sonnet 5, Fable 5 included. On earlier 4.x: at most one of temperature/top_p |
 | `cache_control` | object | no | Top-level auto-caching: caches the last cacheable block |
 | `container` | string | no | Reuse a code-execution container id |
 | `mcp_servers` | array | no | Remote MCP connector (beta `mcp-client-2025-11-20`) |
@@ -59,7 +59,7 @@ and the API rejects the request.
   "id": "msg_01...",
   "type": "message",
   "role": "assistant",
-  "model": "claude-opus-4-8",
+  "model": "claude-opus-5",
   "content": [
     {"type": "thinking", "thinking": "...", "signature": "..."},
     {"type": "text", "text": "Hello!"},
@@ -104,7 +104,7 @@ The API is stateless — send the full history every request:
 messages = []
 def chat(user_msg: str) -> str:
     messages.append({"role": "user", "content": user_msg})
-    r = client.messages.create(model="claude-opus-4-8", max_tokens=16000, messages=messages)
+    r = client.messages.create(model="claude-opus-5", max_tokens=16000, messages=messages)
     # Append the FULL content list (preserves tool_use/thinking/compaction blocks)
     messages.append({"role": "assistant", "content": r.content})
     return next(b.text for b in r.content if b.type == "text")
@@ -119,7 +119,7 @@ state is silently lost.
 ## Streaming
 
 ```python
-with client.messages.stream(model="claude-opus-4-8", max_tokens=64000,
+with client.messages.stream(model="claude-opus-5", max_tokens=64000,
                             messages=[...]) as stream:
     for text in stream.text_stream:
         print(text, end="", flush=True)
@@ -128,7 +128,7 @@ print(final.usage.output_tokens)
 ```
 
 ```typescript
-const stream = client.messages.stream({ model: "claude-opus-4-8", max_tokens: 64000, messages });
+const stream = client.messages.stream({ model: "claude-opus-5", max_tokens: 64000, messages });
 stream.on("text", (delta) => process.stdout.write(delta));
 const final = await stream.finalMessage();   // never wrap .on() in new Promise()
 ```
@@ -156,7 +156,7 @@ estimates will run >~10 min). Default to streaming for anything long.
 
 | HTTP | `error.type` | Retryable | Typical cause |
 |---|---|---|---|
-| 400 | `invalid_request_error` | no | Bad params: removed sampling params, `budget_tokens` on 4.7+, prefill on 4.6+, role ordering |
+| 400 | `invalid_request_error` | no | Bad params: removed sampling params, `budget_tokens` on 4.7+, prefill on 4.7+, modified thinking blocks, role ordering |
 | 401 | `authentication_error` | no | Missing/invalid key; both key + token set |
 | 403 | `permission_error` | no | Key lacks model/feature access |
 | 404 | `not_found_error` | no | Bad model ID (date-suffix mistake) or endpoint |
@@ -270,7 +270,7 @@ without running it:
 
 ```python
 n = client.messages.count_tokens(
-    model="claude-opus-4-8",
+    model="claude-opus-5",
     system=system, tools=tools,
     messages=[{"role": "user", "content": text}],
 ).input_tokens
