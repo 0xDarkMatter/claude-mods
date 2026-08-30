@@ -129,5 +129,60 @@ if [ -n "$PWSH" ]; then
   done
 fi
 
+# -- process-triage: steady-state runaway/orphan/stale triage --------------
+# Two invariants carry real safety weight and are asserted structurally rather
+# than left to review:
+#   1. the script NEVER terminates anything (it reports; the caller kills), and
+#   2. it resolves this session's own ancestry and marks it protected, so a
+#      caller cannot be walked into killing the shell reading the output.
+# Both were the difference between a clean cleanup and ending the session that
+# was doing it (2026-08-30).
+echo "-- process-triage --"
+PT="$SCRIPTS/process-triage.ps1"
+[ -f "$PT" ] && ok "process-triage.ps1 present" || no "process-triage.ps1 missing"
+
+# Invariant 1: report-only. Any termination cmdlet here is a contract break.
+if grep -nE '(^|[^-])\b(Stop-Process|taskkill|\.Kill\(\))' "$PT" >/dev/null 2>&1; then
+  no "process-triage.ps1 can terminate processes (must be report-only)"
+else ok "process-triage.ps1 never terminates (report-only contract)"; fi
+
+# Invariant 2: self-ancestry guard exists and is wired to the output.
+grep -q 'selfChain' "$PT" && ok "self-ancestry chain computed" || no "no self-ancestry chain"
+grep -q 'protected' "$PT" && ok "rows carry a protected flag" || no "no protected flag on rows"
+# The chain must be built BEFORE either reporting mode can run, or a mode could
+# emit rows with no protection resolved.
+awk '/selfChain = New-Object/{c=NR} /TREE MODE/{t=NR} END{exit !(c && t && c<t)}' "$PT" \
+  && ok "self-ancestry resolved before any reporting path" \
+  || no "self-ancestry resolved after a reporting path"
+
+grep -q 'EXAMPLES' "$PT" && ok "help includes EXAMPLES section" || no "help has no EXAMPLES section"
+grep -q 'claude-mods.windows-ops.process-triage/v1' "$PT" && ok "JSON envelope declares a schema" || no "no schema in JSON envelope"
+grep -q 'exit 10' "$PT" && ok "findings exit 10 (domain signal)" || no "findings do not exit 10"
+
+if [ -n "$PWSH" ]; then
+  WPT="$(winpath "$PT")"
+  "$PWSH" -NoProfile -File "$WPT" -Help >/dev/null 2>&1; rc=$?
+  [ "$rc" = "0" ] && ok "-Help exits 0" || no "-Help exits $rc, expected 0"
+  "$PWSH" -NoProfile -File "$WPT" -Help 2>/dev/null | grep -q 'EXAMPLES' \
+    && ok "-Help prints EXAMPLES to stdout" || no "-Help does not print EXAMPLES to stdout"
+  "$PWSH" -NoProfile -File "$WPT" -Sample 1 >/dev/null 2>&1; rc=$?
+  [ "$rc" = "2" ] && ok "-Sample below floor -> exit 2" || no "-Sample 1 -> exit $rc, expected 2"
+  "$PWSH" -NoProfile -File "$WPT" -Threshold 99999 >/dev/null 2>&1; rc=$?
+  [ "$rc" = "2" ] && ok "-Threshold out of range -> exit 2" || no "-Threshold 99999 -> exit $rc, expected 2"
+  "$PWSH" -NoProfile -File "$WPT" -Tree 999999 >/dev/null 2>&1; rc=$?
+  [ "$rc" = "3" ] && ok "-Tree on absent PID -> exit 3" || no "-Tree 999999 -> exit $rc, expected 3"
+
+  # Happy path (test floor): -Tree on the CALLING process runs and emits valid
+  # JSON. Invoking with & keeps $PID the same process, so the script's own
+  # ancestry walk must mark that row protected — the guard, proven at runtime.
+  jout="$("$PWSH" -NoProfile -Command "& '$WPT' -Tree \$PID -Json -Quiet" 2>/dev/null)"
+  if printf '%s' "$jout" | grep -q '"schema":"claude-mods.windows-ops.process-triage/v1"'; then
+    ok "-Tree emits a valid JSON envelope"
+  else no "-Tree JSON envelope missing or malformed"; fi
+  if printf '%s' "$jout" | grep -q '"protected":true'; then
+    ok "self PID marked protected=true at runtime"
+  else no "self PID NOT marked protected at runtime (safety guard broken)"; fi
+fi
+
 echo "=== $PASS passed, $FAIL failed ==="
 [ "$FAIL" -eq 0 ] || exit 1

@@ -1,6 +1,6 @@
 ---
 name: windows-ops
-description: "Comprehensive Windows workstation operations - diagnose slow boot, failing drives, BSOD crashes, startup bloat, event logs. Use for: Windows is slow, slow bootup, won't boot, blue screen, BSOD, kernel crash, drive failing, SMART errors, disk errors, Event 41, Event 129, storahci reset, BugCheck, CRITICAL_PROCESS_DIED, crash dump, MEMORY.DMP, minidump, msconfig, services.msc, registry Run keys, StartupApproved, scheduled tasks at logon, slow login, high CPU at boot, disable startup app, unexplained UAC prompt, what asked for admin, prefetch forensics, BAM, process attribution, Security 4688. A drive letter alone does not name the skill: mapped network drive, SMB, UNC, NAS route to net-ops."
+description: "Comprehensive Windows workstation operations - diagnose slow boot, failing drives, BSOD crashes, startup bloat, runaway processes, event logs. Use for: Windows is slow, slow bootup, won't boot, blue screen, BSOD, kernel crash, drive failing, SMART errors, disk errors, Event 41, Event 129, storahci reset, BugCheck, CRITICAL_PROCESS_DIED, crash dump, MEMORY.DMP, minidump, msconfig, services.msc, registry Run keys, StartupApproved, scheduled tasks at logon, slow login, high CPU at boot, disable startup app, unexplained UAC prompt, what asked for admin, prefetch forensics, BAM, process attribution, Security 4688, high CPU, runaway process, spinning process, process eating CPU, memory commit exhausted, out of memory, too many processes, what is using my RAM, orphaned process, stale processes, zombie process, kill a process tree, machine is hot, fans are loud. A drive letter alone does not name the skill: mapped network drive, SMB, UNC, NAS route to net-ops."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
@@ -42,6 +42,8 @@ Unexplained UAC prompts attributed to their caller. A declined elevation still e
 
 Boot duration measurement and slow-startup-component identification. The `Microsoft-Windows-Diagnostics-Performance/Operational` log (admin-only) records per-boot timing — `BootMainPathTime`, `BootPostBootTime`, total, and degradation flag — plus calls out specific apps, drivers, or services that exceeded the system's fast-boot threshold. Without admin, kernel-event fallback gives coarser but still useful timing.
 
+A machine that is hot, loud, or out of commit with no boot-time explanation. The expensive case is a **hung process whose parent is perfectly healthy** — it keeps its supervisor, so every "orphaned process" check reports nothing while it burns a core indefinitely. Measured here 2026-08-30: an orphan scan found 3 processes / 1.16 GB while six live-parented spinners held five cores across 43.8 hours. Rate-sampling finds them; snapshots and lineage never will — see [Runaway Process Triage](#runaway-process-triage).
+
 ## The Universal Insight
 
 **Windows tells you what's wrong if you ask the right log in the right way.** Most users (and most tutorials) reach for Task Manager. The actual diagnostic signal lives in the Event Log, the Registry's StartupApproved key, the storage driver's reset events, and the kernel's bugcheck records. This skill packages the queries that turn noise into a verdict.
@@ -59,11 +61,11 @@ Walk down the layers in order. Each rung has a binary outcome:
 3. Crash record       — Event 41 (Kernel-Power) + BugCheck code + dump files
 4. Pre-crash timeline — events in N minutes before each crash
 5. Boot inventory     — all 5 startup mechanisms (registry, services, tasks, folders, group policy)
-6. Resource pressure  — top CPU/RAM/IO consumers
+6. Resource pressure  — CPU RATE sample, commit hoarders, orphans, stale hosts
 7. Verdict            — what's failing, what to do
 ```
 
-The most interesting failures cluster at rung 2 (storage) and rung 5 (startup bloat). The least interesting (but most-treated) is rung 6.
+The most interesting failures cluster at rung 2 (storage) and rung 5 (startup bloat). Rung 6 is the most-treated and the most *misread*: a Task Manager **snapshot** there really is low-value, which is why it gets waved away — but a CPU **rate** sample at the same rung finds hung processes no snapshot and no orphan check can see.
 
 ## Workflow
 
@@ -253,6 +255,49 @@ If `0` or no dumps exist after recent crashes:
 - Power loss crashes can't write dumps regardless — RAM contents are gone before disk write
 - Some BSODs in early boot also skip dump-writing
 
+## Runaway Process Triage
+
+Steady-state, not boot-time — something is burning the machine *right now*. The
+whole discipline is one correction: **measure the rate, not the lineage.**
+
+Cumulative CPU tells you what a process has *ever* done. An orphan scan tells you
+whose parent died. Neither finds the expensive case — a stuck process whose
+supervisor is alive and well, spinning near a full core and producing nothing.
+
+```powershell
+scripts/process-triage.ps1                                 # sample all, flag >=20% of a core
+scripts/process-triage.ps1 -Name claude,node -Threshold 50 # hunt agent/editor spinners
+scripts/process-triage.ps1 -Json | ConvertFrom-Json        # machine-readable findings
+scripts/process-triage.ps1 -Tree 35736                     # what a kill takes, leaves-first
+```
+
+Exit `10` = findings, `0` = clean. Two CPU samples across a window give
+percent-of-one-core alongside private commit, age and orphan status. **It never
+terminates anything** — `-Tree` emits an ordered list so the caller acts
+deliberately.
+
+**The guard that matters.** The script resolves *this session's own ancestry* —
+shell → agent host → application — before reporting, and marks every hop
+`protected=True`. Killing any of them ends the session doing the investigation,
+so that hop must never be indistinguishable from a candidate. Doing this by hand
+means walking your own PID up through `ParentProcessId` **first**, before you
+look at anything else.
+
+Then terminate **leaves-first**: deepest descendants before their supervisor, so
+a live parent cannot respawn a child you already reaped. Later entries reporting
+"already gone" is the cascade working, not an error. Killing a process never
+deletes files — uncommitted work in its directory survives untouched.
+
+**Report commit, not RAM.** Windows exhausts *commit* (RAM + pagefile guarantees,
+`Win32_OperatingSystem.FreeVirtualMemory`) before it exhausts physical memory, so
+a box with free RAM can still refuse to start anything. Quote before/after for
+process count, private commit, and machine commit free — freeing commit often
+recovers more than the sum of what you killed.
+
+Depth — the three failure classes, the triage ladder, Electron/agent-host
+topology, stale-build detection, and the worktree-teardown case — is in
+[`references/process-triage.md`](references/process-triage.md).
+
 ## Event Log Query Patterns
 
 `Get-WinEvent` with `-FilterHashtable` is dramatically faster than `Where-Object` filtering. Keys that work:
@@ -315,7 +360,7 @@ Output follows the claude-mods diagnostic convention:
 ## What This Skill Doesn't Cover
 
 - **Network diagnostics, including anything storage-shaped that turns out to live on the network** → use `net-ops`. Concretely: a mapped network drive, a mapping stuck `Disconnected` / `Unavailable`, a UNC path (`\\server\share`) that won't open, SMB itself, a NAS or Synology box, `net use` failures, and "access is denied" on a share. A drive letter does not make it local.
-- **Specific application performance profiling** → use `perf-ops`
+- **Application performance profiling** (flamegraphs, py-spy/pprof, load tests, slow queries) → use `perf-ops`. The split: windows-ops triages *the workstation* — which process is burning the box and is it safe to kill; perf-ops profiles *inside* a program you are optimising.
 - **Source-code-level debugging** → use `debug-ops`
 - **Kernel dump file analysis with WinDbg** — too specialised for this skill; covered by reference doc pointers only
 - **Group Policy diagnostics** — relevant for enterprise but rare on workstations
@@ -329,6 +374,8 @@ Output follows the claude-mods diagnostic convention:
 | Need to triage a remote Windows box | `net-ops` reverse-probe pattern adapts directly |
 | Crash is networking-related | Combine with `net-ops` for DNS / VPN driver issues |
 | Multiple machines exhibit same pattern | Run `health-audit.ps1` on each, diff the outputs |
+| A flagged spinner names a git worktree that no longer exists | `fleet-ops` owns worktree lifecycle — [the teardown-ordering landmine](../fleet-ops/SKILL.md#landmine-removing-a-worktree-out-from-under-a-live-session) |
+| Need to profile inside an app rather than triage the box | `perf-ops` |
 
 ## References
 
@@ -341,6 +388,8 @@ Output follows the claude-mods diagnostic convention:
 - `references/recovery-patterns.md` — Drive-failure data recovery (robocopy `/R:0`, ddrescue with map files), filesystem repair (chkdsk decision tree — when NEVER to `/f`), system file integrity (`sfc`, `DISM /Online /Cleanup-Image /RestoreHealth`), boot configuration repair (BCD, `bootrec`, UEFI bootloader rebuild), pagefile relocation, drive removal procedures (software offline → BIOS-disable → physical disconnect → destruction), and no-boot recovery (Windows RE, Safe Mode, System Restore). Load when responding to "my drive is dying" or any irreversible/destructive operation.
 
 - `references/uac-attribution.md` — Attributing an unexplained UAC prompt to its caller: the 30-second in-the-moment playbook (Show details → note command line → decline → check Security 4688), the after-the-fact forensic ladder (Prefetch/PECmd run times, BAM FILETIME decode, npx `_npx` cache, agent-transcript time correlation — all in one elevated pass, never elevated via gsudo itself), the process-creation auditing countermeasure, and the `npx` auto-install footgun. Load when responding to "what asked for admin?", an unexpected elevation prompt, or post-incident process attribution.
+
+- `references/process-triage.md` — Steady-state process forensics: the three failure classes (spinner / orphan / hoarder) and why each needs different evidence, rate-vs-lineage sampling maths, commit-vs-working-set on Windows, the six-rung triage ladder, safe-termination rules (self-ancestry, leaves-first), Electron and agent-host topology including windowless-zombie and stale-build detection, and the worktree-teardown case that manufactures spinners. Load when a machine is hot, loud, or out of commit, or before terminating any process tree.
 
 - `references/remote-diagnostics.md` — PowerShell remoting patterns (WS-Man and SSH transports) for running this skill against a remote Windows box. Authentication models (Kerberos, NTLM, CredSSP, SSH keys), `TrustedHosts` setup for workgroup machines, the double-hop problem, common error catalog, and a complete worked example: stage the skill on the target via `Copy-Item -ToSession`, then invoke each script remotely and parse the JSON output. Load when troubleshooting "my dad's PC across town", a server in a datacenter, or any Windows machine where physical access isn't available.
 

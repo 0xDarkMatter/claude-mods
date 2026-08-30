@@ -274,8 +274,8 @@ script, or a `--remove --yes` sweep racing a session that wakes mid-run.
 
 **A session whose worktree vanishes does not exit and does not error.** It drops
 into a retry loop and spins at ~85% of a core, indefinitely. Six of them,
-observed 2026-08-30 in `X:\Forge\Praxis`, burned **66.6 core-hours across 43.8
-hours**; five pointed at directories absent from both disk *and*
+observed 2026-08-30 across one repo's lane worktrees, burned **66.6 core-hours
+across 43.8 hours**; five pointed at directories absent from both disk *and*
 `git worktree list`. Nothing logged, nothing alerted, no transcript was written.
 The only symptom was a warm machine.
 

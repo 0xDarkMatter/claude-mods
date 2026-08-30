@@ -16,7 +16,7 @@
 | Component | Count | Notes |
 |-----------|-------|-------|
 | Agents | 3 | Pure context-isolation/worker roles only: git-agent (background commits/PRs), firecrawl-expert (noisy scrapes), project-organizer (bulk restructure) |
-| Skills | 103 | Operational skills, CLI tools, workflows, diagnostics, security |
+| Skills | 104 | Operational skills, CLI tools, workflows, diagnostics, security |
 | Commands | 3 | Session management + git orchestration (sync, save, git-ops) |
 | Rules | 14 | agentic-quality, cli-tools, commit-style, dev-servers, loop-engineering, modern-tools, naming-conventions, prompt-injection, public-posts, release-review, shell-preference, skill-agent-updates, supply-chain, worktree-boundaries |
 | Output Styles | 13 | Vesper, Spartan, Mentor, Executive, Pair, Atlas, Coach, Harbour, Meridian, Noir, Roast, Sage, Scout |
@@ -87,7 +87,8 @@ Full build spec: [docs/plans/QUALITY-2026-07.md](plans/QUALITY-2026-07.md).
 Theme: subtraction and enforcement, not addition.
 
 - [x] Phase 0 — closed the loop (README count fixes, plan committed, CI green)
-- [x] Phase 1 — enforcement gates: description-budget gate (700 hard cap),
+- [x] Phase 1 — enforcement gates: description-budget gate (700 hard cap as
+      shipped; raised to 1000 in 2026-08 — `tests/validate.sh` is authoritative),
       section-map drift gates (summon, svg-brand-tint-ops), doc-drift
       extensions (prose counts, frontmatter ghost refs), repo-doctor
       guard-comment recognition, hook wiring on script installs

@@ -12,13 +12,13 @@
 
 > *A comprehensive extension toolkit that transforms Claude Code into a specialized development powerhouse.*
 
-**claude-mods** is a production-ready plugin that extends Claude Code with 103 specialized skills, 3 expert agents, 13 output styles, 13 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
+**claude-mods** is a production-ready plugin that extends Claude Code with 104 specialized skills, 3 expert agents, 13 output styles, 13 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
 
 Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms), claude-mods fills critical gaps in Claude Code's capabilities: persistent session state that survives across machines, on-demand expert knowledge for specialized domains, token-efficient modern CLI tools (10-100x faster than traditional alternatives), and proven workflow patterns for TDD, code review, and feature development. The toolkit implements Anthropic's [recommended patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), ensuring your development context never vanishes when sessions end.
 
 From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
 
-**3 agents. 103 skills. 13 styles. 13 hooks. 14 rules. One install.**
+**3 agents. 104 skills. 13 styles. 13 hooks. 14 rules. One install.**
 
 ## Recent Updates
 
@@ -74,7 +74,7 @@ Claude Code is powerful out of the box, but it has gaps. This toolkit fills them
 
 - **Session continuity** — Tasks vanish when sessions end. We fix that with `/save` and `/sync`, implementing Anthropic's [recommended pattern](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) for long-running agents.
 
-- **Expert-level knowledge on demand** — 103 on-demand skills covering React, TypeScript, Python, Go, Rust, PostgreSQL, and more, plus 3 specialized agents reserved for genuine context-isolation/worker roles (git operations, web scraping, project reorganization). Skills-first: knowledge loads when relevant instead of living in heavyweight agent prompts.
+- **Expert-level knowledge on demand** — 104 on-demand skills covering React, TypeScript, Python, Go, Rust, PostgreSQL, and more, plus 3 specialized agents reserved for genuine context-isolation/worker roles (git operations, web scraping, project reorganization). Skills-first: knowledge loads when relevant instead of living in heavyweight agent prompts.
 
 - **Modern CLI tools** — Stop using `grep`, `find`, and `cat`. Our rules automatically prefer `ripgrep`, `fd`, `eza`, and `bat` — 10-100x faster and token-efficient.
 
@@ -99,7 +99,7 @@ claude-mods/
 ├── .claude-plugin/     # Plugin metadata
 ├── agents/             # Expert subagents (3)
 ├── commands/           # Slash commands (3)
-├── skills/             # Custom skills (103)
+├── skills/             # Custom skills (104)
 ├── output-styles/      # Response personalities
 ├── hooks/              # Hook examples & docs
 ├── rules/              # Claude Code rules
@@ -206,6 +206,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [cypress-ops](skills/cypress-ops/) | Cypress e2e + component testing - data-test selectors, cy.intercept, cy.session, Test Replay, flake diagnosis |
 | [tailwind-ops](skills/tailwind-ops/) | Tailwind CSS patterns, v4 migration, components, configuration |
 | [color-ops](skills/color-ops/) | Color spaces, WCAG/APCA contrast checker, palette + harmony generators, CSS color functions, design tokens, color converter |
+| [icon-ops](skills/icon-ops/) | SVG icons for web UI end-to-end - set selection (grid/family/stroke-width lock-in), licence and trademark traps (brand marks are not cleared by a CC0 file licence; aggregators hide the originating set), currentColor theming, sprite vs inline vs component delivery, the external-`<use>` CORS trap, and the two accessibility cases; `normalize-icon.py` strips vendor cruft and rebinds paints (`--check` as a CI gate, `--symbol` for sprite assembly) |
 | [genart-ops](skills/genart-ops/) | Generative art - three.js scenes, p5.js sketches, SVG generation, GLSL shaders, procedural algorithms, colour theory |
 | [threejs-ops](skills/threejs-ops/) | App/game-scale three.js - import maps + ES-module reality, GLTF pipeline (DRACO/KTX2/meshopt, gltf-transform), AnimationMixer crossfades, fixed-timestep loops, rapier/cannon-es physics, R3F + drei, InstancedMesh/LOD/disposal discipline, boids/steering actors; npm staleness verifier |
 | [mapbox-ops](skills/mapbox-ops/) | Advanced Mapbox GL JS (web v3) - custom markers, thematic dataviz, 3D/terrain, cinematic camera, style composition, expressions, performance, gotchas; headless Playwright map verifier |

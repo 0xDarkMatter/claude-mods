@@ -7,6 +7,44 @@ feature releases live in the README "Recent Updates" section.
 
 ## [Unreleased]
 
+### Added
+
+- **`icon-ops` skill** - sourcing, vetting and shipping SVG icons for web UI.
+  Covers the four decisions that lock an icon set (grid, family, stroke width,
+  corner language), the two licence traps that actually bite (a brand mark is a
+  trademark whatever the file licence says; aggregators like Iconify hide which
+  set's licence applies), `currentColor` theming, the delivery matrix including
+  why icon fonts fail and why an external `<use>` is CORS-blocked in production,
+  and the two accessibility cases - with the counter-intuitive rule that the SVG
+  stays `aria-hidden` in both and the name goes on the control. Ships
+  `normalize-icon.py` (strips editor cruft, rebinds literal colours to
+  `currentColor`, drops fixed sizing, applies a11y attributes; `--check` as a CI
+  gate, `--symbol` for sprite assembly, idempotent) and a commented sprite
+  scaffold.
+
+- **`windows-ops`: steady-state process triage** - the skill covered boot- and
+  crash-time only, so a workstation pinned by already-running processes did not
+  route to it. Adds `process-triage.ps1` (samples CPU twice and reports
+  percent-of-one-core, private commit, age and orphan status; exit 10 on
+  findings; `-Tree` emits a leaves-first termination order) plus
+  `references/process-triage.md`. The load-bearing part is the safety guard:
+  the script resolves the calling session's own ancestry and marks it
+  `protected`, because the failure it exists to prevent is an agent killing the
+  process chain it is running in. Encodes a measured incident - six spinners
+  with LIVE parents held five cores for 43.8 hours while a dead-parent orphan
+  scan reported 1.16 GB, which is why the technique is rate, not lineage.
+
+- **`fleet-ops`: worktree-teardown ordering landmine** - removing a lane
+  worktree while its session is attached does not kill the session; it spins at
+  ~85% of a core indefinitely against the deleted path.
+
+### Changed
+
+- **Skill description budget raised 700 -> 1000 chars per skill.** The 700 cap
+  from the 2026-07 trim proved too tight for skills with a genuinely broad
+  trigger surface, and cutting real trigger phrases costs more in missed routing
+  than it saves in tokens. The catalog-wide soft budget is unchanged.
+
 ## [3.7.0] - 2026-08-15
 
 ### Added

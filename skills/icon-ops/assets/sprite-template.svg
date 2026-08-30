@@ -1,0 +1,58 @@
+<!--
+  SVG sprite scaffold: one HTTP request, every icon reusable via <use>.
+
+  EDITING THIS FILE: never put a double hyphen inside an XML comment. It is
+  illegal in XML and makes this whole template unparseable, which is why the
+  CLI flags below are described in prose rather than written out. The icon-ops
+  test suite parses this file precisely to catch that.
+
+  HOW TO USE
+  1. Inline this whole file near the top of <body>. Do NOT load it through <img>
+     or an external <use href="sprite.svg#id"> unless you have verified CORS: a
+     cross origin reference is blocked and silently renders nothing.
+  2. Append normalized symbols produced by scripts/normalize-icon.py in its
+     symbol mode (see SKILL.md for the exact invocation), appending to this file.
+  3. Reference one anywhere:
+       <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-search"/></svg>
+
+  WHY THIS SHAPE
+  * display:none on the host <svg> makes Safari drop the symbols. The absolute
+    plus clip pattern below hides it while keeping every symbol renderable.
+  * Each <symbol> keeps its OWN viewBox, so symbols from different grid sizes
+    (24, 20, 16) scale correctly side by side instead of cropping.
+  * fill="currentColor" means CSS `color` drives the icon, so it inherits theme,
+    hover and focus states for free. Never hardcode a hex value here.
+  * The consuming <svg> carries the accessibility attributes, not the symbol.
+    A decorative icon needs aria-hidden="true" focusable="false"; a meaningful
+    one needs its name on the surrounding control.
+
+  SIZING belongs in your stylesheet, not on each element:
+       .icon { width: 1em; height: 1em; flex: none; }
+  Sizing in em ties the icon to the adjacent text size, which is what keeps it
+  optically aligned with a label across every step of the type scale.
+-->
+<svg xmlns="http://www.w3.org/2000/svg"
+     style="position:absolute;width:0;height:0;overflow:hidden"
+     aria-hidden="true"
+     focusable="false">
+  <defs>
+
+    <!-- Replace these with real symbols. Both icon families are shown. -->
+
+    <!-- Filled icon: paints with fill, inherits `color`. -->
+    <symbol id="i-example-filled" viewBox="0 0 24 24" fill="currentColor">
+      <circle cx="12" cy="12" r="8" />
+    </symbol>
+
+    <!-- Stroke icon: fill MUST be none or the glyph floods solid. Keep
+         stroke-width identical across every stroke icon in the set. Mixing
+         1.5 and 2 is the most visible sign of a mixed source icon set. -->
+    <symbol id="i-example-stroke" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="1.5"
+            stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="11" cy="11" r="7" />
+      <path d="M21 21l-4.3-4.3" />
+    </symbol>
+
+  </defs>
+</svg>
