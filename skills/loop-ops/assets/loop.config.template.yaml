@@ -15,8 +15,18 @@ tier: L1                     # L1 report-only | L2 assisted (worktree+gate) | L3
 permission_mode: dontAsk     # plan | dontAsk | auto | acceptEdits | bypassPermissions
                              #   L1 → plan or dontAsk · L2 → dontAsk/auto · L3 → bypassPermissions (container only)
 
-# ── cadence ─────────────────────────────────────────────────────────────────
+# ── cadence & host ──────────────────────────────────────────────────────────
 cadence: 1h                  # 10m | 1h | 6h | 1d, or a cron string ("*/10 * * * *")
+host: local                  # where ticks execute — decides which constraints apply:
+                             #   local          generic local run (default; no host checks)
+                             #   session-cron   /loop + CronCreate — L1 only: needs an open
+                             #                  idle session, 7-day expiry, ≥1 min
+                             #   desktop-task   scheduled-tasks MCP — durable, local files,
+                             #                  per-task permission mode, ≥1 min
+                             #   cloud-routine  /schedule Routines — no local files, NO
+                             #                  permission mode, ≥1 hour
+                             #   external       cron / Task Scheduler / systemd → loop-run.sh
+                             # Full semantics: references/native-scheduling.md
 
 # ── purpose & bounds ────────────────────────────────────────────────────────
 goal: "<one sentence: what this loop does AND what it must never do>"

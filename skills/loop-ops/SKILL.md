@@ -1,6 +1,6 @@
 ---
 name: loop-ops
-description: "Design and safely run OUTER loops - scheduled discover-triage-implement-verify-escalate agent loops. Risk-tier ladder (L1 report -> L3 unattended), STATE/run-log/budget spine, kill switch, pattern catalog. Triggers: outer loop, scheduled/autonomous agent loop, PR watch, CI watch, dep-bump loop, run on a schedule, kill switch, risk tier."
+description: "Design and safely run OUTER loops - scheduled discover-triage-implement-verify-escalate agent loops. Native primitives schedule; loop-ops governs. Risk-tier ladder (L1 report -> L3 unattended), STATE/run-log/budget spine, kill switch, pattern catalog. Triggers: outer loop, scheduled/autonomous agent loop, PR watch, CI watch, dep-bump loop, run on a schedule, kill switch, risk tier, CronCreate, scheduled task, cloud routine, /loop."
 license: MIT
 allowed-tools: "Read Write Edit Bash Glob Grep"
 metadata:
@@ -24,6 +24,25 @@ metric, one session, git-as-memory); `loop-ops` is the design discipline for the
 that *schedules and gates* inner runs. It does not reimplement spawning or landing; it
 **composes** what this repo already ships.
 
+## Native primitives schedule; loop-ops governs
+
+Claude Code now ships the *cadence* half natively. **Do not hand-roll a scheduler** — pick
+a native host, declare it as `host:` in the config, and spend the discipline where the
+primitives leave a hole. Verified surface, parameters and limits (2026-08-30):
+[references/native-scheduling.md](references/native-scheduling.md).
+
+| Native primitive | What it gives you | What it does NOT give you |
+|---|---|---|
+| **`/loop`** — a *bundled* skill ([docs](https://code.claude.com/docs/en/scheduled-tasks)), driving `CronCreate`/`CronList`/`CronDelete`; `ScheduleWakeup` for its self-paced mode | Fixed-cron or Claude-paced ticks (delay clamped 60 s–1 h), a built-in maintenance prompt, `.claude/loop.md` to override it, `Esc` to stop | **Session-scoped and in-memory** — fires only while the session is idle, dies with the conversation, and every recurring job **self-deletes after 7 days**. No state spine, no budget, no gate. L1-supervised only. |
+| **Desktop scheduled tasks** — the `scheduled-tasks` MCP server ([docs](https://code.claude.com/docs/en/desktop-scheduled-tasks)) | Durable local ticks (≥1 min) with local files, a **fresh session per run**, a per-task permission mode with saved approvals, a task folder, run history, an Active/Paused toggle | The worktree toggle is **off by default** (runs against uncommitted changes); one catch-up only for a missed window; a Manual-mode task **stalls** on an unapproved tool. No STATE spine, no token budget, no verify gate. |
+| **Cloud routines** — `/schedule` ([docs](https://code.claude.com/docs/en/routines)) | Machine-off ticks (≥1 h), plus **native event triggers**: an API `/fire` endpoint and GitHub `pull_request`/`release` events with filters. A real push guard on non-`claude/` branches | **No permission mode at all** and **every connector attaches by default**; no local files (fresh clone); green run status ≠ task success. The boundary must come from repos + environment + connectors. |
+| **`/goal`** ([docs](https://code.claude.com/docs/en/goal)) | A native *completion* gate — keep going until a fast model confirms the condition | Not a cadence, and not an audit trail. |
+
+What **none** of them provide — and what this skill is for: a **state spine** that survives
+ticks, a **token budget**, a **verify gate** you can trust, an **escalation rule**, and the
+**risk-tier ladder** that decides whether the loop has earned the autonomy you're about to
+grant it. The plumbing moved into the harness; the judgement did not.
+
 ---
 
 ## The six primitives → what owns each here
@@ -33,7 +52,7 @@ already exist:
 
 | Primitive | What it is | Owned in claude-mods by |
 |---|---|---|
-| **Schedule** | fire the loop on a cadence | native-first: `/loop` (in-session), **Desktop scheduled task** (local, unattended), `/schedule` cloud routines (no local files); `/goal` is the native completion gate. External (cron/Task Scheduler + `loop-run.sh`) only for non-Claude-Code control |
+| **Schedule** | fire the loop on a cadence *or an event* | native-first, declared as `host:` — `session-cron` (`/loop`+`CronCreate`, L1 only), `desktop-task` (`scheduled-tasks` MCP: local + durable), `cloud-routine` (`/schedule`: machine-off, plus API/GitHub event triggers), `/goal` for completion. `external` (cron/Task Scheduler + `loop-run.sh`) only for non-Claude-Code control |
 | **Worktree** | isolated, discardable execution context | `git-ops` worktrees, `fleet-worker` (per-task worktree) |
 | **Skills** | persistent project knowledge the run loads | this repo's skill layer + your `CLAUDE.md` |
 | **Sub-agents** | maker/checker separation | `Agent`/`Task`; dispatching skills (`review`, `testgen`) |
@@ -74,6 +93,13 @@ isolate* fork in [references/risk-tiers.md](references/risk-tiers.md).
 | **L2 Assisted** | suggest changes, human gates the merge | `dontAsk`+narrow allowlist, or `auto` | edit in a **worktree**, run tests, open a PR | a human approves the PR (or `fleet-ops`) |
 | **L3 Unattended** | autonomous land within a denylist | `bypassPermissions` **in an isolated container only** | commit/merge allowlisted classes | the loop itself, inside its boundary |
 
+**The host is part of the tier.** `session-cron` (`/loop` + `CronCreate`) cannot host L2+
+at all: it needs an open idle session and every recurring job expires after 7 days.
+`cloud-routine` has *no permission mode*, so its tier is expressed as repos + environment
+network policy + connectors instead — which means a routine is effectively autonomous the
+moment it is created, and the L1 posture has to come from the prompt being read-only.
+`loop-doctor` enforces both. Details: [references/native-scheduling.md](references/native-scheduling.md).
+
 The cardinal rule, straight from Claude Code's own gate model: **an unattended loop is a
 *scheduler/script that invokes `claude -p`*, not a Claude session that spawns ungated
 children.** A session in `auto` mode that tries to launch a `--permission-mode
@@ -98,6 +124,12 @@ Code's classifier tiers. Bake these into the config's `escalation:` field:
 - **Scope the tools, not just the mode.** Allowlist exactly the tools/MCP connectors the
   job needs (read-only at L1); keep `gh pr merge` out and `land_via: fleet-ops` in. Full
   connector/MCP-scope discipline + the auto-merge guard: [references/risk-tiers.md](references/risk-tiers.md).
+  On a **cloud routine this is the whole gate** — there is no permission mode, and every
+  connected connector is attached by default with full write access. Prune them.
+- **A task that reschedules itself is self-modification.** The `scheduled-tasks` MCP lets a
+  running task call `update_scheduled_task` on its own schedule or prompt. Useful, and on
+  the always-escalate list unless adaptive cadence is the loop's *stated* purpose — a loop
+  that can rewrite its own trigger has left the boundary you audited.
 
 ## The state spine
 
@@ -108,8 +140,12 @@ read/write contract in [references/state-spine.md](references/state-spine.md)):
   Read at the top of every run, rewritten at the end.
 - **`run-log.md`** — append one line per run (timestamp, action, outcome, tokens). The
   audit trail that answers "what has this loop been doing?"
-- **`loop.config.yaml`** — the loop's definition (goal, tier, cadence, scope, gate,
-  budget, escalation). Scaffolded by `loop-scaffold`, scored by `loop-check`.
+- **`loop.config.yaml`** — the loop's definition (goal, tier, cadence, **host**, scope,
+  gate, budget, escalation). Scaffolded by `loop-scaffold`, scored by `loop-check`.
+
+A native host gives you a *place* for this spine (a Desktop task's folder) but never the
+spine itself: no host writes `STATE.md`, enforces a token budget, or records what the loop
+*decided*. Run history says a tick happened; the run-log says what it did and cost.
 
 ## Pattern catalog (a morphology, not a fixed list)
 
@@ -157,7 +193,9 @@ Running several loops? Two non-negotiables (detail in
 | spawn cheap parallel makers | [`fleet-worker`](../fleet-worker/SKILL.md) | bespoke `claude -p` plumbing |
 | route models across a fan-out (cheap finders, Opus judges) | [`fleet-worker` model-routing](../fleet-worker/references/model-routing.md) | every agent on the orchestrator's model |
 | test-gate + land winning branches | [`fleet-ops`](../fleet-ops/SKILL.md) | a manual merge step |
-| fire on a cadence | native `/loop` · Desktop scheduled task · `/schedule` cloud routine; `/goal` for completion | a custom cron in this skill |
+| fire on a cadence or an event | a native `host:` — `/loop`, Desktop scheduled task, cloud routine (schedule/API/GitHub triggers); `/goal` for completion | a custom cron in this skill |
+| trust the `verify` gate's judgement | the **`evals-ops`** skill — a gate is an eval (golden set, judge bias, `pass^k`, blocking vs advisory) | eyeballing a few runs and calling it proven |
+| reason about per-tick prompt-cache cost | [`claude-api-ops` caching-and-cost](../claude-api-ops/references/caching-and-cost.md) | a TTL number memorised from a blog post |
 | commit / PR / release | [`git-ops`](../git-ops/SKILL.md), [`github-ops`](../github-ops/SKILL.md) | raw `git push` |
 | signal between loops | [`pigeon`](../pigeon/SKILL.md) | a shared scratch file |
 
@@ -167,12 +205,13 @@ Running several loops? Two non-negotiables (detail in
 
 ## Tools
 
-Five scripts, all following the [Skill Resource Protocol](../../docs/SKILL-RESOURCE-PROTOCOL.md)
+Six scripts, all following the [Skill Resource Protocol](../../docs/SKILL-RESOURCE-PROTOCOL.md)
 (stdout = data, semantic exit codes, `--help` with EXAMPLES, `--json` envelopes): **init**
 scaffolds the loop, **audit** scores whether the config is *well-formed*, **doctor**
-preflights whether it will actually *run*, **cost** estimates spend (caching-aware), and
-**check-pricing-sync** gates pricing drift in CI. The discipline before scheduling is
-`init → fill → cost → audit → doctor --live`.
+preflights whether it will actually *run* (host-aware), **cost** estimates spend
+(caching-aware), and two drift guards — **check-pricing-sync** for the pricing table and
+**check-native-facts** for the native-scheduling limits. The discipline before scheduling
+is `init → fill → cost → audit → doctor --live`.
 
 ### `scripts/loop-scaffold.sh` — scaffold a loop's state spine
 
@@ -188,9 +227,16 @@ pattern's scope/goal/escalation — and, at L2+, its gate — so you get a near-
 review, not blank placeholders (it audits clean immediately). Doctrine holds: it still
 scaffolds at L1 by default with a graduation block.
 
+`--host` records where ticks will execute (`local` default, or `session-cron` /
+`desktop-task` / `cloud-routine` / `external`) so `loop-doctor` checks that host's real
+constraints instead of assuming a local `claude -p`.
+
 ```bash
 # Create .loops/pr-watch/ with config + STATE.md + run-log.md + run.md from templates:
 bash scripts/loop-scaffold.sh --name pr-watch --pattern pr-watch --tier L1
+
+# A connector-driven loop bound for a cloud routine (>=1h floor, no permission mode):
+bash scripts/loop-scaffold.sh --name digest --pattern digest --host cloud-routine --cadence 1h
 
 # Custom dir + cadence, preview without writing:
 bash scripts/loop-scaffold.sh --name dep-bump --pattern dep-bump \
@@ -227,10 +273,19 @@ interactive), an L3 bypass declares an isolation boundary. `--live` adds runtime
 the `verify`/`guard` gate's leading binary resolves on PATH, `claude`/`git` are present,
 the kill-switch sentinel's parent dir exists.
 
+**It is host-aware.** `host:` changes what "will it run" even means, so the doctor checks
+against the declared surface: a `cloud-routine` faster than its 1-hour floor is rejected at
+creation; a routine with no named repos/environment/connector boundary has no gate at all
+(it has no permission mode either, so demanding one there would be a false finding); a
+`session-cron` host at L2+ can't run unattended and is called a predicted failure; and
+`--live` is **skipped, not passed**, for a cloud routine — this machine's PATH says nothing
+about a fresh cloud clone, and a green check there would be false confidence.
+
 ```bash
 bash scripts/loop-doctor.sh --offline .loops/pr-watch/loop.config.yaml   # CI gate
 bash scripts/loop-doctor.sh --live .loops/ci-watch/loop.config.yaml          # before scheduling
 bash scripts/loop-doctor.sh --live --json .loops/dep-bump/loop.config.yaml | jq '.data[] | select(.state=="bad")'
+bash scripts/loop-doctor.sh --offline .loops/digest/loop.config.yaml   # host: cloud-routine -> floor + boundary
 ```
 
 Exit **0** = will run, **10** = a check predicts a runtime failure (gate binary missing,
@@ -243,8 +298,13 @@ Estimate spend **before** committing to a cadence — the cost of an outer loop 
 runs/day × tokens/run × price, and sub-agents multiply it. It also models **prompt
 caching**: a loop re-sends the same `run.md`+system prefix every tick (the Ralph
 property), so the prefix should be cache-written once then read (~0.1×) — *but only if the
-tick interval fits the cache TTL*. A loop slower than ~1h can't cache (the entry expires
-between ticks); the estimator says so and recommends the TTL. Pricing reads from
+tick interval fits the cache TTL*. **The TTL is a choice, not a constant:** 5 minutes by
+default (1.25× write) or 1 hour with `"ttl": "1h"` (2× write), so the daemon window is
+~4.5 min *or* ~55 min — not a fixed 270 s. The estimator picks the cheapest TTL that stays
+warm at your cadence and names it; past 1 h nothing caches at all. Mechanics and
+break-even: [`claude-api-ops` caching-and-cost](../claude-api-ops/references/caching-and-cost.md).
+The estimate itself is **host-agnostic** — tokens are tokens wherever the tick fires; the
+host-dependent limit is the *minimum cadence*, which `loop-doctor` enforces. Pricing reads from
 `assets/model-pricing.json` (date-stamped; [`claude-api-ops`](../claude-api-ops/SKILL.md)
 is the source of truth — run its `check-model-table.py` if you suspect drift).
 
@@ -271,14 +331,34 @@ CI via `tests/check-resources.sh`; live model-id drift is owned by claude-api-op
 python scripts/check-pricing-sync.py --offline   # exit 0 in sync, 10 drift, 3 a file missing
 ```
 
+### `scripts/check-native-facts.py` — native-scheduling staleness guard
+
+[references/native-scheduling.md](references/native-scheduling.md) encodes a **fast-moving
+external surface**, and `loop-doctor` refuses configs on those numbers — so a silently
+stale limit becomes a wrong refusal. `--offline` (PR CI) proves internal consistency: the
+host vocabulary is *one* set across the config template, `loop-scaffold --host`,
+`loop-doctor`'s case arm and the reference; the reference still carries its `Verified
+<date>` stamp; and every limit the doctor enforces is still stated in the prose that
+justifies it. `--live` (scheduled, never a PR gate) fetches the three published docs pages
+and checks our numbers still appear in them.
+
+```bash
+python scripts/check-native-facts.py --offline   # exit 0 in sync, 10 drift, 3 file missing
+python scripts/check-native-facts.py --live      # exit 7 = docs unreachable (advisory)
+```
+
 ---
 
 ## End-to-end workflow
 
-1. **Pick a pattern** from the catalog (or `custom`). Start at **L1**.
-2. **Scaffold:** `bash scripts/loop-scaffold.sh --name <n> --pattern <p> --tier L1`.
+1. **Pick a pattern** from the catalog (or `custom`), and **pick the host** — does the tick
+   need local files? must it run with the machine off? is it supervised? Start at **L1**.
+2. **Scaffold:** `bash scripts/loop-scaffold.sh --name <n> --pattern <p> --tier L1
+   --host <h>`.
 3. **Fill `loop.config.yaml`** — the real `goal`, `scope` (bounded globs, never `*`),
-   `verify` gate, `escalation` rule, `budget_tokens`, `kill_switch`.
+   `verify` gate, `escalation` rule, `budget_tokens`, `kill_switch`. On a `cloud-routine`,
+   name the boundary that replaces the absent permission mode: repos, environment network
+   policy, and the connectors you kept.
 4. **Cost it:** `python scripts/loop-estimate.py --pattern <p> --cadence <c> --model <m>` —
    sanity-check the monthly spend against the value.
 5. **Audit it:** `bash scripts/loop-check.sh .loops/<n>/loop.config.yaml` — fix every
@@ -286,15 +366,20 @@ python scripts/check-pricing-sync.py --offline   # exit 0 in sync, 10 drift, 3 a
 6. **Doctor it:** `bash scripts/loop-doctor.sh --live .loops/<n>/loop.config.yaml` — prove
    it will actually *run* (gate binary on PATH, budget fits a tick). Audit = well-formed;
    doctor = will-run.
-7. **Schedule** the L1 run — but pick the mechanism deliberately; the **recipe selector**
-   in [references/claude-code-loops.md](references/claude-code-loops.md) prescribes it per
-   situation, because they're not interchangeable: connector-driven (email/Asana, no local
-   code) → **cloud routine**; touches local code → **Desktop scheduled task**; sustained &
-   token-sensitive → a **cache-warm daemon** (`claude -p` every ~270 s), *not* `/loop`
-   (which grows a session and chews tokens); fixed-criteria long task → **`/goal`**; quick
-   supervised polling → `/loop`. (L1 is read-only — it just writes `STATE.md` + a report.)
+7. **Schedule** the L1 run on the declared host — the **recipe selector** in
+   [references/claude-code-loops.md](references/claude-code-loops.md) prescribes which,
+   because they're not interchangeable: connector-driven (email/Asana, no local code) →
+   **cloud routine**; touches local code → **Desktop scheduled task**; sustained &
+   token-sensitive → a **cache-warm daemon** (`claude -p` inside the cache TTL you paid
+   for), *not* `/loop` (which grows a session and chews tokens); fixed-criteria long task →
+   **`/goal`**; quick supervised polling → `/loop`. Per-primitive limits:
+   [references/native-scheduling.md](references/native-scheduling.md). (L1 is read-only —
+   it just writes `STATE.md` + a report.)
 8. **Read the reports.** Only after the loop's judgment is proven do you graduate it to
-   **L2** (worktree + guard + `fleet-ops` landing) and re-audit at the higher tier.
+   **L2** (worktree + guard + `fleet-ops` landing), change `host:` if the proving host was
+   `session-cron`, and re-audit at the higher tier. If the gate's verdict is a judgement
+   rather than a green test run, harden it with the **`evals-ops`** discipline before you
+   let it decide unattended.
 
 ## Worked example
 
@@ -315,7 +400,8 @@ example every build, so it can't drift out of validity.
 The incident-shaped catalog — symptom → mechanism → the control that catches each — is
 [references/failure-modes.md](references/failure-modes.md) (runaway budget, the 3am-dead
 loop, cache-cold, force-push, ungated-child spawn, colliding loops, silent-stop,
-gate reward-hacking, …). The headline ones:
+gate reward-hacking, and the native-host trio — the **expired** 7-day loop, the
+**over-connected** routine, the **stalled/skipped** Desktop task). The headline ones:
 
 - **Routing around the gate.** Wrapping `claude -p --permission-mode bypassPermissions`
   in a script to dodge the classifier is *Auto-Mode Bypass* — a `hard_deny` nothing
@@ -325,7 +411,13 @@ gate reward-hacking, …). The headline ones:
   the wrong place to launch the loop. The scheduler/cron/Task-Scheduler/CI runner that
   invokes `claude -p` is the authorizer. See [references/risk-tiers.md](references/risk-tiers.md) §"enumerate vs isolate".
 - **No gate.** A loop whose `verify:` is empty is not a loop, it's an unsupervised typer.
-  `loop-check` errors on it.
+  `loop-check` errors on it. Nor is a *green run status* a gate: on a cloud routine green
+  means "the session started and exited without an infrastructure error", never that the
+  task succeeded. Grade the work, not the process.
+- **Assuming the native host gave you a boundary.** It gave you a cadence. A Desktop task's
+  worktree toggle is off by default; a cloud routine has no permission mode and attaches
+  every connector; `/loop` evaporates after 7 days. Each is a default that reads as safe
+  and isn't.
 - **Unbounded scope.** `scope: "*"` means "may touch anything" — the audit rejects it.
 - **No kill switch / no budget.** A loop you can't stop, or whose spend you didn't
   bound, will eventually surprise you. Both are audit findings.
@@ -337,7 +429,8 @@ gate reward-hacking, …). The headline ones:
 - [references/risk-tiers.md](references/risk-tiers.md) — L1/L2/L3 ↔ permission modes, headless profiles, enumerate-vs-isolate.
 - [references/pattern-catalog.md](references/pattern-catalog.md) — the seven patterns, full skeletons + escalation rules.
 - [references/state-spine.md](references/state-spine.md) — STATE.md / run-log / budget schemas, multi-loop coordination.
-- [references/claude-code-loops.md](references/claude-code-loops.md) — where loops actually live: `/loop`, `/schedule`, hooks, the scheduler pattern.
+- [references/native-scheduling.md](references/native-scheduling.md) — the native primitives themselves (verified 2026-08-30): `CronCreate`/`/loop` + its dynamic mode, the `scheduled-tasks` MCP, cloud routines — parameters, limits, failure semantics, and what each still doesn't give you.
+- [references/claude-code-loops.md](references/claude-code-loops.md) — which mechanism and how to wire it: the recipe selector, event triggers, hooks, the external-scheduler shape.
 - [references/failure-modes.md](references/failure-modes.md) — how loops break (incident-shaped) and the control that catches each.
 - [assets/loop.config.template.yaml](assets/loop.config.template.yaml) — the loop definition starter; [assets/STATE.template.md](assets/STATE.template.md) — the state-spine starter; [assets/run.template.md](assets/run.template.md) — the headless run prompt.
 - Lineage (public sources): the [Ralph loop](https://ghuntley.com/ralph/) (fresh-context inner brute-force) and the broader *loop engineering* discipline framed by Peter Steinberger and Addy Osmani.

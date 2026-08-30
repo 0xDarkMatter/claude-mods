@@ -125,6 +125,48 @@ judgment has earned.
 
 ---
 
+## 12. The expired loop (native-host)
+
+- **Symptom:** a `/loop`-scheduled watch that ran fine for a week is simply gone. No
+  error, no final report — and `CronList` shows nothing.
+- **Mechanism:** `CronCreate` recurring jobs **self-delete 7 days after creation** (they
+  fire one final time first), and the whole session store is in-memory: a new conversation
+  clears it, and `durable` is documented as having no effect. A loop hosted on
+  `session-cron` has a hard, silent lifetime ceiling. This is silent-stop (#7) with a
+  cause you cannot fix by watching the scheduler.
+- **Catch:** don't host anything unattended on `session-cron`. Declare
+  `host: session-cron` and `loop-doctor` refuses it at L2+; at L1 it warns. For anything
+  that must outlive a week, use `desktop-task`, `cloud-routine` or `external`.
+
+## 13. The over-connected routine (native-host)
+
+- **Symptom:** a read-only "summarise my inbox" routine sent an email / closed an issue /
+  posted to Slack.
+- **Mechanism:** cloud routines have **no permission mode and no approval prompts**, and
+  **every connected connector is attached by default** with full write access. Nothing
+  between the prompt and the tools — the "read-only" was only ever a wording in the prompt.
+  A leaked `/fire` bearer token compounds it (fire text is at least wrapped as untrusted,
+  so it can't issue instructions the prompt didn't opt into).
+- **Catch:** prune connectors to the minimum on every routine; scope the environment's
+  network access; select only the repos the work needs. `loop-doctor` refuses a
+  `cloud-routine` config that doesn't name that boundary, precisely because there is no
+  permission mode to fall back on.
+
+## 14. The stalled task (native-host)
+
+- **Symptom:** a Desktop scheduled task shows a session open in the sidebar and no output
+  for hours, or a task "runs" daily but the run history is mostly *skipped*.
+- **Mechanism:** three separate defaults. A task in Manual permission mode that needs an
+  unapproved tool **stalls waiting for a human** rather than failing (as does any MCP tool
+  marked `requiresUserInteraction`, on every call). Tasks fire only while the app is open
+  and the machine is awake; a sleeping machine skips the run. And a machine that was
+  asleep all day gets **exactly one** catch-up for the most recent missed window, so a 9am
+  task can execute at 11pm.
+- **Catch:** click *Run now* once after creating a task and always-allow each tool it
+  needs; then put **time guardrails in the run prompt itself** ("only review today's
+  commits; if it's after 5pm, skip and summarise what was missed") — the loop cannot
+  assume it is running when it was scheduled to.
+
 ## At a glance — symptom → control
 
 | Failure | Primary control |
@@ -140,9 +182,13 @@ judgment has earned.
 | Unbounded scope | `loop-check` rejects `*` |
 | No kill switch | mandatory `kill_switch` + PreToolUse PAUSED hook |
 | Comprehension debt | L1-first graduation; read the reports |
+| Expired loop (7-day) | never host unattended on `session-cron`; `loop-doctor` host check |
+| Over-connected routine | prune connectors + scope environment; `loop-doctor` boundary check |
+| Stalled / skipped task | always-allow the tools once; time guardrails in `run.md` |
 
 ## See also
 
+- [native-scheduling.md](native-scheduling.md) — the per-host limits behind #12–#14.
 - [risk-tiers.md](risk-tiers.md) — the graduated-autonomy ladder behind #11.
 - [state-spine.md](state-spine.md) — budget + heartbeat + multi-loop coordination.
 - [../../../rules/loop-engineering.md](../../../rules/loop-engineering.md) — the directives that prevent #4/#5/#9/#10.

@@ -3,41 +3,72 @@
 The outer loop is a *cadence + a headless run*. This file is the mechanics: the concrete
 ways to fire a loop in Claude Code, when to use each, and how they compose with the tier
 model. The doctrine — *a scheduler invokes `claude -p`, not a session that spawns ungated
-children* — is in [risk-tiers.md](risk-tiers.md); this is the how.
+children* — is in [risk-tiers.md](risk-tiers.md); this is the how. The primitives
+themselves — every parameter, limit and failure semantic, verified and date-stamped — are
+in [native-scheduling.md](native-scheduling.md); read that before trusting a number here.
 
 ---
 
 A loop's **trigger** answers *when a tick fires* — a **cadence** (poll on a clock) or an
-**event** (something pushed in by a Channel) — and its **completion** rule answers *when
+**event** (something pushed in from outside) — and its **completion** rule answers *when
 the work stops*. Claude Code has native answers to all three. **Prefer the native
 mechanisms — zero/low-infra, no GitHub Actions.** Reach for an external scheduler only for
 non-Claude-Code control.
 
 ## Cadence — when a tick fires
 
-| Mechanism | Runs on | Local files? | Open session? | Min interval | Best for |
-|---|---|---|---|---|---|
-| **`/loop`** | your machine | ✅ | **yes** | 1 min | supervised, in-session polling (L1) |
-| **Desktop scheduled task** | your machine | ✅ | no | 1 min | **the local-first unattended default** — loops that touch the repo/build/tools |
-| **Cloud routine** (`/schedule` → [Routines](https://code.claude.com/docs/en/routines)) | **Anthropic cloud** | ❌ **fresh clone** | no | **1 hour** | unattended loops needing **no** local state (GitHub PRs, web) |
-| **`ScheduleWakeup`** | your machine | ✅ | yes | — | self-pacing one long task |
-| external scheduler + `loop-run.sh` | your machine | ✅ | no | your call | non-Claude-Code control: cron / Task Scheduler / systemd / process-compose / CI |
-| **GitHub Actions** | GH runner | fresh clone | no | — | *optional* — only if the repo already lives on GitHub |
+| Mechanism | `host:` | Runs on | Local files? | Open session? | Min interval | Best for |
+|---|---|---|---|---|---|---|
+| **`/loop`** (bundled skill) + `CronCreate` | `session-cron` | your machine | ✅ | **yes, idle** | 1 min | supervised, in-session polling (**L1 only** — 7-day expiry) |
+| **`ScheduleWakeup`** — `/loop`'s dynamic mode | `session-cron` | your machine | ✅ | yes | 60 s–1 h clamp | self-pacing one task; Claude picks each delay |
+| **Desktop scheduled task** (`scheduled-tasks` MCP) | `desktop-task` | your machine | ✅ | no (app open) | 1 min | **the local-first unattended default** — loops that touch the repo/build/tools |
+| **Cloud routine** (`/schedule` → [Routines](https://code.claude.com/docs/en/routines)) | `cloud-routine` | **Anthropic cloud** | ❌ **fresh clone** | no | **1 hour** | unattended loops needing **no** local state (GitHub PRs, web, connectors) |
+| external scheduler + `loop-run.sh` | `external` | your machine | ✅ | no | your call | non-Claude-Code control: cron / Task Scheduler / systemd / process-compose / CI |
+| **GitHub Actions** | `external` | GH runner | fresh clone | no | — | *optional* — only if the repo already lives on GitHub |
 
-> **Load-bearing caveat:** **cloud routines run on a fresh clone with no access to your
-> local files.** A loop that touches a local repo, build, model dir, or tool **cannot** be
-> a cloud routine — use a **Desktop scheduled task** or `/loop`. Cloud routines are for
-> cloud-reachable, local-state-free work only.
+Declare the choice as `host:` in `loop.config.yaml`; `loop-doctor` then enforces that
+host's real constraints instead of assuming a local `claude -p`.
+
+> **Three load-bearing caveats, all verified 2026-08-30:**
+>
+> 1. **Cloud routines run on a fresh clone with no access to your local files.** A loop
+>    that touches a local repo, build, model dir, or tool **cannot** be a cloud routine —
+>    use a Desktop scheduled task or `/loop`. They also have **no permission mode at all**:
+>    the boundary is repos + environment network policy + connectors, and *every* connected
+>    connector attaches by default.
+> 2. **`/loop` and `CronCreate` are session-scoped and expire.** In-memory, gone on a new
+>    conversation (`--resume` restores unexpired ones), fire only while the session is
+>    **idle**, and every recurring job **self-deletes 7 days after creation**. That makes
+>    `session-cron` an L1-supervised host — never the home of an unattended loop.
+> 3. **A Desktop task's worktree toggle is OFF by default**, so a run works against your
+>    working directory *including uncommitted changes*. At L2+ turn it on, or the loop's
+>    "isolation" is imaginary.
 
 The unattended options (Desktop task, cloud routine, external scheduler, Actions) are the
 human-configured **authorizer** — no parent auto-mode session, so nothing blocks the
 headless child. Many loop frameworks are CI/Actions-centric; loop-ops is
 runner-agnostic and **native-first** on purpose.
 
-## Event — when something happens (Channels)
+## Event — when something happens (routine triggers, Channels)
 
-Polling burns tokens while nothing changes and lags the thing it watches. A
-[**Channel**](https://code.claude.com/docs/en/channels) (v2.1.80+, research preview) is an
+Polling burns tokens while nothing changes and lags the thing it watches. There are now
+**three** ways to fire on an event instead of a timer, and they differ in whether a session
+must stay alive:
+
+| Event source | Needs a live session? | Fires |
+|---|---|---|
+| **Routine API trigger** — `POST /fire` + bearer token | **no** | your alerting system, deploy pipeline or internal tool starts a cloud run |
+| **Routine GitHub trigger** — `pull_request` / `release` + filters | **no** | a repo event starts a cloud run |
+| **Channel** — an MCP plugin pushing into a session | **yes** | anything you can build a receiver for |
+
+The routine triggers are the important addition: **a native event loop no longer has to be
+a kept-alive background session.** An alert-triage or deploy-verification loop is an API
+trigger; a PR-review loop is a GitHub trigger with filters. Both carry the cloud-routine
+constraints above. `text` sent to `/fire` arrives wrapped in a `<routine-fire-payload>`
+block **labelled untrusted** — the prompt must explicitly opt in to acting on it, which is
+what stops a leaked bearer token from becoming instruction injection.
+
+A [**Channel**](https://code.claude.com/docs/en/channels) (v2.1.80+, research preview) is an
 MCP plugin that **pushes** an external event — a CI failure, an error-tracker alert, a
 deploy webhook, a chat message — straight into a running session, so the tick fires *on the
 event* instead of on a timer.
@@ -69,6 +100,12 @@ Headless, one tick to completion:
 claude -p "/goal all tests in test/auth pass and lint is clean, or stop after 20 turns"
 ```
 
+`/loop`'s **dynamic mode** carries its own completion rule: Claude ends the loop itself by
+calling `ScheduleWakeup` with `stop: true` once the task is done, and an iteration that
+neither reschedules nor stops gets one ~20-minute fallback wakeup before the loop ends.
+That is a *self-judged* stop, so it is weaker than `/goal`'s explicit condition — use it
+for exploratory watching, not as a loop's `verify` gate.
+
 **The fully-native, zero-external-infra loop** = a **Desktop scheduled task** (local, has
 files, no open session) that runs `claude -p "/goal <tick condition>"` against the STATE
 spine. No cron, no Task Scheduler, no Actions.
@@ -85,7 +122,7 @@ answering: does it need **local code**, is it **connector-driven**, is it **recu
 |---|---|---|
 | **Connector work, no local code** — triage email, Asana, Slack, calendar, issues via your claude.ai connectors | **Cloud routine** (`/schedule`) | Runs unattended in the cloud and **keeps all your claude.ai connectors** — email/Asana/tools work with your machine *off*. The fresh-clone/no-local-files limit doesn't bite because the work isn't in your repo. (≥1-hour cadence.) |
 | **Touches local code / build / tools**, unattended | **Desktop scheduled task**, or a **background daemon** running `claude -p` | Both have local files and need no open session. The daemon adds fresh context per tick + deterministic, tunable cost (next row). |
-| **Sustained / heavy cadence where tokens matter** | a **deterministic daemon** (or cron) firing `claude -p` — **not** `/loop` | `/loop` runs in one *growing* session: context accumulates, tokens climb, quality drifts past ~150k. A daemon fires a **fresh** `claude -p` each tick — bounded cost, no drift — and is deterministic. **Wake it just under the 5-min prompt-cache TTL (~240–270 s)** so the static `run.md`+system prefix stays cache-warm and each tick reads it at ~0.1×. Fresh context *and* cache reads — the cheap sustained-loop recipe. |
+| **Sustained / heavy cadence where tokens matter** | a **deterministic daemon** (or cron) firing `claude -p` — **not** `/loop` | `/loop` runs in one *growing* session: context accumulates, tokens climb, quality drifts past ~150k. A daemon fires a **fresh** `claude -p` each tick — bounded cost, no drift — and is deterministic. **Wake it inside the cache TTL you're paying for** so the static `run.md`+system prefix stays warm and each tick reads it at ~0.1×: ~240–270 s for the default 5-minute TTL, or up to ~55 min if the prefix is written with `"ttl": "1h"`. Fresh context *and* cache reads — the cheap sustained-loop recipe. |
 | **Supervised, light, you're watching** | **`/loop`** | Quickest to start, in-session — perfect for a short burst ("watch this deploy"). But it's **token-hungry if left running heavy**; graduate to a daemon for anything sustained. |
 | **Long task with a fixed, verifiable end state** — "migrate until tests pass", "split until each file < N lines", "drain the labeled backlog" | **`/goal`** (+ auto mode) | Runs turn-after-turn until a fast model confirms the criteria, then stops — a *completion gate*, not a cadence. Auto mode makes each turn unattended; bound with `or stop after N turns`. |
 
@@ -101,14 +138,22 @@ Cadence is the top cost lever, **caching is the next** ([state-spine.md](state-s
 - **`/loop`** keeps one session alive; its input grows every iteration (accumulating
   transcript), so cost climbs and the cache helps less. Great for short supervised runs.
 - **A daemon/cron `claude -p`** starts fresh each tick (the Ralph property → flat per-tick
-  cost) and, fired **under the 5-min cache TTL**, keeps the static prefix warm (~0.1× reads).
-  `loop-estimate --cadence 5m` will show this; a 6 h loop can't cache at all.
+  cost) and, fired **inside the cache TTL**, keeps the static prefix warm (~0.1× reads).
+  **The TTL is a choice, not a constant:** 5 minutes by default (1.25× write), or 1 hour
+  with `"ttl": "1h"` (2× write) — so the practical daemon window is ~4.5 min *or* ~55 min.
+  `loop-estimate` picks the cheapest TTL that stays warm at your cadence and says which;
+  past 1 h nothing caches. Break-even and the multipliers:
+  [claude-api-ops caching-and-cost](../../claude-api-ops/references/caching-and-cost.md).
+  The same reasoning is why an in-session `/loop` gains less: its input *grows*, so the
+  cached prefix is a shrinking share of each tick — the fresh-context daemon is what keeps
+  the cacheable part dominant.
 
 A minimal local daemon (no scheduler infra) — wake under the cache window, fresh context each tick:
 
 ```bash
-# fires loop-run.sh every ~4.5 min: fresh `claude -p`, prefix stays cache-warm
+# fires loop-run.sh every ~4.5 min: fresh `claude -p`, prefix stays cache-warm (5m TTL)
 while true; do .loops/<name>/loop-run.sh; sleep 270; done
+# with a 1h-TTL cache write on the prefix, ~55 min still reads warm: sleep 3300
 # or run it under process-compose / a systemd timer / nohup for boot persistence
 ```
 
@@ -206,12 +251,15 @@ The cadence fires; the work is done by the layers this repo already ships:
 
 ## A worked L1 → L2 graduation
 
-1. **L1, supervised:** `/loop 15m` in a session, running a read-only "report PR state to
-   STATE.md" prompt. You watch it; it writes nothing but the snapshot. Permission mode
-   `plan`.
+1. **L1, supervised:** `/loop 15m` in a session (`host: session-cron`), running a
+   read-only "report PR state to STATE.md" prompt. You watch it; it writes nothing but the
+   snapshot. Permission mode `plan`. Remember the 7-day expiry — this host is for the
+   proving period, not the destination.
 2. **Prove judgment:** read a week of `STATE.md` snapshots + the run-log. Is its triage
    right? Does readiness hold?
-3. **L2, unattended:** move the cadence to `/schedule` (or cron → `claude -p`). Switch the
+3. **L2, unattended:** move the host — `desktop-task` if the loop touches local code,
+   `cloud-routine` if it doesn't, `external` for sub-minute cadence — and update `host:`
+   so `loop-doctor` checks the right constraints. Switch the
    run prompt to "open a fix PR in a worktree" with `--permission-mode dontAsk` + a narrow
    allowlist (`Bash(npm test)`, `Bash(git …)`). Add a `guard`, set `land_via: fleet-ops`,
    write the `escalation` rule. Re-run `loop-check` at L2 — fix every error — then enable.
@@ -221,6 +269,7 @@ The point of the ladder: the cadence mechanism *changes* (session `/loop` → sc
 
 ## See also
 
+- [native-scheduling.md](native-scheduling.md) — the primitives themselves: verified parameters, limits and failure semantics per host.
 - [risk-tiers.md](risk-tiers.md) — the permission-mode mapping + scheduler-not-session rule.
 - [state-spine.md](state-spine.md) — the STATE.md the run reads and rewrites.
 - [../../claude-code-ops/SKILL.md](../../claude-code-ops/SKILL.md) — the full hook catalog, `claude -p` flags, headless reference.

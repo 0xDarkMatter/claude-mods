@@ -147,6 +147,18 @@ bash "$INIT" --name a-mc --pattern metric-chase --tier L2 --cadence 1h --dir "$S
 bash "$AUDIT" "$SB/arch/a-mc/loop.config.yaml" >/dev/null 2>&1; expect_exit "metric-chase L2 audits clean -> 0" 0 $?
 bash "$DOCTOR" --offline "$SB/arch/a-mc/loop.config.yaml" >/dev/null 2>&1; expect_exit "metric-chase L2 doctors clean (budget fits) -> 0" 0 $?
 
+# ── loop-scaffold: --host records the execution surface ────────────────────────
+# `host:` selects which constraints loop-doctor enforces (references/native-scheduling.md).
+echo "-- loop-scaffold --host --"
+bash "$INIT" --name h-default --dir "$SB/hosts" >/dev/null 2>&1
+expect_has "host defaults to local" "host: local" "$(cat "$SB/hosts/h-default/loop.config.yaml")"
+bash "$INIT" --name h-cloud --host cloud-routine --dir "$SB/hosts" >/dev/null 2>&1
+expect_has "template render carries --host" "host: cloud-routine" "$(cat "$SB/hosts/h-cloud/loop.config.yaml")"
+# the seeded (known --pattern) path is a separate renderer - it must carry host too
+bash "$INIT" --name h-seed --pattern digest --host desktop-task --dir "$SB/hosts" >/dev/null 2>&1
+expect_has "seeded render carries --host" "host: desktop-task" "$(cat "$SB/hosts/h-seed/loop.config.yaml")"
+bash "$INIT" --name h-bad --host nonsense --dir "$SB/hosts" >/dev/null 2>&1; expect_exit "unknown --host -> 2" 2 $?
+
 # ── loop-check: a freshly-init'd config is NOT ready (placeholders) -> 10 ───
 echo "-- loop-check --"
 bash "$INIT" --name raw --pattern custom --tier L1 --dir "$SB/loops" >/dev/null 2>&1
@@ -251,6 +263,64 @@ bash "$DOCTOR" --offline "$SB/no-such.yaml" >/dev/null 2>&1; expect_exit "doctor
 out="$(bash "$DOCTOR" --offline --json "$SB/l1.yaml" 2>/dev/null)"
 expect_has "doctor json schema" "claude-mods.loop-ops.doctor/v1" "$out"
 
+# ── loop-doctor: host-aware checks (native scheduling) ─────────────────────────
+# Each native host has different hard limits, so "will it run" depends on `host:`.
+# Facts asserted here are verified against the live tool schemas + docs (2026-08-30)
+# and written up in references/native-scheduling.md - if a limit changes upstream,
+# these are the assertions that should fail first.
+echo "-- loop-doctor (host-aware) --"
+
+# A config with NO host: must behave exactly as before (host defaults to local).
+grep -v '^host:' "$SB/l1.yaml" > "$SB/l1-nohost.yaml" 2>/dev/null || cp "$SB/l1.yaml" "$SB/l1-nohost.yaml"
+bash "$DOCTOR" --offline "$SB/l1-nohost.yaml" >/dev/null 2>&1; expect_exit "no host: still healthy (defaults local) -> 0" 0 $?
+
+# cloud-routine: minimum interval is 1 hour; faster expressions are rejected at creation.
+sed 's|^kill_switch:.*|kill_switch: "pause the routine (Repeats toggle)"|' "$SB/l1.yaml" > "$SB/cloud.yaml"
+cat >> "$SB/cloud.yaml" <<'EOF'
+host: cloud-routine
+EOF
+sed -i 's|^cadence: 10m|cadence: 10m|' "$SB/cloud.yaml"
+out="$(bash "$DOCTOR" --offline "$SB/cloud.yaml" 2>/dev/null)"; rc=$?
+expect_exit "cloud-routine sub-hour cadence -> 10" 10 "$rc"
+expect_has  "names the 1-hour floor" "1 hour" "$out"
+
+# cloud-routine has NO permission mode, so the boundary must be named instead
+# (repos + environment network policy + connectors). Absent -> a finding.
+sed 's|^cadence: 10m|cadence: 1h|' "$SB/cloud.yaml" > "$SB/cloud-1h.yaml"
+out="$(bash "$DOCTOR" --offline "$SB/cloud-1h.yaml" 2>/dev/null)"; rc=$?
+expect_exit "cloud-routine without a named boundary -> 10" 10 "$rc"
+expect_has  "names the missing boundary" "boundary" "$out"
+
+# With the boundary named it passes, and permission_mode is reported as ignored, not required.
+sed 's|^escalation:.*|escalation: "connectors pruned to GitHub read; environment network Trusted; never merge"|' \
+  "$SB/cloud-1h.yaml" > "$SB/cloud-ok.yaml"
+bash "$DOCTOR" --offline "$SB/cloud-ok.yaml" >/dev/null 2>&1; expect_exit "cloud-routine with boundary -> 0" 0 $?
+out="$(bash "$DOCTOR" --offline "$SB/cloud-ok.yaml" 2>/dev/null)"
+expect_has "permission_mode reported as ignored on cloud" "ignored by cloud routines" "$out"
+
+# --live must be SKIPPED (not passed) for a cloud routine: the tick runs on a fresh
+# cloud clone, so this machine's PATH proves nothing. A missing gate binary here must
+# NOT fail, and must not be silently reported as ok either.
+sed 's|^escalation:|verify: "totally-missing-binary-zzz run"\nescalation:|' "$SB/cloud-ok.yaml" > "$SB/cloud-live.yaml"
+out="$(bash "$DOCTOR" --live "$SB/cloud-live.yaml" 2>/dev/null)"; rc=$?
+expect_exit "cloud-routine --live does not fail on local PATH -> 0" 0 "$rc"
+expect_has  "cloud-routine --live is explicitly skipped" "skipped" "$out"
+
+# session-cron (/loop + CronCreate) is session-scoped with a 7-day expiry: L1 only.
+sed 's|^host: cloud-routine|host: session-cron|' "$SB/cloud-ok.yaml" > "$SB/sess-l1.yaml"
+bash "$DOCTOR" --offline "$SB/sess-l1.yaml" >/dev/null 2>&1; expect_exit "session-cron at L1 -> 0 (warns only)" 0 $?
+out="$(bash "$DOCTOR" --offline "$SB/sess-l1.yaml" 2>/dev/null)"
+expect_has "session-cron L1 warns about the 7-day expiry" "7-day expiry" "$out"
+# same host at L2 = unattended, which it cannot do
+{ sed 's|^tier: L1|tier: L2|' "$SB/sess-l1.yaml"; printf 'verify: "true"\nguard: "true"\nworktree: true\nland_via: fleet-ops\n'; } > "$SB/sess-l2.yaml"
+out="$(bash "$DOCTOR" --offline "$SB/sess-l2.yaml" 2>/dev/null)"; rc=$?
+expect_exit "session-cron at L2 (unattended) -> 10" 10 "$rc"
+expect_has  "names the unattended mismatch" "can't run unattended" "$out"
+
+# An unknown host is a finding, not a silent pass.
+sed 's|^host: session-cron|host: made-up|' "$SB/sess-l1.yaml" > "$SB/host-bad.yaml"
+bash "$DOCTOR" --offline "$SB/host-bad.yaml" >/dev/null 2>&1; expect_exit "unknown host -> 10" 10 $?
+
 # ── loop-estimate: validation errors ───────────────────────────────────────────
 "$PYTHON" "$COST" --pattern pr-watch --cadence 10m --model claude-nope >/dev/null 2>&1; expect_exit "unknown model -> 4" 4 $?
 "$PYTHON" "$COST" --pattern not-a-pattern --cadence 10m --model claude-haiku-4-5 >/dev/null 2>&1; expect_exit "unknown pattern -> 4" 4 $?
@@ -301,6 +371,65 @@ grep -q 'BRAND::loop' "$SKILL/../_lib/term.sh" && ok "term.sh registers the loop
 # Piped audit findings stay plain (no ANSI in the data stream).
 po="$(bash "$AUDIT" "$SB/l2-nogate.yaml" 2>/dev/null)"
 case "$po" in *$'\033'*) no "piped audit leaked ANSI into data";; *) ok "piped audit stays plain data";; esac
+
+# ── check-native-facts: the native-scheduling staleness guard ──────────────
+# Asserts the guard actually detects drift, not just that it exits 0 today: a
+# verifier that can only pass is decoration.
+echo "-- check-native-facts --"
+NATIVE_CHK="$SCRIPTS/check-native-facts.py"
+"$PYTHON" "$NATIVE_CHK" --help >/dev/null 2>&1; expect_exit "native-facts --help -> 0" 0 $?
+"$PYTHON" "$NATIVE_CHK" --offline >/dev/null 2>&1; expect_exit "native-facts offline in sync -> 0" 0 $?
+"$PYTHON" "$NATIVE_CHK" --offline --live >/dev/null 2>&1; expect_exit "mutually exclusive modes -> 2" 2 $?
+"$PYTHON" "$NATIVE_CHK" --offline --skill "$SB/not-a-skill" >/dev/null 2>&1; expect_exit "missing skill dir -> 3" 3 $?
+out="$("$PYTHON" "$NATIVE_CHK" --offline --json 2>/dev/null)"
+expect_has "native-facts json schema" "claude-mods.loop-ops.native-facts/v1" "$out"
+expect_has "native-facts json in_sync" '"in_sync": true' "$out"
+# Drift detection: copy the skill, drop a host from the reference -> must be caught.
+mkdir -p "$SB/drift"
+cp -r "$SKILL/assets" "$SKILL/scripts" "$SKILL/references" "$SB/drift/" 2>/dev/null
+"$PYTHON" "$NATIVE_CHK" --offline --skill "$SB/drift" >/dev/null 2>&1
+expect_exit "unmodified copy still in sync -> 0" 0 $?
+sed 's|`cloud-routine`|`clown-routine`|g' "$SKILL/references/native-scheduling.md" > "$SB/drift/references/native-scheduling.md"
+out="$("$PYTHON" "$NATIVE_CHK" --offline --skill "$SB/drift" 2>/dev/null)"; rc=$?
+expect_exit "host vocabulary drift -> 10" 10 "$rc"
+expect_has  "names the drifted source" "native-scheduling.md" "$out"
+# A reference that loses its date stamp is drift too - undated is how a doc rots.
+sed 's|\*\*Verified 2026-08-30\*\*|Verified recently|' "$SKILL/references/native-scheduling.md" > "$SB/drift/references/native-scheduling.md"
+"$PYTHON" "$NATIVE_CHK" --offline --skill "$SB/drift" >/dev/null 2>&1; expect_exit "missing date stamp -> 10" 10 $?
+
+# ── docs: the native-scheduling reference must exist AND be cited ──────────
+# A reference SKILL.md never links is dead weight the router can't find
+# (docs/SKILL-CREATION-PROTOCOL.md step 4), so both halves are asserted.
+echo "-- native-scheduling reference --"
+NATIVE="$SKILL/references/native-scheduling.md"
+[[ -f "$NATIVE" ]] && ok "native-scheduling.md present" || no "native-scheduling.md missing"
+skillmd="$(cat "$SKILL/SKILL.md")"
+expect_has "SKILL.md cites native-scheduling.md" "references/native-scheduling.md" "$skillmd"
+expect_has "claude-code-loops.md cites native-scheduling.md" "native-scheduling.md" "$(cat "$SKILL/references/claude-code-loops.md")"
+# The reference is a claim about a fast-moving external surface, so it must carry the
+# date it was verified - an undated table is how a scheduling doc rots invisibly.
+expect_has "native-scheduling.md is date-stamped" "Verified 2026-08-30" "$(cat "$NATIVE")"
+# Each host named by the config template must be documented in the reference.
+for h in session-cron desktop-task cloud-routine; do
+  expect_has "reference documents host '$h'" "$h" "$(cat "$NATIVE")"
+done
+# The gate is an eval; loop-ops links the discipline rather than restating it.
+expect_has "SKILL.md routes gate-judgement work to evals-ops" "evals-ops" "$skillmd"
+
+# FRONTMATTER CONTRACT (stated here because a later description-trim lane edits
+# frontmatter without reading this suite - see SKILL-CREATION-PROTOCOL.md step 5):
+#   1. `description` must keep the repositioning clause "Native primitives schedule;
+#      loop-ops governs" - it is what stops a reader reaching for this skill to build a
+#      scheduler the harness already ships. Trimming it changes what the skill IS.
+#   2. `description` must keep the native trigger words, or the router never fires on
+#      "cron", "scheduled task" or "cloud routine".
+#   3. Nothing here requires `when_to_use`; this skill does not use that field.
+fm="$(grep -m1 '^description:' "$SKILL/SKILL.md")"
+expect_has "description keeps the repositioning clause" "Native primitives schedule; loop-ops governs" "$fm"
+expect_has "description keeps the native scheduling triggers" "cloud routine" "$fm"
+# Progressive disclosure: the body stays under the 500-line cap (protocol step 3).
+sk_lines="$(wc -l < "$SKILL/SKILL.md" | tr -d ' ')"
+[[ "$sk_lines" -lt 500 ]] && ok "SKILL.md under the 500-line cap ($sk_lines)" || no "SKILL.md is $sk_lines lines (cap 500)"
 
 # ── summary ────────────────────────────────────────────────────────────────
 echo "=== $PASS passed, $FAIL failed ==="

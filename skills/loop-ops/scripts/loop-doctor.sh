@@ -4,6 +4,12 @@
 # loop-check checks the config is well-formed; loop-doctor checks the loop will
 # execute: the gate command's binary resolves, claude/git are on PATH, the budget
 # can fit a tick, and the permission mode is achievable from where it launches.
+#
+# HOST-AWARE. Since native scheduling landed, "where it launches" is a real
+# variable, so the config's optional `host:` selects which constraints apply - a
+# cloud routine has NO permission mode and a >=1h floor, and this machine's PATH
+# says nothing about it; a session-cron host cannot run unattended at all.
+# Verified surface + limits: references/native-scheduling.md (2026-08-30).
 # Modeled on fleet-worker/scripts/fleet-doctor.sh.
 #
 # Usage:   loop-doctor.sh [--offline|--live] [--json] [-q] <loop.config.yaml>
@@ -18,6 +24,8 @@
 #                        isolation coherence. Safe for PR CI.
 #   --live:              adds runtime preflight - claude/git on PATH, the verify/guard
 #                        leading binary resolvable, the kill-switch path's parent exists.
+#                        Skipped (not failed) when host: cloud-routine - the tick does
+#                        not run on this machine, so this machine's PATH is irrelevant.
 #
 # Examples:
 #   loop-doctor.sh --offline .loops/pr-watch/loop.config.yaml
@@ -49,7 +57,8 @@ Usage:
 
 Options:
   --offline      config-shape + budget-vs-cost + permission coherence (default; no PATH/exec).
-  --live         adds runtime preflight: claude/git on PATH, verify/guard binary resolvable.
+  --live         adds runtime preflight: claude/git on PATH, verify/guard binary resolvable
+                 (skipped for host: cloud-routine - ticks do not run on this machine).
   --json         emit a JSON envelope.
   -q, --quiet    suppress the stderr panel.
   -h, --help     show this help and exit 0.
@@ -110,6 +119,7 @@ cfg_list_items() {
 TIER="$(cfg_scalar tier)"; PMODE="$(cfg_scalar permission_mode)"; PATTERN="$(cfg_scalar pattern)"
 VERIFY="$(cfg_scalar verify)"; GUARD="$(cfg_scalar guard)"; BUDGET="$(cfg_scalar budget_tokens)"
 KILL="$(cfg_scalar kill_switch)"; ESCAL="$(cfg_scalar escalation)"
+CADENCE="$(cfg_scalar cadence)"; HOST="$(cfg_scalar host)"; [[ -z "$HOST" ]] && HOST="local"
 is_l2plus=0; [[ "$TIER" == "L2" || "$TIER" == "L3" ]] && is_l2plus=1
 
 # ── findings ─────────────────────────────────────────────────────────────
@@ -121,12 +131,74 @@ row() { ROWS+=("$1"$'\t'"$2"$'\t'"$3"); [[ "$1" == "bad" ]] && FINDING=1; }
 lead_bin() { awk '{ for(i=1;i<=NF;i++){ if($i !~ /=/){print $i; exit} } }' <<<"$1"; }
 
 # ── OFFLINE checks ───────────────────────────────────────────────────────
-# Permission mode achievability.
-case "$PMODE" in
-  default) row bad "permission_mode" "default is interactive - a headless 'claude -p' tick can't answer prompts; use dontAsk/auto/bypassPermissions" ;;
-  "")      row bad "permission_mode" "missing" ;;
-  *)       row ok  "permission_mode" "$PMODE" ;;
+# Cadence in minutes, for the host floor checks. Nm/Nh/Nd, or "*/N * * * *" -> N.
+# Anything richer returns empty and the floor check is SKIPPED rather than guessed:
+# a wrong floor finding is worse than no finding.
+cadence_minutes() {
+  case "$1" in
+    *[0-9]m) printf '%s' "${1%m}" ;;
+    *[0-9]h) printf '%s' "$(( ${1%h} * 60 ))" ;;
+    *[0-9]d) printf '%s' "$(( ${1%d} * 1440 ))" ;;
+    */[0-9]*\ *) awk '{ n=$1; sub(/^\*\//,"",n); if (n ~ /^[0-9]+$/ && $2=="*") print n }' <<<"$1" ;;
+    *) printf '' ;;
+  esac
+}
+CAD_MIN="$(cadence_minutes "$CADENCE" 2>/dev/null)"
+
+# Host coherence. `host:` names where ticks execute; each surface has different hard
+# limits (references/native-scheduling.md, verified 2026-08-30).
+case "$HOST" in
+  local|external|desktop-task|cloud-routine|session-cron) row ok "host" "$HOST" ;;
+  *) row bad "host" "unknown host '$HOST' - use local|session-cron|desktop-task|cloud-routine|external" ;;
 esac
+
+case "$HOST" in
+  session-cron)
+    # /loop + CronCreate are session-scoped: they need an open, idle session and every
+    # recurring job self-deletes 7 days after creation. Fine for L1 supervised polling;
+    # it cannot host an unattended loop, which is what L2+ means.
+    if [[ "$is_l2plus" -eq 1 ]]; then
+      row bad "host/tier" "session-cron can't run unattended ($TIER) - needs an open idle session and expires after 7 days; use desktop-task or external"
+    else
+      row warn "host/tier" "session-cron is supervised-only: open idle session, 7-day expiry, no catch-up for missed fires"
+    fi
+    ;;
+  desktop-task)
+    # One catch-up run for the most recently missed window; older ones are discarded,
+    # so a slow tick can land at any hour. The prompt needs its own time guardrails.
+    if [[ -n "$CAD_MIN" ]] && [[ "$CAD_MIN" -ge 720 ]]; then
+      row warn "catch-up" "desktop-task runs ONE catch-up for the latest missed window - a $CADENCE tick may fire hours late; put time guardrails in run.md"
+    fi
+    ;;
+  cloud-routine)
+    # Routines run autonomously in the cloud: no permission-mode picker, >=1h floor,
+    # fresh clone with no local files. The boundary is repos + environment + connectors.
+    if [[ -n "$CAD_MIN" ]] && [[ "$CAD_MIN" -lt 60 ]]; then
+      row bad "cadence" "cloud-routine minimum interval is 1 hour - '$CADENCE' is rejected at creation"
+    fi
+    if printf '%s %s' "$ESCAL" "$(cfg_list_items scope | tr '\n' ' ')" | grep -Eqi 'connectors?|environment|network access|repositor'; then
+      row ok "boundary" "cloud-routine boundary names repos/environment/connectors"
+    else
+      row bad "boundary" "cloud-routine has NO permission mode - the boundary must be repos + environment network policy + connectors (ALL connectors attach by default); name it in scope/escalation"
+    fi
+    ;;
+esac
+
+# Permission mode achievability. A cloud routine has no permission-mode picker at all,
+# so requiring one there would be a false finding - the boundary check above replaces it.
+if [[ "$HOST" == "cloud-routine" ]]; then
+  if [[ -n "$PMODE" ]]; then
+    row warn "permission_mode" "'$PMODE' is ignored by cloud routines (they run autonomously, no approval prompts)"
+  else
+    row ok "permission_mode" "n/a for cloud-routine"
+  fi
+else
+  case "$PMODE" in
+    default) row bad "permission_mode" "default is interactive - a headless 'claude -p' tick can't answer prompts; use dontAsk/auto/bypassPermissions" ;;
+    "")      row bad "permission_mode" "missing" ;;
+    *)       row ok  "permission_mode" "$PMODE" ;;
+  esac
+fi
 # L3 bypass needs an isolation boundary.
 if [[ "$TIER" == "L3" && "$PMODE" == "bypassPermissions" ]]; then
   if printf '%s %s' "$ESCAL" "$(cfg_list_items scope | tr '\n' ' ')" | grep -Eqi 'container|isolat|sandbox|devcontainer'; then
@@ -152,7 +224,12 @@ except Exception: print('')" 2>/dev/null)"
 fi
 
 # ── LIVE checks ──────────────────────────────────────────────────────────
-if [[ "$MODE" == "live" ]]; then
+# Skipped wholesale for cloud-routine: the tick runs on a fresh cloud clone, so this
+# machine's PATH, git and gate binaries say nothing about whether it will run. A pass
+# here would be false confidence - worse than no check.
+if [[ "$MODE" == "live" && "$HOST" == "cloud-routine" ]]; then
+  row warn "live" "skipped - host cloud-routine runs on a fresh cloud clone; verify the gate in the routine's environment setup script instead"
+elif [[ "$MODE" == "live" ]]; then
   if command -v claude >/dev/null 2>&1; then row ok "claude" "on PATH"; else row warn "claude" "not on PATH - the scheduler that runs 'claude -p' must have it"; fi
   if command -v git >/dev/null 2>&1; then
     row ok "git" "on PATH"

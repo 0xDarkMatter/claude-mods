@@ -97,6 +97,15 @@ jobs:
           if [ "$rc" -eq 7 ]; then echo "::warning::threejs-ops live check unreachable (npm registry) — skipped"; fi
           exit 0
 
+      - name: loop-ops native-scheduling limits vs published docs
+        run: |
+          set +e
+          python skills/loop-ops/scripts/check-native-facts.py --live
+          rc=$?
+          if [ "$rc" -eq 10 ]; then echo "::error::loop-ops drift — a native scheduling limit changed upstream; re-verify references/native-scheduling.md"; exit 1; fi
+          if [ "$rc" -eq 7 ]; then echo "::warning::loop-ops live check unreachable (code.claude.com docs) — skipped"; fi
+          exit 0
+
       - name: r-ops recommended packages still on CRAN
         run: |
           set +e

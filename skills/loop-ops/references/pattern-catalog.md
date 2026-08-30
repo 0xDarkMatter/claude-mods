@@ -14,14 +14,16 @@ its judgment.
 | Trigger | Fires when | Mechanism | Best for |
 |---|---|---|---|
 | `cadence` | a clock interval elapses | `/loop` (supervised), Desktop task, cloud routine, or a daemon | steady polling — backlog, PRs, deps |
-| `event` | an external thing happens (CI fail, error, deploy, message) | a **Channel** (MCP webhook receiver) pushes it into a live session | responsiveness + low cost — no idle polling |
+| `event` | an external thing happens (CI fail, error, deploy, message) | a cloud routine's **API `/fire`** or **GitHub** trigger (no session needed), or a **Channel** (MCP receiver) pushing into a live session | responsiveness + low cost — no idle polling |
 | `goal` | runs continuously **until a condition holds**, then stops | `/goal` (+ auto mode) | run-to-completion — migrations, metric targets |
 
 > **Event beats poll when you can get it.** A CI webhook firing the tick is cheaper and
-> faster than a 10-min poll. The cost: a Channel needs a **persistent session**
-> (`claude --channels …` in a background process), and it's a research-preview,
-> Anthropic-auth-only feature. Cadence stays fully detached; event trades that for
-> responsiveness. See [claude-code-loops.md](claude-code-loops.md).
+> faster than a 10-min poll — and it no longer has to cost you detachment. A **routine API
+> trigger** (`POST /fire` with a bearer token) or a **GitHub trigger** starts a cloud run
+> with no session alive at all; only a **Channel** needs a persistent session
+> (`claude --channels …` in a background process, research-preview, Anthropic-auth only).
+> Pick the routine trigger when the work can run in the cloud, the Channel when it must
+> touch local state. See [claude-code-loops.md](claude-code-loops.md).
 
 **2. Posture — how much autonomy** (the [risk tier](risk-tiers.md)): `L1` report · `L2`
 propose-and-human-gates · `L3` autonomous-in-a-denylist.
@@ -32,6 +34,11 @@ propose-and-human-gates · `L3` autonomous-in-a-denylist.
 |---|---|---|---|
 | `connector` | **cloud routine** (`/schedule`) | your claude.ai connectors (email, Asana, Slack, issues) — **no local files** | the work lives in services, not your repo |
 | `local` | Desktop task / daemon / `/loop` | the repo, build, models, local tools | the work touches local state |
+
+**Locus is `host:`.** The axis is not decorative — write the resolved answer into the
+config's `host:` field (`cloud-routine` for `connector`; `desktop-task`, `session-cron` or
+`external` for `local`) so `loop-doctor` enforces that surface's real limits instead of
+assuming a local `claude -p`. Per-host limits: [native-scheduling.md](native-scheduling.md).
 
 The recipe-selector in [claude-code-loops.md](claude-code-loops.md) is just these axes
 resolved to a mechanism. A loop = **(trigger × posture × locus) + the [state spine](state-spine.md)**.

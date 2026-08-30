@@ -17,6 +17,7 @@
 #   loop-scaffold.sh --name pr-watch --pattern pr-watch --tier L1
 #   loop-scaffold.sh --name dep-bump --pattern dep-bump --tier L2 --cadence 1d
 #   loop-scaffold.sh --name nightly --cadence "0 3 * * *" --dry-run
+#   loop-scaffold.sh --name digest --pattern digest --host cloud-routine --cadence 1h
 set -uo pipefail
 
 readonly EX_OK=0 EX_USAGE=2 EX_NOTFOUND=3 EX_PRECOND=5
@@ -45,6 +46,7 @@ NAME=""
 PATTERN="custom"
 TIER="L1"
 CADENCE="1h"
+HOST="local"
 DIR=".loops"
 DRY_RUN=0
 FORCE=0
@@ -63,6 +65,9 @@ Options:
                      daily-scan) or "custom" (default: custom).
   --tier L1|L2|L3    starting autonomy tier (default: L1).
   --cadence STR      10m | 1h | 6h | 1d, or a cron string (default: 1h).
+  --host HOST        where ticks execute: local (default) | session-cron |
+                     desktop-task | cloud-routine | external. Decides which
+                     constraints loop-doctor enforces (references/native-scheduling.md).
   --dir DIR          parent directory for the loop (default: .loops).
   --dry-run          print the target path + rendered config; write nothing.
   --force            overwrite an already-populated <dir>/<name>/ directory.
@@ -75,6 +80,7 @@ Examples:
   loop-scaffold.sh --name pr-watch --pattern pr-watch --tier L1
   loop-scaffold.sh --name dep-bump --pattern dep-bump --tier L2 --cadence 1d
   loop-scaffold.sh --name nightly --cadence "0 3 * * *" --dry-run
+  loop-scaffold.sh --name digest --pattern digest --host cloud-routine --cadence 1h
 EOF
 }
 
@@ -87,6 +93,7 @@ while [[ $# -gt 0 ]]; do
     --pattern) [[ $# -ge 2 ]] || die_usage "--pattern needs a value"; PATTERN="$2"; shift 2 ;;
     --tier)    [[ $# -ge 2 ]] || die_usage "--tier needs a value"; TIER="$2"; shift 2 ;;
     --cadence) [[ $# -ge 2 ]] || die_usage "--cadence needs a value"; CADENCE="$2"; shift 2 ;;
+    --host)    [[ $# -ge 2 ]] || die_usage "--host needs a value"; HOST="$2"; shift 2 ;;
     --dir)     [[ $# -ge 2 ]] || die_usage "--dir needs a value"; DIR="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     --force)   FORCE=1; shift ;;
@@ -104,6 +111,12 @@ case "$TIER" in L1|L2|L3) ;; *) die_usage "--tier must be L1|L2|L3 (got '$TIER')
 # cadence: Nm/Nh/Nd OR a cron-ish string (digits, spaces, * / , -)
 [[ "$CADENCE" =~ ^[0-9]+[mhd]$ || "$CADENCE" =~ ^[-0-9*/,\ ]+$ ]] \
   || die_usage "--cadence must be like 10m/1h/1d or a cron string (got '$CADENCE')"
+# host: the execution surface. Its constraints are enforced by loop-doctor, not here -
+# scaffolding a not-yet-valid combination is fine; scheduling one is not.
+case "$HOST" in
+  local|session-cron|desktop-task|cloud-routine|external) ;;
+  *) die_usage "--host must be local|session-cron|desktop-task|cloud-routine|external (got '$HOST')" ;;
+esac
 
 [[ -f "$CFG_TPL" ]]   || { printf 'error: config template not found at %s\n' "$CFG_TPL" >&2; exit "$EX_NOTFOUND"; }
 [[ -f "$STATE_TPL" ]] || { printf 'error: STATE template not found at %s\n' "$STATE_TPL" >&2; exit "$EX_NOTFOUND"; }
@@ -205,6 +218,7 @@ render_config() {
     -e "s|<pattern-key>|$PATTERN|" \
     -e "s|^tier: L1|tier: $TIER|" \
     -e "s|^cadence: 1h|cadence: $CADENCE|" \
+    -e "s|^host: local|host: $HOST|" \
     -e "s|^permission_mode: dontAsk|permission_mode: $PMODE|" \
     "$CFG_TPL"
 }
@@ -251,6 +265,7 @@ pattern: $PATTERN
 tier: $TIER
 permission_mode: $PMODE
 cadence: $CADENCE
+host: $HOST
 goal: "$GOAL_SEED"
 scope:
   - "$SCOPE_SEED"

@@ -28,11 +28,12 @@ Flat YAML so it's trivially parseable (no `yq` dependency). Full annotated templ
 | `pattern` | yes | a catalog key (`pr-watch`, …) or `custom` |
 | `tier` | yes | `L1` / `L2` / `L3` — the autonomy rung |
 | `cadence` | yes | `10m` / `1h` / `6h` / `1d`, or a cron string |
+| `host` | rec | where ticks execute: `local` (default) / `session-cron` / `desktop-task` / `cloud-routine` / `external`. Selects which hard limits `loop-doctor` enforces — see [native-scheduling.md](native-scheduling.md) |
 | `goal` | yes | one sentence: what this loop does and what it must NOT do |
 | `scope` | yes | bounded globs the loop may touch — **never `*`** |
 | `verify` | L2+ | the gate command (the metric/check); a loop with no gate is invalid |
 | `guard` | L2+ | a must-always-pass command (full suite / typecheck) |
-| `permission_mode` | yes | `plan` / `dontAsk` / `auto` / `acceptEdits` / `bypassPermissions` |
+| `permission_mode` | yes | `plan` / `dontAsk` / `auto` / `acceptEdits` / `bypassPermissions`. **Ignored when `host: cloud-routine`** — routines have no permission picker; the boundary is repos + environment + connectors |
 | `worktree` | L2+ | `true` to isolate code changes in a git worktree |
 | `escalation` | yes | what the loop escalates instead of doing (the gate rule) |
 | `budget_tokens` | rec | per-run output-token ceiling |
@@ -148,3 +149,4 @@ in `kill_switch:` and make checking it the first action of every run, before the
 - [risk-tiers.md](risk-tiers.md) — the autonomy ladder the config's `tier` selects.
 - [pattern-catalog.md](pattern-catalog.md) — each pattern's place in the priority order.
 - [claude-code-loops.md](claude-code-loops.md) — how the cadence actually fires.
+- [native-scheduling.md](native-scheduling.md) — the `host:` values and the limits each one imposes.
