@@ -104,6 +104,14 @@ run "hono-facts --help"               0 "$PY" skills/hono-ops/scripts/check-hono
 run "route-inventory --help"          0 "$PY" skills/hono-ops/scripts/route-inventory.py --help
 run "route-inventory fixture scan"    0 "$PY" skills/hono-ops/scripts/route-inventory.py skills/hono-ops/tests/fixtures/sample-app.ts
 
+echo "== nextjs-ops: Next.js fact/staleness verifier + app-router audit contract"
+run "nextjs-facts --offline consistent" 0 "$PY" skills/nextjs-ops/scripts/check-nextjs-facts.py --offline
+run "nextjs-facts --help"               0 "$PY" skills/nextjs-ops/scripts/check-nextjs-facts.py --help
+run "app-router-audit --help"           0 "$PY" skills/nextjs-ops/scripts/audit-app-router.py --help
+# The fixture is a deliberate minefield: exit 10 (findings) is the pass condition.
+run "app-router-audit fixture scan"    10 "$PY" skills/nextjs-ops/scripts/audit-app-router.py skills/nextjs-ops/tests/fixtures/app-sample
+run "app-router-audit clean control"    0 "$PY" skills/nextjs-ops/scripts/audit-app-router.py skills/nextjs-ops/tests/fixtures/app-sample/app/clean/page.tsx
+
 echo "== protocol: every new verifier is executable + compiles"
 for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/claude-api-ops/scripts/context-budget.py \
@@ -116,7 +124,7 @@ for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/threejs-ops/scripts/check-three-facts.py \
          skills/isometric-ops/scripts/check-iso-facts.py \
          skills/hono-ops/scripts/check-hono-facts.py \
-         skills/hono-ops/scripts/route-inventory.py; do
+         skills/hono-ops/scripts/route-inventory.py          skills/nextjs-ops/scripts/check-nextjs-facts.py          skills/nextjs-ops/scripts/audit-app-router.py; do
     "$PY" -m py_compile "$s" 2>/dev/null && pass "py_compile $(basename "$s")" || bad "py_compile $(basename "$s")"
 done
 bash -n skills/terraform-ops/scripts/check-action-refs.sh 2>/dev/null \
