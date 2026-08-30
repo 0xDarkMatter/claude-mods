@@ -1,6 +1,6 @@
 ---
 name: icon-ops
-description: "Source, vet, normalize and ship SVG icons for web UI - set selection, licence and trademark traps, currentColor theming, sprite/inline delivery, and accessibility. Triggers on: icon, icons, svg icon, find an icon, add an icon, pick an icon, icon set, icon library, iconify, lucide, heroicons, phosphor, tabler, feather, material symbols, font awesome, simple icons, brand logo, icon sprite, svg sprite, symbol use, currentColor, icon won't change colour, icon is the wrong colour, icon font, icon accessibility, aria-hidden icon, icon-only button, icon size, icons look inconsistent, mixed icon sets, normalize svg, strip svg cruft, optimise svg."
+description: "Source, vet, normalize and ship SVG icons for web UI - set selection, licence and trademark traps, currentColor theming, sprite/inline delivery, and accessibility. Triggers on: icon, icons, svg icon, find an icon, add an icon, pick an icon, icon set, icon library, iconify, lucide, heroicons, phosphor, tabler, feather, material symbols, font awesome, simple icons, brand logo, icon sprite, svg sprite, symbol use, currentColor, icon won't change colour, icon is the wrong colour, icon font, icon accessibility, aria-hidden icon, icon-only button, icon size, icons look inconsistent, mixed icon sets, normalize svg, strip svg cruft, optimise svg, brandfetch, company logo, client logo, logo by domain, brand assets api, logo api, thesvg, brand icon, simple icons."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
@@ -29,6 +29,10 @@ than after 60 icons are embedded.
 
 Using a brand logo — GitHub, Google, a client's mark — and needing to know
 whether you actually may. The file licence does not answer this; trademark does.
+
+Needing a logo for an arbitrary company that no icon set carries. That is a
+different category from icon sets — a runtime lookup by domain, not a committed
+glyph — with its own quota, caching and trademark consequences.
 
 Icon-only buttons that a screen reader announces as "button", or announces
 twice. Both come from putting the accessible name in the wrong place.
@@ -84,6 +88,16 @@ brand logos under CC0, but the marks remain their owners' property. Nominative
 use ("Sign in with GitHub") is fine; implying endorsement, recolouring a mark to
 your palette, or putting it in your own logo is not. Quoting "it's CC0" as
 clearance is the wrong answer.
+
+**A company logo is not a UI icon.** Three sources cover brand marks and they
+trade off reach against commitment — **Simple Icons** (committed, monochrome,
+themeable), **theSVG** (MIT, 6,500+ marks in brand colour via
+`npm i thesvg`, an MCP server needing no key, or `npx skills add glincker/thesvg`), and **Brandfetch** (runtime lookup by *domain*, any company, nothing
+committed; free key at developers.brandfetch.com/dashboard, hotlink-only URLs
+that expire in ~24h, and two free tiers that differ by 10,000x). All three carry
+the identical trademark position — see
+[Brand marks](references/icon-sources.md#brand-marks--three-sources-one-trademark-position).
+They resolve the mark for you; none of them clears it.
 
 **Aggregators hide the licence.** Iconify, and any icon-search MCP or plugin,
 resolve across 150+ sets each keeping its own terms. Record the *originating
@@ -202,9 +216,12 @@ meaning: pair it with a distinct shape.
 - [`references/icon-sources.md`](references/icon-sources.md) — the set comparison
   table (licence, grid, family, notes) for the eleven sets worth knowing; the
   trademark-vs-file-licence distinction for brand marks; the aggregator licence
-  trap; MCP/plugin sourcing discipline; and what each licence class actually
-  requires by way of attribution. Load when choosing a set, or before shipping
-  any brand mark.
+  trap; MCP/plugin sourcing discipline; what each licence class actually
+  requires by way of attribution; and **brand marks** — Simple Icons vs theSVG
+  vs Brandfetch compared on shape, coverage, colour and offline behaviour, plus
+  Brandfetch's key setup, its two very different free tiers, hotlink/expiry
+  constraints, and both MCP servers. Load when choosing a set, sourcing a
+  company logo, or before shipping any brand mark.
 
 - [`references/inline-delivery.md`](references/inline-delivery.md) — delivery
   mechanism comparison and why icon fonts fail; the external-`<use>` CORS trap;
