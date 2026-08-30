@@ -18,6 +18,33 @@ WORKER="$SCRIPTS/fleet-worker"
 COLLECT="$SCRIPTS/fleet-collect.sh"
 DOCTOR="$SCRIPTS/fleet-doctor.sh"
 
+# --- Hermetic environment (LOAD-BEARING) -------------------------------------
+# The launcher reads FLEET_WORKER_* and the auth vars from the environment as
+# part of its documented key-resolution chain, so a developer machine exporting
+# any of them silently REORDERS that chain and the suite then asserts against
+# the wrong branch. Setting env per-invocation is not enough: an unset var in
+# the invocation still inherits the host value.
+#
+# Observed 2026-08-30: a host with FLEET_WORKER_KEYRING_SERVICE/KEY exported
+# made the mock `keyring` (resolution rank 2) pre-empt the ZHIPU/GLM branches
+# (ranks 3/4) that three assertions exist to test - and satisfied the no-key
+# case too, so it exited 0 where 5 was expected. Three failures, one cause, and
+# only on machines that use the keyring path. CI, which exports none of these,
+# stayed green throughout - the worst shape of test bug, because the suite's
+# verdict depended on who ran it.
+#
+# The list is DERIVED from the scripts rather than hardcoded, so a new env knob
+# added to a script cannot reintroduce this by being forgotten here.
+# No backslash escapes in this pattern. A generator or editor that processes
+# them turns a backslash-b escape into a literal backspace byte; the pattern
+# then matches nothing and this loop silently clears NOTHING - exactly the
+# failure the hermeticity assertion below caught when this was written.
+# Character classes suffice here without word boundaries.
+for __v in $(grep -ohE '(FLEET_WORKER|FLEETFLOW)_[A-Z0-9_]+|ANTHROPIC_[A-Z0-9_]+|ZHIPU_API_KEY|GLM_API_KEY' "$SCRIPTS"/* 2>/dev/null | sort -u); do
+  unset "$__v" 2>/dev/null || true
+done
+unset __v
+
 command -v jq >/dev/null 2>&1 || { echo "SKIP: jq not available"; exit 0; }
 
 SB="$(mktemp -d)"; trap 'rm -rf "$SB"' EXIT
@@ -55,6 +82,20 @@ cat > "$MB/keyring" <<'EOF'
 EOF
 chmod +x "$MB/keyring"
 PC="$MB:/usr/bin:/bin"   # controlled PATH: mock first, no real claude
+
+echo "-- environment hermeticity --"
+__leak=""
+# Kept on one line deliberately: a line continuation here has already been
+# mangled once into a literal two-character sequence by a generator.
+for __v in FLEET_WORKER_KEYRING_SERVICE FLEET_WORKER_KEYRING_KEY FLEET_WORKER_MODEL FLEET_WORKER_BASE_URL FLEET_WORKER_CLAUDE_BIN FLEET_WORKER_PERMISSION_MODE ANTHROPIC_AUTH_TOKEN ZHIPU_API_KEY GLM_API_KEY; do
+  [ -n "$(eval "printf '%s' \"\${$__v:-}\"")" ] && __leak="$__leak $__v"
+done
+if [ -z "$__leak" ]; then
+  ok "no host env leaks into key resolution"
+else
+  no "host env leaked:$__leak (would reorder the resolution chain)"
+fi
+unset __v __leak
 
 echo "-- launcher --"
 "$WORKER" --help >/dev/null 2>&1; ee "worker --help" 0 $?
