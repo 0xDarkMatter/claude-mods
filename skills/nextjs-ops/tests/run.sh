@@ -60,7 +60,8 @@ done
 
 # 4. Every SKILL.md-cited bundled resource exists on disk
 for res in assets/next.config.template.ts assets/nextjs-facts.json \
-           scripts/audit-app-router.py scripts/check-nextjs-facts.py; do
+           scripts/audit-app-router.py scripts/check-nextjs-facts.py \
+           tests/fixtures/app-sample/package.json; do
   [ -f "$here/$res" ] && ok "resource present: $res" || bad "missing resource: $res"
 done
 
@@ -110,11 +111,28 @@ printf '%s\n' "$err_out" | grep -qv '^error	' && bad "audit: --min-severity erro
 rule_out="$("$PY" "$audit" --rules middleware-file "$fixture" 2>/dev/null)"
 [ "$(printf '%s\n' "$rule_out" | grep -c .)" = "1" ] && ok "audit: --rules narrows to one" || bad "audit: --rules did not narrow"
 
+# Version gating: the fixture pins next ^16.3.3, so all 12 rules apply. Against
+# an older major the six rules describing 15/16-only breakages must go silent —
+# a linter that flags correct code is the failure mode this gate exists to stop.
+# CONTRACT: these counts follow the min_major column in the script's RULES table.
+ec 2 "audit: --assume-major 0 -> 2" "$PY" "$audit" --assume-major 0 "$fixture"
+v15="$("$PY" "$audit" --assume-major 15 "$fixture" 2>/dev/null)"
+[ "$(printf '%s\n' "$v15" | grep -c .)" = "8" ] && ok "audit: 8 findings at next 15" || bad "audit: next-15 count != 8"
+v14="$("$PY" "$audit" --assume-major 14 "$fixture" 2>/dev/null)"
+[ "$(printf '%s\n' "$v14" | grep -c .)" = "4" ] && ok "audit: 4 findings at next 14" || bad "audit: next-14 count != 4"
+for gated in sync-request-api sync-params-prop request-api-in-use-cache \
+             parallel-route-no-default nondeterministic-in-use-cache \
+             middleware-file edge-runtime-segment revalidate-tag-single-arg; do
+  printf '%s\n' "$v14" | grep -qF "	$gated	" \
+    && bad "audit: $gated fired at next 14 (rule postdates that major)" \
+    || ok "audit: $gated correctly silent at next 14"
+done
+
 # --json envelope parses with the documented schema (stdout is data-only).
 # Capture first: findings exit 10, and under pipefail that would sink the pipe.
 audit_json="$("$PY" "$audit" --json "$fixture" 2>/dev/null)"
 printf '%s' "$audit_json" \
-  | "$PY" -c 'import json,sys; d=json.load(sys.stdin); assert d["meta"]["schema"]=="claude-mods.nextjs-ops.app-audit/v1"; assert d["meta"]["count"]==12; assert d["meta"]["truncated"] is False; assert {f["rule"] for f in d["data"]} >= {"sync-request-api","action-without-auth"}' \
+  | "$PY" -c 'import json,sys; d=json.load(sys.stdin); m=d["meta"]; assert m["schema"]=="claude-mods.nextjs-ops.app-audit/v1"; assert m["count"]==12; assert m["truncated"] is False; assert m["next_major"]==16, m; assert "package.json" in m["next_major_source"], m; assert {f["rule"] for f in d["data"]} >= {"sync-request-api","action-without-auth"}' \
   && ok "audit: --json envelope parses" || bad "audit: --json envelope broken"
 lim_json="$("$PY" "$audit" --json --limit 2 "$fixture" 2>/dev/null)"
 printf '%s' "$lim_json" \

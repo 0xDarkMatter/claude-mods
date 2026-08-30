@@ -281,10 +281,17 @@ The non-obvious ones, in rough order of hours lost.
 
 | Resource | Use it when |
 |---|---|
-| [`scripts/audit-app-router.py`](scripts/audit-app-router.py) | Auditing or inheriting an app — 12 static rules for the landmines above |
+| [`scripts/audit-app-router.py`](scripts/audit-app-router.py) | Auditing or inheriting an app — 12 static rules for the landmines above, **gated on the project's detected Next.js major** |
 | [`scripts/check-nextjs-facts.py`](scripts/check-nextjs-facts.py) | CI / freshness: are this skill's version facts still true? |
 | [`assets/next.config.template.ts`](assets/next.config.template.ts) | Starting a 16.x config, or auditing an inherited one |
 | [`assets/nextjs-facts.json`](assets/nextjs-facts.json) | The dated fact catalog the verifier reads |
+
+The audit script takes this skill's own advice: it reads the project's Next.js
+major from `node_modules/next` (or `package.json`) and **suppresses the rules
+that postdate it** — six of the twelve describe breakages introduced in 15 or
+16, so running them against a 14-era app would flag correct code. The verdict
+line always states the major it gated on. Use `--assume-major N` when scanning a
+bare subdirectory where the version cannot be read.
 
 ```bash
 # Inherit an unfamiliar app: what will bite, worst first
@@ -295,6 +302,9 @@ python scripts/audit-app-router.py --min-severity error .
 
 # Machine-readable, for triage or a report
 python scripts/audit-app-router.py --json . | jq '.data[] | select(.severity=="error")'
+
+# Scanning a subtree with no package.json in reach
+python scripts/audit-app-router.py --assume-major 15 ./packages/web/app
 
 # Is this skill still describing reality?
 python scripts/check-nextjs-facts.py --offline

@@ -15,6 +15,11 @@ proof of a bug. `review` findings are prompts for judgement by design.
 Usage:   audit-app-router.py [OPTIONS] <PATH>
 Input:   PATH = a Next.js project root (app/ or src/app/ auto-detected) or any
          directory/file to scan. No stdin.
+Version: rules are gated on the project's Next.js major, read from
+         node_modules/next or package.json. Six of them describe breakages that
+         did not exist before 15/16, so running them unversioned against an
+         older app would flag correct code. Override with --assume-major when
+         the version cannot be read (scanning a bare subdirectory).
 Output:  stdout = findings, one TSV row per finding
          (severity<TAB>rule<TAB>file:line<TAB>detail), or a --json envelope.
          Data only.
@@ -27,6 +32,7 @@ Examples:
   audit-app-router.py --min-severity error src/app
   audit-app-router.py --json . | jq '.data[] | select(.severity=="error")'
   audit-app-router.py --rules sync-request-api,client-secret-env .
+  audit-app-router.py --assume-major 15 ./legacy-app
 """
 from __future__ import annotations
 
@@ -49,22 +55,33 @@ SEV_RANK = {s: i for i, s in enumerate(SEVERITIES)}
 CODE_SUFFIXES = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"}
 SKIP_DIRS = {"node_modules", ".next", ".git", "dist", "build", "out", ".turbo", "coverage"}
 
-# Every rule the scanner knows, with the one-line reason it exists. Kept as data
-# so --help, --rules validation and the JSON meta all read from one place.
-RULES: dict[str, tuple[str, str]] = {
-    "sync-request-api": ("error", "cookies()/headers()/draftMode() are async since Next.js 15 - must be awaited"),
-    "sync-params-prop": ("error", "params/searchParams are Promises since Next.js 15 - type as Promise and await"),
-    "request-api-in-use-cache": ("error", "request APIs inside a 'use cache' scope throw next-request-in-use-cache"),
-    "client-secret-env": ("error", "non-NEXT_PUBLIC_ env var in a 'use client' module is replaced with an empty string"),
-    "client-imports-server-only": ("error", "'use client' module importing server-only fails the build"),
-    "parallel-route-no-default": ("error", "parallel route slot without default.js fails the build since Next.js 16"),
-    "nondeterministic-in-use-cache": ("warn", "Math.random/Date.now/randomUUID in a cached scope freeze one value for all users"),
-    "middleware-file": ("warn", "middleware.ts is deprecated since Next.js 16 - rename to proxy.ts"),
-    "edge-runtime-segment": ("warn", "runtime='edge' is the deprecated path; Node.js is the default and has no API gaps"),
-    "revalidate-tag-single-arg": ("warn", "revalidateTag(tag) single-arg form is deprecated - pass a cacheLife profile or use updateTag"),
-    "images-domains-config": ("warn", "images.domains is deprecated - use images.remotePatterns"),
-    "action-without-auth": ("review", "'use server' module with no visible auth check - actions are public POST endpoints"),
+# Every rule the scanner knows: (severity, min_major, why). Kept as data so
+# --help, --rules validation, version gating and the JSON meta all read from one
+# place.
+#
+# min_major is the Next.js major at which the rule first became true. This skill's
+# central instruction is "establish the version before answering a caching
+# question", and a linter that ignores its own advice is worse than no linter: run
+# unversioned against a Next.js 14 app, six of these rules would flag correct code.
+# 0 means the rule is version-independent.
+RULES: dict[str, tuple[str, int, str]] = {
+    "sync-request-api": ("error", 15, "cookies()/headers()/draftMode() are async since Next.js 15 - must be awaited"),
+    "sync-params-prop": ("error", 15, "params/searchParams are Promises since Next.js 15 - type as Promise and await"),
+    "request-api-in-use-cache": ("error", 15, "request APIs inside a 'use cache' scope throw next-request-in-use-cache"),
+    "client-secret-env": ("error", 0, "non-NEXT_PUBLIC_ env var in a 'use client' module is replaced with an empty string"),
+    "client-imports-server-only": ("error", 0, "'use client' module importing server-only fails the build"),
+    "parallel-route-no-default": ("error", 16, "parallel route slot without default.js fails the build since Next.js 16"),
+    "nondeterministic-in-use-cache": ("warn", 15, "Math.random/Date.now/randomUUID in a cached scope freeze one value for all users"),
+    "middleware-file": ("warn", 16, "middleware.ts is deprecated since Next.js 16 - rename to proxy.ts"),
+    "edge-runtime-segment": ("warn", 16, "runtime='edge' is the deprecated path; Node.js is the default and has no API gaps"),
+    "revalidate-tag-single-arg": ("warn", 16, "revalidateTag(tag) single-arg form is deprecated - pass a cacheLife profile or use updateTag"),
+    "images-domains-config": ("warn", 0, "images.domains is deprecated - use images.remotePatterns"),
+    "action-without-auth": ("review", 0, "'use server' module with no visible auth check - actions are public POST endpoints"),
 }
+
+# The major this skill documents; used when the project's version can't be read.
+ASSUMED_MAJOR = 16
+
 
 # --- patterns ---------------------------------------------------------------
 DIRECTIVE_RE = re.compile(r"""^\s*['"](use (?:client|server|cache(?::\s*\w+)?))['"]\s*;?\s*$""")
@@ -146,6 +163,42 @@ def rel(path: Path, root: Path) -> str:
         return path.relative_to(root).as_posix()
     except ValueError:
         return path.as_posix()
+
+
+def detect_next_major(root: Path) -> tuple[int | None, str]:
+    """Return (major, source). Prefer the *resolved* install over the manifest
+    range: `"next": "^15.0.0"` in package.json can be satisfied by 15.5, and only
+    node_modules knows which. Falls back to the declared range, then to nothing.
+    """
+    if root.is_file():
+        root = root.parent
+    for base in (root, root.parent):
+        installed = base / "node_modules" / "next" / "package.json"
+        if installed.is_file():
+            try:
+                ver = str(json.loads(installed.read_text(encoding="utf-8")).get("version", ""))
+            except (OSError, json.JSONDecodeError):
+                ver = ""
+            m = re.match(r"\s*(\d+)", ver)
+            if m:
+                return int(m.group(1)), f"node_modules ({ver})"
+        manifest = base / "package.json"
+        if manifest.is_file():
+            try:
+                pkg = json.loads(manifest.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            for field in ("dependencies", "devDependencies", "peerDependencies"):
+                spec = (pkg.get(field) or {}).get("next")
+                if not isinstance(spec, str):
+                    continue
+                # ^16.3.3, ~15.2, >=15 <17, 16.x - take the first number present.
+                m = re.search(r"(\d+)", spec)
+                if m:
+                    return int(m.group(1)), f"package.json ({spec})"
+                # "latest"/"canary"/a git URL carry no major we can trust.
+                return None, f"package.json ({spec}) - no major to parse"
+    return None, "not found"
 
 
 def scan_file(path: Path, root: Path, in_app_tree: bool) -> list[dict]:
@@ -246,8 +299,9 @@ def scan_file(path: Path, root: Path, in_app_tree: bool) -> list[dict]:
     return findings
 
 
-def scan_project(root: Path) -> tuple[list[dict], dict]:
-    """Scan a project root or subtree. Returns (findings, meta-ish counters)."""
+def scan_project(root: Path, major: int) -> tuple[list[dict], dict]:
+    """Scan a project root or subtree. Returns (findings, meta-ish counters).
+    `major` gates rules that only became true at a later Next.js version."""
     app_dirs = [d for d in (root / "app", root / "src" / "app") if d.is_dir()]
     findings: list[dict] = []
     files = 0
@@ -288,6 +342,8 @@ def scan_project(root: Path) -> tuple[list[dict], dict]:
                               "builds fail since Next.js 16; add one returning null or calling notFound()",
                 })
 
+    # Version gate, applied once at the end so a rule never has to know it.
+    findings = [f for f in findings if major >= RULES[f["rule"]][1]]
     return findings, {"files_scanned": files}
 
 
@@ -296,9 +352,9 @@ def main(argv: list[str]) -> int:
         prog="audit-app-router.py",
         description="Static hazard scan of a Next.js App Router tree (boundary, caching, runtime).",
         epilog=(
-            "Rules:\n"
-            + "".join(f"  {sev:<6} {name:<30} {why}\n"
-                      for name, (sev, why) in sorted(RULES.items(), key=lambda kv: (-SEV_RANK[kv[1][0]], kv[0])))
+            "Rules (severity, the Next.js major the rule first applies to, why):\n"
+            + "".join(f"  {sev:<6} next>={mm:<3} {name:<30} {why}\n"
+                      for name, (sev, mm, why) in sorted(RULES.items(), key=lambda kv: (-SEV_RANK[kv[1][0]], kv[0])))
             + "\nExamples:\n"
               "  audit-app-router.py .\n"
               "  audit-app-router.py --min-severity error src/app\n"
@@ -312,6 +368,9 @@ def main(argv: list[str]) -> int:
                    help="drop findings below this severity (default: review = report all)")
     p.add_argument("--rules", default="",
                    help="comma-separated rule names to run (default: all)")
+    p.add_argument("--assume-major", type=int, default=None, metavar="N",
+                   help="treat the project as Next.js N.x instead of detecting it "
+                        f"(detection falls back to {ASSUMED_MAJOR} when the version cannot be read)")
     p.add_argument("--limit", type=int, default=500,
                    help="maximum findings to emit (default: 500)")
     p.add_argument("--json", action="store_true", help="emit a JSON envelope")
@@ -343,7 +402,18 @@ def main(argv: list[str]) -> int:
         return EX_NOTFOUND
     root = root.resolve()
 
-    findings, meta = scan_project(root)
+    if args.assume_major is not None:
+        if args.assume_major < 1:
+            print("error: --assume-major must be >= 1", file=sys.stderr)
+            return EX_USAGE
+        major, source = args.assume_major, "--assume-major"
+    else:
+        detected, source = detect_next_major(root)
+        major = detected if detected is not None else ASSUMED_MAJOR
+        if detected is None:
+            source = f"{source}; assuming {ASSUMED_MAJOR}.x"
+
+    findings, meta = scan_project(root, major)
 
     floor = SEV_RANK[args.min_severity]
     findings = [f for f in findings if SEV_RANK[f["severity"]] >= floor]
@@ -358,6 +428,7 @@ def main(argv: list[str]) -> int:
             "data": findings,
             "meta": {"count": len(findings), "files_scanned": meta["files_scanned"],
                      "min_severity": args.min_severity, "truncated": truncated,
+                     "next_major": major, "next_major_source": source,
                      "schema": SCHEMA},
         }, indent=2))
     else:
@@ -369,7 +440,8 @@ def main(argv: list[str]) -> int:
         note = " (truncated)" if truncated else ""
         print(
             f"audit-app-router: {len(findings)} finding(s){note} in {meta['files_scanned']} file(s) "
-            f"- {by_sev['error']} error, {by_sev['warn']} warn, {by_sev['review']} review",
+            f"- {by_sev['error']} error, {by_sev['warn']} warn, {by_sev['review']} review "
+            f"[next {major}.x via {source}]",
             file=sys.stderr,
         )
 
