@@ -125,11 +125,30 @@ print(u.input_tokens)                 # uncached remainder (full price)
 # total prompt = input + cache_creation + cache_read
 ```
 
-### What does NOT invalidate
+### What invalidates which level (verified 2026-08-30)
 
-Changing `tool_choice`, toggling thinking, or message content changes leave
-the tools+system cache intact. Only tool-definition changes and model switches
-force a full rebuild.
+Changes cascade **downward**: the level that changes, and every level after it,
+is invalidated. ✓ = that level's cache survives, ✘ = it is invalidated.
+
+| What changes | Tools | System | Messages | Note |
+|---|:--:|:--:|:--:|---|
+| Tool definitions (names, descriptions, params) | ✘ | ✘ | ✘ | Tools render at position 0 — a full rebuild |
+| Model switch | ✘ | ✘ | ✘ | Caches are model-scoped |
+| Web search toggle | ✓ | ✘ | ✘ | Modifies the system prompt |
+| Citations toggle | ✓ | ✘ | ✘ | Modifies the system prompt |
+| `speed: "fast"` ↔ standard | ✓ | ✘ | ✘ | Invalidates system + messages |
+| `tool_choice` | ✓ | ✓ | ✘ | Affects message blocks only |
+| Images added/removed anywhere | ✓ | ✓ | ✘ | Affects message blocks only |
+| Thinking config (mode, `budget_tokens`) | model-specific | model-specific | ✘ | Always invalidates messages; tools/system too on models that render it ahead of them |
+| `output_config.effort` | model-specific | model-specific | ✘ | Same shape as thinking. Setting effort explicitly to the model's default is equivalent to omitting it and does **not** invalidate |
+| Non-tool results w/ extended thinking | ✓ | ✓ | model-specific | Opus 4.5+ / Sonnet 4.6+ preserve thinking blocks (✓); earlier Opus/Sonnet and all Haiku strip them, dropping following messages from cache |
+
+The trap: `tool_choice`, images, thinking and effort are all commonly toggled
+per-request and all invalidate the **messages** cache every time. In a long agent
+loop, where the messages cache holds most of the tokens, "just flipping
+`tool_choice`" is not free — keep it constant across a conversation.
+
+Source: `https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md`
 
 ## Batches API
 
