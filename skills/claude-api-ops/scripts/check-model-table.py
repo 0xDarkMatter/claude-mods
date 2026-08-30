@@ -103,6 +103,66 @@ SCHEMA = "claude-mods.claude-api-ops.model-table/v1"
 MODELS_API = "https://api.anthropic.com/v1/models?limit=1000"
 ANTHROPIC_VERSION = "2023-06-01"
 
+# --- Cache-economics constants (offline cross-file tripwire) -----------------
+# These numbers are stated in more than one file, so a future edit can desync
+# them silently. This table is the single source of truth: each entry names the
+# canonical value, a regex that must match in EVERY listed file, and why.
+# Changing a real-world value means changing it here AND in every listed file --
+# that is the point: a one-file edit trips this check instead of rotting.
+#
+# Deliberately offline-only. A --live parse of the docs page would be brittle
+# (prose/format churn -> spurious exit 10), and SKILL-RESOURCE-PROTOCOL.md §7 is
+# explicit that a gate which cries wolf is a gate everyone learns to ignore.
+# The human cross-check stays the "Live Documentation" link in SKILL.md.
+CACHE_CONSTANTS = [
+    {
+        "key": "cache_read_multiplier",
+        "value": "0.1x base input",
+        "pattern": r"0\.1\s*[x×]",
+        "files": ["SKILL.md", "references/caching-and-cost.md",
+                  "references/context-engineering.md", "references/compaction.md"],
+    },
+    {
+        "key": "cache_write_5m_multiplier",
+        "value": "1.25x base input",
+        "pattern": r"1\.25\s*[x×]",
+        "files": ["references/caching-and-cost.md", "references/compaction.md"],
+    },
+    {
+        "key": "cache_write_1h_multiplier",
+        "value": "2x base input",
+        # Anchored to the TTL in either order so a bare "2x" elsewhere can't
+        # satisfy it. Note "2×" (U+00D7) has no trailing \b -- don't add one.
+        "pattern": (r"(?<![\d.])2\s*[x×][^\n]{0,40}1-hour"
+                    r"|1-hour[^\n]{0,40}(?<![\d.])2\s*[x×]"),
+        "files": ["references/caching-and-cost.md", "references/compaction.md"],
+    },
+    {
+        "key": "max_breakpoints",
+        "value": "4 cache_control breakpoints per request",
+        "pattern": r"\*\*4\*\*\s*`?cache_control`?\s*breakpoints",
+        "files": ["references/caching-and-cost.md"],
+    },
+    {
+        "key": "lookback_blocks",
+        "value": "20-block backward lookback per breakpoint",
+        "pattern": r"\b20\b[^.\n]{0,48}\bblock",
+        "files": ["references/caching-and-cost.md",
+                  "references/context-engineering.md"],
+    },
+    {
+        "key": "context_management_beta",
+        "value": "context-management-2025-06-27 beta header",
+        "pattern": r"context-management-2025-06-27",
+        "files": ["SKILL.md", "references/compaction.md"],
+    },
+]
+
+# Docs whose facts were verified on a date must SAY so, so staleness is visible
+# to a reader rather than only to this script.
+DATE_STAMPED_DOCS = ["references/context-engineering.md", "references/compaction.md"]
+DATE_STAMP_RE = re.compile(r"verified[^\n]{0,80}?(\d{4}-\d{2}-\d{2})", re.I)
+
 # A well-formed alias id: claude-<word>-<digit>... and NO date suffix.
 # Accepts claude-opus-4-8, claude-fable-5, claude-sonnet-4-6, claude-haiku-4-5.
 ID_RE = re.compile(r"^claude-[a-z]+-\d+(?:-\d+)?$")
@@ -229,6 +289,79 @@ def clean_id(id_cell: str) -> str:
     return id_cell.strip().strip("`").strip()
 
 
+def validate_cache_constants(skill_dir: Path, json_mode: bool, quiet: bool) -> list[dict]:
+    """Assert every file that states a cache-economics constant states the same one.
+
+    Presence-based on purpose: if an edit changes 0.1x to 0.15x in one file, that
+    file stops matching and this trips. Returns one result row per constant.
+    """
+    rows: list[dict] = []
+    for const in CACHE_CONSTANTS:
+        rx = re.compile(const["pattern"])
+        missing: list[str] = []
+        for rel in const["files"]:
+            path = skill_dir / rel
+            if not path.is_file():
+                fail_validation("file referenced by a cache constant is missing",
+                                {"constant": const["key"], "file": rel}, json_mode)
+            if not rx.search(path.read_text(encoding="utf-8")):
+                missing.append(rel)
+        if missing:
+            fail_validation(
+                f"cache constant {const['key']!r} not stated consistently across files",
+                {"expected": const["value"],
+                 "pattern": const["pattern"],
+                 "files_missing_it": ", ".join(missing),
+                 "hint": ("either the doc drifted, or the real value changed and "
+                          "CACHE_CONSTANTS in this script needs updating too")},
+                json_mode)
+        rows.append({"key": const["key"], "value": const["value"],
+                     "files": const["files"], "consistent": True})
+    note(f"  {len(rows)} cache constants consistent across files", quiet)
+    return rows
+
+
+def validate_date_stamps(skill_dir: Path, json_mode: bool, quiet: bool) -> list[dict]:
+    """Every fact-heavy doctrine reference must carry a 'verified <ISO date>' stamp."""
+    rows: list[dict] = []
+    for rel in DATE_STAMPED_DOCS:
+        path = skill_dir / rel
+        if not path.is_file():
+            fail_validation("date-stamped doc is missing", {"file": rel}, json_mode)
+        m = DATE_STAMP_RE.search(path.read_text(encoding="utf-8"))
+        if not m:
+            fail_validation(
+                "doc encodes fast-moving facts but carries no verification date",
+                {"file": rel,
+                 "hint": "add a line like 'Facts verified against ... YYYY-MM-DD'"},
+                json_mode)
+        rows.append({"file": rel, "verified": m.group(1)})
+    note(f"  {len(rows)} doctrine docs carry a verification date", quiet)
+    return rows
+
+
+def validate_cited_references(skill_dir: Path, json_mode: bool, quiet: bool) -> list[str]:
+    """Every references/*.md on disk must be cited from SKILL.md, and vice versa.
+
+    SKILL-RESOURCE-PROTOCOL.md §1: an uncited reference is dead weight the router
+    never finds; a cited-but-absent one is a broken link.
+    """
+    skill_text = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+    on_disk = sorted(p.name for p in (skill_dir / "references").glob("*.md"))
+    cited = set(re.findall(r"\(references/([A-Za-z0-9._-]+\.md)\)", skill_text))
+
+    uncited = [n for n in on_disk if n not in cited]
+    ghosts = sorted(n for n in cited if n not in on_disk)
+    if uncited or ghosts:
+        fail_validation(
+            "SKILL.md and references/ disagree",
+            {"on_disk_but_uncited": ", ".join(uncited) or "(none)",
+             "cited_but_missing": ", ".join(ghosts) or "(none)"},
+            json_mode)
+    note(f"  {len(on_disk)} reference files, all cited from SKILL.md", quiet)
+    return on_disk
+
+
 def validate_offline(skill_dir: Path, json_mode: bool, quiet: bool) -> dict:
     skill_md = skill_dir / "SKILL.md"
     cache_md = skill_dir / "references" / "caching-and-cost.md"
@@ -312,6 +445,13 @@ def validate_offline(skill_dir: Path, json_mode: bool, quiet: bool) -> dict:
     note(f"  {len(models_out)} model rows, all well-formed", quiet)
     note(f"  {len(cache_rows)} cache-minimum rows, all integer", quiet)
     note("  cross-file model lineup consistent", quiet)
+
+    # Context-engineering layer: constants stated in several files, verification
+    # date stamps, and SKILL.md <-> references/ citation integrity.
+    constants = validate_cache_constants(skill_dir, json_mode, quiet)
+    stamps = validate_date_stamps(skill_dir, json_mode, quiet)
+    refs = validate_cited_references(skill_dir, json_mode, quiet)
+
     note(f"{TERM.mark('ok')} OK: tables internally consistent.", quiet)
 
     return {
@@ -319,6 +459,9 @@ def validate_offline(skill_dir: Path, json_mode: bool, quiet: bool) -> dict:
         "models": models_out,
         "documented_ids": documented_ids,
         "cache_min_rows": cache_rows,
+        "cache_constants": constants,
+        "date_stamps": stamps,
+        "reference_files": refs,
         "consistent": True,
     }
 
