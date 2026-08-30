@@ -9,6 +9,23 @@ feature releases live in the README "Recent Updates" section.
 
 ### Added
 
+- **`a11y-ops` skill** - web accessibility as a legal requirement with dates
+  attached, not a quality preference. Two facts frame it: automated tooling
+  finds only ~30-40% of WCAG failures, so a green axe run is a floor rather
+  than a result; and almost every failure traces back to a `<div>` replacing a
+  native element and rebuilding a fraction of what it provided. Carries the
+  standards map (WCAG 2.2's nine new criteria and why 4.1.1 was removed; EAA
+  extraterritorial reach, penalties and the EN 301 549 v4.1.1 move to WCAG 2.2;
+  **ADA Title II deadlines extended by the DOJ on 2026-04-20 to 26 Apr 2027 /
+  2028** - most published advice still quotes the old dates), a four-pass audit
+  workflow with what each pass can and cannot detect, twelve recurring failures
+  with class-level fixes, and a deliberately honest accessibility-statement
+  template. Ships `scan-a11y.py`: a static pre-flight over
+  HTML/JSX/Vue/Svelte/Astro source with fifteen conservative rules, severity and
+  rule filtering, a JSON envelope and exit 10 as the CI signal - and a test
+  suite that asserts zero false positives on correct markup, because a linter
+  that cries wolf gets muted.
+
 - **`icon-ops` skill** - sourcing, vetting and shipping SVG icons for web UI.
   Covers the four decisions that lock an icon set (grid, family, stroke width,
   corner language), the two licence traps that actually bite (a brand mark is a
