@@ -15,8 +15,8 @@ Operational expertise for yt-dlp as the **acquisition layer**: get the right byt
 onto disk in the right codec, politely, resumably — then hand off. Anything that
 re-encodes, cuts precisely, grades, or packages after download is
 [ffmpeg-ops](../ffmpeg-ops/SKILL.md) territory; AI-driven editing of what you
-acquired (transcript → EDL → final cut) is [cutcraft](../cutcraft/SKILL.md) —
-the full chain is acquire → process → edit.
+acquired (transcript → EDL → final cut) is `cutcraft` — a separate tool, not shipped
+by this repo. The full chain is acquire → process → edit.
 
 ## Doctrine: version first, formats second
 

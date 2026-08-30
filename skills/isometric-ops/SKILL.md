@@ -315,5 +315,5 @@ is the quickstart pointer.
 [`genart-ops`](../genart-ops/SKILL.md) (general three.js / creative coding) ·
 `threejs-ops` (app/game-scale three.js: GLTF, r3f, `InstancedMesh`) ·
 [`color-ops`](../color-ops/SKILL.md) (colour science, OKLCH ramps) ·
-[`frontend-design`](../frontend-design/SKILL.md) (production UI craft) ·
+`frontend-design` (Claude-Code-bundled; production UI craft) ·
 [`playwright-ops`](../playwright-ops/SKILL.md) (headless render verification).

@@ -4,6 +4,7 @@
 **Fetched:** 2026-05-12
 **License:** Apache-2.0
 **Note:** Verbatim copy of the upstream OAuth integration skill from portless. Refresh on portless version bumps.
+**Deviation:** the trailing `examples/google-oauth` link was absolutised to the upstream repo URL — it is repo-relative upstream and has no target here. Re-apply after any refresh.
 
 ---
 
@@ -174,4 +175,4 @@ The auth library is constructing the callback URL from `localhost` instead of th
 
 ## Example
 
-See [`examples/google-oauth`](../../examples/google-oauth) for a complete working example with Next.js + NextAuth + Google OAuth using `--tld dev`.
+See [`examples/google-oauth`](https://github.com/vercel-labs/portless/tree/main/examples/google-oauth) for a complete working example with Next.js + NextAuth + Google OAuth using `--tld dev`.

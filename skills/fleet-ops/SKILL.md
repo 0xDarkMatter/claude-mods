@@ -129,9 +129,9 @@ fleet owner <branch>        Who owns this lane, and are they still writing?
 
 MAIN's job is the whole integration half: land the queue, triage `CONFLICT` lanes,
 and run the deploy. Lanes build and signal; MAIN integrates. Note that deploying is
-maintainer-gated regardless — see [`deploy-gating`](../../rules/deploy-gating.md); MAIN
-being "the one that deploys" describes *which session prepares it*, never an
-authorisation to ship unattended.
+maintainer-gated regardless — it needs an explicit human OK for that specific deploy,
+from the maintainer's own session. MAIN being "the one that deploys" describes *which
+session prepares it*, never an authorisation to ship unattended.
 
 ### The live-owner gate
 
