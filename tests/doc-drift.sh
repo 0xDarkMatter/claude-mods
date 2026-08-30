@@ -8,6 +8,9 @@
 #   3. Every repo-relative markdown link in README.md / AGENTS.md resolves
 #      to an existing file or directory (no ghost references)
 #   4. Skill frontmatter references only skills that exist on disk
+#   5. Every file-relative markdown link inside skills/**/*.md resolves
+#      to an existing path (links inside skills are relative to the file,
+#      not the repo root; exclusions documented at the check itself)
 #
 # Exit 0 = clean, exit 1 = drift detected.
 set -u
@@ -141,6 +144,44 @@ for skill_file in skills/*/SKILL.md; do
         metadata && /^  (related-skills|depends-on):/ { print }
     ' "$skill_file")
 done
+
+# --- 5. Skill-internal link check (skills/**/*.md) --------------------------
+# Links inside a skill are FILE-relative (`../../rules/x.md`, `../color-ops/SKILL.md`),
+# unlike the repo-root-relative links check 3 handles — so each is resolved against
+# the directory of the file containing it. Only NON-RESOLVING links are flagged:
+# climbing out of the skill directory is intentional and common (cross-skill and
+# rule cross-references), and failing those would bury real breakage in noise.
+#
+# Exclusions, and why each one is not a loophole:
+#   - skills/*/assets/**   templates copied INTO another repo; their links are meant
+#                          to resolve at the destination, never here.
+#   - fenced code blocks   ``` / ~~~ regions are examples, not navigation. This also
+#                          removes generic signatures like `Map[K, V](m map[K]V, ...)`
+#                          which look exactly like a markdown link to a regex.
+#   - inline code spans    same reason, e.g. `* [Title](url) - description`.
+#   - http/https/mailto    external; not this gate's business.
+#   - / and ~/ prefixes    absolute and home-relative (`~/.claude/rules/...`) paths
+#                          deliberately name the INSTALLED location, not a repo path.
+#   - #anchor-only         intra-document.
+#   - <, {, $, or a space  template placeholders and prose, not real paths.
+while IFS= read -r skill_doc; do
+    case "$skill_doc" in */assets/*) continue ;; esac
+    skill_dir="$(dirname "$skill_doc")"
+    while IFS= read -r link; do
+        case "$link" in
+            http://*|https://*|mailto:*|/*|'~/'*|'#'*|'') continue ;;
+            *'<'*|*'{'*|*'$'*|*' '*) continue ;;
+        esac
+        link="${link%%#*}"   # strip anchors
+        [ -z "$link" ] && continue
+        [ -e "$skill_dir/$link" ] || err "$skill_doc: link target does not exist: $link"
+    done < <(awk '
+        /^[[:space:]]*(```|~~~)/ { fence = !fence; next }
+        fence { next }
+        { gsub(/`[^`]*`/, ""); print }
+    ' "$skill_doc" | grep -oE '\]\([^)]+\)' | sed -E 's/^\]\(//; s/\)$//')
+done < <(find skills -name '*.md' | sort)
+
 
 echo
 if [ "$errors" -eq 0 ]; then
