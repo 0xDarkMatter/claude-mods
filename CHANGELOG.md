@@ -9,6 +9,22 @@ feature releases live in the README "Recent Updates" section.
 
 ### Added
 
+- **`evals-ops` skill** - the eval harness discipline that everything else in
+  agent engineering depends on: you cannot tune a prompt, retriever or memory
+  layer without a measurable suite. Covers the three levels most teams collapse
+  into one (outcome vs step vs trajectory, and the *lucky pass* that
+  outcome-only scoring banks as a win), golden-set construction as four
+  deliberate buckets with freeze discipline (a set that grows every sprint
+  cannot tell you whether the system or the set moved), the documented
+  LLM-as-a-judge biases and when a lens-diverse panel beats N identical judges,
+  adversarial refute-not-confirm verification, and the tier ladder that keeps a
+  CI gate alive - deterministic checks block, judge metrics start advisory,
+  thresholds sit below the *measured* noise floor. Ships
+  `judge-calibration.py` (Cohen kappa vs human labels, per-class confusion,
+  verbosity/position bias probes; exit 10 below `--min-kappa`) and
+  `goldenset-audit.py` (duplicates, bucket skew, staleness, and freeze-manifest
+  drift that catches a frozen case edited in place to make it pass).
+
 - **`icon-ops` skill** - sourcing, vetting and shipping SVG icons for web UI.
   Covers the four decisions that lock an icon set (grid, family, stroke width,
   corner language), the two licence traps that actually bite (a brand mark is a

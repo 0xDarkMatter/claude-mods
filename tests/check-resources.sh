@@ -41,6 +41,12 @@ echo "== claude-code-ops: hooks.json validator"
 run "hooks-lint clean on repo hooks.json" 0 "$PY" skills/claude-code-ops/scripts/validate-hooks-json.py hooks/hooks.json
 run "hooks-lint --help"                   0 "$PY" skills/claude-code-ops/scripts/validate-hooks-json.py --help
 
+echo "== evals-ops: judge calibration + golden-set audit"
+run "judge-calibration --help"     0 "$PY" skills/evals-ops/scripts/judge-calibration.py --help
+run "goldenset-audit --help"       0 "$PY" skills/evals-ops/scripts/goldenset-audit.py --help
+run "judge-calibration bad args"   2 "$PY" skills/evals-ops/scripts/judge-calibration.py
+run "goldenset-audit bad args"     2 "$PY" skills/evals-ops/scripts/goldenset-audit.py
+
 echo "== playwright-ops: flake-triage"
 run "flake-triage --help" 0 "$PY" skills/playwright-ops/scripts/triage-flakes.py --help
 
