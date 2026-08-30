@@ -264,6 +264,41 @@ Three further guards, all on the irreversible direction:
    where that repo's own base branch and config apply — so a single command can
    never sweep the machine.
 
+### Landmine: removing a worktree out from under a live session
+
+**Terminate the session first, then remove its worktree — never the reverse.**
+`fleet prune` already enforces this: bucket 2 keeps a LIVE owner, and guard 2
+re-verifies liveness immediately before each delete. The hazard is every *other*
+path — a hand-run `git worktree remove`, an `rm -rf`, an external teardown
+script, or a `--remove --yes` sweep racing a session that wakes mid-run.
+
+**A session whose worktree vanishes does not exit and does not error.** It drops
+into a retry loop and spins at ~85% of a core, indefinitely. Six of them,
+observed 2026-08-30 in `X:\Forge\Praxis`, burned **66.6 core-hours across 43.8
+hours**; five pointed at directories absent from both disk *and*
+`git worktree list`. Nothing logged, nothing alerted, no transcript was written.
+The only symptom was a warm machine.
+
+It also evades the obvious check. These processes keep a **live** parent — the
+Desktop instance that spawned them — so a dead-parent orphan scan reports
+nothing useful: on that same machine it found 3 orphans totalling 1.16 GB while
+the six spinners held five cores. **Detect by CPU rate, not by lineage.** Sample
+twice and flag sustained burn:
+
+```powershell
+$s=@{}; Get-Process claude,node -EA SilentlyContinue | % { $s[$_.Id]=$_.CPU }
+Start-Sleep 10
+Get-Process claude,node -EA SilentlyContinue |
+  ? { $s[$_.Id] -ne $null -and ($_.CPU-$s[$_.Id])/10 -gt 0.5 } |
+  Select Id,@{n='CorePct';e={[math]::Round(($_.CPU-$s[$_.Id])/10*100)}}
+```
+
+POSIX equivalent: `ps -eo pid,pcpu,etimes,args | grep claude` — a lane process
+at steady high `pcpu` with a large `etimes` is the same signature. Cross-check
+the offender's `--add-dir` against `git worktree list`; a target missing from
+both is conclusive. Killing the process is safe — it frees the CPU and touches
+no files, so uncommitted work in any surviving worktree is untouched.
+
 ### Seeing the backlog
 
 `fleet status` adds one line when a repo has prunable worktrees
@@ -308,7 +343,7 @@ For non-branching status updates ("here's what happened, here's what landed"), p
 | Out of scope | Why |
 |------|-----|
 | Spawning / monitoring sessions | Native: agent teams, `claude --bg`, agent view. Fleet-ops never launches a session. |
-| Deleting worktrees a session still owns | `fleet prune` removes only what is merged, clean, and owned by an archived-or-absent session. Anything live, dirty, unmerged, or unattributable is reported, never removed — and cross-repo removal is impossible by design. |
+| Deleting worktrees a session still owns | `fleet prune` removes only what is merged, clean, and owned by an archived-or-absent session. Anything live, dirty, unmerged, or unattributable is reported, never removed — and cross-repo removal is impossible by design. Removing one by any *other* path strands the session in a silent CPU spin — see [the ordering landmine](#landmine-removing-a-worktree-out-from-under-a-live-session). |
 | Multiple sessions on one shared working tree | Git limitation. Skill detects and refuses with worktree pointer. |
 | Uncommitted work at signal time | `signal.sh` rejects dirty lanes. The queue needs an immutable commit. |
 | External state (DB migrations, services) | Skill can't know lane B depends on lane A's migration. Order manually via `fleet land`. |
