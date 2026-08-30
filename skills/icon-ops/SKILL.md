@@ -1,6 +1,6 @@
 ---
 name: icon-ops
-description: "Source, vet, normalize and ship SVG icons for web UI - set selection, licence and trademark traps, currentColor theming, sprite/inline delivery, and accessibility. Triggers on: icon, icons, svg icon, find an icon, add an icon, pick an icon, icon set, icon library, iconify, lucide, heroicons, phosphor, tabler, feather, material symbols, font awesome, simple icons, brand logo, icon sprite, svg sprite, symbol use, currentColor, icon won't change colour, icon is the wrong colour, icon font, icon accessibility, aria-hidden icon, icon-only button, icon size, icons look inconsistent, mixed icon sets, normalize svg, strip svg cruft, optimise svg, brandfetch, company logo, client logo, logo by domain, brand assets api, logo api, thesvg, brand icon, simple icons."
+description: "Source, vet, normalize and ship SVG icons for web UI - set selection, licence and trademark traps, currentColor theming, sprite/inline delivery, and accessibility. Triggers on: icon, icons, svg icon, find an icon, add an icon, icon set, icon library, iconify, lucide, heroicons, phosphor, tabler, feather, material symbols, font awesome, simple icons, brand logo, icon sprite, svg sprite, symbol use, currentColor, icon won't change colour, icon font, icon accessibility, aria-hidden icon, icon-only button, icon size, icons look inconsistent, mixed icon sets, normalize svg, strip svg cruft, optimise svg, brandfetch, company logo, client logo, logo by domain, brand assets api, logo api, thesvg, brand icon, brandmark, brand mark, find a logo, logo wall, partner logo, greyscale logo, grayscale, tint a logo, reverse out, knockout, mono logo, dark mode logo, favicon, app icon, apple-touch-icon, maskable icon, svg id collision."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
@@ -46,6 +46,19 @@ recoloured at all.
 
 A sprite that renders nothing in production but worked locally (the external
 `<use>` CORS trap).
+
+Two inlined logos where the second one's gradient bleeds into the first. Both
+files declared `id="a"`; the last definition in the document wins for the whole
+page. Brand marks hit this constantly because they carry gradients.
+
+Needing a mark in grey, knocked out of a dark header, or in one brand ink — and
+wanting to know whether to generate it or use the owner's published variant.
+
+A logo wall where one wide wordmark dominates because everything was set to the
+same `width`.
+
+Favicons and app icons — the modern four-file set, and why an Android maskable
+icon gets its edges cropped.
 
 ## The core technique
 
@@ -108,8 +121,27 @@ question and an audit.
 ### 3. Normalize before it enters the repo
 
 Vendor output is not shippable. `scripts/normalize-icon.py` strips editor cruft,
-rebinds literal colours to `currentColor`, drops fixed `width`/`height` so CSS
-controls size, and applies the correct accessibility attributes.
+**namespaces internal ids** so two inlined SVGs cannot clobber each other's
+gradients, drops fixed `width`/`height` so CSS controls size, and applies the
+correct accessibility attributes.
+
+**Colour is never guessed.** A single-colour source rebinds to `currentColor`. A
+multi-colour source is **refused (exit 11)** until you name the treatment,
+because flattening a mark to a silhouette is lossy *and* counts as modifying it:
+
+| Flag | Result |
+|---|---|
+| *(default)* | mono source → `currentColor` |
+| `--keep-colour` | colours untouched — the right default for someone else's mark |
+| `--greyscale` | Rec.709 luminance-mapped grey |
+| `--tint '#fff'` | flatten to one colour; white = knockout / reverse-out |
+| `--flatten` | yes, really collapse a multi-colour source to `currentColor` |
+
+**It also sanitises.** An *inlined* SVG runs script in your page's origin; an
+`<img src="x.svg">` does not. Since this skill tells you to inline third-party
+SVGs, the normalizer strips `<script>`, `<foreignObject>`, every `on*` handler
+and `javascript:`/`data:text` hrefs. Treat any SVG you did not author as
+untrusted input, and never inline one that has not been through this.
 
 ```bash
 # Would this file change? exit 10 = yes, 0 = already clean
@@ -117,6 +149,9 @@ scripts/normalize-icon.py --check vendor.svg
 
 # Normalize a filled icon into the repo (atomic write)
 scripts/normalize-icon.py vendor.svg -o src/icons/search.svg
+
+# A brand mark: keep its colours, just clean and namespace it
+scripts/normalize-icon.py --keep-colour acme.svg -o src/logos/acme.svg
 
 # Stroke icon: forces fill=none, stroke=currentColor, consistent caps/joins
 scripts/normalize-icon.py --stroke vendor.svg -o src/icons/search.svg
@@ -129,8 +164,9 @@ scripts/normalize-icon.py --json vendor.svg | jq '.data[0]'
 ```
 
 Exit codes: `0` ok · `2` usage · `3` no such file · `4` not a usable SVG ·
-`10` (`--check` only) normalization would change the file. The `--check` mode is
-a CI gate — run it over `src/icons/` to keep un-normalized icons out.
+`10` (`--check` only) normalization would change the file · `11` multi-colour
+source refused. The `--check` mode is a CI gate — run it over `src/icons/` to
+keep un-normalized icons out.
 
 For byte-level path optimisation, run **SVGO after** normalizing, never before:
 
@@ -195,10 +231,41 @@ Also: icon-only controls need a **24×24 CSS px** minimum interactive area (WCAG
 2.2 §2.5.8) — pad the control, don't grow the glyph. Never let colour alone carry
 meaning: pair it with a distinct shape.
 
+### 6. Variants and site icons
+
+A mark rarely ships in one treatment. **Use the owner's published mono/reversed/
+greyscale asset when one exists** — theirs is drawn, yours is computed, and a
+designer already fixed the hairline that vanishes when knocked out. Generate
+only when they publish none.
+
+```bash
+scripts/normalize-icon.py --tint '#fff'  acme.svg -o src/logos/acme-knockout.svg
+scripts/normalize-icon.py --greyscale    acme.svg -o src/logos/acme-grey.svg
+```
+
+`filter: grayscale(1)` is right for a *hover-reveal effect* and wrong for a
+canonical asset. `filter: invert(1)` is **never** a knockout — it inverts hue
+too, so a blue mark comes back orange.
+
+**Logo walls: constrain both axes.** `width: 120px` on everything makes a wide
+wordmark occupy ~3x the visual area of a square badge. Use `max-width` **and**
+`max-height` in a fixed box, then correct optically by eye.
+
+**Favicons are a different mark**, not your logo scaled down — four files
+(`favicon.ico`, `icon.svg`, `apple-touch-icon.png` 180x180, and a *separate*
+512x512 maskable PNG whose content sits inside the centre 80%-diameter circle).
+
+Variant production, light/dark pairs, logo-wall sizing and logo `alt` conventions
+→ [`references/brand-variants.md`](references/brand-variants.md). The favicon set,
+the theme-aware SVG favicon, and maskable safe zones →
+[`references/favicons-and-app-icons.md`](references/favicons-and-app-icons.md).
+
 ## What this skill doesn't cover
 
-- **Recolouring a set to a brand palette** (duotone, gradients, CSS filter
-  tinting, tracing a raster logo) → `svg-brand-tint-ops`
+- **Duotone/tri-tone treatments, filter-based tinting of a whole set, and
+  raster→vector tracing** → `svg-brand-tint-ops`. This skill produces flat
+  variants (mono, grey, knockout) of a single mark; that one does tonal
+  re-mapping and vectorising.
 - **Choosing the palette itself** → `color-ops`
 - **Illustration and generative artwork** → `genart-ops`, `isometric-ops`
 - **Authoring new icons** — this skill sources, vets and ships existing ones
@@ -229,6 +296,18 @@ meaning: pair it with a distinct shape.
   accessibility checklist (both cases, target size, contrast, reduced motion);
   and SVGO ordering. Load when wiring icons into a page or debugging one that
   won't theme.
+
+- [`references/brand-variants.md`](references/brand-variants.md) — producing mono,
+  greyscale, knockout and single-ink variants of a mark; why Rec.709 luminance
+  beats an RGB average; when a CSS filter is right and when it is a lie; the three
+  light/dark approaches and why the internal-media-query one usually breaks;
+  logo-wall sizing by area rather than width; and logo `alt` conventions. Load
+  when a mark needs a treatment it did not ship with.
+
+- [`references/favicons-and-app-icons.md`](references/favicons-and-app-icons.md) —
+  the modern four-file set and the head block that serves it, why `rel="shortcut
+  icon"` is meaningless, the theme-aware SVG favicon, Android maskable safe zones,
+  and designing a mark down to 16px. Load for favicons, PWA icons or app icons.
 
 ## Scripts
 

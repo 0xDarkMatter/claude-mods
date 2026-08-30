@@ -39,6 +39,28 @@ sprite into the document** (near the top of `<body>`), or bundle icons as
 components. If you must reference externally, verify it on the deployed origin,
 not on localhost.
 
+## Inline SVG is executable; `<img>` is not
+
+The delivery choice is a security boundary, not only a styling one. An **inlined**
+`<svg>` becomes part of your DOM: `<script>`, `on*` handlers and
+`javascript:` hrefs inside it run **in your page's origin**, with access to your
+cookies and storage. The same file loaded through `<img src="icon.svg">` or a CSS
+`background-image` is rendered in an isolated context where none of that executes.
+
+That is the real cost of the recommendation to inline: you inherit responsibility
+for the contents. So:
+
+- **Never inline an SVG you did not author** without sanitising it first.
+  `scripts/normalize-icon.py` removes `<script>`, `<foreignObject>`, every `on*`
+  attribute and `javascript:`/`vbscript:`/`data:text` hrefs, and reports the count
+  as `stripped_active`.
+- **User-uploaded SVG is the dangerous case** — an avatar or logo upload is a
+  stored-XSS vector the moment it is inlined. Serve untrusted SVG through `<img>`
+  from a separate origin, or rasterise it.
+- A **Content-Security-Policy** without `unsafe-inline` blocks inline `<script>`
+  in an SVG too, and is worth having as the second layer — but it does not cover
+  every vector, so sanitise regardless.
+
 ## Sizing
 
 Size icons in `em`, not `px`:
