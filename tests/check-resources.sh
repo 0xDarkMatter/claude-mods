@@ -33,6 +33,14 @@ echo "== claude-api-ops: model-table verifier"
 run "model-table --offline consistent" 0 "$PY" skills/claude-api-ops/scripts/check-model-table.py --offline
 run "model-table --help"               0 "$PY" skills/claude-api-ops/scripts/check-model-table.py --help
 
+echo "== claude-api-ops: context-budget calculator"
+# The verdict IS the contract: exit 0 = append wins, exit 10 = compaction
+# indicated. Assert both directions - a calculator that can only reach one
+# verdict would pass a single-sided check while being useless.
+run "context-budget --help"           0 "$PY" skills/claude-api-ops/scripts/context-budget.py --help
+run "context-budget short->append"    0 "$PY" skills/claude-api-ops/scripts/context-budget.py --history-tokens 25000 --turns-remaining 5 --base-rate 0.30 -q
+run "context-budget deep->compact"   10 "$PY" skills/claude-api-ops/scripts/context-budget.py --history-tokens 120000 --turns-remaining 40 --base-rate 2.00 -q
+
 echo "== terraform-ops: action-ref verifier"
 run "action-refs --offline well-formed" 0 bash skills/terraform-ops/scripts/check-action-refs.sh --offline
 run "action-refs --help"                0 bash skills/terraform-ops/scripts/check-action-refs.sh --help
@@ -98,6 +106,7 @@ run "route-inventory fixture scan"    0 "$PY" skills/hono-ops/scripts/route-inve
 
 echo "== protocol: every new verifier is executable + compiles"
 for s in skills/claude-api-ops/scripts/check-model-table.py \
+         skills/claude-api-ops/scripts/context-budget.py \
          skills/claude-code-ops/scripts/validate-hooks-json.py \
          skills/playwright-ops/scripts/triage-flakes.py \
          skills/mapbox-ops/scripts/check-mapbox-facts.py \
@@ -132,6 +141,7 @@ purity() { # desc, cmd...
 }
 purity "action-refs" bash skills/terraform-ops/scripts/check-action-refs.sh --offline
 purity "model-table" "$PY" skills/claude-api-ops/scripts/check-model-table.py --offline
+purity "context-budget" "$PY" skills/claude-api-ops/scripts/context-budget.py --history-tokens 25000 --turns-remaining 5 --base-rate 0.30
 purity "hooks-lint"  "$PY" skills/claude-code-ops/scripts/validate-hooks-json.py hooks/hooks.json
 __tf="$(mktemp)"; printf '{"suites":[]}' > "$__tf"
 purity "flake-triage" "$PY" skills/playwright-ops/scripts/triage-flakes.py "$__tf"
@@ -145,6 +155,7 @@ grep -q '_lib/term.sh' skills/terraform-ops/scripts/check-action-refs.sh \
 grep -q '_lib/term.sh' skills/fleet-worker/scripts/fleet-doctor.sh \
     && pass "fleet-doctor sources term.sh" || bad "fleet-doctor missing term.sh"
 for s in skills/claude-api-ops/scripts/check-model-table.py \
+         skills/claude-api-ops/scripts/context-budget.py \
          skills/claude-code-ops/scripts/validate-hooks-json.py \
          skills/playwright-ops/scripts/triage-flakes.py \
          skills/loop-ops/scripts/check-pricing-sync.py \

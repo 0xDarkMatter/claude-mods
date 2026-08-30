@@ -379,6 +379,39 @@ python skills/claude-api-ops/scripts/check-model-table.py --offline --json | pyt
 ANTHROPIC_API_KEY=sk-... python skills/claude-api-ops/scripts/check-model-table.py --live
 ```
 
+**`scripts/context-budget.py`** — append-vs-compact calculator. Models both paths
+in dollars over the turns you actually have left, checks the context ceiling
+first, and exits **10** when cost favours compaction, **0** when appending wins:
+
+```bash
+# Short session — appending is cheaper (exit 0)
+python skills/claude-api-ops/scripts/context-budget.py \
+    --history-tokens 25000 --turns-remaining 5 --base-rate 0.30
+
+# Deep session — cost favours compaction (exit 10)
+python skills/claude-api-ops/scripts/context-budget.py \
+    --history-tokens 120000 --turns-remaining 40 --base-rate 2.00 --json
+```
+
+Two results worth knowing before you trust it: the break-even turn count is
+**scale-invariant** (history size and price cancel out — it tracks the summary
+ratio, not how big or costly the conversation is), and it prices **cost only**.
+Recall loss is not in the model, so "compact" means cheaper, not better.
+
+**`assets/cached-agent-loop.py`** — the cache-aware sibling of the minimal loop
+below, and the executable form of the Context Engineering section: breakpoint at
+the end of the static prefix, a rolling breakpoint on the newest turn, an
+intermediate anchor every ~15 blocks so long tool-heavy turns don't jump the
+20-block lookback, tool output capped at the boundary, and a per-turn
+`cache_read_input_tokens` check that warns when the prefix silently changed.
+Copy it when the agent is long-running; copy `agentic-loop.py` when it isn't.
+
+**`assets/recall-probe.py`** — the "measure it on your workload" harness:
+plants a fact, buries it under N turns, probes for it, and reports recall, cost
+per turn and TTFT for **append** vs **compact**. Makes real API calls, so start
+small (`--turns 6 --trials 1`). Replace the synthetic filler turns with traffic
+from your own logs — that is the point of running it.
+
 **`assets/agentic-loop.py`** — a minimal, runnable tool-use loop (define a tool,
 call `messages.create`, loop while `stop_reason == "tool_use"`, append
 `tool_result`, re-request until `end_turn`). Copy it as the starting point when

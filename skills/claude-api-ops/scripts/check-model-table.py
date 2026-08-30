@@ -151,6 +151,17 @@ CACHE_CONSTANTS = [
                   "references/context-engineering.md"],
     },
     {
+        # context-budget.py encodes the same multipliers as executable constants.
+        # Prose and code drifting apart is the exact failure this guards: a doc
+        # that says 0.1x beside a calculator that bills 0.15x.
+        "key": "cache_multipliers_in_calculator",
+        "value": "context-budget.py constants match the documented multipliers",
+        "pattern": (r"CACHE_READ_MULTIPLIER\s*=\s*0\.1\b[\s\S]{0,200}?"
+                    r"CACHE_WRITE_5M\s*=\s*1\.25\b[\s\S]{0,200}?"
+                    r"CACHE_WRITE_1H\s*=\s*2\.0\b"),
+        "files": ["scripts/context-budget.py"],
+    },
+    {
         "key": "context_management_beta",
         "value": "context-management-2025-06-27 beta header",
         "pattern": r"context-management-2025-06-27",
@@ -358,8 +369,27 @@ def validate_cited_references(skill_dir: Path, json_mode: bool, quiet: bool) -> 
             {"on_disk_but_uncited": ", ".join(uncited) or "(none)",
              "cited_but_missing": ", ".join(ghosts) or "(none)"},
             json_mode)
-    note(f"  {len(on_disk)} reference files, all cited from SKILL.md", quiet)
-    return on_disk
+
+    # Same rule for scripts/ and assets/ (SKILL-RESOURCE-PROTOCOL.md §2.8: every
+    # resource is cited from SKILL.md). Those are referenced as backticked paths
+    # or worked invocations rather than markdown links, so match on the basename.
+    shipped: list[str] = []
+    for sub in ("scripts", "assets"):
+        for p in sorted((skill_dir / sub).glob("*")):
+            if not p.is_file() or p.name.startswith(".") or p.suffix == ".pyc":
+                continue
+            if p.name not in skill_text:
+                fail_validation(
+                    f"{sub}/ file is not cited from SKILL.md",
+                    {"file": f"{sub}/{p.name}",
+                     "hint": "an uncited resource is dead weight the router never "
+                             "finds - cite it with a worked invocation"},
+                    json_mode)
+            shipped.append(f"{sub}/{p.name}")
+
+    note(f"  {len(on_disk)} reference files + {len(shipped)} scripts/assets, "
+         "all cited from SKILL.md", quiet)
+    return on_disk + shipped
 
 
 def validate_offline(skill_dir: Path, json_mode: bool, quiet: bool) -> dict:

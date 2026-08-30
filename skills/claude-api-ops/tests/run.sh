@@ -131,6 +131,102 @@ rm -f "$C/references/compaction.md"
 "$PYTHON" "$C/scripts/check-model-table.py" --offline >"$SB/n4.out" 2>&1
 expect_exit "cited-but-missing reference -> 4" 4 $?
 
+# NEGATIVE 5: an uncited script/asset (same protocol rule as references, but
+# those are cited by basename in prose rather than by markdown link).
+C="$(fresh_copy)"
+printf '# orphan\n' > "$C/assets/orphan-asset.py"
+"$PYTHON" "$C/scripts/check-model-table.py" --offline >"$SB/n5.out" 2>&1
+expect_exit "uncited asset -> 4" 4 $?
+expect_has "finding names the uncited asset" "orphan-asset.py" "$(cat "$SB/n5.out")"
+
+# ── context-budget calculator ────────────────────────────────────────────────
+# The doctrine's break-even arithmetic, executable. Its VERDICT is the contract:
+# exit 0 = append wins, exit 10 = cost favours compaction. Both directions are
+# asserted, because a calculator that can only say one thing is not a calculator.
+echo "-- context-budget --"
+CB="$SKILL/scripts/context-budget.py"
+"$PYTHON" -m py_compile "$CB" 2>/dev/null && ok "py_compile context-budget.py" || no "py_compile context-budget.py"
+"$PYTHON" "$CB" --help >/dev/null 2>&1; expect_exit "context-budget --help exits 0" 0 $?
+expect_has "context-budget --help has EXAMPLES" "EXAMPLES" "$("$PYTHON" "$CB" --help 2>&1)"
+"$PYTHON" "$CB" --bogus >/dev/null 2>&1; expect_exit "context-budget unknown flag -> 2" 2 $?
+
+# Short session: the doctrine's default answer. Must be exit 0 (append).
+"$PYTHON" "$CB" --history-tokens 25000 --turns-remaining 5 --base-rate 0.30 -q >/dev/null 2>&1
+expect_exit "short session -> append (0)" 0 $?
+# Deep session: enough remaining turns to repay the rewrite. Must be exit 10.
+"$PYTHON" "$CB" --history-tokens 120000 --turns-remaining 40 --base-rate 2.00 -q >/dev/null 2>&1
+expect_exit "deep session -> compaction indicated (10)" 10 $?
+# Context ceiling binds regardless of cost.
+"$PYTHON" "$CB" --history-tokens 900000 --turns-remaining 10 --growth-per-turn 50000 \
+  --context-window 1000000 -q >/dev/null 2>&1
+expect_exit "context ceiling -> 10" 10 $?
+
+out="$("$PYTHON" "$CB" --history-tokens 25000 --turns-remaining 5 --base-rate 0.30 --json -q 2>/dev/null)"
+expect_has "context-budget --json envelope schema" '"schema": "claude-mods.claude-api-ops.context-budget/v1"' "$out"
+expect_has "context-budget --json verdict" '"verdict": "append"' "$out"
+# The recall caveat must ride along in the machine-readable output: an agent
+# acting on the verdict alone would otherwise treat "cheaper" as "better".
+expect_has "context-budget --json carries the recall caveat" 'recall loss' "$out"
+
+# Input validation (resource protocol §6 - agents fabricate plausible inputs).
+for bad in "--history-tokens -5 --turns-remaining 10" \
+           "--history-tokens 1000 --turns-remaining -1" \
+           "--history-tokens 1000 --turns-remaining 5 --base-rate 0" \
+           "--history-tokens 1000 --turns-remaining 5 --summary-tokens 5000"; do
+  "$PYTHON" "$CB" $bad >/dev/null 2>&1
+  expect_exit "rejects bad input ($bad)" 4 $?
+done
+
+# ── cache-correct loop asset ─────────────────────────────────────────────────
+# The asset's only real logic is breakpoint placement, and getting it wrong is
+# silent (a missed cache costs money and raises no error). Exercise it directly
+# with the anthropic SDK stubbed out - no network, no SDK install needed.
+echo "-- cached-agent-loop --"
+"$PYTHON" -m py_compile "$SKILL/assets/cached-agent-loop.py" 2>/dev/null \
+  && ok "py_compile cached-agent-loop.py" || no "py_compile cached-agent-loop.py"
+"$PYTHON" -m py_compile "$SKILL/assets/recall-probe.py" 2>/dev/null \
+  && ok "py_compile recall-probe.py" || no "py_compile recall-probe.py"
+
+"$PYTHON" - "$SKILL/assets/cached-agent-loop.py" >"$SB/bp.out" 2>&1 <<'PY'
+import sys, types, importlib.util
+stub = types.ModuleType("anthropic"); stub.Anthropic = lambda *a, **k: None
+sys.modules["anthropic"] = stub
+spec = importlib.util.spec_from_file_location("loop", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+
+def marks(msgs):
+    return [(i, j) for i, msg in enumerate(msgs)
+            for j, b in enumerate(msg["content"])
+            if isinstance(b, dict) and "cache_control" in b]
+
+# The newest turn must always carry a breakpoint, or hits never accrue.
+msgs = [{"role": "user", "content": [{"type": "text", "text": "hi"}]}]
+m.place_message_breakpoints(msgs)
+assert marks(msgs) == [(0, 0)], f"short: {marks(msgs)}"
+
+# A tool-heavy turn appending 40 blocks must not exceed the API's 4-breakpoint
+# limit (one is spent on the system block) and must keep consecutive anchors
+# inside the 20-block backward search, or the lookback silently misses.
+msgs = [{"role": "user", "content": [{"type": "text", "text": f"b{i}"} for i in range(40)]}]
+m.place_message_breakpoints(msgs)
+got = marks(msgs)
+assert len(got) <= m.MAX_BREAKPOINTS - 1, f"too many breakpoints: {got}"
+assert got[-1] == (0, 39), f"newest block unmarked: {got}"
+gaps = [got[i + 1][1] - got[i][1] for i in range(len(got) - 1)]
+assert all(g <= m.LOOKBACK_BLOCKS for g in gaps), f"anchor gap exceeds lookback: {gaps}"
+assert m.BREAKPOINT_EVERY < m.LOOKBACK_BLOCKS, "anchor spacing must fit the window"
+
+# Idempotent: called every turn, it must not accumulate stale markers.
+before = marks(msgs); m.place_message_breakpoints(msgs)
+assert marks(msgs) == before, "not idempotent"
+
+# Tool output is capped at the boundary (the cache-preserving lever).
+assert len(m.capped("x" * 99999)) < 99999, "capped() did not truncate"
+assert m.capped("short") == "short", "capped() mangled a short result"
+print("OK")
+PY
+expect_has "breakpoint placement, capping and idempotence" "OK" "$(cat "$SB/bp.out")"
+
 # ── SKILL.md sanity ───────────────────────────────────────────────────────────
 echo "-- SKILL.md --"
 # CONTRACT (frontmatter shape): this suite asserts that SKILL.md's frontmatter
