@@ -4,7 +4,7 @@ description: "Build and run evals for LLM and agent systems: golden datasets, LL
 license: MIT
 metadata:
   author: claude-mods
-  related-skills: "testing-ops, claude-api-ops, iterate, fleet-ops"
+  related-skills: "testing-ops, claude-api-ops, iterate, loop-ops, fleet-ops"
 ---
 
 # Evals Ops
@@ -28,6 +28,7 @@ make a judge trustworthy, and how to gate CI on it without teaching everyone to 
 | "Where do the human labels come from?" | `references/annotation-workflow.md` |
 | "Should this block the merge?" | [Gating](#regression-gating) → `references/regression-gating.md` |
 | "Did this change really make it worse?" | [Is the drop real](#is-the-drop-real) |
+| "Optimise against the eval / run it overnight" | [Hillclimbing](#hillclimbing) → `references/hillclimbing.md` |
 | "Which platform should we use?" | `references/tooling-landscape.md` |
 | "Just give me a starting file" | [Assets](#assets) — golden set, rubric, runner, CI gate |
 
@@ -208,6 +209,40 @@ you find out the accuracy win cost 4x the tokens, and retrofitting attribution a
 harness exists is far more annoying than a `tokens_in` / `tokens_out` / `ms` field per case.
 Full CI shape and the noise-floor method: `references/regression-gating.md`.
 
+## Hillclimbing
+
+Once the harness measures, the obvious move is to optimise against it. That works, and it
+is also the fastest way to make a good suite useless.
+
+**The loop belongs to [`iterate`](../iterate/) - this skill owns what goes wrong.** Every
+hillclimbing failure is a property of the metric, not of the loop:
+
+1. **Banking noise.** `iterate` keeps a change when the metric beats the previous best -
+   correct for line coverage, a coin flip for an eval score. At 0.88 +/- 0.03, a measured
+   0.90 is not evidence. Gate the keep decision on the noise floor instead:
+
+   ```bash
+   python3 scripts/eval-baseline.py history.jsonl --candidate iter.jsonl --accept
+   # exit 0 = KEEP (a real improvement), 10 = DISCARD (noise or worse)
+   ```
+
+   `--accept` deliberately inverts the CI meaning of "noise": CI asks *did this get worse*,
+   a hillclimb asks *is this improvement real*. Noise fails the second question.
+2. **Overfitting the frozen set.** Split train / validation / held-out before optimising,
+   never show the validation set to whatever proposes changes, and treat held-out as a
+   *budget* you spend at milestones - not a dashboard.
+3. **Keeping a champion instead of a frontier.** One aggregate best hides which cases a
+   candidate won. Retaining candidates that are best on at least one case is what stops the
+   loop walling itself into a local optimum.
+
+And the eval-design consequence: **a scalar score gives an optimizer nothing to reflect on.**
+A judge returning `{"reason": ..., "verdict": ...}` can be improved against; one returning
+`0.4` cannot. That field costs nothing today and is what makes automated optimization
+tractable later.
+
+Splits, the optimizer landscape (GEPA, MIPROv2, APE/ORPO/SPO), the pre-flight checklist,
+and the extraction trigger for a future `prompt-optimization-ops`: `references/hillclimbing.md`.
+
 ## Tooling
 
 Trace-level observability and eval scoring have converged into the same products - you are
@@ -229,7 +264,7 @@ not before. Which-one-when: `references/tooling-landscape.md`.
 |---|---|
 | `scripts/judge-calibration.py` | Judge-vs-human agreement: Cohen kappa, confusion matrix, per-class breakdown, verbosity/position bias probes. Exit 10 = below `--min-kappa`. |
 | `scripts/goldenset-audit.py` | Golden-set health: duplicates, bucket balance, staleness, freeze-manifest drift. Exit 10 = findings. |
-| `scripts/eval-baseline.py` | Noise floor from run history, the threshold your gate should use, and McNemar's exact test naming the cases that flipped. Exit 10 = confirmed regression or a cost/latency ceiling breach. |
+| `scripts/eval-baseline.py` | Noise floor from run history, the threshold your gate should use, and McNemar's exact test naming the cases that flipped. Exit 10 = confirmed regression or a cost/latency ceiling breach; `--accept` turns it into a hillclimb keep/discard gate. |
 
 All three accept `--help` and `--json`, and are offline and stdlib-only.
 
@@ -260,4 +295,5 @@ than on scaffolding:
 - `references/retrieval-eval.md` - RAG: recall@k, the retrieval-vs-generation split, ground truth, failure classes
 - `references/annotation-workflow.md` - where human labels come from: the human-human ceiling, sampling, adjudication, drift
 - `references/regression-gating.md` - blocking vs advisory, noise floor, McNemar, CI shape, cost/latency attribution
+- `references/hillclimbing.md` - optimising against an eval without destroying it: noise, overfitting, frontiers, optimizers
 - `references/tooling-landscape.md` - platform comparison with verification datestamps

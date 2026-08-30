@@ -48,6 +48,9 @@ run "judge-calibration bad args"   2 "$PY" skills/evals-ops/scripts/judge-calibr
 run "goldenset-audit bad args"     2 "$PY" skills/evals-ops/scripts/goldenset-audit.py
 run "eval-baseline --help"         0 "$PY" skills/evals-ops/scripts/eval-baseline.py --help
 run "eval-baseline bad args"       2 "$PY" skills/evals-ops/scripts/eval-baseline.py
+# --accept inverts the meaning of exit 10 on purpose; pin it so a refactor
+# cannot quietly restore "noise is fine" to the hillclimb keep gate.
+run "eval-baseline --accept help" 0 "$PY" skills/evals-ops/scripts/eval-baseline.py --accept --help
 # The shipped starter set must survive the skill's own auditor - an asset its
 # tools reject is worse than no asset at all.
 run "example golden set audits clean" 0 "$PY" skills/evals-ops/scripts/goldenset-audit.py  skills/evals-ops/assets/golden-set.example.jsonl

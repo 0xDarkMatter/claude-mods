@@ -49,6 +49,23 @@ feature releases live in the README "Recent Updates" section.
   instructions and calibration checklist, and a GitHub Actions workflow encoding
   the tier ladder.
 
+  Finally, `hillclimbing.md` and a two-way seam with `iterate`. Optimising against
+  an eval is where a good suite gets destroyed, and neither skill knew the other
+  existed: `iterate` keeps a change when the metric beats the previous best, which
+  is correct for line coverage and a coin flip for a score with run-to-run
+  variance - point it at an eval and roughly half its "improvements" are noise,
+  banked with perfect discipline. `eval-baseline.py --accept` is the fix, and it
+  deliberately inverts the exit semantics: CI asks "did this get worse" (noise is
+  fine), a hillclimb asks "is this improvement real" (noise is not). `iterate`
+  gains a Noisy Metrics section pointing at it; the reference owns the discipline
+  `iterate` cannot - train/validation/held-out splits, the held-out look budget,
+  and why a single `iterate/best` champion is a local-optimum trap where a Pareto
+  frontier is not. Grounded in GEPA (arXiv:2507.19457, ICLR 2026 Oral), whose
+  documented verbosity-overfit failure mode and never-shown-to-the-reflector
+  validation split are the citable versions of both arguments. Carries an explicit
+  extraction trigger for a future `prompt-optimization-ops` rather than pre-empting
+  one. Suite 97 -> 109 assertions.
+
 - **`icon-ops` skill** - sourcing, vetting and shipping SVG icons for web UI.
   Covers the four decisions that lock an icon set (grid, family, stroke width,
   corner language), the two licence traps that actually bite (a brand mark is a

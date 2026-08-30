@@ -22,12 +22,19 @@ Exit:    0 no regression (noise, improvement, or not enough evidence),
          2 usage, 3 not-found, 4 validation,
          10 REGRESSION CONFIRMED or a cost/latency ceiling breached
 
+         --accept INVERTS this deliberately, for use as a hillclimb keep/discard
+         gate:  0 = KEEP (a real improvement),  10 = DISCARD (noise or worse).
+         Under --accept, "noise" is a DISCARD -- banking a change that is inside
+         the noise band is how an improvement loop turns into a random walk.
+         See references/hillclimbing.md.
+
 Examples:
   eval-baseline.py evals/history.jsonl
   eval-baseline.py evals/history.jsonl --candidate /tmp/run.jsonl
   eval-baseline.py evals/history.jsonl --baseline-results base.jsonl \
       --candidate-results new.jsonl --alpha 0.05
   eval-baseline.py evals/history.jsonl --max-cost-usd 2.50 --max-p95-ms 6000
+  eval-baseline.py evals/history.jsonl --candidate iter.jsonl --accept  # keep/discard
   eval-baseline.py evals/history.jsonl --json | jq '.data.recommended_threshold'
 
 Offline and stdlib-only: it reads files you already have, it never calls a model.
@@ -230,9 +237,16 @@ def build_report(history, candidate, window, sigma, paired, alpha, ceilings):
             f"{x['metric']} {x['value']} exceeds ceiling {x['ceiling']}" for x in breaches
         )
 
+    # The hillclimb decision is NOT the same question as the CI-gate decision.
+    # CI asks "did this get worse?" (noise is fine). A hillclimb asks "is this
+    # improvement real?" (noise is not good enough to bank). Only an improvement
+    # that clears the floor, or is significant on the paired test, is a KEEP.
+    decision = "keep" if verdict == "improvement" else "discard"
+
     return {
         "verdict": verdict,
         "reason": reason,
+        "hillclimb_decision": decision,
         "failing": verdict == "regression" or bool(breaches),
         "baseline": baseline,
         "noise_floor": spread,
@@ -271,6 +285,7 @@ def print_human(r, source):
         out.append(f"  CEILING         {x['metric']} {x['value']} > {x['ceiling']}")
     out.append("")
     out.append(f"  verdict         {r['verdict'].upper()} - {r['reason']}")
+    out.append(f"  hillclimb       {r['hillclimb_decision'].upper()}")
     print("\n".join(out))
 
 
@@ -299,6 +314,10 @@ def main(argv=None):
                     help="fail if the candidate run exceeds this cost")
     ap.add_argument("--max-p95-ms", type=float, metavar="MS",
                     help="fail if the candidate run exceeds this p95 latency")
+    ap.add_argument("--accept", action="store_true",
+                    help="hillclimb keep/discard gate: exit 0 = KEEP a real improvement, "
+                         "exit 10 = DISCARD noise or a regression (INVERTS the default "
+                         "meaning of noise -- see the header)")
     ap.add_argument("--json", action="store_true", help="emit the JSON envelope on stdout")
 
     try:
@@ -365,6 +384,8 @@ def main(argv=None):
     for w in report["warnings"]:
         print(f"eval-baseline: warning: {w}", file=sys.stderr)
 
+    if args.accept:
+        return EXIT_OK if report["hillclimb_decision"] == "keep" else EXIT_REGRESSION
     return EXIT_REGRESSION if report["failing"] else EXIT_OK
 
 

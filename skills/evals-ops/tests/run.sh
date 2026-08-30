@@ -433,6 +433,62 @@ exit_is 0 "runner template compiles"                -- "$PYTHON" -m py_compile "
 [ -f "$ASSETS/eval-gate.template.yml" ]   && ok "CI gate template ships"      || bad "CI gate template ships"
 
 
+# --- --accept: the hillclimb keep/discard gate ------------------------------
+# The whole point of this flag is that it asks a DIFFERENT question from CI.
+# CI: "did this get worse?" -> noise is fine, exit 0.
+# Hillclimb: "is this improvement real?" -> noise is NOT good enough to bank.
+# These four assertions pin that inversion. If a refactor ever makes the noise
+# case exit 0 under --accept, the loop silently goes back to banking noise.
+echo '{"score":0.97,"n":30,"dataset":"v3","judge":"j1"}' > "$SB/win.jsonl"
+
+exit_is 0  "noise passes CI (did it get worse? no)" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl"
+exit_is 10 "noise is a DISCARD under --accept (is it real? no)" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl" --accept
+exit_is 0  "a real improvement is a KEEP under --accept" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/win.jsonl" --accept
+exit_is 10 "a regression is a DISCARD under --accept" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/drop.jsonl" --accept
+
+json_eq "data.hillclimb_decision" "discard" "noise reports decision=discard" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl" --json
+json_eq "data.hillclimb_decision" "keep" "a real improvement reports decision=keep" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/win.jsonl" --json
+
+# The decision is exposed in the report regardless of the flag, so a caller can
+# read it without adopting the inverted exit semantics.
+json_eq "data.hillclimb_decision" "discard" "decision is reported without --accept too" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/drop.jsonl" --json
+
+# A significant paired improvement is a KEEP even when the aggregate barely moved -
+# this is the case a raw score comparison gets wrong in the generous direction.
+json_eq "data.hillclimb_decision" "keep" "paired significance drives the keep decision" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl" \
+       --baseline-results "$SB/cand-res.jsonl" --candidate-results "$SB/base-res.jsonl" --json
+# ...and churn (8 broken / 7 fixed, p=1.0) is NOT a keep, despite 7 fixes.
+json_eq "data.hillclimb_decision" "discard" "churn is never banked as an improvement" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl" \
+       --baseline-results "$SB/churn-base.jsonl" --candidate-results "$SB/churn-cand.jsonl" --json
+
+# --- the iterate <-> evals-ops seam is documented in BOTH directions --------
+# A one-way cross-reference rots: whichever side gets edited without the other
+# leaves a dangling claim. These assert the link exists from each end.
+ITERATE="$SKILL/../iterate/SKILL.md"
+if [ -f "$ITERATE" ]; then
+    grep -q "eval-baseline.py" "$ITERATE" \
+        && ok "iterate points at the noise-floor gate" \
+        || bad "iterate points at the noise-floor gate"
+    grep -q "hillclimbing.md" "$ITERATE" \
+        && ok "iterate links the hillclimbing reference" \
+        || bad "iterate links the hillclimbing reference"
+else
+    ok "iterate skill not present (installed standalone) - seam check skipped"
+fi
+grep -q "iterate" "$SKILL/references/hillclimbing.md" \
+    && ok "hillclimbing defers loop mechanics to iterate" \
+    || bad "hillclimbing defers loop mechanics to iterate"
+
+
 echo
 echo "evals-ops: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1
