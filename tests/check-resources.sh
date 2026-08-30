@@ -46,6 +46,12 @@ run "judge-calibration --help"     0 "$PY" skills/evals-ops/scripts/judge-calibr
 run "goldenset-audit --help"       0 "$PY" skills/evals-ops/scripts/goldenset-audit.py --help
 run "judge-calibration bad args"   2 "$PY" skills/evals-ops/scripts/judge-calibration.py
 run "goldenset-audit bad args"     2 "$PY" skills/evals-ops/scripts/goldenset-audit.py
+run "eval-baseline --help"         0 "$PY" skills/evals-ops/scripts/eval-baseline.py --help
+run "eval-baseline bad args"       2 "$PY" skills/evals-ops/scripts/eval-baseline.py
+# The shipped starter set must survive the skill's own auditor - an asset its
+# tools reject is worse than no asset at all.
+run "example golden set audits clean" 0 "$PY" skills/evals-ops/scripts/goldenset-audit.py  skills/evals-ops/assets/golden-set.example.jsonl
+run "eval-runner template compiles"   0 "$PY" -m py_compile  skills/evals-ops/assets/eval-runner.template.py
 
 echo "== playwright-ops: flake-triage"
 run "flake-triage --help" 0 "$PY" skills/playwright-ops/scripts/triage-flakes.py --help

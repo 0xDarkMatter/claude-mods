@@ -25,6 +25,30 @@ feature releases live in the README "Recent Updates" section.
   `goldenset-audit.py` (duplicates, bucket skew, staleness, and freeze-manifest
   drift that catches a frozen case edited in place to make it pass).
 
+  Also covers RAG (`retrieval-eval.md` - recall@k, the retrieval-vs-generation
+  2x2 that stops two independent bugs being averaged into one number, and the
+  unanswerable-question bucket almost everyone omits, without which a suite
+  cannot detect hallucination under retrieval failure) and the labelling step
+  itself (`annotation-workflow.md` - the human-human agreement ceiling a judge
+  mathematically cannot beat, stratified sampling across the judge's own
+  verdicts, adjudication, and annotator drift).
+
+  A third script, `eval-baseline.py`, derives the baseline and noise floor from
+  the rolling run history, prints the threshold a gate should actually use, and
+  runs McNemar's exact test over paired per-case results. The point: a change
+  that breaks 8 cases and fixes 7 moves the headline score by 0.01 and is
+  invisible to any score comparison, while the paired view names all 15 - and
+  honestly reports p=1.0, because churn is not a regression. Exit 10 on a
+  confirmed regression or a cost/latency ceiling breach.
+
+  Four copy-and-adapt assets, so the first hour goes on deciding what to measure
+  rather than on scaffolding: a 12-case starter golden set spanning all four
+  buckets (and passing the skill's own auditor - enforced in CI, because an asset
+  the skill's tools reject is worse than no asset), the 40-line runner the skill
+  tells you to start with, a one-criterion judge rubric carrying the bias-counter
+  instructions and calibration checklist, and a GitHub Actions workflow encoding
+  the tier ladder.
+
 - **`icon-ops` skill** - sourcing, vetting and shipping SVG icons for web UI.
   Covers the four decisions that lock an icon set (grid, family, stroke width,
   corner language), the two licence traps that actually bite (a brand mark is a

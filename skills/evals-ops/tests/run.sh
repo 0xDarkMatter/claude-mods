@@ -15,6 +15,7 @@ SKILL="$(dirname "$HERE")"
 SCRIPTS="$SKILL/scripts"
 CAL="$SCRIPTS/judge-calibration.py"
 AUD="$SCRIPTS/goldenset-audit.py"
+BAS="$SCRIPTS/eval-baseline.py"
 
 # Probe python by EXECUTING it. `command -v python3` finds the Windows Store
 # app-execution stub, which exists on PATH but exits 49 non-interactively.
@@ -72,8 +73,10 @@ echo "== evals-ops self-test ($PYTHON)"
 # --- protocol surface -------------------------------------------------------
 exit_is 0 "judge-calibration --help"  -- "$PYTHON" "$CAL" --help
 exit_is 0 "goldenset-audit --help"    -- "$PYTHON" "$AUD" --help
+exit_is 0 "eval-baseline --help"      -- "$PYTHON" "$BAS" --help
 exit_is 2 "judge-calibration no args" -- "$PYTHON" "$CAL"
 exit_is 2 "goldenset-audit no args"   -- "$PYTHON" "$AUD"
+exit_is 2 "eval-baseline no args"     -- "$PYTHON" "$BAS"
 exit_is 2 "judge-calibration rejects out-of-range --min-kappa" \
     -- "$PYTHON" "$CAL" /dev/null --min-kappa 5
 exit_is 3 "judge-calibration missing file"  -- "$PYTHON" "$CAL" "$SB/nope.jsonl"
@@ -299,6 +302,136 @@ exit_is 0 "key reordering does not count as drift" -- "$PYTHON" "$AUD" "$SB/reor
 exit_is 2 "--freeze and --write-freeze are mutually exclusive" \
     -- "$PYTHON" "$AUD" "$SB/healthy.jsonl" --freeze "$SB/m.json" --write-freeze "$SB/m2.json"
 exit_is 3 "missing freeze manifest" -- "$PYTHON" "$AUD" "$SB/healthy.jsonl" --freeze "$SB/absent.json"
+
+# --- eval-baseline: noise floor, significance, ceilings ---------------------
+# History with a KNOWN spread. scores .88 .85 .89 .86 .88
+#   mean         = 0.872
+#   sample stdev = sqrt(0.00108/4) = 0.016432 -> 0.0164
+#   2-sigma gate = 0.872 - 2(0.0164) = 0.8392
+for v in 0.88 0.85 0.89 0.86 0.88; do
+  echo "{\"score\":$v,\"n\":30,\"dataset\":\"v3\",\"judge\":\"j1\"}"
+done > "$SB/hist.jsonl"
+echo '{"score":0.87,"n":30,"dataset":"v3","judge":"j1","cost_usd":1.20,"p95_ms":3000}' > "$SB/cand.jsonl"
+
+json_eq "data.baseline" "0.872" "baseline is the window mean" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl" --json
+json_eq "data.noise_floor" "0.0164" "noise floor is the sample stdev" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl" --json
+json_eq "data.recommended_threshold" "0.8392" "gate sits 2 sigma below baseline" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl" --json
+json_eq "data.verdict" "noise" "a 0.002 drop inside the band is noise" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl" --json
+exit_is 0 "noise does not fail the gate" -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl"
+
+echo '{"score":0.62,"n":30,"dataset":"v3","judge":"j1"}' > "$SB/drop.jsonl"
+json_eq "data.verdict" "regression" "a drop past the threshold is a regression" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/drop.jsonl" --json
+exit_is 10 "regression exits 10" -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/drop.jsonl"
+
+# --sigma widens the band: 0.83 is below the 2-sigma gate (0.8392) but above the
+# 4-sigma gate (0.8064), so the same score must classify differently.
+echo '{"score":0.83,"n":30,"dataset":"v3","judge":"j1"}' > "$SB/mid.jsonl"
+json_eq "data.verdict" "regression" "0.83 is a regression at the default 2 sigma" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/mid.jsonl" --json
+json_eq "data.verdict" "noise" "0.83 is noise at 4 sigma (wider band)" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/mid.jsonl" --sigma 4 --json
+
+# --- McNemar exact test -----------------------------------------------------
+# 30 cases all passing at baseline; 8 now fail. b=8, c=0.
+# p = 2 * C(8,0)/2^8 = 2/256 = 0.007812
+for i in $(seq 1 30); do echo "{\"id\":\"c$i\",\"passed\":true}"; done > "$SB/base-res.jsonl"
+{ for i in $(seq 1 22); do echo "{\"id\":\"c$i\",\"passed\":true}"; done
+  for i in $(seq 23 30); do echo "{\"id\":\"c$i\",\"passed\":false}"; done; } > "$SB/cand-res.jsonl"
+
+PAIR=(--baseline-results "$SB/base-res.jsonl" --candidate-results "$SB/cand-res.jsonl")
+json_eq "data.significance.p_value" "0.007812" "McNemar exact p for b=8,c=0" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl" "${PAIR[@]}" --json
+json_eq "data.verdict" "regression" "paired test overrides a flat aggregate score" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl" "${PAIR[@]}" --json
+json_eq "data.significance.regressed.0" "c23" "regressed cases are named, not just counted" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl" "${PAIR[@]}" --json
+exit_is 10 "significant paired regression exits 10" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl" "${PAIR[@]}"
+
+# CHURN, not regression. 8 break and 7 are fixed: b=8, c=7, p = 1.0 exactly.
+# This is the case references/regression-gating.md calls out: the honest verdict
+# is "noise", and the value of the run is the enumerated lists, not the verdict.
+# If this ever flips to "regression", the exact test has been replaced by
+# something that over-claims - which is the failure mode the whole file warns about.
+{ for i in $(seq 1 15); do echo "{\"id\":\"c$i\",\"passed\":true}"; done
+  for i in $(seq 16 22); do echo "{\"id\":\"c$i\",\"passed\":false}"; done
+  for i in $(seq 23 30); do echo "{\"id\":\"c$i\",\"passed\":true}"; done; } > "$SB/churn-base.jsonl"
+{ for i in $(seq 1 15); do echo "{\"id\":\"c$i\",\"passed\":true}"; done
+  for i in $(seq 16 22); do echo "{\"id\":\"c$i\",\"passed\":true}"; done
+  for i in $(seq 23 30); do echo "{\"id\":\"c$i\",\"passed\":false}"; done; } > "$SB/churn-cand.jsonl"
+
+CHURN=(--baseline-results "$SB/churn-base.jsonl" --candidate-results "$SB/churn-cand.jsonl")
+json_eq "data.significance.p_value" "1.0" "8 broken / 7 fixed is p=1.0, not a regression" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl" "${CHURN[@]}" --json
+json_eq "data.verdict" "noise" "churn is reported as noise, honestly" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl" "${CHURN[@]}" --json
+json_eq "data.significance.n_fixed" "7" "...but the 7 fixed cases are still enumerated" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl" "${CHURN[@]}" --json
+exit_is 0 "churn does not fail the gate" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl" "${CHURN[@]}"
+
+# Identical runs: zero discordant pairs, p = 1.0 by definition.
+json_eq "data.significance.p_value" "1.0" "identical runs give p=1.0" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl" \
+       --baseline-results "$SB/base-res.jsonl" --candidate-results "$SB/base-res.jsonl" --json
+
+# Direction matters: the same pair reversed is an improvement, not a regression.
+REV=(--baseline-results "$SB/cand-res.jsonl" --candidate-results "$SB/base-res.jsonl")
+json_eq "data.verdict" "improvement" "a significant improvement is labelled as such" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl" "${REV[@]}" --json
+exit_is 0 "an improvement never fails the gate" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl" "${REV[@]}"
+
+# Cases present in only one result set cannot be paired and must be flagged.
+head -20 "$SB/base-res.jsonl" > "$SB/short-res.jsonl"
+json_eq "data.significance.unpaired_ids" "10" "unpaired case ids are counted" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl" \
+       --baseline-results "$SB/short-res.jsonl" --candidate-results "$SB/cand-res.jsonl" --json
+
+# --- confounded comparisons must warn ---------------------------------------
+# A dataset or judge change inside the window means the MEASUREMENT moved, not
+# necessarily the system. Silence here would be the worst possible failure.
+for v in 0.88 0.85 0.89; do echo "{\"score\":$v,\"dataset\":\"v3\",\"judge\":\"j1\"}"; done > "$SB/mixed.jsonl"
+echo '{"score":0.86,"dataset":"v4","judge":"j1"}' >> "$SB/mixed.jsonl"
+_err="$("$PYTHON" "$BAS" "$SB/mixed.jsonl" 2>&1 >/dev/null)"
+case "$_err" in
+    *"dataset version changed"*) ok "warns when the dataset version changes mid-window" ;;
+    *) bad "warns when the dataset version changes mid-window" ;;
+esac
+_err="$("$PYTHON" "$BAS" "$SB/hist.jsonl" --window 2 --candidate "$SB/cand.jsonl" 2>&1 >/dev/null)"
+case "$_err" in
+    *"noise floor needs"*) ok "warns when the window is too small for a noise floor" ;;
+    *) bad "warns when the window is too small for a noise floor" ;;
+esac
+
+# --- ceilings: absolute, not trend ------------------------------------------
+exit_is 10 "cost ceiling breach fails"    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl" --max-cost-usd 0.50
+exit_is 0  "cost under ceiling passes"    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl" --max-cost-usd 5.00
+exit_is 10 "latency ceiling breach fails" -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl" --max-p95-ms 1000
+exit_is 0  "latency under ceiling passes" -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --candidate "$SB/cand.jsonl" --max-p95-ms 9000
+
+# --- argument validation ----------------------------------------------------
+exit_is 2 "paired flags must be given together" \
+    -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --baseline-results "$SB/base-res.jsonl"
+exit_is 2 "--alpha must be in (0,1)"  -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --alpha 1.5
+exit_is 2 "--sigma must be positive"  -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --sigma 0
+exit_is 2 "--window must be >= 1"     -- "$PYTHON" "$BAS" "$SB/hist.jsonl" --window 0
+exit_is 3 "missing history file"      -- "$PYTHON" "$BAS" "$SB/absent.jsonl"
+exit_is 4 "malformed history"         -- "$PYTHON" "$BAS" "$SB/bad.jsonl"
+
+# --- shipped assets must survive the skill's own tools ----------------------
+# An asset the skill's own scripts reject is worse than no asset at all.
+ASSETS="$SKILL/assets"
+exit_is 0 "example golden set passes its own audit" -- "$PYTHON" "$AUD" "$ASSETS/golden-set.example.jsonl"
+exit_is 0 "runner template compiles"                -- "$PYTHON" -m py_compile "$ASSETS/eval-runner.template.py"
+[ -f "$ASSETS/judge-rubric.template.md" ] && ok "judge rubric template ships" || bad "judge rubric template ships"
+[ -f "$ASSETS/eval-gate.template.yml" ]   && ok "CI gate template ships"      || bad "CI gate template ships"
+
 
 echo
 echo "evals-ops: $PASS passed, $FAIL failed"

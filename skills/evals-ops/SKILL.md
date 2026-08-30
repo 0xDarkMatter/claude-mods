@@ -24,8 +24,12 @@ make a judge trustworthy, and how to gate CI on it without teaching everyone to 
 | "Where do the test cases come from?" | [Golden set](#the-golden-set) → `references/golden-datasets.md` |
 | "My judge disagrees with me / is it any good?" | [Judges](#llm-as-a-judge) → `references/llm-judge.md` |
 | "Verify a finding is real, not plausible" | [Refuters](#adversarial-verification) → `references/adversarial-verification.md` |
+| "Is my RAG retrieval any good?" | [Retrieval](#retrieval) → `references/retrieval-eval.md` |
+| "Where do the human labels come from?" | `references/annotation-workflow.md` |
 | "Should this block the merge?" | [Gating](#regression-gating) → `references/regression-gating.md` |
+| "Did this change really make it worse?" | [Is the drop real](#is-the-drop-real) |
 | "Which platform should we use?" | `references/tooling-landscape.md` |
+| "Just give me a starting file" | [Assets](#assets) — golden set, rubric, runner, CI gate |
 
 ## The 60-second version
 
@@ -125,6 +129,12 @@ kappa >= 0.8 production-ready - 0.6-0.8 substantial, usable with care - below 0.
 is the problem, not the model. Re-sample ~50 fresh cases periodically; judges drift when the
 underlying model version moves. Depth, including bias-probe design: `references/llm-judge.md`.
 
+**Measure the human-human ceiling first.** A judge cannot beat the agreement two people
+achieve with each other. Two annotators on 30-50 shared cases gives you that number - and
+if it is below ~0.6, the rubric is ambiguous and every label you produce against it is
+wasted. How to run the sessions, stratify the sample, and adjudicate disagreements:
+`references/annotation-workflow.md`.
+
 ## Adversarial verification
 
 For findings rather than scores - bug reports, audit results, review comments - flip the
@@ -139,6 +149,26 @@ over three identical skeptics - same reasoning as judge panels.
 This composes with the parallel-work skills rather than duplicating them: `fleet-ops` and
 `parallel-ops` own the fan-out mechanics; this skill owns the scoring contract the refuters
 return. See `references/adversarial-verification.md`.
+
+## Retrieval
+
+RAG is the most common eval target and the most commonly mis-measured. Scoring only the
+final answer averages two independent failures into one uninterpretable number:
+
+|  | Right context | Wrong context |
+|---|---|---|
+| **Answer correct** | Working | **Lucky** - the model knew it anyway; scores as a pass |
+| **Answer wrong** | **Generation bug** - chunking, prompt, model | **Retrieval bug** - embeddings, index, query rewriting |
+
+Record the retrieved chunk ids next to every answer and that opaque score becomes a 2x2
+you can assign to a team. Gate on **recall@k** (a precision failure degrades an answer; a
+recall failure makes a correct one impossible) and on citation-id validity, which is free
+and catches confident answers attached to unrelated sources. Retrieval is the one place
+deterministic scoring genuinely dominates - you have ground-truth ids, so skip the judge.
+
+The bucket almost everyone omits: **questions the corpus cannot answer.** Without them the
+suite cannot detect hallucination under retrieval failure, which is what users hit most.
+Metrics, the six failure classes, and ground-truth construction: `references/retrieval-eval.md`.
 
 ## Regression gating
 
@@ -155,6 +185,23 @@ Set the threshold *below* the baseline by more than the measured noise floor: if
 scores 0.88 +/- 0.03 across reruns, gate at 0.80, not 0.87. You cannot know the noise floor
 from a single run - commit a rolling window of run results to git and read the variance off
 it. That committed history is also what distinguishes "today is noisy" from "today broke".
+
+### Is the drop real?
+
+A noise floor tells you the aggregate moved unusually far. It does not tell you *the same
+cases* moved. Two runs over one frozen set are paired binary outcomes, and the tool for
+those is **McNemar's exact test** over the discordant pairs only.
+
+This matters because a change that breaks 8 cases and fixes 7 moves the headline score by
+0.01 - invisible against any noise floor - while silently swapping which 15 things work. The
+paired view names those 15 cases; a score comparison structurally cannot. Whether 8-vs-7 is
+*significant* is a separate question - it is not - but knowing which cases flipped is what
+lets you go and look.
+
+```bash
+python3 scripts/eval-baseline.py evals/history.jsonl   --baseline-results base.jsonl --candidate-results new.jsonl
+# exit 10 = significant regression, and it names the cases that flipped
+```
 
 Attribute **cost and latency per eval run** from the start. An eval suite is the only place
 you find out the accuracy win cost 4x the tokens, and retrofitting attribution after the
@@ -182,13 +229,27 @@ not before. Which-one-when: `references/tooling-landscape.md`.
 |---|---|
 | `scripts/judge-calibration.py` | Judge-vs-human agreement: Cohen kappa, confusion matrix, per-class breakdown, verbosity/position bias probes. Exit 10 = below `--min-kappa`. |
 | `scripts/goldenset-audit.py` | Golden-set health: duplicates, bucket balance, staleness, freeze-manifest drift. Exit 10 = findings. |
+| `scripts/eval-baseline.py` | Noise floor from run history, the threshold your gate should use, and McNemar's exact test naming the cases that flipped. Exit 10 = confirmed regression or a cost/latency ceiling breach. |
 
-Both accept `--help` and `--json`, and are offline and stdlib-only.
+All three accept `--help` and `--json`, and are offline and stdlib-only.
 
 ```bash
 python3 scripts/judge-calibration.py labels.jsonl --json | jq '.data.kappa'
 python3 scripts/goldenset-audit.py golden.jsonl --freeze manifest.json
+python3 scripts/eval-baseline.py history.jsonl --json | jq '.data.recommended_threshold'
 ```
+
+## Assets
+
+Copy-and-adapt starting points, so the first hour goes on deciding what to measure rather
+than on scaffolding:
+
+| Asset | What it is |
+|---|---|
+| `assets/golden-set.example.jsonl` | 10 worked cases across all four buckets, with `why` and `criteria` filled in |
+| `assets/eval-runner.template.py` | The 40-line runner this skill tells you to start with - two ADAPT blocks, cost/latency/pass^k pre-wired |
+| `assets/judge-rubric.template.md` | One-criterion rubric with the bias-counter instructions and the calibration checklist |
+| `assets/eval-gate.template.yml` | GitHub Actions workflow encoding the tier ladder: deterministic blocks on push, judge advisory on PR, k=3 nightly |
 
 ## References
 
@@ -196,5 +257,7 @@ python3 scripts/goldenset-audit.py golden.jsonl --freeze manifest.json
 - `references/golden-datasets.md` - building, four-bucket composition, sizing, freeze discipline, rot
 - `references/llm-judge.md` - bias catalog and mitigations, rubric design, panels, calibration method
 - `references/adversarial-verification.md` - refute-not-confirm, majority thresholds, lens diversity
-- `references/regression-gating.md` - blocking vs advisory, noise floor, CI shape, cost/latency attribution
+- `references/retrieval-eval.md` - RAG: recall@k, the retrieval-vs-generation split, ground truth, failure classes
+- `references/annotation-workflow.md` - where human labels come from: the human-human ceiling, sampling, adjudication, drift
+- `references/regression-gating.md` - blocking vs advisory, noise floor, McNemar, CI shape, cost/latency attribution
 - `references/tooling-landscape.md` - platform comparison with verification datestamps
