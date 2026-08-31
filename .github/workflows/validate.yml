@@ -47,3 +47,20 @@ jobs:
 
       - name: Offline resource checks (verifier scripts)
         run: bash tests/check-resources.sh
+
+  # scripts/install.ps1 builds its destination paths with backslashes and is a
+  # Windows-targeted installer (install.sh is the POSIX one), so its guard and
+  # doctor can only be exercised honestly on a Windows runner. Running it on
+  # ubuntu would create files literally named "dir\skills\alpha" and the suite
+  # would pass or fail for the wrong reasons.
+  install-guard:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the staleness guard compares HEAD against main
+
+      - name: Install guard + doctor behavioural tests
+        shell: bash
+        run: bash tests/install-guard.sh

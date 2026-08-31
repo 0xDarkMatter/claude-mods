@@ -117,6 +117,14 @@ Requires Sonnet 4+ or Opus 4+.
   `scripts/install.ps1` strips CRs from installed shell scripts as a backstop.
   Extension-less shebang scripts ride on git's text-detection heuristic — if one
   ever reads as binary (e.g. embedded NUL), pin it in `.gitattributes` explicitly.
+- **`~/.claude` is shared, and installs are last-writer-wins**: `scripts/install.ps1`
+  copies from whatever tree it is run in, so installing from a checkout that predates
+  another lane's landed work silently reverts it (six skills, unnoticed, 2026-08-31).
+  A staleness guard now refuses that install (`-Force` overrides) and
+  `install.ps1 -Doctor` reports drift read-only. **Any comparison between the repo and
+  `~/.claude` must ignore line endings** — SKILL.md files are often committed CRLF while
+  the installed copies land LF, so a naive byte compare flags most of the skill tree as
+  drifted and the check gets disabled. `tests/install-guard.sh` gates both.
 - **Executable bit on commit**: scripts under `skills/*/scripts/` and `hooks/*.sh`
   must be tracked `100755`. Git on Windows won't set this for you — `tests/check-exec-bits.sh`
   gates it; a script that "works locally" but fails `bash foo.sh` for another

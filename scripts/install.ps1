@@ -1,31 +1,92 @@
 <#
 .SYNOPSIS
-    Install claude-mods extensions to ~/.claude/
+    Install claude-mods extensions to ~/.claude/ (or diagnose an existing install).
 
 .DESCRIPTION
-    Copies commands, skills, agents, and rules to the global Claude Code config.
-    Handles cleanup of deprecated items and command-to-skill migrations.
+    Copies commands, skills, agents, rules, output styles and hooks to the
+    global Claude Code config. Handles cleanup of deprecated items and
+    command-to-skill migrations.
+
+    WHY THE GUARD AND THE DOCTOR EXIST
+    ~/.claude is a single shared mutable resource, but this installer is run
+    from whatever tree the session happens to be sitting in. There is no
+    ordering discipline between parallel lanes, so a session installing from a
+    checkout that predates another lane's landed work silently overwrites it.
+
+    Observed 2026-08-31: the installed loop-ops SKILL.md was 343 lines while
+    main had 454. Six skills had been reverted by an older tree's install -
+    exactly the set touched by main's most recent commits. Nothing errored and
+    nothing warned; the only symptom was a skill description quietly reading
+    wrong in a session's skill listing. It is worse than a clean revert,
+    because the installer deliberately keeps dest-only files (see the SKILLS
+    section below), so the NEW files survive while the SKILL.md documenting
+    them reverts - a half-updated state that is harder to spot.
+
+    So: a staleness guard refuses an install that would revert landed work
+    (-Force overrides), and -Doctor reports the drift read-only.
+
+    NOTE ON COMPARISON: every repo-vs-installed comparison here is
+    line-ending-insensitive. Many SKILL.md files are committed CRLF while the
+    installed copies land LF, so a naive byte compare flags most of the skill
+    tree as drifted when nothing is wrong. A guard that cries wolf on scores of
+    false positives gets disabled within a day and is worse than no guard.
 
 .PARAMETER Statusline
     Opt in to installing the context-usage statusline. Off by default so a
     shared install never changes the user's prompt UI without being asked.
 
+.PARAMETER Doctor
+    Read-only. Report staleness of the source tree plus per-file drift between
+    the repo and the install target. Writes nothing. Exit 0 clean, 10 when
+    stale or missing content is found.
+
+.PARAMETER Force
+    Install even when the staleness guard fires. Use when you knowingly want
+    this tree's content to win.
+
+.PARAMETER Json
+    With -Doctor, emit a machine-readable envelope on stdout instead of a
+    human report. Schema: claude-mods.install.doctor/v1.
+
+.PARAMETER Help
+    Print usage and examples to stdout, then exit 0.
+
 .NOTES
-    Run from the claude-mods directory:
+    Install target is $env:CLAUDE_DIR when set, else ~/.claude.
+
+    Exit codes: 0 success, 2 usage, 5 precondition, 10 domain signal
+    (guard fired / drift found).
+
+.EXAMPLE
     .\scripts\install.ps1
+    Install from the current tree, refusing if it would revert landed work.
+
+.EXAMPLE
     .\scripts\install.ps1 -Statusline
+    Install and opt in to the context-usage statusline.
+
+.EXAMPLE
+    .\scripts\install.ps1 -Doctor
+    Report what differs between this tree and the install target. Writes nothing.
+
+.EXAMPLE
+    .\scripts\install.ps1 -Doctor -Json
+    Same, as JSON on stdout, for a pre-flight check or a hook.
+
+.EXAMPLE
+    .\scripts\install.ps1 -Force
+    Install even though the guard says this tree is behind main.
 #>
 
 param(
-    [switch]$Statusline
+    [switch]$Statusline,
+    [switch]$Doctor,
+    [switch]$Force,
+    [switch]$Json,
+    [switch]$Help
 )
 
 $ErrorActionPreference = "Stop"
-
-Write-Host "================================================================" -ForegroundColor Cyan
-Write-Host "           claude-mods Installer (Windows)                      " -ForegroundColor Cyan
-Write-Host "================================================================" -ForegroundColor Cyan
-Write-Host ""
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Split-Path -Parent $scriptDir
@@ -34,6 +95,390 @@ if ($env:CLAUDE_DIR) {
 } else {
     $claudeDir = "$env:USERPROFILE\.claude"
 }
+
+# Paths this installer copies FROM the repo. Both the guard (which commits
+# would be reverted) and the doctor (which files differ) are scoped to these -
+# a README-only commit on main cannot revert anything installable.
+$installablePaths = @("skills", "agents", "rules", "commands", "output-styles", "hooks")
+
+# Commands migrated to skills; the installer never copies them, so the doctor
+# must not report them as missing either. Keep in step with $skipCommands below.
+$skipCommandFiles = @("review.md", "testgen.md")
+
+# =============================================================================
+# HELP
+# =============================================================================
+if ($Help) {
+    @'
+install.ps1 - install claude-mods extensions to the global Claude Code config.
+
+USAGE
+  install.ps1 [-Statusline] [-Force]
+  install.ps1 -Doctor [-Json]
+  install.ps1 -Help
+
+OPTIONS
+  -Statusline   Also install the context-usage statusline (opt-in).
+  -Force        Install even when the staleness guard fires.
+  -Doctor       Read-only drift report. Writes nothing.
+  -Json         With -Doctor, emit JSON on stdout instead of a human report.
+  -Help         This text.
+
+ENVIRONMENT
+  CLAUDE_DIR    Install target. Defaults to ~/.claude.
+
+EXIT CODES
+  0   Success / no drift found.
+  2   Usage error.
+  5   Precondition failed (install target unreadable).
+  10  Domain signal: staleness guard fired, or doctor found stale/missing files.
+
+EXAMPLES
+  install.ps1
+  install.ps1 -Statusline
+  install.ps1 -Doctor
+  install.ps1 -Doctor -Json
+  install.ps1 -Force
+'@
+    exit 0
+}
+
+if ($Json -and -not $Doctor) {
+    # Write-Error would terminate under ErrorActionPreference=Stop and mask
+    # the semantic exit code, so write to stderr directly.
+    [Console]::Error.WriteLine("install.ps1: -Json is only meaningful with -Doctor.")
+    exit 2
+}
+
+# =============================================================================
+# GIT HELPERS
+#
+# Every git failure here degrades to "unknown" rather than aborting: a missing
+# git, a tarball download, a detached HEAD or a repo without main are all
+# legitimate ways to run this installer, and none of them should block it.
+# =============================================================================
+function Invoke-GitRaw {
+    param([string[]]$GitArgs)
+
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    # PS 7.4+ turns a non-zero native exit into a terminating error under
+    # ErrorActionPreference=Stop. `merge-base --is-ancestor` answers "no" with
+    # exit 1, which is data, not a fault - so opt out for the duration.
+    $prevNative = $null
+    if (Test-Path Variable:\PSNativeCommandUseErrorActionPreference) {
+        $prevNative = $PSNativeCommandUseErrorActionPreference
+        $PSNativeCommandUseErrorActionPreference = $false
+    }
+    $out = @()
+    $code = 127
+    try {
+        $out = @(& git -C $projectRoot @GitArgs 2>$null)
+        $code = $LASTEXITCODE
+    } catch {
+        $out = @()
+        $code = 127
+    } finally {
+        $ErrorActionPreference = $prevEap
+        if ($null -ne $prevNative) { $PSNativeCommandUseErrorActionPreference = $prevNative }
+    }
+    return [PSCustomObject]@{ Ok = ($code -eq 0); Code = $code; Out = $out }
+}
+
+# Returns: status ok|behind|unknown, plus the files an install would revert.
+#
+# "behind" means specifically: main contains commits this tree does not, AND
+# those commits touch installable paths. A branch that is merely AHEAD of an
+# up-to-date main is the normal lane workflow and must stay silent - a guard
+# that fires on every feature branch gets deleted within a day.
+function Get-StalenessReport {
+    $report = [PSCustomObject]@{
+        status        = 'unknown'
+        branch        = $null
+        base          = $null
+        revertedFiles = @()
+        reason        = ''
+    }
+
+    if (-not (Get-Command git -CommandType Application -ErrorAction SilentlyContinue)) {
+        $report.reason = 'git is not on PATH'
+        return $report
+    }
+
+    $inside = Invoke-GitRaw @('rev-parse', '--is-inside-work-tree')
+    if (-not $inside.Ok) {
+        $report.reason = 'not a git working tree'
+        return $report
+    }
+
+    $branch = Invoke-GitRaw @('symbolic-ref', '--quiet', '--short', 'HEAD')
+    if ($branch.Ok -and $branch.Out.Count -gt 0) {
+        $report.branch = $branch.Out[0]
+    } else {
+        # Detached HEAD is still comparable - only the label is missing.
+        $report.branch = '(detached HEAD)'
+    }
+
+    foreach ($candidate in @('main', 'origin/main')) {
+        $verify = Invoke-GitRaw @('rev-parse', '--verify', '--quiet', "$candidate^{commit}")
+        if ($verify.Ok -and $verify.Out.Count -gt 0) {
+            $report.base = $candidate
+            break
+        }
+    }
+    if (-not $report.base) {
+        $report.reason = 'no main or origin/main branch to compare against'
+        return $report
+    }
+
+    $ancestor = Invoke-GitRaw @('merge-base', '--is-ancestor', $report.base, 'HEAD')
+    if ($ancestor.Ok) {
+        $report.status = 'ok'
+        $report.reason = "$($report.base) is fully contained in HEAD"
+        return $report
+    }
+    if ($ancestor.Code -ne 1) {
+        $report.reason = "git merge-base failed (exit $($ancestor.Code))"
+        return $report
+    }
+
+    $logArgs = @('log', "HEAD..$($report.base)", '--name-only', '--pretty=format:', '--') + $installablePaths
+    $log = Invoke-GitRaw $logArgs
+    if (-not $log.Ok) {
+        $report.reason = "git log failed (exit $($log.Code))"
+        return $report
+    }
+
+    $files = @($log.Out | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Sort-Object -Unique)
+    if ($files.Count -eq 0) {
+        $report.status = 'ok'
+        $report.reason = "behind $($report.base), but no installable paths are affected"
+        return $report
+    }
+
+    $report.status = 'behind'
+    $report.revertedFiles = $files
+    $report.reason = "$($report.base) has commits this tree lacks that touch installable paths"
+    return $report
+}
+
+# =============================================================================
+# CONTENT COMPARISON (line-ending-insensitive - see the note in .DESCRIPTION)
+# =============================================================================
+function Get-ContentFingerprint {
+    param([string]$Path)
+
+    try {
+        $bytes = [System.IO.File]::ReadAllBytes($Path)
+    } catch {
+        return $null
+    }
+
+    # A NUL byte in the head means binary: hash it raw. Text is decoded and
+    # CR-stripped so CRLF-vs-LF alone never reads as drift.
+    $probe = [Math]::Min($bytes.Length, 8192)
+    $isBinary = $false
+    for ($i = 0; $i -lt $probe; $i++) {
+        if ($bytes[$i] -eq 0) { $isBinary = $true; break }
+    }
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        if (-not $isBinary) {
+            $text = [System.Text.Encoding]::UTF8.GetString($bytes).Replace("`r", "")
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes($text)
+        }
+        return [System.BitConverter]::ToString($sha.ComputeHash($bytes))
+    } finally {
+        $sha.Dispose()
+    }
+}
+
+# Relative-path -> full-path map for one installable category, on one side.
+# Mirrors exactly what the install sections below copy, so the doctor cannot
+# report a file as "missing" that the installer was never going to write.
+function Get-CategoryFiles {
+    param([string]$Root, [string]$Category)
+
+    $dir = Join-Path $Root $Category
+    $map = @{}
+    # -LiteralPath throughout: `[` and `]` are PowerShell wildcard
+    # metacharacters, so -Path silently drops a bracketed name such as a
+    # Next.js dynamic-route fixture (`app/shop/[slug]/page.tsx`) with no error.
+    # In a DOCTOR that is the worst possible failure - it would read clean while
+    # the very files it exists to notice were invisible to it. Same bug the
+    # skill-sync copy hit on 2026-08-31.
+    if (-not (Test-Path -LiteralPath $dir)) { return $map }
+
+    if ($Category -eq 'skills') {
+        foreach ($f in (Get-ChildItem -LiteralPath $dir -Recurse -File -ErrorAction SilentlyContinue)) {
+            $map["skills/" + ($f.FullName.Substring($dir.Length + 1) -replace '\\', '/')] = $f.FullName
+        }
+        return $map
+    }
+
+    $filter = if ($Category -eq 'hooks') { '*.sh' } else { '*.md' }
+    foreach ($f in (Get-ChildItem -LiteralPath $dir -Filter $filter -File -ErrorAction SilentlyContinue)) {
+        if ($Category -eq 'commands') {
+            if ($f.Name -in $skipCommandFiles -or $f.Name -like 'archive*') { continue }
+        }
+        $map["$Category/$($f.Name)"] = $f.FullName
+    }
+    return $map
+}
+
+function Get-DriftReport {
+    $stale = New-Object System.Collections.Generic.List[string]
+    $missing = New-Object System.Collections.Generic.List[string]
+    $orphan = New-Object System.Collections.Generic.List[string]
+
+    foreach ($category in $installablePaths) {
+        $src = Get-CategoryFiles -Root $projectRoot -Category $category
+        $dst = Get-CategoryFiles -Root $claudeDir -Category $category
+
+        foreach ($rel in $src.Keys) {
+            if (-not $dst.ContainsKey($rel)) {
+                $missing.Add($rel)
+                continue
+            }
+            $a = Get-ContentFingerprint -Path $src[$rel]
+            $b = Get-ContentFingerprint -Path $dst[$rel]
+            if ($null -eq $a -or $null -eq $b -or $a -ne $b) { $stale.Add($rel) }
+        }
+        foreach ($rel in $dst.Keys) {
+            if (-not $src.ContainsKey($rel)) { $orphan.Add($rel) }
+        }
+    }
+
+    return [PSCustomObject]@{
+        stale   = @($stale | Sort-Object)
+        missing = @($missing | Sort-Object)
+        orphan  = @($orphan | Sort-Object)
+    }
+}
+
+# =============================================================================
+# DOCTOR - read-only diagnosis. Writes nothing, anywhere.
+# =============================================================================
+if ($Doctor) {
+    if (-not (Test-Path -LiteralPath $claudeDir)) {
+        if ($Json) {
+            @{ error = @{ code = 'PRECONDITION'; message = "install target does not exist: $claudeDir"; details = @{ claudeDir = $claudeDir } } } | ConvertTo-Json -Depth 5
+        }
+        [Console]::Error.WriteLine("install.ps1: install target does not exist: $claudeDir")
+        exit 5
+    }
+
+    $staleness = Get-StalenessReport
+    $drift = Get-DriftReport
+    $problems = $drift.stale.Count + $drift.missing.Count
+    $exitCode = if ($problems -gt 0 -or $staleness.status -eq 'behind') { 10 } else { 0 }
+
+    if ($Json) {
+        # stdout carries the data product only; the human report below is
+        # suppressed entirely under -Json.
+        [PSCustomObject]@{
+            data = [PSCustomObject]@{
+                staleness = $staleness
+                stale     = $drift.stale
+                missing   = $drift.missing
+                orphan    = $drift.orphan
+            }
+            meta = [PSCustomObject]@{
+                count     = $problems
+                schema    = 'claude-mods.install.doctor/v1'
+                claudeDir = $claudeDir
+            }
+        } | ConvertTo-Json -Depth 6
+        exit $exitCode
+    }
+
+    Write-Host "================================================================" -ForegroundColor Cyan
+    Write-Host "           claude-mods Install Doctor (read-only)               " -ForegroundColor Cyan
+    Write-Host "================================================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  Source: $projectRoot" -ForegroundColor DarkGray
+    Write-Host "  Target: $claudeDir" -ForegroundColor DarkGray
+    Write-Host ""
+
+    switch ($staleness.status) {
+        'behind' {
+            Write-Host "  Source tree: BEHIND $($staleness.base) on $($staleness.branch)" -ForegroundColor Red
+            Write-Host "    Installing from here would revert $($staleness.revertedFiles.Count) file(s)." -ForegroundColor Red
+        }
+        'ok' {
+            Write-Host "  Source tree: up to date ($($staleness.reason))" -ForegroundColor Green
+        }
+        default {
+            Write-Host "  Source tree: unknown ($($staleness.reason))" -ForegroundColor Yellow
+        }
+    }
+    Write-Host ""
+
+    if ($drift.stale.Count -gt 0) {
+        Write-Host "  STALE - installed copy differs from this repo ($($drift.stale.Count)):" -ForegroundColor Red
+        foreach ($f in $drift.stale) { Write-Host "    $f" -ForegroundColor Red }
+        Write-Host ""
+    }
+    if ($drift.missing.Count -gt 0) {
+        Write-Host "  MISSING - in repo, absent from target ($($drift.missing.Count)):" -ForegroundColor Yellow
+        foreach ($f in $drift.missing) { Write-Host "    $f" -ForegroundColor Yellow }
+        Write-Host ""
+    }
+    if ($drift.orphan.Count -gt 0) {
+        # Informational only. The installer deliberately keeps dest-only files,
+        # so an orphan is usually machine-local content, not a fault.
+        Write-Host "  ORPHAN - in target, absent from repo ($($drift.orphan.Count), informational):" -ForegroundColor DarkGray
+        foreach ($f in $drift.orphan) { Write-Host "    $f" -ForegroundColor DarkGray }
+        Write-Host ""
+    }
+
+    if ($exitCode -eq 0) {
+        Write-Host "  Clean - installed content matches this repo." -ForegroundColor Green
+    } else {
+        Write-Host "  Run scripts/install.ps1 to sync (rebase on main first if the tree is behind)." -ForegroundColor Yellow
+    }
+    Write-Host ""
+    exit $exitCode
+}
+
+# =============================================================================
+# STALENESS GUARD - runs before the installer writes anything
+#
+# Refuses rather than warns. The 2026-08-31 revert was silent for an unknown
+# number of days; a warning in a 200-line install log scrolls past unread,
+# which is exactly how it went unnoticed. Refusal costs one -Force flag and is
+# instantly recoverable; a silent revert costs a hunt. The normal-workflow
+# false positive (a branch merely AHEAD of main) is excluded by the ancestor
+# test in Get-StalenessReport, so this should essentially never fire wrongly.
+# =============================================================================
+$staleness = Get-StalenessReport
+if ($staleness.status -eq 'behind') {
+    Write-Host ""
+    Write-Host "  STALE SOURCE TREE - install refused" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "  Branch '$($staleness.branch)' is missing commits on '$($staleness.base)'" -ForegroundColor Red
+    Write-Host "  that touch installable paths. Installing from here would revert" -ForegroundColor Red
+    Write-Host "  $($staleness.revertedFiles.Count) file(s) another lane already landed:" -ForegroundColor Red
+    Write-Host ""
+    foreach ($f in $staleness.revertedFiles) { Write-Host "    $f" -ForegroundColor Red }
+    Write-Host ""
+    Write-Host "  Fix it one of these ways:" -ForegroundColor Yellow
+    Write-Host "    git rebase $($staleness.base)      # bring this branch up to date, then re-run" -ForegroundColor Yellow
+    Write-Host "    ...or run the installer from the $($staleness.base) checkout instead" -ForegroundColor Yellow
+    Write-Host "    ...or re-run with -Force if this tree's content should win" -ForegroundColor Yellow
+    Write-Host ""
+    if (-not $Force) { exit 10 }
+    Write-Host "  -Force given: continuing anyway." -ForegroundColor Yellow
+    Write-Host ""
+} elseif ($staleness.status -eq 'unknown') {
+    Write-Host "  Staleness check skipped: $($staleness.reason)" -ForegroundColor DarkGray
+}
+
+Write-Host "================================================================" -ForegroundColor Cyan
+Write-Host "           claude-mods Installer (Windows)                      " -ForegroundColor Cyan
+Write-Host "================================================================" -ForegroundColor Cyan
+Write-Host ""
 
 # Ensure ~/.claude directories exist
 $dirs = @("commands", "skills", "agents", "rules", "output-styles", "hooks")
