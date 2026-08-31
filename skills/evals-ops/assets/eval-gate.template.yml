@@ -6,7 +6,18 @@
 # and you have measured the noise floor. The full k=3 consistency run and the
 # history append happen nightly on main, where cost and duration are affordable.
 #
-# ADAPT: <angle brackets>, the eval commands, and the secret names.
+# ADAPT before use:
+#   1. <angle brackets>, the eval commands, and the secret names.
+#   2. ACTION VERSIONS. The `uses:` majors below are placeholders, NOT a
+#      recommendation -- check the current major for each action and pin to a
+#      full commit SHA (`uses: actions/checkout@<sha>  # v5.0.0`). A floating
+#      major is a supply-chain surface; see the supply-chain-defense skill.
+#   3. SCRIPT PATHS. $EVALS_OPS below assumes the skill is installed at
+#      ~/.claude/skills/evals-ops. If you vendor claude-mods into the repo
+#      instead, set it to skills/evals-ops. The scripts are stdlib-only, so
+#      copying the three you use into the repo is also a legitimate option and
+#      removes the dependency entirely.
+#
 # See references/regression-gating.md for why each tier sits where it does.
 
 name: evals
@@ -25,6 +36,7 @@ concurrency:
 
 env:
   DATASET_VERSION: golden-v3     # bump = re-baseline; never compare across it
+  EVALS_OPS: $HOME/.claude/skills/evals-ops   # ADAPT: see header note 3
   PYTHON_VERSION: "3.12"
 
 jobs:
@@ -34,8 +46,8 @@ jobs:
   deterministic:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@vX      # ADAPT: current major, pinned to a SHA
+      - uses: actions/setup-python@vX  # ADAPT: current major, pinned to a SHA
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -44,7 +56,7 @@ jobs:
       # step is what catches it.
       - name: Golden-set health and freeze check
         run: |
-          python3 skills/evals-ops/scripts/goldenset-audit.py \
+          python3 "$EVALS_OPS"/scripts/goldenset-audit.py \
             evals/golden.jsonl --freeze evals/freeze.json
 
       - name: Deterministic assertions
@@ -59,10 +71,10 @@ jobs:
     # three unexplained reds kill the gate socially even while it still enforces.
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@vX      # ADAPT: current major, pinned to a SHA
         with:
           fetch-depth: 0          # history file needs real history
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@vX  # ADAPT: current major, pinned to a SHA
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -70,7 +82,7 @@ jobs:
       # has drifted below threshold, the scores below are not evidence.
       - name: Judge is calibrated
         run: |
-          python3 skills/evals-ops/scripts/judge-calibration.py \
+          python3 "$EVALS_OPS"/scripts/judge-calibration.py \
             evals/labels.jsonl --min-kappa 0.6
 
       - name: Run evals (stratified subset, k=1)
@@ -86,7 +98,7 @@ jobs:
       # flipped cases is what stops people ignoring the result.
       - name: Regression check
         run: |
-          python3 skills/evals-ops/scripts/eval-baseline.py \
+          python3 "$EVALS_OPS"/scripts/eval-baseline.py \
             evals/history.jsonl --candidate /tmp/run.jsonl \
             --baseline-results evals/baseline-results.jsonl \
             --candidate-results results.jsonl
@@ -102,8 +114,8 @@ jobs:
     permissions:
       contents: write             # to commit the appended history row
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@vX      # ADAPT: current major, pinned to a SHA
+      - uses: actions/setup-python@vX  # ADAPT: current major, pinned to a SHA
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -123,7 +135,7 @@ jobs:
       # product decision someone actually made.
       - name: Cost and latency ceilings
         run: |
-          python3 skills/evals-ops/scripts/eval-baseline.py \
+          python3 "$EVALS_OPS"/scripts/eval-baseline.py \
             evals/history.jsonl --max-cost-usd <2.50> --max-p95-ms <6000>
 
       - name: Commit the history row

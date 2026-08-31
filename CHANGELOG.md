@@ -66,6 +66,48 @@ feature releases live in the README "Recent Updates" section.
   extraction trigger for a future `prompt-optimization-ops` rather than pre-empting
   one. Suite 97 -> 109 assertions.
 
+### Fixed
+
+- **`evals-ops`: nine defects found by adversarially reviewing the skill against
+  its own doctrine.** Refute-don't-confirm, applied to the thing that preaches
+  it. Seven were in the scripts and **all of them failed OPEN** - reporting
+  "fine" while measuring nothing, which is the dangerous direction for a gate:
+  - `eval-baseline.py` treated a *measured* spread of exactly 0.0 as "no data"
+    (`if spread:` is falsy at zero), so a deterministic or genuinely stable
+    suite reported INSUFFICIENT-DATA and exited 0 on an unambiguous 0.90 -> 0.70
+    collapse. Zero variance is the most informative history there is.
+  - An integer case id of `0` was dropped from the paired test (`if r.get("id")`
+    is falsy), hiding real regressions. Ids are now membership-tested and
+    stringified so `1` and `"1"` pair.
+  - A `null` or JSON-string score in the history file was ignored silently;
+    now reported.
+  - The exact McNemar test is O(n) big-integer work over `2**n` - measured at
+    133 ms for 2,000 discordant pairs but **~100 seconds for 20,000**, i.e. a CI
+    hang. Switches to a continuity-corrected normal approximation above 1,000
+    pairs and reports which method it used.
+  - `goldenset-audit.py` hashed `_line` and `id` as part of a case's content, so
+    `DUPLICATE_CASE` could never fire on the one thing it exists to catch: the
+    same case under two ids.
+  - `judge-calibration.py` read `"length": true` as a length of 1.0 (bool is a
+    subclass of int) and emitted a confident, meaningless -0.87 verbosity
+    correlation.
+  - The shipped CI template asserted unverified GitHub Action majors -
+    precisely the staleness trap this repo has a verifier doctrine about - and
+    hard-coded a vendored script path that contradicted the one `iterate`
+    documents. Both are now flagged ADAPT points behind one `$EVALS_OPS` var.
+  - `golden-datasets.md` stated bucket *targets* (production 40-50%) while the
+    auditor warned on a wider *band* (30-65%) with nothing saying the two
+    numbers differed on purpose. Both are now named, and a warning quotes the
+    target it is measured against.
+
+  All nine are pinned by named regression assertions, and the four sharpest were
+  mutation-tested - the fix reverted, the suite confirmed red - because an
+  assertion that cannot fail is not a test. That step earned its cost
+  immediately: the duplicate-hash assertion passed against deliberately re-broken
+  code, because its fixture carried an `expected` field and so exercised the
+  wrong branch of a two-branch function. A tenth defect, in the test for the
+  ninth. Fixture corrected and the reason written next to it. Suite 109 -> 127.
+
 - **`icon-ops` skill** - sourcing, vetting and shipping SVG icons for web UI.
   Covers the four decisions that lock an icon set (grid, family, stroke width,
   corner language), the two licence traps that actually bite (a brand mark is a

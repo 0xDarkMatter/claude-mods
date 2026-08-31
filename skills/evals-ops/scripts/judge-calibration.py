@@ -134,6 +134,11 @@ def analyse(records, verbosity_field):
         # HUMAN scored identically? Correlation there is bias, not signal.
         length = obj.get(verbosity_field)
         jn = obj["judge"]
+        # bool is a subclass of int in Python, so a `true` in the length field
+        # would silently read as 1.0 and yield a confident, meaningless
+        # correlation. A length is never a boolean -- reject it explicitly.
+        if isinstance(length, bool):
+            length = None
         if isinstance(length, (int, float)) and isinstance(jn, (int, float, bool)):
             lengths.append(float(length))
             judge_numeric.append(float(jn))

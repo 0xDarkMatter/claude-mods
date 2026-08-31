@@ -87,28 +87,49 @@ def stdev(values):
     return math.sqrt(sum((v - mean) ** 2 for v in values) / (n - 1))
 
 
-def mcnemar_exact(b, c):
-    """Two-sided exact McNemar p-value.
+# Above this many discordant pairs the exact test is switched for the normal
+# approximation. The exact sum is O(n) big-integer work over 2**n: measured at
+# 133 ms for n=2000 but ~100 SECONDS for n=20000, which is a CI hang, not a
+# slow test. The approximation is reliable well below this bound (the usual
+# rule of thumb is b+c >= 25), so nothing accurate is lost by switching here.
+MCNEMAR_EXACT_MAX = 1000
+
+
+def mcnemar(b, c):
+    """Two-sided McNemar p-value. Returns (p_value, method).
 
     b = passed before, fails now (regressions);  c = failed before, passes now.
-    Only the DISCORDANT pairs carry information -- cases that behaved the same
-    in both runs tell you nothing about whether the change helped. Under the null
-    b ~ Binomial(b+c, 0.5), so the exact test is a coin-flip tail probability.
-    Exact rather than chi-square because eval sets routinely produce b+c < 25,
-    where the chi-square approximation is unreliable.
+    Only the DISCORDANT pairs carry information -- cases that behaved the same in
+    both runs tell you nothing about whether the change helped. Under the null
+    b ~ Binomial(b+c, 0.5), so the p-value is a coin-flip tail probability.
+
+    Exact below MCNEMAR_EXACT_MAX because eval sets routinely produce b+c < 25,
+    where the chi-square/normal approximation is unreliable; normal (with a
+    continuity correction) above it, because the exact form does not terminate
+    in useful time. The method used is reported so a caller never has to guess.
     """
     n = b + c
     if n == 0:
-        return 1.0
-    k = min(b, c)
-    tail = sum(math.comb(n, i) for i in range(0, k + 1)) / (2 ** n)
-    return min(1.0, 2 * tail)
+        return 1.0, "none-discordant"
+    if n <= MCNEMAR_EXACT_MAX:
+        k = min(b, c)
+        tail = sum(math.comb(n, i) for i in range(0, k + 1)) / (2 ** n)
+        return min(1.0, 2 * tail), "exact"
+    # Continuity-corrected normal approximation; erfc gives the two-sided tail.
+    z = (abs(b - c) - 1) / math.sqrt(n)
+    return min(1.0, math.erfc(abs(z) / math.sqrt(2))), "normal-approx"
 
 
 def paired_counts(baseline_rows, candidate_rows):
     """Pair per-case results by id. Returns (b, c, both_pass, both_fail, unpaired)."""
-    base = {r.get("id"): bool(r.get("passed")) for r in baseline_rows if r.get("id")}
-    cand = {r.get("id"): bool(r.get("passed")) for r in candidate_rows if r.get("id")}
+    # Test `"id" in r`, NOT the truthiness of r["id"] -- an integer id of 0 or an
+    # empty-string id is falsy, and the truthiness form silently DROPPED those
+    # cases from the paired test, hiding real regressions. Stringify so 1 and "1"
+    # pair with each other rather than becoming two unpaired cases.
+    def index(rows):
+        return {str(r["id"]): bool(r.get("passed")) for r in rows if "id" in r}
+
+    base, cand = index(baseline_rows), index(candidate_rows)
     shared = set(base) & set(cand)
 
     b = sorted(i for i in shared if base[i] and not cand[i])
@@ -124,6 +145,16 @@ def build_report(history, candidate, window, sigma, paired, alpha, ceilings):
     scores = [float(r["score"]) for r in prior if isinstance(r.get("score"), (int, float))]
 
     warnings = []
+    # A row whose score is absent or non-numeric (a JSON string "0.9", a null) is
+    # unusable. Dropping it in silence let a whole malformed history report
+    # "insufficient data" and exit 0 -- a gate failing open with no explanation.
+    unusable = len(prior) - len(scores)
+    if unusable:
+        warnings.append(
+            f"{unusable} history row(s) had a missing or non-numeric 'score' and "
+            "were ignored (scores must be JSON numbers, not strings)"
+        )
+
     baseline = round(sum(scores) / len(scores), 4) if scores else None
     spread = stdev(scores)
     spread = round(spread, 4) if spread is not None else None
@@ -131,11 +162,21 @@ def build_report(history, candidate, window, sigma, paired, alpha, ceilings):
     # A threshold inside the noise band fails on identical code. Sit below the
     # baseline by more than the measured spread -- that is the whole point of
     # keeping a history rather than judging each run standalone.
-    threshold = round(baseline - sigma * spread, 4) if (baseline is not None and spread) else None
+    #
+    # `spread is not None` is deliberate, NOT a truthiness test: a spread of
+    # exactly 0.0 is a MEASURED result (a deterministic metric, or a genuinely
+    # stable suite) and the most informative history you can have. Treating it as
+    # "no data" made the gate report insufficient-data and exit 0 on an
+    # unambiguous 0.90 -> 0.70 regression.
+    threshold = (round(baseline - sigma * spread, 4)
+                 if (baseline is not None and spread is not None) else None)
 
     cand_score = candidate.get("score") if candidate else None
     cand_score = float(cand_score) if isinstance(cand_score, (int, float)) else None
     delta = round(cand_score - baseline, 4) if (cand_score is not None and baseline is not None) else None
+    # z is undefined when the spread is exactly 0 (division by zero), but that is
+    # the EASY case, not the hard one: with no measured variance any movement is
+    # real. Handled explicitly in the verdict below rather than left as None.
     z = None
     if delta is not None and spread:
         z = round(delta / spread, 2)
@@ -160,9 +201,9 @@ def build_report(history, candidate, window, sigma, paired, alpha, ceilings):
     significance = None
     if paired is not None:
         b_ids, c_ids, both_pass, both_fail, unpaired = paired
-        p = mcnemar_exact(len(b_ids), len(c_ids))
+        p, method = mcnemar(len(b_ids), len(c_ids))
         significance = {
-            "test": "mcnemar-exact",
+            "test": f"mcnemar-{method}",
             "regressed": b_ids,           # passed before, fails now
             "fixed": c_ids,               # failed before, passes now
             "n_regressed": len(b_ids),
@@ -219,8 +260,24 @@ def build_report(history, candidate, window, sigma, paired, alpha, ceilings):
             )
     elif cand_score is None or threshold is None:
         verdict, reason = "insufficient-data", (
-            "no candidate score, or too little history to derive a noise floor"
+            "no candidate score, or fewer than 2 usable history rows -- rerun the "
+            "suite against unchanged code a few times to establish a noise floor "
+            "before gating on it"
         )
+    elif spread == 0:
+        # Zero measured variance: every rerun of unchanged code gave the same
+        # number, so ANY movement is signal and there is no band to be inside.
+        if cand_score < baseline:
+            verdict, reason = "regression", (
+                f"score {cand_score} is below a baseline of {baseline} measured "
+                "with zero variance across the window"
+            )
+        elif cand_score > baseline:
+            verdict, reason = "improvement", (
+                f"score {cand_score} exceeds a zero-variance baseline of {baseline}"
+            )
+        else:
+            verdict, reason = "noise", f"score is identical to the baseline {baseline}"
     elif cand_score < threshold:
         verdict, reason = "regression", (
             f"score {cand_score} is below the {sigma}-sigma threshold {threshold}"

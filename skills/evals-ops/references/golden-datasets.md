@@ -46,6 +46,12 @@ case.
 | `adversarial` | 15-20% | Injections, contradictory instructions, refusal-bait, out-of-scope asks | Silent policy failures; the class judges also fail on |
 | `edge` | 10-15% | Empty, enormous, ambiguous, multilingual, malformed | Where deterministic code breaks first |
 
+Those are **targets to compose against**, not thresholds. `goldenset-audit.py` warns on a
+deliberately wider band (production 30-65%, replay 10-40%, adversarial 8-35%, edge 5-30%)
+and names the target in the warning, because a check that fires on every healthy set gets
+ignored within a week - the same rule this skill applies to CI gates. Hitting the target is
+good practice; leaving the band is a finding.
+
 **The replay bucket is the easiest to justify and the most neglected.** Every production
 incident is a free, pre-validated, maximally relevant test case. Make "add the replay case"
 a step in the incident checklist and the bucket fills itself.

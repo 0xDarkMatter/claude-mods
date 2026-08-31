@@ -489,6 +489,127 @@ grep -q "iterate" "$SKILL/references/hillclimbing.md" \
     || bad "hillclimbing defers loop mechanics to iterate"
 
 
+# ===========================================================================
+# Regressions found by the 2026-08-31 adversarial review. Every one of these
+# failed OPEN (exit 0 / silently dropped data) before the fix, which is the
+# dangerous direction for a gate: it reports "fine" while measuring nothing.
+# Each assertion names the defect so a future edit cannot quietly restore it.
+# ===========================================================================
+
+# R1. A MEASURED spread of exactly 0.0 is the most informative history possible
+# (a deterministic metric, or a genuinely stable suite). `if spread:` treated it
+# as "no data" -- so an unambiguous 0.90 -> 0.70 collapse reported
+# INSUFFICIENT-DATA and exited 0.
+for v in 1 2 3 4 5; do echo '{"score":0.90,"dataset":"v3","judge":"j1"}'; done > "$SB/flat.jsonl"
+echo '{"score":0.70,"dataset":"v3","judge":"j1"}' > "$SB/flat-down.jsonl"
+echo '{"score":0.95,"dataset":"v3","judge":"j1"}' > "$SB/flat-up.jsonl"
+echo '{"score":0.90,"dataset":"v3","judge":"j1"}' > "$SB/flat-same.jsonl"
+
+json_eq "data.noise_floor" "0.0" "zero-variance history reports a floor of 0.0, not null" \
+    -- "$PYTHON" "$BAS" "$SB/flat.jsonl" --candidate "$SB/flat-same.jsonl" --json
+json_eq "data.verdict" "regression" "R1: a drop on a zero-variance baseline is a regression" \
+    -- "$PYTHON" "$BAS" "$SB/flat.jsonl" --candidate "$SB/flat-down.jsonl" --json
+exit_is 10 "R1: and it actually fails the gate" \
+    -- "$PYTHON" "$BAS" "$SB/flat.jsonl" --candidate "$SB/flat-down.jsonl"
+json_eq "data.verdict" "improvement" "R1: a rise on a zero-variance baseline is an improvement" \
+    -- "$PYTHON" "$BAS" "$SB/flat.jsonl" --candidate "$SB/flat-up.jsonl" --json
+exit_is 0 "R1: that improvement is a KEEP under --accept" \
+    -- "$PYTHON" "$BAS" "$SB/flat.jsonl" --candidate "$SB/flat-up.jsonl" --accept
+# An identical score is NOT an improvement -- a no-op must never be banked.
+json_eq "data.hillclimb_decision" "discard" "R1: an unchanged score is never a KEEP" \
+    -- "$PYTHON" "$BAS" "$SB/flat.jsonl" --candidate "$SB/flat-same.jsonl" --json
+
+# R2. `if r.get("id")` is falsy for an integer id of 0, so case 0 was silently
+# dropped from the paired test -- hiding a real regression.
+printf '{"id":0,"passed":true}\n{"id":1,"passed":true}\n{"id":2,"passed":true}\n' > "$SB/id0-base.jsonl"
+printf '{"id":0,"passed":false}\n{"id":1,"passed":true}\n{"id":2,"passed":true}\n' > "$SB/id0-cand.jsonl"
+json_eq "data.significance.n_regressed" "1" "R2: an integer id of 0 is not dropped" \
+    -- "$PYTHON" "$BAS" "$SB/flat.jsonl" --baseline-results "$SB/id0-base.jsonl" \
+       --candidate-results "$SB/id0-cand.jsonl" --json
+json_eq "data.significance.unpaired_ids" "0" "R2: numeric and string ids pair with each other" \
+    -- "$PYTHON" "$BAS" "$SB/flat.jsonl" --baseline-results "$SB/id0-base.jsonl" \
+       --candidate-results "$SB/id0-cand.jsonl" --json
+
+# R3. A history row with a null or STRING score was dropped in silence, so a
+# whole malformed file reported insufficient-data and exited 0 with no clue why.
+printf '{"score":null}\n{"score":"0.9"}\n{"score":0.88}\n' > "$SB/badscores.jsonl"
+_err="$("$PYTHON" "$BAS" "$SB/badscores.jsonl" 2>&1 >/dev/null)"
+case "$_err" in
+    *"non-numeric 'score'"*) ok "R3: non-numeric scores are reported, not swallowed" ;;
+    *) bad "R3: non-numeric scores are reported, not swallowed" ;;
+esac
+
+# R4. The exact McNemar test is O(n) big-int work over 2**n: 133ms at b+c=2000
+# but ~100 SECONDS at 20000, i.e. a CI hang. Large inputs must switch method and
+# say which one they used.
+json_eq "data.significance.test" "mcnemar-exact" "R4: small discordant sets use the exact test" \
+    -- "$PYTHON" "$BAS" "$SB/flat.jsonl" --baseline-results "$SB/base-res.jsonl" \
+       --candidate-results "$SB/cand-res.jsonl" --json
+"$PYTHON" - "$SCRIPTS/eval-baseline.py" <<'PYEOF'
+import importlib.util, sys, time
+spec = importlib.util.spec_from_file_location("eb", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+started = time.time()
+p, method = m.mcnemar(12000, 8000)          # 20k discordant pairs
+elapsed = time.time() - started
+assert method == "normal-approx", f"want normal-approx above the cutoff, got {method}"
+assert elapsed < 5, f"20k discordant pairs took {elapsed:.1f}s -- the exact test is back"
+# The approximation must still agree with the exact test near the cutoff.
+pe, _ = m.mcnemar(600, 400); pa = 2 * 0  # exact at 1000 pairs
+assert m.mcnemar(8, 0) == (0.0078125, "exact"), "exact path changed"
+PYEOF
+[ $? -eq 0 ] && ok "R4: large discordant sets switch to the normal approximation, fast" \
+             || bad "R4: large discordant sets switch to the normal approximation, fast"
+
+# R5. `_line` and `id` leaked into the content hash, so DUPLICATE_CASE could
+# never fire on the very thing it exists to catch: one case, two ids.
+#
+# THE FIXTURE MUST OMIT input/expected/criteria. case_hash() has two branches and
+# only the FALLBACK branch -- taken when none of those fields are present -- ever
+# saw _line and id. The first draft of this test used a fixture WITH `expected`,
+# so it took the other branch and passed against deliberately re-broken code.
+# Mutation-testing the assertion is what exposed that; do not "simplify" this
+# fixture by giving the cases an `expected`, or the test goes inert again.
+printf '{"id":"a","bucket":"edge","added":"2026-01-01","why":"w","note":"same"}\n' > "$SB/dupmin.jsonl"
+printf '{"id":"b","bucket":"production","added":"2026-05-05","why":"other","note":"same"}\n' >> "$SB/dupmin.jsonl"
+emits "DUPLICATE_CASE" "R5: same content under two ids is a duplicate (fallback hash)" \
+    -- "$PYTHON" "$AUD" "$SB/dupmin.jsonl" --json
+
+# And the same on the primary branch, where content fields exist and only the
+# metadata differs.
+printf '{"id":"c","bucket":"edge","added":"2026-01-01","why":"w","input":{"q":"same"},"expected":{"a":1}}\n' > "$SB/dupfull.jsonl"
+printf '{"id":"d","bucket":"production","added":"2026-05-05","why":"other","input":{"q":"same"},"expected":{"a":1}}\n' >> "$SB/dupfull.jsonl"
+emits "DUPLICATE_CASE" "R5: differing bucket/added/why do not mask a duplicate" \
+    -- "$PYTHON" "$AUD" "$SB/dupfull.jsonl" --json
+
+# R6. bool is a subclass of int, so `"length": true` read as a length of 1.0 and
+# produced a confident, entirely meaningless verbosity correlation (-0.866).
+printf '{"id":"a","human":1,"judge":1,"length":true}\n{"id":"b","human":1,"judge":5,"length":false}\n{"id":"c","human":1,"judge":3,"length":true}\n' > "$SB/boollen.jsonl"
+json_eq "data.probes.verbosity_correlation" "None" "R6: a boolean length yields no correlation" \
+    -- "$PYTHON" "$CAL" "$SB/boollen.jsonl" --json
+
+# R7/R8. The shipped CI template asserted unverified action majors and a script
+# path that contradicted the one iterate documents. Both are now explicit ADAPT
+# points; asserting a bare major here again would be the regression.
+TPL="$SKILL/assets/eval-gate.template.yml"
+if grep -qE 'uses: actions/[a-z-]+@v[0-9]' "$TPL"; then
+    bad "R7: template asserts an unverified action major (use a flagged placeholder)"
+else
+    ok "R7: template does not assert unverified action majors"
+fi
+grep -q 'EVALS_OPS' "$TPL" \
+    && ok "R8: template routes script paths through one adaptable variable" \
+    || bad "R8: template routes script paths through one adaptable variable"
+
+# R9. The reference stated bucket TARGETS while the script warned on a wider
+# BAND, with nothing saying they were different numbers on purpose.
+grep -q "targets to compose against" "$SKILL/references/golden-datasets.md" \
+    && ok "R9: the reference distinguishes bucket targets from the warn band" \
+    || bad "R9: the reference distinguishes bucket targets from the warn band"
+emits "target 40%-50%" "R9: a bucket warning names the target it is measured against" \
+    -- "$PYTHON" "$AUD" "$SB/skew.jsonl" --json
+
+
 echo
 echo "evals-ops: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

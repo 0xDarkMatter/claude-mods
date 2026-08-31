@@ -38,8 +38,18 @@ EXIT_OK, EXIT_USAGE, EXIT_NOT_FOUND, EXIT_VALIDATION, EXIT_FINDINGS = 0, 2, 3, 4
 
 SEVERITY_ORDER = {"info": 0, "warn": 1, "error": 2}
 
-# Recommended shares from references/golden-datasets.md. A bucket far outside its
-# band means the set has stopped testing something it was built to test.
+# TARGET share per bucket, from references/golden-datasets.md, and the WARN band
+# around it. These are deliberately different numbers: the target is what you aim
+# for when composing the set, the band is where a warning fires. A band equal to
+# the target would warn on almost every healthy set and get ignored within a week
+# -- the same "a gate that cries wolf is a dead gate" rule the skill applies to CI.
+# Both numbers are reported, so a warning names the target it is measured against.
+BUCKET_TARGETS = {
+    "production": (0.40, 0.50),
+    "replay": (0.20, 0.30),
+    "adversarial": (0.15, 0.20),
+    "edge": (0.10, 0.15),
+}
 BUCKET_BANDS = {
     "production": (0.30, 0.65),
     "replay": (0.10, 0.40),
@@ -56,10 +66,22 @@ def canonical(obj):
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
+# A case's hash is its CONTENT, never its identity or metadata. Excluded:
+#   _line   bookkeeping we inject -- leaked in and made two identical cases on
+#           different lines hash differently, so duplicate detection missed them
+#   id      the whole point of duplicate detection is "two ids, one case"; if id
+#           were hashed, DUPLICATE_CASE could never fire (ids are unique by rule)
+#   bucket  reclassifying a case does not change what it tests
+#   added / why   documentation about the case, not the case
+# Excluding id also keeps the freeze manifest honest: it stores id and hash as
+# separate fields, so a rename shows as removed+added rather than as an edit.
+HASH_EXCLUDE = ("_line", "id", "bucket", "added", "why")
+
+
 def case_hash(case):
     payload = {k: case.get(k) for k in ("input", "expected", "criteria") if k in case}
     if not payload:
-        payload = {k: v for k, v in case.items() if k not in ("added", "why")}
+        payload = {k: v for k, v in case.items() if k not in HASH_EXCLUDE}
     return hashlib.sha256(canonical(payload).encode("utf-8")).hexdigest()
 
 
@@ -190,14 +212,17 @@ def audit(cases, near_threshold, max_pairs):
     if known:
         for bucket, (lo, hi) in BUCKET_BANDS.items():
             share = shares.get(bucket, 0.0)
+            t_lo, t_hi = BUCKET_TARGETS[bucket]
             if share < lo:
                 add("warn", "BUCKET_THIN",
-                    f"bucket '{bucket}' is {share:.0%} of the set (recommended >= {lo:.0%})",
-                    bucket=bucket, share=share, floor=lo)
+                    f"bucket '{bucket}' is {share:.0%} of the set "
+                    f"(target {t_lo:.0%}-{t_hi:.0%}, warns below {lo:.0%})",
+                    bucket=bucket, share=share, floor=lo, target=[t_lo, t_hi])
             elif share > hi:
                 add("warn", "BUCKET_HEAVY",
-                    f"bucket '{bucket}' is {share:.0%} of the set (recommended <= {hi:.0%})",
-                    bucket=bucket, share=share, ceiling=hi)
+                    f"bucket '{bucket}' is {share:.0%} of the set "
+                    f"(target {t_lo:.0%}-{t_hi:.0%}, warns above {hi:.0%})",
+                    bucket=bucket, share=share, ceiling=hi, target=[t_lo, t_hi])
 
     # --- size ---------------------------------------------------------------
     if n < 20:
