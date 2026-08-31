@@ -231,6 +231,41 @@ print("OK")
 PY
 expect_has "breakpoint placement, capping and idempotence" "OK" "$(cat "$SB/bp.out")"
 
+# ── negative: a retired model id in a code sample (exit 4 VALIDATION) ─────────
+# The regression this check exists for: on 2026-08-30 the tables were retargeted
+# at the Claude 5 lineup and went green, then a sibling branch landed an asset
+# still pinned to claude-opus-4-8. Tables were consistent; the sample was wrong.
+echo "-- negative: retired id in a sample --"
+rm -rf "$SB/copy2"; cp -r "$SKILL" "$SB/copy2"
+"$PYTHON" - "$SB/copy2" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1]) / "assets/cached-agent-loop.py"
+t = p.read_text(encoding="utf-8")
+assert 'MODEL = "claude-opus-5"' in t, "fixture no longer matches cached-agent-loop.py"
+p.write_text(t.replace('MODEL = "claude-opus-5"', 'MODEL = "claude-opus-4-8"'), encoding="utf-8")
+PY
+"$PYTHON" "$SB/copy2/scripts/check-model-table.py" --offline >"$SB/neg2.out" 2>&1
+expect_exit "retired id in a sample -> 4" 4 $?
+expect_has "finding names the file and fault" "cached-agent-loop.py" "$(cat "$SB/neg2.out")"
+expect_has "finding classifies it retired" "retired" "$(cat "$SB/neg2.out")"
+
+# The escape hatch must actually release the gate, or authors will delete it.
+"$PYTHON" - "$SB/copy2" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1]) / "assets/cached-agent-loop.py"
+p.write_text(p.read_text(encoding="utf-8").replace(
+    'MODEL = "claude-opus-4-8"', 'MODEL = "claude-opus-4-8"  # legacy-ok'), encoding="utf-8")
+PY
+"$PYTHON" "$SB/copy2/scripts/check-model-table.py" --offline >/dev/null 2>&1
+expect_exit "legacy-ok marker releases the gate" 0 $?
+
+# An id in neither the table nor the legacy list is a typo or a hallucination.
+rm -rf "$SB/copy3"; cp -r "$SKILL" "$SB/copy3"
+printf '\nUse claude-opus-7 for this.\n' >> "$SB/copy3/references/tool-use.md"
+"$PYTHON" "$SB/copy3/scripts/check-model-table.py" --offline >"$SB/neg3.out" 2>&1
+expect_exit "unknown model id -> 4" 4 $?
+expect_has "finding classifies it unknown" "unknown" "$(cat "$SB/neg3.out")"
+
 # ── SKILL.md sanity ───────────────────────────────────────────────────────────
 echo "-- SKILL.md --"
 # CONTRACT (frontmatter shape): this suite asserts that SKILL.md's frontmatter

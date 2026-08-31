@@ -36,7 +36,7 @@ import anthropic
 
 client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from the environment
 
-MODEL = "claude-opus-4-8"  # >>> ADAPT: pick a tier (see the skill's model table)
+MODEL = "claude-opus-5"  # >>> ADAPT: pick a tier (see the skill's model table)
 
 # --- Cache tuning knobs (documented values, not guesses) --------------------
 MAX_BREAKPOINTS = 4      # hard API limit: 4 cache_control markers per request

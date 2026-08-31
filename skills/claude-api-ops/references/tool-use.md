@@ -55,11 +55,13 @@ call per response.
 
 Gotchas:
 
-- **Thinking on (enabled or adaptive) + `any`/`tool` = 400.** Only `auto` and
-  `none` are compatible with thinking. To force a tool while thinking, prompt
-  for it instead, or disable thinking for that call.
-- `any`/`tool` add more tool-use system-prompt tokens than `auto`/`none` (e.g.
-  410 vs 290 on Opus 5).
+- **Manual extended thinking (`{"type": "enabled"}`) + `any`/`tool` = 400.**
+  Only `auto`/`none` are compatible with it. **Adaptive thinking has no such
+  limit** — including the models where it is on by default (Fable 5, Opus 5,
+  Sonnet 5), forced tool choice is accepted.
+- `any`/`tool` add more tool-use system-prompt tokens than `auto`/`none` (a
+  measured ~410 vs ~290 on Opus 4.8; re-measure with `count_tokens` rather than
+  carrying the figure across model generations).
 - Changing `tool_choice` between requests does **not** invalidate the
   tools+system prompt cache (message cache only).
 

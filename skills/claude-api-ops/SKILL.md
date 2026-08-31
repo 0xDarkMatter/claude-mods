@@ -386,7 +386,11 @@ Two modes per the [resource protocol §7](../../docs/SKILL-RESOURCE-PROTOCOL.md)
 # (0.1x read, 1.25x/2x writes, 4 breakpoints, 20-block lookback, the
 # context-management beta id), asserts each doctrine reference carries a
 # "verified <ISO date>" stamp, and checks SKILL.md <-> references/ citation
-# integrity in both directions. Exit 4 on any contradiction.
+# integrity in both directions. It then scans every file in the skill for model
+# ids: an id in neither the table nor the Legacy list is flagged "unknown", and
+# a LEGACY id sitting where a reader would copy it (model=..., "model": ...,
+# --model ...) is flagged "retired" - append a `legacy-ok` comment to that line
+# for a deliberate migration example. Exit 4 on any contradiction.
 python skills/claude-api-ops/scripts/check-model-table.py --offline
 python skills/claude-api-ops/scripts/check-model-table.py --offline --json | python -m json.tool
 
@@ -440,8 +444,8 @@ building a manual agent loop; the `>>> ADAPT` marks show what to change.
 the canonical `output_config.format` shape (with `additionalProperties: false`
 and a `required` array). Copy and reshape `schema.properties` when adding JSON
 outputs; see [references/structured-outputs.md](references/structured-outputs.md)
-for the rules. (Supported on Fable 5, Opus 5, Sonnet 5, and the 4.5–4.8 line;
-Haiku 4.5 needs its dated id, `claude-haiku-4-5-20251001`.)
+for the rules. (Supported on every current model — Fable 5, Opus 5, Sonnet 5,
+Haiku 4.5 — and the legacy 4.5–4.8 line.)
 
 ## Reference Files
 

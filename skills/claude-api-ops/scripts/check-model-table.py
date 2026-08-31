@@ -180,6 +180,23 @@ ID_RE = re.compile(r"^claude-[a-z]+-\d+(?:-\d+)?$")
 # A date suffix looks like an 8-digit run (e.g. -20251114).
 DATE_SUFFIX_RE = re.compile(r"-\d{8}$")
 
+# Any Claude model id appearing in the skill body, dated snapshots included.
+ANY_ID_RE = re.compile(r"\bclaude-[a-z]+-\d+(?:-\d+)?(?:-\d{8})?\b")
+# A model id being ASSIGNED - what a reader copies. Covers model="x", model: "x",
+# "model": "x", MODEL = "x", and --model x.
+ASSIGN_RE = re.compile(
+    r'(?:"?\bmodel"?\s*[:=]\s*["\']([a-z0-9.\-]+)["\'])'
+    r'|(?:--model[=\s]+([a-z0-9.\-]+))',
+    re.IGNORECASE,
+)
+# Escape hatch: a line carrying this marker may name a legacy id deliberately
+# (e.g. a migration before/after snippet).
+LEGACY_OK = "legacy-ok"
+# tests/ is fixture material - it deliberately writes malformed ids to prove the
+# verifier rejects them, so scanning it would be self-defeating.
+SCAN_SKIP_DIRS = {"tests", "__pycache__", ".git"}
+SCAN_SUFFIXES = {".md", ".py", ".json", ".sh", ".ts", ".js", ".yaml", ".yml", ".txt"}
+
 
 def note(msg: str, quiet: bool) -> None:
     if not quiet:
@@ -252,6 +269,58 @@ def parse_model_table(text: str) -> tuple[list[dict], list[str]]:
             })
         j += 1
     return rows, header
+
+
+def parse_legacy_ids(text: str) -> list[str]:
+    """Extract the backticked ids from SKILL.md's 'Legacy (still available...)'
+    paragraph. Parsed rather than hard-coded so retiring a model is a one-line
+    doc edit, not a code change."""
+    m = re.search(r"\*\*Legacy \(still available[^*]*\)\:\*\*(.+?)(?:\n\n|\Z)",
+                  text, re.S)
+    if not m:
+        return []
+    return [i for i in re.findall(r"`([^`]+)`", m.group(1)) if ID_RE.match(i)]
+
+
+def scan_body_ids(skill_dir: Path, current: set[str], legacy: set[str]) -> list[dict]:
+    """Flag model ids used in the skill body that a reader must not copy.
+
+    Two distinct faults, because they have different severities in practice:
+      unknown  - an id in neither the current table nor the legacy list. A typo
+                 or a hallucinated model; nothing resolves it.
+      retired  - a LEGACY id sitting in an assignable position (model=..., MODEL
+                 = ..., "model": ..., --model ...). Naming a legacy model in
+                 prose is legitimate; shipping one as the value a reader copies
+                 is not. Append the `legacy-ok` marker to that line to allow it.
+    """
+    findings: list[dict] = []
+    for path in sorted(skill_dir.rglob("*")):
+        if not path.is_file() or path.suffix.lower() not in SCAN_SUFFIXES:
+            continue
+        if SCAN_SKIP_DIRS & set(p.name for p in path.relative_to(skill_dir).parents):
+            continue
+        rel = path.relative_to(skill_dir).as_posix()
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except UnicodeDecodeError:
+            continue
+        for n, line in enumerate(lines, 1):
+            if LEGACY_OK in line:
+                continue
+            # Strip a dated snapshot to its alias before membership testing: a
+            # dated id is a real, resolvable snapshot of a known model, and the
+            # docs discuss several deliberately.
+            for raw in ANY_ID_RE.findall(line):
+                base = DATE_SUFFIX_RE.sub("", raw)
+                if base not in current and base not in legacy:
+                    findings.append({"file": rel, "line": n, "id": raw,
+                                     "fault": "unknown"})
+            for a, b in ASSIGN_RE.findall(line):
+                val = DATE_SUFFIX_RE.sub("", (a or b).strip())
+                if val in legacy:
+                    findings.append({"file": rel, "line": n, "id": val,
+                                     "fault": "retired"})
+    return findings
 
 
 def parse_cache_min_table(text: str) -> list[dict]:
@@ -472,9 +541,28 @@ def validate_offline(skill_dir: Path, json_mode: bool, quiet: bool) -> dict:
              "hint": "every documented model needs a prompt-cache minimum row"},
             json_mode)
 
+    # Body scan: the tables can be perfectly consistent while a code sample
+    # ships a retired model. Guard what readers copy, not just what they read.
+    legacy_ids = set(parse_legacy_ids(skill_md.read_text(encoding="utf-8")))
+    body = scan_body_ids(skill_dir, set(documented_ids), legacy_ids)
+    if body:
+        detail = {}
+        for f in body[:12]:
+            detail[f"{f['file']}:{f['line']}"] = f"{f['fault']}: {f['id']}"
+        if len(body) > 12:
+            detail["..."] = f"{len(body) - 12} more"
+        fail_validation(
+            f"{len(body)} model-id problem(s) in the skill body",
+            {**detail,
+             "hint": "'retired' = a legacy id in an assignable position; retarget "
+                     "it at a current model or append the 'legacy-ok' marker. "
+                     "'unknown' = an id in neither the model table nor the legacy list."},
+            json_mode)
+
     note(f"  {len(models_out)} model rows, all well-formed", quiet)
     note(f"  {len(cache_rows)} cache-minimum rows, all integer", quiet)
     note("  cross-file model lineup consistent", quiet)
+    note(f"  {len(legacy_ids)} legacy id(s) tracked; no retired/unknown id in the body", quiet)
 
     # Context-engineering layer: constants stated in several files, verification
     # date stamps, and SKILL.md <-> references/ citation integrity.
@@ -492,6 +580,7 @@ def validate_offline(skill_dir: Path, json_mode: bool, quiet: bool) -> dict:
         "cache_constants": constants,
         "date_stamps": stamps,
         "reference_files": refs,
+        "legacy_ids": sorted(legacy_ids),
         "consistent": True,
     }
 
