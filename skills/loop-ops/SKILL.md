@@ -43,6 +43,24 @@ ticks, a **token budget**, a **verify gate** you can trust, an **escalation rule
 **risk-tier ladder** that decides whether the loop has earned the autonomy you're about to
 grant it. The plumbing moved into the harness; the judgement did not.
 
+### When the native primitive is enough — stop here
+
+Don't scaffold a loop for work the harness already does. **Use the primitive raw** when
+*all* of these hold:
+
+- it **writes nothing** you'd have to undo (watch a deploy, poll a build, remind you), or
+  the only writes are ones you'll review anyway;
+- it is **supervised or short-lived** — you're watching, or it stops in a session;
+- **nothing needs to be remembered between ticks** beyond what's in the repo;
+- and you'd **shrug if a tick silently didn't fire**.
+
+`/loop 5m check if the deploy finished` is a complete, correct answer. Wrapping it in a
+`loop.config.yaml` adds ceremony and no safety.
+
+Reach for loop-ops the moment **any one** of those flips: the loop starts *changing*
+things, runs *unattended*, needs to know what it did *last time*, or its silence would
+cost you. That is the whole trigger — everything below is what to do once it fires.
+
 ---
 
 ## The six primitives → what owns each here

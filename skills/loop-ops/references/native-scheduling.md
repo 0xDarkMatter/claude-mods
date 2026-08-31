@@ -56,6 +56,11 @@ day-of-month and day-of-week are both constrained, a date matches if **either** 
 - **Session-scoped and in-memory.** The `durable` parameter is present but documented as
   having **no effect** — "durable persistence is not available". A new conversation clears
   every task; `--resume` / `--continue` restores unexpired ones.
+  *One caveat worth knowing before you trust that flatly:* the docs describe a narrow
+  case where a task you ask to keep across sessions **is** written to the project's
+  `.claude` directory — when feature-flag fetching is off (and it errors if that path is a
+  symlink). So "no effect" is what the tool reports in a normal session, not a universal
+  law. Either way it is not a foundation for an unattended loop; don't design around it.
 - **Seven-day expiry.** A recurring task fires one final time 7 days after creation, then
   deletes itself. This is a hard ceiling on unattended lifetime.
 - **Fires only while the REPL is idle.** Not mid-response. If Claude is busy when a task

@@ -321,6 +321,52 @@ expect_has  "names the unattended mismatch" "can't run unattended" "$out"
 sed 's|^host: session-cron|host: made-up|' "$SB/sess-l1.yaml" > "$SB/host-bad.yaml"
 bash "$DOCTOR" --offline "$SB/host-bad.yaml" >/dev/null 2>&1; expect_exit "unknown host -> 10" 10 $?
 
+# ── loop-doctor: regressions found by adversarial review ───────────────────
+# Each of these shipped broken once. They are cheap to re-break and silent when broken.
+echo "-- loop-doctor (adversarial regressions) --"
+
+# R1. A cron-string cadence must still hit the cloud floor - the Nm/Nh/Nd path is not
+# the only way to express "every 10 minutes".
+sed 's|^cadence: 1h|cadence: "*/10 * * * *"|' "$SB/cloud-ok.yaml" > "$SB/cloud-cron.yaml"
+out="$(bash "$DOCTOR" --offline "$SB/cloud-cron.yaml" 2>/dev/null)"; rc=$?
+expect_exit "cron-string cadence hits the cloud floor -> 10" 10 "$rc"
+# ...and an hourly cron must NOT be flagged (1h is legal on cloud).
+sed 's|^cadence: 1h|cadence: "0 * * * *"|' "$SB/cloud-ok.yaml" > "$SB/cloud-hourly.yaml"
+bash "$DOCTOR" --offline "$SB/cloud-hourly.yaml" >/dev/null 2>&1; expect_exit "hourly cron is legal on cloud -> 0" 0 $?
+
+# R2. A malformed cadence must not leak a bash arithmetic error. '1a2m' matches the
+# *[0-9]m glob, so without a digits-only guard ${1%m} hands '1a2' to $(( )).
+sed 's|^cadence: 1h|cadence: 1a2m|' "$SB/cloud-ok.yaml" > "$SB/cad-junk.yaml"
+allout="$(bash "$DOCTOR" --offline "$SB/cad-junk.yaml" 2>&1)"
+case "$allout" in
+  *"value too great for base"*|*"syntax error"*) no "malformed cadence leaks an arithmetic error" ;;
+  *) ok "malformed cadence degrades quietly (no arithmetic leak)" ;;
+esac
+
+# R3. L3 on a cloud routine must NOT demand a local container note - the cloud infra IS
+# the isolation, and its permission_mode is ignored. A false finding here teaches people
+# to write a bogus "container" note to satisfy the tool.
+{ sed -e 's|^tier: L1|tier: L3|' -e 's|^permission_mode: dontAsk|permission_mode: bypassPermissions|' "$SB/cloud-ok.yaml"
+  printf 'verify: "true"\nguard: "true"\nworktree: true\nland_via: fleet-ops\n'; } > "$SB/cloud-l3.yaml"
+out="$(bash "$DOCTOR" --offline "$SB/cloud-l3.yaml" 2>/dev/null)"
+case "$out" in
+  *"bad"*"isolation"*) no "L3 cloud-routine wrongly demands a container note" ;;
+  *) ok "L3 cloud-routine does not demand a local container" ;;
+esac
+# The same check must still bite for a LOCAL L3 bypass - the fix must not disarm it.
+{ sed -e 's|^tier: L1|tier: L3|' -e 's|^host: cloud-routine|host: local|' \
+      -e 's|^permission_mode: dontAsk|permission_mode: bypassPermissions|' "$SB/cloud-ok.yaml"
+  printf 'verify: "true"\nguard: "true"\nworktree: true\nland_via: fleet-ops\n'; } > "$SB/local-l3.yaml"
+out="$(bash "$DOCTOR" --offline "$SB/local-l3.yaml" 2>/dev/null)"
+expect_has "local L3 bypass still demands isolation" "isolated VM/container" "$out"
+
+# R4. `worktree: true` on a desktop-task is a declaration, not the switch: the real
+# toggle is per-task and OFF by default, so the doctor must say it cannot enforce it.
+{ sed -e 's|^host: cloud-routine|host: desktop-task|' -e 's|^tier: L1|tier: L2|' "$SB/cloud-ok.yaml"
+  printf 'verify: "true"\nguard: "true"\nworktree: true\nland_via: fleet-ops\n'; } > "$SB/desk-l2.yaml"
+out="$(bash "$DOCTOR" --offline "$SB/desk-l2.yaml" 2>/dev/null)"
+expect_has "desktop-task flags the out-of-band worktree toggle" "toggle is on" "$out"
+
 # ── loop-estimate: validation errors ───────────────────────────────────────────
 "$PYTHON" "$COST" --pattern pr-watch --cadence 10m --model claude-nope >/dev/null 2>&1; expect_exit "unknown model -> 4" 4 $?
 "$PYTHON" "$COST" --pattern not-a-pattern --cadence 10m --model claude-haiku-4-5 >/dev/null 2>&1; expect_exit "unknown pattern -> 4" 4 $?
@@ -358,6 +404,9 @@ bash "$DOCTOR" --offline "$EX" >/dev/null 2>&1; expect_exit "shipped example doc
 [[ -f "$SKILL/assets/examples/pr-watch/loop-run.sh" ]] && ok "example ships loop-run.sh (runner-agnostic)" || no "example missing loop-run.sh"
 [[ -f "$SKILL/assets/examples/pr-watch/github-actions.yml" ]] && ok "example ships an optional GH Actions scheduler" || no "example missing GH Actions option"
 [[ -f "$SKILL/assets/examples/pr-watch/run.md" ]] && ok "example ships a run prompt" || no "example missing run.md"
+# The flagship example is what people copy, so it must model the doctrine it teaches:
+# a loop declares where it runs before it is scheduled.
+expect_has "example declares a host" "host:" "$(cat "$EX")"
 
 # ── terminal design system ─────────────────────────────────────────────────
 echo "-- terminal design system --"
@@ -415,6 +464,9 @@ for h in session-cron desktop-task cloud-routine; do
 done
 # The gate is an eval; loop-ops links the discipline rather than restating it.
 expect_has "SKILL.md routes gate-judgement work to evals-ops" "evals-ops" "$skillmd"
+# A skill that repositions itself against a native primitive must say when NOT to use
+# itself, or it just re-sells ceremony for work the harness already does.
+expect_has "SKILL.md says when the native primitive is enough" "native primitive is enough" "$skillmd"
 
 # FRONTMATTER CONTRACT (stated here because a later description-trim lane edits
 # frontmatter without reading this suite - see SKILL-CREATION-PROTOCOL.md step 5):

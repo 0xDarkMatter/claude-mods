@@ -6,6 +6,10 @@ pattern: pr-watch
 tier: L1
 permission_mode: dontAsk
 cadence: 10m
+# Ticks run on this machine via the wrapper below, so the local host applies. A 10m
+# cadence rules out cloud-routine (1h floor); session-cron would work while you watch
+# it, but expires after 7 days. See references/native-scheduling.md.
+host: external
 goal: "Watch open PRs; flag stuck (no review > 4h), failing checks, and merge conflicts in STATE.md; post at most one summary comment per PR; never merge."
 scope:
   - "src/**"

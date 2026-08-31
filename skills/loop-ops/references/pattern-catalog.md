@@ -53,7 +53,7 @@ and the **failure mode to watch** ([failure-modes.md](failure-modes.md)).
 | Pattern | Trigger · Locus | Start tier | Mechanism | Job → escalates | Watch |
 |---|---|---|---|---|---|
 | `daily-scan` | cadence · local | L1 | Desktop task (off-peak) | sweep backlog/alerts, write `STATE.md` → all to a human | silent-stop |
-| `pr-watch` | event\|cadence · connector | L1 | Channel (PR webhook) or cloud routine | flag stuck/failing/conflicted PRs → never merges | runaway tokens if polled tight |
+| `pr-watch` | event\|cadence · connector | L1 | cloud routine on a **GitHub `pull_request` trigger** (no session needed), or a Channel | flag stuck/failing/conflicted PRs → never merges | runaway tokens if polled tight |
 | `ci-watch` | **event** · local | L2 | Channel (CI webhook) → fix in a worktree | failing test passes + full guard → flaky/deploy/secrets | gate reward-hacking |
 | `dep-bump` | cadence · local | L2 | Desktop task/daemon | patch-only behind cooldown + guard → minor/major, advisories | supply-chain |
 | `changelog-gen` | event(on tag)\|cadence · local | L1 | tag-event or Desktop task | draft `RELEASE_NOTES_DRAFT.md` → human publishes | — |
@@ -70,11 +70,12 @@ and the **failure mode to watch** ([failure-modes.md](failure-modes.md)).
 
 ## Notes on the patterns that need them
 
-- **`ci-watch` / `pr-watch` — prefer event over poll.** Wire a CI/PR webhook through a
-  Channel so the tick fires on the event, not a timer. A polled `pr-watch` at 5 min costs
+- **`ci-watch` / `pr-watch` — prefer event over poll.** A polled `pr-watch` at 5 min costs
   ~3× a 15-min one for marginal freshness; the event-driven version costs ~nothing while
-  quiet. At L2, `ci-watch` opens a fix in a worktree and hands the branch to `fleet-ops`;
-  never auto-merges `main`.
+  quiet. Two ways to get the event now: a cloud routine's **GitHub trigger** (`pr-watch`)
+  or **API `/fire`** from your CI (`ci-watch`) — neither needs a session alive — or a
+  **Channel** when the tick must touch local state. At L2, `ci-watch` opens a fix in a
+  worktree and hands the branch to `fleet-ops`; never auto-merges `main`.
 - **`metric-chase` is the bridge to [`iterate`](../../iterate/SKILL.md).** The loop's
   *trigger* is a `/goal` ("coverage ≥ 90, or stop after N turns"); the *work* each turn is
   an `iterate` step (modify → measure → keep/discard). Use it for any measurable target —

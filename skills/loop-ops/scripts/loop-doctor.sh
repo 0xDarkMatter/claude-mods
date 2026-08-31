@@ -120,6 +120,7 @@ TIER="$(cfg_scalar tier)"; PMODE="$(cfg_scalar permission_mode)"; PATTERN="$(cfg
 VERIFY="$(cfg_scalar verify)"; GUARD="$(cfg_scalar guard)"; BUDGET="$(cfg_scalar budget_tokens)"
 KILL="$(cfg_scalar kill_switch)"; ESCAL="$(cfg_scalar escalation)"
 CADENCE="$(cfg_scalar cadence)"; HOST="$(cfg_scalar host)"; [[ -z "$HOST" ]] && HOST="local"
+WORKTREE="$(cfg_scalar worktree)"
 is_l2plus=0; [[ "$TIER" == "L2" || "$TIER" == "L3" ]] && is_l2plus=1
 
 # ── findings ─────────────────────────────────────────────────────────────
@@ -134,11 +135,17 @@ lead_bin() { awk '{ for(i=1;i<=NF;i++){ if($i !~ /=/){print $i; exit} } }' <<<"$
 # Cadence in minutes, for the host floor checks. Nm/Nh/Nd, or "*/N * * * *" -> N.
 # Anything richer returns empty and the floor check is SKIPPED rather than guessed:
 # a wrong floor finding is worse than no finding.
+#
+# The digits-only guard is load-bearing, not defensive padding: `1a2m` matches the
+# *[0-9]m glob, and ${1%m} would hand `1a2` to arithmetic - which errors to stderr and
+# leaves a garbage CAD_MIN that later trips `[[ -lt ]]`. Malformed cadence is loop-check's
+# finding to report; here it must simply yield "unknown" and skip the floor check.
 cadence_minutes() {
+  local n=""
   case "$1" in
-    *[0-9]m) printf '%s' "${1%m}" ;;
-    *[0-9]h) printf '%s' "$(( ${1%h} * 60 ))" ;;
-    *[0-9]d) printf '%s' "$(( ${1%d} * 1440 ))" ;;
+    *[0-9]m) n="${1%m}"; [[ "$n" =~ ^[0-9]+$ ]] && printf '%s' "$n" ;;
+    *[0-9]h) n="${1%h}"; [[ "$n" =~ ^[0-9]+$ ]] && printf '%s' "$(( n * 60 ))" ;;
+    *[0-9]d) n="${1%d}"; [[ "$n" =~ ^[0-9]+$ ]] && printf '%s' "$(( n * 1440 ))" ;;
     */[0-9]*\ *) awk '{ n=$1; sub(/^\*\//,"",n); if (n ~ /^[0-9]+$/ && $2=="*") print n }' <<<"$1" ;;
     *) printf '' ;;
   esac
@@ -168,6 +175,13 @@ case "$HOST" in
     # so a slow tick can land at any hour. The prompt needs its own time guardrails.
     if [[ -n "$CAD_MIN" ]] && [[ "$CAD_MIN" -ge 720 ]]; then
       row warn "catch-up" "desktop-task runs ONE catch-up for the latest missed window - a $CADENCE tick may fire hours late; put time guardrails in run.md"
+    fi
+    # `worktree: true` in this config is a DECLARATION, not the switch. The real toggle
+    # lives on the task itself and is OFF by default, so a task can satisfy the config
+    # while running against the working dir including uncommitted changes. Nothing on
+    # disk lets us verify it - so say so rather than implying the config settled it.
+    if [[ "$WORKTREE" == "true" ]]; then
+      row warn "worktree" "config declares worktree: true - confirm the TASK's worktree toggle is on (it is off by default); this file cannot enforce it"
     fi
     ;;
   cloud-routine)
@@ -200,7 +214,15 @@ else
   esac
 fi
 # L3 bypass needs an isolation boundary.
-if [[ "$TIER" == "L3" && "$PMODE" == "bypassPermissions" ]]; then
+#
+# A cloud routine already IS one: it runs in Anthropic-managed cloud infrastructure on a
+# fresh clone, and its permission_mode is ignored entirely. Demanding a "container" note
+# there is a false finding that teaches people to write a bogus note to satisfy the tool -
+# so the cloud host reports its real boundary (environment + connectors, checked above)
+# instead of the host-isolation one.
+if [[ "$TIER" == "L3" && "$HOST" == "cloud-routine" ]]; then
+  row ok "isolation" "cloud-routine runs in Anthropic-managed cloud infra - the boundary is environment + connectors, not a local container"
+elif [[ "$TIER" == "L3" && "$PMODE" == "bypassPermissions" ]]; then
   if printf '%s %s' "$ESCAL" "$(cfg_list_items scope | tr '\n' ' ')" | grep -Eqi 'container|isolat|sandbox|devcontainer'; then
     row ok "isolation" "L3 bypass declares an isolation boundary"
   else
