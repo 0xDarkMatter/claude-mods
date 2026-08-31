@@ -164,7 +164,7 @@ else no "references/readme-landing-page.md missing or empty"; fi
 # It must actually cover the four things it owns; a stub that only exists to satisfy
 # the citation check would pass a bare -s test.
 lp_body="$(cat "$LP" 2>/dev/null)"   # captured, not piped — see SIGPIPE note above
-for topic in "Badge row" "Features as benefits" "Screenshots and demo media" "Anti-patterns"; do
+for topic in "Two registers" "Badge row" "Features as benefits" "Screenshots and demo media" "Anti-patterns"; do
   if grep -qF "$topic" <<<"$lp_body"; then ok "reference covers: $topic"
   else no "reference missing section: $topic"; fi
 done
@@ -177,6 +177,17 @@ if grep -qF "docs/screenshots/" <<<"$lp_body"; then ok "reference pins screensho
 else no "reference does not name docs/screenshots/"; fi
 if grep -qF "prefers-color-scheme" <<<"$lp_body"; then ok "reference documents the <picture> dark-mode pattern"
 else no "reference missing prefers-color-scheme guidance"; fi
+
+# Register axis: both registers must be named, AND the reference must state the
+# guard that keeps "Showcase" from becoming a licence for marketing fluff. Without
+# that boundary the register choice silently reopens readme-description.md's
+# anti-patterns, which is the whole risk of offering the choice at all.
+for r in "Showcase" "Reference"; do
+  if grep -qF "$r" <<<"$lp_body"; then ok "reference names the $r register"
+  else no "reference does not name the $r register"; fi
+done
+if grep -qF "What does NOT vary" <<<"$lp_body"; then ok "reference fences what register does NOT change"
+else no "reference missing the register invariants section (fluff guard)"; fi
 
 # Public-repo hygiene (hard rule 7 + tests/agnostic.sh): no local machine paths.
 if grep -Eq '[A-Za-z]:[\\/]Users[\\/]|/home/[a-z]|/Users/[A-Za-z]' <<<"$lp_body"; then
@@ -205,6 +216,14 @@ if grep -qE 'WARN-level, never a hard fail' <<<"$lp_block"; then ok "audit rows 
 else no "audit landing-page rows not declared WARN-level"; fi
 if grep -qF "CONDITIONAL" <<<"$lp_block"; then ok "screenshot row is conditional on a visual surface"
 else no "screenshot audit row is not conditional (would nag CLI libraries)"; fi
+# Audit must judge against the README's OWN register, or it flags a Reference
+# README for declining a hero — the exact false positive the axis exists to avoid.
+if grep -qF "REGISTER" <<<"$lp_block"; then ok "audit infers the register before judging rows"
+else no "audit rows are register-blind (would flag Reference READMEs for missing a hero)"; fi
+
+# Mode new must offer the register as a user-flippable choice, not decide silently.
+if grep -qE "say 'showcase' to flip" <<<"$sk_body"; then ok "mode new surfaces register as a flippable line"
+else no "mode new does not surface the register choice to the user"; fi
 
 # The scorecard is deliberately NOT extended — assert the decision stayed put, so a
 # later lane that adds scoring has to update the rubric in --help at the same time.

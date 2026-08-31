@@ -32,9 +32,80 @@ Note the asymmetry: questions 1–3 are *decisions*, question 4 is *mechanics*. 
 before mechanics** is not a stylistic preference — it is the order the reader is already
 asking in.
 
+## Two registers: Showcase and Reference
+
+The four questions are universal; how much room each one gets is not. Pick a **register**
+before laying the page out, and say which one you picked — an unstated register is how a
+README ends up half-pitch and half-manual, serving neither reader.
+
+| | **Showcase** | **Reference** |
+|---|---|---|
+| Reader | Deciding *whether* to adopt | Already decided, needs to *use* it |
+| Arrives from | A link, a topic page, a post, a search | A dependency list, a colleague, their own `go.mod` |
+| Fits | Apps, dashboards, TUIs, generators, plugin packs, anything with visible output | Libraries, SDKs, CLIs with plain output, internal tooling, protocol implementations |
+| Hero | Tagline + badge row + visual, room to breathe | Tagline + badge row, then straight to work |
+| Visual | High, above Features. Often the strongest argument | A fenced code block showing real usage |
+| Features | 4–7 benefit bullets, punchy leads | 4–6 capability bullets, still benefit-led, denser and flatter |
+| Install | Below Features | High — often immediately after the intro |
+| First code | After the pitch | In the first screenful |
+| Prose density | Airier; short paragraphs, whitespace does work | Tight; tables and lists over prose |
+| Length | Longer is fine if it stays scannable | Shorter is a feature; link out for depth |
+
+### Picking one
+
+Ask what the reader most likely does in the next sixty seconds.
+
+- **They might close the tab** → Showcase. You have to earn the scroll.
+- **They're going to write code against it** → Reference. Get out of the way.
+
+Two useful tie-breakers: if the project's **output is visible**, Showcase is almost always
+right, because a still frame outperforms any paragraph you could write. If the project is
+a **dependency of other code**, Reference is almost always right, because the reader
+reached you from a lockfile and wants a signature, not a story.
+
+**A repo can change register.** An internal tool that gets open-sourced usually should. If
+it does, change it deliberately and all at once — a Reference README with a Showcase hero
+bolted on top reads worse than either.
+
+### What does NOT vary
+
+This is the load-bearing part. Register controls **emphasis and density**, never honesty.
+Every one of these holds in both:
+
+- No marketing verbs, no "blazing fast", no "powerful", no emoji walls. Showcase is *not*
+  permission for the anti-patterns in `readme-description.md` — it earns attention with a
+  screenshot and a sharp first sentence, not with adjectives.
+- Bullets still lead with what the reader **gets**. A Reference README's bullets are
+  terser and more technical; they are not an inventory of components.
+- Badge discipline is identical: at most five, one shared `labelColor`, none you won't
+  maintain.
+- Alt text on every image; the dark-mode variant or a theme-safe capture.
+- Honest scope, including what the thing deliberately does not do.
+
+The difference between the registers is *how much room the pitch gets*, not *whether the
+pitch is true*.
+
+### Worked contrast
+
+Same project, same facts, both legitimate. Showcase:
+
+> **Stops a leaked key before it leaves your machine.** Runs gitleaks plus a regex
+> layer over the diff and refuses the push on any hit — no `--force-anyway` flag,
+> because you'd use it.
+
+Reference:
+
+> **Refuses on any secret hit** — gitleaks + regex layer over the staged diff. No
+> override flag; exit `1` on detection.
+
+Neither is inflated. The Showcase line spends words on the *reason*; the Reference line
+spends them on the *contract* (exit code, no override). A reader wiring this into CI
+wants the second; a reader deciding whether to install wants the first.
+
 ## Section order
 
-The default shape. Vary it when the project demands, but know what you're trading.
+The default shape, in **Showcase** register — the Reference variant follows. Vary either
+when the project demands, but know what you're trading.
 
 ```
 # project-name
@@ -56,6 +127,34 @@ The default shape. Vary it when the project demands, but know what you're tradin
 ## Contributing
 ## License
 ```
+
+In **Reference** register the same sections reorder to put working code in the first
+screenful:
+
+```
+# project-name
+> one-line tagline (<= 120 chars)
+
+[badges: license · version · CI · runtime]
+
+<2 paragraph intro — tighter than Showcase>
+
+## Install                             <- promoted; one command, no ceremony
+## Usage                               <- a real, runnable example, not a toy
+## Features                            <- still benefit-led, denser
+## API / Configuration / How it works  <- the bulk of the page
+## Recent Updates
+## Contributing
+## License
+```
+
+Two things survive the reorder and are not negotiable: the **badge row stays under the
+title** (liveness is a zero-scroll signal in both registers), and **Features still leads
+with benefits** — it just sits lower, because a reader who arrived from a lockfile has
+already decided the *what* and needs the *how*.
+
+The status badge matters more here, not less: a library at `alpha` is a load-bearing fact
+for someone about to depend on it.
 
 ### Reconciling "Recent Updates" placement
 
@@ -383,14 +482,16 @@ in the intro. These extend that list to the layout layer:
 | **"Star this repo" / sponsor plea above the fold** | Asks for payment before delivering value. Bottom of the README, after the reader has decided. |
 | **Duplicated install instructions** (badge, hero, and Install section) | Three copies drift; the reader learns to trust none of them. |
 | **A hero image that is just the project name in a font** | Costs a network round-trip to say what the `# H1` already said, and is invisible to search. |
+| **Mixed register** | A Showcase hero bolted onto a Reference body (or a library that opens with a lifestyle screenshot). Reads as indecision, and both audiences bounce. Pick one and commit. |
+| **"Marketing register" as a licence for fluff** | Showcase means *more room for the pitch*, not *permission to inflate it*. Marketing verbs are banned in both registers. |
 
 ## Applying this in the three modes
 
 | Mode | Action |
 |---|---|
-| `new` | Full treatment. Badge row, Features-as-benefits, and a screenshot **if** the project has a visual surface. Surface the draft README for approval before committing — this is the first impression. |
-| `update` | Do not churn a good landing page. Act only when: a release added a capability worth a new Features bullet, the CI badge has gone stale or wrong, or a screenshot no longer matches the UI. |
-| `audit` | Report WARN, never a hard fail. Missing badge row is a WARN. No Features/benefits section is a WARN. No screenshot **when the project has a visual surface** is a WARN; when it does not, stay silent. Suggest, don't auto-edit. |
+| `new` | **Pick the register first and say which**, as a flippable line the user can overrule ("laying this out as **Reference** — say 'showcase' to flip"), the same way visibility is surfaced. Then the full treatment: badge row, Features-as-benefits, and a screenshot **if** the project has a visual surface. Surface the draft README for approval before committing — this is the first impression. |
+| `update` | Do not churn a good landing page, and **do not silently switch register** — a repo that reads as Reference stays Reference unless the user asks. Act only when: a release added a capability worth a new Features bullet, the CI badge has gone stale or wrong, or a screenshot no longer matches the UI. A genuine audience change (internal tool going public) is worth *proposing* a register switch, done all at once. |
+| `audit` | Report WARN, never a hard fail. **Infer the register from the existing README and judge against that one** — a Reference README is not missing a hero, it declined one. Missing badge row is a WARN in both. No Features/benefits section is a WARN in both. No screenshot **when the project has a visual surface** is a WARN; when it does not, stay silent. A visibly mixed register is a WARN worth naming. Suggest, don't auto-edit. |
 
 **The conditional matters.** A CLI library legitimately has no screenshot, and a check
 that nags it every audit teaches the reader to ignore the audit. Decide "does this project

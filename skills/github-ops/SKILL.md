@@ -73,7 +73,22 @@ Triggered by: "publish to github", "create repo on github", "push to github" (wh
 2b. Build the landing-page layer — see references/readme-landing-page.md
    The intro answers "what is this"; this step answers the other three questions a
    cold visitor asks in their first ten seconds (is it alive / what do I get /
-   what does it look like). Benefits before mechanics:
+   what does it look like). Benefits before mechanics.
+
+   FIRST pick the register, and surface it as a flippable line like visibility:
+     "Laying the README out as **Reference** — say 'showcase' to flip"
+   - Showcase — reader is deciding WHETHER to adopt. Apps, dashboards, TUIs,
+     generators, anything with visible output. Visual high, Features above Install,
+     airier prose.
+   - Reference — reader has already decided and needs to USE it. Libraries, SDKs,
+     plain-output CLIs, internal tooling. Install + a real usage example in the
+     first screenful; Features denser and lower.
+   Tie-breakers: output is visible → Showcase. It's a dependency of other code →
+   Reference. Register controls emphasis and density, NEVER honesty — Showcase is
+   not permission for marketing verbs; the readme-description.md anti-patterns
+   apply identically to both. Never mix the two.
+
+   Then, in whichever register:
    - Badge row under the title: at most five — license, version, CI, runtime floor,
      project status. One shared labelColor so they read as one row. Never add a badge
      you won't maintain; a stale red CI badge is worse than no badge.
@@ -160,7 +175,10 @@ Triggered by: "ship a release", "cut a release", "release v0.X.Y", "publish upda
    Don't churn good prose — only act if the intro is genuinely thin or stale.
 
    Landing-page touch-ups (see references/readme-landing-page.md) — act only on a
-   real trigger, never as routine churn:
+   real trigger, never as routine churn. Keep the README's EXISTING register
+   (Showcase vs Reference); never switch it silently. A genuine audience change
+   (internal tool going public) is worth proposing a switch — done all at once,
+   with approval — not drifting into one bullet at a time:
    - The release added a capability worth a Features bullet → add one (benefit-led),
      and cut a weaker one if the section now runs past ~7.
    - The CI badge is red/stale, or the version badge no longer tracks releases →
@@ -217,6 +235,11 @@ LOCAL FILE CHECKS
   [ ] README has "Recent Updates" section near top
 
 LANDING-PAGE CHECKS — all WARN-level, never a hard fail (references/readme-landing-page.md)
+  [~] Infer the README's REGISTER first (Showcase = pitch-forward, visual high, Features
+      above Install; Reference = install + usage in the first screenful, denser Features)
+      and judge every row below against THAT register. A Reference README is not missing
+      a hero — it declined one. WARN if the register is visibly mixed (a Showcase hero
+      bolted onto a Reference body, or vice versa): it serves neither reader.
   [~] README has a badge row under the title (≤ 5 badges; license + at least one
       liveness signal — CI or version). WARN if absent; WARN if > 7 badges (badge wall)
       or if a CI badge points at a workflow with no runs / a red default branch.
@@ -316,7 +339,7 @@ See `references/pr-ops.md` for full playbooks, review-flow templates, and the me
 |---|---|---|
 | Release strategy | `references/release-strategy.md` | minor on `feat:`, patch on `fix:`-only, major requires approval |
 | README intro (2–3 paragraphs) | `references/readme-description.md` | what it is / why it exists / who it's for; concrete, dry, no marketing fluff |
-| README as a landing page | `references/readme-landing-page.md` | section order (benefits before mechanics), ≤ 5-badge row with a shared `labelColor`, features-as-benefits, conditional screenshot in `docs/screenshots/` with alt text + dark variant |
+| README as a landing page | `references/readme-landing-page.md` | pick a register first (**Showcase** pitch-forward vs **Reference** usage-forward) and never mix; then section order (benefits before mechanics), ≤ 5-badge row with a shared `labelColor`, features-as-benefits, conditional screenshot in `docs/screenshots/` with alt text + dark variant |
 | README Recent Updates style | `references/readme-recent-updates.md` | claude-mods per-version blocks (alternate: flarecrawl table) |
 | Repo visibility default | `references/repo-visibility.md` | `--private` unless user says "public" |
 | Metadata audit checklist | `references/metadata-checklist.md` | full source-of-truth for mode `audit` |
@@ -394,7 +417,7 @@ When adding any of the above, keep the boundary discipline: anything talking to 
 | `SKILL.md` | This file — modes, rules, delegation |
 | `references/release-strategy.md` | Version bump policy |
 | `references/readme-description.md` | 2–3 paragraph README intro — voice, structure, anti-patterns |
-| `references/readme-landing-page.md` | The layer between intro and changelog — section order, badge row (shields.io + `labelColor`), features-as-benefits with a before/after rewrite, screenshot/demo policy, landing-page anti-patterns |
+| `references/readme-landing-page.md` | The layer between intro and changelog — the Showcase/Reference register choice, section order for each, badge row (shields.io + `labelColor`), features-as-benefits with a before/after rewrite, screenshot/demo policy, landing-page anti-patterns |
 | `references/readme-recent-updates.md` | "Recent Updates" section format + emoji vocabulary |
 | `references/repo-visibility.md` | Private-by-default policy |
 | `references/metadata-checklist.md` | Audit checklist source of truth |
