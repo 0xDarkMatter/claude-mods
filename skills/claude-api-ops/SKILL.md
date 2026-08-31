@@ -429,6 +429,12 @@ intermediate anchor every ~15 blocks so long tool-heavy turns don't jump the
 `cache_read_input_tokens` check that warns when the prefix silently changed.
 Copy it when the agent is long-running; copy `agentic-loop.py` when it isn't.
 
+The footgun it encodes: `cache_control` is a key on a content block, so it can
+only be set on a **dict**. Appending `response.content` verbatim (SDK block
+objects) or using the `"content": "a string"` shorthand leaves nowhere to put a
+marker — every breakpoint aimed at those turns is discarded with no error and no
+warning. Normalise content to dict blocks before placing breakpoints.
+
 **`assets/recall-probe.py`** — the "measure it on your workload" harness:
 plants a fact, buries it under N turns, probes for it, and reports recall, cost
 per turn and TTFT for **append** vs **compact**. Makes real API calls, so start

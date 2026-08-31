@@ -113,9 +113,10 @@ def cost_usd(usage, in_rate: float, out_rate: float) -> float:
 
 
 def run_trial(strategy: str, turns: int, keep_recent: int,
-              in_rate: float, out_rate: float) -> dict:
+              in_rate: float, out_rate: float, compact_every: int) -> dict:
     messages = [{"role": "user", "content": PLANT}]
-    total_cost, ttfts = 0.0, []
+    total_cost, ttfts, compactions = 0.0, [], 0
+    turns_since_compaction = 0
 
     text, usage, ttft = send(messages)
     total_cost += cost_usd(usage, in_rate, out_rate)
@@ -129,10 +130,23 @@ def run_trial(strategy: str, turns: int, keep_recent: int,
         ttfts.append(ttft)
         messages.append({"role": "assistant", "content": text})
 
-        if strategy == "compact" and len(messages) > 2 * keep_recent + 1:
+        turns_since_compaction += 1
+        if (strategy == "compact"
+                and turns_since_compaction >= compact_every
+                and len(messages) > 2 * keep_recent + 1):
             # Summarise everything except the most recent keep_recent exchanges,
             # then continue from the summary. This is the default behaviour of
             # most agent frameworks -- and the thing under test.
+            #
+            # FAIRNESS, and the reason for the cadence: an earlier version of
+            # this harness compacted on EVERY turn once the history exceeded
+            # keep_recent, so the compact arm paid a summarisation call per turn
+            # (21 API calls against append's 12, over 10 turns). That inflates
+            # the arm under test and would "confirm" the keep-everything result
+            # regardless of what the data said. Real systems trigger on a token
+            # threshold (context_management's `trigger`); a turn cadence is the
+            # closest honest approximation without burning a count_tokens call
+            # every turn.
             head, tail = messages[:-2 * keep_recent], messages[-2 * keep_recent:]
             summary_text, usage, _ = send(
                 head + [{"role": "user", "content": COMPACT_INSTRUCTION}])
@@ -141,6 +155,8 @@ def run_trial(strategy: str, turns: int, keep_recent: int,
                           "content": f"[Summary of earlier conversation]\n{summary_text}"},
                          {"role": "assistant", "content": "Understood, continuing."}]
                         + tail)
+            compactions += 1
+            turns_since_compaction = 0
 
     messages.append({"role": "user", "content": PROBE})
     answer, usage, ttft = send(messages)
@@ -150,7 +166,7 @@ def run_trial(strategy: str, turns: int, keep_recent: int,
     # Normalised substring match. Deliberately generous: a strategy that cannot
     # pass THIS has lost the fact outright, not merely paraphrased it.
     recalled = SECRET_VALUE.lower() in answer.lower()
-    return {"recalled": recalled, "cost": total_cost,
+    return {"recalled": recalled, "cost": total_cost, "compactions": compactions,
             "ttft": statistics.mean(ttfts), "answer": answer.strip()[:120]}
 
 
@@ -161,20 +177,26 @@ def main() -> int:
     ap.add_argument("--trials", type=int, default=3, help="repeats per strategy")
     ap.add_argument("--keep-recent", type=int, default=2,
                     help="exchanges kept verbatim by the compact strategy")
+    ap.add_argument("--compact-every", type=int, default=5,
+                    help="turns between compactions (default: 5). Setting this "
+                         "to 1 compacts every turn, which inflates the compact "
+                         "arm and rigs the result toward keep-everything - only "
+                         "do it if you are deliberately modelling that.")
     ap.add_argument("--in-rate", type=float, default=1.00, help="input $/MTok")
     ap.add_argument("--out-rate", type=float, default=5.00, help="output $/MTok")
     args = ap.parse_args()
 
-    print(f"model={MODEL} turns={args.turns} trials={args.trials}\n")
+    print(f"model={MODEL} turns={args.turns} trials={args.trials} compact_every={args.compact_every}\n")
     for strategy in ("append", "compact"):
         results = [run_trial(strategy, args.turns, args.keep_recent,
-                             args.in_rate, args.out_rate)
+                             args.in_rate, args.out_rate, args.compact_every)
                    for _ in range(args.trials)]
         hits = sum(r["recalled"] for r in results)
         per_turn = statistics.mean(r["cost"] for r in results) / (args.turns + 2)
         print(f"{strategy:8s} recall {hits}/{args.trials}  "
               f"${per_turn:.5f}/turn  "
-              f"ttft {statistics.mean(r['ttft'] for r in results):.2f}s")
+              f"ttft {statistics.mean(r['ttft'] for r in results):.2f}s  "
+              f"compactions {statistics.mean(r['compactions'] for r in results):.1f}")
         for r in results:
             if not r["recalled"]:
                 print(f"           miss -> {r['answer']!r}")
