@@ -221,6 +221,23 @@ else no "screenshot audit row is not conditional (would nag CLI libraries)"; fi
 if grep -qF "REGISTER" <<<"$lp_block"; then ok "audit infers the register before judging rows"
 else no "audit rows are register-blind (would flag Reference READMEs for missing a hero)"; fi
 
+# FRONTMATTER CONTRACT — this suite requires README trigger phrases in the skill's
+# `description:` field. The description IS the router's trigger: github-ops owns the
+# README intro, the landing page and Recent Updates, but a request like "write me a
+# README" reaches none of it unless the description says so. A description-trim lane
+# that strips these phrases silently un-routes three references, so the assertion
+# lives here and this comment says why. Keep the phrases; trim elsewhere if needed.
+sk_desc="$(grep -m1 '^description:' "$SK")"
+for cue in "write a README" "README badges"; do
+  if grep -qF "$cue" <<<"$sk_desc"; then ok "description carries the '$cue' trigger"
+  else no "description missing README trigger: '$cue' (skill unreachable for README work)"; fi
+done
+# Per-skill description cap is 1000 chars (tests/validate.sh) and the catalog-wide
+# budget is already tight — assert we stayed well inside it.
+desc_len=${#sk_desc}
+if [ "$desc_len" -le 1000 ]; then ok "description within the 1000-char cap ($desc_len)"
+else no "description is $desc_len chars (cap 1000)"; fi
+
 # Mode new must offer the register as a user-flippable choice, not decide silently.
 if grep -qE "say 'showcase' to flip" <<<"$sk_body"; then ok "mode new surfaces register as a flippable line"
 else no "mode new does not surface the register choice to the user"; fi

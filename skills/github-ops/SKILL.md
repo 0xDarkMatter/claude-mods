@@ -1,6 +1,6 @@
 ---
 name: github-ops
-description: "GitHub remote operations: repo creation, metadata, releases, issue/PR management with preview-before-send, and read-only security auditing. Triggers on: push to github, ship release, gh release, audit github repo, gh issue, gh pr, merge PR, branch protection, secret scanning, SECURITY.md."
+description: "GitHub remote operations and README authoring: repo creation, metadata, releases, issue/PR management with preview-before-send, README as a landing page (badge row, features-as-benefits, screenshots, Recent Updates), and read-only security auditing. Triggers on: write a README, improve the README, README badges, README features section, push to github, ship release, gh release, audit github repo, gh issue, gh pr, merge PR, branch protection, secret scanning, SECURITY.md."
 license: MIT
 allowed-tools: "Read Write Edit Bash Glob Grep"
 metadata:
