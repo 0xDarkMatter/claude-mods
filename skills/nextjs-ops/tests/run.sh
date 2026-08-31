@@ -61,7 +61,8 @@ done
 # 4. Every SKILL.md-cited bundled resource exists on disk
 for res in assets/next.config.template.ts assets/nextjs-facts.json \
            scripts/audit-app-router.py scripts/check-nextjs-facts.py \
-           tests/fixtures/app-sample/package.json; do
+           tests/fixtures/app-sample/package.json \
+           tests/fixtures/clean-app/package.json; do
   [ -f "$here/$res" ] && ok "resource present: $res" || bad "missing resource: $res"
 done
 
@@ -73,6 +74,7 @@ ec() { local want="$1" lbl="$2"; shift 2; "$@" >/dev/null 2>&1; local got=$?
 audit="$here/scripts/audit-app-router.py"
 fixture="$here/tests/fixtures/app-sample"
 clean="$fixture/app/clean/page.tsx"
+cleanapp="$here/tests/fixtures/clean-app"
 "$PY" -m py_compile "$audit" && ok "audit: py_compile clean" || bad "audit: py_compile failed"
 "$PY" "$audit" --help 2>/dev/null | grep -q "Examples:" && ok "audit: --help has Examples" || bad "audit: --help missing Examples"
 ec 0 "audit: --help exits 0"          "$PY" "$audit" --help
@@ -82,27 +84,51 @@ ec 2 "audit: --limit 0 -> 2"          "$PY" "$audit" --limit 0 "$fixture"
 ec 3 "audit: missing path -> 3"       "$PY" "$audit" /no/such/path
 ec 10 "audit: fixture has findings -> 10" "$PY" "$audit" "$fixture"
 
-# Behaviour: the fixture carries exactly one bait per rule, so every rule must
-# fire exactly once and the negative-control file must stay silent.
+# Behaviour: app-sample/ is a minefield carrying at least one bait per rule, so
+# every rule must fire. (sync-params-prop has two: a sync type annotation and a
+# sync destructure, which are separate code paths.)
 # CONTRACT: tests/fixtures/app-sample/ and these numbers move together — adding
 # a rule to audit-app-router.py means adding its bait to the fixture.
 out="$("$PY" "$audit" "$fixture" 2>/dev/null)"
-[ "$(printf '%s\n' "$out" | grep -c .)" = "12" ] && ok "audit: 12 findings" || bad "audit: finding count != 12"
+[ "$(printf '%s\n' "$out" | grep -c .)" = "17" ] && ok "audit: 17 findings" || bad "audit: finding count != 17"
 for rule in sync-request-api sync-params-prop request-api-in-use-cache \
             client-secret-env client-imports-server-only parallel-route-no-default \
             nondeterministic-in-use-cache middleware-file edge-runtime-segment \
-            revalidate-tag-single-arg images-domains-config action-without-auth; do
+            revalidate-tag-single-arg images-domains-config action-without-auth \
+            force-static-with-request-api client-component-route-file \
+            proxy-without-matcher blanket-force-dynamic; do
   n="$(printf '%s\n' "$out" | grep -cF "	$rule	")"
-  [ "$n" = "1" ] && ok "audit: rule fires once: $rule" || bad "audit: rule $rule fired $n times (want 1)"
+  [ "$n" -ge 1 ] && ok "audit: rule fires: $rule" || bad "audit: rule $rule never fired"
 done
 
-# The negative control is the load-bearing half: a linter that flags correct code
-# is worse than no linter. app/clean/page.tsx is correct on every rule.
+# The negative controls are the load-bearing half: a linter that flags correct
+# code is worse than no linter. app/clean/page.tsx is a single correct page;
+# clean-app/ is the adversarial version - a whole app built from constructs a
+# naive regex misreads (the documented read-outside-pass-in pattern with the
+# cached and uncached functions in ONE module, params aliased rather than
+# destructured, an unrelated object literal carrying a `params:` key, a guard
+# named requireOwner rather than auth). It must stay at zero findings.
+# CONTRACT: a rule added to audit-app-router.py needs its near-miss added here,
+# not only its bait in app-sample/. Every construct in clean-app/ is a false
+# positive this suite has already caught once.
 ec 0 "audit: negative control is clean" "$PY" "$audit" "$clean"
+ec 0 "audit: adversarial clean app is clean" "$PY" "$audit" "$cleanapp"
+scanned="$("$PY" "$audit" --json "$cleanapp" 2>/dev/null | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["meta"]["files_scanned"])')"
+[ "${scanned:-0}" -ge 7 ] \
+  && ok "audit: clean app actually scanned ($scanned files)" \
+  || bad "audit: clean app scanned $scanned files - a zero finding count would be meaningless"
+
+# The destructure path shipped dead once: its character class ended in a literal
+# newline, but splitlines() has already removed the newline, so
+# `const { id } = params` at end-of-line never matched and the branch never ran.
+# Assert the exact bait, not just a rule-level count that the type path satisfies.
+printf '%s\n' "$out" | grep -q "app/page.tsx:5	.*destructured" \
+  && ok "audit: sync-params destructure path fires (regression: was dead code)" \
+  || bad "audit: sync-params destructure path is dead again"
 
 # Severity floor actually filters, and results stay sorted worst-first.
 err_out="$("$PY" "$audit" --min-severity error "$fixture" 2>/dev/null)"
-[ "$(printf '%s\n' "$err_out" | grep -c .)" = "6" ] && ok "audit: 6 errors" || bad "audit: error count != 6"
+[ "$(printf '%s\n' "$err_out" | grep -c .)" = "8" ] && ok "audit: 8 errors" || bad "audit: error count != 8"
 printf '%s\n' "$err_out" | grep -qv '^error	' && bad "audit: --min-severity error leaked lower severities" \
   || ok "audit: --min-severity error filters cleanly"
 [ "$(printf '%s\n' "$out" | head -1 | cut -f1)" = "error" ] && ok "audit: sorted worst-first" || bad "audit: not sorted worst-first"
@@ -111,15 +137,15 @@ printf '%s\n' "$err_out" | grep -qv '^error	' && bad "audit: --min-severity erro
 rule_out="$("$PY" "$audit" --rules middleware-file "$fixture" 2>/dev/null)"
 [ "$(printf '%s\n' "$rule_out" | grep -c .)" = "1" ] && ok "audit: --rules narrows to one" || bad "audit: --rules did not narrow"
 
-# Version gating: the fixture pins next ^16.3.3, so all 12 rules apply. Against
-# an older major the six rules describing 15/16-only breakages must go silent —
+# Version gating: the fixture pins next ^16.3.3, so all 16 rules apply. Against
+# an older major the eight rules describing 15/16-only breakages must go silent —
 # a linter that flags correct code is the failure mode this gate exists to stop.
 # CONTRACT: these counts follow the min_major column in the script's RULES table.
 ec 2 "audit: --assume-major 0 -> 2" "$PY" "$audit" --assume-major 0 "$fixture"
 v15="$("$PY" "$audit" --assume-major 15 "$fixture" 2>/dev/null)"
-[ "$(printf '%s\n' "$v15" | grep -c .)" = "8" ] && ok "audit: 8 findings at next 15" || bad "audit: next-15 count != 8"
+[ "$(printf '%s\n' "$v15" | grep -c .)" = "13" ] && ok "audit: 13 findings at next 15" || bad "audit: next-15 count != 13"
 v14="$("$PY" "$audit" --assume-major 14 "$fixture" 2>/dev/null)"
-[ "$(printf '%s\n' "$v14" | grep -c .)" = "4" ] && ok "audit: 4 findings at next 14" || bad "audit: next-14 count != 4"
+[ "$(printf '%s\n' "$v14" | grep -c .)" = "8" ] && ok "audit: 8 findings at next 14" || bad "audit: next-14 count != 8"
 for gated in sync-request-api sync-params-prop request-api-in-use-cache \
              parallel-route-no-default nondeterministic-in-use-cache \
              middleware-file edge-runtime-segment revalidate-tag-single-arg; do
@@ -132,7 +158,7 @@ done
 # Capture first: findings exit 10, and under pipefail that would sink the pipe.
 audit_json="$("$PY" "$audit" --json "$fixture" 2>/dev/null)"
 printf '%s' "$audit_json" \
-  | "$PY" -c 'import json,sys; d=json.load(sys.stdin); m=d["meta"]; assert m["schema"]=="claude-mods.nextjs-ops.app-audit/v1"; assert m["count"]==12; assert m["truncated"] is False; assert m["next_major"]==16, m; assert "package.json" in m["next_major_source"], m; assert {f["rule"] for f in d["data"]} >= {"sync-request-api","action-without-auth"}' \
+  | "$PY" -c 'import json,sys; d=json.load(sys.stdin); m=d["meta"]; assert m["schema"]=="claude-mods.nextjs-ops.app-audit/v1"; assert m["count"]==17; assert m["truncated"] is False; assert m["next_major"]==16, m; assert "package.json" in m["next_major_source"], m; assert {f["rule"] for f in d["data"]} >= {"sync-request-api","action-without-auth"}' \
   && ok "audit: --json envelope parses" || bad "audit: --json envelope broken"
 lim_json="$("$PY" "$audit" --json --limit 2 "$fixture" 2>/dev/null)"
 printf '%s' "$lim_json" \

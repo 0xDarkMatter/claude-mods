@@ -1,6 +1,6 @@
 ---
 name: nextjs-ops
-description: "Next.js App Router operations - the server/client boundary, the two caching models, Server Actions security, streaming, proxy.ts and deployment. Use for: next.js, nextjs, app router, use cache, cacheComponents, Cache Components, cacheLife, cacheTag, revalidateTag, updateTag, revalidatePath, unstable_cache, PPR, partial prerendering, stale data in production, use client, use server, server actions, RSC payload, serialization boundary, next/headers, async params, cookies not awaited, loading.tsx, Suspense boundary, generateStaticParams, ISR, proxy.ts, middleware.ts deprecated, edge runtime, next build vs next start, self-hosting Next.js, standalone output, Failed to find Server Action."
+description: "Next.js App Router operations - the server/client boundary, the two caching models, Server Actions security, streaming, proxy.ts and deployment. Use for: next.js, nextjs, app router, use cache, cacheComponents, Cache Components, cacheLife, cacheTag, revalidateTag, updateTag, revalidatePath, unstable_cache, PPR, partial prerendering, stale data in production, use client, use server, server actions, RSC payload, serialization boundary, next/headers, async params, cookies not awaited, loading.tsx, Suspense boundary, generateStaticParams, ISR, proxy.ts, middleware.ts deprecated, edge runtime, next build vs next start, self-hosting Next.js, standalone output, Failed to find Server Action, upgrade to Next.js 16, Pages Router to App Router, force-static, force-dynamic, next/font, next/script, bundle size, testing server components."
 license: MIT
 allowed-tools: "Read Write Bash Grep Glob"
 metadata:
@@ -75,6 +75,15 @@ What are you doing with Next.js?
 │
 ├─ Shipping it: self-host, Docker, multi-instance, CDN, Cloudflare
 │  └─ references/deployment.md
+│
+├─ Upgrading 14/15 -> 16, or Pages Router -> App Router
+│  └─ references/upgrading.md
+│
+├─ Fonts, scripts, images, bundle size, build speed
+│  └─ references/optimization.md
+│
+├─ Testing it (and what simply cannot be unit-tested)
+│  └─ references/testing.md
 │
 └─ Auditing an existing app for the known footguns
    └─ python scripts/audit-app-router.py <project-root>
@@ -281,14 +290,14 @@ The non-obvious ones, in rough order of hours lost.
 
 | Resource | Use it when |
 |---|---|
-| [`scripts/audit-app-router.py`](scripts/audit-app-router.py) | Auditing or inheriting an app — 12 static rules for the landmines above, **gated on the project's detected Next.js major** |
+| [`scripts/audit-app-router.py`](scripts/audit-app-router.py) | Auditing or inheriting an app — 16 static rules for the landmines above, **gated on the project's detected Next.js major** |
 | [`scripts/check-nextjs-facts.py`](scripts/check-nextjs-facts.py) | CI / freshness: are this skill's version facts still true? |
 | [`assets/next.config.template.ts`](assets/next.config.template.ts) | Starting a 16.x config, or auditing an inherited one |
 | [`assets/nextjs-facts.json`](assets/nextjs-facts.json) | The dated fact catalog the verifier reads |
 
 The audit script takes this skill's own advice: it reads the project's Next.js
 major from `node_modules/next` (or `package.json`) and **suppresses the rules
-that postdate it** — six of the twelve describe breakages introduced in 15 or
+that postdate it** — eight of the sixteen describe breakages introduced in 15 or
 16, so running them against a 14-era app would flag correct code. The verdict
 line always states the major it gated on. Use `--assume-major N` when scanning a
 bare subdirectory where the version cannot be read.
@@ -322,6 +331,9 @@ python scripts/check-nextjs-facts.py --offline
 | [references/routing-and-rendering.md](references/routing-and-rendering.md) | File conventions, async `params`, dynamic/parallel/intercepting routes, metadata |
 | [references/proxy-and-runtimes.md](references/proxy-and-runtimes.md) | `proxy.ts`, matchers, execution order, Node vs Edge runtime API gaps |
 | [references/deployment.md](references/deployment.md) | Self-hosting, Docker, multi-instance, CDN behaviour, the Cloudflare path |
+| [references/upgrading.md](references/upgrading.md) | 14 -> 15 -> 16 deltas (which are silent), Cache Components adoption, Pages -> App |
+| [references/optimization.md](references/optimization.md) | `next/font`, `next/script` strategies, image props, bundle and build speed |
+| [references/testing.md](references/testing.md) | The shifted pyramid: async Server Components are E2E-only; action security tests; `instant()` |
 
 ## Cross-references
 

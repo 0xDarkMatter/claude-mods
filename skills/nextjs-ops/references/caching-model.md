@@ -53,10 +53,11 @@ export const getCachedUser = unstable_cache(
 )
 ```
 
-`unstable_cache` is the only one of these stores that survives a deploy —
-`'use cache'` entries never do, because the build id is part of their key. If
-something must persist across deploys, this (or the `fetch` data cache) is the
-tool.
+**This model's two stores are the ones that survive a deploy.** Both the `fetch`
+data cache and `unstable_cache` persist across builds; `'use cache'` entries
+never do, because the build id (or `deploymentId`) is part of their key — not
+even `remote` ones. If something must outlive a deploy, it belongs in one of
+these two, not in a Cache Components scope.
 
 ```ts
 // Deduplicate non-fetch reads within one render pass
