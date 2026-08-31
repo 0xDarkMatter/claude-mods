@@ -17,6 +17,13 @@ Same loop, plus the four things that decide whether a long-running agent costs
   4. TOOL OUTPUT CAPPED AT THE BOUNDARY. The cheapest context lever there is:
      it shrinks context WITHOUT rewriting the cached prefix, so unlike
      compaction it costs nothing in cache terms.
+  5. CONTENT NORMALISED TO DICT BLOCKS. cache_control is a key on a content
+     block, so it can only be set on a dict. `response.content` is a list of
+     SDK block OBJECTS and "content": "a string" has no blocks at all -- append
+     either verbatim and every marker aimed at it is silently discarded. An
+     earlier version of this file did exactly that and placed ZERO message
+     breakpoints in a realistic conversation, with no error and no warning.
+     to_blocks() is what makes points 2 and 3 actually take effect.
 
 And the one assertion that matters: cache_read_input_tokens > 0. A broken
 cache produces no error, no warning, and no symptom other than the bill --
@@ -101,13 +108,49 @@ def capped(text: str, limit: int = TOOL_RESULT_CAP) -> str:
 
 
 # === 2/3. BREAKPOINT PLACEMENT ==============================================
+def to_blocks(content) -> list:
+    """Normalise any message content into a list of plain dict blocks.
+
+    THIS IS LOAD-BEARING, not tidiness. cache_control is a key on a content
+    block, so a breakpoint can only be attached to a dict. Two shapes in normal
+    use are NOT dicts and will silently refuse every marker:
+
+      * `response.content` — SDK block OBJECTS (TextBlock, ToolUseBlock, ...).
+        Appending them verbatim, as the minimal loop does, is idiomatic and
+        correct for a loop that never caches. Here it means every assistant
+        turn is un-markable.
+      * `"content": "a plain string"` — the shorthand form has no blocks at
+        all, so there is nowhere to put a marker.
+
+    Either one produces NO error and NO warning: the request simply caches
+    less than you think. Normalising at append time is what keeps the
+    breakpoint logic below sound.
+    """
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}]
+    out = []
+    for block in content:
+        if isinstance(block, dict):
+            out.append(block)
+        elif hasattr(block, "model_dump"):        # pydantic v2 (current SDK)
+            out.append(block.model_dump(exclude_none=True))
+        elif hasattr(block, "dict"):              # pydantic v1
+            out.append(block.dict(exclude_none=True))
+        else:                                     # last resort
+            out.append(dict(vars(block)))
+    return out
+
+
 def _blocks(message) -> list:
     content = message["content"]
     return content if isinstance(content, list) else []
 
 
-def place_message_breakpoints(messages: list) -> None:
+def place_message_breakpoints(messages: list) -> int:
     """Re-anchor rolling cache breakpoints across the message list, in place.
+
+    Returns the number of markers actually placed — check it. Silently placing
+    zero is the failure this function exists to prevent.
 
     Rules encoded here:
       * The newest turn always carries a breakpoint, so the next request can
@@ -117,6 +160,11 @@ def place_message_breakpoints(messages: list) -> None:
         30 blocks would otherwise jump clean over the previous entry.
       * At most MAX_BREAKPOINTS - 1 markers here; the system block owns the
         fourth. Exceeding 4 is an API error, so oldest markers are dropped.
+      * A marker can only sit on a dict block. If the chosen position is not
+        one (an un-normalised SDK object, say), walk BACKWARD to the nearest
+        dict rather than dropping the anchor — dropping it silently is exactly
+        how a loop ends up with no caching at all. Run content through
+        to_blocks() and this path never triggers.
     """
     assert BREAKPOINT_EVERY < LOOKBACK_BLOCKS, "anchor must fall inside the window"
 
@@ -128,22 +176,46 @@ def place_message_breakpoints(messages: list) -> None:
                 block.pop("cache_control", None)
 
     # Walk the flattened block stream, marking a candidate every N blocks and
-    # always marking the final block.
+    # always marking the final block. Positions count EVERY block (the API sees
+    # them all), even ones that cannot themselves carry a marker.
     flat = [(mi, bi) for mi, msg in enumerate(messages)
             for bi, _ in enumerate(_blocks(msg))]
     if not flat:
-        return
-    candidates = [flat[i] for i in range(BREAKPOINT_EVERY - 1, len(flat), BREAKPOINT_EVERY)]
-    if flat[-1] not in candidates:
-        candidates.append(flat[-1])
+        # Every message used the plain-string shorthand: nothing can be cached.
+        print("  WARNING: no content blocks to anchor a cache breakpoint on.\n"
+              "           Message content is in string shorthand - run it through\n"
+              "           to_blocks() so cache_control has somewhere to attach.")
+        return 0
+
+    def settable(idx: int):
+        """Nearest dict block at or before idx, within the lookback window."""
+        for k in range(idx, max(-1, idx - LOOKBACK_BLOCKS), -1):
+            mi, bi = flat[k]
+            if isinstance(_blocks(messages[mi])[bi], dict):
+                return k
+        return None
+
+    chosen: list[int] = []
+    for i in list(range(BREAKPOINT_EVERY - 1, len(flat), BREAKPOINT_EVERY)) + [len(flat) - 1]:
+        k = settable(i)
+        if k is not None and k not in chosen:
+            chosen.append(k)
 
     # Keep the most recent ones; the system breakpoint consumes one of the 4.
-    for mi, bi in candidates[-(MAX_BREAKPOINTS - 1):]:
+    placed = 0
+    for k in chosen[-(MAX_BREAKPOINTS - 1):]:
+        mi, bi = flat[k]
         block = _blocks(messages[mi])[bi]
         if isinstance(block, dict):
             block["cache_control"] = {"type": "ephemeral"}
+            placed += 1
             # >>> ADAPT: {"type": "ephemeral", "ttl": "1h"} if turns are minutes
             # apart. 1h writes cost 2x vs 1.25x, so it needs 3+ reads to pay off.
+    if placed == 0:
+        print("  WARNING: placed 0 message cache breakpoints - the conversation\n"
+              "           will re-read from the system breakpoint only. Normalise\n"
+              "           message content with to_blocks().")
+    return placed
 
 
 def report_usage(usage, turn: int, first_turn: bool) -> None:
@@ -166,12 +238,14 @@ def report_usage(usage, turn: int, first_turn: bool) -> None:
 def main() -> None:
     # >>> ADAPT: your opening request. Volatile content belongs HERE, after the
     # cached system block -- never interpolated into SYSTEM_PROMPT.
+    # Block form, not the "content": "..." string shorthand — a string has no
+    # block for cache_control to attach to.
     messages = [{"role": "user",
                  "content": [{"type": "text",
                               "text": "What's the weather in Paris and in Oslo?"}]}]
 
     for turn in range(1, 21):  # bounded: never ship an unbounded agent loop
-        place_message_breakpoints(messages)
+        place_message_breakpoints(messages)  # returns the count; 0 means no caching
 
         response = client.messages.create(
             model=MODEL,
@@ -191,7 +265,11 @@ def main() -> None:
                     print(block.text)
             return
 
-        messages.append({"role": "assistant", "content": response.content})
+        # to_blocks(), not response.content verbatim: SDK block objects cannot
+        # carry cache_control, so appending them raw silently un-caches every
+        # assistant turn (no error, just a bigger bill).
+        messages.append({"role": "assistant",
+                         "content": to_blocks(response.content)})
 
         tool_results = []
         for block in response.content:
@@ -211,7 +289,7 @@ def main() -> None:
             })
         messages.append({"role": "user", "content": tool_results})
 
-    print("Hit the turn ceiling without an end_turn — check the tool loop.")
+    print("Hit the turn ceiling without an end_turn - check the tool loop.")
 
 
 if __name__ == "__main__":

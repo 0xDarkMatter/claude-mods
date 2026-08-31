@@ -9,9 +9,15 @@ the arithmetic is short enough that people skip it and guess wrong.
 Models both paths in dollars (see references/compaction.md §3):
   append  : history rides the cache at CACHE_READ_MULTIPLIER of base input,
             every remaining turn, growing by --growth-per-turn.
-  compact : one summarisation call (cached read in, summary out) + a cache
-            WRITE of the new prefix + the remaining turns on the summary,
-            and every token cached before the rewrite is forfeited.
+  compact : summarisation call(s) (cached read in, summary out) + a cache
+            WRITE of the new prefix each time + the remaining turns on the
+            summary, and every token cached before a rewrite is forfeited.
+
+            Compaction RECURS when the history grows. With --growth-per-turn
+            set, the summary climbs back toward the original size and a real
+            system compacts again; this models that cadence rather than
+            charging a single one-shot rewrite. Assuming one compaction
+            understated its cost by ~2.2x on a 60-turn, 4k-per-turn session.
 
 Also checks the hard constraint first: if the projected history overflows the
 context window, cost is moot and compaction (or offloading) is forced.
@@ -242,21 +248,36 @@ def main(argv: list[str]) -> int:
                                     args.growth_per_turn, rate)
 
     # --- Path 2: compact. Summarise now, then carry the summary.
-    #   a) the summarisation call: history read from cache, summary generated
-    cost_summarise = (args.history_tokens * CACHE_READ_MULTIPLIER * rate / PER_MTOK
-                      + summary * out_rate / PER_MTOK)
-    #   b) writing the new (shorter) prefix into the cache
-    cost_rewrite = summary * write_mult * rate / PER_MTOK
-    #   c) carrying the summary for the remaining turns, growing as before
+    #   a) one summarisation call: history read from cache, summary generated
+    per_summarise = (args.history_tokens * CACHE_READ_MULTIPLIER * rate / PER_MTOK
+                     + summary * out_rate / PER_MTOK)
+    #   b) writing the new (shorter) prefix into the cache, once per compaction
+    per_rewrite = summary * write_mult * rate / PER_MTOK
+    #   c) HOW MANY compactions. With growth, the summary climbs back to the
+    #      original size after (history - summary)/growth turns and a real
+    #      system compacts again. Charging a single one-shot rewrite flatters
+    #      compaction badly on long agentic sessions (~2.2x on 60 turns at
+    #      4k/turn), which is the regime where people actually reach for it.
+    if args.growth_per_turn > 0:
+        regrow_turns = (args.history_tokens - summary) / args.growth_per_turn
+        compactions = max(1, 1 + int(turns / regrow_turns)) if turns > 0 else 0
+    else:
+        compactions = 1 if turns > 0 else 0
+    cost_summarise = per_summarise * compactions
+    cost_rewrite = per_rewrite * compactions
+    #   d) carrying the summary for the remaining turns, growing as before
     cost_carry = cached_carry_cost(summary, turns, args.growth_per_turn, rate)
     cost_compact = cost_summarise + cost_rewrite + cost_carry
 
     delta = cost_append - cost_compact          # >0 means compaction is cheaper
-    # Break-even: the turn count at which compaction's fixed cost is repaid.
-    # Per-turn saving is the token difference carried at cache-read price.
+    # Break-even: turns needed to repay ONE compaction's fixed cost. With
+    # growth the cycle repeats, so this is a per-cycle repayment period, not a
+    # whole-session verdict -- the verdict below compares the full modelled
+    # costs including every compaction. Per-turn saving is the token difference
+    # carried at cache-read price.
     per_turn_saving = ((args.history_tokens - summary)
                        * CACHE_READ_MULTIPLIER * rate / PER_MTOK)
-    fixed_cost = cost_summarise + cost_rewrite
+    fixed_cost = per_summarise + per_rewrite   # one compaction's fixed cost
     breakeven = (fixed_cost / per_turn_saving) if per_turn_saving > 0 else float("inf")
 
     if overflows:
@@ -268,11 +289,14 @@ def main(argv: list[str]) -> int:
 
     note(f"  projected history at turn {turns}: {projected:,.0f} tokens "
          f"(window {args.context_window:,.0f})", quiet)
+    note(f"  compactions modelled: {compactions}"
+         + (" (history regrows at --growth-per-turn)" if args.growth_per_turn > 0
+            else " (no growth given -> one-shot)"), quiet)
     note(f"  append  ${cost_append:.4f}   compact ${cost_compact:.4f}"
          f"   (summarise ${cost_summarise:.4f} + rewrite ${cost_rewrite:.4f}"
          f" + carry ${cost_carry:.4f})", quiet)
-    note(f"  break-even at ~{breakeven:.1f} remaining turns "
-         f"(you have {turns})", quiet)
+    note(f"  break-even at ~{breakeven:.1f} turns per compaction cycle "
+         f"(you have {turns} turns, {compactions} compaction(s) modelled)", quiet)
     note("  note: break-even is scale-invariant - size and price cancel out; it "
          "tracks the summary ratio, not how big or costly the conversation is.",
          quiet)
@@ -314,12 +338,17 @@ def main(argv: list[str]) -> int:
             "compact_carry": round(cost_carry, 6),
             "delta_append_minus_compact": round(delta, 6),
         },
-        "breakeven_turns": (round(breakeven, 2) if breakeven != float("inf") else None),
+        "breakeven_turns_per_compaction": (
+            round(breakeven, 2) if breakeven != float("inf") else None),
+        "compactions_modelled": compactions,
         "projected_history_tokens": projected,
         "caveats": [
             "models cost only - recall loss from summarisation is not priced",
             "break-even turns is scale-invariant: driven by the summary ratio, "
-            "not by history size or price",
+            "the output/input price ratio and the write multiplier - not by "
+            "history size or price level",
+            "break-even is the repayment period for ONE compaction; the verdict "
+            "compares full modelled costs across all modelled compactions",
         ],
     }
 
@@ -328,7 +357,8 @@ def main(argv: list[str]) -> int:
                           "meta": {"schema": SCHEMA, "status": verdict}}))
     else:
         print(f"{verdict}\tappend=${cost_append:.4f}\tcompact=${cost_compact:.4f}"
-              f"\tbreakeven_turns={breakeven:.1f}")
+              f"\tbreakeven_turns_per_compaction={breakeven:.1f}"
+              f"  compactions={compactions}")
 
     return EXIT_COMPACT if verdict == "compact" else EXIT_OK
 

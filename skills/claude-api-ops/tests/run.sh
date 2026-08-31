@@ -172,6 +172,18 @@ expect_has "context-budget --json verdict" '"verdict": "append"' "$out"
 # acting on the verdict alone would otherwise treat "cheaper" as "better".
 expect_has "context-budget --json carries the recall caveat" 'recall loss' "$out"
 
+# REGRESSION: the calculator originally charged ONE compaction. With growth the
+# summary regrows and a real system compacts again -- assuming one-shot
+# understated compaction's fixed cost ~2.2x on a 60-turn, 4k/turn session, i.e.
+# it was biased TOWARD compaction, the opposite of the doctrine's default.
+out="$("$PYTHON" "$CB" --history-tokens 120000 --turns-remaining 60 --base-rate 2.00         --growth-per-turn 4000 --json -q 2>/dev/null)"
+expect_has "growing session models >1 compaction" '"compactions_modelled": 3' "$out"
+out="$("$PYTHON" "$CB" --history-tokens 120000 --turns-remaining 60 --base-rate 2.00 --json -q 2>/dev/null)"
+expect_has "no growth -> one-shot compaction" '"compactions_modelled": 1' "$out"
+# Break-even is a per-compaction repayment period, not a session verdict; the
+# key name has to say so or readers compare it against total turns and misread.
+expect_has "break-even key is scoped per compaction" '"breakeven_turns_per_compaction"' "$out"
+
 # Input validation (resource protocol §6 - agents fabricate plausible inputs).
 for bad in "--history-tokens -5 --turns-remaining 10" \
            "--history-tokens 1000 --turns-remaining -1" \
@@ -227,6 +239,54 @@ assert marks(msgs) == before, "not idempotent"
 # Tool output is capped at the boundary (the cache-preserving lever).
 assert len(m.capped("x" * 99999)) < 99999, "capped() did not truncate"
 assert m.capped("short") == "short", "capped() mangled a short result"
+
+# === REGRESSION: the shipped loop once placed ZERO breakpoints ===============
+# In a real loop, assistant turns are `response.content` -- SDK block OBJECTS,
+# not dicts -- and cache_control can only be set on a dict. The first version
+# of this asset skipped non-dict blocks silently, so every anchor landed on an
+# assistant block and was dropped: no error, no warning, no caching, full price
+# forever. The original test missed it because it only ever fed dicts. These
+# cases feed the shapes a real loop actually produces.
+class SDKBlock:                       # stands in for anthropic.types.TextBlock
+    def __init__(self, t): self.type = "text"; self.text = t
+    def model_dump(self, exclude_none=False): return {"type": "text", "text": self.text}
+
+def mixed(n_turns):
+    msgs = []
+    for k in range(n_turns):
+        msgs.append({"role": "user",
+                     "content": [{"type": "text", "text": f"u{k}-{j}"} for j in range(4)]})
+        msgs.append({"role": "assistant", "content": [SDKBlock(f"a{k}-{j}") for j in range(4)]})
+    return msgs
+
+# Un-normalised SDK objects: must still place markers (walks back to a dict).
+msgs = mixed(6)
+placed = m.place_message_breakpoints(msgs)
+assert placed > 0, "REGRESSION: zero breakpoints placed on an SDK-object conversation"
+assert placed <= m.MAX_BREAKPOINTS - 1, f"too many breakpoints: {placed}"
+
+# Normalised via to_blocks() -- the path main() takes. The newest block must
+# carry a marker, and anchors must stay inside the 20-block lookback.
+msgs = [{"role": m0["role"], "content": m.to_blocks(m0["content"])} for m0 in mixed(6)]
+placed = m.place_message_breakpoints(msgs)
+got = marks(msgs)
+assert placed == len(got), f"reported {placed} but set {len(got)}"
+assert got[-1] == (len(msgs) - 1, len(msgs[-1]["content"]) - 1), f"newest block unmarked: {got}"
+flat_pos = []
+for mi, msg in enumerate(msgs):
+    for bi in range(len(msg["content"])):
+        flat_pos.append((mi, bi))
+idxs = [flat_pos.index(g) for g in got]
+gaps = [idxs[i + 1] - idxs[i] for i in range(len(idxs) - 1)]
+assert all(g <= m.LOOKBACK_BLOCKS for g in gaps), f"anchor gap exceeds lookback: {gaps}"
+
+# String-shorthand content has no block to attach a marker to: warn, don't crash.
+assert m.place_message_breakpoints([{"role": "user", "content": "plain string"}]) == 0
+
+# to_blocks() normalises all three shapes a caller may hand it.
+assert m.to_blocks("hi") == [{"type": "text", "text": "hi"}]
+assert m.to_blocks([{"type": "text", "text": "hi"}]) == [{"type": "text", "text": "hi"}]
+assert m.to_blocks([SDKBlock("hi")]) == [{"type": "text", "text": "hi"}]
 print("OK")
 PY
 expect_has "breakpoint placement, capping and idempotence" "OK" "$(cat "$SB/bp.out")"
@@ -265,6 +325,52 @@ printf '\nUse claude-opus-7 for this.\n' >> "$SB/copy3/references/tool-use.md"
 "$PYTHON" "$SB/copy3/scripts/check-model-table.py" --offline >"$SB/neg3.out" 2>&1
 expect_exit "unknown model id -> 4" 4 $?
 expect_has "finding classifies it unknown" "unknown" "$(cat "$SB/neg3.out")"
+
+# Runtime warnings must be ASCII: this asset prints to a console that is cp1252
+# by default on Windows, where an em-dash renders as a replacement character.
+"$PYTHON" - "$SKILL/assets/cached-agent-loop.py" "$SKILL/assets/recall-probe.py" >"$SB/ascii.out" 2>&1 <<'PY'
+import ast, pathlib, sys
+bad = []
+for f in sys.argv[1:]:
+    tree = ast.parse(pathlib.Path(f).read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "print":
+            for a in ast.walk(node):
+                if isinstance(a, ast.Constant) and isinstance(a.value, str) \
+                        and any(ord(c) > 127 for c in a.value):
+                    bad.append((pathlib.Path(f).name, a.value[:40]))
+print("CLEAN" if not bad else f"NON-ASCII IN PRINT: {bad}")
+PY
+expect_has "asset runtime output is ASCII-safe" "CLEAN" "$(cat "$SB/ascii.out")"
+
+# ── recall-probe fairness ────────────────────────────────────────────────────
+# REGRESSION: the harness originally compacted on EVERY turn once the history
+# exceeded keep_recent, so the compact arm paid a summarisation call per turn
+# (21 API calls vs append's 12 over 10 turns). That inflates the arm under test
+# and would "confirm" the keep-everything result whatever the data said. The
+# cadence knob is the fix; assert it exists and is actually consulted.
+echo "-- recall-probe fairness --"
+RP="$SKILL/assets/recall-probe.py"
+grep -q 'compact_every' "$RP" && ok "recall-probe has a compaction cadence" \
+  || no "recall-probe has a compaction cadence"
+grep -q 'turns_since_compaction >= compact_every' "$RP" \
+  && ok "cadence actually gates compaction" || no "cadence actually gates compaction"
+grep -q '"--compact-every"' "$RP" && ok "cadence is user-tunable" || no "cadence is user-tunable"
+# Default must not be 1 -- that is the rigged configuration.
+"$PYTHON" - "$RP" >"$SB/rp.out" 2>&1 <<'PY'
+import ast, pathlib, sys
+tree = ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+for node in ast.walk(tree):
+    if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "add_argument":
+        if node.args and getattr(node.args[0], "value", "") == "--compact-every":
+            d = [k.value.value for k in node.keywords if k.arg == "default"]
+            print("DEFAULT", d[0] if d else "none")
+PY
+out="$(cat "$SB/rp.out")"
+case "$out" in
+  "DEFAULT 1"|"DEFAULT none"|"") no "compact cadence default is unbiased (got '$out')" ;;
+  *) ok "compact cadence default is unbiased ($out)" ;;
+esac
 
 # ── SKILL.md sanity ───────────────────────────────────────────────────────────
 echo "-- SKILL.md --"
