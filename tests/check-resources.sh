@@ -273,6 +273,25 @@ if [ -n "$__dirty" ]; then
     bad "term.sh consumers hardcode registry glyphs (use \$TERM_DOT/\$TERM_ARROW/term_*):$__dirty"
 else pass "term.sh consumers route every registry glyph through term.sh"; fi
 
+echo "== installer: skill sync must be wildcard-safe"
+# `[` and `]` are PowerShell wildcard metacharacters, so `Copy-Item -Path` on a
+# path like `app/shop/[slug]/page.tsx` matches nothing, copies nothing, and
+# raises no error - the file is silently absent from the installed skill. Any
+# skill shipping a Next.js dynamic-route fixture hits this. Found 2026-08-31,
+# when nextjs-ops installed two files short and its own suite passed vacuously.
+# This is a grep because CI runs on Linux and cannot execute install.ps1.
+__installer="scripts/install.ps1"
+if [ -f "$__installer" ]; then
+    if grep -qE 'Copy-Item\s+-Path\s+\$(f\.FullName|src)\b' "$__installer"; then
+        bad "install.ps1 copies skill files with -Path (glob-expands; drops bracketed paths) - use -LiteralPath"
+    else pass "install.ps1 skill copy uses -LiteralPath"; fi
+    if grep -qE 'Get-ChildItem\s+-Path\s+\$(src|dest)\b' "$__installer"; then
+        bad "install.ps1 enumerates skill files with -Path (glob-expands) - use -LiteralPath"
+    else pass "install.ps1 skill enumeration uses -LiteralPath"; fi
+else
+    pass "install.ps1 absent - installer check skipped"
+fi
+
 echo
 if [ "$fail" -eq 0 ]; then echo "resource checks: clean"; exit 0; fi
 echo "resource checks: failures above"; exit 1
