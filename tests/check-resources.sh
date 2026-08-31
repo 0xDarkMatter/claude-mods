@@ -104,6 +104,14 @@ run "hono-facts --help"               0 "$PY" skills/hono-ops/scripts/check-hono
 run "route-inventory --help"          0 "$PY" skills/hono-ops/scripts/route-inventory.py --help
 run "route-inventory fixture scan"    0 "$PY" skills/hono-ops/scripts/route-inventory.py skills/hono-ops/tests/fixtures/sample-app.ts
 
+echo "== nextjs-ops: Next.js fact/staleness verifier + app-router audit contract"
+run "nextjs-facts --offline consistent" 0 "$PY" skills/nextjs-ops/scripts/check-nextjs-facts.py --offline
+run "nextjs-facts --help"               0 "$PY" skills/nextjs-ops/scripts/check-nextjs-facts.py --help
+run "app-router-audit --help"           0 "$PY" skills/nextjs-ops/scripts/audit-app-router.py --help
+# The fixture is a deliberate minefield: exit 10 (findings) is the pass condition.
+run "app-router-audit fixture scan"    10 "$PY" skills/nextjs-ops/scripts/audit-app-router.py skills/nextjs-ops/tests/fixtures/app-sample
+run "app-router-audit clean control"    0 "$PY" skills/nextjs-ops/scripts/audit-app-router.py skills/nextjs-ops/tests/fixtures/app-sample/app/clean/page.tsx
+
 echo "== protocol: every new verifier is executable + compiles"
 for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/claude-api-ops/scripts/context-budget.py \
@@ -116,7 +124,7 @@ for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/threejs-ops/scripts/check-three-facts.py \
          skills/isometric-ops/scripts/check-iso-facts.py \
          skills/hono-ops/scripts/check-hono-facts.py \
-         skills/hono-ops/scripts/route-inventory.py; do
+         skills/hono-ops/scripts/route-inventory.py          skills/nextjs-ops/scripts/check-nextjs-facts.py          skills/nextjs-ops/scripts/audit-app-router.py; do
     "$PY" -m py_compile "$s" 2>/dev/null && pass "py_compile $(basename "$s")" || bad "py_compile $(basename "$s")"
 done
 bash -n skills/terraform-ops/scripts/check-action-refs.sh 2>/dev/null \
@@ -264,6 +272,25 @@ done
 if [ -n "$__dirty" ]; then
     bad "term.sh consumers hardcode registry glyphs (use \$TERM_DOT/\$TERM_ARROW/term_*):$__dirty"
 else pass "term.sh consumers route every registry glyph through term.sh"; fi
+
+echo "== installer: skill sync must be wildcard-safe"
+# `[` and `]` are PowerShell wildcard metacharacters, so `Copy-Item -Path` on a
+# path like `app/shop/[slug]/page.tsx` matches nothing, copies nothing, and
+# raises no error - the file is silently absent from the installed skill. Any
+# skill shipping a Next.js dynamic-route fixture hits this. Found 2026-08-31,
+# when nextjs-ops installed two files short and its own suite passed vacuously.
+# This is a grep because CI runs on Linux and cannot execute install.ps1.
+__installer="scripts/install.ps1"
+if [ -f "$__installer" ]; then
+    if grep -qE 'Copy-Item\s+-Path\s+\$(f\.FullName|src)\b' "$__installer"; then
+        bad "install.ps1 copies skill files with -Path (glob-expands; drops bracketed paths) - use -LiteralPath"
+    else pass "install.ps1 skill copy uses -LiteralPath"; fi
+    if grep -qE 'Get-ChildItem\s+-Path\s+\$(src|dest)\b' "$__installer"; then
+        bad "install.ps1 enumerates skill files with -Path (glob-expands) - use -LiteralPath"
+    else pass "install.ps1 skill enumeration uses -LiteralPath"; fi
+else
+    pass "install.ps1 absent - installer check skipped"
+fi
 
 echo
 if [ "$fail" -eq 0 ]; then echo "resource checks: clean"; exit 0; fi

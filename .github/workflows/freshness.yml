@@ -133,6 +133,15 @@ jobs:
           if [ "$rc" -eq 7 ]; then echo "::warning::hono-ops live check unreachable (npm registry) — skipped"; fi
           exit 0
 
+      - name: nextjs-ops packages vs npm registry (existence + Next.js/React majors)
+        run: |
+          set +e
+          python skills/nextjs-ops/scripts/check-nextjs-facts.py --live
+          rc=$?
+          if [ "$rc" -eq 10 ]; then echo "::error::nextjs-ops drift - a named npm package is gone, or Next.js/React shipped a major past the documented line (caching + rendering semantics move with the major)"; exit 1; fi
+          if [ "$rc" -eq 7 ]; then echo "::warning::nextjs-ops live check unreachable (npm registry) - skipped"; fi
+          exit 0
+
       - name: GitHub Action refs still resolve
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

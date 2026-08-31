@@ -1,0 +1,9 @@
+{
+  "//": "FIXTURE (nextjs-ops tests). Pins the major so audit-app-router.py's version gate is deterministic; it is never installed.",
+  "name": "nextjs-ops-fixture",
+  "private": true,
+  "dependencies": {
+    "next": "^16.3.3",
+    "react": "^19.2.0"
+  }
+}

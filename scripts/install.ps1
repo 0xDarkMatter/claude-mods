@@ -164,25 +164,32 @@ foreach ($skill in (Get-ChildItem -Path $skillsDir -Directory)) {
     $src = $skill.FullName
     $dest = "$claudeDir\skills\$($skill.Name)"
     try {
-        if (-not (Test-Path $dest)) {
-            Copy-Item -Path $src -Destination $dest -Recurse -Force -ErrorAction Stop
+        if (-not (Test-Path -LiteralPath $dest)) {
+            Copy-Item -LiteralPath $src -Destination $dest -Recurse -Force -ErrorAction Stop
             Write-Host "  $($skill.Name)/" -ForegroundColor Green
             continue
         }
 
         # Merge copy: overwrite file-by-file so a locked destination still syncs.
+        #
+        # -LiteralPath everywhere, deliberately. `-Path` glob-expands, and `[` and
+        # `]` are PowerShell wildcard metacharacters - so a Next.js dynamic-route
+        # fixture like `app/shop/[slug]/page.tsx` matches nothing, copies nothing,
+        # and raises NO error. The file is simply absent from the installed skill.
+        # Found 2026-08-31 when nextjs-ops' clean-app fixture arrived two files
+        # short and its own test suite still passed, vacuously.
         $srcRel = @{}
         $fileErrors = @()
-        foreach ($f in (Get-ChildItem -Path $src -Recurse -File)) {
+        foreach ($f in (Get-ChildItem -LiteralPath $src -Recurse -File)) {
             $rel = $f.FullName.Substring($src.Length + 1)
             $srcRel[$rel] = $true
             try {
                 $destFile = Join-Path $dest $rel
                 $destFileDir = Split-Path -Parent $destFile
-                if (-not (Test-Path $destFileDir)) {
+                if (-not (Test-Path -LiteralPath $destFileDir)) {
                     New-Item -ItemType Directory -Path $destFileDir -Force -ErrorAction Stop | Out-Null
                 }
-                Copy-Item -Path $f.FullName -Destination $destFile -Force -ErrorAction Stop
+                Copy-Item -LiteralPath $f.FullName -Destination $destFile -Force -ErrorAction Stop
             } catch {
                 $fileErrors += "$rel ($($_.Exception.Message))"
             }
@@ -190,7 +197,7 @@ foreach ($skill in (Get-ChildItem -Path $skillsDir -Directory)) {
 
         # Dest-only files are machine-local (unversioned) or stale. Surface
         # them, never delete them - deleting is the 2026-08-01 data loss.
-        $destOnly = @(Get-ChildItem -Path $dest -Recurse -File | Where-Object {
+        $destOnly = @(Get-ChildItem -LiteralPath $dest -Recurse -File | Where-Object {
             -not $srcRel.ContainsKey($_.FullName.Substring($dest.Length + 1))
         })
 

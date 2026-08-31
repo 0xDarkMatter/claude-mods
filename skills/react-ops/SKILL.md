@@ -1,11 +1,11 @@
 ---
 name: react-ops
-description: "React development patterns, hooks, state management, Server Components, and performance optimization. Use for: react, hooks, useState, useEffect, jsx, tsx, next.js, nextjs, app router, server components, RSC, zustand, react query, component patterns, react testing library, error boundary, suspense, react 19."
+description: "React development patterns, hooks, state management, Server Components, and performance optimization. Use for: react, hooks, useState, useEffect, jsx, tsx, server components, RSC, zustand, react query, component patterns, react testing library, error boundary, suspense, react 19."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: typescript-ops, testing-ops, tailwind-ops, javascript-ops
+  related-skills: nextjs-ops, typescript-ops, testing-ops, tailwind-ops, javascript-ops
 ---
 
 # React Operations

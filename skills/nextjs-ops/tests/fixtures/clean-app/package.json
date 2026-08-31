@@ -1,0 +1,6 @@
+{
+  "//": "FIXTURE (nextjs-ops tests): a CORRECT Next.js 16 app. Every construct here is either the documented-correct form or a near-miss that a naive regex would flag. It must produce ZERO findings - that is the whole point of the file.",
+  "name": "nextjs-ops-clean-fixture",
+  "private": true,
+  "dependencies": { "next": "^16.3.3", "react": "^19.2.0" }
+}
