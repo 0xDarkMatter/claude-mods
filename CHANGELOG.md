@@ -25,6 +25,104 @@ feature releases live in the README "Recent Updates" section.
   rule filtering, a JSON envelope and exit 10 as the CI signal - and a test
   suite that asserts zero false positives on correct markup, because a linter
   that cries wolf gets muted.
+- **`evals-ops` skill** - the eval harness discipline that everything else in
+  agent engineering depends on: you cannot tune a prompt, retriever or memory
+  layer without a measurable suite. Covers the three levels most teams collapse
+  into one (outcome vs step vs trajectory, and the *lucky pass* that
+  outcome-only scoring banks as a win), golden-set construction as four
+  deliberate buckets with freeze discipline (a set that grows every sprint
+  cannot tell you whether the system or the set moved), the documented
+  LLM-as-a-judge biases and when a lens-diverse panel beats N identical judges,
+  adversarial refute-not-confirm verification, and the tier ladder that keeps a
+  CI gate alive - deterministic checks block, judge metrics start advisory,
+  thresholds sit below the *measured* noise floor. Ships
+  `judge-calibration.py` (Cohen kappa vs human labels, per-class confusion,
+  verbosity/position bias probes; exit 10 below `--min-kappa`) and
+  `goldenset-audit.py` (duplicates, bucket skew, staleness, and freeze-manifest
+  drift that catches a frozen case edited in place to make it pass).
+
+  Also covers RAG (`retrieval-eval.md` - recall@k, the retrieval-vs-generation
+  2x2 that stops two independent bugs being averaged into one number, and the
+  unanswerable-question bucket almost everyone omits, without which a suite
+  cannot detect hallucination under retrieval failure) and the labelling step
+  itself (`annotation-workflow.md` - the human-human agreement ceiling a judge
+  mathematically cannot beat, stratified sampling across the judge's own
+  verdicts, adjudication, and annotator drift).
+
+  A third script, `eval-baseline.py`, derives the baseline and noise floor from
+  the rolling run history, prints the threshold a gate should actually use, and
+  runs McNemar's exact test over paired per-case results. The point: a change
+  that breaks 8 cases and fixes 7 moves the headline score by 0.01 and is
+  invisible to any score comparison, while the paired view names all 15 - and
+  honestly reports p=1.0, because churn is not a regression. Exit 10 on a
+  confirmed regression or a cost/latency ceiling breach.
+
+  Four copy-and-adapt assets, so the first hour goes on deciding what to measure
+  rather than on scaffolding: a 12-case starter golden set spanning all four
+  buckets (and passing the skill's own auditor - enforced in CI, because an asset
+  the skill's tools reject is worse than no asset), the 40-line runner the skill
+  tells you to start with, a one-criterion judge rubric carrying the bias-counter
+  instructions and calibration checklist, and a GitHub Actions workflow encoding
+  the tier ladder.
+
+  Finally, `hillclimbing.md` and a two-way seam with `iterate`. Optimising against
+  an eval is where a good suite gets destroyed, and neither skill knew the other
+  existed: `iterate` keeps a change when the metric beats the previous best, which
+  is correct for line coverage and a coin flip for a score with run-to-run
+  variance - point it at an eval and roughly half its "improvements" are noise,
+  banked with perfect discipline. `eval-baseline.py --accept` is the fix, and it
+  deliberately inverts the exit semantics: CI asks "did this get worse" (noise is
+  fine), a hillclimb asks "is this improvement real" (noise is not). `iterate`
+  gains a Noisy Metrics section pointing at it; the reference owns the discipline
+  `iterate` cannot - train/validation/held-out splits, the held-out look budget,
+  and why a single `iterate/best` champion is a local-optimum trap where a Pareto
+  frontier is not. Grounded in GEPA (arXiv:2507.19457, ICLR 2026 Oral), whose
+  documented verbosity-overfit failure mode and never-shown-to-the-reflector
+  validation split are the citable versions of both arguments. Carries an explicit
+  extraction trigger for a future `prompt-optimization-ops` rather than pre-empting
+  one. Suite 97 -> 109 assertions.
+
+### Fixed
+
+- **`evals-ops`: nine defects found by adversarially reviewing the skill against
+  its own doctrine.** Refute-don't-confirm, applied to the thing that preaches
+  it. Seven were in the scripts and **all of them failed OPEN** - reporting
+  "fine" while measuring nothing, which is the dangerous direction for a gate:
+  - `eval-baseline.py` treated a *measured* spread of exactly 0.0 as "no data"
+    (`if spread:` is falsy at zero), so a deterministic or genuinely stable
+    suite reported INSUFFICIENT-DATA and exited 0 on an unambiguous 0.90 -> 0.70
+    collapse. Zero variance is the most informative history there is.
+  - An integer case id of `0` was dropped from the paired test (`if r.get("id")`
+    is falsy), hiding real regressions. Ids are now membership-tested and
+    stringified so `1` and `"1"` pair.
+  - A `null` or JSON-string score in the history file was ignored silently;
+    now reported.
+  - The exact McNemar test is O(n) big-integer work over `2**n` - measured at
+    133 ms for 2,000 discordant pairs but **~100 seconds for 20,000**, i.e. a CI
+    hang. Switches to a continuity-corrected normal approximation above 1,000
+    pairs and reports which method it used.
+  - `goldenset-audit.py` hashed `_line` and `id` as part of a case's content, so
+    `DUPLICATE_CASE` could never fire on the one thing it exists to catch: the
+    same case under two ids.
+  - `judge-calibration.py` read `"length": true` as a length of 1.0 (bool is a
+    subclass of int) and emitted a confident, meaningless -0.87 verbosity
+    correlation.
+  - The shipped CI template asserted unverified GitHub Action majors -
+    precisely the staleness trap this repo has a verifier doctrine about - and
+    hard-coded a vendored script path that contradicted the one `iterate`
+    documents. Both are now flagged ADAPT points behind one `$EVALS_OPS` var.
+  - `golden-datasets.md` stated bucket *targets* (production 40-50%) while the
+    auditor warned on a wider *band* (30-65%) with nothing saying the two
+    numbers differed on purpose. Both are now named, and a warning quotes the
+    target it is measured against.
+
+  All nine are pinned by named regression assertions, and the four sharpest were
+  mutation-tested - the fix reverted, the suite confirmed red - because an
+  assertion that cannot fail is not a test. That step earned its cost
+  immediately: the duplicate-hash assertion passed against deliberately re-broken
+  code, because its fixture carried an `expected` field and so exercised the
+  wrong branch of a two-branch function. A tenth defect, in the test for the
+  ninth. Fixture corrected and the reason written next to it. Suite 109 -> 127.
 
 - **`icon-ops` skill** - sourcing, vetting and shipping SVG icons for web UI.
   Covers the four decisions that lock an icon set (grid, family, stroke width,

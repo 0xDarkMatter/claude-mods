@@ -49,6 +49,21 @@ echo "== claude-code-ops: hooks.json validator"
 run "hooks-lint clean on repo hooks.json" 0 "$PY" skills/claude-code-ops/scripts/validate-hooks-json.py hooks/hooks.json
 run "hooks-lint --help"                   0 "$PY" skills/claude-code-ops/scripts/validate-hooks-json.py --help
 
+echo "== evals-ops: judge calibration + golden-set audit"
+run "judge-calibration --help"     0 "$PY" skills/evals-ops/scripts/judge-calibration.py --help
+run "goldenset-audit --help"       0 "$PY" skills/evals-ops/scripts/goldenset-audit.py --help
+run "judge-calibration bad args"   2 "$PY" skills/evals-ops/scripts/judge-calibration.py
+run "goldenset-audit bad args"     2 "$PY" skills/evals-ops/scripts/goldenset-audit.py
+run "eval-baseline --help"         0 "$PY" skills/evals-ops/scripts/eval-baseline.py --help
+run "eval-baseline bad args"       2 "$PY" skills/evals-ops/scripts/eval-baseline.py
+# --accept inverts the meaning of exit 10 on purpose; pin it so a refactor
+# cannot quietly restore "noise is fine" to the hillclimb keep gate.
+run "eval-baseline --accept help" 0 "$PY" skills/evals-ops/scripts/eval-baseline.py --accept --help
+# The shipped starter set must survive the skill's own auditor - an asset its
+# tools reject is worse than no asset at all.
+run "example golden set audits clean" 0 "$PY" skills/evals-ops/scripts/goldenset-audit.py  skills/evals-ops/assets/golden-set.example.jsonl
+run "eval-runner template compiles"   0 "$PY" -m py_compile  skills/evals-ops/assets/eval-runner.template.py
+
 echo "== playwright-ops: flake-triage"
 run "flake-triage --help" 0 "$PY" skills/playwright-ops/scripts/triage-flakes.py --help
 

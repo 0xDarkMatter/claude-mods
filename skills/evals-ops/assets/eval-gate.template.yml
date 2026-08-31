@@ -1,0 +1,147 @@
+# Eval CI gate — the tier ladder as a workflow. Copy to .github/workflows/evals.yml.
+#
+# The shape encodes one rule: A BLOCKING CHECK MUST NEVER BE FLAKY. Deterministic
+# assertions block on every push. Judge metrics run on PRs and start ADVISORY --
+# they are promoted to blocking only after judge-calibration.py says kappa >= 0.6
+# and you have measured the noise floor. The full k=3 consistency run and the
+# history append happen nightly on main, where cost and duration are affordable.
+#
+# ADAPT before use:
+#   1. <angle brackets>, the eval commands, and the secret names.
+#   2. ACTION VERSIONS. The `uses:` majors below are placeholders, NOT a
+#      recommendation -- check the current major for each action and pin to a
+#      full commit SHA (`uses: actions/checkout@<sha>  # v5.0.0`). A floating
+#      major is a supply-chain surface; see the supply-chain-defense skill.
+#   3. SCRIPT PATHS. $EVALS_OPS below assumes the skill is installed at
+#      ~/.claude/skills/evals-ops. If you vendor claude-mods into the repo
+#      instead, set it to skills/evals-ops. The scripts are stdlib-only, so
+#      copying the three you use into the repo is also a legitimate option and
+#      removes the dependency entirely.
+#
+# See references/regression-gating.md for why each tier sits where it does.
+
+name: evals
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  schedule:
+    - cron: "0 3 * * *"   # nightly on main
+  workflow_dispatch:
+
+concurrency:
+  group: evals-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DATASET_VERSION: golden-v3     # bump = re-baseline; never compare across it
+  EVALS_OPS: $HOME/.claude/skills/evals-ops   # ADAPT: see header note 3
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # --- TIER 0: deterministic. Blocking, zero tolerance, every push. ----------
+  # No model calls, no judge, no network to a provider. Seconds and $0, which is
+  # exactly why it is allowed to fail the build.
+  deterministic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@vX      # ADAPT: current major, pinned to a SHA
+      - uses: actions/setup-python@vX  # ADAPT: current major, pinned to a SHA
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # The golden set is an artifact with its own integrity. Editing a frozen
+      # case in place to make it pass is fitting the test to the code -- this
+      # step is what catches it.
+      - name: Golden-set health and freeze check
+        run: |
+          python3 "$EVALS_OPS"/scripts/goldenset-audit.py \
+            evals/golden.jsonl --freeze evals/freeze.json
+
+      - name: Deterministic assertions
+        run: <your-deterministic-eval-command>   # e.g. pytest evals/test_assertions.py
+
+  # --- TIER 1/2: judge metrics on a PR subset. Advisory until calibrated. ----
+  judge:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    # ADAPT: flip to `false` only once judge-calibration.py reports kappa >= 0.6
+    # AND you have measured the noise floor. Until then a red here is noise, and
+    # three unexplained reds kill the gate socially even while it still enforces.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@vX      # ADAPT: current major, pinned to a SHA
+        with:
+          fetch-depth: 0          # history file needs real history
+      - uses: actions/setup-python@vX  # ADAPT: current major, pinned to a SHA
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # Judge calibration is a gate on the JUDGE, not on the code. If the rubric
+      # has drifted below threshold, the scores below are not evidence.
+      - name: Judge is calibrated
+        run: |
+          python3 "$EVALS_OPS"/scripts/judge-calibration.py \
+            evals/labels.jsonl --min-kappa 0.6
+
+      - name: Run evals (stratified subset, k=1)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python3 evals/runner.py evals/golden.jsonl \
+            -k 1 --dataset-version "$DATASET_VERSION" \
+            --out results.jsonl --history /tmp/run.jsonl
+
+      # Compare against the committed baseline. Exit 10 = confirmed regression
+      # (outside the noise floor); exit 0 = noise or improvement. Naming the
+      # flipped cases is what stops people ignoring the result.
+      - name: Regression check
+        run: |
+          python3 "$EVALS_OPS"/scripts/eval-baseline.py \
+            evals/history.jsonl --candidate /tmp/run.jsonl \
+            --baseline-results evals/baseline-results.jsonl \
+            --candidate-results results.jsonl
+
+      - name: Comment the delta
+        if: always()
+        run: <post the eval-baseline.py --json summary as a PR comment>
+
+  # --- TIER 3/4: nightly. Full set, k=3, cost and latency, history append. ---
+  nightly:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write             # to commit the appended history row
+    steps:
+      - uses: actions/checkout@vX      # ADAPT: current major, pinned to a SHA
+      - uses: actions/setup-python@vX  # ADAPT: current major, pinned to a SHA
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # k=3 gives pass^k -- what production actually experiences. pass@k flatters
+      # a non-deterministic agent and must never be the headline.
+      # NOTE: never retry a failing eval to green. Retry-until-pass turns a real
+      # regression into a flake report; k=3 reports ALL attempts by design.
+      - name: Full eval, k=3
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python3 evals/runner.py evals/golden.jsonl \
+            -k 3 --dataset-version "$DATASET_VERSION" \
+            --out nightly-results.jsonl --history evals/history.jsonl
+
+      # Ceilings, not trends. A trend gate fires on noise; a ceiling encodes a
+      # product decision someone actually made.
+      - name: Cost and latency ceilings
+        run: |
+          python3 "$EVALS_OPS"/scripts/eval-baseline.py \
+            evals/history.jsonl --max-cost-usd <2.50> --max-p95-ms <6000>
+
+      - name: Commit the history row
+        run: |
+          git config user.name  "eval-bot"
+          git config user.email "eval-bot@users.noreply.github.com"
+          git add evals/history.jsonl
+          git diff --staged --quiet || git commit -m "chore(evals): nightly run"
+          git push

@@ -7,6 +7,7 @@ license: MIT
 allowed-tools: "Read Write Edit Glob Grep Bash Agent TaskCreate TaskUpdate TaskList"
 metadata:
   author: claude-mods
+  related-skills: "evals-ops, loop-ops"
 ---
 
 # Iterate - Autonomous Improvement Loop
@@ -142,7 +143,9 @@ LOOP (until any stop condition met):
   4. VERIFY    Run the verify command after the final commit of the batch.
               Extract the metric. If guard is set, run it too.
 
-  5. DECIDE
+  5. DECIDE    NOTE: "improved" assumes a DETERMINISTIC metric. If the metric is
+              noisy - an eval score, a benchmark, anything with run-to-run
+              variance - this rule banks noise; see "Noisy metrics" below.
               Improved + guard ok (or no guard)
                 -> KEEP entire batch
               Regressed / unchanged / guard failed:
@@ -300,6 +303,39 @@ The guard is an optional safety net - a command that must always pass regardless
 If the metric improves but the guard fails, the change is reverted (or bisected, in batch mode). The agent should note WHY the guard failed and adapt future attempts accordingly.
 
 Common guards: `npm test`, `tsc --noEmit`, `cargo check`, `pytest`, `go vet`
+
+## Noisy Metrics
+
+The keep/discard rule above - "keep it if the number went up" - is correct for a
+**deterministic** metric. Coverage, bundle bytes, lint counts and type errors are the same
+on every run, so any movement is real.
+
+It is **wrong** for a metric with run-to-run variance: an LLM eval score, a benchmark
+timing, anything sampled. If the metric reads 0.88 +/- 0.03 across reruns of *unchanged
+code*, then a candidate measuring 0.90 has told you almost nothing - and keeping it banks
+noise. Over an overnight run that is a random walk executed with perfect discipline, and
+`iterate/best` lands on whichever iteration got luckiest.
+
+**Before pointing `iterate` at a noisy metric:**
+
+1. Measure the noise floor - rerun the verify command 5 times against unchanged code and
+   record the spread. If you cannot do that, the metric is not ready to hillclimb on.
+2. Require the delta to clear that floor before a KEEP. The `evals-ops` skill ships a gate
+   for exactly this:
+
+   ```bash
+   python3 ~/.claude/skills/evals-ops/scripts/eval-baseline.py history.jsonl        --candidate iter.jsonl --accept
+   # exit 0 = KEEP (a real improvement), exit 10 = DISCARD (inside the noise band)
+   ```
+
+   Wire it as the DECIDE gate rather than comparing raw numbers.
+3. Prefer raising `Batch`/repeat count over raising `Iterations`. Averaging a candidate
+   over 3 runs shrinks the noise floor; evaluating 3x as many candidates once does not.
+
+For eval-specific hillclimbing - train/validation/held-out splits, overfitting the golden
+set, why a single `iterate/best` champion is a local-optimum trap, and the automated
+prompt-optimizer landscape - see
+[`evals-ops` -> references/hillclimbing.md](../evals-ops/references/hillclimbing.md).
 
 ## Usage Examples
 
