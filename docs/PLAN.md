@@ -3,7 +3,7 @@
 **Goal**: A centralized repository of custom Claude Code commands, agents, and skills that enhance Claude Code's native capabilities with persistent session state, specialized expert agents, and streamlined workflows.
 
 **Created**: 2025-11-27
-**Last Updated**: 2026-07-09
+**Last Updated**: 2026-08-31
 **Status**: Active Development
 
 > Historical record of what shipped lives in [CHANGELOG.md](../CHANGELOG.md) and the
@@ -68,7 +68,11 @@ Subdirs: `archive/` (completed-migration records, retired) · `references/` (ven
 
 ### Phase 3 — Distribution & native-feature adoption
 
-- [ ] Submit to community marketplace (claude.ai/settings/plugins/submit)
+- [ ] Submit to the official plugin directory (form: https://clau.de/plugin-directory-submission).
+      Structure already conforms — `.claude-plugin/plugin.json`, `commands/`,
+      `agents/`, `skills/`, `README.md`. Separately, skills.sh needs no
+      submission at all: a public repo with `SKILL.md` files is installable via
+      `npx skills add <owner>/<repo>` and surfaces there on install telemetry.
 - [x] Reposition /save + /sync as portable/team-shareable state (native
       auto-memory covers single-machine context)
 - [x] Adopt new hook events: ConfigChange guard (worm-persistence IOCs on

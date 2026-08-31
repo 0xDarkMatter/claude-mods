@@ -4,8 +4,12 @@ All notable changes to claude-mods are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/). Fuller narrative entries for
 feature releases live in the README "Recent Updates" section.
+## [Unreleased]
 
-## [Unreleased]
+## [3.8.0] - 2026-08-31
+
+Four new skills, and three existing ones realigned against a reality that moved
+underneath them.
 
 ### Added
 
@@ -25,6 +29,7 @@ feature releases live in the README "Recent Updates" section.
   rule filtering, a JSON envelope and exit 10 as the CI signal - and a test
   suite that asserts zero false positives on correct markup, because a linter
   that cries wolf gets muted.
+
 - **`evals-ops` skill** - the eval harness discipline that everything else in
   agent engineering depends on: you cannot tune a prompt, retriever or memory
   layer without a measurable suite. Covers the three levels most teams collapse
@@ -82,6 +87,77 @@ feature releases live in the README "Recent Updates" section.
   extraction trigger for a future `prompt-optimization-ops` rather than pre-empting
   one. Suite 97 -> 109 assertions.
 
+- **`nextjs-ops` skill** - the framework underneath `payloadcms-ops` had no skill
+  of its own. Covers the server/client boundary and what actually crosses it, the
+  two caching models (`use cache` / `cacheComponents` alongside the older
+  `unstable_cache` and `revalidateTag` forms) as the section the skill exists
+  for, Server Actions as public endpoints with the security posture that
+  implies, streaming and Suspense boundaries, the `middleware.ts` -> `proxy.ts`
+  move, and self-hosting beyond Vercel. Audit rules gate on the project's
+  detected Next.js major rather than assuming the latest.
+
+- **`icon-ops` skill** - sourcing, vetting and shipping SVG icons for web UI.
+  Covers the four decisions that lock an icon set (grid, family, stroke width,
+  corner language), the two licence traps that actually bite (a brand mark is a
+  trademark whatever the file licence says; aggregators like Iconify hide which
+  set's licence applies), `currentColor` theming, the delivery matrix including
+  why icon fonts fail and why an external `<use>` is CORS-blocked in production,
+  and the two accessibility cases - with the counter-intuitive rule that the SVG
+  stays `aria-hidden` in both and the name goes on the control. Ships
+  `normalize-icon.py` (strips editor cruft, rebinds literal colours to
+  `currentColor`, drops fixed sizing, applies a11y attributes; `--check` as a CI
+  gate, `--symbol` for sprite assembly, idempotent) and a commented sprite
+  scaffold.
+
+- **Skill-internal link gate.** `doc-drift.sh` checked markdown links in
+  `README.md` and `AGENTS.md` only, so links *inside* skills rotted unseen - four
+  had, including a `fleet-ops` pointer to a rule that was never shipped to this
+  repo and a `ytdlp-ops` pointer to a skill that was extracted to its own. The
+  gate now resolves every link inside `skills/**` relative to its containing
+  file. Deliberately narrow: it flags only links that fail to resolve, not the
+  82 legitimate cross-skill references that climb out of their own directory.
+
+### Changed
+
+- **`claude-api-ops` gains context-engineering doctrine.** The discipline that
+  replaced prompt engineering in 2026: deciding what the model sees on every
+  call, and treating the window as a budget with three tiers (in-context /
+  on-disk / retrieved). The load-bearing and counter-intuitive part is that under
+  modern prompt caching, keeping full history has been measured to beat
+  summarisation on cost, latency *and* recall at once - so compaction is a
+  deliberate response to a named constraint, not a reflex. Also retargeted at the
+  Claude 5 lineup.
+
+- **`loop-ops` accounts for native scheduling primitives** - "native primitives
+  schedule; loop-ops governs", the same repositioning `fleet-ops` took against
+  agent teams. It was written when scheduling was something you wired up
+  externally; Claude Code has since shipped `CronCreate`, a scheduled-tasks MCP
+  surface and `/loop` as a bundled skill with a self-pacing dynamic mode. The
+  plumbing is now the harness's job. The durable value - the L1/L2/L3 risk ladder,
+  the STATE/run-log/budget spine, the kill switch and the escalation gate - is
+  what the skill keeps.
+
+- **`windows-ops`: steady-state process triage** - the skill covered boot- and
+  crash-time only, so a workstation pinned by already-running processes did not
+  route to it. Adds `process-triage.ps1` (samples CPU twice and reports
+  percent-of-one-core, private commit, age and orphan status; exit 10 on
+  findings; `-Tree` emits a leaves-first termination order) plus
+  `references/process-triage.md`. The load-bearing part is the safety guard:
+  the script resolves the calling session's own ancestry and marks it
+  `protected`, because the failure it exists to prevent is an agent killing the
+  process chain it is running in. Encodes a measured incident - six spinners
+  with LIVE parents held five cores for 43.8 hours while a dead-parent orphan
+  scan reported 1.16 GB, which is why the technique is rate, not lineage.
+
+- **`fleet-ops`: worktree-teardown ordering landmine** - removing a lane
+  worktree while its session is attached does not kill the session; it spins at
+  ~85% of a core indefinitely against the deleted path.
+
+- **Skill description budget raised 700 -> 1000 chars per skill.** The 700 cap
+  from the 2026-07 trim proved too tight for skills with a genuinely broad
+  trigger surface, and cutting real trigger phrases costs more in missed routing
+  than it saves in tokens. The catalog-wide soft budget is unchanged.
+
 ### Fixed
 
 - **`evals-ops`: nine defects found by adversarially reviewing the skill against
@@ -124,41 +200,20 @@ feature releases live in the README "Recent Updates" section.
   wrong branch of a two-branch function. A tenth defect, in the test for the
   ninth. Fixture corrected and the reason written next to it. Suite 109 -> 127.
 
-- **`icon-ops` skill** - sourcing, vetting and shipping SVG icons for web UI.
-  Covers the four decisions that lock an icon set (grid, family, stroke width,
-  corner language), the two licence traps that actually bite (a brand mark is a
-  trademark whatever the file licence says; aggregators like Iconify hide which
-  set's licence applies), `currentColor` theming, the delivery matrix including
-  why icon fonts fail and why an external `<use>` is CORS-blocked in production,
-  and the two accessibility cases - with the counter-intuitive rule that the SVG
-  stays `aria-hidden` in both and the name goes on the control. Ships
-  `normalize-icon.py` (strips editor cruft, rebinds literal colours to
-  `currentColor`, drops fixed sizing, applies a11y attributes; `--check` as a CI
-  gate, `--symbol` for sprite assembly, idempotent) and a commented sprite
-  scaffold.
+- **`install.ps1` silently dropped bracketed paths.** `[` and `]` are PowerShell
+  wildcards, so `Copy-Item -Path` on a path like `app/shop/[slug]/page.tsx`
+  matched nothing, copied nothing and raised no error - files were simply absent
+  from the installed skill. Switched to `-LiteralPath`. Also gains a staleness
+  guard and a doctor mode.
 
-- **`windows-ops`: steady-state process triage** - the skill covered boot- and
-  crash-time only, so a workstation pinned by already-running processes did not
-  route to it. Adds `process-triage.ps1` (samples CPU twice and reports
-  percent-of-one-core, private commit, age and orphan status; exit 10 on
-  findings; `-Tree` emits a leaves-first termination order) plus
-  `references/process-triage.md`. The load-bearing part is the safety guard:
-  the script resolves the calling session's own ancestry and marks it
-  `protected`, because the failure it exists to prevent is an agent killing the
-  process chain it is running in. Encodes a measured incident - six spinners
-  with LIVE parents held five cores for 43.8 hours while a dead-parent orphan
-  scan reported 1.16 GB, which is why the technique is rate, not lineage.
+- **`fleet-worker`'s test suite was environment-dependent.** Three assertions
+  failed on a host that exports `FLEET_WORKER_KEYRING_SERVICE`/`KEY` and passed
+  in CI, because the suite's own mock `keyring` then pre-empted the ZHIPU/GLM
+  branches those assertions exist to test. The suite now clears every env knob it
+  derives from the scripts themselves, and asserts hermeticity first so the
+  symptom is one honest failure rather than three misleading ones.
 
-- **`fleet-ops`: worktree-teardown ordering landmine** - removing a lane
-  worktree while its session is attached does not kill the session; it spins at
-  ~85% of a core indefinitely against the deleted path.
-
-### Changed
-
-- **Skill description budget raised 700 -> 1000 chars per skill.** The 700 cap
-  from the 2026-07 trim proved too tight for skills with a genuinely broad
-  trigger surface, and cutting real trigger phrases costs more in missed routing
-  than it saves in tokens. The catalog-wide soft budget is unchanged.
+- **`payloadcms-ops`** updated to the Next.js 16 `revalidateTag` form.
 
 ## [3.7.0] - 2026-08-15
 
