@@ -28,6 +28,7 @@ git-ops                        push-gate           github-ops  (this skill)
 | Repo description / homepage / topics / visibility | **`github-ops`** |
 | `gh release create` + release notes | **`github-ops`** |
 | README "Recent Updates" section maintenance | **`github-ops`** |
+| README as a landing page (badge row, features-as-benefits, screenshots) | **`github-ops`** |
 | Package metadata audit (pyproject/package.json ↔ GH topics ↔ tag ↔ version) | **`github-ops`** |
 | `gh issue` operations (view/list/create/comment/edit/triage/close) | **`github-ops`** |
 | `gh pr` operations (view/list/diff/checks/create/comment/review/edit/merge/close) | **`github-ops`** |
@@ -69,9 +70,26 @@ Triggered by: "publish to github", "create repo on github", "push to github" (wh
      first impression and shouldn't be a one-shot.
    - Commit via git-ops with: docs: Expand README intro
 
+2b. Build the landing-page layer — see references/readme-landing-page.md
+   The intro answers "what is this"; this step answers the other three questions a
+   cold visitor asks in their first ten seconds (is it alive / what do I get /
+   what does it look like). Benefits before mechanics:
+   - Badge row under the title: at most five — license, version, CI, runtime floor,
+     project status. One shared labelColor so they read as one row. Never add a badge
+     you won't maintain; a stale red CI badge is worse than no badge.
+   - ## Features section ABOVE Install, written as benefits (bold lead = what the
+     reader gets, then the concrete detail), 4–7 bullets. Not a component inventory.
+   - A screenshot or demo ONLY if the project has a visual surface (TUI/GUI/dashboard/
+     rendered output, or colourised CLI output). Plain-text CLI and libraries take a
+     fenced code block instead. Store under docs/screenshots/, alt text on every image,
+     <picture> + prefers-color-scheme so it doesn't glow white in dark mode.
+   - Surface the layout to the user with the intro draft; commit together.
+
 3. Add "Recent Updates" section to README if missing
    - Use claude-mods style by default (see references/readme-recent-updates.md)
-   - Place after Quickstart, before deep "why this exists" sections
+   - Place after Quickstart, before deep "why this exists" sections — i.e. below the
+     Features + visual added in step 2b (see references/readme-landing-page.md for the
+     full section order and why liveness sits there, not above Features)
    - For first release, single bullet block describing the initial extraction
    - Commit via git-ops with: docs: Add Recent Updates section
 
@@ -141,6 +159,16 @@ Triggered by: "ship a release", "cut a release", "release v0.X.Y", "publish upda
    the intro was written, propose an expansion (see references/readme-description.md).
    Don't churn good prose — only act if the intro is genuinely thin or stale.
 
+   Landing-page touch-ups (see references/readme-landing-page.md) — act only on a
+   real trigger, never as routine churn:
+   - The release added a capability worth a Features bullet → add one (benefit-led),
+     and cut a weaker one if the section now runs past ~7.
+   - The CI badge is red/stale, or the version badge no longer tracks releases →
+     fix it or remove it. A badge nobody maintains is worse than no badge.
+   - A shipped UI change made an existing screenshot wrong → recapture or drop it.
+   - The repo has a visual surface and still has no visual → propose one; don't add
+     it unasked.
+
 5. Commit README + CHANGELOG via git-ops:
    docs: Recent Updates + CHANGELOG for v<N>
 
@@ -187,6 +215,19 @@ LOCAL FILE CHECKS
   [ ] README has: tagline, install, quickstart, license link
   [ ] README intro is ≥ 80 words (2–3 paragraphs orienting a cold reader)
   [ ] README has "Recent Updates" section near top
+
+LANDING-PAGE CHECKS — all WARN-level, never a hard fail (references/readme-landing-page.md)
+  [~] README has a badge row under the title (≤ 5 badges; license + at least one
+      liveness signal — CI or version). WARN if absent; WARN if > 7 badges (badge wall)
+      or if a CI badge points at a workflow with no runs / a red default branch.
+  [~] README has a "## Features" (or equivalent) section ABOVE Install, with bullets
+      that lead with what the reader GETS, not what the software contains. WARN if the
+      section is missing, or if it is a component inventory / a flag-by-flag table.
+  [~] README has a screenshot or demo — CONDITIONAL. Only warn when the project has a
+      visual surface (TUI, GUI, dashboard, web UI, rendered/generated output, or
+      colourised CLI output). A plain-text CLI, a library, an SDK, or a config/skill
+      bundle legitimately has none: report nothing, do not nag. Where images exist,
+      WARN on missing alt text or a light-only capture with no <picture> dark variant.
   [ ] CHANGELOG.md present and has entry for latest tag
   [ ] pyproject.toml / package.json: description, keywords, license, repository URL, homepage
   [ ] Latest tag matches version in package metadata
@@ -210,6 +251,12 @@ SECURITY POSTURE CHECKS (run scripts/check-security-posture.sh — read-only)
   [ ] Branch protection on the default branch
   [ ] No OPEN dependabot / secret / code-scanning alerts on enabled scanners
 ```
+
+The landing-page rows are marked `[~]` because they are **advisory**: they never fail an
+audit and never block mode `new`. They are also **not** scored by `repo-scorecard.sh` —
+judging "are these bullets benefits" and "does this project have anything to show" needs
+reading comprehension the script can't do at fleet scale, and a wrong answer there would
+be charged to every repo. See the reference's closing section for the full rationale.
 
 Output: per-row pass/fail/warn, then a summary score and list of fixes. Fixes are suggested but not applied — the user decides whether to run mode `new` or mode `update` to act on them. For the security-posture rows, run `scripts/check-security-posture.sh --repo <o>/<r>` and fold its checklist in; the enable commands it emits are surfaced for the user to approve, never auto-run.
 
@@ -269,6 +316,7 @@ See `references/pr-ops.md` for full playbooks, review-flow templates, and the me
 |---|---|---|
 | Release strategy | `references/release-strategy.md` | minor on `feat:`, patch on `fix:`-only, major requires approval |
 | README intro (2–3 paragraphs) | `references/readme-description.md` | what it is / why it exists / who it's for; concrete, dry, no marketing fluff |
+| README as a landing page | `references/readme-landing-page.md` | section order (benefits before mechanics), ≤ 5-badge row with a shared `labelColor`, features-as-benefits, conditional screenshot in `docs/screenshots/` with alt text + dark variant |
 | README Recent Updates style | `references/readme-recent-updates.md` | claude-mods per-version blocks (alternate: flarecrawl table) |
 | Repo visibility default | `references/repo-visibility.md` | `--private` unless user says "public" |
 | Metadata audit checklist | `references/metadata-checklist.md` | full source-of-truth for mode `audit` |
@@ -346,6 +394,7 @@ When adding any of the above, keep the boundary discipline: anything talking to 
 | `SKILL.md` | This file — modes, rules, delegation |
 | `references/release-strategy.md` | Version bump policy |
 | `references/readme-description.md` | 2–3 paragraph README intro — voice, structure, anti-patterns |
+| `references/readme-landing-page.md` | The layer between intro and changelog — section order, badge row (shields.io + `labelColor`), features-as-benefits with a before/after rewrite, screenshot/demo policy, landing-page anti-patterns |
 | `references/readme-recent-updates.md` | "Recent Updates" section format + emoji vocabulary |
 | `references/repo-visibility.md` | Private-by-default policy |
 | `references/metadata-checklist.md` | Audit checklist source of truth |
