@@ -124,7 +124,9 @@ for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/threejs-ops/scripts/check-three-facts.py \
          skills/isometric-ops/scripts/check-iso-facts.py \
          skills/hono-ops/scripts/check-hono-facts.py \
-         skills/hono-ops/scripts/route-inventory.py          skills/nextjs-ops/scripts/check-nextjs-facts.py          skills/nextjs-ops/scripts/audit-app-router.py; do
+         skills/hono-ops/scripts/route-inventory.py \
+         skills/nextjs-ops/scripts/check-nextjs-facts.py \
+         skills/nextjs-ops/scripts/audit-app-router.py; do
     "$PY" -m py_compile "$s" 2>/dev/null && pass "py_compile $(basename "$s")" || bad "py_compile $(basename "$s")"
 done
 bash -n skills/terraform-ops/scripts/check-action-refs.sh 2>/dev/null \
