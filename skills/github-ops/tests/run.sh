@@ -189,6 +189,16 @@ done
 if grep -qF "What does NOT vary" <<<"$lp_body"; then ok "reference fences what register does NOT change"
 else no "reference missing the register invariants section (fluff guard)"; fi
 
+# Cross-reference must be BIDIRECTIONAL. The sibling references are the far more
+# common entry points (a release loads readme-recent-updates.md, an intro rewrite
+# loads readme-description.md); if neither points forward, an agent on those paths
+# never learns the landing-page layer exists and reinstates the pre-split picture.
+for sib in readme-description readme-recent-updates; do
+  if grep -q "readme-landing-page.md" "$ROOT/references/$sib.md"; then
+    ok "$sib.md links forward to the landing page"
+  else no "$sib.md has no forward link (landing page unreachable from that path)"; fi
+done
+
 # Public-repo hygiene (hard rule 7 + tests/agnostic.sh): no local machine paths.
 if grep -Eq '[A-Za-z]:[\\/]Users[\\/]|/home/[a-z]|/Users/[A-Za-z]' <<<"$lp_body"; then
   no "reference contains a machine-specific local path"
