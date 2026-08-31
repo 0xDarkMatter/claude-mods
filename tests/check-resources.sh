@@ -305,6 +305,13 @@ if [ -f "$__installer" ]; then
     if grep -qE 'Get-ChildItem\s+-Path\s+\$(src|dest)\b' "$__installer"; then
         bad "install.ps1 enumerates skill files with -Path (glob-expands) - use -LiteralPath"
     else pass "install.ps1 skill enumeration uses -LiteralPath"; fi
+    # Same metacharacter trap in -Doctor's enumeration. Worse there: a doctor
+    # blind to bracketed paths reports CLEAN while the files it exists to notice
+    # are invisible to it. tests/install-guard.sh proves it behaviourally on
+    # Windows; this grep is the Linux-CI backstop.
+    if grep -qE 'Get-ChildItem\s+-Path\s+\$dir\b|Test-Path\s+\$dir\b' "$__installer"; then
+        bad "install.ps1 -Doctor enumerates with -Path (glob-expands) - use -LiteralPath"
+    else pass "install.ps1 doctor enumeration uses -LiteralPath"; fi
 else
     pass "install.ps1 absent - installer check skipped"
 fi

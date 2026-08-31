@@ -141,6 +141,13 @@ The install scripts:
 - Handle command→skill migrations (won't create duplicates)
 - Preserve any extra skills installed separately (e.g., project-specific skills)
 
+`scripts/install.ps1` additionally refuses to run from a tree that is behind
+`main` on paths it installs, since that would silently revert work another branch
+already landed (`-Force` overrides). `.\scripts\install.ps1 -Doctor` reports,
+read-only, what differs between the repo and `~/.claude` — stale, missing, and
+orphaned files — and exits non-zero when it finds any. Both comparisons ignore
+line endings.
+
 ### CLI Tools (Optional)
 
 Install modern CLI tools (fd, rg, bat, etc.) for better performance:
