@@ -312,6 +312,17 @@ if [ -f "$__installer" ]; then
     if grep -qE 'Get-ChildItem\s+-Path\s+\$dir\b|Test-Path\s+\$dir\b' "$__installer"; then
         bad "install.ps1 -Doctor enumerates with -Path (glob-expands) - use -LiteralPath"
     else pass "install.ps1 doctor enumeration uses -LiteralPath"; fi
+    # And once more at the TOP-LEVEL install loops, whose roots come straight
+    # from $projectRoot (the script's own location) and $claudeDir. A repo or
+    # worktree at `.../lane[1]/` glob-expands every one of them to nothing, so
+    # the installer prints its full banner and section headers and then installs
+    # zero skills, agents, rules, commands, styles and hooks - a silent total
+    # no-op, which is the worst failure this script has. `Test-Path $var` is
+    # included because the styles/settings/pigeon branches gate on it: a false
+    # negative there skips whole sections just as quietly.
+    if grep -qE 'Get-ChildItem\s+-Path\s+\$(commandsDir|skillsDir|agentsDir|rulesDir|stylesDir|hooksDir|root)\b|Test-Path\s+\$[A-Za-z_]' "$__installer"; then
+        bad "install.ps1 top-level install loops use -Path (glob-expands; a bracketed repo root installs NOTHING) - use -LiteralPath"
+    else pass "install.ps1 top-level install loops use -LiteralPath"; fi
 else
     pass "install.ps1 absent - installer check skipped"
 fi

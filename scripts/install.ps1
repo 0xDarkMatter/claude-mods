@@ -90,6 +90,18 @@ $ErrorActionPreference = "Stop"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Split-Path -Parent $scriptDir
+# INVARIANT: every path derived from $projectRoot or $claudeDir is passed as
+# -LiteralPath, never -Path. `[` and `]` are PowerShell wildcard
+# metacharacters, and both roots are attacker-free but bracket-prone: a git
+# worktree at `.claude\worktrees\lane[1]\` makes every -Path enumeration
+# glob-expand to NOTHING and return an empty set with no error - the
+# installer prints its whole banner and installs zero skills, agents and
+# rules. -Filter and -Recurse are unaffected (they walk children through the
+# provider); only the enumeration ROOT expands, so -LiteralPath is a drop-in.
+# New-Item -Path is the one exception left: it creates, so it is already
+# literal, and it has no -LiteralPath parameter.
+# tests/install-guard.sh section 11 asserts this behaviourally; the grep in
+# tests/check-resources.sh is the Linux-CI backstop.
 if ($env:CLAUDE_DIR) {
     $claudeDir = $env:CLAUDE_DIR
 } else {
@@ -484,7 +496,7 @@ Write-Host ""
 $dirs = @("commands", "skills", "agents", "rules", "output-styles", "hooks")
 foreach ($dir in $dirs) {
     $path = Join-Path $claudeDir $dir
-    if (-not (Test-Path $path)) {
+    if (-not (Test-Path -LiteralPath $path)) {
         New-Item -ItemType Directory -Path $path -Force | Out-Null
         Write-Host "  Created $path" -ForegroundColor Green
     }
@@ -549,9 +561,9 @@ $renamedSkills = @(
 
 foreach ($oldSkill in $renamedSkills) {
     $oldPath = "$claudeDir\skills\$oldSkill"
-    if (Test-Path $oldPath) {
+    if (Test-Path -LiteralPath $oldPath) {
         try {
-            Remove-Item -Path $oldPath -Recurse -Force -ErrorAction Stop
+            Remove-Item -LiteralPath $oldPath -Recurse -Force -ErrorAction Stop
             $newName = $oldSkill -replace '-patterns$', '-ops'
             Write-Host "  Removed renamed: $oldSkill (now $newName)" -ForegroundColor Red
         } catch {
@@ -562,9 +574,9 @@ foreach ($oldSkill in $renamedSkills) {
 
 Write-Host "Cleaning up deprecated items..." -ForegroundColor Yellow
 foreach ($item in $deprecated) {
-    if (Test-Path $item) {
+    if (Test-Path -LiteralPath $item) {
         try {
-            Remove-Item -Path $item -Recurse -Force -ErrorAction Stop
+            Remove-Item -LiteralPath $item -Recurse -Force -ErrorAction Stop
             Write-Host "  Removed: $item" -ForegroundColor Red
         } catch {
             Write-Host "  WARNING: could not remove $item ($($_.Exception.Message)) - continuing" -ForegroundColor Yellow
@@ -581,9 +593,9 @@ Write-Host "Installing commands..." -ForegroundColor Cyan
 $skipCommands = @("review.md", "testgen.md")
 
 $commandsDir = Join-Path $projectRoot "commands"
-Get-ChildItem -Path $commandsDir -Filter "*.md" | ForEach-Object {
+Get-ChildItem -LiteralPath $commandsDir -Filter "*.md" | ForEach-Object {
     if ($_.Name -notin $skipCommands -and $_.Name -notlike "archive*") {
-        Copy-Item $_.FullName -Destination "$claudeDir\commands\" -Force
+        Copy-Item -LiteralPath $_.FullName -Destination "$claudeDir\commands\" -Force
         Write-Host "  $($_.Name)" -ForegroundColor Green
     }
 }
@@ -605,7 +617,7 @@ Write-Host "Installing skills..." -ForegroundColor Cyan
 
 $skillsDir = Join-Path $projectRoot "skills"
 $failedSkills = @()
-foreach ($skill in (Get-ChildItem -Path $skillsDir -Directory)) {
+foreach ($skill in (Get-ChildItem -LiteralPath $skillsDir -Directory)) {
     $src = $skill.FullName
     $dest = "$claudeDir\skills\$($skill.Name)"
     try {
@@ -675,8 +687,8 @@ Write-Host ""
 Write-Host "Installing agents..." -ForegroundColor Cyan
 
 $agentsDir = Join-Path $projectRoot "agents"
-Get-ChildItem -Path $agentsDir -Filter "*.md" | ForEach-Object {
-    Copy-Item $_.FullName -Destination "$claudeDir\agents\" -Force
+Get-ChildItem -LiteralPath $agentsDir -Filter "*.md" | ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination "$claudeDir\agents\" -Force
     Write-Host "  $($_.Name)" -ForegroundColor Green
 }
 Write-Host ""
@@ -687,8 +699,8 @@ Write-Host ""
 Write-Host "Installing rules..." -ForegroundColor Cyan
 
 $rulesDir = Join-Path $projectRoot "rules"
-Get-ChildItem -Path $rulesDir -Filter "*.md" | ForEach-Object {
-    Copy-Item $_.FullName -Destination "$claudeDir\rules\" -Force
+Get-ChildItem -LiteralPath $rulesDir -Filter "*.md" | ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination "$claudeDir\rules\" -Force
     Write-Host "  $($_.Name)" -ForegroundColor Green
 }
 Write-Host ""
@@ -699,9 +711,9 @@ Write-Host ""
 Write-Host "Installing output styles..." -ForegroundColor Cyan
 
 $stylesDir = Join-Path $projectRoot "output-styles"
-if (Test-Path $stylesDir) {
-    Get-ChildItem -Path $stylesDir -Filter "*.md" | ForEach-Object {
-        Copy-Item $_.FullName -Destination "$claudeDir\output-styles\" -Force
+if (Test-Path -LiteralPath $stylesDir) {
+    Get-ChildItem -LiteralPath $stylesDir -Filter "*.md" | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination "$claudeDir\output-styles\" -Force
         Write-Host "  $($_.Name)" -ForegroundColor Green
     }
 }
@@ -713,13 +725,13 @@ Write-Host ""
 Write-Host "Installing hooks..." -ForegroundColor Cyan
 
 $hooksDir = Join-Path $projectRoot "hooks"
-Get-ChildItem -Path $hooksDir -Filter "*.sh" | ForEach-Object {
-    Copy-Item $_.FullName -Destination "$claudeDir\hooks\" -Force
+Get-ChildItem -LiteralPath $hooksDir -Filter "*.sh" | ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination "$claudeDir\hooks\" -Force
 }
 
 $settingsPath = Join-Path $claudeDir "settings.json"
-if (Test-Path $settingsPath) {
-    $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
+if (Test-Path -LiteralPath $settingsPath) {
+    $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
 } else {
     $settings = [PSCustomObject]@{}
 }
@@ -727,7 +739,7 @@ if (-not $settings.PSObject.Properties["hooks"]) {
     $settings | Add-Member -MemberType NoteProperty -Name hooks -Value ([PSCustomObject]@{})
 }
 
-$desired = Get-Content (Join-Path $hooksDir "hooks.json") -Raw | ConvertFrom-Json
+$desired = Get-Content -LiteralPath (Join-Path $hooksDir "hooks.json") -Raw | ConvertFrom-Json
 foreach ($eventProperty in $desired.hooks.PSObject.Properties) {
     $eventName = $eventProperty.Name
     if (-not $settings.hooks.PSObject.Properties[$eventName]) {
@@ -773,8 +785,8 @@ foreach ($eventProperty in $desired.hooks.PSObject.Properties) {
 if ($Statusline) {
     if (-not $settings.PSObject.Properties["statusLine"]) {
         $statuslineTemplate = Join-Path $projectRoot "templates\settings.json"
-        if (Test-Path $statuslineTemplate) {
-            $tpl = Get-Content $statuslineTemplate -Raw | ConvertFrom-Json
+        if (Test-Path -LiteralPath $statuslineTemplate) {
+            $tpl = Get-Content -LiteralPath $statuslineTemplate -Raw | ConvertFrom-Json
             if ($tpl.PSObject.Properties["statusLine"]) {
                 $settings | Add-Member -MemberType NoteProperty -Name statusLine -Value $tpl.statusLine
                 Write-Host "  Context-usage statusline added to settings.json" -ForegroundColor Green
@@ -787,7 +799,7 @@ if ($Statusline) {
     Write-Host "  Statusline skipped (re-run with -Statusline to install it)" -ForegroundColor DarkGray
 }
 
-$settings | ConvertTo-Json -Depth 20 | Set-Content $settingsPath -Encoding UTF8
+$settings | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $settingsPath -Encoding UTF8
 Write-Host "  Security and peer-guard hooks wired in settings.json" -ForegroundColor Green
 Write-Host ""
 
@@ -798,8 +810,8 @@ Write-Host "Installing pigeon (pmail)..." -ForegroundColor Cyan
 
 # Clean up old agentmail install if present
 $oldAgentmailDir = Join-Path $claudeDir "agentmail"
-if (Test-Path $oldAgentmailDir) {
-    Remove-Item -Path $oldAgentmailDir -Recurse -Force
+if (Test-Path -LiteralPath $oldAgentmailDir) {
+    Remove-Item -LiteralPath $oldAgentmailDir -Recurse -Force
     Write-Host "  Removed old agentmail/ (renamed to pigeon/)" -ForegroundColor Red
 }
 
@@ -809,27 +821,27 @@ New-Item -ItemType Directory -Force -Path $pigeonDir | Out-Null
 $mailDbSrc = Join-Path $projectRoot "skills\pigeon\scripts\mail-db.sh"
 $checkMailSrc = Join-Path $projectRoot "hooks\check-mail.sh"
 
-if (Test-Path $mailDbSrc) {
-    Copy-Item $mailDbSrc -Destination "$pigeonDir\" -Force
+if (Test-Path -LiteralPath $mailDbSrc) {
+    Copy-Item -LiteralPath $mailDbSrc -Destination "$pigeonDir\" -Force
     Write-Host "  mail-db.sh" -ForegroundColor Green
 }
-if (Test-Path $checkMailSrc) {
-    Copy-Item $checkMailSrc -Destination "$pigeonDir\" -Force
+if (Test-Path -LiteralPath $checkMailSrc) {
+    Copy-Item -LiteralPath $checkMailSrc -Destination "$pigeonDir\" -Force
     Write-Host "  check-mail.sh" -ForegroundColor Green
 }
 
 $settingsPath = Join-Path $claudeDir "settings.json"
 
 # Migrate stale agentmail hook path -> pigeon
-if ((Test-Path $settingsPath) -and (Select-String -Path $settingsPath -Pattern "agentmail/check-mail\.sh" -Quiet)) {
-    $content = Get-Content $settingsPath -Raw
+if ((Test-Path -LiteralPath $settingsPath) -and (Select-String -LiteralPath $settingsPath -Pattern "agentmail/check-mail\.sh" -Quiet)) {
+    $content = Get-Content -LiteralPath $settingsPath -Raw
     $content = $content -replace 'agentmail/check-mail\.sh', 'pigeon/check-mail.sh'
-    Set-Content $settingsPath -Value $content -NoNewline
+    Set-Content -LiteralPath $settingsPath -Value $content -NoNewline
     Write-Host "  Migrated agentmail hook -> pigeon in settings.json" -ForegroundColor Green
 }
 
 # Check if hook is already configured (pigeon path)
-if ((Test-Path $settingsPath) -and (Select-String -Path $settingsPath -Pattern "pigeon/check-mail\.sh" -Quiet)) {
+if ((Test-Path -LiteralPath $settingsPath) -and (Select-String -LiteralPath $settingsPath -Pattern "pigeon/check-mail\.sh" -Quiet)) {
     Write-Host "  Hook already configured in settings.json" -ForegroundColor Green
 } else {
     Write-Host ""
@@ -861,14 +873,14 @@ New-Item -ItemType Directory -Force -Path $autoSkillDir | Out-Null
 $scripts = @("track-tools.sh", "evaluate.sh")
 foreach ($script in $scripts) {
     $src = Join-Path $projectRoot "skills\auto-skill\scripts\$script"
-    if (Test-Path $src) {
-        Copy-Item $src -Destination "$autoSkillDir\" -Force
+    if (Test-Path -LiteralPath $src) {
+        Copy-Item -LiteralPath $src -Destination "$autoSkillDir\" -Force
         Write-Host "  $script" -ForegroundColor Green
     }
 }
 
 $settingsPath = Join-Path $claudeDir "settings.json"
-if ((Test-Path $settingsPath) -and (Select-String -Path $settingsPath -Pattern "auto-skill" -Quiet)) {
+if ((Test-Path -LiteralPath $settingsPath) -and (Select-String -LiteralPath $settingsPath -Pattern "auto-skill" -Quiet)) {
     Write-Host "  Hooks already configured in settings.json" -ForegroundColor Green
 } else {
     Write-Host ""
@@ -903,8 +915,8 @@ Write-Host "Normalizing shell-script line endings..." -ForegroundColor Cyan
 $crFixed = 0
 foreach ($d in @("hooks", "skills", "pigeon", "auto-skill")) {
     $root = Join-Path $claudeDir $d
-    if (-not (Test-Path $root)) { continue }
-    foreach ($f in (Get-ChildItem -Path $root -Recurse -File)) {
+    if (-not (Test-Path -LiteralPath $root)) { continue }
+    foreach ($f in (Get-ChildItem -LiteralPath $root -Recurse -File)) {
         $isShell = $f.Name -match '\.sh(\.template)?$'
         if (-not $isShell -and -not $f.Extension) {
             # Extension-less files are shell iff they open with a shebang.
