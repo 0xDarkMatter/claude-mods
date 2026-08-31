@@ -147,7 +147,7 @@ hooks: {
 }
 ```
 
-Common use: in `afterChange`, call Next.js `revalidatePath()` / `revalidateTag()` to bust the front-end cache on publish. Full hook catalog (collection, field, global, auth hooks): `references/hooks-and-fields.md`.
+Common use: in `afterChange`, call Next.js `revalidatePath()` / `revalidateTag()` to bust the front-end cache on publish. Since Next.js 16 that is `revalidateTag('posts', 'max')` — the second argument is a cacheLife profile, and the single-argument form is deprecated (on Next 15 it is the only form, and passing two arguments is a TypeScript error). Full hook catalog (collection, field, global, auth hooks) and the version table: `references/hooks-and-fields.md`.
 
 ---
 
@@ -173,7 +173,8 @@ const { docs } = await payload.find({
 
 ### Caching in Next.js
 
-- Wrap Local API reads in `unstable_cache` (or `cache`) with tags, then invalidate from an `afterChange` hook via `revalidateTag`.
+- Tag Local API reads — `'use cache'` + `cacheTag` on Next 16, `unstable_cache(..., { tags })` on 15 — then invalidate from an `afterChange` hook via `revalidateTag(tag, 'max')`.
+- Don't use `updateTag()` in a Payload hook: it is Server-Actions-only, and Payload's REST/GraphQL writes run in a Route Handler where it throws.
 - `depth` controls relationship population — keep it low to avoid over-fetching.
 
 ---
@@ -210,7 +211,8 @@ const { docs } = await payload.find({
 |--------|-----|-----|
 | Users see data they shouldn't | `read` access returns `true` (no row filter) | Return a **query constraint** from `read`, not just `true` |
 | Local disk uploads vanish on Vercel | Serverless FS is ephemeral | Use S3/R2 storage adapter |
-| Stale front-end after publish | Next.js caches the read | `revalidateTag/Path` in an `afterChange` hook |
+| Stale front-end after publish | Next.js caches the read | `revalidateTag(tag, 'max')` / `revalidatePath` in an `afterChange` hook |
+| `updateTag` throws in a hook | It is Server-Actions-only; Payload's API writes run in a Route Handler | Use `revalidateTag(tag, 'max')`, or `{ expire: 0 }` if it must not serve stale |
 | S3 signed URL 403s on frontend | URLs expire | Handle 403 gracefully; refresh URL |
 | Over-deep relationship fetch | High `depth` populates everything | Keep `depth` minimal; populate explicitly |
 | Custom endpoint leaks data | Bypassed access control | Go through Local API with access on; reserve `overrideAccess` for trusted paths |

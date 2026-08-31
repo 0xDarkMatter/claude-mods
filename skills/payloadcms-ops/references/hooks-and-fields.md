@@ -30,9 +30,9 @@ hooks: {
   ],
   afterChange: [
     async ({ doc, req }) => {
-      // bust Next.js cache for this content on publish
+      // bust Next.js cache for this content on publish (Next 16 two-arg form)
       const { revalidateTag } = await import('next/cache')
-      revalidateTag(`posts`)
+      revalidateTag(`posts`, 'max')
       return doc
     },
   ],
@@ -62,9 +62,33 @@ single field — use for per-field derivation (e.g. auto-slug from title):
 
 ### Cache-invalidation pattern (the canonical Next.js use)
 
-1. Read with `unstable_cache(..., { tags: ['posts'] })` in the front end.
-2. In the collection's `afterChange` (and `afterDelete`), call `revalidateTag('posts')`.
+1. Tag the front-end read: `'use cache'` + `cacheTag('posts')` on Next 16, or
+   `unstable_cache(..., { tags: ['posts'] })` on 15 (`unstable_cache` still runs
+   on 16, but the docs now point at `use cache`).
+2. In the collection's `afterChange` (and `afterDelete`), call
+   `revalidateTag('posts', 'max')`.
 3. Publish/edit now busts exactly the affected cache entry.
+
+#### Which Next.js major (verified against nextjs.org, Next 16.3.3, 2026-08)
+
+`revalidateTag` takes a **cacheLife profile as a second argument since Next.js 16**.
+The single-argument form still runs but is deprecated.
+
+| Next.js | Call | Behaviour |
+|---|---|---|
+| 16 | `revalidateTag('posts', 'max')` | Stale-while-revalidate — readers are served the old page for up to a year while the rebuild runs. The recommended default. |
+| 16 | `revalidateTag('posts', { expire: 0 })` | No stale content; the next request blocks on a fresh fetch. Use when the edit must be visible immediately. |
+| 15 | `revalidateTag('posts')` | The only signature 15 has. Passing a second argument is a **TypeScript error** on 15, so don't ship the two-arg form to a 15 app. |
+
+**Do not reach for `updateTag()` here.** It is the Next 16 read-your-own-writes API,
+but it can *only* be called from inside a Server Action and throws anywhere else.
+Payload mounts its REST and GraphQL surface under a Route Handler, so an
+`afterChange` triggered by the admin panel or an API write is not in a Server
+Action — `revalidateTag` is the correct call in a Payload hook. `updateTag` only
+applies when *your own* Server Action calls the Local API directly.
+
+Payload 3 does not pin a Next.js major, so check the host app's `next` version
+before copying either form. The `nextjs-ops` skill carries the full caching model.
 
 ## Fields — composition patterns
 
