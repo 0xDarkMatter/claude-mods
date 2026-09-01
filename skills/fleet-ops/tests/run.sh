@@ -160,6 +160,25 @@ grep -v "cleanup-me" "$SB/wt-chore_descrub/f" > "$SB/wt-chore_descrub/f.tmp" && 
 git -C "$SB/wt-chore_descrub" -c user.email=w@t -c user.name=w commit -qam "remove stale marker"
 bash "$FLEET" scrub-check chore/descrub >/dev/null 2>&1; ee "scrub-check passes marker REMOVAL" 0 $?
 
+echo "-- scrub gate: mktemp X-templates pass, lone triple-X markers refuse --"
+# Regression (2026-09-01): the old default's X-term matched the 4th X of a
+# mktemp template (uppercase X is not [a-z]), refusing any branch that added
+#   TMP="$(mktemp -t push-gate-paths.<six X's>)"
+# even though identical templates already lived on main. Runs of 4+ X's are
+# templates; only a lone triple-X followed by a non-letter is a marker. Both
+# tokens are BUILT at runtime — a contiguous triple-X (or marker) in this
+# source would trip the gate on run.sh itself (see the marker note above).
+XR='XX'
+mk_lane "chore/mktempl" tmpl.sh
+printf 'TMP="$(mktemp -t push-gate-paths.%s)"\n' "$XR$XR$XR" >> "$SB/wt-chore_mktempl/tmpl.sh"
+git -C "$SB/wt-chore_mktempl" -c user.email=w@t -c user.name=w commit -qam "add mktemp template"
+bash "$FLEET" scrub-check chore/mktempl >/dev/null 2>&1; ee "mktemp X-template passes scrub" 0 $?
+
+mk_lane "chore/xmark" mark.txt
+printf '%sX fix this later\n' "$XR" >> "$SB/wt-chore_xmark/mark.txt"
+git -C "$SB/wt-chore_xmark" -c user.email=w@t -c user.name=w commit -qam "add a marker"
+bash "$FLEET" scrub-check chore/xmark >/dev/null 2>&1; ee "lone triple-X marker still refused" 1 $?
+
 echo "-- signal.sh log gate: exit codes and summaries, not prose --"
 # Regression (Ledger, 2026-07): a GREEN run whose stderr prints "failed"/"error"
 # prose, or whose test NAMES contain "error", must not be refused. Verdict order

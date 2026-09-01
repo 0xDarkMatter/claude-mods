@@ -57,7 +57,15 @@ MODE="auto"
 # "Headless agent compatibility".
 WORKTREE_ROOT=".fleet-worktrees"
 TEST_CMD=""
-FORBIDDEN_PATTERN="TODO_SCRUB|XXX[^a-z]|FIXME_BEFORE_LAND"
+# Scrub default. BUILT by string concatenation so this line never contains a
+# contiguous marker token — the scrub gate greps every ADDED diff line, so a
+# literal here would refuse the very branch that edits this default (same
+# trick as the marker note in tests/run.sh). The X-marker term is written
+# X{3} with [^X] guards for the same reason, and because a run of 4+ X's is a
+# mktemp template (push-gate-paths. plus six X's — false-refused a landing,
+# 2026-09-01), not a marker; a lone triple-X followed by a non-letter
+# (space, colon) still refuses.
+FORBIDDEN_PATTERN='TODO_''SCRUB|(^|[^X])X{3}[^a-zX]|FIXME_''BEFORE_LAND'
 BASE_BRANCH="main"
 POLL_INTERVAL=5
 ICONS="${icons:-}"   # env seed; config `icons=ascii` overrides below
