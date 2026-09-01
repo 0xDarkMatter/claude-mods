@@ -380,7 +380,7 @@ Optional `.claude/fleet/config`, one `key=value` per line:
 mode=auto                            # auto | worktree | branch
 worktree_root=.fleet-worktrees       # keep outside .claude/ — see "Headless agent compatibility"
 test_cmd=npm run check               # if set, land runs it post-merge; else trust signal log
-forbidden_pattern=TODO_SCRUB|XXX
+forbidden_pattern=NEVER_LAND|debugger;   # override — the shipped default is described below
 base_branch=main
 poll_interval=5
 icons=unicode                        # unicode | ascii (same as FLEET_ASCII=1)
@@ -390,6 +390,19 @@ prune_hint=on                        # on | off — show the prunable backlog in
 ```
 
 Zero-config works for the common case.
+
+**The shipped `forbidden_pattern` default** (the exact regex lives at
+`FORBIDDEN_PATTERN` in `scripts/fleet.sh`) refuses the two scrub markers —
+`TODO_` + `SCRUB` and `FIXME_` + `BEFORE_LAND`, spelled split here deliberately —
+plus lone triple-X markers via the term `(^|[^X])X{3}[^a-zX]`. A run of four or
+more X's is a `mktemp` template (`push-gate-paths.` plus six X's) and passes; a
+bare triple-X followed by a non-letter (a space, a colon) still refuses. A
+template false-refused a landing on 2026-09-01, hence the run-aware form.
+
+Mind the self-reference: the scrub greps every **added** diff line, so writing a
+contiguous marker token — or a triple-X run — into docs, comments, or a config
+example refuses the very branch that adds it. Build such tokens by concatenation
+(`'TODO_''SCRUB'`), as `scripts/fleet.sh` and `tests/run.sh` themselves do.
 
 **Grammar.** The file is *parsed*, not `source`d — it cannot execute code, and it is
 not bash:
