@@ -25,6 +25,12 @@
 #        and the fixture below proves it on a file whose ONLY difference is its
 #        line endings.
 #
+#   It also covers the installer proper on one axis the guard and doctor share:
+#   bracketed paths. `[`/`]` are PowerShell wildcards, so a -Path enumeration
+#   rooted at a worktree like `.claude/worktrees/lane[1]/` matches nothing and
+#   returns cleanly - the installer installs zero of everything and exits 0.
+#   Sections 8 and 11 assert the doctor and the install side see through that.
+#
 # Usage:  bash tests/install-guard.sh
 # Input:  none (builds throwaway git repos under a mktemp dir)
 # Output: human progress lines on stdout
@@ -83,6 +89,14 @@ wp() {
     if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s' "$1"; fi
 }
 
+# git is a native Windows binary here too, and its MSYS argument translator
+# mangles a bracketed POSIX path: `git -C '/tmp/x/lane[1]'` dies with "cannot
+# change to ... No such file or directory" even though the directory exists.
+# Feeding it the Windows form works. Section 11 depends on this - without it the
+# bracketed fixture is silently not a git repo, which sends install.ps1 down its
+# no-git degradation path and tests something other than what it claims to.
+g() { local d="$1"; shift; git -C "$(wp "$d")" "$@"; }
+
 TMPROOT="$(mktemp -d)"
 cleanup() { rm -rf "$TMPROOT"; }
 trap cleanup EXIT
@@ -105,21 +119,21 @@ new_repo() {
     printf '{ "hooks": {} }\n' > "$d/hooks/hooks.json"
     printf -- '# readme\n' > "$d/README.md"
     printf -- 'name: ci\n' > "$d/.github/workflow.yml"
-    git -C "$d" init -q -b main
-    git -C "$d" config user.email "test@example.invalid"
-    git -C "$d" config user.name "install-guard test"
-    git -C "$d" config commit.gpgsign false
+    g "$d" init -q -b main
+    g "$d" config user.email "test@example.invalid"
+    g "$d" config user.name "install-guard test"
+    g "$d" config commit.gpgsign false
     # Pin line endings off. The CRLF fixture below depends on the working tree
     # holding exactly the bytes this script writes; autocrlf would rewrite them
     # on checkout and silently invalidate the most important comparison test.
-    git -C "$d" config core.autocrlf false
-    git -C "$d" config core.safecrlf false
+    g "$d" config core.autocrlf false
+    g "$d" config core.safecrlf false
     commit_all "$d" "init"
 }
 
 commit_all() {
-    git -C "$1" add -A
-    git -C "$1" commit -q --no-verify -m "$2"
+    g "$1" add -A
+    g "$1" commit -q --no-verify -m "$2"
 }
 
 # --- runners ----------------------------------------------------------------
@@ -150,7 +164,7 @@ echo "=== claude-mods :: install guard + doctor ==="
 # ---------------------------------------------------------------------------
 R1="$TMPROOT/ahead"; C1="$TMPROOT/ahead-dest"; mkdir -p "$C1"
 new_repo "$R1"
-git -C "$R1" switch -q -c feat/ahead
+g "$R1" switch -q -c feat/ahead
 printf -- '---\nname: beta\ndescription: "beta"\n---\n\n# Beta\n' > "$R1/skills/alpha/extra.md"
 commit_all "$R1" "feat(skills): add extra"
 doctor "$R1" "$C1"
@@ -165,10 +179,10 @@ fi
 # ---------------------------------------------------------------------------
 R2="$TMPROOT/behind"; C2="$TMPROOT/behind-dest"; mkdir -p "$C2"
 new_repo "$R2"
-git -C "$R2" branch lane/stale
+g "$R2" branch lane/stale
 printf -- '---\nname: alpha\ndescription: "alpha v2"\n---\n\n# Alpha v2\n' > "$R2/skills/alpha/SKILL.md"
 commit_all "$R2" "feat(skills): land alpha v2"
-git -C "$R2" switch -q lane/stale
+g "$R2" switch -q lane/stale
 doctor "$R2" "$C2"
 if [ "$(jqd '.data.staleness.status')" = "behind" ]; then
     pass "guard fires for a branch missing a main commit touching skills/"
@@ -187,11 +201,11 @@ fi
 # ---------------------------------------------------------------------------
 R3="$TMPROOT/behind-noninstallable"; C3="$TMPROOT/bni-dest"; mkdir -p "$C3"
 new_repo "$R3"
-git -C "$R3" branch lane/docs
+g "$R3" branch lane/docs
 printf -- '# readme v2\n' > "$R3/README.md"
 printf -- 'name: ci v2\n' > "$R3/.github/workflow.yml"
 commit_all "$R3" "docs: update readme and ci"
-git -C "$R3" switch -q lane/docs
+g "$R3" switch -q lane/docs
 doctor "$R3" "$C3"
 if [ "$(jqd '.data.staleness.status')" = "ok" ]; then
     pass "guard silent when the missing main commit touches nothing installable"
@@ -379,6 +393,53 @@ if [ "$(jqd '.data.staleness.status')" = "unknown" ]; then
     pass "doctor reports staleness 'unknown' outside a git repo"
 else
     fail "expected staleness unknown outside git, got $(jqd '.data.staleness.status')"
+fi
+
+# ---------------------------------------------------------------------------
+# 11. Bracketed paths, INSTALL side. Section 8 proved the doctor sees them;
+#     this proves the installer actually copies. The top-level enumeration roots
+#     ($projectRoot/skills, /agents, /rules, ...) and the CLAUDE_DIR target both
+#     come from bracket-prone locations - a git worktree at `.../lane[1]/` is the
+#     realistic one - and a -Path loop over a bracketed root returns an EMPTY set
+#     with no error. The installer then prints its whole banner, every section
+#     header, exits 0, and installs nothing at all.
+#
+#     So the assertion is content, not exit code: exit 0 is exactly what the
+#     broken installer produces. Revert any one -LiteralPath in install.ps1 to
+#     -Path and this section must go red - a bracket test that passes either way
+#     is worthless, which is the mistake section 8 was corrected for.
+# ---------------------------------------------------------------------------
+RI="$TMPROOT/inst[2]"; CI="$TMPROOT/inst[2]-dest"; mkdir -p "$CI"
+new_repo "$RI"
+install_run "$RI" "$CI"
+if [ "$INSTALL_EXIT" -eq 0 ]; then
+    pass "install from a bracketed repo root exits 0"
+else
+    fail "install from a bracketed root exited $INSTALL_EXIT"
+fi
+# One assertion per top-level loop: each has its own Get-ChildItem root, so a
+# single missed -LiteralPath silences exactly one of these and nothing else.
+for landed in \
+    "skills/alpha/SKILL.md" \
+    "agents/demo-expert.md" \
+    "rules/demo.md" \
+    "commands/demo.md" \
+    "output-styles/demo.md" \
+    "hooks/demo.sh"
+do
+    if [ -f "$CI/$landed" ]; then
+        pass "bracketed-root install landed $landed"
+    else
+        fail "bracketed-root install did NOT land $landed (silent no-op)"
+    fi
+done
+# The doctor agreeing is the cross-check: a broken installer plus a doctor that
+# also cannot see the target would both report clean and cancel each other out.
+doctor "$RI" "$CI"
+if [ "$DOC_EXIT" -eq 0 ] && [ "$(jqd '.data.missing | length')" = "0" ]; then
+    pass "doctor confirms a bracketed-root install is complete"
+else
+    fail "doctor found gaps after a bracketed-root install: missing=$(jqd '.data.missing')"
 fi
 
 echo ""
