@@ -159,8 +159,13 @@ unresolvable one refuses exactly as before. Self must also be the **only** live 
 a second live session writing the same branch refuses, naming the peer.
 
 Override with `session_check=off` in config, or `FLEET_SKIP_SESSION_CHECK=1` for one
-run. `fleet config` states plainly whether the gate is armed *and* whether self-identity
-resolved — the same observability lesson as `test_cmd`.
+run. One run means one run: fleet consumes the variable at startup and strips it (and
+the rest of the `FLEET_*` knob family) from the environment before `test_cmd` runs, so
+the override can never disarm a gate inside the very suite the landing is gated on —
+inherited into fleet-ops' own self-test, it once turned 6 live-owner refusal tests into
+false FAILs and reverted a green merge (2026-09-01). `fleet config` states plainly
+whether the gate is armed *and* whether self-identity resolved — the same observability
+lesson as `test_cmd`.
 
 ### Where each channel works (verified 2026-08-03)
 
