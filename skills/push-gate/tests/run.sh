@@ -112,6 +112,62 @@ git -C "$repo" commit -q -m 'test: add references'
 scan_stubbed "$repo" "$SB/false-positives.out"; rc=$?
 expect_exit "env reference, placeholder, and shell fallback stay clean" 0 "$rc"
 
+echo "-- repo-local allowlist (.pushgate-allow) --"
+secret_line="$(printf '%s%s' 'sk-' 'abcdefghijklmnopqrstuvwxyz0123456789')"
+
+# Allowlisted hit in the right file → clean
+repo="$SB/allow-hit"
+new_repo "$repo"
+printf '%s\n' \
+  '# reason: test fixture token, not a live credential' \
+  "candidate.txt:^${secret_line}\$" > "$repo/.pushgate-allow"
+printf '%s\n' "$secret_line" > "$repo/candidate.txt"
+git -C "$repo" add .pushgate-allow candidate.txt
+git -C "$repo" commit -q -m 'test: allowlisted fixture'
+scan_stubbed "$repo" "$SB/allow-hit.out"; rc=$?
+expect_exit "allowlisted hit reports clean" 0 "$rc"
+expect_has "allowlisted verdict is CLEAN" "secret scan CLEAN" "$(cat "$SB/allow-hit.out")"
+
+# Entry scoped to another file → hit still refuses, and a ready-made entry is suggested
+repo="$SB/allow-scope"
+new_repo "$repo"
+printf '%s\n' \
+  '# reason: entry deliberately points at a different file' \
+  "other.txt:^${secret_line}\$" > "$repo/.pushgate-allow"
+printf '%s\n' "$secret_line" > "$repo/candidate.txt"
+printf '%s\n' 'nothing to see' > "$repo/other.txt"
+git -C "$repo" add .pushgate-allow candidate.txt other.txt
+git -C "$repo" commit -q -m 'test: mis-scoped allowlist'
+scan_stubbed "$repo" "$SB/allow-scope.out"; rc=$?
+expect_exit "entry for another file does not suppress the hit" 1 "$rc"
+expect_has "refusal names the hit file" "candidate.txt: " "$(cat "$SB/allow-scope.out")"
+expect_has "refusal suggests a ready-made entry" "candidate.txt:^" "$(cat "$SB/allow-scope.out")"
+expect_has "mis-scoped entry is reported stale" "stale .pushgate-allow entry" "$(cat "$SB/allow-scope.out")"
+
+# Stale entry (file gone) on an otherwise clean push → clean exit + warning
+repo="$SB/allow-stale"
+new_repo "$repo"
+printf '%s\n' \
+  '# reason: file was deleted after this entry was added' \
+  'ghost.txt:^never-matches\$' > "$repo/.pushgate-allow"
+printf '%s\n' 'message = "ordinary configuration"' > "$repo/candidate.txt"
+git -C "$repo" add .pushgate-allow candidate.txt
+git -C "$repo" commit -q -m 'test: stale allowlist entry'
+scan_stubbed "$repo" "$SB/allow-stale.out"; rc=$?
+expect_exit "stale entry does not gate a clean push" 0 "$rc"
+expect_has "stale entry is warned about" "stale .pushgate-allow entry" "$(cat "$SB/allow-stale.out")"
+
+# Entry without a reason comment → warned, still honoured
+repo="$SB/allow-noreason"
+new_repo "$repo"
+printf '%s\n' "candidate.txt:^${secret_line}\$" > "$repo/.pushgate-allow"
+printf '%s\n' "$secret_line" > "$repo/candidate.txt"
+git -C "$repo" add .pushgate-allow candidate.txt
+git -C "$repo" commit -q -m 'test: entry without reason'
+scan_stubbed "$repo" "$SB/allow-noreason.out"; rc=$?
+expect_exit "comment-less entry still suppresses its hit" 0 "$rc"
+expect_has "missing reason comment is warned about" "no reason comment" "$(cat "$SB/allow-noreason.out")"
+
 echo "-- gitleaks integration --"
 if command -v gitleaks >/dev/null 2>&1; then
   repo="$SB/gitleaks"

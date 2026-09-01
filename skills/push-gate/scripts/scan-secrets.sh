@@ -64,7 +64,8 @@ fi
 # ── Layer 1: gitleaks on the commit range ─────────────────────────────────────
 echo "push-gate: scanning ${SCAN_LABEL}"
 GITLEAKS_REPORT="$(mktemp -t gitleaks.XXXXXX.json)"
-trap 'rm -f "$GITLEAKS_REPORT" "$DIFF_FILE" 2>/dev/null || true' EXIT
+DIFF_FILE="" ADDED_FILE="" PATHS_FILE=""
+trap 'rm -f "$GITLEAKS_REPORT" "$DIFF_FILE" "$ADDED_FILE" "$PATHS_FILE" 2>/dev/null || true' EXIT
 
 # Config: default rule set + allowlist for public-by-design tokens (e.g. Mapbox pk.*).
 # Guarded so push-gate still runs with the built-in default config if it's absent.
@@ -110,13 +111,36 @@ DIFF_FILE="$(mktemp -t push-gate-diff.XXXXXX)"
 # Exclude push-gate's own pattern corpus — it contains examples of every
 # secret shape it's trying to detect, so scanning it matches everything.
 # (Classic snake-eating-tail when push-gate is part of the pushed content.)
+# Same for .pushgate-allow: its entries are regexes of confirmed-safe hits,
+# which by construction resemble the shapes the corpus matches. Only the
+# regex pass skips it — the gitleaks layer still scans the allowlist file.
 git diff "$DIFF_RANGE" -- . \
   ':(exclude,glob)**/push-gate/references/secret-patterns.txt' \
+  ':(exclude,top).pushgate-allow' \
   > "$DIFF_FILE"
 
-# Extract added lines only (strip the leading '+'), ignore file-header lines
+# Extract added lines, keeping per-line file attribution: ADDED_FILE holds the
+# content ('+' stripped, trailing CR dropped for CRLF checkouts), PATHS_FILE the
+# repo-relative path each line was added to — same line count, same order.
+# Attribution is what lets .pushgate-allow scope an allow to one file instead
+# of the whole diff.
 ADDED_FILE="$(mktemp -t push-gate-added.XXXXXX)"
-grep -E '^\+' "$DIFF_FILE" | grep -vE '^\+\+\+ ' | sed 's/^+//' > "$ADDED_FILE" || true
+PATHS_FILE="$(mktemp -t push-gate-paths.XXXXXX)"
+awk -v added="$ADDED_FILE" -v paths="$PATHS_FILE" '
+  /^\+\+\+ / {
+    p = substr($0, 5)
+    gsub(/^"|"$/, "", p)          # git quotes paths containing special chars
+    sub(/^b\//, "", p)
+    path = (p == "/dev/null") ? "" : p
+    next
+  }
+  /^\+/ {
+    l = substr($0, 2)
+    sub(/\r$/, "", l)
+    print l > added
+    print path > paths
+  }
+' "$DIFF_FILE"
 
 # Load patterns (skip blanks/comments)
 PATTERN_ARGS=()
@@ -127,35 +151,120 @@ while IFS= read -r line; do
   esac
 done < "$PATTERNS_FILE"
 
-# Run ripgrep with all patterns; capture matches
+# Run ripgrep with all patterns; line numbers index into PATHS_FILE
 RAW_HITS="$(rg --no-filename --line-number --no-heading "${PATTERN_ARGS[@]}" "$ADDED_FILE" 2>/dev/null || true)"
 
-# Filter common false positives.
+# Common false positives, filtered before the allowlist is consulted.
 # Note: the `\.\.\.'` ellipsis-apostrophe patterns were removed because they
 # required an embedded `'` inside a bash single-quoted string, which closes
 # the string early and breaks the regex ("Unmatched ( or \("). The remaining
 # patterns (placeholder/example/getenv/etc) cover the bulk of false positives.
-FILTERED_HITS="$(
-  printf '%s\n' "$RAW_HITS" \
-    | grep -viE '(example|placeholder|\<dummy\>|\<fake\>|\<TODO\>|<unset>|os\.environ|process\.env|getenv|\$\{[A-Z_]+:-|\$\{[A-Z_]+\}|\$\([A-Z_]+\)|\$env:[A-Z_]+|\.\.\.<|pk\.eyJ[A-Za-z0-9_-]{6,})' \
-    || true
-)"
+FP_FILTER='(example|placeholder|\<dummy\>|\<fake\>|\<TODO\>|<unset>|os\.environ|process\.env|getenv|\$\{[A-Z_]+:-|\$\{[A-Z_]+\}|\$\([A-Z_]+\)|\$env:[A-Z_]+|\.\.\.<|pk\.eyJ[A-Za-z0-9_-]{6,})'
 
-# Drop blank lines
-FILTERED_HITS="$(printf '%s\n' "$FILTERED_HITS" | grep -v '^$' || true)"
+# ── Repo-local allowlist (.pushgate-allow) ────────────────────────────────────
+# Committed at the scanned repo's root, mirroring gitleaks' .gitleaksignore.
+# Entry format (one per line):   <repo-relative-path>:<line-regex>
+#   - split on the FIRST ':' — the path portion must not contain ':' (git's
+#     repo-relative paths never do on Windows; avoid them elsewhere)
+#   - <line-regex> is Rust-regex matched against the full added-line content;
+#     no line numbers anywhere — they drift, a content anchor does not
+#   - '#' comment lines allowed; each entry must carry a reason comment
+#     directly above it (warned when missing, not gated)
+# An entry only suppresses regex-layer hits in that exact file. Any hit NOT
+# allowlisted still refuses. Entries that no longer match any line of their
+# file at the branch tip are reported as stale (warning, non-gating).
+TOPLEVEL="$(git rev-parse --show-toplevel)"
+ALLOW_FILE="$TOPLEVEL/.pushgate-allow"
+ALLOW_PATHS=()
+ALLOW_REGEXES=()
+if [ -f "$ALLOW_FILE" ]; then
+  prev_comment=0
+  allow_lineno=0
+  while IFS= read -r al || [ -n "$al" ]; do
+    allow_lineno=$((allow_lineno + 1))
+    al="${al%$'\r'}"
+    case "$al" in
+      '') continue ;;
+      \#*) prev_comment=1; continue ;;
+    esac
+    case "$al" in
+      *:*) : ;;
+      *)
+        echo "push-gate: WARN .pushgate-allow:${allow_lineno} malformed (want <path>:<regex>): $al" >&2
+        prev_comment=0
+        continue
+        ;;
+    esac
+    if [ "$prev_comment" -eq 0 ]; then
+      echo "push-gate: WARN .pushgate-allow:${allow_lineno} entry has no reason comment above it: ${al%%:*}" >&2
+    fi
+    prev_comment=0
+    ALLOW_PATHS+=("${al%%:*}")
+    ALLOW_REGEXES+=("${al#*:}")
+  done < "$ALLOW_FILE"
 
-rm -f "$ADDED_FILE" "$DIFF_FILE"
+  # Stale-entry check against the branch tip (not just this diff): an entry
+  # whose file is gone, or whose regex matches no line of that file anymore,
+  # documents a hit that was since removed — prune it. A malformed regex also
+  # lands here (rg errors are treated as no-match).
+  for i in "${!ALLOW_PATHS[@]}"; do
+    ap="${ALLOW_PATHS[$i]}"; ar="${ALLOW_REGEXES[$i]}"
+    if ! git cat-file -e "${BRANCH}:${ap}" 2>/dev/null; then
+      echo "push-gate: WARN stale .pushgate-allow entry — ${ap} does not exist at ${BRANCH} tip"
+    elif ! git show "${BRANCH}:${ap}" 2>/dev/null | rg -e "$ar" >/dev/null 2>&1; then
+      echo "push-gate: WARN stale .pushgate-allow entry — no line in ${ap} matches: ${ar}"
+    fi
+  done
+fi
+
+# ── Per-hit verdicts: FP filter → allowlist → refuse ─────────────────────────
+FILTERED_HITS=""
+SUGGESTIONS=""
+if [ -n "$RAW_HITS" ]; then
+  while IFS= read -r hit; do
+    [ -z "$hit" ] && continue
+    n="${hit%%:*}"
+    content="${hit#*:}"
+    if grep -qiE "$FP_FILTER" <<<"$content"; then
+      continue
+    fi
+    hit_path="$(sed -n "${n}p" "$PATHS_FILE")"
+    allowed=0
+    for i in "${!ALLOW_PATHS[@]}"; do
+      if [ "$hit_path" = "${ALLOW_PATHS[$i]}" ] \
+         && rg -e "${ALLOW_REGEXES[$i]}" >/dev/null 2>&1 <<<"$content"; then
+        allowed=1
+        break
+      fi
+    done
+    [ "$allowed" -eq 1 ] && continue
+    FILTERED_HITS+="${hit_path}: ${content}"$'\n'
+    # Ready-made anchored allowlist entry: escape Rust-regex metacharacters in
+    # the line content so the suggestion matches it literally and exactly.
+    esc="$(sed 's/[][\\.^$*+?(){}|]/\\&/g' <<<"$content")"
+    SUGGESTIONS+="  ${hit_path}:^${esc}"'$'$'\n'
+  done <<<"$RAW_HITS"
+fi
+
+rm -f "$ADDED_FILE" "$PATHS_FILE" "$DIFF_FILE"
 
 if [ -n "$FILTERED_HITS" ]; then
   echo ""
   echo "═══════════════════════════════════════════════════════════════"
   echo "  SECRET-PATTERN MATCH (regex layer)"
   echo "═══════════════════════════════════════════════════════════════"
-  printf '%s\n' "$FILTERED_HITS" | head -40
+  printf '%s' "$FILTERED_HITS" | head -40
   echo ""
   echo "Refusing push. These are added lines matching secret-shape patterns."
-  echo "Each match must be confirmed safe (placeholder/reference) or redacted"
-  echo "via history rewrite. See SKILL.md §False-positive handling."
+  echo "If a hit is a REAL secret: rotate it now, then rewrite history."
+  echo "If a hit is confirmed safe (test fixture, deliberate example), add an"
+  echo "entry to .pushgate-allow at the repo root with a reason comment above"
+  echo "it, commit, and re-run push-gate. Ready-made entries for these hits:"
+  echo ""
+  echo "  # reason: <why this line is not a live credential>"
+  printf '%s' "$SUGGESTIONS" | awk '!seen[$0]++'
+  echo ""
+  echo "See SKILL.md §False-positive handling."
   exit 1
 fi
 

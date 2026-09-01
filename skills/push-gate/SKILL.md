@@ -17,7 +17,7 @@ Use this skill whenever the user asks to push, or before Claude runs `git push` 
 ## Hard rules
 
 1. **Gitleaks is a required dependency.** If not installed, emit the install instructions and refuse. Do not silently fall back to regex-only.
-2. **Any secret-scanner hit ⇒ refuse.** No bypass flag. Force the user to rewrite history and re-invoke the gate.
+2. **Any secret-scanner hit ⇒ refuse.** No bypass flag. Confirmed-safe findings go into the committed repo-local allowlists (`.gitleaksignore` for gitleaks, `.pushgate-allow` for the regex layer — see §False-positive handling), never an inline override. Real secrets force the user to rewrite history and re-invoke the gate.
 3. **Never `--force` push.** The gate never passes a force flag. If the user needs to force-push, that's a separate conversation with explicit authorization.
 4. **Never `--no-verify`.** Don't skip hooks.
 5. **Working tree must be clean.** Refuse on dirty tree (uncommitted work could be accidentally stashed into the push flow).
@@ -31,7 +31,8 @@ Step 2  →  git fetch <remote>
 Step 3  →  Verify working tree clean
 Step 4  →  Compute pending commits (count + list)
 Step 5  →  Check divergence (non-ff ⇒ require user to rebase first)
-Step 6  →  Secret scan  ────────┐
+Step 6  →  Secret scan  ────────┐  gitleaks honours .gitleaksignore,
+                                │  regex layer honours .pushgate-allow
 Step 7  →  Forbidden-file scan  │ refuse on any hit
 Step 8  →  Size advisory        │
         →  Open-issue advisory (github-ops; informational, never gates)
@@ -86,7 +87,30 @@ Claude should invoke `scripts/preflight.sh` on any of these. Do not invoke on lo
 
 ## False-positive handling
 
-The regex layer filters common false positives automatically (env-var references, shell fallbacks, placeholders with `...`). Gitleaks has its own `.gitleaksignore` file mechanism — add entries there for confirmed-safe findings, committed at repo root. The skill **will not** offer an inline bypass.
+Both secret layers have a repo-local, **committed** allowlist. The gate still refuses any hit not explicitly allowed, and the skill **will not** offer an inline bypass — a confirmed-safe finding earns a reviewed entry in the repo, not a one-off override.
+
+| Layer | Allowlist file (repo root) | Entry format |
+|---|---|---|
+| gitleaks | `.gitleaksignore` | gitleaks fingerprint (`commit:file:rule:line`) |
+| regex | `.pushgate-allow` | `<repo-relative-path>:<line-regex>` |
+
+The regex layer also drops common false positives automatically (env-var references, shell fallbacks, placeholders with `...`) before the allowlist is consulted.
+
+`.pushgate-allow` rules:
+
+- One entry per line; `#` comments allowed. **Each entry must carry a reason comment directly above it** — the scanner warns when one is missing.
+- Entries split on the **first** `:` — a repo-relative path (forward slashes, no `:` in the path), then a Rust-regex matched against the added line's full content. No line numbers anywhere: they drift on every edit above them; a content anchor does not.
+- An entry suppresses hits **only in that exact file**. Every other hit still refuses.
+- On refusal, the scanner prints a ready-made anchored entry per hit — copy it under a reason comment, commit, and re-run the gate.
+- Entries whose file is gone, or whose regex no longer matches any line of that file at the branch tip, are reported as **stale** (warning, non-gating) — prune them.
+- The gate's clean-tree rule (hard rule 5) means the file is always committed by the time it is consulted — an uncommitted allowlist edit fails Step 3 before it can suppress anything.
+
+Example:
+
+```
+# reason: test fixture — wire-snapshot key exercised by MCP wire tests, not a credential
+packages/mcp/test/client.test.ts:^  apiKey: "wire-snapshot-key",$
+```
 
 ## Not in scope
 
@@ -104,4 +128,7 @@ The regex layer filters common false positives automatically (env-var references
 | `scripts/scan-secrets.sh` | Gitleaks + regex layer (Step 6) |
 | `references/secret-patterns.txt` | Regex corpus + false-positive filter words |
 | `references/gitleaks-config.toml` | Gitleaks config: default rules + public-token allowlist (used by `scan-secrets.sh` when present) |
+| `tests/run.sh` | Offline behavioural self-test for the secret scanner (planted secrets, FP filter, allowlist, stale entries) |
 | `assets/` | (empty; reserved for future report templates) |
+
+Per-repo (not shipped with the skill): `.gitleaksignore` and `.pushgate-allow`, committed at the scanned repo's root — see §False-positive handling.
