@@ -71,6 +71,19 @@ SESSION_LIVE_SECS=600
 # the whole point is that an unswept backlog is invisible otherwise.
 PRUNE_HINT="on"
 
+# === ONE-RUN ENV OVERRIDES ====================================================
+# FLEET_SKIP_SESSION_CHECK means "skip the live-owner gate for THIS invocation"
+# — but an exported env var inherits into every child process, test_cmd
+# included. On 2026-09-01 `FLEET_SKIP_SESSION_CHECK=1 fleet land` leaked the
+# override into the post-merge test suite, which runs fleet-ops' own self-test;
+# the live-owner gate that suite asserts REFUSES was disarmed inside every
+# sandboxed test repo, 6 tests failed, and a genuinely green merge was
+# hard-reset as a false FAIL. So: read it ONCE here, strip it from the
+# environment immediately, and use the internal copy everywhere below. land_one
+# additionally sanitizes the wider FLEET_* knob family around test_cmd.
+SKIP_SESSION_CHECK="${FLEET_SKIP_SESSION_CHECK:-}"
+unset FLEET_SKIP_SESSION_CHECK
+
 # === CONFIG ===================================================================
 # The config is PARSED, never `source`d. Two reasons, both learned the hard way
 # (2026-07: every documented key had been a silent no-op since the file shipped):
@@ -1566,7 +1579,9 @@ land_one() {
   # Cheapest refusal first, and BEFORE the merge below — an unarmed gate must
   # never reach a state where $BASE_BRANCH has already moved.
   require_test_cmd || return 1
-  if [[ -z "${FLEET_SKIP_SESSION_CHECK:-}" ]]; then
+  # $SKIP_SESSION_CHECK is the consumed copy of FLEET_SKIP_SESSION_CHECK — the
+  # env var itself was unset at startup so it can never reach test_cmd below.
+  if [[ -z "$SKIP_SESSION_CHECK" ]]; then
     session_land_gate "$branch" || { set_lane_state "$branch" "CONFLICT" "owning session still live"; return 1; }
   fi
   local hits
@@ -1589,7 +1604,18 @@ land_one() {
     # guarantees it is set, so the gate always runs. The old else-branch
     # ("trusting signal.sh's log gate") is what let untested merges through.
     log "running test_cmd: $TEST_CMD"
-    if eval "$TEST_CMD" >>"$LOG" 2>&1; then
+    # Sanitized subshell: fleet's own behaviour-altering env knobs must not
+    # reach the suite test_cmd invokes — a suite that itself exercises fleet
+    # (fleet-ops' self-test, run via this repo's test_cmd) would inherit
+    # overrides meant for THIS invocation only and test the wrong behaviour.
+    # FLEET_SKIP_SESSION_CHECK is already consumed at startup; strip the rest
+    # of the family here for depth.
+    if ( unset FLEET_SKIP_SESSION_CHECK FLEET_SESSION_STORE FLEET_SESSION_NOCACHE \
+               FLEET_SESSION_LIVE_SECS FLEET_SESSION_CACHE_TTL \
+               FLEET_SESSION_MAX_AGE_DAYS FLEET_SELF_SESSION_ID \
+               FLEET_NO_PRUNE_HINT FLEET_PRUNE_ROOTS FLEET_PRUNE_MAX_REPOS \
+               FLEET_ASCII
+         eval "$TEST_CMD" ) >>"$LOG" 2>&1; then
       log "PASS: $branch landed"
     else
       log "FAIL: tests failed — reverting $branch"

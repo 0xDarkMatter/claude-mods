@@ -14,6 +14,18 @@ SKILL="$(dirname "$HERE")"
 FLEET="$SKILL/scripts/fleet.sh"
 export TERM_ASCII=1
 
+# Hermetic env: the CALLER's fleet knobs must never reach the logic under test.
+# The canonical failure (2026-09-01): `FLEET_SKIP_SESSION_CHECK=1 fleet land`
+# ran this suite as its post-merge test_cmd, the exported override inherited,
+# and the live-owner gate this suite asserts REFUSES was disarmed inside every
+# sandbox — 6 false FAILs hard-reset a green merge. fleet.sh now strips these
+# before test_cmd, but the suite must not depend on its callers being fixed.
+# Cases that WANT an override set it explicitly on their own command line.
+unset FLEET_SKIP_SESSION_CHECK FLEET_SESSION_STORE FLEET_SESSION_NOCACHE \
+      FLEET_SESSION_LIVE_SECS FLEET_SESSION_CACHE_TTL FLEET_SESSION_MAX_AGE_DAYS \
+      FLEET_SELF_SESSION_ID FLEET_NO_PRUNE_HINT FLEET_PRUNE_ROOTS \
+      FLEET_PRUNE_MAX_REPOS FLEET_ASCII
+
 command -v git >/dev/null 2>&1 || { echo "SKIP: git not available"; exit 0; }
 
 SB="$(mktemp -d)"; trap 'rm -rf "$SB"' EXIT
@@ -428,6 +440,20 @@ case "$(git -C "$SREPO" log --oneline main)" in
 # Explicit override lands it.
 FLEET_SKIP_SESSION_CHECK=1 bash "$FLEET" land hot-lane >/dev/null 2>&1
 ee "override lands despite live owner" 0 $?
+
+# The override is ONE-RUN: fleet.sh must consume it and strip it from the env
+# before eval'ing test_cmd, or any suite that itself exercises fleet (this one,
+# when run as a repo's post-merge gate) inherits a disarmed live-owner gate —
+# the 2026-09-01 false-FAIL incident. Probe with a test_cmd that fails when the
+# variable is visible at test time: a leak reverts the merge and land exits 1.
+mk_lane_in "$SREPO" leak-lane lk.txt
+bash "$FLEET" track leak-lane >/dev/null 2>&1
+printf 'test_cmd=test -z "${FLEET_SKIP_SESSION_CHECK:-}"\n' > "$SREPO/.claude/fleet/config"
+FLEET_SKIP_SESSION_CHECK=1 bash "$FLEET" land leak-lane >/dev/null 2>&1
+ee "override is stripped from test_cmd's env" 0 $?
+case "$(git -C "$SREPO" log --oneline main)" in
+  *"merge: leak-lane"*) ok "env-probe gate passed and the lane merged";; *) no "env-probe gate failed — override leaked into test_cmd";; esac
+arm_gate "$SREPO"
 
 # -- self-ownership exemption --------------------------------------------------
 # The gate protects against a CONCURRENT writer, and the session doing the
