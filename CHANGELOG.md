@@ -4,7 +4,7 @@ All notable changes to claude-mods are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/). Fuller narrative entries for
 feature releases live in the README "Recent Updates" section.
-## [Unreleased]
+## [Unreleased]
 
 ## [3.8.0] - 2026-08-31
 
