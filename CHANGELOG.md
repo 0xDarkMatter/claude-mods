@@ -4,7 +4,22 @@ All notable changes to claude-mods are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/). Fuller narrative entries for
 feature releases live in the README "Recent Updates" section.
-## [Unreleased]
+## [Unreleased]
+
+### Added
+
+- **`push-gate` regex-layer allowlist (`.pushgate-allow`)** - the regex secret
+  layer gains the repo-local allowlist the gitleaks layer always had via
+  `.gitleaksignore`. A committed repo-root file, one `<path>:<line-regex>`
+  entry per line with a required reason comment above each; entries anchor on
+  content, never line numbers (they drift), and suppress hits only in their
+  exact file - everything not allowlisted still refuses, and there is still no
+  inline bypass. Refusals now print a ready-made anchored entry to copy; an
+  entry whose file or matching line no longer exists at the branch tip warns
+  as stale. Born from a real push where nine verified test fixtures and a
+  deliberately unsigned JWT forced a manual override of hard rule 2 - exactly
+  what the rule exists to avoid normalising. The scanner keeps per-line file
+  attribution now, and the self-test grows eight allowlist assertions.
 
 ## [3.8.0] - 2026-08-31
 
