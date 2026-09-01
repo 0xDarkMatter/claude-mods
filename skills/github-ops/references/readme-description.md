@@ -11,6 +11,7 @@ The default tagline-only intro is too thin. Most published 0xDarkMatter repos de
 | Title (`# repo-name`) | ~3 words | Identity |
 | Tagline (one line, optional `>` blockquote) | ≤ 120 chars | The pitch |
 | Intro paragraphs (2–3) | ~150–300 words total | Orientation |
+| Badge row, `## Features`, screenshot | — | The pitch — [readme-landing-page.md](readme-landing-page.md) |
 | Then `## Install` etc. | — | The mechanics |
 
 The intro is *not* a feature list. Save bullets for later sections. This is prose, written like a developer explaining the project to a peer over coffee — concrete, slightly opinionated, not performative.
@@ -73,6 +74,12 @@ When in doubt, omit the joke. A clean, plain description is always better than a
 | Auto-generated boilerplate | A reader can spot it instantly. Trust collapses. |
 | Restating the title | "Foo is a tool called foo that does foo things." |
 | Hedging ("might be useful for", "could potentially help") | Either it's for them or it isn't. Say so. |
+
+These cover the intro's *prose*. The layout layer — badge walls, emoji-per-heading,
+oversized demo GIFs, feature tables that restate the API — is covered by
+[readme-landing-page.md](readme-landing-page.md). Note that its Showcase register is
+**not** a licence to relax anything in the table above: every anti-pattern here applies
+in both registers.
 
 ## Process
 

@@ -100,6 +100,18 @@ Update on **every** release regardless of size. This is the one README touch tha
 - Before the deep "Why this exists" / feature comparison sections
 - High enough to be visible without scrolling on a typical browser
 
+The full section order — including the badge row and `## Features` that sit above this
+section — is owned by [readme-landing-page.md](readme-landing-page.md). Two things from
+there matter when placing this block:
+
+- **This section is the *confirming* liveness signal, not the first one.** The badge row
+  answers "is this alive" at zero scroll; Recent Updates confirms it for a reader who has
+  already decided the project is interesting. So it belongs *below* Features, not above —
+  don't ask someone to read a changelog for a thing they haven't decided they want.
+- **The exception is high-cadence tooling**, where recency *is* the feature (a scraper
+  chasing anti-bot changes, a wrapper tracking an upstream API). There, promote it above
+  Install — which is the same case the table style below exists for.
+
 ## Trim policy
 
 When the section grows past ~7 versions, trim oldest version blocks atomically with adding the new one (same commit). CHANGELOG.md keeps the full history.
