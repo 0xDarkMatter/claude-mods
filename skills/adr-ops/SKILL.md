@@ -235,6 +235,19 @@ vice-versa); config keys (`file.yaml:key`) by exact-or-prefix.
 "heads up, ADR-010 governs this path; read it before changing." Exit `3` dir not found,
 `2` usage.
 
+**Batched queries:** pass several positionals and the ADR set is parsed once —
+one spawn for N paths, which is what makes it cheap to call from a lint loop
+(fleetflow's `ff-plan lint` went from 225 spawns to 35 on a 35-packet plan). The
+exit code is any-governed (`10` if at least one query is governed, `0` only when
+none is); the per-query split is in the `--json` envelope's `queries` list, each
+entry `{query, governing, rc}`. `data` stays the deduped union so `.data[].number`
+keeps working, and a single-query call's envelope is unchanged.
+
+```bash
+python scripts/adr-touching.py --json src/a.py src/b.py lib/ \
+  | jq -r '.queries[] | select(.rc==10) | .query'   # which of these are governed
+```
+
 ### `scripts/adr-lint.py` — conformance validator
 
 ```bash

@@ -324,6 +324,33 @@ expect_has  "touching names the ADR" "ADR-001" "$out"
 # --json envelope schema
 out="$("$PYTHON" "$TOUCHING" --dir "$TCH" --json src/auth.py 2>/dev/null)"
 expect_has "touching json envelope schema" "claude-mods.adr-ops.touching/v1" "$out"
+# single-query envelope keeps its pre-batching shape: meta.query is the string
+printf '%s' "$out" | jq -e '.meta.query=="src/auth.py" and (.meta|has("queries")|not) and (.queries|length)==1' >/dev/null 2>&1 \
+  && ok "touching single-query envelope unchanged (meta.query string, one queries[] entry)" \
+  || no "touching single-query envelope drifted"
+
+# ── adr-touching.py: batched queries (2026-09-05) ───────────────────────────
+# One spawn, N queries, per-query verdicts. Exit is any-governed: 10 if at least
+# one query is governed, 0 only when none is. fleetflow's plan lint depends on
+# this to make one call per packet instead of one per owned path.
+"$PYTHON" "$TOUCHING" --dir "$TCH" src/auth.py other/unrelated.txt >/dev/null 2>&1
+expect_exit "touching multi-query any-governed -> 10" 10 $?
+"$PYTHON" "$TOUCHING" --dir "$TCH" other/unrelated.txt nope/x.txt >/dev/null 2>&1
+expect_exit "touching multi-query none-governed -> 0" 0 $?
+"$PYTHON" "$TOUCHING" --dir "$TCH" src/auth.py "" >/dev/null 2>&1
+expect_exit "touching multi-query with a blank entry -> 2" 2 $?
+out="$("$PYTHON" "$TOUCHING" --dir "$TCH" --json src/auth.py other/unrelated.txt lib/deep/thing.go 2>/dev/null)"
+printf '%s' "$out" | jq -e '
+    (.queries|length)==3
+    and (.queries[0]|.query=="src/auth.py" and .rc==10 and (.governing|length)==1)
+    and (.queries[1]|.query=="other/unrelated.txt" and .rc==0 and (.governing|length)==0)
+    and (.queries[2]|.query=="lib/deep/thing.go" and .rc==10)
+    and (.data|length)==1 and .data[0].number=="ADR-001"
+    and (.meta.queries|length)==3 and (.meta|has("query")|not)' >/dev/null 2>&1 \
+  && ok "touching multi-query json: per-query verdicts, deduped data union, meta.queries" \
+  || no "touching multi-query json envelope wrong: $out"
+out="$("$PYTHON" "$TOUCHING" --dir "$TCH" src/auth.py other/unrelated.txt 2>/dev/null)"
+expect_has "touching multi-query text rows carry the query column" "src/auth.py | ADR-001 |" "$out"
 
 # ── non-Latin-1 text must not break the exit contract (regression) ──────────
 # Both Python tools print ADR titles / touches: entries / field values verbatim.

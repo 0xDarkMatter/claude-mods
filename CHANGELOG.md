@@ -8,6 +8,16 @@ feature releases live in the README "Recent Updates" section.
 
 ### Added
 
+- **`adr-touching.py` batched queries** - several positionals in one call:
+  the ADR set is parsed once and every query is matched against it, so a
+  caller with N paths pays one spawn instead of N. `--json` gains a
+  `queries` list with a per-query `{query, governing, rc}` verdict; `data`
+  is the deduped union so `.data[].number` keeps working, and a single-query
+  call's envelope and text rows are byte-identical to before. Exit stays
+  `10`/`0`, now any-governed across the batch; a blank query anywhere is
+  usage (`2`) for the whole call rather than a silent skip. Motivated by
+  fleetflow's plan lint spending 33s of a 40s run spawning it 225 times.
+
 - **`push-gate` regex-layer allowlist (`.pushgate-allow`)** - the regex secret
   layer gains the repo-local allowlist the gitleaks layer always had via
   `.gitleaksignore`. A committed repo-root file, one `<path>:<line-regex>`

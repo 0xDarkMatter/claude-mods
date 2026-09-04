@@ -13,17 +13,33 @@ is governed by query `src/`; touches `src/` governs query `src/auth.py`).
 Config-key entries (`file.yaml:db.host`) match by exact-or-prefix on the whole
 string. Pragmatic, not exhaustive.
 
-Usage:   adr-touching.py [--dir DIR] [--json] <path-or-glob-or-key>
-Input:   one positional query + argv flags (no stdin).
-Output:  stdout = matching ADRs, "number | status | title | matched-entry" rows.
-         Data only. --json: {"data":[...],"meta":{...,"schema":
-         "claude-mods.adr-ops.touching/v1"}}.
+Usage:   adr-touching.py [--dir DIR] [--json] <path-or-glob-or-key>...
+Input:   one OR MORE positional queries + argv flags (no stdin). The ADR set is
+         parsed once and every query is matched against it, so a caller with N
+         paths pays one process spawn instead of N (the 2026-09-05 batching:
+         fleetflow's plan lint went from 225 spawns to 35 on a 35-packet run).
+Output:  stdout = matching ADRs, data only.
+         Single query: "number | status | title | matched-entry" rows — the
+         legacy format, byte-identical to before batching existed.
+         Multiple queries: "query | number | status | title | matched-entry"
+         rows (the query column is prepended so rows stay attributable).
+         --json: {"data":[...],"queries":[{"query":Q,"governing":[...],
+         "rc":0|10},...],"meta":{...,"schema":"claude-mods.adr-ops.touching/v1"}}.
+         "data" is the union of governing ADRs across all queries (deduped by
+         number, ordered by first appearance) so `.data[].number` keeps
+         working; "queries" carries the per-query verdict a batching caller
+         needs. meta.query (string) is present for a single query — unchanged;
+         a multi-query call carries meta.queries (list) instead.
          Both streams are pinned to UTF-8 at import so an ADR title carrying an
          em dash or an arrow cannot break the exit contract.
 Stderr:  headers, the PyYAML fallback notice, errors.
-Exit:    0 NO governing ADR found, 2 usage, 3 dir not found,
-         10 at least one governing ADR found (domain signal — a pre-edit hook or
-         CI can branch on it: "heads up, ADR-NNN governs this path").
+Exit:    0 NO governing ADR found for ANY query, 2 usage (no query, or a blank
+         one), 3 dir not found,
+         10 at least one governing ADR found for AT LEAST ONE query (domain
+         signal — a pre-edit hook or CI can branch on it: "heads up, ADR-NNN
+         governs this path"). Multi-query exit is deliberately any-governed so a
+         caller that only reads the exit code gets the conservative answer; the
+         per-query split lives in the --json "queries" list.
 
 Prefers PyYAML for frontmatter; falls back to a minimal parser when absent
 (announced on stderr).
@@ -33,6 +49,7 @@ Examples:
   adr-touching.py 'src/**'
   adr-touching.py --dir docs/decisions config.yaml:db.host
   adr-touching.py --json src/ | jq '.data[].number'
+  adr-touching.py --json src/a.py src/b.py lib/ | jq '.queries[] | select(.rc==10) | .query'
 """
 from __future__ import annotations
 
@@ -276,15 +293,16 @@ def find_title(body: str) -> str:
     return ""
 
 
-def scan(adr_dir: Path, query: str) -> list[dict]:
-    """Return the list of matching ADR records (sorted by number)."""
-    results: list[dict] = []
+def load_adrs(adr_dir: Path) -> list[dict]:
+    """Parse every ADR-*.md once. Returns records sorted by number, each carrying
+    the parsed `touches:` list; a file that fails to parse is skipped with a
+    stderr warning (not fatal — one broken record must not blind the guard)."""
+    adrs: list[dict] = []
     files = sorted(p for p in adr_dir.glob("ADR-*.md") if FILENAME_RE.match(p.name))
     for path in files:
         fn = FILENAME_RE.match(path.name)
         if fn is None:
             continue
-        number = f"ADR-{fn.group(1)}"
         try:
             text = path.read_text(encoding="utf-8")
             fm_text, body = split_frontmatter(text)
@@ -292,16 +310,33 @@ def scan(adr_dir: Path, query: str) -> list[dict]:
         except (OSError, FrontmatterError) as exc:
             print(f"warning: skipping {path.name}: {exc}", file=sys.stderr)
             continue
-        touches = as_list(fm.get("touches"))
-        matched = next((t for t in touches if matches(query, t)), None)
+        adrs.append(
+            {
+                "number": f"ADR-{fn.group(1)}",
+                "status": str(fm.get("status", "")),
+                "title": find_title(body),
+                "file": path.name,
+                "touches": as_list(fm.get("touches")),
+            }
+        )
+    return adrs
+
+
+def scan(adrs: list[dict], query: str) -> list[dict]:
+    """Return the ADR records (from load_adrs) whose touches: govern `query`.
+    Separated from parsing so a batched call matches N queries against one
+    parsed set — the whole point of accepting several positionals."""
+    results: list[dict] = []
+    for adr in adrs:
+        matched = next((t for t in adr["touches"] if matches(query, t)), None)
         if matched is not None:
             results.append(
                 {
-                    "number": number,
-                    "status": str(fm.get("status", "")),
-                    "title": find_title(body),
+                    "number": adr["number"],
+                    "status": adr["status"],
+                    "title": adr["title"],
                     "matched": matched,
-                    "file": path.name,
+                    "file": adr["file"],
                 }
             )
     return results
@@ -315,14 +350,21 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument("--dir", default="docs/adr", help="ADR directory (default: docs/adr)")
     parser.add_argument("--json", action="store_true", help="emit a JSON envelope")
-    parser.add_argument("query", nargs="?", help="path, glob, or config key to look up")
+    parser.add_argument(
+        "query", nargs="*", help="path(s), glob(s), or config key(s) to look up"
+    )
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
         return EX_USAGE if exc.code not in (0, None) else (exc.code or EX_OK)
 
-    if args.query is None or args.query.strip() == "":
-        print("error: a path/glob/config-key query is required", file=sys.stderr)
+    # A blank query anywhere in the list is a usage error for the WHOLE call,
+    # not a silent skip: a caller that built its argv from a bad split would
+    # otherwise get a confident "ungoverned" verdict for a path it never asked
+    # about.
+    queries: list[str] = list(args.query)
+    if not queries or any(q.strip() == "" for q in queries):
+        print("error: at least one non-blank path/glob/config-key query is required", file=sys.stderr)
         return EX_USAGE
 
     if not _HAVE_YAML:
@@ -333,40 +375,56 @@ def main(argv: list[str]) -> int:
         print(f"error: ADR directory not found: {adr_dir}", file=sys.stderr)
         return EX_NOTFOUND
 
-    results = scan(adr_dir, args.query)
+    adrs = load_adrs(adr_dir)
+    per_query: list[dict] = []
+    for q in queries:
+        res = scan(adrs, q)
+        per_query.append({"query": q, "governing": res, "rc": EX_FOUND if res else EX_OK})
+    # Union across queries, deduped by ADR number, first appearance wins (so a
+    # single-query call's "data" is exactly that query's result list — the
+    # pre-batching envelope, unchanged).
+    seen: set[str] = set()
+    union: list[dict] = []
+    for pq in per_query:
+        for r in pq["governing"]:
+            if r["number"] not in seen:
+                seen.add(r["number"])
+                union.append(r)
+    single = len(queries) == 1
+    any_found = any(pq["rc"] == EX_FOUND for pq in per_query)
 
     if args.json:
-        envelope = {
-            "data": results,
-            "meta": {
-                "count": len(results),
-                "query": args.query,
-                "dir": str(adr_dir),
-                "schema": "claude-mods.adr-ops.touching/v1",
-            },
-        }
+        meta: dict = {"count": len(union)}
+        if single:
+            meta["query"] = queries[0]
+        else:
+            meta["queries"] = queries
+        meta["dir"] = str(adr_dir)
+        meta["schema"] = "claude-mods.adr-ops.touching/v1"
+        envelope = {"data": union, "queries": per_query, "meta": meta}
         print(json.dumps(envelope, indent=2))
     else:
         tout = Term(sys.stdout)
         terr = Term(sys.stderr)
         status_color = {"accepted": "green", "proposed": "yellow"}
-        for r in results:
-            if tout.color:
-                num = tout.c("cyan", r["number"])
-                st = tout.c(status_color.get(r["status"], "dim"), r["status"])
-                print(f"{tout.mark('warn')} {num} | {st} | {r['title']} | {r['matched']}")
+        for pq in per_query:
+            # Multi-query rows carry the query as a leading column; single-query
+            # rows do not, so the legacy plain format stays byte-identical.
+            lead = "" if single else f"{pq['query']} | "
+            for r in pq["governing"]:
+                if tout.color:
+                    num = tout.c("cyan", r["number"])
+                    st = tout.c(status_color.get(r["status"], "dim"), r["status"])
+                    print(f"{tout.mark('warn')} {lead}{num} | {st} | {r['title']} | {r['matched']}")
+                else:
+                    print(f"{lead}{r['number']} | {r['status']} | {r['title']} | {r['matched']}")
+            n = len(pq["governing"])
+            if n:
+                print(f"--- {terr.c('orange', str(n))} ADR(s) govern '{pq['query']}'", file=sys.stderr)
             else:
-                # Plain stream stays byte-identical to the legacy data format.
-                print(f"{r['number']} | {r['status']} | {r['title']} | {r['matched']}")
-        if results:
-            print(
-                f"--- {terr.c('orange', str(len(results)))} ADR(s) govern '{args.query}'",
-                file=sys.stderr,
-            )
-        else:
-            print(f"--- no ADR governs '{args.query}'", file=sys.stderr)
+                print(f"--- no ADR governs '{pq['query']}'", file=sys.stderr)
 
-    return EX_FOUND if results else EX_OK
+    return EX_FOUND if any_found else EX_OK
 
 
 if __name__ == "__main__":
