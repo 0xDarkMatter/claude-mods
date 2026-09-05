@@ -105,7 +105,9 @@ function loadInput(path) {
   try { data = JSON.parse(raw); } catch (e) { bad(`invalid JSON: ${e.message}`); }
   if (!Array.isArray(data.images) || data.images.length === 0) bad('images[] is required');
   data.images.forEach((im, i) => {
-    if (!im.id) bad(`images[${i}] missing id`);
+    // Before upload there is no Figma node ID; the staging slug (name) is the identity.
+    im.id = im.id || im.name;
+    if (!im.id) bad(`images[${i}] needs an id or a name`);
     if (!(im.w > 0 && im.h > 0)) bad(`images[${i}] (${im.id}) needs true w and h`);
   });
   data.centre = data.centre || { w: 1040, h: 1040 };

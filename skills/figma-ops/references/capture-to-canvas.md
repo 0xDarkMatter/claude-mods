@@ -34,26 +34,34 @@ the strongest material and the least described ("images attached" turned out to 
 eight designed brand comps, not the robot photos the captions implied). Write one line
 per image saying what it contributes — that line becomes its caption later.
 
-## 3. Read true dimensions
+## 3–4. Stage: slugs + true dimensions in one step
 
-Never trust the upload frame. Read the header:
+`scripts/stage-assets.mjs` does both jobs the old way did by hand:
 
-```js
-// PNG: width/height are big-endian uint32 at bytes 16 and 20.
-// JPEG: walk markers to the first SOF (0xC0–0xCF, excluding C4/C8/CC); height then width.
-function png(b){return {w:b.readUInt32BE(16),h:b.readUInt32BE(20)};}
-function jpg(b){let o=2;while(o<b.length){if(b[o]!==0xFF){o++;continue;}const m=b[o+1];
-  if(m>=0xC0&&m<=0xCF&&m!==0xC4&&m!==0xC8&&m!==0xCC)return{h:b.readUInt16BE(o+5),w:b.readUInt16BE(o+7)};
-  o+=2+b.readUInt16BE(o+2);}return null;}
+```bash
+node scripts/stage-assets.mjs --list shortlist.txt --dir E:/refs --out ./staged --json
+#  → exit 10: every image listed with w/h and flags [needs-subject] / [needs-arm]
 ```
 
-Feed `{id, name, w, h, arm}` per image to `scripts/plan-layout.mjs`.
+Look at the flagged images (Phase 2 — you were going to anyway), then supply the
+two human decisions as small JSON maps and re-run for exit 0:
 
-## 4. Stage with meaningful filenames
+```bash
+echo '{"IMG_0997.PNG":"collected system","IMG_0998.PNG":"serro field report"}' > names.json
+echo '{"07-ref-collected-system":"N","08-ref-serro-field-report":"W"}'         > arms.json
+node scripts/stage-assets.mjs --list shortlist.txt --dir E:/refs --out ./staged \
+  --names names.json --arms arms.json --json > board.json
+```
 
-`upload_assets` uses the uploaded filename as the Figma layer name. Copy sources to a
-scratch folder as `NN-source-subject.png` (`07-ref-collected-system.png`) before
-uploading; the numbering keeps upload order and layer order aligned.
+What it guarantees: originals untouched; copies named `NN-<source>-<subject>.<ext>`
+(the `NN` keeps upload order == layer order; shotcraft filenames are parsed into
+`<domain>-<page>`); dimensions read from the PNG/JPEG/GIF header, never from the
+upload frame; `board.json` is valid `plan-layout.mjs` input as-is (`id` is the slug
+until upload assigns a node ID — overwrite it then).
+
+If you need the header logic elsewhere: PNG width/height are big-endian uint32 at
+bytes 16 and 20; JPEG walks markers to the first SOFn (`C0`–`CF` except `C4/C8/CC`),
+height then width; GIF is little-endian uint16 at 6 and 8.
 
 ## 5. Upload
 

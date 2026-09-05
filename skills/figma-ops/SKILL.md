@@ -103,16 +103,25 @@ visible progress, decisions surfaced, never silently defaulting).
 3. Designed comps the user supplies — usually the strongest material; these are the
    aesthetic *executed*, not referenced.
 
-**Upload.** `upload_assets` with `count: N`, then POST each file as `multipart/form-data`
-with a `file` field — the filename becomes the layer name, so **rename files to
-meaningful slugs before uploading** (`07-ref-collected-system.png`, not `IMG_0997.PNG`).
-Record the returned `placedOnNodeId` for every file.
+**Stage first.** `scripts/stage-assets.mjs` takes a folder and/or a shortlist, copies
+each image to a staging directory under a meaningful slug (`07-ref-collected-system.png`,
+never `IMG_0997.PNG` — the filename becomes the Figma layer name on upload), reads
+**true pixel dimensions from the file header**, and emits the planner's input JSON.
+It exits 10 until every image has a subject (`--names`) and an arm (`--arms`): the
+grouping is a human decision and the script refuses to guess it.
+
+```bash
+node scripts/stage-assets.mjs --list shortlist.txt --dir ./refs --out ./staged \
+  --names names.json --arms arms.json --json > board.json
+```
+
+**Upload.** `upload_assets` with `count: N`, then POST each staged file as
+`multipart/form-data` with a `file` field. Record the returned `placedOnNodeId` per
+file into `board.json`'s `id` fields (§7 ledger).
 
 **The 400×300 trap.** Uploaded images land as 400×300 frames with `scaleMode: FILL`,
-which *crops*. The frame tells you nothing about the image. Read true dimensions from
-the file on disk (PNG: bytes 16–23; JPEG: SOF marker) and `resize()` every frame to its
-real aspect ratio at the chosen width before placing it. `scripts/plan-layout.mjs`
-takes those dimensions as input.
+which *crops*. The frame tells you nothing about the image; only the header does.
+`resize()` every frame to the planner's `w×h` before placing it.
 
 **Uploads land on whichever page is current for the upload tool** — not necessarily
 the page your last script switched to. Find them by ID and `appendChild` them where
@@ -213,5 +222,10 @@ not just the new ones.
   skill landscape and what this skill deliberately leaves to them.
 - [references/lessons.md](references/lessons.md) — the session log this skill was
   distilled from, kept as evidence for the rules in §6.
+- `scripts/stage-assets.mjs` — folder/shortlist → slug-named copies + true dimensions
+  → planner JSON. Exits 10 until subjects and arms are supplied.
 - `scripts/plan-layout.mjs` — deterministic layout planner (grid / plus / loose).
 - `assets/plus-layout.example.json` — a real 14-image fixture; also the test input.
+
+The pipeline, end to end: shotcraft (or a folder) → `stage-assets` → `plan-layout`
+→ one `use_figma` placement loop → `get_screenshot` → dress.
