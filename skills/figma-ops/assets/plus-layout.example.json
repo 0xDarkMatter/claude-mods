@@ -1,0 +1,23 @@
+{
+  "_notes": "Real fixture from the Agntik brand moodboard (Sep 2026): 14 references grouped by what they share. N = paper/document, S = product UI, E = full-field Pop orange, W = ink ground / display type. w/h are TRUE source pixel dimensions read from the file headers, never the 400x300 upload frame. Also the input for tests/run.sh.",
+  "centre": { "w": 1040, "h": 1040 },
+  "images": [
+    { "id": "44:4",  "name": "serro-wordmark",         "w": 2560, "h": 1491, "arm": "N", "ring": 1 },
+    { "id": "44:5",  "name": "collected-system",       "w": 1920, "h": 1080, "arm": "N", "ring": 2 },
+    { "id": "44:6",  "name": "factory-signal-deploy",  "w": 2048, "h": 1152, "arm": "N", "ring": 3 },
+    { "id": "44:7",  "name": "droid-display",          "w": 2048, "h": 1152, "arm": "N", "ring": 4 },
+
+    { "id": "44:8",  "name": "cloudflare-region-earth","w": 2560, "h": 1704, "arm": "S", "ring": 1 },
+    { "id": "44:9",  "name": "conductorai-agentic",    "w": 2560, "h": 1432, "arm": "S", "ring": 2 },
+    { "id": "44:10", "name": "conductorai-cases",      "w": 2560, "h": 2258, "arm": "S", "ring": 3 },
+
+    { "id": "44:11", "name": "op1-ultra",              "w": 2048, "h": 1152, "arm": "E", "ring": 1 },
+    { "id": "44:12", "name": "droids-active",          "w": 2048, "h": 1152, "arm": "E", "ring": 2 },
+    { "id": "44:13", "name": "brasshands-04",          "w": 2560, "h": 1491, "arm": "E", "ring": 3 },
+    { "id": "44:14", "name": "deploy-droids",          "w": 2048, "h": 1152, "arm": "E", "ring": 4 },
+
+    { "id": "44:2",  "name": "conductorai-hero",       "w": 2560, "h": 1600, "arm": "W", "ring": 1 },
+    { "id": "44:15", "name": "brand-systems",          "w": 2048, "h": 1152, "arm": "W", "ring": 2 },
+    { "id": "44:16", "name": "serro-field-report",     "w": 2048, "h": 1152, "arm": "W", "ring": 3 }
+  ]
+}
