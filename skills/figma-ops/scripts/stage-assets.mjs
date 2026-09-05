@@ -200,8 +200,10 @@ files.forEach((file, idx) => {
   if (!arm) flags.push('needs-arm');
   if (flags.length) needsHuman++;
 
+  // vetted is false by construction: nobody has looked at the image yet. Flip it to
+  // true in the board JSON after opening the file; emit-placement refuses otherwise.
   images.push({ id: null, name: slug, file: staged.replace(/\\/g, '/'), src: file.replace(/\\/g, '/'),
-    w: d.w, h: d.h, ar: +(d.w / d.h).toFixed(3), arm, flags });
+    w: d.w, h: d.h, ar: +(d.w / d.h).toFixed(3), arm, caption: null, vetted: false, flags });
 });
 
 const out = { centre: o.centre, images };

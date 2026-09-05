@@ -1,0 +1,89 @@
+{
+  "_notes": "Second real fixture: 8 light-ground captures from four shotcraft library runs (Sep 2026), mixed section/viewport crops. Exists so the planner defaults are validated on a board that is not the one they were tuned on. ids are slugs (pre-upload) - exercises the name-as-identity path; captions and vetted:true exercise the passthrough.",
+  "centre": {
+    "w": 900,
+    "h": 900
+  },
+  "images": [
+    {
+      "id": "anthropic-macbook-home-menu--viewport",
+      "name": "anthropic-macbook-home-menu--viewport",
+      "w": 2560,
+      "h": 1600,
+      "arm": "N",
+      "ring": 1,
+      "vetted": true,
+      "caption": "ANTHROPIC  //  HOME MENU  VIEWPORT"
+    },
+    {
+      "id": "anthropic-macbook-claude--viewport",
+      "name": "anthropic-macbook-claude--viewport",
+      "w": 2560,
+      "h": 1600,
+      "arm": "N",
+      "ring": 2,
+      "vetted": true,
+      "caption": "ANTHROPIC  //  CLAUDE  VIEWPORT"
+    },
+    {
+      "id": "lovewestside-macbook-sectn-01-what-s-on--section",
+      "name": "lovewestside-macbook-sectn-01-what-s-on--section",
+      "w": 2560,
+      "h": 1589,
+      "arm": "S",
+      "ring": 1,
+      "vetted": true,
+      "caption": "LOVEWESTSIDE  //  SECTN 01 WHAT S ON  SECTION"
+    },
+    {
+      "id": "lovewestside-macbook-search-map--viewport",
+      "name": "lovewestside-macbook-search-map--viewport",
+      "w": 2560,
+      "h": 1600,
+      "arm": "S",
+      "ring": 2,
+      "vetted": true,
+      "caption": "LOVEWESTSIDE  //  SEARCH MAP  VIEWPORT"
+    },
+    {
+      "id": "australianballet-macbook-home--viewport",
+      "name": "australianballet-macbook-home--viewport",
+      "w": 2560,
+      "h": 1600,
+      "arm": "E",
+      "ring": 1,
+      "vetted": true,
+      "caption": "AUSTRALIANBALLET  //  HOME  VIEWPORT"
+    },
+    {
+      "id": "australianballet-macbook-our-dancers--viewport",
+      "name": "australianballet-macbook-our-dancers--viewport",
+      "w": 2560,
+      "h": 1600,
+      "arm": "E",
+      "ring": 2,
+      "vetted": true,
+      "caption": "AUSTRALIANBALLET  //  OUR DANCERS  VIEWPORT"
+    },
+    {
+      "id": "healthpartners-macbook-members--viewport",
+      "name": "healthpartners-macbook-members--viewport",
+      "w": 2560,
+      "h": 1600,
+      "arm": "W",
+      "ring": 1,
+      "vetted": true,
+      "caption": "HEALTHPARTNERS  //  MEMBERS  VIEWPORT"
+    },
+    {
+      "id": "healthpartners-macbook-dental--viewport",
+      "name": "healthpartners-macbook-dental--viewport",
+      "w": 2560,
+      "h": 1600,
+      "arm": "W",
+      "ring": 2,
+      "vetted": true,
+      "caption": "HEALTHPARTNERS  //  DENTAL  VIEWPORT"
+    }
+  ]
+}

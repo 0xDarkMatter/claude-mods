@@ -50,6 +50,8 @@ Options:
   --columns N         grid columns                   (default: 3)
   --col-width N       grid column width              (default: 733)
   --budget WxH        max tolerated overlap          (default: 250x80)
+  --jitter N          loose: ±N px irregularity      (default: 0 = none)
+  --seed N            PRNG seed for --jitter         (default: 1; same seed = same plan)
   --json              emit JSON (default: table)
   -h, --help          this text
 
@@ -65,7 +67,8 @@ EXAMPLES:
 function parseArgs(argv) {
   const o = { mode: 'loose', ringV: [1040, 760, 540, 380], ringH: [1040, 700, 480, 330],
     gap: 56, centreGap: 72, overlap: 40, tuck: 130, corner: 200, nudge: 120, margin: 240,
-    columns: 3, colWidth: 733, budget: { w: 250, h: 80 }, json: false, input: null };
+    columns: 3, colWidth: 733, budget: { w: 250, h: 80 }, json: false, input: null,
+    seed: 1, jitter: 0 };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i], v = argv[i + 1];
     const num = () => { const n = Number(v); if (!Number.isFinite(n)) usage(`bad number for ${a}`); i++; return n; };
@@ -85,6 +88,8 @@ function parseArgs(argv) {
       case '--columns': o.columns = num(); break;
       case '--col-width': o.colWidth = num(); break;
       case '--budget': { const m = /^(\d+)x(\d+)$/.exec(v || ''); if (!m) usage('--budget wants WxH'); o.budget = { w: +m[1], h: +m[2] }; i++; break; }
+      case '--seed': o.seed = num(); break;
+      case '--jitter': o.jitter = num(); break;
       case '--json': o.json = true; break;
       default: usage(`unknown option ${a}`);
     }
@@ -115,6 +120,13 @@ function loadInput(path) {
 }
 
 // === GEOMETRY ===============================================================
+// mulberry32: tiny seeded PRNG so --jitter is reproducible per --seed. Math.random
+// would make every plan unrepeatable, which defeats "plan, verify, re-plan".
+let rand = () => 0;
+function seedRandom(seed) {
+  let a = seed >>> 0;
+  rand = () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
 const ar = im => im.w / im.h;
 const fitW = (im, w) => ({ w, h: Math.round(w / ar(im)) });
 
@@ -172,7 +184,12 @@ function planPlus(data, o, loose) {
       const c = along + extent / 2;
       const cx = vertical ? lateral : dx * c;
       const cy = vertical ? dy * c : lateral;
-      out.push({ id: im.id, name: im.name, arm, ring: i + 1, x: cx - w / 2, y: cy - h / 2, w, h });
+      // Seeded jitter (loose only): a little irregularity in gap and lateral so the
+      // four arms don't rhyme. Deterministic per --seed, so a plan is reproducible.
+      const jx = loose && o.jitter ? Math.round((rand() * 2 - 1) * o.jitter) : 0;
+      const jy = loose && o.jitter ? Math.round((rand() * 2 - 1) * o.jitter) : 0;
+      out.push({ id: im.id, name: im.name, arm, ring: i + 1, x: cx - w / 2 + jx, y: cy - h / 2 + jy, w, h,
+        ...(im.caption != null ? { caption: im.caption } : {}), ...(im.vetted != null ? { vetted: im.vetted } : {}) });
       along += extent + o.gap;
     });
   }
@@ -195,7 +212,8 @@ function planGrid(data, o) {
       const y = Math.max(...bottoms.slice(c, c + span));
       if (y < bestY) { bestY = y; best = c; }
     }
-    out.push({ id: im.id, name: im.name, arm: 'G', ring: best, x: colX(best), y: bestY, w, h });
+    out.push({ id: im.id, name: im.name, arm: 'G', ring: best, x: colX(best), y: bestY, w, h,
+      ...(im.caption != null ? { caption: im.caption } : {}), ...(im.vetted != null ? { vetted: im.vetted } : {}) });
     for (let c = best; c < best + span; c++) bottoms[c] = bestY + h + 60; // 60 = caption room
   }
   return out;
@@ -231,6 +249,7 @@ function overlaps(placements, budget) {
 // === MAIN ===================================================================
 const o = parseArgs(process.argv.slice(2));
 const data = loadInput(o.input);
+seedRandom(o.seed);
 const placements = o.mode === 'grid' ? planGrid(data, o) : planPlus(data, o, o.mode === 'loose');
 const canvas = o.mode === 'grid'
   ? { w: o.margin * 2 + o.columns * o.colWidth + (o.columns - 1) * 30, h: Math.max(...placements.map(p => p.y + p.h)) + o.margin, origin: { x: 0, y: 0 } }

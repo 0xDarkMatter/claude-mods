@@ -116,6 +116,66 @@ node "$STAGE" --list "$SB/list.txt" --dir "$SB/src" --out "$SB/out" --names "$SB
 expect_exit "stage with names+arms exits 0" 0 $?
 grep -q '"name": "02-ref-collected-system"' "$SB/board.json" && ok "--names override becomes the slug" || no "--names override becomes the slug"
 node "$PLAN" --input "$SB/board.json" --mode loose --json >/dev/null 2>&1; expect_exit "planner accepts stage output" 0 $?
+grep -q '"vetted": false' "$SB/board.json" && ok "stage emits vetted:false by construction" || no "stage emits vetted:false by construction"
+
+# ── second fixture: defaults must hold on a board they were not tuned on ─────
+FIX2="$SKILL/assets/light-board.example.json"
+for m in loose plus grid; do
+  node "$PLAN" --input "$FIX2" --mode "$m" --json 2>/dev/null > "$SB/fix2-$m.json"; expect_exit "second fixture plans in $m" 0 $?
+done
+grep -q '"caption"' "$SB/fix2-loose.json" && ok "caption passes through the planner" || no "caption passes through the planner"
+
+# ── seeded jitter: deterministic per seed, different across seeds ────────────
+node "$PLAN" --input "$FIX" --mode loose --jitter 24 --seed 7 --json 2>/dev/null > "$SB/j7a.json"
+node "$PLAN" --input "$FIX" --mode loose --jitter 24 --seed 7 --json 2>/dev/null > "$SB/j7b.json"
+node "$PLAN" --input "$FIX" --mode loose --jitter 24 --seed 8 --json 2>/dev/null > "$SB/j8.json"
+cmp -s "$SB/j7a.json" "$SB/j7b.json" && ok "same seed -> identical plan" || no "same seed -> identical plan"
+cmp -s "$SB/j7a.json" "$SB/j8.json" && no "different seed -> different plan" || ok "different seed -> different plan"
+node "$PLAN" --input "$FIX" --mode loose --jitter 24 --seed 7 >/dev/null 2>&1; expect_exit "jittered plan stays within budget" 0 $?
+
+# ── emit-placement.mjs ────────────────────────────────────────────────────────
+EMIT="$SKILL/scripts/emit-placement.mjs"
+node "$EMIT" --help >/dev/null 2>&1;                                  expect_exit "emit --help" 0 $?
+node "$EMIT" --plan "$SB/j7a.json" --phase place >/dev/null 2>&1;    expect_exit "emit place without --backdrop is usage" 2 $?
+node "$EMIT" --plan "$SB/j7a.json" --phase backdrop > "$SB/bd.js" 2>/dev/null; expect_exit "emit backdrop" 0 $?
+node "$EMIT" --plan "$SB/j7a.json" --phase place --backdrop 45:2 --captions > "$SB/pl.js" 2>/dev/null; expect_exit "emit place (real node ids)" 0 $?
+# generated code must be valid inside use_figma's async wrapper
+node -e 'const AF=Object.getPrototypeOf(async function(){}).constructor; for (const f of process.argv.slice(1)) new AF("figma", require("fs").readFileSync(f,"utf8"));' "$SB/bd.js" "$SB/pl.js" 2>/dev/null && ok "generated scripts parse as async use_figma bodies" || no "generated scripts parse as async use_figma bodies"
+grep -c '^  \["44:' "$SB/pl.js" | grep -q '^14$' && ok "place script carries all 14 ids" || no "place script carries all 14 ids"
+node "$EMIT" --plan "$SB/fix2-loose.json" --phase place --backdrop 45:2 >/dev/null 2>&1; expect_exit "slug ids (pre-upload) are refused as bad input" 3 $?
+node -e 'const p=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); p.placements[2].vetted=false; require("fs").writeFileSync(process.argv[2],JSON.stringify(p));' "$SB/j7a.json" "$SB/unvetted.json"
+node "$EMIT" --plan "$SB/unvetted.json" --phase place --backdrop 45:2 >/dev/null 2>&1; expect_exit "unvetted image is refused with exit 10" 10 $?
+node "$EMIT" --plan "$SB/unvetted.json" --phase place --backdrop 45:2 --allow-unvetted >/dev/null 2>&1; expect_exit "--allow-unvetted overrides" 0 $?
+
+# ── verify-board.mjs ──────────────────────────────────────────────────────────
+VERIFY="$SKILL/scripts/verify-board.mjs"
+node "$VERIFY" --help >/dev/null 2>&1; expect_exit "verify --help" 0 $?
+node - "$SB/j7a.json" "$SB/rb-good.json" "$SB/rb-bad.json" <<'EOF'
+const fs=require('fs');const [plan,good,bad]=process.argv.slice(2);
+const p=JSON.parse(fs.readFileSync(plan,'utf8'));
+const kids=p.placements.filter(x=>x.id!=='centre').map((x,i)=>({id:x.id,name:x.name,type:'FRAME',index:i,x:x.x,y:x.y,w:x.w,h:x.h,rotation:0,hasStroke:true}));
+fs.writeFileSync(good,JSON.stringify({backdrop:{id:'45:2',w:p.canvas.w,h:p.canvas.h},children:kids}));
+kids[3].w=400;kids[3].h=300; kids[5].rotation=2.5; [kids[7].index,kids[8].index]=[kids[8].index,kids[7].index]; kids[1].hasStroke=false;
+fs.writeFileSync(bad,JSON.stringify({backdrop:{id:'45:2',w:p.canvas.w,h:p.canvas.h},children:kids}));
+EOF
+node "$VERIFY" --plan "$SB/j7a.json" --board "$SB/rb-good.json" >/dev/null 2>&1; expect_exit "faithful read-back verifies clean" 0 $?
+R="$(node "$VERIFY" --plan "$SB/j7a.json" --board "$SB/rb-bad.json" --json 2>/dev/null)"; expect_exit "broken read-back exits 10" 10 $?
+for kind in size rotation z-order stroke; do
+  grep -q "\"kind\": \"$kind\"" <<<"$R" && ok "verify reports $kind" || no "verify reports $kind"
+done
+grep -q '400x300 upload frame' <<<"$R" && ok "verify names the 400x300 trap" || no "verify names the 400x300 trap"
+
+# ── verify-freshness.mjs (offline only; --live is for the scheduled freshness run) ──
+FRESH="$SKILL/scripts/verify-freshness.mjs"
+node "$FRESH" --help >/dev/null 2>&1;  expect_exit "freshness --help" 0 $?
+node "$FRESH" >/dev/null 2>&1;         expect_exit "freshness without mode is usage" 2 $?
+# With a plugin cache present this asserts the router table is TRUE (exit 0); without
+# one it skips (also exit 0). Exit 10 here means SKILL.md §1 names a skill that no
+# longer exists in the installed Figma plugin — fix the table, don't relax the test.
+node "$FRESH" --offline >/dev/null 2>&1; expect_exit "router names only skills that exist (or skipped)" 0 $?
+# Synthetic cache: a router-named skill missing must be STALE (exit 10)
+mkdir -p "$SB/cache/figma-use"; : > "$SB/cache/figma-use/SKILL.md"
+node "$FRESH" --offline --cache "$SB/cache" >/dev/null 2>&1; expect_exit "missing routed skill in cache -> stale exit 10" 10 $?
 
 echo "=== $PASS passed, $FAIL failed ==="
 [[ $FAIL -eq 0 ]]

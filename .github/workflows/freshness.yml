@@ -97,6 +97,15 @@ jobs:
           if [ "$rc" -eq 7 ]; then echo "::warning::threejs-ops live check unreachable (npm registry) — skipped"; fi
           exit 0
 
+      - name: figma-ops router + community inventory vs live index
+        run: |
+          set +e
+          node skills/figma-ops/scripts/verify-freshness.mjs --live
+          rc=$?
+          if [ "$rc" -eq 10 ]; then echo "::error::figma-ops drift — the router names a plugin skill that no longer exists, or the community index lists skills references/skill-map.md doesn't"; exit 1; fi
+          if [ "$rc" -eq 7 ]; then echo "::warning::figma-ops live check unreachable (GitHub raw) — skipped"; fi
+          exit 0
+
       - name: loop-ops native-scheduling limits vs published docs
         run: |
           set +e

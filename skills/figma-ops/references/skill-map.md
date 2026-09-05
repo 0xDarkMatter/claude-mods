@@ -22,12 +22,24 @@ Cached under `~/.claude/plugins/cache/claude-plugins-official/figma/<ver>/skills
 
 ## Official community skills (`figma/community-resources/agent_skills`)
 
-~33 skills clustered by design domain: accessibility (APCA, WCAG lint, scorecards),
-components (analyze/arrange/document/reconstruct), design systems (tokens in DTCG /
-CSS / Tailwind, variable CRUD, inventory), process (annotations, parity, narrative,
-IA), FigJam (boards, workshops), localisation. `bulk-capture` captures many live
-pages in parallel via `generate_figma_design`. Descriptions are outcome-first
-("audits", "generates", "extracts").
+Clustered by design domain; descriptions are outcome-first ("audits", "generates",
+"extracts"). `bulk-capture` captures many live pages in parallel via
+`generate_figma_design` — the nearest neighbour to this skill's capture phase.
+
+**Inventory (33, as of 2026-09-05).** `scripts/verify-freshness.mjs --live` diffs
+this list against the index; a name missing here is drift — add it, don't delete
+the check.
+
+| Category | Skills |
+|---|---|
+| Accessibility | `apca-compliance-figma`, `audit-accessibility-figma`, `lint-design-figma`, `scan-code-accessibility-figma` |
+| AI behaviour | `emote-behavioral-contracts` |
+| Components | `analyze-component-set-figma`, `arrange-component-set-figma`, `component-properties-figma`, `deep-component-figma`, `design-react-api`, `generate-component-doc-figma`, `reconstruct-component-figma` |
+| Design generation | `bridge-ds`, `build-slides-figma`, `bulk-capture` |
+| Design process | `annotations-figma`, `check-design-parity-figma`, `delight-audit`, `design-narrative`, `screens-to-ia` |
+| Design systems | `design-system-inventory-figma`, `ds-init-figma`, `ds-compliance-audit`, `export-tokens-figma`, `generate-tokens-from-figma`, `import-tokens-figma`, `library-variables-figma`, `manage-variables-figma`, `setup-design-tokens-figma` |
+| FigJam | `create-figjam-content`, `figjam-builder`, `workshop-board` |
+| Localisation | `localeflow` |
 
 ## southleft `figma-console-mcp-skills` (22)
 

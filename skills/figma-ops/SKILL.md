@@ -2,7 +2,9 @@
 name: figma-ops
 description: "Router and composition workflows for Figma via the official Figma MCP: which Figma skill/tool for which job, capture-to-canvas (screenshots or shotcraft crops into a Figma file), moodboard and reference-board composition (grid, plus, loose-plus arrangements with a deterministic layout planner), canvas craft rules the API skills don't cover, and multi-account routing. Triggers on: figma, moodboard, brand board, reference board, put these screenshots in figma, compose in figma, arrange images in figma, plus arrangement, which figma skill, figma account, upload to figma, delete figma page."
 license: MIT
-compatibility: "Official Figma MCP server (Claude Code figma plugin) for canvas work; Node 18+ for scripts/plan-layout.mjs; shotcraft optional for live-site capture"
+when_to_use: "Any Figma request that isn't obviously a single official skill's job: 'put these screenshots in Figma', 'make a moodboard from these references', 'arrange this more organically', 'which Figma skill do I use for X', 'it says I don't have edit access', 'this file is in my other Figma account', 'delete the old pages'."
+argument-hint: "[route|compose|verify] [figma-url]"
+compatibility: "Official Figma MCP server (Claude Code figma plugin) for canvas work; Node 18+ for scripts/*.mjs; shotcraft optional for live-site capture"
 allowed-tools: "Read Write Bash Glob Grep AskUserQuestion"
 metadata:
   author: claude-mods
@@ -31,7 +33,8 @@ don't:
 | The job | Load | Tool it wraps |
 |---|---|---|
 | Any script that mutates or reads the canvas | `figma-use` (mandatory prerequisite) | `use_figma` |
-| Design → code, implement a screen | `figma-design-to-code` (or `get_design_context` guidance) | `get_design_context`, `get_screenshot` |
+| Design → code, implement a screen | the design-to-code guidance served as MCP resource `skill://figma/figma-design-to-code/SKILL.md` (not a plugin skill) | `get_design_context`, `get_screenshot` |
+| SwiftUI ↔ Figma, either direction | `figma-swiftui` | `get_design_context`, `use_figma` |
 | Build a page/screen *from* app code | `figma-generate-design` + `figma-use` | `use_figma`, `generate_figma_design` |
 | Tokens, variables, component library | `figma-generate-library` + `figma-use` | `use_figma`, `search_design_system` |
 | Map components to code | `figma-code-connect` | Code Connect tools |
@@ -153,14 +156,21 @@ Rules that held across all three:
   strip its chrome (strokes, ticks, metadata) or it reads as a broken box.
 - **Vocabulary in the quadrants or corners, never in the cluster.**
 
-Plan coordinates with the script rather than by hand:
+Plan coordinates with the script rather than by hand, and generate the placement
+script rather than typing it:
 
 ```bash
-node scripts/plan-layout.mjs --input assets/plus-layout.example.json --mode loose --json
+node scripts/plan-layout.mjs --input board.json --mode loose --jitter 24 --seed 7 --json > plan.json
+node scripts/emit-placement.mjs --plan plan.json --phase backdrop            # → use_figma
+node scripts/emit-placement.mjs --plan plan.json --phase place --backdrop 45:2 --captions
 ```
 
-It emits backdrop-relative `{id, x, y, w, h}` placements, canvas size, and an
-overlap report — paste the placements into one `use_figma` loop.
+`plan-layout` emits backdrop-relative `{id, x, y, w, h}` placements in z-order,
+canvas size, and an overlap report (exit 10 over budget). `--jitter` adds seeded
+irregularity for "organic" without losing reproducibility — same seed, same plan.
+`emit-placement` turns the plan into the exact `use_figma` script, and **refuses
+any image whose plan entry is `vetted: false`** — the look-at-it gate as data, not
+memory. Full flow in [references/place-and-verify.md](references/place-and-verify.md).
 
 ## 6. Canvas craft rules (above the API)
 
@@ -180,9 +190,14 @@ Learned the expensive way; each one cost a round-trip this skill now saves.
   9px footer squares and moved them 440px. Track IDs; filter by name or ID.
 - **Deleting a label deletes only the text.** Its leader line and dot stay. Remove
   the whole triplet, or rebuild all captions after a re-layout rather than nudging.
-- **Screenshot after every structural change.** `get_screenshot` on the board node at
-  `maxDimension` 1400–1800; look for collisions, stranded chrome, illegible items.
-  Node-level screenshots (`contentsOnly`) are for detail, not verification.
+- **Verify mechanically, then screenshot.** Read the board back (the read-only script
+  in [references/place-and-verify.md](references/place-and-verify.md)) and run
+  `scripts/verify-board.mjs --plan plan.json --board readback.json`. It catches what
+  eyes don't: frames still at 400×300, drift, inverted z-order, budget breaches,
+  missing strokes, rotation. *Then* `get_screenshot` on the board node at
+  `maxDimension` 1400–1800 for what programs can't judge: collisions of meaning,
+  stranded chrome, whether it is any good. Node-level screenshots (`contentsOnly`)
+  are for detail, not verification.
 - **Renders go to the user.** `curl` the screenshot URL to `design/exports/` and send
   the file; a description of a board is not a board.
 - **Page deletion is explicit and last.** Switch `currentPage` to the survivor first
@@ -222,10 +237,24 @@ not just the new ones.
   skill landscape and what this skill deliberately leaves to them.
 - [references/lessons.md](references/lessons.md) — the session log this skill was
   distilled from, kept as evidence for the rules in §6.
+- [references/place-and-verify.md](references/place-and-verify.md) — the last mile:
+  fill in node IDs, emit the two `use_figma` scripts, read the board back, verify.
 - `scripts/stage-assets.mjs` — folder/shortlist → slug-named copies + true dimensions
-  → planner JSON. Exits 10 until subjects and arms are supplied.
-- `scripts/plan-layout.mjs` — deterministic layout planner (grid / plus / loose).
-- `assets/plus-layout.example.json` — a real 14-image fixture; also the test input.
+  → planner JSON (`vetted: false` by construction). Exits 10 until subjects and arms
+  are supplied.
+- `scripts/plan-layout.mjs` — deterministic layout planner (grid / plus / loose),
+  seeded `--jitter`, overlap budget, captions and `vetted` passed through.
+- `scripts/emit-placement.mjs` — plan → exact `use_figma` scripts (backdrop, place,
+  optional captions). Refuses unvetted images.
+- `scripts/verify-board.mjs` — board read-back vs plan: size, position, rotation,
+  z-order, overlap budget, strokes. Exit 10 with findings.
+- `scripts/verify-freshness.mjs` — `--offline`: every skill the router names exists
+  in the local plugin cache; `--live`: the community index vs `skill-map.md`.
+- `assets/plus-layout.example.json` — the real 14-image Agntik fixture.
+- `assets/light-board.example.json` — a second real fixture (8 light-ground captures,
+  smaller centre, slug IDs, captions) so defaults are validated on more than one board.
 
-The pipeline, end to end: shotcraft (or a folder) → `stage-assets` → `plan-layout`
-→ one `use_figma` placement loop → `get_screenshot` → dress.
+The pipeline, end to end: shotcraft (or a folder) → `stage-assets` → look at every
+image, set `vetted`, `caption`, `arm` → `plan-layout` → `emit-placement` (backdrop)
+→ `upload_assets` → fill IDs → `emit-placement` (place) → read back → `verify-board`
+→ `get_screenshot` → dress → send the render.

@@ -45,6 +45,22 @@ echo "== terraform-ops: action-ref verifier"
 run "action-refs --offline well-formed" 0 bash skills/terraform-ops/scripts/check-action-refs.sh --offline
 run "action-refs --help"                0 bash skills/terraform-ops/scripts/check-action-refs.sh --help
 
+echo "== figma-ops: router freshness + pipeline scripts"
+# --offline exits 0 both when the router matches the local Figma plugin cache AND
+# when no cache exists (CI) — the skip is deliberate; --live runs in freshness.yml.
+if command -v node >/dev/null 2>&1; then
+  run "figma freshness --offline (fresh or skipped)" 0  node skills/figma-ops/scripts/verify-freshness.mjs --offline
+  run "figma freshness --help"                       0  node skills/figma-ops/scripts/verify-freshness.mjs --help
+  run "figma plan-layout fixture 1 (loose)"          0  node skills/figma-ops/scripts/plan-layout.mjs --input skills/figma-ops/assets/plus-layout.example.json --mode loose --json
+  run "figma plan-layout fixture 2 (loose)"          0  node skills/figma-ops/scripts/plan-layout.mjs --input skills/figma-ops/assets/light-board.example.json --mode loose --json
+  run "figma plan-layout bad args"                   2  node skills/figma-ops/scripts/plan-layout.mjs
+  run "figma emit-placement --help"                  0  node skills/figma-ops/scripts/emit-placement.mjs --help
+  run "figma verify-board --help"                    0  node skills/figma-ops/scripts/verify-board.mjs --help
+  run "figma stage-assets --help"                    0  node skills/figma-ops/scripts/stage-assets.mjs --help
+else
+  pass "figma-ops checks skipped (no node)"
+fi
+
 echo "== claude-code-ops: hooks.json validator"
 run "hooks-lint clean on repo hooks.json" 0 "$PY" skills/claude-code-ops/scripts/validate-hooks-json.py hooks/hooks.json
 run "hooks-lint --help"                   0 "$PY" skills/claude-code-ops/scripts/validate-hooks-json.py --help
