@@ -513,6 +513,53 @@ case "$(head -n1 "$MREPO/.claude/fleet/lanes/redland-lane" 2>/dev/null)" in
   FAILED) ok "lane marked FAILED after a real merge failed its gate";;
   *) no "lane not FAILED after a failed gate";; esac
 
+# (d2) ...and the rewind itself is CHECKED. An unchecked `git reset --hard` is
+#      the same lie in miniature: the lane reports FAILED while the failing
+#      merge is still sitting on the base branch, and nothing anywhere says so.
+#      There is no portable way to make a reset fail for real (a locked file
+#      under Windows is the realistic cause), so it is fault-injected with a
+#      `git` shim placed first on PATH for exactly one invocation. $SB comes
+#      from mktemp -d, so it is a POSIX path: a Windows-style X:/... entry in
+#      PATH is silently NOT resolved by Git Bash, and the shim would appear to
+#      work while the real git ran.
+#      Its own repo, because a successful injection strands a merge on main.
+mkdir -p "$SB/shim"
+printf '#!/usr/bin/env bash\nif [ "$1" = "reset" ]; then echo "simulated reset failure" >&2; exit 1; fi\nexec "%s" "$@"\n' \
+  "$(command -v git)" > "$SB/shim/git"
+chmod +x "$SB/shim/git"
+RREPO="$SB/rrepo"; mkdir -p "$RREPO"
+git -C "$RREPO" init -q -b main
+git -C "$RREPO" config user.email t@t; git -C "$RREPO" config user.name t
+git -C "$RREPO" config core.autocrlf false
+echo base > "$RREPO/f"; git -C "$RREPO" add -A; git -C "$RREPO" commit -qm init
+mkdir -p "$RREPO/.claude/fleet"; printf 'test_cmd=false\n' > "$RREPO/.claude/fleet/config"
+cd "$RREPO"
+git -C "$RREPO" checkout -q -b lane/rewind main
+echo w > "$RREPO/w.txt"; git -C "$RREPO" add -- w.txt
+git -C "$RREPO" -c user.email=w@t -c user.name=w commit -qm "work lane/rewind"
+git -C "$RREPO" checkout -q main
+bash "$FLEET" track lane/rewind >/dev/null 2>&1
+before_rw="$(git -C "$RREPO" rev-parse main)"
+if PATH="$SB/shim:$PATH" command -v git | grep -q "$SB/shim"; then
+  rw_out="$(PATH="$SB/shim:$PATH" bash "$FLEET" land lane/rewind 2>&1)"; rc=$?
+  ee "land still fails when the post-merge rewind cannot run" 1 $rc
+  case "$rw_out" in *"could not reset main"*) ok "a failed rewind is reported, not swallowed";;
+    *) no "failed rewind passed silently - lane says FAILED, merge stays on main";; esac
+  case "$rw_out" in *"THE FAILING MERGE IS STILL ON main"*) ok "log states the base branch is now broken";;
+    *) no "log does not warn that the merge is still on the base branch";; esac
+  case "$rw_out" in *"git reset --hard $before_rw"*) ok "log hands over the exact recovery command";;
+    *) no "no recovery command offered";; esac
+  [ "$before_rw" != "$(git -C "$RREPO" rev-parse main)" ] \
+    && ok "the injection really did strand the merge (the test tests something)" \
+    || no "reset was not actually blocked - this case proves nothing"
+  case "$(sed -n '2p' "$RREPO/.claude/fleet/lanes/lane%2Frewind" 2>/dev/null)" in
+    *"rewind to"*"FAILED"*) ok "lane note records that the rewind failed";;
+    *) no "lane note claims an ordinary post-merge failure";; esac
+else
+  echo "  SKIP  rewind-failure injection (PATH shim not resolvable here)"
+fi
+cd "$CREPO"
+
 # (e) land --all counts a no-op apart from a real land. Two lanes: one already
 #     merged by a peer, one genuinely unmerged, with fixed commit times so the
 #     oldest-first batch order is deterministic.

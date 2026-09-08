@@ -1688,10 +1688,20 @@ land_one() {
       log "PASS: $branch landed"
     else
       log "FAIL: tests failed — reverting $branch"
-      # $before, not HEAD^ — see (2) above.
-      git reset --hard "$before"
+      # $before, not HEAD^ — see (2) above. And checked, because an unchecked
+      # rewind is the same lie in miniature: if the reset fails (a locked file
+      # under Windows is the realistic way), the failing merge stays on
+      # $BASE_BRANCH while the lane confidently reports FAILED, and nothing
+      # anywhere says the base branch is now broken.
+      if git reset --hard "$before"; then
+        set_lane_state "$branch" "FAILED" "tests failed post-merge"
+      else
+        log "ERROR: could not reset $BASE_BRANCH to $before"
+        log "       THE FAILING MERGE IS STILL ON $BASE_BRANCH — fix by hand:"
+        log "         git checkout $BASE_BRANCH && git reset --hard $before"
+        set_lane_state "$branch" "FAILED" "tests failed; rewind to $before FAILED — merge still on $BASE_BRANCH"
+      fi
       LAND_RESULT="FAILED"
-      set_lane_state "$branch" "FAILED" "tests failed post-merge"
       return 1
     fi
     LAND_RESULT="LANDED"
