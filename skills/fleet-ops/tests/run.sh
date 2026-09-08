@@ -387,6 +387,161 @@ case "$(head -n1 "$CREPO/.claude/fleet/lanes/nogate-lane" 2>/dev/null)" in
 # The daemon must refuse to start too, rather than spin refusing every poll.
 bash "$FLEET" start >/dev/null 2>&1; ee "daemon refuses to start unarmed" 1 $?
 
+# -- already-merged branch: the two-sessions-one-branch case -------------------
+# Regression, reproduced 2026-09-08 (X:\Forge\Praxis, branch
+# claude/charming-mendel-4ebf5d landed twice, 90 seconds apart). `git merge
+# --no-ff` exits 0 with "Already up to date." when the branch is already an
+# ancestor of the base, so land_one took the success path for a merge it never
+# made:
+#   (a) it logged `PASS: <branch> landed` and returned 0 for a no-op land, and
+#   (b) when the gate then failed it ran `git reset --hard HEAD^`, discarding a
+#       merge commit ANOTHER session had created — a peer's landed work, thrown
+#       away on a branch fleet believed it owned. In the incident the gate
+#       happened to pass; that was luck, not design.
+# Case (b) is also the only case that can tell `reset --hard $before` apart from
+# `reset --hard HEAD^`: after a genuine --no-ff merge those name the same commit.
+echo "-- already-merged branch: no false land, no peer-destroying reset --"
+
+MREPO="$SB/mrepo"; mkdir -p "$MREPO"
+git -C "$MREPO" init -q -b main
+git -C "$MREPO" config user.email t@t; git -C "$MREPO" config user.name t
+git -C "$MREPO" config core.autocrlf false
+echo base > "$MREPO/f"; git -C "$MREPO" add -A; git -C "$MREPO" commit -qm init
+mkdir -p "$MREPO/.claude/fleet"
+MCFG="$MREPO/.claude/fleet/config"
+cd "$MREPO"
+
+# Lane with one commit at a FIXED timestamp — `land --all` orders by commit
+# time, and same-second ties would make the batch order (and so the tally
+# assertion in (e)) nondeterministic. The worktree is dropped afterwards: while
+# a branch is checked out anywhere, `git branch -d` cannot delete it, so "the
+# lane branch survived" would prove nothing about whether fleet tried to.
+mk_mlane(){ # repo, branch, file, epoch
+  local wt="$SB/mwt-$2"
+  git -C "$1" branch "$2" main
+  git -C "$1" worktree add -q "$wt" "$2"
+  echo "$2" > "$wt/$3"
+  git -C "$wt" add -A
+  GIT_AUTHOR_DATE="@$4 +0000" GIT_COMMITTER_DATE="@$4 +0000" \
+    git -C "$wt" -c user.email=w@t -c user.name=w commit -qm "work $2"
+  git -C "$1" worktree remove --force "$wt" >/dev/null 2>&1 || true
+}
+# What the OTHER session does: a real --no-ff merge, made outside fleet.
+peer_land(){ git -C "$1" merge "$2" --no-ff -m "merge: $2" -q; }
+
+# (a) already merged, green gate -> reported as already landed, not as a land.
+#     The gate is side-effecting, so "did it run?" is a file test rather than
+#     prose-matching: there is no merge of ours to gate, so it must not run.
+printf 'test_cmd=touch ./gate-ran\n' > "$MCFG"
+mk_mlane "$MREPO" dup-green x.txt 1700000000
+peer_land "$MREPO" dup-green
+bash "$FLEET" track dup-green >/dev/null 2>&1
+# AFTER the track, deliberately: ensure_fleet_dir appends .claude/fleet/ and
+# .fleet-worktrees/ to .gitignore and auto-commits that on base_branch, so a tip
+# captured before tracking is already stale. The invariant under test is "the
+# LAND does not move the tip", so capture it immediately before the land.
+peer_sha="$(git -C "$MREPO" rev-parse main)"
+land_out="$(bash "$FLEET" land dup-green 2>&1)"; rc=$?
+ee "already-merged branch lands cleanly" 0 $rc
+eq "already-merged land leaves the base tip untouched" "$peer_sha" "$(git -C "$MREPO" rev-parse main)"
+case "$land_out" in *"ALREADY LANDED: dup-green"*) ok "log uses a distinct ALREADY LANDED verb";;
+  *) no "no ALREADY LANDED line - a no-op reads exactly like a real land";; esac
+case "$land_out" in *"PASS: dup-green landed"*) no "claimed PASS for a merge it never made";;
+  *) ok "does not claim PASS for a merge it never made";; esac
+[ -f "$MREPO/gate-ran" ] && no "test_cmd ran for a merge that never happened" || ok "no merge, no gate run"
+# Exactly one merge of this branch on main - the peer's. A second would mean
+# fleet manufactured one. Captured, not piped - SIGPIPE note above.
+m_log="$(git -C "$MREPO" log --oneline main)"
+eq "exactly one merge commit for the branch" "1" \
+   "$(printf '%s\n' "$m_log" | grep -c 'merge: dup-green' || true)"
+case "$(head -n1 "$MREPO/.claude/fleet/lanes/dup-green" 2>/dev/null)" in
+  LANDED) ok "lane recorded LANDED (the end state the caller wanted IS true)";;
+  *) no "lane not LANDED after an already-merged land";; esac
+case "$(sed -n '2p' "$MREPO/.claude/fleet/lanes/dup-green" 2>/dev/null)" in
+  *"no merge performed"*) ok "lane note records the no-op";;
+  *) no "lane note does not distinguish this from a real land";; esac
+git -C "$MREPO" rev-parse --verify --quiet refs/heads/dup-green >/dev/null 2>&1 \
+  && ok "lane branch left alone (this run did not land it)" \
+  || no "deleted a lane branch it did not land"
+
+# (b) already merged, RED gate -> must NOT hard-reset the peer's merge commit.
+#     The destructive half, and the assertion that actually pins the fix.
+printf 'test_cmd=false\n' > "$MCFG"
+mk_mlane "$MREPO" dup-red y.txt 1700000100
+peer_land "$MREPO" dup-red
+bash "$FLEET" track dup-red >/dev/null 2>&1
+peer_sha="$(git -C "$MREPO" rev-parse main)"
+land_out="$(bash "$FLEET" land dup-red 2>&1)"; rc=$?
+ee "already-merged branch is not failed by a gate it never ran" 0 $rc
+eq "red gate does NOT reset away the peer's merge" "$peer_sha" "$(git -C "$MREPO" rev-parse main)"
+m_log="$(git -C "$MREPO" log --oneline main)"
+case "$m_log" in *"merge: dup-red"*) ok "peer's merge commit survives a red gate";;
+  *) no "peer's merge commit was RESET AWAY";; esac
+
+# (c) the load-bearing half: a genuinely unmerged branch behaves as before.
+printf 'test_cmd=touch ./gate-ran-real\n' > "$MCFG"
+mk_mlane "$MREPO" real-lane z.txt 1700000200
+before_real="$(git -C "$MREPO" rev-parse main)"
+bash "$FLEET" track real-lane >/dev/null 2>&1
+land_out="$(bash "$FLEET" land real-lane 2>&1)"; rc=$?
+ee "genuinely unmerged branch still lands" 0 $rc
+case "$land_out" in *"PASS: real-lane landed"*) ok "real land still reports PASS";;
+  *) no "real land lost its PASS line";; esac
+case "$land_out" in *"ALREADY LANDED"*) no "real land misreported as already landed";;
+  *) ok "real land is not confused with a no-op";; esac
+[ -f "$MREPO/gate-ran-real" ] && ok "gate ran for a real merge" || no "gate did not run for a real merge"
+[ "$before_real" != "$(git -C "$MREPO" rev-parse main)" ] && ok "base tip advanced on a real land" \
+  || no "base tip did not move on a real land"
+m_log="$(git -C "$MREPO" log --oneline main)"
+case "$m_log" in *"merge: real-lane"*) ok "merge commit created";; *) no "no merge commit";; esac
+git -C "$MREPO" rev-parse --verify --quiet refs/heads/real-lane >/dev/null 2>&1 \
+  && no "landed lane branch not cleaned up" || ok "landed lane branch still deleted"
+
+# (d) red gate after a REAL merge rewinds to exactly the pre-merge tip, and no
+#     further. `$before` and `HEAD^` coincide on a genuine --no-ff merge, so
+#     this cannot separate them - (b) is what does. What it pins is that the
+#     rewind does not overshoot: the whole history is identical to before.
+printf 'test_cmd=false\n' > "$MCFG"
+mk_mlane "$MREPO" redland-lane q.txt 1700000300
+before_red="$(git -C "$MREPO" rev-parse main)"
+log_before_red="$(git -C "$MREPO" log --oneline main)"
+bash "$FLEET" track redland-lane >/dev/null 2>&1
+bash "$FLEET" land redland-lane >/dev/null 2>&1; ee "red gate fails the land" 1 $?
+eq "red gate rewinds to exactly the pre-merge tip" "$before_red" "$(git -C "$MREPO" rev-parse main)"
+eq "and no further - history either side is unchanged" "$log_before_red" "$(git -C "$MREPO" log --oneline main)"
+case "$(head -n1 "$MREPO/.claude/fleet/lanes/redland-lane" 2>/dev/null)" in
+  FAILED) ok "lane marked FAILED after a real merge failed its gate";;
+  *) no "lane not FAILED after a failed gate";; esac
+
+# (e) land --all counts a no-op apart from a real land. Two lanes: one already
+#     merged by a peer, one genuinely unmerged, with fixed commit times so the
+#     oldest-first batch order is deterministic.
+echo "-- land --all counts an already-merged lane apart from a real land --"
+BREPO="$SB/brepo"; mkdir -p "$BREPO"
+git -C "$BREPO" init -q -b main
+git -C "$BREPO" config user.email t@t; git -C "$BREPO" config user.name t
+git -C "$BREPO" config core.autocrlf false
+echo base > "$BREPO/f"; git -C "$BREPO" add -A; git -C "$BREPO" commit -qm init
+arm_gate "$BREPO"
+cd "$BREPO"
+mk_mlane "$BREPO" batch-dup  bd.txt 1700000000
+mk_mlane "$BREPO" batch-real br.txt 1700000400
+peer_land "$BREPO" batch-dup
+bash "$FLEET" track batch-dup batch-real >/dev/null 2>&1
+batch_out="$(bash "$FLEET" land --all --running 2>&1)"; rc=$?
+ee "land --all exits 0 when one lane was already merged" 0 $rc
+case "$batch_out" in
+  *"land --all: 1 landed, 1 already in main, 0 conflict, 0 failed"*)
+    ok "summary counts 1 landed + 1 already, not 2 landed";;
+  *) no "summary miscounts the no-op";; esac
+b_log="$(git -C "$BREPO" log --oneline main)"
+eq "no duplicate merge commit for the already-merged lane" "1" \
+   "$(printf '%s\n' "$b_log" | grep -c 'merge: batch-dup' || true)"
+case "$b_log" in *"merge: batch-real"*) ok "the genuinely unmerged lane still landed";;
+  *) no "real lane did not land in the batch";; esac
+
+cd "$CREPO"
+
 # -- session awareness: the live-owner land gate -------------------------------
 # Guards the hazard that motivated it: landing a lane while the session that
 # owns it is still writing. The store is faked (FLEET_SESSION_STORE) so the
