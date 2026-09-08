@@ -388,7 +388,7 @@ case "$(head -n1 "$CREPO/.claude/fleet/lanes/nogate-lane" 2>/dev/null)" in
 bash "$FLEET" start >/dev/null 2>&1; ee "daemon refuses to start unarmed" 1 $?
 
 # -- already-merged branch: the two-sessions-one-branch case -------------------
-# Regression, reproduced 2026-09-08 (X:\Forge\Praxis, branch
+# Regression, reproduced 2026-09-08 in a downstream repo (branch
 # claude/charming-mendel-4ebf5d landed twice, 90 seconds apart). `git merge
 # --no-ff` exits 0 with "Already up to date." when the branch is already an
 # ancestor of the base, so land_one took the success path for a merge it never
