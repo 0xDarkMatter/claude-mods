@@ -542,6 +542,151 @@ case "$b_log" in *"merge: batch-real"*) ok "the genuinely unmerged lane still la
 
 cd "$CREPO"
 
+# -- revert targets the branch you named, and only that branch ----------------
+# Regression, reproduced 2026-09-08. cmd_revert located the commit to undo with
+# `git log --merges --grep="merge: $branch" -n1`, which is wrong twice over:
+#   * --grep matches a SUBSTRING, so `merge: lane/auth` also matched
+#     `merge: lane/auth-refactor`; with -n1 taking the newest, reverting
+#     lane/auth destroyed the REFACTOR lane's work and logged
+#     `reverted: lane/auth`. Sibling lane names sharing a prefix are the norm.
+#   * --grep is a REGEX with the branch interpolated raw, so `feat/a.b` matched
+#     a landed `merge: feat/aXb` — a branch that was never landed at all.
+# Both are the same failure the land audit found: a destructive operation whose
+# report describes what was ASKED FOR rather than what was DONE.
+echo "-- revert: exact-subject targeting, clean abort, honest lane state --"
+
+VREPO="$SB/vrepo"; mkdir -p "$VREPO"
+git -C "$VREPO" init -q -b main
+git -C "$VREPO" config user.email t@t; git -C "$VREPO" config user.name t
+git -C "$VREPO" config core.autocrlf false
+echo base > "$VREPO/f"; git -C "$VREPO" add -A; git -C "$VREPO" commit -qm init
+arm_gate "$VREPO"
+cd "$VREPO"
+
+# Branch with one commit touching $3, merged into main by fleet's own message
+# convention. No worktree: these cases only care about main's history.
+mk_landed(){ # repo, branch, file
+  git -C "$1" checkout -q -b "$2" main
+  echo "$2" > "$1/$3"
+  # Explicit path, never `add -A`: fleet gitignores .claude/fleet/ via
+  # ensure_fleet_dir, but arm_gate wrote the config before any fleet command
+  # ran, so `-A` here would COMMIT fleet's own runtime state. activity.log then
+  # counts as a tracked file that every fleet command dirties, and the
+  # clean-base refusals in land_one/cmd_revert fire on the fixture rather than
+  # on anything under test.
+  git -C "$1" add -- "$3"
+  git -C "$1" -c user.email=w@t -c user.name=w commit -qm "work $2"
+  git -C "$1" checkout -q main
+  git -C "$1" merge "$2" --no-ff -m "merge: $2" -q
+}
+
+# (a) A sibling branch whose name merely CONTAINS the one being reverted must
+#     not be the one that gets undone.
+mk_landed "$VREPO" lane/auth          auth.txt
+mk_landed "$VREPO" lane/auth-refactor refactor.txt
+bash "$FLEET" revert lane/auth >/dev/null 2>&1; ee "revert with a prefix-sharing sibling present" 0 $?
+eq "reverts the branch it was asked for" 'Revert "merge: lane/auth"' \
+   "$(git -C "$VREPO" log -1 --format=%s main)"
+[ -f "$VREPO/refactor.txt" ] && ok "the sibling lane's work survives" \
+  || no "reverted the WRONG branch - sibling lane's file destroyed"
+[ -f "$VREPO/auth.txt" ] && no "named branch's file still present after revert" \
+  || ok "the named branch's work is gone, as asked"
+
+# (b) A branch name is data, not a pattern. `feat/a.b` was never landed; the
+#     landed sibling is `feat/aXb`, which only a regex could confuse it with.
+mk_landed "$VREPO" 'feat/aXb' regex.txt
+rev_out="$(bash "$FLEET" revert 'feat/a.b' 2>&1)"; rc=$?
+ee "an unlanded branch name is not regex-matched onto a landed one" 1 $rc
+case "$rev_out" in *"no merge commit found for feat/a.b"*) ok "refusal names the branch asked for";;
+  *) no "wrong refusal message for an unlanded branch";; esac
+[ -f "$VREPO/regex.txt" ] && ok "the regex-adjacent branch's work survives" \
+  || no "regex match reverted an unrelated branch"
+
+# (c) A revert that conflicts must leave nothing behind. Before, it died inside
+#     `git revert` with the sequencer running and a conflicted index, and the
+#     operator's next `fleet land` blamed "uncommitted tracked changes" - the
+#     symptom, not the cause.
+# Its own repo, deliberately: a revert that fails to clean up strands the
+# sequencer, and every later case sharing the fixture would then fail as a
+# CONSEQUENCE rather than as an independent detection - the coupled-fixture
+# trap this repo already lists as a landmine.
+CVREPO="$SB/cvrepo"; mkdir -p "$CVREPO"
+git -C "$CVREPO" init -q -b main
+git -C "$CVREPO" config user.email t@t; git -C "$CVREPO" config user.name t
+git -C "$CVREPO" config core.autocrlf false
+echo base > "$CVREPO/f"; git -C "$CVREPO" add -A; git -C "$CVREPO" commit -qm init
+arm_gate "$CVREPO"
+cd "$CVREPO"
+mk_landed "$CVREPO" lane/conflicty c.txt
+echo "changed downstream" > "$CVREPO/c.txt"
+git -C "$CVREPO" add -- c.txt; git -C "$CVREPO" commit -qm "later edit to the same file"
+before_conf="$(git -C "$CVREPO" rev-parse main)"
+rev_out="$(bash "$FLEET" revert lane/conflicty 2>&1)"; rc=$?
+ee "a conflicting revert exits non-zero" 1 $rc
+case "$rev_out" in *"REVERT FAILED"*) ok "conflict is reported as a failed revert";;
+  *) no "conflicting revert did not say so";; esac
+eq "conflicting revert leaves the base tip untouched" "$before_conf" "$(git -C "$CVREPO" rev-parse main)"
+[ -d "$CVREPO/.git/sequencer" ] || [ -f "$CVREPO/.git/REVERT_HEAD" ] \
+  && no "left a revert in progress for the operator to discover" \
+  || ok "no sequencer state left behind"
+eq "working tree left clean (no conflicted index)" "" \
+   "$(git -C "$CVREPO" status --porcelain | grep -v '^??' || true)"
+# A stranded sequencer is not merely untidy: the operator's next land blamed
+# "uncommitted tracked changes", describing the symptom and hiding the cause.
+bash "$FLEET" track lane/conflicty >/dev/null 2>&1
+case "$(bash "$FLEET" land lane/conflicty 2>&1)" in
+  *"uncommitted tracked changes"*) no "next land still blames a dirty tree - the failed revert left state behind";;
+  *) ok "the next land is not poisoned by the failed revert";; esac
+cd "$VREPO"
+
+# (d) The lane said LANDED; after a revert it is not. Leaving it LANDED is a
+#     status panel that lies about where the work lives. RUNNING, not a new
+#     REVERTED state: an unknown state falls through the panel's count map and
+#     never satisfies the daemon's "not LANDED and not FAILED" terminal test.
+mk_landed "$VREPO" lane/stateful s.txt
+bash "$FLEET" track lane/stateful >/dev/null 2>&1
+case "$(head -n1 "$VREPO/.claude/fleet/lanes/lane%2Fstateful" 2>/dev/null)" in
+  RUNNING) ok "tracked lane starts RUNNING";; *) no "tracked lane not RUNNING";; esac
+# Land is a no-op here (already merged by mk_landed) but still records LANDED.
+bash "$FLEET" land lane/stateful >/dev/null 2>&1
+case "$(head -n1 "$VREPO/.claude/fleet/lanes/lane%2Fstateful" 2>/dev/null)" in
+  LANDED) ok "lane reads LANDED before the revert";; *) no "lane not LANDED before revert";; esac
+bash "$FLEET" revert lane/stateful >/dev/null 2>&1; ee "revert of a tracked lane" 0 $?
+case "$(head -n1 "$VREPO/.claude/fleet/lanes/lane%2Fstateful" 2>/dev/null)" in
+  LANDED)  no "lane still claims LANDED after being reverted";;
+  RUNNING) ok "reverted lane returns to RUNNING (non-terminal, and true)";;
+  *)       no "reverted lane left in an unexpected state";; esac
+case "$(sed -n '2p' "$VREPO/.claude/fleet/lanes/lane%2Fstateful" 2>/dev/null)" in
+  *"reverted from main"*) ok "lane note records the revert";;
+  *) no "lane note does not mention the revert";; esac
+
+# (e) Reverting a branch fleet never tracked must not conjure a lane into the
+#     status panel - set_lane_state creates the file it writes.
+mk_landed "$VREPO" lane/untracked u.txt
+bash "$FLEET" revert lane/untracked >/dev/null 2>&1; ee "revert of an untracked branch" 0 $?
+[ -f "$VREPO/.claude/fleet/lanes/lane%2Funtracked" ] \
+  && no "revert invented a lane for an untracked branch" \
+  || ok "untracked branch stays untracked"
+
+# (f) Landed, reverted, re-landed leaves two `merge: X` commits. Reverting the
+#     newest is right; doing it silently is how the substring bug stayed
+#     invisible, so the count and the chosen SHA are logged.
+mk_landed "$VREPO" lane/twice t1.txt
+git -C "$VREPO" checkout -q lane/twice
+echo more > "$VREPO/t2.txt"; git -C "$VREPO" add -- t2.txt
+git -C "$VREPO" -c user.email=w@t -c user.name=w commit -qm "second commit on lane/twice"
+git -C "$VREPO" checkout -q main
+git -C "$VREPO" merge lane/twice --no-ff -m "merge: lane/twice" -q
+newest="$(git -C "$VREPO" rev-parse main)"
+rev_out="$(bash "$FLEET" revert lane/twice 2>&1)"; rc=$?
+ee "revert with two identically-named merges" 0 $rc
+case "$rev_out" in *"2 merges of lane/twice"*) ok "ambiguity is reported, not hidden";;
+  *) no "multiple candidate merges chosen silently";; esac
+case "$rev_out" in *"$newest"*) ok "log names the exact SHA it reverted";;
+  *) no "log does not identify which merge was reverted";; esac
+
+cd "$CREPO"
+
 # -- session awareness: the live-owner land gate -------------------------------
 # Guards the hazard that motivated it: landing a lane while the session that
 # owns it is still writing. The store is faked (FLEET_SESSION_STORE) so the

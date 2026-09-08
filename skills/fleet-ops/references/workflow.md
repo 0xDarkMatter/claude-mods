@@ -139,7 +139,7 @@ Daemon picks it up on next poll (or `fleet land` it manually).
 fleet revert <branch>
 ```
 
-Finds the merge commit on `main` (by message `merge: <branch>`), runs `git revert -m 1`, logs the action. No git surgery while you're panicking.
+Finds the merge commit on `main` whose subject is exactly `merge: <branch>` (exact match, not a `--grep` substring — that used to revert a prefix-sharing sibling lane), runs `git revert -m 1`, logs the SHA it reverted, and returns the lane to `RUNNING`. A conflicting revert is aborted rather than left half-done. No git surgery while you're panicking.
 
 ## Common patterns
 

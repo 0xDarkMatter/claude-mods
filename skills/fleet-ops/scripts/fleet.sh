@@ -1861,16 +1861,109 @@ cmd_stop() {
   rm -f "$PID_FILE"
 }
 
+# Every merge commit on $BASE_BRANCH whose subject is EXACTLY "merge: <branch>",
+# newest first. The exactness is the whole point, and it is why this cannot be
+# `git log --grep`:
+#
+#   * --grep matches a SUBSTRING, so `--grep="merge: lane/auth"` also matches
+#     `merge: lane/auth-refactor`. With `-n1` picking the newest match, a
+#     `fleet revert lane/auth` run after lane/auth-refactor landed reverted the
+#     REFACTOR branch and logged `reverted: lane/auth` (reproduced 2026-09-08) —
+#     a destructive operation aimed at the wrong target, reported as the right
+#     one. Sibling lane names differing only by suffix are the norm, not an edge
+#     case.
+#   * --grep is a REGEX, and the branch name is interpolated raw. `feat/a.b`
+#     matched a landed `merge: feat/aXb`; a name containing `*`, `[`, or `\`
+#     is worse still. Branch names are data, never patterns.
+#
+# The subject is the contract fleet itself writes in land_one, and SKILL.md
+# says so ("this message is what fleet revert finds later") — matching it
+# exactly is therefore both the correct lookup and the documented one. Structural
+# alternatives (second parent == branch tip) do not survive land_one deleting the
+# lane branch, which is why the message is load-bearing.
+revert_find_merges() {
+  local branch=$1 want="merge: $branch" raw sha subj
+  raw=$(git log "$BASE_BRANCH" --merges --format='%H%x09%s' 2>/dev/null || true)
+  [[ -z "$raw" ]] && return 0
+  while IFS=$'\t' read -r sha subj; do
+    # `if`, not `[[ ]] && printf`: a non-matching final line would make the loop
+    # — and this function — return 1, which errexit turns into a dead `fleet
+    # revert`. Same trap noted in ensure_fleet_dir.
+    if [[ "$subj" == "$want" ]]; then printf '%s\n' "$sha"; fi
+  done <<< "$raw"
+  return 0
+}
+
 cmd_revert() {
   local branch=${1:-}
   [[ -z "$branch" ]] && { echo "usage: fleet revert <branch>" >&2; exit 1; }
-  local sha
-  sha=$(git log "$BASE_BRANCH" --merges --grep="merge: $branch" -n1 --format=%H)
-  [[ -z "$sha" ]] && { log "ERROR: no merge commit found for $branch on $BASE_BRANCH"; exit 1; }
+
+  local shas sha line n k
+  shas=$(revert_find_merges "$branch")
+  if [[ -z "$shas" ]]; then
+    log "ERROR: no merge commit found for $branch on $BASE_BRANCH"
+    exit 1
+  fi
+  # Collected into an array rather than counted and sliced with `| wc -l` and
+  # `| head -n1`: under `set -o pipefail` a reader that exits early can kill the
+  # writer with SIGPIPE (141) and fail the whole command substitution — the same
+  # trap tests/run.sh documents for `git log | grep -q`. No pipe, no trap.
+  local -a cand=()
+  while IFS= read -r line; do
+    if [[ -n "$line" ]]; then cand+=("$line"); fi
+  done <<< "$shas"
+  n=${#cand[@]}
+  sha=${cand[0]}   # git log walks newest-first
+
+  # Refuse on a dirty base for the same reason land_one does, and BEFORE
+  # announcing an intent we may not be able to carry out: git revert would fail
+  # here anyway, but later and with a message about the tree rather than about
+  # the land queue.
+  if is_dirty_tracked; then
+    log "REFUSE REVERT: $BASE_BRANCH has uncommitted tracked changes — clean before reverting"
+    exit 1
+  fi
+  if ! git checkout "$BASE_BRANCH"; then
+    log "ERROR: cannot check out $BASE_BRANCH — nothing reverted"
+    exit 1
+  fi
+
+  # A branch landed, reverted, then re-landed has more than one `merge: X` on
+  # $BASE_BRANCH. Reverting the newest is right, but it must be SAID: silently
+  # choosing among several candidates is how the substring bug above stayed
+  # invisible for so long.
+  if [[ "$n" -gt 1 ]]; then
+    log "NOTE: $n merges of $branch on $BASE_BRANCH — reverting the most recent, $sha"
+    for (( k = 1; k < n; k++ )); do
+      log "      not reverted (older): ${cand[$k]}"
+    done
+  fi
   log "reverting merge $sha (was: $branch)"
-  git checkout "$BASE_BRANCH"
-  git revert -m 1 "$sha" --no-edit
-  log "reverted: $branch"
+
+  if ! git revert -m 1 "$sha" --no-edit; then
+    # Leave no sequencer behind. Without this, a conflicting revert stranded the
+    # repo mid-`git revert` with a conflicted index and no message saying so —
+    # and the operator's next `fleet land` refused with "uncommitted tracked
+    # changes", which describes the symptom and hides the cause.
+    log "REVERT FAILED: $branch — conflict, or this merge is already reverted"
+    git revert --abort 2>/dev/null || git revert --quit 2>/dev/null || true
+    log "              aborted; $BASE_BRANCH left as it was"
+    exit 1
+  fi
+  log "reverted: $branch ($sha)"
+
+  # The lane claimed LANDED and no longer is; leaving it there is a status panel
+  # that lies about where the work lives. RUNNING rather than a new REVERTED
+  # state on purpose: an unknown state string would fall through the panel's
+  # count map (idx=-1), and the daemon's terminal test is literally
+  # "not LANDED and not FAILED", so a REVERTED lane would keep the daemon alive
+  # forever. RUNNING is also simply true — the commits are on the branch, not in
+  # $BASE_BRANCH — and non-terminal, which is what a reverted lane is.
+  # Only ever UPDATES a lane; `fleet revert` on an untracked branch must not
+  # conjure one into the status panel.
+  if [[ "$(lane_state "$branch")" != "MISSING" ]]; then
+    set_lane_state "$branch" "RUNNING" "reverted from $BASE_BRANCH ($sha)"
+  fi
 }
 
 daemon_cleanup() {
