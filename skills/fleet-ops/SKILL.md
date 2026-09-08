@@ -76,11 +76,11 @@ N > 1 on one shared working tree           → REFUSE. Worktrees or separate clo
 
 1. **Scrub** — `git diff main...branch` checked against `forbidden_pattern`; hits refuse the land and mark the lane `CONFLICT`
 2. **Clean-base check** — refuses if `main` has uncommitted tracked changes
-3. **Merge** — `--no-ff` with message `merge: <branch>` (this message is what `fleet revert` finds later)
-4. **Test gate** — runs `test_cmd` if set; on failure, hard-resets the merge and marks the lane `FAILED`. If unset, trusts `signal.sh`'s log gate (refused READY on failing logs). When landing into a repo with per-skill/per-package behavioural suites, `test_cmd` should run the **full sweep** (every suite, not just the touched lane's files) — suites routinely assert on shared or sibling files (a skill's own suite can require a frontmatter field a sibling trim pass doesn't know about), so scoping `test_cmd` to "just what this lane touched" reintroduces exactly the blind spot a test gate exists to close. **Confirm the gate is actually armed with `fleet config` before trusting it** — and watch the land log for `running test_cmd: …` rather than `no test_cmd set`.
+3. **Merge** — `--no-ff` with message `merge: <branch>` (this message is what `fleet revert` finds later). If the branch is *already* contained in `main` — another session landed it while this one sat in the queue — `git merge` exits 0 with "Already up to date." and nothing happens. fleet detects that by comparing the tip before and after (never by parsing git's prose) and reports it as `ALREADY LANDED: <branch> — already in main, no merge performed by this run`: the lane goes `LANDED`, the gate does **not** run (there is no merge of ours to gate), the lane branch is left for whoever did land it, and `land --all` counts it as `already in <base>`, apart from real lands
+4. **Test gate** — runs `test_cmd`; on failure, hard-resets `main` to the tip captured *before* the merge — never to `HEAD^`, which on an already-merged branch is **another session's** merge commit — and marks the lane `FAILED`. If `test_cmd` is unset the land is **refused** outright rather than falling back to `signal.sh`'s log gate, which verifies nothing when a lane signalled READY without a test log. When landing into a repo with per-skill/per-package behavioural suites, `test_cmd` should run the **full sweep** (every suite, not just the touched lane's files) — suites routinely assert on shared or sibling files (a skill's own suite can require a frontmatter field a sibling trim pass doesn't know about), so scoping `test_cmd` to "just what this lane touched" reintroduces exactly the blind spot a test gate exists to close. **Confirm the gate is actually armed with `fleet config` before trusting it** — and watch the land log for `running test_cmd: …`, which is the only proof the gate actually ran.
 5. **Rebase others** — every still-active lane is rebased onto the new `main` (in its own worktree if it has one); a rebase conflict marks that lane `CONFLICT`
 
-`fleet revert <branch>` finds the `merge: <branch>` commit on `main` and runs `git revert -m 1` — one command to back out a bad landing.
+`fleet revert <branch>` finds the merge commit on `main` whose subject is **exactly** `merge: <branch>` and runs `git revert -m 1` — one command to back out a bad landing. The match is exact, never `git log --grep`: `--grep` is a regex applied as a *substring*, so `merge: lane/auth` also matched `merge: lane/auth-refactor` and reverting one lane destroyed the other's work while reporting the branch you asked for (fixed 2026-09-08). If the branch landed more than once, the most recent merge is reverted and the others are logged rather than silently passed over. A revert that conflicts is **aborted**, leaving `main` and the working tree exactly as they were — no stranded sequencer for the next `fleet land` to misreport as "uncommitted tracked changes". A reverted lane goes back to `RUNNING` with a note: it is no longer in `main`, so leaving it `LANDED` would be a status panel that lies about where the work lives.
 
 ## Daemon lifecycle (experimental)
 
@@ -426,9 +426,10 @@ A config that exists but sets nothing recognised warns
 like an absent file.
 
 **`test_cmd` is the test gate.** When set, `fleet land` runs it *after* the merge
-commit and `git reset --hard HEAD^` on a non-zero exit, dropping the lane to `FAILED`;
-the log shows `running test_cmd: …`. When unset, the log says `no test_cmd set in
-.claude/fleet/config` and landing trusts signal.sh's weaker log gate. Worked example:
+commit and, on a non-zero exit, hard-resets `base_branch` to the tip it captured *before*
+merging — not `HEAD^` — dropping the lane to `FAILED`; the log shows `running test_cmd: …`.
+When unset, landing is **refused** (`the landing gate is UNARMED`, naming the config path)
+rather than falling through to signal.sh's weaker log gate. Worked example:
 
 ```
 test_cmd=uv run pytest -q --maxfail=1

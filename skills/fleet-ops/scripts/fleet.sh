@@ -1582,21 +1582,33 @@ prune_status_hint() {
 }
 # === END PRUNE ================================================================
 
+# LAND_RESULT — how the last land_one() call finished, for callers that need a
+# distinction the exit code cannot carry. land_one returns 0 for "this lane's
+# work is in $BASE_BRANCH", which is true both when this run merged it and when
+# it was already there; cmd_land_all must tally those separately or its summary
+# claims lands the batch never performed.
+#   LANDED   merge created by THIS run, gate passed
+#   ALREADY  no merge performed — already contained in $BASE_BRANCH
+#   CONFLICT | FAILED | REFUSED   the return-1 paths
+LAND_RESULT=""
+
 land_one() {
   local branch=$1
+  LAND_RESULT="REFUSED"
   # Cheapest refusal first, and BEFORE the merge below — an unarmed gate must
   # never reach a state where $BASE_BRANCH has already moved.
   require_test_cmd || return 1
   # $SKIP_SESSION_CHECK is the consumed copy of FLEET_SKIP_SESSION_CHECK — the
   # env var itself was unset at startup so it can never reach test_cmd below.
   if [[ -z "$SKIP_SESSION_CHECK" ]]; then
-    session_land_gate "$branch" || { set_lane_state "$branch" "CONFLICT" "owning session still live"; return 1; }
+    session_land_gate "$branch" || { LAND_RESULT="CONFLICT"; set_lane_state "$branch" "CONFLICT" "owning session still live"; return 1; }
   fi
   local hits
   hits=$(scrub_diff "$branch")
   if [[ -n "$hits" ]]; then
     log "REFUSE LAND: $branch failed scrub-check"
     echo "$hits" | head -10 | tee -a "$LOG"
+    LAND_RESULT="CONFLICT"
     set_lane_state "$branch" "CONFLICT" "scrub-check failed"
     return 1
   fi
@@ -1606,8 +1618,57 @@ land_one() {
   fi
 
   log "LANDING: $branch"
-  git checkout "$BASE_BRANCH"
+  # Everything below reasons about $BASE_BRANCH's tip, so a failed checkout must
+  # refuse rather than proceed against the wrong branch's history: it would merge
+  # into — and, on a red gate, reset — whichever branch happened to be current.
+  # set -e does not cover this: every call site invokes land_one inside `if` or
+  # `&&`, which disables errexit for the whole call.
+  if ! git checkout "$BASE_BRANCH"; then
+    log "REFUSE LAND: cannot check out $BASE_BRANCH"
+    return 1
+  fi
+  # The pre-merge tip, captured for two jobs, both load-bearing:
+  #
+  #   1. DID WE ACTUALLY MERGE? `git merge --no-ff` exits 0 with "Already up to
+  #      date." when $branch is already an ancestor of $BASE_BRANCH — typically
+  #      because another session landed it while this one was queued. No merge
+  #      commit is created and HEAD does not move, but the exit status is
+  #      indistinguishable from a real merge, so fleet used to log
+  #      `PASS: <branch> landed` for a land it never performed. Compare SHAs,
+  #      never git's prose: "Already up to date." is locale- and version-dependent.
+  #   2. WHAT DOES A RED GATE UNDO? The revert below resets to exactly this SHA
+  #      rather than to `HEAD^`. On the no-op path `HEAD^` is the first parent of
+  #      SOMEONE ELSE'S merge commit, so a failing gate silently discarded a peer
+  #      session's landed work on a branch fleet believed it owned (reproduced
+  #      2026-09-08). Resetting to $before can only ever undo the merge THIS
+  #      invocation created — true even if the detection in (1) is later reworked.
+  local before after
+  before=$(git rev-parse HEAD)
   if git merge "$branch" --no-ff -m "merge: $branch"; then
+    after=$(git rev-parse HEAD)
+    if [[ "$before" == "$after" ]]; then
+      # Benign no-op, deliberately NOT reported as a land. The end state the
+      # caller wanted is already true — the lane's work is in $BASE_BRANCH — so
+      # this is success (return 0, state LANDED) and the lane must not be
+      # retried. Three things it must not do:
+      #   * claim it landed anything. The distinct verb is the point: an operator
+      #     reading activity.log has to be able to tell "I landed it" from
+      #     "someone else already had".
+      #   * run test_cmd. The gate answers "did MY merge break $BASE_BRANCH", and
+      #     there is no merge of ours to answer for. This is NOT the 2026-08-04
+      #     untested-merge landmine in new clothes — that one merged and then
+      #     skipped the gate; here nothing was merged, and a red result would
+      #     have no remedy anyway (see the next point).
+      #   * fall through to the revert path, which would hard-reset a merge
+      #     commit this run did not create.
+      # The lane branch is left alone for the same reason: deleting a branch we
+      # did not just land is a surprise, and cleanup belongs to whoever did land
+      # it (`fleet prune` classifies its worktree SAFE either way).
+      log "ALREADY LANDED: $branch — already in $BASE_BRANCH, no merge performed by this run"
+      LAND_RESULT="ALREADY"
+      set_lane_state "$branch" "LANDED" "already in $BASE_BRANCH — no merge performed by this run"
+      return 0
+    fi
     # No "$TEST_CMD is empty" branch here by design: require_test_cmd above
     # guarantees it is set, so the gate always runs. The old else-branch
     # ("trusting signal.sh's log gate") is what let untested merges through.
@@ -1627,16 +1688,30 @@ land_one() {
       log "PASS: $branch landed"
     else
       log "FAIL: tests failed — reverting $branch"
-      git reset --hard HEAD^
-      set_lane_state "$branch" "FAILED" "tests failed post-merge"
+      # $before, not HEAD^ — see (2) above. And checked, because an unchecked
+      # rewind is the same lie in miniature: if the reset fails (a locked file
+      # under Windows is the realistic way), the failing merge stays on
+      # $BASE_BRANCH while the lane confidently reports FAILED, and nothing
+      # anywhere says the base branch is now broken.
+      if git reset --hard "$before"; then
+        set_lane_state "$branch" "FAILED" "tests failed post-merge"
+      else
+        log "ERROR: could not reset $BASE_BRANCH to $before"
+        log "       THE FAILING MERGE IS STILL ON $BASE_BRANCH — fix by hand:"
+        log "         git checkout $BASE_BRANCH && git reset --hard $before"
+        set_lane_state "$branch" "FAILED" "tests failed; rewind to $before FAILED — merge still on $BASE_BRANCH"
+      fi
+      LAND_RESULT="FAILED"
       return 1
     fi
+    LAND_RESULT="LANDED"
     set_lane_state "$branch" "LANDED"
     git branch -d "$branch" 2>/dev/null || git branch -D "$branch" 2>/dev/null || true
     return 0
   else
     log "MERGE CONFLICT: $branch"
     git merge --abort 2>/dev/null || true
+    LAND_RESULT="CONFLICT"
     set_lane_state "$branch" "CONFLICT" "merge conflict with $BASE_BRANCH"
     return 1
   fi
@@ -1737,12 +1812,19 @@ cmd_land_all() {
   local ordered
   ordered=$(printf '%s\n' "${candidates[@]}" | sort -n)
 
-  local landed=0 conflict=0 failed=0
+  local landed=0 already=0 conflict=0 failed=0
   while IFS=$'\t' read -r ts b; do
     [[ -z "$b" ]] && continue
     if land_one "$b"; then
       rebase_others "$b"
-      landed=$((landed+1))
+      # A no-op land — the branch was already in $BASE_BRANCH, another session
+      # got there first — returns 0 exactly like a real one, so it has to be
+      # tallied apart or the summary reports lands this batch never performed.
+      if [[ "$LAND_RESULT" == "ALREADY" ]]; then
+        already=$((already+1))
+      else
+        landed=$((landed+1))
+      fi
     else
       case "$(lane_state "$b")" in
         CONFLICT) conflict=$((conflict+1)) ;;
@@ -1751,7 +1833,14 @@ cmd_land_all() {
     fi
   done <<< "$ordered"
 
-  log "land --all: $landed landed, $conflict conflict, $failed failed"
+  # The "already" clause appears only when it is non-zero, so an ordinary batch
+  # logs the same line it always did and the extra term reads as a real event.
+  local summary="land --all: $landed landed"
+  # NB: `[[ ... ]] && summary=...` would return 1 when already==0, and cmd_land_all
+  # runs with errexit live (dispatched directly, not from an `if`) — see the same
+  # trap noted in ensure_fleet_dir.
+  if [[ $already -gt 0 ]]; then summary="$summary, $already already in $BASE_BRANCH"; fi
+  log "$summary, $conflict conflict, $failed failed"
   cmd_fleet
   # Non-zero exit when anything didn't land, so orchestrators can branch on it.
   [[ $((conflict + failed)) -eq 0 ]]
@@ -1782,16 +1871,109 @@ cmd_stop() {
   rm -f "$PID_FILE"
 }
 
+# Every merge commit on $BASE_BRANCH whose subject is EXACTLY "merge: <branch>",
+# newest first. The exactness is the whole point, and it is why this cannot be
+# `git log --grep`:
+#
+#   * --grep matches a SUBSTRING, so `--grep="merge: lane/auth"` also matches
+#     `merge: lane/auth-refactor`. With `-n1` picking the newest match, a
+#     `fleet revert lane/auth` run after lane/auth-refactor landed reverted the
+#     REFACTOR branch and logged `reverted: lane/auth` (reproduced 2026-09-08) —
+#     a destructive operation aimed at the wrong target, reported as the right
+#     one. Sibling lane names differing only by suffix are the norm, not an edge
+#     case.
+#   * --grep is a REGEX, and the branch name is interpolated raw. `feat/a.b`
+#     matched a landed `merge: feat/aXb`; a name containing `*`, `[`, or `\`
+#     is worse still. Branch names are data, never patterns.
+#
+# The subject is the contract fleet itself writes in land_one, and SKILL.md
+# says so ("this message is what fleet revert finds later") — matching it
+# exactly is therefore both the correct lookup and the documented one. Structural
+# alternatives (second parent == branch tip) do not survive land_one deleting the
+# lane branch, which is why the message is load-bearing.
+revert_find_merges() {
+  local branch=$1 want="merge: $branch" raw sha subj
+  raw=$(git log "$BASE_BRANCH" --merges --format='%H%x09%s' 2>/dev/null || true)
+  [[ -z "$raw" ]] && return 0
+  while IFS=$'\t' read -r sha subj; do
+    # `if`, not `[[ ]] && printf`: a non-matching final line would make the loop
+    # — and this function — return 1, which errexit turns into a dead `fleet
+    # revert`. Same trap noted in ensure_fleet_dir.
+    if [[ "$subj" == "$want" ]]; then printf '%s\n' "$sha"; fi
+  done <<< "$raw"
+  return 0
+}
+
 cmd_revert() {
   local branch=${1:-}
   [[ -z "$branch" ]] && { echo "usage: fleet revert <branch>" >&2; exit 1; }
-  local sha
-  sha=$(git log "$BASE_BRANCH" --merges --grep="merge: $branch" -n1 --format=%H)
-  [[ -z "$sha" ]] && { log "ERROR: no merge commit found for $branch on $BASE_BRANCH"; exit 1; }
+
+  local shas sha line n k
+  shas=$(revert_find_merges "$branch")
+  if [[ -z "$shas" ]]; then
+    log "ERROR: no merge commit found for $branch on $BASE_BRANCH"
+    exit 1
+  fi
+  # Collected into an array rather than counted and sliced with `| wc -l` and
+  # `| head -n1`: under `set -o pipefail` a reader that exits early can kill the
+  # writer with SIGPIPE (141) and fail the whole command substitution — the same
+  # trap tests/run.sh documents for `git log | grep -q`. No pipe, no trap.
+  local -a cand=()
+  while IFS= read -r line; do
+    if [[ -n "$line" ]]; then cand+=("$line"); fi
+  done <<< "$shas"
+  n=${#cand[@]}
+  sha=${cand[0]}   # git log walks newest-first
+
+  # Refuse on a dirty base for the same reason land_one does, and BEFORE
+  # announcing an intent we may not be able to carry out: git revert would fail
+  # here anyway, but later and with a message about the tree rather than about
+  # the land queue.
+  if is_dirty_tracked; then
+    log "REFUSE REVERT: $BASE_BRANCH has uncommitted tracked changes — clean before reverting"
+    exit 1
+  fi
+  if ! git checkout "$BASE_BRANCH"; then
+    log "ERROR: cannot check out $BASE_BRANCH — nothing reverted"
+    exit 1
+  fi
+
+  # A branch landed, reverted, then re-landed has more than one `merge: X` on
+  # $BASE_BRANCH. Reverting the newest is right, but it must be SAID: silently
+  # choosing among several candidates is how the substring bug above stayed
+  # invisible for so long.
+  if [[ "$n" -gt 1 ]]; then
+    log "NOTE: $n merges of $branch on $BASE_BRANCH — reverting the most recent, $sha"
+    for (( k = 1; k < n; k++ )); do
+      log "      not reverted (older): ${cand[$k]}"
+    done
+  fi
   log "reverting merge $sha (was: $branch)"
-  git checkout "$BASE_BRANCH"
-  git revert -m 1 "$sha" --no-edit
-  log "reverted: $branch"
+
+  if ! git revert -m 1 "$sha" --no-edit; then
+    # Leave no sequencer behind. Without this, a conflicting revert stranded the
+    # repo mid-`git revert` with a conflicted index and no message saying so —
+    # and the operator's next `fleet land` refused with "uncommitted tracked
+    # changes", which describes the symptom and hides the cause.
+    log "REVERT FAILED: $branch — conflict, or this merge is already reverted"
+    git revert --abort 2>/dev/null || git revert --quit 2>/dev/null || true
+    log "              aborted; $BASE_BRANCH left as it was"
+    exit 1
+  fi
+  log "reverted: $branch ($sha)"
+
+  # The lane claimed LANDED and no longer is; leaving it there is a status panel
+  # that lies about where the work lives. RUNNING rather than a new REVERTED
+  # state on purpose: an unknown state string would fall through the panel's
+  # count map (idx=-1), and the daemon's terminal test is literally
+  # "not LANDED and not FAILED", so a REVERTED lane would keep the daemon alive
+  # forever. RUNNING is also simply true — the commits are on the branch, not in
+  # $BASE_BRANCH — and non-terminal, which is what a reverted lane is.
+  # Only ever UPDATES a lane; `fleet revert` on an untracked branch must not
+  # conjure one into the status panel.
+  if [[ "$(lane_state "$branch")" != "MISSING" ]]; then
+    set_lane_state "$branch" "RUNNING" "reverted from $BASE_BRANCH ($sha)"
+  fi
 }
 
 daemon_cleanup() {
