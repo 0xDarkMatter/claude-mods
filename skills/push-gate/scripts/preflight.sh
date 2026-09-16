@@ -70,7 +70,7 @@ fi
 DIRTY="$(git status --porcelain)"
 if [ -n "$DIRTY" ]; then
   echo "STEP 3  FAIL  working tree dirty:"
-  printf '%s\n' "$DIRTY" | head -20 | sed 's/^/            /'
+  printf '%s\n' "$DIRTY" | sed -n '1,20p' | sed 's/^/            /'
   exit 3
 fi
 echo "STEP 3  OK    working tree clean"
@@ -88,7 +88,7 @@ else
     echo "          nothing to push; exiting cleanly"
     exit 0
   fi
-  git log --oneline "$RANGE" | head -20 | sed 's/^/            /'
+  git log --oneline -20 "$RANGE" | sed 's/^/            /'
   if [ "$COMMIT_COUNT" -gt 20 ]; then
     echo "            … and $((COMMIT_COUNT - 20)) more"
   fi
