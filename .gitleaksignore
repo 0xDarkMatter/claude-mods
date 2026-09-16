@@ -22,3 +22,5 @@ abe6bce3b9a1277bf40a08db1dd2be8dc3bdb115:skills/techdebt/references/severity-gui
 0ade4e6405798e5b8dd9a4e7f668add5e0a3c6e9:.claude/settings.local.json:generic-api-key:45
 2c603fdb1f9f757408be3e47e4d90dff2e2d8b01:commands/testgen.md:generic-api-key:291
 2c603fdb1f9f757408be3e47e4d90dff2e2d8b01:commands/testgen.md:generic-api-key:395
+# reason: recall-probe test fixture - a deliberately unguessable planted fact the probe asks the model to recall; not a credential (variable is named SECRET_VALUE by design)
+f829a8e4454fcbfca767a3a46eb0ceec131444fb:skills/claude-api-ops/assets/recall-probe.py:generic-api-key:55
