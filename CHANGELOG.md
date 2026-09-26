@@ -31,6 +31,16 @@ feature releases live in the README "Recent Updates" section.
   what the rule exists to avoid normalising. The scanner keeps per-line file
   attribution now, and the self-test grows eight allowlist assertions.
 
+### Fixed
+
+- **pigeon attachments reported `(missing)` on Windows** - every attachment but
+  the last. Windows' native `sqlite3.exe` writes `\r\n` in text mode, and
+  command substitution strips only the final newline, so each line-parsed path
+  kept a stray `\r` and failed its existence check although the stored path
+  was clean. `mail-db.sh` now routes every query through one `sqlite3`
+  function that strips CR (exit status kept via `pipefail`), fixing the
+  attachment loops and the other line-by-line readers at once.
+
 ## [3.8.0] - 2026-08-31
 
 Four new skills, and three existing ones realigned against a reality that moved

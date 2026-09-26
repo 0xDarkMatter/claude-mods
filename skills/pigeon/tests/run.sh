@@ -48,6 +48,17 @@ read_out="$(bash "$MAIL" read)"
 case "$read_out" in *"round trip"*"isolated body"*) ok "read returns sent message";; *) no "read omitted sent message";; esac
 expect_eq "read marks message read" "0" "$(bash "$MAIL" count)"
 
+echo "-- attachments --"
+# Regression: Windows' sqlite3.exe emits "\r\n", which left a stray "\r" on every
+# attachment path but the last, so existing files read back as "(missing)".
+# Two or more attachments are needed: the LAST line always survived.
+printf 'alpha' > "$SB/att-one.txt"
+printf 'beta!' > "$SB/att-two.txt"
+bash "$MAIL" send --attach "$SB/att-one.txt" --attach "$SB/att-two.txt" "$(pwd)" "attach trip" "two files" >/dev/null
+att_out="$(bash "$MAIL" read)"
+case "$att_out" in *"(missing)"*) no "every existing attachment resolves (got: (missing))";; *) ok "every existing attachment resolves";; esac
+expect_eq "each attachment reports its size" "2" "$(printf '%s\n' "$att_out" | grep -c '(5 bytes)')"
+
 echo ""
 echo "=== $PASS passed, $FAIL failed ==="
 [[ "$FAIL" -eq 0 ]]

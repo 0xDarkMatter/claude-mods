@@ -10,6 +10,23 @@ MAIL_DB="$HOME/.claude/pmail.db"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ============================================================================
+# SQLite access - the one choke point every query goes through
+# ============================================================================
+
+# Guard: this function deliberately SHADOWS the sqlite3 binary. Windows' native
+# sqlite3.exe (the one Git Bash finds at C:\Windows\sqlite3) writes its output in
+# text mode, so every "\n" - row separators AND newlines stored inside a value -
+# arrives as "\r\n". Command substitution strips only the final newline, so every
+# line-by-line parser here kept a stray "\r" on all but its last line: a message
+# with four attachments showed the first three as "(missing)" although the stored
+# paths were clean. Stripping CR here fixes every read site at once; `pipefail`
+# (set above) keeps sqlite3's own exit status, which the `|| ALTER TABLE`
+# migrations depend on. Don't bypass it with `command sqlite3` at a call site.
+sqlite3() {
+  command sqlite3 "$@" | tr -d '\r'
+}
+
+# ============================================================================
 # Identity - git-rooted project IDs
 # ============================================================================
 
