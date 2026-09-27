@@ -170,6 +170,23 @@ feature releases live in the README "Recent Updates" section.
   had always claimed - 11 of 13 hooks were tracked 100644 (harmless while every
   wiring calls `bash hooks/x.sh`, but the documented gate did not exist).
 
+- **`fleet prune` classified live sessions' worktrees SAFE** - a real dry run
+  marked 12 of 17 worktrees removable, five of them the cwd of an open session
+  and two of those running; `--remove` would have stranded both in the silent
+  CPU spin the skill documents. `sessions.sh` read only the first Desktop
+  session store it found, while the owners lived in a second Desktop
+  instance's (`--user-data-dir`) store; it joined ownership on branch alone,
+  never on the session's cwd; and it took liveness from a wrapper timestamp
+  Desktop only rewrites at turn boundaries. It now reads every instance's
+  store, attributes worktrees by branch, cwd, worktreePath, transcript
+  directory and live cwd, and takes liveness from the transcript too - which
+  also arms `fleet land`'s live-owner gate against mid-turn and
+  other-instance sessions. A `.claude/worktrees/` tree no session record
+  claims is now REVIEW, never SAFE; `--remove` re-classifies against a
+  forced-fresh scan before deleting; and the index cache is keyed by the
+  stores it scanned, so a fixture run can no longer poison a real one.
+  `sessions.sh stores` and `fleet config` now say which stores answered.
+
 ### Changed
 
 - **Rules made machine- and person-agnostic.** Rules ship in a public plugin, so
