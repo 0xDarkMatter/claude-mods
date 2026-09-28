@@ -402,6 +402,102 @@ case "$(head -n1 "$CREPO/.claude/fleet/lanes/nogate-lane" 2>/dev/null)" in
 # The daemon must refuse to start too, rather than spin refusing every poll.
 bash "$FLEET" start >/dev/null 2>&1; ee "daemon refuses to start unarmed" 1 $?
 
+# -- daemon lifecycle: a signal STOPS it, between lands (the SIGHUP ghost) -----
+# Regression, reproduced 2026-09-28. cmd_start trapped INT/TERM/HUP with a
+# handler that removed the PID file but never exited, and a trapped signal
+# RESUMES the script. SIGHUP (what the daemon gets when its Claude session
+# ends) left a ghost: "daemon stopping" logged, no PID file, `fleet stop`
+# answering "no daemon running", and 3s later the ghost landed a lane.
+# `fleet stop`'s SIGTERM was swallowed the same way, so every stop was really
+# its SIGKILL escalation. poll_interval=5 (the default) is deliberate: an idle
+# daemon must answer DURING its poll sleep, not after it, or SIGTERM races the
+# 5s SIGKILL. session_check=off: the live-owner gate is not under test here,
+# and switching it off keeps sessions.sh lookups out of the timing.
+echo "-- daemon lifecycle: signals stop it, between lands (the SIGHUP ghost) --"
+DREPO="$SB/drepo"; mkdir -p "$DREPO"
+git -C "$DREPO" init -q -b main
+git -C "$DREPO" config user.email t@t; git -C "$DREPO" config user.name t
+git -C "$DREPO" config core.autocrlf false
+echo base > "$DREPO/f"; git -C "$DREPO" add -A; git -C "$DREPO" commit -qm init
+cd "$DREPO"
+bash "$FLEET" init d-one d-two >/dev/null 2>&1   # RUNNING lanes keep the daemon polling
+DCFG="$DREPO/.claude/fleet/config"; DPIDF="$DREPO/.claude/fleet/daemon.pid"
+DLOG="$DREPO/.claude/fleet/activity.log"
+printf 'test_cmd=true\npoll_interval=5\nsession_check=off\n' > "$DCFG"
+
+# Start a daemon in the background; DPID is its PID once daemon.pid names a
+# live process. Background jobs are never piped or captured: $( ) would block
+# until the daemon exits.
+DPID=""
+daemon_up(){
+  DPID=""
+  bash "$FLEET" start >/dev/null 2>&1 &
+  local i p
+  for ((i = 0; i < 150; i++)); do
+    p="$(cat "$DPIDF" 2>/dev/null)"
+    if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then DPID=$p; return 0; fi
+    sleep 0.1
+  done
+  return 1
+}
+# True once PID $1 is gone, polling for up to $2 tenths of a second.
+exits_within(){ local i; for ((i = 0; i < $2; i++)); do kill -0 "$1" 2>/dev/null || return 0; sleep 0.1; done; return 1; }
+# A daemon that ignored its signal must not outlive the suite: on Windows a
+# live process inside $SB also blocks the EXIT trap's rm -rf.
+reap_daemon(){ if [ -n "$DPID" ]; then kill -KILL "$DPID" 2>/dev/null; rm -f "$DPIDF"; fi; wait 2>/dev/null; }
+
+daemon_up || no "daemon did not come up (SIGHUP case)"
+kill -HUP "$DPID" 2>/dev/null
+if exits_within "$DPID" 30; then ok "daemon exits on SIGHUP, within its poll sleep"
+else no "daemon survived SIGHUP by 3s — a ghost that keeps landing"; reap_daemon; fi
+[ -f "$DPIDF" ] && no "SIGHUP left daemon.pid behind" || ok "SIGHUP'd daemon removed daemon.pid"
+wait 2>/dev/null
+
+daemon_up || no "daemon did not come up (fleet stop case)"
+stop_out="$(bash "$FLEET" stop 2>&1)"; ee "fleet stop" 0 $?
+case "$stop_out" in
+  *SIGKILL*)          no "fleet stop escalated to SIGKILL — the daemon ignored SIGTERM" ;;
+  *"daemon stopped"*) ok "SIGTERM alone stops an idle daemon" ;;
+  *)                  no "fleet stop output unrecognised: $stop_out" ;;
+esac
+exits_within "$DPID" 30 || { no "daemon still alive after fleet stop"; reap_daemon; }
+wait 2>/dev/null
+
+# Mid-land: the stop must neither cut the land short (a merge left without its
+# gate) nor let another land start. The gate blocks on a sentinel, so the
+# signal provably arrives while test_cmd runs; the in-flight lane must finish
+# through the gate and the next READY lane must stay READY.
+for l in d-one d-two; do
+  ( cd "$DREPO/.fleet-worktrees/$l" && echo "$l" > "$l.txt" && git add "$l.txt" \
+      && git commit -qm "work $l" && bash "$DREPO/.claude/fleet/signal.sh" READY ) >/dev/null 2>&1
+done
+cat > "$DCFG" <<'EOF'
+test_cmd=n=0; until [ -f .claude/fleet/go ] || [ $n -ge 300 ]; do sleep 0.1; n=$((n+1)); done
+poll_interval=5
+session_check=off
+EOF
+daemon_up || no "daemon did not come up (mid-land case)"
+for ((i = 0; i < 300; i++)); do grep -q "running test_cmd" "$DLOG" 2>/dev/null && break; sleep 0.1; done
+kill -TERM "$DPID" 2>/dev/null
+sleep 0.5   # signal delivery is asynchronous under MSYS; let it register first
+touch "$DREPO/.claude/fleet/go"
+exits_within "$DPID" 300 && ok "daemon exits after a mid-land SIGTERM" \
+  || { no "daemon still alive 30s after a mid-land SIGTERM"; reap_daemon; }
+wait 2>/dev/null
+case "$(head -n1 "$DREPO/.claude/fleet/lanes/d-one" 2>/dev/null)" in
+  LANDED) ok "in-flight land finished through its gate" ;;
+  *)      no "in-flight land did not finish: d-one = $(head -n1 "$DREPO/.claude/fleet/lanes/d-one" 2>/dev/null)" ;;
+esac
+dlog="$(git -C "$DREPO" log --oneline main)"   # captured, not piped — SIGPIPE note above
+case "$dlog" in *"merge: d-one"*) ok "in-flight merge kept";; *) no "in-flight merge missing";; esac
+case "$(head -n1 "$DREPO/.claude/fleet/lanes/d-two" 2>/dev/null)" in
+  READY) ok "no new land started after the stop request" ;;
+  *)     no "daemon kept landing after SIGTERM: d-two = $(head -n1 "$DREPO/.claude/fleet/lanes/d-two" 2>/dev/null)" ;;
+esac
+case "$dlog" in *"merge: d-two"*) no "d-two merged after the stop request";; *) ok "no merge of d-two after the stop";; esac
+grep -q "SIGTERM received" "$DLOG" && ok "activity log records the stop request" || no "stop request not logged"
+cd "$CREPO"
+
 # -- already-merged branch: the two-sessions-one-branch case -------------------
 # Regression, reproduced 2026-09-08 in a downstream repo (branch
 # claude/charming-mendel-4ebf5d landed twice, 90 seconds apart). `git merge
