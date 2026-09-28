@@ -51,20 +51,26 @@ fi
 # --- Selected README prose count claims -------------------------------------
 # These five known count-bearing patterns are intentionally exhaustive; newly
 # introduced prose patterns must be added explicitly if they should be gated.
+# Only TOTALS are gated here: subset counts in the same prose ("58 skills ship
+# real scripts", "21 skills ship a verifier") are not the skill total, so never
+# widen a pattern to a bare '[0-9]+ skills' — it would flag every one of them.
 check_readme_prose() { # $1=regex $2=disk-count $3=label
-    local line claim matched=0
-    while IFS= read -r line; do
-        [ -n "$line" ] || continue
+    local span claim matched=0
+    while IFS= read -r span; do
+        [ -n "$span" ] || continue
         matched=$((matched + 1))
-        claim="$(echo "$line" | grep -oE '[0-9]+' | head -1)"
+        # The claim is read from the MATCHED SPAN, not the whole line: README
+        # prose is number-dense ("~100 tokens per skill ... 108 skills cost"),
+        # and the first number on the line is often not the one being claimed.
+        claim="$(echo "$span" | grep -oE '[0-9]+' | head -1)"
         [ "$claim" = "$2" ] || err "README.md: $claim $3 claimed, $2 on disk"
-    done < <(grep -E "$1" README.md || true)
+    done < <(grep -oE "$1" README.md || true)
     # Zero matches = the count-bearing line was deleted or reworded, which is
     # drift too — a guard that finds nothing to check must not stay silent.
     [ "$matched" -ge 1 ] || err "README.md: prose pattern for '$3' matched no lines (deleted/reworded?)"
 }
-check_readme_prose '[0-9]+ specialized skills' "$skills_disk" "specialized skills"
-check_readme_prose '[0-9]+ on-demand skills' "$skills_disk" "on-demand skills"
+check_readme_prose 'Its [0-9]+ skills' "$skills_disk" "skills (intro paragraph)"
+check_readme_prose '[0-9]+ skills cost' "$skills_disk" "skills (token-cost bullet)"
 check_readme_prose 'Custom skills \([0-9]+\)' "$skills_disk" "custom skills"
 check_readme_prose 'Slash commands \([0-9]+\)' "$commands_disk" "slash commands"
 check_readme_prose 'Expert subagents \([0-9]+\)' "$agents_disk" "expert subagents"
