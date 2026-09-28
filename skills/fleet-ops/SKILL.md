@@ -144,6 +144,15 @@ The join is `writtenBranches` from the session wrapper, not just the checked-out
 branch — a session working in worktree `claude/foo-bar` routinely commits its real work
 to `lane/thing`, and only `writtenBranches` connects the two.
 
+**It also joins on the directory.** Any session claiming the worktree the lane branch
+is checked out in (wrapper `cwd`/`worktreePath`, transcript directory, live `cwd` — the
+claims [prune](#prune--worktree-housekeeping) uses) blocks, whatever branch its wrapper
+records: branch drift and `EnterWorktree` both defeat the branch join (2026-09-28). The
+read is `sessions.sh at --fresh`. The cached index may nominate claimants but never
+decides: each one's liveness is re-read, and transcripts being written in the worktree
+are read off disk, so a session that arrived after the index was built still blocks.
+Blind spot: a shell that `cd`'d in since the last index, or writes by absolute path.
+
 "Active" means the newer of the wrapper's `lastActivityAt` and the session's last
 transcript write (its subagents' included), searched across every Desktop
 instance's store. Until 2026-09-28 the gate read the wrapper alone, from the
@@ -161,8 +170,11 @@ It stays conservative in both directions. Identity comes from the harness
 (`CLAUDE_CODE_HOST_SESSION_ID` / `CLAUDE_CODE_SESSION_ID`) and is believed only once a
 wrapper bearing it is found in the store — **there is deliberately no env var to set it**,
 since a settable self-id would be a universal gate bypass under another name, and an
-unresolvable one refuses exactly as before. Self must also be the **only** live owner:
-a second live session writing the same branch refuses, naming the peer.
+unresolvable one refuses exactly as before. Self must also be the **only** live
+claimant, by branch or by directory: a second live session writing the same branch, or
+working in the same worktree, refuses, naming the peer. A CLI or headless session has
+no store record to prove it is self, so if one is live in the lane's worktree the land
+refuses, even when it is that session's own.
 
 Override with `session_check=off` in config, or `FLEET_SKIP_SESSION_CHECK=1` for one
 run. One run means one run: fleet consumes the variable at startup and strips it (and
@@ -500,4 +512,4 @@ Shipped since first release:
 
 - `scripts/fleet.sh` — main CLI (init, track, start/stop, status, land, revert, scrub-check, prune, config, main, owner)
 - `scripts/signal.sh` — branch-aware signaler (deployed to `.claude/fleet/signal.sh`); prints the MAIN handoff after READY/CONFLICT
-- `scripts/sessions.sh` — branch → owning-session and directory → claiming-session resolver, read off every Desktop instance's session store plus the CLI transcripts on disk (deployed alongside signal.sh so lane sessions can resolve MAIN). `sessions.sh stores` shows what it read; `sessions.sh at <path>` shows who claims a directory. Enrichment only: exits 3 and stays silent wherever the store or `jq` is missing, and every caller treats that as "no info"
+- `scripts/sessions.sh` — branch → owning-session and directory → claiming-session resolver, read off every Desktop instance's session store plus the CLI transcripts on disk (deployed alongside signal.sh so lane sessions can resolve MAIN). `sessions.sh stores` shows what it read; `sessions.sh at <path>` shows who claims a directory (`--fresh`: liveness re-read, the land gate's view). Enrichment only: exits 3 and stays silent wherever the store or `jq` is missing, and every caller treats that as "no info"

@@ -1255,6 +1255,129 @@ export TMPDIR=$SUITE_TMPDIR FLEET_SESSION_NOCACHE=1
 [ -d "$AREPO/.claude/worktrees/idle-open" ] && ok "idle-open worktree survived --remove" || no "idle-open worktree was REMOVED"
 [ -d "$AREPO/.claude/worktrees/orphan" ] && ok "unclaimed native worktree survived --remove" || no "unclaimed native worktree was REMOVED"
 
+# -- land gate: directory claims (the 2026-09-28 follow-up) ---------------------
+# The land gate joined owners on BRANCH alone, so it was blind in the same two
+# ways prune was above: wrapper branch drift (a session in worktree
+# vigilant-grothendieck recorded branch claude/keen-mccarthy) and a session that
+# EnterWorktree'd into a lane, which only its transcript records. A live session
+# working in the lane's worktree therefore did not block `fleet land`, which
+# merged under it and rebased its tree. Every refusal below lands on the
+# pre-fix gate. Same fixture helpers as the block above, pointed at a store and
+# transcript root of their own (mk_wrap / mk_tx read ASTORE / ATX at call time).
+echo "-- land gate: directory claims --"
+LREPO="$SB/lrepo"; mkdir -p "$LREPO"
+git -C "$LREPO" init -q -b main
+git -C "$LREPO" config user.email t@t; git -C "$LREPO" config user.name t
+git -C "$LREPO" config core.autocrlf false
+echo base > "$LREPO/f"; git -C "$LREPO" add -A; git -C "$LREPO" commit -qm init
+arm_gate "$LREPO"
+ASTORE="$SB/lstore/acct/ws" ATX="$SB/ltx"; mkdir -p "$ASTORE" "$ATX"
+export FLEET_SESSION_STORE="$SB/lstore" FLEET_TRANSCRIPT_ROOTS="$ATX"
+cd "$LREPO"
+
+mk_llane(){ # branch [worktree-dir] — one commit on its own file, tracked
+  local wt=${2:-"$SB/lwt-$(printf '%s' "$1" | tr / _)"}
+  git -C "$LREPO" branch "$1" main
+  git -C "$LREPO" worktree add -q "$wt" "$1"
+  echo "$1" > "$wt/$(printf '%s' "$1" | tr / _).txt"; git -C "$wt" add -A
+  git -C "$wt" -c user.email=w@t -c user.name=w commit -qm "work $1"
+  bash "$FLEET" track "$1" >/dev/null 2>&1
+}
+# The lane's worktree in git's own path form.
+lwt(){ git -C "$LREPO" worktree list --porcelain | awk -v b="branch refs/heads/$1" '
+         /^worktree / { p = substr($0, 10) } $0 == b { print p }'; }
+landed(){ case "$(git -C "$LREPO" log --oneline main)" in *"merge: $1"*) return 0;; esac; return 1; }
+LLOG="$LREPO/.claude/fleet/activity.log"
+
+# Branch drift: the wrapper records a branch that is not the lane. Only the
+# session's cwd — the lane's worktree, recorded natively and backslashed — ties
+# it to the lane.
+mk_llane lane/drift
+mk_wrap local_drifter "Working here, drifted" "$(bs_path "$(lwt lane/drift)")" 5 claude/keen-drift false
+bash "$FLEET" land lane/drift >/dev/null 2>&1; lx=$?
+[ "$lx" -ne 0 ] && ok "a live session in the lane's worktree under a drifted branch blocks the land (exit $lx)" \
+  || no "a live session in the lane's worktree (drifted branch) did not block the land"
+landed lane/drift && no "drifted-branch lane was merged under its live session" || ok "no merge under the drifted-branch session"
+grep -q "local_drifter.*by cwd" "$LLOG" 2>/dev/null && ok "the refusal names the claimant and how it claims" \
+  || no "refusal log does not name local_drifter by cwd"
+# Control: only liveness changed, and the same lane now lands — the directory
+# join refuses live claimants, not claimed directories.
+mk_wrap local_drifter "Working here, drifted" "$(bs_path "$(lwt lane/drift)")" 7200 claude/keen-drift false
+bash "$FLEET" land lane/drift >/dev/null 2>&1; ee "control: the same lane lands once that session is idle" 0 $?
+
+# EnterWorktree: created elsewhere (its wrapper cwd, forever) and mid-turn (its
+# wrapper timestamp is the turn's start). Only its transcript, filed under the
+# lane's worktree and written seconds ago, says where it is working.
+mk_llane lane/entered
+mk_wrap local_enterer "Entered the lane" "$(bs_path "$SB/lwt-spawned-here")" 7200 claude/spawn-x false cli-enterer
+mk_tx cli-enterer "$(bs_path "$(lwt lane/entered)")" 5
+bash "$FLEET" land lane/entered >/dev/null 2>&1; lx=$?
+[ "$lx" -ne 0 ] && ok "a session that EnterWorktree'd into the lane blocks the land (exit $lx)" \
+  || no "a session working in the lane via EnterWorktree did not block the land"
+landed lane/entered && no "lane merged under a session that entered it" || ok "no merge under the entered session"
+
+# A worktree path with a space in it. worktree_path_for used to take awk's $2,
+# which cuts the path at the space — the join would then match nothing.
+mk_llane lane/spaced "$SB/lwt dir/spaced"
+mk_wrap local_spaced "In a spaced path" "$(bs_path "$(lwt lane/spaced)")" 5 claude/spaced-drift false
+bash "$FLEET" land lane/spaced >/dev/null 2>&1; lx=$?
+[ "$lx" -ne 0 ] && ok "a live claim on a worktree path containing a space still blocks (exit $lx)" \
+  || no "worktree path with a space: live claimant not seen"
+
+# The gate must not act on the 15-minute index. Caching ON for these cases, in
+# a cache dir of their own; each claim becomes live only AFTER the index is
+# built, so the cached read is stale by construction.
+unset FLEET_SESSION_NOCACHE; SUITE_TMPDIR=$TMPDIR
+export TMPDIR="$SB/lcache"; mkdir -p "$TMPDIR"
+mk_llane lane/woke
+mk_wrap local_sleeper "Idle, then woke" "$(bs_path "$(lwt lane/woke)")" 7200 claude/sleeper-drift false
+mk_llane lane/latecomer
+bash "$SESSIONS" paths >/dev/null 2>&1          # the index is built now
+mk_wrap local_sleeper "Idle, then woke" "$(bs_path "$(lwt lane/woke)")" 5 claude/sleeper-drift false
+mk_tx cli-latecomer "$(bs_path "$(lwt lane/latecomer)")" 5   # headless: no wrapper at all
+[ "$(bash "$SESSIONS" at "$(lwt lane/woke)" 2>/dev/null | cut -f7)" = "0" ] \
+  && ok "premise: the cached index still calls the woken session idle" || no "premise failed: cache was not stale"
+[ -z "$(bash "$SESSIONS" at "$(lwt lane/latecomer)" 2>/dev/null)" ] \
+  && ok "premise: the cached index has no claim on the latecomer's worktree" || no "premise failed: cache already saw the latecomer"
+[ "$(bash "$SESSIONS" at --fresh "$(lwt lane/woke)" 2>/dev/null | cut -f7)" = "1" ] \
+  && ok "at --fresh re-reads liveness the cache still calls idle" || no "at --fresh trusted the cached liveness"
+case "$(bash "$SESSIONS" at --fresh "$(lwt lane/latecomer)" 2>/dev/null)" in
+  *cli:cli-latecomer*transcript*) ok "at --fresh sees a transcript newer than the index";;
+  *) no "at --fresh missed a claim the index predates";; esac
+bash "$FLEET" land lane/woke >/dev/null 2>&1; lx=$?
+[ "$lx" -ne 0 ] && ok "a claimant that woke after the index was built blocks the land (exit $lx)" \
+  || no "the gate acted on the cached idle reading"
+bash "$FLEET" land lane/latecomer >/dev/null 2>&1; lx=$?
+[ "$lx" -ne 0 ] && ok "a session that started in the lane after the index was built blocks the land (exit $lx)" \
+  || no "the gate missed a claim newer than the index"
+export TMPDIR=$SUITE_TMPDIR FLEET_SESSION_NOCACHE=1
+
+# Self in its own worktree: its claims arrive by cwd, by transcript (named by
+# the CLI session id, attributed back to its wrapper) and by live cwd, all on a
+# drifted branch. It must land unaided — but only once self actually resolves.
+mk_llane lane/mine
+mk_wrap local_selfwt "This very session" "$(bs_path "$(lwt lane/mine)")" 5 claude/selfwt-drift false cli-selfwt
+mk_tx cli-selfwt "$(bs_path "$(lwt lane/mine)")" 5
+( unset CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_SESSION_ID CLAUDE_SESSION_ID
+  bash "$FLEET" land lane/mine >/dev/null 2>&1 ); lx=$?
+[ "$lx" -ne 0 ] && ok "unresolvable self in the lane's worktree does not exempt (exit $lx)" \
+  || no "an unresolved self landed on its directory claim"
+CLAUDE_CODE_HOST_SESSION_ID=local_selfwt bash "$FLEET" land lane/mine >/dev/null 2>&1
+ee "self in its own worktree still lands unaided" 0 $?
+landed lane/mine && ok "self's own lane actually merged" || no "no merge commit for self's own lane"
+
+# ...and self must be the ONLY live claimant: a headless peer writing in the
+# same tree is the concurrent writer the gate exists for.
+mk_llane lane/crowded
+mk_wrap local_selfwt2 "This very session" "$(bs_path "$(lwt lane/crowded)")" 5 claude/selfwt2 false cli-selfwt2
+mk_tx cli-peerwt "$(bs_path "$(lwt lane/crowded)")" 5
+CLAUDE_CODE_HOST_SESSION_ID=local_selfwt2 bash "$FLEET" land lane/crowded >/dev/null 2>&1; lx=$?
+[ "$lx" -ne 0 ] && ok "a live peer in self's worktree still blocks self's land (exit $lx)" \
+  || no "self landed over a live peer in its own worktree"
+landed lane/crowded && no "lane merged over a live peer in the worktree" || ok "no merge while a peer works in the tree"
+grep -q "cli:cli-peerwt" "$LLOG" 2>/dev/null && ok "the refusal names the peer, not self" \
+  || no "refusal log does not name the peer"
+
 unset FLEET_SESSION_NOCACHE; hermetic_sessions
 cd "$REPO"
 fi

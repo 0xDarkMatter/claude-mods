@@ -187,6 +187,22 @@ feature releases live in the README "Recent Updates" section.
   stores it scanned, so a fixture run can no longer poison a real one.
   `sessions.sh stores` and `fleet config` now say which stores answered.
 
+- **`fleet land` merged under a live session working in the lane's worktree** -
+  the live-owner gate still joined owners on branch alone, so the two shapes
+  the prune fix cured - wrapper branch drift (a session in worktree
+  `vigilant-grothendieck` recording branch `claude/keen-mccarthy`) and a session
+  that `EnterWorktree`'d into a lane, which only its transcript records - left
+  a live writer invisible: the land merged, then rebased its tree. The gate
+  now also treats any live directory claim on the lane branch's worktree as an
+  owner, read through the new `sessions.sh at --fresh`: the cached index may
+  nominate claimants but every one's liveness is re-read, and transcripts
+  being written in the worktree are read straight off disk (seconds, against
+  60s for a fresh full scan). The self-exemption holds only when self is the
+  sole live claimant by either join. Liveness re-reads are batched
+  (`live_many`, one walk for any number of sessions, where each used to cost
+  ~3s), and `worktree_path_for` no longer cuts a worktree path at its first
+  space.
+
 ### Changed
 
 - **Rules made machine- and person-agnostic.** Rules ship in a public plugin, so

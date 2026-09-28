@@ -32,6 +32,16 @@
 # A that moved into lane B still claims only A in its wrapper (measured
 # 2026-09-28: 27 entries in the spawn worktree, 258 in the lane it moved to).
 #
+# SECTION MAP (grep the `# --- name ---` banners to jump):
+#   paths       norm_path / path_key — the two forms paths are compared in
+#   discovery   which session stores and transcript roots exist (fork-free)
+#   scan        one pass over both -> wide rows; the cache; index/paths views
+#   liveness    live_many — the fresh read every gate decision rests on
+#   self        which session is calling (the land gate's self-exemption)
+#   owner       branch -> newest owning session
+#   main        the repo's coordinator session
+#   at          directory -> claims; --fresh is the land gate's read
+#
 # INVARIANTS
 #   - stdout is DATA ONLY (TSV). Notes go to stderr.
 #   - Never fails a caller: an absent store, absent jq, or a non-Desktop
@@ -65,7 +75,11 @@ USAGE
   $SELF main                      The MAIN/coordinator session for this repo
   $SELF paths                     All path->session claims (TSV, see below)
   $SELF views                     index + paths from one scan, tagged I / P
-  $SELF at <path>                 The claims on one directory (a worktree)
+  $SELF at [--fresh] <path>       The claims on one directory (a worktree).
+                                  --fresh re-reads every claimant's liveness
+                                  and adds sessions whose transcript is being
+                                  written in <path> right now, which the cache
+                                  cannot know yet — the land gate's read.
   $SELF live <sessionId>          1 if that session is live, else 0
   $SELF self                      The CALLING session's own store id, if it can
                                   be resolved and verified against the store.
@@ -92,7 +106,8 @@ ENVIRONMENT
   FLEET_SESSION_LIVE_SECS   liveness window in seconds (default 600)
   FLEET_SESSION_CACHE_TTL   index cache lifetime in seconds (default 900).
                             Long by design — no gate reads cached liveness;
-                            they use \`owner --fresh\` or a fresh re-scan.
+                            they use \`owner --fresh\`, \`at --fresh\`, or a
+                            fresh re-scan.
   FLEET_SESSION_NOCACHE     set to any value to force a fresh scan
 
 EXAMPLES
@@ -306,8 +321,8 @@ scan_wrappers() {
 # Depth 2 only (<root>/<encoded-cwd>/<cliSessionId>.jsonl): subagent
 # transcripts one level further down roughly double the walk (3.0s -> 6.8s
 # measured 2026-09-28) and here they could only move a row between KEEP and
-# REVIEW, neither of which prune removes. `session_live_now` — the land gate's
-# fresh read — does count them, per session, where it is cheap.
+# REVIEW, neither of which prune removes. `live_many` — the gates' fresh read —
+# does count them, for just the sessions it is asked about.
 # stat is batched through -exec +: a handful of processes, not one per file.
 # The flavour is PROBED, never tried-then-fallen-back: on GNU, `stat -f` means
 # --file-system and would splice filesystem dumps into the listing.
@@ -383,8 +398,8 @@ scan_all() {
 # gate call this repeatedly, and uncached, five calls blew a 2-minute timeout
 # during development.
 # TTL is long ON PURPOSE. Nothing that DECIDES anything reads a cached liveness
-# value: `session_land_gate` calls `owner --fresh`, which re-reads the single
-# owning session and bypasses this cache, and `prune --remove` re-classifies
+# value: `session_land_gate` calls `owner --fresh` and `at --fresh`, which
+# re-read each claimant's liveness directly, and `prune --remove` re-classifies
 # against a forced fresh scan before it deletes anything. Cached rows feed
 # display and prune's first-pass classification only. A short TTL bought no
 # correctness and cost ~41s per `fleet status` (47.1s cold vs 6.0s warm,
@@ -477,46 +492,98 @@ build_views() {
     project_paths 'P\t' <<< "$WIDE"
 }
 
-# Newest transcript write for CLI session $1 in epoch ms, counting its
-# subagents' transcripts (a session fanned out to subagents can go quiet in its
-# own file while they work). 0 when there is none.
-transcript_mtime_ms() {
-    local cli=${1:-} r f m best=0
-    [[ -n "$cli" ]] || { printf '0'; return; }
-    load_dirs
-    for r in ${TROOTS[@]+"${TROOTS[@]}"}; do
-        for f in "$r"/*/"$cli".jsonl "$r"/*/"$cli"/subagents/*.jsonl; do
-            [[ -f "$f" ]] || continue
-            m=$(file_mtime_s "$f")
-            (( m > best )) && best=$m
-        done
-    done
-    printf '%s' "$(( best * 1000 ))"
+# --- liveness ----------------------------------------------------------------
+# id  lastActivityAt  cliSessionId — one row per wrapper FILE given. jq's status
+# is checked, as in scan_wrappers: one unparseable file (a wrapper caught
+# mid-rewrite) stops jq mid-stream, and every wrapper after it would silently
+# read as idle. On failure each file is therefore read on its own.
+wrapper_live_meta() {
+    local q='def s: if type == "string" then . else "" end;
+        [ (.sessionId | s),
+          ((.lastActivityAt // 0) | if type == "number" then floor | tostring else "0" end),
+          (.cliSessionId | s) ] | @tsv'
+    local out rc f
+    out=$(cat "$@" 2>/dev/null | jq -r "$q" 2>/dev/null; exit "${PIPESTATUS[1]}"); rc=$?
+    if (( rc != 0 )); then
+        out=""
+        for f in "$@"; do out+=$(jq -r "$q" < "$f" 2>/dev/null)$'\n'; done
+    fi
+    printf '%s\n' "$out" | tr -d '\r'    # CRLF from a Windows-native jq — see scan_wrappers
 }
 
-# Authoritative liveness for ONE session, bypassing the cache.
+# Authoritative liveness, bypassing the cache: "id<TAB>1|0" for each session id
+# given, in the order given. Accepts store ids (local_<uuid>) and T-row ids
+# (cli:<uuid>); an unknown id is 0.
 # The cache trades staleness for speed, and stale-idle-but-actually-live is the
-# one direction that would let the land gate through when it should refuse. So
-# the gate re-reads just the owning wrapper and its transcript — no store walk.
-# Accepts a store id (local_<uuid>) or a T-row id (cli:<uuid>).
-# Echoes "1" (live) or "0". Unknown session → "0".
-session_live_now() {
-    local id=$1 la=0 cli="" f meta
-    if [[ "$id" == cli:* ]]; then
-        cli=${id#cli:}
-    else
-        command -v jq >/dev/null 2>&1 || { printf '0'; return; }
-        f=$(find_wrapper "$id")
-        [[ -n "$f" ]] || { printf '0'; return; }
-        meta=$(jq -r '"\((.lastActivityAt // 0) | floor)\t\(.cliSessionId // "")"' <"$f" 2>/dev/null) || meta=""
-        meta=${meta%$'\r'}    # CRLF from a Windows-native jq — see scan_wrappers
-        la=${meta%%$'\t'*}; cli=${meta#*$'\t'}
-        [[ "$la" =~ ^[0-9]+$ ]] || la=0
+# one direction that would let the land gate through when it should refuse — so
+# every gate decision re-reads here. Live = the newer of the wrapper's
+# lastActivityAt and the session's newest transcript write, its subagents'
+# included (a session fanned out to subagents can go quiet in its own file while
+# they work). A wrapper found in several stores takes its newest timestamp.
+# BATCHED ON PURPOSE: one walk of the stores and one of the transcript roots, for
+# any number of ids. The per-session read it replaced cost ~3s here (it globbed
+# every root twice), so `at --fresh` on a checkout with a few dozen past
+# claimants took ~48s one session at a time and ~9s batched (measured
+# 2026-09-28). The walk finds exactly what those globs did:
+# <root>/<dir>/<cli>.jsonl and <root>/<dir>/<cli>/subagents/*.jsonl.
+live_many() {
+    (( $# )) || return 0
+    load_dirs
+    local id la c f fmt=() files=() names=() stats=() clis=() wmeta="" tmeta=""
+    for id in "$@"; do [[ -z "$id" || "$id" == cli:* ]] || names+=(-o -name "$id.json"); done
+    if (( ${#names[@]} && ${#STORES[@]} )) && command -v jq >/dev/null 2>&1; then
+        while IFS= read -r f; do [[ -n "$f" ]] && files+=("$f"); done \
+            < <(find "${STORES[@]}" -type f \( "${names[@]:1}" \) 2>/dev/null)
+        (( ${#files[@]} )) && wmeta=$(wrapper_live_meta "${files[@]}")
     fi
-    local tm; tm=$(transcript_mtime_ms "$cli")
-    (( tm > la )) && la=$tm
-    local now_ms=$(( $(date +%s) * 1000 ))
-    if (( la > 0 && (now_ms - la) <= LIVE_SECS * 1000 )); then printf '1'; else printf '0'; fi
+
+    while IFS=$'\t' read -r id la c; do [[ -n "$c" ]] && clis+=("$c"); done <<< "$wmeta"
+    for id in "$@"; do [[ "$id" == cli:* ]] && clis+=("${id#cli:}"); done
+    names=()
+    for c in ${clis[@]+"${clis[@]}"}; do names+=(-o -name "$c.jsonl" -o -name "$c"); done
+    if (( ${#names[@]} && ${#TROOTS[@]} )); then
+        while IFS= read -r f; do
+            [[ -n "$f" ]] || continue
+            if [[ -d "$f" ]]; then
+                for c in "$f"/subagents/*.jsonl; do [[ -f "$c" ]] && stats+=("$c"); done
+            elif [[ "$f" == *.jsonl ]]; then
+                stats+=("$f")
+            fi
+        done < <(find "${TROOTS[@]}" -mindepth 2 -maxdepth 2 \( "${names[@]:1}" \) 2>/dev/null)
+    fi
+    if (( ${#stats[@]} )); then
+        # Probed, never tried-then-fallen-back — see scan_transcripts.
+        if stat -c '%Y' / >/dev/null 2>&1; then fmt=(-c '%Y %n'); else fmt=(-f '%m %N'); fi
+        tmeta=$(printf '%s\0' "${stats[@]}" | xargs -0 stat "${fmt[@]}" 2>/dev/null | awk '
+            NF >= 2 {
+                m = $1 + 0; p = $0; sub(/^[^ ]+ /, "", p); n = split(p, a, "/")
+                c = (n > 2 && a[n-1] == "subagents") ? a[n-2] : a[n]; sub(/\.jsonl$/, "", c)
+                if (!(c in b) || m > b[c]) b[c] = m
+            }
+            END { for (c in b) printf "%s\t%.0f\n", c, b[c] * 1000 }')
+    fi
+
+    local now_s; now_s=$(date +%s)
+    awk -F'\t' -v now="$(( now_s * 1000 ))" -v win="$(( LIVE_SECS * 1000 ))" '
+        FILENAME == ARGV[1] { if ($1 != "") t[$1] = $2 + 0; next }
+        FILENAME == ARGV[2] {
+            if ($1 != "" && (!($1 in la) || $2 + 0 > la[$1])) { la[$1] = $2 + 0; cl[$1] = $3 }
+            next
+        }
+        $0 != "" {
+            last = 0; c = ""
+            if (substr($0, 1, 4) == "cli:") c = substr($0, 5)
+            else if ($0 in la) { last = la[$0]; c = cl[$0] }
+            if (c != "" && (c in t) && t[c] > last) last = t[c]
+            printf "%s\t%d\n", $0, (last > 0 && now - last <= win) ? 1 : 0
+        }' <(printf '%s\n' "$tmeta") <(printf '%s\n' "$wmeta") <(printf '%s\n' "$@")
+}
+
+# One session's liveness: "1" or "0". A one-id call into live_many, so there is
+# exactly one definition of "live" for every gate that asks.
+session_live_now() {
+    local r; r=$(live_many "${1:-}"); r=${r##*$'\t'}
+    if [[ "$r" == 1 ]]; then printf '1'; else printf '0'; fi
 }
 
 # --- self --------------------------------------------------------------------
@@ -637,13 +704,137 @@ cmd_main() {
 # a transcript's project dir. The key match is lossy by construction (every
 # non-alphanumeric is '-'), so callers must treat a key-only claim as grounds
 # to KEEP a tree, never as positive evidence that it is abandoned.
+#
+# --fresh is the land gate's read, held to the standard `owner --fresh` set:
+# the cache may NOMINATE a claimant, it never DECIDES one is idle. Every
+# nominated session's liveness is re-read directly, and the claim route the
+# cache is blind to by construction — a session writing its transcript into
+# this directory right now, because it started or EnterWorktree'd here after
+# the index was built — is read straight off disk. Deliberately NOT a fresh
+# full scan: that took 60s on a busy machine (measured 2026-09-28) and every
+# `fleet land` would pay it; this costs a few seconds.
+# What it still cannot see: a session whose Bash cwd moved here after the
+# index was built while its transcript stays filed elsewhere (the live-cwd
+# route) — the same class as a write by absolute path, which nothing records.
+# The inverse staleness is the safe one: a session that has since LEFT still
+# counts while it is live, because its cached claim is kept and only its
+# liveness is refreshed.
+
+# cli  lastMs — every session whose transcript, or one of its subagents',
+# is filed under encoded key $1 and was written inside the live window. One
+# directory lookup per transcript root, then only the matching directories'
+# files. -mmin is only a coarse prefilter (platforms round minutes
+# differently); the exact window is applied to the stat'd mtime. A nested
+# file belongs to its first path component (<cli>/subagents/<agent>.jsonl):
+# a session fanned out to subagents can go quiet in its own file meanwhile.
+live_transcripts_under() {
+    local key=${1:-} d dirs=() now_s fmt=()
+    [[ -n "$key" ]] || return 0
+    load_dirs
+    (( ${#TROOTS[@]} )) || return 0
+    while IFS= read -r d; do [[ -n "$d" ]] && dirs+=("$d"); done \
+        < <(find "${TROOTS[@]}" -mindepth 1 -maxdepth 1 -type d -iname "$key" 2>/dev/null)
+    (( ${#dirs[@]} )) || return 0
+    now_s=$(date +%s)
+    # Probed, never tried-then-fallen-back — see scan_transcripts.
+    if stat -c '%Y' / >/dev/null 2>&1; then fmt=(-c '%Y %n'); else fmt=(-f '%m %N'); fi
+    find "${dirs[@]}" -mindepth 1 -maxdepth 3 -type f -name '*.jsonl' \
+            -mmin "-$(( LIVE_SECS / 60 + 2 ))" -exec stat "${fmt[@]}" {} + 2>/dev/null \
+    | awk -v key="$key" -v now="$now_s" -v win="$LIVE_SECS" '
+        NF >= 2 {
+            m = $1 + 0; p = $0; sub(/^[^ ]+ /, "", p)
+            if (now - m > win) next
+            n = split(p, a, "/"); c = ""
+            for (j = n - 1; j >= 1 && j >= n - 3; j--) if (tolower(a[j]) == key) { c = a[j + 1]; break }
+            if (c == "") next
+            sub(/\.jsonl$/, "", c)
+            if (!(c in best) || m > best[c]) best[c] = m
+        }
+        END { for (c in best) printf "%s\t%.0f\n", c, best[c] * 1000 }'
+    return 0
+}
+
+# cli  id  title  archived — the Desktop wrapper carrying each CLI session id
+# given, found by content across EVERY store (~1.6s over ~2,000 wrappers), so
+# attribution never waits on the cache either. This is what lets the land
+# gate's self-exemption recognise the caller's own transcript: a transcript is
+# named by the CLI session id, the store by the host's. grep narrows, jq then
+# demands an exact cliSessionId match. An id no wrapper carries is a CLI or
+# headless session and is reported as cli:<id>, like a T row.
+# No mapfile: sessions.sh still runs on macOS's stock bash 3.2.
+wrappers_for_clis() {
+    (( $# )) || return 0
+    command -v jq >/dev/null 2>&1 || return 0
+    load_dirs
+    (( ${#STORES[@]} )) || return 0
+    local c f pats=() files=()
+    for c in "$@"; do pats+=(-e "$c"); done
+    while IFS= read -r f; do [[ -n "$f" ]] && files+=("$f"); done \
+        < <(grep -rlF --include='local_*.json' "${pats[@]}" "${STORES[@]}" 2>/dev/null)
+    (( ${#files[@]} )) || return 0
+    cat "${files[@]}" 2>/dev/null | jq -r --arg want "$(printf '%s\n' "$@")" '
+        def s: if type == "string" then . else "" end;
+        ($want | split("\n")) as $w
+        | (.cliSessionId | s) as $c
+        | select($c != "" and any($w[]; . == $c))
+        | [ $c, (.sessionId | s), (.title | s), (if .isArchived == true then "1" else "0" end) ]
+        | @tsv
+    ' 2>/dev/null | tr -d '\r'    # CRLF from a Windows-native jq — see scan_wrappers
+    return 0
+}
+
+# The --fresh read of claim rows $2 (the `at` TSV) on the directory keyed $1.
+freshen_claims() {
+    local key=$1 rows=$2 tx probe="" id fresh_map=""
+    tx=$(live_transcripts_under "$key")
+    if [[ -n "$tx" ]]; then
+        local clis=() cli ms
+        while IFS=$'\t' read -r cli ms; do [[ -n "$cli" ]] && clis+=("$cli"); done <<< "$tx"
+        # One row per (live transcript, wrapper carrying its id), else cli:<id>.
+        probe=$(awk -F'\t' -v OFS='\t' -v k="$key" '
+            FILENAME == ARGV[1] { if ($1 != "") { n[$1]++; w[$1, n[$1]] = $2 "\t" $3 "\t" $4 }; next }
+            $1 != "" {
+                if ($1 in n)
+                    for (i = 1; i <= n[$1]; i++) { split(w[$1, i], a, "\t"); print k, "", a[1], a[2], $2, a[3], 1, "transcript" }
+                else
+                    print k, "", "cli:" $1, "(no Desktop record - CLI or headless session)", $2, 0, 1, "transcript"
+            }' <(wrappers_for_clis ${clis[@]+"${clis[@]}"}) <(printf '%s\n' "$tx"))
+    fi
+    # Every cached claimant's liveness, re-read in one batch. A session the probe
+    # just saw writing here is live by that direct observation, and the map
+    # lists it last so nothing can read it back down to idle.
+    local ids=()
+    while IFS= read -r id; do [[ -n "$id" ]] && ids+=("$id"); done \
+        < <(printf '%s\n' "$rows" | awk -F'\t' 'NF && !s[$3]++ { print $3 }')
+    fresh_map=$(live_many ${ids[@]+"${ids[@]}"}
+                printf '%s\n' "$probe" | awk -F'\t' -v OFS='\t' 'NF { print $3, 1 }')
+    # Cached rows first (live column overwritten), then the probe's; one row
+    # per (session, route).
+    {
+        awk -F'\t' -v OFS='\t' '
+            FILENAME == ARGV[1] { if ($1 != "") L[$1] = $2; next }
+            NF { if ($3 in L) $7 = L[$3]; print }' <(printf '%s' "$fresh_map") <(printf '%s\n' "$rows")
+        printf '%s\n' "$probe"
+    } | awk -F'\t' 'NF && !seen[$3 FS $8]++'
+}
+
 cmd_at() {
+    local fresh=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --fresh) fresh=1; shift ;;
+            -*) echo "$SELF: unknown flag '$1'" >&2; return 2 ;;
+            *) break ;;
+        esac
+    done
     local p=${1:-}
-    [[ -z "$p" ]] && { echo "usage: $SELF at <path>" >&2; return 2; }
+    [[ -z "$p" ]] && { echo "usage: $SELF at [--fresh] <path>" >&2; return 2; }
     local n k rows
     n=$(norm_path "$p"); k=$(path_key "$n")
     rows=$(build_paths) || return $?
-    printf '%s\n' "$rows" | awk -F'\t' -v n="$n" -v k="$k" 'NF && (($2 != "" && $2 == n) || $1 == k)'
+    rows=$(printf '%s\n' "$rows" | awk -F'\t' -v n="$n" -v k="$k" 'NF && (($2 != "" && $2 == n) || $1 == k)')
+    (( fresh )) && rows=$(freshen_claims "$k" "$rows")
+    [[ -n "$rows" ]] && printf '%s\n' "$rows"
     return 0
 }
 
