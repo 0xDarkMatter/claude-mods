@@ -42,6 +42,9 @@ jobs:
       - name: Agnostic gate (no author-specific identifiers in a public repo)
         run: bash tests/agnostic.sh
 
+      - name: Hook contract tests (stdin JSON in, exit 2 + stderr to block)
+        run: bash tests/hooks.sh
+
       - name: Executable-bit gate (tracked scripts must be executable)
         run: bash tests/check-exec-bits.sh
 

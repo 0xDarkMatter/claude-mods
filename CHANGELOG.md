@@ -81,6 +81,22 @@ feature releases live in the README "Recent Updates" section.
   `tests/validate.sh` and an archived brief; `rules/dev-servers.md` is now a
   generic template (the concrete stack values belong in a private `CLAUDE.md`).
 
+- **The opt-in quality hooks now work under Claude Code's real hook contract** - input
+  as JSON on stdin, exit 2 + stderr to block. None had been tested against it, and
+  all three were broken: `post-edit-format` read only `$1`, so it silently formatted
+  nothing; `pre-commit-lint` exited 1 - a non-blocking error - so the commit went
+  ahead and the lint output (on stdout) never reached the model; `dangerous-cmd-warn`
+  wrote its reason to stdout, hard-blocked `uv venv`, `python -m venv`, `printenv HOME`,
+  `cat .env.example` and `git push --force-with-lease`, and its UPDATE-without-WHERE
+  guard used a lookahead `grep -E` cannot parse, so it never fired. New
+  `tests/hooks.sh` pins every one of these (26 assertions; 17 of them fail against the
+  old hooks) and runs in `just check` and CI. `hooks/README.md` wiring examples and the
+  sample scripts moved off the old string-list format and non-existent
+  `$TOOL_INPUT`/`$FILE_PATH` variables; a new section documents the stdin fields and
+  exit codes. `tests/check-exec-bits.sh` now also covers `hooks/*.sh`, as AGENTS.md
+  had always claimed - 11 of 13 hooks were tracked 100644 (harmless while every
+  wiring calls `bash hooks/x.sh`, but the documented gate did not exist).
+
 ### Changed
 
 - **Rules made machine- and person-agnostic.** Rules ship in a public plugin, so

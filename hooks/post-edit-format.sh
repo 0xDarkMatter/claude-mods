@@ -3,17 +3,28 @@
 # PostToolUse hook - auto-formats files after Write or Edit operations
 # Matcher: Write|Edit
 #
-# Configuration in .claude/settings.json:
+# Configuration in .claude/settings.json (Claude Code sends the tool call as JSON
+# on stdin; a positional path is still accepted for older wiring):
 # {
 #   "hooks": {
 #     "PostToolUse": [{
 #       "matcher": "Write|Edit",
-#       "hooks": ["bash hooks/post-edit-format.sh $FILE_PATH"]
+#       "hooks": [{ "type": "command", "command": "bash hooks/post-edit-format.sh" }]
 #     }]
 #   }
 # }
+# Contract tests: tests/hooks.sh
 
-FILE="$1"
+FILE="${1:-}"
+# Read the path from the stdin JSON when no argument was given. Without this the
+# hook received an empty path under modern Claude Code and silently formatted
+# nothing, ever.
+if [[ -z "$FILE" && ! -t 0 ]]; then
+  RAW="$(cat 2>/dev/null)"
+  if [[ -n "$RAW" ]] && command -v jq >/dev/null 2>&1; then
+    FILE="$(printf '%s' "$RAW" | jq -r '.tool_input.file_path // empty' 2>/dev/null)"
+  fi
+fi
 
 # Skip if no file path provided
 if [[ -z "$FILE" || ! -f "$FILE" ]]; then

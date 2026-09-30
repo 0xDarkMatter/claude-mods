@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Check git index modes, not filesystem permissions (Git Bash can fake those).
 # Root tests/*.sh and scripts/*.sh are excluded because tracked 100644 files
-# there are legitimate today; this gate covers skill-bundled scripts only.
+# there are legitimate today; this gate covers shipped scripts: skill-bundled
+# scripts and hooks/*.sh (AGENTS.md documents both as 100755).
 set -u
 
 usage() {
     cat <<'EOF'
 Usage: tests/check-exec-bits.sh [--help]
 
-Print tracked skill scripts whose git mode is not 100755, one per line.
+Print tracked skill scripts and hooks whose git mode is not 100755, one per line.
 
 EXAMPLES
   bash tests/check-exec-bits.sh
@@ -32,6 +33,13 @@ findings=0
 candidates=0
 while read -r mode object stage path; do
     case "$path" in
+        hooks/*.sh)
+            candidates=$((candidates + 1))
+            if [ "$mode" != "100755" ]; then
+                echo "$path"
+                findings=$((findings + 1))
+            fi
+            ;;
         skills/*/scripts/*)
             # A "script" is: known script extension, OR extensionless with a
             # shebang (e.g. introspect/scripts/cc-session). Data/doc files and
@@ -51,7 +59,7 @@ while read -r mode object stage path; do
             fi
             ;;
     esac
-done < <(git ls-files -s -- skills)
+done < <(git ls-files -s -- skills hooks)
 
 # Empty candidate list means the scan itself is broken (not in a repo, path
 # typo, git missing) — a gate that checked nothing must not report clean.

@@ -58,7 +58,9 @@ a file path as `$1` for manual scans.
 
 ## Configuration
 
-Add hooks to `.claude/settings.json` or `.claude/settings.local.json`:
+Add hooks to `.claude/settings.json` or `.claude/settings.local.json`. Each entry is an
+object with `type` and `command`; the tool call arrives as **JSON on stdin** (see
+[Hook input and exit codes](#hook-input-and-exit-codes)), so no arguments are passed:
 
 ```json
 {
@@ -67,21 +69,24 @@ Add hooks to `.claude/settings.json` or `.claude/settings.local.json`:
       {
         "matcher": "Bash",
         "hooks": [
-          "bash hooks/dangerous-cmd-warn.sh $TOOL_INPUT",
-          "bash hooks/enforce-uv.sh $TOOL_INPUT",
-          "bash hooks/pre-commit-lint.sh $TOOL_INPUT"
+          { "type": "command", "command": "bash hooks/dangerous-cmd-warn.sh" },
+          { "type": "command", "command": "bash hooks/enforce-uv.sh" },
+          { "type": "command", "command": "bash hooks/pre-commit-lint.sh" }
         ]
       }
     ],
     "PostToolUse": [
       {
         "matcher": "Write|Edit",
-        "hooks": ["bash hooks/post-edit-format.sh $FILE_PATH"]
+        "hooks": [{ "type": "command", "command": "bash hooks/post-edit-format.sh" }]
       }
     ]
   }
 }
 ```
+
+`tests/hooks.sh` pins the contract of the opt-in hooks (stdin in, exit 2 + stderr to
+block) and runs in `just check` and CI.
 
 ### Prompt-injection hooks (SessionStart + git pre-commit)
 
@@ -131,7 +136,7 @@ Detect dangerous patterns before execution:
 # hooks/security-check.sh
 # Detects: eval, exec, os.system, pickle, SQL injection patterns
 
-INPUT="$1"
+INPUT="$(jq -r '.tool_input.command // .tool_input.content // empty')"
 
 PATTERNS=(
   "eval("
@@ -146,9 +151,10 @@ PATTERNS=(
 )
 
 for pattern in "${PATTERNS[@]}"; do
-  if echo "$INPUT" | grep -q "$pattern"; then
-    echo "SECURITY WARNING: Detected potentially dangerous pattern: $pattern"
-    exit 1
+  if printf '%s\n' "$INPUT" | grep -qF "$pattern"; then
+    # stderr + exit 2 = block, and Claude sees the reason (exit 1 would NOT block)
+    echo "SECURITY WARNING: Detected potentially dangerous pattern: $pattern" >&2
+    exit 2
   fi
 done
 
@@ -163,7 +169,8 @@ Run linter after file edits:
 #!/bin/bash
 # hooks/post-edit.sh
 
-FILE="$1"
+FILE="$(jq -r '.tool_input.file_path // empty')"
+[[ -f "$FILE" ]] || exit 0
 EXT="${FILE##*.}"
 
 case "$EXT" in
@@ -187,7 +194,7 @@ Run tests after code changes:
 #!/bin/bash
 # hooks/post-test.sh
 
-FILE="$1"
+FILE="$(jq -r '.tool_input.file_path // empty')"
 
 # Only run for source files
 if [[ "$FILE" == *"/src/"* ]]; then
@@ -201,15 +208,16 @@ if [[ "$FILE" == *"/src/"* ]]; then
 fi
 ```
 
-### 4. Commit Message Hook
+### 4. Commit Message Hook (a *git* hook, not a Claude Code hook)
 
-Ensure commit messages follow convention:
+Ensure commit messages follow convention. Install as `.git/hooks/commit-msg`; git passes
+the **path of the message file** as `$1`, not the message itself:
 
 ```bash
 #!/bin/bash
-# hooks/commit-msg.sh
+# .git/hooks/commit-msg
 
-MSG="$1"
+MSG="$(head -n1 "$1")"
 
 # Conventional commits pattern
 PATTERN="^(feat|fix|docs|style|refactor|test|chore)(\(.+\))?: .{1,50}"
@@ -232,15 +240,15 @@ Full hooks configuration:
     "PreToolUse": [
       {
         "matcher": "Bash",
-        "hooks": ["bash hooks/security-check.sh $TOOL_INPUT"]
+        "hooks": [{ "type": "command", "command": "bash hooks/security-check.sh" }]
       }
     ],
     "PostToolUse": [
       {
         "matcher": "Write|Edit",
         "hooks": [
-          "bash hooks/post-edit.sh $FILE_PATH",
-          "bash hooks/post-test.sh $FILE_PATH"
+          { "type": "command", "command": "bash hooks/post-edit.sh" },
+          { "type": "command", "command": "bash hooks/post-test.sh" }
         ]
       }
     ]
@@ -248,14 +256,27 @@ Full hooks configuration:
 }
 ```
 
-## Variables Available
+## Hook input and exit codes
 
-| Variable | Description |
-|----------|-------------|
-| `$TOOL_INPUT` | Full input to the tool |
-| `$TOOL_OUTPUT` | Output from tool (PostToolUse only) |
-| `$FILE_PATH` | Path to file being modified |
-| `$TOOL_NAME` | Name of tool being called |
+Claude Code passes the tool call to a command hook as **JSON on stdin** — not as shell
+variables or arguments. Read it with `jq`:
+
+| Field | Present on | Example |
+|-------|-----------|---------|
+| `.tool_name` | all tool events | `"Bash"`, `"Edit"` |
+| `.tool_input.command` | Bash | `jq -r '.tool_input.command'` |
+| `.tool_input.file_path` | Write / Edit | `jq -r '.tool_input.file_path'` |
+| `.tool_response` | PostToolUse | the tool's result |
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | Allow / success |
+| `2` | **Block** — for PreToolUse the call does not run, and **stderr** is fed back to the model |
+| anything else | Non-blocking error — shown to the user, the call proceeds anyway |
+
+A blocking hook must write its reason to **stderr**; stdout is not shown to the model.
+Check the hooks reference for the full, current schema:
+https://code.claude.com/docs/en/hooks
 
 ## Best Practices
 

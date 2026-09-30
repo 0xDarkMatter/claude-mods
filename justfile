@@ -11,6 +11,7 @@ check:
     @bash tests/validate.sh
     @bash tests/doc-drift.sh
     @bash tests/agnostic.sh
+    @bash tests/hooks.sh
     @bash tests/check-resources.sh
     @bash tests/run-skill-tests.sh
 
@@ -19,6 +20,7 @@ check-fast:
     @bash tests/validate.sh
     @bash tests/doc-drift.sh
     @bash tests/agnostic.sh
+    @bash tests/hooks.sh
     @bash tests/check-resources.sh
 
 # Everything in tests/justfile is reachable from root too
