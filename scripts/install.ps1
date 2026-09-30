@@ -102,6 +102,9 @@ $projectRoot = Split-Path -Parent $scriptDir
 # literal, and it has no -LiteralPath parameter.
 # tests/install-guard.sh section 11 asserts this behaviourally; the grep in
 # tests/check-resources.sh is the Linux-CI backstop.
+# SECOND INVARIANT: relative paths come only from Get-FilesUnder, never from
+# FullName.Substring against a root string - see RELATIVE PATHS below for the
+# 8.3 short-name trap that made every CI doctor run report phantom drift.
 if ($env:CLAUDE_DIR) {
     $claudeDir = $env:CLAUDE_DIR
 } else {
@@ -275,6 +278,39 @@ function Get-StalenessReport {
 }
 
 # =============================================================================
+# RELATIVE PATHS - the only place this script turns a full path into a
+# path relative to a root.
+#
+# Never write $f.FullName.Substring($root.Length + 1) against a root spelled
+# by the caller. The FileSystem provider (5.1 and 7.x alike) hands children
+# back under ITS canonical spelling of the root: 8.3 short names expanded,
+# `..` collapsed, doubled separators dropped. Each of those changes the prefix
+# LENGTH, so the substring silently shifts by the difference. A GitHub Windows
+# runner's %TEMP% is C:\Users\RUNNER~1\... ("runneradmin", three characters
+# longer), so an installed skills/alpha/SKILL.md read back as
+# skills/ls/alpha/SKILL.md: the doctor called every installed skill file both
+# missing and orphaned, and the merge-copy listed every dest file as dest-only.
+# Resolving the root through the same provider and enumerating FROM that
+# spelling makes the prefix match by construction. tests/install-guard.sh
+# section 12 proves it; tests/check-resources.sh greps for the old pattern.
+# =============================================================================
+function Get-FilesUnder {
+    param([string]$Root, [switch]$SkipUnreadable)
+
+    $base = (Get-Item -LiteralPath $Root -Force).FullName
+    $prefix = if ($base.EndsWith('\')) { $base } else { $base + '\' }
+    $onError = if ($SkipUnreadable) { 'SilentlyContinue' } else { 'Stop' }
+    foreach ($f in (Get-ChildItem -LiteralPath $base -Recurse -File -ErrorAction $onError)) {
+        if (-not $f.FullName.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            # Unreachable while the provider is self-consistent. If it ever is
+            # not, a loud failure beats relative paths that are silently wrong.
+            throw "install.ps1: enumerated '$($f.FullName)' outside its root '$base'"
+        }
+        [PSCustomObject]@{ Rel = $f.FullName.Substring($prefix.Length); FullName = $f.FullName }
+    }
+}
+
+# =============================================================================
 # CONTENT COMPARISON (line-ending-insensitive - see the note in .DESCRIPTION)
 # =============================================================================
 function Get-ContentFingerprint {
@@ -323,8 +359,8 @@ function Get-CategoryFiles {
     if (-not (Test-Path -LiteralPath $dir)) { return $map }
 
     if ($Category -eq 'skills') {
-        foreach ($f in (Get-ChildItem -LiteralPath $dir -Recurse -File -ErrorAction SilentlyContinue)) {
-            $map["skills/" + ($f.FullName.Substring($dir.Length + 1) -replace '\\', '/')] = $f.FullName
+        foreach ($f in (Get-FilesUnder -Root $dir -SkipUnreadable)) {
+            $map["skills/" + ($f.Rel -replace '\\', '/')] = $f.FullName
         }
         return $map
     }
@@ -637,8 +673,8 @@ foreach ($skill in (Get-ChildItem -LiteralPath $skillsDir -Directory)) {
         # short and its own test suite still passed, vacuously.
         $srcRel = @{}
         $fileErrors = @()
-        foreach ($f in (Get-ChildItem -LiteralPath $src -Recurse -File)) {
-            $rel = $f.FullName.Substring($src.Length + 1)
+        foreach ($f in (Get-FilesUnder -Root $src)) {
+            $rel = $f.Rel
             $srcRel[$rel] = $true
             try {
                 $destFile = Join-Path $dest $rel
@@ -654,9 +690,9 @@ foreach ($skill in (Get-ChildItem -LiteralPath $skillsDir -Directory)) {
 
         # Dest-only files are machine-local (unversioned) or stale. Surface
         # them, never delete them - deleting is the 2026-08-01 data loss.
-        $destOnly = @(Get-ChildItem -LiteralPath $dest -Recurse -File | Where-Object {
-            -not $srcRel.ContainsKey($_.FullName.Substring($dest.Length + 1))
-        })
+        # $dest is spelled from $claudeDir as given (CLAUDE_DIR may be an 8.3
+        # short path), so its relative paths must come from Get-FilesUnder too.
+        $destOnly = @(Get-FilesUnder -Root $dest | Where-Object { -not $srcRel.ContainsKey($_.Rel) })
 
         if ($fileErrors.Count -gt 0) {
             $failedSkills += $skill.Name
@@ -665,7 +701,7 @@ foreach ($skill in (Get-ChildItem -LiteralPath $skillsDir -Directory)) {
         } elseif ($destOnly.Count -gt 0) {
             Write-Host "  $($skill.Name)/ (kept $($destOnly.Count) dest-only file(s) not in repo)" -ForegroundColor Yellow
             foreach ($f in $destOnly) {
-                Write-Host "    $($f.FullName.Substring($dest.Length + 1))" -ForegroundColor Yellow
+                Write-Host "    $($f.Rel)" -ForegroundColor Yellow
             }
         } else {
             Write-Host "  $($skill.Name)/" -ForegroundColor Green
