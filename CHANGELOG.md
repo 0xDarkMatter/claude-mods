@@ -51,6 +51,13 @@ feature releases live in the README "Recent Updates" section.
   against the real on-disk spelling (directory listings cached, pure-bash
   comparison), so a wrong-case link fails locally too; the three wrong-case
   references are corrected.
+- **windows-ops suite no longer fails on Linux CI.** It skipped its PowerShell
+  checks only when `pwsh` was missing, but GitHub's Ubuntu runners ship `pwsh`, so
+  the Windows-only scripts (robocopy, CIM, process ancestry) were executed there
+  and returned the wrong exit codes. Six assertions failed on every run, hidden
+  until the doc-drift fix let the step run at all. The script-runtime checks now
+  gate on the PowerShell host reporting `Win32NT`; the static and `common.ps1`
+  framing checks still run everywhere.
 - **pigeon mail notifications never reached the model** - `check-mail.sh`
   printed its delivery block as plain stdout. For PreToolUse hooks, Claude Code
   sends plain stdout to the debug log. Only UserPromptSubmit, SessionStart and

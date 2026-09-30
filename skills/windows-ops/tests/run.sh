@@ -2,12 +2,17 @@
 # Self-test for windows-ops — terminal-design adoption + (where pwsh exists)
 # runtime ASCII purity of the shared framing.
 #
-# Static checks run everywhere. The dynamic PowerShell checks need `pwsh`; on a
-# host without it (e.g. a Linux CI runner) they skip cleanly, like the mac-ops /
-# net-ops suites gate on their platform.
+# Three tiers, each gated on what it actually needs:
+#   static   grep-level structural checks            — run everywhere
+#   framing  common.ps1 output under TERM_ASCII etc.  — any PowerShell
+#   runtime  executing the scripts themselves         — Windows PowerShell only
+# The runtime tier drives robocopy, CIM and Windows process ancestry, so it is
+# gated on the PowerShell host reporting Win32NT, NOT on `pwsh` being on PATH:
+# GitHub's Linux runners ship pwsh, and there those scripts fail for reasons
+# unrelated to the code under test (wrong exit codes, no parent-PID chain).
 #
 # Usage:   bash tests/run.sh
-# Exit:    0 all pass (or dynamic checks skipped), 1 a failure
+# Exit:    0 all pass (or a tier skipped), 1 a failure
 
 set -uo pipefail
 
@@ -39,6 +44,21 @@ if [ -z "$PWSH" ]; then
   [ "$FAIL" -eq 0 ] || exit 1
   exit 0
 fi
+
+# Ask the interpreter that will run the scripts, not uname: [Environment]::
+# OSVersion.Platform exists in both Windows PowerShell 5.1 and pwsh 7 ($IsWindows
+# does not exist in 5.1). It prints "Unix" on Linux/macOS. The CR strip matters
+# because Windows pwsh ends its output with CRLF.
+ONWIN=""
+[ "$("$PWSH" -NoProfile -Command '[Environment]::OSVersion.Platform' 2>/dev/null | tr -d '\r')" = "Win32NT" ] && ONWIN=1
+[ -n "$ONWIN" ] || echo "  (PowerShell is not on Windows — skipping script runtime checks)"
+# Never skip blind: on a Windows bash (Git Bash / MSYS / Cygwin) a probe that did
+# not answer Win32NT is a broken probe, and silently skipping would let the whole
+# runtime tier pass without running.
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*) [ -n "$ONWIN" ] && ok "platform probe reports Win32NT on a Windows host" \
+                          || no "Windows host, but the PowerShell platform probe did not report Win32NT" ;;
+esac
 
 # Resolve a path PowerShell can open (convert MSYS -> Windows when needed).
 winpath() { if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s' "$1"; fi; }
@@ -78,7 +98,7 @@ grep -q 'exit 10' "$CT" && ok "partial failure exits 10, not 1" || no "partial f
 grep -q 'Context 0,1' "$CT" && ok "error extraction captures the reason line" || no "error extraction drops the reason line"
 grep -q 'Group-Object path' "$CT" && ok "failures deduped per file (retries log twice)" || no "failures not deduped"
 
-if [ -n "$PWSH" ]; then
+if [ -n "$ONWIN" ]; then
   WCT="$(winpath "$CT")"
   # Guard rails, exercised for real: usage and not-found must not be exit 0.
   "$PWSH" -NoProfile -File "$WCT" >/dev/null 2>&1; rc=$?
@@ -121,7 +141,7 @@ if grep -qiE 'X:\\\\Tools|OLDDATA|VeraCrypt|HGST|rescue-diag' "$RI" "$XI"; then
   no "tier-2 scripts contain machine-specific references"
 else ok "tier-2 scripts are environment-agnostic"; fi
 
-if [ -n "$PWSH" ]; then
+if [ -n "$ONWIN" ]; then
   for f in "$RI" "$XI"; do
     n="$(basename "$f")"
     "$PWSH" -NoProfile -File "$(winpath "$f")" >/dev/null 2>&1; rc=$?
@@ -159,7 +179,7 @@ grep -q 'EXAMPLES' "$PT" && ok "help includes EXAMPLES section" || no "help has 
 grep -q 'claude-mods.windows-ops.process-triage/v1' "$PT" && ok "JSON envelope declares a schema" || no "no schema in JSON envelope"
 grep -q 'exit 10' "$PT" && ok "findings exit 10 (domain signal)" || no "findings do not exit 10"
 
-if [ -n "$PWSH" ]; then
+if [ -n "$ONWIN" ]; then
   WPT="$(winpath "$PT")"
   "$PWSH" -NoProfile -File "$WPT" -Help >/dev/null 2>&1; rc=$?
   [ "$rc" = "0" ] && ok "-Help exits 0" || no "-Help exits $rc, expected 0"

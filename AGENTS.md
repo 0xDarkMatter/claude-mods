@@ -148,6 +148,10 @@ Requires Sonnet 4+ or Opus 4+.
   nothing). Set `MSYS_NO_PATHCONV=1` for such calls, and never let a gate swallow a
   tool's exit-2 error — that combination once made the agnostic gate pass while
   scanning nothing.
+- **`pwsh` on PATH does not mean Windows.** GitHub's Ubuntu runners ship `pwsh`, so
+  a suite that runs Windows-only scripts whenever `command -v pwsh` succeeds goes
+  red on Linux CI (windows-ops, supply-chain-defense). Gate runtime checks on the
+  host: `[Environment]::OSVersion.Platform` = `Win32NT` (works in 5.1 and 7).
 
 ## Testing
 
