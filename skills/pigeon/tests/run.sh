@@ -73,7 +73,10 @@ else
   hook() { (cd "$SB/hookproj" && bash "$HOOK" </dev/null); }
   mail_hookproj() { (cd "$SB/hookproj" && bash "$MAIL" send "$(pwd)" "$1" "$2" </dev/null >/dev/null); }
   envelope_event() { printf '%s' "$1" | jq -rs 'if length == 1 then .[0].hookSpecificOutput.hookEventName else "not-one-json-value" end' 2>/dev/null; }
-  envelope_ctx() { printf '%s' "$1" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null; }
+  # tr: Windows jq.exe writes -r output in text mode (every "\n" becomes "\r\n").
+  # Test for CRs inside the string with envelope_has_cr, never on this output.
+  envelope_ctx() { printf '%s' "$1" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null | tr -d '\r'; }
+  envelope_has_cr() { printf '%s' "$1" | jq '.hookSpecificOutput.additionalContext | test("\r")' 2>/dev/null | tr -d '\r'; }
 
   expect_eq "hook silent with no mail" "" "$(hook)"
 
@@ -94,6 +97,17 @@ else
   [[ -n "$ctx" && "${#ctx}" -lt 10000 ]] && ok "oversized mail stays under the 10k cap (${#ctx} chars)" || no "oversized mail is ${#ctx} chars"
   case "$ctx" in *"truncated"*"pigeon read"*) ok "truncation points at pigeon read";; *) no "truncation notice missing";; esac
   expect_eq "footer survives truncation" '=== To reply: pigeon reply <id> "message" ===' "$(printf '%s\n' "$ctx" | tail -n 1)"
+
+  # Regression (Windows): the hook has its own attachment loop, so it carried the
+  # same sqlite3.exe "\r\n" bug mail-db.sh had - every path but the last showed
+  # "(missing)", and multi-line bodies reached the model with stray CRs.
+  (cd "$SB/hookproj" && bash "$MAIL" read </dev/null >/dev/null)
+  (cd "$SB/hookproj" && bash "$MAIL" send --attach "$SB/att-one.txt" --attach "$SB/att-two.txt" "$(pwd)" "hook attach" $'two\nlines' </dev/null >/dev/null)
+  hook_out="$(hook)"
+  ctx="$(envelope_ctx "$hook_out")"
+  case "$ctx" in *"(missing)"*) no "hook resolves every existing attachment (got: (missing))";; *) ok "hook resolves every existing attachment";; esac
+  expect_eq "hook reports each attachment's size" "2" "$(printf '%s\n' "$ctx" | grep -c '(5 bytes)')"
+  expect_eq "hook context carries no CR" "false" "$(envelope_has_cr "$hook_out")"
 fi
 
 echo ""

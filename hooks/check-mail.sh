@@ -23,6 +23,16 @@ PMAIL_SCRIPT="$HOME/.claude/pigeon/mail-db.sh"
 # headroom because ${#var} counts bytes or code points, not UTF-16 units.
 MAX_CONTEXT=9000
 
+# Guard: this function deliberately SHADOWS the sqlite3 binary, same as the one
+# in skills/pigeon/scripts/mail-db.sh. Windows' native sqlite3.exe writes "\r\n"
+# in text mode. Command substitution strips only the final newline, so the
+# attachment loop below kept a stray "\r" on every path but the last (reported
+# "(missing)" although the file existed), and multi-line bodies reached the model
+# with CRs. Don't bypass it with `command sqlite3` at a call site.
+sqlite3() {
+  command sqlite3 "$@" | tr -d '\r'
+}
+
 # Skip if disabled for this project
 [ -f ".claude/pigeon.disable" ] && exit 0
 

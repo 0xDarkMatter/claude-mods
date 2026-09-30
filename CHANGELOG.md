@@ -49,7 +49,10 @@ feature releases live in the README "Recent Updates" section.
   kept a stray `\r` and failed its existence check although the stored path
   was clean. `mail-db.sh` now routes every query through one `sqlite3`
   function that strips CR (exit status kept via `pipefail`), fixing the
-  attachment loops and the other line-by-line readers at once.
+  attachment loops and the other line-by-line readers at once. The
+  `check-mail.sh` delivery hook has its own attachment loop and had the same
+  bug, and multi-line bodies reached the model with stray CRs. It now uses the
+  same CR-stripping `sqlite3` function.
 
 ## [3.8.0] - 2026-08-31
 
