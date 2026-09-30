@@ -81,15 +81,27 @@ Each project hash renders as a unique pixel-art identicon (11x11 symmetric grid 
 
 ## Passive Notification (Hook)
 
-A global PreToolUse hook checks for pmail on every tool call (no cooldown). Silent when inbox is empty.
+A global PreToolUse hook checks for pmail on every tool call (no cooldown). Silent when inbox is empty. When mail is waiting it prints one JSON envelope, and Claude Code passes its `additionalContext` to the model:
+
+```json
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"=== INCOMING PMAIL (1 message(s)) ===\n..."}}
+```
+
+What the model reads:
 
 ```
-=== PMAIL: 3 unread message(s) ===
-  From: some-api  |  Auth endpoints ready
-  From: frontend  |  Need updated types
-  ... and 1 more
-Use pigeon read to read messages.
+=== INCOMING PMAIL (1 message(s)) ===
+
+--- #42 from some-api (a1b2c3) @ 2026-09-30 10:12:04 ---
+Subject: Auth endpoints ready
+Login and refresh are live on staging.
+
+=== ACTION REQUIRED: Inform the user about these messages and ask if they want to reply. ===
+=== Then run: pigeon read (to mark as read) ===
+=== To reply: pigeon reply <id> "message" ===
 ```
+
+The JSON form is required. For PreToolUse, plain stdout goes to Claude Code's debug log and never reaches the model. Claude Code caps `additionalContext` at 10,000 chars, so the hook truncates message bodies at about 9,000 and points at `pigeon read`. The header and footer are always kept. Delivery does not mark mail read. The signal file is cleared, so each new send triggers one notice.
 
 ## Attachments
 
@@ -133,6 +145,7 @@ Pigeon requires two things: **scripts** (the mail engine) and a **hook** (passiv
 ### Prerequisites
 
 - `sqlite3` - ships with macOS, most Linux distros, and Git Bash on Windows. No install needed.
+- `jq` - the hook uses it to build the JSON envelope Claude Code requires (`brew install jq`, `scoop install jq`, `apt install jq`). Without `jq` the hook stays silent, and `pigeon read` still works.
 
 ### Step 1: Copy Scripts
 
@@ -242,6 +255,7 @@ CREATE TABLE projects (
 | `sqlite3: not found` | Ships with macOS, Linux, and Git Bash on Windows. Run `sqlite3 --version` to check. |
 | Hook not firing | Ensure `hooks` block is in `~/.claude/settings.json` (Step 2 above) |
 | Hook fires but no notification | Working as intended - hook is silent when inbox is empty |
+| Mail is unread but Claude never mentions it | The hook must print JSON `additionalContext`, because plain PreToolUse stdout only reaches the debug log. Reinstall `check-mail.sh` from this repo and check `jq --version` |
 | Messages not arriving | Target must be a known name, hash, or path. Use `pigeon projects` to see registered projects |
 | Upgraded from basename IDs | Run `pigeon migrate` to convert old messages to hash-based IDs |
 | Changed display name | Use `pigeon alias old-name new-name` to update the project's display name |

@@ -59,6 +59,43 @@ att_out="$(bash "$MAIL" read)"
 case "$att_out" in *"(missing)"*) no "every existing attachment resolves (got: (missing))";; *) ok "every existing attachment resolves";; esac
 expect_eq "each attachment reports its size" "2" "$(printf '%s\n' "$att_out" | grep -c '(5 bytes)')"
 
+echo "-- hook delivery (PreToolUse additionalContext envelope) --"
+# Regression: check-mail.sh used to echo plain text, which Claude Code sends to
+# the debug log for PreToolUse - the model never saw a single notification. The
+# hook must print exactly one JSON envelope (contract at the top of the hook).
+# It runs from a throwaway non-git dir so its /tmp/pigeon_signal_* name is
+# unique to this run and a live pigeon session's hook can't clear it mid-test.
+HOOK="$(cd "$SKILL/../.." && pwd)/hooks/check-mail.sh"
+if ! command -v jq >/dev/null 2>&1; then
+  echo "  SKIP  hook envelope tests (jq not installed)"
+else
+  mkdir -p "$SB/hookproj"
+  hook() { (cd "$SB/hookproj" && bash "$HOOK" </dev/null); }
+  mail_hookproj() { (cd "$SB/hookproj" && bash "$MAIL" send "$(pwd)" "$1" "$2" </dev/null >/dev/null); }
+  envelope_event() { printf '%s' "$1" | jq -rs 'if length == 1 then .[0].hookSpecificOutput.hookEventName else "not-one-json-value" end' 2>/dev/null; }
+  envelope_ctx() { printf '%s' "$1" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null; }
+
+  expect_eq "hook silent with no mail" "" "$(hook)"
+
+  mail_hookproj "envelope trip" $'line one\nsays "quoted" \\ back'
+  hook_out="$(hook)"
+  expect_eq "hook prints exactly one PreToolUse envelope" "PreToolUse" "$(envelope_event "$hook_out")"
+  ctx="$(envelope_ctx "$hook_out")"
+  case "$ctx" in
+    *"INCOMING PMAIL"*"envelope trip"*'says "quoted" \ back'*"ACTION REQUIRED"*) ok "additionalContext carries header, message and footer";;
+    *) no "additionalContext missing delivery text (got: ${ctx:0:200})";;
+  esac
+  expect_eq "hook silent once its signal is cleared" "" "$(hook)"
+
+  # Over the 10,000-char additionalContext cap Claude Code shows the model only a
+  # 2,000-char preview, so the hook truncates bodies but keeps the footer.
+  mail_hookproj "big one" "$(head -c 12000 /dev/zero | tr '\0' x)"
+  ctx="$(envelope_ctx "$(hook)")"
+  [[ -n "$ctx" && "${#ctx}" -lt 10000 ]] && ok "oversized mail stays under the 10k cap (${#ctx} chars)" || no "oversized mail is ${#ctx} chars"
+  case "$ctx" in *"truncated"*"pigeon read"*) ok "truncation points at pigeon read";; *) no "truncation notice missing";; esac
+  expect_eq "footer survives truncation" '=== To reply: pigeon reply <id> "message" ===' "$(printf '%s\n' "$ctx" | tail -n 1)"
+fi
+
 echo ""
 echo "=== $PASS passed, $FAIL failed ==="
 [[ "$FAIL" -eq 0 ]]

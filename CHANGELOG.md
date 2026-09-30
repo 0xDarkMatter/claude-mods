@@ -33,6 +33,16 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **pigeon mail notifications never reached the model** - `check-mail.sh`
+  printed its delivery block as plain stdout. For PreToolUse hooks, Claude Code
+  sends plain stdout to the debug log. Only UserPromptSubmit, SessionStart and
+  a few other events add it to context. The hook now emits one
+  `hookSpecificOutput.additionalContext` JSON envelope via `jq`, and it
+  truncates message bodies to stay under the 10,000-char cap. Verified with
+  headless `claude -p` on 2.1.280: the old hook fired, but the model answered
+  NONE in 2 of 2 runs. With the new hook, the model quoted the planted code
+  word in 2 of 2 runs. The hook now needs `jq` and stays silent without it.
+
 - **pigeon attachments reported `(missing)` on Windows** - every attachment but
   the last. Windows' native `sqlite3.exe` writes `\r\n` in text mode, and
   command substitution strips only the final newline, so each line-parsed path
