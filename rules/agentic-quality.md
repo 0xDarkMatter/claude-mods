@@ -32,9 +32,9 @@ Three non-negotiables:
 
 ## Why this matters
 
-A 2026-07 audit of 10 active repos on this machine found the single best
-(4.8/5) and one of the weakest (3.2/5) were built by the same developer with
-the same tooling in the same month. The difference was never effort — it was whether the
+An audit of ten active repos found the single best (4.8/5) and one of the
+weakest (3.2/5) were built by the same developer with the same tooling in the
+same month. The difference was never effort — it was whether the
 conventions below were *applied as-you-go* vs deferred. The recurring failures, every
 one of them expensive for agents: 9,560-line files navigable only by grep; docs lagging
 100+ commits behind code; idempotency-key formats with zero explanation two ADRs away
@@ -159,7 +159,7 @@ The full playbook is `repo-doctor`'s [monorepo-structure reference](../skills/re
   the only reason large shared files/dirs stay safe.
 - **Extraction signal**: when a subsystem grows a roadmap, an asset library, or an
   audience of its own, it's a product — extract it to its own repo before it distorts
-  the host (the iso-studio/svg-studio rule).
+  the host.
 
 ## Self-check — before ending any turn that wrote code
 

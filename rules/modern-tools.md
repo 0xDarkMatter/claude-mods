@@ -10,7 +10,7 @@ This applies whenever you're generating user-facing commands — README install 
 
 ## Why this matters
 
-The user has explicitly built their environment around modern tooling and pre-approved permissions for it. Every legacy fallback you generate is friction the user has to undo. The user notices. They've corrected this drift more than once.
+When a user has built their environment around modern tooling and pre-approved permissions for it, every legacy fallback you generate is friction they have to undo — and it is exactly the kind of drift users notice and correct, repeatedly.
 
 Modern tools are also typically 10–100× faster (uv vs pip, fd vs find, rg vs grep) — defaulting legacy is a measurable cost, not a stylistic preference.
 

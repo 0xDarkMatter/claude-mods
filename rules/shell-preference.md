@@ -3,9 +3,9 @@
 Companion to [cli-tools.md](cli-tools.md) and [modern-tools.md](modern-tools.md). Those pick *which tool*;
 this picks *which shell syntax* to hand the user.
 
-> **Portability note:** the worked example below is the **author's** setup — Windows
-> PowerShell 5.1 on Windows. It ships as one concrete instance of the pattern, not as
-> universal law. Treat it as a template: if your interactive shell differs (zsh, fish,
+> **Portability note:** the worked example below is one concrete setup — Windows
+> PowerShell 5.1 on Windows. It ships as an instance of the pattern, not as universal
+> law. Treat it as a template: if your interactive shell differs (zsh, fish,
 > bash, pwsh 7, cmd), replace that example's table with your own shell's syntax. The
 > pattern — detect the user's shell, hand them native commands — is the portable part.
 
@@ -44,10 +44,10 @@ host's default.
 
 ## Worked example: a Windows PowerShell 5.1 user
 
-The author of this plugin pastes into **Windows PowerShell 5.1**. Generate against its
-limits: no `&&`/`||` chaining, no `export`, no `\` line-continuation, no unix coreutils.
-The table below is the bash → PowerShell translation that keeps paste-error friction to
-zero for that one user. **If your shell differs, replace this whole section with your own
+For a user who pastes into **Windows PowerShell 5.1**, generate against its limits: no
+`&&`/`||` chaining, no `export`, no `\` line-continuation, no unix coreutils. The table
+below is the bash → PowerShell translation that keeps paste-error friction to zero for
+that user. **If your shell differs, replace this whole section with your own
 table** — see the portability note above.
 
 | Don't give the user | Give instead |

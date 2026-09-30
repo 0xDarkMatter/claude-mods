@@ -8,6 +8,15 @@ feature releases live in the README "Recent Updates" section.
 
 ### Added
 
+- **`deploy-gating` rule** - a child session never deploys. Background agents, chips,
+  workflow/fleet workers, headless and scheduled runs, and CI-autofix or review-triage
+  loops may build, test and commit, but stop at the deploy boundary and report the
+  exact command and its effect. The deploy list is explicit about the case agents
+  miss: **merging or pushing to a branch that deploys automatically** (deploy-on-merge
+  CI, CodeDeploy `appspec.yml`, git-integrated hosting) *is* a deploy even though no
+  deploy command is typed. Only a live instruction in the user's own session
+  authorises one; an instruction written into a chip or lane brief does not.
+
 - **`adr-touching.py` batched queries** - several positionals in one call:
   the ADR set is parsed once and every query is matched against it, so a
   caller with N paths pays one spawn instead of N. `--json` gains a
@@ -74,6 +83,18 @@ feature releases live in the README "Recent Updates" section.
 
 ### Changed
 
+- **Rules made machine- and person-agnostic.** Rules ship in a public plugin, so
+  author-specific incidents, repos and phrasing ("the user corrected this on…") are
+  retold generically with the lesson kept: `release-review`, `public-posts`,
+  `worktree-boundaries`, `modern-tools`, `shell-preference` and `agentic-quality`.
+  `worktree-boundaries` also stops asserting that chips never isolate - whether a
+  chip gets its own worktree depends on how it is started, so the directive is to
+  seed every chip prompt to create its own lane rather than to assume either way.
+- **`public-posts` exempts replies on an automated reviewer's threads** - answering
+  an AI code-review bot's finding with evidence on a PR you are working on is the
+  PR's working record, not a statement to a third party, and a review-triage or
+  CI-autofix flow depends on it. Human-started threads and other people's PRs still
+  need the preview.
 - **`agentic-quality` rule gains a Tests section** - "evidence, not ceremony". Agents
   over-produce tests that restate the code they were written after: they always pass,
   catch nothing, and break on every refactor. The section rewards signal over count:

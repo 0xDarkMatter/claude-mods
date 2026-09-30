@@ -33,11 +33,10 @@ Pushing a commit + tag is *also* visible, but it's a much smaller signal
 than a release page. The user can review the pushed state on GitHub
 before creating the release.
 
-The user has explicitly corrected this drift (rookery v0.3.0, 2026-04-28):
-
-> "no human review before github release"
-
-— meaning a human review step is required *before* the release is published.
+This rule exists because the failure is easy and quiet: an agent told to "run the
+release flow" reads that as authority to publish, and the first human look at the
+release notes then happens *after* strangers have seen them. A human review step is
+required *before* the release is published.
 
 ## How to apply — the right release flow
 
@@ -68,16 +67,16 @@ When you stop at step 5, give the user:
 Example:
 
 ```
-v0.3.0 commit + tag pushed. Ready to create the GitHub release.
+v1.4.0 commit + tag pushed. Ready to create the GitHub release.
 
-Diff: https://github.com/0xDarkMatter/rookery/compare/v0.2.0...v0.3.0
-Tree: https://github.com/0xDarkMatter/rookery/tree/v0.3.0
+Diff: https://github.com/acme/widget-cli/compare/v1.3.0...v1.4.0
+Tree: https://github.com/acme/widget-cli/tree/v1.4.0
 
 Proposed release command:
-  gh release create v0.3.0 \
-    --repo 0xDarkMatter/rookery \
-    --title "v0.3.0 — Parcel reporting refactor" \
-    --notes-file /tmp/v030-notes.md
+  gh release create v1.4.0 \
+    --repo acme/widget-cli \
+    --title "v1.4.0 — Reporting refactor" \
+    --notes-file /tmp/v140-notes.md
 
 Want me to run it, or do you want to review on GitHub first?
 ```

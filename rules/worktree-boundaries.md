@@ -4,7 +4,7 @@ Never touch `.claude/worktrees/` in any repo. Never touch git worktrees, submodu
 
 ## The rule
 
-**Worktrees belong to the project that owns them.** If private-project housekeeping touches file X in repo Y, that does NOT extend to `.claude/worktrees/` in repo Y. Worktrees are the private state of whichever agent, session, or human spawned them. They may look orphaned and aren't.
+**Worktrees belong to the project that owns them.** If cross-project housekeeping touches file X in repo Y, that does NOT extend to `.claude/worktrees/` in repo Y. Worktrees are the private state of whichever agent, session, or human spawned them. They may look orphaned and aren't.
 
 ## What counts as "don't touch"
 
@@ -22,9 +22,9 @@ Never touch `.claude/worktrees/` in any repo. Never touch git worktrees, submodu
 - Agent-spawned worktrees may contain uncommitted work the user wants to inspect
 - Cross-project cleanup assumes context you don't have; when a project wants cleanup it will ask its own session
 
-## The specific failure this came from (2026-04-19)
+## The failure this came from
 
-During a private-project ecosystem-wide "commit + push all tool repos" pass, `git add -A` in flarecrawl staged gitlinks to 9 agent worktrees (from background agents running inside flarecrawl). Those gitlinks were committed and pushed as part of "chore: sync tool state". Then a subsequent `rm -rf .claude/worktrees/` deleted the filesystem dirs, creating a dirty state. The user correctly pushed back — private-project housekeeping has no business touching another project's agent state.
+During an ecosystem-wide "commit + push all tool repos" pass, `git add -A` in one repo staged gitlinks to nine agent worktrees (from background agents running inside that repo). Those gitlinks were committed and pushed as part of a routine "chore: sync" commit. A follow-up `rm -rf .claude/worktrees/` then deleted the directories, leaving a dirty state behind. Cross-project housekeeping has no business touching another project's agent state.
 
 ## Applied corrections when running bulk commits across repos
 
@@ -51,12 +51,12 @@ work for *sequential* work.
 |---|---|
 | Background agents (`claude --bg`) | ✅ auto-worktree under `.claude/worktrees/` — safe by default |
 | `Agent`-tool subagents / `/workflows` agents that **write** | set `isolation: 'worktree'` (read-only agents don't need it) |
-| **`spawn_task` chips** | ❌ **do NOT isolate** — the spawned session runs on the *current branch* of the primary checkout ([claude-code#64605](https://github.com/anthropics/claude-code/issues/64605)); seed the chip prompt to `git switch -c <slug>` first |
+| **`spawn_task` chips** | ⚠️ **don't assume** — whether a chip gets its own worktree depends on how it is started (it can start in a fresh worktree, but historically chips ran on the primary checkout's current branch — [claude-code#64605](https://github.com/anthropics/claude-code/issues/64605)). Seed every chip prompt to create and work in its own lane: `git worktree add .claude/worktrees/<slug> -b lane/<slug>` |
 | Manual parallel sessions | give each its own worktree; **never two writing sessions in one checkout** |
 | Agent teams | share one tree — only safe with file-partitioned, non-overlapping scopes |
 
-**Detect a live peer writer before you write.** The "worktree contract" is not enforced (chips
-violate it; an agent can escape a worktree via an absolute path), so don't *assume* isolation —
+**Detect a live peer writer before you write.** The "worktree contract" is not enforced (a chip may
+not honour it; an agent can escape a worktree via an absolute path), so don't *assume* isolation —
 verify it. When you start in a checkout whose tree is **already dirty with changes you didn't make**,
 probe before writing: fingerprint `git diff | sha1sum` twice ~6s apart and check the newest
 modified-file mtime. If the fingerprint changes (or a file was written seconds ago and you didn't do

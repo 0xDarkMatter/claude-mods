@@ -16,7 +16,7 @@
 
 Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms) and Anthropic's [patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), it installs as a standard plugin and toggles off as easily as it toggles on.
 
-**3 agents. 108 skills. 13 styles. 13 hooks. 14 rules. One install.**
+**3 agents. 108 skills. 13 styles. 13 hooks. 15 rules. One install.**
 
 ## Recent Updates
 
@@ -434,7 +434,8 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [worktree-boundaries.md](rules/worktree-boundaries.md) | Never touch other sessions' worktrees - no rm -rf, no git add -A sweeping gitlinks |
 | [loop-engineering.md](rules/loop-engineering.md) | Graduated-autonomy discipline for scheduled/autonomous agent loops - L1→L2→L3, scheduler-not-session, escalation gate, kill switch + budget; companion to loop-ops |
 | [agentic-quality.md](rules/agentic-quality.md) | Code, comments, and structure that survive the session - cold-agent test, comment doctrine (contract blocks, WHY-only, guard comments), entry-doc standard, file-size discipline, test doctrine (seen failing, named for the bug, boundary-first, no coverage targets), docs indexing + pairing; companion to repo-doctor |
-| [dev-servers.md](rules/dev-servers.md) | Never start local dev servers ad-hoc - register them under a process-compose + portless stack with a port registry; template rule (adapt paths), companion to process-compose-ops/portless-ops |
+| [deploy-gating.md](rules/deploy-gating.md) | Child sessions never deploy - background agents, chips, headless runs and CI-autofix loops build, test and commit, then stop at the deploy boundary; a merge to an auto-deploying branch counts as a deploy; only a live instruction in the user's own session authorises one |
+| [dev-servers.md](rules/dev-servers.md) | Never start local dev servers ad-hoc - register them under a supervised stack (e.g. process-compose + portless) with a port registry; generic template - concrete values live in a private CLAUDE.md; companion to process-compose-ops/portless-ops |
 | [modern-tools.md](rules/modern-tools.md) | Which-tool enforcement when generating commands - default modern (uv, fd, rg, sd), footnote legacy; companion to cli-tools.md |
 | [public-posts.md](rules/public-posts.md) | Preview-before-send for public surfaces - quote the verbatim draft and wait for explicit approval before gh comments, PRs, or any external post |
 | [release-review.md](rules/release-review.md) | Never auto-publish GitHub releases - push commit+tag, stop, surface the diff for human review before gh release create |

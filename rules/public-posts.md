@@ -19,7 +19,7 @@ Applies to (non-exhaustive):
 - `gh release create`, `gh release edit` (covered also by release-review)
 - Slack / Discord / email sends
 - Any MCP tool that publishes a comment / message / canvas to an external
-  service (Asana, Notion, Apollo, Linear, Tessitura, etc.)
+  service (Asana, Notion, Linear, Jira, etc.)
 
 Does **not** apply to:
 
@@ -29,6 +29,13 @@ Does **not** apply to:
 - `git push` itself — that's covered by the push-gate skill and per-task
   authorisation.
 - Reading public surfaces (`gh issue view`, `gh pr checks`, etc.).
+- Replies on an **automated reviewer's** threads (an AI code-review bot's findings)
+  on a PR you are working on, when the reply answers the finding with evidence —
+  e.g. "Not applicable: this repo has no test suite; verified manually, see
+  Testing." These are the PR's working record, addressed to a bot, and a
+  review-triage or CI-autofix flow depends on them. They must stay factual and
+  scoped to the finding. Threads started by humans, and anything on someone else's
+  PR, still need the preview.
 
 ## Why
 
@@ -41,8 +48,8 @@ The cost of pausing to surface the draft is one extra message. The cost
 of sending the wrong tone, a misattribution, a stale claim, or a typo to
 a third party is real and not fully reversible.
 
-The user (2026-05-29) corrected this on a `gh issue comment` to issue #4
-that they had authorised in concept but had not seen the text of.
+The failure it prevents is common: a post authorised in concept ("reply to
+that issue") goes out with wording the user never saw.
 
 ## How to apply
 
