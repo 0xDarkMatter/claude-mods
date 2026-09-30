@@ -92,13 +92,42 @@ is noise).
   probes in root. Scratch work goes to the session scratchpad or `dev/`; captured
   verification images go to `docs/screenshots/`; generated artifacts are gitignored or
   clearly marked generated ("built — don't hand-edit" header).
-- **Tests live where an agent looks**: colocated `test/`/`tests/` per package, named for
-  the behaviour they defend. Adversarial tests are named for the adversary
-  (`double-bill-nudge.test.ts`, not `billing2.test.ts`) — the name tells the next agent
-  what evil the test blocks.
+- **Tests live where an agent looks**: colocated `test/`/`tests/` per package. How they
+  are named, and what earns a test its place at all, is in
+  [Tests](#tests--evidence-not-ceremony).
 - **Every repo has one `check` entry point** (`npm run check`, `just check`, `make
   check`) that gates typecheck + lint + tests + the repo's invariant scripts. If it
   isn't one command, agents won't run it.
+
+## Tests — evidence, not ceremony
+
+A test earns its place by catching a bug nothing else would. Agents over-produce tests
+that restate the code they were written after: they always pass, catch nothing, and
+break on every refactor — and the agent then spends its time maintaining tests instead
+of the feature. Test count and coverage are the proxy an agent optimises; these
+directives reward the signal instead.
+
+- **Seen failing, or deleted.** Every new test must be watched fail — against the
+  unfixed code, or a deliberately broken version of it. A test that cannot fail is
+  noise. Characterisation tests written before a refactor are fine: they must fail when
+  the behaviour changes.
+- **Named for the bug it prevents** (`returns_404_for_unknown_slug`, not
+  `test_generate_2`). Adversarial tests are named for the adversary
+  (`double-bill-nudge.test.ts`, not `billing2.test.ts`) — the name tells the next agent
+  what evil the test blocks. If you can't name the bug, don't write the test.
+- **Failure modes first.** Before writing new logic, list the ways it can fail; each
+  becomes a named test. The list is the test plan.
+- **Test at the boundary users hit** — HTTP response, CLI output, tool result, public
+  API. Table-driven unit tests are for logic with many cases (pricing, parsing, dates,
+  permissions). Never mock the unit under test; no snapshots for logic.
+- **Small and scoped.** 1-3 tests per behaviour change; extend an existing test file
+  before creating one; no coverage targets; never introduce a test framework inside a
+  feature PR — adopting one is its own decision.
+- **E2E runs end with a checkable artifact** — screenshot, response body, trace — so a
+  reviewer (human or AI) can verify the claim without re-running it.
+- **Deleting a redundant test is an improvement.** Cull one module per PR, with
+  revert-and-run evidence that each deleted test caught nothing its neighbours don't;
+  never a repo-wide sweep.
 
 ## Docs discipline — as-you-go, indexed, delegated
 
@@ -140,6 +169,7 @@ The full playbook is `repo-doctor`'s [monorepo-structure reference](../skills/re
   Same-commit fix.
 - Did I create a file > 400 lines, or push one past 800? → Markers / split / guard.
 - Did I leave anything in repo root that isn't permanent? → Move or delete.
+- Did I add or change a test? → Have I seen it fail against the unfixed or broken code?
 - Would `repo-doctor` flag what I just did? When in doubt, run it.
 
 ## When to bend the rule

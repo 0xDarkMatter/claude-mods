@@ -54,6 +54,20 @@ feature releases live in the README "Recent Updates" section.
   bug, and multi-line bodies reached the model with stray CRs. It now uses the
   same CR-stripping `sqlite3` function.
 
+### Changed
+
+- **`agentic-quality` rule gains a Tests section** - "evidence, not ceremony". Agents
+  over-produce tests that restate the code they were written after: they always pass,
+  catch nothing, and break on every refactor. The section rewards signal over count:
+  every new test must be seen failing (against the unfixed or a deliberately broken
+  version), is named for the bug it prevents, starts from a written list of failure
+  modes, tests at the boundary users hit, stays small (1-3 per behaviour change, no
+  coverage targets, no new framework inside a feature PR), ends E2E runs with a
+  checkable artifact, and treats deleting a redundant test as an improvement - culled
+  one module per PR with revert-and-run evidence, never a repo-wide sweep. Test naming
+  moved here from the Structure section so it is stated once; the self-check gains
+  "have I seen it fail?".
+
 ## [3.8.0] - 2026-08-31
 
 Four new skills, and three existing ones realigned against a reality that moved
