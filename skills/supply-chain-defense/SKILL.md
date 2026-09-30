@@ -423,7 +423,9 @@ A dependency reaches a local machine two ways, and each gets an advisory hook:
   spec — the Claude-Code path the install hook misses. Advises depscore + cooldown
   before install. High-signal: silent on version bumps / metadata edits.
 
-Both read the tool call as JSON on stdin (`.tool_input`), falling back to `$1`.
+Both read the tool call as JSON on stdin (`.tool_input`), falling back to `$1`, and
+advise through one `additionalContext` JSON envelope on stdout - plain stdout from a
+tool hook goes to the debug log, never the model (`hooks/README.md`, "Output channels").
 
 ```json
 {

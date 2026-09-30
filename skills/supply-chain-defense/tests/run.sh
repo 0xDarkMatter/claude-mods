@@ -20,7 +20,10 @@ SCRIPTS="$SKILL/scripts"
 HOOK="$SKILL/../../hooks/pre-install-scan.sh"   # repo root/hooks or ~/.claude/hooks
 MHOOK="$SKILL/../../hooks/manifest-dep-scan.sh"
 CGHOOK="$SKILL/../../hooks/config-change-guard.sh"
-WGHOOK="$SKILL/../../hooks/worktree-guard.sh"   # not supply-chain, but hooks share this suite (no hooks-level runner)
+WGHOOK="$SKILL/../../hooks/worktree-guard.sh"   # not supply-chain, but its detection cases live here
+# Behaviour only: these cases capture 2>&1 and match substrings, so they pass on
+# either output channel. Which channel (additionalContext JSON vs stderr + exit 2)
+# is pinned by tests/hooks.sh, which the installed layout does not ship.
 SCAN="$SKILL/scripts/scan-extensions.sh"
 # Pick a python that actually executes — skips the Windows Store `python3` stub
 # (an app-execution alias that exits non-zero non-interactively).

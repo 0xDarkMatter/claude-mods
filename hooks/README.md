@@ -13,7 +13,7 @@ Claude Code hooks allow you to run custom scripts at key workflow points.
 | `pre-install-scan.sh` | PreToolUse | Advisory on dependency installs (npm/pnpm/yarn/bun/pip/uv/poetry/composer/gem/cargo, incl. `composer update`) — route through Socket, respect the release-age cooldown. `SUPPLY_CHAIN_BLOCK=1` for a hard gate. |
 | `manifest-dep-scan.sh` | PostToolUse (Write\|Edit) | Advisory when the agent edits a dependency manifest (package.json/requirements/composer.json/Cargo.toml/go.mod/Gemfile/pyproject.toml) — depscore + cooldown the added package. High-signal (silent on version bumps). |
 | `check-mail.sh` | PreToolUse | Check for unread pigeon pmail via signal file (zero-cost when empty) |
-| `config-change-guard.sh` | ConfigChange | Worm-persistence tripwire: when a Claude settings file changes mid-session, scan just that file for the vetted IOC set (curl\|sh, base64-decode eval, Invoke-Expression+Download, /dev/tcp, reads of `.claude/settings` / `.aws/credentials`). Silent on clean; advisory `systemMessage` on a finding. `SUPPLY_CHAIN_BLOCK=1` blocks the change (exit 2). Fast single-file sibling of `supply-chain-defense`'s `integrity-audit.sh`. |
+| `config-change-guard.sh` | ConfigChange | Worm-persistence tripwire: when a Claude settings file changes mid-session, scan just that file for the vetted IOC set (curl\|sh, base64-decode eval, Invoke-Expression+Download, /dev/tcp, reads of `.claude/settings` / `.aws/credentials`). Silent on clean; on a finding, a desktop notification (`terminalSequence`, interactive sessions only - ConfigChange discards `systemMessage`, so no text reaches you or the model). `SUPPLY_CHAIN_BLOCK=1` blocks the change (exit 2). Fast single-file sibling of `supply-chain-defense`'s `integrity-audit.sh`. |
 | `worktree-guard.sh` | PreToolUse (Bash) | Enforce `rules/worktree-boundaries.md`: flags `rm` on `.claude/worktrees`, `git worktree remove/prune` against worktrees, `git rm` on worktree gitlinks, and `git add -A`/`.` in a repo that has a `.claude/worktrees` dir. Sessions whose cwd is inside their own worktree are exempt. Advisory by default; `WORKTREE_GUARD_BLOCK=1` hard-denies (exit 2). |
 | `session-start-unicode-scan.sh` | SessionStart | One-shot hidden-Unicode scan of the project's instruction files (CLAUDE.md/AGENTS.md/SKILL.md/.cursorrules) at session boot. Silent on clean; advisory on a finding. Pairs with `prompt-injection-defense`. |
 | `pre-write-peer-guard.sh` | PreToolUse (Edit\|Write) | Mid-session peer-writer guard (`rules/worktree-boundaries.md`): before writing a file, warn if it was freshly modified by something that isn't this session — the signature of a live peer session sharing the checkout. Uses the touched-ledger to tell own edits apart. Advisory by default; `GUARD_BLOCK=1` denies the write. Auto-wired with its ledger companion. |
@@ -85,8 +85,8 @@ object with `type` and `command`; the tool call arrives as **JSON on stdin** (se
 }
 ```
 
-`tests/hooks.sh` pins the contract of the opt-in hooks (stdin in, exit 2 + stderr to
-block) and runs in `just check` and CI.
+`tests/hooks.sh` pins the hook contract (stdin in; exit 2 + stderr to block; one
+`additionalContext` JSON envelope to advise) and runs in `just check` and CI.
 
 ### Prompt-injection hooks (SessionStart + git pre-commit)
 
@@ -278,11 +278,29 @@ A blocking hook must write its reason to **stderr**; stdout is not shown to the 
 Check the hooks reference for the full, current schema:
 https://code.claude.com/docs/en/hooks
 
+### Output channels - what actually reaches the model
+
+Plain `echo` on exit 0 is **not** a way to tell the model something. For most events
+Claude Code sends that stdout to the debug log; only `UserPromptSubmit`,
+`UserPromptExpansion`, `SessionStart` and `PostModelSwitch` add plain stdout to
+context. The hooks here use:
+
+| Intent | Channel | Used by |
+|--------|---------|---------|
+| Advise, don't block (PreToolUse / PostToolUse) | exit 0 + **one** JSON value on stdout: `{"hookSpecificOutput":{"hookEventName":"<event>","additionalContext":"..."}}` (capped at 10,000 chars) | `pre-install-scan`, `worktree-guard`, `manifest-dep-scan`, `pre-write-peer-guard`, `check-mail` |
+| Block | exit 2 + reason on **stderr** | `dangerous-cmd-warn`, `enforce-uv`, `pre-commit-lint`, and the `*_BLOCK=1` modes |
+| SessionStart advisory | plain stdout (delivered for this event) | `session-start-unicode-scan` |
+| ConfigChange | no text channel: `systemMessage` is discarded and even a block is silent. Only `terminalSequence` (a desktop notification, interactive sessions only) reaches a person | `config-change-guard` |
+
+Build the envelope with `jq -nc --arg c "$MSG" '...'`, never by string
+concatenation, and print nothing else to stdout. `tests/hooks.sh` asserts each
+channel; run it with `HOOKS_DIR=<dir>` to point it at another copy of the hooks.
+
 ## Best Practices
 
 1. **Keep hooks fast** - They run synchronously and block Claude
-2. **Exit 0 for success** - Non-zero exits halt execution
-3. **Log sparingly** - Output goes to Claude's context
+2. **Exit 0 for success, 2 to block** - Any other non-zero exit is a non-blocking error; the call proceeds
+3. **Pick the channel on purpose** - Plain stdout reaches the model only for a few events; see [Output channels](#output-channels---what-actually-reaches-the-model)
 4. **Use matchers** - Only run hooks for relevant tools
 5. **Test locally first** - Debug before enabling in Claude
 

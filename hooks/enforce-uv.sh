@@ -8,19 +8,20 @@
 #   pip install <pkg>        -> uv add <pkg>   (or `uv pip ...` for unmanaged envs)
 #   pytest / ruff / mypy ... -> uv run <tool>
 #
-# Configuration in .claude/settings.json:
+# Configuration in .claude/settings.json (the tool call arrives as JSON on stdin):
 # {
 #   "hooks": {
 #     "PreToolUse": [{
 #       "matcher": "Bash",
-#       "hooks": ["bash hooks/enforce-uv.sh $TOOL_INPUT"]
+#       "hooks": [{ "type": "command", "command": "bash hooks/enforce-uv.sh" }]
 #     }]
 #   }
 # }
 #
 # Exit codes:
 #   0 = allow (not a Python project, already uv, or no violation)
-#   2 = block with guidance
+#   2 = block; the guidance goes to STDERR, which Claude Code feeds to the model
+# Contract tests: tests/hooks.sh
 #
 # Scope guards:
 #   - Only activates when a pyproject.toml exists in the working directory
@@ -44,12 +45,17 @@ fi
 # Only enforce inside a uv-managed project
 [[ -f "pyproject.toml" ]] || exit 0
 
-block() {
-  echo "BLOCKED (enforce-uv): $1"
-  echo "Use instead:        $2"
-  echo ""
-  echo "This project has a pyproject.toml — prefer the uv workflow."
-  echo "To bypass for one command, prefix it with ENFORCE_UV=0."
+# Claude Code feeds a blocking hook's STDERR back to the model; stdout is not
+# shown ("Exit code 2" in https://code.claude.com/docs/en/hooks). On stdout the
+# agent is blocked with no idea why or what to run instead.
+block() {   # $1 = what matched, $2 = the uv equivalent
+  {
+    echo "BLOCKED (enforce-uv): $1"
+    echo "Use instead:        $2"
+    echo ""
+    echo "This project has a pyproject.toml — prefer the uv workflow."
+    echo "To bypass for one command, prefix it with ENFORCE_UV=0."
+  } >&2
   exit 2
 }
 

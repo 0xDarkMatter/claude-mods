@@ -9,23 +9,26 @@
 # recognises install/add verbs and reminds you to scan + respect the release-age
 # cooldown, routing through the Socket CLI when available.
 #
-# Configuration in .claude/settings.json:
+# Configuration in .claude/settings.json (auto-wired by hooks/hooks.json on
+# plugin installs; the tool call arrives as JSON on stdin):
 # {
 #   "hooks": {
 #     "PreToolUse": [{
 #       "matcher": "Bash",
-#       "hooks": ["bash hooks/pre-install-scan.sh $TOOL_INPUT"]
+#       "hooks": [{ "type": "command", "command": "bash hooks/pre-install-scan.sh" }]
 #     }]
 #   }
 # }
 #
 # Behaviour:
-#   Default          → ADVISORY. Prints guidance, exits 0 (command proceeds).
-#   SUPPLY_CHAIN_BLOCK=1 → HARD GATE. Exits 2 (command blocked) so you scan first.
+#   Default          → ADVISORY. One additionalContext JSON envelope on stdout
+#                      (the model sees it next to the tool result), exit 0.
+#   SUPPLY_CHAIN_BLOCK=1 → HARD GATE. Reason on STDERR, exit 2 (command blocked).
 #
 # Exit codes:
 #   0 = allow (not an install, already wrapped, or advisory mode)
 #   2 = block with message (install verb matched AND SUPPLY_CHAIN_BLOCK=1)
+# Channel contract tests: tests/hooks.sh
 
 INPUT="$1"
 # Modern Claude Code delivers the tool call as JSON on stdin
@@ -74,23 +77,36 @@ fi
 # ─── Compose the advisory ──────────────────────────────────────────────────
 HAS_SOCKET=0; command -v socket >/dev/null 2>&1 && HAS_SOCKET=1
 
-echo "SUPPLY CHAIN: dependency install detected (${ECO})."
-echo "Lifecycle scripts run on install — the 2026 worm vector. Before proceeding:"
-echo "  1. Behavioural scan (not just npm audit / pip-audit — those miss fresh malware)."
-echo "  2. Respect the 7-day release-age cooldown for anything that hits prod/CI."
+MSG="SUPPLY CHAIN: dependency install detected (${ECO}).
+Lifecycle scripts run on install — the 2026 worm vector. Before proceeding:
+  1. Behavioural scan (not just npm audit / pip-audit — those miss fresh malware).
+  2. Respect the 7-day release-age cooldown for anything that hits prod/CI."
 if [[ "$HAS_SOCKET" -eq 1 ]]; then
-  echo "  Route it through Socket:  ${SAFE}"
+  MSG+=$'\n'"  Route it through Socket:  ${SAFE}"
 else
-  echo "  Socket CLI not installed (free):  npm install -g socket"
-  echo "  Or add depscore MCP (no key):  claude mcp add --transport http socket-mcp https://mcp.socket.dev/"
+  MSG+=$'\n'"  Socket CLI not installed (free):  npm install -g socket"
+  MSG+=$'\n'"  Or add depscore MCP (no key):  claude mcp add --transport http socket-mcp https://mcp.socket.dev/"
 fi
-echo "  Cooldown check:  bash skills/supply-chain-defense/scripts/preinstall-check.sh <pkg>"
+MSG+=$'\n'"  Cooldown check:  bash skills/supply-chain-defense/scripts/preinstall-check.sh <pkg>"
 
+# ─── Emit ──────────────────────────────────────────────────────────────────
+# Guard: do not "simplify" this back to plain echo. For PreToolUse, plain stdout
+# on exit 0 goes to the debug log and never reaches the model, and on exit 2
+# Claude Code feeds the model STDERR, not stdout ("Exit code 0" / "Exit code 2"
+# in https://code.claude.com/docs/en/hooks). The echo-only original was invisible
+# on both paths: advisories reached nobody, and the hard gate blocked the agent
+# without telling it why. Nothing else may write to stdout, or the JSON stops
+# parsing.
 if [[ "${SUPPLY_CHAIN_BLOCK:-0}" == "1" ]]; then
-  echo ""
-  echo "Blocked (SUPPLY_CHAIN_BLOCK=1). Scan the package, then re-run via the Socket"
-  echo "wrapper or unset SUPPLY_CHAIN_BLOCK after you've confirmed it's safe."
+  {
+    printf '%s\n\n' "$MSG"
+    echo "Blocked (SUPPLY_CHAIN_BLOCK=1). Scan the package, then re-run via the Socket"
+    echo "wrapper or unset SUPPLY_CHAIN_BLOCK after you've confirmed it's safe."
+  } >&2
   exit 2
 fi
 
+# No jq, no envelope - stay silent (plain text would only reach the debug log).
+command -v jq >/dev/null 2>&1 || exit 0
+jq -nc --arg c "$MSG" '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:$c}}'
 exit 0

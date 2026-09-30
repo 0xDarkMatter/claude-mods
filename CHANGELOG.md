@@ -42,6 +42,23 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **Supply-chain, worktree and enforce-uv hooks never reached the model** -
+  the pigeon hook's output-channel defect, in five more hooks. The
+  auto-wired advisories (`pre-install-scan`, `worktree-guard` on PreToolUse,
+  `manifest-dep-scan` on PostToolUse) echoed plain text, which Claude Code sends
+  to the debug log for tool events; they now emit one
+  `hookSpecificOutput.additionalContext` JSON envelope via `jq`.
+  `pre-install-scan`'s `SUPPLY_CHAIN_BLOCK=1` gate and `enforce-uv` blocked with
+  their reason on stdout, so the agent was stopped with "No stderr output"; the
+  reason now goes to stderr. `config-change-guard` sent a `systemMessage`, which
+  ConfigChange discards (as it does every text channel); on an IOC it now also
+  raises a desktop notification via `terminalSequence`, the one field that
+  event delivers (interactive sessions only). Verified A/B with headless
+  `claude -p` on 2.1.280: every old hook's text was absent from the model's
+  context, every fixed hook's text was quoted back. `tests/hooks.sh` pins each
+  channel (8 new assertions fail against the old hooks) and the hooks README
+  gains an "Output channels" table; its "output goes to Claude's context"
+  best-practice line was wrong and is gone.
 - **doc-drift link checks are now case-exact, and CI's doc-drift step passes
   again.** `fleet-worker` linked `docs/auto-mode-classifier.md`, but the file is
   `docs/AUTO-MODE-CLASSIFIER.md`. The gate tested links with `[ -e ]`, which is
