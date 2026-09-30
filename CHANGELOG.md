@@ -42,6 +42,15 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **doc-drift link checks are now case-exact, and CI's doc-drift step passes
+  again.** `fleet-worker` linked `docs/auto-mode-classifier.md`, but the file is
+  `docs/AUTO-MODE-CLASSIFIER.md`. The gate tested links with `[ -e ]`, which is
+  case-insensitive on Windows and macOS, so it passed locally and failed only on
+  Linux CI - where it had kept the validate job red since mid-September and stopped
+  every later step from running. Links are now checked component by component
+  against the real on-disk spelling (directory listings cached, pure-bash
+  comparison), so a wrong-case link fails locally too; the three wrong-case
+  references are corrected.
 - **pigeon mail notifications never reached the model** - `check-mail.sh`
   printed its delivery block as plain stdout. For PreToolUse hooks, Claude Code
   sends plain stdout to the debug log. Only UserPromptSubmit, SessionStart and

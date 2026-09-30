@@ -224,7 +224,7 @@ allow-rule can't whitelist the launch. Either launch the fan-out from outside th
 auto-mode session (script / Task Scheduler, or an interactive orchestrator), or run
 the worker in `dontAsk` + an allowlist (`--allowedTools …` or `permissions.allow` in
 the worker config) — `dontAsk` is non-interactive yet not an "unsafe agent." The
-launcher warns on `dontAsk` with no allowlist. Full model: `docs/auto-mode-classifier.md`.
+launcher warns on `dontAsk` with no allowlist. Full model: `docs/AUTO-MODE-CLASSIFIER.md`.
 
 ## 10. Effort control
 

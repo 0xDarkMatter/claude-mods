@@ -21,6 +21,32 @@ cd "$ROOT" || exit 1
 errors=0
 err() { echo "DRIFT: $*"; errors=$((errors + 1)); }
 
+# True only if the path exists with EXACTLY this spelling, component by
+# component. `[ -e ]` is case-insensitive on Windows and macOS filesystems, so a
+# link to docs/auto-mode-classifier.md passed locally while the file was
+# docs/AUTO-MODE-CLASSIFIER.md - and failed on case-sensitive Linux CI.
+# Each directory is listed once and cached, and the comparison is pure bash:
+# spawning ls+grep per component per link took this gate from seconds to minutes
+# under Git Bash, where process start-up is expensive.
+declare -A DIR_LS=()
+exists_exact() {
+    local p="$1" cur="" part dir
+    [ -e "$p" ] || return 1
+    local IFS='/'
+    for part in $p; do
+        case "$part" in
+            ''|'.') continue ;;
+            '..') cur="${cur:+$cur/}.."; continue ;;
+        esac
+        dir="${cur:-.}"
+        if [ -z "${DIR_LS[$dir]+set}" ]; then
+            DIR_LS[$dir]=$'\n'"$(ls -a -- "$dir" 2>/dev/null)"$'\n'
+        fi
+        [[ "${DIR_LS[$dir]}" == *$'\n'"$part"$'\n'* ]] || return 1
+        cur="${cur:+$cur/}$part"
+    done
+}
+
 # --- 1. Counts on disk ------------------------------------------------------
 skills_disk=0
 for d in skills/*/; do
@@ -118,7 +144,7 @@ for doc in README.md AGENTS.md; do
     while IFS= read -r path; do
         path="${path%%#*}"   # strip anchors
         [ -z "$path" ] && continue
-        [ -e "$path" ] || err "$doc: link target does not exist: $path"
+        exists_exact "$path" || err "$doc: link target does not exist (or wrong case): $path"
     done < <(grep -oE '\]\((skills|agents|hooks|rules|output-styles|commands|docs|tools|tests|scripts)/[^)]*\)' "$doc" \
              | sed -E 's/^\]\(//; s/\)$//')
 done
@@ -180,7 +206,7 @@ while IFS= read -r skill_doc; do
         esac
         link="${link%%#*}"   # strip anchors
         [ -z "$link" ] && continue
-        [ -e "$skill_dir/$link" ] || err "$skill_doc: link target does not exist: $link"
+        exists_exact "$skill_dir/$link" || err "$skill_doc: link target does not exist (or wrong case): $link"
     done < <(awk '
         /^[[:space:]]*(```|~~~)/ { fence = !fence; next }
         fence { next }

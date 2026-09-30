@@ -111,7 +111,7 @@ export ANTHROPIC_DEFAULT_HAIKU_MODEL="${FLEET_WORKER_SMALL_MODEL:-GLM-4.5-Air}"
 # spawned FROM a parent session in auto mode, a bypassPermissions launch is hard-denied
 # by the auto-mode classifier as "Create Unsafe Agents" - no allow-rule saves it. The
 # fix is a gated but still-non-interactive mode: dontAsk + an allowlist. Full model in
-# ../SKILL.md "Permission posture" and docs/auto-mode-classifier.md.
+# ../SKILL.md "Permission posture" and docs/AUTO-MODE-CLASSIFIER.md.
 PERM_MODE="${FLEET_WORKER_PERMISSION_MODE:-bypassPermissions}"
 case "$PERM_MODE" in
   default|acceptEdits|plan|auto|dontAsk|bypassPermissions) ;;

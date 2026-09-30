@@ -230,7 +230,7 @@ auto mode). Two fixes, either works:
 
 `FLEET_WORKER_PERMISSION_MODE` accepts any Claude Code mode
 (`default|acceptEdits|plan|auto|dontAsk|bypassPermissions`). See
-[../../docs/auto-mode-classifier.md](../../docs/auto-mode-classifier.md) for the full
+[../../docs/AUTO-MODE-CLASSIFIER.md](../../docs/AUTO-MODE-CLASSIFIER.md) for the full
 classifier model (the override rules, the broad-allow-rule drop, and §7.9 on running
 headless sessions).
 
