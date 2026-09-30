@@ -303,7 +303,7 @@ validate_description_budget() {
     DESC_BUDGET_MODE="fail" # warn|fail
 
     local skills_dir="$PROJECT_DIR/skills"
-    # Per-skill hard cap raised 700 -> 1000 (Mack, 2026-08-30). The 700 figure came out of
+    # Per-skill hard cap raised 700 -> 1000 (maintainer decision, 2026-08-30). The 700 figure came out of
     # the 2026-07 trim and proved too tight for skills whose trigger surface is genuinely
     # broad - windows-ops alone covers boot, storage, crash AND steady-state process triage.
     # Cutting real trigger phrases to fit a number costs more in missed routing than it saves

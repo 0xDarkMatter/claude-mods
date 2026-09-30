@@ -39,6 +39,9 @@ jobs:
       - name: Doc-drift gate (docs must match disk)
         run: bash tests/doc-drift.sh
 
+      - name: Agnostic gate (no author-specific identifiers in a public repo)
+        run: bash tests/agnostic.sh
+
       - name: Executable-bit gate (tracked scripts must be executable)
         run: bash tests/check-exec-bits.sh
 

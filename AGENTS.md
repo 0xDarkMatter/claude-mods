@@ -64,6 +64,7 @@ On "INIT:" message at session start:
 | [`fleetflow`](https://github.com/0xDarkMatter/fleetflow) (own repo) | Heterogeneous GLM/Codex/Grok/Pi/Anthropic worker fleets from one session; extracted 2026-08-01, mounted as `/fleetflow` via junction at `~/.claude/skills/fleetflow` |
 | `tests/validate.sh` | Frontmatter + naming gate; enforces the description-budget cap (combined description+when_to_use, hard-fails over budget) |
 | `tests/doc-drift.sh` | Counts-on-disk vs docs gate; also checks section-map markers and skill-frontmatter ghost references (related-skills/depends-on naming a skill not on disk) |
+| `tests/agnostic.sh` | Public-repo gate: fails on user-profile paths with real names, plus anything in the author's PRIVATE deny list; legit look-alikes go in `tests/agnostic-allow.txt` |
 
 ## Quick Reference
 
@@ -135,10 +136,21 @@ Requires Sonnet 4+ or Opus 4+.
   don't just eyeball the code change).
 - Never touch `.claude/worktrees/` or any repo's git worktree state (see
   `rules/worktree-boundaries.md`) — it looks orphaned and isn't.
+- **This repo is public — keep it agnostic.** `tests/agnostic.sh` (in `just check` and
+  CI) catches user-profile paths with real names; author-specific identifiers are
+  caught by a PRIVATE deny list (`~/.claude/agnostic-deny.txt` or the gitignored
+  `tests/agnostic-deny.local`). Never write personal names into the committed gate —
+  that publishes what it protects. Machine-specific values belong in the user's
+  private `CLAUDE.md`, not in a rule.
+- **Git Bash rewrites arguments that start with `/`** into Windows paths
+  (`rg --path-separator /` → the Git install dir; `sd '/Users/...'` silently matches
+  nothing). Set `MSYS_NO_PATHCONV=1` for such calls, and never let a gate swallow a
+  tool's exit-2 error — that combination once made the agnostic gate pass while
+  scanning nothing.
 
 ## Testing
 
 ```bash
-just check        # THE gate: validate + doc-drift + resource contracts + skill suites
+just check        # THE gate: validate + doc-drift + agnostic + resource contracts + skill suites
 just check-fast   # same minus the per-skill behavioural suites
 ```

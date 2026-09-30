@@ -27,7 +27,7 @@ Absolute paths break on any other machine, in CI, or after a folder rename.
 
 ```r
 # BAD — ties code to one machine
-setwd("/Users/mack/projects/analysis")
+setwd("/Users/me/projects/analysis")
 data <- read.csv("data/raw.csv")
 
 # GOOD — works everywhere the .Rproj exists
@@ -455,7 +455,7 @@ dependencies (R >= 4.1).
 
 ```r
 # This crashes on every other machine
-read_csv("/Users/mack/Desktop/data.csv")
+read_csv("/Users/me/Desktop/data.csv")
 
 # Use here::here() relative to project root
 read_csv(here::here("data", "raw.csv"))

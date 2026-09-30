@@ -1552,7 +1552,7 @@ $('#inspectBtn').onclick=toggleInspect;
 $('#splitBtn').onclick=toggleSplit;
 $('#meshBtn').onclick=toggleMesh;
 $('#undoBtn').onclick=undo; updateUndoBtn();
-// chrome theme: E7 light (default) ↔ petrol dark — a token swap on <html data-theme>
+// chrome theme: brand light (default) ↔ petrol dark — a token swap on <html data-theme>
 function applyChromeTheme(t){ document.documentElement.dataset.theme=t; try{localStorage.setItem('svgstudio-theme',t);}catch{} }
 $('#themeBtn').onclick=()=>applyChromeTheme(document.documentElement.dataset.theme==='petrol'?'light':'petrol');
 applyChromeTheme(LS.get('svgstudio-theme')||'light');

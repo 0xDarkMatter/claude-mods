@@ -113,7 +113,7 @@ Get-Item WSMan:\localhost\Client\TrustedHosts
 Then auth with local credentials of the target:
 
 ```powershell
-$cred = Get-Credential REMOTE-PC\Mack    # username = TARGET\user, password = TARGET's user password
+$cred = Get-Credential REMOTE-PC\admin   # username = TARGET\user, password = TARGET's user password
 Enter-PSSession -ComputerName REMOTE-PC -Credential $cred
 ```
 
@@ -262,7 +262,7 @@ Restart-Service sshd
 
 Caller side:
 ```powershell
-Enter-PSSession -HostName REMOTE-PC -UserName Mack
+Enter-PSSession -HostName REMOTE-PC -UserName admin
 # Same as SSH — uses ~\.ssh\id_rsa, ~/.ssh/config, known_hosts
 ```
 

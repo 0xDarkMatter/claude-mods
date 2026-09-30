@@ -9,7 +9,9 @@ Issues and PRs are welcome. A few ground rules keep them mergeable.
 - Commits follow [Conventional Commits](https://www.conventionalcommits.org/):
   `type(scope): summary` - see `rules/commit-style.md` for the house specifics.
 - Run the gate before pushing: `just check` (frontmatter validation, doc-drift,
-  resource contracts, and every skill's behavioural suite).
+  the agnostic gate, resource contracts, and every skill's behavioural suite).
+- Keep contributions machine-agnostic: no real usernames, home paths, hostnames or
+  private project names in examples - use placeholders (`/Users/me`, `<project>`).
 - Conventions for skills, agents, and naming live in
   [AGENTS.md](AGENTS.md) and `docs/SKILL-CREATION-PROTOCOL.md` - read those
   before adding components.

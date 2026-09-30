@@ -180,7 +180,7 @@ curl --cacert ~/.portless/ca.pem https://<your-app>.<your-tld>/   # proper
 
 ## Worked Example: Replacing Caddy with portless
 
-See `~/X/00_Orchestration/compose-portless/` for a worked migration from PM2+Caddy to Process Compose+portless. Key files:
+A PM2+Caddy to Process Compose+portless migration is worth keeping in its own small repo (e.g. `~/infra/local-stack/`), with these key files:
 
 - `process-compose.yaml` — supervisor config with health-checked services
 - `scripts/cutover.ps1` — stops PM2/Caddy, starts portless+PC, registers aliases

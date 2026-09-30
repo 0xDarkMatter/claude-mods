@@ -84,7 +84,7 @@ Or manual check: only `name`, `description`, `license`, `compatibility`, `allowe
 
 ```bash
 # From claude-mods root
-claude -p "Update all 66 SKILL.md files in /Users/mack/projects/claude-mods/skills/ to comply with Agent Skills spec. [paste this brief as context]" --dangerously-skip-permissions
+claude -p "Update all 66 SKILL.md files in ~/projects/claude-mods/skills/ to comply with Agent Skills spec. [paste this brief as context]" --dangerously-skip-permissions
 ```
 
 ## Reference
@@ -92,4 +92,4 @@ claude -p "Update all 66 SKILL.md files in /Users/mack/projects/claude-mods/skil
 - Spec: https://agentskills.io/specification
 - CLI: https://github.com/vercel-labs/skills (npx skills)
 - Directory: https://skills.sh
-- private-project core skills (already updated): /Users/mack/projects/private-project/00_forma/.claude/skills/
+- private-project core skills (already updated): ~/projects/private-project/.claude/skills/

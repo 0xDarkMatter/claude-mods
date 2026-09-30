@@ -1,0 +1,11 @@
+# Allowlist for tests/agnostic.sh - legitimate matches that look like leaks.
+#
+# Format: a `# reason` comment, then `<repo-relative path>:<line regex (bash ERE)>`.
+# A hit is suppressed only when it is in that exact file AND its line matches the
+# regex. Keep entries narrow - anchor on the content, never on a line number (they
+# drift) - and never add a whole-file bypass. Every entry needs a reason a stranger
+# would accept.
+
+# 192.168.50.0/24 is the factory-default LAN of current ASUS routers, used in a
+# commented-out example explicitly labelled ADAPT - not anyone's real network.
+skills/asus-router-ops/assets/firewall-start.sh:192\.168\.50\.

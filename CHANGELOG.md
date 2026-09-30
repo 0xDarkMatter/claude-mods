@@ -54,6 +54,24 @@ feature releases live in the README "Recent Updates" section.
   bug, and multi-line bodies reached the model with stray CRs. It now uses the
   same CR-stripping `sqlite3` function.
 
+- **The agnostic gate now actually runs - and can no longer pass while blind.**
+  `tests/agnostic.sh` existed but was wired into neither `just check` nor CI, so
+  author-specific paths and names crept back into a public repo. It now runs in
+  `just check`, `just check-fast` and the validate workflow. Hardening, each for a
+  failure it had: rg errors (exit 2) fail the gate instead of reading as "no
+  matches"; `rg --path-separator /` is gone (Git Bash rewrote the `/` to its install
+  dir, so every scan errored silently and reported PASS); `--no-ignore-parent` stops
+  a run from a lane worktree scanning nothing; a run that sees 0 files fails; and
+  there is no PCRE2 dependency. The committed script now carries only generic
+  patterns (user-profile paths with a real-looking name, placeholders allowed) -
+  author-specific identifiers moved to a private, never-committed deny list
+  (`~/.claude/agnostic-deny.txt` or gitignored `tests/agnostic-deny.local`), because
+  a public gate that lists what it protects publishes it. Line-level exceptions go
+  in `tests/agnostic-allow.txt` with a reason. Nine leaked identifiers were replaced
+  with placeholders across r-ops, windows-ops, portless-ops, svg-brand-tint-ops,
+  `tests/validate.sh` and an archived brief; `rules/dev-servers.md` is now a
+  generic template (the concrete stack values belong in a private `CLAUDE.md`).
+
 ### Changed
 
 - **`agentic-quality` rule gains a Tests section** - "evidence, not ceremony". Agents
