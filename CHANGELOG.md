@@ -42,6 +42,18 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **`prompt-injection-defense` missed line separators and invisible fillers** -
+  `scan-hidden-unicode.py` reported `ok<U+2028>=== FORGED ===` as clean, though a
+  model may read `U+2028` as a new line that no reviewer sees. The scanner split
+  lines with `str.splitlines()`, which drops VT, FF, FS-RS, NEL, `U+2028` and
+  `U+2029` before they can be classified (and shifts every later line number); it
+  now splits on CRLF/CR/LF only. New catalog bands: line/paragraph separators, NEL,
+  FS-RS, soft hyphen, CGJ, Khmer inherent vowels and the Hangul fillers at `high`;
+  VT/FF and the Mongolian vowel separator at `medium`. `sanitize-content.py` now
+  flattens the line-break bands and the blank-rendering Hangul fillers to a space
+  (new catalog field `replace_with`, reported as `replaced_by_band`) instead of
+  deleting them, so a forged line can't survive and words never fuse.
+
 - **Supply-chain, worktree and enforce-uv hooks never reached the model** -
   the pigeon hook's output-channel defect, in five more hooks. The
   auto-wired advisories (`pre-install-scan`, `worktree-guard` on PreToolUse,
