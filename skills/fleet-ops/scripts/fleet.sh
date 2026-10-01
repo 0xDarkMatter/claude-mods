@@ -794,6 +794,12 @@ cmd_config() {
     else
       echo "# session awareness: ON but no sessions resolved — store missing, jq missing, or terminal-only host" >&2
     fi
+    # Which stores answered. The 2026-09-28 prune misclassification came from
+    # reading one Desktop instance's store out of four, and nothing said so.
+    local kind dir
+    while IFS=$'\t' read -r kind dir; do
+      [[ -n "$kind" ]] && echo "#   $kind: $dir" >&2
+    done < <(bash "$SESSIONS_SH" stores 2>/dev/null || true)
   else
     echo "# session awareness: OFF — 'fleet land' will not check for live lane owners" >&2
   fi
@@ -862,14 +868,55 @@ SESSION_INDEX_LOADED=0
 # evidence at all, and the two are indistinguishable from an empty index alone.
 # Anything that can't tell them apart must not classify a worktree removable.
 SESSION_STORE_OK=0
+# Directory claims (sessions.sh `paths`): key, path, sessionId, title, lastMs,
+# archived, live, via. Prune needs these as well as the branch index, because
+# the branch join is blind in two ways that both occurred on 2026-09-28: a
+# wrapper's branch can differ from what its worktree has checked out (a session
+# ran branch `claude/keen-mccarthy` in worktree `vigilant-grothendieck`), and a
+# session that moved into a lane via EnterWorktree never records that lane in
+# its wrapper at all — only its transcript's directory says where it went.
+SESSION_PATHS_CACHE=""
+# load_session_index [fresh] — `fresh` forces a re-scan even when already
+# loaded, for the one caller that must not act on a cached read: prune's
+# pre-removal re-classification.
 load_session_index() {
   session_enabled || return 0
-  [[ $SESSION_INDEX_LOADED -eq 1 ]] && return 0
+  local fresh=${1:-}
+  [[ $SESSION_INDEX_LOADED -eq 1 && "$fresh" != fresh ]] && return 0
   SESSION_INDEX_LOADED=1
-  local rc=0
-  SESSION_INDEX_CACHE=$(FLEET_SESSION_LIVE_SECS="$SESSION_LIVE_SECS" \
-    bash "$SESSIONS_SH" index 2>/dev/null) || rc=$?
-  [[ $rc -eq 0 ]] && SESSION_STORE_OK=1
+  SESSION_STORE_OK=0
+  local rc=0 views="" nocache="${FLEET_SESSION_NOCACHE:-}"
+  [[ "$fresh" == fresh ]] && nocache=1
+  # One process, one scan, both projections (tagged I/P): a second sessions.sh
+  # process costs ~200ms on Windows on every `fleet status`.
+  views=$(FLEET_SESSION_LIVE_SECS="$SESSION_LIVE_SECS" FLEET_SESSION_NOCACHE="$nocache" \
+    bash "$SESSIONS_SH" views 2>/dev/null) || rc=$?
+  SESSION_INDEX_CACHE=""; SESSION_PATHS_CACHE=""
+  # Both views, or neither: prune reads "no claim" as evidence, which is only
+  # true when the claims were actually read.
+  if [[ $rc -eq 0 ]]; then
+    SESSION_INDEX_CACHE=$(printf '%s\n' "$views" | awk '/^I\t/ { print substr($0, 3) }')
+    SESSION_PATHS_CACHE=$(printf '%s\n' "$views" | awk '/^P\t/ { print substr($0, 3) }')
+    SESSION_STORE_OK=1
+  fi
+  return 0
+}
+
+# Claude Code's project-dir encoding, lowercased — the key a transcript's
+# directory is filed under. MIRRORS path_key() in sessions.sh; a drift between
+# the two silently loses transcript claims (tests/run.sh pins the pair).
+path_key() {
+  printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C sed 's/[^a-z0-9]/-/g'
+}
+
+# Every claim on worktree $1 (git's path form): an exact normalised-path match,
+# or a transcript filed under its encoded key. Same TSV as `sessions.sh paths`.
+path_claims() {
+  [[ -z "$SESSION_PATHS_CACHE" ]] && return 0
+  local n k
+  n=$(prune_norm "$1"); k=$(path_key "$n")
+  printf '%s\n' "$SESSION_PATHS_CACHE" \
+    | awk -F'\t' -v n="$n" -v k="$k" 'NF && (($2 != "" && $2 == n) || $1 == k)'
   return 0
 }
 
@@ -918,7 +965,7 @@ session_is_self() {
   session_enabled || return 1
   if [[ $SELF_SESSION_LOADED -eq 0 ]]; then
     SELF_SESSION_LOADED=1
-    SELF_SESSION_ID=$(bash "$SESSIONS_SH" self 2>/dev/null) || SELF_SESSION_ID=""
+    SELF_SESSION_ID=$(bash "$SESSIONS_SH" self 2>/dev/null </dev/null) || SELF_SESSION_ID=""
   fi
   [[ -n "$SELF_SESSION_ID" && "$1" == "$SELF_SESSION_ID" ]]
 }
@@ -941,9 +988,55 @@ peer_live_owners() {
   return 0
 }
 
-# The gate itself. Refuses to land a lane whose owning session is still live —
+# Live DIRECTORY claims on worktree $1, one row per session:
+# "id<TAB>title<TAB>routes" (routes: cwd,worktree,transcript,live-cwd).
+# The branch join alone is blind in the two ways prune hit on 2026-09-28: a
+# wrapper's branch drifts from what its worktree has checked out (a session in
+# worktree vigilant-grothendieck recorded branch claude/keen-mccarthy), and a
+# session that EnterWorktree'd into a lane records that only in its
+# transcript. Either way the branch join finds no live owner, and the gate
+# merged — then rebased — under a session still writing in that worktree.
+# `at --fresh`, never the cached `at`: this decides a refusal, and the index is
+# up to 15 minutes old. See cmd_at in sessions.sh for what "fresh" covers.
+worktree_live_claims() {
+  session_enabled || return 0
+  FLEET_SESSION_LIVE_SECS="$SESSION_LIVE_SECS" \
+    bash "$SESSIONS_SH" at --fresh "$1" 2>/dev/null </dev/null \
+    | awk -F'\t' -v OFS='\t' '
+        NF && $7 == "1" {
+          if (!($3 in t)) { o[++n] = $3; t[$3] = $4; r[$3] = $8 }
+          else if (index("," r[$3] ",", "," $8 ",") == 0) r[$3] = r[$3] "," $8
+        }
+        END { for (i = 1; i <= n; i++) print o[i], t[o[i]], r[o[i]] }' || true
+}
+
+# Collapse "id<TAB>title<TAB>how" rows ($1) to one per session, first-seen
+# order, the hows joined with "; ".
+merge_claimants() {
+  printf '%s\n' "$1" | awk -F'\t' -v OFS='\t' '
+    NF >= 3 && $1 != "" {
+      if (!($1 in t)) { o[++n] = $1; t[$1] = $2; h[$1] = $3 } else h[$1] = h[$1] "; " $3
+    }
+    END { for (i = 1; i <= n; i++) print o[i], t[o[i]], h[o[i]] }'
+}
+
+log_claimants() {
+  local id title how
+  while IFS=$'\t' read -r id title how; do
+    [[ -n "$id" ]] && log "    '$title' ($id) - $how"
+  done <<< "$1"
+  return 0
+}
+
+# The gate itself. Refuses to land a lane any LIVE session is working on —
 # landing under a session that is mid-turn means merging a branch it may still
 # be committing to, and then rebasing its worktree out from under it.
+#
+# "Working on" is the union of two joins, because each is blind where the
+# other sees: the BRANCH join (the newest session that checked out or wrote
+# the lane branch, via `owner --fresh`) and the DIRECTORY join (any session
+# claiming the worktree the branch is checked out in — worktree_live_claims).
+# Neither trusts the cached index's liveness; both re-read it.
 #
 # SELF-OWNERSHIP IS EXEMPT, and the reason is the whole design: that hazard is
 # about a CONCURRENT writer. A session landing its own lane is not one — it is
@@ -954,35 +1047,55 @@ peer_live_owners() {
 # for the peers it genuinely protects. A narrow exemption beats a blunt one.
 #
 # It stays conservative in both directions: unresolvable self never matches,
-# and self must be the ONLY live owner. A second live session writing the same
-# branch is the real hazard, and refuses exactly as before.
+# and self must be the ONLY live claimant — by either join, plus every other
+# live writer of the branch (peer_live_owners). A second live session is the
+# real hazard, and refuses exactly as before. A CLI or headless session has no
+# store record, so it can never prove it is self: working in the lane's
+# worktree, it refuses even its own land.
 # Returns 0 = safe to land, 1 = refuse.
 session_land_gate() {
   local branch=$1
   session_enabled || return 0
-  local row; row=$(lane_owner "$branch" --fresh)
-  [[ -z "$row" ]] && return 0            # unknown owner → no opinion → allow
-  local live; live=$(sfield "$row" 7)
-  [[ "$live" != "1" ]] && return 0       # idle → allow
-  local title; title=$(sfield "$row" 3)
-  local id;    id=$(sfield "$row" 2)
-  if session_is_self "$id"; then
-    local peers pid ptitle
-    peers=$(peer_live_owners "$branch" "$id")
-    if [[ -z "$peers" ]]; then
-      log "landing own lane: $branch is owned by THIS session ($id) — not a concurrent writer"
+  local claimants="" row wt claims
+  row=$(lane_owner "$branch" --fresh)
+  if [[ -n "$row" && "$(sfield "$row" 7)" == "1" ]]; then
+    claimants="$(sfield "$row" 2)"$'\t'"$(sfield "$row" 3)"$'\t'"owns $branch"$'\n'
+  fi
+  while IFS= read -r wt; do
+    [[ -n "$wt" ]] || continue
+    claims=$(worktree_live_claims "$wt")
+    [[ -n "$claims" ]] || continue
+    claimants+=$(printf '%s\n' "$claims" \
+      | awk -F'\t' -v OFS='\t' -v wt="$wt" 'NF { print $1, $2, "working in " wt " (by " $3 ")" }')$'\n'
+  done <<< "$(worktree_path_for "$branch")"
+  claimants=$(merge_claimants "$claimants")
+  [[ -z "$claimants" ]] && return 0      # nobody live → allow
+
+  local id title how others="" self_in=0
+  while IFS=$'\t' read -r id title how; do
+    [[ -z "$id" ]] && continue
+    if session_is_self "$id"; then self_in=1; else others+="$id"$'\t'"$title"$'\t'"$how"$'\n'; fi
+  done <<< "$claimants"
+
+  if [[ $self_in -eq 1 ]]; then
+    local peers
+    peers=$(peer_live_owners "$branch" "$SELF_SESSION_ID")
+    [[ -n "$peers" ]] && others+=$(printf '%s\n' "$peers" \
+      | awk -F'\t' -v OFS='\t' -v b="$branch" 'NF { print $1, $2, "also writes " b }')$'\n'
+    others=$(merge_claimants "$others")
+    if [[ -z "$others" ]]; then
+      log "landing own lane: $branch is claimed only by THIS session ($SELF_SESSION_ID) — not a concurrent writer"
       return 0
     fi
     # Self plus someone else: the someone else is the hazard, so say who.
-    log "REFUSE LAND: $branch is owned by this session AND another LIVE session:"
-    while IFS=$'\t' read -r pid ptitle; do
-      [[ -n "$pid" ]] && log "    '$ptitle' ($pid)"
-    done <<< "$peers"
+    log "REFUSE LAND: $branch is claimed by this session AND another LIVE session:"
+    log_claimants "$others"
     log "  a peer may still be committing to it — coordinate before landing."
     return 1
   fi
-  log "REFUSE LAND: $branch is owned by a LIVE session — '$title' ($id)"
-  log "  that session was active within ${SESSION_LIVE_SECS}s and may still be committing."
+  log "REFUSE LAND: $branch has a LIVE session on it:"
+  log_claimants "$claimants"
+  log "  active within ${SESSION_LIVE_SECS}s, so it may still be committing."
   log "  wait for it to finish, or override with: session_check=off (or FLEET_SKIP_SESSION_CHECK=1)"
   return 1
 }
@@ -1009,14 +1122,25 @@ session_land_gate() {
 #   1  primary / locked / the caller's own tree   KEEP    structurally untouchable
 #   1b git says the directory is gone             REVIEW  git's own bookkeeping —
 #                                                         `git worktree prune`
-#   2  owning session is LIVE                     KEEP    someone is writing here
+#   2  any claiming session is LIVE               KEEP    someone is writing here
 #   3  session store unreadable, or awareness     REVIEW  no evidence of anything
 #      switched off                                       => nothing can be SAFE
 #   4  detached HEAD                              REVIEW  no branch to attribute
 #   5  uncommitted or untracked changes           REVIEW  removal would destroy them
 #   6  commits not yet in <base>                  REVIEW  unintegrated work
-#   7  merged + clean + owner archived or absent  SAFE    finished and recoverable
+#   7  merged + clean, and no OPEN session        SAFE    finished and recoverable
+#      claims it; for .claude/worktrees/ also a
+#      positive archived claim
 #   8  anything else                              REVIEW  default deny
+#
+# A session CLAIMS a worktree by any of: its branch (checked-out or written),
+# its wrapper cwd or worktreePath, its transcript's project directory, or —
+# while live — the last cwd its transcript recorded (sessions.sh `paths`).
+# Until 2026-09-28 only the branch join existed, and it read one session store
+# out of several; 12 worktrees came back SAFE, five of them the cwd of an OPEN
+# session and two of those RUNNING. Rule 7's positive-claim clause is the
+# backstop for whatever the joins still miss: a .claude/worktrees/ tree nobody
+# claims is "unknown", and unknown is REVIEW.
 #
 # Rule 6 deliberately folds together two readings that cannot both apply to one
 # row — "unmerged commits => KEEP" and "unmerged with no live owner => REVIEW".
@@ -1106,16 +1230,30 @@ prune_emit() {
     prune_row "$wt" "${br:-<detached>}" REVIEW "directory missing - run 'git worktree prune'"; return 0
   fi
 
-  # 2 — a live owner outranks every other consideration
+  # 2 — a live claim outranks every other consideration. Two joins, because
+  #     they fail differently: the branch owner (lane-level, sees
+  #     writtenBranches) and the directory claims (see the header). Either one
+  #     being live is enough.
   local orow="" olive="0" oarch="0" otitle=""
-  if [[ -n "$br" && $SESSION_STORE_OK -eq 1 ]]; then
-    orow=$(owner_row_cached "$br")
-    if [[ -n "$orow" ]]; then
-      olive=$(sfield "$orow" 7); oarch=$(sfield "$orow" 6); otitle=$(sfield "$orow" 3)
+  local claims="" live_claim="" open_claim=""
+  if [[ $SESSION_STORE_OK -eq 1 ]]; then
+    if [[ -n "$br" ]]; then
+      orow=$(owner_row_cached "$br")
+      if [[ -n "$orow" ]]; then
+        olive=$(sfield "$orow" 7); oarch=$(sfield "$orow" 6); otitle=$(sfield "$orow" 3)
+      fi
     fi
+    # First match without `exit`: an early-exiting reader can SIGPIPE the
+    # printf, and under pipefail + set -e that kills the whole command.
+    claims=$(path_claims "$wt")
+    live_claim=$(printf '%s\n' "$claims" | awk -F'\t' 'NF && $7 == "1" && !f { print $4 " (by " $8 ")"; f = 1 }')
+    open_claim=$(printf '%s\n' "$claims" | awk -F'\t' 'NF && $6 == "0" && !f { print $4; f = 1 }')
   fi
   if [[ "$olive" == "1" ]]; then
-    prune_row "$wt" "$br" KEEP "live session: ${otitle:-?}"; return 0
+    prune_row "$wt" "${br:-<detached>}" KEEP "live session: ${otitle:-?}"; return 0
+  fi
+  if [[ -n "$live_claim" ]]; then
+    prune_row "$wt" "${br:-<detached>}" KEEP "live session: $live_claim"; return 0
   fi
 
   # 3 — no session evidence at all. "The store says nobody owns this" is
@@ -1147,23 +1285,48 @@ prune_emit() {
   ahead=$(git -C "$repo" rev-list --count "$base..$br" 2>/dev/null || echo 0)
   if [[ $is_merged -ne 1 || "${ahead:-0}" != "0" ]]; then
     local who="no owner in store"
-    if [[ -n "$orow" ]]; then
-      if [[ "$oarch" == "1" ]]; then who="owner archived"; else who="owner idle"; fi
-    fi
+    if [[ -n "$open_claim" || ( -n "$orow" && "$oarch" != "1" ) ]]; then who="owner idle"
+    elif [[ -n "$orow" || -n "$claims" ]]; then who="owner archived"; fi
     prune_row "$wt" "$br" REVIEW "unmerged - ${ahead:-?} ahead of $base ($who)"; return 0
   fi
 
-  # 7 — merged, clean, and nobody is coming back for it
-  if [[ -z "$orow" ]]; then
-    prune_row "$wt" "$br" SAFE "merged + clean, no session owns it"; return 0
+  # 8 (checked before 7) — an OPEN session claims it, by branch or by
+  #     directory: idle now, and free to wake up. A session resumed into a
+  #     deleted cwd does not error — it spins a core indefinitely (SKILL.md,
+  #     "Landmine"). Not ours to remove.
+  if [[ -n "$orow" && "$oarch" != "1" ]]; then
+    prune_row "$wt" "$br" REVIEW "merged + clean, but owner still open: ${otitle:-?}"; return 0
   fi
-  if [[ "$oarch" == "1" ]]; then
-    prune_row "$wt" "$br" SAFE "merged + clean, owner archived"; return 0
+  if [[ -n "$open_claim" ]]; then
+    prune_row "$wt" "$br" REVIEW "merged + clean, but owner still open: $open_claim"; return 0
   fi
 
-  # 8 — default deny. Merged and clean, but a non-archived session still owns
-  #     the branch: idle now, and free to wake up. Not ours to remove.
-  prune_row "$wt" "$br" REVIEW "merged + clean, but owner still open: ${otitle:-?}"
+  # 7 — merged, clean, and every claim is archived. POSITIVE evidence means an
+  #     archived branch owner, or an archived session whose cwd/worktreePath is
+  #     EXACTLY this tree. A transcript-directory claim does not count: its key
+  #     is lossy (every non-alphanumeric becomes '-'), so it may keep a tree but
+  #     never condemn one.
+  local proven=0
+  [[ -n "$orow" && "$oarch" == "1" ]] && proven=1
+  if [[ $proven -eq 0 ]] && printf '%s\n' "$claims" \
+       | awk -F'\t' -v n="$wtn" 'NF && $2 == n && $6 == "1" && ($8 == "cwd" || $8 == "worktree") { f = 1 } END { exit !f }'; then
+    proven=1
+  fi
+  if [[ $proven -eq 1 ]]; then
+    prune_row "$wt" "$br" SAFE "merged + clean, owner archived"; return 0
+  fi
+  # No claim at all. For a .claude/worktrees/ tree that is the ABSENCE of a
+  # signal, not evidence: Claude Code made it for a session, and the store we
+  # read did not mention that session — a store we cannot see, a session
+  # outside the scan window, a claim the joins cannot express. That is the
+  # 2026-09-28 failure in general form, so it resolves to REVIEW. A
+  # `.fleet-worktrees/` lane or a hand-made tree is not created per session;
+  # any session working in one is found by the cwd and transcript joins, so
+  # there "nobody claims it" means what it says.
+  if prune_is_native "$wt"; then
+    prune_row "$wt" "$br" REVIEW "merged + clean, but no session record claims it - cannot prove abandoned"; return 0
+  fi
+  prune_row "$wt" "$br" SAFE "merged + clean, no session owns it"
 }
 
 # prune_classify <repo> <base>  — fills PRUNE_ROWS. The PRIMARY worktree is
@@ -1287,14 +1450,36 @@ prune_recovery_note() {
 
 prune_remove_safe() {
   local removed=0 skipped=0 failed=0
-  local p br bucket reason rows fresh dirty
+  local p br bucket reason rows fresh dirty fresh_rows now_row
   rows=$(printf '%s' "$PRUNE_ROWS" | awk -F'\t' 'NF && $3=="SAFE"')
+
+  # Re-classify against a FORCED-FRESH scan before touching anything. The table
+  # the operator confirmed may rest on a cached index up to 15 minutes old, and
+  # in that window a session can wake, be unarchived, or move into a tree.
+  # Re-running the SAME classifier, rather than a narrower re-check, is the
+  # point: the removal gate can never drift out of step with the rules that
+  # produced the SAFE row. A store that has become unreadable reclassifies
+  # every row REVIEW, and nothing is removed.
+  prune_log "re-reading every session store before removal (a fresh scan can take a minute)..."
+  local confirmed_rows=$PRUNE_ROWS
+  load_session_index fresh
+  prune_classify "$REPO_ROOT" "$BASE_BRANCH"
+  fresh_rows=$PRUNE_ROWS
+  PRUNE_ROWS=$confirmed_rows
+
   while IFS=$'\t' read -r p br bucket reason; do
     [[ -z "$p" ]] && continue
 
-    # Re-verify immediately before deleting. Classification read a session index
-    # with a long TTL (15 min); a session can wake between the table and the delete, and
-    # this is the one operation where being one poll behind destroys data.
+    now_row=$(printf '%s' "$fresh_rows" | awk -F'\t' -v p="$p" '$1 == p && !f { print $3 "\t" $4; f = 1 }')
+    [[ -n "$now_row" ]] || now_row=$'MISSING\tabsent from the fresh classification'
+    if [[ "${now_row%%$'\t'*}" != "SAFE" ]]; then
+      prune_log "SKIP $p - no longer SAFE on a fresh read: ${now_row#*$'\t'}"
+      skipped=$((skipped + 1)); continue
+    fi
+
+    # And once more per row, immediately before its delete: the fresh scan
+    # above took time, and this is the one operation where being one poll
+    # behind destroys data.
     fresh=$(lane_owner "$br" --fresh)
     if [[ -n "$fresh" && "$(sfield "$fresh" 7)" == "1" ]]; then
       prune_log "SKIP $p - owning session went LIVE since classification"
@@ -1680,7 +1865,7 @@ land_one() {
     # FLEET_SKIP_SESSION_CHECK is already consumed at startup; strip the rest
     # of the family here for depth.
     if ( unset FLEET_SKIP_SESSION_CHECK FLEET_SESSION_STORE FLEET_SESSION_NOCACHE \
-               FLEET_SESSION_LIVE_SECS FLEET_SESSION_CACHE_TTL \
+               FLEET_TRANSCRIPT_ROOTS FLEET_SESSION_LIVE_SECS FLEET_SESSION_CACHE_TTL \
                FLEET_SESSION_MAX_AGE_DAYS FLEET_SELF_SESSION_ID \
                FLEET_NO_PRUNE_HINT FLEET_PRUNE_ROOTS FLEET_PRUNE_MAX_REPOS \
                FLEET_ASCII
@@ -1717,13 +1902,17 @@ land_one() {
   fi
 }
 
+# Every worktree with branch $1 checked out, in git's own path form (normally
+# one — git refuses a second checkout without --force); empty when none.
+# The path is everything after "worktree ", never awk's $2: that cut a path
+# containing a space at the space, which would point rebase_others at the
+# wrong directory and leave the land gate's directory join matching nothing.
 worktree_path_for() {
-  # Echo the worktree path for branch $1, or empty if branch isn't in a worktree
   local branch=$1
-  git worktree list --porcelain 2>/dev/null | awk -v want="refs/heads/$branch" '
-    /^worktree /{p=$2}
-    /^branch /{ if ($2==want) print p }
-  '
+  git worktree list --porcelain 2>/dev/null | awk -v want="branch refs/heads/$branch" '
+    /^worktree / { p = substr($0, 10) }
+    $0 == want   { print p }
+  ' || true
 }
 
 rebase_others() {

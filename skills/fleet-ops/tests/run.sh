@@ -22,6 +22,7 @@ export TERM_ASCII=1
 # before test_cmd, but the suite must not depend on its callers being fixed.
 # Cases that WANT an override set it explicitly on their own command line.
 unset FLEET_SKIP_SESSION_CHECK FLEET_SESSION_STORE FLEET_SESSION_NOCACHE \
+      FLEET_TRANSCRIPT_ROOTS \
       FLEET_SESSION_LIVE_SECS FLEET_SESSION_CACHE_TTL FLEET_SESSION_MAX_AGE_DAYS \
       FLEET_SELF_SESSION_ID FLEET_NO_PRUNE_HINT FLEET_PRUNE_ROOTS \
       FLEET_PRUNE_MAX_REPOS FLEET_ASCII
@@ -29,6 +30,20 @@ unset FLEET_SKIP_SESSION_CHECK FLEET_SESSION_STORE FLEET_SESSION_NOCACHE \
 command -v git >/dev/null 2>&1 || { echo "SKIP: git not available"; exit 0; }
 
 SB="$(mktemp -d)"; trap 'rm -rf "$SB"' EXIT
+# sessions.sh caches its index under $TMPDIR. Keep every cache this suite writes
+# inside the sandbox: a fixture index left in the real TMPDIR is exactly what
+# once let test data answer a real `fleet prune` (2026-09-28).
+mkdir -p "$SB/tmp"; export TMPDIR="$SB/tmp"
+# Every block that is not ABOUT sessions runs against an empty fixture store
+# (readable, nobody in it) and no transcript roots. Left unset, each fleet call
+# in the landing blocks read the developer's real Desktop stores: not hermetic,
+# and a cold scan of a busy machine costs ~50s. Blocks that fake a store set
+# their own and restore this default when they end.
+hermetic_sessions(){
+  mkdir -p "$SB/no-sessions"
+  export FLEET_SESSION_STORE="$SB/no-sessions" FLEET_TRANSCRIPT_ROOTS=""
+}
+hermetic_sessions
 PASS=0; FAIL=0
 ok(){ PASS=$((PASS+1)); printf '  PASS  %s\n' "$1"; }
 no(){ FAIL=$((FAIL+1)); printf '  FAIL  %s\n' "$1"; }
@@ -744,6 +759,9 @@ if ! command -v jq >/dev/null 2>&1; then
 else
 SESSIONS="$SKILL/scripts/sessions.sh"
 export FLEET_SESSION_NOCACHE=1     # the index cache would leak between cases
+# Set-but-empty = no transcript signal. Unset, sessions.sh would walk the
+# developer's real ~/.claude/projects on every call: slow, and not hermetic.
+export FLEET_TRANSCRIPT_ROOTS=""
 
 bash "$SESSIONS" --help >/dev/null 2>&1; ee "sessions.sh --help" 0 $?
 
@@ -907,7 +925,7 @@ bash "$FLEET" track offcheck-lane >/dev/null 2>&1
 bash "$FLEET" land offcheck-lane >/dev/null 2>&1; ee "session_check=off restores old behaviour" 0 $?
 arm_gate "$SREPO"
 
-unset FLEET_SESSION_STORE FLEET_SESSION_NOCACHE
+unset FLEET_SESSION_NOCACHE; hermetic_sessions
 cd "$REPO"
 fi
 
@@ -923,6 +941,7 @@ if ! command -v jq >/dev/null 2>&1; then
   echo "  SKIP  prune tests (jq not installed)"
 else
 export FLEET_SESSION_NOCACHE=1
+export FLEET_TRANSCRIPT_ROOTS=""   # hermetic: see the session-awareness block
 
 PREPO="$SB/prepo"; mkdir -p "$PREPO"
 git -C "$PREPO" init -q -b main
@@ -1055,7 +1074,311 @@ case "$(bash "$FLEET" status 2>&1)" in
   *)          ok "prune_hint=off suppresses the hint";; esac
 rm -f "$PREPO/.claude/fleet/config"
 
-unset FLEET_SESSION_STORE FLEET_SESSION_NOCACHE
+# -- prune: ownership attribution (the 2026-09-28 near-miss) --------------------
+# A real `fleet prune --dry-run` classified 12 of 17 worktrees SAFE, including
+# the cwd of two RUNNING sessions and three idle-but-open ones; `--remove`
+# would have stranded the running two in a silent CPU spin. Each cause is one
+# case below, and each case fails on the pre-fix code:
+#   - only ONE Desktop session store was read, and the owners lived in another
+#     Desktop instance's (--user-data-dir) store
+#   - ownership was joined on branch alone, never on the session's cwd — which
+#     Desktop records natively, BACKSLASHED
+#   - liveness came from a wrapper timestamp that does not move mid-turn
+#   - a .claude/worktrees/ tree that nobody claimed was SAFE by default
+#   - the index cache was keyed by uid alone, so a fixture store poisoned it
+# All worktrees here are merged + clean, so ownership is the only variable.
+echo "-- prune ownership attribution (2026-09-28 regressions) --"
+AREPO="$SB/arepo"; mkdir -p "$AREPO"
+git -C "$AREPO" init -q -b main
+git -C "$AREPO" config user.email t@t; git -C "$AREPO" config user.name t
+git -C "$AREPO" config core.autocrlf false
+echo base > "$AREPO/f"; git -C "$AREPO" add -A; git -C "$AREPO" commit -qm init
+printf '.claude/\n' >> "$AREPO/.git/info/exclude"
+
+ASTORE="$SB/astore/acct/ws"; mkdir -p "$ASTORE"
+ATX="$SB/atx"; mkdir -p "$ATX"
+export FLEET_SESSION_STORE="$SB/astore" FLEET_TRANSCRIPT_ROOTS="$ATX"
+
+# Desktop's own path form: native and BACKSLASHED, with the drive letter's case
+# free to differ from git's (x:\ vs X:/). Linux has no native form, so the
+# POSIX path is backslashed instead — normalisation must fold both to git's.
+bs_path(){
+  local p
+  p=$(cygpath -w "$1" 2>/dev/null) || p=$(printf '%s' "$1" | tr / '\\')
+  printf '%s%s' "$(printf '%s' "${p:0:1}" | tr '[:upper:]' '[:lower:]')" "${p:1}"
+}
+# Claude Code's project-dir encoding, reimplemented here independently of the
+# scripts from observed behaviour (D:\Code\App\.claude\worktrees\fix-login
+# is filed under D--Code-App--claude-worktrees-fix-login). Case kept,
+# as Claude Code keeps it — the scripts must match case-insensitively.
+enc_cc(){ printf '%s' "$1" | LC_ALL=C sed 's/[^A-Za-z0-9]/-/g'; }
+
+mk_awt(){ # slug branch — a merged, clean worktree under .claude/worktrees/
+  local wt="$AREPO/.claude/worktrees/$1"
+  git -C "$AREPO" branch "$2" main
+  git -C "$AREPO" worktree add -q "$wt" "$2"
+  echo "$1" > "$wt/$1.txt"; git -C "$wt" add -A
+  git -C "$wt" -c user.email=w@t -c user.name=w commit -qm "work $1"
+  git -C "$AREPO" merge -q --no-ff -m "merge: $2" "$2"
+}
+awt_path(){ git -C "$AREPO" worktree list --porcelain | sed -n "s|^worktree \(.*/worktrees/$1\)\$|\1|p"; }
+# A wrapper in the real Desktop shape: writtenBranches null (as observed), and
+# a cliSessionId linking it to its transcript. Built with jq so a backslashed
+# cwd is escaped exactly as Desktop writes it.
+mk_wrap(){ # id title cwd ageSecs branch archived(true|false) [cliId] [store]
+  local ms=$(( ($(date +%s) - $4) * 1000 ))
+  jq -n --arg id "$1" --arg t "$2" --arg c "$3" --argjson la "$ms" --arg b "$5" \
+        --argjson ar "$6" --arg cli "${7:-}" \
+    '{sessionId:$id, title:$t, cwd:$c, lastActivityAt:$la, isArchived:$ar,
+      branch:$b, writtenBranches:null} + (if $cli != "" then {cliSessionId:$cli} else {} end)' \
+    > "${8:-$ASTORE}/$1.json"
+}
+# A transcript filed under Claude Code's encoding of <nativeCwd>, last written
+# <ageSecs> ago.
+mk_tx(){ # cliId nativeCwd ageSecs
+  local d; d="$ATX/$(enc_cc "$2")"; mkdir -p "$d"
+  printf '{"type":"user","cwd":%s}\n' "$(jq -Rn --arg c "$2" '$c')" > "$d/$1.jsonl"
+  local t=$(( $(date +%s) - $3 ))
+  touch -d "@$t" "$d/$1.jsonl" 2>/dev/null || touch -t "$(date -r "$t" +%Y%m%d%H%M.%S)" "$d/$1.jsonl"
+}
+pa(){ bash "$FLEET" prune --porcelain 2>/dev/null \
+      | awk -F'\t' -v n="/worktrees/$1" 'substr($1, length($1) - length(n) + 1) == n { print $3 }'; }
+
+cd "$AREPO"
+mk_awt live-bs   claude/live-bs
+mk_awt idle-open claude/idle-open
+mk_awt midturn   claude/midturn
+mk_awt moved     lane/moved
+mk_awt spawn     claude/spawn
+mk_awt orphan    claude/orphan
+mk_awt done      claude/done
+
+# The cwd join, with the branch join deliberately defeated (the wrapper records
+# a different branch — branch drift is common: one session ran `claude/keen-mccarthy`
+# in worktree vigilant-grothendieck). Only a backslash-tolerant cwd match can
+# find these owners.
+mk_wrap local_livebs "Running here" "$(bs_path "$(awt_path live-bs)")"   5    claude/drift-a false
+mk_wrap local_idleop "Open, idle"   "$(bs_path "$(awt_path idle-open)")" 7200 claude/drift-b false
+[ "$(pa live-bs)"   = KEEP   ] && ok "live session's backslash-path cwd => KEEP"      || no "live session's backslash cwd not KEEP (got '$(pa live-bs)')"
+[ "$(pa idle-open)" = REVIEW ] && ok "idle open session's worktree is never SAFE"      || no "idle open session's worktree classified '$(pa idle-open)'"
+
+# Mid-turn: the wrapper still carries the timestamp the turn started with; the
+# transcript was written seconds ago. The session is RUNNING.
+mk_wrap local_midturn "Long turn" "$(bs_path "$(awt_path midturn)")" 7200 claude/midturn false cli-midturn
+mk_tx cli-midturn "$(bs_path "$(awt_path midturn)")" 5
+[ "$(pa midturn)" = KEEP ] && ok "running session with a stale wrapper timestamp => KEEP" || no "mid-turn session not KEEP (got '$(pa midturn)')"
+[ "$(bash "$SESSIONS" owner --fresh claude/midturn 2>/dev/null | cut -f7)" = "1" ] \
+  && ok "owner --fresh reads a mid-turn session live (land gate)" || no "owner --fresh called a mid-turn session idle"
+[ "$(bash "$SESSIONS" live local_midturn 2>/dev/null)" = "1" ] \
+  && ok "live <id> counts the transcript, not just the wrapper" || no "live <id> ignored the transcript"
+
+# EnterWorktree: the session was created in `spawn` (its wrapper cwd, forever)
+# and moved into `moved`; only its transcript's directory says so. An ARCHIVED
+# session with an exact cwd on `moved` also exists — positive evidence that the
+# open mover must still veto.
+mk_wrap local_mover  "Moved into lane" "$(bs_path "$(awt_path spawn)")" 7200 claude/spawn false cli-mover
+mk_tx cli-mover "$(bs_path "$(awt_path moved)")" 7200
+mk_wrap local_oldown "Earlier owner"   "$(bs_path "$(awt_path moved)")" 9000 lane/moved   true
+[ "$(pa moved)" = REVIEW ] && ok "an open session that moved into a lane keeps it out of SAFE" || no "moved-into lane classified '$(pa moved)'"
+mk_tx cli-mover "$(bs_path "$(awt_path moved)")" 5
+[ "$(pa moved)" = KEEP ] && ok "a live session working in a lane it moved into => KEEP" || no "live moved-into lane classified '$(pa moved)'"
+case "$(bash "$SESSIONS" at "$(awt_path moved)" 2>/dev/null)" in
+  *local_mover*transcript*) ok "sessions.sh at attributes by transcript directory";;
+  *) no "sessions.sh at missed the transcript claim";; esac
+
+# No claim at all on a Claude Code session worktree is the ABSENCE of a signal.
+[ "$(pa orphan)" = REVIEW ] && ok "unclaimed .claude/worktrees/ tree is REVIEW, never SAFE" || no "unclaimed native tree classified '$(pa orphan)'"
+# Control: positive evidence still works, or prune would be useless.
+mk_wrap local_done "Finished" "$(bs_path "$(awt_path done)")" 9000 claude/drift-c true
+[ "$(pa done)" = SAFE ] && ok "control: exact-cwd archived owner => SAFE" || no "archived exact-cwd owner not SAFE (got '$(pa done)')"
+
+# A headless / CLI session has a transcript and no Desktop record. While it is
+# live, it owns the directory it is working in — even a non-native lane.
+HWT="$SB/aw-headless"
+git -C "$AREPO" branch lane/headless main
+git -C "$AREPO" worktree add -q "$HWT" lane/headless
+echo h > "$HWT/h.txt"; git -C "$HWT" add -A; git -C "$HWT" -c user.email=w@t -c user.name=w commit -qm h
+git -C "$AREPO" merge -q --no-ff -m "merge: lane/headless" lane/headless
+hb(){ bash "$FLEET" prune --porcelain 2>/dev/null | awk -F'\t' '$1 ~ /\/aw-headless$/ { print $3 }'; }
+[ "$(hb)" = SAFE ] && ok "control: unclaimed non-native lane is SAFE" || no "unclaimed non-native lane classified '$(hb)'"
+mk_tx cli-headless "$(bs_path "$HWT")" 5
+[ "$(hb)" = KEEP ] && ok "a live headless session with no Desktop record => KEEP" || no "live headless session's lane classified '$(hb)'"
+
+# The incident's root cause, end to end through DISCOVERY (no store override):
+# the first store found is readable and populated, and the owner is in a
+# second Desktop instance's store under ~/.claude-desktop-profiles/.
+mk_awt other-inst claude/other-inst
+FHOME="$SB/fhome"
+PRIM="$FHOME/AppData/Roaming/Claude/claude-code-sessions/acct/ws"
+PROF="$FHOME/.claude-desktop-profiles/work/claude-code-sessions/acct/ws"
+mkdir -p "$PRIM" "$PROF"
+mk_wrap local_decoy "Unrelated"          "C:\\elsewhere"                         60 claude/decoy      false "" "$PRIM"
+mk_wrap local_inst2 "Other instance run" "$(bs_path "$(awt_path other-inst)")" 5  claude/drift-d    false "" "$PROF"
+disc(){ env -u FLEET_SESSION_STORE -u APPDATA HOME="$FHOME" "$@"; }
+dstores="$(disc bash "$SESSIONS" stores 2>/dev/null)"
+case "$dstores" in *".claude-desktop-profiles/work/"*) ok "discovery finds a second Desktop instance's store";;
+  *) no "discovery missed the profile store";; esac
+case "$dstores" in *"AppData/Roaming/Claude"*) ok "discovery keeps the primary store too";;
+  *) no "discovery dropped the primary store";; esac
+dib="$(disc bash "$FLEET" prune --porcelain 2>/dev/null | awk -F'\t' '$1 ~ /\/worktrees\/other-inst$/ { print $3 }')"
+[ "$dib" = KEEP ] && ok "owner in another Desktop instance's store => KEEP" || no "other-instance owner missed (got '$dib')"
+
+# Cache isolation: the index cache must be keyed by what was scanned. Before,
+# a run against a fixture store overwrote the one cache a real run then read.
+CSB="$SB/cache-a"; mkdir -p "$CSB/s1/a/w" "$CSB/s2/a/w" "$CSB/tmp"
+mk_wrap local_c1 "Store one" "C:\\one" 60 lane/cache-one false "" "$CSB/s1/a/w"
+mk_wrap local_c2 "Store two" "C:\\two" 60 lane/cache-two false "" "$CSB/s2/a/w"
+( unset FLEET_SESSION_NOCACHE; export TMPDIR="$CSB/tmp"
+  FLEET_SESSION_STORE="$CSB/s1" bash "$SESSIONS" index >/dev/null 2>&1
+  FLEET_SESSION_STORE="$CSB/s2" bash "$SESSIONS" index 2>/dev/null ) > "$CSB/out"
+if grep -q local_c2 "$CSB/out" && ! grep -q local_c1 "$CSB/out"; then
+  ok "a fixture store cannot poison another store's cached index"
+else no "cache served one store's rows for another"; fi
+
+# Removal re-verifies against a FRESH scan: a claim that appears after a
+# (cached) classification must stop the delete. `late` is SAFE when the cache
+# is warmed; then an open session claims it; the cached table still says SAFE,
+# and --remove must refuse it anyway.
+mk_awt late claude/late
+mk_wrap local_lateold "Old owner" "$(bs_path "$(awt_path late)")" 9000 claude/drift-e true
+# Caching ON for this case (it is the point), in a cache dir of its own so no
+# earlier case's index is what gets read.
+unset FLEET_SESSION_NOCACHE; SUITE_TMPDIR=$TMPDIR
+export TMPDIR="$SB/rcache"; mkdir -p "$TMPDIR"
+[ "$(pa late)" = SAFE ] && ok "premise: 'late' is SAFE before the claim appears" || no "premise failed: 'late' is '$(pa late)'"
+mk_wrap local_latenew "Opened later" "$(bs_path "$(awt_path late)")" 7200 claude/drift-f false
+[ "$(pa late)" = SAFE ] && ok "premise: the cached classification is stale (still SAFE)" || no "premise failed: cache was not stale"
+bash "$FLEET" prune --remove --yes >/dev/null 2>&1
+export TMPDIR=$SUITE_TMPDIR FLEET_SESSION_NOCACHE=1
+[ -d "$AREPO/.claude/worktrees/late" ] && ok "--remove re-verifies fresh: a late claim stops the delete" || no "--remove deleted a worktree an open session had claimed"
+[ -d "$AREPO/.claude/worktrees/done" ] && no "--remove skipped a still-SAFE row" || ok "--remove still removes rows that stay SAFE"
+[ -d "$AREPO/.claude/worktrees/idle-open" ] && ok "idle-open worktree survived --remove" || no "idle-open worktree was REMOVED"
+[ -d "$AREPO/.claude/worktrees/orphan" ] && ok "unclaimed native worktree survived --remove" || no "unclaimed native worktree was REMOVED"
+
+# -- land gate: directory claims (the 2026-09-28 follow-up) ---------------------
+# The land gate joined owners on BRANCH alone, so it was blind in the same two
+# ways prune was above: wrapper branch drift (a session in worktree
+# vigilant-grothendieck recorded branch claude/keen-mccarthy) and a session that
+# EnterWorktree'd into a lane, which only its transcript records. A live session
+# working in the lane's worktree therefore did not block `fleet land`, which
+# merged under it and rebased its tree. Every refusal below lands on the
+# pre-fix gate. Same fixture helpers as the block above, pointed at a store and
+# transcript root of their own (mk_wrap / mk_tx read ASTORE / ATX at call time).
+echo "-- land gate: directory claims --"
+LREPO="$SB/lrepo"; mkdir -p "$LREPO"
+git -C "$LREPO" init -q -b main
+git -C "$LREPO" config user.email t@t; git -C "$LREPO" config user.name t
+git -C "$LREPO" config core.autocrlf false
+echo base > "$LREPO/f"; git -C "$LREPO" add -A; git -C "$LREPO" commit -qm init
+arm_gate "$LREPO"
+ASTORE="$SB/lstore/acct/ws" ATX="$SB/ltx"; mkdir -p "$ASTORE" "$ATX"
+export FLEET_SESSION_STORE="$SB/lstore" FLEET_TRANSCRIPT_ROOTS="$ATX"
+cd "$LREPO"
+
+mk_llane(){ # branch [worktree-dir] — one commit on its own file, tracked
+  local wt=${2:-"$SB/lwt-$(printf '%s' "$1" | tr / _)"}
+  git -C "$LREPO" branch "$1" main
+  git -C "$LREPO" worktree add -q "$wt" "$1"
+  echo "$1" > "$wt/$(printf '%s' "$1" | tr / _).txt"; git -C "$wt" add -A
+  git -C "$wt" -c user.email=w@t -c user.name=w commit -qm "work $1"
+  bash "$FLEET" track "$1" >/dev/null 2>&1
+}
+# The lane's worktree in git's own path form.
+lwt(){ git -C "$LREPO" worktree list --porcelain | awk -v b="branch refs/heads/$1" '
+         /^worktree / { p = substr($0, 10) } $0 == b { print p }'; }
+landed(){ case "$(git -C "$LREPO" log --oneline main)" in *"merge: $1"*) return 0;; esac; return 1; }
+LLOG="$LREPO/.claude/fleet/activity.log"
+
+# Branch drift: the wrapper records a branch that is not the lane. Only the
+# session's cwd — the lane's worktree, recorded natively and backslashed — ties
+# it to the lane.
+mk_llane lane/drift
+mk_wrap local_drifter "Working here, drifted" "$(bs_path "$(lwt lane/drift)")" 5 claude/keen-drift false
+bash "$FLEET" land lane/drift >/dev/null 2>&1; lx=$?
+[ "$lx" -ne 0 ] && ok "a live session in the lane's worktree under a drifted branch blocks the land (exit $lx)" \
+  || no "a live session in the lane's worktree (drifted branch) did not block the land"
+landed lane/drift && no "drifted-branch lane was merged under its live session" || ok "no merge under the drifted-branch session"
+grep -q "local_drifter.*by cwd" "$LLOG" 2>/dev/null && ok "the refusal names the claimant and how it claims" \
+  || no "refusal log does not name local_drifter by cwd"
+# Control: only liveness changed, and the same lane now lands — the directory
+# join refuses live claimants, not claimed directories.
+mk_wrap local_drifter "Working here, drifted" "$(bs_path "$(lwt lane/drift)")" 7200 claude/keen-drift false
+bash "$FLEET" land lane/drift >/dev/null 2>&1; ee "control: the same lane lands once that session is idle" 0 $?
+
+# EnterWorktree: created elsewhere (its wrapper cwd, forever) and mid-turn (its
+# wrapper timestamp is the turn's start). Only its transcript, filed under the
+# lane's worktree and written seconds ago, says where it is working.
+mk_llane lane/entered
+mk_wrap local_enterer "Entered the lane" "$(bs_path "$SB/lwt-spawned-here")" 7200 claude/spawn-x false cli-enterer
+mk_tx cli-enterer "$(bs_path "$(lwt lane/entered)")" 5
+bash "$FLEET" land lane/entered >/dev/null 2>&1; lx=$?
+[ "$lx" -ne 0 ] && ok "a session that EnterWorktree'd into the lane blocks the land (exit $lx)" \
+  || no "a session working in the lane via EnterWorktree did not block the land"
+landed lane/entered && no "lane merged under a session that entered it" || ok "no merge under the entered session"
+
+# A worktree path with a space in it. worktree_path_for used to take awk's $2,
+# which cuts the path at the space — the join would then match nothing.
+mk_llane lane/spaced "$SB/lwt dir/spaced"
+mk_wrap local_spaced "In a spaced path" "$(bs_path "$(lwt lane/spaced)")" 5 claude/spaced-drift false
+bash "$FLEET" land lane/spaced >/dev/null 2>&1; lx=$?
+[ "$lx" -ne 0 ] && ok "a live claim on a worktree path containing a space still blocks (exit $lx)" \
+  || no "worktree path with a space: live claimant not seen"
+
+# The gate must not act on the 15-minute index. Caching ON for these cases, in
+# a cache dir of their own; each claim becomes live only AFTER the index is
+# built, so the cached read is stale by construction.
+unset FLEET_SESSION_NOCACHE; SUITE_TMPDIR=$TMPDIR
+export TMPDIR="$SB/lcache"; mkdir -p "$TMPDIR"
+mk_llane lane/woke
+mk_wrap local_sleeper "Idle, then woke" "$(bs_path "$(lwt lane/woke)")" 7200 claude/sleeper-drift false
+mk_llane lane/latecomer
+bash "$SESSIONS" paths >/dev/null 2>&1          # the index is built now
+mk_wrap local_sleeper "Idle, then woke" "$(bs_path "$(lwt lane/woke)")" 5 claude/sleeper-drift false
+mk_tx cli-latecomer "$(bs_path "$(lwt lane/latecomer)")" 5   # headless: no wrapper at all
+[ "$(bash "$SESSIONS" at "$(lwt lane/woke)" 2>/dev/null | cut -f7)" = "0" ] \
+  && ok "premise: the cached index still calls the woken session idle" || no "premise failed: cache was not stale"
+[ -z "$(bash "$SESSIONS" at "$(lwt lane/latecomer)" 2>/dev/null)" ] \
+  && ok "premise: the cached index has no claim on the latecomer's worktree" || no "premise failed: cache already saw the latecomer"
+[ "$(bash "$SESSIONS" at --fresh "$(lwt lane/woke)" 2>/dev/null | cut -f7)" = "1" ] \
+  && ok "at --fresh re-reads liveness the cache still calls idle" || no "at --fresh trusted the cached liveness"
+case "$(bash "$SESSIONS" at --fresh "$(lwt lane/latecomer)" 2>/dev/null)" in
+  *cli:cli-latecomer*transcript*) ok "at --fresh sees a transcript newer than the index";;
+  *) no "at --fresh missed a claim the index predates";; esac
+bash "$FLEET" land lane/woke >/dev/null 2>&1; lx=$?
+[ "$lx" -ne 0 ] && ok "a claimant that woke after the index was built blocks the land (exit $lx)" \
+  || no "the gate acted on the cached idle reading"
+bash "$FLEET" land lane/latecomer >/dev/null 2>&1; lx=$?
+[ "$lx" -ne 0 ] && ok "a session that started in the lane after the index was built blocks the land (exit $lx)" \
+  || no "the gate missed a claim newer than the index"
+export TMPDIR=$SUITE_TMPDIR FLEET_SESSION_NOCACHE=1
+
+# Self in its own worktree: its claims arrive by cwd, by transcript (named by
+# the CLI session id, attributed back to its wrapper) and by live cwd, all on a
+# drifted branch. It must land unaided — but only once self actually resolves.
+mk_llane lane/mine
+mk_wrap local_selfwt "This very session" "$(bs_path "$(lwt lane/mine)")" 5 claude/selfwt-drift false cli-selfwt
+mk_tx cli-selfwt "$(bs_path "$(lwt lane/mine)")" 5
+( unset CLAUDE_CODE_HOST_SESSION_ID CLAUDE_CODE_SESSION_ID CLAUDE_SESSION_ID
+  bash "$FLEET" land lane/mine >/dev/null 2>&1 ); lx=$?
+[ "$lx" -ne 0 ] && ok "unresolvable self in the lane's worktree does not exempt (exit $lx)" \
+  || no "an unresolved self landed on its directory claim"
+CLAUDE_CODE_HOST_SESSION_ID=local_selfwt bash "$FLEET" land lane/mine >/dev/null 2>&1
+ee "self in its own worktree still lands unaided" 0 $?
+landed lane/mine && ok "self's own lane actually merged" || no "no merge commit for self's own lane"
+
+# ...and self must be the ONLY live claimant: a headless peer writing in the
+# same tree is the concurrent writer the gate exists for.
+mk_llane lane/crowded
+mk_wrap local_selfwt2 "This very session" "$(bs_path "$(lwt lane/crowded)")" 5 claude/selfwt2 false cli-selfwt2
+mk_tx cli-peerwt "$(bs_path "$(lwt lane/crowded)")" 5
+CLAUDE_CODE_HOST_SESSION_ID=local_selfwt2 bash "$FLEET" land lane/crowded >/dev/null 2>&1; lx=$?
+[ "$lx" -ne 0 ] && ok "a live peer in self's worktree still blocks self's land (exit $lx)" \
+  || no "self landed over a live peer in its own worktree"
+landed lane/crowded && no "lane merged over a live peer in the worktree" || ok "no merge while a peer works in the tree"
+grep -q "cli:cli-peerwt" "$LLOG" 2>/dev/null && ok "the refusal names the peer, not self" \
+  || no "refusal log does not name the peer"
+
+unset FLEET_SESSION_NOCACHE; hermetic_sessions
 cd "$REPO"
 fi
 

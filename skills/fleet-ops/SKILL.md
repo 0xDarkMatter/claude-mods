@@ -144,6 +144,21 @@ The join is `writtenBranches` from the session wrapper, not just the checked-out
 branch — a session working in worktree `claude/foo-bar` routinely commits its real work
 to `lane/thing`, and only `writtenBranches` connects the two.
 
+**It also joins on the directory.** Any session claiming the worktree the lane branch
+is checked out in (wrapper `cwd`/`worktreePath`, transcript directory, live `cwd` — the
+claims [prune](#prune--worktree-housekeeping) uses) blocks, whatever branch its wrapper
+records: branch drift and `EnterWorktree` both defeat the branch join (2026-09-28). The
+read is `sessions.sh at --fresh`. The cached index may nominate claimants but never
+decides: each one's liveness is re-read, and transcripts being written in the worktree
+are read off disk, so a session that arrived after the index was built still blocks.
+Blind spot: a shell that `cd`'d in since the last index, or writes by absolute path.
+
+"Active" means the newer of the wrapper's `lastActivityAt` and the session's last
+transcript write (its subagents' included), searched across every Desktop
+instance's store. Until 2026-09-28 the gate read the wrapper alone, from the
+primary instance alone — so a session deep in a long turn, or running in a
+`--user-data-dir` instance, read as idle and did not block a land.
+
 **Self-ownership is exempt.** The hazard is a *concurrent* writer, and the session
 running `fleet land` is not one — it is blocked inside that call, so it is provably not
 mid-commit, and the worktree being rebased "out from under a live session" is the one it
@@ -155,8 +170,11 @@ It stays conservative in both directions. Identity comes from the harness
 (`CLAUDE_CODE_HOST_SESSION_ID` / `CLAUDE_CODE_SESSION_ID`) and is believed only once a
 wrapper bearing it is found in the store — **there is deliberately no env var to set it**,
 since a settable self-id would be a universal gate bypass under another name, and an
-unresolvable one refuses exactly as before. Self must also be the **only** live owner:
-a second live session writing the same branch refuses, naming the peer.
+unresolvable one refuses exactly as before. Self must also be the **only** live
+claimant, by branch or by directory: a second live session writing the same branch, or
+working in the same worktree, refuses, naming the peer. A CLI or headless session has
+no store record to prove it is self, so if one is live in the lane's worktree the land
+refuses, even when it is that session's own.
 
 Override with `session_check=off` in config, or `FLEET_SKIP_SESSION_CHECK=1` for one
 run. One run means one run: fleet consumes the variable at startup and strips it (and
@@ -227,17 +245,45 @@ from deletion.
 |---|---|---|
 | 1 | primary / git-locked / the tree you invoked from | **KEEP** |
 | 1b | git reports the directory gone | **REVIEW** (that's `git worktree prune`'s job) |
-| 2 | owning session is LIVE | **KEEP** |
+| 2 | any session claiming it is LIVE | **KEEP** |
 | 3 | session store unreadable, or `session_check=off` | **REVIEW** |
 | 4 | detached HEAD | **REVIEW** |
 | 5 | uncommitted or untracked changes | **REVIEW** |
 | 6 | commits not yet in `base_branch` | **REVIEW** |
-| 7 | merged + clean + owner archived or absent | **SAFE** |
-| 8 | anything else (incl. merged + clean but owner still open) | **REVIEW** |
+| 7 | merged + clean, no open session claims it — and for `.claude/worktrees/`, an archived session positively does | **SAFE** |
+| 8 | anything else (incl. an open owner, or a `.claude/worktrees/` tree no session record mentions) | **REVIEW** |
 
 Only **SAFE** is ever removable. **KEEP** means one thing — hands off, not yours
 to judge. Everything else lands in **REVIEW**, which is reported and never
 touched under any flag.
+
+**How a session claims a worktree.** By its branch (checked-out or
+`writtenBranches`), by its wrapper's `cwd` or `worktreePath` (compared
+normalised: slashes, case, `X:` vs `/x/`), by the directory its CLI transcript
+is filed under (`EnterWorktree` moves it there; the wrapper's `cwd` never
+changes), and, while live, by the last `cwd` its transcript recorded. The store
+read is the **union** of every Desktop instance's store — the primary and each
+`--user-data-dir` instance under `~/.claude-desktop-profiles/` — and `fleet
+config` lists which ones answered. Liveness is the newer of the wrapper's
+`lastActivityAt` and the transcript's mtime, because Desktop rewrites the
+wrapper only at turn boundaries: a session deep in one long turn reads idle on
+the wrapper alone.
+
+**The near-miss that shaped this (2026-09-28).** A dry run in a real repo
+classified 12 of 17 worktrees SAFE, "merged + clean, no session owns it" — five
+of them the cwd of an open session, two of those running. The owners were all
+in a second Desktop instance's store, which `sessions.sh` never opened; it read
+the primary store, found it readable and populated, and took its silence for
+evidence. Ownership was also joined on branch only, never on `cwd`, and the
+wrapper's stale timestamp called the running sessions idle. `--remove` would
+have stranded both in the silent spin described below. The fixes are the
+claims above, and rule 7's positive-claim clause as the backstop for whatever
+the joins still miss.
+
+**Known limitation — writes by absolute path.** A session whose cwd never
+entered a worktree, but which writes into it by absolute path, leaves no claim
+in any store or transcript. Prune cannot see it, so prune must never be the
+only guard: check `fleet status`, and your own lanes, before `--remove`.
 
 Rule 3 is the one that matters most on a non-Desktop host: *"the store says
 nobody owns this"* is evidence of abandonment, while *"the store could not be
@@ -251,9 +297,10 @@ Those directories are Claude Code's own session worktrees, and
 [`worktree-boundaries`](../../rules/worktree-boundaries.md) is blunt about them:
 *they may look orphaned and aren't*. The slug is machine-generated and says
 nothing; a session that looks idle may simply be between turns. Prune marks them
-`!` in the table, and — because SAFE already requires a readable store plus an
-archived-or-absent owner — one can only be removed on positive evidence, never
-on the absence of a signal.
+`!` in the table, and SAFE requires an archived session that positively claims
+the tree — by branch, or by exact `cwd`/`worktreePath` — so one can only be
+removed on positive evidence, never on the absence of a signal. (The docs
+promised this before the code kept it; since 2026-09-28 it does.)
 
 Three further guards, all on the irreversible direction:
 
@@ -261,9 +308,11 @@ Three further guards, all on the irreversible direction:
    on its own, and it unregisters the worktree instead of leaving a stale
    administrative entry behind.
 2. **Re-verify immediately before deleting.** Classification reads a session
-   index with a long TTL (15 min); a session can wake between the table and the delete,
-   so each SAFE row is re-checked with a fresh liveness read and a fresh dirty
-   check, and skipped if either changed.
+   index with a long TTL (15 min); a session can wake, be unarchived, or move
+   into a tree between the table and the delete. So `--remove` first re-runs the
+   *same* classifier against a forced-fresh scan of every store (this can take
+   a minute), skips any row that is no longer SAFE, and then re-checks each
+   survivor's owner liveness and dirtiness once more right before its delete.
 3. **`--all-repos` can never remove.** It reports counts for sibling repos and
    stops there. Acting on another repo means running `fleet prune` inside it,
    where that repo's own base branch and config apply — so a single command can
@@ -348,7 +397,7 @@ For non-branching status updates ("here's what happened, here's what landed"), p
 | Out of scope | Why |
 |------|-----|
 | Spawning / monitoring sessions | Native: agent teams, `claude --bg`, agent view. Fleet-ops never launches a session. |
-| Deleting worktrees a session still owns | `fleet prune` removes only what is merged, clean, and owned by an archived-or-absent session. Anything live, dirty, unmerged, or unattributable is reported, never removed — and cross-repo removal is impossible by design. Removing one by any *other* path strands the session in a silent CPU spin — see [the ordering landmine](#landmine-removing-a-worktree-out-from-under-a-live-session). |
+| Deleting worktrees a session still owns | `fleet prune` removes only what is merged, clean, and claimed by no open session — and, for a `.claude/worktrees/` tree, positively claimed by an archived one. Anything live, dirty, unmerged, open, or unattributable is reported, never removed — and cross-repo removal is impossible by design. Removing one by any *other* path strands the session in a silent CPU spin — see [the ordering landmine](#landmine-removing-a-worktree-out-from-under-a-live-session). |
 | Multiple sessions on one shared working tree | Git limitation. Skill detects and refuses with worktree pointer. |
 | Uncommitted work at signal time | `signal.sh` rejects dirty lanes. The queue needs an immutable commit. |
 | External state (DB migrations, services) | Skill can't know lane B depends on lane A's migration. Order manually via `fleet land`. |
@@ -463,4 +512,4 @@ Shipped since first release:
 
 - `scripts/fleet.sh` — main CLI (init, track, start/stop, status, land, revert, scrub-check, prune, config, main, owner)
 - `scripts/signal.sh` — branch-aware signaler (deployed to `.claude/fleet/signal.sh`); prints the MAIN handoff after READY/CONFLICT
-- `scripts/sessions.sh` — branch → owning-session resolver, read off the Desktop session store on disk (deployed alongside signal.sh so lane sessions can resolve MAIN). Enrichment only: exits 3 and stays silent wherever the store or `jq` is missing, and every caller treats that as "no info"
+- `scripts/sessions.sh` — branch → owning-session and directory → claiming-session resolver, read off every Desktop instance's session store plus the CLI transcripts on disk (deployed alongside signal.sh so lane sessions can resolve MAIN). `sessions.sh stores` shows what it read; `sessions.sh at <path>` shows who claims a directory (`--fresh`: liveness re-read, the land gate's view). Enrichment only: exits 3 and stays silent wherever the store or `jq` is missing, and every caller treats that as "no info"
