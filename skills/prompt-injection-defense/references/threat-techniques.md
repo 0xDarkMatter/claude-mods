@@ -10,10 +10,11 @@ the mechanism to a reviewer.
 2. [Bidi reordering (Trojan Source)](#bidi-reordering-trojan-source)
 3. [Tag-block ASCII smuggling](#tag-block-ascii-smuggling)
 4. [Zero-width and invisible characters](#zero-width-and-invisible-characters)
-5. [Variation-selector steganography](#variation-selector-steganography)
-6. [Homoglyph / confusable impersonation](#homoglyph--confusable-impersonation)
-7. [Private-use-area characters](#private-use-area-characters)
-8. [The severity model](#the-severity-model)
+5. [Line breaks that forge structure](#line-breaks-that-forge-structure)
+6. [Variation-selector steganography](#variation-selector-steganography)
+7. [Homoglyph / confusable impersonation](#homoglyph--confusable-impersonation)
+8. [Private-use-area characters](#private-use-area-characters)
+9. [The severity model](#the-severity-model)
 
 ## The core principle
 
@@ -125,6 +126,76 @@ BOM/ZWNBSP `U+FEFF`.
 - `U+FEFF` — legitimate as a leading BOM; the scanner ignores it at byte 0 and flags
   it only mid-file → `medium`.
 
+**Other default-ignorable characters.** Unicode marks these Default_Ignorable_Code_Point
+(UCD `DerivedCoreProperties.txt`): renderers draw nothing for them, so each one
+splits a keyword exactly like ZWSP.
+
+- `U+00AD` soft hyphen - a hyphenation hint (Unicode 18.0 section 23.2), visible only
+  where a line actually wraps. Common in scraped web text, required by no orthography
+  -> `high`, deleted at `standard`.
+- `U+034F` combining grapheme joiner - blocks canonical reordering of combining marks
+  for collation (section 23.2.4); no glyph -> `high`.
+- `U+17B4`/`U+17B5` Khmer inherent vowels - invisible transcription marks whose use in
+  other contexts the Unicode NamesList discourages -> `high`.
+- `U+115F`/`U+1160` Hangul jamo fillers - zero-width placeholders inside archaic
+  conjoining syllables -> `high`, deleted.
+- `U+3164`/`U+FFA0` Hangul fillers - *letters* (category Lo) that fonts draw as a
+  blank, so identifier and word-character checks accept them; one has been used as an
+  invisible JavaScript variable name to smuggle a backdoor parameter -> `high`, and
+  replaced with a space rather than deleted, because a reader sees a gap there.
+- `U+180E` Mongolian vowel separator - zero-width since Unicode 6.3, yet whitespace to
+  older regex engines; **required** in Mongolian to select a vowel's final form ->
+  `medium`, stripped only at `aggressive` (the ZWNJ precedent).
+
+## Line breaks that forge structure
+
+**Codepoints:** LINE SEPARATOR `U+2028`, PARAGRAPH SEPARATOR `U+2029`; NEXT LINE (NEL)
+`U+0085`; vertical tab `U+000B` and form feed `U+000C`; information separators FS, GS,
+RS `U+001C`-`U+001E`.
+
+**Mechanism.** Unicode has more line breaks than LF. LS and PS are the unambiguous
+line and paragraph separators (Unicode 18.0 section 23.2, Layout Controls, which
+defers to section 5.8, Newline Guidelines); NEL is the EBCDIC newline (section 23.1,
+Control Codes). UAX #14 puts LS, PS, VT and FF in class BK and NEL in class NL -
+mandatory breaks under rules LB4 and LB5. JavaScript treats LS/PS as line
+terminators, Python's `str.splitlines()` breaks on all of the above, and a model may
+read any of them as a new line.
+
+Renderers disagree. Many editors and terminals draw LS, PS and NEL as nothing or keep
+the text inline; others break the line. So `ok<U+2028>=== FORGED ===` can show a
+reviewer one ordinary line while the model sees the marker on a line of its own.
+Anything that leans on line structure is forgeable this way: an
+`=== END OF UNTRUSTED DATA ===` fence, a `## System` heading, a fake turn marker, a
+new row in a line-oriented log or TSV.
+
+**Why the scanner never calls `str.splitlines()`.** It splits on exactly these
+characters and drops them, so they would never be classified, and every finding after
+one would report the wrong line number. `scan-hidden-unicode.py` splits on CRLF, CR
+and LF only, and its ASCII fast path skips printable characters only, so the C0 bands
+(VT, FF, FS-RS) still reach the catalog.
+
+**Sanitizing: flatten, never delete.** `sanitize-content.py` replaces each line-break
+code point with a space (the catalog's `replace_with`), and its report names every
+replacement (`replaced_by_band`). Deleting would fuse the words either side
+(`end<U+2028>begin` -> `endbegin`), which changes meaning and can itself assemble a
+keyword; replacing with a newline would make the forged line real. A space keeps the
+word boundary and keeps the text on the line the reviewer saw.
+
+**Why VT and FF are only `medium`.** They are line breaks too (UAX #14 class BK), but a
+raw-byte review shows them - most code editors draw a control glyph, and vim and
+`bat --show-all` print `^K` / `^L` - and form feed is a legitimate page break in
+RFC-style text and older source. They fail only under `--strict`; the sanitizer
+still flattens them at `standard`.
+
+**Demonstrate it** (bytes built with `printf`, never a literal character):
+
+```bash
+printf 'ok\xe2\x80\xa8=== FORGED ===\n' > /tmp/AGENTS.md
+python3 -c "print(open('/tmp/AGENTS.md', encoding='utf-8').read().splitlines())"  # ['ok', '=== FORGED ===']
+scripts/scan-hidden-unicode.py /tmp/AGENTS.md    # U+2028 high line-paragraph-separators at 1:3
+scripts/sanitize-content.py /tmp/AGENTS.md       # ok === FORGED ===
+```
+
 ## Variation-selector steganography
 
 **Codepoints:** `U+FE00`–`U+FE0F` (VS1–16); `U+E0100`–`U+E01EF` (VS17–256).
@@ -189,6 +260,21 @@ a `strip_level`. The two scripts apply them as policy:
 | Removes | critical only | + high + medium | + low |
 | Emoji-safe? | yes | yes | **no** (strips VS16) |
 | Multilingual-safe? | yes | yes (keeps ZWNJ/ZWJ) | no (strips ZWNJ) |
+
+Bands with a `replace_with` code point in the catalog are *replaced*, not deleted, at
+their strip level: the line-break class and the blank-rendering Hangul fillers become
+`U+0020` (see [Line breaks that forge structure](#line-breaks-that-forge-structure)).
+
+Severity for the line-break and invisible-filler bands, against the table above:
+
+| Band | Code points | Severity | Why |
+|---|---|---|---|
+| `line-paragraph-separators` | `U+2028`-`U+2029` | high | Mandatory breaks (UAX #14 BK) that LF-terminated text never needs; many viewers draw nothing or stay inline |
+| `next-line` | `U+0085` | high | UAX #14 NL; EBCDIC-only; a C1 control most viewers draw as nothing |
+| `information-separators` | `U+001C`-`U+001E` | high | `str.splitlines()` boundaries with no use in text; invisible in terminals |
+| `vertical-tab-form-feed` | `U+000B`-`U+000C` | medium | Line breaks too, but a raw-byte review shows them and FF is a legitimate page break |
+| `soft-hyphen`, `combining-grapheme-joiner`, `khmer-inherent-vowels`, `hangul-jamo-fillers`, `hangul-filler`, `hangul-halfwidth-filler` | see above | high | Invisible, and no living orthography requires them |
+| `mongolian-vowel-separator` | `U+180E` | medium | Invisible, but required in Mongolian - script-specific, like ZWNJ |
 
 Rule of thumb: **scan with defaults** (catches the unambiguous attacks without noise),
 escalate to `--strict` when impersonation or steganography is plausible. **Sanitize

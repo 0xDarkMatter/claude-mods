@@ -118,14 +118,15 @@ scripts/scan-hidden-unicode.py --json . | jq '.data[] | select(.severity=="criti
 
 Exits `0` clean, `10` when dangerous codepoints are found (worst severity on stderr).
 Default fails on `critical`+`high` bands (bidi overrides, tag-block, zero-width
-space, word-joiner). `--strict` adds `medium`+`low` bands and mixed-script homoglyph
-tokens. stdout is data (TSV, or JSON envelope with `--json`); stderr is the summary.
+space, word-joiner, line/paragraph separators and NEL, soft hyphen, invisible
+fillers). `--strict` adds `medium`+`low` bands (incl. VT/FF) and mixed-script
+homoglyph tokens. stdout is data (TSV, or JSON envelope with `--json`); stderr is the summary.
 
 ### Pattern 2: Sanitize untrusted content before it enters context
 
 When you must ingest external content, strip the hidden codepoints first - don't
 trust the source to be clean. This is a byte-faithful filter: UTF-8 in, UTF-8 out,
-identical except removed codepoints.
+identical except removed or flattened codepoints.
 
 ```bash
 # Clean a fetched page before reading it
@@ -139,10 +140,16 @@ scripts/sanitize-content.py notes.txt --json 2> removal-report.json
 ```
 
 `--strip-level` is `minimal` (bidi overrides + tag-block only - safe for any text),
-`standard` (default; + zero-width, isolates, marks, mid-file BOM - preserves emoji
-and Persian/Arabic/Indic joiners), or `aggressive` (+ ZWNJ, PUA, variation selectors
-- *may* alter emoji and icon-font glyphs, so reserve it for plain prose). Sanitized
-content goes to stdout (or `-o`); the removal report goes to stderr.
+`standard` (default; + zero-width, isolates, marks, mid-file BOM, soft hyphen, line
+separators - preserves emoji and Persian/Arabic/Indic joiners), or `aggressive`
+(+ ZWNJ, Mongolian vowel separator, PUA, variation selectors - *may* alter emoji and
+icon-font glyphs, so reserve it for plain prose). Sanitized content goes to stdout
+(or `-o`); the removal report goes to stderr.
+
+Line-break code points (`U+2028`/`U+2029`, NEL, VT/FF, FS-RS) and the blank-rendering
+Hangul fillers are **flattened to a space, never deleted** - deletion would fuse the
+words either side, and a newline would make a forged line real. The report names
+each replacement (`replaced_by_band` in `--json`).
 
 ### Pattern 3: Review raw bytes, never the rendered view
 
@@ -214,6 +221,11 @@ raw.
 emoji are legitimate. A scanner that fails on "any non-ASCII" trains people to ignore
 it. Flag by *codepoint band and severity*, whitelist emoji (`U+FE0F`, `U+200D`).
 
+**Splitting lines with `str.splitlines()` in a scanner.** It treats VT, FF, FS-RS,
+NEL, `U+2028` and `U+2029` as line breaks and drops them - the very characters that
+forge a line a reviewer never saw - and shifts every later line number. Split on
+CRLF/CR/LF only, and don't let an "ASCII is safe" fast path skip C0 controls.
+
 **Stripping zero-width joiners globally.** `U+200D` is load-bearing in emoji
 sequences and Indic scripts; blanket removal corrupts legitimate text. It's `never`
 strip in the catalog for that reason.
@@ -250,6 +262,10 @@ publisher, 2.2M installs, still malicious). Scan the content regardless of sourc
 | Bidi overrides | `U+202A`-`U+202E` | critical | Trojan Source reordering |
 | Bidi isolates | `U+2066`-`U+2069` | high | Subtler reordering; legit in mixed-direction text |
 | Zero-width space / word-joiner | `U+200B`, `U+2060`-`U+2064` | high | Invisible separators / filter evasion |
+| Line / paragraph separators, NEL, FS-RS | `U+2028`-`U+2029`, `U+0085`, `U+001C`-`U+001E` | high | Forge a line break; flattened to a space |
+| Soft hyphen, CGJ, Khmer inherent vowels, Hangul fillers | `U+00AD`, `U+034F`, `U+17B4`-`U+17B5`, `U+115F`-`U+1160`, `U+3164`, `U+FFA0` | high | Default-ignorable; keyword splitting |
+| VT / FF | `U+000B`-`U+000C` | medium | Line breaks, but visible in a raw-byte review |
+| Mongolian vowel separator | `U+180E` | medium | Invisible; required in Mongolian (like ZWNJ) |
 | BOM mid-file | `U+FEFF` | medium | Legit only at byte 0 |
 | Variation selectors | `U+FE00`-`U+FE0F` | low | `U+FE0F` whitelisted (emoji) |
 | Private use areas | `U+E000`-`U+F8FF`, supp. | low | Icon fonts; suspicious in prose |
@@ -271,8 +287,9 @@ UTF-8 stdio so they don't crash on Windows cp1252 consoles.
 ## References
 
 - `references/threat-techniques.md` - deep dive on each technique (Trojan Source bidi,
-  tag-block ASCII smuggling, zero-width text, variation-selector and homoglyph
-  steganography) with codepoint tables and worked examples. Load when triaging a
+  tag-block ASCII smuggling, zero-width text, line-break structure forgery,
+  variation-selector and homoglyph steganography) with codepoint tables and worked
+  examples. Load when triaging a
   specific finding or explaining the mechanism.
 - `references/ingestion-surfaces.md` - the trust-boundary map: every surface that
   feeds untrusted content into context, the control for each, and the

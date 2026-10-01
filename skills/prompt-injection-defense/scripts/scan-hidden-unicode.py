@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import unicodedata
 from pathlib import Path
@@ -51,6 +52,12 @@ DEFAULT_CATALOG = Path(__file__).resolve().parent.parent / "assets" / "dangerous
 
 # Scripts treated as a confusable risk when mixed within one token (--strict only).
 CONFUSABLE_SCRIPTS = ("LATIN", "CYRILLIC", "GREEK", "ARMENIAN")
+
+# Split ONLY on CRLF / CR / LF. Never use str.splitlines(): it also breaks on VT,
+# FF, FS-RS, NEL, U+2028 and U+2029 and drops them, so the line-break bands that
+# forge structure would never reach classify(), and every later finding's line
+# number would drift from what an editor shows.
+LINE_BREAK = re.compile(r"\r\n|\r|\n")
 
 
 def log(level: str, msg: str, quiet: bool = False) -> None:
@@ -119,7 +126,7 @@ def script_of(ch: str) -> str | None:
 
 
 def find_mixed_script_tokens(text: str, lineno: int) -> list[dict]:
-    """--strict heuristic: a single word mixing confusable scripts (e.g. Latin + Cyrillic 'аdmin')."""
+    """--strict heuristic: a single word mixing confusable scripts (e.g. Latin + Cyrillic '<U+0430>dmin')."""
     findings = []
     col = 0
     token = ""
@@ -156,10 +163,12 @@ def find_mixed_script_tokens(text: str, lineno: int) -> list[dict]:
 
 def scan_text(text: str, bands: list[dict], strict: bool, whitelist: bool) -> list[dict]:
     findings: list[dict] = []
-    for lineno, line in enumerate(text.splitlines(), start=1):
+    for lineno, line in enumerate(LINE_BREAK.split(text), start=1):
         for col, ch in enumerate(line, start=1):
             cp = ord(ch)
-            if cp < 0x80:
+            # Printable ASCII is never dangerous. C0 controls fall through to the
+            # catalog (VT/FF/FS-RS are bands); tab and the rest simply don't match.
+            if 0x20 <= cp < 0x7F:
                 continue
             band = classify(cp, bands)
             if band is None:
@@ -178,7 +187,8 @@ def scan_text(text: str, bands: list[dict], strict: bool, whitelist: bool) -> li
             try:
                 cname = unicodedata.name(ch)
             except ValueError:
-                cname = "<unnamed>"
+                # Control codes (VT, FF, NEL...) have no character name in the UCD.
+                cname = "<control>" if unicodedata.category(ch) == "Cc" else "<unnamed>"
             findings.append({
                 "type": "codepoint",
                 "line": lineno, "col": col,

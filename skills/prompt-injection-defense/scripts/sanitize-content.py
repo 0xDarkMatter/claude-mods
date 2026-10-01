@@ -11,9 +11,14 @@ Exit:    0 ok (even if nothing removed), 2 usage, 3 not-found, 5 missing-catalog
 Strip levels (default: standard):
   minimal     bidi overrides + tag-block only        (never touches emoji/multilingual)
   standard    + zero-width, word-joiner, isolates,    (preserves emoji + legit ZWNJ/ZWJ)
-              marks, mid-file BOM, VS-supplement
-  aggressive  + ZWNJ, PUA, variation selectors        (MAY alter emoji / icon-fonts /
-                                                        Persian-Arabic-Indic text)
+              marks, mid-file BOM, VS-supplement,
+              soft hyphen, CGJ, line separators
+  aggressive  + ZWNJ, MVS, PUA, variation selectors   (MAY alter emoji / icon-fonts /
+                                                        Persian-Arabic-Indic-Mongolian)
+
+Bands with a catalog 'replace_with' are REPLACED, not deleted: line/paragraph
+separators, NEL, VT/FF, FS-RS and the spacing Hangul fillers become a space, so
+a forged line can't survive and the words either side never fuse.
 
 Examples:
   cat fetched-page.md | sanitize-content.py > clean.md
@@ -66,9 +71,12 @@ def load_bands(path: Path, as_json: bool) -> list[dict]:
         return []
     bands = []
     for b in raw.get("bands", []):
+        repl = b.get("replace_with")
         bands.append({
             "id": b["id"], "start": parse_cp(b["start"]), "end": parse_cp(b["end"]),
             "strip_level": b.get("strip_level", "standard"),
+            # None = delete the code point; otherwise substitute this character.
+            "replace_with": chr(parse_cp(repl)) if repl else None,
         })
     return bands
 
@@ -86,12 +94,20 @@ def band_for(cp: int, strip_bands: list[dict]) -> dict | None:
     return None
 
 
-def sanitize(text: str, strip_bands: list[dict], nfkc: bool) -> tuple[str, dict]:
+def sanitize(text: str, strip_bands: list[dict], nfkc: bool) -> tuple[str, dict, dict]:
+    """Return (cleaned, removed_by_band, replaced_by_band).
+
+    removed_by_band counts every neutralised code point; replaced_by_band is the
+    subset that was substituted (catalog replace_with) rather than deleted.
+    """
     out_chars = []
     removed: dict[str, int] = {}
+    replaced: dict[str, int] = {}
     for i, ch in enumerate(text):
         cp = ord(ch)
-        if cp < 0x80:
+        # Printable ASCII, tab and CR/LF always pass. Other C0 controls go to the
+        # catalog: VT/FF/FS-RS are bands and must not slip through as "ASCII".
+        if 0x20 <= cp < 0x7F or ch in "\t\r\n":
             out_chars.append(ch)
             continue
         # Preserve a leading BOM (legitimate only at absolute file start).
@@ -101,12 +117,15 @@ def sanitize(text: str, strip_bands: list[dict], nfkc: bool) -> tuple[str, dict]
         b = band_for(cp, strip_bands)
         if b is None:
             out_chars.append(ch)
-        else:
-            removed[b["id"]] = removed.get(b["id"], 0) + 1
+            continue
+        removed[b["id"]] = removed.get(b["id"], 0) + 1
+        if b["replace_with"] is not None:
+            out_chars.append(b["replace_with"])
+            replaced[b["id"]] = replaced.get(b["id"], 0) + 1
     cleaned = "".join(out_chars)
     if nfkc:
         cleaned = unicodedata.normalize("NFKC", cleaned)
-    return cleaned, removed
+    return cleaned, removed, replaced
 
 
 def main() -> int:
@@ -145,7 +164,7 @@ def main() -> int:
     else:
         text = sys.stdin.buffer.read().decode("utf-8", errors="replace")
 
-    cleaned, removed = sanitize(text, strip_bands, args.nfkc)
+    cleaned, removed, replaced = sanitize(text, strip_bands, args.nfkc)
 
     # stdout / -o is the sanitized content (this is a filter). Write BYTES, not text,
     # so the platform newline layer never rewrites \n -> \r\n (which breaks idempotency
@@ -164,11 +183,17 @@ def main() -> int:
     if not args.quiet:
         if as_json:
             print(json.dumps({
-                "data": {"removed_by_band": removed, "nfkc": args.nfkc, "strip_level": args.strip_level},
-                "meta": {"removed_total": total, "schema": "claude-mods.prompt-injection.sanitize/v1"},
+                "data": {"removed_by_band": removed, "replaced_by_band": replaced,
+                         "nfkc": args.nfkc, "strip_level": args.strip_level},
+                "meta": {"removed_total": total, "replaced_total": sum(replaced.values()),
+                         "schema": "claude-mods.prompt-injection.sanitize/v1"},
             }), file=sys.stderr)
         elif total:
-            detail = ", ".join(f"{k}={v}" for k, v in sorted(removed.items()))
+            # Name every replacement so a flattened line break is never silent.
+            repl_of = {b["id"]: b["replace_with"] for b in strip_bands if b["replace_with"]}
+            detail = ", ".join(
+                f"{k}={v}" + (f" (replaced with U+{ord(repl_of[k]):04X})" if k in replaced else "")
+                for k, v in sorted(removed.items()))
             print(f"[INFO] removed {total} hidden codepoint(s) [{args.strip_level}]: {detail}",
                   file=sys.stderr)
         else:
