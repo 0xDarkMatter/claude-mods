@@ -2165,9 +2165,42 @@ cmd_revert() {
   fi
 }
 
+# A signal is a STOP REQUEST, never an exit from inside the handler. Two ways to
+# get this wrong, the first shipped until 2026-09-28:
+#
+#   1. `trap daemon_cleanup INT TERM HUP` with a handler that did not exit. A
+#      trapped signal runs its handler and then RESUMES the script, so the daemon
+#      logged "daemon stopping", deleted its PID file, and kept polling. SIGHUP is
+#      what it gets when its Claude session ends: the ghost landed a lane 3s
+#      later, invisible to `fleet stop` ("no daemon running") and to the
+#      double-start guard, both of which trust the PID file.
+#   2. Calling `exit` in the handler instead. bash runs a trap between commands,
+#      so the exit can fall between land_one's `git merge` and its test gate —
+#      an untested merge left on $BASE_BRANCH, the landmine require_test_cmd
+#      exists to prevent.
+#
+# So the handler only records the request and cuts the poll sleep short; the
+# loop checks it at two safe points (before starting a land, and before
+# sleeping) and returns normally, and the EXIT trap does the cleanup. A land
+# already in progress always finishes, test gate included.
+DAEMON_STOP=""
+DAEMON_SLEEP_PID=""
+
+daemon_request_stop() {
+  DAEMON_STOP=$1
+  # The poll `sleep` is a child the loop waits on with the `wait` builtin, which
+  # a trapped signal interrupts at once; kill the child too so it does not
+  # outlive the daemon holding the repo as its cwd (on Windows that blocks
+  # deleting the directory).
+  if [[ -n "$DAEMON_SLEEP_PID" ]]; then kill "$DAEMON_SLEEP_PID" 2>/dev/null || true; fi
+}
+
 daemon_cleanup() {
-  log "daemon stopping (pid $$)"
+  # PID file first: it is the one step that must happen. `log` can fail (its
+  # stderr may be gone after a SIGHUP), and under errexit that ends the handler.
   rm -f "$PID_FILE"
+  if [[ -n "$DAEMON_SLEEP_PID" ]]; then kill "$DAEMON_SLEEP_PID" 2>/dev/null || true; fi
+  log "daemon stopping (pid $$)" || true
 }
 
 cmd_start() {
@@ -2191,11 +2224,19 @@ cmd_start() {
     fi
   fi
 
+  # Cleanup on EXIT only; the signals merely request a stop (see daemon_cleanup).
+  # Installed BEFORE the PID file exists, so no signal can hit the default
+  # action and leave a stale PID file behind. SIGINT is untrappable when the
+  # daemon runs as a non-interactive background job (bash ignores it there), so
+  # TERM and HUP are the ones that matter.
+  trap daemon_cleanup EXIT
+  trap 'daemon_request_stop SIGTERM' TERM
+  trap 'daemon_request_stop SIGINT' INT
+  trap 'daemon_request_stop SIGHUP' HUP
   echo "$$" > "$PID_FILE"
-  trap daemon_cleanup EXIT INT TERM HUP
   log "daemon start (pid $$, poll: ${POLL_INTERVAL}s, test_cmd: ${TEST_CMD:-<none>})"
 
-  while true; do
+  while [[ -z "$DAEMON_STOP" ]]; do
     local ready=()
     for f in "$LANES_DIR"/*; do
       [[ -f "$f" && "$(head -n1 "$f")" == "READY" ]] && ready+=("$(decode_lane "$(basename "$f")")")
@@ -2203,12 +2244,15 @@ cmd_start() {
 
     if [[ ${#ready[@]} -gt 0 ]]; then
       for branch in "${ready[@]}"; do
+        # Safe point 1: never START a land once a stop was requested.
+        if [[ -n "$DAEMON_STOP" ]]; then break; fi
         if land_one "$branch"; then
           rebase_others "$branch"
         fi
       done
       cmd_fleet
     fi
+    if [[ -n "$DAEMON_STOP" ]]; then break; fi
 
     local active=0
     for f in "$LANES_DIR"/*; do
@@ -2222,8 +2266,20 @@ cmd_start() {
       cmd_fleet
       break
     fi
-    sleep "$POLL_INTERVAL"
+    # Safe point 2: an interruptible sleep. A foreground `sleep` defers the trap
+    # until it returns — up to poll_interval, which at the default is the whole
+    # of `fleet stop`'s 5s grace, so SIGTERM raced the SIGKILL escalation.
+    # The flag is re-checked AFTER the sleep is spawned: a signal that arrives
+    # before that point finds no sleep to kill, and would otherwise cost a full
+    # interval (measured 5.3s — the lane scan above forks per lane, so the
+    # window is wide on Windows). One that arrives after it kills the sleep.
+    sleep "$POLL_INTERVAL" & DAEMON_SLEEP_PID=$!
+    if [[ -z "$DAEMON_STOP" ]]; then wait "$DAEMON_SLEEP_PID" 2>/dev/null || true; fi
+    DAEMON_SLEEP_PID=""
   done
+  if [[ -n "$DAEMON_STOP" ]]; then
+    log "daemon: $DAEMON_STOP received — stopped between lands, none interrupted"
+  fi
 }
 
 case "${1:-}" in

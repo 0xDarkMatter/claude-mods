@@ -162,6 +162,6 @@ Requires Sonnet 4+ or Opus 4+.
 ## Testing
 
 ```bash
-just check        # THE gate: validate + doc-drift + agnostic + hook contracts + resource contracts + skill suites
-just check-fast   # same minus the per-skill behavioural suites
+just check        # THE gate: validate + doc-drift + agnostic + hook contracts + resource contracts + skill suites + e2e suites
+just check-fast   # same minus the behavioural suites (per-skill and e2e)
 ```
