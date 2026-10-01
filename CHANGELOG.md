@@ -217,6 +217,18 @@ feature releases live in the README "Recent Updates" section.
   ~3s), and `worktree_path_for` no longer cuts a worktree path at its first
   space.
 
+- **The `fleet start` daemon ignored SIGTERM and SIGHUP and kept landing as a
+  ghost** - its handler removed `daemon.pid` and then resumed, because a trapped
+  signal returns to the script. A daemon whose session ended (SIGHUP) kept
+  polling, invisible to `fleet stop` ("no daemon running") and to the
+  double-start guard, and landed a lane 3s later; every `fleet stop` was really
+  its SIGKILL escalation. A signal is now a stop request honoured between
+  lands: a land in progress finishes through its gate, no new one starts, and
+  an idle daemon answers during its poll sleep instead of after it. The
+  fleet-ops e2e (`tests/skills/functional/fleet-ops/e2e.sh`), which no gate
+  ran and which had drifted to 7 FAILs, is repaired and now runs in
+  `tests/run-skill-tests.sh`.
+
 ### Changed
 
 - **Rules made machine- and person-agnostic.** Rules ship in a public plugin, so
