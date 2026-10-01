@@ -75,6 +75,25 @@ feature releases live in the README "Recent Updates" section.
   until the doc-drift fix let the step run at all. The script-runtime checks now
   gate on the PowerShell host reporting `Win32NT`; the static and `common.ps1`
   framing checks still run everywhere.
+
+- **`install.ps1 -Doctor` reported phantom drift whenever the install target
+  was spelled differently from how PowerShell spells it** - the reason the
+  `install-guard` CI job had never passed on a Windows runner. Relative paths
+  were cut as `FullName.Substring($root.Length + 1)`, but the FileSystem
+  provider returns children under its own canonical form of the root (8.3
+  short names expanded, `..` collapsed). A GitHub runner's `%TEMP%` is the
+  short form `C:\Users\RUNNER~1`, three characters shorter than the canonical
+  `runneradmin`. So an installed `skills/alpha/SKILL.md` read back as
+  `skills/ls/alpha/SKILL.md`, and the doctor reported every installed skill
+  file as both missing and orphaned. The installer's merge-copy had the same
+  flaw: its dest-only list was garbage, or the skill failed to sync outright
+  when the given spelling was longer. It passed locally only on volumes with
+  8.3 names disabled. All relative paths now come from one `Get-FilesUnder`
+  helper, which resolves the root through the provider and enumerates from
+  that spelling. `tests/install-guard.sh` section 12 pins it on any volume
+  with a `..`-spelled target; it fails against the old installer.
+  `tests/check-resources.sh` adds a grep backstop for the Linux CI.
+
 - **pigeon mail notifications never reached the model** - `check-mail.sh`
   printed its delivery block as plain stdout. For PreToolUse hooks, Claude Code
   sends plain stdout to the debug log. Only UserPromptSubmit, SessionStart and

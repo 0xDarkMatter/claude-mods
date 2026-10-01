@@ -339,6 +339,17 @@ if [ -f "$__installer" ]; then
     if grep -qE 'Get-ChildItem\s+-Path\s+\$(commandsDir|skillsDir|agentsDir|rulesDir|stylesDir|hooksDir|root)\b|Test-Path\s+\$[A-Za-z_]' "$__installer"; then
         bad "install.ps1 top-level install loops use -Path (glob-expands; a bracketed repo root installs NOTHING) - use -LiteralPath"
     else pass "install.ps1 top-level install loops use -LiteralPath"; fi
+    # Relative paths cut from FullName against a root STRING. The provider
+    # returns children under its canonical spelling of the root (8.3 short
+    # names expanded, `..` collapsed), so `FullName.Substring($root.Length + 1)`
+    # shifts silently whenever the caller spelled the root differently - on a
+    # GitHub Windows runner, whose %TEMP% is C:\Users\RUNNER~1, every doctor run
+    # reported phantom missing+orphan skill files. Get-FilesUnder, which cuts at
+    # its own canonical $prefix, is the one sanctioned site. Comments are
+    # stripped first because the guard comment quotes the forbidden form.
+    if sed 's/#.*$//' "$__installer" | grep -E 'FullName\.Substring\(' | grep -vqE 'Substring\(\$prefix\.Length\)'; then
+        bad "install.ps1 cuts a relative path with FullName.Substring against a root string (breaks on 8.3 short paths) - use Get-FilesUnder"
+    else pass "install.ps1 relative paths all come from Get-FilesUnder"; fi
 else
     pass "install.ps1 absent - installer check skipped"
 fi

@@ -31,6 +31,13 @@
 #   returns cleanly - the installer installs zero of everything and exits 0.
 #   Sections 8 and 11 assert the doctor and the install side see through that.
 #
+#   And one more: root SPELLING. The provider canonicalises a root (8.3 short
+#   names expanded, `..` collapsed) before handing back its children, so a
+#   relative path cut by string length against the caller's spelling shifts
+#   silently. A GitHub Windows runner's %TEMP% is an 8.3 short path, which made
+#   this suite fail on every CI run while passing on machines without 8.3
+#   names. Section 12 pins it on any volume with a `..` spelling.
+#
 # Usage:  bash tests/install-guard.sh
 # Input:  none (builds throwaway git repos under a mktemp dir)
 # Output: human progress lines on stdout
@@ -138,17 +145,28 @@ commit_all() {
 
 # --- runners ----------------------------------------------------------------
 
+# Each runner has a *_spelled twin that hands CLAUDE_DIR to install.ps1
+# byte-for-byte, bypassing wp(): cygpath normalises paths, and section 12 needs
+# a deliberately non-canonical spelling to reach the installer intact.
 DOC_JSON=""
 DOC_EXIT=0
 doctor() {  # repo, claude_dir
-    DOC_JSON="$(CLAUDE_DIR="$(wp "$2")" pwsh -NoProfile -File "$(wp "$1/scripts/install.ps1")" -Doctor -Json 2>/dev/null)"
+    doctor_spelled "$1" "$(wp "$2")"
+}
+doctor_spelled() {  # repo, claude_dir exactly as install.ps1 receives it
+    DOC_JSON="$(CLAUDE_DIR="$2" pwsh -NoProfile -File "$(wp "$1/scripts/install.ps1")" -Doctor -Json 2>/dev/null)"
     DOC_EXIT=$?
 }
 
 INSTALL_EXIT=0
+INSTALL_OUT=""
 install_run() {  # repo, claude_dir, extra args...
     local repo="$1" dir="$2"; shift 2
-    CLAUDE_DIR="$(wp "$dir")" pwsh -NoProfile -File "$(wp "$repo/scripts/install.ps1")" "$@" >/dev/null 2>&1
+    install_spelled "$repo" "$(wp "$dir")" "$@"
+}
+install_spelled() {  # repo, claude_dir exactly as install.ps1 receives it, extra args...
+    local repo="$1" dir="$2"; shift 2
+    INSTALL_OUT="$(CLAUDE_DIR="$dir" pwsh -NoProfile -File "$(wp "$repo/scripts/install.ps1")" "$@" 2>&1)"
     INSTALL_EXIT=$?
 }
 
@@ -440,6 +458,45 @@ if [ "$DOC_EXIT" -eq 0 ] && [ "$(jqd '.data.missing | length')" = "0" ]; then
     pass "doctor confirms a bracketed-root install is complete"
 else
     fail "doctor found gaps after a bracketed-root install: missing=$(jqd '.data.missing')"
+fi
+
+# ---------------------------------------------------------------------------
+# 12. A non-canonical spelling of the install target. The FileSystem provider
+#     returns children under ITS canonical spelling of a root, so relative paths
+#     cut by string length against the caller's spelling shift silently. This is
+#     why this suite failed on every GitHub Windows run while passing locally:
+#     the runner's %TEMP% sits under the 8.3 short name RUNNER~1, three
+#     characters shorter than the canonical account name, so an
+#     installed skills/alpha/SKILL.md read back as skills/ls/alpha/SKILL.md -
+#     "missing" and "orphan" at once, on every run.
+#
+#     8.3 names can be disabled per volume (they often are on dev drives, which
+#     is how the bug hid), so this section uses a `..` segment instead: it is
+#     non-canonical on every volume and every OS. Before the fix, both the
+#     doctor AND the installer's dest-only report went wrong here.
+# ---------------------------------------------------------------------------
+RN="$TMPROOT/noncanon"; CN="$TMPROOT/noncanon-dest"
+mkdir -p "$CN" "$TMPROOT/decoy"
+new_repo "$RN"
+if command -v cygpath >/dev/null 2>&1; then
+    CN_SPELLED="$(wp "$TMPROOT")\\decoy\\..\\noncanon-dest"
+else
+    CN_SPELLED="$TMPROOT/decoy/../noncanon-dest"
+fi
+# First install takes the fresh-directory copy; the second takes the merge-copy
+# branch, whose dest-only report is one of the two sites under test.
+install_spelled "$RN" "$CN_SPELLED"
+install_spelled "$RN" "$CN_SPELLED"
+if [ "$INSTALL_EXIT" -eq 0 ] && ! printf '%s' "$INSTALL_OUT" | grep -qiE 'dest-only|failed'; then
+    pass "re-install via a non-canonical target path reports no phantom dest-only files"
+else
+    fail "re-install via '$CN_SPELLED' exited $INSTALL_EXIT or misreported: $(printf '%s' "$INSTALL_OUT" | grep -iE 'dest-only|failed|^ +[^ ]' | head -5 | tr '\n' '|')"
+fi
+doctor_spelled "$RN" "$CN_SPELLED"
+if [ "$DOC_EXIT" -eq 0 ] && [ "$(jqd '.data.missing | length')" = "0" ] && [ "$(jqd '.data.orphan | length')" = "0" ]; then
+    pass "doctor is clean via a non-canonical target path (no phantom missing/orphan)"
+else
+    fail "doctor misread a non-canonical target: exit=$DOC_EXIT missing=$(jqd '.data.missing') orphan=$(jqd '.data.orphan')"
 fi
 
 echo ""

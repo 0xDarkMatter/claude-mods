@@ -127,6 +127,12 @@ Requires Sonnet 4+ or Opus 4+.
   `~/.claude` must ignore line endings** — SKILL.md files are often committed CRLF while
   the installed copies land LF, so a naive byte compare flags most of the skill tree as
   drifted and the check gets disabled. `tests/install-guard.sh` gates both.
+- **The Windows CI runner's `%TEMP%` is an 8.3 short path** (`C:\Users\RUNNER~1`),
+  and PowerShell hands paths back long-form. Path arithmetic against a
+  caller-spelled root passes on a volume with 8.3 names disabled and fails only
+  in CI. `install.ps1` cuts relative paths solely via `Get-FilesUnder`. To
+  reproduce locally, point `TMPDIR` at the short name of a long-named directory
+  on a volume that has 8.3 names.
 - **Executable bit on commit**: scripts under `skills/*/scripts/` and `hooks/*.sh`
   must be tracked `100755`. Git on Windows won't set this for you — `tests/check-exec-bits.sh`
   gates it; a script that "works locally" but fails `bash foo.sh` for another
