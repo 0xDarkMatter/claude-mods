@@ -1,8 +1,9 @@
 {
-  "schema_version": "v0.2.0",
+  "schema_version": "v0.3.0",
   "_about": "Codepoint range catalog for scan-hidden-unicode.py and sanitize-content.py. Each band lists a Unicode range that is invisible, direction-altering, or visually misleading in normal Latin-script instruction text. 'severity' drives the scanner's default fail threshold (critical+high fail by default; medium+low fail only under --strict; benign never fails). 'strip_level' tells the sanitizer when to remove the band (minimal < standard < aggressive). 'legitimate_use' documents why a band is NOT always an attack — read it before tightening severity, because the emoji bands (FE0F, ZWJ) false-positive on every README that uses emoji.",
   "_threshold_note": "Fail threshold is a scanner policy, not a catalog field: default fails on critical+high, --strict additionally fails on medium+low. Sanitizer uses strip_level: minimal strips only critical, standard adds high+medium, aggressive adds low. Benign is never stripped or failed unless explicitly forced.",
-  "_replace_note": "Optional 'replace_with' (a 'U+XXXX' code point) makes the sanitizer substitute that character instead of deleting the band. It is set on bands a reader sees as a break or a blank (line/paragraph separators, NEL, VT/FF, FS-RS, the spacing Hangul fillers): deleting those would fuse the words either side ('end<LS>begin' -> 'endbegin'), and a newline would make the forged line real, so they flatten to U+0020. Write code points as 'U+XXXX' strings, never literal characters.",
+  "_replace_note": "Optional 'replace_with' (a 'U+XXXX' code point) makes the sanitizer substitute that character instead of deleting the band. It is set on bands a reader sees as a break or a blank (line/paragraph separators, NEL, VT/FF, FS-US, the spacing Hangul fillers): deleting those would fuse the words either side ('end<LS>begin' -> 'endbegin'), and a newline would make the forged line real, so they flatten to U+0020. Write code points as 'U+XXXX' strings, never literal characters.",
+  "_ranges_note": "A band is one 'start'/'end' span, or (since v0.3.0) a 'ranges' list of ['U+XXXX', 'U+XXXX'] spans in place of start/end, for one concept the code chart splits: the C1 controls around NEL, the Mongolian free variation selectors around the vowel separator, the reserved default-ignorable runs. Both scripts expand each span into its own entry under the band's id. Bands must NOT overlap: the scanner matches the narrowest band first, the sanitizer in catalog order, so an overlap makes them name different bands for the same code point. tests/run.sh enforces this, and that every Default_Ignorable_Code_Point plus every C0/C1 control except TAB, LF and CR lies in some band.",
   "bands": [
     {
       "id": "bidi-override",
@@ -137,6 +138,17 @@
       "attack": "A zero-width format character since Unicode 6.3 (a space separator before), so current renderers draw nothing while older regex engines and trim() routines still treat it as whitespace - a splitter that filters disagree on."
     },
     {
+      "id": "mongolian-free-variation-selectors",
+      "name": "Mongolian free variation selectors",
+      "ranges": [["U+180B", "U+180D"], ["U+180F", "U+180F"]],
+      "severity": "medium",
+      "strip_level": "aggressive",
+      "category": "Mn",
+      "members": "FVS1 U+180B, FVS2 U+180C, FVS3 U+180D, FVS4 U+180F (added in Unicode 14.0); the vowel separator U+180E between them is its own band",
+      "legitimate_use": "Required in Mongolian, Todo and Manchu text: each one selects a letter's contextual glyph variant, so stripping them changes how genuine text is shaped. Script-specific like the vowel separator and ZWNJ, hence medium + aggressive.",
+      "attack": "Default_Ignorable marks with no glyph of their own: after a Latin letter they draw nothing, so they split a keyword exactly like ZWSP."
+    },
+    {
       "id": "khmer-inherent-vowels",
       "name": "Khmer inherent vowels",
       "start": "U+17B4",
@@ -187,6 +199,53 @@
       "attack": "Same as U+3164: a letter that renders as a blank. Replaced with a space for the same reason."
     },
     {
+      "id": "deprecated-format-characters",
+      "name": "Deprecated format characters",
+      "start": "U+206A",
+      "end": "U+206F",
+      "severity": "high",
+      "strip_level": "standard",
+      "category": "Cf",
+      "members": "ISS U+206A, ASS U+206B, IAFS U+206C, AAFS U+206D, NADS U+206E, NODS U+206F",
+      "legitimate_use": "None: Deprecated property set, and the Unicode Standard (section 23.3, Deprecated Format Characters) strongly discourages them. They once toggled symmetric swapping (bracket mirroring in right-to-left runs), Arabic form shaping and national digit shapes; conforming text does not use them.",
+      "attack": "Default_Ignorable, and modern renderers ignore their old effects, so they draw nothing: invisible keyword splitters that no current text needs. high, not critical: unlike the bidi overrides, current software reorders nothing for them."
+    },
+    {
+      "id": "shorthand-format-controls",
+      "name": "Shorthand format controls",
+      "start": "U+1BCA0",
+      "end": "U+1BCA3",
+      "severity": "medium",
+      "strip_level": "aggressive",
+      "category": "Cf",
+      "members": "LETTER OVERLAP U+1BCA0, CONTINUING OVERLAP U+1BCA1, DOWN STEP U+1BCA2, UP STEP U+1BCA3",
+      "legitimate_use": "Required in Duployan shorthand: they tell the renderer to overlap letters or step them down or up, so stripping them changes how genuine shorthand is laid out. Script-specific, hence medium + aggressive like ZWNJ and the Mongolian selectors - though Duployan is rare enough that a hit in an instruction file deserves a look.",
+      "attack": "Default_Ignorable format controls with no glyph: outside Duployan they are invisible keyword splitters."
+    },
+    {
+      "id": "musical-format-characters",
+      "name": "Musical symbol format characters",
+      "start": "U+1D173",
+      "end": "U+1D17A",
+      "severity": "high",
+      "strip_level": "standard",
+      "category": "Cf",
+      "members": "BEGIN BEAM U+1D173, END BEAM U+1D174, BEGIN TIE U+1D175, END TIE U+1D176, BEGIN SLUR U+1D177, END SLUR U+1D178, BEGIN PHRASE U+1D179, END PHRASE U+1D17A",
+      "legitimate_use": "Plain-text markup for beams, ties, slurs and phrases in Unicode musical notation. Music software keeps its own formats, few renderers implement these, and no script depends on them.",
+      "attack": "Default_Ignorable format characters that render as nothing: invisible keyword splitters from a block a filter author is unlikely to think of."
+    },
+    {
+      "id": "reserved-default-ignorable",
+      "name": "Reserved default-ignorable code points",
+      "ranges": [["U+2065", "U+2065"], ["U+FFF0", "U+FFF8"], ["U+E0080", "U+E00FF"], ["U+E01F0", "U+E0FFF"]],
+      "severity": "high",
+      "strip_level": "standard",
+      "category": "Cn",
+      "members": "U+2065, U+FFF0-U+FFF8, U+E0080-U+E00FF, U+E01F0-U+E0FFF (unassigned as of Unicode 18.0)",
+      "legitimate_use": "None today: nothing is assigned here, so no conforming text contains them. Unicode reserves them as Default_Ignorable so that format characters assigned later degrade to invisible in older software (UAX #44; Unicode Standard section 5.21, Ignoring Characters in Processing). If a future version assigns one, re-evaluate it as its own band.",
+      "attack": "Because the property already applies, a conforming renderer draws nothing for them rather than a missing-glyph box: invisible separators that a filter built from a list of named characters never sees."
+    },
+    {
       "id": "line-paragraph-separators",
       "name": "Line and paragraph separators",
       "start": "U+2028",
@@ -227,16 +286,62 @@
     },
     {
       "id": "information-separators",
-      "name": "Information separators FS, GS, RS",
+      "name": "Information separators FS, GS, RS, US",
       "start": "U+001C",
-      "end": "U+001E",
+      "end": "U+001F",
       "severity": "high",
       "strip_level": "standard",
       "replace_with": "U+0020",
       "category": "Cc",
-      "members": "FS U+001C, GS U+001D, RS U+001E (INFORMATION SEPARATOR FOUR, THREE, TWO)",
-      "legitimate_use": "Record delimiters for legacy data formats; no use in text files (JSON forbids them unescaped). Covered alongside VT/FF because Python's str.splitlines() treats them as line boundaries too.",
-      "attack": "Terminals draw nothing for them, yet str.splitlines() starts a new line at each one: the forged-line primitive in the C0 range."
+      "members": "FS U+001C, GS U+001D, RS U+001E, US U+001F (INFORMATION SEPARATOR FOUR, THREE, TWO, ONE)",
+      "legitimate_use": "Record and field delimiters for legacy data formats; no use in text files (JSON forbids them unescaped). FS-RS sit beside VT/FF because Python's str.splitlines() treats them as line boundaries; US is not one, but it is the same family with the same (non-)uses.",
+      "attack": "Terminals draw nothing for them. FS-RS start a new line under str.splitlines() and are paragraph separators to the bidi algorithm (UAX #9 class B): the forged-line primitive in the C0 range. US is a segment separator (class S, like TAB). All four are flattened to a space: each separates the text either side, and deleting it would fuse the two."
+    },
+    {
+      "id": "c0-controls",
+      "name": "C0 controls (NUL-BS, SO-SUB)",
+      "ranges": [["U+0000", "U+0008"], ["U+000E", "U+001A"]],
+      "severity": "high",
+      "strip_level": "standard",
+      "category": "Cc",
+      "members": "NUL U+0000, SOH, STX, ETX, EOT, ENQ, ACK, BEL, BS U+0008; SO U+000E, SI, DLE, DC1-DC4, NAK, SYN, ETB, CAN, EM, SUB U+001A. TAB, LF and CR are deliberately in no band; VT/FF, ESC and FS-US have their own.",
+      "legitimate_use": "None in text files: plain text needs only TAB, LF and CR, and the rest are transmission and device controls (ECMA-48). BS turns up in captured nroff/man output, where 'X<BS>X' overstrikes a bold letter.",
+      "attack": "BS moves a terminal's cursor back a cell, so text after a run of BS overwrites the text before it: cat or a pager shows the harmless overwrite while the bytes keep both. One NUL in a file's first 8000 bytes trips git's binary heuristic, and git diff prints 'Binary files ... differ' instead of the change - the reviewer never sees the edit. The rest draw nothing in a terminal and split keywords like ZWSP. Deleted, not replaced: none is a gap a reader sees."
+    },
+    {
+      "id": "escape",
+      "name": "Escape (ANSI escape sequences)",
+      "start": "U+001B",
+      "end": "U+001B",
+      "severity": "high",
+      "strip_level": "standard",
+      "category": "Cc",
+      "members": "ESC U+001B",
+      "legitimate_use": "Starts ECMA-48 control sequences: the colour codes in captured terminal output and CLI test fixtures. Hand-authored instruction files have no use for it, and JSON must escape it.",
+      "attack": "A terminal executes the sequence instead of showing it: 'ESC[8m' (SGR 8, concealed) hides what follows, 'ESC[2K' (EL 2) erases the line, cursor movement overwrites earlier text. git diff passes the bytes through unchanged, and git's default pager setting (LESS=FRX) lets less pass SGR sequences to the terminal, so a review in a terminal can miss a clause the model reads in full. high, not critical: captured coloured output is a legitimate source. Deleted, not replaced: the leftover '[8m' stays as visible text, which is what a reviewer needs to see."
+    },
+    {
+      "id": "ascii-delete",
+      "name": "Delete (DEL)",
+      "start": "U+007F",
+      "end": "U+007F",
+      "severity": "high",
+      "strip_level": "standard",
+      "category": "Cc",
+      "members": "DEL U+007F",
+      "legitimate_use": "None in text: a paper-tape relic (all holes punched means erased). Keyboards that send it for a backspace key produce input, not file content.",
+      "attack": "Terminals ignore it on output, so 'ad<DEL>min' displays as 'admin' while a string match for 'admin' misses it: the ZWSP filter-evasion primitive in the ASCII range, waiting for any 'printable ASCII is safe' fast path written as cp <= 0x7F."
+    },
+    {
+      "id": "c1-controls",
+      "name": "C1 controls (except NEL)",
+      "ranges": [["U+0080", "U+0084"], ["U+0086", "U+009F"]],
+      "severity": "high",
+      "strip_level": "standard",
+      "category": "Cc",
+      "members": "U+0080-U+0084 and U+0086-U+009F, incl. DCS U+0090, CSI U+009B, OSC U+009D, APC U+009F. NEL U+0085 is its own band (a line break, replaced rather than deleted).",
+      "legitimate_use": "None in UTF-8 text. When one appears it is usually Windows-1252 decoded as Latin-1 (0x92 is a right quote there, 0x96 and 0x97 dashes) - mojibake worth fixing at the source anyway.",
+      "attack": "Most viewers draw nothing for them. Some terminals honour the 8-bit forms: U+009B is CSI, the one-character equivalent of 'ESC[', so it can carry the same conceal and erase sequences with no ESC in the file. Deleted, not replaced."
     },
     {
       "id": "bom-zwnbsp",

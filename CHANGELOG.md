@@ -42,6 +42,20 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **`prompt-injection-defense` left terminal controls and most default-ignorables
+  unbanded** - the hidden-Unicode catalog now covers every Default_Ignorable code
+  point (4174 in UCD 18.0) and every C0/C1 control except TAB, LF and CR, and the
+  self-test pins both sets, so a gap fails the build instead of passing silently.
+  New `high` bands: ESC (an `ESC[8m` run is concealed in a terminal `git diff`), the
+  other C0 controls (BS overprints; a single NUL turns `git diff` into "Binary files
+  differ"), DEL, the C1 controls (`U+009B` is an 8-bit CSI), the deprecated format
+  characters `U+206A`-`U+206F`, the musical format characters and the reserved
+  default-ignorable ranges; US joins the FS-RS band. New `medium` bands, stripped
+  only at `aggressive`: the Mongolian free variation selectors and the Duployan
+  shorthand format controls. Catalog v0.3.0 adds an optional `ranges` field for
+  bands the code chart splits, and the self-test fails if two bands overlap, since
+  the scanner and the sanitizer would then name different bands.
+
 - **`prompt-injection-defense` missed line separators and invisible fillers** -
   `scan-hidden-unicode.py` reported `ok<U+2028>=== FORGED ===` as clean, though a
   model may read `U+2028` as a new line that no reviewer sees. The scanner split

@@ -92,14 +92,18 @@ def load_catalog(path: Path, as_json: bool) -> list[dict]:
     bands = []
     for b in raw.get("bands", []):
         try:
-            bands.append({
-                "id": b["id"],
-                "name": b["name"],
-                "start": parse_cp(b["start"]),
-                "end": parse_cp(b["end"]),
-                "severity": b["severity"],
-                "strip_level": b.get("strip_level", "standard"),
-            })
+            # A band is one start/end span, or a 'ranges' list of [start, end] spans
+            # for a concept the code chart splits (C1 around NEL, the Mongolian FVS
+            # around MVS). Each span becomes its own entry carrying the band's id.
+            for start, end in b.get("ranges") or [(b["start"], b["end"])]:
+                bands.append({
+                    "id": b["id"],
+                    "name": b["name"],
+                    "start": parse_cp(start),
+                    "end": parse_cp(end),
+                    "severity": b["severity"],
+                    "strip_level": b.get("strip_level", "standard"),
+                })
         except (KeyError, ValueError) as e:
             die(f"malformed band in catalog: {e}", "VALIDATION_ERROR", EXIT_VALIDATION, as_json)
     # Sort so smaller/more-specific bands match before the broad PUA ranges.
@@ -166,8 +170,10 @@ def scan_text(text: str, bands: list[dict], strict: bool, whitelist: bool) -> li
     for lineno, line in enumerate(LINE_BREAK.split(text), start=1):
         for col, ch in enumerate(line, start=1):
             cp = ord(ch)
-            # Printable ASCII is never dangerous. C0 controls fall through to the
-            # catalog (VT/FF/FS-RS are bands); tab and the rest simply don't match.
+            # Printable ASCII (0x20-0x7E) is never dangerous. Every other C0 control
+            # and DEL falls through to the catalog, which bands them all except TAB
+            # (CR/LF never get here: LINE_BREAK consumed them). Keep the bound at
+            # < 0x7F - widening this fast path is how controls go unscanned.
             if 0x20 <= cp < 0x7F:
                 continue
             band = classify(cp, bands)

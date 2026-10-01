@@ -51,7 +51,7 @@ it).
 | **Adding / vetting an MCP server** | Scan its manifest/tool-description files AND read the prose — descriptions are model-facing instructions. |
 | **Committing** an instruction file | Let the pre-commit gate scan it; fix any `critical` finding before committing. |
 | A scan returns a **`critical`** finding (tag-block, bidi override) | Stop. These are never legitimate. Sanitise and re-review before trusting the file. |
-| A scan returns **`high`** (isolates, zero-width, line separators, invisible fillers) | Note it; legitimate in genuinely multilingual text, suspicious from an untrusted source. Judge in context. A line separator (`U+2028`/`U+2029`, NEL) in an instruction file can forge a line the reviewer never saw. |
+| A scan returns **`high`** (isolates, zero-width, line separators, invisible fillers, control characters) | Note it; legitimate in genuinely multilingual text, suspicious from an untrusted source. Judge in context. A line separator (`U+2028`/`U+2029`, NEL) in an instruction file can forge a line the reviewer never saw; an ESC or BS can hide text from a terminal review. Review those as raw bytes. |
 
 ## Noise discipline (important)
 
