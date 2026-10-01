@@ -118,7 +118,7 @@ $installablePaths = @("skills", "agents", "rules", "commands", "output-styles", 
 
 # Commands migrated to skills; the installer never copies them, so the doctor
 # must not report them as missing either. Keep in step with $skipCommands below.
-$skipCommandFiles = @("review.md", "testgen.md")
+$skipCommandFiles = @("review.md")
 
 # =============================================================================
 # HELP
@@ -543,10 +543,11 @@ foreach ($dir in $dirs) {
 # =============================================================================
 $deprecated = @(
     "$claudeDir\commands\review.md",
-    "$claudeDir\commands\testgen.md",
     "$claudeDir\commands\conclave.md",
     "$claudeDir\commands\pulse.md",
     "$claudeDir\skills\conclave",
+    "$claudeDir\skills\testgen",                # Merged into test-engineering
+    "$claudeDir\skills\testing-ops",            # Merged into test-engineering
     "$claudeDir\skills\claude-code-templates",  # Replaced by skill-creator
     "$claudeDir\skills\agentmail",              # Renamed to pigeon (v2.3.0)
     "$claudeDir\skills\claude-code-debug",      # Merged into claude-code-ops (v3.0)
@@ -626,7 +627,7 @@ Write-Host ""
 # =============================================================================
 Write-Host "Installing commands..." -ForegroundColor Cyan
 
-$skipCommands = @("review.md", "testgen.md")
+$skipCommands = @("review.md")
 
 $commandsDir = Join-Path $projectRoot "commands"
 Get-ChildItem -LiteralPath $commandsDir -Filter "*.md" | ForEach-Object {

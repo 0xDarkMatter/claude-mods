@@ -59,6 +59,8 @@ All skills follow the official Anthropic pattern with bundled resources:
 
 **Naming guidance:** Use `-ops` for all skills providing domain knowledge. The `-ops` suffix signals comprehensive operational expertise - design, implementation, and operations.
 
+**Deliberate exceptions:** `supply-chain-defense`, `prompt-injection-defense` and `test-engineering` are named for a discipline that cuts across every domain, where `-ops` would misdescribe them. Extend this list deliberately; do not invent new suffixes case by case.
+
 **Frontmatter:** field placement is owned by
 [SKILL-SUBAGENT-REFERENCE.md](../docs/SKILL-SUBAGENT-REFERENCE.md) (the Agent Skills
 spec). Only `name`, `description`, `license`, `compatibility`, `allowed-tools`, and

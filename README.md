@@ -12,11 +12,11 @@
 
 > *Doctrine you can execute. Knowledge that knows when it's stale. Agents that land their own work.*
 
-**claude-mods** is a Claude Code plugin built on one premise: a skill that only *tells* the model something is a suggestion, and a skill that ships a gate is a guarantee. Its 108 skills carry the expert depth you'd expect - React, Rust, PostgreSQL, Cloudflare Workers, Next.js - but the ones that earn the install are the ones that run *agents*: a headless-worker spawner, a test-gated landing queue for parallel branches, a graduated-autonomy ladder for scheduled loops, and a security layer pointed at the agent itself. 58 skills ship executable tooling, 52 ship their own test suites, and 21 carry staleness verifiers that trip when the world moves under them.
+**claude-mods** is a Claude Code plugin built on one premise: a skill that only *tells* the model something is a suggestion, and a skill that ships a gate is a guarantee. Its 107 skills carry the expert depth you'd expect - React, Rust, PostgreSQL, Cloudflare Workers, Next.js - but the ones that earn the install are the ones that run *agents*: a headless-worker spawner, a test-gated landing queue for parallel branches, a graduated-autonomy ladder for scheduled loops, and a security layer pointed at the agent itself. 58 skills ship executable tooling, 52 ship their own test suites, and 21 carry staleness verifiers that trip when the world moves under them.
 
 Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms) and Anthropic's [patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), it installs as a standard plugin and toggles off as easily as it toggles on.
 
-**3 agents. 108 skills. 13 styles. 13 hooks. 15 rules. One install.**
+**4 agents. 107 skills. 13 styles. 13 hooks. 15 rules. One install.**
 
 ## Recent Updates
 
@@ -96,7 +96,7 @@ Each one is a **currency layer over the model's priors** - React, Vue, Next.js, 
 - **Production-mined, not tutorial-shaped.** 200 KB on SQLite/D1 carries the migration that times out but applies and the `.batch()` semantics that bite; 152 KB on Postgres; 104 KB on TypeScript's TS 7 adoption path; `hono-ops` distilled from a live multi-tenant Worker. The gotchas the docs don't mention are the ones an agent walks straight into.
 - **Version-aware, not newest-wins.** `nextjs-ops`' audit reads the project's installed major and gates its rules on *that* - it won't demand a v16 idiom of a v14 codebase. A skill that only knows the latest is a liability on any repo older than a month.
 - **Pinned and verified.** Eleven stack skills carry an `assets/*-facts.json` with an `as_of` date, and pillar 3's verifiers check it against the world. The claim "modern TypeScript" is machine-enforced, not asserted.
-- **Nearly free to carry.** ~100 tokens per skill until one triggers, then references load on demand. 108 skills cost roughly 10k tokens of descriptions; the 5.6 MB behind them costs nothing until you're actually in that stack.
+- **Nearly free to carry.** ~100 tokens per skill until one triggers, then references load on demand. 107 skills cost roughly 10k tokens of descriptions; the 5.6 MB behind them costs nothing until you're actually in that stack.
 
 And the payoff loops back to pillar 1. A `fleet-worker`'s isolated config dir starts clean - you *provision* skills into it. A GLM worker with `hono-ops` loaded writes better Hono than GLM alone, which is why the skill's own docs call provisioning *"often the cheapest way to lift a weak model's output on a specialized task."* The stack skills are what turn "a cheaper brain" from a cost-cut into a real option: the discipline layers decide *what* an agent may do, and the stack layers decide whether what it does is any good.
 
@@ -117,9 +117,9 @@ Some things outgrew a skill directory. An app with a dashboard and a roadmap is 
 ```
 claude-mods/
 ├── .claude-plugin/     # Plugin metadata
-├── agents/             # Expert subagents (3)
-├── commands/           # Slash commands (3)
-├── skills/             # Custom skills (108)
+├── agents/             # Expert subagents (4)
+├── commands/           # Slash commands (4)
+├── skills/             # Custom skills (107)
 ├── output-styles/      # Response personalities
 ├── hooks/              # Hook examples & docs
 ├── rules/              # Claude Code rules
@@ -209,6 +209,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 |---------|-------------|
 | [sync](commands/sync.md) | Session bootstrap - restore tasks, plan, git/PR context. Suggests `--resume` and `--from-pr`. |
 | [save](commands/save.md) | Persist tasks, plan, git/PR context, and session summary to native memory. |
+| [testgen](commands/testgen.md) | One-release alias for `/test-engineering write`. |
 
 ### Skills
 
@@ -340,14 +341,13 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [setperms](skills/setperms/) | Set tool permissions and CLI preferences in .claude/ directory. |
 | [introspect](skills/introspect/) | Analyze previous session logs without consuming current context. |
 | [review](skills/review/) | Code review with semantic diffs, expert routing, and auto-TaskCreate. |
-| [testgen](skills/testgen/) | Generate tests with expert routing and framework detection. |
+| [test-engineering](skills/test-engineering/) | Tests that are proven able to fail: design (failure modes first), write (TDD or test-after, each test proved against a planted mutant), audit (blind review + mutation), gate (CI) and triage. Zero-dependency mutation harness, per-repo `.test-profile.yml`, AI-reviewer (Greptile) aware. Replaces testgen and testing-ops. |
 | [techdebt](skills/techdebt/) | Technical debt detection using parallel subagents. |
 | [migrate-ops](skills/migrate-ops/) | Framework/language migration patterns, version upgrades, codemods |
 | [refactor-ops](skills/refactor-ops/) | Safe refactoring patterns, code smell detection, test-driven methodology |
 | [scaffold](skills/scaffold/) | Project scaffolding - generate boilerplate for APIs, web apps, CLIs, monorepos |
 | [iterate](skills/iterate/) | Autonomous improvement loop - modify, measure, keep or discard, repeat. Inspired by Karpathy's autoresearch. |
 | [loop-ops](skills/loop-ops/) | Outer-loop design discipline - the orchestration layer above `iterate`: risk-tier ladder (L1 report → L2 assisted → L3 unattended) mapped onto Claude Code's permission model, STATE/run-log/budget spine, a 13-pattern morphology (cadence/event/goal × L1–L3 × cloud/local), multi-loop coordination, kill switch. Composes iterate/fleet-worker/fleet-ops/native-loop. loop-scaffold/loop-check/loop-estimate scripts. |
-| [testing-ops](skills/testing-ops/) | Test strategy patterns - mocking, CI testing, test data design |
 | [evals-ops](skills/evals-ops/) | Evals for LLM/agent systems - outcome vs step vs trajectory scoring, golden-set construction and freeze discipline, LLM-as-a-judge bias control and Cohen-kappa calibration, adversarial refuters, blocking-vs-advisory CI gates, cost/latency attribution. McNemar paired-significance testing, RAG retrieval eval, annotation workflow, and hillclimbing discipline (pairs with `iterate`). judge-calibration/goldenset-audit/eval-baseline scripts plus golden-set, rubric, runner and CI-gate templates. |
 | [claude-code-ops](skills/claude-code-ops/) | Claude Code internals - full hook event catalog, skill frontmatter spec, headless/CLI reference, extension debugging |
 | [playwright-ops](skills/playwright-ops/) | Playwright e2e testing - selector hierarchy, fixtures, network mocking, CI sharding, flake hunting |
@@ -402,15 +402,16 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 > retired agents had *no* content their skill twin lacked). Knowledge belongs in skills; subagents are reserved
 > for delegation that needs its own context or model.
 >
-> Delegation stays where it earns its keep: dispatching skills (review, testgen, perf-ops, security-ops,
+> Delegation stays where it earns its keep: dispatching skills (review, test-engineering, perf-ops, security-ops,
 > explain) still route to `general-purpose` agents — but those agents now *preload the relevant skill* for
 > their knowledge. Subagent = the isolation mechanism, skill = the knowledge it loads. The agents below remain
 > because they have no skill twin (a distinct capability, or — like git-agent — a real background-worker role
 > that uses the isolation boundary).
 >
 > The end state is clean: **every domain-knowledge agent is now a skill**, and the only agents left are the
-> three whose value *is* the isolation mechanism — git-agent (a background worker), firecrawl-expert (large
-> noisy scrapes), and project-organizer (bulk filesystem restructure).
+> four whose value *is* the isolation mechanism — git-agent (a background worker), firecrawl-expert (large
+> noisy scrapes), project-organizer (bulk filesystem restructure), and test-review-agent (a blind,
+> read-only test reviewer whose verdicts are only worth having because it cannot run or edit anything).
 >
 > Sources: [Agent Skills](https://code.claude.com/docs/en/skills) — progressive disclosure and on-demand
 > loading; [Subagents](https://code.claude.com/docs/en/sub-agents) — a separate context window for delegated work.
@@ -420,6 +421,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [firecrawl-expert](agents/firecrawl-expert.md) | Web scraping, crawling, parallel fetching, structured extraction |
 | [git-agent](agents/git-agent.md) | Background git operations - commits, PRs, releases (Sonnet) |
 | [project-organizer](agents/project-organizer.md) | Reorganize directory structures, cleanup |
+| [test-review-agent](agents/test-review-agent.md) | Blind, read-only test-suite review for test-engineering: slop, and behaviours no test would catch |
 
 ### Rules
 

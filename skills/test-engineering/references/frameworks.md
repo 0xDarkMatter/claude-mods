@@ -1,6 +1,8 @@
-# TestGen Framework Examples
+# Test Framework Examples
 
-Code examples for each supported testing framework. These are loaded on-demand when the testgen skill detects a specific framework.
+Code examples for each supported testing framework, loaded on demand by write mode once the
+framework is detected. They show idiom, not doctrine: name each test for the bug it prevents
+and prove it fails (write.md), whatever the examples below call their tests.
 
 ---
 

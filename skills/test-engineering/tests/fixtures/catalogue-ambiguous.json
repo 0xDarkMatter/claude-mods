@@ -1,0 +1,1 @@
+[{ "id": "AMB-1", "file": "src/limit.mjs", "old": "amount", "new": "amt", "bug": "anchor occurs many times", "class": "G2" }]

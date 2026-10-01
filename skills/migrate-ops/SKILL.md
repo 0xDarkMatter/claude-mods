@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Edit Write Bash Glob Grep Agent"
 metadata:
   author: claude-mods
-  related-skills: testing-ops, debug-ops, git-ops, refactor-ops
+  related-skills: test-engineering, debug-ops, git-ops, refactor-ops
 ---
 
 # Migrate Operations
@@ -290,7 +290,7 @@ The canonical target-version list lives in [`assets/migrate-facts.json`](assets/
 
 | Skill | When to Combine |
 |-------|----------------|
-| `testing-ops` | Ensuring test coverage before migration, writing regression tests after |
+| `test-engineering` | Ensuring test coverage before migration, writing regression tests after |
 | `debug-ops` | Diagnosing failures introduced by migration, bisecting breaking commits |
 | `git-ops` | Branch strategy for migration, git bisect to find breaking change |
 | `refactor-ops` | Code transformations that often accompany version upgrades |

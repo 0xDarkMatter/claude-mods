@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: nextjs-ops, typescript-ops, testing-ops, tailwind-ops, javascript-ops
+  related-skills: nextjs-ops, typescript-ops, test-engineering, tailwind-ops, javascript-ops
 ---
 
 # React Operations
@@ -291,6 +291,6 @@ The canonical fact list lives in [`assets/react-facts.json`](assets/react-facts.
 | Skill | When to Combine |
 |-------|----------------|
 | `typescript-ops` | TypeScript generics with React props, discriminated unions for state machines, utility types |
-| `testing-ops` | Test strategy, mocking patterns, CI integration, snapshot vs behavioral tests |
+| `test-engineering` | Test strategy, mocking patterns, CI integration, snapshot vs behavioral tests |
 | `tailwind-ops` | CSS-in-JS alternatives, responsive design with Tailwind in React components |
 | `javascript-ops` | Async patterns, Promises, generators, module system fundamentals |

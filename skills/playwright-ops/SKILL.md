@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: testing-ops, ci-cd-ops
+  related-skills: test-engineering, ci-cd-ops
 ---
 
 # Playwright Operations

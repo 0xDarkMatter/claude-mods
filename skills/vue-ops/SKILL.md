@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: typescript-ops, testing-ops, tailwind-ops, javascript-ops
+  related-skills: typescript-ops, test-engineering, tailwind-ops, javascript-ops
 ---
 
 # Vue Operations
@@ -481,6 +481,6 @@ The canonical fact list lives in [`assets/vue-facts.json`](assets/vue-facts.json
 ## See Also
 
 - **typescript-ops** — TypeScript generics, utility types, strict mode configuration
-- **testing-ops** — General testing patterns, TDD, mocking strategies, CI integration
+- **test-engineering** — General testing patterns, TDD, mocking strategies, CI integration
 - **tailwind-ops** — Tailwind CSS with Vue component patterns, dark mode, responsive design
 - **javascript-ops** — Modern JS patterns used alongside Vue (async/await, modules, iterators)

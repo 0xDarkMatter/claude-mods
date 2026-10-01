@@ -4,7 +4,7 @@ description: "Build and run evals for LLM and agent systems: golden datasets, LL
 license: MIT
 metadata:
   author: claude-mods
-  related-skills: "testing-ops, claude-api-ops, iterate, loop-ops, fleet-ops"
+  related-skills: "test-engineering, claude-api-ops, iterate, loop-ops, fleet-ops"
 ---
 
 # Evals Ops

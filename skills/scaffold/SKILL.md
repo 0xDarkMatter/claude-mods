@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Edit Write Bash Glob Grep Agent"
 metadata:
   author: claude-mods
-  related-skills: docker-ops, ci-cd-ops, testing-ops, python-env, typescript-ops, repo-doctor
+  related-skills: docker-ops, ci-cd-ops, test-engineering, python-env, typescript-ops, repo-doctor
 ---
 
 # Scaffold
@@ -549,6 +549,6 @@ strict = true
 |-------|----------------|
 | `docker-ops` | Container configuration, multi-stage builds, compose orchestration |
 | `ci-cd-ops` | GitHub Actions workflows, deployment pipelines, release automation |
-| `testing-ops` | Test framework setup, coverage configuration, CI test integration |
+| `test-engineering` | Test framework setup, coverage configuration, CI test integration |
 | `python-env` | Python virtual environments, dependency management with uv |
 | `typescript-ops` | TypeScript configuration, strict mode, module resolution |

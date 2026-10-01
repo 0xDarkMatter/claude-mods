@@ -1,0 +1,4 @@
+[{ "id": "LIM-1", "file": "src/limit.mjs", "old": "return amount > limit;", "new": "return amount >= limit;",
+   "bug": "spending exactly the limit is refused", "class": "G2" },
+ { "id": "FEE-1", "file": "src/limit.mjs", "old": "amount * 0.029 * 100", "new": "amount * 0.03 * 100",
+   "bug": "card fee charged at 3.0% instead of 2.9%", "class": "G7" }]

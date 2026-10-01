@@ -8,6 +8,25 @@ feature releases live in the README "Recent Updates" section.
 
 ### Added
 
+- **`test-engineering` skill** (replaces `testgen` and `testing-ops`) - tests that are proven
+  able to fail. Five modes behind one router: **design** (failure modes first, from a gap-class
+  checklist), **write** (TDD or test-after; every test proved against a planted mutant or the
+  unfixed code, else marked `unverified`), **audit** (blind review plus mutation, authored and
+  predicted results never blended), **gate** (v1 blocks only on lost Python tests, the one
+  slop class a linter detects exactly) and **triage** (red tests, survivors, flakes, and AI
+  reviewer comments about tests, closed with evidence). Ships `scripts/mutate.mjs`, a
+  zero-dependency harness (vitest, jest, pytest, go, any command) that restores files from
+  memory rather than `git checkout`, refuses red or incomplete baselines, brackets batches with
+  null controls and strips secret-looking env vars from test runs; a per-repo
+  `.test-profile.yml` (strictness, posture, risk zones); slop (S1-S18) and gap (G1-G13)
+  catalogues; and Greptile guidance. Grounded in a 13-repo survey: suites that were all green
+  killed 74% of authored mutants, and 20 of 20 behaviours a blind reviewer predicted were
+  untested survived.
+- **`test-review-agent`** - blind, read-only (Read, Grep, Glob) test-suite reviewer spawned by
+  test-engineering's audit and triage modes.
+- **`security-ops`: optional discovery companion** - `cloudflare/security-audit-skill`,
+  referenced at a pinned, reviewed commit rather than vendored.
+
 - **`deploy-gating` rule** - a child session never deploys. Background agents, chips,
   workflow/fleet workers, headless and scheduled runs, and CI-autofix or review-triage
   loops may build, test and commit, but stop at the deploy boundary and report the
@@ -171,6 +190,12 @@ feature releases live in the README "Recent Updates" section.
   wiring calls `bash hooks/x.sh`, but the documented gate did not exist).
 
 ### Changed
+
+- **BREAKING: `testgen` and `testing-ops` are merged into `test-engineering`.** `/testgen`
+  survives for one release as a command alias for `/test-engineering write`; installers remove
+  the old skill directories. `coverage-check.sh` is now report-only by default (`--threshold`
+  restores the old gate), and the mocking guidance no longer says to always mock databases
+  and the file system.
 
 - **Rules made machine- and person-agnostic.** Rules ship in a public plugin, so
   author-specific incidents, repos and phrasing ("the user corrected this on…") are

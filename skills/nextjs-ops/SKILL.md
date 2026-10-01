@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Write Bash Grep Glob"
 metadata:
   author: claude-mods
-  related-skills: "react-ops, typescript-ops, tailwind-ops, payloadcms-ops, cloudflare-ops, hono-ops, auth-ops, testing-ops"
+  related-skills: "react-ops, typescript-ops, tailwind-ops, payloadcms-ops, cloudflare-ops, hono-ops, auth-ops, test-engineering"
 ---
 
 # Next.js Operations
@@ -347,4 +347,4 @@ python scripts/check-nextjs-facts.py --offline
   Hono-based APIs. Next.js on Cloudflare goes through `@opennextjs/cloudflare`;
   see `references/deployment.md` for the seam, and those skills for the platform.
 - **`auth-ops`** — session and token design that Server Actions depend on;
-  **`testing-ops`** — the test strategy this framework's boundaries need.
+  **`test-engineering`** — the test strategy this framework's boundaries need.

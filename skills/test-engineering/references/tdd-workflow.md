@@ -70,8 +70,18 @@ class Cart:
 ### Three Laws of TDD
 
 1. **Don't write production code** until you have a failing test
-2. **Write only enough test** to fail (compilation counts)
+2. **Write only enough test** to fail. A compile error or missing symbol is a step on the way,
+   not the red that counts: stub just enough to reach the assertion
 3. **Write only enough production code** to pass the test
+
+### The right-reason red
+
+The red step is evidence only when it is an **assertion failure on a value** (expected 90, got
+100). An ImportError, a missing symbol or a "not implemented" throw proves the code is absent,
+not that the test pins the behaviour. And once the code exists, plant a realistic mutant in
+it and run the test again (`mutate.mjs --prove`, see write.md): a test that stays green has
+found an over-general implementation, the classic TDD trap where the green step satisfies a
+test that pins nothing.
 
 ### Test Size Rules
 

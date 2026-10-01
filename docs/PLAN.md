@@ -15,9 +15,9 @@
 
 | Component | Count | Notes |
 |-----------|-------|-------|
-| Agents | 3 | Pure context-isolation/worker roles only: git-agent (background commits/PRs), firecrawl-expert (noisy scrapes), project-organizer (bulk restructure) |
-| Skills | 108 | Operational skills, CLI tools, workflows, diagnostics, security |
-| Commands | 3 | Session management + git orchestration (sync, save, git-ops) |
+| Agents | 4 | Pure context-isolation/worker roles only: git-agent (background commits/PRs), firecrawl-expert (noisy scrapes), project-organizer (bulk restructure), test-review-agent (blind read-only test review) |
+| Skills | 107 | Operational skills, CLI tools, workflows, diagnostics, security |
+| Commands | 4 | Session management + git orchestration (sync, save, git-ops) + /testgen alias (one release) |
 | Rules | 15 | agentic-quality, cli-tools, commit-style, deploy-gating, dev-servers, loop-engineering, modern-tools, naming-conventions, prompt-injection, public-posts, release-review, shell-preference, skill-agent-updates, supply-chain, worktree-boundaries |
 | Output Styles | 13 | Vesper, Spartan, Mentor, Executive, Pair, Atlas, Coach, Harbour, Meridian, Noir, Roast, Sage, Scout |
 | Hooks | 13 | lint, format, safety, uv, install-scan, manifest-scan, pmail, unicode-scan ×2, config-change guard, worktree guard, peer-writer guard, touched-files ledger |

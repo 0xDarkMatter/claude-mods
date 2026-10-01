@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: typescript-ops, react-ops, vue-ops, testing-ops
+  related-skills: typescript-ops, react-ops, vue-ops, test-engineering
 ---
 
 # JavaScript Operations
@@ -282,4 +282,4 @@ class AppError extends Error {
 - `typescript-ops` — TypeScript types, generics, utility types, tsconfig
 - `react-ops` — React hooks, Server Components, state management
 - `vue-ops` — Vue 3 Composition API, Pinia, Nuxt
-- `testing-ops` — Jest, Vitest, Playwright, TDD patterns
+- `test-engineering` — Jest, Vitest, Playwright, TDD patterns

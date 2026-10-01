@@ -4,23 +4,25 @@ When, what, and how to mock effectively.
 
 ## When to Mock
 
-### ALWAYS Mock
-- External HTTP APIs
-- Databases in unit tests
-- File system in unit tests
-- Time-dependent operations
-- Random number generators
-- Email/SMS services
+The rule: **mock at process boundaries you do not own; control nondeterminism by injection;
+use the real thing everywhere else when it is cheap.** In a 13-repo survey the strongest
+suites ran real SQLite/D1 with the real migrations and real temp directories, and the bugs
+that slipped through were in exactly the layers other suites had stubbed (S8, one layer short).
 
-### SOMETIMES Mock
-- Internal services (depends on test type)
-- Caches
-- Message queues
+### Fake or stub (boundaries you do not own)
+- Third-party HTTP APIs (a recorded or spec-validating fake at the network edge)
+- Email/SMS, payment providers, anything that sends or charges
+- Time, randomness and generated ids: inject them, do not patch globals
 
-### NEVER Mock
-- The code under test itself
-- Simple value objects
-- Pure functions without side effects
+### Prefer the real thing (cheap and in-process)
+- Databases: SQLite or D1 with the real migrations, a transaction or a fresh file per test
+- The file system: a temp directory per test
+- Your own internal modules and services: test through them, not around them
+- Caches and queues with an in-memory implementation that honours the same contract
+
+### Never mock
+- The code under test, or a copy of it (S15, shadow implementation)
+- Value objects and pure functions
 
 ## The Testing Boundary
 

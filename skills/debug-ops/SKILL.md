@@ -6,7 +6,7 @@ license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: testing-ops, security-ops, monitoring-ops, code-stats
+  related-skills: test-engineering, security-ops, monitoring-ops, code-stats
 ---
 
 # Debug Operations
@@ -273,7 +273,7 @@ jq -r 'select(.level == "error") | .error_type' app.log | sort | uniq -c | sort 
 
 ## See Also
 
-- **testing-ops** -- Write tests to prevent bugs from recurring
+- **test-engineering** -- Write tests to prevent bugs from recurring
 - **security-ops** -- Security-specific debugging (auth failures, injection, CSRF)
 - **monitoring-ops** -- Production observability, alerting, dashboards
 - **code-stats** -- Measure code complexity and identify bug-prone areas

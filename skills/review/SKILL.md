@@ -50,7 +50,7 @@ review [target] [--focus] [--depth]
     │     ├─ Shell/bash → general-purpose, preload bash-ops
     │     ├─ Claude extensions → general-purpose, preload claude-code-ops
     │     ├─ Multi-domain → parallel general-purpose dispatch
-    │     └─ All reviewers preload: security-ops + testing-ops context
+    │     └─ All reviewers preload: security-ops + test-engineering context
     │
     ├─→ Step 5: Generate Review
     │     ├─ Severity: CRITICAL / WARNING / SUGGESTION / PRAISE
@@ -61,7 +61,7 @@ review [target] [--focus] [--depth]
     └─→ Step 6: Integration
           ├─ Auto-create tasks (TaskCreate) for CRITICAL issues
           ├─ Link to /save for tracking
-          └─ Suggest follow-up: /testgen, /explain
+          └─ Suggest follow-up: /test-engineering write, /explain
 ```
 
 ## Execution Steps
@@ -176,7 +176,7 @@ Prompt includes:
   - Skill preloading (domain knowledge):
     "First, read these files for review context:
      - Read: skills/security-ops/references/owasp-detailed.md
-     - Read: skills/testing-ops/SKILL.md
+     - Read: skills/test-engineering/SKILL.md
      - Read: [Preload column for the matched file pattern]"
   - Diff content
   - Project conventions from AGENTS.md
@@ -406,5 +406,5 @@ command -v delta >/dev/null 2>&1 && git diff --cached | delta || git diff --cach
 | Command | Relationship |
 |---------|--------------|
 | `/explain` | Deep dive into flagged code |
-| `/testgen` | Generate tests for issues found |
+| `/test-engineering write` | Tests for issues found, each proved able to fail |
 | `/save` | Persist review findings to session state |

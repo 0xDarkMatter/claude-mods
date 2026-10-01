@@ -73,7 +73,7 @@ already exist:
 | **Schedule** | fire the loop on a cadence *or an event* | native-first, declared as `host:` — `session-cron` (`/loop`+`CronCreate`, L1 only), `desktop-task` (`scheduled-tasks` MCP: local + durable), `cloud-routine` (`/schedule`: machine-off, plus API/GitHub event triggers), `/goal` for completion. `external` (cron/Task Scheduler + `loop-run.sh`) only for non-Claude-Code control |
 | **Worktree** | isolated, discardable execution context | `git-ops` worktrees, `fleet-worker` (per-task worktree) |
 | **Skills** | persistent project knowledge the run loads | this repo's skill layer + your `CLAUDE.md` |
-| **Sub-agents** | maker/checker separation | `Agent`/`Task`; dispatching skills (`review`, `testgen`) |
+| **Sub-agents** | maker/checker separation | `Agent`/`Task`; dispatching skills (`review`, `test-engineering`) |
 | **Connectors** | reach tickets / CI / chat | MCP tools, `gh`, `github-ops` |
 | **+ State** | a durable spine *outside* the conversation | `STATE.md` + run-log + budget (this skill) |
 

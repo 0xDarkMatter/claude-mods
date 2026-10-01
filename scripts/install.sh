@@ -59,12 +59,13 @@ echo -e "${YELLOW}Cleaning up deprecated items...${NC}"
 deprecated_items=(
     # Removed commands (migrated to skills or deleted)
     "$CLAUDE_DIR/commands/review.md"      # Migrated to skill
-    "$CLAUDE_DIR/commands/testgen.md"     # Migrated to skill
     "$CLAUDE_DIR/commands/conclave.md"    # Deprecated
     "$CLAUDE_DIR/commands/pulse.md"       # Now a skill only
 
     # Removed skills
     "$CLAUDE_DIR/skills/conclave"                # Deprecated
+    "$CLAUDE_DIR/skills/testgen"                 # Merged into test-engineering
+    "$CLAUDE_DIR/skills/testing-ops"             # Merged into test-engineering
     "$CLAUDE_DIR/skills/claude-code-templates"   # Replaced by skill-creator
     "$CLAUDE_DIR/skills/agentmail"               # Renamed to pigeon (v2.3.0)
     "$CLAUDE_DIR/skills/claude-code-debug"       # Merged into claude-code-ops (v3.0)
@@ -135,7 +136,7 @@ echo ""
 echo -e "${BLUE}Installing commands...${NC}"
 
 # Commands that should NOT be copied (migrated to skills)
-skip_commands=("review.md" "testgen.md")
+skip_commands=("review.md")
 
 for file in "$PROJECT_ROOT/commands"/*.md; do
     [ -f "$file" ] || continue

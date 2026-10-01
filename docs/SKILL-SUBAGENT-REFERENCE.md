@@ -127,7 +127,7 @@ effort: high
 license: MIT
 metadata:                 # custom bookkeeping only
   author: claude-mods
-  related-skills: "testgen, security-ops"
+  related-skills: "test-engineering, security-ops"
 ---
 ```
 

@@ -1,12 +1,12 @@
 ---
 name: cypress-ops
 description: "Cypress end-to-end and component testing operations - selector/retry-ability strategy, cy.intercept network stubbing, cy.session auth, component vs e2e, flake diagnosis, CI, Test Replay. Use for: cypress, e2e test, component test, cy.get, cy.intercept, cy.session, data-cy, data-test, retry-ability, flake, flaky test, cypress.config, cy.mount, Test Replay, custom commands, fixtures."
-when_to_use: "Use when writing or fixing Cypress e2e/component tests — e.g. 'pick stable selectors and data-cy', 'stub network with cy.intercept', 'share login with cy.session', 'diagnose a flaky retry-ability test'. For Playwright or other runners, use playwright-ops / testing-ops."
+when_to_use: "Use when writing or fixing Cypress e2e/component tests — e.g. 'pick stable selectors and data-cy', 'stub network with cy.intercept', 'share login with cy.session', 'diagnose a flaky retry-ability test'. For Playwright or other runners, use playwright-ops / test-engineering."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: "playwright-ops, testing-ops, ci-cd-ops"
+  related-skills: "playwright-ops, test-engineering, ci-cd-ops"
 ---
 
 # Cypress Operations

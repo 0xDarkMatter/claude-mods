@@ -1,0 +1,2 @@
+[{ "id": "LIM-1", "file": "src/limit.mjs", "old": "return amount > limit;", "new": "return amount >= limit;",
+   "bug": "spending exactly the limit is refused", "class": "G2" }]

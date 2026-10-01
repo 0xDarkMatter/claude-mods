@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Write Bash Grep Glob"
 metadata:
   author: claude-mods
-  related-skills: "cloudflare-ops, typescript-ops, sqlite-ops, rest-ops, testing-ops, auth-ops"
+  related-skills: "cloudflare-ops, typescript-ops, sqlite-ops, rest-ops, test-engineering, auth-ops"
 ---
 
 # Hono Operations

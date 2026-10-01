@@ -156,6 +156,11 @@ jobs:
 
 ## Flaky Test Handling
 
+Retries hide flakes; they do not fix them. Treat "passed on retry" as **flaky**, not green:
+record it, and treat a guard whose only test is flaky as unguarded (triage.md). Use the
+mechanisms below to keep CI moving while the nondeterminism is removed, with an owner and a
+date on every quarantine.
+
 ### Retry Mechanism
 
 ```yaml

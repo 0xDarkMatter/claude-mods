@@ -1,0 +1,29 @@
+# .test-profile.yml - read by every test-engineering mode (references/profile.md)
+# Copy to the repo root and link it from the "## Testing" section of AGENTS.md.
+version: 1
+
+# What kind of software this is; drives the default kinds of test. One or more of:
+# cli | mcp-server | http-service | web-ui | data-pipeline | media-pipeline | llm-feature | library
+shape: [http-service, cli]
+
+# How much evidence is demanded outside zones: standard | strict | critical
+strictness: standard
+
+# Repo default order of work: tdd | test-after. A developer overrides it per run.
+# Gates never check the order, only the evidence.
+posture: test-after
+
+# Exceptions to the shape defaults only. Examples:
+#   e2e: smoke | full | off      visual: drift | review | off
+#   property: on                 a11y: on
+kinds: {}
+
+# Risk zones. Tags make failure classes mandatory and set the default level:
+# money, auth, pii, irreversible -> strict; mission-critical -> critical (always).
+# An explicit level overrides the tag default. Detection can propose zones; a human
+# declares mission-critical and anything a keyword scan cannot see.
+zones:
+  - { paths: ["src/billing/**", "src/lib/currency.*"], tags: [money] }
+  - { paths: ["src/auth/**"], tags: [auth] }
+  - { package: "packages/api", paths: ["src/routes/orders*"], tags: [irreversible, pii, money] }
+  - { paths: ["src/payroll/**"], tags: [mission-critical] }

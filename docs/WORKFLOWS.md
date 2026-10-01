@@ -7,7 +7,7 @@ Recommended patterns for common development tasks.
 > (1) claude-mods is **skills-first** — domain knowledge lives in `-ops` skills loaded
 > on demand, not in agents; **subagents are reserved for context-isolation/worker roles
 > only** (git-agent, firecrawl-expert, project-organizer). Dispatching skills (review,
-> testgen, perf-ops, …) route `general-purpose` agents that preload the relevant skill.
+> test-engineering, perf-ops, …) route `general-purpose` agents that preload the relevant skill.
 > (2) To **build** a skill, follow [SKILL-CREATION-PROTOCOL.md](SKILL-CREATION-PROTOCOL.md);
 > for what's shipping/next, see [PLAN.md](PLAN.md). Treat any specific skill/agent named
 > in older examples below as illustrative — [ARCHITECTURE.md](ARCHITECTURE.md) is the

@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: color-ops, icon-ops, playwright-ops, testing-ops
+  related-skills: color-ops, icon-ops, playwright-ops, test-engineering
 ---
 
 # a11y-ops
@@ -170,7 +170,7 @@ position; "fully conformant" without an audit is not.
 |---|---|
 | Checking a palette meets 1.4.3 / 1.4.11 | `color-ops` |
 | Naming icon-only controls, logo `alt` | `icon-ops` |
-| Automating the DOM scan in e2e | `playwright-ops`, `testing-ops` |
+| Automating the DOM scan in e2e | `playwright-ops`, `test-engineering` |
 | The component library needs rebuilding around native elements | `refactor-ops` |
 
 ## References

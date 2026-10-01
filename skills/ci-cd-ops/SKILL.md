@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: git-ops, docker-ops, testing-ops
+  related-skills: git-ops, docker-ops, test-engineering
 ---
 
 # CI/CD Operations

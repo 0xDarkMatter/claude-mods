@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: docker-ops, ci-cd-ops, api-design-ops, testing-ops
+  related-skills: docker-ops, ci-cd-ops, api-design-ops, test-engineering
 ---
 
 # Go Operations
@@ -308,4 +308,4 @@ Load these for deep-dive topics. Each is self-contained.
 
 - `docker-ops` - Multi-stage builds for Go binaries (scratch/distroless)
 - `ci-cd-ops` - Go CI pipelines, caching go modules, goreleaser
-- `testing-ops` - Cross-language testing strategies
+- `test-engineering` - Cross-language testing strategies

@@ -1,19 +1,19 @@
 # Visual Testing with Chrome DevTools
 
-Documentation for the `--visual` flag which uses Chrome DevTools MCP for interactive visual testing.
+Interactive visual checks during write mode, using browser tooling. **Policy lives in
+profile.md** (when visual tests are worth having, and who may accept a new baseline: the diff
+image in the PR at `standard`, a named human at `critical`). Visual regression is a change
+detector: it proves no behaviour, so it never replaces a behavioural test of the same rule.
 
 ---
 
 ## Overview
 
-The `--visual` flag enables browser-based testing using Chrome DevTools MCP tools. This provides real browser verification, accessibility snapshots, and visual regression testing.
+`--visual` in write mode adds browser-based checks: real browser verification, accessibility
+snapshots and visual regression baselines.
 
 ```bash
-# Visual test with Chrome DevTools
-/testgen src/pages/Login.tsx --visual
-
-# Combined with E2E type
-/testgen src/components/Form.tsx --type e2e --visual
+/test-engineering write src/pages/Login.tsx --visual
 ```
 
 ---
@@ -136,25 +136,11 @@ Chrome DevTools MCP → Claude-in-Chrome → Playwright → Cypress → Manual t
 
 ---
 
-## Advanced Flags
+## UI issues found in review
 
-### --coverage + --visual
-
-Combine coverage analysis with visual testing:
-
-```bash
-/testgen src/components/ --coverage --visual
-```
-
-This identifies untested visual states and generates tests for them.
-
-### --from-review + --visual
-
-Generate visual regression tests for UI issues found by `/review`:
-
-```bash
-/testgen --from-review --visual
-```
+A UI issue raised by `/review` or an AI reviewer goes through triage mode first: the
+regression test that closes it must fail on the unfixed code, and a visual baseline alone does
+not count as that test.
 
 ---
 
