@@ -34,8 +34,10 @@
 #
 # Behaviour (silent on clean):
 #   no violation             → no output, exit 0
-#   violation                → ADVISORY warning naming the rule, exit 0
+#   violation                → ADVISORY: one additionalContext JSON envelope on
+#                              stdout naming the rule, exit 0
 #   + WORKTREE_GUARD_BLOCK=1 → HARD DENY: stderr + exit 2 (tool call prevented)
+# Channel contract tests: tests/hooks.sh
 
 set -uo pipefail
 
@@ -98,8 +100,16 @@ if [[ "${WORKTREE_GUARD_BLOCK:-0}" == "1" ]]; then
   exit 2
 fi
 
-echo "WORKTREE GUARD: $VIOLATION."
-echo "rules/worktree-boundaries.md: .claude/worktrees/ is another session's private"
-echo "state — it may look orphaned and isn't. Use explicit paths with git add; ask"
-echo "the user before removing any worktree. (WORKTREE_GUARD_BLOCK=1 to hard-deny.)"
+MSG="WORKTREE GUARD: $VIOLATION.
+rules/worktree-boundaries.md: .claude/worktrees/ is another session's private
+state — it may look orphaned and isn't. Use explicit paths with git add; ask
+the user before removing any worktree. (WORKTREE_GUARD_BLOCK=1 to hard-deny.)"
+
+# Guard: do not "simplify" this back to plain echo. For PreToolUse, plain stdout
+# on exit 0 goes to the debug log and never reaches the model ("Exit code 0" in
+# https://code.claude.com/docs/en/hooks); the echo-only original warned nobody.
+# The block path above is already right: exit 2 feeds STDERR to the model.
+# Nothing else may write to stdout, or the JSON stops parsing.
+command -v jq >/dev/null 2>&1 || exit 0   # no jq, no envelope - stay silent
+jq -nc --arg c "$MSG" '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:$c}}'
 exit 0

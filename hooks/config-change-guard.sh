@@ -25,11 +25,14 @@
 #
 # Behaviour (silent guardian — rules/prompt-injection.md noise discipline):
 #   clean              → no output, exit 0
-#   IOC found          → ADVISORY: systemMessage JSON on stdout, exit 0
-#   + SUPPLY_CHAIN_BLOCK=1 → HARD GATE: stderr + exit 2 (change blocked;
-#                        ConfigChange is blockable for non-policy sources)
+#   IOC found          → ADVISORY: JSON on stdout carrying a desktop notification
+#                        (terminalSequence) + systemMessage, exit 0
+#   + SUPPLY_CHAIN_BLOCK=1 → HARD GATE: same JSON, reason on stderr, exit 2
+#                        (change blocked; blockable for non-policy sources)
+#   Why a notification and not a message: see the channel guard at the emit site.
 #
 # Exit codes: 0 allow (clean or advisory), 2 block (IOC + SUPPLY_CHAIN_BLOCK=1)
+# Channel contract tests: tests/hooks.sh
 
 set -uo pipefail   # NOT -e: a guard must not crash into a false block
 
@@ -68,15 +71,37 @@ HITS="$(grep -nEi "$SUSPECT" "$FILE" 2>/dev/null)"
 FLAT="$(printf '%s' "$HITS" | head -5 | tr '\n' ';' )"
 MSG="CONFIG GUARD: worm-persistence IOC in changed settings file ($FILE): ${FLAT} — confirm YOU added this. If unexplained, treat as an incident: run skills/supply-chain-defense/scripts/integrity-audit.sh, isolate, rotate credentials."
 
+# ── Emit ───────────────────────────────────────────────────────────────────
+# Guard: ConfigChange is the one event where no text channel reaches anyone.
+# Per "ConfigChange decision control" in https://code.claude.com/docs/en/hooks,
+# it DISCARDS systemMessage, has no additionalContext, and even a block
+# "surfaces no message to you or to Claude" - plain stdout and stderr land in
+# the debug log only. The one field that still reaches a person is
+# terminalSequence: a desktop notification (OSC 9) that Claude Code writes
+# itself, in interactive sessions only (ignored under -p and the SDK). The
+# systemMessage-only original alerted nobody. systemMessage stays for any
+# harness that does show it; nothing here reaches the model.
+#
+# OSC 9 grammar: ESC ] 9 ; <body> BEL. The body is a fixed string plus the file
+# path, never the IOC lines (attacker-written settings content), and is stripped
+# of control bytes: one stray ESC/BEL would make Claude Code reject the field
+# (allowlist: OSC 0/1/2/9/99/777 + BEL). The leading "Claude" keeps the body
+# from reading as a ConEmu/Windows Terminal "9;<n>;" sub-command.
+NOTE="$(printf 'Claude Code config guard: worm-persistence IOC in %s - review before trusting it' "$FILE" | tr -d '\000-\037\177')"
+SEQ="$(printf '\033]9;%s\007' "$NOTE")"
+emit_notice() {
+  [[ "$HAS_JQ" -eq 1 ]] || return 0   # no jq, no envelope - nothing would be read anyway
+  jq -nc --arg m "$MSG" --arg s "$SEQ" '{systemMessage:$m, terminalSequence:$s}'
+}
+
 if [[ "${SUPPLY_CHAIN_BLOCK:-0}" == "1" ]]; then
+  # exit 2 blocks whatever the JSON says, and Claude Code still reads the JSON,
+  # so the notification also explains an otherwise silent block.
+  emit_notice
   echo "$MSG" >&2
   echo "Blocked (SUPPLY_CHAIN_BLOCK=1). Review the change before allowing it." >&2
   exit 2
 fi
 
-if [[ "$HAS_JQ" -eq 1 ]]; then
-  jq -n --arg m "$MSG" '{systemMessage: $m}'
-else
-  echo "$MSG"
-fi
+emit_notice
 exit 0
