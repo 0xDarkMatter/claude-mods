@@ -41,6 +41,12 @@ Vetting MCP servers - tool descriptions are model-facing instructions you rarely
 eyeball. A malicious or compromised MCP server is a direct injection channel; scan
 its manifest/descriptions the same way you scan a config file.
 
+Catching text that hides from a *terminal* review rather than a GUI one - an ANSI
+escape (`ESC[8m` conceals what follows, `ESC[2K` erases the line) that `git diff` and
+its pager pass straight through, backspace overprinting, or a single NUL that makes
+`git diff` print "Binary files differ" instead of the edit. Every C0/C1 control but
+TAB, LF and CR is banded.
+
 Catching homoglyph / confusable tricks - a word mixing Latin and Cyrillic letters
 (`раyment` with Cyrillic `а`/`р`) used to impersonate a command or evade a keyword
 filter. `scripts/scan-hidden-unicode.py --strict`.
@@ -119,8 +125,11 @@ scripts/scan-hidden-unicode.py --json . | jq '.data[] | select(.severity=="criti
 Exits `0` clean, `10` when dangerous codepoints are found (worst severity on stderr).
 Default fails on `critical`+`high` bands (bidi overrides, tag-block, zero-width
 space, word-joiner, line/paragraph separators and NEL, soft hyphen, invisible
-fillers). `--strict` adds `medium`+`low` bands (incl. VT/FF) and mixed-script
-homoglyph tokens. stdout is data (TSV, or JSON envelope with `--json`); stderr is the summary.
+fillers, C0/C1 controls incl. ESC and DEL, deprecated and musical format characters,
+reserved default-ignorables). `--strict` adds `medium`+`low` bands (incl. VT/FF and
+the Mongolian and Duployan format controls) and mixed-script homoglyph tokens. Every
+Default_Ignorable code point is in some band - a self-test invariant, not a hope.
+stdout is data (TSV, or JSON envelope with `--json`); stderr is the summary.
 
 ### Pattern 2: Sanitize untrusted content before it enters context
 
@@ -141,12 +150,13 @@ scripts/sanitize-content.py notes.txt --json 2> removal-report.json
 
 `--strip-level` is `minimal` (bidi overrides + tag-block only - safe for any text),
 `standard` (default; + zero-width, isolates, marks, mid-file BOM, soft hyphen, line
-separators - preserves emoji and Persian/Arabic/Indic joiners), or `aggressive`
-(+ ZWNJ, Mongolian vowel separator, PUA, variation selectors - *may* alter emoji and
-icon-font glyphs, so reserve it for plain prose). Sanitized content goes to stdout
-(or `-o`); the removal report goes to stderr.
+separators, C0/C1 controls - preserves emoji and Persian/Arabic/Indic joiners), or
+`aggressive` (+ ZWNJ, the Mongolian vowel separator and free variation selectors,
+Duployan format controls, PUA, variation selectors - *may* alter emoji and icon-font
+glyphs, so reserve it for plain prose). Sanitized content goes to stdout (or `-o`); the removal
+report goes to stderr.
 
-Line-break code points (`U+2028`/`U+2029`, NEL, VT/FF, FS-RS) and the blank-rendering
+Line-break code points (`U+2028`/`U+2029`, NEL, VT/FF, FS-US) and the blank-rendering
 Hangul fillers are **flattened to a space, never deleted** - deletion would fuse the
 words either side, and a newline would make a forged line real. The report names
 each replacement (`replaced_by_band` in `--json`).
@@ -224,7 +234,8 @@ it. Flag by *codepoint band and severity*, whitelist emoji (`U+FE0F`, `U+200D`).
 **Splitting lines with `str.splitlines()` in a scanner.** It treats VT, FF, FS-RS,
 NEL, `U+2028` and `U+2029` as line breaks and drops them - the very characters that
 forge a line a reviewer never saw - and shifts every later line number. Split on
-CRLF/CR/LF only, and don't let an "ASCII is safe" fast path skip C0 controls.
+CRLF/CR/LF only, and don't let an "ASCII is safe" fast path skip C0 controls or DEL:
+printable ASCII is `0x20`-`0x7E`, nothing more.
 
 **Stripping zero-width joiners globally.** `U+200D` is load-bearing in emoji
 sequences and Indic scripts; blanket removal corrupts legitimate text. It's `never`
@@ -262,10 +273,15 @@ publisher, 2.2M installs, still malicious). Scan the content regardless of sourc
 | Bidi overrides | `U+202A`-`U+202E` | critical | Trojan Source reordering |
 | Bidi isolates | `U+2066`-`U+2069` | high | Subtler reordering; legit in mixed-direction text |
 | Zero-width space / word-joiner | `U+200B`, `U+2060`-`U+2064` | high | Invisible separators / filter evasion |
-| Line / paragraph separators, NEL, FS-RS | `U+2028`-`U+2029`, `U+0085`, `U+001C`-`U+001E` | high | Forge a line break; flattened to a space |
+| Line / paragraph separators, NEL, FS-US | `U+2028`-`U+2029`, `U+0085`, `U+001C`-`U+001F` | high | Forge a line break; flattened to a space |
+| ESC (ANSI escape sequences) | `U+001B` | high | Conceals / erases text in a terminal review |
+| C0 controls, DEL, C1 controls | `U+0000`-`U+0008`, `U+000E`-`U+001A`, `U+007F`, `U+0080`-`U+009F` (not NEL) | high | BS overprints; NUL makes `git diff` show "binary"; `U+009B` is 8-bit CSI. TAB/LF/CR unbanded |
 | Soft hyphen, CGJ, Khmer inherent vowels, Hangul fillers | `U+00AD`, `U+034F`, `U+17B4`-`U+17B5`, `U+115F`-`U+1160`, `U+3164`, `U+FFA0` | high | Default-ignorable; keyword splitting |
+| Deprecated + musical format characters | `U+206A`-`U+206F`, `U+1D173`-`U+1D17A` | high | Default-ignorable; no living use |
+| Reserved default-ignorables | `U+2065`, `U+FFF0`-`U+FFF8`, `U+E0080`-`U+E00FF`, `U+E01F0`-`U+E0FFF` | high | Unassigned, yet already invisible by property |
 | VT / FF | `U+000B`-`U+000C` | medium | Line breaks, but visible in a raw-byte review |
-| Mongolian vowel separator | `U+180E` | medium | Invisible; required in Mongolian (like ZWNJ) |
+| Mongolian vowel separator + free variation selectors | `U+180B`-`U+180F` | medium | Invisible; required in Mongolian (like ZWNJ) |
+| Shorthand format controls | `U+1BCA0`-`U+1BCA3` | medium | Invisible; required in Duployan shorthand |
 | BOM mid-file | `U+FEFF` | medium | Legit only at byte 0 |
 | Variation selectors | `U+FE00`-`U+FE0F` | low | `U+FE0F` whitelisted (emoji) |
 | Private use areas | `U+E000`-`U+F8FF`, supp. | low | Icon fonts; suspicious in prose |
@@ -288,7 +304,8 @@ UTF-8 stdio so they don't crash on Windows cp1252 consoles.
 
 - `references/threat-techniques.md` - deep dive on each technique (Trojan Source bidi,
   tag-block ASCII smuggling, zero-width text, line-break structure forgery,
-  variation-selector and homoglyph steganography) with codepoint tables and worked
+  terminal control characters, variation-selector and homoglyph steganography) with
+  codepoint tables and worked
   examples. Load when triaging a
   specific finding or explaining the mechanism.
 - `references/ingestion-surfaces.md` - the trust-boundary map: every surface that

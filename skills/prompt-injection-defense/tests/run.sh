@@ -125,8 +125,10 @@ assert_exit 3 "sanitize missing file NOT_FOUND" -- "$PY" "$SANITIZE" "$TMP/nope.
 # the default scan only when high+, and neutralised by the sanitizer at its strip
 # level: line-break-class bands (and the spacing Hangul fillers) become a SPACE -
 # never deleted, which would fuse "end<LS>begin" into one token - while
-# zero-width ones are deleted. The TAB and CRLF must survive both tools untouched,
-# so the control-character handling can't over-reach.
+# zero-width ones and terminal controls are deleted. The TAB and CRLF must survive
+# both tools untouched, so the control-character handling can't over-reach.
+# Multi-range bands get a row per span, so a loader that reads only the first
+# span of a 'ranges' list fails here.
 "$PY" - "$TMP" "$SCAN" "$SANITIZE" > "$TMP/bands.results" 2>&1 <<'PY' || true
 import json, subprocess, sys
 from pathlib import Path
@@ -134,23 +136,45 @@ from pathlib import Path
 tmp, scan, sanitize = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
 # (code point, band id, severity, strip level that neutralises it, replacement; "" = deleted)
 CASES = [
+    (0x0000, "c0-controls",               "high",   "standard",   ""),
+    (0x0008, "c0-controls",               "high",   "standard",   ""),
     (0x000B, "vertical-tab-form-feed",    "medium", "standard",   " "),
     (0x000C, "vertical-tab-form-feed",    "medium", "standard",   " "),
+    (0x000E, "c0-controls",               "high",   "standard",   ""),
+    (0x001A, "c0-controls",               "high",   "standard",   ""),
+    (0x001B, "escape",                    "high",   "standard",   ""),
     (0x001C, "information-separators",    "high",   "standard",   " "),
     (0x001D, "information-separators",    "high",   "standard",   " "),
     (0x001E, "information-separators",    "high",   "standard",   " "),
+    (0x001F, "information-separators",    "high",   "standard",   " "),
+    (0x007F, "ascii-delete",              "high",   "standard",   ""),
+    (0x0080, "c1-controls",               "high",   "standard",   ""),
     (0x0085, "next-line",                 "high",   "standard",   " "),
+    (0x0086, "c1-controls",               "high",   "standard",   ""),
+    (0x009B, "c1-controls",               "high",   "standard",   ""),
     (0x00AD, "soft-hyphen",               "high",   "standard",   ""),
     (0x034F, "combining-grapheme-joiner", "high",   "standard",   ""),
     (0x115F, "hangul-jamo-fillers",       "high",   "standard",   ""),
     (0x1160, "hangul-jamo-fillers",       "high",   "standard",   ""),
     (0x17B4, "khmer-inherent-vowels",     "high",   "standard",   ""),
     (0x17B5, "khmer-inherent-vowels",     "high",   "standard",   ""),
+    (0x180B, "mongolian-free-variation-selectors", "medium", "aggressive", ""),
     (0x180E, "mongolian-vowel-separator", "medium", "aggressive", ""),
+    (0x180F, "mongolian-free-variation-selectors", "medium", "aggressive", ""),
     (0x2028, "line-paragraph-separators", "high",   "standard",   " "),
     (0x2029, "line-paragraph-separators", "high",   "standard",   " "),
+    (0x2065, "reserved-default-ignorable", "high",  "standard",   ""),
+    (0x206A, "deprecated-format-characters", "high", "standard",  ""),
+    (0x206F, "deprecated-format-characters", "high", "standard",  ""),
     (0x3164, "hangul-filler",             "high",   "standard",   " "),
     (0xFFA0, "hangul-halfwidth-filler",   "high",   "standard",   " "),
+    (0xFFF0, "reserved-default-ignorable", "high",  "standard",   ""),
+    (0x1BCA0, "shorthand-format-controls", "medium", "aggressive", ""),
+    (0x1D173, "musical-format-characters", "high",  "standard",   ""),
+    (0x1D17A, "musical-format-characters", "high",  "standard",   ""),
+    (0xE0080, "reserved-default-ignorable", "high", "standard",   ""),
+    (0xE01F0, "reserved-default-ignorable", "high", "standard",   ""),
+    (0xE0FFF, "reserved-default-ignorable", "high", "standard",   ""),
 ]
 fx = tmp / "bands"
 fx.mkdir()
@@ -193,6 +217,75 @@ if [ -s "$TMP/bands.results" ]; then
   done < "$TMP/bands.results"
 else
   bad "band table produced no results"
+fi
+
+# ---- catalog coverage: no invisible code point left unbanded -----------------
+# Every Default_Ignorable_Code_Point renders as nothing in a conforming viewer
+# (reserved ones included - that is what the property promises future format
+# characters), and every C0/C1 control but TAB/LF/CR is either invisible or a
+# terminal command. One fixture holds them all; --strict must name each one, and
+# the sanitizer must attribute each to the same band the scanner did. Bands must
+# not overlap: the scanner matches narrowest-first, the sanitizer in catalog
+# order, so an overlap makes the two tools disagree about what they removed.
+"$PY" - "$TMP" "$SCAN" "$SANITIZE" > "$TMP/coverage.results" 2>&1 <<'PY' || true
+import json, subprocess, sys, unicodedata
+from collections import Counter
+from pathlib import Path
+
+tmp, scan, sanitize = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+# Default_Ignorable_Code_Point, UCD 18.0 DerivedCoreProperties.txt, runs merged
+# ("Total code points: 4174"; unchanged since Unicode 14.0 added U+180F).
+DI = [(0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1160),
+      (0x17B4, 0x17B5), (0x180B, 0x180F), (0x200B, 0x200F), (0x202A, 0x202E),
+      (0x2060, 0x206F), (0x3164, 0x3164), (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF),
+      (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8), (0x1BCA0, 0x1BCA3), (0x1D173, 0x1D17A),
+      (0xE0000, 0xE0FFF)]
+di = {cp for lo, hi in DI for cp in range(lo, hi + 1)}
+cc = {cp for cp in range(0xA0) if unicodedata.category(chr(cp)) == "Cc"} - {0x09, 0x0A, 0x0D}
+pinned = sorted(di | cc)
+
+def spans(cps):
+    out, run = [], []
+    for cp in cps:
+        if run and cp != run[-1] + 1:
+            out.append(run); run = []
+        run.append(cp)
+    if run:
+        out.append(run)
+    return ", ".join(f"U+{r[0]:04X}" + (f"-U+{r[-1]:04X}" if len(r) > 1 else "") for r in out)
+
+if len(di) != 4174:
+    print(f"FAIL pinned Default_Ignorable list has {len(di)} code points, want 4174")
+fx = tmp / "coverage.txt"
+fx.write_bytes(("x" + "x".join(map(chr, pinned)) + "x\n").encode("utf-8"))
+
+r = subprocess.run([sys.executable, scan, "--json", "--strict", "--no-emoji-whitelist", str(fx)],
+                   capture_output=True)
+found = {int(f["codepoint"][2:], 16): f for f in json.loads(r.stdout)["data"] if f["type"] == "codepoint"}
+missing = [cp for cp in pinned if cp not in found]
+print(("FAIL " if missing else "PASS ")
+      + "every Default_Ignorable code point and C0/C1 control is named by --strict"
+      + (f" - unbanded: {spans(missing)}" if missing else ""))
+
+s = subprocess.run([sys.executable, sanitize, "--json", "--strip-level", "aggressive", str(fx)],
+                   capture_output=True)
+removed = json.loads(s.stderr)["data"]["removed_by_band"]
+# benign (ZWJ) is strip_level never, so the sanitizer keeps it by design.
+want = dict(Counter(f["band"] for f in found.values() if f["severity"] != "benign"))
+diff = {k: (want.get(k), removed.get(k)) for k in set(want) | set(removed) if want.get(k) != removed.get(k)}
+print(("FAIL " if diff else "PASS ")
+      + "scanner and sanitizer attribute every code point to the same band"
+      + (f" - band: (scanner, sanitizer) {diff}" if diff else ""))
+PY
+if [ -s "$TMP/coverage.results" ]; then
+  while IFS= read -r line; do
+    case "$line" in
+      "PASS "*) ok "${line#PASS }" ;;
+      *)        bad "${line#FAIL }" ;;
+    esac
+  done < "$TMP/coverage.results"
+else
+  bad "coverage check produced no results"
 fi
 
 # ---- U+2028 forged-marker repro -----------------------------------------------
