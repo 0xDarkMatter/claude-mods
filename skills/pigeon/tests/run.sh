@@ -59,6 +59,33 @@ att_out="$(bash "$MAIL" read)"
 case "$att_out" in *"(missing)"*) no "every existing attachment resolves (got: (missing))";; *) ok "every existing attachment resolves";; esac
 expect_eq "each attachment reports its size" "2" "$(printf '%s\n' "$att_out" | grep -c '(5 bytes)')"
 
+echo "-- bodies over the Windows command-line limit --"
+# Regression (Windows): send, reply and broadcast handed the escaped body to
+# sqlite3.exe as a command-line argument. Windows caps a command line at ~32K
+# chars, so any bigger body died with "Argument list too long" (rc 126) and
+# nothing was stored. Linux allows ~2 MB, so only a Windows run can fail these.
+big="$(head -c 40000 /dev/zero | tr '\0' x)"$'\n'"it's the end"
+bash "$MAIL" send "$(pwd)" "big send" "$big" >/dev/null 2>&1
+case "$(bash "$MAIL" read)" in *" | ${big} | "*) ok "40 KB send body round-trips through read";; *) no "40 KB send body did not round-trip";; esac
+
+bash "$MAIL" send "$(pwd)" "big parent" "short" >/dev/null
+parent_id="$(sqlite3 "$DB" "SELECT MAX(id) FROM messages;" | tr -d '\r')"
+bash "$MAIL" read >/dev/null
+bash "$MAIL" reply "$parent_id" "$big" >/dev/null 2>&1
+case "$(bash "$MAIL" read)" in *" | ${big} | "*) ok "40 KB reply body round-trips through read";; *) no "40 KB reply body did not round-trip";; esac
+
+mkdir -p "$SB/bigpeer"
+(cd "$SB/bigpeer" && bash "$MAIL" id >/dev/null)
+bash "$MAIL" broadcast "big broadcast" "$big" >/dev/null 2>&1
+case "$(cd "$SB/bigpeer" && bash "$MAIL" read)" in *" | ${big} | "*) ok "40 KB broadcast body round-trips through read";; *) no "40 KB broadcast body did not round-trip";; esac
+
+# Regression (Windows): the fix above feeds SQL on stdin, which sqlite3.exe reads
+# in text mode - a raw Ctrl-Z (0x1A) there is end-of-file, cutting the INSERT off
+# mid-literal. sql_escape splices it back in as char(26).
+ctrlz=$'before\x1aafter'
+bash "$MAIL" send "$(pwd)" "ctrl-z" "$ctrlz" >/dev/null 2>&1
+case "$(bash "$MAIL" read)" in *" | ${ctrlz} | "*) ok "Ctrl-Z byte in a body round-trips";; *) no "Ctrl-Z byte in a body did not round-trip";; esac
+
 echo "-- hook delivery (PreToolUse additionalContext envelope) --"
 # Regression: check-mail.sh used to echo plain text, which Claude Code sends to
 # the debug log for PreToolUse - the model never saw a single notification. The

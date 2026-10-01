@@ -42,6 +42,16 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **`pigeon send`, `reply` and `broadcast` no longer fail on Windows for bodies
+  over ~32 KB.** The escaped body went to `sqlite3.exe` as a command-line argument,
+  and Windows caps a command line at 32,767 chars, so a large message died with
+  "Argument list too long" (rc 126) and nothing was stored. Linux allows ~2 MB, so
+  CI never saw it. Message INSERTs now reach sqlite3 on stdin via one `sql_exec`
+  helper; a 2 MB body round-trips. Stdin is read in text mode on Windows, where a
+  raw Ctrl-Z (0x1A) means end-of-file, so `sql_escape` now splices that byte back
+  in as `char(26)`. The pigeon suite gains four Windows regressions (40 KB send,
+  reply and broadcast round-trips, plus Ctrl-Z), each seen failing first.
+
 - **doc-drift link checks are now case-exact, and CI's doc-drift step passes
   again.** `fleet-worker` linked `docs/auto-mode-classifier.md`, but the file is
   `docs/AUTO-MODE-CLASSIFIER.md`. The gate tested links with `[ -e ]`, which is

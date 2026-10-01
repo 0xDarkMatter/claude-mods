@@ -26,6 +26,18 @@ sqlite3() {
   command sqlite3 "$@" | tr -d '\r'
 }
 
+# Run SQL that carries user text (subjects, bodies, attachment lists) by feeding
+# it to sqlite3 on STDIN - never as an argument. Windows caps a whole command
+# line at 32,767 chars, so a body over ~32 KB passed as argv died with "Argument
+# list too long" (rc 126) and nothing was stored; Linux allows ~2 MB, so CI never
+# saw it. Dot-command lines inside a body (".shell ...") stay inert: they sit in
+# the quoted literal of an already-open statement, and the sqlite3 shell only
+# reads meta-commands at a statement boundary. Routed through the sqlite3()
+# shadow above like every other query.
+sql_exec() {
+  printf '%s\n' "$1" | sqlite3 "$MAIL_DB"
+}
+
 # ============================================================================
 # Identity - git-rooted project IDs
 # ============================================================================
@@ -145,8 +157,15 @@ SQL
     sqlite3 "$MAIL_DB" "ALTER TABLE messages ADD COLUMN attachments TEXT DEFAULT '';" 2>/dev/null
 }
 
+# Escape text for a single-quoted SQL literal: double every ', and splice any
+# Ctrl-Z (0x1A) back in as '||char(26)||'. The Ctrl-Z clause exists because
+# sql_exec() feeds SQL on stdin, which Windows' sqlite3.exe reads in text mode,
+# where 0x1A means end-of-file - a raw one cut the INSERT off mid-literal. The
+# splice is valid only because every caller puts the result inside '...' in an
+# expression; keep it that way. The control byte sits literally in the sed
+# script ($'...') because BSD sed has no \x escapes.
 sql_escape() {
-  printf '%s' "$1" | sed "s/'/''/g"
+  printf '%s' "$1" | sed -e "s/'/''/g" -e $'s/\x1a/\'||char(26)||\'/g'
 }
 
 # Resolve attachment path to absolute, validate existence
@@ -384,7 +403,7 @@ send() {
     attachments=$(IFS=$'\n'; echo "${attach_paths[*]}")
   fi
   safe_attachments=$(sql_escape "$attachments")
-  sqlite3 "$MAIL_DB" \
+  sql_exec \
     "INSERT INTO messages (from_project, to_project, subject, body, priority, attachments) VALUES ('${from_id}', '${to_id}', '${safe_subject}', '${safe_body}', '${priority}', '${safe_attachments}');"
   # Signal the recipient
   touch "/tmp/pigeon_signal_${to_id}"
@@ -514,7 +533,7 @@ reply() {
     attachments=$(IFS=$'\n'; echo "${attach_paths[*]}")
   fi
   safe_attachments=$(sql_escape "$attachments")
-  sqlite3 "$MAIL_DB" \
+  sql_exec \
     "INSERT INTO messages (from_project, to_project, subject, body, thread_id, attachments) VALUES ('${from_id}', '${orig_from_hash}', '${safe_subject}', '${safe_body}', ${thread_id}, '${safe_attachments}');"
   # Signal the recipient
   touch "/tmp/pigeon_signal_${orig_from_hash}"
@@ -588,7 +607,7 @@ broadcast() {
   safe_body=$(sql_escape "$body")
   while IFS= read -r target_hash; do
     [ -z "$target_hash" ] && continue
-    sqlite3 "$MAIL_DB" \
+    sql_exec \
       "INSERT INTO messages (from_project, to_project, subject, body) VALUES ('${from_id}', '${target_hash}', '${safe_subject}', '${safe_body}');"
     touch "/tmp/pigeon_signal_${target_hash}"
     count=$((count + 1))
