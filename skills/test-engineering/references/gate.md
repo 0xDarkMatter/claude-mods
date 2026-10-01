@@ -9,7 +9,7 @@ In a 13-repo survey, static slop heuristics were 13% precise overall (assertion-
 detection 33%, snapshot flags 0%). A gate built on them blocks good PRs nine times in ten and
 gets disabled within a week. One class is different: **lost tests (S17)**. Two Python test
 functions with the same name in one scope mean the first never runs; pyflakes rule `F811`
-detects it exactly. That is the only blocking check in v1.
+detects it exactly. That, plus PHP's runtime no-assertion check (below), is all v1 blocks on.
 
 The rest of the doctrine is enforced where it is cheap and accurate: at write time
 (`--prove`), in review (evidence rows in the PR body), and in scheduled audits.
@@ -21,6 +21,14 @@ The rest of the doctrine is enforced where it is cheap and accurate: at write ti
 | Python | `ruff check --select F811 tests/` (or pylint `function-redefined`) | yes |
 | JS/TS | none needed: duplicate titles both run. `no-identical-title` (eslint-plugin-vitest / -jest) is naming hygiene | advisory |
 | Go | none needed: duplicate test names do not compile | - |
+| PHP (PHPUnit, Pest, Laravel) | none needed: a duplicate method is a fatal error, and Pest refuses a duplicate description (`TestAlreadyExist`). Instead block **assertion-free tests**: `failOnRisky="true"` in `phpunit.xml` | yes |
+
+**PHP gets a second exact check.** PHPUnit knows at runtime whether a test performed any
+assertion, so `failOnRisky="true"` fails the existing test job on an assertion-free test: S2,
+which is only a 33%-precise guess for a static scanner, becomes an exact check. A test that
+genuinely asserts nothing (it only must not throw) declares it with
+`$this->expectNotToPerformAssertions()`. One line in `phpunit.xml`, no new CI job; Pest reads
+the same file.
 
 Template: [`assets/test-gate.yml`](../assets/test-gate.yml) (GitHub Actions, pinned by SHA).
 Common failure: the repo's ruff config already selects `F811`, but no CI job runs ruff over

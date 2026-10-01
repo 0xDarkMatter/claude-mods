@@ -52,6 +52,14 @@ node <skill>/scripts/mutate.mjs --runner vitest --catalogue m.json \
 | Skip one output path | redaction applied to the log line but not the preview | G12, G10 |
 | Return the default | `return parsed ?? DEFAULT` where `parsed` was `false` | G11 |
 | Drop a key component | remove one field from an idempotency or cache key | G9 |
+| Unescape a template output | Twig `{{ x }}` to `{{ x\|raw }}`; Blade `{{ $x }}` to `{!! $x !!}`; drop `\|e('js')` | G12 |
+| Drop a template guard | remove a `@can` / `{% if currentUser.can(...) %}` wrapper, `@csrf` or `csrfInput()` | G1, G12 |
+| Drop a route or policy guard (Laravel) | remove `->middleware('auth')`, a `can:` middleware, or `$this->authorize(...)` | G1 |
+| Widen what is accepted (Laravel) | drop one validation rule (`'required\|integer\|min:1'` to `'required\|integer'`); `$guarded = []` | G12 |
+| Drop a tenancy scope | remove a `->where('tenant_id', ...)` or a global scope | G1, G12 |
+
+PHP mutants are syntax-checked with `php -l` before any test runs; one that does not parse is
+a `compile-error`, never a kill. Twig has no such check, so keep template mutants parseable.
 
 ## Postures
 
@@ -89,7 +97,9 @@ layout. Framework examples: [frameworks.md](frameworks.md).
 | `*.tsx`, `*.jsx`, `*.vue` | react-ops / vue-ops | `vitest` or `jest` |
 | `*.py` | python-pytest-ops | `pytest` |
 | `*.go` | go-ops | `go` |
-| `*.rs`, `*.php`, `*.sh`, anything else | rust-ops / laravel-ops / bash-ops | `command` (run only the test being proved) |
+| `*.php`, `*.blade.php` (Laravel) | laravel-ops | `pest` or `phpunit` |
+| `*.twig` (Craft, Symfony) | craftcms-ops | `phpunit` or `pest` through a render test; `command` for Codeception |
+| `*.rs`, `*.sh`, anything else | rust-ops / bash-ops | `command` (run only the test being proved) |
 | browser e2e and component tests | playwright-ops / cypress-ops | `command`, and see the visual and e2e policy in profile.md |
 
 ## Evidence in the PR body

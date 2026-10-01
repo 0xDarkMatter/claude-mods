@@ -25,7 +25,7 @@ locate it. Audit findings stay in the private audit report.
 | G9 | Idempotency and replay | Are cache and idempotency keys complete, retries safe, claims not stolen? | a dedup window constant changed with no test noticing |
 | G10 | Output-channel hygiene | Does anything write to a protocol stream (MCP stdout, JSON output)? | one stray log line corrupting a stdio protocol |
 | G11 | Defaults and config parsing | Is the "off" spelling tested (`=false`, `=0`, empty, unset), not only "on"? | `FEATURE=false` treated as enabled because the string is truthy |
-| G12 | Security edges | Exact match vs prefix/suffix, regex anchors, array audiences, redaction on **every** output path? | an allow-list matched by suffix, so `evil-example.com` passes as `example.com`; a path checked before it is URL-decoded; a secret redacted in logs but echoed in an error message |
+| G12 | Security edges | Exact match vs prefix/suffix, regex anchors, array audiences, redaction on **every** output path? | an allow-list matched by suffix, so `evil-example.com` passes as `example.com`; a path checked before it is URL-decoded; a secret redacted in logs but echoed in an error message; a template output switched to raw |
 | G13 | Injection boundaries (MCP and LLM shapes) | Does untrusted content (tool results, fetched pages, repo text) reach an instruction surface without being framed as data? Is there a drift gate on model-facing tool descriptions? | a tool result spliced into a prompt verbatim |
 
 ## Which classes are mandatory where

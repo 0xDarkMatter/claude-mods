@@ -63,6 +63,11 @@ else
   expect_has "--help has Examples" "xamples" "$(node "$M" --help 2>/dev/null)"
   node "$M" --bogus >/dev/null 2>&1; expect_exit "unknown flag -> 2" 2 $?
   node "$M" --runner nope --baseline >/dev/null 2>&1; expect_exit "unknown runner -> 2" 2 $?
+  err="$(node "$M" --runner phpunit --repo "$HERE/fixtures/node-project" --baseline 2>&1 >/dev/null)"; rc=$?
+  expect_exit "phpunit with no vendor/bin is a precondition failure" 5 "$rc"
+  # Exit 5 alone is not enough: a missing binary also ends as a no-report baseline (exit 5).
+  # What the user needs is the actionable cause, before any run is attempted.
+  expect_has "missing vendor/bin says to composer install" "composer install" "$err"
 
   echo "-- mutate.mjs: parsers on recorded runner reports --"
   node "$HERE/parsers.test.mjs"; expect_exit "parser checks" 0 $?

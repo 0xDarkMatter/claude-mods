@@ -39,7 +39,7 @@ always `critical`. One repo can be relaxed in its CLI glue and uncompromising in
 | Independent oracle required | money zones | every zone | everywhere |
 | Visual baseline updates | the diff image in the PR | the diff image in the PR | approved by a named human |
 | Blind reviewer's security lens | inside `auth` and `pii` zones | inside `auth` and `pii` zones | the whole repo |
-| CI gate (v1) | lost tests block | lost tests block | lost tests block |
+| CI gate (v1) | exact checks block (gate.md) | same | same |
 
 ## Zone tags
 
@@ -60,7 +60,7 @@ The profile's `kinds:` lists only exceptions; an explicit kind beats the shape d
 | `cli` | integration through the real entry point (subprocess or CliRunner): exit codes, stdout as data, stderr as human text |
 | `mcp-server` | wire tests through the real server; stdout hygiene (G10); tool descriptions under a drift gate (G13) |
 | `http-service` | integration in the real runtime with real migrations; contract tests against a simulator |
-| `web-ui` | component tests (Testing Library); e2e smoke on critical journeys; `visual: drift`; a11y when public |
+| `web-ui` | component tests (Testing Library, Vue Test Utils); for server-rendered templates (Twig, Blade), an escaping test on every output of user data; e2e smoke on critical journeys; `visual: drift`; a11y when public |
 | `data-pipeline`, `media-pipeline` | golden artefacts built at test time with tolerances, not byte snapshots |
 | `llm-feature` | deterministic parts as normal tests; output quality handed to evals-ops |
 | `library` | table-driven unit tests; property tests for parsers and arithmetic |

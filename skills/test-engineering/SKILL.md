@@ -39,7 +39,7 @@ data and media pipelines), every number measured, not estimated:
 | Lead-authored mutants: 45 of 61 killed (74%) by suites that were all green | `audit` measures with mutants, never with coverage |
 | Mutants a blind reviewer predicted were untested: **20 of 20 survived** | the reviewer agent is the cheapest source of real gaps |
 | Behaviour a site comment warned about: protected 87%; unflagged behaviour: 66% | `design` walks a gap-class list to supply what nobody anticipated |
-| Static slop heuristics: 13% precise | they never block; only lost tests (exact) do |
+| Static slop heuristics: 13% precise | they never block; only exact checks do (lost Python tests, assertion-free PHP tests) |
 | New slop families: tests of copied production code, lost duplicate-named tests | catalogued as S15 and S17 |
 
 ## Modes
@@ -51,7 +51,7 @@ Pick from the request; say which mode you chose. Each mode loads only its own re
 | **design** | "how should I test X", "test plan", "what could break" | [design.md](references/design.md) | failure list: one named test per bug, with level, oracle, doubles |
 | **write** | "write / generate / add tests", TDD, a bug fix | [write.md](references/write.md) | tests, each proved with `mutate.mjs --prove`, or marked `unverified` |
 | **audit** | "what do our tests catch", "is this suite slop" | [audit.md](references/audit.md) | inventory, blind review, mutation results, per-file verdicts |
-| **gate** | "test gate in CI", "block bad tests" | [gate.md](references/gate.md) | a CI job (v1: lost tests only) and the AGENTS.md Testing section |
+| **gate** | "test gate in CI", "block bad tests" | [gate.md](references/gate.md) | a CI check (v1: only what a tool detects exactly) and the AGENTS.md Testing section |
 | **triage** | a red test, a survivor, a flaky test, a reviewer's test comment | [triage.md](references/triage.md) | one ruling per item, with the evidence that decided it |
 
 Write mode starts from design's failure list; audit hands survivors to write mode; triage
@@ -81,7 +81,9 @@ Full schema, zone tags, shapes, and the visual/e2e/browser policy: [profile.md](
 
 ## The harness: `scripts/mutate.mjs`
 
-Zero dependencies (Node 18+). Runners: `vitest`, `jest`, `pytest`, `go`, `command`.
+Zero dependencies (Node 18+). Runners: `vitest`, `jest`, `pytest`, `go`, `phpunit`, `pest`
+(Laravel included), and `command` for anything else. React and Vue component tests go
+through `vitest` or `jest`; Twig templates through a PHP runner that renders them.
 
 ```bash
 # write mode: does this one test catch this one mutant?  exit 0 proved, 10 not proved
@@ -115,7 +117,7 @@ plantable anchors. Spawn it from audit and triage; persist its JSON reply unchan
 
 ## Deliberately not in v1
 
-The CI ladder beyond lost tests (seen-failing replay, nightly red-proof replay, per-PR
+The CI ladder beyond its exact checks (seen-failing replay, nightly red-proof replay, per-PR
 generated mutants) and the machinery that keeps a *blocking* heuristic gate honest (waivers,
 rebaselines, flake ledgers, pilot windows) wait for evidence they are needed. Each deferral and
 its trigger: [gate.md](references/gate.md).

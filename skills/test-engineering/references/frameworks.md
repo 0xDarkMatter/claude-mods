@@ -115,6 +115,41 @@ describe('LoginForm', () => {
 
 ---
 
+## Vue Test Utils (Vue + Vitest)
+
+Idioms (composables, Pinia, Nuxt) live in vue-ops; this is what the doctrine adds. Component
+tests run under vitest (`environment: 'happy-dom'` or `'jsdom'`), so `--runner vitest` proves
+them, and a `.vue` single-file component mutates as plain text like any other source file.
+
+```ts
+// RefundForm.spec.ts
+import { mount } from '@vue/test-utils'
+import { describe, it, expect } from 'vitest'
+import RefundForm from '@/components/RefundForm.vue'
+
+describe('RefundForm', () => {
+  it('refuses a refund larger than the order total', async () => {
+    const wrapper = mount(RefundForm, { props: { orderTotal: 50 } })
+    await wrapper.get('input[name="amount"]').setValue('60')
+    await wrapper.get('form').trigger('submit')
+
+    expect(wrapper.emitted('refund')).toBeUndefined()
+    expect(wrapper.get('[role="alert"]').text()).toBe('Refund cannot exceed the order total')
+  })
+})
+```
+
+- **`mount`, not `shallowMount`, when the behaviour crosses a child component.** Stubbing the
+  children is S8 (one layer short) whenever the bug would live in them.
+- **Pinia:** `createTestingPinia()` stubs every action by default. If the store's action IS the
+  behaviour under test, that is mocking the unit (S9): use a real store
+  (`setActivePinia(createPinia())`) or `createTestingPinia({ stubActions: false })`.
+- **Assert what the user sees and what the component emits** (`text()`, `emitted()`), not
+  internal refs or `wrapper.vm` state.
+- **Network:** fake at the fetch edge (MSW or a stubbed client), never the composable under test.
+
+---
+
 ## pytest (Python)
 
 ```python
@@ -561,6 +596,86 @@ describe('AuthService', function () {
     });
 });
 ```
+
+---
+
+## Laravel (Pest or PHPUnit)
+
+Idioms (factories, HTTP tests, Sanctum, Dusk) live in laravel-ops; this is what the doctrine
+adds. Prove tests with `--runner pest` or `--runner phpunit`: the harness calls
+`vendor/bin/pest` or `vendor/bin/phpunit` directly, because `php artisan test` wraps them and
+its report location is not the harness's to choose.
+
+```php
+// tests/Feature/RefundTest.php
+it('refuses a refund for another tenant\'s order', function () {
+    $order = Order::factory()->for(Tenant::factory())->create(['total' => 5000]);
+
+    actingAs(User::factory()->create())          // a user from a DIFFERENT tenant
+        ->postJson("/orders/{$order->id}/refunds", ['amount' => 1000])
+        ->assertForbidden();
+
+    $this->assertDatabaseMissing('refunds', ['order_id' => $order->id]);
+    Mail::assertNothingSent();
+});
+```
+
+- **Real database, real migrations:** `RefreshDatabase` with SQLite in memory is fast. SQLite
+  differs from MySQL and Postgres (JSON columns, collation, foreign keys), so in `money` and
+  `irreversible` zones also run the suite against the production engine in CI.
+- **No stray network:** `Http::preventStrayRequests()` in the base `TestCase` makes any
+  unfaked outbound request throw: the network edge stays faked, and a mutant that disables a
+  dry-run guard cannot reach a live API.
+- **Recording fakes at process boundaries** (`Mail::fake()`, `Notification::fake()`,
+  `Queue::fake()`, `Http::fake()`) are right: assert what did and did not go out. Avoid
+  `Event::fake()` when a listener is the behaviour under test: the fake swallows it (S8).
+- **A negative test per guard (G1):** every `auth` or `can:` middleware, policy and
+  `authorize()` call gets a request from the wrong user or tenant that must be refused.
+- **Assert outcomes:** exact status (`assertForbidden()`, `assertStatus(422)`),
+  `assertJsonPath`, `assertDatabaseHas` / `assertDatabaseMissing`.
+- **Assertion-free tests can block:** set `failOnRisky="true"` in `phpunit.xml` (Pest reads it
+  too). See gate.md.
+
+---
+
+## Twig templates (Craft CMS, Symfony, standalone)
+
+Craft specifics live in craftcms-ops. Test Twig according to where the logic lives:
+
+| Logic lives in | Test it with |
+|---|---|
+| PHP (modules, plugins, services) | PHPUnit or Pest unit tests: the first move is to get business logic out of templates |
+| A custom Twig filter, function or tag | `\Twig\Test\IntegrationTestCase` (implement `getExtensions()` and `getFixtureDir()`; one `.test` fixture per case) |
+| A partial or macro with explicit inputs | render it with a plain `Twig\Environment` and assert on the output (below) |
+| A template bound to CMS queries (`craft.entries`) | HTTP-level tests against a seeded site (Craft has used Codeception; Craft 5 documents no official testing framework yet, and Pest is being explored), or one Playwright smoke per critical page |
+
+```php
+// tests/Templates/GreetingTest.php
+use PHPUnit\Framework\TestCase;
+use Twig\Environment;
+use Twig\Loader\FilesystemLoader;
+
+final class GreetingTest extends TestCase
+{
+    public function testEscapesAUserSuppliedName(): void
+    {
+        $twig = new Environment(new FilesystemLoader(__DIR__ . '/../../templates'), ['autoescape' => 'html', 'cache' => false]);
+        $html = $twig->render('greeting.twig', ['name' => '<script>x</script>']);
+
+        $this->assertStringNotContainsString('<script>', $html);
+        $this->assertStringContainsString('&lt;script&gt;', $html);
+    }
+}
+```
+
+- **Templates mutate as text.** `mutate.mjs` edits a `.twig` file like any source file; the
+  runner is whatever renders it (`phpunit` or `pest`, or `command` for Codeception). Keep
+  mutants parseable: a Twig syntax error reads as a red test for the wrong reason.
+- **Escaping is the security edge (G12).** Every place a template renders user data needs a test
+  that a script tag comes out escaped; `|raw` and a missing context escaper (`|e('js')`,
+  `|e('url')`) are where XSS survives.
+- **Rendered-HTML snapshots are change detectors (S4).** Assert the behaviour (escaped, shown,
+  hidden, formatted) on the specific element instead.
 
 ---
 

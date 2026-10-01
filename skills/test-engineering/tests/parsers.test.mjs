@@ -25,6 +25,20 @@ const pc = parseJunit(fx("pytest-collect-error.xml"));
 check("pytest: a collection failure is a suite error, not a kill", pc.failed === 0 && pc.suiteErrors.length === 1);
 check("pytest: a collection failure classifies as suite-error", classify({ parsed: true, ...pc, code: 2 }) === "suite-error");
 
+const j = parseJestJson(fx("jest.json"), "/repo");
+check("jest: an import crash is a suite error, not a kill (same format as vitest)", j.suiteErrors.length === 1 && j.suiteErrors[0].file === "broken.test.js");
+check("jest: the failing test is named and a skip is not a failure", j.failedTests.length === 1 && j.failedTests[0].test === "keeps negative totals negative" && j.skipped === 1);
+
+const pu = parseJunit(fx("phpunit.xml"), "/repo");
+check("phpunit: an exception inside a test body counts as a failing test", pu.failed === 2 && pu.failedTests.some(t => t.test === "MoneyTest::testThrowsInsideTheTest"));
+check("phpunit: absolute report paths become repo-relative", pu.failedTests[0].file === "tests/MoneyTest.php");
+check("phpunit: the failure type stands in for the missing message attribute", /ExpectationFailedException/.test(pu.failedTests[0].msg));
+check("phpunit: a skip counts toward the total but never as a failure", pu.total === 6 && pu.skipped === 1);
+check("phpunit: an empty report (PHP parse error, exit 255) is no-report, not zero tests", parseJunit("", "/repo").parsed === false && classify({ parsed: false }) === "no-report");
+
+const pe = parseJunit(fx("pest.xml"), "/repo");
+check("pest: the description is the test name, prefixed by its class", pe.failedTests[0]?.test === "Tests.MoneyTest::keeps negative totals negative" && pe.total === 3 && pe.skipped === 1);
+
 const g = parseGoJson(fx("go.jsonl"));
 check("go: a package that does not compile is a build failure", g.buildFails.length >= 1);
 check("go: a build failure classifies as compile-error even beside a real kill", classify({ parsed: true, ...g, code: 1 }) === "compile-error");

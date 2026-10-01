@@ -12,10 +12,12 @@ feature releases live in the README "Recent Updates" section.
   able to fail. Five modes behind one router: **design** (failure modes first, from a gap-class
   checklist), **write** (TDD or test-after; every test proved against a planted mutant or the
   unfixed code, else marked `unverified`), **audit** (blind review plus mutation, authored and
-  predicted results never blended), **gate** (v1 blocks only on lost Python tests, the one
-  slop class a linter detects exactly) and **triage** (red tests, survivors, flakes, and AI
+  predicted results never blended), **gate** (v1 blocks only on what a tool detects exactly:
+  lost Python tests via ruff F811, and assertion-free PHP tests via PHPUnit's `failOnRisky`) and **triage** (red tests, survivors, flakes, and AI
   reviewer comments about tests, closed with evidence). Ships `scripts/mutate.mjs`, a
-  zero-dependency harness (vitest, jest, pytest, go, any command) that restores files from
+  zero-dependency harness (vitest, jest, pytest, go, phpunit, pest, any command; React and
+  Vue through vitest/jest, Laravel through pest/phpunit, Twig through a PHP render test) that
+  syntax-checks PHP mutants with `php -l`, restores files from
   memory rather than `git checkout`, refuses red or incomplete baselines, brackets batches with
   null controls and strips secret-looking env vars from test runs; a per-repo
   `.test-profile.yml` (strictness, posture, risk zones); slop (S1-S18) and gap (G1-G13)

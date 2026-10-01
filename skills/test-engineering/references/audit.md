@@ -87,6 +87,8 @@ generate mutants at scale and are worth pairing with it for large audits. None i
 | mutmut 3.x | Python | needs `fork`, so WSL or Linux on Windows hosts |
 | gremlins 0.6 | Go | fast, coverage-guided |
 | go-mutesting 2.x | Go | AST operators |
+| Infection 0.35.x | PHP | runs PHPUnit, Pest or Codeception; reports a mutation score per file |
+| `pest --mutate` | PHP | ships with Pest 5 (pest-plugin-mutate); the quickest start in a Laravel repo already on Pest |
 
 Pin any engine to a release more than 7 days old and run it through the supply-chain checks
 before adding it to a repo.

@@ -3,7 +3,7 @@
 //
 // Usage:   mutate.mjs (--config <cfg.json> | --runner <name>) [MODE] [OPTIONS] [-- runner args]
 // Input:   a catalogue (--catalogue): JSON array of mutant rows, shape in assets/mutant.example.json;
-//          cfg.json: {runner, repo, args, command, python, typecheck, timeoutS, keepEnv}
+//          cfg.json: {runner, repo, args, command, python, php, typecheck, timeoutS, keepEnv}
 // Output:  stdout: ONE JSON summary {mode, runner, baseline, closing, trusted, proved, counts,
 //          rows, scrubbedEnv, network}; --out also appends one JSONL line per result row
 // Stderr:  progress, warnings, the crash-backup path, errors
@@ -19,6 +19,7 @@
 //   mutate.mjs --runner vitest --catalogue m.json --prove "refuses a used reset link" -- test/reset.test.ts
 //   mutate.mjs --runner pytest --catalogue m.json --prove test_rejects_negative_total -- tests/test_money.py
 //   mutate.mjs --runner command --catalogue m.json --prove x -- node --test test/x.test.mjs
+//   mutate.mjs --runner pest --catalogue m.json --prove "refuses a negative amount" -- tests/Feature/RefundTest.php
 //   mutate.mjs --config .mutate.json --catalogue audit.json --out results.jsonl
 //
 // Contract and invariants (references/audit.md and references/write.md own the reasoning):
@@ -37,7 +38,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, relative, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HELP = `mutate.mjs - plant one mutant at a time and record which tests catch it.
@@ -53,7 +54,7 @@ Modes (default: run the whole catalogue as an audit batch):
 
 Options:
   --catalogue <file>   JSON array of {id, file, old, new, bug, class} rows
-  --runner <name>      vitest | jest | pytest | go | command
+  --runner <name>      vitest | jest | pytest | go | phpunit | pest | command
   --repo <dir>         repository root (default: current directory)
   --out <file>         also append one JSONL row per result
   --only <ID,ID>       run only these catalogue ids
@@ -147,28 +148,35 @@ export function parseJestJson(text, repo = ".") {
   return { parsed: true, total: r.numTotalTests, failed: r.numFailedTests, skipped: (r.numPendingTests ?? 0) + (r.numTodoTests ?? 0), failedTests, suiteErrors };
 }
 
-// pytest --junitxml with junit_family=xunit1 (carries the file attribute).
-export function parseJunit(xml) {
-  const unesc = s => s.replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&apos;/g, "'").replace(/&#10;/g, " ").replace(/&amp;/g, "&");
+// JUnit XML from pytest (--junitxml, junit_family=xunit1), PHPUnit and Pest (--log-junit).
+// PHPUnit and Pest write an absolute `file` and put the message in the element text with
+// only a `type` attribute; pytest writes a relative `file` and a `message` attribute.
+// An EMPTY report means the runner died before testing (a PHP parse error exits 255 and
+// writes 0 bytes): that is no-report, never "zero tests ran".
+export function parseJunit(xml, repo = ".") {
+  if (!xml.trim()) return { parsed: false };
+  const unesc = s => s.replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&apos;/g, "'").replace(/&#1[03];/g, " ").replace(/&amp;/g, "&");
   const attr = (tag, k) => { const m = tag.match(new RegExp(`\\s${k}="([^"]*)"`)); return m ? unesc(m[1]) : ""; };
+  const why = el => (attr(el, "message") || attr(el, "type")).slice(0, 240);
   const failedTests = [], suiteErrors = [];
   let total = 0, failed = 0, skipped = 0;
   const re = /<testcase\b([^>]*?)(\/>|>([\s\S]*?)<\/testcase>)/g;
   let m;
   while ((m = re.exec(xml))) {
     const head = m[1], body = m[3] ?? "";
-    const file = attr(head, "file") || attr(head, "classname").replace(/\./g, "/") + ".py";
+    const raw = attr(head, "file");
+    const file = raw ? (isAbsolute(raw) ? posix(relative(repo, raw)) : posix(raw)) : attr(head, "classname").replace(/\./g, "/") + ".py";
     const fail = body.match(/<failure\b([^>]*)/), err = body.match(/<error\b([^>]*)/);
     // A collection error is reported as a testcase NAMED after the module, with an empty
     // classname and <error message="collection failure">: an import crash, never a kill.
     if (err && (!attr(head, "classname") || !attr(head, "name") || /collection failure/i.test(attr(err[0], "message")))) {
-      suiteErrors.push({ file, msg: attr(err[0], "message").slice(0, 240) }); continue;
+      suiteErrors.push({ file, msg: why(err[0]) }); continue;
     }
     total++;
     if (/<skipped\b/.test(body)) { skipped++; continue; }
     if (fail || err) {
       failed++;
-      failedTests.push({ file, test: `${attr(head, "classname")}::${attr(head, "name")}`, msg: attr((fail ?? err)[0], "message").slice(0, 240) });
+      failedTests.push({ file, test: `${attr(head, "classname")}::${attr(head, "name")}`, msg: why((fail ?? err)[0]) });
     }
   }
   if (/<testsuite\b[^>]*\berrors="[1-9]/.test(xml) && total === 0 && !suiteErrors.length) suiteErrors.push({ file: "?", msg: "collection error with no testcase" });
@@ -232,7 +240,7 @@ function killTree(pid) {
 
 // .cmd/.bat shims (npm, npx) cannot be spawned without a shell on Windows; quote by hand.
 function needsShell(cmd) {
-  return process.platform === "win32" && !/[\\/]/.test(cmd) && !/^(node|go|python3?|py)(\.exe)?$/i.test(cmd);
+  return process.platform === "win32" && !/[\\/]/.test(cmd) && !/^(node|go|python3?|py|php)(\.exe)?$/i.test(cmd);
 }
 const winQuote = s => (/[\s"&|<>^]/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s);
 
@@ -301,6 +309,24 @@ function makeAdapter(cfg, repo) {
         command: report => [pythonFor(cfg, repo), ["-m", "pytest", ...args, `--junitxml=${report}`, "-o", "junit_family=xunit1"]],
         parse: report => existsSync(report) ? parseJunit(readFileSync(report, "utf8")) : { parsed: false },
       };
+    case "phpunit": case "pest": {
+      // Laravel's `php artisan test` wraps these two; call the binary directly so the JUnit
+      // report lands where the harness reads it. Pest is PHPUnit underneath: same report.
+      const php = cfg.php ?? "php";
+      const bin = join(repo, "vendor", "bin", cfg.runner);
+      if (!existsSync(bin)) throw fail(5, `${cfg.runner} not found at ${bin} (composer install from the lockfile first)`);
+      return {
+        command: report => [php, [bin, ...args, "--log-junit", report]],
+        parse: report => existsSync(report) ? parseJunit(readFileSync(report, "utf8"), repo) : { parsed: false },
+        // A PHP mutant that does not parse would surface as errors inside every test that
+        // autoloads the class, which reads as a kill. `php -l` catches it first: compile-error.
+        precheck: async file => {
+          if (!file.endsWith(".php")) return { ok: true };
+          const r = await run(php, ["-l", file], { cwd: repo, env: process.env, timeoutMs: 60_000 });
+          return { ok: r.code === 0, tail: r.tail.slice(-600) };
+        },
+      };
+    }
     case "go": {
       let idx;
       return {
@@ -318,7 +344,7 @@ function makeAdapter(cfg, repo) {
         parse: (_r, res) => res.spawnError ? { parsed: false } : { parsed: true, total: null, failed: res.code === 0 ? 0 : 1, skipped: 0, failedTests: [], suiteErrors: [], countless: true },
       };
     }
-    default: throw usage(`unknown runner: ${cfg.runner} (vitest | jest | pytest | go | command)`);
+    default: throw usage(`unknown runner: ${cfg.runner} (vitest | jest | pytest | go | phpunit | pest | command)`);
   }
 }
 
@@ -423,13 +449,20 @@ async function main() {
       let r, attempts = 0, tcm;
       try {
         writeFileSync(path, mutated);
-        // GUARD: a runner can silently drop a test file and still report success, so a
-        // non-killing run below the expected count is retried before it may be believed.
-        do { attempts++; r = await runSuite(); }
-        while (!r.res.timedOut && r.s.parsed && !r.s.failed && !r.s.buildFails?.length && expectTotal > 0 && r.s.total < expectTotal && attempts <= retries);
-        r.s.incomplete = expectTotal > 0 && r.s.parsed && r.s.total != null && r.s.total < expectTotal;
-        const green = runStatus(r.s, r.res) === "green";
-        if (green) tcm = await typecheck();
+        // Runner-specific syntax check (php -l): a mutant that does not parse is a
+        // compile-error, decided before any test runs, so it can never read as a kill.
+        const pre = adapter.precheck ? await adapter.precheck(path) : { ok: true };
+        if (!pre.ok) {
+          r = { res: { code: 255, timedOut: false, ms: 0, tail: pre.tail }, s: { parsed: true, total: null, failed: 0, failedTests: [], suiteErrors: [], buildFails: [m.file] } };
+        } else {
+          // GUARD: a runner can silently drop a test file and still report success, so a
+          // non-killing run below the expected count is retried before it may be believed.
+          do { attempts++; r = await runSuite(); }
+          while (!r.res.timedOut && r.s.parsed && !r.s.failed && !r.s.buildFails?.length && expectTotal > 0 && r.s.total < expectTotal && attempts <= retries);
+          r.s.incomplete = expectTotal > 0 && r.s.parsed && r.s.total != null && r.s.total < expectTotal;
+          const green = runStatus(r.s, r.res) === "green";
+          if (green) tcm = await typecheck();
+        }
       } finally {
         restore();
         process.removeListener("SIGINT", onSignal); process.removeListener("SIGTERM", onSignal);
