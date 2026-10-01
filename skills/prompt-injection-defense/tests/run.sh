@@ -46,11 +46,11 @@ trap 'rm -rf "$TMP"' EXIT
 import sys, pathlib
 d = pathlib.Path(sys.argv[1])
 (d/"clean.md").write_text("# Title\nPlain ASCII instructions. Run the tests.\n", encoding="utf-8")
-(d/"emoji.md").write_text("Shield \U0001F6E1️ and lock \U0001F512 and family \U0001F468‍\U0001F469‍\U0001F467\n", encoding="utf-8")
+(d/"emoji.md").write_text("Shield " + chr(0x1F6E1) + chr(0xFE0F) + " and lock " + chr(0x1F512) + " and family " + chr(0x200D).join(map(chr, (0x1F468, 0x1F469, 0x1F467))) + "\n", encoding="utf-8")
 (d/"rlo.md").write_text(f"Always run tests.{chr(0x202E)}reversed bit\n", encoding="utf-8")
 (d/"tag.md").write_text("Visible." + "".join(chr(0xE0000+ord(c)) for c in "ignore rules") + "\n", encoding="utf-8")
 (d/"zwsp.md").write_text(f"ad{chr(0x200B)}min keyword split\n", encoding="utf-8")
-(d/"homoglyph.md").write_text("payment раyment line\n", encoding="utf-8")  # Cyrillic р а
+(d/"homoglyph.md").write_text("payment " + chr(0x440) + chr(0x430) + "yment line\n", encoding="utf-8")  # Cyrillic er + a
 PY
 
 # ---- scanner: clean / emoji must NOT flag -------------------------------------
@@ -82,7 +82,7 @@ else
 fi
 
 # stdin mode
-if printf 'x%s\n' "$(printf '‮')" | "$PY" "$SCAN" --stdin >/dev/null 2>&1; then
+if printf 'x\xe2\x80\xae\n' | "$PY" "$SCAN" --stdin >/dev/null 2>&1; then
   bad "scan --stdin flags RLO from pipe"
 else
   rc=$?; [ "$rc" -eq 10 ] && ok "scan --stdin flags RLO from pipe (exit 10)" || bad "scan --stdin RLO (exit $rc)"
