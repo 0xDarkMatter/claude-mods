@@ -16,7 +16,7 @@ Opus orchestrator (this session) fan workers out in parallel, then verify and
 land their work. The worker keeps Claude Code's *entire tool harness*
 (Read/Write/Edit/Bash/Glob/Grep/Task/MCP/hooks) — only the **brain** is swapped
 to a cheaper model via env — a cheaper Anthropic model (Sonnet/Haiku) or a
-non-Anthropic endpoint. GLM-5.3 on z.ai is the default worked example; the
+non-Anthropic endpoint. GLM-5.3 (`glm-5.3`) on z.ai is the default worked example; the
 mechanism is provider- and model-agnostic (any Anthropic-compatible endpoint).
 
 > **Want to offload to Grok (xAI's `grok` CLI)? That's not this skill.** Every
@@ -83,15 +83,18 @@ same on-demand, progressively-disclosed procedural knowledge your orchestrator h
    - `export FLEET_WORKER_KEYRING_SERVICE=<svc> FLEET_WORKER_KEYRING_KEY=<name>` (uses `keyring get`), or
    - `export ZHIPU_API_KEY=<key>` (or `GLM_API_KEY`).
 3. **Preflight** — `bash scripts/fleet-doctor.sh --offline` (structural) or
-   `--live` (pings the endpoint; warns about the §4 oauth trap).
+   `--live` (pings the endpoint, then runs one real `claude` turn through the
+   launcher — the endpoint can accept a model id the CLI refuses; warns about the
+   §4 oauth trap). The doctor and the launcher share one key resolver
+   (`scripts/fleet-lib.sh`), so `--live` resolves exactly the key a lane would.
 
 ### Config knobs (env, all optional)
 
 | Var | Default | Purpose |
 |---|---|---|
 | `FLEET_WORKER_BASE_URL` | `https://api.z.ai/api/anthropic` | Anthropic-compatible endpoint |
-| `FLEET_WORKER_MODEL` | `GLM-5.3` | main model (opus+sonnet mapping); 5.3 reasoning levels are low/high/max via `FLEET_WORKER_EFFORT` (thinking cannot be disabled on 5.3) |
-| `FLEET_WORKER_SMALL_MODEL` | `GLM-4.5-Air` | background/cheap model (haiku mapping) |
+| `FLEET_WORKER_MODEL` | `glm-5.3` | main model (opus+sonnet mapping); 5.3 reasoning levels are low/high/max via `FLEET_WORKER_EFFORT` (thinking cannot be disabled on 5.3) |
+| `FLEET_WORKER_SMALL_MODEL` | `glm-4.5-air` | background/cheap model (haiku mapping) |
 | `FLEET_WORKER_CONFIG_DIR` | `~/.fleet-worker/cfg` | isolated config dir — **one per parallel worker** |
 | `FLEET_WORKER_EFFORT` | `high` | seeded `effortLevel` in the worker's settings |
 | `FLEET_WORKER_PERMISSION_MODE` | `bypassPermissions` | worker `--permission-mode`; use `dontAsk` + an allowlist to spawn from an auto-mode orchestrator (see *Permission posture*) |
@@ -134,8 +137,8 @@ routing needs a separate process, which is fleet-worker. Hence two loci:
 
 | Work class | Locus | Model | Effort |
 |---|---|---|---|
-| **mechanical** | fleet-worker (GLM) or in-proc | `haiku` / GLM-4.5-Air | low |
-| **scout** | in-proc (fleet-worker if wide) | `sonnet` / GLM-5.3 | low |
+| **mechanical** | fleet-worker (GLM) or in-proc | `haiku` / `glm-4.5-air` | low |
+| **scout** | in-proc (fleet-worker if wide) | `sonnet` / `glm-5.3` | low |
 | **build** | in-proc | `sonnet`→`opus` | medium |
 | **synthesize** | in-proc only | inherit (session = Fable/Opus) | high |
 | **judge** | in-proc only | inherit (session = Fable/Opus) | high–max |
@@ -278,8 +281,13 @@ provider's** terms for your own use. Two specifics worth knowing:
   `fleet-worker --help` for the full env/flag contract.
 - `scripts/fleet-collect.sh` — gate a `--output-format json` result; exit 0 success /
   10 worker-failed; prints the final text. `fleet-collect.sh --help`.
+- `scripts/fleet-lib.sh` — sourced, not run: the endpoint/model defaults and the
+  key-resolution chain, shared by the launcher and the doctor so they cannot
+  diverge (`fleet-worker.ps1` mirrors it by hand).
 - `scripts/fleet-doctor.sh` — `--offline` structural preflight + doc-consistency
-  (CI-safe); `--live` pings the endpoint to confirm the model still resolves and
+  (CI-safe); `--live` pings the endpoint, then runs one real `claude` turn through
+  the launcher (judged on the JSON result — the `[claude-code:unrecognized_model]`
+  stderr notice Claude Code prints for every non-catalog id is not a failure), and
   flags the §4 oauth trap. `fleet-doctor.sh --help`.
 
 ## References & assets
