@@ -42,6 +42,20 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **`fleet-worker` doctor said "no API key" on hosts where the launcher ran fine** -
+  `fleet-doctor.sh --live` carried its own if/elif copy of the key chain, so with
+  `FLEET_WORKER_KEYRING_SERVICE`/`_KEY` set but an empty keyring entry it never fell
+  through to `ZHIPU_API_KEY`/`GLM_API_KEY` (fleetflow surfaced it as
+  `glm-endpoint unreachable (rc=7)`). Defaults and the resolver now live once in
+  `scripts/fleet-lib.sh`, sourced by both; the suite fails if a second `keyring get`
+  copy appears. `--live` also gains a `live-cli` probe that runs one real `claude`
+  turn through the launcher, so a model the endpoint accepts but the CLI cannot run
+  is reported as drift instead of passed. It judges the JSON result, not stderr:
+  Claude Code 2.1.280 prints `[claude-code:unrecognized_model]` for every
+  non-catalog id, healthy runs included. Default model ids move to the canonical
+  lowercase `glm-5.3` / `glm-4.5-air` (both verified live; the uppercase ids also
+  still work).
+
 - **`prompt-injection-defense` left terminal controls and most default-ignorables
   unbanded** - the hidden-Unicode catalog now covers every Default_Ignorable code
   point (4174 in UCD 18.0) and every C0/C1 control except TAB, LF and CR, and the

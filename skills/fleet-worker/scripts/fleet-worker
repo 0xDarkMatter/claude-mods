@@ -17,8 +17,8 @@
 # Config (env, all optional - defaults target the z.ai GLM Coding Plan):
 #   FLEET_WORKER_CONFIG_DIR   isolated CLAUDE_CONFIG_DIR (default ~/.fleet-worker/cfg)
 #   FLEET_WORKER_BASE_URL     Anthropic-compatible endpoint (default z.ai)
-#   FLEET_WORKER_MODEL        main model      (default GLM-5.3)
-#   FLEET_WORKER_SMALL_MODEL  background model (default GLM-4.5-Air)
+#   FLEET_WORKER_MODEL        main model      (default glm-5.3)
+#   FLEET_WORKER_SMALL_MODEL  background model (default glm-4.5-air)
 #   FLEET_WORKER_EFFORT       seeded effortLevel (default high)
 #   FLEET_WORKER_CLAUDE_BIN   claude binary to exec (default: claude); lets a
 #                             caller that validated an override run that same
@@ -27,9 +27,10 @@
 #                             Use dontAsk + an allowlist to spawn FROM an auto-mode
 #                             orchestrator - a bypassPermissions launch is hard-denied
 #                             there as "Create Unsafe Agents". See ../SKILL.md.
-# Key resolution order (the key is never printed):
+# Key resolution order (the key is never printed; owned by fleet-lib.sh):
 #   1. ANTHROPIC_AUTH_TOKEN (already exported)            -> used as-is
 #   2. FLEET_WORKER_KEYRING_SERVICE + FLEET_WORKER_KEYRING_KEY -> `keyring get svc key`
+#      (an empty keyring entry falls through to 3)
 #   3. ZHIPU_API_KEY / GLM_API_KEY                         -> used as-is
 #
 # Examples:
@@ -67,20 +68,15 @@ if [ ! -f "$GLM_CFG/settings.json" ]; then
 fi
 export CLAUDE_CONFIG_DIR="$GLM_CFG"
 
+# --- Shared defaults + key chain (fleet-lib.sh, also sourced by the doctor) --
+__fw_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/fleet-lib.sh"
+if [ ! -f "$__fw_lib" ]; then
+  echo "fleet-worker: missing $__fw_lib (re-run install)" >&2; exit "$EXIT_MISSING_DEP"
+fi
+. "$__fw_lib"
+
 # --- Resolve the API key (never echoed) --------------------------------------
-resolve_key() {
-  if [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]; then printf '%s' "$ANTHROPIC_AUTH_TOKEN"; return 0; fi
-  if [ -n "${FLEET_WORKER_KEYRING_SERVICE:-}" ] && [ -n "${FLEET_WORKER_KEYRING_KEY:-}" ] \
-     && command -v keyring >/dev/null 2>&1; then
-    local k
-    k="$(keyring get "$FLEET_WORKER_KEYRING_SERVICE" "$FLEET_WORKER_KEYRING_KEY" 2>/dev/null | tr -d '\r\n')"
-    if [ -n "$k" ]; then printf '%s' "$k"; return 0; fi
-  fi
-  if [ -n "${ZHIPU_API_KEY:-}" ]; then printf '%s' "$ZHIPU_API_KEY"; return 0; fi
-  if [ -n "${GLM_API_KEY:-}" ];   then printf '%s' "$GLM_API_KEY";   return 0; fi
-  return 1
-}
-if ! __key="$(resolve_key)"; then
+if ! __key="$(fw_resolve_key)"; then
   cat >&2 <<'MSG'
 fleet-worker: no API key resolved. Provide one of:
   - export ANTHROPIC_AUTH_TOKEN=<key>
@@ -99,11 +95,11 @@ command -v "$CLAUDE_BIN" >/dev/null 2>&1 || {
   echo "fleet-worker: '$CLAUDE_BIN' (Claude Code) not found on PATH" >&2; exit "$EXIT_MISSING_DEP"; }
 
 # --- Endpoint + model mapping ------------------------------------------------
-export ANTHROPIC_BASE_URL="${FLEET_WORKER_BASE_URL:-https://api.z.ai/api/anthropic}"
+export ANTHROPIC_BASE_URL="${FLEET_WORKER_BASE_URL:-$FW_DEFAULT_BASE_URL}"
 export ANTHROPIC_AUTH_TOKEN="$__key"
-export ANTHROPIC_DEFAULT_OPUS_MODEL="${FLEET_WORKER_MODEL:-GLM-5.3}"
-export ANTHROPIC_DEFAULT_SONNET_MODEL="${FLEET_WORKER_MODEL:-GLM-5.3}"
-export ANTHROPIC_DEFAULT_HAIKU_MODEL="${FLEET_WORKER_SMALL_MODEL:-GLM-4.5-Air}"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="${FLEET_WORKER_MODEL:-$FW_DEFAULT_MODEL}"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="${FLEET_WORKER_MODEL:-$FW_DEFAULT_MODEL}"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="${FLEET_WORKER_SMALL_MODEL:-$FW_DEFAULT_SMALL_MODEL}"
 
 # --- Permission mode ---------------------------------------------------------
 # Default bypassPermissions keeps back-compat; safety = the cage (isolated worktree
