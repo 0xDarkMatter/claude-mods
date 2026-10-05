@@ -496,6 +496,77 @@ case "$(head -n1 "$DREPO/.claude/fleet/lanes/d-two" 2>/dev/null)" in
 esac
 case "$dlog" in *"merge: d-two"*) no "d-two merged after the stop request";; *) ok "no merge of d-two after the stop";; esac
 grep -q "SIGTERM received" "$DLOG" && ok "activity log records the stop request" || no "stop request not logged"
+
+# -- fleet stop mid-land: waits out the gate, never SIGKILLs it (the 5s guillotine)
+# Regression, 2026-10-05. The block above signals the daemon directly; this one
+# goes through `fleet stop`, whose fixed "5s grace, then SIGKILL" did not know a
+# land was running. Any gate slower than 5s was killed mid-run: the merge stayed
+# on main untested, the lane stayed READY, and the next pass's "Already up to
+# date" path marked it LANDED, blessing a merge no gate ever passed. The gate
+# blocks on the sentinel past that 5s, so the old cmd_stop provably fires.
+echo "-- fleet stop mid-land: waits out the gate, never SIGKILLs it (the 5s guillotine) --"
+rm -f "$DREPO/.claude/fleet/go"
+cat > "$DCFG" <<'EOF'
+test_cmd=n=0; until [ -f .claude/fleet/go ] || [ $n -ge 600 ]; do sleep 0.1; n=$((n+1)); done
+poll_interval=5
+session_check=off
+EOF
+gates_before="$(grep -c "running test_cmd" "$DLOG" 2>/dev/null)"
+daemon_up || no "daemon did not come up (fleet stop mid-land case)"
+for ((i = 0; i < 300; i++)); do
+  [ "$(grep -c "running test_cmd" "$DLOG" 2>/dev/null)" -gt "$gates_before" ] && break; sleep 0.1
+done
+[ -f "$DREPO/.claude/fleet/landing" ] && ok "daemon marks the lane it is landing" \
+  || no "no landing marker while the gate runs"
+STOP_OUT="$SB/stop-midland.out"
+bash "$FLEET" stop >"$STOP_OUT" 2>&1 & STOPPID=$!
+sleep 7   # past the 5s grace that used to end in SIGKILL
+kill -0 "$DPID" 2>/dev/null && ok "daemon survives fleet stop's 5s grace while its gate runs" \
+  || no "fleet stop killed the daemon mid-gate"
+kill -0 "$STOPPID" 2>/dev/null && ok "fleet stop keeps waiting while the land is in flight" \
+  || no "fleet stop returned with the land still in flight"
+touch "$DREPO/.claude/fleet/go"
+exits_within "$STOPPID" 300 || { no "fleet stop still waiting 30s after the gate finished"; kill "$STOPPID" 2>/dev/null; }
+wait "$STOPPID"; ee "fleet stop mid-land" 0 $?
+exits_within "$DPID" 50 || { no "daemon alive after fleet stop returned"; reap_daemon; }
+wait 2>/dev/null
+stop_out="$(cat "$STOP_OUT")"
+case "$stop_out" in *SIGKILL*) no "fleet stop escalated to SIGKILL mid-land";; *) ok "no SIGKILL while the gate ran";; esac
+case "$stop_out" in *"mid-land on d-two"*) ok "fleet stop names the land it waits for";; *) no "fleet stop did not say why it waits";; esac
+case "$stop_out" in *"daemon stopped"*) ok "fleet stop reports the daemon stopped";; *) no "fleet stop output unrecognised: $stop_out";; esac
+case "$(head -n1 "$DREPO/.claude/fleet/lanes/d-two" 2>/dev/null)" in
+  LANDED) ok "the land fleet stop waited on finished through its gate" ;;
+  *)      no "land cut short by fleet stop: d-two = $(head -n1 "$DREPO/.claude/fleet/lanes/d-two" 2>/dev/null)" ;;
+esac
+grep -q "PASS: d-two landed" "$DLOG" && ok "gate PASS logged for the stopped-on land" || no "no gate result for d-two"
+[ -f "$DREPO/.claude/fleet/landing" ] && no "landing marker left after the daemon exited" || ok "landing marker cleared"
+[ -f "$DPIDF" ] && no "daemon.pid left after fleet stop" || ok "daemon.pid removed after a mid-land stop"
+
+# The marker must not disarm the SIGKILL backstop once its daemon is gone: a
+# marker stranded by a kill -9 must not make a later stop wait forever on a
+# daemon that ignores SIGTERM. The fake daemon ignores TERM (and exec keeps the
+# ignore), so only the backstop can end it. `fleet stop` runs in the background
+# with a deadline, so a regression FAILs here instead of hanging the suite.
+echo "-- fleet stop: a stale landing marker cannot disarm the SIGKILL backstop --"
+bash -c 'trap "" TERM; exec sleep 60' & WEDGED=$!
+sleep 0.5
+echo "$WEDGED" > "$DPIDF"
+printf '%s\t%s\t%s\n' 999999 "$(date +%s)" d-two > "$DREPO/.claude/fleet/landing"
+STALE_OUT="$SB/stop-stale.out"
+bash "$FLEET" stop >"$STALE_OUT" 2>&1 & STOPPID=$!
+if exits_within "$STOPPID" 150; then
+  wait "$STOPPID"; ee "fleet stop with a stale marker" 0 $?
+else
+  no "stale landing marker kept fleet stop waiting 15s on a wedged daemon"
+  kill "$STOPPID" 2>/dev/null
+fi
+case "$(cat "$STALE_OUT")" in
+  *SIGKILL*) ok "stale marker ignored: a wedged daemon is still SIGKILLed" ;;
+  *)         no "stale marker disarmed the backstop: $(cat "$STALE_OUT")" ;;
+esac
+exits_within "$WEDGED" 30 || { no "wedged fake daemon survived fleet stop"; kill -KILL "$WEDGED" 2>/dev/null; }
+wait 2>/dev/null
+rm -f "$DREPO/.claude/fleet/landing" "$DPIDF"
 cd "$CREPO"
 
 # -- already-merged branch: the two-sessions-one-branch case -------------------

@@ -41,7 +41,7 @@ Fleet-ops doesn't care who produced the branch — an agent-team teammate, a bac
 fleet init <name>...        Create branch + worktree per name (manual-spawn path)
 fleet track <branch>...     Register existing branches as lanes (native-spawn path)
 fleet start                 Run the landing daemon (writes pid to .claude/fleet/daemon.pid)
-fleet stop                  Signal the running daemon to exit cleanly
+fleet stop                  Stop the daemon; a land in progress finishes first
 fleet status                One-shot fleet status panel
 fleet land <branch>         Manual land + rebase others
 fleet land --all [--running]  Batch-land all READY lanes oldest-first (--running
@@ -82,7 +82,7 @@ N > 1 on one shared working tree           → REFUSE. Worktrees or separate clo
 
 The daemon is the queue-automation layer on top of `fleet land` — optional; manual `fleet land` per branch is fully supported and not experimental.
 
-`fleet start` (via `Bash(run_in_background: true)`) polls `.claude/fleet/lanes/`, lands each lane as it turns READY and exits once all are terminal; `fleet stop` lets an in-progress land finish. **Don't stop it mid-gate**: the 5 s SIGKILL escalation can leave an untested merge on `main` (check `activity.log` first). It dies with the session. Detail: [references/daemon.md](references/daemon.md).
+`fleet start` (via `Bash(run_in_background: true)`) polls `.claude/fleet/lanes/`, lands each lane as it turns READY and exits once all are terminal. `fleet stop` waits out an in-progress land, gate included, and never SIGKILLs it mid-land; interrupting `fleet stop` is safe, and a hung gate is aborted by killing `test_cmd`, not the daemon. It dies with the session. Detail: [references/daemon.md](references/daemon.md).
 
 `signal.sh` deploys to `.claude/fleet/signal.sh` on `init`/`track`. Working sessions call:
 

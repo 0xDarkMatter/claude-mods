@@ -202,6 +202,16 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **`fleet stop` SIGKILLed the daemon mid-gate** - its fixed "5s grace, then
+  SIGKILL" did not know a land was running, and the daemon defers SIGTERM until
+  the land finishes. With any `test_cmd` slower than 5s, the merge stayed on the
+  base branch untested and the lane stayed `READY`. The next pass then hit the
+  "already up to date" path and marked it `LANDED`, blessing a merge no gate had
+  passed. The daemon now records the lane it is landing in
+  `.claude/fleet/landing`, and `fleet stop` waits out that land, printing
+  progress. Its 5s SIGKILL backstop runs only while the daemon is idle, and a
+  marker stranded by a dead daemon cannot disarm it.
+
 - **Vite 8 chunking advice named a removed option.** Vite 8 (2026-03-12) bundles with
   Rolldown: `build.rollupOptions` is now `build.rolldownOptions`, the object form of
   `output.manualChunks` is no longer supported, and its function form is deprecated in
