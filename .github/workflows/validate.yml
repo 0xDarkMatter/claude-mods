@@ -26,12 +26,16 @@ jobs:
         run: npm install -g @anthropic-ai/claude-code
 
       - name: Validate plugin + marketplace manifests
+        # tests/plugin-validate.sh waives only the reserved plugin-name error (exit 3) until
+        # 2026-10-31; any other error still fails. TODO(rename): revert to plain
+        # `claude plugin validate` once the plugin is renamed.
         run: |
-          claude plugin validate .
+          bash tests/plugin-validate.sh --self-test
+          bash tests/plugin-validate.sh . || [ $? -eq 3 ]
           tmp="$(mktemp -d)"
           mkdir -p "$tmp/.claude-plugin"
           cp .claude-plugin/plugin.json "$tmp/.claude-plugin/plugin.json"
-          claude plugin validate "$tmp"
+          bash tests/plugin-validate.sh "$tmp" || [ $? -eq 3 ]
 
       - name: Validate extensions (frontmatter, naming, structure)
         run: bash tests/validate.sh

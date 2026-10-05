@@ -42,6 +42,16 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **Gates went red when Claude Code reserved the plugin name** - Claude Code 2.1.287
+  launched Claude Mods and reserved plugin names that pass as Anthropic's own, naming
+  `claude-mods` explicitly. `claude plugin validate` now rejects it (install and load
+  still work), which failed `tests/validate.sh` and CI on an untouched `main` and blocked
+  every landing. `tests/plugin-validate.sh` now runs the validator and waives ONLY that
+  error, as a dated WARN, until 2026-10-31. Any other validator error still fails, and the
+  waiver itself fails after its expiry so the rename can't be forgotten. It self-tests
+  against fixtures before judging the repo; a waive-everything mutation fails that
+  self-test. `validate.sh` and the CI step both route through it. TODO(rename): rename
+  the plugin, then delete the waiver.
 - **`fleet-worker` doctor said "no API key" on hosts where the launcher ran fine** -
   `fleet-doctor.sh --live` carried its own if/elif copy of the key chain, so with
   `FLEET_WORKER_KEYRING_SERVICE`/`_KEY` set but an empty keyring entry it never fell
