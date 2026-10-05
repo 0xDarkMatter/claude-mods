@@ -122,11 +122,23 @@ These are claude-mods bookkeeping fields that neither spec defines. They live un
    flow style (`[a, b]`, `{k: v}`) even where Claude Code would accept it. Put list items on
    their own `- item` lines
 6. **Directory structure**: every skill must have `scripts/`, `references/`, `assets/` (use `.gitkeep` if empty)
-7. **Body under ~5,000 tokens** (about 18,000 characters). After auto-compaction Claude
-   Code re-attaches only the first 5,000 tokens of each invoked skill (25,000 across all
-   skills), so anything later silently drops. The spec also recommends under 5,000 tokens
-   and under 500 lines. `tests/skill-size.sh` warns above the line and never fails; put the
-   load-bearing instructions first and move detail into `references/`
+7. **The size rule** - the one statement of it; every other doc points here:
+   - **SKILL.md body under 500 lines AND under ~5,000 tokens** (characters / 3.6,
+     frontmatter excluded; about 18,000 characters). Both limits bind: a dense 300-line
+     body can still pass 5,000 tokens. After auto-compaction Claude Code re-attaches only
+     the first 5,000 tokens of each invoked skill (25,000 across all skills), so anything
+     later silently drops. Put the procedure and hard rules first and move detail into
+     `references/`. `tests/skill-size.sh` warns over the token line (`--strict` fails).
+   - **References one level deep, one topic each.** Link every reference directly from
+     SKILL.md; one that only another reference links to may be read partially.
+   - **A reference over 100 lines opens with a `## Contents` list**, so a partial read
+     still sees the whole map. Some skill suites also cap each reference at 300 lines;
+     that is the skill's own choice, enforced in its `tests/run.sh`, not a repo rule.
+
+   Sources: the spec ("Progressive disclosure": under 5,000 tokens and 500 lines; "File
+   references": one level deep), Claude Code's skills docs (500 lines; the compaction
+   budget) and Anthropic's skill authoring best practices (500 lines; table of contents
+   past 100 lines). Links under Reference below.
 
 ### Validation
 
@@ -143,6 +155,7 @@ flow-style list passed it on 2026-10-05, so it is no substitute for `tests/spec.
 - Spec: https://agentskills.io/specification
 - Reference validator: https://github.com/agentskills/agentskills/tree/main/skills-ref
 - Claude Code frontmatter: https://code.claude.com/docs/en/skills
+- Skill authoring best practices: https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices
 - CLI: https://github.com/vercel-labs/skills
 - Directory: https://skills.sh
 

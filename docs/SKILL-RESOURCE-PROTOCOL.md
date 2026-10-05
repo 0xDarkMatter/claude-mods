@@ -33,7 +33,7 @@ skill scripts in this repo, the strong ones already follow this —
 | Resource | Ship one when… |
 |---|---|
 | `scripts/*` | The agent would re-derive the same logic every task, OR the invocation has >3 flags, OR it's a known-good decoder/validator/verifier |
-| `references/*.md` | A sub-topic is too long for the SKILL.md body (keep body < 500 lines); one concept per file, kebab-case, TOC if > 300 lines |
+| `references/*.md` | A sub-topic is too long for the SKILL.md body (body under 500 lines and ~5,000 tokens); one concept per file, kebab-case, linked directly from SKILL.md, and a `## Contents` list at the top once it passes 100 lines. The full rule and its sources: "The size rule" in [SKILL-SUBAGENT-REFERENCE.md](SKILL-SUBAGENT-REFERENCE.md#rules-for-claude-mods-skills) |
 | `assets/*` | A task needs a known-good scaffold — a config template, a starter schema, canonical lookup data |
 
 Every reference and asset MUST be cited from `SKILL.md` with enough context that the

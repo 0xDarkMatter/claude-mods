@@ -186,15 +186,15 @@ All skills comply with the [Agent Skills specification](https://agentskills.io/s
 
 ```
 skill-name/
-├── SKILL.md              # Core workflow (< 500 lines)
+├── SKILL.md              # Core workflow (< 500 lines and ~5k tokens)
 ├── scripts/              # Executable code (optional)
 ├── references/           # Documentation loaded as needed (optional)
 └── assets/               # Output templates/files (optional)
 ```
 
 **Progressive Loading:**
-1. Metadata (name + description) - Always in context (~100 words)
-2. SKILL.md body - Loaded when skill triggers (<5k words)
+1. Metadata (name + description) - Always in context (~100 tokens)
+2. SKILL.md body - Loaded when skill triggers (< 5,000 tokens; after auto-compaction Claude Code keeps only the first 5,000)
 3. Bundled resources - Loaded only when Claude needs them
 
 Skills carry the full layout by convention - a directory may sit empty until it's needed, so bundled resources always have an obvious home. In practice 95 skills ship references and 61 ship scripts.
