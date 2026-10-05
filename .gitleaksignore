@@ -24,3 +24,7 @@ abe6bce3b9a1277bf40a08db1dd2be8dc3bdb115:skills/techdebt/references/severity-gui
 2c603fdb1f9f757408be3e47e4d90dff2e2d8b01:commands/testgen.md:generic-api-key:395
 # reason: recall-probe test fixture - a deliberately unguessable planted fact the probe asks the model to recall; not a credential (variable is named SECRET_VALUE by design)
 f829a8e4454fcbfca767a3a46eb0ceec131444fb:skills/claude-api-ops/assets/recall-probe.py:generic-api-key:55
+# security-ops audit prompt checklist line ("Session tokens: cryptographically random,
+# sufficient length?"), moved verbatim from SKILL.md (allowlisted above at cb575e7) into
+# references/audit-agent-prompts.md: prose, not a credential. Fingerprints pin the file.
+d9bc420cb123a2f9b6205d8c0ae6f4f9fa20bea3:skills/security-ops/references/audit-agent-prompts.md:generic-api-key:142
