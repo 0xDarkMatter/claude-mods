@@ -189,10 +189,12 @@ feature releases live in the README "Recent Updates" section.
   bundler table, and frontend-upgrade-ops' `.extract()` row, follow suit. The
   web-perf-ops facts catalog now tracks `vite` (major 8), so the weekly `--live` check
   flags Vite 9 before its config keys go stale too.
+
 - **"Task tool" is now "Agent tool"** in explain, review, testgen, spawn and
   tool-discovery (Claude Code renamed it in 2.1.63; `Task(...)` still aliases). spawn
   no longer promises a new agent is available at once in every case: the first agent in
   a new `agents/` directory needs a session restart.
+
 - **`fleet prune` kept the worktrees of archived sessions as "live session"** - archiving
   a Desktop session stops it, and the stop appends records to its transcript ~2s before
   Desktop rewrites the wrapper with `isArchived: true`. `sessions.sh` read that write as
@@ -211,6 +213,7 @@ feature releases live in the README "Recent Updates" section.
   left behind: SAFE only when clean, with HEAD in base, no rebase/bisect in progress,
   and an archived owner placed there by path. Each of the eleven new cases was seen
   failing, either on the old code or against a deliberately broken guard.
+
 - **CLAUDE.md beside AGENTS.md is a shadow, not a pattern** - Claude Code reads AGENTS.md
   only when no `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` is present (unless
   the CLAUDE.md imports `@AGENTS.md`). `rules/agentic-quality.md` recommended a one-line
@@ -223,12 +226,14 @@ feature releases live in the README "Recent Updates" section.
   `tests/plugin-validate.sh` read only the first count, so CI went red while the local
   CLI (which stops after the marketplace) passed. It now sums every block, and new
   self-test cases feed it CI's two-block output; both failed against the old counting.
+
 - **`fleet release` no longer flakes on Windows when a state file is briefly held.**
   The MAIN pin and the daemon PID files were removed with a bare `rm -f`, which fails
   (EBUSY) while another process has the file open; the test discarded that error, so it
   read as a resolution bug. A `remove_state_file` helper now retries for up to
   `FLEET_RM_RETRY_SECS` (default 5) and counts success only when the file is gone, else
   exits 1 naming it. New cases hold the pin open for real and failed against the old code.
+
 - **Gates went red when Claude Code reserved the plugin name** - Claude Code 2.1.287
   launched Claude Mods and reserved plugin names that pass as Anthropic's own, naming
   `claude-mods` explicitly. `claude plugin validate` now rejects it (install and load
@@ -239,6 +244,7 @@ feature releases live in the README "Recent Updates" section.
   against fixtures before judging the repo; a waive-everything mutation fails that
   self-test. `validate.sh` and the CI step both route through it. TODO(rename): rename
   the plugin, then delete the waiver.
+
 - **`fleet-worker` doctor said "no API key" on hosts where the launcher ran fine** -
   `fleet-doctor.sh --live` carried its own if/elif copy of the key chain, so with
   `FLEET_WORKER_KEYRING_SERVICE`/`_KEY` set but an empty keyring entry it never fell
@@ -310,6 +316,7 @@ feature releases live in the README "Recent Updates" section.
   channel (8 new assertions fail against the old hooks) and the hooks README
   gains an "Output channels" table; its "output goes to Claude's context"
   best-practice line was wrong and is gone.
+
 - **`pigeon send`, `reply` and `broadcast` no longer fail on Windows for bodies
   over ~32 KB.** The escaped body went to `sqlite3.exe` as a command-line argument,
   and Windows caps a command line at 32,767 chars, so a large message died with
@@ -319,6 +326,7 @@ feature releases live in the README "Recent Updates" section.
   raw Ctrl-Z (0x1A) means end-of-file, so `sql_escape` now splices that byte back
   in as `char(26)`. The pigeon suite gains four Windows regressions (40 KB send,
   reply and broadcast round-trips, plus Ctrl-Z), each seen failing first.
+
 - **doc-drift link checks are now case-exact, and CI's doc-drift step passes
   again.** `fleet-worker` linked `docs/auto-mode-classifier.md`, but the file is
   `docs/AUTO-MODE-CLASSIFIER.md`. The gate tested links with `[ -e ]`, which is
@@ -328,6 +336,7 @@ feature releases live in the README "Recent Updates" section.
   against the real on-disk spelling (directory listings cached, pure-bash
   comparison), so a wrong-case link fails locally too; the three wrong-case
   references are corrected.
+
 - **windows-ops suite no longer fails on Linux CI.** It skipped its PowerShell
   checks only when `pwsh` was missing, but GitHub's Ubuntu runners ship `pwsh`, so
   the Windows-only scripts (robocopy, CIM, process ancestry) were executed there
@@ -476,12 +485,14 @@ feature releases live in the README "Recent Updates" section.
   A new `check-craft-facts.py` verifier keeps the Craft and plugin majors honest
   (offline in PR CI, live against Packagist in the weekly freshness job). The
   description now carries its own "Use when" trigger, with no separate `when_to_use`.
+
 - **`security-ops` fits the compaction budget.** The three T2 audit-agent prompts, the
   T3 remediation preflight and the report template moved verbatim to
   `references/audit-agent-prompts.md`; `SKILL.md` keeps routing, tiers, detection,
   consolidation and a one-table summary of what each agent reads and reports. The body
   drops from about 5,200 to 3,400 estimated tokens, under the 5,000 Claude Code keeps
   after auto-compaction, so the orchestration no longer falls off the end.
+
 - **`security-ops` references split to a 300-line ceiling.** The OWASP guide is now
   `owasp-top10-a01-a05.md` + `owasp-top10-a06-a10.md` (the `review`, `testgen` and
   `techdebt` preloads point at both), MFA/rate-limiting/lockout moved to
@@ -489,6 +500,7 @@ feature releases live in the README "Recent Updates" section.
   Contents list. The skill's suite now fails on an over-length reference, a stale
   Contents list, a repo citation of a reference that no longer exists, or a
   secret-shaped example value.
+
 - **`supply-chain-defense` and `prompt-injection-defense` are self-contained and
   portable** - each folder now runs when copied alone into another plugin. Both ship
   `scripts/run-python.sh`, which runs the `.py` scripts with the first of
@@ -511,11 +523,13 @@ feature releases live in the README "Recent Updates" section.
   `worktree-boundaries` also stops asserting that chips never isolate - whether a
   chip gets its own worktree depends on how it is started, so the directive is to
   seed every chip prompt to create its own lane rather than to assume either way.
+
 - **`public-posts` exempts replies on an automated reviewer's threads** - answering
   an AI code-review bot's finding with evidence on a PR you are working on is the
   PR's working record, not a statement to a third party, and a review-triage or
   CI-autofix flow depends on it. Human-started threads and other people's PRs still
   need the preview.
+
 - **`agentic-quality` rule gains a Tests section** - "evidence, not ceremony". Agents
   over-produce tests that restate the code they were written after: they always pass,
   catch nothing, and break on every refactor. The section rewards signal over count:
@@ -527,6 +541,7 @@ feature releases live in the README "Recent Updates" section.
   one module per PR with revert-and-run evidence, never a repo-wide sweep. Test naming
   moved here from the Structure section so it is stated once; the self-check gains
   "have I seen it fail?".
+
 - **Twelve over-budget skills restructured to survive compaction** - fleet-ops,
   windows-ops, github-ops, loop-ops, ffmpeg-ops, claude-api-ops, summon, git-ops,
   isometric-ops, mac-ops, tailwind-ops and sqlite-ops each had a SKILL.md body past
@@ -538,6 +553,7 @@ feature releases live in the README "Recent Updates" section.
   every original line still exists in the skill, and each skill's own suite stays
   green. Bodies now sit at ~4,000-4,800 tokens. supply-chain-defense and the
   vendored skill-creator were left alone.
+
 - **One skill size rule, stated once.** The docs disagreed (500 lines with no token
   budget and a contents list past 300 lines in one, under 300 lines in the template).
   "The size rule" in `docs/SKILL-SUBAGENT-REFERENCE.md` now holds it with its sources -
@@ -545,6 +561,7 @@ feature releases live in the README "Recent Updates" section.
   on any reference past 100 lines - and the other docs point there. `skill-creator`,
   the last skill over budget, now leads with its procedure and keeps anatomy and
   progressive-disclosure detail in references, so `tests/skill-size.sh` reports clean.
+
 - **Craft-stack skills cross-linked** - `craftcms-ops`, `web-perf-ops`,
   `frontend-upgrade-ops` and `tailwind-ops` route to each other where the work crosses
   (Mix-to-Vite cutovers take a lab metrics baseline; Tailwind v4 waits until after the
