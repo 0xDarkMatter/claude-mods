@@ -1,0 +1,52 @@
+# Pull-only DDEV provider recipe for a SANITISED database dump.
+#
+# Copy to .ddev/providers/<name>.yaml (the file name becomes `ddev pull <name>`), fill in
+# the two variables, then:
+#   ddev auth ssh -f ~/.ssh/<one-key-scoped-to-the-dump-host>
+#   ddev pull <name>
+#
+# Adapted from DDEV's rsync.yaml.example (pkg/ddevapp/dotddev_assets/providers, v1.25.4).
+# Deliberate differences - keep them:
+#   * NO db_push_command / files_push_command. `ddev push` overwrites the upstream
+#     database and files; a recipe that can reach production must not be able to push.
+#   * It pulls an artifact that was ANONYMISED WHERE THE DATA LIVES (a scheduled job on
+#     the server or a staging copy). Sanitising after download is too late: the personal
+#     data has already reached the laptop. See references/database.md.
+#   * Files are skipped by default (uploads are rarely needed and may hold personal data).
+#     Point filesurl at a curated archive before enabling files_pull_command.
+#   * The dburl guard below refuses a path that does not name a sanitised dump - a speed
+#     bump against pointing the recipe at a raw production backup.
+#
+# This file does not carry DDEV's generated-file marker, so DDEV never overwrites it.
+
+environment_variables:
+  # user@host:path of the sanitised dump, written upstream by e.g. smile/gdpr-dump.
+  dburl: deploy@dump-host.example.com:dumps/sanitized.sql.gz
+  # Optional curated uploads archive (tar.gz). Leave empty to skip files.
+  filesurl: ""
+
+auth_command:
+  command: |
+    set -eu -o pipefail
+    ssh-add -l >/dev/null || { echo "Run 'ddev auth ssh -f <key>' first." >&2; exit 1; }
+
+db_pull_command:
+  command: |
+    # set -x   # uncomment to trace
+    set -eu -o pipefail
+    case "${dburl}" in
+      *sanitized*|*anonymised*|*anonymized*) ;;
+      *) echo "Refusing: dburl does not name a sanitised dump (${dburl})." >&2; exit 1 ;;
+    esac
+    rsync -az "${dburl}" /var/www/html/.ddev/.downloads/db.sql.gz
+  service: web
+
+files_pull_command:
+  command: |
+    set -eu -o pipefail
+    if [ -z "${filesurl}" ]; then echo "files: skipped (filesurl empty)" >&2; exit 0; fi
+    cd /var/www/html/.ddev/.downloads
+    rm -f files.tar.gz
+    rsync -az "${filesurl}" files.tar.gz
+    tar -xzf files.tar.gz -C files/
+  service: web

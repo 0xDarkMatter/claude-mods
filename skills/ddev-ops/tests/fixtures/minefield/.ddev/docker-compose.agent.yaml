@@ -1,0 +1,9 @@
+# Fixture: host SSH-agent forwarding into the web container (ssh-agent-forwarded).
+services:
+  web:
+    volumes:
+      - type: bind
+        source: /run/host-services/ssh-auth.sock
+        target: /run/host-services/ssh-auth.sock
+    environment:
+      - SSH_AUTH_SOCK=/run/host-services/ssh-auth.sock

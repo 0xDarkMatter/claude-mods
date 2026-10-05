@@ -8,6 +8,25 @@ feature releases live in the README "Recent Updates" section.
 
 ### Added
 
+- **`ddev-ops` skill** - DDEV local environments, owned in one place. A 2026-10-05 read of
+  36 DDEV-based agency repositories shaped it: `scripts/audit-ddev-config.py` runs 17
+  checks, most seen there and each with its reason from DDEV's docs or source (v1.25.4):
+  unpinned PHP and database versions, end-of-life PHP and Node.js, per-developer settings
+  committed for the team (`performance_mode`, router ports, Xdebug), keys DDEV now
+  ignores, `upload_dirs` written from the project root when DDEV resolves them from the
+  docroot, project commands that shadow DDEV's built-ins, CRLF command files, host
+  SSH-agent forwarding into containers, provider recipes that can push, and credentials
+  in committed env files (named, never printed). Seven references cover configuration and
+  env files, database workflows and sanitised pulls (with a pull-only recipe asset),
+  Mutagen, WSL2 and Docker providers, add-ons, commands and hooks, Node and dev-server
+  ports, Xdebug and sharing, and a troubleshooting runbook. `check-ddev-facts.py` keeps
+  the facts the auditor uses (defaults, end-of-life floors, built-in command names)
+  current: `--offline` in PR CI, `--live` weekly in `freshness.yml`. The skill runs when
+  copied alone and follows the team-plugin port limits (description starts "Use when ",
+  no project-hostname placeholders). Generic DDEV material moved out of `craftcms-ops`'
+  `ddev.md`, which now holds only Craft-specific facts; `security-ops`,
+  `frontend-upgrade-ops` and `docker-ops` link to it.
+
 - **Agent Skills spec gate (`tests/spec.sh`)** - every skill is checked by the spec's
   own reference validator, `skills-ref` (pinned 0.1.1, run through `uv` with its whole
   dependency tree frozen past a 7-day cooldown), in `just check`, `check-fast` and CI.

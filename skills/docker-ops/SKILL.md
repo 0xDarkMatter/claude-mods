@@ -6,7 +6,7 @@ license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: container-orchestration, go-ops, rust-ops, ci-cd-ops
+  related-skills: container-orchestration, ddev-ops, go-ops, rust-ops, ci-cd-ops
 ---
 
 # Docker Operations
@@ -185,6 +185,10 @@ networks:
 ```
 
 > **See:** `references/compose-patterns.md` for full patterns including profiles, watch mode, and override files.
+
+> **PHP/CMS project with a `.ddev/` folder?** DDEV generates its own compose files; don't
+> hand-write a parallel stack. Use `ddev-ops` (extra services go in
+> `.ddev/docker-compose.<name>.yaml`, and the Compose syntax inside them is this skill's).
 
 ## Security Quick Reference
 

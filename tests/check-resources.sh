@@ -159,6 +159,16 @@ echo "== frontend-upgrade-ops: Vite/Vue/craft-vite fact/staleness verifier"
 run "frontend-upgrade-facts --offline consistent" 0 "$PY" skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py --offline
 run "frontend-upgrade-facts --help"               0 "$PY" skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py --help
 
+echo "== ddev-ops: DDEV facts staleness verifier + .ddev/ config auditor contract"
+run "ddev-facts --offline consistent" 0 "$PY" skills/ddev-ops/scripts/check-ddev-facts.py --offline
+run "ddev-facts --help"               0 "$PY" skills/ddev-ops/scripts/check-ddev-facts.py --help
+# Live comparisons exercised offline against recorded sources (no network in PR CI).
+run "ddev-facts --live vs fixtures"   0 "$PY" skills/ddev-ops/scripts/check-ddev-facts.py --live --today 2026-10-05 --fixtures skills/ddev-ops/tests/fixtures/live
+run "audit-ddev-config --help"        0 "$PY" skills/ddev-ops/scripts/audit-ddev-config.py --help
+# The minefield fixture is the landmine set (exit 10 = findings); the clean fixture is the control.
+run "audit-ddev-config minefield"    10 "$PY" skills/ddev-ops/scripts/audit-ddev-config.py skills/ddev-ops/tests/fixtures/minefield
+run "audit-ddev-config clean control" 0 "$PY" skills/ddev-ops/scripts/audit-ddev-config.py skills/ddev-ops/tests/fixtures/clean
+
 echo "== protocol: every new verifier is executable + compiles"
 for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/claude-api-ops/scripts/context-budget.py \
@@ -177,7 +187,9 @@ for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/craftcms-ops/scripts/check-craft-facts.py \
          skills/web-perf-ops/scripts/check-web-perf-facts.py \
          skills/web-perf-ops/scripts/triage-vitals.py \
-         skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py; do
+         skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py \
+         skills/ddev-ops/scripts/check-ddev-facts.py \
+         skills/ddev-ops/scripts/audit-ddev-config.py; do
     "$PY" -m py_compile "$s" 2>/dev/null && pass "py_compile $(basename "$s")" || bad "py_compile $(basename "$s")"
 done
 bash -n skills/terraform-ops/scripts/check-action-refs.sh 2>/dev/null \
@@ -213,6 +225,8 @@ purity "native-facts"  "$PY" skills/loop-ops/scripts/check-native-facts.py --off
 purity "r-facts"       "$PY" skills/r-ops/scripts/check-r-facts.py --offline
 purity "craft-facts"   "$PY" skills/craftcms-ops/scripts/check-craft-facts.py --offline
 purity "frontend-upgrade-facts" "$PY" skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py --offline
+purity "ddev-facts"    "$PY" skills/ddev-ops/scripts/check-ddev-facts.py --offline
+purity "ddev-audit"    "$PY" skills/ddev-ops/scripts/audit-ddev-config.py skills/ddev-ops/tests/fixtures/minefield
 grep -q '_lib/term.sh' skills/terraform-ops/scripts/check-action-refs.sh \
     && pass "check-action-refs sources term.sh" || bad "check-action-refs missing term.sh"
 grep -q '_lib/term.sh' skills/fleet-worker/scripts/fleet-doctor.sh \

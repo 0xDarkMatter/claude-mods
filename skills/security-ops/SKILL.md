@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Edit Write Bash Glob Grep Agent TaskCreate TaskUpdate"
 metadata:
   author: claude-mods
-  related-skills: auth-ops, testing-ops, debug-ops, monitoring-ops, craftcms-ops, supply-chain-defense, laravel-ops
+  related-skills: auth-ops, testing-ops, debug-ops, monitoring-ops, craftcms-ops, ddev-ops, supply-chain-defense, laravel-ops
 ---
 
 # Security Operations
@@ -40,7 +40,7 @@ Load references by what T1 detects. Each is one topic, 300 lines or fewer, opens
 | | `references/craft-uploads-assets.md` | Allowed types, private volumes, transform CVEs |
 | | `references/craft-graphql-security.md` | Schemas, tokens, limits, introspection, CORS |
 | | `references/craft-advisories.md` | Support windows, exploited CVEs, triage, EOL mitigation |
-| DDEV (`.ddev/config.yaml`) | `references/ddev-config-drift.md` | Local vs production PHP/Craft settings, data, `ddev share` |
+| DDEV (`.ddev/config.yaml`) | `references/ddev-config-drift.md` | Local vs production PHP/Craft settings, data, `ddev share`; DDEV mechanics and a `.ddev/` auditor: `ddev-ops` |
 
 Craft 3 and Craft 4 are past security end of life (2024-04-30 and 2026-04-30); any audit of one leads with that finding (`craft-advisories.md`).
 
