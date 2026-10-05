@@ -245,6 +245,22 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **The pre-commit hidden-Unicode gate scanned the working tree, not the commit.**
+  `hooks/pre-commit-unicode-scan.sh` took names from `git diff --cached` but passed
+  the files on disk to the scanner and skipped names missing there. A file staged
+  with a bidi override or tag-block payload, then rewritten clean or deleted on disk,
+  was committed poisoned. Its name list also missed two cases: non-ASCII filenames,
+  which git C-quotes without `-z`, and renamed files, which are status `R` and fell
+  outside its `A`/`M` filter. It now copies each staged blob out of the index
+  (`git cat-file blob :0:<name>`, names from `-z --no-renames --diff-filter=ACMRT`)
+  and scans them in one scanner run. It also blocks a staged instruction file it
+  could not scan (an unreadable blob, a file in the scanner's `meta.unscanned`, a
+  crashed scanner) instead of calling exit 5 a "benign-severity" advisory and
+  allowing it. `PROMPT_INJECTION_ALLOW=1` still overrides once. The SessionStart
+  hook now reads the `--json` envelope. A file it could not scan gets a plain "NOT
+  scanned" advisory naming the file and the reason, instead of a findings header
+  over an empty body.
+
 - **package-manager-ops docs and routing review** - a second facts pass, each claim
   re-checked against its primary source, plus SKILL.md design fixes. Offline installs:
   `npm ci --offline` is offline, `--prefer-offline` still fetches cache misses.
