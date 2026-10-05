@@ -59,6 +59,7 @@ feature releases live in the README "Recent Updates" section.
   thresholds from web-vitals' own source and watches the tool majors. That check caught
   `@builder.io/partytown`'s deprecation and the fact that `@lhci/cli` still bundles
   Lighthouse 12. `perf-ops` routes Core Web Vitals questions here.
+
 - **`frontend-upgrade-ops` skill** - the two front-end upgrades a Craft CMS/Twig
   site keeps meeting, as one portable unit. Laravel Mix or raw Webpack to Vite via
   craft-vite: a Mix-API translation table, source rewrites, Tailwind v3 kept as-is,
