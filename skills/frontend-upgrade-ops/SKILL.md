@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Edit Write Bash Glob Grep"
 metadata:
   author: claude-mods
-  related-skills: "migrate-ops, vue-ops, craftcms-ops, ddev-ops, web-perf-ops, tailwind-ops, playwright-ops, security-ops"
+  related-skills: "migrate-ops, vue-ops, craftcms-ops, ddev-ops, web-perf-ops, tailwind-ops, playwright-ops, security-ops, package-manager-ops"
 ---
 
 # Frontend Upgrade Operations
@@ -197,3 +197,4 @@ reference against its cited source, then bump `documented_major` - never just th
 | `tailwind-ops` | The separate Tailwind v3 to v4 migration |
 | `playwright-ops` | Page-type smoke tests for the parity checks |
 | `security-ops` | Reviewing in-DOM template injection and `VITE_*` exposure |
+| `package-manager-ops` | The install side: one lockfile, `npm ci` in CI and deploy, the Node pin, node-sass to Dart Sass, Bower to npm |

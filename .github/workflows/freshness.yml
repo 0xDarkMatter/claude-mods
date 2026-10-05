@@ -198,6 +198,17 @@ jobs:
           if [ "$rc" -eq 7 ]; then echo "::warning::memory-docs live check unreachable (code.claude.com) - skipped"; fi
           exit 0
 
+      - name: package-manager-ops Node/PHP tables + manager majors (nodejs.org, php.net, npm, Composer, GitHub)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          python skills/package-manager-ops/scripts/check-pm-facts.py --live
+          rc=$?
+          if [ "$rc" -eq 10 ]; then echo "::error::package-manager-ops drift - a Node or PHP release line or date moved, a manager shipped a new major, or Corepack/Volta/node-sass/Yarn 1/Bower changed status (pm-audit's end-of-life table depends on it)"; exit 1; fi
+          if [ "$rc" -eq 7 ]; then echo "::warning::package-manager-ops live check unreachable (nodejs.org / php.net / npm / getcomposer.org / GitHub) - skipped"; fi
+          exit 0
+
       - name: GitHub Action refs still resolve
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -46,6 +46,28 @@ feature releases live in the README "Recent Updates" section.
   AGENTS.md generation to the scaffold, and its contradicting generation templates are
   gone.
 
+- **`package-manager-ops` skill** - day-to-day npm, Yarn, pnpm, Bun and Composer for
+  server-rendered sites, in eleven one-topic references (each 300 lines or fewer,
+  Contents-listed, verified 2026-10-05 against the tools' own docs): detecting the
+  manager and resolving two lockfiles without losing resolved versions; `packageManager`,
+  Corepack (no longer shipped with Node since 25.0.0) and `devEngines`; frozen installs
+  for CI and deploy; Node and PHP pins (`.nvmrc`, `engines`, `config.platform.php`,
+  `require.php`) that agree with DDEV; npx, dlx and `composer exec` safety, including
+  never routing a native CLI through npm; upgrades and ERESOLVE; scripts, workspaces and
+  the now-default blocking of dependency install scripts in npm 12, pnpm, Yarn 4.14+ and
+  Bun; registries and auth; caches and CI; Windows, DDEV and Apple Silicon gotchas; and
+  exits from Bower, node-sass, Yarn 1, lockfile v1 and end-of-life Node and PHP.
+  `scripts/pm-audit.py` is a read-only repo audit (25 finding ids; exit 10 on findings),
+  tested against 37 fixture cases that were each seen failing first.
+  `scripts/check-pm-facts.py` guards the Node and PHP end-of-life tables pm-audit reads,
+  offline in PR CI and live (nodejs.org, php.net, npm, Composer, GitHub) in
+  `freshness.yml`. The skill runs copied alone, so it joins the portable skills and
+  carries its own byte-identical `run-python.sh`. DDEV's own config stays with
+  `ddev-ops`' auditor: pm-audit reads DDEV's PHP and Node only to check that they agree
+  with the repo's other pins. `javascript-ops` drops its stale package-manager section for
+  a pointer; `supply-chain-defense`, `frontend-upgrade-ops`, `javascript-ops`,
+  `docker-ops` and `ddev-ops` link to it.
+
 - **Agent Skills spec gate (`tests/spec.sh`)** - every skill is checked by the spec's
   own reference validator, `skills-ref` (pinned 0.1.1, run through `uv` with its whole
   dependency tree frozen past a 7-day cooldown), in `just check`, `check-fast` and CI.
