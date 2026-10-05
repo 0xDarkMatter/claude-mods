@@ -155,6 +155,10 @@ run "triage-vitals --help"                0 "$PY" skills/web-perf-ops/scripts/tr
 run "triage-vitals poor PSI fixture"     10 "$PY" skills/web-perf-ops/scripts/triage-vitals.py skills/web-perf-ops/tests/fixtures/psi-poor.json
 run "triage-vitals good CrUX control"     0 "$PY" skills/web-perf-ops/scripts/triage-vitals.py skills/web-perf-ops/tests/fixtures/crux-good.json
 
+echo "== frontend-upgrade-ops: Vite/Vue/craft-vite fact/staleness verifier"
+run "frontend-upgrade-facts --offline consistent" 0 "$PY" skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py --offline
+run "frontend-upgrade-facts --help"               0 "$PY" skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py --help
+
 echo "== protocol: every new verifier is executable + compiles"
 for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/claude-api-ops/scripts/context-budget.py \
@@ -172,7 +176,8 @@ for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/nextjs-ops/scripts/audit-app-router.py \
          skills/craftcms-ops/scripts/check-craft-facts.py \
          skills/web-perf-ops/scripts/check-web-perf-facts.py \
-         skills/web-perf-ops/scripts/triage-vitals.py; do
+         skills/web-perf-ops/scripts/triage-vitals.py \
+         skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py; do
     "$PY" -m py_compile "$s" 2>/dev/null && pass "py_compile $(basename "$s")" || bad "py_compile $(basename "$s")"
 done
 bash -n skills/terraform-ops/scripts/check-action-refs.sh 2>/dev/null \
@@ -207,6 +212,7 @@ purity "pricing-sync"  "$PY" skills/loop-ops/scripts/check-pricing-sync.py --off
 purity "native-facts"  "$PY" skills/loop-ops/scripts/check-native-facts.py --offline
 purity "r-facts"       "$PY" skills/r-ops/scripts/check-r-facts.py --offline
 purity "craft-facts"   "$PY" skills/craftcms-ops/scripts/check-craft-facts.py --offline
+purity "frontend-upgrade-facts" "$PY" skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py --offline
 grep -q '_lib/term.sh' skills/terraform-ops/scripts/check-action-refs.sh \
     && pass "check-action-refs sources term.sh" || bad "check-action-refs missing term.sh"
 grep -q '_lib/term.sh' skills/fleet-worker/scripts/fleet-doctor.sh \

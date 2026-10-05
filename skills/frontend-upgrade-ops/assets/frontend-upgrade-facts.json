@@ -1,0 +1,35 @@
+{
+  "_comment": "Canonical fast-moving facts frontend-upgrade-ops encodes. scripts/check-frontend-upgrade-facts.py asserts SKILL.md + references name these (--offline) and probes npm/Packagist for major-version drift (--live). Edit deliberately: a change here is a skill-content decision, not housekeeping. documented_major is the major the prose commits to; bump it only after re-verifying the affected reference against its cited source.",
+  "schema": "claude-mods.frontend-upgrade-ops.facts/v1",
+  "as_of": "2026-10-05",
+  "dated_facts": {
+    "_comment": "Point-in-time facts the prose must state verbatim. --offline fails if a token disappears from SKILL.md/references; these never change live, so they are not probed.",
+    "vue2_eol": "31 December 2023",
+    "vue2_final_release": "2.7.16",
+    "mix_last_release": "6.0.49",
+    "vite_dev_server_security_release": "6.0.9",
+    "vite_manifest_path": ".vite/manifest.json",
+    "tailwind_v3_final": "3.4.19",
+    "plugin_vue2_vite_ceiling": "vite ^7.0.0",
+    "pinia_last_vue2_major": "Pinia 2"
+  },
+  "peer_watch": {
+    "_comment": "Advice that hinges on a peer range. SKILL.md 'Sequencing' pins the Vue 2.7 interim to Vite 7 because @vitejs/plugin-vue2 peers stop at vite ^7. --live flags DRIFT when the latest release's peer range admits a higher major - the sequencing advice is then stale.",
+    "@vitejs/plugin-vue2": { "peer": "vite", "documented_max_major": 7 }
+  },
+  "packages": {
+    "vite":                   { "registry": "npm",       "documented_major": 8, "prose": ["Vite 8"],                 "role": "bundler + dev server" },
+    "vue":                    { "registry": "npm",       "documented_major": 3, "prose": ["Vue 3"],                  "role": "framework target" },
+    "@vue/compat":            { "registry": "npm",       "documented_major": 3, "prose": ["@vue/compat"],            "role": "Vue 2-compatible migration build" },
+    "pinia":                  { "registry": "npm",       "documented_major": 4, "prose": ["Pinia 4"],                "role": "store (Vuex replacement)" },
+    "@vitejs/plugin-vue":     { "registry": "npm",       "documented_major": 6, "prose": ["@vitejs/plugin-vue"],     "role": "Vue 3 SFC plugin" },
+    "@vitejs/plugin-vue2":    { "registry": "npm",       "documented_major": 2, "prose": ["@vitejs/plugin-vue2"],    "role": "Vue 2.7 SFC plugin for the interim step" },
+    "@vitejs/plugin-legacy":  { "registry": "npm",       "documented_major": 8, "prose": ["@vitejs/plugin-legacy"],  "role": "nomodule legacy builds" },
+    "@vue/test-utils":        { "registry": "npm",       "documented_major": 2, "prose": ["@vue/test-utils"],        "role": "component tests" },
+    "vitest":                 { "registry": "npm",       "documented_major": 5, "prose": ["Vitest 5"],               "role": "test runner" },
+    "tailwindcss":            { "registry": "npm",       "documented_major": 4, "prose": ["Tailwind v3", "Tailwind v4"], "role": "CSS framework (skill stays on v3 during the bundler swap)" },
+    "laravel-mix":            { "registry": "npm",       "documented_major": 6, "prose": ["Laravel Mix"],            "role": "the frozen bundler being replaced" },
+    "alpinejs":               { "registry": "npm",       "documented_major": 3, "prose": ["Alpine"],                 "role": "replacement for small widgets" },
+    "nystudio107/craft-vite": { "registry": "packagist", "documented_major": 5, "prose": ["craft-vite"],             "role": "Craft plugin: manifest + dev-server tags" }
+  }
+}
