@@ -1,0 +1,89 @@
+{
+  "_comment": "Canonical fast-moving facts package-manager-ops encodes, and the tables scripts/pm-audit.py reads at run time (Node + PHP end-of-life dates, LTS codenames, native CLI names). scripts/check-pm-facts.py --offline asserts the skill prose names every token here; --live re-checks the tables against nodejs/Release schedule.json, php.net, the npm registry, getcomposer.org and GitHub. Edit deliberately: a change here changes what pm-audit reports. Verified 2026-10-05.",
+  "schema": "claude-mods.package-manager-ops.facts/v1",
+  "as_of": "2026-10-05",
+  "node": {
+    "_comment": "From https://raw.githubusercontent.com/nodejs/Release/main/schedule.json. 'end' = end of life. Odd majors never reach LTS. From 27 on, one major per year and every line becomes LTS (nodejs.org blog, 2026-03-10). 26's codename is not assigned in schedule.json yet, so it is absent here on purpose: --live flags drift once it is.",
+    "lts_codenames": {
+      "dubnium": 10, "erbium": 12, "fermium": 14, "gallium": 16,
+      "hydrogen": 18, "iron": 20, "jod": 22, "krypton": 24
+    },
+    "releases": {
+      "10": {"end": "2021-04-30"},
+      "11": {"end": "2019-06-01"},
+      "12": {"end": "2022-04-30"},
+      "13": {"end": "2020-06-01"},
+      "14": {"end": "2023-04-30"},
+      "15": {"end": "2021-06-01"},
+      "16": {"end": "2023-09-11"},
+      "17": {"end": "2022-06-01"},
+      "18": {"end": "2025-04-30"},
+      "19": {"end": "2023-06-01"},
+      "20": {"lts": "2023-10-24", "maintenance": "2024-10-22", "end": "2026-04-30"},
+      "21": {"end": "2024-06-01"},
+      "22": {"lts": "2024-10-29", "maintenance": "2025-10-21", "end": "2027-04-30"},
+      "23": {"end": "2025-06-01"},
+      "24": {"lts": "2025-10-28", "maintenance": "2026-10-20", "end": "2028-04-30"},
+      "25": {"end": "2026-06-01"},
+      "26": {"lts": "2026-10-28", "maintenance": "2027-10-20", "end": "2029-04-30"}
+    }
+  },
+  "php": {
+    "_comment": "From https://www.php.net/supported-versions.php and https://www.php.net/eol.php. security_end = the day support ends; pm-audit treats a version as end-of-life the day after.",
+    "releases": {
+      "5.6": {"security_end": "2018-12-31"},
+      "7.0": {"security_end": "2019-01-10"},
+      "7.1": {"security_end": "2019-12-01"},
+      "7.2": {"security_end": "2020-11-30"},
+      "7.3": {"security_end": "2021-12-06"},
+      "7.4": {"security_end": "2022-11-28"},
+      "8.0": {"security_end": "2023-11-26"},
+      "8.1": {"security_end": "2025-12-31"},
+      "8.2": {"initial": "2022-12-08", "active_end": "2024-12-31", "security_end": "2026-12-31"},
+      "8.3": {"initial": "2023-11-23", "active_end": "2025-12-31", "security_end": "2027-12-31"},
+      "8.4": {"initial": "2024-11-21", "active_end": "2026-12-31", "security_end": "2028-12-31"},
+      "8.5": {"initial": "2025-11-20", "active_end": "2027-12-31", "security_end": "2029-12-31"}
+    }
+  },
+  "packages": {
+    "_comment": "documented_major = the major the prose commits to. --live: DRIFT when the registry's latest major is ahead, or the package is gone.",
+    "npm":               {"registry": "npm", "documented_major": 12, "prose": ["npm 12"], "role": "Node's bundled manager; Node 24/26 still bundle npm 11"},
+    "pnpm":              {"registry": "npm", "documented_major": 12, "prose": ["pnpm 12"], "role": "content-addressed store manager"},
+    "yarn":              {"registry": "npm", "documented_major": 1, "prose": ["Yarn 1"], "role": "Yarn classic, maintenance mode"},
+    "@yarnpkg/cli-dist": {"registry": "npm", "documented_major": 4, "prose": ["Yarn 4"], "role": "Yarn Berry (modern Yarn)"},
+    "bun":               {"registry": "npm", "documented_major": 1, "prose": ["Bun"], "role": "runtime + package manager"},
+    "corepack":          {"registry": "npm", "documented_major": 0, "prose": ["corepack"], "role": "standalone since Node 25 stopped bundling it"},
+    "npm-check-updates": {"registry": "npm", "documented_major": 23, "prose": ["npm-check-updates"], "role": "major-bump helper (run pinned)"},
+    "sass":              {"registry": "npm", "documented_major": 1, "prose": ["Dart Sass"], "role": "node-sass replacement"},
+    "composer/composer": {"registry": "composer", "documented_major": 2, "prose": ["Composer 2"], "role": "PHP dependency manager"},
+    "nvm-windows/nvm":   {"registry": "github", "documented_major": 2, "prose": ["nvm-windows"], "role": "Windows Node version manager (v2 rewrite, new repo)"},
+    "Schniz/fnm":        {"registry": "github", "documented_major": 1, "prose": ["fnm"], "role": "cross-platform Node version manager"}
+  },
+  "text_watch": {
+    "_comment": "Status statements the skill relies on. --live: DRIFT when the page no longer contains the phrase (the status changed - re-read and update the prose).",
+    "corepack_unbundled": {"url": "https://raw.githubusercontent.com/nodejs/node/main/doc/contributing/distribution.md", "contains": "no longer distributed"},
+    "volta_unmaintained": {"url": "https://raw.githubusercontent.com/volta-cli/volta/main/README.md", "contains": "unmaintained"},
+    "node_sass_eol":      {"url": "https://raw.githubusercontent.com/sass/node-sass/master/README.md", "contains": "end of life"},
+    "yarn1_security_only": {"url": "https://raw.githubusercontent.com/yarnpkg/yarn/master/README.md", "contains": "only accept security fixes"},
+    "bower_recommends_alternatives": {"url": "https://bower.io/", "contains": "we recommend"}
+  },
+  "dated_facts": {
+    "_comment": "Point-in-time facts the prose must state verbatim; --offline fails if a token disappears from SKILL.md/references.",
+    "corepack_unbundled_node": "25.0.0",
+    "devengines_npm": "10.9.0",
+    "composer_latest": "2.10.3",
+    "yarn1_last": "1.22.22",
+    "node_sass_last": "9.0.0",
+    "node_sass_eol": "2024-07-24",
+    "npm12_release": "2026-07-08",
+    "node_annual_cadence": "one major a year",
+    "pnpm11_settings_file": "pnpm-workspace.yaml",
+    "bun_text_lockfile": "bun.lock",
+    "ddev_node_auto": "nodejs_version: auto",
+    "composer_why_not": "composer why-not php"
+  },
+  "native_cli_names": {
+    "_comment": "Tools whose official channel is NOT the npm package of that bare name (winget/brew/apt/cargo/GitHub releases). `npx <name>` runs whatever owns that npm name - possibly a squatter. pm-audit flags npx.native-cli on these.",
+    "names": ["rg", "ripgrep", "fd", "fd-find", "sd", "bat", "eza", "exa", "jq", "yq", "fzf", "delta", "git-delta", "dust", "procs", "hyperfine", "tokei", "difft", "difftastic", "zoxide", "just", "uv", "ruff", "gh", "lazygit", "markitdown"]
+  }
+}
