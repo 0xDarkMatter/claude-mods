@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: "laravel-ops, sql-ops, nginx-ops, perf-ops, tailwind-ops, playwright-ops, a11y-ops, security-ops"
+  related-skills: "laravel-ops, sql-ops, nginx-ops, perf-ops, web-perf-ops, frontend-upgrade-ops, tailwind-ops, playwright-ops, a11y-ops, security-ops"
 ---
 
 # Craft CMS Operations
@@ -44,9 +44,11 @@ each topic lives in one reference.
 | Rich-text fields, nested entries inside rich text, Redactor conversion | [ckeditor.md](references/ckeditor.md) |
 | Local setup, DB pull/push, Xdebug, snapshots | [ddev.md](references/ddev.md) |
 | Tests for modules/plugins, fixtures, ECS/PHPStan | [codeception.md](references/codeception.md) |
-| Front-end assets, Vite dev server, critical CSS, moving off Laravel Mix | [craft-vite.md](references/craft-vite.md) |
+| Front-end assets, Vite dev server, critical CSS | [craft-vite.md](references/craft-vite.md) |
+| Moving off Laravel Mix/Webpack, or Vue 2 to Vue 3 | `frontend-upgrade-ops` (the full migration playbook) |
 | Upgrading Craft 3 → 4 → 5, plugin version lines, Craft 6 status | [upgrades.md](references/upgrades.md) |
 | Slow pages, images, queue setup, production config | [performance.md](references/performance.md) |
+| Core Web Vitals failing (LCP, INP, CLS), PageSpeed or Search Console flags | `web-perf-ops` (field data first; its `references/craft.md` maps the Craft levers) |
 | Headless front ends, GraphQL schemas and tokens | [graphql.md](references/graphql.md) |
 | Modules, plugins, events, migrations, queue jobs | [plugin-development.md](references/plugin-development.md) |
 | Modeling a new flexible page type | [assets/entry-type-field-layout.md](assets/entry-type-field-layout.md) |
@@ -144,6 +146,10 @@ sections. Starter shape: [entry-type-field-layout.md](assets/entry-type-field-la
 - `laravel-ops` (Composer/PHP tooling; Craft 6 is Laravel-based) · `sql-ops` (indexes behind
   slow `orderBy`) · `nginx-ops` (serving Craft, Blitz rewrites) · `perf-ops` (profiling) ·
   `tailwind-ops` · `playwright-ops` (browser tests against the DDEV URL)
+- `web-perf-ops` (Core Web Vitals: CrUX/RUM first, then the failing subpart; Blitz, transforms,
+  craft-vite critical CSS and SEOmatic/Formie script placement as INP/LCP levers)
+- `frontend-upgrade-ops` (Laravel Mix or Webpack to Vite via craft-vite, Vue 2 to Vue 3,
+  Vue islands in Twig, and when a widget should become Alpine instead)
 - `a11y-ops` (WCAG 2.2 for Twig sites: heading levels across partials, asset alt text, Formie
   and CKEditor markup, multi-site `lang`; see its `references/server-rendered-templates.md`)
 - `security-ops` (Craft/Twig/PHP security: CSRF and Formie, `allowAnonymous`, devMode and the

@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: react-ops, vue-ops, astro-ops
+  related-skills: "react-ops, vue-ops, astro-ops, craftcms-ops, frontend-upgrade-ops, web-perf-ops"
 ---
 
 # Tailwind Operations
@@ -186,6 +186,9 @@ Copy-paste snippets for a card, button variants, a form input, navbar, modal ove
 | Container queries | Plugin required | Native `@container`, `@sm:`, `@md:` |
 | Entry animations | JS needed | `@starting-style` (CSS native) |
 
+On a site still building with Laravel Mix, move to Vite on Tailwind v3 first
+(`frontend-upgrade-ops`), then do v4 as its own change with its own visual diff.
+
 ### v4 CSS-First Config
 
 ```css
@@ -337,5 +340,8 @@ The canonical fact list lives in [`assets/tailwind-facts.json`](assets/tailwind-
 - `react-ops` - React component patterns using Tailwind
 - `vue-ops` - Vue component patterns using Tailwind
 - `astro-ops` - Astro project patterns with Tailwind integration
+- `craftcms-ops` - Tailwind in Twig templates; `content` globs must reach `templates/**/*.twig`
+- `frontend-upgrade-ops` - Laravel Mix to Vite with Tailwind v3 kept as-is, before any v4 move
+- `web-perf-ops` - unused and render-blocking CSS, critical CSS, and their effect on LCP/CLS
 - Tailwind docs: https://tailwindcss.com/docs
 - Tailwind v4 blog: https://tailwindcss.com/blog/tailwindcss-v4

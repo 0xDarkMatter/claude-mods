@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Edit Write Bash Glob Grep"
 metadata:
   author: claude-mods
-  related-skills: "perf-ops, craftcms-ops, nginx-ops, cloudflare-ops, ci-cd-ops, vue-ops, tailwind-ops"
+  related-skills: "perf-ops, craftcms-ops, frontend-upgrade-ops, nginx-ops, cloudflare-ops, ci-cd-ops, vue-ops, tailwind-ops"
 ---
 
 # Web Performance Operations
@@ -182,7 +182,7 @@ Both follow the repo's script contract: `--help` with examples, `--json` envelop
 | Craft content modelling, Twig, element queries | `craftcms-ops` |
 | Nginx/Cloudflare configuration syntax | `nginx-ops`, `cloudflare-ops` |
 | CI workflow hardening | `ci-cd-ops` |
-| Vue 2 -> 3, Laravel Mix -> Vite migrations | `vue-ops`, `migrate-ops` |
+| Laravel Mix/Webpack -> Vite, Vue 2 -> 3 on a Craft/Twig site | `frontend-upgrade-ops` (other stacks: `migrate-ops`; steady-state Vue 3: `vue-ops`) |
 
 ## Gotchas
 
@@ -196,3 +196,4 @@ Both follow the repo's script contract: `--help` with examples, `--json` envelop
 | Third-party tags invisible in lab | Lab runs consent-free; reproduce with consent accepted and read RUM attribution |
 | `@lhci/cli` assertions on legacy audit ids | LHCI bundles Lighthouse 12; legacy ids vanish on 13. Use metric, `resource-summary`, `*-insight` ids |
 | `@builder.io/partytown` in package.json | Deprecated; the project is now `@qwik.dev/partytown` (still beta) |
+| LCP or CLS worse right after a Mix -> Vite cutover | craft-vite loads CSS async by default: add critical CSS or `asyncCss = false`, and re-check `modulepreload` (`frontend-upgrade-ops` cutover checklist). Take the lab baseline on the Mix build first |

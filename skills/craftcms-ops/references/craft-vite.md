@@ -152,9 +152,12 @@ Laravel Mix is still the most common build tool on older Craft codebases, but it
 release was 6.0.49 in June 2022 (npm, checked 2026-10-05) - effectively unmaintained. There is no official migration
 guide; nystudio107's
 [Vite + Craft article](https://nystudio107.com/blog/using-vite-js-next-generation-frontend-tooling-with-craft-cms)
-covers the target architecture. The practical path:
+covers the target architecture. The full playbook (Mix API translation table, source
+rewrites, the DDEV dev server, and sequencing alongside a Vue 2 to Vue 3 upgrade) is the
+`frontend-upgrade-ops` skill; the short version:
 
-1. Map each `mix.js()` / `mix.postCss()` call to a Vite `rollupOptions.input` entry.
+1. Map each `mix.js()` / `mix.postCss()` call to a Vite `build.rolldownOptions.input`
+   entry (`rollupOptions` on Vite 7 and earlier - see the config above).
 2. Replace `{{ mix('/css/app.css') }}` (or a manifest-reading macro) with
    `craft.vite.script()` for each entry.
 3. Move `public/`-style static copies (`mix.copy`) to Vite's `publicDir` or keep them
