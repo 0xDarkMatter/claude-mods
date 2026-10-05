@@ -126,8 +126,35 @@ feature releases live in the README "Recent Updates" section.
   description is trimmed to a 500-character "Use when" form, now pinned by the
   skill's own suite.
 
+- **Contents-list gate (`tests/reference-contents.sh`)** - warns when a reference
+  over 100 lines has no `## Contents` list in its first 15 lines, or has a list that
+  misses a `##` heading, as the size rule requires. It is warn-only (`--strict` fails,
+  `--report` lists files) and runs in `just check` and `check-fast`, not the landing
+  chain. A fixture self-test runs first. Today it flags 351 of 427 long references
+  in 83 skills: 280 with no contents heading at all, 48 with another heading such as
+  "Table of Contents", 2 with the list too low, and 21 with a stale list. The parser
+  is security-ops' own, moved into `skills/security-ops/tests/reference-contents.awk`
+  and shared so the two checks can't disagree. It now reads CRLF, ignores link markup
+  in numbered lists and checks every file in one process. The portable skills
+  (a11y-ops, supply-chain-defense, security-ops, prompt-injection-defense,
+  craftcms-ops, web-perf-ops, frontend-upgrade-ops) are clean; the rest get their
+  lists when next touched.
+
 ### Fixed
 
+- **Vite 8 chunking advice named a removed option.** Vite 8 (2026-03-12) bundles with
+  Rolldown: `build.rollupOptions` is now `build.rolldownOptions`, the object form of
+  `output.manualChunks` is no longer supported, and its function form is deprecated in
+  favour of `output.codeSplitting.groups`. web-perf-ops, astro-ops (Astro 7 ships
+  Vite 8) and perf-ops all recommended the object form. They now give the key for each
+  Vite major, with sources dated 2026-10-05. javascript-ops' library example and
+  bundler table, and frontend-upgrade-ops' `.extract()` row, follow suit. The
+  web-perf-ops facts catalog now tracks `vite` (major 8), so the weekly `--live` check
+  flags Vite 9 before its config keys go stale too.
+- **"Task tool" is now "Agent tool"** in explain, review, testgen, spawn and
+  tool-discovery (Claude Code renamed it in 2.1.63; `Task(...)` still aliases). spawn
+  no longer promises a new agent is available at once in every case: the first agent in
+  a new `agents/` directory needs a session restart.
 - **The reserved-name waiver counted only the first validated file.** CI's Claude Code
   validates `marketplace.json` and `plugin.json` and prints one error block per file;
   `tests/plugin-validate.sh` read only the first count, so CI went red while the local
