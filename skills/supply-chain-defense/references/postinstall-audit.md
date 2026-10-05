@@ -16,6 +16,17 @@ When any of those misses, the malware is already in `node_modules` / `site-packa
 it scans what actually landed on disk for the behaviours the 2026 worms exhibit, rather
 than asking a registry whether a name is known-bad.
 
+## Contents
+
+1. [What it flags](#what-it-flags)
+2. [Incremental cache (daily-runnable)](#incremental-cache-daily-runnable)
+3. [Exit codes](#exit-codes)
+4. [--deep (GuardDog confirmation)](#--deep-guarddog-confirmation)
+5. [--live (registry takedown check)](#--live-registry-takedown-check)
+6. [Existing-tool evaluation (tool-first)](#existing-tool-evaluation-tool-first)
+7. [Scheduling — run it daily](#scheduling--run-it-daily)
+8. [When a finding fires](#when-a-finding-fires)
+
 ## What it flags
 
 Per package, grouped so a single weak signal never fires alone (real `node_modules`
@@ -115,7 +126,17 @@ post-install scanning with tamper detection. GuardDog is the closest and is wire
 ### Windows Task Scheduler
 
 ```powershell
-$py  = (Get-Command python).Source
+# First of python3/python/py that really runs 3.8+ - the PowerShell twin of
+# scripts/run-python.sh. Get-Command alone can return the WindowsApps Store alias,
+# which exits without running anything, so the task would "succeed" doing nothing.
+$py = $null
+foreach ($c in 'python3', 'python', 'py') {
+    $cmd = Get-Command $c -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $cmd) { continue }
+    & $cmd.Source -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' 2>$null
+    if ($LASTEXITCODE -eq 0) { $py = $cmd.Source; break }
+}
+if (-not $py) { throw 'No Python 3.8+ found (tried python3, python, py)' }
 $arg = '"C:\Users\<you>\.claude\skills\supply-chain-defense\scripts\postinstall-audit.py"' +
        ' --root D:/code --root D:/lab' +
        ' --json'

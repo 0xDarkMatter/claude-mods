@@ -158,6 +158,12 @@ Requires Sonnet 4+ or Opus 4+.
   a suite that runs Windows-only scripts whenever `command -v pwsh` succeeds goes
   red on Linux CI (windows-ops, supply-chain-defense). Gate runtime checks on the
   host: `[Environment]::OSVersion.Platform` = `Win32NT` (works in 5.1 and 7).
+- **Portable skills must run copied alone.** `supply-chain-defense` and
+  `prompt-injection-defense` are copied standalone into other plugins: no `../../`
+  dependency, `_lib/term.sh` only behind a guard, and `scripts/run-python.sh` is
+  duplicated in each **on purpose** - don't DRY it into `_lib`
+  (`tests/check-resources.sh` fails if the copies drift). Each suite's "standalone"
+  block copies the folder alone and proves it.
 
 ## Testing
 
