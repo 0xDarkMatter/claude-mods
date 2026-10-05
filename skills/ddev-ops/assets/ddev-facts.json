@@ -1,0 +1,57 @@
+{
+  "schema": "claude-mods.ddev-ops.facts/v1",
+  "as_of": "2026-10-05",
+  "_comment": "Single source of truth for the fast-moving DDEV facts this skill states. scripts/audit-ddev-config.py READS it (defaults, EOL floors, obsolete keys, built-in command names); scripts/check-ddev-facts.py VERIFIES it (--offline: prose still states each token and each token still contains its value; --live: GitHub releases, the docs config page at the release tag, the built-in command listing, endoflife.date). Sources on as_of: https://api.github.com/repos/ddev/ddev/releases, https://raw.githubusercontent.com/ddev/ddev/<tag>/docs/content/users/configuration/config.md, pkg/ddevapp/global_dotddev_assets/commands/<service> at the tag, https://endoflife.date/api/{php,nodejs}.json. Bump a value, its prose, and the 'Versions verified' note in SKILL.md in one commit.",
+  "release": {
+    "tag": "v1.25.4",
+    "minor": "1.25"
+  },
+  "defaults": {
+    "php_version": "8.4",
+    "database": "mariadb:11.8",
+    "nodejs_version": "24"
+  },
+  "php_range": {
+    "min": "5.6",
+    "max": "8.5"
+  },
+  "eol_floor": {
+    "_comment": "Oldest release line still supported upstream on as_of (endoflife.date eol date in the future). Anything older is end of life.",
+    "php": "8.2",
+    "nodejs": "22"
+  },
+  "node_codenames": {
+    "argon": "4",
+    "boron": "6",
+    "carbon": "8",
+    "dubnium": "10",
+    "erbium": "12",
+    "fermium": "14",
+    "gallium": "16",
+    "hydrogen": "18",
+    "iron": "20",
+    "jod": "22",
+    "krypton": "24"
+  },
+  "obsolete_keys": {
+    "_comment": "DDEV parses config.yaml non-strictly (yaml.Unmarshal), so a key it no longer defines is silently ignored rather than rejected.",
+    "nfs_mount_enabled": "NFS support was removed in v1.25.0; the key is ignored. Use performance_mode.",
+    "mutagen_enabled": "Replaced by performance_mode; the key is ignored, so Mutagen follows the global default.",
+    "upload_dir": "Deprecated single-value form; DDEV migrates it, but write upload_dirs (a list)."
+  },
+  "builtin_commands": {
+    "_comment": "Files DDEV ships in pkg/ddevapp/global_dotddev_assets/commands/<service> at release.tag (README and *.example excluded). A project .ddev/commands/<service>/<name> with the same name wins, because project commands are registered first.",
+    "web": ["admin-watch", "artisan", "asterios", "blackfire", "cake", "console", "craft", "dr", "drush", "magento", "maho", "npm", "npx", "php", "pint", "sake", "shopware-cli", "spark", "storefront-watch", "typo3", "wp", "xdebug", "xhprof", "yarn"],
+    "host": ["dbeaver", "heidisql", "launch", "mailpit", "phpmyadmin", "querious", "self-upgrade", "sequelace", "tableplus", "tablepro"],
+    "db": ["mariadb", "mysql", "psql"]
+  },
+  "prose_tokens": [
+    {"key": "release",        "token": "DDEV v1.25.4",              "value_of": "release.tag"},
+    {"key": "default-php",    "token": "default `php_version` is 8.4", "value_of": "defaults.php_version"},
+    {"key": "default-db",     "token": "`mariadb:11.8`",           "value_of": "defaults.database"},
+    {"key": "default-node",   "token": "Node.js 24",                "value_of": "defaults.nodejs_version"},
+    {"key": "php-range",      "token": "PHP 5.6 through 8.5",       "value_of": "php_range.max"},
+    {"key": "php-eol-floor",  "token": "PHP older than 8.2",        "value_of": "eol_floor.php"},
+    {"key": "node-eol-floor", "token": "Node.js older than 22",     "value_of": "eol_floor.nodejs"}
+  ]
+}

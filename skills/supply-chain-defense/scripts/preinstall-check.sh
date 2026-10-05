@@ -56,6 +56,9 @@ emit() { [[ "$QUIET" -eq 1 ]] && return; printf '%s\n' "$1" >&2; }
 
 # Terminal design system: framing on stderr (term_init 2); TSV/--json stays plain
 # on stdout. Full panel for a human at a TTY (or FORCE_COLOR); else legacy emit.
+# The lib is OPTIONAL: this skill is copied standalone into other plugins with no
+# skills/_lib beside it, so the fallback must work and stay 7-bit ASCII (pinned by
+# the "standalone" block in tests/run.sh). Never source it unconditionally.
 __lib="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../_lib" 2>/dev/null && pwd || true)"
 if [ -n "${__lib:-}" ] && [ -f "$__lib/term.sh" ]; then . "$__lib/term.sh"; term_init 2; __HAVE_TERM=1
 else __HAVE_TERM=0; TERM_DOT="|"; fi
@@ -110,13 +113,16 @@ result() {  # name version published
   fi
 }
 
-fetch() { curl -fsSL -A "supply-chain-defense/preinstall-check" "$1" 2>/dev/null || { unavailable=1; echo ""; }; }
+# fetch runs inside $(...), a subshell, so it cannot set `unavailable` itself (the
+# assignment would die with the subshell and exit 7 would never fire). It returns
+# curl's status; every caller writes `json=$(fetch ...) || unavailable=1`.
+fetch() { curl -fsSL -A "supply-chain-defense/preinstall-check" "$1" 2>/dev/null; }
 
 check_npm() {
   local spec=$1 name version json
   name="${spec%@*}"; version=""
   [[ "$spec" == *"@"* && "$spec" != @*/* ]] && version="${spec#*@}"
-  json=$(fetch "https://registry.npmjs.org/${name}")
+  json=$(fetch "https://registry.npmjs.org/${name}") || unavailable=1
   [[ -z "$json" || "$HAS_JQ" -eq 0 ]] && { result "$name" "" ""; return; }
   [[ -z "$version" ]] && version=$(jq -r '."dist-tags".latest // empty' <<<"$json")
   result "$name" "$version" "$(jq -r --arg v "$version" '.time[$v] // empty' <<<"$json")"
@@ -127,7 +133,7 @@ check_pypi() {
   [[ "$spec" == *"=="* ]] && version="${spec#*==}"
   [[ "$spec" == *"@"* ]] && { name="${spec%@*}"; version="${spec#*@}"; }
   url="https://pypi.org/pypi/${name}/json"; [[ -n "$version" ]] && url="https://pypi.org/pypi/${name}/${version}/json"
-  json=$(fetch "$url")
+  json=$(fetch "$url") || unavailable=1
   [[ -z "$json" || "$HAS_JQ" -eq 0 ]] && { result "$name" "" ""; return; }
   [[ -z "$version" ]] && version=$(jq -r '.info.version // empty' <<<"$json")
   result "$name" "$version" "$(jq -r --arg v "$version" \
@@ -138,7 +144,7 @@ check_composer() {  # Packagist: repo.packagist.org/p2/<vendor>/<pkg>.json
   local spec=$1 name version json published
   name="${spec%@*}"; version=""
   [[ "$spec" == *"@"* ]] && version="${spec#*@}"
-  json=$(fetch "https://repo.packagist.org/p2/${name}.json")
+  json=$(fetch "https://repo.packagist.org/p2/${name}.json") || unavailable=1
   [[ -z "$json" || "$HAS_JQ" -eq 0 ]] && { result "$name" "" ""; return; }
   [[ -z "$version" ]] && version=$(jq -r --arg n "$name" '(.packages[$n][0].version) // empty' <<<"$json")
   published=$(jq -r --arg n "$name" --arg v "$version" 'first(.packages[$n][] | select(.version==$v) | .time) // empty' <<<"$json")
@@ -148,7 +154,7 @@ check_cargo() {  # crates.io API (requires User-Agent — fetch sets one)
   local spec=$1 name version json published
   name="${spec%@*}"; version=""
   [[ "$spec" == *"@"* ]] && version="${spec#*@}"
-  json=$(fetch "https://crates.io/api/v1/crates/${name}")
+  json=$(fetch "https://crates.io/api/v1/crates/${name}") || unavailable=1
   [[ -z "$json" || "$HAS_JQ" -eq 0 ]] && { result "$name" "" ""; return; }
   [[ -z "$version" ]] && version=$(jq -r '.crate.max_stable_version // .crate.newest_version // empty' <<<"$json")
   published=$(jq -r --arg v "$version" 'first(.versions[] | select(.num==$v) | .created_at) // empty' <<<"$json")
@@ -158,8 +164,8 @@ check_go() {  # proxy.golang.org/<module>/@v/<version>.info  (or /@latest)
   local spec=$1 mod version json
   mod="${spec%@*}"; version=""
   [[ "$spec" == *"@"* ]] && version="${spec#*@}"
-  if [[ -z "$version" ]]; then json=$(fetch "https://proxy.golang.org/${mod}/@latest")
-  else json=$(fetch "https://proxy.golang.org/${mod}/@v/${version}.info"); fi
+  if [[ -z "$version" ]]; then json=$(fetch "https://proxy.golang.org/${mod}/@latest") || unavailable=1
+  else json=$(fetch "https://proxy.golang.org/${mod}/@v/${version}.info") || unavailable=1; fi
   [[ -z "$json" || "$HAS_JQ" -eq 0 ]] && { result "$mod" "" ""; return; }
   result "$mod" "$(jq -r '.Version // empty' <<<"$json")" "$(jq -r '.Time // empty' <<<"$json")"
 }

@@ -80,6 +80,7 @@ Gather context from T1 diagnosis, then dispatch a `general-purpose` agent preloa
 | Rust (Cargo.toml, .rs files) | general-purpose | `skills/rust-ops/SKILL.md` + perf-ops references | cargo-flamegraph, samply, DHAT, criterion |
 | TypeScript/JavaScript (backend, package.json + server) | general-purpose | `skills/javascript-ops/SKILL.md` + perf-ops references | clinic flame/doctor/bubbleprof, 0x |
 | TypeScript/JavaScript (frontend, bundle issues) | general-purpose | `skills/typescript-ops/SKILL.md` + perf-ops references | webpack-bundle-analyzer, Lighthouse, source-map-explorer |
+| Page speed / Core Web Vitals (LCP, INP, CLS, PageSpeed, CrUX) | route, don't dispatch | `skills/web-perf-ops/SKILL.md` | field-vs-lab method, `triage-vitals.py`, Lighthouse CI budgets |
 | SQL / PostgreSQL | general-purpose | `skills/postgres-ops/SKILL.md` + perf-ops references | EXPLAIN ANALYZE, pg_stat_statements, pgbench |
 | SQL / SQLite, Cloudflare D1, libSQL/Turso (`*.db`, `*.sqlite`, `wrangler.toml` with a d1_databases binding) | general-purpose | `skills/sqlite-ops/SKILL.md` + perf-ops references | EXPLAIN QUERY PLAN, `sqlite-ops/scripts/eqp-triage.py`, `sqlite3 .timer/.stats`, `wrangler d1 insights`, `sql_duration_ms` + `rows_read` |
 | General / unknown / CLI benchmarking | general-purpose | perf-ops references | hyperfine, perf, strace |
@@ -305,6 +306,7 @@ Load reference files when deeper tool-specific guidance is needed beyond what th
 
 | Skill | When to Combine |
 |-------|----------------|
+| `web-perf-ops` | Frontend page speed - Core Web Vitals diagnosis, field vs lab data, image/font/JS/CSS fixes, Lighthouse CI |
 | `debug-ops` | Root cause analysis for performance regressions |
 | `monitoring-ops` | Production metrics, alerting on latency/throughput |
 | `testing-ops` | Performance regression tests in CI, benchmark suites |

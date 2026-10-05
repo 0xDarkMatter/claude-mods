@@ -12,8 +12,10 @@ Exit:    0 report produced (grade >= B, or --strict not set and repo readable),
          10 --strict and grade below B (CI gate), 2 usage error, 3 not a git repo
 
 Dimensions scored (0-5 each, weighted into the grade):
-  entry_docs   AGENTS.md/CLAUDE.md presence, Landmines section, length budget,
-               freshness measured in commits-since-touched (never days)
+  entry_docs   AGENTS.md/CLAUDE.md presence, Landmines section, 200-line budget,
+               freshness measured in commits-since-touched (never days), and a
+               CLAUDE.md that shadows AGENTS.md (no @AGENTS.md import); the deep
+               AGENTS.md audit is scripts/agents-md.py
   docs_health  README, docs/ index when >6 files, ghost/missing index entries
   comments     contract blocks on the largest source files; section markers in
                files >400 lines
@@ -85,7 +87,13 @@ SECTION_PAT = re.compile(r"^\s*(#|//|/\*|<!--|--)\s*.{0,8}([=─-]{4,}|SECTION|�
 FEATFIX_PAT = re.compile(r"^(feat|fix|refactor|perf)\b", re.I)
 
 MONSTER_WARN, MONSTER_CRIT = 800, 1500
-ENTRY_LEAN_LINES = 250
+# Claude Code's memory docs: "target under 200 lines per CLAUDE.md file. Longer files
+# consume more context and reduce adherence." The house target is 150
+# (references/agents-md-protocol.md section 3); this scorer warns at the ceiling.
+ENTRY_LEAN_LINES = 200
+# A CLAUDE.md (or .claude/CLAUDE.md) imports AGENTS.md with an `@path` line. Keep in
+# lockstep with classify_claude() in agents-md.py, which owns the full shadowing audit.
+AGENTS_IMPORT = re.compile(r"(?:^|\s)@(?:\./|\.\./)?AGENTS\.md\b")
 FRESH_COMMITS = 15
 DOCS_INDEX_THRESHOLD = 6
 WEIGHTS = {"entry_docs": 2.0, "docs_health": 1.5, "comments": 2.0,
@@ -216,18 +224,29 @@ class Audit:
                      f"{entry.name} last touched {since} commits ago — verify it "
                      "still describes the code, then touch it in the fixing commit",
                      entry.name)
-        if agents.exists() and claude.exists():
-            ctext = claude.read_text(encoding="utf-8", errors="replace")
-            if len(ctext) > 400 and ctext[:400] in text:
+        dot_claude = self.repo / ".claude" / "CLAUDE.md"
+        for cfile in (claude, dot_claude):
+            if not (agents.exists() and cfile.is_file()):
+                continue
+            rel = str(cfile.relative_to(self.repo)).replace("\\", "/")
+            ctext = cfile.read_text(encoding="utf-8", errors="replace")
+            code_free = re.sub(r"(?ms)^\s*```.*?^\s*```[^\n]*$|`[^`\n]*`", "", ctext)
+            if not AGENTS_IMPORT.search(code_free):
+                # Claude Code reads AGENTS.md only when no CLAUDE.md is present, so this
+                # file hides it from every Claude session (a prose pointer included).
+                score -= 1
                 self.add("entry_docs", "warn",
-                         "CLAUDE.md appears to duplicate AGENTS.md — keep deltas "
-                         "only, or reduce CLAUDE.md to a pointer", "CLAUDE.md")
+                         f"{rel} shadows AGENTS.md: Claude Code reads only the CLAUDE.md "
+                         "files when one exists. Put `@AGENTS.md` on its first line or "
+                         "delete it (agents-md.py audit --diff)", rel)
+            elif len(ctext) > 400 and ctext[-400:] in text:
+                self.add("entry_docs", "warn",
+                         f"{rel} imports AGENTS.md but also duplicates it: keep Claude-only "
+                         "deltas below the import", rel)
             else:
                 self.add("entry_docs", "info",
-                         "both AGENTS.md and CLAUDE.md present — fine if CLAUDE.md "
-                         "is deltas-only (Gather pattern); shared rule changes must "
-                         "update both in one commit")
-        self.scores["entry_docs"] = score
+                         f"{rel} imports AGENTS.md: fine while it holds Claude-only deltas")
+        self.scores["entry_docs"] = max(score, 0)
 
     # -- dimension: docs health -----------------------------------------------
     def check_docs_health(self) -> None:

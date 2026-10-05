@@ -63,16 +63,26 @@ is noise).
 
 - **One `AGENTS.md` per repo, and it is the single source of truth.** It carries: what
   the repo is (2–4 lines), run/test/check commands (exact, tested), a structure map
-  (folder → what lives there), conventions, and — mandatory — a **Landmines** section:
-  the specific things that break non-obviously (coupled golden fixtures, generated files
-  you must not hand-edit, ordering-sensitive registries). Landmines are the highest-value
-  lines in the file.
+  (only what folder names don't say), conventions, deploy notes when the repo ships,
+  and — mandatory — a **Landmines** section: the specific things that break
+  non-obviously (coupled golden fixtures, generated files you must not hand-edit,
+  ordering-sensitive registries). Landmines are the highest-value lines in the file.
 - **Keep it lean.** An agent re-reads this every session; every line is a recurring
-  token cost. Target under ~150 lines; push walkthroughs and rationale into `docs/` and
-  link them. Setup guides for humans go in README or CONTRIBUTING, not AGENTS.md.
-- **CLAUDE.md**: only as a one-line pointer to AGENTS.md (tool compatibility), or when
-  there are genuinely Claude-specific deltas — and then it holds *only* the deltas,
-  never a copy. If both exist, a change to a shared rule updates both in one commit.
+  token cost. Target ~150 lines; **200 is the ceiling** (Claude Code's documented target:
+  longer files consume more context and reduce adherence). Split by moving detail to
+  what loads on demand (a nested AGENTS.md, path-scoped `.claude/rules/`, linked
+  `docs/`), never to `@` imports, which load at launch anyway. Setup guides for humans go
+  in README or CONTRIBUTING, not AGENTS.md.
+- **CLAUDE.md shadows AGENTS.md.** Claude Code reads AGENTS.md only when no `CLAUDE.md`,
+  `.claude/CLAUDE.md` or `CLAUDE.local.md` sits in the working directory or above it. So:
+  no CLAUDE.md at all, or one whose **first line is `@AGENTS.md`** (an import; a sentence
+  pointing at AGENTS.md loads nothing) with *only* Claude-specific deltas below it. A
+  personal `CLAUDE.local.md` silently hides AGENTS.md from that developer, and a symlink
+  breaks on Windows clones.
+- **Create, audit and upgrade it with tools, not by eye**: repo-doctor's
+  `agents-md.py scaffold` (a draft from sourced facts), `audit --diff` (shadowing, dead
+  commands, size, staleness in commits) and `survey --org` (read-only, many repos). The
+  full protocol is repo-doctor's `references/agents-md-protocol.md`.
 - **Nested AGENTS.md** only where a subsystem has its own contract (a design-system
   package, an engine with determinism laws, a per-tool CLI). Nested files carry deltas
   and their own landmines; the root file links each one in an ownership table.
@@ -184,11 +194,11 @@ creative repos modifiable later.
 ## Cross-reference
 
 - `~/.claude/skills/repo-doctor/SKILL.md` — the auditor: scores any repo against this
-  doctrine; references own the depth (comment-doctrine, entry-docs, monorepo-structure,
-  scoring-rubric).
+  doctrine, and creates, audits, upgrades and org-surveys AGENTS.md files; references own
+  the depth (agents-md-protocol, comment-doctrine, monorepo-structure, scoring-rubric).
 - `~/.claude/skills/adr-ops/SKILL.md` — decision records (when-to-write rule lives there).
-- `~/.claude/skills/doc-scanner/SKILL.md` — reads/synthesizes/generates entry docs;
-  repo-doctor audits them.
+- `~/.claude/skills/doc-scanner/SKILL.md` — finds and consolidates scattered platform
+  docs; repo-doctor drafts and audits the resulting AGENTS.md.
 - `~/.claude/skills/refactor-ops/SKILL.md` — the remediation path for monster files.
 - `naming-conventions.md` — claude-mods component naming; this rule owns cross-repo
   code/doc quality.

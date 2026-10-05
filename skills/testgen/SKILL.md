@@ -158,14 +158,15 @@ Dispatch is skills-first: the generic `general-purpose` subagent preloads the re
 | `*.sh`, `*.bash` | general-purpose | `skills/bash-ops/SKILL.md` |
 | (--visual flag) | Chrome DevTools MCP | `skills/typescript-ops/SKILL.md` |
 
-**Invoke via Task tool:**
+**Invoke via the Agent tool:**
 ```
-Task tool with subagent_type: "general-purpose" (or surviving specialist from table)
+Agent tool with subagent_type: "general-purpose" (or surviving specialist from table)
 model: "sonnet"
 Prompt includes:
   - Skill preloading (domain knowledge):
     "First, read these files for testing context:
-     - Read: skills/security-ops/references/owasp-detailed.md
+     - Read: skills/security-ops/references/owasp-top10-a01-a05.md
+     - Read: skills/security-ops/references/owasp-top10-a06-a10.md
      - Read: skills/testing-ops/SKILL.md
      - Read: [Preload column for the matched file pattern]"
   - Source file content

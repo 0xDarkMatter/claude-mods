@@ -331,6 +331,39 @@ set_lane_state() {
   fi
 }
 
+# Delete a fleet state file (the MAIN pin, the daemon PID file) and PROVE it is
+# gone, or fail out loud. These files are read back with `[[ -f ]]`, so one that
+# survives its delete keeps meaning exactly what it meant before.
+#
+# One bare `rm -f` is not enough on Windows. A process holding the file open
+# WITHOUT delete-sharing (the Win32/.NET default; antivirus and the search
+# indexer do it for a moment after a write) makes the delete fail with EBUSY.
+# `-f` does not hide that error, but a single attempt loses a race that a short
+# wait wins. On 2026-10-05 the fleet-ops suite failed once under load with
+# "release did not restore heuristic" and passed on rerun. A held pin reproduces
+# that exactly (tests/run.sh "held-pin-release"): the pin survives and MAIN
+# stays pinned. So: retry for up to FLEET_RM_RETRY_SECS (default 5, 0 = one try),
+# judge success by the path being gone rather than by rm's status, and when
+# giving up name the file, say why, and return 1.
+# Callers print "cleared" only AFTER this returns 0.
+remove_state_file() {
+  local f=$1 what=$2 err="" warned=0 wait=${FLEET_RM_RETRY_SECS:-5}
+  [[ "$wait" =~ ^[0-9]+$ ]] || wait=5
+  local deadline=$(( SECONDS + wait ))
+  while :; do
+    if err=$(rm -f -- "$f" 2>&1) && [[ ! -e "$f" ]]; then return 0; fi
+    (( SECONDS < deadline )) || break
+    if (( ! warned )); then
+      echo "fleet: $what is held open by another process; retrying for up to ${wait}s (${err:-still present after rm})" >&2
+      warned=1
+    fi
+    sleep 0.2
+  done
+  echo "fleet: ERROR: could not remove $what ($f): ${err:-still present after rm}" >&2
+  echo "fleet:   another process is holding it open (antivirus, the search indexer, an editor). Close it and re-run." >&2
+  return 1
+}
+
 scrub_diff() {
   # echoes hits (one per line) for given branch's diff vs base. Empty = clean.
   # ADDED lines only ('+…', not the '+++' file header): deletion lines, context
@@ -752,8 +785,11 @@ cmd_main() {
       printf '%s\n' "$id"
       ;;
     release)
-      if [[ -f "$pin" ]]; then rm -f "$pin"; echo "MAIN pin cleared" >&2
-      else echo "no MAIN pin to clear" >&2; fi
+      if [[ ! -f "$pin" ]]; then echo "no MAIN pin to clear" >&2; return 0; fi
+      # A pin that survives keeps overriding the heuristic, so a failed delete
+      # is a failed release (exit 1), never a "cleared".
+      remove_state_file "$pin" "MAIN pin" || return 1
+      echo "MAIN pin cleared" >&2
       ;;
     *) echo "usage: fleet main [show|claim [<sessionId>]|release]" >&2; return 2 ;;
   esac
@@ -1128,7 +1164,10 @@ session_land_gate() {
 #   2  any claiming session is LIVE               KEEP    someone is writing here
 #   3  session store unreadable, or awareness     REVIEW  no evidence of anything
 #      switched off                                       => nothing can be SAFE
-#   4  detached HEAD                              REVIEW  no branch to attribute
+#   4  detached HEAD                              REVIEW  unless: clean, no git op
+#                                                         in flight, HEAD in <base>,
+#                                                         no open claim, and an
+#                                                         archived owner proven => SAFE
 #   5  uncommitted or untracked changes           REVIEW  removal would destroy them
 #   6  commits not yet in <base>                  REVIEW  unintegrated work
 #   7  merged + clean, and no OPEN session        SAFE    finished and recoverable
@@ -1145,6 +1184,18 @@ session_land_gate() {
 # backstop for whatever the joins still miss: a .claude/worktrees/ tree nobody
 # claims is "unknown", and unknown is REVIEW.
 #
+# ARCHIVED OWNERS (2026-10-05). Ten sessions archived after their lanes landed
+# left 17 merged, clean worktrees that prune kept as "live session": archiving
+# writes the transcript one last time, and that write read as activity. Now
+# (sessions.sh header, "ARCHIVED IS NOT LIVE") an archived session is live only
+# on a write AFTER its archive, and `fleet prune` re-reads every claimant fresh
+# (prune_freshen_sessions) rather than trusting a pre-archive cache. An archive
+# flag that cannot be read is "?": treated as live/open, never as archived, and
+# every reason it decides says so. POSITIVE archived evidence is an exact path:
+# a wrapper cwd/worktreePath, or the cwd an archived session's transcript last
+# recorded — that last one is what proves a lane it EnterWorktree'd into, which
+# its wrapper (cwd and gitAnchors alike) never names.
+#
 # Rule 6 deliberately folds together two readings that cannot both apply to one
 # row — "unmerged commits => KEEP" and "unmerged with no live owner => REVIEW".
 # Neither is ever removed, so the choice is purely about which bucket the
@@ -1153,6 +1204,8 @@ session_land_gate() {
 # meaning only: hands off, not yours to judge.
 
 PRUNE_ROWS=""   # accumulated TSV: path \t branch \t bucket \t reason
+PRUNE_FRESHEN=0     # 1 under `fleet prune` only — see prune_freshen_sessions
+SESSION_LASTCWD=""  # sessionId \t normalised last transcript cwd (archived only)
 
 # Normalise a path for comparison: forward slashes, no trailing slash,
 # lowercased (Windows paths are case-insensitive and git's casing of the drive
@@ -1212,6 +1265,93 @@ prune_is_native() {
   case "$(prune_norm "$1")" in */.claude/worktrees/*) return 0 ;; *) return 1 ;; esac
 }
 
+# Re-read, fresh, every session that claims one of this repo's worktrees
+# (sessions.sh `state`): liveness, the archive flag, and an archived session's
+# last transcript cwd, patched over the cached index before anything is
+# classified. WHY: the index is cached for 15 minutes and `fleet land` builds
+# it, so the usual sequence — land, archive, prune — classified against rows
+# written before the archive. Every just-archived owner still read open, nothing
+# was SAFE, and --remove stopped at "nothing to remove" before its own fresh pass.
+# Targeted, not a re-scan: one sessions.sh process over the claimants only (a
+# few seconds), where a fresh scan of every store takes a minute. A failed read
+# changes nothing: the cached values can only be staler, and --remove still
+# re-classifies against a full fresh scan. `fleet prune` only (PRUNE_FRESHEN);
+# the status-panel hint stays on the cache, where staleness costs a REVIEW.
+# The awk's np/enc MIRROR prune_norm and path_key — path_claims' join. The first
+# porcelain record is the primary, which prune never classifies.
+prune_freshen_sessions() {
+  local raw=$1 ids=() id state="" rc=0
+  SESSION_LASTCWD=""
+  [[ $SESSION_STORE_OK -eq 1 ]] || return 0
+  while IFS= read -r id; do [[ -n "$id" ]] && ids+=("$id"); done < <(LC_ALL=C awk -F'\t' '
+      function np(p) { gsub(/\\/, "/", p); sub(/\/+$/, "", p); return tolower(p) }
+      function enc(p) { p = np(p); gsub(/[^a-z0-9]/, "-", p); return p }
+      FILENAME == ARGV[1] {
+        if (substr($0, 1, 9) == "worktree ") { if (w++) { p = np(substr($0, 10)); N[p] = 1; K[enc(p)] = 1 } }
+        else if (w > 1 && substr($0, 1, 18) == "branch refs/heads/") B[substr($0, 19)] = 1
+        next
+      }
+      FILENAME == ARGV[2] { if (NF && (($2 != "" && ($2 in N)) || ($1 in K)) && !s[$3]++) print $3; next }
+      NF && ($1 in B) && !s[$2]++ { print $2 }' \
+    <(printf '%s\n' "$raw") <(printf '%s\n' "$SESSION_PATHS_CACHE") <(printf '%s\n' "$SESSION_INDEX_CACHE"))
+  [[ ${#ids[@]} -gt 0 ]] || return 0
+  state=$(FLEET_SESSION_LIVE_SECS="$SESSION_LIVE_SECS" \
+    bash "$SESSIONS_SH" state "${ids[@]}" 2>/dev/null </dev/null) || rc=$?
+  [[ $rc -eq 0 && -n "$state" ]] || return 0
+  # state: id live archived(1|0|?|-) lastCwd. '-' = no wrapper read: keep the
+  # cached flag rather than invent one.
+  local patch='FILENAME == ARGV[1] { if ($1 != "") { L[$1] = $2; if ($3 != "-" && $3 != "") A[$1] = $3 }; next }'
+  SESSION_PATHS_CACHE=$(awk -F'\t' -v OFS='\t' "$patch"'
+      NF { if ($3 in L) $7 = L[$3]; if ($3 in A) $6 = A[$3]; print }' \
+    <(printf '%s\n' "$state") <(printf '%s\n' "$SESSION_PATHS_CACHE"))
+  SESSION_INDEX_CACHE=$(awk -F'\t' -v OFS='\t' "$patch"'
+      NF { if ($2 in L) $7 = L[$2]; if ($2 in A) $6 = A[$2]; print }' \
+    <(printf '%s\n' "$state") <(printf '%s\n' "$SESSION_INDEX_CACHE"))
+  SESSION_LASTCWD=$(printf '%s\n' "$state" | awk -F'\t' -v OFS='\t' 'NF >= 4 && $4 != "" { print $1, $4 }')
+  return 0
+}
+
+# Does an ARCHIVED session positively claim the tree normalised as $1, among
+# claims $2? Positive means an exact path: its wrapper cwd/worktreePath is the
+# tree, or (after prune_freshen_sessions) the cwd its transcript last recorded
+# is the tree or inside it. The bare transcript KEY never counts: every
+# non-alphanumeric encodes to '-', so `lane.x` and `lane-x` share one, and a
+# neighbour's session would condemn this tree. Prints which proof held.
+prune_archived_proof() {
+  local n=$1 claims=$2
+  if printf '%s\n' "$claims" | awk -F'\t' -v n="$n" '
+       NF && $2 == n && $6 == "1" && ($8 == "cwd" || $8 == "worktree") { f = 1 } END { exit !f }'; then
+    printf 'cwd'; return 0
+  fi
+  [[ -n "$SESSION_LASTCWD" ]] || return 1
+  if awk -F'\t' -v n="$n" '
+       FILENAME == ARGV[1] { if ($1 != "") lc[$1] = $2; next }
+       NF && $8 == "transcript" && $6 == "1" && ($3 in lc) && (lc[$3] == n || index(lc[$3], n "/") == 1) { f = 1 }
+       END { exit !f }' <(printf '%s\n' "$SESSION_LASTCWD") <(printf '%s\n' "$claims"); then
+    printf 'transcript cwd'; return 0
+  fi
+  return 1
+}
+
+# The git operation parked in worktree $1 (rebase, bisect, ...), or nothing. A
+# paused rebase or a bisect leaves HEAD detached in a CLEAN tree, so the dirty
+# check passes it — and removing the tree discards the operation's state. One
+# rev-parse resolves every state path, per-worktree, in a single process.
+prune_op_in_progress() {
+  local wt=$1 p i=0 f args=()
+  local files=(rebase-merge rebase-apply BISECT_LOG MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD sequencer)
+  local words=(rebase rebase bisect merge cherry-pick revert sequencer)
+  for f in "${files[@]}"; do args+=(--git-path "$f"); done
+  while IFS= read -r p; do
+    if [[ -n "$p" ]]; then
+      [[ "$p" == /* || "$p" == [A-Za-z]:* ]] || p="$wt/$p"
+      if [[ -e "$p" ]]; then printf '%s' "${words[$i]}"; return 0; fi
+    fi
+    i=$((i + 1))
+  done < <(git -C "$wt" rev-parse "${args[@]}" 2>/dev/null)
+  return 0
+}
+
 # prune_emit <repo> <base> <path> <branch> <detached> <locked> <gone> <merged_list>
 prune_emit() {
   local repo=$1 base=$2 wt=$3 br=$4 det=$5 locked=$6 gone=$7 merged_list=$8
@@ -1238,7 +1378,8 @@ prune_emit() {
   #     writtenBranches) and the directory claims (see the header). Either one
   #     being live is enough.
   local orow="" olive="0" oarch="0" otitle=""
-  local claims="" live_claim="" open_claim=""
+  local claims="" live_claim="" open_claim="" open_flag="" who="no owner in store"
+  local unread="archive flag unreadable - treated as live"
   if [[ $SESSION_STORE_OK -eq 1 ]]; then
     if [[ -n "$br" ]]; then
       orow=$(owner_row_cached "$br")
@@ -1249,11 +1390,22 @@ prune_emit() {
     # First match without `exit`: an early-exiting reader can SIGPIPE the
     # printf, and under pipefail + set -e that kills the whole command.
     claims=$(path_claims "$wt")
-    live_claim=$(printf '%s\n' "$claims" | awk -F'\t' 'NF && $7 == "1" && !f { print $4 " (by " $8 ")"; f = 1 }')
-    open_claim=$(printf '%s\n' "$claims" | awk -F'\t' 'NF && $6 == "0" && !f { print $4; f = 1 }')
+    live_claim=$(printf '%s\n' "$claims" | awk -F'\t' -v u="$unread" '
+      NF && $7 == "1" && !f { print $4 " (by " $8 ($6 == "?" ? "; " u : "") ")"; f = 1 }')
+    # OPEN = anything not provably archived: 0, and ? — an unreadable flag is
+    # never presumed archived. "title<TAB>flag", preferring a plainly open one.
+    open_claim=$(printf '%s\n' "$claims" | awk -F'\t' '
+      NF && $6 != "1" { if ($6 == "0") { if (!z) { zt = $4; z = 1 } } else if (!q) { qt = $4; q = 1 } }
+      END { if (z) print zt "\t0"; else if (q) print qt "\t?" }')
+    if [[ -n "$open_claim" ]]; then open_flag=${open_claim##*$'\t'}; open_claim=${open_claim%$'\t'*}; fi
+    # Who owns it, for the REVIEW reasons below.
+    if [[ ( -n "$orow" && "$oarch" == "0" ) || "$open_flag" == "0" ]]; then who="owner idle"
+    elif [[ ( -n "$orow" && "$oarch" == "?" ) || "$open_flag" == "?" ]]; then who="owner's archive flag unreadable"
+    elif [[ -n "$orow" || -n "$claims" ]]; then who="owner archived"; fi
   fi
   if [[ "$olive" == "1" ]]; then
-    prune_row "$wt" "${br:-<detached>}" KEEP "live session: ${otitle:-?}"; return 0
+    local note=""; [[ "$oarch" == "?" ]] && note=" ($unread)"
+    prune_row "$wt" "${br:-<detached>}" KEEP "live session: ${otitle:-?}$note"; return 0
   fi
   if [[ -n "$live_claim" ]]; then
     prune_row "$wt" "${br:-<detached>}" KEEP "live session: $live_claim"; return 0
@@ -1266,9 +1418,32 @@ prune_emit() {
     prune_row "$wt" "${br:-<detached>}" REVIEW "no session info - cannot prove abandoned"; return 0
   fi
 
-  # 4 — detached HEAD: no branch, so nothing to attribute an owner to
+  # 4 — detached HEAD. No branch, so only a DIRECTORY claim can name an owner,
+  #     and what Desktop's archive leaves behind is exactly this: the session's
+  #     own tree, HEAD detached, its branch deleted. SAFE needs every guard:
+  #     clean; no git operation parked in it (a paused rebase or a bisect sits
+  #     detached in a clean tree); HEAD already in base, so nothing committed
+  #     is lost; no open claim; and an archived owner proven by exact path.
   if [[ $det -eq 1 || -z "$br" ]]; then
-    prune_row "$wt" "<detached>" REVIEW "detached HEAD - no branch to attribute"; return 0
+    local ddirty op
+    ddirty=$(prune_dirty_count "$wt")
+    if [[ "${ddirty:-0}" -gt 0 ]]; then
+      prune_row "$wt" "<detached>" REVIEW "detached HEAD, DIRTY - $ddirty uncommitted/untracked ($who)"; return 0
+    fi
+    op=$(prune_op_in_progress "$wt")
+    if [[ -n "$op" ]]; then
+      prune_row "$wt" "<detached>" REVIEW "detached HEAD - git $op in progress"; return 0
+    fi
+    if ! git -C "$wt" merge-base --is-ancestor HEAD "$base" 2>/dev/null; then
+      prune_row "$wt" "<detached>" REVIEW "detached HEAD - commit not in $base ($who)"; return 0
+    fi
+    if [[ -n "$open_claim" ]]; then
+      prune_row "$wt" "<detached>" REVIEW "detached HEAD in $base, but $who: $open_claim"; return 0
+    fi
+    if prune_archived_proof "$wtn" "$claims" >/dev/null; then
+      prune_row "$wt" "<detached>" SAFE "detached + clean, HEAD in $base, owner archived"; return 0
+    fi
+    prune_row "$wt" "<detached>" REVIEW "detached HEAD - no archived session provably owns it"; return 0
   fi
 
   local is_merged=0
@@ -1280,45 +1455,44 @@ prune_emit() {
   if [[ "${dirty:-0}" -gt 0 ]]; then
     local mstate="unmerged"
     [[ $is_merged -eq 1 ]] && mstate="merged"
-    prune_row "$wt" "$br" REVIEW "$mstate but DIRTY - $dirty uncommitted/untracked"; return 0
+    prune_row "$wt" "$br" REVIEW "$mstate but DIRTY - $dirty uncommitted/untracked ($who)"; return 0
   fi
 
   # 6 — committed but not yet in base
   local ahead
   ahead=$(git -C "$repo" rev-list --count "$base..$br" 2>/dev/null || echo 0)
   if [[ $is_merged -ne 1 || "${ahead:-0}" != "0" ]]; then
-    local who="no owner in store"
-    if [[ -n "$open_claim" || ( -n "$orow" && "$oarch" != "1" ) ]]; then who="owner idle"
-    elif [[ -n "$orow" || -n "$claims" ]]; then who="owner archived"; fi
     prune_row "$wt" "$br" REVIEW "unmerged - ${ahead:-?} ahead of $base ($who)"; return 0
   fi
 
   # 8 (checked before 7) — an OPEN session claims it, by branch or by
   #     directory: idle now, and free to wake up. A session resumed into a
   #     deleted cwd does not error — it spins a core indefinitely (SKILL.md,
-  #     "Landmine"). Not ours to remove.
+  #     "Landmine"). Not ours to remove. An unreadable archive flag lands here
+  #     too, and says so.
+  local still="owner still open" unopen="owner's archive flag unreadable, treated as open"
   if [[ -n "$orow" && "$oarch" != "1" ]]; then
-    prune_row "$wt" "$br" REVIEW "merged + clean, but owner still open: ${otitle:-?}"; return 0
+    [[ "$oarch" == "?" ]] && still=$unopen
+    prune_row "$wt" "$br" REVIEW "merged + clean, but $still: ${otitle:-?}"; return 0
   fi
   if [[ -n "$open_claim" ]]; then
-    prune_row "$wt" "$br" REVIEW "merged + clean, but owner still open: $open_claim"; return 0
+    [[ "$open_flag" == "?" ]] && still=$unopen
+    prune_row "$wt" "$br" REVIEW "merged + clean, but $still: $open_claim"; return 0
   fi
 
   # 7 — merged, clean, and every claim is archived. POSITIVE evidence means an
-  #     archived branch owner, or an archived session whose cwd/worktreePath is
-  #     EXACTLY this tree. A transcript-directory claim does not count: its key
-  #     is lossy (every non-alphanumeric becomes '-'), so it may keep a tree but
-  #     never condemn one.
-  local proven=0
+  #     archived branch owner, or an archived session placed EXACTLY in this
+  #     tree by path (prune_archived_proof). A transcript-directory claim alone
+  #     does not count: its key is lossy, so it may keep a tree but never
+  #     condemn one — only the cwd that transcript recorded can.
+  local proven=0 how=""
   [[ -n "$orow" && "$oarch" == "1" ]] && proven=1
-  if [[ $proven -eq 0 ]] && printf '%s\n' "$claims" \
-       | awk -F'\t' -v n="$wtn" 'NF && $2 == n && $6 == "1" && ($8 == "cwd" || $8 == "worktree") { f = 1 } END { exit !f }'; then
-    proven=1
-  fi
+  if [[ $proven -eq 0 ]] && how=$(prune_archived_proof "$wtn" "$claims"); then proven=1; fi
   if [[ $proven -eq 1 ]]; then
-    prune_row "$wt" "$br" SAFE "merged + clean, owner archived"; return 0
+    local by=""; [[ "$how" == "transcript cwd" ]] && by=" (by its transcript cwd)"
+    prune_row "$wt" "$br" SAFE "merged + clean, owner archived$by"; return 0
   fi
-  # No claim at all. For a .claude/worktrees/ tree that is the ABSENCE of a
+  # No positive claim. For a .claude/worktrees/ tree that is the ABSENCE of a
   # signal, not evidence: Claude Code made it for a session, and the store we
   # read did not mention that session — a store we cannot see, a session
   # outside the scan window, a claim the joins cannot express. That is the
@@ -1327,6 +1501,9 @@ prune_emit() {
   # any session working in one is found by the cwd and transcript joins, so
   # there "nobody claims it" means what it says.
   if prune_is_native "$wt"; then
+    if [[ -n "$claims" ]]; then
+      prune_row "$wt" "$br" REVIEW "merged + clean, but no archived session provably worked here - cannot prove abandoned"; return 0
+    fi
     prune_row "$wt" "$br" REVIEW "merged + clean, but no session record claims it - cannot prove abandoned"; return 0
   fi
   prune_row "$wt" "$br" SAFE "merged + clean, no session owns it"
@@ -1347,6 +1524,7 @@ prune_classify() {
   local raw
   raw=$(git -C "$repo" worktree list --porcelain 2>/dev/null || true)
   [[ -z "$raw" ]] && return 0
+  if [[ $PRUNE_FRESHEN -eq 1 ]]; then prune_freshen_sessions "$raw"; fi
 
   # Porcelain records are blank-line separated. Command substitution ate the
   # trailing newlines, so append one blank line to flush the final record.
@@ -1648,8 +1826,11 @@ fleet prune — classify (and optionally remove) finished lane worktrees
 Buckets:
   SAFE    merged into $BASE_BRANCH, clean, and the owning session is archived or
           gone from the session store. Removable; committed work is recoverable.
-  REVIEW  reported, never removed: dirty, unmerged, detached, or no session
-          info at all. Your call.
+          A detached tree qualifies only with HEAD in $BASE_BRANCH, no git
+          operation in progress, and an archived owner placed there by path.
+  REVIEW  reported, never removed: dirty, unmerged, detached without proof, an
+          owner whose archive flag cannot be read, or no session info at all.
+          Your call.
   KEEP    a live session owns it, git has it locked, or it is the tree you are
           standing in. Not touched under any flag.
 
@@ -1675,6 +1856,10 @@ cmd_prune() {
       *) echo "fleet prune: unknown flag '$1'" >&2; prune_usage >&2; return 2 ;;
     esac
   done
+
+  # Classify against a fresh read of every claimant (prune_freshen_sessions),
+  # not the 15-minute cache the status hint uses.
+  PRUNE_FRESHEN=1
 
   # --porcelain is report-only by construction: a machine-readable mode that
   # could also delete is one typo away from an unattended sweep.
@@ -1871,7 +2056,7 @@ land_one() {
                FLEET_TRANSCRIPT_ROOTS FLEET_SESSION_LIVE_SECS FLEET_SESSION_CACHE_TTL \
                FLEET_SESSION_MAX_AGE_DAYS FLEET_SELF_SESSION_ID \
                FLEET_NO_PRUNE_HINT FLEET_PRUNE_ROOTS FLEET_PRUNE_MAX_REPOS \
-               FLEET_ASCII
+               FLEET_ASCII FLEET_RM_RETRY_SECS
          eval "$TEST_CMD" ) >>"$LOG" 2>&1; then
       log "PASS: $branch landed"
     else
@@ -2068,7 +2253,7 @@ cmd_stop() {
   pid=$(cat "$PID_FILE")
   if ! kill -0 "$pid" 2>/dev/null; then
     log "stale PID file (pid $pid not alive) — clearing"
-    rm -f "$PID_FILE"
+    remove_state_file "$PID_FILE" "stale PID file" || return 1
     return 0
   fi
   log "sending SIGTERM to daemon (pid $pid)"
@@ -2091,7 +2276,7 @@ cmd_stop() {
       if (( idle >= 5 )); then
         log "daemon didn't exit on SIGTERM, sending SIGKILL"
         kill -KILL "$pid" 2>/dev/null || true
-        rm -f "$PID_FILE"
+        remove_state_file "$PID_FILE" "daemon PID file" || return 1
         return 0
       fi
     fi
@@ -2254,6 +2439,16 @@ daemon_request_stop() {
 # sees "not landing", which only matters if the daemon also ignores SIGTERM.
 daemon_mark_landing() { printf '%s\t%s\t%s\n' "$$" "$(date +%s)" "$1" > "$LANDING_FILE"; }
 
+# Through remove_state_file, never a bare `rm -f`: the daemon loop runs under
+# errexit, so one EBUSY from a briefly-held marker would kill the daemon between
+# lands. A marker that still survives the retry is logged and left; it names
+# this live pid, so cmd_stop would wait instead of escalating, but an idle
+# daemon exits on SIGTERM anyway.
+daemon_clear_landing() {
+  remove_state_file "$LANDING_FILE" "landing marker" \
+    || log "WARNING: landing marker $LANDING_FILE survived (held open)" || true
+}
+
 # Is the daemon with PID $1 mid-land? Status 0 with LANDING_LANE / LANDING_START
 # set when it is; 1, both empty, when there is no marker or it belongs to some
 # other (dead) daemon. Sets globals rather than printing, so cmd_stop's
@@ -2274,7 +2469,16 @@ landing_of() {
 daemon_cleanup() {
   # PID file first: it is the one step that must happen. `log` can fail (its
   # stderr may be gone after a SIGHUP), and under errexit that ends the handler.
-  rm -f "$PID_FILE" "$LANDING_FILE"
+  # The helper's stderr is dropped for the same reason: its retry notice must
+  # not be what kills the handler. A file that survives anyway is recorded in
+  # activity.log. The next start/stop sees a dead pid and clears it as stale,
+  # unless that pid has been reused by then.
+  remove_state_file "$PID_FILE" "daemon PID file" 2>/dev/null \
+    || log "WARNING: daemon PID file survived exit (held open); next fleet start/stop clears it as stale" \
+    || true
+  # A marker that survives names a pid that is now dead, so landing_of already
+  # ignores it; no retry needed here.
+  rm -f "$LANDING_FILE" 2>/dev/null || true
   if [[ -n "$DAEMON_SLEEP_PID" ]]; then kill "$DAEMON_SLEEP_PID" 2>/dev/null || true; fi
   log "daemon stopping (pid $$)" || true
 }
@@ -2296,7 +2500,7 @@ cmd_start() {
       exit 1
     else
       log "stale PID file (pid $existing_pid not alive) — clearing"
-      rm -f "$PID_FILE"
+      remove_state_file "$PID_FILE" "stale PID file" || exit 1
     fi
   fi
 
@@ -2326,11 +2530,11 @@ cmd_start() {
         # place (cmd_stop then waits). No land ever runs unmarked.
         if [[ -n "$DAEMON_STOP" ]]; then break; fi
         daemon_mark_landing "$branch"
-        if [[ -n "$DAEMON_STOP" ]]; then rm -f "$LANDING_FILE"; break; fi
+        if [[ -n "$DAEMON_STOP" ]]; then daemon_clear_landing; break; fi
         if land_one "$branch"; then
           rebase_others "$branch"
         fi
-        rm -f "$LANDING_FILE"
+        daemon_clear_landing
       done
       cmd_fleet
     fi

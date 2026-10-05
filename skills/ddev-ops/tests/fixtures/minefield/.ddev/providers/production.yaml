@@ -1,0 +1,15 @@
+# Fixture: a provider recipe that can push (provider-push).
+environment_variables:
+  dburl: deploy@host.example.com:backups/db.sql.gz
+
+db_pull_command:
+  command: |
+    set -eu -o pipefail
+    rsync -az "${dburl}" /var/www/html/.ddev/.downloads/db.sql.gz
+  service: web
+
+db_push_command:
+  command: |
+    set -eu -o pipefail
+    mysqldump db | gzip >/var/www/html/.ddev/.downloads/db_push.sql.gz
+    rsync -az /var/www/html/.ddev/.downloads/db_push.sql.gz "${dburl}"

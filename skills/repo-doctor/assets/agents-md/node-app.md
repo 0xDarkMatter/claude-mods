@@ -1,0 +1,39 @@
+<!-- Archetype: Node / TypeScript app. Rendered by scripts/agents-md.py scaffold from
+     repo-scan facts; also usable by hand. Slots: {{TITLE}} {{DRAFT_NOTE}} {{OVERVIEW}}
+     {{COMMANDS}} {{LANDMINES}} {{DEPLOY}} {{STRUCTURE}} {{CONVENTIONS}} {{POINTERS}}
+     {{QUESTIONS}}. Everything outside the slots is the archetype's own prompts, written
+     as TODO(owner) questions, never as claims. Protocol: references/agents-md-protocol.md -->
+# Agent Instructions - {{TITLE}}
+
+{{DRAFT_NOTE}}
+
+{{OVERVIEW}}
+
+## Commands
+
+{{COMMANDS}}
+
+## Landmines
+
+<!-- Mandatory. Turn each confirmed TODO(owner) into a numbered landmine: what breaks,
+     why, and the procedure. Delete the ones that are not rules. -->
+
+{{LANDMINES}}
+- [ ] TODO(owner): Which environment variables are needed at build time versus run time, and where are they set for each environment?
+- [ ] TODO(owner): Is any generated code committed (API clients, types, schema output), and which command regenerates it?
+
+## Deploy
+
+{{DEPLOY}}
+
+## Structure
+
+{{STRUCTURE}}
+
+## Conventions
+
+{{CONVENTIONS}}
+
+{{POINTERS}}
+
+{{QUESTIONS}}

@@ -5,7 +5,7 @@
 This is **claude-mods** - a collection of custom extensions for Claude Code:
 - **3 expert agents** for pure context-isolation/worker roles (git-agent, firecrawl-expert, project-organizer) - every domain-knowledge agent became an `-ops` skill (v3.0, skills-first)
 - **3 commands** for session management and git orchestration (/sync, /save, /git-ops)
-- **108 skills** for CLI tools, patterns, workflows, and development tasks (incl. `figma-ops` as the router for the Figma MCP skill family plus the capture→curate→compose workflows (moodboards, reference boards, loose-plus arrangements) none of the official or community Figma skills cover — read it first when a Figma request is ambiguous; `a11y-ops` for WCAG 2.2 conformance and the EAA/ADA deadlines that now make it a legal requirement; `evals-ops` for the eval-harness discipline every other agent-engineering change depends on; `nextjs-ops` for App Router caching, the server/client boundary and Server Actions; `icon-ops` for sourcing/normalising icons and brand marks without flattening a trademark; `rembg-ops` for transparent-PNG cutouts of flat illustration/sticker/avatar art with a deterministic fallback ladder past rembg's ML failure modes; `parallel-ops` as the router for the parallel/recurring-agent-work family — fleet-ops, fleet-worker, fleetflow (extracted to [its own repo](https://github.com/0xDarkMatter/fleetflow), mounted as a skill via junction), loop-ops, iterate, spawn — read it first when that family is ambiguous; `repo-doctor` for agentic-quality repo audits; `svg-brand-tint-ops` for zero-dep in-browser SVG brand-recolour + Potrace-stage raster vectorising; `r-ops` for tidyverse-first modern R / data analysis; `loop-ops` for outer-loop design discipline; `ffmpeg-ops` for probe-first media processing and EDL-driven editing; `supply-chain-defense` for behavioural-first dependency security; `prompt-injection-defense` for instruction-integrity scanning; `pypi-ops` for OIDC Trusted Publishing to PyPI; `net-ops` for network troubleshooting; `windows-ops` / `mac-ops` for workstation diagnostics; `fleet-worker` for cheap parallel worker delegation)
+- **112 skills** for CLI tools, patterns, workflows, and development tasks (incl. `package-manager-ops` for day-to-day npm/Yarn/pnpm/Bun/Composer use - one lockfile, frozen installs, Node and PHP pins that agree with DDEV, pinned npx, legacy exits - with the read-only `pm-audit` repo scanner; `ddev-ops` for DDEV local environments - version pinning, sanitised pulls, Mutagen/WSL2, add-ons - with an auditor for the `.ddev/` mistakes that break teams; `frontend-upgrade-ops` for moving server-rendered Craft/Twig sites off Laravel Mix/Webpack onto Vite and off Vue 2 — or replacing small widgets with Alpine; `figma-ops` as the router for the Figma MCP skill family plus the capture→curate→compose workflows (moodboards, reference boards, loose-plus arrangements) none of the official or community Figma skills cover — read it first when a Figma request is ambiguous; `a11y-ops` for WCAG 2.2 conformance and the EAA/ADA deadlines that now make it a legal requirement; `evals-ops` for the eval-harness discipline every other agent-engineering change depends on; `nextjs-ops` for App Router caching, the server/client boundary and Server Actions; `icon-ops` for sourcing/normalising icons and brand marks without flattening a trademark; `rembg-ops` for transparent-PNG cutouts of flat illustration/sticker/avatar art with a deterministic fallback ladder past rembg's ML failure modes; `parallel-ops` as the router for the parallel/recurring-agent-work family — fleet-ops, fleet-worker, fleetflow (extracted to [its own repo](https://github.com/0xDarkMatter/fleetflow), mounted as a skill via junction), loop-ops, iterate, spawn — read it first when that family is ambiguous; `repo-doctor` for agentic-quality repo audits; `svg-brand-tint-ops` for zero-dep in-browser SVG brand-recolour + Potrace-stage raster vectorising; `r-ops` for tidyverse-first modern R / data analysis; `loop-ops` for outer-loop design discipline; `ffmpeg-ops` for probe-first media processing and EDL-driven editing; `supply-chain-defense` for behavioural-first dependency security; `prompt-injection-defense` for instruction-integrity scanning; `pypi-ops` for OIDC Trusted Publishing to PyPI; `net-ops` for network troubleshooting; `windows-ops` / `mac-ops` for workstation diagnostics; `fleet-worker` for cheap parallel worker delegation)
 - **13 output styles** for response personality (Vesper, Spartan, Mentor, Executive, Pair, Atlas, Coach, Harbour, Meridian, Noir, Roast, Sage, Scout)
 - **13 hooks** for pre-commit linting, post-edit formatting, dangerous command warnings, uv enforcement, dependency-install + manifest-edit supply-chain advisories, hidden-Unicode scanning (session-start + pre-commit), live config-change + worktree guards, mid-session peer-writer guard + touched-files ledger, and pmail notifications - security set auto-wired via plugin hooks.json
 - **Pigeon** inter-session messaging (`pigeon send/read/reply`) - SQLite-backed pmail at `~/.claude/pmail.db`
@@ -38,7 +38,7 @@ cd claude-mods && ./scripts/install.sh  # or .\scripts\install.ps1 on Windows
 | `tools/` | Modern CLI toolkit documentation |
 | `tests/` | Validation scripts + justfile |
 | `scripts/` | Install scripts |
-| `docs/` | ARCHITECTURE.md, SKILL-CREATION-PROTOCOL.md (start here to build a skill), SKILL-SUBAGENT-REFERENCE.md, SKILL-RESOURCE-PROTOCOL.md, WORKFLOWS.md, PLAN.md, RESERVED-COMMANDS.md, TERMINAL-DESIGN.md; `archive/` (completed-migration records), `references/` (vendored guides) |
+| `docs/` | Design docs and protocols, indexed one line each in `docs/00_INDEX.md`; to build a skill start at SKILL-CREATION-PROTOCOL.md |
 
 ## Session Init
 
@@ -59,12 +59,15 @@ On "INIT:" message at session start:
 | `skills/pigeon/` | Inter-session pmail - send, read, reply, broadcast, search across projects |
 | `skills/auto-skill/` | Auto-detect skill-worthy workflows; Stop hook suggests after complex sessions. `/auto-skill on/off/status` to toggle |
 | `skills/supply-chain-defense/` | Behavioural-first dependency security - Socket.dev depscore MCP, exposure-check (IOC match across npm/pnpm/yarn/bun/PyPI/Composer/Cargo/Go/RubyGems + extensions), integrity-audit (persistence), scan-extensions, install/manifest hooks. Paired with `rules/supply-chain.md` |
-| `skills/repo-doctor/` | Agentic-quality auditor - scores any repo (entry docs, comments, structure, gates, doc-pairing) with --json + --strict CI gate; monorepo-structure + comment-doctrine references. Paired with `rules/agentic-quality.md` |
+| `skills/repo-doctor/` | Agentic-quality auditor - scores any repo (entry docs, comments, structure, gates, doc-pairing) with --json + --strict CI gate - and the AGENTS.md toolchain: `repo-scan.py` (sourced facts + git-history landmine questions), `agents-md.py` scaffold / `audit --diff` / read-only `survey --org`, `references/agents-md-protocol.md`. Paired with `rules/agentic-quality.md` |
 | `skills/parallel-ops/` | Router for the parallel/recurring-agent-work family (fleet-ops, fleet-worker, fleetflow — own repo — loop-ops, iterate, spawn) - read first when it's unclear which one owns a fan-out/schedule/delegation ask |
 | [`fleetflow`](https://github.com/0xDarkMatter/fleetflow) (own repo) | Heterogeneous GLM/Codex/Grok/Pi/Anthropic worker fleets from one session; extracted 2026-08-01, mounted as `/fleetflow` via junction at `~/.claude/skills/fleetflow` |
 | `tests/validate.sh` | Frontmatter + naming gate; enforces the description-budget cap (combined description+when_to_use, hard-fails over budget) |
+| `tests/spec.sh` | Agent Skills spec gate: the spec's own validator (`skills-ref`, pinned, via `uv`) on every skill, allowing Claude Code's documented fields top-level; fixture self-test first. Size is not checked here (that is `tests/skill-size.sh`). Policy: `docs/SKILL-SUBAGENT-REFERENCE.md` |
 | `tests/doc-drift.sh` | Counts-on-disk vs docs gate; also checks section-map markers and skill-frontmatter ghost references (related-skills/depends-on naming a skill not on disk) |
 | `tests/agnostic.sh` | Public-repo gate: fails on user-profile paths with real names, plus anything in the author's PRIVATE deny list; legit look-alikes go in `tests/agnostic-allow.txt` |
+| `tests/skill-size.sh` | Warns when a SKILL.md body passes ~5,000 estimated tokens (chars / 3.6, frontmatter excluded) - after auto-compaction Claude Code keeps only the first 5,000 tokens of each invoked skill, so procedure and hard rules go first and detail goes in `references/`. `--report` lists every skill, `--strict` fails instead of warning; built-in self-test refuses to pass blind |
+| `tests/reference-contents.sh` | Warns when a `references/*.md` over 100 lines lacks a `## Contents` list in its first 15 lines, or the list misses a `##` heading (the size rule). Its parser is `skills/security-ops/tests/reference-contents.awk`, shared with that skill's hard check, so don't move it. One summary line by default; `--report` lists files, `--strict` fails; fixture self-test first |
 | `tests/hooks.sh` | Hook contract tests: feeds the opt-in hooks the stdin JSON Claude Code sends, asserts exit 2 + stderr to block and no false positives; `HOOKS_DIR=<dir>` runs it against another copy (e.g. to prove it fails on a regression) |
 
 ## Quick Reference
@@ -141,6 +144,19 @@ Requires Sonnet 4+ or Opus 4+.
   file colocated in the same `tests/` dir — editing the skill's output format
   without regenerating the fixture is a silent, not loud, break (diff the fixture,
   don't just eyeball the code change).
+- **Skill frontmatter: two parsers disagree.** Claude Code reads its own fields
+  (`when_to_use`, `argument-hint`, `effort`, ...) ONLY at the top level, so moving them
+  under `metadata` to "satisfy the spec" silently disables them. The spec's validator
+  parses with strictyaml, which rejects flow-style YAML (`[a, b]`) that Claude Code
+  accepts. `tests/spec.sh` encodes both. `claude plugin validate` checks neither,
+  because it never reads SKILL.md.
+- **"Keep both sides" conflict resolutions drop shared lines.** Git hoists lines both
+  sides added identically (a trailing `exit 0`, a blank separator) out of the conflict
+  block and keeps one copy, so a union of the two blocks loses the copy one side needed
+  (a lost blank line between two new CHANGELOG entries, 2026-10-05). Check the result as
+  ours + theirs - base: in a merge, `git diff HEAD -- <file>` must add and remove the
+  same lines as `git diff $(git merge-base HEAD MERGE_HEAD) MERGE_HEAD -- <file>`, and
+  likewise with `HEAD` and `MERGE_HEAD` swapped.
 - Never touch `.claude/worktrees/` or any repo's git worktree state (see
   `rules/worktree-boundaries.md`) — it looks orphaned and isn't.
 - **This repo is public — keep it agnostic.** `tests/agnostic.sh` (in `just check` and
@@ -158,10 +174,26 @@ Requires Sonnet 4+ or Opus 4+.
   a suite that runs Windows-only scripts whenever `command -v pwsh` succeeds goes
   red on Linux CI (windows-ops, supply-chain-defense). Gate runtime checks on the
   host: `[Environment]::OSVersion.Platform` = `Win32NT` (works in 5.1 and 7).
+- **The plugin name `claude-mods` is reserved** by Claude Code 2.1.287+ (Claude Mods).
+  `claude plugin validate` rejects it, so call the validator only through
+  `tests/plugin-validate.sh`, which waives that one error until 2026-10-31 and fails on
+  any other. Never widen the waiver; the fix is renaming the plugin. Scripts here run
+  under `set -e`, so capture its exit 3 with `|| rc=$?`, never `; rc=$?`.
+- **Portable skills must run copied alone.** `supply-chain-defense`,
+  `prompt-injection-defense`, `ddev-ops` and `package-manager-ops` are copied standalone into other plugins: no `../../`
+  dependency, `_lib/term.sh` only behind a guard, and `scripts/run-python.sh` is
+  duplicated in each **on purpose** - don't DRY it into `_lib`
+  (`tests/check-resources.sh` fails if the copies drift). Each suite's "standalone"
+  block copies the folder alone and proves it.
 
 ## Testing
 
 ```bash
-just check        # THE gate: validate + doc-drift + agnostic + hook contracts + resource contracts + skill suites + e2e suites
+just check        # THE gate: validate + spec + doc-drift + agnostic + hook contracts + resource contracts + skill size + reference contents (both warn-only) + skill suites + e2e suites
 just check-fast   # same minus the behavioural suites (per-skill and e2e)
 ```
+
+CI (`.github/workflows/validate.yml`) also runs three gates `just check` does not:
+`tests/plugin-validate.sh --self-test`, `tests/check-exec-bits.sh`, and
+`tests/install-guard.sh` (Windows runner only). Run them by hand before landing a change
+to the manifests, a script's mode, or `scripts/install.ps1`.

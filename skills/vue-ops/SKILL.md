@@ -5,12 +5,14 @@ license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: typescript-ops, testing-ops, tailwind-ops, javascript-ops
+  related-skills: typescript-ops, testing-ops, tailwind-ops, javascript-ops, frontend-upgrade-ops
 ---
 
 # Vue Operations
 
 Comprehensive Vue 3 reference covering Composition API, Pinia, Vue Router, Nuxt 4, and testing — production patterns with TypeScript throughout.
+
+Still on Vue 2, or mounting Vue islands in server-rendered Twig pages? That is **frontend-upgrade-ops** (migration build, Vuex to Pinia, islands, Alpine-or-Vue).
 
 > Vue 3 / Nuxt 4 ecosystem facts verified as of 2026-07-05.
 

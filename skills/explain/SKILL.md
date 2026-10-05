@@ -132,9 +132,9 @@ Dispatch is skills-first: the generic `general-purpose` subagent preloads the re
 | `*.test.*`, `*.spec.*` | general-purpose | (framework skill by file type) | - |
 | Other | general-purpose | - | Fallback |
 
-**Invoke via Task tool:**
+**Invoke via the Agent tool:**
 ```
-Task tool with subagent_type: "general-purpose" (preload claude-code-ops for Claude extensions)
+Agent tool with subagent_type: "general-purpose" (preload claude-code-ops for Claude extensions)
 model: "sonnet"
 Prompt includes:
   - Skill preloading (domain knowledge):

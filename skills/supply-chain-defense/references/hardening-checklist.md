@@ -6,6 +6,18 @@ read-only; the rest change live state — confirm before acting.
 
 ---
 
+## Contents
+
+1. [1. Self-integrity + exposure scan (read-only — run first)](#1-self-integrity--exposure-scan-read-only--run-first)
+2. [2. Editor extension audit (read-only)](#2-editor-extension-audit-read-only)
+3. [3. Stale OIDC trust audit (read-only)](#3-stale-oidc-trust-audit-read-only)
+4. [4. Revoke stale OIDC + rotate tokens (changes live state — confirm)](#4-revoke-stale-oidc--rotate-tokens-changes-live-state--confirm)
+5. [5. Dependency pinning + cooldown policy](#5-dependency-pinning--cooldown-policy)
+6. [6. Wrap installs (layer 2)](#6-wrap-installs-layer-2)
+7. [7. Behavioural scanning in PRs + CI (layer 1)](#7-behavioural-scanning-in-prs--ci-layer-1)
+8. [8. Client-facing posture (optional but increasingly asked)](#8-client-facing-posture-optional-but-increasingly-asked)
+9. [Quick pass (the 1-hour version)](#quick-pass-the-1-hour-version)
+
 ## 1. Self-integrity + exposure scan (read-only — run first)
 
 Detect whether a worm has already persisted on this machine, and whether you have a
@@ -14,8 +26,9 @@ known-bad package/extension installed.
 ```bash
 bash scripts/integrity-audit.sh      # persistence: .claude/MCP/editor configs,
                                       # shell rc files, .npmrc/.pypirc, workflow OIDC
-python scripts/exposure-check.py --root .   # known-IOC match across npm/pnpm/yarn/
-                                            # pypi/composer/cargo/go/rubygems + extensions
+bash scripts/run-python.sh scripts/exposure-check.py --root .
+                                      # known-IOC match across npm/pnpm/yarn/
+                                      # pypi/composer/cargo/go/rubygems + extensions
 ```
 
 Manual equivalents if you want to eyeball it:

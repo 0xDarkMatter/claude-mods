@@ -861,60 +861,10 @@ node --experimental-permission --allow-fs-read=. --allow-fs-write=./dist bundler
 
 ## Package Management Patterns
 
-### npm workspaces
-
-```json
-// Root package.json
-{
-  "name": "my-monorepo",
-  "private": true,
-  "workspaces": ["packages/*", "apps/*"]
-}
-```
-
-```bash
-# Install deps for all packages
-npm install
-
-# Run script in specific package
-npm run build --workspace=packages/my-lib
-
-# Run script in all packages
-npm run test --workspaces
-
-# Add dep to a specific workspace
-npm install zod --workspace=packages/my-lib
-```
-
-### corepack — Package Manager Version Pinning
-
-```bash
-# Enable corepack (built into Node 16.9+)
-corepack enable
-
-# Use specific pnpm version
-corepack use pnpm@9.0.0
-# Adds "packageManager": "pnpm@9.0.0" to package.json
-
-# Corepack downloads and uses exact version — no global installs
-```
-
-### package.json Best Practices
-
-```json
-{
-  "name": "my-package",
-  "version": "1.0.0",
-  "engines": {
-    "node": ">=18.17.0",
-    "npm": ">=9.0.0"
-  },
-  "packageManager": "pnpm@9.0.0",
-  "overrides": {
-    "vulnerable-package": ">=2.1.0"
-  }
-}
-```
+Package managers have their own skill, `package-manager-ops`: workspaces, the
+`packageManager` field and Corepack (no longer distributed with Node since 25.0.0),
+`engines` / `devEngines` pins, `overrides`, lockfiles and frozen installs. Those facts
+move fast and are verified in one place, so this file does not repeat them.
 
 ---
 

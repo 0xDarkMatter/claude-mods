@@ -12,37 +12,7 @@ metadata:
 
 ## Helps with
 
-Slow boot on a Windows machine that used to be fast — bloat accumulation across the five startup mechanisms (registry Run keys, services, scheduled tasks, startup folders, group policy). The same machine still boots fast once those are inventoried and trimmed.
-
-Failing drives that nobody's spotted yet. The signal lives in System log Events `7` / `52` / `153` / `154` (disk bad block, paging error, retry, hardware error) and `storahci` Event `129` ("Reset to device, \Device\RaidPortN, was issued"). Healthy drives produce zero of these — hundreds in a month means active failure even when SMART still claims "Healthy."
-
-Crashes with no obvious cause. Event 41 (Kernel-Power) carries the BugCheck code at `Properties[0]` and four parameters at `Properties[1-4]`. A `0xEF` (CRITICAL_PROCESS_DIED), `0xD1` (DRIVER_IRQL), `0x124` (WHEA uncorrectable), or `0x0` (no bugcheck recorded → hard power loss) each implies a completely different fix.
-
-"My PC is slow" diagnosed by chasing the wrong symptom. Task Manager shows what's running NOW; the System log shows what failed at boot, what's been crashing, and what storage events preceded each crash. Always audit before treating.
-
-Unable to disable an HKLM startup entry because the user isn't an Administrator. The `StartupApproved` registry mechanism — what Task Manager's "Disable" button actually does — flips one byte in `HKCU\...\Explorer\StartupApproved\Run` and works without elevation, even for HKLM entries.
-
-BSOD analysis without a dump file. Pagefile too small, or hard power loss skipped the dump-write. `CrashDumpEnabled` registry key + pagefile size + free space on system drive determine whether the next crash gets diagnosed at all.
-
-Pre-crash timeline correlation. The events in the 10 minutes BEFORE Event 41 are where the story is. `storahci` resets before a crash → storage failure cascade. `nvlddmkm` / `igdkmd64` warnings before crash → GPU driver hang. WHEA events before crash → hardware fault.
-
-Identifying which physical drive is failing when the symptom is "Disk 1" or "\Device\Harddisk1" in an event message. Maps physical disk number ↔ drive letter ↔ controller port ↔ model + firmware, so the user knows which SATA cable to unplug.
-
-Adobe Creative Cloud / Docker Desktop / Slack / Electron app bloat eating boot time. Each ships with multiple startup entries (registry + services + scheduled tasks) that all need disabling to fully stop the auto-launch.
-
-"Is it safe to physically disconnect drive X?" — finding every system mechanism that references a drive letter before pulling the cable. Pagefile location, Windows Search index, scheduled tasks, services, user-profile junctions / symlinks, startup folder shortcuts, registry Run keys, and volume mount points. The wrong answer destroys uptime; the right answer is a one-line verdict.
-
-Cloning data off a failing drive without finishing it off. `robocopy /R:0 /W:0` (no retries) avoids the "every retry on a bad sector kills the drive faster" trap. For severely damaged drives, `ddrescue` with a resumable map file is the next tier. NEVER `chkdsk /f` a failing drive — repair operations write to bad sectors and accelerate failure.
-
-Recovery from no-boot scenarios — boot configuration data (BCD) repair via `bootrec`, UEFI bootloader rebuild via `bcdboot`, Safe Mode access from a failing system, System Restore from Windows RE, and the boot-sequence triage layers (POST → boot device → boot driver → service load → shell).
-
-Remote Windows diagnostics across the network. PowerShell remoting via WS-Man (the default WinRM transport) or SSH (modern alternative on Win10 1809+). Authentication for in-domain (Kerberos), workgroup (NTLM via `TrustedHosts`), and cross-OS (SSH key) scenarios. The double-hop problem and CredSSP. Running this skill's diagnostic scripts against a remote box by staging the skill folder via `Copy-Item -ToSession`.
-
-Unexplained UAC prompts attributed to their caller. A declined elevation still executes the requesting binary unelevated, so Prefetch run times (PECmd), BAM last-execution FILETIMEs, the npx `_npx` cache, and Security 4688 (if auditing is on) identify exactly what asked for admin and when — see `references/uac-attribution.md` for the playbook and the one-elevated-pass forensic ladder.
-
-Boot duration measurement and slow-startup-component identification. The `Microsoft-Windows-Diagnostics-Performance/Operational` log (admin-only) records per-boot timing — `BootMainPathTime`, `BootPostBootTime`, total, and degradation flag — plus calls out specific apps, drivers, or services that exceeded the system's fast-boot threshold. Without admin, kernel-event fallback gives coarser but still useful timing.
-
-A machine that is hot, loud, or out of commit with no boot-time explanation. The expensive case is a **hung process whose parent is perfectly healthy** — it keeps its supervisor, so every "orphaned process" check reports nothing while it burns a core indefinitely. Measured here 2026-08-30: an orphan scan found 3 processes / 1.16 GB while six live-parented spinners held five cores across 43.8 hours. Rate-sampling finds them; snapshots and lineage never will — see [Runaway Process Triage](#runaway-process-triage).
+Slow or worsening boot, silently failing drives, crashes with no obvious cause, an HKLM startup entry you can't disable without admin, BSODs that leave no dump, unexplained UAC prompts, 'is it safe to unplug this drive?', cloning a failing drive, no-boot recovery, remote diagnostics, and a hot or out-of-commit machine with no boot-time explanation. Where each signal lives: [references/symptom-guide.md](references/symptom-guide.md).
 
 ## The Universal Insight
 
@@ -121,53 +91,7 @@ All disables are reversible — the StartupApproved registry mechanism flips one
 
 The single highest-yield audit. Failing drives cause slow boots (Windows times out probing them), instability (controller resets cascade into kernel hangs), and crashes (I/O failures kill critical processes). Three independent data sources to cross-reference:
 
-### Disk error events
-
-```powershell
-Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='disk'; StartTime=(Get-Date).AddDays(-30)} |
-    Group-Object Id | Select-Object Count, Name
-```
-
-Event ID catalog (full reference in `references/storage-events.md`):
-
-| ID | Meaning | Severity |
-|----|---------|----------|
-| **7** | "The device, \Device\HarddiskN\DR1, has a bad block" | **High** — sectors going bad |
-| **51** | "An error was detected on device during a paging operation" | High |
-| **52** | "Write cache enabled" | Informational |
-| **153** | "IO operation at LBA X was retried" | Medium |
-| **154** | "IO operation at LBA X failed due to a hardware error" | **High** — Windows' explicit hardware verdict |
-
-Even 10 events of ID 7 or 154 in a month is a strong failure signal. Hundreds = drive replacement is urgent.
-
-### Storage controller resets
-
-```powershell
-Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='storahci'; Id=129; StartTime=(Get-Date).AddDays(-60)}
-```
-
-`storahci` Event 129 ("Reset to device, \Device\RaidPortN, was issued") means the drive stopped responding and the driver had to reset the controller. **Healthy = zero events.** Any non-zero count warrants investigation. >5 in a month = active failure.
-
-### Disk → drive letter mapping
-
-The error message identifies `\Device\HarddiskN` — to find the actual drive:
-
-```powershell
-Get-Disk | Select-Object Number, FriendlyName, BusType, HealthStatus, FirmwareVersion,
-    @{N='SizeGB';E={[math]::Round($_.Size/1GB,0)}}
-```
-
-`Number` matches the `N` in `\Device\HarddiskN`. Cross-reference with `Get-Partition -DiskNumber N` for drive letter.
-
-### SMART reliability counters
-
-```powershell
-Get-PhysicalDisk | ForEach-Object {
-    $_ | Get-StorageReliabilityCounter | Select-Object Temperature, Wear, ReadErrorsTotal, WriteErrorsTotal, PowerOnHours
-}
-```
-
-Returns blank on some NVMe drives due to Windows driver limitations — fall back to vendor tools (Samsung Magician, CrystalDiskInfo) or `smartctl` from smartmontools if installed.
+Disk Events **7** (bad block) and **154** (hardware error) are the high-severity IDs: even 10 in a month is a strong failure signal, hundreds means replace now. `storahci` Event **129** (controller reset): healthy is zero, more than 5 a month is active failure. `\Device\HarddiskN` is `Get-Disk` number N. `scripts/disk-health.ps1` runs all three; the manual queries, event catalogue and SMART fallbacks: [references/manual-queries.md](references/manual-queries.md).
 
 ## Boot Performance & Startup Management
 
@@ -181,79 +105,11 @@ Windows has **five separate startup mechanisms**, each requiring different tooli
 | Startup folder shortcuts | `%APPDATA%\...\Startup\` + AllUsers | `Get-ChildItem` | Delete or rename .lnk |
 | Group Policy startup scripts | `HKLM\...\Policies\Scripts` | Group Policy Editor / `gpresult` | (rare on workstations) |
 
-### The StartupApproved trick (disable HKLM entries without admin)
-
-Task Manager's "Disable" button writes a binary flag to:
-
-```
-HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run    (HKLM 64-bit entries)
-HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32  (HKLM WOW6432 entries)
-HKCU\...\StartupApproved\StartupFolder                                          (startup folder shortcuts)
-```
-
-The value is 12 bytes: `[status byte] [00 00 00] [8-byte FILETIME timestamp]`. Status = `0x02` enabled, `0x03` disabled. Writing this to HKCU lets a non-admin user disable HKLM startup entries for themselves. The script `scripts/safe-disable-startup.ps1` automates this.
-
-### Boot duration measurement
-
-Windows 11 stores boot performance in `Microsoft-Windows-Diagnostics-Performance/Operational` log (admin to read). Without admin, infer from the gap between Event 12 (`The operating system started at...`) and Event 6005 (`The Event log service was started`), then to first user-mode event. Typically:
-
-- Healthy SSD system: 15–25 seconds to login screen
-- Healthy + many startup apps: 30–60 seconds to usable desktop
-- Failing storage: 60+ seconds, with stalls
+Task Manager's Disable writes a 12-byte `StartupApproved` flag under HKCU (`0x02` enabled, `0x03` disabled), so a non-admin can disable HKLM entries for themselves; `scripts/safe-disable-startup.ps1` does it. Boot timing lives in the admin-only Diagnostics-Performance log (`scripts/boot-perf.ps1` falls back to kernel events): healthy SSD 15–25 s to login, failing storage 60 s and up. Detail: [references/manual-queries.md](references/manual-queries.md).
 
 ## Crash Analysis & Dump Triage
 
-### Event 41 (Kernel-Power) decoding
-
-This is **the** crash record. Properties array layout:
-
-| Index | Field | What it means |
-|-------|-------|---------------|
-| 0 | BugcheckCode | The stop code (0x0 = no bugcheck recorded → hard power loss or hang) |
-| 1 | BugcheckParameter1 | First parameter (often a memory address) |
-| 2-4 | BugcheckParameter2-4 | Additional parameters |
-| 5 | SleepInProgress | True if crash during sleep transition |
-| 6 | PowerButtonTimestamp | Non-zero = power button was held |
-
-Common BugCheck codes (full reference in `references/bugcheck-codes.md`):
-
-| Code | Name | Typical cause |
-|------|------|---------------|
-| `0x0` | (no bugcheck) | Hard power loss, total hang, hardware-level failure |
-| `0xEF` | CRITICAL_PROCESS_DIED | A critical system process (csrss/services/wininit) was killed |
-| `0xD1` | DRIVER_IRQL_NOT_LESS_OR_EQUAL | Bad driver accessed bad memory address |
-| `0x50` | PAGE_FAULT_IN_NONPAGED_AREA | Bad memory or storage I/O for pagefile |
-| `0x124` | WHEA_UNCORRECTABLE_ERROR | Hardware-level CPU/cache/PCIe error |
-| `0x7E` | SYSTEM_THREAD_EXCEPTION_NOT_HANDLED | Driver crashed |
-| `0x9F` | DRIVER_POWER_STATE_FAILURE | Driver hung during sleep/wake |
-
-### Pre-crash timeline correlation
-
-The crash record alone rarely tells you the cause. The **events in the 10 minutes before the crash** are where the story is. Use:
-
-```powershell
-scripts/crash-triage.ps1 -CrashTime '2026-05-15 00:57:50' -WindowMinutes 10
-```
-
-Look for:
-- `storahci` Event 129 (drive reset) before crash → storage failure cascade
-- `nvlddmkm` / `igdkmd64` warnings before crash → GPU driver hang
-- `WHEA-Logger` events before crash → hardware-level fault
-- Sudden silence (no events for >30s before crash) → total system hang
-
-### Dump configuration audit
-
-```powershell
-Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CrashControl' |
-    Select-Object CrashDumpEnabled, DumpFile, MinidumpDir, AutoReboot
-```
-
-`CrashDumpEnabled` values: `0` = None, `1` = Complete, `2` = Kernel, `3` = Small (minidump), `7` = Automatic.
-
-If `0` or no dumps exist after recent crashes:
-- Pagefile may be too small (needs >RAM size for complete dump, or >256MB for minidump)
-- Power loss crashes can't write dumps regardless — RAM contents are gone before disk write
-- Some BSODs in early boot also skip dump-writing
+Event 41 (Kernel-Power) is the crash record: `Properties[0]` is the BugCheck code (`0x0` = none recorded, so hard power loss or a hang) and a non-zero index 6 means the power button was held. The 10 minutes before it hold the story: `storahci` 129 → storage cascade, GPU driver warnings → driver hang, WHEA → hardware fault, silence → total hang (`scripts/crash-triage.ps1 -CrashTime …`). No dumps after crashes → check `CrashControl\CrashDumpEnabled` and pagefile size. Layout and decoding tables: [references/manual-queries.md](references/manual-queries.md); stop codes: `references/bugcheck-codes.md`.
 
 ## Runaway Process Triage
 
@@ -300,31 +156,20 @@ topology, stale-build detection, and the worktree-teardown case — is in
 
 ## Event Log Query Patterns
 
-`Get-WinEvent` with `-FilterHashtable` is dramatically faster than `Where-Object` filtering. Keys that work:
-
-| Key | Type | Example |
-|-----|------|---------|
-| `LogName` | string or array | `'System'`, `@('System','Application')` |
-| `ProviderName` | string or array | `'storahci'`, `'Microsoft-Windows-Kernel-Power'` |
-| `Id` | int or array | `41`, `@(7,153,154)` |
-| `Level` | int or array | `1`=Critical, `2`=Error, `3`=Warning, `4`=Information |
-| `StartTime` | DateTime | `(Get-Date).AddDays(-7)` |
-| `EndTime` | DateTime | `(Get-Date)` |
-
-Use `scripts/event-search.ps1` for common patterns (events in time window, by provider, correlated across logs).
+Filter with `Get-WinEvent -FilterHashtable` (far faster than `Where-Object`); the keys that work: [references/manual-queries.md](references/manual-queries.md).
 
 ## Common Failure Modes
 
 | Symptom | First check | Common cause |
 |---------|-------------|--------------|
 | Mapped drive shows `Disconnected` / UNC path unreachable | Is this a network mapping? `Get-SmbMapping` | Hand to `net-ops` — not a local storage fault |
-| Slow boot, used to be fast | `startup-audit.ps1` | Bloat accumulation (Docker, Adobe CC, Electron apps) |
+| Slow boot, used to be fast | `boot-perf.ps1`, then `health-audit.ps1` startup section | Bloat accumulation (Docker, Adobe CC, Electron apps) |
 | Slow boot, getting worse | `disk-health.ps1` | Failing drive — Windows waiting on probe timeouts |
 | Random freezes + hard restarts | `disk-health.ps1` + `crash-triage.ps1` | storahci resets cascading into kernel hang |
 | BSOD on wake from sleep | `crash-triage.ps1` (BugCheck `0x9F`) | Driver power state failure (often GPU, USB) |
 | BSOD with WHEA before it | `crash-triage.ps1` (BugCheck `0x124`) | Hardware fault — RAM, CPU, PCIe lane |
 | Sluggish but not crashing | `health-audit.ps1` performance section | Background process pileup |
-| Login takes minutes | `startup-audit.ps1` | Slow startup item synchronously blocking shell |
+| Login takes minutes | `boot-perf.ps1` (post-boot time), then `safe-disable-startup.ps1 -List` | Slow startup item synchronously blocking shell |
 
 ## Recovery Patterns
 
@@ -379,89 +224,19 @@ Output follows the claude-mods diagnostic convention:
 
 ## References
 
-- `references/storage-events.md` — full event ID catalog for `disk`, `storahci`, `Ntfs`, `partmgr`, `volmgr` providers. Load when investigating disk errors, mapping `\Device\Harddisk N` references, or interpreting LBA-level I/O failures. Includes severity triage thresholds (per-month counts that indicate failure for HDD vs SSD) and the query recipes the audit script uses.
+- `references/storage-events.md` — disk and controller event IDs, failure thresholds
+- `references/bugcheck-codes.md` — BSOD stop codes and their likely causes
+- `references/startup-mechanisms.md` — the five startup mechanisms, vendor auto-launch hooks
+- `references/recovery-patterns.md` — data recovery, the chkdsk decision tree, BCD and no-boot repair; load before anything destructive
+- `references/uac-attribution.md` — what asked for admin, in the moment and after the fact
+- `references/process-triage.md` — spinners, orphans, hoarders; safe termination order
+- `references/remote-diagnostics.md` — running this skill against a remote box
+- `references/symptom-guide.md` — symptom to signal, by complaint
+- `references/manual-queries.md` — the queries and decoding tables the scripts automate
+- `references/worked-example.md` — one failing-drive case end to end
 
-- `references/bugcheck-codes.md` — Windows BSOD stop-code catalog covering the codes that actually appear on workstations. Load when decoding a non-trivial Event 41, analyzing a minidump's stop code, or matching a symptom ("crashes during sleep", "random reboot no dump", "crashes during file copy") to a likely cause. Covers `0xEF`, `0xD1`, `0x124`, `0x50`, `0x7A`, `0x9F` and the special `0x0` case.
-
-- `references/startup-mechanisms.md` — Deep dive on all five Windows startup mechanisms: registry Run keys, services, scheduled tasks, startup folders, group policy. Load when doing a full startup audit, hunting vendor-installed auto-launch hooks across multiple mechanisms, or implementing the StartupApproved disable trick. Includes vendor-pattern checklists (Adobe, Docker, NVIDIA) and edge cases like WMI permanent event consumers and IFEO Debugger redirects.
-
-- `references/recovery-patterns.md` — Drive-failure data recovery (robocopy `/R:0`, ddrescue with map files), filesystem repair (chkdsk decision tree — when NEVER to `/f`), system file integrity (`sfc`, `DISM /Online /Cleanup-Image /RestoreHealth`), boot configuration repair (BCD, `bootrec`, UEFI bootloader rebuild), pagefile relocation, drive removal procedures (software offline → BIOS-disable → physical disconnect → destruction), and no-boot recovery (Windows RE, Safe Mode, System Restore). Load when responding to "my drive is dying" or any irreversible/destructive operation.
-
-- `references/uac-attribution.md` — Attributing an unexplained UAC prompt to its caller: the 30-second in-the-moment playbook (Show details → note command line → decline → check Security 4688), the after-the-fact forensic ladder (Prefetch/PECmd run times, BAM FILETIME decode, npx `_npx` cache, agent-transcript time correlation — all in one elevated pass, never elevated via gsudo itself), the process-creation auditing countermeasure, and the `npx` auto-install footgun. Load when responding to "what asked for admin?", an unexpected elevation prompt, or post-incident process attribution.
-
-- `references/process-triage.md` — Steady-state process forensics: the three failure classes (spinner / orphan / hoarder) and why each needs different evidence, rate-vs-lineage sampling maths, commit-vs-working-set on Windows, the six-rung triage ladder, safe-termination rules (self-ancestry, leaves-first), Electron and agent-host topology including windowless-zombie and stale-build detection, and the worktree-teardown case that manufactures spinners. Load when a machine is hot, loud, or out of commit, or before terminating any process tree.
-
-- `references/remote-diagnostics.md` — PowerShell remoting patterns (WS-Man and SSH transports) for running this skill against a remote Windows box. Authentication models (Kerberos, NTLM, CredSSP, SSH keys), `TrustedHosts` setup for workgroup machines, the double-hop problem, common error catalog, and a complete worked example: stage the skill on the target via `Copy-Item -ToSession`, then invoke each script remotely and parse the JSON output. Load when troubleshooting "my dad's PC across town", a server in a datacenter, or any Windows machine where physical access isn't available.
+When to load each, in full: [references/reference-index.md](references/reference-index.md).
 
 ## Worked example
 
-A user reports "my PC takes minutes to boot and crashes sometimes." Running `scripts/health-audit.ps1` produces a panel that follows the [Terminal Panel Design System](../../docs/TERMINAL-DESIGN.md):
-
-```
-╭── 🩺 windows-ops · health-audit ──────────────────────────────────────────── WORKSTATION ───●
-│
-├── 4 disks · 1 failing · 2 unclean shutdowns
-│
-├── failing (5)
-│   ├── [storage] Disk 1 (HGST HDN728080ALE6…   Failing: Event7=1943, Event154=1646 …
-│   ├── [storage] Controller resets             20 storahci controller resets in 60d
-│   ├── [crash] 2026-05-15 00:57                BugCheck=0x0 — hard power loss
-│   ├── [crash] 2026-05-11 00:12                BugCheck=0x0 — power button held
-│   └── [crash] Pattern                         2 unclean shutdowns — investigate PSU
-│   │   ▲ back up + disconnect Disk 1 (Y) — see copy-tree.ps1 and drive-deps.ps1
-│
-├── warn (2) · pass (7) · info (4)
-│
-╰── R refresh · D drill · ? help ──────────────────────── ⬤ storage  • 2 crashes ───●
-```
-
-The verdict reads at a glance: storage is busted (⬤ — large, unmissable), two crashes recent (•), specific drive identified by `[Y]`, action items inlined under the critical alert with cross-script wayfinding. Drill into the suspect:
-
-```
-╭── 🩺 windows-ops · disk-health ──────────────────────────────────── Disk 1 / Y ───●
-│
-├── HGST HDN728080ALE604 · A4GNW91X · 7452 GB · HDD/SATA
-│
-├── FAILING (3)
-│   ├── Event 7 (bad block)              ▰▰▰▰▰▰▰▰▰▰      1943x
-│   ├── Event 154 (hw error)             ▰▰▰▰▰▰▰▰▰▰      1646x
-│   └── Controller resets                ▰▰▰▰▰▰▰▰▱▱      20x
-│   │   ▲ back up data, run drive-dependencies.ps1, then replace
-│
-╰── B back · C clone · ? help ────────────────────────────────────── ⬤ failing ───●
-```
-
-Pip bars show how many times over threshold each indicator runs. Before disconnecting, audit dependencies:
-
-```
-╭── 🩺 windows-ops · drive-dependencies ─────────────────────────────────── Y ───●
-│
-├── 0 system references · safe to disconnect
-│
-│   💡 no system mechanism references this drive
-│
-╰── B back · ? help ────────────────────────────────────────────────── • safe ───●
-```
-
-Three commands, three panels, complete decision tree. Then the same loop: `crash-triage.ps1` decodes the most recent crash with a T-relative pre-crash timeline; `safe-disable-startup.ps1 -List` panel-displays every Run-key / StartupFolder entry grouped by state; `copy-tree.ps1 Y:\important Z:\rescue -Mode Rescue` clones with `robocopy /R:0 /W:0 /MT:1` so retries don't accelerate the drive's death; `boot-perf.ps1` quantifies boot duration with capacity pip bars.
-
-The data was always there in the System log — this skill just asks for it correctly *and renders it like a proper instrument*.
-
-### Legacy workflow notes
-
-For non-panel verbose tracing add `-Verbose`. For machine-readable consumers add `-Json` (all scripts emit NDJSON / JSON suitable for `jq`). For piped contexts (no TTY) chrome rendering disables itself automatically and JSON-only output is appropriate.
-
-Full command sequence:
-
-```powershell
-scripts/health-audit.ps1                            # diagnose
-scripts/disk-health.ps1 -DriveLetter Y              # drill into suspect
-scripts/crash-triage.ps1                            # decode most recent crash
-scripts/drive-dependencies.ps1 -DriveLetter Y       # verify safe to disconnect
-scripts/copy-tree.ps1 Y:\ Z:\rescue -Mode Rescue     # salvage data
-scripts/safe-disable-startup.ps1 -List              # audit startup state
-scripts/safe-disable-startup.ps1 -Name 'Adobe*','Granola','MuseHub'  # cull bloat
-Set-Service AdobeARMservice -StartupType Manual     # service-tier (admin)
-# (physical) disconnect failing drive, reboot
-scripts/health-audit.ps1                            # verify clean
-```
+A slow-booting, crashing PC taken through the `health-audit.ps1`, `disk-health.ps1` and `drive-dependencies.ps1` panels, then the fix loop. Every script takes `-Json` (for `jq`) and `-Verbose`, and drops panel chrome when piped. Panels and the full command sequence: [references/worked-example.md](references/worked-example.md).

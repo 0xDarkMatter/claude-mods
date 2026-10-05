@@ -1,0 +1,8 @@
+{% set layouts = { grid: '_layouts/grid', list: '_layouts/list' } %}
+{% include layouts[craft.app.request.getQueryParam('layout')] ?? '_layouts/grid' %}
+<form method="post">
+  {{ csrfInput() }}
+  {{ redirectInput('account/thanks') }}
+</form>
+<p>Results for {{ craft.app.request.getQueryParam('q') }}</p>
+{{ submission.bio|purify }}

@@ -151,6 +151,64 @@ jobs:
           if [ "$rc" -eq 7 ]; then echo "::warning::nextjs-ops live check unreachable (npm registry) - skipped"; fi
           exit 0
 
+      - name: craftcms-ops Craft + plugin majors vs Packagist
+        run: |
+          set +e
+          python skills/craftcms-ops/scripts/check-craft-facts.py --live
+          rc=$?
+          if [ "$rc" -eq 10 ]; then echo "::error::craftcms-ops drift - a package left Packagist, or Craft/a plugin shipped a stable major past the documented line (e.g. Craft 6, Formie 4)"; exit 1; fi
+          if [ "$rc" -eq 7 ]; then echo "::warning::craftcms-ops live check unreachable (Packagist) - skipped"; fi
+          exit 0
+
+      - name: web-perf-ops Core Web Vitals thresholds + tool majors (web-vitals source, npm)
+        run: |
+          set +e
+          python skills/web-perf-ops/scripts/check-web-perf-facts.py --live
+          rc=$?
+          if [ "$rc" -eq 10 ]; then echo "::error::web-perf-ops drift - Google moved a Core Web Vitals threshold, a tool shipped a new major or was deprecated, or @lhci/cli changed its bundled Lighthouse (audit ids move with it)"; exit 1; fi
+          if [ "$rc" -eq 7 ]; then echo "::warning::web-perf-ops live check unreachable (unpkg / npm registry) - skipped"; fi
+          exit 0
+
+      - name: frontend-upgrade-ops packages vs npm + Packagist (majors + plugin-vue2 peer range)
+        run: |
+          set +e
+          python skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py --live
+          rc=$?
+          if [ "$rc" -eq 10 ]; then echo "::error::frontend-upgrade-ops drift - Vite/Vue/Pinia/craft-vite shipped a major past the documented line, a package is gone, or @vitejs/plugin-vue2 widened its vite peer range (the Mix-to-Vite sequencing advice depends on it)"; exit 1; fi
+          if [ "$rc" -eq 7 ]; then echo "::warning::frontend-upgrade-ops live check unreachable (npm/Packagist) - skipped"; fi
+          exit 0
+
+      - name: ddev-ops facts vs DDEV releases, docs, built-in commands + PHP/Node EOL
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          python skills/ddev-ops/scripts/check-ddev-facts.py --live
+          rc=$?
+          if [ "$rc" -eq 10 ]; then echo "::error::ddev-ops drift - DDEV shipped a new minor, changed a default (PHP/database/Node.js) or a built-in command, or a PHP/Node.js line reached end of life; re-verify assets/ddev-facts.json and the prose"; exit 1; fi
+          if [ "$rc" -eq 7 ]; then echo "::warning::ddev-ops live check unreachable (GitHub API / raw docs / endoflife.date) - skipped"; fi
+          exit 0
+
+      - name: repo-doctor AGENTS.md protocol vs Claude Code memory docs
+        run: |
+          set +e
+          python skills/repo-doctor/scripts/check-memory-docs.py --live
+          rc=$?
+          if [ "$rc" -eq 10 ]; then echo "::error::Claude Code's memory docs no longer state a fact the AGENTS.md protocol encodes (version floor, shadowing, the Project instructions setting, the 200-line target) - re-read the page and fix agents-md-protocol.md section 4"; exit 1; fi
+          if [ "$rc" -eq 7 ]; then echo "::warning::memory-docs live check unreachable (code.claude.com) - skipped"; fi
+          exit 0
+
+      - name: package-manager-ops Node/PHP tables + manager majors (nodejs.org, php.net, npm, Composer, GitHub)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          python skills/package-manager-ops/scripts/check-pm-facts.py --live
+          rc=$?
+          if [ "$rc" -eq 10 ]; then echo "::error::package-manager-ops drift - a Node or PHP release line or date moved, a manager shipped a new major, or Corepack/Volta/node-sass/Yarn 1/Bower changed status (pm-audit's end-of-life table depends on it)"; exit 1; fi
+          if [ "$rc" -eq 7 ]; then echo "::warning::package-manager-ops live check unreachable (nodejs.org / php.net / npm / getcomposer.org / GitHub) - skipped"; fi
+          exit 0
+
       - name: GitHub Action refs still resolve
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

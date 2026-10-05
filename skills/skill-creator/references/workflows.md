@@ -2,6 +2,18 @@
 
 Effective patterns for designing multi-step processes and conditional logic in skills.
 
+## Contents
+
+- Sequential Workflows
+- Conditional Logic
+- Iterative Refinement
+- Parallel Execution
+- Error Handling
+- Subagent Delegation Patterns
+- ASCII Diagrams for Understanding
+- Checklist Pattern
+- State Machine Pattern
+
 ## Sequential Workflows
 
 For tasks that follow a clear sequence, use numbered steps with verification checkpoints:

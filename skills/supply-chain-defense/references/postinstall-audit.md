@@ -1,5 +1,21 @@
 # Post-install behavioural audit — closing the on-disk gap
 
+`scripts/postinstall-audit.py`: the after-the-fact sweep of what already landed on disk.
+
+## Contents
+
+1. [The gap it closes](#the-gap-it-closes)
+2. [What it flags](#what-it-flags)
+3. [Incremental cache (daily-runnable)](#incremental-cache-daily-runnable)
+4. [Exit codes](#exit-codes)
+5. [--deep (GuardDog confirmation)](#--deep-guarddog-confirmation)
+6. [--live (registry takedown check)](#--live-registry-takedown-check)
+7. [Existing-tool evaluation (tool-first)](#existing-tool-evaluation-tool-first)
+8. [Scheduling — run it daily](#scheduling--run-it-daily)
+9. [When a finding fires](#when-a-finding-fires)
+
+## The gap it closes
+
 The pre-install controls in this skill (the `socket` wrapper, `preinstall-check.sh`
 cooldown, the install-scan hook) all act **before** a package executes. They are the
 right primary defence, but each has a miss case:
@@ -115,7 +131,17 @@ post-install scanning with tamper detection. GuardDog is the closest and is wire
 ### Windows Task Scheduler
 
 ```powershell
-$py  = (Get-Command python).Source
+# First of python3/python/py that really runs 3.8+ - the PowerShell twin of
+# scripts/run-python.sh. Get-Command alone can return the WindowsApps Store alias,
+# which exits without running anything, so the task would "succeed" doing nothing.
+$py = $null
+foreach ($c in 'python3', 'python', 'py') {
+    $cmd = Get-Command $c -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $cmd) { continue }
+    & $cmd.Source -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' 2>$null
+    if ($LASTEXITCODE -eq 0) { $py = $cmd.Source; break }
+}
+if (-not $py) { throw 'No Python 3.8+ found (tried python3, python, py)' }
 $arg = '"C:\Users\<you>\.claude\skills\supply-chain-defense\scripts\postinstall-audit.py"' +
        ' --root D:/code --root D:/lab' +
        ' --json'

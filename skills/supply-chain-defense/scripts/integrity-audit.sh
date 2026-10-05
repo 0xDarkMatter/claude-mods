@@ -42,6 +42,9 @@ done
 # the TSV/--json data product stays plain on stdout. The full enclosing panel
 # renders for a human at a TTY (or FORCE_COLOR); piped/quiet keeps the legacy
 # "== section ==" framing so any stderr consumer is unaffected.
+# The lib is OPTIONAL: this skill is copied standalone into other plugins with no
+# skills/_lib beside it, so the fallback must work and stay 7-bit ASCII (pinned by
+# the "standalone" block in tests/run.sh). Never source it unconditionally.
 __lib="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../_lib" 2>/dev/null && pwd || true)"
 if [ -n "${__lib:-}" ] && [ -f "$__lib/term.sh" ]; then . "$__lib/term.sh"; term_init 2; __HAVE_TERM=1
 else __HAVE_TERM=0; fi
@@ -175,12 +178,12 @@ section "GitHub Actions" "live OIDC publish trust (Mini Shai-Hulud entry point)"
 WF_DIR="$PROJECT_DIR/.github/workflows"
 if [[ -d "$WF_DIR" ]]; then
   if [[ "$HAS_ZIZMOR" -eq 1 ]]; then
-    info "running zizmor (richer workflow analysis) — see stderr"
+    info "running zizmor (richer workflow analysis) - see stderr"
     [[ "$QUIET" -eq 0 ]] && zizmor "$WF_DIR" >&2 2>&1 || true
   else
     # Surface the degradation at info level (NOT verbose-only) — the caller must
     # know they're getting the weaker check, or they'll assume full coverage.
-    info "NOTE: zizmor not installed — using weaker rg-based OIDC check only."
+    info "NOTE: zizmor not installed - using weaker rg-based OIDC check only."
     info "      Misses pull_request_target / template-injection. Install: uv tool install zizmor"
   fi
   while IFS= read -r wf; do

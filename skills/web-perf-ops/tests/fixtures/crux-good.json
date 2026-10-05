@@ -1,0 +1,21 @@
+{
+  "_fixture": "Hand-built minimal CrUX API records:queryRecord response (shape per developer.chrome.com/docs/crux/api, 2025-02-11). Every Core Web Vital is good. CLS p75 is a STRING, as the real API returns it. triage-vitals.py must exit 0 on this file and flag 'load delay' as the dominant LCP subpart.",
+  "record": {
+    "key": {"origin": "https://example.com", "formFactor": "PHONE"},
+    "metrics": {
+      "largest_contentful_paint": {"histogram": [{"start": 0, "end": 2500, "density": 0.86}], "percentiles": {"p75": 2140}},
+      "interaction_to_next_paint": {"histogram": [{"start": 0, "end": 200, "density": 0.91}], "percentiles": {"p75": 150}},
+      "cumulative_layout_shift": {"histogram": [{"start": "0.00", "end": "0.10", "density": 0.93}], "percentiles": {"p75": "0.03"}},
+      "first_contentful_paint": {"histogram": [{"start": 0, "end": 1800, "density": 0.80}], "percentiles": {"p75": 1650}},
+      "experimental_time_to_first_byte": {"histogram": [{"start": 0, "end": 800, "density": 0.78}], "percentiles": {"p75": 640}},
+      "largest_contentful_paint_image_time_to_first_byte": {"percentiles": {"p75": 610}},
+      "largest_contentful_paint_image_resource_load_delay": {"percentiles": {"p75": 820}},
+      "largest_contentful_paint_image_resource_load_duration": {"percentiles": {"p75": 410}},
+      "largest_contentful_paint_image_element_render_delay": {"percentiles": {"p75": 150}}
+    },
+    "collectionPeriod": {
+      "firstDate": {"year": 2026, "month": 9, "day": 6},
+      "lastDate": {"year": 2026, "month": 10, "day": 3}
+    }
+  }
+}

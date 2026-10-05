@@ -19,14 +19,11 @@ SKILL_DIR="$(cd "$HERE/.." && pwd)"
 SCAN="$SKILL_DIR/scripts/scan-hidden-unicode.py"
 SANITIZE="$SKILL_DIR/scripts/sanitize-content.py"
 
-# Pick a python that actually runs (Windows Store stub exits 49 / prints nothing).
-PY=""
-for cand in python3 python py; do
-  if command -v "$cand" >/dev/null 2>&1 && "$cand" -c "import sys" >/dev/null 2>&1; then
-    PY="$cand"; break
-  fi
-done
-[ -n "$PY" ] || { echo "no working python found" >&2; exit 5; }
+# The skill's own launcher picks the interpreter (first of python3/python/py
+# that really runs 3.8+, skipping the Windows Store `python3` alias, which exits
+# 49 and runs nothing), so the suite resolves Python the way the docs do.
+PY="$(bash "$SKILL_DIR/scripts/run-python.sh" --which 2>/dev/null)" \
+  || { echo "no Python 3.8+ found (scripts/run-python.sh --which)" >&2; exit 5; }
 
 PASS=0; FAIL=0
 ok()   { PASS=$((PASS+1)); echo "PASS  $1"; }
@@ -315,6 +312,73 @@ if printf '%s' "$DRIFT_OUT" | "$PY" -c "import json,sys; d=json.load(sys.stdin)[
 else
   bad "scan line numbers don't drift after a U+2028"
 fi
+
+# ---- run-python.sh: first of python3/python/py that is really 3.8+ ------------
+# On Windows `python3` is often the Microsoft Store alias (prints a hint, exits
+# 49, runs nothing), and an old interpreter passes a bare "import sys" probe yet
+# can't run these scripts. Fake both on PATH ahead of a `py` that wraps the real
+# interpreter: the launcher must skip them and land on py.
+RP="$SKILL_DIR/scripts/run-python.sh"
+REAL_PY="$(command -v "$PY")"
+FK="$TMP/fakepy"; mkdir -p "$FK/skip" "$FK/first" "$FK/none"
+printf '#!/bin/sh\necho "Python was not found; run without arguments to install from the Microsoft Store" >&2\nexit 49\n' > "$FK/stub"
+# Pre-3.8 stand-in: answers "import sys" (as a real 3.7 would), fails the version
+# gate, and dies on anything else the way 3.7 dies on 3.8+ syntax.
+printf '#!/bin/sh\ncase "$*" in *version_info*) exit 1 ;; "-c import sys"*) exit 0 ;; esac\necho "SyntaxError: invalid syntax" >&2; exit 1\n' > "$FK/old"
+printf '#!/bin/sh\nexec "%s" "$@"\n' "$REAL_PY" > "$FK/real"
+chmod +x "$FK/stub" "$FK/old" "$FK/real"
+cp "$FK/stub" "$FK/skip/python3"; cp "$FK/old" "$FK/skip/python"; cp "$FK/real" "$FK/skip/py"
+for n in python3 python py; do cp "$FK/real" "$FK/first/$n"; done
+cp "$FK/stub" "$FK/none/python3"; cp "$FK/old" "$FK/none/python"; cp "$FK/stub" "$FK/none/py"
+assert_exit 0 "launcher --help"                 -- bash "$RP" --help
+assert_exit 2 "launcher no args is USAGE"       -- bash "$RP"
+out="$(PATH="$FK/skip:$PATH" bash "$RP" --which 2>/dev/null || true)"
+[ "$out" = "py" ] && ok "launcher skips Store-stub python3 + pre-3.8 python, picks py" || bad "launcher want py past the broken python3/python, got '$out'"
+out="$(PATH="$FK/first:$PATH" bash "$RP" --which 2>/dev/null || true)"
+[ "$out" = "python3" ] && ok "launcher: first working candidate wins (python3)" || bad "launcher want python3 first, got '$out'"
+assert_exit 10 "launcher runs the scanner past a broken python3" -- env PATH="$FK/skip:$PATH" bash "$RP" "$SCAN" "$TMP/rlo.md"
+assert_exit 5  "launcher with no usable python is PRECONDITION"  -- env PATH="$FK/none" "$BASH" "$RP" --which
+
+# ---- the unicode hooks probe for 3.8+ the same way ----------------------------
+# Their old probe was a bare "import sys", which the pre-3.8 fake passes: the
+# SessionStart hook then printed an empty advisory for a CLEAN project, and the
+# pre-commit gate let a critical bidi override through. Repo layout only - the
+# hooks live in claude-mods' hooks/, beside skills/, not inside this folder.
+HOOKS="$SKILL_DIR/../../hooks"
+if [ -f "$HOOKS/session-start-unicode-scan.sh" ] && [ -f "$HOOKS/pre-commit-unicode-scan.sh" ] && command -v git >/dev/null 2>&1; then
+  mkdir -p "$TMP/hp-clean" "$TMP/hp-dirty" "$TMP/hp-git"
+  printf '# Rules\nRun the tests.\n' > "$TMP/hp-clean/AGENTS.md"
+  printf 'Always run tests.\xe2\x80\xaereversed\n' > "$TMP/hp-dirty/AGENTS.md"
+  out="$(CLAUDE_PROJECT_DIR="$TMP/hp-clean" PATH="$FK/skip:$PATH" bash "$HOOKS/session-start-unicode-scan.sh" </dev/null 2>&1 || true)"
+  [ -z "$out" ] && ok "session-start hook: clean project silent past a broken python3/python" \
+    || bad "session-start hook: clean project should be silent (got: ${out%%$'\n'*})"
+  out="$(CLAUDE_PROJECT_DIR="$TMP/hp-dirty" PATH="$FK/skip:$PATH" bash "$HOOKS/session-start-unicode-scan.sh" </dev/null 2>&1 || true)"
+  case "$out" in
+    *U+202E*) ok "session-start hook: names U+202E past a broken python3/python" ;;
+    *)        bad "session-start hook: should name U+202E (got: ${out%%$'\n'*})" ;;
+  esac
+  git -C "$TMP/hp-git" init -q
+  git -C "$TMP/hp-git" config core.autocrlf false   # no CRLF warning noise from a global autocrlf
+  printf 'Always run tests.\xe2\x80\xaereversed\n' > "$TMP/hp-git/AGENTS.md"
+  git -C "$TMP/hp-git" add AGENTS.md
+  rc=0; (cd "$TMP/hp-git" && PATH="$FK/skip:$PATH" bash "$HOOKS/pre-commit-unicode-scan.sh") >/dev/null 2>&1 || rc=$?
+  [ "$rc" -eq 1 ] && ok "pre-commit hook blocks a critical bidi override past a broken python3/python (exit 1)" \
+    || bad "pre-commit hook should block a critical bidi override (exit $rc, want 1)"
+else
+  echo "SKIP  unicode hooks not beside this skill (copied alone) or git missing"
+fi
+
+# ---- standalone: the skill folder copied ALONE --------------------------------
+# This folder is copied on its own into other plugins. Copy just this skill to a
+# bare temp dir and prove both scripts answer --help, run offline through the
+# copied launcher, and still find the bundled catalog.
+mkdir "$TMP/alone"; cp -R "$SKILL_DIR" "$TMP/alone/"
+A="$TMP/alone/$(basename "$SKILL_DIR")/scripts"   # a pack may rename the folder
+assert_exit 0  "alone: run-python.sh --which"                -- bash "$A/run-python.sh" --which
+assert_exit 0  "alone: scan --help"                          -- bash "$A/run-python.sh" "$A/scan-hidden-unicode.py" --help
+assert_exit 0  "alone: sanitize --help"                      -- bash "$A/run-python.sh" "$A/sanitize-content.py" --help
+assert_exit 10 "alone: scan flags RLO via the copied catalog" -- bash "$A/run-python.sh" "$A/scan-hidden-unicode.py" "$TMP/rlo.md"
+assert_exit 0  "alone: sanitize runs offline"                -- bash "$A/run-python.sh" "$A/sanitize-content.py" "$TMP/rlo.md" -o "$TMP/alone-rlo.clean" --quiet
 
 # ---- summary ------------------------------------------------------------------
 echo "----"

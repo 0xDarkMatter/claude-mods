@@ -6,6 +6,16 @@ Accurate command surface as of May 2026. Distilled from
 [github.com/SocketDev/socket-mcp](https://github.com/SocketDev/socket-mcp). Verify
 against the live docs before quoting versions — Socket iterates fast.
 
+## Contents
+
+1. [Is it free? — yes, and free covers this threat](#is-it-free--yes-and-free-covers-this-threat)
+2. [Installation](#installation)
+3. [Authentication](#authentication)
+4. [Core commands](#core-commands)
+5. [depscore MCP server — the Claude Code win (free, no key)](#depscore-mcp-server--the-claude-code-win-free-no-key)
+6. [GitHub app (layer 1 for PRs)](#github-app-layer-1-for-prs)
+7. [Sources](#sources)
+
 ## Is it free? — yes, and free covers this threat
 
 The **Socket CLI is open-source and free to install and run.** A **free account**

@@ -143,6 +143,50 @@ run "app-router-audit --help"           0 "$PY" skills/nextjs-ops/scripts/audit-
 run "app-router-audit fixture scan"    10 "$PY" skills/nextjs-ops/scripts/audit-app-router.py skills/nextjs-ops/tests/fixtures/app-sample
 run "app-router-audit clean control"    0 "$PY" skills/nextjs-ops/scripts/audit-app-router.py skills/nextjs-ops/tests/fixtures/app-sample/app/clean/page.tsx
 
+echo "== craftcms-ops: Craft + plugin major-version staleness verifier"
+run "craft-facts --offline consistent" 0 "$PY" skills/craftcms-ops/scripts/check-craft-facts.py --offline
+run "craft-facts --help"               0 "$PY" skills/craftcms-ops/scripts/check-craft-facts.py --help
+
+echo "== web-perf-ops: Core Web Vitals threshold verifier + report triage contract"
+run "web-perf-facts --offline consistent" 0 "$PY" skills/web-perf-ops/scripts/check-web-perf-facts.py --offline
+run "web-perf-facts --help"               0 "$PY" skills/web-perf-ops/scripts/check-web-perf-facts.py --help
+run "triage-vitals --help"                0 "$PY" skills/web-perf-ops/scripts/triage-vitals.py --help
+# The poor PSI fixture is the minefield (exit 10 = findings); the CrUX fixture is the clean control.
+run "triage-vitals poor PSI fixture"     10 "$PY" skills/web-perf-ops/scripts/triage-vitals.py skills/web-perf-ops/tests/fixtures/psi-poor.json
+run "triage-vitals good CrUX control"     0 "$PY" skills/web-perf-ops/scripts/triage-vitals.py skills/web-perf-ops/tests/fixtures/crux-good.json
+
+echo "== frontend-upgrade-ops: Vite/Vue/craft-vite fact/staleness verifier"
+run "frontend-upgrade-facts --offline consistent" 0 "$PY" skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py --offline
+run "frontend-upgrade-facts --help"               0 "$PY" skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py --help
+
+echo "== ddev-ops: DDEV facts staleness verifier + .ddev/ config auditor contract"
+run "ddev-facts --offline consistent" 0 "$PY" skills/ddev-ops/scripts/check-ddev-facts.py --offline
+run "ddev-facts --help"               0 "$PY" skills/ddev-ops/scripts/check-ddev-facts.py --help
+# Live comparisons exercised offline against recorded sources (no network in PR CI).
+run "ddev-facts --live vs fixtures"   0 "$PY" skills/ddev-ops/scripts/check-ddev-facts.py --live --today 2026-10-05 --fixtures skills/ddev-ops/tests/fixtures/live
+run "audit-ddev-config --help"        0 "$PY" skills/ddev-ops/scripts/audit-ddev-config.py --help
+# The minefield fixture is the landmine set (exit 10 = findings); the clean fixture is the control.
+run "audit-ddev-config minefield"    10 "$PY" skills/ddev-ops/scripts/audit-ddev-config.py skills/ddev-ops/tests/fixtures/minefield
+run "audit-ddev-config clean control" 0 "$PY" skills/ddev-ops/scripts/audit-ddev-config.py skills/ddev-ops/tests/fixtures/clean
+
+echo "== repo-doctor: AGENTS.md toolchain + Claude Code memory-docs verifier"
+# --offline: the protocol still states every encoded Claude Code fact and the two
+# scripts agree on the 200-line ceiling. --live runs in freshness.yml only.
+run "memory-docs --offline consistent" 0 "$PY" skills/repo-doctor/scripts/check-memory-docs.py --offline
+run "memory-docs --help"               0 "$PY" skills/repo-doctor/scripts/check-memory-docs.py --help
+run "repo-scan --help"                 0 "$PY" skills/repo-doctor/scripts/repo-scan.py --help
+run "repo-scan unknown section"        2 "$PY" skills/repo-doctor/scripts/repo-scan.py --only bogus
+run "agents-md --help"                 0 "$PY" skills/repo-doctor/scripts/agents-md.py --help
+run "agents-md no subcommand"          2 "$PY" skills/repo-doctor/scripts/agents-md.py
+
+echo "== package-manager-ops: Node/PHP/manager facts verifier + pm-audit contract"
+run "pm-facts --offline consistent" 0 "$PY" skills/package-manager-ops/scripts/check-pm-facts.py --offline
+run "pm-facts --help"               0 "$PY" skills/package-manager-ops/scripts/check-pm-facts.py --help
+run "pm-audit --help"               0 "$PY" skills/package-manager-ops/scripts/pm-audit.py --help
+run "pm-audit bad args"             2 "$PY" skills/package-manager-ops/scripts/pm-audit.py
+# The fixture matrix lives in the skill's own tests/run.sh: its fixtures carry a .fx
+# suffix (so scanners never read them as real manifests) and must be materialised first.
+
 echo "== protocol: every new verifier is executable + compiles"
 for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/claude-api-ops/scripts/context-budget.py \
@@ -157,7 +201,18 @@ for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/hono-ops/scripts/check-hono-facts.py \
          skills/hono-ops/scripts/route-inventory.py \
          skills/nextjs-ops/scripts/check-nextjs-facts.py \
-         skills/nextjs-ops/scripts/audit-app-router.py; do
+         skills/nextjs-ops/scripts/audit-app-router.py \
+         skills/craftcms-ops/scripts/check-craft-facts.py \
+         skills/web-perf-ops/scripts/check-web-perf-facts.py \
+         skills/web-perf-ops/scripts/triage-vitals.py \
+         skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py \
+         skills/ddev-ops/scripts/check-ddev-facts.py \
+         skills/ddev-ops/scripts/audit-ddev-config.py \
+         skills/repo-doctor/scripts/check-memory-docs.py \
+         skills/repo-doctor/scripts/repo-scan.py \
+         skills/repo-doctor/scripts/agents-md.py \
+         skills/package-manager-ops/scripts/check-pm-facts.py \
+         skills/package-manager-ops/scripts/pm-audit.py; do
     "$PY" -m py_compile "$s" 2>/dev/null && pass "py_compile $(basename "$s")" || bad "py_compile $(basename "$s")"
 done
 bash -n skills/terraform-ops/scripts/check-action-refs.sh 2>/dev/null \
@@ -191,6 +246,11 @@ purity "fleet-doctor"  bash skills/fleet-worker/scripts/fleet-doctor.sh --offlin
 purity "pricing-sync"  "$PY" skills/loop-ops/scripts/check-pricing-sync.py --offline
 purity "native-facts"  "$PY" skills/loop-ops/scripts/check-native-facts.py --offline
 purity "r-facts"       "$PY" skills/r-ops/scripts/check-r-facts.py --offline
+purity "craft-facts"   "$PY" skills/craftcms-ops/scripts/check-craft-facts.py --offline
+purity "frontend-upgrade-facts" "$PY" skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py --offline
+purity "ddev-facts"    "$PY" skills/ddev-ops/scripts/check-ddev-facts.py --offline
+purity "ddev-audit"    "$PY" skills/ddev-ops/scripts/audit-ddev-config.py skills/ddev-ops/tests/fixtures/minefield
+purity "pm-facts"      "$PY" skills/package-manager-ops/scripts/check-pm-facts.py --offline
 grep -q '_lib/term.sh' skills/terraform-ops/scripts/check-action-refs.sh \
     && pass "check-action-refs sources term.sh" || bad "check-action-refs missing term.sh"
 grep -q '_lib/term.sh' skills/fleet-worker/scripts/fleet-doctor.sh \
@@ -353,6 +413,20 @@ if [ -f "$__installer" ]; then
 else
     pass "install.ps1 absent - installer check skipped"
 fi
+
+echo "== portable skills: duplicated python launcher stays identical"
+# scripts/run-python.sh is copied into every skill that ships .py scripts on
+# purpose: each skill folder must run when copied alone into another plugin, so
+# it cannot reach one shared copy. The price is drift; this is the fence.
+__rp_ref=""
+for f in skills/*/scripts/run-python.sh; do
+    [ -f "$f" ] || continue
+    bash -n "$f" 2>/dev/null && pass "bash -n $f" || bad "bash -n $f"
+    if [ -z "$__rp_ref" ]; then __rp_ref="$f"; continue; fi
+    cmp -s "$__rp_ref" "$f" && pass "$f identical to $__rp_ref" \
+        || bad "$f drifted from $__rp_ref - keep every copy byte-identical"
+done
+[ -n "$__rp_ref" ] || bad "no skills/*/scripts/run-python.sh found (portable python launcher missing)"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "resource checks: clean"; exit 0; fi

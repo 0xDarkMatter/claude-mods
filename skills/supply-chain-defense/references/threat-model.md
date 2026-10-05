@@ -4,6 +4,15 @@ Distilled from the "Sandworms in the Registry" briefing (May 2026) and the publi
 incident reporting it cites. This is the *why* behind every directive in the
 skill and the `supply-chain.md` rule.
 
+## Contents
+
+1. [The shift in attacker behaviour (last 90 days)](#the-shift-in-attacker-behaviour-last-90-days)
+2. [Timeline of named incidents](#timeline-of-named-incidents)
+3. [Why each legacy control fails](#why-each-legacy-control-fails)
+4. [Coverage — which control catches which vector](#coverage--which-control-catches-which-vector)
+5. [Indicators of compromise (what behavioural scanners flag)](#indicators-of-compromise-what-behavioural-scanners-flag)
+6. [What the next 12 months look like](#what-the-next-12-months-look-like)
+
 ## The shift in attacker behaviour (last 90 days)
 
 Attackers stopped typosquatting and moved to compromising packages you *actually

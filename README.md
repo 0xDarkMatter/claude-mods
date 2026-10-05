@@ -12,13 +12,26 @@
 
 > *Doctrine you can execute. Knowledge that knows when it's stale. Agents that land their own work.*
 
-**claude-mods** is a Claude Code plugin built on one premise: a skill that only *tells* the model something is a suggestion, and a skill that ships a gate is a guarantee. Its 108 skills carry the expert depth you'd expect - React, Rust, PostgreSQL, Cloudflare Workers, Next.js - but the ones that earn the install are the ones that run *agents*: a headless-worker spawner, a test-gated landing queue for parallel branches, a graduated-autonomy ladder for scheduled loops, and a security layer pointed at the agent itself. 58 skills ship executable tooling, 52 ship their own test suites, and 21 carry staleness verifiers that trip when the world moves under them.
+**claude-mods** is a Claude Code plugin built on one premise: a skill that only *tells* the model something is a suggestion, and a skill that ships a gate is a guarantee. Its 112 skills carry the expert depth you'd expect - React, Rust, PostgreSQL, Cloudflare Workers, Next.js - but the ones that earn the install are the ones that run *agents*: a headless-worker spawner, a test-gated landing queue for parallel branches, a graduated-autonomy ladder for scheduled loops, and a security layer pointed at the agent itself. 63 skills ship executable tooling, 57 ship their own test suites, and 28 carry staleness verifiers that trip when the world moves under them.
 
 Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms) and Anthropic's [patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), it installs as a standard plugin and toggles off as easily as it toggles on.
 
-**3 agents. 108 skills. 13 styles. 13 hooks. 15 rules. One install.**
+**3 agents. 112 skills. 13 styles. 13 hooks. 15 rules. One install.**
 
 ## Recent Updates
+
+**Unreleased** (October 2026, not yet tagged)
+- 🐳 **`ddev-ops` skill** - DDEV, the local stack behind most PHP agency sites, fails quietly: a default that moved under an unpinned project (PHP 8.3 to 8.4 in v1.25.0), a retired key it silently ignores, one developer's Mutagen setting committed for the whole team. `audit-ddev-config.py` reads a project's `.ddev/` and runs 17 checks. The commonest in a read of 36 agency repositories: a taken-over `craft` command shadowing DDEV's built-in (19), committed router ports (18), committed Mutagen (14) and host SSH-agent forwarding into containers (13); it also catches push recipes that can overwrite production and secrets in committed env files. References cover pinning, sanitised pulls, snapshots, Mutagen and WSL2, add-ons, Xdebug and a troubleshooting runbook; a weekly verifier tracks DDEV's releases, defaults and PHP/Node.js end of life.
+- 📝 **AGENTS.md: create, audit, upgrade, survey** - `repo-doctor` now owns the entry doc's whole lifecycle. `repo-scan.py` deep-scans a checkout into facts that each cite their source, and mines git history for landmine *questions*: files that always change together, fix clusters, config edits that force a rebuild. `agents-md.py scaffold` drafts only from those facts, `audit --diff` proposes a reviewable patch (a split past 200 lines, dead commands, staleness in commits), and `survey --org` reads a whole GitHub org without cloning. The fact that drives half of it: Claude Code reads AGENTS.md only when no CLAUDE.md exists, so a one-line "see AGENTS.md" pointer hides the file it points to.
+- 📦 **`package-manager-ops` skill** - npm, Yarn, pnpm, Bun and Composer as a site actually uses them: one lockfile (and which one wins when a repo has two), `npm ci` and `composer install` in CI and deploy, Node and PHP pins that agree with DDEV, and npx that never fetches a stranger's latest. It ships `pm-audit`, a read-only scan for conflicting or stale lockfiles, missing or end-of-life Node and PHP pins, unpinned npx, native CLIs routed through npm, Bower, node-sass and committed registry tokens. The research changed the advice: npm 12 stopped reading `npm-shrinkwrap.json`, Corepack left the Node distribution at 25.0.0, pnpm 11 stopped reading package.json's `pnpm` field, and npm, pnpm, Yarn and Bun now all block dependency install scripts by default.
+- ⚡ **`web-perf-ops` skill** - Core Web Vitals, method first: field data (CrUX, RUM) decides whether there is a problem, lab data explains it, and each fix targets the failing metric's dominant subpart rather than the Lighthouse score. `triage-vitals.py` rates a Lighthouse, PageSpeed or CrUX report and routes every finding to the reference that holds the fix; a Craft lever map covers Blitz, transforms, craft-vite and the queue.
+- 🔼 **`frontend-upgrade-ops` skill** - the two upgrades a Craft/Twig site keeps meeting: Laravel Mix or Webpack to Vite via craft-vite, and Vue 2 to Vue 3 through `@vue/compat`. It leads with a migrate-or-replace table (most agency Vue is a handful of widgets that Alpine or plain HTML does better) and one sequencing rule: the bundler and the framework never move in the same deploy.
+- 🛡️ **`security-ops` speaks PHP, Twig, Craft and OWASP Top 10:2025** - one-topic references for Twig escaping and template injection, Craft CSRF, `allowAnonymous` and GraphQL scoping, PHP deserialisation, Composer audit and DDEV-versus-production drift; PHP and Craft checks in the scanner; `Axx:2025` tags with a 2021 crosswalk so older reports stay readable.
+- 🏗️ **`craftcms-ops` rebuilt for real agency builds** - one-topic references for SEOmatic, Blitz, Formie, CKEditor, DDEV, Codeception and the 3-to-4-to-5 upgrade, checked against the vendor docs (which overturned several common assumptions: Blitz Hints is gone, CKEditor 5.x dropped global configs, Vite 5+ moved the manifest), plus a verifier that watches the plugin majors on Packagist. `a11y-ops` gains the matching Twig reference.
+- ✂️ **Skills that survive compaction** - after auto-compaction Claude Code keeps only the first 5,000 tokens of each invoked skill, so a long SKILL.md silently loses its tail mid-session. `tests/skill-size.sh` warns past that line, the skills over it now lead with their procedure and keep the detail in `references/`, and the docs state one size rule with its sources.
+- ✅ **Agent Skills spec gate** - `tests/spec.sh` runs the spec's own reference validator, `skills-ref`, over every skill in `just check` and CI, with the one deliberate deviation written down: Claude Code's own fields stay top-level, because Claude Code reads them nowhere else.
+- 🧳 **Portable security skills** - `supply-chain-defense` and `prompt-injection-defense` now run when copied alone into another plugin. The copy-alone test promptly caught a registry-down check that could never exit 7 and hooks that could pick a Python too old to run the scanner.
+- 🚦 **`deploy-gating` rule** - a child session never deploys: background agents, chips, fleet workers and scheduled runs build, test and commit, then stop and report the exact command. The case agents miss is spelled out: merging to a branch that deploys on merge *is* a deploy.
 
 **v3.8.0** (August 2026)
 - ♿ **`a11y-ops` skill** - accessibility as a dated legal requirement, not a quality preference. Carries the standards-and-law map (EAA supervision live since June, **ADA Title II deadlines extended to April 2027/2028** - most published advice still quotes the old dates), a four-pass audit workflow built around the fact that automated tooling finds only ~30-40% of WCAG failures, and `scan-a11y.py` as a static pre-flight with an exit-10 CI signal.
@@ -83,9 +96,9 @@ An agent that installs packages, reads web pages and edits its own settings has 
 
 ### 3. Its knowledge knows when it's stale
 
-A skill that says "modern R" or "Hono v4" is making a claim that will be false within a year. claude-mods makes those claims **machine-checked**: 21 skills ship a `check-*-facts` verifier with an `--offline` mode (does the prose still match the catalogue?) and a `--live` mode (does the catalogue still match the world?). CI runs the first on every push; a scheduled workflow runs the second every Monday. When TypeScript ships a native compiler or ADA deadlines move, a tripwire fires instead of a reference quietly rotting.
+A skill that says "modern R" or "Hono v4" is making a claim that will be false within a year. claude-mods makes those claims **machine-checked**: 22 skills ship a `check-*-facts` verifier with an `--offline` mode (does the prose still match the catalogue?) and a `--live` mode (does the catalogue still match the world?). CI runs the first on every push; a scheduled workflow runs the second every Monday. When TypeScript ships a native compiler or ADA deadlines move, a tripwire fires instead of a reference quietly rotting.
 
-The same instinct runs through the tooling: 58 skills ship real scripts, 52 ship their own `tests/run.sh`, 44 gates use exit-10 as a machine-readable findings signal, and 5.6 MB of references load progressively - ~100 tokens per skill until one is relevant.
+The same instinct runs through the tooling: 63 skills ship real scripts, 57 ship their own `tests/run.sh`, 44 gates use exit-10 as a machine-readable findings signal, and 5.6 MB of references load progressively - ~100 tokens per skill until one is relevant.
 
 ### 4. The stacks are fuel, not filler
 
@@ -96,7 +109,7 @@ Each one is a **currency layer over the model's priors** - React, Vue, Next.js, 
 - **Production-mined, not tutorial-shaped.** 200 KB on SQLite/D1 carries the migration that times out but applies and the `.batch()` semantics that bite; 152 KB on Postgres; 104 KB on TypeScript's TS 7 adoption path; `hono-ops` distilled from a live multi-tenant Worker. The gotchas the docs don't mention are the ones an agent walks straight into.
 - **Version-aware, not newest-wins.** `nextjs-ops`' audit reads the project's installed major and gates its rules on *that* - it won't demand a v16 idiom of a v14 codebase. A skill that only knows the latest is a liability on any repo older than a month.
 - **Pinned and verified.** Eleven stack skills carry an `assets/*-facts.json` with an `as_of` date, and pillar 3's verifiers check it against the world. The claim "modern TypeScript" is machine-enforced, not asserted.
-- **Nearly free to carry.** ~100 tokens per skill until one triggers, then references load on demand. 108 skills cost roughly 10k tokens of descriptions; the 5.6 MB behind them costs nothing until you're actually in that stack.
+- **Nearly free to carry.** ~100 tokens per skill until one triggers, then references load on demand. 112 skills cost roughly 10k tokens of descriptions; the 5.6 MB behind them costs nothing until you're actually in that stack.
 
 And the payoff loops back to pillar 1. A `fleet-worker`'s isolated config dir starts clean - you *provision* skills into it. A GLM worker with `hono-ops` loaded writes better Hono than GLM alone, which is why the skill's own docs call provisioning *"often the cheapest way to lift a weak model's output on a specialized task."* The stack skills are what turn "a cheaper brain" from a cost-cut into a real option: the discipline layers decide *what* an agent may do, and the stack layers decide whether what it does is any good.
 
@@ -119,7 +132,7 @@ claude-mods/
 ├── .claude-plugin/     # Plugin metadata
 ├── agents/             # Expert subagents (3)
 ├── commands/           # Slash commands (3)
-├── skills/             # Custom skills (108)
+├── skills/             # Custom skills (112)
 ├── output-styles/      # Response personalities
 ├── hooks/              # Hook examples & docs
 ├── rules/              # Claude Code rules
@@ -186,18 +199,18 @@ All skills comply with the [Agent Skills specification](https://agentskills.io/s
 
 ```
 skill-name/
-├── SKILL.md              # Core workflow (< 500 lines)
+├── SKILL.md              # Core workflow (< 500 lines and ~5k tokens)
 ├── scripts/              # Executable code (optional)
 ├── references/           # Documentation loaded as needed (optional)
 └── assets/               # Output templates/files (optional)
 ```
 
 **Progressive Loading:**
-1. Metadata (name + description) - Always in context (~100 words)
-2. SKILL.md body - Loaded when skill triggers (<5k words)
+1. Metadata (name + description) - Always in context (~100 tokens)
+2. SKILL.md body - Loaded when skill triggers (< 5,000 tokens; after auto-compaction Claude Code keeps only the first 5,000)
 3. Bundled resources - Loaded only when Claude needs them
 
-Skills carry the full layout by convention - a directory may sit empty until it's needed, so bundled resources always have an obvious home. In practice 93 skills ship references and 58 ship scripts.
+Skills carry the full layout by convention - a directory may sit empty until it's needed, so bundled resources always have an obvious home. In practice 95 skills ship references and 61 ship scripts.
 
 See [skill-creator](skills/skill-creator/) for the complete guide.
 
@@ -226,14 +239,14 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [vue-ops](skills/vue-ops/) | Vue 3 Composition API, Pinia, Vue Router, Nuxt 3 |
 | [astro-ops](skills/astro-ops/) | Astro islands, content collections, rendering strategies, deployment |
 | [laravel-ops](skills/laravel-ops/) | Laravel Eloquent, architecture, authentication, testing with Pest |
-| [craftcms-ops](skills/craftcms-ops/) | Craft CMS 5 - entries/sections/fields, Matrix-as-entries, Twig, element queries, GraphQL, plugins |
+| [craftcms-ops](skills/craftcms-ops/) | Craft CMS 3/4/5 agency builds - Matrix-as-entries, Twig + escaping, eager loading, SEOmatic, Blitz, Formie, CKEditor, craft-vite, DDEV, Codeception, upgrades, performance |
 | [payloadcms-ops](skills/payloadcms-ops/) | Payload CMS 3 (Next.js-native) - collections/globals, Local API, access control, hooks, fields |
 | [hono-ops](skills/hono-ops/) | Hono v4 on Cloudflare Workers - app composition + sub-app mounting, middleware ordering/auth boundaries, typed errors + onError, zValidator vs hand-rolled validation, SPA co-serving, hc RPC vs typed clients, vitest-pool-workers testing, streaming/SSE/WebSockets; route-inventory + middleware-order linter, staleness verifier |
 | [cli-ops](skills/cli-ops/) | Production CLI tool patterns - agentic workflows, stream separation, exit codes |
 | [bash-ops](skills/bash-ops/) | Defensive Bash - strict mode, traps, safe argument parsing, semantic exit codes, shellcheck, CI scripts |
 | [cypress-ops](skills/cypress-ops/) | Cypress e2e + component testing - data-test selectors, cy.intercept, cy.session, Test Replay, flake diagnosis |
 | [tailwind-ops](skills/tailwind-ops/) | Tailwind CSS patterns, v4 migration, components, configuration |
-| [a11y-ops](skills/a11y-ops/) | Web accessibility end to end - WCAG 2.2 conformance and the legal map (EAA supervision from 2026, ADA Title II deadlines extended to 2027/2028), the four audit passes and what each can actually detect (automation finds ~30-40%), the twelve recurring failures with class-level fixes, and an honest accessibility-statement template; `scan-a11y.py` static pre-flight over HTML/JSX/Vue/Svelte/Astro with exit-10 CI signal |
+| [a11y-ops](skills/a11y-ops/) | Web accessibility end to end - WCAG 2.2 conformance and the legal map (EAA supervision from 2026, ADA Title II deadlines extended to 2027/2028), the four audit passes and what each can actually detect (automation finds ~30-40%), the twelve recurring failures with class-level fixes, an honest accessibility-statement template, and a server-rendered Craft CMS/Twig reference (headings across partials, asset alt text, Formie/CKEditor markup, multi-site `lang`, axe/pa11y-ci against DDEV); `scan-a11y.py` static pre-flight over HTML/JSX/Vue/Svelte/Astro with exit-10 CI signal |
 | [color-ops](skills/color-ops/) | Color spaces, WCAG/APCA contrast checker, palette + harmony generators, CSS color functions, design tokens, color converter |
 | [icon-ops](skills/icon-ops/) | SVG icons for web UI end-to-end - set selection (grid/family/stroke-width lock-in), licence and trademark traps (brand marks are not cleared by a CC0 file licence; aggregators hide the originating set), currentColor theming, sprite vs inline vs component delivery, the external-`<use>` CORS trap, and the two accessibility cases; `normalize-icon.py` strips vendor cruft and rebinds paints (`--check` as a CI gate, `--symbol` for sprite assembly) |
 | [figma-ops](skills/figma-ops/) | Router + composition pipeline for the official Figma MCP - which of the ~65 Figma skills/tools to load for a job, multi-account routing (one MCP server per Figma org), and a scripted capture→curate→compose flow for moodboards and reference boards: `stage-assets` (slugs + true dimensions, `vetted:false` by construction) → `plan-layout` (grid / plus / loose-plus, seeded jitter, overlap budget) → `emit-placement` (generates the exact `use_figma` scripts; refuses unvetted images) → `verify-board` (read-back vs plan: 400×300 frames, drift, z-order, budget) → screenshot; `verify-freshness` trips when the router names a plugin skill that no longer exists |
@@ -270,6 +283,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | Skill | Description |
 |-------|-------------|
 | [docker-ops](skills/docker-ops/) | Dockerfile best practices, multi-stage builds, Compose, optimization |
+| [ddev-ops](skills/ddev-ops/) | DDEV local environments - version pinning, `config.local.yaml` and `.env` files, snapshots and sanitised pulls, Mutagen/WSL2, add-ons, Xdebug, troubleshooting, plus a `.ddev/` landmine auditor |
 | [ci-cd-ops](skills/ci-cd-ops/) | GitHub Actions, release automation, testing pipelines |
 | [container-orchestration](skills/container-orchestration/) | Kubernetes, Helm, pod patterns |
 | [nginx-ops](skills/nginx-ops/) | Nginx reverse proxy, SSL/TLS, load balancing, performance tuning |
@@ -278,10 +292,11 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [monitoring-ops](skills/monitoring-ops/) | Prometheus, Grafana, OpenTelemetry, structured logging, alerting |
 | [debug-ops](skills/debug-ops/) | Systematic debugging, language-specific debuggers, common scenarios |
 | [perf-ops](skills/perf-ops/) | Performance profiling - CPU, memory, bundle analysis, load testing, flamegraphs |
+| [web-perf-ops](skills/web-perf-ops/) | Frontend page speed - Core Web Vitals (LCP/INP/CLS) field-vs-lab method, report triage script, image/font/JS/CSS/caching fixes, Lighthouse CI budgets, Craft CMS levers, threshold staleness verifier |
 | [terraform-ops](skills/terraform-ops/) | Terraform/OpenTofu IaC - state management, module patterns, OIDC CI/CD, drift detection, secrets |
 | [supply-chain-defense](skills/supply-chain-defense/) | Behavioural-first dependency security - Socket.dev (free CLI + depscore MCP), exposure-check (IOC match across npm/pnpm/yarn/bun/PyPI/Composer/Cargo/Go/RubyGems + extensions), integrity-audit (worm persistence), scan-extensions, install/manifest hooks |
 | [prompt-injection-defense](skills/prompt-injection-defense/) | Instruction-integrity defense - hidden Unicode scanning (bidi/Trojan Source, tag-block smuggling, zero-width), content sanitization, trust-boundary doctrine |
-| [security-ops](skills/security-ops/) | Reactive security auditing - 3 parallel agents (dependency CVEs, SAST patterns, auth/config review) consolidated into OWASP-mapped report |
+| [security-ops](skills/security-ops/) | Reactive security auditing - 3 parallel agents (dependency CVEs, SAST patterns, auth/config review) consolidated into OWASP-mapped report; PHP 8, Twig and Craft CMS references (CSRF, allowAnonymous, devMode, GraphQL, uploads, advisories, DDEV drift) |
 | [portless-ops](skills/portless-ops/) | Local-dev HTTPS proxy operations for Vercel Labs' portless - TLD selection, supervisor pairing, Windows gotchas |
 | [process-compose-ops](skills/process-compose-ops/) | Process Compose supervisor operations - YAML schema, readiness probes, dependency patterns, boot persistence |
 | [pypi-ops](skills/pypi-ops/) | PyPI publishing - OIDC Trusted Publishing + PEP 740 attestations, the pending-publisher first-publish fix (`invalid-publisher`), preflight/diagnose/pin-verifier scripts, hardened `publish.yml`, uv & twine local paths |
@@ -320,7 +335,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [fleet-worker](skills/fleet-worker/) | Delegate tasks to cheap headless GLM (or any Anthropic-compatible) workers - per-task git worktree + isolated config, result gating, fan-out that hands winning branches to fleet-ops landing |
 | [summon](skills/summon/) | Claude Desktop session toolbox - cross-account transfer, recovery picker, cwd rebind, store doctor |
 | [doc-scanner](skills/doc-scanner/) | Scan and synthesize project documentation |
-| [repo-doctor](skills/repo-doctor/) | Audit any repo against the agentic-quality doctrine - entry docs, comment contracts, structure, enforcement gates, doc-pairing; scorer with --json + CI --strict, plus comment-doctrine / entry-docs / monorepo-structure references |
+| [repo-doctor](skills/repo-doctor/) | Audit any repo against the agentic-quality doctrine - entry docs, comment contracts, structure, enforcement gates, doc-pairing (scorer with --json + CI --strict) - and create, audit, upgrade and org-survey AGENTS.md: sourced deep scan with git-history landmine questions, scaffold, `audit --diff` patch, read-only `survey --org`; protocol, comment-doctrine and monorepo-structure references |
 | [adr-ops](skills/adr-ops/) | Architecture Decision Records - when-to-write, canonical format, supersession lifecycle, scaffold/index/lint tools |
 | [okf-ops](skills/okf-ops/) | Open Knowledge Format - assess a doc repo's frontmatter-readiness, validate a bundle for conformance, decide per-repo adoption |
 | [project-planner](skills/project-planner/) | Track stale plans, suggest session commands |
@@ -343,6 +358,8 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [testgen](skills/testgen/) | Generate tests with expert routing and framework detection. |
 | [techdebt](skills/techdebt/) | Technical debt detection using parallel subagents. |
 | [migrate-ops](skills/migrate-ops/) | Framework/language migration patterns, version upgrades, codemods |
+| [frontend-upgrade-ops](skills/frontend-upgrade-ops/) | Server-rendered (Craft/Twig) front-end upgrades - Laravel Mix/Webpack to Vite via craft-vite (DDEV dev server, HMR, Twig asset tags, legacy builds), Vue 2 to Vue 3 via `@vue/compat`, Vuex to Pinia, Vue islands in Twig, and a migrate-or-replace-with-Alpine decision table; staleness verifier with npm + Packagist + peer-range checks |
+| [package-manager-ops](skills/package-manager-ops/) | Day-to-day npm, Yarn, pnpm, Bun and Composer - one lockfile (and how to pick when there are two), frozen installs for CI and deploy, Node and PHP pins that agree with DDEV, pinned npx and no native CLIs through it, ERESOLVE, blocked dependency install scripts, registries and auth, caches, and exits from Bower, node-sass, Yarn 1 and end-of-life PHP; `pm-audit` repo scanner (25 finding ids, 37 fixture cases) and a live Node/PHP/manager facts verifier |
 | [refactor-ops](skills/refactor-ops/) | Safe refactoring patterns, code smell detection, test-driven methodology |
 | [scaffold](skills/scaffold/) | Project scaffolding - generate boilerplate for APIs, web apps, CLIs, monorepos |
 | [iterate](skills/iterate/) | Autonomous improvement loop - modify, measure, keep or discard, repeat. Inspired by Karpathy's autoresearch. |
@@ -533,7 +550,7 @@ Requires a model that supports `tool_reference` blocks: Sonnet 4.5, Haiku 4.5, O
 
 ### Skill Description Budget
 
-With 90+ skills installed (this plugin alone ships 108), skill descriptions can overflow the listing budget. All skill names are always listed, but descriptions share a budget of **1% of the model context window** — on overflow, least-invoked skills lose their descriptions first and **silently stop auto-triggering** (explicit `/name` invocation still works). Each skill's combined `description` + `when_to_use` is also truncated at **1,536 chars**, so trigger phrases belong at the front.
+With 90+ skills installed (this plugin alone ships 112), skill descriptions can overflow the listing budget. All skill names are always listed, but descriptions share a budget of **1% of the model context window** — on overflow, least-invoked skills lose their descriptions first and **silently stop auto-triggering** (explicit `/name` invocation still works). Each skill's combined `description` + `when_to_use` is also truncated at **1,536 chars**, so trigger phrases belong at the front.
 
 - **Check:** run `/doctor` — it shows whether the budget is overflowing and which skills are affected.
 - **Fix:** demote or disable skills you don't use via `skillOverrides` in settings (`"on"` / `"name-only"` / `"user-invocable-only"` / `"off"` per skill, or `/skills` + `Space`). Plugin skills are managed via `/plugin` instead.

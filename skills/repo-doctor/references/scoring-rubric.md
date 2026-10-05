@@ -15,11 +15,12 @@ that genuinely didn't change (then touch it in the next honest commit, don't chu
 
 | Check | Threshold | Why | Fix |
 |---|---|---|---|
-| AGENTS.md or CLAUDE.md exists | crit if absent (score 0) | Agents enter blind; every session re-derives the repo | Generate via `doc-scanner`; seed from assets/AGENTS-template.md |
-| Landmines section | warn | The highest-value lines in the file; absence means non-obvious breakage is tribal knowledge | Add `## Landmines` — what breaks, why, procedure (entry-docs.md §anatomy) |
-| Length ≤ 250 lines | warn above | Recurring per-session token tax; bloat = human walkthroughs in the agent file | Evict setup guides to README/docs, keep deltas + landmines |
+| AGENTS.md or CLAUDE.md exists | crit if absent (score 0) | Agents enter blind; every session re-derives the repo | `agents-md.py scaffold` (sourced draft); hand skeleton: assets/AGENTS-template.md |
+| Landmines section | warn | The highest-value lines in the file; absence means non-obvious breakage is tribal knowledge | Add `## Landmines`: what breaks, why, procedure (agents-md-protocol.md section 1) |
+| Length ≤ 200 lines | warn above | Claude Code's documented target ("longer files consume more context and reduce adherence"); the house target is 150 | `agents-md.py audit --diff` proposes the split (protocol section 3) |
 | Touched within 15 commits | warn above | Commit-lag is the real staleness metric; mtime lies (audit: 100+-commit drift behind week-old mtimes) | Verify claims vs code; update in the same commit as the fix |
-| CLAUDE.md duplicates AGENTS.md | warn | Duplicates diverge into contradictions | Reduce to pointer or deltas-only (entry-docs.md §verdict) |
+| CLAUDE.md or .claude/CLAUDE.md without an `@AGENTS.md` import | warn, -1 | Claude Code then reads only the CLAUDE.md files: AGENTS.md is invisible to every Claude session, prose pointers included | Put `@AGENTS.md` on its first line (protocol section 4); the full check (CLAUDE.local.md, parents, nested) is `agents-md.py audit` |
+| CLAUDE.md imports AGENTS.md but duplicates it | warn | Duplicates diverge into contradictions | Keep Claude-only deltas below the import |
 
 ## docs_health (weight 1.5)
 

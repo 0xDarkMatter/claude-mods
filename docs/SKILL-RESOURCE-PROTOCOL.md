@@ -33,7 +33,7 @@ skill scripts in this repo, the strong ones already follow this —
 | Resource | Ship one when… |
 |---|---|
 | `scripts/*` | The agent would re-derive the same logic every task, OR the invocation has >3 flags, OR it's a known-good decoder/validator/verifier |
-| `references/*.md` | A sub-topic is too long for the SKILL.md body (keep body < 500 lines); one concept per file, kebab-case, TOC if > 300 lines |
+| `references/*.md` | A sub-topic is too long for the SKILL.md body (body under 500 lines and ~5,000 tokens); one concept per file, kebab-case, linked directly from SKILL.md, and a `## Contents` list at the top once it passes 100 lines. The full rule and its sources: "The size rule" in [SKILL-SUBAGENT-REFERENCE.md](SKILL-SUBAGENT-REFERENCE.md#rules-for-claude-mods-skills) |
 | `assets/*` | A task needs a known-good scaffold — a config template, a starter schema, canonical lookup data |
 
 Every reference and asset MUST be cited from `SKILL.md` with enough context that the
@@ -58,6 +58,17 @@ A script under `scripts/` is an **agent-facing tool**. It MUST satisfy all of:
 
 Default to **stdlib + common shell tools** (`jq`, `git`, `curl`). Check optional tools
 with `command -v` and exit `5` (missing-dep) with an install hint, never a stack trace.
+
+**Portable skills** - ones copied standalone into other plugins, today
+`supply-chain-defense`, `prompt-injection-defense`, `ddev-ops` and `package-manager-ops` - must run with nothing beside
+their folder: no `../../` dependency; `skills/_lib/term.sh` sourced only behind a guard
+with a 7-bit ASCII fallback ([TERMINAL-DESIGN.md](TERMINAL-DESIGN.md) §9); `.py`
+scripts launched through a bundled `scripts/run-python.sh`, which runs the first of
+`python3` / `python` / `py` that really is 3.8+ (on Windows `python3` is often the
+Microsoft Store alias, which exits 49 without running anything, and an `env python3`
+shebang lands on it too). Their `tests/run.sh` copies the folder alone and runs every
+script's `--help` and offline mode. The launcher is duplicated per skill on purpose;
+`tests/check-resources.sh` fails if the copies drift.
 
 ---
 

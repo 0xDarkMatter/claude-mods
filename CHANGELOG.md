@@ -8,6 +8,140 @@ feature releases live in the README "Recent Updates" section.
 
 ### Added
 
+- **`ddev-ops` skill** - DDEV local environments, owned in one place. A 2026-10-05 read of
+  36 DDEV-based agency repositories shaped it: `scripts/audit-ddev-config.py` runs 17
+  checks, most seen there and each with its reason from DDEV's docs or source (v1.25.4):
+  unpinned PHP and database versions, end-of-life PHP and Node.js, per-developer settings
+  committed for the team (`performance_mode`, router ports, Xdebug), keys DDEV now
+  ignores, `upload_dirs` written from the project root when DDEV resolves them from the
+  docroot, project commands that shadow DDEV's built-ins, CRLF command files, host
+  SSH-agent forwarding into containers, provider recipes that can push, and credentials
+  in committed env files (named, never printed). Seven references cover configuration and
+  env files, database workflows and sanitised pulls (with a pull-only recipe asset),
+  Mutagen, WSL2 and Docker providers, add-ons, commands and hooks, Node and dev-server
+  ports, Xdebug and sharing, and a troubleshooting runbook. `check-ddev-facts.py` keeps
+  the facts the auditor uses (defaults, end-of-life floors, built-in command names)
+  current: `--offline` in PR CI, `--live` weekly in `freshness.yml`. The skill runs when
+  copied alone and follows the team-plugin port limits (description starts "Use when ",
+  no project-hostname placeholders). Generic DDEV material moved out of `craftcms-ops`'
+  `ddev.md`, which now holds only Craft-specific facts; `security-ops`,
+  `frontend-upgrade-ops` and `docker-ops` link to it.
+
+- **AGENTS.md create / audit / upgrade / survey in `repo-doctor`** - an extension of
+  the skill that already owned the entry-doc standard, not a new skill (decision record:
+  `docs/plans/AGENTS-MD-2026-10.md`). `references/agents-md-protocol.md` supersedes
+  `entry-docs.md`: what an AGENTS.md holds and leaves out, a 150-line target with a
+  200-line ceiling, splitting into things that load on demand (never `@` imports), and
+  CLAUDE.md shadowing as verified against Claude Code's memory docs (2026-10-05).
+  `scripts/repo-scan.py` is a deterministic, read-only deep scan: every fact cites
+  `file:line` or a command, it follows CodeDeploy hooks into the scripts they call, never
+  opens secret files, never runs repo tooling, and mines git history for landmine
+  *questions* (co-change coupling, hot spots, fix and revert clusters, config edits
+  followed by rebuilds or migrations). `scripts/agents-md.py` drafts an AGENTS.md from
+  those facts through four archetype templates (`scaffold`; `--write` only creates),
+  audits one (`audit`; `--diff` prints a `git apply`-able patch that never moves or drops
+  the Landmines section), and surveys a GitHub org through GET-only `gh api` calls
+  (`survey --org`). `scripts/check-memory-docs.py` is the staleness tripwire for the
+  encoded Claude Code facts: offline in PR CI, live in `freshness.yml`. doc-scanner hands
+  AGENTS.md generation to the scaffold, and its contradicting generation templates are
+  gone.
+
+- **`package-manager-ops` skill** - day-to-day npm, Yarn, pnpm, Bun and Composer for
+  server-rendered sites, in eleven one-topic references (each 300 lines or fewer,
+  Contents-listed, verified 2026-10-05 against the tools' own docs): detecting the
+  manager and resolving two lockfiles without losing resolved versions; `packageManager`,
+  Corepack (no longer shipped with Node since 25.0.0) and `devEngines`; frozen installs
+  for CI and deploy; Node and PHP pins (`.nvmrc`, `engines`, `config.platform.php`,
+  `require.php`) that agree with DDEV; npx, dlx and `composer exec` safety, including
+  never routing a native CLI through npm; upgrades and ERESOLVE; scripts, workspaces and
+  the now-default blocking of dependency install scripts in npm 12, pnpm, Yarn 4.14+ and
+  Bun; registries and auth; caches and CI; Windows, DDEV and Apple Silicon gotchas; and
+  exits from Bower, node-sass, Yarn 1, lockfile v1 and end-of-life Node and PHP.
+  `scripts/pm-audit.py` is a read-only repo audit (25 finding ids; exit 10 on findings),
+  tested against 37 fixture cases that were each seen failing first.
+  `scripts/check-pm-facts.py` guards the Node and PHP end-of-life tables pm-audit reads,
+  offline in PR CI and live (nodejs.org, php.net, npm, Composer, GitHub) in
+  `freshness.yml`. The skill runs copied alone, so it joins the portable skills and
+  carries its own byte-identical `run-python.sh`. DDEV's own config stays with
+  `ddev-ops`' auditor: pm-audit reads DDEV's PHP and Node only to check that they agree
+  with the repo's other pins. `javascript-ops` drops its stale package-manager section for
+  a pointer; `supply-chain-defense`, `frontend-upgrade-ops`, `javascript-ops`,
+  `docker-ops` and `ddev-ops` link to it.
+
+- **Agent Skills spec gate (`tests/spec.sh`)** - every skill is checked by the spec's
+  own reference validator, `skills-ref` (pinned 0.1.1, run through `uv` with its whole
+  dependency tree frozen past a 7-day cooldown), in `just check`, `check-fast` and CI.
+  The one deliberate deviation is now written policy: Claude Code's 14 documented
+  fields (`when_to_use`, `argument-hint`, `effort`, ...) stay top-level, because Claude
+  Code reads them nowhere else. Anything else outside the spec's six is rejected, which
+  catches typos like `when-to-use` that Claude Code ignores silently. The gate also
+  checks that `metadata` values are strings (a spec rule `skills-ref` can't see) and
+  lists the skills that can't be uploaded to claude.ai as-is. Skill size stays with
+  `tests/skill-size.sh`. A fixture self-test runs first, so a validator that passes
+  everything fails the gate.
+  The frontmatter docs (`rules/naming-conventions.md`, `docs/SKILL-SUBAGENT-REFERENCE.md`,
+  `docs/SKILL-CREATION-PROTOCOL.md`) now state one rule. They had contradicted each other,
+  and two of them called `claude plugin validate` authoritative for skills, though it
+  never reads SKILL.md.
+
+- **`security-ops` covers PHP 8, Twig and Craft CMS** - fourteen one-topic references
+  (each 300 lines or fewer, Contents-listed, cited inline to Craft, Twig, PHP manual and
+  OWASP sources): Twig escaping and template injection; Craft CSRF/Formie, access control
+  and `allowAnonymous`, config and security-key hardening, uploads, GraphQL, and an
+  advisories reference that leads with Craft 3 and 4 being past security end of life;
+  PHP input validation, SQL via the query builder versus raw SQL, deserialisation,
+  password hashing, and Composer audit (behavioural supply-chain work stays in
+  `supply-chain-defense`); DDEV-versus-production drift. `security-scan.sh` gains PHP,
+  Twig/Craft-template and Craft-config checks and stops flagging committed
+  `.env.example.*` files; `dependency-audit.sh` runs `composer audit --locked`. A
+  stack-routing table in SKILL.md maps detection to references.
+
+- **`security-ops` speaks OWASP Top 10:2025** - findings, agent prompts, the
+  consolidation step and the report template now tag `Axx:2025` IDs, verified against
+  top10.owasp.org/2025. The OWASP references gain an A03 Software Supply Chain Failures
+  section (routing behavioural work to `supply-chain-defense` and Composer to
+  `php-composer-supply-chain.md`), an A10 Mishandling of Exceptional Conditions section
+  (fail-closed handlers, rollback, generic errors, unchecked PHP returns), SSRF folded
+  into A01, and a review checklist of `rg` patterns each. `audit-quickref.md` carries a
+  2021-to-2025 crosswalk so older reports stay readable. Filenames are unchanged - they
+  name ID ranges, which 2025 kept.
+
+- **`web-perf-ops` skill** - frontend page speed and Core Web Vitals, method first:
+  field data (CrUX, RUM) decides whether there is a problem, lab data (Lighthouse,
+  WebPageTest) explains it, and each fix targets the failing metric's dominant subpart.
+  Eleven one-topic references: field vs lab, LCP, INP, CLS, images, fonts,
+  JavaScript and third-party tags, CSS, caching/CDN, CI budgets, and a Craft CMS map
+  (Blitz, `{% cache %}`, eager loading, transforms, craft-vite, SEOmatic, Formie, the
+  queue). `triage-vitals.py` rates a Lighthouse, PSI or CrUX report and routes each
+  finding to the reference that holds the fix. It normalises the APIs' three CLS
+  encodings and flags the dominant field LCP subpart. `check-web-perf-facts.py` keeps
+  the threshold table and its catalog in step offline, and its `--live` mode reads the
+  thresholds from web-vitals' own source and watches the tool majors. That check caught
+  `@builder.io/partytown`'s deprecation and the fact that `@lhci/cli` still bundles
+  Lighthouse 12. `perf-ops` routes Core Web Vitals questions here.
+
+- **`frontend-upgrade-ops` skill** - the two front-end upgrades a Craft CMS/Twig
+  site keeps meeting, as one portable unit. Laravel Mix or raw Webpack to Vite via
+  craft-vite: a Mix-API translation table, source rewrites, Tailwind v3 kept as-is,
+  legacy builds, the DDEV dev server (one port in four places, and the `cors` /
+  `allowedHosts` defaults that broke `*.ddev.site` setups in Vite 6.0.9), Twig tags and
+  asset URLs. Vue 2 to Vue 3 via `@vue/compat`: warning burn-down, the breaking
+  changes that bite on Twig pages (`inline-template`, the mount container), Vuex to
+  Pinia, a plugin replacement table, and mounting Vue islands in Twig - including the
+  landmine that removing compat removes the template compiler, and client-side
+  template injection through in-DOM templates. Leads with a migrate-or-replace table
+  (Alpine, vanilla, native HTML) and a bundler-first sequencing rule. Its verifier
+  probes npm and Packagist, and watches `@vitejs/plugin-vue2`'s peer range because
+  the upgrade order depends on it stopping at Vite 7.
+
+- **`tests/skill-size.sh` gate** - warns when a SKILL.md body passes ~5,000
+  estimated tokens (characters / 3.6, frontmatter excluded). After auto-compaction
+  Claude Code re-attaches each invoked skill but keeps only its first 5,000 tokens,
+  so anything later in a long body silently vanishes mid-session. Warn-only in
+  `just check` and `check-fast`; `--strict` fails instead and `--report` lists every
+  skill. A built-in self-test must see an oversized fixture and ignore a huge
+  frontmatter on every run, and an empty scan exits 2, so the gate cannot pass blind.
+
 - **`deploy-gating` rule** - a child session never deploys. Background agents, chips,
   workflow/fleet workers, headless and scheduled runs, and CI-autofix or review-triage
   loops may build, test and commit, but stop at the deploy boundary and report the
@@ -40,6 +174,32 @@ feature releases live in the README "Recent Updates" section.
   what the rule exists to avoid normalising. The scanner keeps per-line file
   attribution now, and the self-test grows eight allowlist assertions.
 
+- **`a11y-ops` server-rendered templates reference** - WCAG 2.2 for Craft CMS
+  and Twig sites, where no single file owns the page. Covers heading levels
+  passed into partials, landmarks owned by the layout, alt text when the asset
+  carries it but the placement decides it (`getImg()` drops an empty `alt`),
+  what Formie 3 and the CKEditor plugin actually render (read from source,
+  including Formie's server-rendered errors arriving as a CSS class only), and
+  `lang`/`hreflang` on multi-site. Testing runs axe through Playwright or
+  Cypress and pa11y-ci against a DDEV URL, keeping `best-practice` in the axe
+  tags because `heading-order` and the landmark rules live there. The skill
+  description is trimmed to a 500-character "Use when" form, now pinned by the
+  skill's own suite.
+
+- **Contents-list gate (`tests/reference-contents.sh`)** - warns when a reference
+  over 100 lines has no `## Contents` list in its first 15 lines, or has a list that
+  misses a `##` heading, as the size rule requires. It is warn-only (`--strict` fails,
+  `--report` lists files) and runs in `just check` and `check-fast`, not the landing
+  chain. A fixture self-test runs first. Today it flags 351 of 427 long references
+  in 83 skills: 280 with no contents heading at all, 48 with another heading such as
+  "Table of Contents", 2 with the list too low, and 21 with a stale list. The parser
+  is security-ops' own, moved into `skills/security-ops/tests/reference-contents.awk`
+  and shared so the two checks can't disagree. It now reads CRLF, ignores link markup
+  in numbered lists and checks every file in one process. The portable skills
+  (a11y-ops, supply-chain-defense, security-ops, prompt-injection-defense,
+  craftcms-ops, web-perf-ops, frontend-upgrade-ops) are clean; the rest get their
+  lists when next touched.
+
 ### Fixed
 
 - **`fleet stop` SIGKILLed the daemon mid-gate** - its fixed "5s grace, then
@@ -51,6 +211,71 @@ feature releases live in the README "Recent Updates" section.
   `.claude/fleet/landing`, and `fleet stop` waits out that land, printing
   progress. Its 5s SIGKILL backstop runs only while the daemon is idle, and a
   marker stranded by a dead daemon cannot disarm it.
+
+- **Vite 8 chunking advice named a removed option.** Vite 8 (2026-03-12) bundles with
+  Rolldown: `build.rollupOptions` is now `build.rolldownOptions`, the object form of
+  `output.manualChunks` is no longer supported, and its function form is deprecated in
+  favour of `output.codeSplitting.groups`. web-perf-ops, astro-ops (Astro 7 ships
+  Vite 8) and perf-ops all recommended the object form. They now give the key for each
+  Vite major, with sources dated 2026-10-05. javascript-ops' library example and
+  bundler table, and frontend-upgrade-ops' `.extract()` row, follow suit. The
+  web-perf-ops facts catalog now tracks `vite` (major 8), so the weekly `--live` check
+  flags Vite 9 before its config keys go stale too.
+
+- **"Task tool" is now "Agent tool"** in explain, review, testgen, spawn and
+  tool-discovery (Claude Code renamed it in 2.1.63; `Task(...)` still aliases). spawn
+  no longer promises a new agent is available at once in every case: the first agent in
+  a new `agents/` directory needs a session restart.
+
+- **`fleet prune` kept the worktrees of archived sessions as "live session"** - archiving
+  a Desktop session stops it, and the stop appends records to its transcript ~2s before
+  Desktop rewrites the wrapper with `isArchived: true`. `sessions.sh` read that write as
+  activity, so for ten minutes after every archive (longer through the 15-minute index
+  cache) prune kept the session's trees and the land gate refused its lane. After ten
+  sessions were archived, all 17 of their merged, clean worktrees stayed KEEP and had to
+  be removed by hand. Now an archived session is live only if its transcript was written
+  after the archive (the wrapper's mtime, plus 60s), so a terminal `claude --resume`
+  still counts. `fleet prune` re-reads every claimant fresh (new `sessions.sh state`)
+  rather than trusting a cache built before the archive. An `isArchived` that is missing
+  or not a boolean reads `?`, is treated as live/open (never archived), and the reason
+  says so. Archived + dirty or unmerged stays REVIEW, naming the owner as archived.
+  Two kinds of leftover become removable on exact evidence. One is a lane the session
+  `EnterWorktree`'d into, proven by the cwd its transcript last recorded (the lossy
+  directory key alone still proves nothing). The other is a detached tree archiving
+  left behind: SAFE only when clean, with HEAD in base, no rebase/bisect in progress,
+  and an archived owner placed there by path. Each of the eleven new cases was seen
+  failing, either on the old code or against a deliberately broken guard.
+
+- **CLAUDE.md beside AGENTS.md is a shadow, not a pattern** - Claude Code reads AGENTS.md
+  only when no `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` is present (unless
+  the CLAUDE.md imports `@AGENTS.md`). `rules/agentic-quality.md` recommended a one-line
+  CLAUDE.md *pointer*, which hides the file it points to; it now requires the import.
+  repo-doctor's scorer warned only "fine if deltas-only" and now flags the shadow, and its
+  entry-doc budget drops from 250 to Claude Code's 200 lines.
+
+- **The reserved-name waiver counted only the first validated file.** CI's Claude Code
+  validates `marketplace.json` and `plugin.json` and prints one error block per file;
+  `tests/plugin-validate.sh` read only the first count, so CI went red while the local
+  CLI (which stops after the marketplace) passed. It now sums every block, and new
+  self-test cases feed it CI's two-block output; both failed against the old counting.
+
+- **`fleet release` no longer flakes on Windows when a state file is briefly held.**
+  The MAIN pin and the daemon PID files were removed with a bare `rm -f`, which fails
+  (EBUSY) while another process has the file open; the test discarded that error, so it
+  read as a resolution bug. A `remove_state_file` helper now retries for up to
+  `FLEET_RM_RETRY_SECS` (default 5) and counts success only when the file is gone, else
+  exits 1 naming it. New cases hold the pin open for real and failed against the old code.
+
+- **Gates went red when Claude Code reserved the plugin name** - Claude Code 2.1.287
+  launched Claude Mods and reserved plugin names that pass as Anthropic's own, naming
+  `claude-mods` explicitly. `claude plugin validate` now rejects it (install and load
+  still work), which failed `tests/validate.sh` and CI on an untouched `main` and blocked
+  every landing. `tests/plugin-validate.sh` now runs the validator and waives ONLY that
+  error, as a dated WARN, until 2026-10-31. Any other validator error still fails, and the
+  waiver itself fails after its expiry so the rename can't be forgotten. It self-tests
+  against fixtures before judging the repo; a waive-everything mutation fails that
+  self-test. `validate.sh` and the CI step both route through it. TODO(rename): rename
+  the plugin, then delete the waiver.
 
 - **`fleet-worker` doctor said "no API key" on hosts where the launcher ran fine** -
   `fleet-doctor.sh --live` carried its own if/elif copy of the key chain, so with
@@ -79,6 +304,20 @@ feature releases live in the README "Recent Updates" section.
   shorthand format controls. Catalog v0.3.0 adds an optional `ranges` field for
   bands the code chart splits, and the self-test fails if two bands overlap, since
   the scanner and the sanitizer would then name different bands.
+
+- **`supply-chain-defense` `preinstall-check.sh` never exited 7 on an unreachable
+  registry** - `fetch()` set the unavailable flag inside `$(...)`, a subshell, so the
+  assignment died with it and a dead registry looked like "outside cooldown" (exit 0).
+  Callers now set the flag from fetch's exit status. Found by the new copy-alone test,
+  which also caught `integrity-audit.sh` printing em dashes in its zizmor lines (its
+  plain fallback framing is now 7-bit ASCII, as is its `TERM_ASCII=1` output).
+
+- **The unicode hooks could pick a Python too old to run the scanner** -
+  `session-start-unicode-scan.sh` and `pre-commit-unicode-scan.sh` probed candidates
+  with a bare `import sys`, which a pre-3.8 interpreter passes. With one ahead on PATH
+  the SessionStart hook printed an empty advisory for a clean project, and the
+  pre-commit gate let a critical bidi override through. Both now take the first of
+  `python3`/`python`/`py` that is really 3.8+, and their fix hints use the launcher.
 
 - **`prompt-injection-defense` missed line separators and invisible fillers** -
   `scan-hidden-unicode.py` reported `ok<U+2028>=== FORGED ===` as clean, though a
@@ -109,6 +348,7 @@ feature releases live in the README "Recent Updates" section.
   channel (8 new assertions fail against the old hooks) and the hooks README
   gains an "Output channels" table; its "output goes to Claude's context"
   best-practice line was wrong and is gone.
+
 - **`pigeon send`, `reply` and `broadcast` no longer fail on Windows for bodies
   over ~32 KB.** The escaped body went to `sqlite3.exe` as a command-line argument,
   and Windows caps a command line at 32,767 chars, so a large message died with
@@ -118,6 +358,7 @@ feature releases live in the README "Recent Updates" section.
   raw Ctrl-Z (0x1A) means end-of-file, so `sql_escape` now splices that byte back
   in as `char(26)`. The pigeon suite gains four Windows regressions (40 KB send,
   reply and broadcast round-trips, plus Ctrl-Z), each seen failing first.
+
 - **doc-drift link checks are now case-exact, and CI's doc-drift step passes
   again.** `fleet-worker` linked `docs/auto-mode-classifier.md`, but the file is
   `docs/AUTO-MODE-CLASSIFIER.md`. The gate tested links with `[ -e ]`, which is
@@ -127,6 +368,7 @@ feature releases live in the README "Recent Updates" section.
   against the real on-disk spelling (directory listings cached, pure-bash
   comparison), so a wrong-case link fails locally too; the three wrong-case
   references are corrected.
+
 - **windows-ops suite no longer fails on Linux CI.** It skipped its PowerShell
   checks only when `pwsh` was missing, but GitHub's Ubuntu runners ship `pwsh`, so
   the Windows-only scripts (robocopy, CIM, process ancestry) were executed there
@@ -253,7 +495,58 @@ feature releases live in the README "Recent Updates" section.
   ran and which had drifted to 7 FAILs, is repaired and now runs in
   `tests/run-skill-tests.sh`.
 
+- **Skills and docs pointed at files that don't exist.** `windows-ops` told the agent
+  to run `startup-audit.ps1` and `event-search.ps1`, which never existed; it now names
+  the scripts that do the job. `skill-creator` told it to run `init_skill.py` and
+  `package_skill.py`, which this copy never bundled (upstream has since dropped
+  `init_skill.py`); Steps 3 and 5 now scaffold by hand and list the pre-zip checks.
+  `docs/ARCHITECTURE.md` said subagents have no MCP access (they inherit the session's
+  tools), showed a hooks config Claude Code rejects and a plugin manifest
+  `components` key that doesn't exist, and called the Agent tool by its old Task name.
+
 ### Changed
+
+- **`craftcms-ops` refreshed for real agency builds.** Ten new one-topic references -
+  SEOmatic, Blitz, Formie, CKEditor, DDEV, Codeception, Twig output security,
+  craft-vite, the 3 → 4 → 5 upgrade path, and Craft-side performance - plus the old
+  two-topic files split into element queries, GraphQL, and plugin development. Facts
+  checked against the vendor docs and Packagist on 2026-10-05, which corrected several
+  common assumptions: Blitz Hints was removed in 5.10, Blitz won't cache pages with
+  pending transform URLs, CKEditor plugin 5.x dropped global configs, Craft 5 GraphQL
+  types lost their section prefix, and Vite 5+ moved the manifest under `.vite/`.
+  A new `check-craft-facts.py` verifier keeps the Craft and plugin majors honest
+  (offline in PR CI, live against Packagist in the weekly freshness job). The
+  description now carries its own "Use when" trigger, with no separate `when_to_use`.
+
+- **`security-ops` fits the compaction budget.** The three T2 audit-agent prompts, the
+  T3 remediation preflight and the report template moved verbatim to
+  `references/audit-agent-prompts.md`; `SKILL.md` keeps routing, tiers, detection,
+  consolidation and a one-table summary of what each agent reads and reports. The body
+  drops from about 5,200 to 3,400 estimated tokens, under the 5,000 Claude Code keeps
+  after auto-compaction, so the orchestration no longer falls off the end.
+
+- **`security-ops` references split to a 300-line ceiling.** The OWASP guide is now
+  `owasp-top10-a01-a05.md` + `owasp-top10-a06-a10.md` (the `review`, `testgen` and
+  `techdebt` preloads point at both), MFA/rate-limiting/lockout moved to
+  `auth-account-protection.md`, and every reference over 100 lines opens with a
+  Contents list. The skill's suite now fails on an over-length reference, a stale
+  Contents list, a repo citation of a reference that no longer exists, or a
+  secret-shaped example value.
+
+- **`supply-chain-defense` and `prompt-injection-defense` are self-contained and
+  portable** - each folder now runs when copied alone into another plugin. Both ship
+  `scripts/run-python.sh`, which runs the `.py` scripts with the first of
+  `python3`/`python`/`py` that is really Python 3.8+ (on Windows `python3` is often the
+  Microsoft Store alias, which exits 49 without running anything); the copies are
+  duplicated on purpose and `tests/check-resources.sh` fails if they drift. Every doc
+  example launches through it. Each suite gains a "standalone" block that copies the
+  folder alone and runs every script's `--help` and offline mode. Both SKILL.md files
+  now lead with the procedure and decision tables and push depth into references
+  (supply-chain-defense ~9.6k -> ~3.6k estimated tokens), with no content dropped: workflows A-L and the script / hook /
+  portability detail move to new references, and the three references over 300 lines
+  split by topic (`tooling-by-layer.md`, `repo-integrity-response.md`,
+  `line-breaks-and-controls.md`, `codepoint-bands.md`). Every reference over 100 lines
+  carries a table of contents, and both descriptions carry a "Use when" clause.
 
 - **Rules made machine- and person-agnostic.** Rules ship in a public plugin, so
   author-specific incidents, repos and phrasing ("the user corrected this on…") are
@@ -262,11 +555,13 @@ feature releases live in the README "Recent Updates" section.
   `worktree-boundaries` also stops asserting that chips never isolate - whether a
   chip gets its own worktree depends on how it is started, so the directive is to
   seed every chip prompt to create its own lane rather than to assume either way.
+
 - **`public-posts` exempts replies on an automated reviewer's threads** - answering
   an AI code-review bot's finding with evidence on a PR you are working on is the
   PR's working record, not a statement to a third party, and a review-triage or
   CI-autofix flow depends on it. Human-started threads and other people's PRs still
   need the preview.
+
 - **`agentic-quality` rule gains a Tests section** - "evidence, not ceremony". Agents
   over-produce tests that restate the code they were written after: they always pass,
   catch nothing, and break on every refactor. The section rewards signal over count:
@@ -278,6 +573,32 @@ feature releases live in the README "Recent Updates" section.
   one module per PR with revert-and-run evidence, never a repo-wide sweep. Test naming
   moved here from the Structure section so it is stated once; the self-check gains
   "have I seen it fail?".
+
+- **Twelve over-budget skills restructured to survive compaction** - fleet-ops,
+  windows-ops, github-ops, loop-ops, ffmpeg-ops, claude-api-ops, summon, git-ops,
+  isometric-ops, mac-ops, tailwind-ops and sqlite-ops each had a SKILL.md body past
+  the 5,000 tokens compaction keeps (fleet-ops was ~10,000). Background, long
+  examples and catalogues moved verbatim into topic files under `references/`
+  (tables of contents where over 100 lines); procedures, decision tables and hard
+  rules stayed, and every moved section leaves a pointer that restates any rule it
+  carried. Nothing was cut: a line-by-line check against the previous tree proves
+  every original line still exists in the skill, and each skill's own suite stays
+  green. Bodies now sit at ~4,000-4,800 tokens. supply-chain-defense and the
+  vendored skill-creator were left alone.
+
+- **One skill size rule, stated once.** The docs disagreed (500 lines with no token
+  budget and a contents list past 300 lines in one, under 300 lines in the template).
+  "The size rule" in `docs/SKILL-SUBAGENT-REFERENCE.md` now holds it with its sources -
+  body under 500 lines and ~5,000 tokens, references one level deep, a Contents list
+  on any reference past 100 lines - and the other docs point there. `skill-creator`,
+  the last skill over budget, now leads with its procedure and keeps anatomy and
+  progressive-disclosure detail in references, so `tests/skill-size.sh` reports clean.
+
+- **Craft-stack skills cross-linked** - `craftcms-ops`, `web-perf-ops`,
+  `frontend-upgrade-ops` and `tailwind-ops` route to each other where the work crosses
+  (Mix-to-Vite cutovers take a lab metrics baseline; Tailwind v4 waits until after the
+  Vite move). `docs/00_INDEX.md` indexes `docs/`, and `AGENTS.md` gains a landmine for
+  "keep both sides" conflict resolutions that drop a line both sides added.
 
 ## [3.8.0] - 2026-08-31
 

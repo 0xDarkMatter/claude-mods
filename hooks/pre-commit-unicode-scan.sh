@@ -37,9 +37,14 @@ for cand in \
 done
 [ -n "$SCANNER" ] || exit 0   # scanner not installed → don't break commits
 
+# First of python3/python/py that really runs 3.8+ (same probe as the skill's
+# scripts/run-python.sh). A bare "import sys" also passes a pre-3.8 interpreter,
+# which then fails the scanner and let a critical finding through as "unknown".
 PY=""
 for c in python3 python py; do
-  command -v "$c" >/dev/null 2>&1 && "$c" -c "import sys" >/dev/null 2>&1 && { PY="$c"; break; }
+  command -v "$c" >/dev/null 2>&1 \
+    && "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' </dev/null >/dev/null 2>&1 \
+    && { PY="$c"; break; }
 done
 [ -n "$PY" ] || exit 0
 
@@ -78,7 +83,8 @@ if [ "$WORST" = "critical" ]; then
     echo ""
     printf '%s\n' "$DETAIL"
     echo ""
-    echo "Fix:  python <skills>/prompt-injection-defense/scripts/sanitize-content.py <file> -o <file>"
+    echo "Fix:  S=<skills>/prompt-injection-defense/scripts"
+    echo "      bash \$S/run-python.sh \$S/sanitize-content.py <file> -o <file>"
     echo "Then re-stage and commit. Override (only if intentional, e.g. an attack-demo doc):"
     echo "  PROMPT_INJECTION_ALLOW=1 git commit ..."
   } >&2

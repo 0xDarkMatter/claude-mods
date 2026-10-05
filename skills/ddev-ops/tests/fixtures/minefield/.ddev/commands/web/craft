@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+## Description: Fixture - a taken-over copy of DDEV's built-in craft command (shadowed-command)
+## Usage: craft
+## Example: "ddev craft up"
+## ProjectTypes: craftcms
+php craft "$@"

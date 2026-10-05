@@ -1,11 +1,11 @@
 ---
 name: a11y-ops
-description: "Web accessibility end to end - WCAG 2.2 conformance, legal obligations (EAA, ADA Title II), auditing with automated + keyboard + screen-reader passes, and the failures that appear on most sites. Triggers on: accessibility, a11y, WCAG, WCAG 2.2, AA conformance, EAA, European Accessibility Act, EN 301 549, ADA Title II, Section 508, accessibility audit, accessibility statement, VPAT, screen reader, NVDA, VoiceOver, JAWS, TalkBack, axe, axe-core, pa11y, Lighthouse accessibility, keyboard navigation, focus trap, focus visible, focus indicator, skip link, tab order, tabindex, aria, aria-label, aria-hidden, landmarks, alt text, form labels, error messages, colour contrast, target size, prefers-reduced-motion, inaccessible, disability, assistive technology, is my site accessible, accessibility compliance."
+description: "Web accessibility end to end: WCAG 2.2 AA, EAA and ADA Title II obligations, audits (axe, pa11y, keyboard, screen reader), the common failures, accessibility statements, and server-rendered Craft CMS/Twig sites (Formie, CKEditor, multi-site lang). Use when asked about a11y, WCAG, EAA, EN 301 549, Section 508, VPAT, NVDA/VoiceOver, focus, skip links, ARIA, landmarks, alt text, form labels or errors, contrast, target size, or 'is my site accessible'."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: color-ops, icon-ops, playwright-ops, testing-ops
+  related-skills: color-ops, icon-ops, playwright-ops, testing-ops, craftcms-ops, cypress-ops
 ---
 
 # a11y-ops
@@ -92,7 +92,9 @@ untitled iframes, unmuted autoplay, duplicate ids.
 
 Exit codes: `0` clean · `2` usage · `3` path missing · `5` nothing scannable ·
 `10` findings. It reads *source*, so it cannot see computed contrast or
-conditionally-rendered markup — it is a pre-filter, not the audit.
+conditionally-rendered markup — it is a pre-filter, not the audit. Server-side
+templates (`.twig`, `.blade.php`) are not the page; save the rendered HTML and
+scan that.
 
 ### 2. Automated DOM scan (minutes, per route)
 
@@ -144,6 +146,24 @@ Three worth knowing before you read it:
 - **A live region must exist in the DOM before the content arrives**, or nothing
   is announced.
 
+## Server-rendered CMS sites (Craft CMS + Twig)
+
+On a CMS site no single file owns the page: a layout, partials, Matrix loops,
+editor rich text and plugin forms each write part of it. Fix each failure at the
+layer that produced it — template, field settings, or plugin config — and test
+the **rendered** page. Three traps worth knowing first:
+
+- **`asset.getImg()` drops `alt` when it is empty**, and an `<img>` with no `alt`
+  fails 1.1.1. Decorative-or-informative belongs to the placement, not the asset.
+- **CKEditor fields allow h1–h6 by default**, and Formie's form title is a
+  hard-coded `<h2>` — both break the heading outline the layout set up.
+- **Filtering axe to WCAG tags drops `heading-order` and the landmark rules**
+  (they are tagged best-practice) — exactly the ones partial composition breaks.
+
+Landmarks and headings across partials, asset alt text, Formie and CKEditor
+markup, `lang`/`hreflang` on multi-site, and axe/pa11y-ci against a DDEV URL →
+[`references/server-rendered-templates.md`](references/server-rendered-templates.md).
+
 ## Accessibility statements
 
 Publishing one is part of the EAA obligation, not a nicety. Start from
@@ -170,7 +190,8 @@ position; "fully conformant" without an audit is not.
 |---|---|
 | Checking a palette meets 1.4.3 / 1.4.11 | `color-ops` |
 | Naming icon-only controls, logo `alt` | `icon-ops` |
-| Automating the DOM scan in e2e | `playwright-ops`, `testing-ops` |
+| Automating the DOM scan in e2e | `playwright-ops`, `cypress-ops`, `testing-ops` |
+| Craft content modelling, Twig, element queries | `craftcms-ops` |
 | The component library needs rebuilding around native elements | `refactor-ops` |
 
 ## References
@@ -190,6 +211,14 @@ position; "fully conformant" without an audit is not.
 - [`references/common-failures.md`](references/common-failures.md) — the twelve
   recurring failures with before/after code and the class-level fix. Load when
   remediating, or when reviewing a component library.
+
+- [`references/server-rendered-templates.md`](references/server-rendered-templates.md) —
+  Craft CMS + Twig: landmarks and heading levels across layouts and partials,
+  alt text from asset fields, link text in loops, focus, Formie form markup
+  (what it renders and the server-error gap), CKEditor heading levels and
+  tables, `lang`/`hreflang` on multi-site, and testing rendered pages with
+  axe (Playwright/Cypress) and pa11y-ci against DDEV. Load for any
+  server-rendered CMS build.
 
 ## Scripts
 

@@ -590,13 +590,27 @@ validate_plugin() {
     [[ -f "$mkt_file" ]] || log_fail ".claude-plugin/marketplace.json - Missing (required for /plugin marketplace add)"
 
     # --- authoritative path: claude plugin validate ---
+    # Routed through tests/plugin-validate.sh, which waives ONLY the reserved plugin-name
+    # error (Claude Code 2.1.287+ reserves "claude-mods") until its expiry date, and fails on
+    # any other error. TODO(rename): after the plugin is renamed, call `claude plugin validate`
+    # directly again and delete tests/plugin-validate.sh. Exit 3 = passed with the waiver.
     if command -v claude >/dev/null 2>&1; then
-        # Marketplace manifest (repo root resolves to the marketplace).
-        if claude plugin validate "$PROJECT_DIR" >/dev/null 2>&1; then
-            log_pass "marketplace.json - claude plugin validate passed"
-        else
-            log_fail "marketplace.json - claude plugin validate failed (run: claude plugin validate .)"
+        local pv="$PROJECT_DIR/tests/plugin-validate.sh" rc
+        # The waiver judges by parsing CLI output, so prove that logic first: a broken
+        # parser must not be able to wave a real manifest error through.
+        if ! bash "$pv" --self-test >/dev/null 2>&1; then
+            log_fail "plugin-validate self-test failed (run: bash tests/plugin-validate.sh --self-test)"
         fi
+
+        # Marketplace manifest (repo root resolves to the marketplace).
+        # `|| rc=$?`, never `; rc=$?`: this script runs under set -e, which would abort on
+        # the waiver's exit 3 before the case below could read it.
+        rc=0; bash "$pv" "$PROJECT_DIR" >/dev/null 2>&1 || rc=$?
+        case "$rc" in
+            0) log_pass "marketplace.json - claude plugin validate passed" ;;
+            3) log_warn "marketplace.json - passed except the reserved plugin name \"claude-mods\": WAIVED until 2026-10-31, rename pending (tests/plugin-validate.sh)" ;;
+            *) log_fail "marketplace.json - claude plugin validate failed (run: bash tests/plugin-validate.sh .)" ;;
+        esac
 
         # Plugin manifest: validate in isolation so it is not shadowed by the
         # marketplace manifest in the same .claude-plugin/ directory.
@@ -605,11 +619,12 @@ validate_plugin() {
             tmp=$(mktemp -d)
             mkdir -p "$tmp/.claude-plugin"
             cp "$plugin_file" "$tmp/.claude-plugin/plugin.json"
-            if claude plugin validate "$tmp" >/dev/null 2>&1; then
-                log_pass "plugin.json - claude plugin validate passed"
-            else
-                log_fail "plugin.json - claude plugin validate failed (unrecognized keys or wrong field types)"
-            fi
+            rc=0; bash "$pv" "$tmp" >/dev/null 2>&1 || rc=$?
+            case "$rc" in
+                0) log_pass "plugin.json - claude plugin validate passed" ;;
+                3) log_warn "plugin.json - passed except the reserved plugin name \"claude-mods\": WAIVED until 2026-10-31, rename pending (tests/plugin-validate.sh)" ;;
+                *) log_fail "plugin.json - claude plugin validate failed (unrecognized keys or wrong field types)" ;;
+            esac
             rm -rf "$tmp"
         fi
         return

@@ -26,15 +26,30 @@ jobs:
         run: npm install -g @anthropic-ai/claude-code
 
       - name: Validate plugin + marketplace manifests
+        # tests/plugin-validate.sh waives only the reserved plugin-name error (exit 3) until
+        # 2026-10-31; any other error still fails. TODO(rename): revert to plain
+        # `claude plugin validate` once the plugin is renamed.
         run: |
-          claude plugin validate .
+          bash tests/plugin-validate.sh --self-test
+          bash tests/plugin-validate.sh . || [ $? -eq 3 ]
           tmp="$(mktemp -d)"
           mkdir -p "$tmp/.claude-plugin"
           cp .claude-plugin/plugin.json "$tmp/.claude-plugin/plugin.json"
-          claude plugin validate "$tmp"
+          bash tests/plugin-validate.sh "$tmp" || [ $? -eq 3 ]
 
       - name: Validate extensions (frontmatter, naming, structure)
         run: bash tests/validate.sh
+
+      # The spec gate runs the Agent Skills reference validator (skills-ref) through uv.
+      # Third-party action pinned by commit SHA (v10.2.0, 2026-09-21), and uv itself
+      # pinned, per rules/supply-chain.md - a moved tag can't change what runs here.
+      - name: Install uv (for the Agent Skills spec gate)
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.11.2"
+
+      - name: Agent Skills spec gate (official skills-ref + Claude Code fields)
+        run: bash tests/spec.sh
 
       - name: Doc-drift gate (docs must match disk)
         run: bash tests/doc-drift.sh
