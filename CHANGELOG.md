@@ -40,6 +40,18 @@ feature releases live in the README "Recent Updates" section.
   what the rule exists to avoid normalising. The scanner keeps per-line file
   attribution now, and the self-test grows eight allowlist assertions.
 
+- **`a11y-ops` server-rendered templates reference** - WCAG 2.2 for Craft CMS
+  and Twig sites, where no single file owns the page. Covers heading levels
+  passed into partials, landmarks owned by the layout, alt text when the asset
+  carries it but the placement decides it (`getImg()` drops an empty `alt`),
+  what Formie 3 and the CKEditor plugin actually render (read from source,
+  including Formie's server-rendered errors arriving as a CSS class only), and
+  `lang`/`hreflang` on multi-site. Testing runs axe through Playwright or
+  Cypress and pa11y-ci against a DDEV URL, keeping `best-practice` in the axe
+  tags because `heading-order` and the landmark rules live there. The skill
+  description is trimmed to a 500-character "Use when" form, now pinned by the
+  skill's own suite.
+
 ### Fixed
 
 - **`prompt-injection-defense` left terminal controls and most default-ignorables

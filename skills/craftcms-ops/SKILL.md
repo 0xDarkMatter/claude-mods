@@ -6,7 +6,7 @@ license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: laravel-ops, sql-ops, nginx-ops
+  related-skills: laravel-ops, sql-ops, nginx-ops, a11y-ops
 ---
 
 # Craft CMS Operations
@@ -182,6 +182,7 @@ Full upgrade guidance: <https://craftcms.com/docs/5.x/upgrade.html>
 - `laravel-ops` — shared PHP/Composer/Twig-adjacent tooling, Eloquent patterns for comparison
 - `sql-ops` — index strategy behind slow `orderBy`/relation queries
 - `nginx-ops` — serving Craft, caching headers, reverse proxy for headless
+- `a11y-ops` — WCAG 2.2 for Twig sites: heading levels across partials, asset alt text, Formie and CKEditor markup, multi-site `lang` (`references/server-rendered-templates.md`)
 
 ### Key external resources
 
