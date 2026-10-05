@@ -171,4 +171,11 @@ OUT="$(run_json)"
 
 echo
 echo "repo-doctor tests: $pass passed, $fail failed"
-[ "$fail" -eq 0 ] && exit 0 || exit 1
+# The AGENTS.md tooling has its own suites; one runner, one verdict.
+sub=0
+for suite in repo-scan; do
+    echo
+    echo "--- $suite"
+    bash "$HERE/$suite.sh" || sub=1
+done
+[ "$fail" -eq 0 ] && [ "$sub" -eq 0 ]
