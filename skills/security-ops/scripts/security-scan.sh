@@ -106,7 +106,7 @@ check_pattern "document.write" "document\.write\(" "js"
 # and the [^>:\w$] guard keep PDO ->exec() and $exec() out of the shell check.
 printf '\n%s\n' '--- PHP Security Checks ---' >&2
 check_pattern "Hardcoded secrets / security key" "([pP]assword|[sS]ecret|[aA]pi_?[kK]ey|[tT]oken|securityKey)['\"]?\s*(=>|=|\()\s*['\"][^'\"\$<{]{8,}['\"]" "php"
-check_pattern "unserialize() (A08)" "\bunserialize\s*\(" "php"
+check_pattern "unserialize() (A08:2025)" "\bunserialize\s*\(" "php"
 check_pattern "eval() usage" "\beval\s*\(" "php"
 check_pattern "Shell execution" "(^|[^>:\w\$])(shell_exec|exec|system|passthru|popen)\s*\(" "php"
 check_pattern "SQL built by interpolation" "->(where|andWhere|orWhere|having|createCommand|query|exec)\(\s*(\"[^\"]*\\\$|'[^']*'\s*\.\s*\\\$)" "php"
