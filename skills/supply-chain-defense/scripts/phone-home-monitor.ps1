@@ -14,8 +14,14 @@
 # Output:  stdout = findings only (TSV: severity rule process pid remote detail;
 #          JSON envelope with -Json, schema claude-mods.supply-chain-defense.phone-home-monitor/v1)
 # Stderr:  headers, progress, capture-source notes, errors
-# Exit:    0 clean, 2 usage, 3 input-not-found, 5 missing-dep (Sysmon absent),
+# Exit:    0 clean - the capture source was read and nothing flagged
+#          2 usage, 3 input-not-found, 4 IOC catalog unparseable
+#          5 precondition: Sysmon absent, or its log / a capture source refused this
+#            session (run elevated), or live capture asked for on a non-Windows host
+#          7 capture source failed (TCP table, Sysmon log, process table unreadable):
+#            nothing was checked, so this is never a clean result
 #          10 at-least-one-finding (medium+ severity; -Strict counts low too)
+#          -Watch: 10 if anything was logged, else 7/5 if any poll failed to collect
 #
 # Examples:
 #   pwsh -NoProfile -File phone-home-monitor.ps1                  # one snapshot, rules applied
@@ -52,7 +58,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$EXIT_OK = 0; $EXIT_USAGE = 2; $EXIT_NOT_FOUND = 3; $EXIT_MISSING_DEP = 5; $EXIT_FINDING = 10
+$EXIT_OK = 0; $EXIT_USAGE = 2; $EXIT_NOT_FOUND = 3; $EXIT_MISSING_DEP = 5; $EXIT_UNAVAILABLE = 7; $EXIT_FINDING = 10
 $SCHEMA = 'claude-mods.supply-chain-defense.phone-home-monitor/v1'
 $TASK_NAME = 'SupplyChain-PhoneHomeMonitor'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -69,10 +75,12 @@ else { function Get-TermColor { param($Token, $Text) return $Text } }
 function Write-Info([string]$msg) { if (-not $Quiet) { [Console]::Error.WriteLine($msg) } }
 
 function Show-Help {
-    # Emit the first comment block (the contract) as help text.
-    Get-Content $MyInvocation.PSCommandPath -TotalCount 28 |
-        Where-Object { $_ -match '^#' -and $_ -notmatch '^#!' } |
-        ForEach-Object { $_ -replace '^# ?', '' }
+    # Emit the first comment block (the contract) as help text, up to the first
+    # non-comment line, so the header can grow without a line count to keep in step.
+    foreach ($line in (Get-Content $MyInvocation.PSCommandPath | Select-Object -Skip 1)) {
+        if ($line -notmatch '^#') { break }
+        $line -replace '^# ?', ''
+    }
 }
 
 if ($Help) { Show-Help; exit $EXIT_OK }
@@ -86,10 +94,22 @@ if ($modes.Count -gt 1) {
     [Console]::Error.WriteLine('ERROR: -Sysmon/-Status/-Watch/-InstallTask/-UninstallTask/-InputJson are mutually exclusive')
     exit $EXIT_USAGE
 }
-if (-not $LogPath) { $LogPath = Join-Path $env:LOCALAPPDATA 'supply-chain-defense\phone-home.jsonl' }
+# Live capture is Windows-only (TCP table, Windows Event Log, Authenticode, Task
+# Scheduler). Gate on the OS, never on pwsh being present - GitHub's Ubuntu runners
+# ship pwsh, and there every live read would fail or come back empty. Replay
+# (-InputJson) is pure rules and runs on any host.
+if ([Environment]::OSVersion.Platform -ne 'Win32NT' -and -not $InputJson) {
+    [Console]::Error.WriteLine('ERROR: live capture is Windows-only (TCP table, Event Log, Authenticode); nothing was checked.')
+    [Console]::Error.WriteLine('  Replay a capture on any host with -InputJson <file>.')
+    exit $EXIT_MISSING_DEP
+}
+if (-not $LogPath) {
+    $logBase = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { [IO.Path]::GetTempPath() }
+    $LogPath = Join-Path (Join-Path $logBase 'supply-chain-defense') 'phone-home.jsonl'
+}
 
 # ── IOC catalog ──────────────────────────────────────────────────────────────
-$iocPath = if ($Ioc) { $Ioc } else { Join-Path (Split-Path -Parent $ScriptDir) 'assets\network-ioc.json' }
+$iocPath = if ($Ioc) { $Ioc } else { Join-Path (Join-Path (Split-Path -Parent $ScriptDir) 'assets') 'network-ioc.json' }
 $iocDomains = @(); $iocIps = @()
 if (Test-Path $iocPath) {
     try {
@@ -209,21 +229,61 @@ function Get-Findings($conn) {
 }
 
 # ── capture sources ──────────────────────────────────────────────────────────
+# A capture source that fails must never look like a quiet machine. Each reader
+# records its failure here and returns nothing; the mode then exits 5 (access
+# refused - elevation fixes it) or 7 (source broken) instead of reporting an empty
+# connection list as clean, which is what -ErrorAction SilentlyContinue used to do.
+$script:CollectFailure = $null
+$SysmonLog = 'Microsoft-Windows-Sysmon/Operational'
+
+function Set-CollectFailure([string]$Source, $Err) {
+    $rec = $Err -as [System.Management.Automation.ErrorRecord]
+    $ex = if ($rec) { $rec.Exception } else { $Err }
+    $denied = ($ex -is [System.UnauthorizedAccessException]) -or ($rec -and "$($rec.CategoryInfo.Category)" -eq 'PermissionDenied')
+    $hint = 'retry; if it persists, check the WMI/CIM and Windows Event Log services'
+    if ($denied) { $hint = 'run from an elevated prompt (for -Sysmon, Event Log Readers membership also works)' }
+    $script:CollectFailure = [pscustomobject]@{
+        source = $Source; reason = $ex.Message; hint = $hint
+        code   = if ($denied) { $EXIT_MISSING_DEP } else { $EXIT_UNAVAILABLE }
+    }
+}
+
+function Exit-CollectFailure {
+    $cf = $script:CollectFailure
+    [Console]::Error.WriteLine("ERROR: could not collect from $($cf.source): $($cf.reason)")
+    [Console]::Error.WriteLine("  Nothing was checked - this is NOT a clean result. Fix: $($cf.hint).")
+    if ($Json) {
+        $code = if ($cf.code -eq $EXIT_MISSING_DEP) { 'PRECONDITION' } else { 'UNAVAILABLE' }
+        Write-Output (@{ error = @{ code = $code; source = $cf.source; message = $cf.reason } } | ConvertTo-Json -Compress)
+    }
+    exit $cf.code
+}
+
 function Get-DnsMap {
     $m = @{}
     try {
         foreach ($e in (Get-DnsClientCache -ErrorAction Stop | Where-Object { $_.Type -in 1, 28 -and $_.Data })) {
             if (-not $m.ContainsKey($e.Data)) { $m[$e.Data] = $e.Entry.TrimEnd('.') }
         }
-    } catch { }
+    } catch {
+        # Enrichment, not capture: connections are still checked, but IOC domains
+        # can only match through a hostname, so say what this run could not see.
+        Write-Info 'note: DNS client cache unreadable - IOC domain entries cannot match this run (IP entries still do)'
+    }
     return $m
 }
 
 function Get-ProcMap {
+    # Without the process table every connection is "pid:N" with no path or parent,
+    # so no rule but the IOC one can fire - a failed read here is a failed capture.
     $m = @{}
-    foreach ($p in (Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, Name, ExecutablePath)) {
-        $m[[int]$p.ProcessId] = $p
+    try {
+        $procs = Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, Name, ExecutablePath -ErrorAction Stop
+    } catch {
+        Set-CollectFailure 'process-table' $_
+        return $null
     }
+    foreach ($p in $procs) { $m[[int]$p.ProcessId] = $p }
     return $m
 }
 
@@ -243,10 +303,17 @@ function Get-ParentChain([int]$processId, $procMap) {
 
 function Get-SnapshotConnections {
     $procMap = Get-ProcMap
+    if ($script:CollectFailure) { return }
     $dnsMap = Get-DnsMap
     $out = [System.Collections.Generic.List[object]]::new()
-    $tcp = Get-NetTCPConnection -State Established, SynSent -ErrorAction SilentlyContinue |
+    # The CDXML cmdlet reports "no connection in this state" as an ObjectNotFound
+    # error - that one is a real empty answer. Any other error means the table was
+    # not read at all.
+    $tcpErr = $null
+    $tcp = Get-NetTCPConnection -State Established, SynSent -ErrorAction SilentlyContinue -ErrorVariable tcpErr |
         Where-Object { $_.RemoteAddress -and $_.RemoteAddress -notin @('0.0.0.0', '::', '127.0.0.1', '::1') }
+    $hard = @($tcpErr | Where-Object { "$($_.CategoryInfo.Category)" -ne 'ObjectNotFound' })
+    if ($hard.Count -gt 0) { Set-CollectFailure 'tcp-table' $hard[0]; return }
     $dedupe = @{}
     foreach ($c in $tcp) {
         $procId = [int]$c.OwningProcess
@@ -267,15 +334,32 @@ function Get-SnapshotConnections {
     return $out
 }
 
-function Test-SysmonPresent {
-    try { $null = Get-WinEvent -ListLog 'Microsoft-Windows-Sysmon/Operational' -ErrorAction Stop; return $true } catch { return $false }
+function Get-SysmonState {
+    # 'present' | 'absent' | 'unreadable'. A non-elevated -ListLog of an installed
+    # but restricted channel fails too (LogInfoUnavailable), so only
+    # NoMatchingLogsFound means Sysmon is really not there.
+    try { $null = Get-WinEvent -ListLog $SysmonLog -ErrorAction Stop; return 'present' }
+    catch {
+        if ($_.FullyQualifiedErrorId -like 'NoMatchingLogsFound*') { return 'absent' }
+        return 'unreadable'
+    }
 }
 
 function Get-SysmonConnections {
     $procMap = Get-ProcMap
+    if ($script:CollectFailure) { return }
     $out = [System.Collections.Generic.List[object]]::new()
-    $events = Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Sysmon/Operational'; Id = 3 } -MaxEvents $MaxEvents -ErrorAction SilentlyContinue
-    foreach ($ev in ($events ?? @())) {
+    # -LogName + -FilterXPath, never -FilterHashtable: for a log this session may
+    # not read, -FilterHashtable answers "No events were found" (Windows 11,
+    # PowerShell 7.6), so an access denial looked exactly like a quiet machine.
+    # NoMatchingEventsFound from -LogName is a genuine empty log.
+    try {
+        $events = @(Get-WinEvent -LogName $SysmonLog -FilterXPath '*[System[(EventID=3)]]' -MaxEvents $MaxEvents -ErrorAction Stop)
+    } catch {
+        if ($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*') { $events = @() }
+        else { Set-CollectFailure 'sysmon-eid3' $_; return }
+    }
+    foreach ($ev in $events) {
         $x = [xml]$ev.ToXml()
         $d = @{}; foreach ($n in $x.Event.EventData.Data) { $d[$n.Name] = $n.'#text' }
         if ($d['Initiated'] -ne 'true') { continue }
@@ -330,7 +414,7 @@ function Write-FindingLog($finding) {
 
 # ── modes ────────────────────────────────────────────────────────────────────
 if ($Status) {
-    $sysmonOk = Test-SysmonPresent
+    $sysmonState = Get-SysmonState
     $wfp = 'unknown (auditpol requires admin)'
     try {
         $a = auditpol /get /subcategory:'Filtering Platform Connection' 2>$null
@@ -339,7 +423,10 @@ if ($Status) {
     $fwLog = try { @(Get-NetFirewallProfile | Where-Object { $_.LogAllowed -eq 'True' }).Count } catch { 'unknown' }
     $task = try { [bool](Get-ScheduledTask -TaskName $TASK_NAME -ErrorAction SilentlyContinue) } catch { $false }
     $rows = [ordered]@{
-        sysmon_eid3        = if ($sysmonOk) { 'available (preferred source - use -Sysmon)' } else { 'not installed (see references/phone-home-monitoring.md to wire it)' }
+        sysmon_eid3        = switch ($sysmonState) {
+                                 'present'    { 'available (preferred source - use -Sysmon)' }
+                                 'unreadable' { 'installed, not readable from this session (run elevated)' }
+                                 default      { 'not installed (see references/phone-home-monitoring.md to wire it)' } }
         wfp_audit_5156     = $wfp
         firewall_log_allowed_profiles = $fwLog
         tcp_table_polling  = 'available (default source)'
@@ -385,17 +472,24 @@ if ($InputJson) {
 }
 
 if ($Sysmon) {
-    if (-not (Test-SysmonPresent)) {
-        Write-Info 'ERROR: Sysmon is not installed - Event ID 3 (network connections) unavailable.'
-        Write-Info 'Install it with a curated config (the preferred continuous source):'
-        Write-Info '  winget install Microsoft.Sysinternals.Sysmon'
-        Write-Info '  curl -o sysmonconfig.xml https://raw.githubusercontent.com/SwiftOnSecurity/sysmon-config/master/sysmonconfig-export.xml'
-        Write-Info '  sysmon64 -accepteula -i sysmonconfig.xml    # elevated prompt'
-        Write-Info 'See references/phone-home-monitoring.md for the full evaluation.'
+    $sysmonState = Get-SysmonState
+    if ($sysmonState -eq 'absent') {
+        # [Console]::Error, not Write-Info: an exit-5 reason must survive -Quiet.
+        [Console]::Error.WriteLine('ERROR: Sysmon is not installed - Event ID 3 (network connections) unavailable.')
+        [Console]::Error.WriteLine('Install it with a curated config (the preferred continuous source):')
+        [Console]::Error.WriteLine('  winget install Microsoft.Sysinternals.Sysmon')
+        [Console]::Error.WriteLine('  curl -o sysmonconfig.xml https://raw.githubusercontent.com/SwiftOnSecurity/sysmon-config/master/sysmonconfig-export.xml')
+        [Console]::Error.WriteLine('  sysmon64 -accepteula -i sysmonconfig.xml    # elevated prompt')
+        [Console]::Error.WriteLine('See references/phone-home-monitoring.md for the full evaluation.')
         exit $EXIT_MISSING_DEP
     }
+    if ($sysmonState -eq 'unreadable') {
+        Set-CollectFailure 'sysmon-eid3' ([System.UnauthorizedAccessException]::new('the Sysmon channel exists but this session may not read it'))
+        Exit-CollectFailure
+    }
     Write-Info (Get-TermColor cyan "=== phone-home monitor (Sysmon EID 3, last $MaxEvents events) ===")
-    $conns = Get-SysmonConnections
+    $conns = @(Get-SysmonConnections)
+    if ($script:CollectFailure) { Exit-CollectFailure }
     $findings = [System.Collections.Generic.List[object]]::new()
     foreach ($c in $conns) { foreach ($f in (Get-Findings $c)) { $findings.Add($f) } }
     Write-Report $findings 'sysmon-eid3' $conns.Count
@@ -404,10 +498,22 @@ if ($Sysmon) {
 if ($Watch) {
     Write-Info (Get-TermColor cyan "=== phone-home monitor (watch mode, every ${IntervalSeconds}s$(if ($DurationMinutes) { ", for ${DurationMinutes}m" })) ===")
     Write-Info "Findings log: $LogPath"
-    $seen = @{}; $total = 0
+    $seen = @{}; $total = 0; $polls = 0; $failedPolls = 0; $lastFailure = $null
     $deadline = if ($DurationMinutes -gt 0) { (Get-Date).AddMinutes($DurationMinutes) } else { [datetime]::MaxValue }
     while ((Get-Date) -lt $deadline) {
-        foreach ($c in (Get-SnapshotConnections)) {
+        $polls++
+        $conns = @(Get-SnapshotConnections)
+        if ($script:CollectFailure) {
+            # A daemon keeps polling through a transient failure, but the gap is
+            # logged and counted: an interval that was never read is not a clean one.
+            $failedPolls++; $lastFailure = $script:CollectFailure; $script:CollectFailure = $null
+            $now = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+            [Console]::Error.WriteLine("[$now] ERROR: could not collect from $($lastFailure.source): $($lastFailure.reason) - interval NOT checked")
+            Write-FindingLog ([pscustomobject]@{ time = $now; severity = 'error'; rule = 'collection-failed'
+                                                 detail = "$($lastFailure.source): $($lastFailure.reason)" })
+            $conns = @()
+        }
+        foreach ($c in $conns) {
             $key = "$($c.pid)|$($c.remoteAddress)|$($c.remotePort)"
             if ($seen.ContainsKey($key)) { continue }
             $seen[$key] = $true
@@ -422,15 +528,22 @@ if ($Watch) {
         Start-Sleep -Seconds $IntervalSeconds
     }
     Write-Info "Watch ended: $total finding(s) logged to $LogPath"
-    if ($total -gt 0) { exit $EXIT_FINDING } else { exit $EXIT_OK }
+    if ($total -gt 0) { exit $EXIT_FINDING }
+    if ($failedPolls -gt 0) {
+        [Console]::Error.WriteLine("ERROR: $failedPolls of $polls poll(s) could not read $($lastFailure.source) - those intervals were NOT checked.")
+        exit $lastFailure.code
+    }
+    exit $EXIT_OK
 }
 
 # default: one snapshot
 Write-Info '=== phone-home monitor (TCP-table snapshot) ==='
-if (-not (Test-SysmonPresent)) {
-    Write-Info 'note: Sysmon not installed - polling misses short-lived connections. Prefer -Sysmon once wired.'
+switch (Get-SysmonState) {
+    'absent'     { Write-Info 'note: Sysmon not installed - polling misses short-lived connections. Prefer -Sysmon once wired.' }
+    'unreadable' { Write-Info 'note: Sysmon is installed but not readable from this session - run elevated to use -Sysmon.' }
 }
-$conns = Get-SnapshotConnections
+$conns = @(Get-SnapshotConnections)
+if ($script:CollectFailure) { Exit-CollectFailure }
 $findings = [System.Collections.Generic.List[object]]::new()
 foreach ($c in $conns) { foreach ($f in (Get-Findings $c)) { $findings.Add($f) } }
 Write-Report $findings 'tcp-table' $conns.Count

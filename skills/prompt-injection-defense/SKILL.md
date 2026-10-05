@@ -83,6 +83,12 @@ Exits `0` clean, `10` on a hit (worst severity on stderr). The default fails on
 tokens. Every Default_Ignorable code point is in some band - a self-test invariant,
 not a hope. stdout is data (TSV, or a JSON envelope with `--json`).
 
+`0` means every requested file was read and scanned. A file that is **not UTF-8** is
+a `high` finding (`non-utf8-encoding`), not a skip: the bytes a UTF-8 review sees
+are not the bytes a BOM-sniffing loader reads. It is still decoded (UTF-16/32 by BOM)
+and scanned. A path it could not scan exits `3` (missing, or a walk matched nothing)
+or `5` (unreadable), named on stderr even under `--quiet` and in `meta.unscanned`.
+
 ### Pattern 2: Sanitize untrusted content before it enters context
 
 A byte-faithful filter: UTF-8 in, UTF-8 out, identical except removed or flattened
@@ -221,8 +227,9 @@ alias, which exits 49 and runs nothing, and the scripts' `#!/usr/bin/env python3
 shebang finds it too. Exit 5 from the launcher means no Python 3.8+ on PATH. Both
 scripts read `assets/dangerous-codepoints.json` (override with `--catalog`), force
 UTF-8 stdio so they don't crash on Windows cp1252 consoles, and share exit codes:
-`0` ok, `2` usage, `3` not-found, `4` validation, `5` missing catalog, `10` indicator
-found (scan only). `bash tests/run.sh` is the offline self-test.
+`0` ok, `2` usage, `3` not-found, `4` validation, `5` missing catalog (scan: or an
+unreadable file), `10` indicator found (scan only). `bash tests/run.sh` is the
+offline self-test.
 
 ## Portability
 

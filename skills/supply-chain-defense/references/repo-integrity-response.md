@@ -61,6 +61,10 @@ dead-drop endpoints, and `tasks.json` `runOn: folderOpen` auto-run — and exits
 on a finding. Wire it both as a **pre-commit hook** (catch it before it's committed)
 and as a **CI status check** (catch a force-pushed injection at the gate):
 
+`--staged` reads each config from the git **index**, not the working tree: the
+commit carries the staged bytes, and a clean file on disk can sit beside a poisoned
+staged one. Any non-zero exit should block - `5` means a config could not be read.
+
 ```bash
 # pre-commit (.git/hooks/pre-commit or a pre-commit framework hook); S = this skill's scripts/
 bash "$S/run-python.sh" "$S/config-drift-check.py" --staged || exit 1

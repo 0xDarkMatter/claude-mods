@@ -107,8 +107,16 @@ the gotcha recorded in `references/tooling-landscape.md`).
 
 `--live` asks `registry.npmjs.org` whether each *flagged* npm `name@version` still exists.
 A `404` means the version was unpublished — a strong post-compromise IOC (the registry
-took it down). Network failures mark the package `unavailable` and the run exits `7`, not
-`10`.
+took it down). A network failure never fakes that finding: the record gets
+`registry: "unavailable"` (and a `[live] registry: unavailable` line in text mode).
+
+**Exit precedence.** `--live` only checks packages that are already flagged, so a run
+that reaches the registry has findings and exits `10` whatever the registry says - an
+outage must not hide them, and there is no separate `7`. Read the outage from the
+envelope instead: `meta.live` is `"off"` (no `--live`), `"complete"` (every check
+answered) or `"unavailable"`, with the unchecked `name@version`s in
+`meta.live_unchecked`; stderr carries an `ERROR: --live registry check unavailable`
+line naming them.
 
 ## Existing-tool evaluation (tool-first)
 

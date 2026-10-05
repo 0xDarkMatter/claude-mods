@@ -202,6 +202,31 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **Six security-skill checks reported clean when they had not run** (found by an
+  automated code review). Each fix has a test that failed on the old code first. Rule
+  now written into both skills: a check that could not run exits 5 or 7 and names what
+  it skipped, never 0.
+  - `preinstall-check.sh` mangled scoped npm names: `@scope/pkg` queried the registry
+    with an empty name, and `@scope/pkg@1.2.3` checked `latest` instead of 1.2.3.
+  - Without `jq`, `preinstall-check.sh` dropped every registry answer and exited 0 in
+    all five ecosystems, so a package published that day passed. It now exits 5. Any
+    package whose age stays unknown exits 7, and `--json` no longer drops that record.
+  - `config-drift-check.py --staged` took names from the index but read the working
+    tree, so a poisoned config could be committed while a clean copy on disk was
+    scanned. It now reads the staged blob. Unreadable configs exit 5.
+  - `scan-hidden-unicode.py` skipped non-UTF-8 and unreadable files and could exit 0
+    having scanned nothing. Non-UTF-8 is now a `high` finding (`non-utf8-encoding`),
+    and UTF-16/32 files are decoded and scanned too. Missing paths and empty directory
+    walks exit 3, unreadable files 5, and `--quiet` stays silent only when clean.
+  - `phone-home-monitor.ps1` suppressed collection errors, so a TCP-table or Sysmon
+    read that failed looked like a quiet machine. Windows also reports an unreadable
+    log queried by `-FilterHashtable` as "no events". Failed reads now exit 7, refused
+    ones 5, and `-Watch` logs each poll it could not collect. Live modes are gated on
+    `[Environment]::OSVersion.Platform`.
+  - `postinstall-audit.py --live` could never reach its documented exit 7, because
+    `--live` only checks flagged packages. Findings keep exit 10, and a registry outage
+    now shows as `meta.live: "unavailable"` with a stderr line.
+
 - **Vite 8 chunking advice named a removed option.** Vite 8 (2026-03-12) bundles with
   Rolldown: `build.rollupOptions` is now `build.rolldownOptions`, the object form of
   `output.manualChunks` is no longer supported, and its function form is deprecated in

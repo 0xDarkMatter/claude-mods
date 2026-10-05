@@ -37,7 +37,19 @@ its human-readable map.
 | ZWJ | `U+200D` | benign | Whitelisted - emoji/Indic |
 
 **Exit codes (both scripts):** `0` ok · `2` usage · `3` not-found · `4` validation ·
-`5` missing catalog · `10` indicator found (scan only).
+`5` missing catalog · `10` indicator found (scan only). The scanner also exits `3`
+when a requested path is missing or a directory walk matches nothing, and `5` when a
+file is unreadable; findings (`10`) win, and every unscanned path is listed in
+`meta.unscanned`, so "scanned nothing" can never read as `0`.
+
+**Not in the catalog: `non-utf8-encoding` (high).** The scanner raises it for any file
+that does not decode as UTF-8, at the first bad byte (or line 1 col 1 for a UTF-16/32
+BOM). It is a finding rather than "could not scan" because the scan did run and the
+encoding is a fact about the content: a UTF-8 review and every UTF-8-only check see
+different bytes from a loader that sniffs the BOM, which is the evasion this tool
+exists to close. High, not critical, because legacy Latin-1 and Notepad UTF-16 files
+are legitimate. The file is still decoded (by BOM, else UTF-8 with U+FFFD, which no
+band covers) and scanned, so its hidden codepoints are named too.
 
 ## The severity model
 

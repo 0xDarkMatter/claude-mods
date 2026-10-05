@@ -6,19 +6,30 @@ Usage: scan-hidden-unicode.py [OPTIONS] [PATH ...]
 Input:   file/dir paths as argv, or content on stdin with --stdin
 Output:  stdout = findings (TSV by default, JSON envelope with --json)
 Stderr:  human-readable progress, per-file summary, errors
-Exit:    0 clean, 2 usage, 3 not-found, 4 validation, 5 missing-catalog,
-         10 INDICATOR_FOUND (dangerous codepoints present)
+Exit:    0 clean - every requested file was read and scanned, nothing found
+         2 usage, 4 validation
+         3 not-found - a requested path is missing, or a walk matched no files
+         5 precondition - catalog missing, or a file could not be read
+         10 INDICATOR_FOUND (dangerous codepoints, or a file that is not UTF-8)
+         Precedence 10 > 5 > 3; files not scanned are named on stderr (even with
+         --quiet) and in meta.unscanned, so a partial run never reads as clean.
+
+A file that is not valid UTF-8 is a FINDING (band non-utf8-encoding, high), not
+a skip: the bytes a UTF-8 review sees are not the bytes an encoding-sniffing
+loader reads, which is an evasion in itself. It is still decoded (UTF-16/32 by
+BOM, else UTF-8 with replacement) and scanned, so its codepoints are named too.
 
 Examples:
   scan-hidden-unicode.py CLAUDE.md AGENTS.md
   scan-hidden-unicode.py --json . | jq '.data[]'
-  rg -l . | scan-hidden-unicode.py -            # scan a file list (paths on argv)
+  rg -l . | xargs scan-hidden-unicode.py         # scan a file list
   cat suspicious.md | scan-hidden-unicode.py --stdin
   scan-hidden-unicode.py --strict docs/         # also flag medium/low + homoglyphs
 """
 from __future__ import annotations
 
 import argparse
+import codecs
 import json
 import re
 import sys
@@ -58,6 +69,53 @@ CONFUSABLE_SCRIPTS = ("LATIN", "CYRILLIC", "GREEK", "ARMENIAN")
 # forge structure would never reach classify(), and every later finding's line
 # number would drift from what an editor shows.
 LINE_BREAK = re.compile(r"\r\n|\r|\n")
+LINE_BREAK_BYTES = re.compile(rb"\r\n|\r|\n")
+
+# BOMs of a deliberate non-UTF-8 Unicode encoding. UTF-32 first: the UTF-32-LE BOM
+# begins with the UTF-16-LE one.
+UNICODE_BOMS = (
+    (codecs.BOM_UTF32_LE, "utf-32-le", "UTF-32-LE"),
+    (codecs.BOM_UTF32_BE, "utf-32-be", "UTF-32-BE"),
+    (codecs.BOM_UTF16_LE, "utf-16-le", "UTF-16-LE"),
+    (codecs.BOM_UTF16_BE, "utf-16-be", "UTF-16-BE"),
+)
+
+# Why not-UTF-8 is a finding rather than "could not scan": the scanner did run and
+# learned something true about the content. Instruction files are UTF-8, and one
+# that isn't shows a UTF-8 review (and every UTF-8-only check) different bytes than
+# a BOM-sniffing loader reads - that gap is the evasion this tool exists to close.
+# High, not critical: legacy Latin-1 or Notepad UTF-16 files are legitimate too,
+# so it fails the default scan (exit 10) without being "never legitimate".
+NON_UTF8_BAND = "non-utf8-encoding"
+
+
+def decode_for_scan(raw: bytes) -> tuple[str, dict | None]:
+    """(text, None) for UTF-8; else (best-effort text, a non-utf8-encoding finding).
+
+    The best-effort text is still scanned, so a UTF-16 file's hidden codepoints are
+    named as well: decode by BOM when there is one, else UTF-8 with U+FFFD for each
+    bad byte (U+FFFD is in no band, so replacements don't double-report).
+    """
+    try:
+        return raw.decode("utf-8"), None
+    except UnicodeDecodeError as e:
+        bad_at = e.start
+
+    def finding(line: int, col: int, why: str) -> dict:
+        return {"type": "encoding", "line": line, "col": col, "codepoint": "", "char_name": "",
+                "band": NON_UTF8_BAND, "severity": "high", "context": why}
+
+    for bom, codec, label in UNICODE_BOMS:
+        if raw.startswith(bom):
+            return (raw[len(bom):].decode(codec, errors="replace"),
+                    finding(1, 1, f"not UTF-8: {label} (BOM); decoded as {label} and scanned"))
+    prefix = raw[:bad_at]                      # valid UTF-8 up to the first bad byte
+    line = len(LINE_BREAK_BYTES.findall(prefix)) + 1
+    line_start = max(prefix.rfind(b"\n"), prefix.rfind(b"\r")) + 1
+    col = len(prefix[line_start:].decode("utf-8")) + 1
+    return (raw.decode("utf-8", errors="replace"),
+            finding(line, col, f"not UTF-8: invalid byte 0x{raw[bad_at]:02X}; "
+                               "decoded with replacement and scanned - re-save as UTF-8"))
 
 
 def log(level: str, msg: str, quiet: bool = False) -> None:
@@ -207,8 +265,10 @@ def scan_text(text: str, bands: list[dict], strict: bool, whitelist: bool) -> li
     return findings
 
 
-def iter_target_files(paths: list[str], includes: list[str]) -> list[Path]:
+def iter_target_files(paths: list[str], includes: list[str]) -> tuple[list[Path], list[str]]:
+    """(files to scan, directories whose walk matched nothing)."""
     out: list[Path] = []
+    empty_walks: list[str] = []
     seen: set[Path] = set()
 
     def add(p: Path):
@@ -220,14 +280,18 @@ def iter_target_files(paths: list[str], includes: list[str]) -> list[Path]:
     for raw in paths:
         p = Path(raw)
         if p.is_dir():
+            matched = 0   # counted before dedupe: `. docs/` must not call docs/ empty
             for f in sorted(p.rglob("*")):
                 if not f.is_file():
                     continue
                 if f.name in INSTRUCTION_NAMES or any(f.match(g) for g in includes):
+                    matched += 1
                     add(f)
+            if not matched:
+                empty_walks.append(raw)
         else:
             add(p)  # explicit file: scan regardless of extension
-    return out
+    return out, empty_walks
 
 
 def main() -> int:
@@ -260,34 +324,45 @@ def main() -> int:
 
     all_findings: list[dict] = []
     scanned = 0
+    # Everything asked for but not scanned: {"file", "reason", "code"}. Reported on
+    # stderr whatever --quiet says, and it forbids exit 0 - a run that skipped a
+    # file it could not decode or read once exited 0, even with zero files scanned.
+    unscanned: list[dict] = []
+
+    def scan_bytes(raw: bytes, label: str) -> None:
+        text, enc = decode_for_scan(raw)
+        if enc:
+            enc["file"] = label
+            all_findings.append(enc)
+        for f in scan_text(text, bands, args.strict, whitelist):
+            f["file"] = label
+            all_findings.append(f)
 
     if args.stdin:
-        data = sys.stdin.buffer.read().decode("utf-8", errors="replace")
         scanned = 1
-        for f in scan_text(data, bands, args.strict, whitelist):
-            f["file"] = "<stdin>"
-            all_findings.append(f)
+        scan_bytes(sys.stdin.buffer.read(), "<stdin>")
     else:
         if not args.paths:
             die("no paths given (and --stdin not set)", "USAGE", EXIT_USAGE, as_json)
-        targets = iter_target_files(args.paths, includes)
+        targets, empty_walks = iter_target_files(args.paths, includes)
         missing = [p for p in args.paths if not Path(p).exists()]
-        if missing and not targets:
-            die(f"path not found: {missing[0]}", "NOT_FOUND", EXIT_NOT_FOUND, as_json,
-                details={"missing": missing})
+        if not targets:
+            reason = (f"path not found: {missing[0]}" if missing else
+                      f"nothing to scan: no file under {', '.join(args.paths)} matched {includes}")
+            die(reason, "NOT_FOUND", EXIT_NOT_FOUND, as_json,
+                details={"missing": missing, "empty_walks": empty_walks})
+        unscanned += [{"file": p, "reason": "not found", "code": EXIT_NOT_FOUND} for p in missing]
+        unscanned += [{"file": p, "reason": f"no file matched {includes}", "code": EXIT_NOT_FOUND}
+                      for p in empty_walks]
         for path in targets:
             try:
-                data = path.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                log("WARN", f"skip non-UTF-8 file: {path}", args.quiet)
-                continue
+                raw = path.read_bytes()
             except OSError as e:
-                log("WARN", f"skip unreadable file: {path} ({e})", args.quiet)
+                unscanned.append({"file": str(path), "reason": f"unreadable: {e.strerror or e}",
+                                  "code": EXIT_PRECONDITION})
                 continue
             scanned += 1
-            for f in scan_text(data, bands, args.strict, whitelist):
-                f["file"] = str(path)
-                all_findings.append(f)
+            scan_bytes(raw, str(path))
 
     # ---- output ------------------------------------------------------------
     worst = max((SEVERITY_ORDER[f["severity"]] for f in all_findings), default=0)
@@ -299,6 +374,8 @@ def main() -> int:
             "meta": {
                 "count": len(all_findings),
                 "files_scanned": scanned,
+                "unscanned": [{"file": u["file"], "reason": u["reason"]} for u in unscanned],
+                "complete": not unscanned,
                 "strict": args.strict,
                 "worst_severity": next((k for k, v in SEVERITY_ORDER.items() if v == worst), "benign"),
                 "schema": "claude-mods.prompt-injection.scan/v1",
@@ -310,11 +387,17 @@ def main() -> int:
             print(f"{f['file']}\t{f['line']}\t{f['col']}\t{f['codepoint']}\t"
                   f"{f['severity']}\t{f['band']}\t{f['context']}")
 
+    if unscanned:
+        log("ERROR", f"{len(unscanned)} requested path(s) NOT scanned - not checked, not clean:")
+        for u in unscanned:
+            log("ERROR", f"  {u['file']}: {u['reason']}")
     if failed:
         log("ERROR",
             f"{len(all_findings)} hidden-unicode finding(s) across {scanned} file(s); "
             f"worst severity = {next((k for k,v in SEVERITY_ORDER.items() if v==worst),'?')}", args.quiet)
         return EXIT_INDICATOR
+    if unscanned:
+        return max(u["code"] for u in unscanned)   # 5 (unreadable) outranks 3 (not found)
     log("INFO", f"clean: no hidden-unicode indicators in {scanned} file(s)", args.quiet)
     return EXIT_OK
 
