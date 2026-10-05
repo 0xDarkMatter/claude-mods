@@ -8,6 +8,20 @@ feature releases live in the README "Recent Updates" section.
 
 ### Added
 
+- **`web-perf-ops` skill** - frontend page speed and Core Web Vitals, method first:
+  field data (CrUX, RUM) decides whether there is a problem, lab data (Lighthouse,
+  WebPageTest) explains it, and each fix targets the failing metric's dominant subpart.
+  Eleven one-topic references: field vs lab, LCP, INP, CLS, images, fonts,
+  JavaScript and third-party tags, CSS, caching/CDN, CI budgets, and a Craft CMS map
+  (Blitz, `{% cache %}`, eager loading, transforms, craft-vite, SEOmatic, Formie, the
+  queue). `triage-vitals.py` rates a Lighthouse, PSI or CrUX report and routes each
+  finding to the reference that holds the fix. It normalises the APIs' three CLS
+  encodings and flags the dominant field LCP subpart. `check-web-perf-facts.py` keeps
+  the threshold table and its catalog in step offline, and its `--live` mode reads the
+  thresholds from web-vitals' own source and watches the tool majors. That check caught
+  `@builder.io/partytown`'s deprecation and the fact that `@lhci/cli` still bundles
+  Lighthouse 12. `perf-ops` routes Core Web Vitals questions here.
+
 - **`deploy-gating` rule** - a child session never deploys. Background agents, chips,
   workflow/fleet workers, headless and scheduled runs, and CI-autofix or review-triage
   loops may build, test and commit, but stop at the deploy boundary and report the

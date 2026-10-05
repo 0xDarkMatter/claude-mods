@@ -143,6 +143,14 @@ run "app-router-audit --help"           0 "$PY" skills/nextjs-ops/scripts/audit-
 run "app-router-audit fixture scan"    10 "$PY" skills/nextjs-ops/scripts/audit-app-router.py skills/nextjs-ops/tests/fixtures/app-sample
 run "app-router-audit clean control"    0 "$PY" skills/nextjs-ops/scripts/audit-app-router.py skills/nextjs-ops/tests/fixtures/app-sample/app/clean/page.tsx
 
+echo "== web-perf-ops: Core Web Vitals threshold verifier + report triage contract"
+run "web-perf-facts --offline consistent" 0 "$PY" skills/web-perf-ops/scripts/check-web-perf-facts.py --offline
+run "web-perf-facts --help"               0 "$PY" skills/web-perf-ops/scripts/check-web-perf-facts.py --help
+run "triage-vitals --help"                0 "$PY" skills/web-perf-ops/scripts/triage-vitals.py --help
+# The poor PSI fixture is the minefield (exit 10 = findings); the CrUX fixture is the clean control.
+run "triage-vitals poor PSI fixture"     10 "$PY" skills/web-perf-ops/scripts/triage-vitals.py skills/web-perf-ops/tests/fixtures/psi-poor.json
+run "triage-vitals good CrUX control"     0 "$PY" skills/web-perf-ops/scripts/triage-vitals.py skills/web-perf-ops/tests/fixtures/crux-good.json
+
 echo "== protocol: every new verifier is executable + compiles"
 for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/claude-api-ops/scripts/context-budget.py \
@@ -157,7 +165,9 @@ for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/hono-ops/scripts/check-hono-facts.py \
          skills/hono-ops/scripts/route-inventory.py \
          skills/nextjs-ops/scripts/check-nextjs-facts.py \
-         skills/nextjs-ops/scripts/audit-app-router.py; do
+         skills/nextjs-ops/scripts/audit-app-router.py \
+         skills/web-perf-ops/scripts/check-web-perf-facts.py \
+         skills/web-perf-ops/scripts/triage-vitals.py; do
     "$PY" -m py_compile "$s" 2>/dev/null && pass "py_compile $(basename "$s")" || bad "py_compile $(basename "$s")"
 done
 bash -n skills/terraform-ops/scripts/check-action-refs.sh 2>/dev/null \
