@@ -51,8 +51,12 @@ directory name is kebab-case and matches the frontmatter `name` exactly.
 
 ## Step 2 — Frontmatter to spec
 
-→ authority: [SKILL-SUBAGENT-REFERENCE.md](SKILL-SUBAGENT-REFERENCE.md) — read its
-"Allowed Top-Level Fields" table; it is the only legal field list.
+→ authority: [SKILL-SUBAGENT-REFERENCE.md](SKILL-SUBAGENT-REFERENCE.md) — "Skill
+Frontmatter - the rule": the six Agent Skills spec fields plus Claude Code's documented
+fields, all top-level. That is the only legal field list. `skill-creator` says to use only
+`name` and `description`, and its `package_skill.py` rejects anything outside the six. That
+is the claude.ai upload rule. A claude-mods skill may also use Claude Code's fields when it
+needs their behaviour, at the cost of not being uploadable as-is.
 
 claude-mods house rules layered on top (checklist, not a restatement):
 
@@ -61,13 +65,17 @@ claude-mods house rules layered on top (checklist, not a restatement):
 - [ ] `depends-on` / `related-skills` live **under `metadata`** as **comma-separated
       strings** — never arrays, never top-level. Omit entirely if empty.
 - [ ] `name` matches the directory.
+- [ ] Lists are block style (`- item` per line), never `[a, b]`: the spec's validator
+      parses frontmatter with strictyaml, which rejects flow style.
 
 ## Step 3 — Body (progressive disclosure)
 
 → authority: `skill-creator` ("Progressive Disclosure", "What to Not Include").
 
 The load-bearing rules it owns: the **`description` is the trigger** (put every "when to
-use" cue there, never in the body); keep the **body under 500 lines**; split detail into
+use" cue there, never in the body); keep the **body under 500 lines and ~5,000 tokens**
+(after auto-compaction Claude Code keeps only the first 5,000 tokens of an invoked skill,
+so a longer tail silently drops; `tests/skill-size.sh` warns); split detail into
 `references/*.md` (one concept per file, linked from SKILL.md); **don't ship**
 README/CHANGELOG/INSTALL files inside a skill.
 
@@ -122,10 +130,14 @@ commit:
 
 ## Step 7 — Validate & ship
 
-- [ ] [`tests/validate.sh`](../tests/validate.sh) passes (frontmatter + naming).
-- [ ] `claude plugin validate` passes — gate on the **official** validator, never a
+- [ ] [`tests/validate.sh`](../tests/validate.sh) passes (naming + description budget).
+- [ ] [`tests/spec.sh`](../tests/spec.sh) passes: the spec's **official** validator,
+      `skills-ref`, plus Claude Code's fields. Gate on official validators, never a
       hand-rolled reimplementation.
-- [ ] `skill-creator` Step 5 `package_skill.py` if a distributable `.skill` is needed.
+- [ ] `claude plugin validate` passes. It checks the plugin and marketplace manifests
+      only; it does not read SKILL.md frontmatter.
+- [ ] `skill-creator` Step 5 `package_skill.py` if a distributable `.skill` is needed. It
+      accepts only the six spec fields, so strip Claude Code fields from the packaged copy.
 - [ ] Commit per [commit-style.md](../rules/commit-style.md) (`feat(skills): …`).
 
 ---
@@ -136,11 +148,11 @@ commit:
 0 warranted?  → skill-creator §1-2 + ARCHITECTURE (skill vs rule vs agent)
 1 scaffold    → skill-creator init_skill.py; 3 subdirs (naming-conventions)
 2 frontmatter → SKILL-SUBAGENT-REFERENCE (+ license:MIT, metadata.author)
-3 body        → skill-creator (description=trigger, <500 lines, progressive disclosure)
+3 body        → skill-creator (description=trigger, <500 lines / ~5k tokens, progressive disclosure)
 4 resources   → SKILL-RESOURCE-PROTOCOL (§10 gate; staleness verifier if external facts)
 5 tests       → tests/run.sh → run-skill-tests.sh; verifier → check-resources.sh
 6 integrate   → doc-drift.sh: README row + count bumps + no ghost links
-7 ship        → validate.sh + claude plugin validate + package + commit
+7 ship        → validate.sh + spec.sh + claude plugin validate + package + commit
 ```
 
 This doc owns the **sequence and the test/CI/counts bookend**. Everything else is owned by
