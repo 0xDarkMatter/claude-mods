@@ -2,6 +2,17 @@
 
 Essential security patterns for rapid triage during code review and audit.
 
+## Contents
+
+- OWASP Top 10 (2021) Quick Reference
+- Input Validation
+- Output Encoding
+- Authentication
+- Authorization
+- Secrets Management
+- Security Headers
+- Quick Grep Patterns
+
 ## OWASP Top 10 (2021) Quick Reference
 
 > A newer OWASP revision may exist — re-verify the current list at owasp.org.
@@ -111,15 +122,15 @@ def delete_post(post_id):
 
 ## Secrets Management
 
-```bash
-# WRONG - Hardcoded secrets
-API_KEY = "sk-1234567890abcdef"
+```python
+# WRONG - the secret is a literal in source (and so in git history forever)
+client = PaymentClient(key="<live-key-pasted-here>")
 
-# CORRECT - Environment variables
-API_KEY = os.environ["API_KEY"]
+# CORRECT - read from the environment at runtime
+client = PaymentClient(key=os.environ["PAYMENT_KEY"])
 
-# BETTER - Secrets manager
-API_KEY = secrets_client.get_secret("api-key")
+# BETTER - fetch from a secrets manager
+client = PaymentClient(key=secrets_client.get_secret("payment-key"))
 ```
 
 ### Secret Handling Rules
