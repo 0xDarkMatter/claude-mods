@@ -20,6 +20,8 @@
                             "_why": "LHCI 0.15 pins lighthouse 12.6.1, so CI runs Lighthouse 12 audit ids (legacy + insight coexist), not 13's. If LHCI moves to 13, budgets-ci.md's audit-id guidance must be revisited."},
     "chrome_devtools_mcp": {"name": "chrome-devtools-mcp", "documented_major": "1",    "prose_token": "chrome-devtools-mcp"},
     "partytown":           {"name": "@qwik.dev/partytown", "documented_major": "0.14", "prose_token": "@qwik.dev/partytown",
-                            "_why": "@builder.io/partytown is deprecated on npm (last 0.10.3, 2024-12-20); the project moved to QwikDev and still calls itself beta."}
+                            "_why": "@builder.io/partytown is deprecated on npm (last 0.10.3, 2024-12-20); the project moved to QwikDev and still calls itself beta."},
+    "vite":                {"name": "vite",                "documented_major": "8",    "prose_token": "Vite (8.x)",
+                            "_why": "Build config keys move between Vite majors: Vite 8 (Rolldown) renamed build.rollupOptions to rolldownOptions and replaced output.manualChunks with output.codeSplitting. A new major means re-checking javascript.md's build-tool table against the migration guide."}
   }
 }

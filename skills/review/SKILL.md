@@ -168,9 +168,9 @@ Dispatch is skills-first: domain knowledge lives in `-ops` skills, and the gener
 | `wrangler.toml`, `workers/*` | general-purpose | `skills/cloudflare-ops/SKILL.md` |
 | `*.sh`, `*.bash` | general-purpose | `skills/bash-ops/SKILL.md` |
 
-**Invoke via Task tool:**
+**Invoke via the Agent tool:**
 ```
-Task tool with subagent_type: "general-purpose" (or surviving specialist from table)
+Agent tool with subagent_type: "general-purpose" (or surviving specialist from table)
 model: "sonnet"
 Prompt includes:
   - Skill preloading (domain knowledge):

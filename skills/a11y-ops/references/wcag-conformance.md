@@ -4,6 +4,16 @@ What standard applies to you, what it actually requires, and what a conformance
 claim commits you to. Facts verified **2026-08-30** — dates and version numbers
 in this area move, so re-check before quoting one to a client.
 
+## Contents
+
+- [The standards, in one paragraph](#the-standards-in-one-paragraph)
+- [WCAG 2.2 — what changed from 2.1](#wcag-22--what-changed-from-21)
+- [The European Accessibility Act](#the-european-accessibility-act)
+- [ADA Title II (United States)](#ada-title-ii-united-states)
+- [What a conformance claim actually says](#what-a-conformance-claim-actually-says)
+- [Choosing a target](#choosing-a-target)
+- [Cross-reference](#cross-reference)
+
 ---
 
 ## The standards, in one paragraph

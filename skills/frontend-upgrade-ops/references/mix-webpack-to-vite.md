@@ -41,7 +41,7 @@ Read `webpack.mix.js` line by line; each call maps to one of these.
 | `.options({ processCssUrls: false })` | none needed | Vite rewrites relative `url()` and hashes the files |
 | `mix.copy()` / `copyDirectory()` | Vite `publicDir`, or keep files in `web/` untouched | craft-vite's docs also mention a copy plugin |
 | `.version()` | always on in `vite build` | Hashed names + `.vite/manifest.json` |
-| `.extract()` | automatic chunk splitting | Don't hand-split vendors until a bundle report says so |
+| `.extract()` | automatic chunk splitting | Don't hand-split vendors until a bundle report says so. If you must, Vite 8 uses `build.rolldownOptions.output.codeSplitting`; an object `manualChunks` is no longer supported (web-perf-ops `javascript.md`) |
 | `.sourceMaps()` | `build.sourcemap` | |
 | `.webpackConfig({ resolve: { alias } })` | `resolve.alias` | |
 | `.autoload({ jquery: ['$', 'window.jQuery'] })` | explicit `import $ from 'jquery'; window.$ = window.jQuery = $` in the entry | Vite has no ProvidePlugin |

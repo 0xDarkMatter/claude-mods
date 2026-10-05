@@ -19,6 +19,8 @@ read from source, not marketing pages. [Sources](#sources) at the end.
 9. [Language on multi-site Craft](#9-language-on-multi-site-craft)
 10. [Testing rendered pages](#10-testing-rendered-pages)
 
+[Sources](#sources)
+
 ## 1. The rendered page is the unit
 
 Conformance is judged per page, and on a CMS site **no single file owns the

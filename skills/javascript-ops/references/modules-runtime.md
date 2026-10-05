@@ -275,13 +275,13 @@ export function sum(arr) { return arr.reduce((a, b) => a + b, 0); }
 | Feature | Vite | esbuild | Rollup | Webpack 5 |
 |---------|------|---------|--------|-----------|
 | Default output | ESM + CJS | ESM/CJS/IIFE | ESM + CJS | CJS/ESM |
-| Tree shaking | Yes (Rollup) | Yes | Yes | Yes |
+| Tree shaking | Yes (Rolldown in Vite 8; Rollup before) | Yes | Yes | Yes |
 | Code splitting | Yes | Yes | Yes | Yes |
 | CJS named imports | Analyzed | Analyzed | Analyzed | Analyzed |
 | `sideEffects` respected | Yes | Yes | Yes | Yes |
 | Top-level await | Yes | Yes | Yes | Partial |
 | Import attributes | Planned | No | Plugin | Loader |
-| Speed | Fast (esbuild) | Fastest | Moderate | Slow |
+| Speed | Fast (Rolldown + Oxc in Vite 8; esbuild before) | Fastest | Moderate | Slow |
 
 ```javascript
 // Vite — resolves modules with node resolution + browser overrides
@@ -293,7 +293,9 @@ export default {
       formats: ['es', 'cjs'],
       fileName: (format) => `my-lib.${format === 'es' ? 'mjs' : 'cjs'}`,
     },
-    rollupOptions: {
+    // Vite 8 name; on Vite 7 and earlier this key is `rollupOptions`
+    // (Vite 8 keeps that as a deprecated alias - vite.dev/guide/migration)
+    rolldownOptions: {
       external: ['react', 'vue'], // don't bundle peer deps
     },
   },

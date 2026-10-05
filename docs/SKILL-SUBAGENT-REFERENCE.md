@@ -132,7 +132,10 @@ These are claude-mods bookkeeping fields that neither spec defines. They live un
    - **References one level deep, one topic each.** Link every reference directly from
      SKILL.md; one that only another reference links to may be read partially.
    - **A reference over 100 lines opens with a `## Contents` list**, so a partial read
-     still sees the whole map. Some skill suites also cap each reference at 300 lines;
+     still sees the whole map. The list sits in the first 15 lines and names every `##`
+     heading. `tests/reference-contents.sh` warns on a missing or stale list (`--strict`
+     fails); most older references predate the rule, so add the list when you touch
+     the skill. Some skill suites also cap each reference at 300 lines;
      that is the skill's own choice, enforced in its `tests/run.sh`, not a repo rule.
 
    Sources: the spec ("Progressive disclosure": under 5,000 tokens and 500 lines; "File

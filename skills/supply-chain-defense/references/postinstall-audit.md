@@ -1,5 +1,21 @@
 # Post-install behavioural audit — closing the on-disk gap
 
+`scripts/postinstall-audit.py`: the after-the-fact sweep of what already landed on disk.
+
+## Contents
+
+1. [The gap it closes](#the-gap-it-closes)
+2. [What it flags](#what-it-flags)
+3. [Incremental cache (daily-runnable)](#incremental-cache-daily-runnable)
+4. [Exit codes](#exit-codes)
+5. [--deep (GuardDog confirmation)](#--deep-guarddog-confirmation)
+6. [--live (registry takedown check)](#--live-registry-takedown-check)
+7. [Existing-tool evaluation (tool-first)](#existing-tool-evaluation-tool-first)
+8. [Scheduling — run it daily](#scheduling--run-it-daily)
+9. [When a finding fires](#when-a-finding-fires)
+
+## The gap it closes
+
 The pre-install controls in this skill (the `socket` wrapper, `preinstall-check.sh`
 cooldown, the install-scan hook) all act **before** a package executes. They are the
 right primary defence, but each has a miss case:
@@ -15,17 +31,6 @@ When any of those misses, the malware is already in `node_modules` / `site-packa
 `scripts/postinstall-audit.py` is the **after-the-fact** sweep for exactly that state —
 it scans what actually landed on disk for the behaviours the 2026 worms exhibit, rather
 than asking a registry whether a name is known-bad.
-
-## Contents
-
-1. [What it flags](#what-it-flags)
-2. [Incremental cache (daily-runnable)](#incremental-cache-daily-runnable)
-3. [Exit codes](#exit-codes)
-4. [--deep (GuardDog confirmation)](#--deep-guarddog-confirmation)
-5. [--live (registry takedown check)](#--live-registry-takedown-check)
-6. [Existing-tool evaluation (tool-first)](#existing-tool-evaluation-tool-first)
-7. [Scheduling — run it daily](#scheduling--run-it-daily)
-8. [When a finding fires](#when-a-finding-fires)
 
 ## What it flags
 
