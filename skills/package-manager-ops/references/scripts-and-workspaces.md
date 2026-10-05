@@ -36,7 +36,7 @@ dependency install scripts unless you allow the package:
 
 | Manager | Default | Allow one package |
 |---|---|---|
-| npm 12 | blocked unless the root package.json's `allowScripts` policy allows it (npm 11.16 only printed a notice) | `npm install-scripts approve <pkg>`; review with `npm install-scripts ls`; `--allow-scripts` for an `npx` or `-g` install |
+| npm 12 | blocked unless the root package.json's `allowScripts` policy allows it (npm 11.16 only printed a notice) | `npm install-scripts approve <pkg>` (records `pkg@version` by default); review with `npm install-scripts ls`; `--allow-scripts=sharp,canvas` for an `npx` or `-g` install |
 | pnpm 10+ | blocked; pnpm 11 makes an unapproved build an error (`strictDepBuilds`) | `pnpm approve-builds`, which writes `allowBuilds` (it replaced `onlyBuiltDependencies`, removed in pnpm 11) |
 | Yarn 4.14.0+ | blocked (`enableScripts: false` is the default) | `dependenciesMeta: { <pkg>: { built: true } }` in package.json |
 | Bun | only a built-in list of popular packages runs | `trustedDependencies` in package.json, which *replaces* the built-in list |

@@ -78,7 +78,24 @@ for ref in refs:
     rl = rt.splitlines()
     row(len(rl) <= 300, f"{ref.name} <= 300 lines ({len(rl)})")
     if len(rl) > 100:
-        row(any(l.strip() == "## Contents" for l in rl[:20]), f"{ref.name} has '## Contents' near the top")
+        # The repo size rule (tests/reference-contents.sh): the list sits in the first 15
+        # lines and links every `## ` heading below it. Checked here, hard, without
+        # borrowing another skill's parser, so the folder still runs copied alone.
+        row(any(l.strip() == "## Contents" for l in rl[:15]), f"{ref.name} has '## Contents' in its first 15 lines")
+        heads, fence, listed, in_toc = [], False, set(), False
+        for l in rl:
+            if l.lstrip().startswith("```"):
+                fence = not fence
+            if fence:
+                continue
+            if l.startswith("## "):
+                in_toc = l.strip() == "## Contents"
+                if not in_toc:
+                    heads.append(re.sub(r"[^\w\- ]", "", l[3:].strip().lower()).replace(" ", "-"))
+            elif in_toc:
+                listed.update(re.findall(r"\]\(#([^)]+)\)", l))
+        gone = [h for h in heads if h not in listed]
+        row(not gone, f"{ref.name} Contents links every ## heading" + (f" - missing: {gone}" if gone else ""))
     row(f"references/{ref.name}" in text, f"{ref.name} cited from SKILL.md")
     row(".ddev" + ".site" not in rt, f"{ref.name} has no DDEV site-suffix placeholder")
 def slugs(md):

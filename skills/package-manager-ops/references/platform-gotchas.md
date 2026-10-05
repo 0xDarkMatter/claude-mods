@@ -45,8 +45,9 @@ decides on. Keeping repos near the drive root (`C:\code\site`) avoids most of it
 **Node version managers.** nvm-windows v1 switches one global Node for every terminal and
 ignores `.nvmrc` (`nvm use` needs the version typed). The project moved to the
 `nvm-windows/nvm` repository; v2 is a rewrite that detects `.nvmrc` and `.node-version`
-in shim mode. fnm also works natively: add `fnm env --use-on-cd | Out-String |
-Invoke-Expression` to the PowerShell profile and it switches per directory.
+in shim mode. fnm also works natively: add
+`fnm env --use-on-cd --shell powershell | Out-String | Invoke-Expression` to the end of
+the PowerShell profile and it switches per directory.
 
 **Git Bash and quoting.** Arguments after `--` reach the script differently in
 PowerShell, cmd and Git Bash. When a `npm run x -- --flag=value` works in one shell and

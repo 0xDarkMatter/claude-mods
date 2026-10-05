@@ -99,16 +99,22 @@ mismatch: the tarball downloaded does not hash to what the lockfile recorded.
 
 ## Lockfile merge conflicts
 
-Never hand-merge a lockfile. Resolve `package.json` or `composer.json` first, then let
-the tool rebuild the lock:
+Never hand-merge a lockfile. The pattern that works for every manager is the one
+Composer documents ("Resolving merge conflicts" on getcomposer.org): accept one branch's
+lockfile, then re-apply the other branch's change with the command it used.
 
-- **npm**: after fixing package.json, `npm install` (or `npm install
-  --package-lock-only`) rewrites a conflicted `package-lock.json`. Yarn and pnpm also
-  repair a conflicted lockfile on a plain install; review the result either way.
-- **Composer**: take one side's `composer.lock` (`git checkout --theirs composer.lock`),
-  then re-apply the other branch's change with the same command it used
-  (`composer require vendor/pkg:^2` or `composer update vendor/pkg`). The
-  getcomposer.org article "Resolving merge conflicts" describes this.
+1. Resolve the manifest (`package.json` or `composer.json`) by hand.
+2. Take the lockfile from the branch with the most dependency changes:
+   `git checkout --theirs package-lock.json` (or `--ours`).
+3. Re-run the other branch's commands: `npm install vite@^8`,
+   `composer require vendor/pkg:^2`, `composer update vendor/pkg`.
+4. Check before committing: `npm ci` (or `composer validate` and
+   `composer install --dry-run`).
+
+The re-run may pick a newer version than the other branch had locked; review the lock
+diff. When only Composer's `content-hash` conflicts, `composer update --lock` is enough.
+npm 6's docs described `npm install` repairing a conflicted `package-lock.json`
+automatically; current npm docs no longer document that, so don't rely on it.
 
 ## Works on my machine
 

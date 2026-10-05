@@ -35,12 +35,12 @@ Node, no `require.php`, end-of-life PHP and `npx` in READMEs.
 | `npx something` in scripts or README | devDependency, or an exact `@x.y.z` pin | [npx-exec-safety.md](references/npx-exec-safety.md) |
 | Upgrading dependencies, ERESOLVE | Survey, then one layer and one major at a time | [upgrades.md](references/upgrades.md) |
 | A native package "installed" but its binary is missing | Dependency build scripts are blocked by default now; approve that package | [scripts-and-workspaces.md](references/scripts-and-workspaces.md#dependency-install-scripts-are-blocked-by-default) |
-| Monorepo, workspaces, Composer scripts or plugins | | [scripts-and-workspaces.md](references/scripts-and-workspaces.md) |
+| Monorepo, workspaces, Composer scripts or plugins | One lockfile at the root; allow plugins one by one | [scripts-and-workspaces.md](references/scripts-and-workspaces.md) |
 | Private packages, tokens, mirrors | Env references only; never a token in git | [registries-and-auth.md](references/registries-and-auth.md) |
 | Slow or flaky CI installs | Cache the download cache keyed on the lockfile | [caches-and-ci.md](references/caches-and-ci.md) |
-| Windows, DDEV host-vs-container, Apple Silicon oddities | | [platform-gotchas.md](references/platform-gotchas.md) |
+| Windows, DDEV host-vs-container, Apple Silicon oddities | Install where the code runs; check `node -p process.arch` | [platform-gotchas.md](references/platform-gotchas.md) |
 | `bower.json`, node-sass, Yarn 1, PHP 8.1 or older | Planned exit, one at a time | [legacy-exits.md](references/legacy-exits.md) |
-| EINTEGRITY, lock merge conflict, "works on my machine" | | [diagnostics.md](references/diagnostics.md) |
+| EINTEGRITY, lock merge conflict, "works on my machine" | Never hand-merge a lockfile: take one side, re-run the other side's commands | [diagnostics.md](references/diagnostics.md) |
 
 ## Hard rules
 

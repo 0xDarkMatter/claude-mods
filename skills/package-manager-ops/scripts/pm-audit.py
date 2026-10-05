@@ -71,6 +71,11 @@ EXACT_SEMVER = re.compile(r"^v?\d+\.\d+\.\d+([-+][0-9A-Za-z.+-]+)?$")
 SKIP_DIRS = {".git", "node_modules", "vendor", "bower_components", ".yarn", ".pnpm-store",
              "dist", "build", "coverage", ".cache", ".next", ".nuxt", "storage", "cpresources",
              "db_snapshots", ".idea", ".vscode"}
+# Dot-directories are skipped except these: CI, git hooks and DDEV commands run npx for
+# real, while the rest (.cursor/, .claude/, .gemini/...) are usually vendored copies of
+# agent config that would repeat one finding a dozen times.
+DOT_DIRS_SCANNED = {".github", ".gitlab", ".circleci", ".buildkite", ".husky", ".ddev", ".devcontainer"}
+HOOK_DIRS = {".husky", ".ddev"}
 DOC_SUFFIXES = {".md", ".markdown", ".sh", ".bash", ".ps1", ".yml", ".yaml", ".mk"}
 DOC_NAMES = {"makefile", "justfile", "dockerfile", "procfile"}
 MAX_DOC_BYTES = 512 * 1024
@@ -270,12 +275,14 @@ def mini_yaml(text: str) -> dict:
 
 
 def code_lines(text: str, markdown: bool):
-    """Yield (line_no, text) worth scanning: every line of a script, but only fenced
-    code and inline code spans of a markdown file."""
+    """Yield (line_no, text) worth scanning: every non-comment line of a script or YAML
+    file (a `#` comment is prose), but only fenced code and inline code spans of a
+    markdown file."""
     fence = None
     for n, line in enumerate(text.splitlines(), 1):
         if not markdown:
-            yield n, line
+            if not line.lstrip().startswith("#"):
+                yield n, line
             continue
         s = line.lstrip()
         if fence is None and s.startswith(("```", "~~~")):
@@ -284,7 +291,7 @@ def code_lines(text: str, markdown: bool):
         if fence is not None:
             if s.startswith(fence):
                 fence = None
-            else:
+            elif not s.startswith("#"):
                 yield n, line
             continue
         spans = re.findall(r"`([^`]+)`", line)
@@ -692,6 +699,12 @@ class Audit:
     def npx(self):
         native = {n.lower() for n in (self.facts.get("native_cli_names") or {}).get("names", [])}
         declared = set(self._declared()) if self.pkg else set()
+        # The repo's own package name and declared bins: docs showing them are the
+        # publisher's instructions to users, not a dependency of this repo.
+        own = {str(self.pkg.get("name", ""))} if self.pkg else set()
+        bins = (self.pkg or {}).get("bin")
+        own |= set(bins) if isinstance(bins, dict) else set()
+        own.discard("")
         # An unreadable package.json hides which bins are local; guessing "remote" would
         # turn one js.manifest.invalid into a cascade of false npx.unpinned findings.
         locals_unknown = self.pkg is None and (self.root / "package.json").is_file()
@@ -724,6 +737,8 @@ class Audit:
                 if not pkg:
                     continue
                 pkg = pkg.strip("'\"`),")
+                if pkg.endswith((".", ":", ";")):
+                    continue  # sentence punctuation: "...the pinned npx fallback." is prose
                 if not re.match(r"^(@[a-z0-9][\w.-]*/)?[a-z0-9][\w.-]*(@\S+)?$", pkg, re.I):
                     continue  # prose like "npx is..." or a placeholder
                 at = pkg.rfind("@")
@@ -739,16 +754,20 @@ class Audit:
                              f"install {base} from its own channel (winget/brew/apt/cargo) and call it directly",
                              line_no)
                     continue
-                if EXACT_SEMVER.match(ver) or locals_unknown:
+                # `pkg@${VERSION}` / `pkg@$VERSION`: pinned by the variable, checked where it is set.
+                if EXACT_SEMVER.match(ver) or ver.startswith("$") or locals_unknown:
                     continue
                 if base in declared:
                     if in_script:
                         self.note("npx.redundant", file, f"`{launcher} {base}` in a script: {base} is a local dependency; npm run already puts node_modules/.bin on PATH")
                     continue
+                if base in own and not in_script:
+                    continue  # the repo documenting its own published package for its users
                 if len([f for f in self.findings if f["id"] == "npx.unpinned"]) >= self.limit:
                     continue
-                self.add("warn", "npx.unpinned", file,
-                         f"`{launcher} {pkg}` fetches and runs an unpinned package from the registry",
+                what = (f"runs whatever is newest in range '{ver}' - not an exact version" if ver
+                        else "fetches and runs the newest published version")
+                self.add("warn", "npx.unpinned", file, f"`{launcher} {pkg}` {what}",
                          f"add {base} as a devDependency, or pin it: {launcher} {base}@<exact version>",
                          line_no)
 
@@ -759,11 +778,15 @@ class Audit:
             return
         scanned = 0
         for dirpath, dirnames, filenames in os.walk(self.root):
-            dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
+            dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS
+                                 and (not d.startswith(".") or d in DOT_DIRS_SCANNED))
             for fn in sorted(filenames):
                 p = Path(dirpath) / fn
+                # Git hooks (.husky/pre-commit) and DDEV custom commands are extensionless
+                # shell scripts, so inside those dirs a file with no suffix is read too.
+                hook_script = not p.suffix and bool(HOOK_DIRS & set(Path(dirpath).relative_to(self.root).parts))
                 if p.suffix.lower() not in DOC_SUFFIXES and fn.lower() not in DOC_NAMES \
-                        and not fn.lower().startswith(("dockerfile", "readme")):
+                        and not fn.lower().startswith(("dockerfile", "readme")) and not hook_script:
                     continue
                 try:
                     if p.stat().st_size > MAX_DOC_BYTES:

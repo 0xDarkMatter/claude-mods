@@ -48,8 +48,11 @@ npm 12 also blocks dependency install scripts by default; `--allow-scripts` lets
 5. **Global installs are pinned too**: `npm install -g corepack@0.36.0`, not
    `npm install -g corepack`.
 
-pm-audit flags `npx.unpinned` in scripts, docs, CI and shell files, and skips exact
-`pkg@x.y.z` pins and packages the repo already declares.
+pm-audit flags `npx.unpinned` in package.json scripts, and in the code of docs, CI, git
+hooks and shell files. It skips exact `pkg@x.y.z` pins, packages the repo already
+declares, and docs that show the repo's own published package. It does not walk
+dot-directories other than CI, hook and DDEV ones (`.github`, `.husky`, `.ddev` and
+similar), because vendored agent-config copies would repeat one finding many times.
 
 ## Never route a native CLI through npx
 
