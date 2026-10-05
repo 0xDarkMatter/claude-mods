@@ -4,12 +4,12 @@ Flags, examples, exit codes and host-specific behaviour for the six scripts SKIL
 
 ## Contents
 
-  - [`scripts/loop-scaffold.sh` — scaffold a loop's state spine](#scriptsloop-scaffoldsh--scaffold-a-loops-state-spine)
-  - [`scripts/loop-check.sh` — readiness scorer (run before you schedule)](#scriptsloop-checksh--readiness-scorer-run-before-you-schedule)
-  - [`scripts/loop-doctor.sh` — live preflight (will it actually run?)](#scriptsloop-doctorsh--live-preflight-will-it-actually-run)
-  - [`scripts/loop-estimate.py` — token/$ estimate by pattern × cadence × model (caching-aware)](#scriptsloop-estimatepy--token-estimate-by-pattern--cadence--model-caching-aware)
-  - [`scripts/check-pricing-sync.py` — offline drift guard (CI)](#scriptscheck-pricing-syncpy--offline-drift-guard-ci)
-  - [`scripts/check-native-facts.py` — native-scheduling staleness guard](#scriptscheck-native-factspy--native-scheduling-staleness-guard)
+- [`scripts/loop-scaffold.sh` — scaffold a loop's state spine](#scriptsloop-scaffoldsh--scaffold-a-loops-state-spine)
+- [`scripts/loop-check.sh` — readiness scorer (run before you schedule)](#scriptsloop-checksh--readiness-scorer-run-before-you-schedule)
+- [`scripts/loop-doctor.sh` — live preflight (will it actually run?)](#scriptsloop-doctorsh--live-preflight-will-it-actually-run)
+- [`scripts/loop-estimate.py` — token/$ estimate by pattern × cadence × model (caching-aware)](#scriptsloop-estimatepy--token-estimate-by-pattern--cadence--model-caching-aware)
+- [`scripts/check-pricing-sync.py` — offline drift guard (CI)](#scriptscheck-pricing-syncpy--offline-drift-guard-ci)
+- [`scripts/check-native-facts.py` — native-scheduling staleness guard](#scriptscheck-native-factspy--native-scheduling-staleness-guard)
 - [Worked example](#worked-example)
 
 ### `scripts/loop-scaffold.sh` — scaffold a loop's state spine
