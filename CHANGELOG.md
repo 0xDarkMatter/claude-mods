@@ -245,6 +245,29 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **A land's untested merge read as landed, whether the land was live or dead** -
+  `fleet land` merges first and gates second, so for the whole gate (20-45 minutes on
+  this repo) `main`'s tip is a `merge: <lane>` commit that a red gate hard-resets. On
+  2026-10-06 two peer sessions read such a tip as landed: one branched from it, and one
+  rebased onto it and started a second gate beside the first. Only the daemon wrote
+  `.claude/fleet/landing`, and `fleet status` said nothing about `main`. A land that died
+  mid-gate (kill -9, a crash, Ctrl-C, an agent's Bash tool timeout) was worse: the next
+  land took the "already up to date" path and marked its untested merge `LANDED`. Now
+  every land (`fleet land`, each lane of `land --all`, the daemon) holds the marker until
+  its verdict, recording the base tip. It is created exclusively, so a second concurrent
+  land refuses and names the holder. `fleet status` leads with
+  `main <sha> is PROVISIONAL - gate for <lane> running since HH:MM (pid N); red resets to <base>`.
+  The new `fleet landing` exits 10 until `main` is settled. `fleet sweep` turns every action into
+  "wait", lists only WAIT as the next step, and refuses `--apply`. The lane brief and
+  `signal.sh`'s handoff tell lanes to check before they branch or rebase. A marker whose
+  process is gone is examined before any land. An untested merge turns the lane
+  `CONFLICT` with an `UNTESTED MERGE` warning, a rebase left half-done in another lane's
+  worktree flags that lane, and a main checkout left mid-merge refuses with the abort
+  command. A reused PID cannot pass a dead land off as live, and every marker delete
+  retries a briefly-held file. Supersedes the unlanded `lane/stale-landing`. Of the 64
+  checks in the new blocks, 44 fail on the old code, and 12 fail with only the
+  dead-land half in place.
+
 - **package-manager-ops facts review** - two model reviewers read eight references, and
   every disputed claim was checked against primary sources (npm/cli 12.2.0, Composer
   2.10.3, pnpm.io, yarnpkg.com, bun.com). 30 corrections, the ones that change advice

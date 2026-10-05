@@ -19,7 +19,8 @@
 #       3. empty, unregistered dirs under the worktree roots that no OPEN session
 #          claims - `rmdir` refuses a non-empty dir by itself
 #     It never removes a worktree, drops a stash, deletes an unmerged branch,
-#     pushes, or messages a session.
+#     pushes, or messages a session, and it refuses outright while <base> is
+#     not settled (see LANDING).
 #   * Resumable by construction: nothing is cached or journalled. Every verdict
 #     is recomputed from git and the session store on each run, so after any one
 #     step (a land, an archive, a removal) the next run shows exactly what is left.
@@ -31,6 +32,7 @@
 #   ARGS          flags, env, --help
 #   REPO          repo root, base branch, config via `fleet config`
 #   HELPERS       path normalisation, landed-ness, never-push list
+#   LANDING       is <base> provisional right now? (`fleet landing`)
 #   EVIDENCE      prune buckets, worktree facts, session claims
 #   VERDICTS      phase 1 worktrees .. phase 5 sessions -> ROWS
 #   OUTPUT        panel / porcelain / json, next steps, exit code
@@ -59,6 +61,9 @@ USAGE
   fleet sweep --stale-days N   Age that makes a branch or stash stale (default 30)
 
 PHASES (the order is the procedure; re-run after each step)
+  0 landing    is <base> settled? While a land holds it (PROVISIONAL) or it holds
+               an UNTESTED merge, every verdict is judged against a tip that may
+               be reset: the next step is WAIT, and --apply refuses (exit 5)
   1 worktree   every lane worktree, with prune's bucket and the next action
   2 compete    pairs of lanes touching the same non-ledger files
   3 branch     local branches with no worktree: merged, content-landed, stale
@@ -66,7 +71,8 @@ PHASES (the order is the procedure; re-run after each step)
   5 session    finished sessions to ask to archive; hollow ones to archive
 
 VERDICTS that need you (anything else is informational)
-  REMOVE  LAND  REBASE  COMPETING  INSPECT  ASK-ARCHIVE  CONTENT-LANDED
+  PROVISIONAL  UNTESTED-MERGE  REMOVE  LAND  REBASE  COMPETING  INSPECT
+  ASK-ARCHIVE  CONTENT-LANDED
   VERIFY-OWNER  FLEETFLOW  GHOST  OVERLAP  DELETE-MERGED  STALE  UNLANDED
   LEAKED  EMPTY-DIR  ORPHAN-DIR  HOLLOW  STALE-STASH  ARCHIVE-REQUEST
   ARCHIVE-DIRECT  SPINNING?  UNKNOWN
@@ -93,7 +99,8 @@ EXAMPLES
 EXIT
   0 nothing to act on (with --apply: every step it took succeeded)
   10 findings   1 an --apply step failed   2 usage
-  5 precondition (not a git repo, base missing, --json without jq)
+  5 precondition (not a git repo, base missing, --json without jq,
+    --apply while <base> is not settled)
 EOF
 }
 
@@ -254,6 +261,44 @@ never_push() {
 REMOTE_REFS=$(g for-each-ref refs/remotes --format='%(refname)' 2>/dev/null \
   | awk '{ sub(/^refs\/remotes\//, ""); i = index($0, "/"); if (i) print substr($0, 1, i - 1) "\t" substr($0, i + 1) }')
 remote_copy() { printf '%s\n' "$REMOTE_REFS" | awk -F'\t' -v b="$1" '$2 == b && !f { print $1; f = 1 }'; }
+
+# === LANDING ==================================================================
+# Every verdict below is judged against $BASE's tip. While a land holds it, that
+# tip may be a merge its gate has not ruled on, and a red gate hard-resets it:
+# "MERGED" would then name work that is about to leave $BASE, and REMOVE,
+# DELETE-MERGED and ASK-ARCHIVE would act on it (2026-10-06: peers treated such a
+# tip as landed twice in a day). So ask fleet.sh, the marker's one reader, first.
+# When it says wait (exit 10), the report still prints, but the next steps say
+# only "wait", and --apply refuses. Snapshot semantics: --apply asks again right
+# before it acts.
+#   landing_check -> sets L_STATE / L_LANE / L_LINE; status 0 settled, 10 wait
+# The reply is `fleet landing --porcelain`: state, tip, base, lane, pid, start,
+# verdict line, tab-separated, "-" for an empty field (so `read` never shifts).
+landing_check() {
+  local rc=0 out _tip _base _pid _start
+  out=$(cd "$INVOKED_FROM" && bash "$FLEET_SH" landing --porcelain 2>/dev/null) || rc=$?
+  IFS=$'\t' read -r L_STATE _tip _base L_LANE _pid _start L_LINE <<< "$out"
+  # Not the expected reply (an older fleet.sh, a crash): say so rather than
+  # read silence as "settled".
+  if [[ $rc -ne 0 && $rc -ne 10 ]] || [[ -z "$L_STATE" || -z "$L_LINE" ]]; then
+    L_STATE=UNKNOWN L_LANE="-"
+    L_LINE="fleet landing failed (exit $rc): cannot tell whether $BASE is provisional"
+    rc=10
+  fi
+  return "$rc"
+}
+L_STATE="" L_LANE="" L_LINE="" SETTLED=1
+landing_check || SETTLED=0
+# First row, so --porcelain readers meet it before any verdict it qualifies.
+case "$L_STATE" in
+  CLEAR) : ;;
+  STALE) row landing "$BASE" DEAD-LAND "$L_LINE" "-" ;;
+  UNTESTED) row landing "$BASE" UNTESTED-MERGE "$L_LINE" \
+              "verify $BASE (its test_cmd), then fleet land $L_LANE (green) or fleet revert $L_LANE (red)" ;;
+  UNKNOWN) row landing "$BASE" UNKNOWN "$L_LINE" "fleet landing; treat $BASE as provisional until it answers" ;;
+  *) row landing "$BASE" PROVISIONAL "$L_LINE" "wait for the land's verdict (fleet landing exits 0), then re-run fleet sweep" ;;
+esac
+
 
 # === EVIDENCE =================================================================
 say "reading prune's buckets (session store, fresh claimant read)..."
@@ -650,7 +695,16 @@ while IFS=$US read -r id title done blk trees; do
 done <<< "${SESS//$'\t'/$US}"
 
 # === OUTPUT ===================================================================
-INFO_RE='^(KEEP|PARK|TRACKED|HELD|STASH|OWNER-BUSY|FLEETFLOW-RUNS)$'
+# On an unsettled tip the verdicts stay (they are what git says right now), but
+# no row may carry an action: the lane being landed reads MERGED and would show
+# REMOVE -> fleet prune --remove for work a red gate is about to take back out.
+# Every action but the landing row's own becomes "wait", in every output mode,
+# so a script filtering --porcelain on a verdict gets the same answer.
+if [[ $SETTLED -eq 0 ]]; then
+  ROWS=$(printf '%s' "$ROWS" | awk -F'\t' -v OFS='\t' -v w="wait: $BASE is not settled (see the landing row)" \
+    'NF { if ($1 != "landing" && $5 != "-") $5 = w; print }')$'\n'
+fi
+INFO_RE='^(KEEP|PARK|TRACKED|HELD|STASH|OWNER-BUSY|FLEETFLOW-RUNS|DEAD-LAND)$'
 FINDINGS=$(printf '%s' "$ROWS" | awk -F'\t' -v re="$INFO_RE" 'NF && $3 !~ re' | grep -c . || true)
 cnt() { printf '%s' "$ROWS" | awk -F'\t' -v v="$1" 'NF && $3 == v' | grep -c . || true; }
 
@@ -672,6 +726,13 @@ else
   term_panel_vert
   term_summary_line "$NW worktree(s), ${#B_ROWS[@]} worktree-less branch(es) - $FINDINGS to act on"
   [[ $STORE_OK -eq 1 ]] || term_summary_line "session store unreadable: no archive requests, no dir removal"
+  # Above every phase: whether the tip they were all judged against is settled.
+  if [[ $SETTLED -eq 0 ]]; then
+    term_panel_line "$(term_mark warn) $(term_color red "$L_LINE")"
+    term_panel_line "  $(term_color dim "every verdict below is judged against that tip - act on none of them yet")"
+  elif [[ "$L_STATE" == STALE ]]; then
+    term_panel_line "$(term_mark skip) $(term_color dim "$L_LINE")"
+  fi
   term_panel_vert
   phase_n=0
   for ph in worktree compete branch hygiene session; do
@@ -720,15 +781,30 @@ else
     n_req=$(cnt ARCHIVE-REQUEST) n_dir=$(( $(cnt ARCHIVE-DIRECT) + $(cnt 'SPINNING?') ))
     n_rm=$(cnt REMOVE) n_zero=$(( $(cnt DELETE-MERGED) + (ghosts > 0 ? 1 : 0) + ${#EMPTY_OK[@]} ))
     n_hand=$(( $(cnt CONTENT-LANDED) + $(cnt VERIFY-OWNER) + $(cnt ORPHAN-DIR) + $(cnt STALE) + $(cnt STALE-STASH) + $(cnt LEAKED) + $(cnt UNLANDED) + $(cnt FLEETFLOW) ))
-    k=0; echo "  Next, in order - re-run 'fleet sweep' after each step:"
-    [[ $n_comp -gt 0 ]] && { k=$((k+1)); echo "    $k. settle $n_comp competing pair(s): pick a winner before landing either"; }
-    [[ $((n_land + n_reb)) -gt 0 ]] && { k=$((k+1)); echo "    $k. land $n_land lane(s) (fleet land <branch>); $n_reb need a rebase in their lane first"; }
-    [[ $n_insp -gt 0 ]] && { k=$((k+1)); echo "    $k. inspect $n_insp tree(s) with uncommitted work"; }
-    [[ $((n_req + n_dir)) -gt 0 ]] && { k=$((k+1)); echo "    $k. sessions: $n_req archive request(s) (send_message), $n_dir to archive directly - agent step, one gated call each"; }
-    [[ $n_rm -gt 0 ]] && { k=$((k+1)); echo "    $k. remove $n_rm SAFE worktree(s): fleet prune --remove"; }
-    [[ $n_zero -gt 0 ]] && { k=$((k+1)); echo "    $k. zero-loss hygiene ($n_zero): fleet sweep --apply"; }
-    [[ $n_hand -gt 0 ]] && { k=$((k+1)); echo "    $k. by hand, after review: $n_hand row(s) (content-landed, verify-owner, orphan dirs, stale, leaked)"; }
-    [[ $k -eq 0 ]] && echo "    nothing - the wave is swept"
+    # A tip that is not settled makes every step below act on work that may
+    # leave $BASE: landing beside the land is refused anyway, and removing,
+    # deleting or archiving "merged" work loses it if the gate goes red. So the
+    # list is replaced, never appended to: the only next step is to wait.
+    if [[ $SETTLED -eq 0 ]]; then
+      echo "  Next: WAIT - $BASE is not settled:"
+      echo "    $L_LINE"
+      if [[ "$L_STATE" == UNTESTED ]]; then
+        echo "    Settle it first: verify $BASE (its test_cmd), then fleet land $L_LANE (green) or fleet revert $L_LANE (red)."
+      else
+        echo "    Do not land, prune, --apply, archive, or branch from or rebase onto $BASE until it is."
+      fi
+      echo "    'fleet landing' exits 0 once it is; then re-run 'fleet sweep' for the real next steps."
+    else
+      k=0; echo "  Next, in order - re-run 'fleet sweep' after each step:"
+      [[ $n_comp -gt 0 ]] && { k=$((k+1)); echo "    $k. settle $n_comp competing pair(s): pick a winner before landing either"; }
+      [[ $((n_land + n_reb)) -gt 0 ]] && { k=$((k+1)); echo "    $k. land $n_land lane(s) (fleet land <branch>); $n_reb need a rebase in their lane first"; }
+      [[ $n_insp -gt 0 ]] && { k=$((k+1)); echo "    $k. inspect $n_insp tree(s) with uncommitted work"; }
+      [[ $((n_req + n_dir)) -gt 0 ]] && { k=$((k+1)); echo "    $k. sessions: $n_req archive request(s) (send_message), $n_dir to archive directly - agent step, one gated call each"; }
+      [[ $n_rm -gt 0 ]] && { k=$((k+1)); echo "    $k. remove $n_rm SAFE worktree(s): fleet prune --remove"; }
+      [[ $n_zero -gt 0 ]] && { k=$((k+1)); echo "    $k. zero-loss hygiene ($n_zero): fleet sweep --apply"; }
+      [[ $n_hand -gt 0 ]] && { k=$((k+1)); echo "    $k. by hand, after review: $n_hand row(s) (content-landed, verify-owner, orphan dirs, stale, leaked)"; }
+      [[ $k -eq 0 ]] && echo "    nothing - the wave is swept"
+    fi
     echo "  Procedure and the archive-request template: references/sweep.md"
   } >&2
 fi
@@ -736,6 +812,17 @@ fi
 [[ $APPLY -eq 1 ]] || { [[ "${FINDINGS:-0}" -gt 0 ]] && exit 10; exit 0; }
 
 # === APPLY ====================================================================
+# Never on an unsettled tip: "merged into <base>" is the premise of every delete
+# below, and a red gate takes the merge back out (see LANDING). Exit 5 is the
+# precondition code. Asked twice: here, and again after the confirmation, which
+# can sit at a prompt for as long as a land takes to start.
+apply_refuse_unsettled() {
+  echo "fleet sweep --apply: REFUSED - $BASE is not settled, nothing changed:" >&2
+  echo "  $L_LINE" >&2
+  echo "  Re-run once 'fleet landing' exits 0." >&2
+  exit 5
+}
+[[ $SETTLED -eq 1 ]] || apply_refuse_unsettled
 DEL=(); for r in ${B_ROWS[@]+"${B_ROWS[@]}"}; do
   IFS=$US read -r b sha _ <<< "$r"
   printf '%s' "$ROWS" | awk -F'\t' -v b="$b" '$1 == "branch" && $2 == b && $3 == "DELETE-MERGED" { f = 1 } END { exit !f }' \
@@ -753,6 +840,7 @@ if [[ $YES -ne 1 ]]; then
   answer=""; read -r answer || true
   [[ "$answer" == apply ]] || { echo "aborted - nothing changed" >&2; exit 1; }
 fi
+landing_check || apply_refuse_unsettled
 
 failed=0 done_n=0
 if [[ "$ghosts" -gt 0 ]]; then

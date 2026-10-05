@@ -12,10 +12,12 @@ When Claude invokes `fleet start` via `Bash(run_in_background: true)`, the daemo
 
 It never exits from inside the signal handler: bash runs a trap *between* commands, so that exit could fall between `git merge` and the gate and leave an untested merge on `main`. Until 2026-09-28 the handler removed the PID file and then *resumed*. A daemon whose session ended (SIGHUP) kept polling as a ghost, invisible to `fleet stop` and the double-start guard, and landed lanes 3s later.
 
-To stop early: `fleet stop`. It sends SIGTERM and waits. While the daemon is mid-land, `fleet stop` waits as long as the gate takes, printing which lane it is waiting on, and **never escalates**. The daemon records that land in `.claude/fleet/landing` from just before the merge until the follow-up rebase pass is done. Only an idle daemon that still ignores SIGTERM after 5s gets SIGKILL. Until 2026-10-05 that 5s clock ran regardless, so any gate slower than 5s was killed mid-run: the merge stayed on `main` untested, and the next pass's "already up to date" path marked the lane `LANDED` anyway.
+To stop early: `fleet stop`. It sends SIGTERM and waits. While the daemon is mid-land, `fleet stop` waits as long as the gate takes, printing which lane it is waiting on, and **never escalates**. The [landing marker](landing.md#the-landing-marker) is how it tells a land from idleness. Only an idle daemon that still ignores SIGTERM after 5s gets SIGKILL. Until 2026-10-05 that 5s clock ran regardless, so any gate slower than 5s was killed mid-run: the merge stayed on `main` untested, and the next pass's "already up to date" path marked the lane `LANDED` anyway.
 
 - **Interrupting `fleet stop` is safe**: the request is already delivered, and the daemon exits once the land finishes.
 - **To abort a hung gate**, kill the `test_cmd` process, not the daemon. The gate fails, the merge is rewound, and the daemon exits.
-- **From an agent's Bash tool**, a slow gate can outlast the tool timeout. Run `fleet stop` in the background, or with a timeout longer than the gate.
+- **From an agent's Bash tool**, a slow gate can outlast the tool timeout. Run `fleet stop` in the background, or with a timeout longer than the gate. The same goes for `fleet land`: a timeout that kills it mid-gate is an [interrupted land](landing.md#interrupted-lands).
+
+The daemon shares the marker with `fleet land`. If another land holds it, the daemon waits a pass and logs the holder once. On `fleet start`, and again before every pass, a marker left by a land that died is examined first ([interrupted lands](landing.md#interrupted-lands)). If that left the main checkout mid-merge or mid-rebase, the daemon refuses to start, or stops.
 
 On next `fleet start`, a stale PID file is auto-detected and cleared. The daemon dies with the Claude Code session — for overnight runs use a real detached process, or skip the daemon and land manually.

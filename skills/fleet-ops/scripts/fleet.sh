@@ -12,8 +12,10 @@
 #   status views        fleet_view_panel, fleet_view_verbose, cmd_main, cmd_config
 #   SESSION AWARENESS   who owns a lane, and are they still writing (sessions.sh)
 #   PRUNE               worktree housekeeping — the only part that DELETES
+#   LANDING MARKER      one land at a time; recovering a land that died mid-way;
+#                       is the base tip provisional (fleet landing, status line)
 #   landing             land_one, rebase_others, cmd_land, cmd_land_all, revert
-#   daemon              cmd_start / cmd_stop, PID file + landing marker lifecycle
+#   daemon              cmd_start / cmd_stop, PID file lifecycle
 #   dispatch            the subcommand case at the bottom
 set -euo pipefail
 
@@ -47,8 +49,8 @@ LANES_DIR="$FLEET_DIR/lanes"
 LOG="$FLEET_DIR/activity.log"
 CONFIG="$FLEET_DIR/config"
 PID_FILE="$FLEET_DIR/daemon.pid"
-# The lane the daemon is landing right now. Format at daemon_mark_landing; why
-# it exists at cmd_stop.
+# The land in progress right now, by any fleet process. Format at claim_landing;
+# why it exists at the LANDING MARKER banner.
 LANDING_FILE="$FLEET_DIR/landing"
 
 # defaults (overridable via .claude/fleet/config — see load_config below)
@@ -561,6 +563,8 @@ fleet_view_panel() {
 
   echo ""
   term_panel_open fleet fleet "$TERM_GLYPH_BRANCH $BASE_BRANCH"
+  # First, above every lane: whether the base tip is safe to act on at all.
+  landing_status_row
 
   if [[ $total -eq 0 ]]; then
     term_panel_vert
@@ -639,6 +643,7 @@ fleet_view_verbose() {
 
   echo ""
   term_panel_open fleet "fleet ${TERM_DOT} verbose" "$TERM_GLYPH_BRANCH $BASE_BRANCH"
+  landing_status_row
 
   if [[ $total -eq 0 ]]; then
     term_panel_vert
@@ -1955,6 +1960,452 @@ prune_status_hint() {
 }
 # === END PRUNE ================================================================
 
+# === LANDING MARKER ===========================================================
+# One land at a time per repo, and the evidence when a land dies half-way.
+#
+# Every land holds $LANDING_FILE: the daemon's, `fleet land`, and each lane of
+# `fleet land --all`. It is taken just before land_one and given back once that
+# land's rebase_others pass is done, and ONLY then. So a marker whose process is
+# gone means a land was cut short: kill -9, a crash, OOM, a harness tearing down
+# the process tree, Ctrl-C, or an agent's Bash tool timing out a slow gate.
+#
+# The dangerous cut falls after `git merge` and before the gate's PASS/FAIL. The
+# merge then sits on $BASE_BRANCH untested while the lane is still READY (or,
+# for an untracked branch, has no lane file at all). The next land takes
+# land_one's "Already up to date" path and marks it LANDED, which blesses a merge
+# no gate ever passed. recover_stranded_landing runs before every land so that
+# cannot happen.
+#
+# Never give the marker back from an EXIT trap or a signal handler. An exit in
+# the middle of a land is exactly when it must survive (see daemon_cleanup).
+
+# The marker, one line, built here and nowhere else:
+#
+#   <pid> TAB <start, epoch seconds> TAB <base tip SHA, or -> TAB <branch>
+#
+#   pid     whose land it is. cmd_stop trusts it only when this equals the live
+#           daemon's PID (landing_of). Recovery treats it as live only while it
+#           names a running fleet process (landing_pid_live).
+#   start   for the elapsed times cmd_stop and the warnings print.
+#   base    $BASE_BRANCH's tip when the land began: the discriminator for a dead
+#           land. Tip unchanged means nothing merged and the lane can re-land.
+#           A "merge: <branch>" commit after it means a merge no gate judged.
+#           "-" when the branch did not resolve, never empty: TAB is IFS
+#           whitespace to `read`, so an empty field would collapse and shift
+#           the branch into this slot.
+#   branch  last, so it is everything after the third TAB. TAB is a safe
+#           separator because git refuses control characters in ref names.
+#
+# Created under noclobber (O_EXCL), so of two lands racing for it exactly one
+# wins; the other sees the winner's marker and refuses or waits. It is written
+# before land_one touches git, so a marker that stays empty (its writer killed
+# between the open and the write) proves that land never began.
+claim_landing() {
+  local base
+  base=$(git rev-parse -q --verify "refs/heads/$BASE_BRANCH" 2>/dev/null) || base="-"
+  ( set -C; printf '%s\t%s\t%s\t%s\n' "$$" "$(date +%s)" "$base" "$1" > "$LANDING_FILE" ) 2>/dev/null
+}
+# Give the marker back once a land reached its verdict. Through remove_state_file,
+# never a bare `rm -f`: a briefly-held marker (antivirus, the indexer) fails a
+# single delete with EBUSY on Windows, and the daemon loop runs under errexit.
+# Never fails. A marker that survives the retry is logged and left: it names
+# this process, and once we exit, the next land's recovery finds the lane's
+# verdict recorded (or the base unmoved) and clears it.
+release_landing() {
+  remove_state_file "$LANDING_FILE" "landing marker" \
+    || log "WARNING: landing marker $LANDING_FILE survived (held open); the next land examines and clears it" \
+    || true
+}
+
+# Remove the marker only if it is still the line $1 that recovery examined. Two
+# fleet commands can recover the same stranded marker at once; the first one
+# done may already have claimed a fresh marker for its own land, and a plain rm
+# from the second would delete that live claim and let both land together.
+# Status 1 when the examined marker cannot be removed (held open past the
+# retry): the caller refuses, rather than misreading it as a live land.
+release_examined() {
+  local now=""
+  { IFS= read -r now < "$LANDING_FILE"; } 2>/dev/null || true
+  [[ "$now" == "$1" ]] || return 0
+  remove_state_file "$LANDING_FILE" "examined landing marker" && return 0
+  log "REFUSE: cannot clear the examined landing marker $LANDING_FILE (held open); rerun once it is free"
+  return 1
+}
+
+# Parse $LANDING_FILE into M_PID / M_START / M_BASE / M_LANE. Status 1 when there
+# is no marker. Globals rather than output, so cmd_stop's once-a-second poll
+# costs no subshell.
+M_PID="" M_START="" M_BASE="" M_LANE=""
+read_landing_marker() {
+  M_PID="" M_START="" M_BASE="" M_LANE=""
+  [[ -f "$LANDING_FILE" ]] || return 1
+  # Grouped so the redirect's own "No such file" goes to /dev/null too: the
+  # writer can delete the marker between the test above and this read.
+  { IFS=$'\t' read -r M_PID M_START M_BASE M_LANE < "$LANDING_FILE"; } 2>/dev/null || true
+  # Three fields: the form before the base tip was recorded (pid, start, branch).
+  if [[ -z "$M_LANE" && -n "$M_BASE" ]]; then M_LANE=$M_BASE M_BASE=""; fi
+  if [[ "$M_BASE" == "-" ]]; then M_BASE=""; fi
+  return 0
+}
+
+# Is the daemon with PID $1 mid-land? Status 0 with LANDING_LANE / LANDING_START
+# set when it is; 1, both empty, when there is no marker or it belongs to some
+# other process (a manual land, or a dead daemon).
+LANDING_LANE=""
+LANDING_START=""
+landing_of() {
+  LANDING_LANE="" LANDING_START=""
+  read_landing_marker || return 1
+  [[ -n "$M_LANE" && "$M_PID" == "$1" ]] || return 1
+  LANDING_LANE=$M_LANE LANDING_START=$M_START
+}
+
+# Is PID $1 a live fleet process? kill -0 alone is not enough. A stranded marker
+# can sit for hours and Windows reuses PIDs fast, so a dead land's PID may now
+# name some unrelated process. Trusting it would make the dead land look like
+# one in progress: every land refused, and what it left never examined. So the
+# command line must mention fleet as well. /proc covers Linux and Git Bash (MSYS
+# has /proc but no `ps -o`); `ps -o` covers macOS. When neither can say, assume
+# live: a wrong "live" refuses loudly, while a wrong "dead" would recover a land
+# that is still running. Never our own PID: we ask before we hold any marker.
+landing_pid_live() {
+  local p=$1 cmd=""
+  [[ "$p" =~ ^[0-9]+$ && "$p" != "$$" ]] || return 1
+  kill -0 "$p" 2>/dev/null || return 1
+  if [[ -r "/proc/$p/cmdline" ]]; then
+    cmd=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null) || cmd=""
+  else
+    cmd=$(ps -p "$p" -o command= 2>/dev/null) || cmd=""
+  fi
+  [[ -z "$cmd" || "$cmd" == *fleet* ]]
+}
+
+# Log, prefixed $1, which live land holds the marker (M_* already read).
+log_landing_busy() {
+  local who="pid $M_PID" age=""
+  if [[ "$(cat "$PID_FILE" 2>/dev/null)" == "$M_PID" ]]; then who="the daemon (pid $M_PID)"; fi
+  if [[ "$M_START" =~ ^[0-9]+$ ]]; then age=", started $(format_age $(( $(date +%s) - M_START ))) ago"; fi
+  log "$1: another land is in progress: $who on ${M_LANE:-?}$age. One land at a time, so rerun once it finishes"
+}
+
+# Did a dead land's merge of $3 reach $BASE_BRANCH? $1 is the base tip its marker
+# recorded (empty if none), $2 the tip now.
+landing_merged() {
+  local before=$1 now=$2 lane=$3 subj merges
+  [[ -n "$now" && "$now" != "$before" ]] || return 1   # never moved: nothing merged
+  if [[ -n "$before" ]] && git cat-file -e "$before^{commit}" 2>/dev/null; then
+    # The only merge that land could make is land_one's own, subject exactly
+    # "merge: <lane>" (matched exactly, as revert_find_merges explains), and
+    # only after the tip it began from. Captured, not piped: SIGPIPE under
+    # pipefail (see cmd_revert).
+    merges=$(git log --merges --format=%s "$before..$now" 2>/dev/null) || merges=""
+    while IFS= read -r subj; do
+      if [[ "$subj" == "merge: $lane" ]]; then return 0; fi
+    done <<< "$merges"
+    return 1
+  fi
+  # No usable tip recorded. Fall back to "the lane's tip is in the base branch",
+  # which over-flags only a lane that was already there; one `fleet land` of it
+  # clears that.
+  git rev-parse -q --verify "refs/heads/$lane" >/dev/null 2>&1 \
+    && git merge-base --is-ancestor "refs/heads/$lane" "$now" 2>/dev/null
+}
+
+# --- reading the marker: is $BASE_BRANCH provisional? ---------------------------
+# `fleet land` merges first and gates second, so for the whole gate (20-45 min on
+# a big suite) the base tip is a "merge: <lane>" commit that a red gate
+# hard-resets. On 2026-10-06 two peer sessions saw such a merge and read it as
+# landed: one branched from it, the other rebased onto it and started a second
+# gate. Nothing on disk said "provisional". landing_status is the ONE reader of
+# that fact, behind `fleet status`'s top line, `fleet landing` and `fleet sweep`.
+# It never recovers or clears a marker; that is a land's job (begin_land), so a
+# status call cannot race a live land.
+#
+# Sets LS_STATE, LS_TIP (the base tip now) and M_* (the marker, if any):
+#   CLEAR        nothing landing, nothing untested: act on the tip freely
+#   LANDING      a live land that has merged nothing (before its merge, or a red
+#                gate already rewound it). The tip is tested but about to move
+#   PROVISIONAL  a live land merged and its gate has not ruled. The tip is
+#                untested; a red gate resets it to M_BASE
+#   SETTLING     its gate passed (lane LANDED) and its rebase pass is rewriting
+#                the other lanes. The tip is tested; lane branches are moving
+#   UNTESTED     a land died between merge and verdict, so the tip holds a merge
+#                no gate judged: from a dead marker, or from the lane recovery
+#                flagged (marker cleared, lane CONFLICT until a human settles it)
+#   STALE        a land died and left nothing untested; the next land clears it
+# Live = landing_pid_live, or our own pid: a reader inside the land itself
+# (cmd_fleet at the end of land --all) is looking at a live land. An empty
+# marker is a claim caught between its open and its write, so it is live too.
+LS_STATE="CLEAR" LS_TIP=""
+landing_status() {
+  local state="" f s note
+  LS_STATE="CLEAR"
+  LS_TIP=$(git rev-parse -q --verify "refs/heads/$BASE_BRANCH" 2>/dev/null) || LS_TIP=""
+  if ! read_landing_marker; then
+    # Read with builtins, not head/sed: one fork per lane file is ~10ms each on
+    # Windows, and this runs on every `fleet status`.
+    for f in "$LANES_DIR"/*; do
+      [[ -f "$f" ]] || continue
+      s="" note=""
+      { IFS= read -r s; IFS= read -r note; } < "$f" 2>/dev/null || true
+      if [[ "${s%$'\r'}" == "CONFLICT" && "$note" == "UNTESTED MERGE"* ]]; then
+        M_LANE=$(decode_lane "$(basename "$f")") LS_STATE="UNTESTED"
+        return 0
+      fi
+    done
+    return 0
+  fi
+  if [[ -n "$M_LANE" ]]; then state=$(lane_state "$M_LANE"); fi
+  if [[ -z "$M_PID" || "$M_PID" == "$$" ]] || landing_pid_live "$M_PID"; then
+    if [[ -z "$M_PID" || "$state" == "FAILED" ]]; then LS_STATE="LANDING"
+    elif [[ "$state" == "LANDED" ]]; then LS_STATE="SETTLING"
+    # No recorded base (a marker from before the base was recorded): cannot
+    # prove nothing merged, so claim the worse case.
+    elif [[ -z "$M_BASE" || "$LS_TIP" != "$M_BASE" ]]; then LS_STATE="PROVISIONAL"
+    else LS_STATE="LANDING"
+    fi
+  elif [[ -n "$M_LANE" && "$state" != "LANDED" && "$state" != "FAILED" ]] \
+       && landing_merged "$M_BASE" "$LS_TIP" "$M_LANE"; then
+    LS_STATE="UNTESTED"
+  else
+    LS_STATE="STALE"
+  fi
+  return 0
+}
+
+# Epoch seconds -> local HH:MM. GNU date first, then BSD (macOS).
+clock_of() { date -d "@$1" +%H:%M 2>/dev/null || date -r "$1" +%H:%M 2>/dev/null || printf '?'; }
+
+# The one-line verdict for LS_* (call landing_status first); empty for CLEAR.
+# ASCII only: it renders on the same non-UTF-8 consoles as the status panel, and
+# sweep.sh carries it verbatim. The PROVISIONAL wording is the contract peers
+# grep for; tests/run.sh asserts it.
+landing_line() {
+  local tip=${LS_TIP:0:7} base=${M_BASE:0:7} lane=${M_LANE:-?} since="?" ago=""
+  if [[ "$M_START" =~ ^[0-9]+$ ]]; then
+    since=$(clock_of "$M_START")
+    ago=", $(format_age $(( $(date +%s) - M_START ))) ago"
+  fi
+  case "$LS_STATE" in
+    PROVISIONAL)
+      printf '%s %s is PROVISIONAL - gate for %s running since %s (pid %s); red resets to %s\n' \
+        "$BASE_BRANCH" "$tip" "$lane" "$since" "${M_PID:-?}" "${base:-its pre-merge tip}" ;;
+    LANDING)
+      printf 'land of %s in progress since %s (pid %s); %s %s is about to move - wait for its verdict\n' \
+        "$lane" "$since" "${M_PID:-?}" "$BASE_BRANCH" "$tip" ;;
+    SETTLING)
+      printf '%s %s landed %s (gate green); its rebase pass is still running (pid %s) - wait before rebasing a lane\n' \
+        "$BASE_BRANCH" "$tip" "$lane" "${M_PID:-?}" ;;
+    UNTESTED)
+      if [[ -n "$M_PID" ]]; then
+        printf '%s %s holds an UNTESTED merge of %s - its land (pid %s, from %s%s) died before the gate ruled; the next land flags it\n' \
+          "$BASE_BRANCH" "$tip" "$lane" "$M_PID" "$since" "$ago"
+      else
+        printf '%s %s holds an UNTESTED merge of %s - verify, then fleet land %s (green) or fleet revert %s (red)\n' \
+          "$BASE_BRANCH" "$tip" "$lane" "$lane" "$lane"
+      fi ;;
+    STALE)
+      printf 'a land of %s (pid %s, from %s%s) died; nothing of it is untested on %s %s - the next land clears its marker\n' \
+        "$lane" "${M_PID:-?}" "$since" "$ago" "$BASE_BRANCH" "$tip" ;;
+  esac
+}
+
+# `fleet status`'s top line. Nothing at all when CLEAR.
+landing_status_row() {
+  landing_status
+  [[ "$LS_STATE" == "CLEAR" ]] && return 0
+  term_panel_vert
+  case "$LS_STATE" in
+    STALE) term_panel_line "$(term_mark skip) $(term_color dim "$(landing_line)")" ;;
+    UNTESTED|PROVISIONAL) term_panel_line "$(term_mark warn) $(term_color red "$(landing_line)")" ;;
+    *)     term_panel_line "$(term_mark warn) $(term_color yellow "$(landing_line)")" ;;
+  esac
+}
+
+# `fleet landing [--porcelain]`: may a session act on the base tip right now?
+# Read-only, so any session may poll it: peers run it (or `fleet status`) before
+# branching from or rebasing onto the base. Exit 0 for CLEAR and STALE (the tip
+# is tested and nothing is landing); 10 for the rest, the domain signal "wait".
+# stdout is the one-line verdict, or with --porcelain one TSV row, read by
+# sweep.sh (so the marker has one parser):
+#   state TAB tip TAB base TAB lane TAB pid TAB start TAB verdict-line
+# with "-" for an empty field (TAB is IFS whitespace to `read`, and an empty
+# field would collapse and shift the rest).
+cmd_landing() {
+  local porcelain=0 line
+  case "${1:-}" in
+    --porcelain) porcelain=1 ;;
+    "") : ;;
+    *) echo "usage: fleet landing [--porcelain]" >&2; return 2 ;;
+  esac
+  landing_status
+  line=$(landing_line)
+  if [[ "$LS_STATE" == "CLEAR" ]]; then line="$BASE_BRANCH ${LS_TIP:0:7}: no land in progress, nothing untested"; fi
+  if [[ $porcelain -eq 1 ]]; then
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$LS_STATE" "${LS_TIP:--}" "${M_BASE:--}" \
+      "${M_LANE:--}" "${M_PID:--}" "${M_START:--}" "$line"
+  else
+    printf '%s\n' "$line"
+  fi
+  case "$LS_STATE" in CLEAR|STALE) return 0 ;; *) return 10 ;; esac
+}
+
+# Lanes recover_stranded_landing flagged in THIS process, one per line.
+RECOVERY_FLAGGED=""
+
+# A dead land's rebase_others may have left another lane's worktree stuck
+# mid-rebase onto $2 (the base tip it had just landed). worktree_path_for cannot
+# find that worktree: mid-rebase, `git worktree list` reports it as "detached".
+# So this reads each worktree's own git dir under $1. The rebase is NOT aborted:
+# the lane's session may be resolving that conflict right now, and its worktree
+# is not fleet's to reset. CONFLICT keeps the lane out of every land until its
+# owner finishes or aborts and signals READY again.
+recover_stranded_rebases() {
+  local gd=$1 tip=$2 wgd rd hb onto wt
+  for wgd in "$gd"/worktrees/*; do
+    if [[ -d "$wgd/rebase-merge" ]]; then rd="$wgd/rebase-merge"
+    elif [[ -d "$wgd/rebase-apply" ]]; then rd="$wgd/rebase-apply"
+    else continue
+    fi
+    hb="" onto="" wt=""
+    { read -r hb < "$rd/head-name"; } 2>/dev/null || true
+    { read -r onto < "$rd/onto"; } 2>/dev/null || true
+    hb=${hb#refs/heads/}
+    [[ -n "$hb" && -f "$LANES_DIR/$(encode_lane "$hb")" ]] || continue
+    case "$(lane_state "$hb")" in LANDED|FAILED) continue ;; esac
+    # rebase_others rebases onto the tip it just landed. A rebase onto anything
+    # else is the lane session's own business.
+    [[ -z "$onto" || "$onto" == "$tip" ]] || continue
+    { read -r wt < "$wgd/gitdir"; } 2>/dev/null || true
+    wt=${wt%/.git}
+    [[ -n "$wt" ]] || wt=$wgd
+    set_lane_state "$hb" "CONFLICT" "rebase onto $BASE_BRANCH cut short by a land that died; finish or abort it in $wt, then signal READY"
+    RECOVERY_FLAGGED+="$hb"$'\n'
+    log "WARNING: $hb is stuck mid-rebase onto $BASE_BRANCH in $wt"
+    log "         The dead land's rebase pass started it and never finished. Marked CONFLICT."
+    log "         Look:     git -C \"$wt\" status"
+    log "         Undo it:  git -C \"$wt\" rebase --abort   (puts the lane back exactly as it was)"
+    log "         then signal READY again from the lane."
+  done
+}
+
+# Examine a marker left by a land that never reached a verdict, before any new
+# land may start. Status:
+#   0  no marker now: there was none, or a stranded one was examined and cleared
+#   1  refuse: the main checkout is mid-merge or mid-rebase. The marker stays,
+#      so the next run examines it again once a human has dealt with that.
+#   2  a live fleet process holds it: a land is in progress right now (M_* set)
+#
+# What a dead land can leave, and what each finding gets:
+#   base tip unchanged      nothing merged (it died before the merge, or after a
+#                           red gate's rewind). Lane untouched; it re-lands.
+#   "merge: <lane>" since   THE hazard: a merge no gate judged, lane not LANDED
+#                           or FAILED. Loud WARNING with the verify / revert
+#                           commands, and lane -> CONFLICT. Left READY (or
+#                           untracked), the next land would bless it.
+#   lane worktree mid-rebase  see recover_stranded_rebases.
+#   main checkout mid-merge or mid-rebase  refuse, naming the abort command.
+#                           Never aborted here: it is the integration tree, and
+#                           a human may be resolving it.
+# Every finding is re-derived from git each time, so a recovery that is itself
+# interrupted is simply redone.
+recover_stranded_landing() {
+  read_landing_marker || return 0
+  if [[ -z "$M_PID" ]]; then
+    # Caught between a claim's open and its write; give that writer a moment.
+    sleep 1
+    read_landing_marker || return 0
+  fi
+  if landing_pid_live "$M_PID"; then return 2; fi
+  local seen=""
+  { IFS= read -r seen < "$LANDING_FILE"; } 2>/dev/null || true
+  if [[ -z "$M_LANE" ]]; then
+    log "NOTE: clearing an unreadable landing marker (pid ${M_PID:-?}); its land died before touching git"
+    release_examined "$seen" || return 1
+    return 0
+  fi
+
+  local age="" tip state shown gd hb=""
+  if [[ "$M_START" =~ ^[0-9]+$ ]]; then age=", started $(format_age $(( $(date +%s) - M_START ))) ago"; fi
+  # NOTE, not WARNING: only the findings below that need a human say WARNING.
+  log "NOTE: a land of $M_LANE (pid $M_PID$age) died before finishing; checking what it left"
+  tip=$(git rev-parse -q --verify "refs/heads/$BASE_BRANCH" 2>/dev/null) || tip=""
+  state=$(lane_state "$M_LANE")
+  shown=$state
+  if [[ "$state" == "MISSING" ]]; then shown="untracked"; fi
+
+  case "$state" in
+    LANDED|FAILED)
+      log "  $M_LANE is $state: land_one recorded its verdict before the process died" ;;
+    *)
+      if landing_merged "$M_BASE" "$tip" "$M_LANE"; then
+        set_lane_state "$M_LANE" "CONFLICT" "UNTESTED MERGE on $BASE_BRANCH: its land died before the gate passed or failed. Verify, then fleet land $M_LANE (green) or fleet revert $M_LANE (red)"
+        RECOVERY_FLAGGED+="$M_LANE"$'\n'
+        log "WARNING: UNTESTED MERGE on $BASE_BRANCH: $M_LANE"
+        log "         Its land merged it, then died before the gate passed or failed: no gate has judged it."
+        log "         $BASE_BRANCH moved ${M_BASE:0:12}${M_BASE:+ }-> ${tip:0:12} since that land began."
+        log "         $M_LANE is now CONFLICT (was $shown), so nothing lands it as-is. Every other"
+        log "         land's gate runs over it too until it is settled. Verify it by hand:"
+        log "           cd \"$REPO_ROOT\" && git checkout $BASE_BRANCH && ${TEST_CMD:-<test_cmd>}"
+        log "         green: fleet land $M_LANE     marks it LANDED, rebases the other lanes"
+        log "         red:   fleet revert $M_LANE   reverts the merge; the lane goes back to RUNNING"
+      elif [[ -n "$M_BASE" && "$tip" == "$M_BASE" ]]; then
+        log "  $BASE_BRANCH has not moved since that land began, so nothing merged; $M_LANE ($shown) lands normally"
+      else
+        log "  $BASE_BRANCH holds no merge of $M_LANE from that land; $M_LANE ($shown) lands normally"
+      fi ;;
+  esac
+
+  gd=$(git rev-parse --absolute-git-dir 2>/dev/null) || gd=""
+  if [[ -n "$gd" ]]; then
+    recover_stranded_rebases "$gd" "$tip"
+    # The main checkout is where every land runs. A merge or a plain lane's
+    # rebase left half-done there makes the next land refuse with "uncommitted
+    # tracked changes", which names the symptom and hides the cause.
+    if git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+      log "REFUSE: $REPO_ROOT is mid-merge; the dead land's \`git merge\` never finished"
+      log "        Nothing of it was committed. Undo it, then rerun:"
+      log "          git -C \"$REPO_ROOT\" merge --abort"
+      return 1
+    fi
+    if [[ -d "$gd/rebase-merge" || -d "$gd/rebase-apply" ]]; then
+      { read -r hb < "$gd/rebase-merge/head-name"; } 2>/dev/null \
+        || { read -r hb < "$gd/rebase-apply/head-name"; } 2>/dev/null || true
+      log "REFUSE: $REPO_ROOT is mid-rebase of ${hb#refs/heads/}; the dead land's rebase pass never finished"
+      log "        Undo it, then rerun:"
+      log "          git -C \"$REPO_ROOT\" rebase --abort"
+      log "          git -C \"$REPO_ROOT\" checkout $BASE_BRANCH"
+      return 1
+    fi
+  fi
+  release_examined "$seen" || return 1
+}
+
+# Examine any stranded marker, then take the marker for a land of $1. Status:
+#   0  taken: run the land, then release_landing
+#   1  refused, reason already logged
+#   2  another fleet process is landing right now (M_* describe it)
+begin_land() {
+  local branch=$1 rc=0
+  recover_stranded_landing || rc=$?
+  if [[ $rc -ne 0 ]]; then return "$rc"; fi
+  # Never land a lane recovery just flagged. This same call would otherwise take
+  # land_one's "Already up to date" path and mark it LANDED right under the
+  # warning. A LATER `fleet land` of it is the operator's verified decision.
+  if [[ $'\n'"$RECOVERY_FLAGGED" == *$'\n'"$branch"$'\n'* ]]; then
+    log "REFUSE LAND: $branch was flagged above. Settle it first, then rerun: fleet land $branch"
+    return 1
+  fi
+  mkdir -p "$FLEET_DIR"
+  if claim_landing "$branch"; then return 0; fi
+  # Lost a race: another land claimed it between the check and the claim.
+  if read_landing_marker && [[ -n "$M_PID" ]]; then return 2; fi
+  log "REFUSE LAND: $branch: cannot create $LANDING_FILE"
+  return 1
+}
+
+# === END LANDING MARKER =======================================================
+
 # LAND_RESULT — how the last land_one() call finished, for callers that need a
 # distinction the exit code cannot carry. land_one returns 0 for "this lane's
 # work is in $BASE_BRANCH", which is true both when this run merged it and when
@@ -2139,9 +2590,16 @@ rebase_others() {
 }
 
 cmd_land() {
-  local branch=${1:-}
+  local branch=${1:-} rc=0
   [[ -z "$branch" ]] && { echo "usage: fleet land <branch>" >&2; exit 1; }
-  land_one "$branch" && rebase_others "$branch"
+  begin_land "$branch" || rc=$?
+  if [[ $rc -eq 2 ]]; then log_landing_busy "REFUSE LAND: $branch"; fi
+  if [[ $rc -ne 0 ]]; then return 1; fi
+  # The marker is released only after a verdict. If this process dies anywhere
+  # in between, it stays behind for the next land's recovery to examine.
+  if ! land_one "$branch"; then release_landing; return 1; fi
+  rebase_others "$branch"
+  release_landing
 }
 
 # Batch-land every landable lane in one pass. Default: READY lanes only
@@ -2161,6 +2619,12 @@ cmd_land_all() {
     esac
   done
   ensure_fleet_dir
+
+  # Before choosing candidates, so a dead land's lane is flagged, not picked.
+  local rrc=0
+  recover_stranded_landing || rrc=$?
+  if [[ $rrc -eq 2 ]]; then log_landing_busy "land --all: REFUSED"; fi
+  if [[ $rrc -ne 0 ]]; then return 1; fi
 
   # Collect candidate lanes with their tip-commit time, so we can order them.
   local candidates=() f b state ts
@@ -2189,9 +2653,23 @@ cmd_land_all() {
   local ordered
   ordered=$(printf '%s\n' "${candidates[@]}" | sort -n)
 
-  local landed=0 already=0 conflict=0 failed=0
+  local landed=0 already=0 conflict=0 failed=0 brc stopped=""
   while IFS=$'\t' read -r ts b; do
     [[ -z "$b" ]] && continue
+    # Re-read: the scan above is a snapshot, and recovery or a concurrent land
+    # can have moved this lane since. Only what is landable NOW is landed.
+    case "$(lane_state "$b")" in
+      READY)   : ;;
+      RUNNING) [[ $include_running -eq 1 ]] || continue ;;
+      *)       continue ;;
+    esac
+    brc=0
+    begin_land "$b" || brc=$?
+    if [[ $brc -ne 0 ]]; then
+      if [[ $brc -eq 2 ]]; then log_landing_busy "land --all: stopping before $b"; fi
+      stopped=$b
+      break
+    fi
     if land_one "$b"; then
       rebase_others "$b"
       # A no-op land — the branch was already in $BASE_BRANCH, another session
@@ -2208,6 +2686,7 @@ cmd_land_all() {
         *)        failed=$((failed+1)) ;;
       esac
     fi
+    release_landing
   done <<< "$ordered"
 
   # The "already" clause appears only when it is non-zero, so an ordinary batch
@@ -2217,10 +2696,12 @@ cmd_land_all() {
   # runs with errexit live (dispatched directly, not from an `if`) — see the same
   # trap noted in ensure_fleet_dir.
   if [[ $already -gt 0 ]]; then summary="$summary, $already already in $BASE_BRANCH"; fi
-  log "$summary, $conflict conflict, $failed failed"
+  summary="$summary, $conflict conflict, $failed failed"
+  if [[ -n "$stopped" ]]; then summary="$summary; stopped before $stopped, the rest not tried"; fi
+  log "$summary"
   cmd_fleet
   # Non-zero exit when anything didn't land, so orchestrators can branch on it.
-  [[ $((conflict + failed)) -eq 0 ]]
+  [[ $((conflict + failed)) -eq 0 && -z "$stopped" ]]
 }
 
 # `fleet stop` asks, then waits, and NEVER SIGKILLs a daemon that is mid-land.
@@ -2234,7 +2715,7 @@ cmd_land_all() {
 # date" path and marked the lane LANDED, blessing a merge no gate ever passed.
 #
 # So the grace clock runs only while the daemon is NOT landing, judged by the
-# landing marker (format at daemon_mark_landing). Mid-land, this waits as long
+# landing marker (format at claim_landing). Mid-land, this waits as long
 # as the gate takes, printing progress, and the clock restarts from zero once
 # the land is done. Do not "simplify" this back to a fixed deadline: there is no
 # deadline that is safe for every repo's test_cmd. SIGKILL stays only as the
@@ -2419,53 +2900,6 @@ daemon_request_stop() {
   if [[ -n "$DAEMON_SLEEP_PID" ]]; then kill "$DAEMON_SLEEP_PID" 2>/dev/null || true; fi
 }
 
-# The landing marker, $LANDING_FILE: one line, written by the daemon just before
-# a land and removed once that land's rebase_others pass is done (and by
-# daemon_cleanup on any exit that runs the EXIT trap). cmd_stop reads it to know
-# it must not SIGKILL.
-#
-#   <daemon pid> TAB <start, epoch seconds> TAB <branch>
-#
-#   pid     whose land it is. cmd_stop trusts the marker only when this equals
-#           the live PID in daemon.pid, so a marker stranded by a daemon that died
-#           without its EXIT trap (kill -9, a crash) can never stall a later stop.
-#   start   for the elapsed time cmd_stop prints while it waits.
-#   branch  last, so it is everything after the second TAB. TAB is a safe
-#           separator because git refuses control characters in ref names.
-#
-# It spans rebase_others as well as land_one: a SIGKILL mid-rebase strands
-# another lane's worktree in a half-finished rebase, no better than a half-gated
-# merge. A plain `>` write is enough: a reader that catches it empty or partial
-# sees "not landing", which only matters if the daemon also ignores SIGTERM.
-daemon_mark_landing() { printf '%s\t%s\t%s\n' "$$" "$(date +%s)" "$1" > "$LANDING_FILE"; }
-
-# Through remove_state_file, never a bare `rm -f`: the daemon loop runs under
-# errexit, so one EBUSY from a briefly-held marker would kill the daemon between
-# lands. A marker that still survives the retry is logged and left; it names
-# this live pid, so cmd_stop would wait instead of escalating, but an idle
-# daemon exits on SIGTERM anyway.
-daemon_clear_landing() {
-  remove_state_file "$LANDING_FILE" "landing marker" \
-    || log "WARNING: landing marker $LANDING_FILE survived (held open)" || true
-}
-
-# Is the daemon with PID $1 mid-land? Status 0 with LANDING_LANE / LANDING_START
-# set when it is; 1, both empty, when there is no marker or it belongs to some
-# other (dead) daemon. Sets globals rather than printing, so cmd_stop's
-# once-a-second poll costs no subshell.
-LANDING_LANE=""
-LANDING_START=""
-landing_of() {
-  LANDING_LANE="" LANDING_START=""
-  local mpid="" mstart="" mlane=""
-  [[ -f "$LANDING_FILE" ]] || return 1
-  # Grouped so the redirect's own "No such file" goes to /dev/null too: the
-  # daemon can delete the marker between the test above and this read.
-  { IFS=$'\t' read -r mpid mstart mlane < "$LANDING_FILE"; } 2>/dev/null || true
-  [[ -n "$mlane" && "$mpid" == "$1" ]] || return 1
-  LANDING_LANE=$mlane LANDING_START=$mstart
-}
-
 daemon_cleanup() {
   # PID file first: it is the one step that must happen. `log` can fail (its
   # stderr may be gone after a SIGHUP), and under errexit that ends the handler.
@@ -2476,9 +2910,12 @@ daemon_cleanup() {
   remove_state_file "$PID_FILE" "daemon PID file" 2>/dev/null \
     || log "WARNING: daemon PID file survived exit (held open); next fleet start/stop clears it as stale" \
     || true
-  # A marker that survives names a pid that is now dead, so landing_of already
-  # ignores it; no retry needed here.
-  rm -f "$LANDING_FILE" 2>/dev/null || true
+  # The landing marker is deliberately NOT removed here, not even with a bare
+  # `rm -f`. Every path out of the loop releases it first, so it is only still
+  # present when the daemon exits in the middle of a land, e.g. errexit in
+  # rebase_others when `log` loses its stderr. That is exactly when it is
+  # evidence: removing it would hide an untested merge or a half-done rebase
+  # from the next run's recovery (see the LANDING MARKER banner).
   if [[ -n "$DAEMON_SLEEP_PID" ]]; then kill "$DAEMON_SLEEP_PID" 2>/dev/null || true; fi
   log "daemon stopping (pid $$)" || true
 }
@@ -2504,6 +2941,14 @@ cmd_start() {
     fi
   fi
 
+  # A daemon killed mid-land leaves its marker behind. Examine it before
+  # anything runs, and refuse to start over a main checkout that needs a human,
+  # the way require_test_cmd refuses an unarmed gate. A live land elsewhere
+  # (status 2) is no reason not to start: the loop waits for it.
+  local rrc=0
+  recover_stranded_landing || rrc=$?
+  if [[ $rrc -eq 1 ]]; then exit 1; fi
+
   # Cleanup on EXIT only; the signals merely request a stop (see daemon_cleanup).
   # Installed BEFORE the PID file exists, so no signal can hit the default
   # action and leave a stale PID file behind. SIGINT is untrappable when the
@@ -2516,25 +2961,44 @@ cmd_start() {
   echo "$$" > "$PID_FILE"
   log "daemon start (pid $$, poll: ${POLL_INTERVAL}s, test_cmd: ${TEST_CMD:-<none>})"
 
+  local halt="" waiting_on=""
   while [[ -z "$DAEMON_STOP" ]]; do
     local ready=()
-    for f in "$LANES_DIR"/*; do
-      [[ -f "$f" && "$(head -n1 "$f")" == "READY" ]] && ready+=("$(decode_lane "$(basename "$f")")")
-    done
+    # Every pass, not just at start: a `fleet land` run beside the daemon can
+    # die mid-land too, and the daemon's next land would bless what it left.
+    rrc=0
+    recover_stranded_landing || rrc=$?
+    if [[ $rrc -eq 1 ]]; then
+      log "daemon stopping: a land that died left the main checkout needing a human (see above)"
+      halt=1
+      break
+    elif [[ $rrc -eq 2 ]]; then
+      # Logged once per holder, not once per poll.
+      if [[ "$waiting_on" != "$M_PID" ]]; then log_landing_busy "daemon: waiting"; waiting_on=$M_PID; fi
+    else
+      waiting_on=""
+      for f in "$LANES_DIR"/*; do
+        [[ -f "$f" && "$(head -n1 "$f")" == "READY" ]] && ready+=("$(decode_lane "$(basename "$f")")")
+      done
+    fi
 
     if [[ ${#ready[@]} -gt 0 ]]; then
       for branch in "${ready[@]}"; do
         # Safe point 1: never START a land once a stop was requested. Checked
-        # again AFTER the marker is written, so a stop request that slips in
+        # again AFTER the marker is taken, so a stop request that slips in
         # between finds either no land (second check) or the marker already in
         # place (cmd_stop then waits). No land ever runs unmarked.
         if [[ -n "$DAEMON_STOP" ]]; then break; fi
-        daemon_mark_landing "$branch"
-        if [[ -n "$DAEMON_STOP" ]]; then daemon_clear_landing; break; fi
+        # Re-read: a land earlier in this pass may have moved this lane.
+        [[ "$(lane_state "$branch")" == "READY" ]] || continue
+        # Another fleet process took the marker first: never land beside it.
+        # The next pass waits for it, or recovers it if it died.
+        claim_landing "$branch" || break
+        if [[ -n "$DAEMON_STOP" ]]; then release_landing; break; fi
         if land_one "$branch"; then
           rebase_others "$branch"
         fi
-        daemon_clear_landing
+        release_landing
       done
       cmd_fleet
     fi
@@ -2563,6 +3027,7 @@ cmd_start() {
     if [[ -z "$DAEMON_STOP" ]]; then wait "$DAEMON_SLEEP_PID" 2>/dev/null || true; fi
     DAEMON_SLEEP_PID=""
   done
+  if [[ -n "$halt" ]]; then exit 1; fi
   if [[ -n "$DAEMON_STOP" ]]; then
     log "daemon: $DAEMON_STOP received — stopped between lands, none interrupted"
   fi
@@ -2577,6 +3042,7 @@ case "${1:-}" in
   land)         shift
                 if [[ "${1:-}" == "--all" ]]; then shift; cmd_land_all "$@"; else cmd_land "$@"; fi ;;
   revert)       shift; cmd_revert "$@" ;;
+  landing)      shift; cmd_landing "$@" ;;
   scrub-check)  shift; cmd_scrub_check "$@" ;;
   prune)        shift; cmd_prune "$@" ;;
   # The post-wave sweep lives in its own script (scripts/sweep.sh) and builds
@@ -2603,6 +3069,9 @@ Usage:
   fleet land --all [--running]  Batch-land all READY lanes (oldest-first);
                               --running also lands vetted RUNNING lanes
   fleet revert <branch>       Revert merge commit on $BASE_BRANCH
+  fleet landing [--porcelain] Is $BASE_BRANCH safe to branch from / rebase onto?
+                              Exit 0 yes; 10 = a land holds it (PROVISIONAL
+                              while its gate runs) or it holds an untested merge
   fleet scrub-check <branch>  Dry-run forbidden-pattern check
   fleet prune [--remove]      Classify finished lane worktrees. DRY RUN by
                               default; --remove deletes only the SAFE ones,
