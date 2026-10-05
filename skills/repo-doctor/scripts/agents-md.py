@@ -1057,6 +1057,12 @@ def cmd_audit(args) -> int:
                                  "then touch it in the fixing commit"})
         plan = split_plan(new, repo)
         data["split_plan"] = [{k: v for k, v in p.items() if k not in ("start", "end")} for p in plan]
+        left = an["lines"] - sum(p["lines"] - 3 for p in plan)   # each move leaves 3 lines
+        if an["lines"] > CEILING_LINES and left > TARGET_LINES:
+            finds.append({"id": "split-insufficient", "severity": "info", "path": rel,
+                          "msg": f"about {left} lines remain after moving every movable section: the "
+                                 "bulk is in Commands or Landmines, which the patch never moves. Trim "
+                                 "them by hand, or move a subsystem's landmines into its nested AGENTS.md"})
         # Pass 1, document order: append each moved body to its destination file.
         # Pass 2, bottom-up: replace each moved section's body in AGENTS.md with a link,
         # so earlier line ranges stay valid. The heading line always stays behind.

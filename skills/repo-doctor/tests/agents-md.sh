@@ -244,6 +244,18 @@ check "a CLAUDE.md in a parent directory warns" \
       "any(f['id']=='shadowed-by-parent' and 'outer' in f['path'] for f in D['findings'])"
 OUT="$("$PY" "$AM" audit --repo "$O/repo" --no-parents --json 2>/dev/null)"
 check "--no-parents skips the parent walk" "'shadowed-by-parent' not in {f['id'] for f in D['findings']}"
+B="$TMP/bulky"; init_repo "$B"; echo '{"name":"b","scripts":{"build":"node b.js"}}' > "$B/package.json"
+"$PY" - "$B/AGENTS.md" <<'EOF'
+import sys
+L = ["# Agent Instructions - bulky", "", "A fixture whose bulk is all landmines.", "",
+     "## Commands", "", "```bash", "npm run build", "```", "", "## Landmines", ""]
+L += [f"{i}. **Rule {i}** - keep invariant {i} intact." for i in range(1, 231)]
+open(sys.argv[1], "w", newline="\n").write("\n".join(L) + "\n")
+EOF
+commit "$B" "docs: bulky agents"
+OUT="$("$PY" "$AM" audit --repo "$B" --no-parents --json 2>/dev/null)"
+check "a doc that can't be split under target says so (landmines stay)" \
+      "D['split_plan']==[] and any(f['id']=='split-insufficient' for f in D['findings'])"
 M="$TMP/missing"; init_repo "$M"; echo x > "$M/f"; commit "$M" "x"
 OUT="$("$PY" "$AM" audit --repo "$M" --no-parents --json 2>/dev/null)"; rc=$?
 check "no AGENTS.md is crit" "D['findings'][0]['id']=='missing-agents-md'"
