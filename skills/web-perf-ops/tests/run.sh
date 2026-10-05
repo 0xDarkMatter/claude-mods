@@ -106,9 +106,11 @@ for res in assets/web-perf-facts.json scripts/check-web-perf-facts.py scripts/tr
   [ -f "$here/$res" ] && ok "resource present: $res" || bad "missing resource: $res"
 done
 
-# 5. Craft coordination: craft.md links to craftcms-ops rather than duplicating it
-grep -q 'craftcms-ops' "$here/references/craft.md" 2>/dev/null && ok "craft.md cross-links craftcms-ops" \
-  || bad "craft.md missing the craftcms-ops cross-link"
+# 5. Craft coordination: craft.md links to craftcms-ops rather than duplicating it.
+# Markdown link syntax only - a plain mention of the skill name doesn't count.
+grep -qE '\]\(\.\./\.\./craftcms-ops/references/performance\.md' "$here/references/craft.md" 2>/dev/null \
+  && ok "craft.md links craftcms-ops' performance reference" \
+  || bad "craft.md does not link ../../craftcms-ops/references/performance.md"
 
 # 6. Staleness verifier: contract + offline consistency on the shipped skill
 "$PY" -m py_compile "$verify" && ok "verifier: py_compile clean" || bad "verifier: py_compile failed"

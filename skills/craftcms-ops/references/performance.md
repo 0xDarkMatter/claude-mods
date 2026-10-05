@@ -14,16 +14,12 @@ measurement method.
 - [Front-end delivery with craft-vite](#front-end-delivery-with-craft-vite)
 - [Production config checklist](#production-config-checklist)
 
-<!-- TODO(web-perf): once lane/web-perf lands, turn the mention below into a link:
-     ../../web-perf-ops/references/craft.md (agreed with that lane 2026-10-05; it maps
-     these same Craft levers to LCP/INP/CLS/TTFB). Owner: the "Build a web-perf skill
-     for Core Web Vitals" chip. Not linked yet because the file does not exist on this
-     branch and doc-drift rejects ghost links. Keep this file Craft-side - the metric
-     method lives there, not here. -->
+<!-- Keep this file Craft-side: the Core Web Vitals method lives in web-perf-ops, which
+     maps these same levers to LCP/INP/CLS/TTFB. tests/run.sh requires the link below. -->
 **Measure first.** The Core Web Vitals method (field vs lab data, LCP/INP/CLS/TTFB
 triage, and which of these levers moves which metric) belongs to the `web-perf-ops`
-skill (its `references/craft.md`), landing separately. Until it does, use `perf-ops`
-for profiling and come back here for the Craft fix.
+skill: start from its [Craft lever map](../../web-perf-ops/references/craft.md) to
+find the failing metric, then come back here for the Craft fix.
 
 ## Triage: which lever?
 

@@ -121,12 +121,13 @@ for src in "$skill" "$here"/references/*.md "$here"/assets/*.md; do
 done
 ok "relative .md links checked"
 
-# 4. The perf reference must either link the web-perf skill or carry an owned
-# TODO for it - the Core Web Vitals method is deliberately NOT duplicated here.
+# 4. The perf reference must link web-perf-ops' Craft lever map - the Core Web
+# Vitals method is deliberately NOT duplicated here. Markdown link syntax only: a
+# path mentioned in a comment or prose doesn't count.
 perf="$here/references/performance.md"
 if [ -f "$perf" ]; then
-  if grep -qE 'TODO\(web-perf\)|skills/web-perf' "$perf"; then ok "performance.md points at the web-perf skill (or owned TODO)"
-  else bad "performance.md has neither a web-perf link nor TODO(web-perf)"; fi
+  if grep -qE '\]\(\.\./\.\./web-perf-ops/references/craft\.md' "$perf"; then ok "performance.md links web-perf-ops' Craft lever map"
+  else bad "performance.md does not link ../../web-perf-ops/references/craft.md"; fi
 fi
 
 # 5. Twig security reference keeps its four load-bearing rules.

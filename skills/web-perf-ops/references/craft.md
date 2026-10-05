@@ -2,8 +2,11 @@
 
 The Craft-specific half of web-perf-ops: which Craft feature or plugin moves which metric,
 and the traps that silently undo them. Content modelling, Twig conventions and element
-queries in general live in the `craftcms-ops` skill, whose `references/performance.md`
-covers the Craft-side mechanics (queue, transforms, caching layers). This file maps
+queries in general live in the `craftcms-ops` skill, whose
+[`references/performance.md`](../../craftcms-ops/references/performance.md) covers the
+Craft-side mechanics ([queue](../../craftcms-ops/references/performance.md#queue),
+[transforms](../../craftcms-ops/references/performance.md#images-transforms-srcset-avif),
+caching layers). This file maps
 those levers to Core Web Vitals and does not repeat them.
 
 ## Contents
@@ -22,12 +25,6 @@ those levers to Core Web Vitals and does not repeat them.
 Versions and defaults were checked against Craft and plugin source and changelogs on
 2026-10-05: Craft 5.11 / 4.18, Blitz 5.13 / 4.23, craft-vite 5.0 / 4.0, SEOmatic 5.1 / 4.1,
 ImageOptimize 5.0 / 4.0, Imager X 6.1 / 4.5, Formie 3.1 / 2.2.
-
-<!-- TODO(web-perf): when craftcms-ops' performance reference has landed (lane/craft-refresh),
-     turn the craftcms-ops mention in the intro into a link:
-     ../../craftcms-ops/references/performance.md (useful anchors: #queue,
-     #images-transforms-srcset-avif, #caching-layers--cache--versus-blitz). It is plain
-     text until then because doc-drift fails on links to files that are not on disk. -->
 
 ## Lever map
 
