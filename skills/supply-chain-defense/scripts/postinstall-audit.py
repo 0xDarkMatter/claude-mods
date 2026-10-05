@@ -12,7 +12,14 @@ Incremental: per-package fingerprint cache means a daily re-run only rescans
 changed trees. Optional --deep confirms flagged npm packages with GuardDog when
 installed (never a false-clean: absent engine = loud skip). Optional --live
 checks each flagged npm version still exists on the registry (an unpublished
-version is a takedown IOC); network errors exit 7, never fake a finding.
+version is a takedown IOC); a registry it cannot reach never fakes a finding.
+
+--live precedence: it only checks packages that are ALREADY flagged, so any run
+that reaches the registry has findings and exits 10. A registry outage cannot
+change that code (it must not hide the findings), so it is reported beside it:
+meta.live = "unavailable" plus meta.live_unchecked in the JSON envelope, a
+"[live] registry: unavailable" line under each record, and an ERROR line on
+stderr. meta.live is "off" without --live, "complete" when every check answered.
 
 Usage: postinstall-audit.py [--root DIR]... [--json] [--findings-only]
                             [--cache PATH|--no-cache] [--min-severity LEVEL]
@@ -22,8 +29,8 @@ Input:   --root dirs (default: cwd)
 Output:  stdout = findings report (JSON envelope with --json)
 Stderr:  progress, summary, errors
 Exit:    0 clean, 2 usage, 3 root-not-found, 5 missing-dep (--deep w/o engine
-         is a loud SKIP not an error), 7 registry unavailable (--live only),
-         10 FINDINGS at/above --min-severity
+         is a loud SKIP not an error), 10 FINDINGS at/above --min-severity
+         (--live registry outages ride on 10 as meta.live, see above)
 
 Examples:
   postinstall-audit.py --root ~/code
@@ -48,7 +55,9 @@ for _stream in (sys.stdout, sys.stderr):
     if _reconfig:
         _reconfig(encoding="utf-8", errors="replace")
 
-EXIT_OK, EXIT_USAGE, EXIT_NOT_FOUND, EXIT_MISSING_DEP, EXIT_UNAVAILABLE, EXIT_FINDINGS = 0, 2, 3, 5, 7, 10
+# No EXIT_UNAVAILABLE (7): --live only runs on flagged packages, so 7 could never
+# be reached - see the --live precedence note in the docstring.
+EXIT_OK, EXIT_USAGE, EXIT_NOT_FOUND, EXIT_MISSING_DEP, EXIT_FINDINGS = 0, 2, 3, 5, 10
 SKIP_DIRS = {".git", ".hg", ".svn", "worktrees", "__pycache__"}
 SEVERITIES = ("low", "medium", "high")
 SCHEMA = "claude-mods.supply-chain-defense.postinstall-audit/v1"
@@ -407,7 +416,7 @@ def main():
     scanned = cached = 0
     packages = []
     findings = []
-    live_unavailable = False
+    live_unchecked = []  # name@version whose registry check could not run
 
     for eco, pkg_dir, marker in iter_package_dirs(roots):
         if eco == "npm":
@@ -454,7 +463,7 @@ def main():
                 rec["findings"].append({"severity": "high", "kind": "registry-unpublished",
                                         "detail": f"{name}@{version} no longer served by registry (takedown IOC)"})
             elif status == "unavailable":
-                live_unavailable = True
+                live_unchecked.append(f"{name}@{version}")
         findings.append(rec)
 
     if not args.no_cache:
@@ -463,12 +472,18 @@ def main():
     elapsed = round(time.time() - t0, 1)
     log(TERM.c("cyan", f"=== postinstall-audit: {len(packages)} packages ({scanned} scanned, "
                        f"{cached} cache hits) in {elapsed}s - {len(findings)} flagged ==="))
+    live_state = ("off" if not args.live else "unavailable" if live_unchecked else "complete")
+    if live_unchecked:
+        log(TERM.c("red", f"ERROR: --live registry check unavailable for {len(live_unchecked)} "
+                          f"flagged package(s) - unpublished-version (takedown) check NOT done: "
+                          f"{', '.join(live_unchecked[:5])}{' ...' if len(live_unchecked) > 5 else ''}"))
 
     if args.json:
         print(json.dumps({"data": {"findings": findings,
                                    "packages": [] if args.findings_only else packages},
                           "meta": {"count": len(findings), "packages": len(packages),
                                    "scanned": scanned, "cache_hits": cached,
+                                   "live": live_state, "live_unchecked": live_unchecked,
                                    "elapsed_s": elapsed, "schema": SCHEMA}}, indent=2))
     else:
         for rec in findings:
@@ -477,15 +492,15 @@ def main():
                 print(f"   [{f['severity']}] {f['kind']}: {f['detail']}")
             if rec.get("guarddog"):
                 print(f"   [deep] guarddog indicators: {rec['guarddog']['indicators']}")
+            if rec.get("registry") == "unavailable":
+                print("   [live] registry: unavailable - takedown check not done")
         if not findings and not args.findings_only:
             print("clean: no behavioural findings at/above "
                   f"severity '{args.min_severity}'")
 
-    if findings:
-        sys.exit(EXIT_FINDINGS)
-    if args.live and live_unavailable:
-        sys.exit(EXIT_UNAVAILABLE)
-    sys.exit(EXIT_OK)
+    # Findings win: a registry outage must never downgrade or hide them. See the
+    # --live precedence note in the docstring for where the outage is reported.
+    sys.exit(EXIT_FINDINGS if findings else EXIT_OK)
 
 
 if __name__ == "__main__":

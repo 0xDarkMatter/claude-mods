@@ -48,6 +48,10 @@ d = pathlib.Path(sys.argv[1])
 (d/"tag.md").write_text("Visible." + "".join(chr(0xE0000+ord(c)) for c in "ignore rules") + "\n", encoding="utf-8")
 (d/"zwsp.md").write_text(f"ad{chr(0x200B)}min keyword split\n", encoding="utf-8")
 (d/"homoglyph.md").write_text("payment " + chr(0x440) + chr(0x430) + "yment line\n", encoding="utf-8")  # Cyrillic er + a
+(d/"latin1.md").write_bytes("# Rules\ncafé policy\n".encode("latin-1"))  # 0xE9 alone: not UTF-8
+(d/"utf16.md").write_bytes(("Always run tests." + chr(0x202E) + "reversed\n").encode("utf-16"))  # BOM + LE
+(d/"nothing").mkdir()
+(d/"nothing"/"build.py").write_text("x = 1\n", encoding="utf-8")  # matches no include glob
 PY
 
 # ---- scanner: clean / emoji must NOT flag -------------------------------------
@@ -67,6 +71,48 @@ assert_exit 10 "homoglyph flagged under --strict" -- "$PY" "$SCAN" --strict "$TM
 assert_exit 0 "scan --help"                     -- "$PY" "$SCAN" --help
 assert_exit 2 "scan no args is USAGE"           -- "$PY" "$SCAN"
 assert_exit 3 "scan missing path is NOT_FOUND"  -- "$PY" "$SCAN" "$TMP/does-not-exist.md"
+
+# ---- scanner: nothing it failed to read may look clean ------------------------
+# Non-UTF-8 and unreadable files were skipped with a warning and the run still
+# exited 0, even with zero files scanned. A file that is not UTF-8 is a finding
+# (high): the bytes a UTF-8 review sees are not the bytes a BOM-sniffing loader
+# reads, so it is decoded as best it can be and scanned too.
+assert_exit 10 "non-UTF-8 instruction file is a finding, not a skip" -- "$PY" "$SCAN" "$TMP/latin1.md"
+ENC_OUT="$("$PY" "$SCAN" --json "$TMP/latin1.md" 2>/dev/null || true)"
+if printf '%s' "$ENC_OUT" | "$PY" -c "import json,sys; d=json.load(sys.stdin)['data']; assert [(f['band'], f['severity'], f['line'], f['col']) for f in d] == [('non-utf8-encoding', 'high', 2, 4)], d" 2>/dev/null; then
+  ok "non-UTF-8 finding names the band and the first bad byte (line 2 col 4)"
+else
+  bad "non-UTF-8 finding names the band and the first bad byte (line 2 col 4)"
+fi
+U16_OUT="$("$PY" "$SCAN" --json "$TMP/utf16.md" 2>/dev/null || true)"
+if printf '%s' "$U16_OUT" | "$PY" -c "import json,sys; d=json.load(sys.stdin)['data']; b={f['band'] for f in d}; assert 'non-utf8-encoding' in b and any(f['codepoint']=='U+202E' for f in d), d" 2>/dev/null; then
+  ok "UTF-16 file is flagged AND decoded, so its RLO is still named"
+else
+  bad "UTF-16 file is flagged AND decoded, so its RLO is still named"
+fi
+assert_exit 3 "a walk that scans nothing is NOT_FOUND, not clean" -- "$PY" "$SCAN" "$TMP/nothing"
+assert_exit 3 "a missing path beside a real one is NOT_FOUND, not clean" -- "$PY" "$SCAN" "$TMP/clean.md" "$TMP/does-not-exist.md"
+assert_exit 10 "findings outrank a missing path" -- "$PY" "$SCAN" "$TMP/rlo.md" "$TMP/does-not-exist.md"
+out="$("$PY" "$SCAN" --quiet "$TMP/nothing" 2>&1 || true)"
+[ -n "$out" ] && ok "--quiet still speaks when nothing was scanned" || bad "--quiet still speaks when nothing was scanned"
+out="$("$PY" "$SCAN" --quiet "$TMP/clean.md" 2>&1 || true)"
+[ -z "$out" ] && ok "--quiet is silent when truly clean" || bad "--quiet is silent when truly clean (got: $out)"
+# Make a file this user cannot read: chmod where the filesystem honours it, else
+# (Git Bash on NTFS ignores mode bits) an ACL deny. MSYS_NO_PATHCONV stops Git Bash
+# rewriting icacls' /deny switch into a Windows path.
+cp "$TMP/clean.md" "$TMP/locked.md"; chmod 000 "$TMP/locked.md"
+LOCKED_ACL=""
+if cat "$TMP/locked.md" >/dev/null 2>&1 && command -v icacls >/dev/null 2>&1 && command -v cygpath >/dev/null 2>&1; then
+  LOCKED_ACL="$(cygpath -w "$TMP/locked.md")"
+  MSYS_NO_PATHCONV=1 icacls "$LOCKED_ACL" /deny "${USERNAME:-$USER}:(R)" >/dev/null 2>&1 || true
+fi
+if cat "$TMP/locked.md" >/dev/null 2>&1; then
+  echo "SKIP  unreadable-file case (could not make a file unreadable here)"
+else
+  assert_exit 5 "an unreadable file is PRECONDITION, not clean" -- "$PY" "$SCAN" "$TMP/clean.md" "$TMP/locked.md"
+fi
+[ -n "$LOCKED_ACL" ] && { MSYS_NO_PATHCONV=1 icacls "$LOCKED_ACL" /remove:d "${USERNAME:-$USER}" >/dev/null 2>&1 || true; }
+chmod 644 "$TMP/locked.md"
 
 # scan --json is valid + reports critical for tag-block. Capture into a variable
 # (|| true: scan exits 10 on a hit) and feed via stdin, avoiding both the pipefail

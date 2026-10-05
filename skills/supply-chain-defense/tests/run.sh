@@ -9,8 +9,8 @@
 # Usage:   bash tests/run.sh
 # Exit:    0 all pass, 1 one or more failures
 #
-# Network-dependent checks (preinstall-check registry lookups) are intentionally
-# omitted here — run that script manually against live registries.
+# No live network: preinstall-check talks to a curl shim that serves a canned
+# registry document, and postinstall-audit --live goes through a dead proxy.
 
 set -uo pipefail
 
@@ -185,6 +185,57 @@ echo "-- preinstall-check.sh --"
 bash "$SCRIPTS/preinstall-check.sh" --help >/dev/null 2>&1; expect_exit "--help" 0 $?
 bash "$SCRIPTS/preinstall-check.sh" --bogus >/dev/null 2>&1; expect_exit "bad flag -> 2" 2 $?
 bash "$SCRIPTS/preinstall-check.sh" >/dev/null 2>&1;        expect_exit "no args -> 2" 2 $?
+
+# Registry faked offline: a curl shim logs each URL it is asked for and answers
+# with one canned npm document - 1.2.3 is years old, 2.0.0 was published today
+# (inside any cooldown). Builtins only, so it also runs on the jq-less PATH below.
+REG="$SB/reg"; mkdir -p "$REG"
+NOW_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+PACKUMENT="{\"dist-tags\":{\"latest\":\"2.0.0\"},\"time\":{\"1.2.3\":\"2020-01-01T00:00:00.000Z\",\"2.0.0\":\"$NOW_ISO\"}}"
+printf '#!/bin/sh\nfor a in "$@"; do u="$a"; done\nprintf "%%s\\n" "$u" >> "%s/urls.log"\nprintf "%%s" '"'"'%s'"'"'\n' \
+  "$REG" "$PACKUMENT" > "$REG/curl"
+chmod +x "$REG/curl"
+# `${spec%@*}` emptied a scoped name (`@scope/pkg` -> ""), so the registry was
+# queried with no package in the URL at all.
+: > "$REG/urls.log"
+out="$(PATH="$REG:$PATH" bash "$SCRIPTS/preinstall-check.sh" -q @scope/pkg 2>/dev/null)"; rc=$?
+case "$(cat "$REG/urls.log")" in
+  *"registry.npmjs.org/@scope"*pkg*) ok "scoped name reaches the registry URL" ;;
+  *) no "scoped name reaches the registry URL (asked for: $(cat "$REG/urls.log"))" ;;
+esac
+expect_has  "scoped name kept in the record" $'\t@scope/pkg\t2.0.0\t' "$out"
+expect_exit "scoped latest published today -> 10" 10 "$rc"
+# The `!= @*/*` guard dropped the version of `@scope/pkg@1.2.3`, so `latest` was
+# checked instead of the version asked for.
+out="$(PATH="$REG:$PATH" bash "$SCRIPTS/preinstall-check.sh" -q @scope/pkg@1.2.3 2>/dev/null)"; rc=$?
+expect_has  "scoped pinned version is the one checked" $'\t@scope/pkg\t1.2.3\t' "$out"
+expect_exit "scoped pinned old version -> 0" 0 "$rc"
+# The new splitter must leave unscoped specs as they were.
+out="$(PATH="$REG:$PATH" bash "$SCRIPTS/preinstall-check.sh" -q lodash@1.2.3 lodash 2>/dev/null)"
+expect_has  "unscoped pinned version kept" $'\tlodash\t1.2.3\t' "$out"
+expect_has  "unscoped bare name checks latest" $'\tlodash\t2.0.0\t' "$out"
+# A registry answer that has no publish time for the version asked for left the
+# age unknown, and an unknown age exited 0: unchecked read as clean.
+PATH="$REG:$PATH" bash "$SCRIPTS/preinstall-check.sh" -q left-pad@9.9.9 >/dev/null 2>&1
+expect_exit "unknown publish age is not a pass -> 7" 7 $?
+# --json built each record with select(), which empties the whole object when a
+# field is blank, so an unchecked package vanished from the output entirely.
+out="$(PATH="$REG:$PATH" bash "$SCRIPTS/preinstall-check.sh" -q --json left-pad@9.9.9 2>/dev/null)"
+expect_has  "--json keeps the unchecked package" '"unchecked_reason": "registry has no publish time' "$out"
+expect_has  "--json meta counts it" '"unchecked": 1' "$out"
+# Without jq every successful registry answer was thrown away: no version, no
+# time, cooldown never tested, exit 0 - a package published today walked through.
+# PATH holds only the shim and wrappers for the coreutils the script calls.
+NOJQ="$SB/nojq"; mkdir -p "$NOJQ"; cp "$REG/curl" "$NOJQ/curl"
+for t in date dirname; do printf '#!/bin/sh\nexec "%s" "$@"\n' "$(command -v "$t")" > "$NOJQ/$t"; done
+chmod +x "$NOJQ"/*
+(PATH="$NOJQ"; command -v jq >/dev/null 2>&1) && no "jq-less PATH still resolves jq (cases below are void)" \
+  || ok "jq-less PATH resolves no jq"
+for eco in npm pip composer cargo go; do
+  err="$(PATH="$NOJQ" "$BASH" "$SCRIPTS/preinstall-check.sh" -q "--$eco" newpkg 2>&1 >/dev/null)"; rc=$?
+  expect_exit "--$eco without jq -> 5, never a pass" 5 "$rc"
+  expect_has  "--$eco without jq names jq" "jq" "$err"
+done
 
 # ── pre-install-scan.sh hook (both input modes) ────────────────────────────
 echo "-- pre-install-scan.sh hook --"
@@ -365,14 +416,62 @@ JSONF
   out="$(pwsh -NoProfile -File "$PHMW" -InputJson "$EVIL_W" -Json 2>/dev/null)"; rc=$?
   expect_exit "evil replay --json -> 10" 10 "$rc"
   expect_has  "json envelope has schema" "phone-home-monitor/v1" "$out"
-  # -Sysmon contract: exit 5 with install hint when Sysmon absent (skip if installed)
-  if pwsh -NoProfile -Command 'try { $null = Get-WinEvent -ListLog "Microsoft-Windows-Sysmon/Operational" -ErrorAction Stop; exit 0 } catch { exit 1 }' >/dev/null 2>&1; then
+  # -Sysmon contract: exit 5 with install hint when Sysmon absent (skip if installed).
+  # Only NoMatchingLogsFound means absent: a non-elevated -ListLog of an installed
+  # but restricted channel fails too, and that case gets an elevation hint instead.
+  if pwsh -NoProfile -Command 'try { $null = Get-WinEvent -ListLog "Microsoft-Windows-Sysmon/Operational" -ErrorAction Stop; exit 0 } catch { if ($_.FullyQualifiedErrorId -like "NoMatchingLogsFound*") { exit 1 } else { exit 0 } }' >/dev/null 2>&1; then
     echo "  SKIP  -Sysmon missing-dep check (Sysmon is installed here)"
   else
     out="$(pwsh -NoProfile -File "$PHMW" -Sysmon 2>&1)"; rc=$?
     expect_exit "-Sysmon w/o Sysmon -> 5" 5 "$rc"
     expect_has  "hint names SwiftOnSecurity config" "SwiftOnSecurity" "$out"
   fi
+  # Both live reads ran with -ErrorAction SilentlyContinue, so a failed collection
+  # came back empty and exited 0: "no connections" and "could not look" were the
+  # same answer. The harness shadows the real cmdlets with global functions that
+  # fail the way Windows does, then runs the unmodified script.
+  cat > "$SB/phm-harness.ps1" <<'PS1'
+param([string]$Target, [string]$Fault, [switch]$Sysmon)
+$notFound = 'NoMatchingEventsFound,Microsoft.PowerShell.Commands.GetWinEventCommand'
+switch ($Fault) {
+  'tcp-fail' {   # CIM provider down: the TCP table was never read
+    function global:Get-NetTCPConnection { [CmdletBinding()] param([string[]]$State)
+      Write-Error -Message 'The RPC server is unavailable.' -Category ResourceUnavailable -ErrorId 'HRESULT 0x800706ba,Get-NetTCPConnection' } }
+  'tcp-none' {   # idle machine: CDXML reports "nothing in this state" as ObjectNotFound
+    function global:Get-NetTCPConnection { [CmdletBinding()] param([string[]]$State)
+      Write-Error -Message 'No matching MSFT_NetTCPConnection objects found' -Category ObjectNotFound -ErrorId 'CmdletizationQuery_NotFound_State,Get-NetTCPConnection' } }
+  'tcp-partial' {   # Established has a connection, SynSent has none: data AND a no-match error
+    function global:Get-NetTCPConnection { [CmdletBinding()] param([string[]]$State)
+      [pscustomobject]@{ RemoteAddress = '203.0.113.7'; RemotePort = 443; OwningProcess = 0 }
+      Write-Error -Message 'No matching MSFT_NetTCPConnection objects found' -Category ObjectNotFound -ErrorId 'CmdletizationQuery_NotFound_State,Get-NetTCPConnection' } }
+  'sysmon-denied' {   # installed, unreadable from this session
+    function global:Get-WinEvent { [CmdletBinding()] param([string]$ListLog, [string]$LogName, [string]$FilterXPath, [hashtable]$FilterHashtable, [int]$MaxEvents)
+      if ($ListLog) { return [pscustomobject]@{ LogName = $ListLog } }
+      # Windows answers an unreadable log queried by -FilterHashtable with "no events"
+      if ($FilterHashtable) { Write-Error -Message 'No events were found that match the specified selection criteria.' -Category ObjectNotFound -ErrorId $notFound; return }
+      Write-Error -Exception ([System.UnauthorizedAccessException]::new('Attempted to perform an unauthorized operation.')) -Category NotSpecified -ErrorId 'System.UnauthorizedAccessException,Microsoft.PowerShell.Commands.GetWinEventCommand' } }
+  'sysmon-empty' {   # readable, genuinely no EID 3 events yet
+    function global:Get-WinEvent { [CmdletBinding()] param([string]$ListLog, [string]$LogName, [string]$FilterXPath, [hashtable]$FilterHashtable, [int]$MaxEvents)
+      if ($ListLog) { return [pscustomobject]@{ LogName = $ListLog } }
+      Write-Error -Message 'No events were found that match the specified selection criteria.' -Category ObjectNotFound -ErrorId $notFound } }
+}
+if ($Sysmon) { & $Target -Sysmon } else { & $Target }
+exit $LASTEXITCODE
+PS1
+  PHH="$SB/phm-harness.ps1"; command -v cygpath >/dev/null 2>&1 && PHH="$(cygpath -w "$PHH")"
+  err="$(pwsh -NoProfile -File "$PHH" -Target "$PHMW" -Fault tcp-fail 2>&1 >/dev/null)"; rc=$?
+  expect_exit "TCP table unreadable -> 7, not clean" 7 "$rc"
+  expect_has  "names the source it could not read" "tcp-table" "$err"
+  pwsh -NoProfile -File "$PHH" -Target "$PHMW" -Fault tcp-none >/dev/null 2>&1
+  expect_exit "no connections in a state is still clean -> 0" 0 $?
+  err="$(pwsh -NoProfile -File "$PHH" -Target "$PHMW" -Fault tcp-partial 2>&1 >/dev/null)"; rc=$?
+  expect_exit "a no-match for one state keeps the other state's connections -> 0" 0 "$rc"
+  expect_has  "partial read still counts its connection" "1 outbound connection(s) examined" "$err"
+  err="$(pwsh -NoProfile -File "$PHH" -Target "$PHMW" -Fault sysmon-denied -Sysmon 2>&1 >/dev/null)"; rc=$?
+  expect_exit "Sysmon log unreadable -> 5, not clean" 5 "$rc"
+  expect_has  "unreadable Sysmon log asks for elevation" "elevated" "$err"
+  pwsh -NoProfile -File "$PHH" -Target "$PHMW" -Fault sysmon-empty -Sysmon >/dev/null 2>&1
+  expect_exit "readable Sysmon log with no events is clean -> 0" 0 $?
 else
   echo "  SKIP  phone-home-monitor.ps1 needs pwsh on Windows (Sysmon/Event-Log tool)"
 fi
@@ -427,6 +526,16 @@ CACHE="$SB/pa-cache.json"
 err="$("$PYTHON" "$PA" --root "$SB/pa-clean" --cache "$CACHE" 2>&1 >/dev/null)"
 expect_has  "second run hits cache" "cache hits" "$err"
 
+# --live checks only packages already flagged, and the findings branch exited 10
+# before the registry outage was looked at, so the documented exit 7 could never
+# fire and an unrun takedown check was invisible. Findings stay 10; the outage
+# must show in the JSON envelope and on stderr. A dead proxy fails every request.
+env HTTPS_PROXY=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9 NO_PROXY= no_proxy= \
+  "$PYTHON" "$PA" --root "$SB/pa" --no-cache --live --json >"$SB/pa-live.json" 2>"$SB/pa-live.err"
+expect_exit "--live, registry down, findings kept -> 10" 10 $?
+expect_has  "--live outage in JSON meta" '"live": "unavailable"' "$(cat "$SB/pa-live.json")"
+expect_has  "--live outage named on stderr" "registry check unavailable" "$(cat "$SB/pa-live.err")"
+
 # ── config-drift-check.py (repo-integrity / config-as-code, layer 6) ───────
 echo "-- config-drift-check.py --"
 CD="$SCRIPTS/config-drift-check.py"
@@ -469,6 +578,60 @@ expect_has  "flags tasks autorun shell" "tasks-autorun-shell" "$out"
 # --json envelope shape
 out="$("$PYTHON" "$CD" --root "$SB/cd-evil" --json --findings-only 2>/dev/null)"
 expect_has  "json envelope schema" "config-drift-check/v1" "$out"
+
+# --staged took file NAMES from the index but read CONTENT from the working tree:
+# stage a poisoned config, put a clean copy back on disk, and the commit carried
+# the loader while the gate scanned the decoy. It must read the staged blob.
+if command -v git >/dev/null 2>&1; then
+  G="$SB/cd-git"; mkdir -p "$G/sub"
+  git -C "$G" init -q; git -C "$G" config core.autocrlf false
+  cp "$SB/cd-evil/tailwind.config.js" "$G/tailwind.config.js"
+  git -C "$G" add tailwind.config.js
+  printf 'module.exports = { content: [] }\n' > "$G/tailwind.config.js"
+  (cd "$G" && "$PYTHON" "$CD" --staged --findings-only >/dev/null 2>&1)
+  expect_exit "--staged scans the staged blob, not the clean working copy -> 10" 10 $?
+  (cd "$G/sub" && "$PYTHON" "$CD" --staged --findings-only >/dev/null 2>&1)
+  expect_exit "--staged from a subdirectory still finds it -> 10" 10 $?
+  rm "$G/tailwind.config.js"
+  (cd "$G" && "$PYTHON" "$CD" --staged --findings-only >/dev/null 2>&1)
+  expect_exit "--staged scans a staged config deleted from disk -> 10" 10 $?
+  # The inverse: a clean staged blob passes even when the working copy is poisoned,
+  # proving --staged reads the index and nothing else.
+  G2="$SB/cd-git2"; mkdir -p "$G2"
+  git -C "$G2" init -q; git -C "$G2" config core.autocrlf false
+  printf 'module.exports = { content: [] }\n' > "$G2/tailwind.config.js"
+  git -C "$G2" add tailwind.config.js
+  cp "$SB/cd-evil/tailwind.config.js" "$G2/tailwind.config.js"
+  (cd "$G2" && "$PYTHON" "$CD" --staged --findings-only >/dev/null 2>&1)
+  expect_exit "--staged passes a clean index beside a poisoned working copy -> 0" 0 $?
+else
+  echo "  SKIP  --staged index-content checks (git not on PATH)"
+fi
+
+# A config that could not be read came back as "" (no findings) and counted as
+# scanned, so the run ended clean. Unreadable is made with chmod where the
+# filesystem honours it, else an ACL deny (Git Bash on NTFS ignores mode bits;
+# MSYS_NO_PATHCONV stops Git Bash rewriting icacls' /deny into a path).
+CDU="$SB/cd-unread"; mkdir -p "$CDU"
+printf 'module.exports = {}\n' > "$CDU/vite.config.js"; chmod 000 "$CDU/vite.config.js"
+CDU_ACL=""
+if cat "$CDU/vite.config.js" >/dev/null 2>&1 && command -v icacls >/dev/null 2>&1 && command -v cygpath >/dev/null 2>&1; then
+  CDU_ACL="$(cygpath -w "$CDU/vite.config.js")"
+  MSYS_NO_PATHCONV=1 icacls "$CDU_ACL" /deny "${USERNAME:-$USER}:(R)" >/dev/null 2>&1
+fi
+if cat "$CDU/vite.config.js" >/dev/null 2>&1; then
+  echo "  SKIP  unreadable-config case (could not make a file unreadable here)"
+else
+  out="$("$PYTHON" "$CD" --root "$CDU" 2>&1)"; rc=$?
+  expect_exit "unreadable config is not clean -> 5" 5 "$rc"
+  expect_has  "unreadable config is named" "vite.config.js" "$out"
+  expect_lacks "no clean verdict beside an unreadable config" "clean: no config-drift" "$out"
+  cp "$SB/cd-evil/tailwind.config.js" "$CDU/tailwind.config.js"
+  "$PYTHON" "$CD" --root "$CDU" --findings-only >/dev/null 2>&1
+  expect_exit "findings outrank an unreadable config -> 10" 10 $?
+fi
+[[ -n "$CDU_ACL" ]] && MSYS_NO_PATHCONV=1 icacls "$CDU_ACL" /remove:d "${USERNAME:-$USER}" >/dev/null 2>&1
+chmod 644 "$CDU/vite.config.js"
 
 # ── terminal design system (term.sh adoption + ASCII purity) ───────────────
 echo "-- terminal design system --"

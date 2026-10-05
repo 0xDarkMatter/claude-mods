@@ -94,7 +94,7 @@ engine, OSV when you need CVE breadth across many ecosystems, zizmor + Harden-Ru
 when CI holds publish credentials.
 
 **None of these are dependencies of this skill.** Its scripts require only baseline
-tooling (bash, coreutils, `curl`; `jq` only for `--json`; Python 3.8+ stdlib for the
+tooling (bash, coreutils, `curl`; `jq` for `preinstall-check.sh` and `--json`; Python 3.8+ stdlib for the
 `.py` scripts, launched via `scripts/run-python.sh`) and treat every supply-chain
 tool above as optional — `command -v`-gated
 with graceful fallback (`preinstall-check.sh` runs without `socket`;

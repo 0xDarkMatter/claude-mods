@@ -15,6 +15,8 @@ shell-exec, Buffer-XOR decode loops, outbound network in a config that shouldn't
 have any, hex-var (_0x..) / long-escape obfuscation, an obfuscated appended blob,
 and tasks.json runOn:folderOpen auto-run. Zero-dependency (Python stdlib),
 read-only. Built to run as a pre-commit hook (--staged) AND in CI (--root .).
+--staged scans the INDEX copy of each staged config (what the commit will
+contain), not the working-tree file, which may differ.
 
 Usage: config-drift-check.py [--root DIR]... [--staged] [FILE ...]
                              [--json] [--findings-only] [--catalog PATH]
@@ -22,8 +24,9 @@ Usage: config-drift-check.py [--root DIR]... [--staged] [FILE ...]
 Input:   --root dirs (default: cwd), or --staged (git staged configs), or FILEs
 Output:  stdout = findings report (JSON envelope with --json)
 Stderr:  progress, summary, errors
-Exit:    0 clean, 2 usage, 3 root/file-not-found, 5 missing-dep (--staged w/o git),
-         10 FINDINGS
+Exit:    0 clean, 2 usage, 3 root/file-not-found, 5 missing-dep (--staged w/o git)
+         or a config that could not be read (named on stderr and in
+         meta.unscanned - never counted clean), 10 FINDINGS (wins over 5)
 
 Examples:
   config-drift-check.py --root .
@@ -152,14 +155,39 @@ def die(msg, code) -> NoReturn:
     sys.exit(code)
 
 
-def read_text_tolerant(path: Path) -> str:
-    try:
-        raw = path.read_bytes()
-    except OSError:
-        return ""
+def decode_tolerant(raw: bytes) -> str:
     if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
         return raw.decode("utf-16", errors="replace")
     return raw.decode("utf-8-sig", errors="replace")
+
+
+class Unreadable(Exception):
+    """Content that could not be read. Callers record it as unscanned: an empty
+    string here once meant "no findings", so an unreadable config passed as clean."""
+
+
+def read_worktree(path: Path) -> str:
+    try:
+        return decode_tolerant(path.read_bytes())
+    except OSError as e:
+        raise Unreadable(str(e)) from e
+
+
+def read_staged(path: Path) -> str:
+    """The INDEX blob for `path` - exactly what the commit will contain.
+
+    `:<path>` names the stage-0 index entry; a path without ./ or ../ is taken
+    from the top of the work tree, which is the form `git diff --cached` prints,
+    so this works from any subdirectory. cat-file (not show) so no textconv runs.
+    """
+    try:
+        r = subprocess.run(["git", "cat-file", "blob", f":{path.as_posix()}"],
+                           capture_output=True, timeout=30)
+    except (subprocess.SubprocessError, OSError) as e:
+        raise Unreadable(f"git cat-file failed: {e}") from e
+    if r.returncode != 0:
+        raise Unreadable(r.stderr.decode("utf-8", errors="replace").strip() or "git cat-file failed")
+    return decode_tolerant(r.stdout)
 
 
 def is_config_file(p: Path) -> bool:
@@ -288,8 +316,7 @@ def scan_package_json(text: str):
     return findings
 
 
-def scan_file(p: Path):
-    text = read_text_tolerant(p)
+def scan_file(p: Path, text: str):
     if not text:
         return []
     name = p.name
@@ -321,21 +348,21 @@ def collect_from_roots(roots):
 
 
 def collect_staged():
+    """Staged config paths, top-level relative. No working-tree existence check:
+    a config can be staged and then deleted or rewritten on disk, and the index
+    copy is what gets committed. -z keeps odd filenames unquoted; R adds renames."""
     if not _which("git"):
         die("--staged requires git on PATH", EXIT_MISSING_DEP)
     try:
-        out = subprocess.run(["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-                             capture_output=True, text=True, timeout=30)
+        out = subprocess.run(["git", "diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"],
+                             capture_output=True, timeout=30)
     except (subprocess.SubprocessError, OSError) as e:
         die(f"git failed: {e}", EXIT_MISSING_DEP)
     if out.returncode != 0:
-        die(f"not a git repo or git error: {out.stderr.strip()}", EXIT_MISSING_DEP)
-    files = []
-    for line in out.stdout.splitlines():
-        p = Path(line.strip())
-        if p.name and is_config_file(p) and p.is_file():
-            files.append(p)
-    return files
+        die(f"not a git repo or git error: {out.stderr.decode('utf-8', 'replace').strip()}",
+            EXIT_MISSING_DEP)
+    return [Path(name) for name in out.stdout.decode("utf-8", "surrogateescape").split("\0")
+            if name and is_config_file(Path(name))]
 
 
 def _which(name):
@@ -388,28 +415,44 @@ def main():
             die(f"no root exists among: {roots}", EXIT_NOT_FOUND)
         files = collect_from_roots(roots)
 
+    read = read_staged if args.staged else read_worktree
     findings = []
-    scanned = 0
+    scanned = []
+    unscanned = []  # [{"file", "reason"}] - reported, and never part of a clean verdict
     for p in files:
-        scanned += 1
-        for sev, kind, detail in scan_file(p):
+        try:
+            text = read(p)
+        except Unreadable as e:
+            unscanned.append({"file": str(p), "reason": str(e)})
+            continue
+        scanned.append(str(p))
+        for sev, kind, detail in scan_file(p, text):
             findings.append({"file": str(p), "severity": sev, "kind": kind, "detail": detail})
 
-    log(TERM.c("cyan", f"=== config-drift-check: {scanned} config file(s) scanned - {len(findings)} finding(s) ==="))
+    source = " (index)" if args.staged else ""
+    log(TERM.c("cyan", f"=== config-drift-check: {len(scanned)} config file(s) scanned{source} - "
+                       f"{len(findings)} finding(s) ==="))
+    if unscanned:
+        log(TERM.c("red", f"ERROR: {len(unscanned)} config file(s) could NOT be read - not checked, not clean:"))
+        for u in unscanned:
+            log(f"  {u['file']}: {u['reason']}")
 
     if args.json:
         print(json.dumps({
             "data": {"findings": findings,
-                     "scanned": [] if args.findings_only else [str(p) for p in files]},
-            "meta": {"count": len(findings), "files": scanned, "schema": SCHEMA}}, indent=2))
+                     "scanned": [] if args.findings_only else scanned},
+            "meta": {"count": len(findings), "files": len(scanned), "unscanned": unscanned,
+                     "source": "index" if args.staged else "worktree", "schema": SCHEMA}}, indent=2))
     else:
         for fobj in findings:
             print(f"{fobj['file']}")
             print(f"   [{fobj['severity']}] {fobj['kind']}: {fobj['detail']}")
-        if not findings and not args.findings_only:
-            print(f"clean: no config-drift findings in {scanned} config file(s)")
+        if not findings and not unscanned and not args.findings_only:
+            print(f"clean: no config-drift findings in {len(scanned)} config file(s)")
 
-    sys.exit(EXIT_FINDINGS if findings else EXIT_OK)
+    if findings:
+        sys.exit(EXIT_FINDINGS)
+    sys.exit(EXIT_MISSING_DEP if unscanned else EXIT_OK)
 
 
 if __name__ == "__main__":

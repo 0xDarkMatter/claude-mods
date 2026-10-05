@@ -68,8 +68,10 @@ Paths are relative to this skill folder. Launch the `.py` scripts through
 is Python 3.8+ (on Windows `python3` is often the Microsoft Store alias, which exits
 49 and runs nothing - the scripts' shebang hits it too). Shared exit codes: 0 ok,
 2 usage, 3 not found, 5 missing dependency, 7 unavailable, **10 = finding** (review
-item / inside cooldown / exposed / behavioural hit). Every script takes `--json`;
-stdout is data, stderr is progress.
+item / inside cooldown / exposed / behavioural hit). **5 and 7 mean part of the
+check did not run** (no `jq`, registry down, log unreadable without elevation) and
+are never a pass: the script names what it could not check on stderr. Every script
+takes `--json`; stdout is data, stderr is progress.
 
 | Script | Answers | Run |
 |---|---|---|

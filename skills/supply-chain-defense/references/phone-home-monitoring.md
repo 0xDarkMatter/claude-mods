@@ -71,6 +71,16 @@ Exit `10` on any **medium+** finding; `-Strict` counts `low` too. Loopback and
 RFC1918 destinations are skipped except for IOC matching. The catalog is meant to
 be extended from advisories exactly like `exposure-catalog.json`.
 
+**"No connections" is not "could not look."** A capture source that fails exits
+`7` (TCP table, process table or Sysmon log unreadable) or `5` (this session was
+refused - run elevated), naming the source on stderr; it never reports the empty
+result as clean. Two Windows traps the script handles: `Get-NetTCPConnection`
+reports "nothing in this state" as an `ObjectNotFound` error (a real empty answer),
+and `Get-WinEvent -FilterHashtable` reports a log the session may not read as "No
+events were found" - so the Sysmon read uses `-LogName -FilterXPath`, which raises
+the access denial. A non-elevated `-ListLog` also fails on an installed Sysmon, so
+`-Status` and `-Sysmon` tell "not installed" from "installed, not readable".
+
 ## Continuous capture (the daemon question)
 
 Three tiers, cheapest first:
