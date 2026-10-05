@@ -468,6 +468,70 @@ ascii_pure "postinstall"     "$PYTHON" "$SCRIPTS/postinstall-audit.py" --root "$
 tdo="$(FORCE_COLOR=1 env HOME="$TDE" "$PYTHON" "$SCRIPTS/exposure-check.py" --root "$TDE" --no-extensions 2>/dev/null)"
 case "$tdo" in *$'\033'*) no "exposure-check stdout leaked ANSI";; *) ok "exposure-check stdout stays plain data";; esac
 
+# ── standalone: the skill folder copied ALONE (portable-pack contract) ─────
+# This folder is copied on its own into other plugins, with no sibling
+# skills/_lib, no repo hooks/, no ~/.claude layout. Copy just this skill to a
+# bare temp dir and prove every script still answers --help and runs offline.
+# The bash scripts must drop to their plain framing when _lib/term.sh is absent,
+# and that framing must be 7-bit ASCII with no TERM_ASCII to ask for it.
+echo "-- standalone (skill folder copied alone) --"
+mkdir -p "$SB/alone"; cp -R "$SKILL" "$SB/alone/"
+AS="$SB/alone/supply-chain-defense/scripts"
+[[ -e "$SB/alone/_lib" ]] && no "standalone copy has a sibling _lib (test is void)" || ok "standalone copy has no sibling _lib"
+plain_ascii() { # desc want-exit cmd...  (stderr must be 7-bit; stdout discarded)
+  local d="$1" want="$2" e rc; shift 2
+  e="$("$@" 2>&1 1>/dev/null)"; rc=$?
+  expect_exit "$d" "$want" "$rc"
+  if printf '%s' "$e" | LC_ALL=C grep -q '[^[:print:][:cntrl:]]'; then
+    no "$d: framing has non-ASCII without _lib"
+  else ok "$d: framing plain ASCII without _lib"; fi
+}
+AW="$SB/alone-proj"; mkdir -p "$AW/.github/workflows" "$SB/alone-zizmor" "$SB/alone-nonet" "$SB/alone-ext/pub.tool-1.0.0"
+printf 'on: push\njobs: { b: { runs-on: ubuntu-latest, steps: [ { run: "echo ok" } ] } }\n' > "$AW/.github/workflows/ci.yml"
+printf '{"publisher":"pub","name":"tool","version":"1.0.0"}' > "$SB/alone-ext/pub.tool-1.0.0/package.json"
+# Shims keep the run offline and deterministic: a silent "installed" zizmor (its
+# own output is not ours to police) and a curl whose every registry fetch fails.
+printf '#!/bin/sh\nexit 0\n' > "$SB/alone-zizmor/zizmor"
+printf '#!/bin/sh\nexit 6\n' > "$SB/alone-nonet/curl"
+chmod +x "$SB/alone-zizmor/zizmor" "$SB/alone-nonet/curl"
+for s in integrity-audit preinstall-check scan-extensions; do
+  bash "$AS/$s.sh" --help >/dev/null 2>&1; expect_exit "alone: $s.sh --help" 0 $?
+done
+for s in exposure-check config-drift-check postinstall-audit; do
+  "$PYTHON" "$AS/$s.py" --help >/dev/null 2>&1; expect_exit "alone: $s.py --help" 0 $?
+done
+for fc in "" 1; do   # FORCE_COLOR=1 is the branch that would open a term.sh panel
+  t="alone${fc:+ FORCE_COLOR}"
+  plain_ascii "$t: integrity-audit, workflows + zizmor" 0 \
+    env FORCE_COLOR="$fc" HOME="$TDE" APPDATA="$TDE" PATH="$SB/alone-zizmor:$PATH" bash "$AS/integrity-audit.sh" "$AW"
+  plain_ascii "$t: preinstall-check, registry down -> 7" 7 \
+    env FORCE_COLOR="$fc" PATH="$SB/alone-nonet:$PATH" bash "$AS/preinstall-check.sh" lodash@4.17.21
+  plain_ascii "$t: scan-extensions inventory" 0 \
+    env FORCE_COLOR="$fc" HOME="$TDE" SC_EXT_DIRS="$SB/alone-ext" bash "$AS/scan-extensions.sh"
+done
+if command -v zizmor >/dev/null 2>&1; then
+  echo "  SKIP  alone: integrity-audit zizmor-absent branch (zizmor installed here)"
+else
+  plain_ascii "alone: integrity-audit, workflows, no zizmor" 0 \
+    env HOME="$TDE" APPDATA="$TDE" bash "$AS/integrity-audit.sh" "$AW"
+fi
+# Offline modes, and the bundled catalog still resolves inside the copy.
+"$PYTHON" "$AS/exposure-check.py" --root "$SB/exposed" --no-extensions --findings-only >/dev/null 2>&1
+expect_exit "alone: exposure-check finds IOC via copied catalog -> 10" 10 $?
+"$PYTHON" "$AS/config-drift-check.py" --root "$SB/cd-clean" >/dev/null 2>&1
+expect_exit "alone: config-drift-check offline -> 0" 0 $?
+"$PYTHON" "$AS/postinstall-audit.py" --root "$SB/pa-clean" --no-cache >/dev/null 2>&1
+expect_exit "alone: postinstall-audit offline -> 0" 0 $?
+if command -v pwsh >/dev/null 2>&1 && [[ "$_PHM_WIN" == 1 ]]; then
+  APHM="$AS/phone-home-monitor.ps1"; ACLEAN="$SB/phm-clean.json"
+  command -v cygpath >/dev/null 2>&1 && { APHM="$(cygpath -w "$APHM")"; ACLEAN="$(cygpath -w "$ACLEAN")"; }
+  pwsh -NoProfile -File "$APHM" --help >/dev/null 2>&1; expect_exit "alone: phone-home-monitor --help" 0 $?
+  pwsh -NoProfile -File "$APHM" -InputJson "$ACLEAN" >/dev/null 2>&1
+  expect_exit "alone: phone-home-monitor clean replay -> 0" 0 $?
+else
+  echo "  SKIP  alone: phone-home-monitor.ps1 needs pwsh on Windows"
+fi
+
 # ── summary ────────────────────────────────────────────────────────────────
 echo "=== $PASS passed, $FAIL failed ==="
 [[ "$FAIL" -eq 0 ]] || exit 1
