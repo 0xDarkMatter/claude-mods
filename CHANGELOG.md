@@ -8,6 +8,14 @@ feature releases live in the README "Recent Updates" section.
 
 ### Added
 
+- **`tests/skill-size.sh` gate** - warns when a SKILL.md body passes ~5,000
+  estimated tokens (characters / 3.6, frontmatter excluded). After auto-compaction
+  Claude Code re-attaches each invoked skill but keeps only its first 5,000 tokens,
+  so anything later in a long body silently vanishes mid-session. Warn-only in
+  `just check` and `check-fast`; `--strict` fails instead and `--report` lists every
+  skill. A built-in self-test must see an oversized fixture and ignore a huge
+  frontmatter on every run, and an empty scan exits 2, so the gate cannot pass blind.
+
 - **`deploy-gating` rule** - a child session never deploys. Background agents, chips,
   workflow/fleet workers, headless and scheduled runs, and CI-autofix or review-triage
   loops may build, test and commit, but stop at the deploy boundary and report the
@@ -254,6 +262,17 @@ feature releases live in the README "Recent Updates" section.
   one module per PR with revert-and-run evidence, never a repo-wide sweep. Test naming
   moved here from the Structure section so it is stated once; the self-check gains
   "have I seen it fail?".
+- **Twelve over-budget skills restructured to survive compaction** - fleet-ops,
+  windows-ops, github-ops, loop-ops, ffmpeg-ops, claude-api-ops, summon, git-ops,
+  isometric-ops, mac-ops, tailwind-ops and sqlite-ops each had a SKILL.md body past
+  the 5,000 tokens compaction keeps (fleet-ops was ~10,000). Background, long
+  examples and catalogues moved verbatim into topic files under `references/`
+  (tables of contents where over 100 lines); procedures, decision tables and hard
+  rules stayed, and every moved section leaves a pointer that restates any rule it
+  carried. Nothing was cut: a line-by-line check against the previous tree proves
+  every original line still exists in the skill, and each skill's own suite stays
+  green. Bodies now sit at ~4,000-4,800 tokens. supply-chain-defense and the
+  vendored skill-creator were left alone.
 
 ## [3.8.0] - 2026-08-31
 
