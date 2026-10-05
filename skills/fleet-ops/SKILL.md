@@ -45,7 +45,7 @@ Fleet-ops doesn't care who produced the branch — an agent-team teammate, a bac
 fleet init <name>...        Create branch + worktree per name (manual-spawn path)
 fleet track <branch>...     Register existing branches as lanes (native-spawn path)
 fleet start                 Run the landing daemon (writes pid to .claude/fleet/daemon.pid)
-fleet stop                  Signal the running daemon to exit cleanly
+fleet stop                  Stop the daemon; a land in progress finishes first
 fleet status                One-shot fleet status panel
 fleet land <branch>         Manual land + rebase others
 fleet land --all [--running]  Batch-land all READY lanes oldest-first (--running
@@ -96,7 +96,13 @@ When Claude invokes `fleet start` via `Bash(run_in_background: true)`, the daemo
 
 It never exits from inside the signal handler: bash runs a trap *between* commands, so that exit could fall between `git merge` and the gate and leave an untested merge on `main`. Until 2026-09-28 the handler removed the PID file and then *resumed*. A daemon whose session ended (SIGHUP) kept polling as a ghost, invisible to `fleet stop` and the double-start guard, and landed lanes 3s later.
 
-To stop early: `fleet stop` (SIGTERM, 5s grace, then SIGKILL). **Caveat:** the SIGKILL escalation does not know about a land in progress, so stopping while a gate slower than 5s runs kills the daemon mid-gate and leaves that merge on `main` untested. Check `activity.log` for a `running test_cmd:` line without its `PASS`/`FAIL` before stopping, and let it finish. On next `fleet start`, a stale PID file is auto-detected and cleared. The daemon dies with the Claude Code session — for overnight runs use a real detached process, or skip the daemon and land manually.
+To stop early: `fleet stop`. It sends SIGTERM and waits. While the daemon is mid-land, `fleet stop` waits as long as the gate takes, printing which lane it is waiting on, and **never escalates**. The daemon records that land in `.claude/fleet/landing` from just before the merge until the follow-up rebase pass is done. Only an idle daemon that still ignores SIGTERM after 5s gets SIGKILL. Until 2026-10-05 that 5s clock ran regardless, so any gate slower than 5s was killed mid-run: the merge stayed on `main` untested, and the next pass's "already up to date" path marked the lane `LANDED` anyway.
+
+- **Interrupting `fleet stop` is safe**: the request is already delivered, and the daemon exits once the land finishes.
+- **To abort a hung gate**, kill the `test_cmd` process, not the daemon. The gate fails, the merge is rewound, and the daemon exits.
+- **From an agent's Bash tool**, a slow gate can outlast the tool timeout. Run `fleet stop` in the background, or with a timeout longer than the gate.
+
+On next `fleet start`, a stale PID file is auto-detected and cleared. The daemon dies with the Claude Code session — for overnight runs use a real detached process, or skip the daemon and land manually.
 
 `signal.sh` deploys to `.claude/fleet/signal.sh` on `init`/`track`. Working sessions call:
 

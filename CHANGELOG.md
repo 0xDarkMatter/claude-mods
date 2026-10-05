@@ -42,6 +42,16 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **`fleet stop` SIGKILLed the daemon mid-gate** - its fixed "5s grace, then
+  SIGKILL" did not know a land was running, and the daemon defers SIGTERM until
+  the land finishes. With any `test_cmd` slower than 5s, the merge stayed on the
+  base branch untested and the lane stayed `READY`. The next pass then hit the
+  "already up to date" path and marked it `LANDED`, blessing a merge no gate had
+  passed. The daemon now records the lane it is landing in
+  `.claude/fleet/landing`, and `fleet stop` waits out that land, printing
+  progress. Its 5s SIGKILL backstop runs only while the daemon is idle, and a
+  marker stranded by a dead daemon cannot disarm it.
+
 - **`fleet-worker` doctor said "no API key" on hosts where the launcher ran fine** -
   `fleet-doctor.sh --live` carried its own if/elif copy of the key chain, so with
   `FLEET_WORKER_KEYRING_SERVICE`/`_KEY` set but an empty keyring entry it never fell

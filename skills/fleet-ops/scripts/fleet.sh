@@ -13,7 +13,7 @@
 #   SESSION AWARENESS   who owns a lane, and are they still writing (sessions.sh)
 #   PRUNE               worktree housekeeping — the only part that DELETES
 #   landing             land_one, rebase_others, cmd_land, cmd_land_all, revert
-#   daemon              cmd_start / cmd_stop, PID file lifecycle
+#   daemon              cmd_start / cmd_stop, PID file + landing marker lifecycle
 #   dispatch            the subcommand case at the bottom
 set -euo pipefail
 
@@ -47,6 +47,9 @@ LANES_DIR="$FLEET_DIR/lanes"
 LOG="$FLEET_DIR/activity.log"
 CONFIG="$FLEET_DIR/config"
 PID_FILE="$FLEET_DIR/daemon.pid"
+# The lane the daemon is landing right now. Format at daemon_mark_landing; why
+# it exists at cmd_stop.
+LANDING_FILE="$FLEET_DIR/landing"
 
 # defaults (overridable via .claude/fleet/config — see load_config below)
 MODE="auto"
@@ -282,7 +285,7 @@ ensure_fleet_dir() {
   chmod +x "$FLEET_DIR/sessions.sh" 2>/dev/null || true
   # Auto-ignore fleet-ops runtime state in git so it doesn't show as "dirty"
   # or get committed. Two paths:
-  #   .claude/fleet/      — lanes/, daemon.pid, activity.log, signal.sh, config
+  #   .claude/fleet/      — lanes/, daemon.pid, landing, activity.log, signal.sh, config
   #   .fleet-worktrees/   — default worktree root (top-level so headless
   #                         Claude lane sessions can write there)
   if git rev-parse --git-dir >/dev/null 2>&1; then
@@ -2035,6 +2038,27 @@ cmd_land_all() {
   [[ $((conflict + failed)) -eq 0 ]]
 }
 
+# `fleet stop` asks, then waits, and NEVER SIGKILLs a daemon that is mid-land.
+#
+# The daemon defers SIGTERM to a safe point (see daemon_request_stop), so during
+# a land the signal only queues. The old fixed "5s grace, then SIGKILL" fired
+# straight through that: with any test_cmd slower than 5s (this repo's own gate
+# takes minutes) it killed the daemon mid-gate. The merge stayed on $BASE_BRANCH
+# untested because the gate's rewind never ran, the lane stayed READY, and
+# test_cmd ran on orphaned. Worse, the next pass took land_one's "Already up to
+# date" path and marked the lane LANDED, blessing a merge no gate ever passed.
+#
+# So the grace clock runs only while the daemon is NOT landing, judged by the
+# landing marker (format at daemon_mark_landing). Mid-land, this waits as long
+# as the gate takes, printing progress, and the clock restarts from zero once
+# the land is done. Do not "simplify" this back to a fixed deadline: there is no
+# deadline that is safe for every repo's test_cmd. SIGKILL stays only as the
+# backstop for a daemon that is idle and still ignoring SIGTERM.
+#
+# Interrupting `fleet stop` itself is always safe: the request is already
+# delivered, and the daemon exits after the land either way. To abort a hung
+# gate, kill test_cmd's process, never the daemon: the gate then fails and
+# land_one rewinds the merge before the daemon exits.
 cmd_stop() {
   if [[ ! -f "$PID_FILE" ]]; then
     echo "no daemon running (no $PID_FILE)" >&2
@@ -2049,15 +2073,30 @@ cmd_stop() {
   fi
   log "sending SIGTERM to daemon (pid $pid)"
   kill -TERM "$pid" 2>/dev/null || true
-  # Wait up to 5s for graceful exit
-  local i
-  for i in 1 2 3 4 5; do
+  local idle=0 waited=0 told=""
+  while kill -0 "$pid" 2>/dev/null; do
     sleep 1
-    kill -0 "$pid" 2>/dev/null || { log "daemon stopped"; return 0; }
+    waited=$((waited + 1))
+    kill -0 "$pid" 2>/dev/null || break
+    if landing_of "$pid"; then
+      idle=0
+      if [[ "$told" != "$LANDING_LANE" ]]; then
+        log "daemon is mid-land on $LANDING_LANE (started $(( $(date +%s) - LANDING_START ))s ago) — waiting for its gate; it exits once that land finishes. Interrupting this command is safe"
+        told=$LANDING_LANE
+      elif (( waited % 15 == 0 )); then
+        echo "  ...still landing $LANDING_LANE ($(( $(date +%s) - LANDING_START ))s)" >&2
+      fi
+    else
+      idle=$((idle + 1))
+      if (( idle >= 5 )); then
+        log "daemon didn't exit on SIGTERM, sending SIGKILL"
+        kill -KILL "$pid" 2>/dev/null || true
+        rm -f "$PID_FILE"
+        return 0
+      fi
+    fi
   done
-  log "daemon didn't exit on SIGTERM, sending SIGKILL"
-  kill -KILL "$pid" 2>/dev/null || true
-  rm -f "$PID_FILE"
+  log "daemon stopped"
 }
 
 # Every merge commit on $BASE_BRANCH whose subject is EXACTLY "merge: <branch>",
@@ -2195,10 +2234,47 @@ daemon_request_stop() {
   if [[ -n "$DAEMON_SLEEP_PID" ]]; then kill "$DAEMON_SLEEP_PID" 2>/dev/null || true; fi
 }
 
+# The landing marker, $LANDING_FILE: one line, written by the daemon just before
+# a land and removed once that land's rebase_others pass is done (and by
+# daemon_cleanup on any exit that runs the EXIT trap). cmd_stop reads it to know
+# it must not SIGKILL.
+#
+#   <daemon pid> TAB <start, epoch seconds> TAB <branch>
+#
+#   pid     whose land it is. cmd_stop trusts the marker only when this equals
+#           the live PID in daemon.pid, so a marker stranded by a daemon that died
+#           without its EXIT trap (kill -9, a crash) can never stall a later stop.
+#   start   for the elapsed time cmd_stop prints while it waits.
+#   branch  last, so it is everything after the second TAB. TAB is a safe
+#           separator because git refuses control characters in ref names.
+#
+# It spans rebase_others as well as land_one: a SIGKILL mid-rebase strands
+# another lane's worktree in a half-finished rebase, no better than a half-gated
+# merge. A plain `>` write is enough: a reader that catches it empty or partial
+# sees "not landing", which only matters if the daemon also ignores SIGTERM.
+daemon_mark_landing() { printf '%s\t%s\t%s\n' "$$" "$(date +%s)" "$1" > "$LANDING_FILE"; }
+
+# Is the daemon with PID $1 mid-land? Status 0 with LANDING_LANE / LANDING_START
+# set when it is; 1, both empty, when there is no marker or it belongs to some
+# other (dead) daemon. Sets globals rather than printing, so cmd_stop's
+# once-a-second poll costs no subshell.
+LANDING_LANE=""
+LANDING_START=""
+landing_of() {
+  LANDING_LANE="" LANDING_START=""
+  local mpid="" mstart="" mlane=""
+  [[ -f "$LANDING_FILE" ]] || return 1
+  # Grouped so the redirect's own "No such file" goes to /dev/null too: the
+  # daemon can delete the marker between the test above and this read.
+  { IFS=$'\t' read -r mpid mstart mlane < "$LANDING_FILE"; } 2>/dev/null || true
+  [[ -n "$mlane" && "$mpid" == "$1" ]] || return 1
+  LANDING_LANE=$mlane LANDING_START=$mstart
+}
+
 daemon_cleanup() {
   # PID file first: it is the one step that must happen. `log` can fail (its
   # stderr may be gone after a SIGHUP), and under errexit that ends the handler.
-  rm -f "$PID_FILE"
+  rm -f "$PID_FILE" "$LANDING_FILE"
   if [[ -n "$DAEMON_SLEEP_PID" ]]; then kill "$DAEMON_SLEEP_PID" 2>/dev/null || true; fi
   log "daemon stopping (pid $$)" || true
 }
@@ -2244,11 +2320,17 @@ cmd_start() {
 
     if [[ ${#ready[@]} -gt 0 ]]; then
       for branch in "${ready[@]}"; do
-        # Safe point 1: never START a land once a stop was requested.
+        # Safe point 1: never START a land once a stop was requested. Checked
+        # again AFTER the marker is written, so a stop request that slips in
+        # between finds either no land (second check) or the marker already in
+        # place (cmd_stop then waits). No land ever runs unmarked.
         if [[ -n "$DAEMON_STOP" ]]; then break; fi
+        daemon_mark_landing "$branch"
+        if [[ -n "$DAEMON_STOP" ]]; then rm -f "$LANDING_FILE"; break; fi
         if land_one "$branch"; then
           rebase_others "$branch"
         fi
+        rm -f "$LANDING_FILE"
       done
       cmd_fleet
     fi
@@ -2305,7 +2387,7 @@ Usage:
   fleet init <name>...        Create branch + worktree per name (manual spawn)
   fleet track <branch>...     Register existing branches as lanes (native spawn)
   fleet start                 Run the daemon (writes pid to $PID_FILE)
-  fleet stop                  Signal the running daemon to exit cleanly
+  fleet stop                  Stop the daemon; a land in progress finishes first
   fleet status                One-shot status view
   fleet land <branch>         Manual land + rebase others
   fleet land --all [--running]  Batch-land all READY lanes (oldest-first);
