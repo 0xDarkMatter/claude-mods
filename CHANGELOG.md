@@ -8,6 +8,18 @@ feature releases live in the README "Recent Updates" section.
 
 ### Added
 
+- **`security-ops` covers PHP 8, Twig and Craft CMS** - fourteen one-topic references
+  (each 300 lines or fewer, Contents-listed, cited inline to Craft, Twig, PHP manual and
+  OWASP sources): Twig escaping and template injection; Craft CSRF/Formie, access control
+  and `allowAnonymous`, config and security-key hardening, uploads, GraphQL, and an
+  advisories reference that leads with Craft 3 and 4 being past security end of life;
+  PHP input validation, SQL via the query builder versus raw SQL, deserialisation,
+  password hashing, and Composer audit (behavioural supply-chain work stays in
+  `supply-chain-defense`); DDEV-versus-production drift. `security-scan.sh` gains PHP,
+  Twig/Craft-template and Craft-config checks and stops flagging committed
+  `.env.example.*` files; `dependency-audit.sh` runs `composer audit --locked`. A
+  stack-routing table in SKILL.md maps detection to references.
+
 - **`deploy-gating` rule** - a child session never deploys. Background agents, chips,
   workflow/fleet workers, headless and scheduled runs, and CI-autofix or review-triage
   loops may build, test and commit, but stop at the deploy boundary and report the
@@ -231,6 +243,13 @@ feature releases live in the README "Recent Updates" section.
 
 ### Changed
 
+- **`security-ops` references split to a 300-line ceiling.** The OWASP guide is now
+  `owasp-top10-a01-a05.md` + `owasp-top10-a06-a10.md` (the `review`, `testgen` and
+  `techdebt` preloads point at both), MFA/rate-limiting/lockout moved to
+  `auth-account-protection.md`, and every reference over 100 lines opens with a
+  Contents list. The skill's suite now fails on an over-length reference, a stale
+  Contents list, a repo citation of a reference that no longer exists, or a
+  secret-shaped example value.
 - **Rules made machine- and person-agnostic.** Rules ship in a public plugin, so
   author-specific incidents, repos and phrasing ("the user corrected this on…") are
   retold generically with the lesson kept: `release-review`, `public-posts`,
