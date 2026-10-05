@@ -23,9 +23,9 @@
 #   bash scripts/run-python.sh --which
 #   PY="$(bash scripts/run-python.sh --which)" && "$PY" -m py_compile scripts/*.py
 #
-# Deliberately duplicated: an identical copy ships in each portable skill
-# (supply-chain-defense, prompt-injection-defense, ddev-ops), because each skill
-# folder must run when copied alone. Keep the copies byte-identical -
+# Deliberately duplicated: an identical copy ships in each portable skill that
+# has .py scripts (docs/SKILL-RESOURCE-PROTOCOL.md section 2 names them), because
+# each skill folder must run when copied alone. Keep the copies byte-identical -
 # tests/check-resources.sh compares them.
 set -uo pipefail
 

@@ -169,6 +169,14 @@ run "audit-ddev-config --help"        0 "$PY" skills/ddev-ops/scripts/audit-ddev
 run "audit-ddev-config minefield"    10 "$PY" skills/ddev-ops/scripts/audit-ddev-config.py skills/ddev-ops/tests/fixtures/minefield
 run "audit-ddev-config clean control" 0 "$PY" skills/ddev-ops/scripts/audit-ddev-config.py skills/ddev-ops/tests/fixtures/clean
 
+echo "== package-manager-ops: Node/PHP/manager facts verifier + pm-audit contract"
+run "pm-facts --offline consistent" 0 "$PY" skills/package-manager-ops/scripts/check-pm-facts.py --offline
+run "pm-facts --help"               0 "$PY" skills/package-manager-ops/scripts/check-pm-facts.py --help
+run "pm-audit --help"               0 "$PY" skills/package-manager-ops/scripts/pm-audit.py --help
+run "pm-audit bad args"             2 "$PY" skills/package-manager-ops/scripts/pm-audit.py
+# The fixture matrix lives in the skill's own tests/run.sh: its fixtures carry a .fx
+# suffix (so scanners never read them as real manifests) and must be materialised first.
+
 echo "== protocol: every new verifier is executable + compiles"
 for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/claude-api-ops/scripts/context-budget.py \
@@ -189,7 +197,9 @@ for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/web-perf-ops/scripts/triage-vitals.py \
          skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py \
          skills/ddev-ops/scripts/check-ddev-facts.py \
-         skills/ddev-ops/scripts/audit-ddev-config.py; do
+         skills/ddev-ops/scripts/audit-ddev-config.py \
+         skills/package-manager-ops/scripts/check-pm-facts.py \
+         skills/package-manager-ops/scripts/pm-audit.py; do
     "$PY" -m py_compile "$s" 2>/dev/null && pass "py_compile $(basename "$s")" || bad "py_compile $(basename "$s")"
 done
 bash -n skills/terraform-ops/scripts/check-action-refs.sh 2>/dev/null \
@@ -227,6 +237,7 @@ purity "craft-facts"   "$PY" skills/craftcms-ops/scripts/check-craft-facts.py --
 purity "frontend-upgrade-facts" "$PY" skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py --offline
 purity "ddev-facts"    "$PY" skills/ddev-ops/scripts/check-ddev-facts.py --offline
 purity "ddev-audit"    "$PY" skills/ddev-ops/scripts/audit-ddev-config.py skills/ddev-ops/tests/fixtures/minefield
+purity "pm-facts"      "$PY" skills/package-manager-ops/scripts/check-pm-facts.py --offline
 grep -q '_lib/term.sh' skills/terraform-ops/scripts/check-action-refs.sh \
     && pass "check-action-refs sources term.sh" || bad "check-action-refs missing term.sh"
 grep -q '_lib/term.sh' skills/fleet-worker/scripts/fleet-doctor.sh \

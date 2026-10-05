@@ -6,7 +6,7 @@ license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: container-orchestration, ddev-ops, go-ops, rust-ops, ci-cd-ops
+  related-skills: container-orchestration, ddev-ops, go-ops, rust-ops, ci-cd-ops, package-manager-ops
 ---
 
 # Docker Operations
@@ -289,3 +289,7 @@ docker image prune -a                                # Remove unused images
 | `references/multi-stage-builds.md` | Per-language multi-stage patterns (Go, Rust, Node, Python) |
 | `references/compose-patterns.md` | Compose services, networking, profiles, watch, overrides |
 | `references/optimization.md` | Image size, BuildKit, security scanning, debugging |
+
+Inside a `RUN` step, install from the lockfile only: `npm ci` (or the manager's frozen
+install) and `composer install --no-dev --optimize-autoloader`. Which command each manager
+needs, and why `npm install` in an image is a bug, is in `package-manager-ops`.

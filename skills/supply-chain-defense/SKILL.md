@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Edit Write Bash Glob Grep Agent WebFetch"
 metadata:
   author: claude-mods
-  related-skills: security-ops, ci-cd-ops, github-ops, auth-ops
+  related-skills: security-ops, ci-cd-ops, github-ops, auth-ops, package-manager-ops
 ---
 
 # Supply Chain Defense
@@ -197,3 +197,4 @@ Layer 6 playbook: `references/repo-integrity.md`.
 | `ci-cd-ops` | Hardening GitHub Actions, OIDC trusted publishing setup |
 | `github-ops` | Release flow, repo security settings |
 | `auth-ops` | Credential/token handling patterns after a rotation |
+| `package-manager-ops` | Day-to-day manager use this skill's policy sits on: frozen installs, lockfile hygiene, pinned npx, approving a dependency's build script |

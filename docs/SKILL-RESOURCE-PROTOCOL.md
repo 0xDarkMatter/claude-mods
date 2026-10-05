@@ -60,7 +60,7 @@ Default to **stdlib + common shell tools** (`jq`, `git`, `curl`). Check optional
 with `command -v` and exit `5` (missing-dep) with an install hint, never a stack trace.
 
 **Portable skills** - ones copied standalone into other plugins, today
-`supply-chain-defense`, `prompt-injection-defense` and `ddev-ops` - must run with nothing beside
+`supply-chain-defense`, `prompt-injection-defense`, `ddev-ops` and `package-manager-ops` - must run with nothing beside
 their folder: no `../../` dependency; `skills/_lib/term.sh` sourced only behind a guard
 with a 7-bit ASCII fallback ([TERMINAL-DESIGN.md](TERMINAL-DESIGN.md) §9); `.py`
 scripts launched through a bundled `scripts/run-python.sh`, which runs the first of

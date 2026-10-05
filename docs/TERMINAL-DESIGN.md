@@ -748,7 +748,7 @@ Initialize-Term
 ### Portable skills: the lib is optional
 
 A skill that is copied standalone into other plugins (`supply-chain-defense`,
-`prompt-injection-defense`) has no `skills/_lib/` beside it, so it must not source
+`prompt-injection-defense`, `ddev-ops`, `package-manager-ops`) has no `skills/_lib/` beside it, so it must not source
 the lib unconditionally. Guard the source, keep a plain fallback, and keep that
 fallback 7-bit ASCII - with no lib there is no glyph registry to fall back through:
 
