@@ -1,7 +1,8 @@
 # Performance: Mutagen, upload_dirs, WSL2 and Docker Providers
 
 Facts from DDEV's performance, Docker-installation, troubleshooting and FAQ docs at DDEV
-v1.25.4, and its source (`upload_dirs.go`), checked 2026-10-05.
+v1.25.4, release notes v1.25.0-v1.25.4, and its source (`upload_dirs.go`,
+`pkg/settings/viper.go`), checked 2026-10-06.
 
 ## Contents
 
@@ -21,7 +22,7 @@ the list:
 |---|---|---|
 | Xdebug left on | `ddev xdebug status` | `ddev xdebug off` - it slows every request |
 | Mutagen state | `ddev mutagen status`, `ddev utility mutagen-diagnose` | Below |
-| Huge sync (first start takes minutes) | `ddev mutagen st -l` while starting | Add `node_modules` and big asset folders to `upload_dirs` |
+| Huge sync (first start takes minutes) | `ddev mutagen st -l` while starting | Add `node_modules` and big asset folders to `upload_dirs` (docroot-relative: `../node_modules` when `docroot: web`) |
 | WSL2 project on the Windows drive | `pwd` starts with `/mnt/c` | Move it into the WSL2 filesystem |
 | Docker VM starved | Provider settings | 5-6 GB memory suits most projects; keep the disk image under 80% full |
 | Slow `ddev start` | Hooks | Move `npm install`/`composer install` out of `post-start` into explicit steps or a daemon |
@@ -30,7 +31,8 @@ the list:
 ## Mutagen
 
 - **Default:** on for macOS and traditional Windows, off elsewhere. DDEV installs and runs
-  its own `mutagen`; never install it separately.
+  its own `mutagen` binary with its own data directory, so nothing needs installing (and a
+  separately installed Mutagen doesn't interfere).
 - **Per developer, not per project:** don't commit `performance_mode` in `config.yaml`. A
   WSL2 or Linux teammate gains nothing from Mutagen and pays its sync cost. Use
   `config.local.yaml` or `ddev config global --performance-mode=<mode>`.
@@ -43,8 +45,10 @@ the list:
   A git `post-checkout` hook running `ddev mutagen sync || true` keeps branch switches
   honest. Do big git operations on the host, not inside the container.
 - **Don't change files while DDEV is stopped:** Mutagen cannot see the change and may
-  restore the old copy from its volume on the next start. If it happens: `ddev stop`,
-  reset files with git, `ddev mutagen reset`, `ddev start`.
+  restore the old copy from its volume on the next start. If you did (a branch switch,
+  say), run `ddev mutagen reset` *before* `ddev start`, so the host copy wins. Only when
+  stale files have already come back: `ddev stop`, restore files with git (this discards
+  uncommitted work - check `git status` first), `ddev mutagen reset`, `ddev start`.
 - **Custom commands that write files** should carry `## MutagenSync: true`.
 - **After changing `upload_dirs` or `.ddev/mutagen/mutagen.yml`:** `ddev mutagen reset`.
 - **Diagnose:** `ddev utility mutagen-diagnose` (volume size warnings at 5 GB and 10 GB,
@@ -65,7 +69,11 @@ the list:
 - **Setting it replaces the project type's defaults**, so list the CMS's own upload
   folder too (Drupal: `sites/default/files`).
 - **Exclude heavy, regenerable trees from Mutagen** by listing them: `node_modules`,
-  large asset or font folders, framework runtime/cache folders.
+  large asset or font folders, framework runtime/cache folders. Write them relative to the
+  docroot: with `docroot: web`, a root-level `node_modules` is `../node_modules`.
+- **Override files append to the list** (`config.*.yaml` adds entries unless it sets
+  `override_config: true`), so check the merged result with
+  `ddev utility configyaml --full-yaml`.
 - Types with no default (`php`, `craftcms`) print a warning when Mutagen is on and
   `upload_dirs` is empty. Fix the setting rather than reaching for
   `disable_upload_dirs_warning`.
@@ -101,7 +109,7 @@ Craft's layout (asset volumes, `storage/`): craftcms-ops' `ddev.md`.
 | Linux | Docker CE | Best tested |
 | Windows | Docker CE inside WSL2 | Recommended |
 | Windows | Docker Desktop | Works with WSL2 and traditional Windows |
-| Any | Podman rootless | Experimental since v1.25.0; cannot bind 80/443, so set router ports globally |
+| Any | Podman rootless, Docker rootless | Stable since v1.25.3 (experimental in v1.25.0-v1.25.2). On macOS Podman cannot bind 80/443, so set router ports globally; DDEV's Linux setup lowers the unprivileged-port limit instead |
 
 - `ddev utility dockercheck` confirms DDEV can talk to the provider.
 - Colima switches the Docker context; `docker context ls` shows which engine DDEV uses.

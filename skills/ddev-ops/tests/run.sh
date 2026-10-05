@@ -138,7 +138,7 @@ out="$("${run_py[@]}" "$audit" "$fixtures/minefield" 2>/dev/null)"; rc=$?
 [ "$rc" = "10" ] && ok "minefield -> exit 10" || bad "minefield exit $rc (want 10)"
 for id in php-unpinned db-unpinned node-eol composer-v1 obsolete-key perf-mode-committed \
           router-ports-committed xdebug-committed upload-dir-misplaced shadowed-command \
-          ssh-agent-forwarded provider-push; do
+          ssh-agent-forwarded provider-push provider-files-noop; do
   printf '%s\n' "$out" | cut -f2 | grep -qx "$id" && ok "minefield reports $id" || bad "minefield misses $id"
 done
 ec 0 "clean fixture -> exit 0 (no false positives)" "${run_py[@]}" "$audit" "$fixtures/clean"
@@ -152,6 +152,8 @@ printf 'OTHER_API_TOKEN=%s\n' "$fake" > "$tmp/mf/.ddev/.env.web.local"
 out="$("${run_py[@]}" "$audit" "$tmp/mf" 2>/dev/null)"
 printf '%s\n' "$out" | grep -q $'^high\tcrlf-command\t.ddev/commands/web/assets' && ok "CRLF command reported" || bad "CRLF command missed"
 printf '%s\n' "$out" | grep -q $'committed-secret\t.ddev/.env.web\t.*PAYMENT_API_TOKEN' && ok "committed secret named" || bad "committed secret missed"
+# DDEV's generated .ddev/.gitignore ignores *.example: the advice must say git add -f.
+printf '%s\n' "$out" | grep $'committed-secret' | grep -qF 'git add -f' && ok "committed-secret says git add -f for the .example" || bad "committed-secret omits git add -f"
 printf '%s\n' "$out" | grep -q 'CRAFT_DB_PASSWORD' && bad "DDEV's local db/db password flagged" || ok "local db/db password not flagged"
 printf '%s\n' "$out" | cut -f3 | grep -qx '.ddev/.env.web.local' && bad ".local env file flagged (it is gitignored)" || ok ".local env file not flagged"
 json="$("${run_py[@]}" "$audit" "$tmp/mf" --json 2>/dev/null)"
@@ -179,6 +181,55 @@ sed 's/^php_version: "8.3"/php_version: "9.9"/' "$fixtures/clean/.ddev/config.ya
 has "$(checks_of "$tmp/php")" php-out-of-range && ok "PHP 9.9 -> php-out-of-range" || bad "PHP 9.9 not flagged"
 sed 's#^  - \.\./storage .*#  - ../../outside#' "$fixtures/clean/.ddev/config.yaml" > "$tmp/php/.ddev/config.yaml"
 has "$(checks_of "$tmp/php")" upload-dir-outside && ok "escaping upload_dirs -> upload-dir-outside" || bad "escaping upload_dirs not flagged"
+
+# DDEV writes acquia/lagoon/pantheon/platform/upsun.yaml into EVERY started project's
+# .ddev/providers/ - #ddev-generated, gitignored, and carrying push stanzas. Flagging them
+# would put five false findings on every real working tree (the fixtures lacked them).
+cp -R "$fixtures/clean" "$tmp/gen"
+printf '#ddev-generated\nauth_command:\n  command: true\ndb_push_command:\n  command: true\nfiles_push_command:\n  command: true\n' \
+  > "$tmp/gen/.ddev/providers/upsun.yaml"
+has "$(checks_of "$tmp/gen")" provider-push && bad "DDEV-generated provider recipe flagged" || ok "DDEV-generated provider recipe not flagged"
+
+# A no-op files_pull_command wipes uploads only because DDEV then imports the empty
+# download folder; a files_import_command takes over the import, so no finding then.
+printf 'files_pull_command:\n  command: |\n    true\nfiles_import_command:\n  command: |\n    rsync -a /tmp/x/ /var/www/html/web/uploads/\n' \
+  > "$tmp/gen/.ddev/providers/custom.yaml"
+has "$(checks_of "$tmp/gen")" provider-files-noop && bad "no-op files pull flagged despite files_import_command" || ok "files_import_command suppresses provider-files-noop"
+
+# The shipped recipe asset must stay pull-only with NO files stanza (an empty files pull
+# empties the upload directory) and no push stanzas.
+asset="$here/assets/sanitized-pull.yaml.example"
+grep -qE '^(files_pull_command|db_push_command|files_push_command):' "$asset" \
+  && bad "recipe asset has a files or push stanza" || ok "recipe asset is db-pull only"
+
+# Output is ordered by severity, so "fix the high rows first" means the top rows.
+sev="$("${run_py[@]}" "$audit" "$fixtures/minefield" 2>/dev/null | cut -f1 | sed 's/high/1/; s/medium/2/; s/low/3/' | tr '\n' ' ' || true)"
+[ -n "$sev" ] && [ "$sev" = "$(printf '%s\n' $sev | sort -n | tr '\n' ' ')" ] \
+  && ok "findings ordered high -> medium -> low" || bad "findings not ordered by severity ($sev)"
+mf_out="$("${run_py[@]}" "$audit" "$fixtures/minefield" 2>/dev/null || true)"   # capture: exit 10 under pipefail
+printf '%s\n' "$mf_out" | grep -q $'^high\tdb-unpinned\t' \
+  && ok "db-unpinned is high (engine silently differs from production)" || bad "db-unpinned not high"
+
+# A committed name: in a git WORKTREE collides with the main checkout (DDEV project names
+# are unique per machine). Only worktrees: a submodule's .git file must not trigger it.
+cp -R "$fixtures/clean" "$tmp/wt"
+printf 'gitdir: /repos/site/.git/worktrees/feature-x\n' > "$tmp/wt/.git"
+has "$(checks_of "$tmp/wt")" name-in-worktree && ok "committed name: in a worktree -> name-in-worktree" || bad "worktree name collision missed"
+printf 'gitdir: /repos/site/.git/modules/theme\n' > "$tmp/wt/.git"
+has "$(checks_of "$tmp/wt")" name-in-worktree && bad "submodule .git file flagged as worktree" || ok "submodule .git file not flagged"
+
+# DDEV merges config.*.y*ml overrides by APPENDING lists unless override_config: true, and
+# reads .yml as well as .yaml. A misplaced entry in config.yaml survives an override file.
+cp -R "$fixtures/clean" "$tmp/merge"
+sed 's#^  - \.\./storage .*#  - storage#' "$fixtures/clean/.ddev/config.yaml" > "$tmp/merge/.ddev/config.yaml"
+printf 'upload_dirs:\n  - uploads2\n' > "$tmp/merge/.ddev/config.extra.yaml"
+has "$(checks_of "$tmp/merge")" upload-dir-misplaced && ok "override lists append (misplaced entry kept)" || bad "override list replaced instead of appended"
+printf 'override_config: true\nupload_dirs:\n  - uploads2\n' > "$tmp/merge/.ddev/config.extra.yaml"
+has "$(checks_of "$tmp/merge")" upload-dir-misplaced && bad "override_config: true did not replace the list" || ok "override_config: true replaces the list"
+rm -f "$tmp/merge/.ddev/config.extra.yaml"
+cp "$fixtures/clean/.ddev/config.yaml" "$tmp/merge/.ddev/config.yaml"
+printf 'upload_dirs:\n  - storage\n' > "$tmp/merge/.ddev/config.extra.yml"
+has "$(checks_of "$tmp/merge")" upload-dir-misplaced && ok ".yml override files are read" || bad ".yml override file ignored"
 
 # Facts come from the catalog, not constants in the script: raising the PHP floor
 # must turn the clean fixture's 8.3 into a finding.

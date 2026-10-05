@@ -35,10 +35,11 @@ installer.
 ## Existing project
 
 ```bash
-ddev config --project-type=craftcms --docroot=web   # once; commit .ddev/config.yaml
+ddev config --project-type=craftcms --docroot=web   # only if the repo has no .ddev/ yet; commit it
 ddev start
 ddev composer install
-ddev import-db --file=backup.sql.gz                 # or: ddev craft db/restore backup.sql
+ddev import-db --file=backup.sql.gz                 # prefer over `ddev craft db/restore`: only
+                                                    # import-db translates MySQL 8 / MariaDB 11 collations
 ddev craft up                                       # migrations + Project Config
 ddev npm ci && ddev npm run build                   # if the build runs in the container
 ddev launch                                         # open the site

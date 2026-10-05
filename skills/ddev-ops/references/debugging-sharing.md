@@ -19,6 +19,8 @@ ddev xdebug on        # also: off, toggle, status, info
 ddev xdebug off       # when done: it slows every request
 ```
 
+- `ddev xdebug on` lasts until the next `ddev start` or `ddev restart`, which turns it
+  off again.
 - Xdebug is a network protocol: PHP in the web container calls out to your IDE, which
   listens on **port 9003**. Most IDEs default to it.
 - **PhpStorm:** start listening, load a page with Xdebug on, accept the incoming
@@ -26,12 +28,15 @@ ddev xdebug off       # when done: it slows every request
   after the project's primary URL (`ddev describe`).
 - **VS Code (and forks):** the PHP Debug extension with DDEV's "Listen for Xdebug"
   `launch.json` snippet: `hostname: "0.0.0.0"`, `port: 9003`, and `pathMappings`
-  `{"/var/www/html": "${workspaceFolder}"}`.
+  `{"/var/www/html": "${workspaceFolder}"}`. On WSL2, DDEV's docs require both the PHP Debug and
+  the WSL extensions to be enabled *inside the distro*, not only on the Windows side.
 - **CLI scripts:** `PHP_IDE_CONFIG` is preset in the container, so `ddev exec php <script>`
   or a framework console command breaks at your breakpoints once a web request has created
   the PhpStorm server.
 - **Not connecting:** `ddev utility xdebug-diagnose` (`--interactive` for the full check),
-  then `ddev logs` for "Could not connect to debugging client". Usual causes: a firewall
+  then `ddev logs` for "Could not connect to debugging client". With the IDE listening,
+  `ddev exec nc -vz -w2 host.docker.internal 9003` shows whether the container can reach
+  it at all. Usual causes: a firewall
   or corporate endpoint security blocking the container-to-host connection on 9003, a VPN,
   or a global `xdebug_ide_location` someone set (reset it to `""`; only an IDE running
   inside WSL2 or a container needs `wsl2`/`container`).
@@ -69,8 +74,14 @@ ddev xdebug off       # when done: it slows every request
 - Set a default with `ddev config global --share-default-provider=cloudflared`; pass tunnel
   arguments with `share_provider_args` or `--provider-args`. Custom providers go in
   `.ddev/share-providers/`.
-- CMSs that store one base URL (WordPress, Magento, some Craft setups) need it switched
-  for the session; `pre-share`/`post-share` hooks can do and undo it.
+- **Base URL:** CMSs that store or configure one base URL (WordPress, Magento, Craft's
+  `PRIMARY_SITE_URL`) send visitors back to the local URL. DDEV sets `DDEV_SHARE_URL`
+  before running `pre-share` hooks, so a hook can switch the URL for the session and a
+  `post-share` hook can switch it back (DDEV's docs show a WordPress `wp search-replace`
+  example).
+- **Build front-end assets first** (`ddev npm run build`). The tunnel forwards the site's
+  own URL, so pages that load assets from a dev server on another port (Vite) break for
+  the visitor.
 - **While shared, everything local is public:** debug modes and stack traces, Xdebug,
   `display_errors`, and whatever data sits in the local database. Before sharing, follow
   security-ops' checklist (debug off, sanitised data); stop the tunnel when the demo ends.

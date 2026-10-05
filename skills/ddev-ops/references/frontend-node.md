@@ -42,11 +42,16 @@ is Node.js 24.
   `ddev exec corepack use pnpm@latest` (`pnpm@latest` needs Node 22+; DDEV's docs use
   `pnpm@latest-10` on Node 18/20). Add a `pnpm` web command with `## ExecRaw: true` for
   `ddev pnpm`.
+- **The older pnpm setup** - a custom `.ddev/commands/web/pnpm` that installs pnpm itself,
+  plus `PNPM_HOME` in `web_environment` (seen in several agency repos) - predates
+  corepack. Replace it with `corepack_enable: true`, which pins the version through
+  `package.json` `packageManager`.
 - **Install and build in the container**, not on the host: the container's Node matches
   teammates' and the lockfile's expectations, and native modules compile for Linux. A
   `node_modules` built on macOS or Windows can fail inside the container.
 - With Mutagen on, add `node_modules` to `upload_dirs` so thousands of files are not
-  synced ([performance.md](performance.md#upload_dirs)).
+  synced. Entries are docroot-relative: with `docroot: web` a root-level folder is
+  `../node_modules` ([performance.md](performance.md#upload_dirs)).
 - Which install command, one lockfile, `.nvmrc` and `engines` that agree with
   `nodejs_version`, and pinned `npx`: `package-manager-ops`, whose `pm-audit.py` checks a
   repo's Node and PHP pins against `.ddev/config.yaml`.

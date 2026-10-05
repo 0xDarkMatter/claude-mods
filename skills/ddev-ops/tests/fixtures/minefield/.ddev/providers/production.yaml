@@ -1,4 +1,6 @@
-# Fixture: a provider recipe that can push (provider-push).
+# Fixture: a provider recipe that can push (provider-push) and whose files stanza fetches
+# nothing, so `ddev pull` would import an empty folder and wipe local uploads
+# (provider-files-noop) - the `true` that DDEV's own docs suggest for "nothing to do".
 environment_variables:
   dburl: deploy@host.example.com:backups/db.sql.gz
 
@@ -7,6 +9,12 @@ db_pull_command:
     set -eu -o pipefail
     rsync -az "${dburl}" /var/www/html/.ddev/.downloads/db.sql.gz
   service: web
+
+files_pull_command:
+  command: |
+    # set -x
+    set -eu -o pipefail
+    true
 
 db_push_command:
   command: |
