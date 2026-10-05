@@ -21,7 +21,23 @@
 set -uo pipefail   # NOT -e: a transient error must never block session start
 
 # ── Resolve project dir WITHOUT hard-requiring python (stdin JSON .cwd → env → PWD) ──
-SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+# SELF_DIR is this file's REAL directory. Run through a symlink, BASH_SOURCE names the
+# link, so a hook linked in from elsewhere looked for skills/ beside the link, missed,
+# and skipped the scan in silence. `readlink -f` where it exists; macOS before 12.3
+# has no -f, so there follow the chain by hand (a relative target is relative to the
+# link's dir). Same block as pre-commit-unicode-scan.sh, duplicated on purpose: that
+# hook is often a lone copy in .git/hooks/, where a shared helper would not be found.
+SELF="${BASH_SOURCE[0]}"
+SELF_REAL="$(readlink -f -- "$SELF" 2>/dev/null)" || SELF_REAL=""
+if [ -z "$SELF_REAL" ]; then
+  SELF_REAL="$SELF"; hops=0
+  while [ -L "$SELF_REAL" ] && [ "$hops" -lt 40 ]; do   # bounded: a link loop must not hang the session
+    link="$(readlink -- "$SELF_REAL")" || break
+    case "$link" in /*) SELF_REAL="$link" ;; *) SELF_REAL="$(dirname -- "$SELF_REAL")/$link" ;; esac
+    hops=$((hops + 1))
+  done
+fi
+SELF_DIR="$(cd "$(dirname -- "$SELF_REAL")" 2>/dev/null && pwd)"
 # First of python3/python/py that really runs 3.8+ (same probe as the skill's
 # scripts/run-python.sh). A bare "import sys" also passes a pre-3.8 interpreter,
 # which then fails the scanner and turned a clean project into an empty advisory.
@@ -81,7 +97,13 @@ for cand in \
   "$HOME/.claude/skills/prompt-injection-defense/scripts/scan-hidden-unicode.py"; do
   [ -f "$cand" ] && { SCANNER="$cand"; break; }
 done
-[ -n "$SCANNER" ] || exit 0   # scanner not installed → silent no-op
+# No work-tree candidate here, unlike the pre-commit gate: this runs on opening ANY
+# project, so a scanner taken from $PROJ would run that project's code at session start.
+# Not found → silent, unlike the pre-commit gate, which warns. This hook is auto-wired
+# (plugin hooks.json), its stdout lands in the model's context every session, and a
+# setup without the skill is a legitimate choice. The pre-commit gate runs only where
+# someone installed it, so there a missing scanner can only mean a broken install.
+[ -n "$SCANNER" ] || exit 0
 
 # Collect existing instruction files (root-level + .claude/)
 FILES=()

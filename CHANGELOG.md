@@ -258,6 +258,21 @@ feature releases live in the README "Recent Updates" section.
     `--live` only checks flagged packages. Findings keep exit 10, and a registry outage
     now shows as `meta.live: "unavailable"` with a stderr line.
 
+- **The pre-commit hidden-Unicode gate allowed every commit when installed as
+  documented.** `hooks/pre-commit-unicode-scan.sh` looked for its scanner beside
+  `dirname "${BASH_SOURCE[0]}"`. Git runs the documented
+  `ln -sf ../../hooks/pre-commit-unicode-scan.sh .git/hooks/pre-commit` as
+  `.git/hooks/pre-commit`, so the hook searched `.git/skills/`. Without a `~/.claude`
+  install to fall back on, it exited 0 silently, critical bidi overrides included.
+  Git Bash's `ln -s` makes a copy, with the same result. Both unicode hooks now
+  resolve their real path first: `readlink -f`, or a bounded manual walk where `-f`
+  is missing (macOS before 12.3). A copied pre-commit hook falls back to the repo
+  it commits to, only when that repo also ships the hook, so a planted `skills/`
+  folder never runs. If the gate still finds no scanner, it warns "NOT scanned" on
+  every commit and allows it. The auto-wired SessionStart hook stays silent in that
+  case. The install docs add a one-line wrapper for Git Bash, where a copy would
+  keep stale hook code.
+
 - **Vite 8 chunking advice named a removed option.** Vite 8 (2026-03-12) bundles with
   Rolldown: `build.rollupOptions` is now `build.rolldownOptions`, the object form of
   `output.manualChunks` is no longer supported, and its function form is deprecated in
