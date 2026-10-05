@@ -179,6 +179,12 @@ else
     (( ${#clause} <= 500 )) && ok "Use-when clause is ${#clause} chars (<=500)" || no "Use-when clause is ${#clause} chars (>500)"
 fi
 
+# Prove the Contents parser can see before trusting its silence: a missing or broken
+# reference-contents.awk would otherwise print nothing and pass every reference
+{ printf '# t\n\n## A\n'; for _ in $(seq 1 110); do echo x; done; } >"$SB/no-toc.md"
+expect_has 'Contents parser flags a long reference with no list' 'no ## Contents' \
+    "$(awk -f "$HERE/reference-contents.awk" "$SB/no-toc.md" 2>&1)"
+
 over=''; uncited=''; toc_bad=''
 for ref in "$REFS"/*.md; do
     name="$(basename "$ref")"
@@ -186,19 +192,8 @@ for ref in "$REFS"/*.md; do
     (( lines <= 300 )) || over+=" $name($lines)"
     grep -q "references/$name" "$SKILL/SKILL.md" || uncited+=" $name"
     (( lines > 100 )) || continue
-    toc_gap="$(awk '
-        /^[[:space:]]*(```|~~~)/ { fence = !fence; next }
-        fence { next }
-        /^## / {
-            h = substr($0, 4)
-            if (h == "Contents") { in_toc = 1; seen = NR; next }
-            in_toc = 0; heads[++n] = h; next
-        }
-        in_toc { toc = toc "\n" $0 }
-        END {
-            if (!seen || seen > 15) { print "no ## Contents in first 15 lines"; exit }
-            for (i = 1; i <= n; i++) if (index(toc, heads[i]) == 0) print "missing: " heads[i]
-        }' "$ref")"
+    # The parser is shared with the repo-wide tests/reference-contents.sh - see its header
+    toc_gap="$(awk -f "$HERE/reference-contents.awk" "$ref" | cut -f2-)"
     [[ -z "$toc_gap" ]] || toc_bad+=" $name[${toc_gap//$'\n'/; }]"
 done
 [[ -z "$over" ]] && ok 'every reference is <=300 lines' || no "references over 300 lines:$over"

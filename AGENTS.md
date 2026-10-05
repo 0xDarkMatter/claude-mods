@@ -67,6 +67,7 @@ On "INIT:" message at session start:
 | `tests/doc-drift.sh` | Counts-on-disk vs docs gate; also checks section-map markers and skill-frontmatter ghost references (related-skills/depends-on naming a skill not on disk) |
 | `tests/agnostic.sh` | Public-repo gate: fails on user-profile paths with real names, plus anything in the author's PRIVATE deny list; legit look-alikes go in `tests/agnostic-allow.txt` |
 | `tests/skill-size.sh` | Warns when a SKILL.md body passes ~5,000 estimated tokens (chars / 3.6, frontmatter excluded) - after auto-compaction Claude Code keeps only the first 5,000 tokens of each invoked skill, so procedure and hard rules go first and detail goes in `references/`. `--report` lists every skill, `--strict` fails instead of warning; built-in self-test refuses to pass blind |
+| `tests/reference-contents.sh` | Warns when a `references/*.md` over 100 lines lacks a `## Contents` list in its first 15 lines, or the list misses a `##` heading (the size rule). Its parser is `skills/security-ops/tests/reference-contents.awk`, shared with that skill's hard check, so don't move it. One summary line by default; `--report` lists files, `--strict` fails; fixture self-test first |
 | `tests/hooks.sh` | Hook contract tests: feeds the opt-in hooks the stdin JSON Claude Code sends, asserts exit 2 + stderr to block and no false positives; `HOOKS_DIR=<dir>` runs it against another copy (e.g. to prove it fails on a regression) |
 
 ## Quick Reference
@@ -188,7 +189,7 @@ Requires Sonnet 4+ or Opus 4+.
 ## Testing
 
 ```bash
-just check        # THE gate: validate + spec + doc-drift + agnostic + hook contracts + resource contracts + skill size (warn-only) + skill suites + e2e suites
+just check        # THE gate: validate + spec + doc-drift + agnostic + hook contracts + resource contracts + skill size + reference contents (both warn-only) + skill suites + e2e suites
 just check-fast   # same minus the behavioural suites (per-skill and e2e)
 ```
 

@@ -235,7 +235,7 @@ For complete patterns, load:
 - [ ] Top 10 essential patterns inline, rest in references/
 - [ ] All file references use relative paths (`./references/`)
 - [ ] Every reference linked directly from SKILL.md (one level deep, no chains)
-- [ ] Any reference over 100 lines opens with a `## Contents` list
+- [ ] Any reference over 100 lines opens with a `## Contents` list naming every `##` heading (`bash tests/reference-contents.sh --report`)
 - [ ] Works without loading references (basic cases)
 - [ ] Optional fields only included if needed
 

@@ -3,6 +3,15 @@
 How to actually find the failures, in the order that finds the most for the least
 effort — and an honest account of what each layer can and cannot detect.
 
+## Contents
+
+- [The uncomfortable number](#the-uncomfortable-number)
+- [The four passes, in order](#the-four-passes-in-order)
+- [Where to spend limited time](#where-to-spend-limited-time)
+- [Reporting a finding usefully](#reporting-a-finding-usefully)
+- [Regression: keep it fixed](#regression-keep-it-fixed)
+- [Cross-reference](#cross-reference)
+
 ---
 
 ## The uncomfortable number

@@ -1,5 +1,19 @@
 # Repo Integrity — defending trusted repos against config-as-code poisoning
 
+Prevent, detect and attribute malicious commits to a repo you already own.
+
+## Contents
+
+1. [A distinct detection surface](#a-distinct-detection-surface)
+2. [The kill chain, and where each control bites](#the-kill-chain-and-where-each-control-bites)
+3. [1. Keys: no shared, no standing, hardware-backed](#1-keys-no-shared-no-standing-hardware-backed)
+4. [2. Branch protection / rulesets — and why *signed commits* defeat Stage 4 (with one big caveat)](#2-branch-protection--rulesets--and-why-signed-commits-defeat-stage-4-with-one-big-caveat)
+5. [3. The audit log is ground truth — git dates are not](#3-the-audit-log-is-ground-truth--git-dates-are-not)
+6. [Checklist](#checklist)
+7. [Sources](#sources)
+
+## A distinct detection surface
+
 The sibling of [`threat-model.md`](threat-model.md)'s dependency-integrity story.
 Everything else in this skill asks *"is a package I pull malicious?"* This file
 asks the question the PolinRider / EtherHiding campaign forced into scope:
@@ -15,15 +29,6 @@ committed — by an attacker-controlled push — into your own `vite.config.js`,
 that *prevent* and *attribute* it are below; isolation, VS Code Workspace Trust, the
 detector and incident containment are in
 [repo-integrity-response.md](repo-integrity-response.md).
-
-## Contents
-
-1. [The kill chain, and where each control bites](#the-kill-chain-and-where-each-control-bites)
-2. [1. Keys: no shared, no standing, hardware-backed](#1-keys-no-shared-no-standing-hardware-backed)
-3. [2. Branch protection / rulesets — and why *signed commits* defeat Stage 4 (with one big caveat)](#2-branch-protection--rulesets--and-why-signed-commits-defeat-stage-4-with-one-big-caveat)
-4. [3. The audit log is ground truth — git dates are not](#3-the-audit-log-is-ground-truth--git-dates-are-not)
-5. [Checklist](#checklist)
-6. [Sources](#sources)
 
 ## The kill chain, and where each control bites
 
