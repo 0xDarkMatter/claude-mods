@@ -151,6 +151,15 @@ jobs:
           if [ "$rc" -eq 7 ]; then echo "::warning::nextjs-ops live check unreachable (npm registry) - skipped"; fi
           exit 0
 
+      - name: craftcms-ops Craft + plugin majors vs Packagist
+        run: |
+          set +e
+          python skills/craftcms-ops/scripts/check-craft-facts.py --live
+          rc=$?
+          if [ "$rc" -eq 10 ]; then echo "::error::craftcms-ops drift - a package left Packagist, or Craft/a plugin shipped a stable major past the documented line (e.g. Craft 6, Formie 4)"; exit 1; fi
+          if [ "$rc" -eq 7 ]; then echo "::warning::craftcms-ops live check unreachable (Packagist) - skipped"; fi
+          exit 0
+
       - name: GitHub Action refs still resolve
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

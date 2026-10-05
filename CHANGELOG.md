@@ -255,6 +255,17 @@ feature releases live in the README "Recent Updates" section.
 
 ### Changed
 
+- **`craftcms-ops` refreshed for real agency builds.** Ten new one-topic references -
+  SEOmatic, Blitz, Formie, CKEditor, DDEV, Codeception, Twig output security,
+  craft-vite, the 3 → 4 → 5 upgrade path, and Craft-side performance - plus the old
+  two-topic files split into element queries, GraphQL, and plugin development. Facts
+  checked against the vendor docs and Packagist on 2026-10-05, which corrected several
+  common assumptions: Blitz Hints was removed in 5.10, Blitz won't cache pages with
+  pending transform URLs, CKEditor plugin 5.x dropped global configs, Craft 5 GraphQL
+  types lost their section prefix, and Vite 5+ moved the manifest under `.vite/`.
+  A new `check-craft-facts.py` verifier keeps the Craft and plugin majors honest
+  (offline in PR CI, live against Packagist in the weekly freshness job). The
+  description now carries its own "Use when" trigger, with no separate `when_to_use`.
 - **Rules made machine- and person-agnostic.** Rules ship in a public plugin, so
   author-specific incidents, repos and phrasing ("the user corrected this on…") are
   retold generically with the lesson kept: `release-review`, `public-posts`,
