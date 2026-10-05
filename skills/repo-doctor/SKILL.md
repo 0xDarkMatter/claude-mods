@@ -79,7 +79,7 @@ debt**; `review`/code-review judge **diffs**. Don't blur the three.
 read by all agent tooling). CLAUDE.md is legitimate only as a pointer or as
 Claude-specific *deltas* maintained in lockstep. The scorer flags apparent duplication;
 the decision tree and the one known-good dual-file pattern are in
-[references/entry-docs.md](references/entry-docs.md).
+[references/agents-md-protocol.md](references/agents-md-protocol.md).
 
 **Nested entry docs** — nest only where a subsystem has its own contract (design-system
 package, determinism-bound engine, per-tool CLI); root file carries an ownership table
@@ -104,7 +104,7 @@ common monorepo blind spot.
 | [scripts/repo-doctor.py](scripts/repo-doctor.py) | The scorer: six dimensions, findings, grade; `--json` envelope `claude-mods.repo-doctor/v1`; `--strict` CI gate |
 | [references/scoring-rubric.md](references/scoring-rubric.md) | Every check: what it measures, threshold, why, and the fix |
 | [references/comment-doctrine.md](references/comment-doctrine.md) | Contract blocks, WHY-only inline, guard comments, section markers, format-at-site, citations — with good/bad examples |
-| [references/entry-docs.md](references/entry-docs.md) | AGENTS.md anatomy + Landmines, AGENTS-vs-CLAUDE decision, nesting policy, freshness discipline |
+| [references/agents-md-protocol.md](references/agents-md-protocol.md) | AGENTS.md anatomy + Landmines, AGENTS-vs-CLAUDE decision, nesting policy, freshness discipline |
 | [references/monorepo-structure.md](references/monorepo-structure.md) | Structuring very large monorepos for agentic development |
 | [assets/AGENTS-template.md](assets/AGENTS-template.md) | Entry-doc skeleton with mandatory Landmines section |
 | [assets/docs-index-template.md](assets/docs-index-template.md) | `docs/00_INDEX.md` skeleton with the two anti-rot rules baked in |

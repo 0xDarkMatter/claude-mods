@@ -53,7 +53,8 @@ them, and package-local changes routinely forgot to update the far-away root doc
 
 ## 3. Nested entry docs: own-contract packages only
 
-Full policy in [entry-docs.md](entry-docs.md); the monorepo application:
+Full policy in [agents-md-protocol.md](agents-md-protocol.md) section 6; the monorepo
+application:
 
 - Every `packages/*` with its own invariant law, audience, or gate → its own
   AGENTS.md (deltas + local landmines, ~60-line budget).
