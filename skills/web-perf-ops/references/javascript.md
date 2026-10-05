@@ -71,12 +71,43 @@ Splitting rules:
 
 | Lever | Vite (8.x) | Laravel Mix (webpack 5) |
 |---|---|---|
-| Vendor split | Automatic chunking; `build.rollupOptions.output.manualChunks` for control | `mix.extract()` |
+| Vendor split | Automatic chunking. For control: `build.rolldownOptions.output.codeSplitting.groups` (Vite 8); `build.rollupOptions.output.manualChunks` only on Vite 7 and earlier (see below) | `mix.extract()` |
 | Hashing for long-term caching | Default (`assets/app-[hash].js`) | `mix.version()` |
 | Dynamic imports | Native `import()` | Native `import()` (webpack chunks) |
 | Modern-only output | Default targets are Baseline-widely-available browsers | Set a modern `browserslist`; drop `core-js` polyfills you don't need |
 | Legacy browsers | `@vitejs/plugin-legacy` (v8) adds a `nomodule` bundle. Only if analytics prove you need it | Usually the reason Mix bundles are large: IE-era Babel targets |
 | Bundle report | `rollup-plugin-visualizer` | `webpack-bundle-analyzer` |
+
+**Vite 8 changed the chunking keys.** Vite 8 (released 2026-03-12) bundles with
+Rolldown. `build.rollupOptions` is renamed `build.rolldownOptions`, and the old name
+is a deprecated alias. The **object** form of `output.manualChunks` is no longer
+supported and the function form is deprecated. Rolldown's replacement is
+`output.codeSplitting` (its older name, `advancedChunks`, is deprecated too). When a
+project moves to Vite 8, rewrite a `manualChunks` object as a group:
+
+```js
+// vite.config.js - Vite 8: one vendor chunk for Vue
+export default {
+  build: {
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [{ name: 'vendor', test: /node_modules[\\/](vue|@vue)[\\/]/ }],
+        },
+      },
+    },
+  },
+};
+// Vite 7 and earlier:
+//   build: { rollupOptions: { output: { manualChunks: { vendor: ['vue'] } } } }
+```
+
+`test` matches module IDs, so `[\\/]` covers Windows path separators. Any manual group
+also makes Rolldown emit an extra `runtime.js` chunk, which is one more request. That
+cost is small, but it is a reason not to add groups the automatic chunking already
+gets right. Sources: vite.dev/guide/migration ("Removed object form
+`build.rollupOptions.output.manualChunks`") and
+rolldown.rs/reference/OutputOptions.codeSplitting, both checked 2026-10-05.
 
 **Laravel Mix** has had no release since 6.0.49 (2022-06). It still builds, but it
 won't get modern defaults. On Mix sites the quick wins are a modern `browserslist`,

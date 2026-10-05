@@ -814,25 +814,34 @@ import UserDashboard from '../components/UserDashboard.astro';
 
 ## Build Optimization
 
-### Bundle Analysis
+### Vendor Chunks
+
+The chunking keys depend on the Vite major that Astro bundles: Astro 7 ships Vite 8
+(Rolldown), while Astro 6 ships Vite 7 and Astro 5 ships Vite 6. Vite 8 renamed
+`build.rollupOptions` to `rolldownOptions` and dropped the object form of
+`output.manualChunks` in favour of `output.codeSplitting` (vite.dev/guide/migration,
+checked 2026-10-05).
 
 ```typescript
-// astro.config.mjs
+// astro.config.mjs - Astro 7 (Vite 8): group vendor chunks
 import { defineConfig } from 'astro/config';
 
 export default defineConfig({
   vite: {
     build: {
-      // Analyze bundle
-      rollupOptions: {
+      rolldownOptions: {
         output: {
-          manualChunks: {
-            // Group vendor chunks
-            'react-vendor': ['react', 'react-dom'],
-            'utils': ['date-fns', 'lodash-es'],
+          codeSplitting: {
+            groups: [
+              { name: 'react-vendor', test: /node_modules[\\/](react|react-dom)[\\/]/ },
+              { name: 'utils', test: /node_modules[\\/](date-fns|lodash-es)[\\/]/ },
+            ],
           },
         },
       },
+      // Astro 5/6 (Vite 6/7):
+      //   rollupOptions: { output: { manualChunks: {
+      //     'react-vendor': ['react', 'react-dom'], utils: ['date-fns', 'lodash-es'] } } },
     },
   },
 });
