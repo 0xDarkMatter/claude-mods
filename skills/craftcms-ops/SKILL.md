@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: "laravel-ops, sql-ops, nginx-ops, perf-ops, tailwind-ops, playwright-ops"
+  related-skills: "laravel-ops, sql-ops, nginx-ops, perf-ops, tailwind-ops, playwright-ops, a11y-ops"
 ---
 
 # Craft CMS Operations
@@ -144,6 +144,8 @@ sections. Starter shape: [entry-type-field-layout.md](assets/entry-type-field-la
 - `laravel-ops` (Composer/PHP tooling; Craft 6 is Laravel-based) · `sql-ops` (indexes behind
   slow `orderBy`) · `nginx-ops` (serving Craft, Blitz rewrites) · `perf-ops` (profiling) ·
   `tailwind-ops` · `playwright-ops` (browser tests against the DDEV URL)
+- `a11y-ops` (WCAG 2.2 for Twig sites: heading levels across partials, asset alt text, Formie
+  and CKEditor markup, multi-site `lang`; see its `references/server-rendered-templates.md`)
 - [Craft 5 docs](https://craftcms.com/docs/5.x/) · [Plugin Store](https://plugins.craftcms.com/) ·
   [Craft security advisories](https://github.com/craftcms/cms/security/advisories)
 
