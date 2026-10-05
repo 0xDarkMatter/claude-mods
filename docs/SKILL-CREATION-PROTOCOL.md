@@ -43,7 +43,8 @@ Repo-specific gates before you scaffold anything:
 
 ## Step 1 — Scaffold
 
-→ method: `skill-creator` Step 3 (`init_skill.py`).
+→ method: `skill-creator` Step 3 (a hand-made skeleton; this repo's copy bundles no
+`init_skill.py`, and Anthropic's upstream has dropped it).
 
 The skill directory MUST contain `scripts/`, `references/`, and `assets/` — create them
 even if empty, with a `.gitkeep` (→ naming-conventions, "Directory Structure"). The
@@ -54,8 +55,8 @@ directory name is kebab-case and matches the frontmatter `name` exactly.
 → authority: [SKILL-SUBAGENT-REFERENCE.md](SKILL-SUBAGENT-REFERENCE.md) — "Skill
 Frontmatter - the rule": the six Agent Skills spec fields plus Claude Code's documented
 fields, all top-level. That is the only legal field list. `skill-creator` says to use only
-`name` and `description`, and its `package_skill.py` rejects anything outside the six. That
-is the claude.ai upload rule. A claude-mods skill may also use Claude Code's fields when it
+`name` and `description`, and Anthropic's upstream `package_skill.py` (not bundled here)
+rejects anything outside the six. That is the claude.ai upload rule. A claude-mods skill may also use Claude Code's fields when it
 needs their behaviour, at the cost of not being uploadable as-is.
 
 claude-mods house rules layered on top (checklist, not a restatement):
@@ -139,8 +140,9 @@ commit:
       hand-rolled reimplementation.
 - [ ] `claude plugin validate` passes. It checks the plugin and marketplace manifests
       only; it does not read SKILL.md frontmatter.
-- [ ] `skill-creator` Step 5 `package_skill.py` if a distributable `.skill` is needed. It
-      accepts only the six spec fields, so strip Claude Code fields from the packaged copy.
+- [ ] `skill-creator` Step 5 if a distributable `.skill` is needed (a zip of the folder;
+      upstream `package_skill.py` automates it). claude.ai accepts only the six spec
+      fields, so strip Claude Code fields from the packaged copy.
 - [ ] Commit per [commit-style.md](../rules/commit-style.md) (`feat(skills): …`).
 
 ---
@@ -149,7 +151,7 @@ commit:
 
 ```
 0 warranted?  → skill-creator §1-2 + ARCHITECTURE (skill vs rule vs agent)
-1 scaffold    → skill-creator init_skill.py; 3 subdirs (naming-conventions)
+1 scaffold    → skill-creator Step 3 (mkdir); 3 subdirs (naming-conventions)
 2 frontmatter → SKILL-SUBAGENT-REFERENCE (+ license:MIT, metadata.author)
 3 body        → skill-creator + size rule (description=trigger, <500 lines AND ~5k tokens, refs 1 deep, Contents past 100 lines)
 4 resources   → SKILL-RESOURCE-PROTOCOL (§10 gate; staleness verifier if external facts)
