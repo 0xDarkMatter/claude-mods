@@ -128,6 +128,11 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **The reserved-name waiver counted only the first validated file.** CI's Claude Code
+  validates `marketplace.json` and `plugin.json` and prints one error block per file;
+  `tests/plugin-validate.sh` read only the first count, so CI went red while the local
+  CLI (which stops after the marketplace) passed. It now sums every block, and new
+  self-test cases feed it CI's two-block output; both failed against the old counting.
 - **`fleet release` no longer flakes on Windows when a state file is briefly held.**
   The MAIN pin and the daemon PID files were removed with a bare `rm -f`, which fails
   (EBUSY) while another process has the file open; the test discarded that error, so it

@@ -31,12 +31,15 @@ RESERVED_RE='Plugin name "claude-mods" is reserved: it passes as one of Anthropi
 
 strip_ansi() { sed 's/\x1b\[[0-9;]*m//g'; }
 
-# verdict <dir> [until]  -> echoes PASS|WAIVED|FAIL, returns 0|3|1
-verdict() {
-    local dir="$1" until="${2:-$WAIVER_UNTIL}" out rc errors reserved today
-    out="$(claude plugin validate "$dir" 2>&1 | strip_ansi)"; rc=${PIPESTATUS[0]}
+# classify <validator-output> <validator-rc> <until>  -> echoes PASS|WAIVED|FAIL, returns 0|3|1
+# Split from verdict() so the self-test can feed it output shapes the local CLI does not
+# produce. The validator prints one "Found N error(s):" block PER FILE it checks: 2.1.288
+# locally stops after marketplace.json, but CI's CLI also checks plugin.json, so the repo
+# yields two blocks. The total is the SUM of every block, never just the first.
+classify() {
+    local out="$1" rc="$2" until="$3" errors reserved today
     if [[ "$rc" -eq 0 ]]; then echo "PASS"; return 0; fi
-    errors="$(printf '%s\n' "$out" | sed -nE 's/.*Found ([0-9]+) errors?:.*/\1/p' | head -n 1)"
+    errors="$(printf '%s\n' "$out" | sed -nE 's/.*Found ([0-9]+) errors?:.*/\1/p' | awk '{s += $1} END {if (NR) print s}')"
     reserved="$(printf '%s\n' "$out" | grep -cE "$RESERVED_RE" || true)"
     today="$(date +%Y%m%d)"
     if [[ -n "$errors" && "$errors" -ge 1 && "$errors" == "$reserved" ]]; then
@@ -46,6 +49,13 @@ verdict() {
         echo "FAIL (reserved-name waiver expired on $until: rename the plugin)"; printf '%s\n' "$out" >&2; return 1
     fi
     echo "FAIL"; printf '%s\n' "$out" >&2; return 1
+}
+
+# verdict <dir> [until]  -> runs the validator, then classify
+verdict() {
+    local dir="$1" until="${2:-$WAIVER_UNTIL}" out rc
+    out="$(claude plugin validate "$dir" 2>&1 | strip_ansi)"; rc=${PIPESTATUS[0]}
+    classify "$out" "$rc" "$until"
 }
 
 self_test() {
@@ -64,6 +74,16 @@ self_test() {
     check "reserved name plus a real error fails"   mixed    "$WAIVER_UNTIL" 1
     check "a valid manifest passes"                 clean    "$WAIVER_UNTIL" 0
     check "an expired waiver fails"                 reserved "20000101"      1
+    # CI's CLI checks marketplace.json AND plugin.json: one error block per file (2026-10-05).
+    local two_reserved two_mixed
+    two_reserved="$(printf '%s\n' 'Validating marketplace manifest: m.json' 'x Found 1 error:' \n        '  > plugins[0].name: Plugin name "claude-mods" is reserved: it passes as one of Anthropic'"'"'s own.' \n        'Validating plugin: p.json' 'x Found 1 error:' \n        '  > name: Plugin name "claude-mods" is reserved: it passes as one of Anthropic'"'"'s own.' 'x Validation failed')"
+    two_mixed="$(printf '%s\n' "$two_reserved" | sed 's/^x Found 1 error:$/x Found 2 errors:/' ; printf '%s\n' '  > version: Expected string, received number')"
+    check_text() {  # name output expected-rc
+        classify "$2" 1 "$WAIVER_UNTIL" >/dev/null 2>&1; got=$?
+        if [[ "$got" -eq "$3" ]]; then echo "  ok   $1"; else echo "  FAIL $1 (exit $got, want $3)"; fails=$((fails+1)); fi
+    }
+    check_text "two files, each only reserved, is waived"     "$two_reserved" 3
+    check_text "two files with an extra real error fails"     "$two_mixed"    1
     rm -rf "$t"
     [[ "$fails" -eq 0 ]]
 }
