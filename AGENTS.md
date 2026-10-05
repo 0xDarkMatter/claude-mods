@@ -158,6 +158,11 @@ Requires Sonnet 4+ or Opus 4+.
   a suite that runs Windows-only scripts whenever `command -v pwsh` succeeds goes
   red on Linux CI (windows-ops, supply-chain-defense). Gate runtime checks on the
   host: `[Environment]::OSVersion.Platform` = `Win32NT` (works in 5.1 and 7).
+- **The plugin name `claude-mods` is reserved** by Claude Code 2.1.287+ (Claude Mods).
+  `claude plugin validate` rejects it, so call the validator only through
+  `tests/plugin-validate.sh`, which waives that one error until 2026-10-31 and fails on
+  any other. Never widen the waiver; the fix is renaming the plugin. Scripts here run
+  under `set -e`, so capture its exit 3 with `|| rc=$?`, never `; rc=$?`.
 
 ## Testing
 
