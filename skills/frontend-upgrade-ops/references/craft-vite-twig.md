@@ -76,6 +76,10 @@ docs use 3000, DDEV's docs use 5173; either works if all four agree.
 
 ## Dev server through DDEV
 
+The DDEV side in general (Node version values, the four `web_extra_exposed_ports`
+fields, daemons, `node_modules` and Mutagen) is the ddev-ops skill's
+`references/frontend-node.md`; this section is the craft-vite wiring on top of it.
+
 ```yaml
 # .ddev/config.yaml - then `ddev restart`
 nodejs_version: "22"          # Vite 8 needs ^20.19 or >=22.12

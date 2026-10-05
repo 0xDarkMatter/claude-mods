@@ -178,6 +178,17 @@ jobs:
           if [ "$rc" -eq 7 ]; then echo "::warning::frontend-upgrade-ops live check unreachable (npm/Packagist) - skipped"; fi
           exit 0
 
+      - name: ddev-ops facts vs DDEV releases, docs, built-in commands + PHP/Node EOL
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          python skills/ddev-ops/scripts/check-ddev-facts.py --live
+          rc=$?
+          if [ "$rc" -eq 10 ]; then echo "::error::ddev-ops drift - DDEV shipped a new minor, changed a default (PHP/database/Node.js) or a built-in command, or a PHP/Node.js line reached end of life; re-verify assets/ddev-facts.json and the prose"; exit 1; fi
+          if [ "$rc" -eq 7 ]; then echo "::warning::ddev-ops live check unreachable (GitHub API / raw docs / endoflife.date) - skipped"; fi
+          exit 0
+
       - name: GitHub Action refs still resolve
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

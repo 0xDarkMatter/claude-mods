@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Edit Write Bash Glob Grep"
 metadata:
   author: claude-mods
-  related-skills: "migrate-ops, vue-ops, craftcms-ops, web-perf-ops, tailwind-ops, playwright-ops, security-ops"
+  related-skills: "migrate-ops, vue-ops, craftcms-ops, ddev-ops, web-perf-ops, tailwind-ops, playwright-ops, security-ops"
 ---
 
 # Frontend Upgrade Operations
@@ -192,6 +192,7 @@ reference against its cited source, then bump `documented_major` - never just th
 | `migrate-ops` | Generic upgrade strategy, rollback, codemods, other frameworks |
 | `vue-ops` | Steady-state Vue 3: Composition API, Pinia, Vue Router, testing |
 | `craftcms-ops` | Steady-state Craft 5: Twig, element queries, Matrix-as-entries |
+| `ddev-ops` | DDEV itself: Node pinning and EOL majors, exposed ports and daemons, Mutagen and `node_modules` |
 | `web-perf-ops` | Before/after Core Web Vitals for the cutover; LCP/INP/CLS fixes once on Vite |
 | `tailwind-ops` | The separate Tailwind v3 to v4 migration |
 | `playwright-ops` | Page-type smoke tests for the parity checks |

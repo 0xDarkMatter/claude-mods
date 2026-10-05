@@ -1,0 +1,13 @@
+# Fixture: a pull-only provider recipe (no push stanzas).
+environment_variables:
+  dburl: deploy@staging.example.com:dumps/sanitized.sql.gz
+
+db_pull_command:
+  command: |
+    set -eu -o pipefail
+    rsync -az "${dburl}" /var/www/html/.ddev/.downloads/db.sql.gz
+  service: web
+
+files_pull_command:
+  command: |
+    true

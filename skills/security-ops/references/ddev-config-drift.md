@@ -4,6 +4,9 @@ A site that is safe on DDEV can be exposed in production, and the reverse - loca
 settings that would be dangerous anywhere public. This file lists where they drift and
 how to check. Facts verified 2026-10-05 against DDEV v1.25.4 docs and source
 (https://docs.ddev.com/en/stable/), php-src `php.ini-*` files, and Craft 5 docs.
+DDEV mechanics - pinning, `.local` env files, sanitised pulls, `ddev auth ssh` - live in
+the ddev-ops skill, whose `audit-ddev-config.py` flags several risks below (secrets in
+committed env files, host SSH-agent forwarding, push recipes, unpinned PHP).
 
 ## Contents
 

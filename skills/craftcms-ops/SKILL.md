@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: "laravel-ops, sql-ops, nginx-ops, perf-ops, web-perf-ops, frontend-upgrade-ops, tailwind-ops, playwright-ops, a11y-ops, security-ops"
+  related-skills: "ddev-ops, laravel-ops, sql-ops, nginx-ops, perf-ops, web-perf-ops, frontend-upgrade-ops, tailwind-ops, playwright-ops, a11y-ops, security-ops"
 ---
 
 # Craft CMS Operations
@@ -42,7 +42,7 @@ each topic lives in one reference.
 | Static caching, "changes don't show", cache warming, dynamic bits on cached pages | [blitz.md](references/blitz.md) |
 | Building, theming, or debugging forms; spam; form emails not sending | [formie.md](references/formie.md) |
 | Rich-text fields, nested entries inside rich text, Redactor conversion | [ckeditor.md](references/ckeditor.md) |
-| Local setup, DB pull/push, Xdebug, snapshots | [ddev.md](references/ddev.md) |
+| Craft on DDEV: the `craftcms` type, `ddev craft`, Craft's `upload_dirs` (generic DDEV: `ddev-ops`) | [ddev.md](references/ddev.md) |
 | Tests for modules/plugins, fixtures, ECS/PHPStan | [codeception.md](references/codeception.md) |
 | Front-end assets, Vite dev server, critical CSS | [craft-vite.md](references/craft-vite.md) |
 | Moving off Laravel Mix/Webpack, or Vue 2 to Vue 3 | `frontend-upgrade-ops` (the full migration playbook) |
@@ -143,6 +143,8 @@ sections. Starter shape: [entry-type-field-layout.md](assets/entry-type-field-la
 
 ## See also
 
+- `ddev-ops` (generic DDEV: version pinning, env files, snapshots and sanitised pulls,
+  Mutagen, add-ons, Xdebug, and an auditor for `.ddev/` mistakes)
 - `laravel-ops` (Composer/PHP tooling; Craft 6 is Laravel-based) · `sql-ops` (indexes behind
   slow `orderBy`) · `nginx-ops` (serving Craft, Blitz rewrites) · `perf-ops` (profiling) ·
   `tailwind-ops` · `playwright-ops` (browser tests against the DDEV URL)

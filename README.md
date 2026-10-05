@@ -12,15 +12,16 @@
 
 > *Doctrine you can execute. Knowledge that knows when it's stale. Agents that land their own work.*
 
-**claude-mods** is a Claude Code plugin built on one premise: a skill that only *tells* the model something is a suggestion, and a skill that ships a gate is a guarantee. Its 110 skills carry the expert depth you'd expect - React, Rust, PostgreSQL, Cloudflare Workers, Next.js - but the ones that earn the install are the ones that run *agents*: a headless-worker spawner, a test-gated landing queue for parallel branches, a graduated-autonomy ladder for scheduled loops, and a security layer pointed at the agent itself. 59 skills ship executable tooling, 53 ship their own test suites, and 22 carry staleness verifiers that trip when the world moves under them.
+**claude-mods** is a Claude Code plugin built on one premise: a skill that only *tells* the model something is a suggestion, and a skill that ships a gate is a guarantee. Its 111 skills carry the expert depth you'd expect - React, Rust, PostgreSQL, Cloudflare Workers, Next.js - but the ones that earn the install are the ones that run *agents*: a headless-worker spawner, a test-gated landing queue for parallel branches, a graduated-autonomy ladder for scheduled loops, and a security layer pointed at the agent itself. 59 skills ship executable tooling, 53 ship their own test suites, and 22 carry staleness verifiers that trip when the world moves under them.
 
 Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms) and Anthropic's [patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), it installs as a standard plugin and toggles off as easily as it toggles on.
 
-**3 agents. 110 skills. 13 styles. 13 hooks. 15 rules. One install.**
+**3 agents. 111 skills. 13 styles. 13 hooks. 15 rules. One install.**
 
 ## Recent Updates
 
 **Unreleased** (October 2026, not yet tagged)
+- 🐳 **`ddev-ops` skill** - DDEV, the local stack behind most PHP agency sites, fails quietly: a default that moved under an unpinned project (PHP 8.3 to 8.4 in v1.25.0), a retired key it silently ignores, one developer's Mutagen setting committed for the whole team. `audit-ddev-config.py` reads a project's `.ddev/` and runs 17 checks. The commonest in a read of 36 agency repositories: a taken-over `craft` command shadowing DDEV's built-in (19), committed router ports (18), committed Mutagen (14) and host SSH-agent forwarding into containers (13); it also catches push recipes that can overwrite production and secrets in committed env files. References cover pinning, sanitised pulls, snapshots, Mutagen and WSL2, add-ons, Xdebug and a troubleshooting runbook; a weekly verifier tracks DDEV's releases, defaults and PHP/Node.js end of life.
 - ⚡ **`web-perf-ops` skill** - Core Web Vitals, method first: field data (CrUX, RUM) decides whether there is a problem, lab data explains it, and each fix targets the failing metric's dominant subpart rather than the Lighthouse score. `triage-vitals.py` rates a Lighthouse, PageSpeed or CrUX report and routes every finding to the reference that holds the fix; a Craft lever map covers Blitz, transforms, craft-vite and the queue.
 - 🔼 **`frontend-upgrade-ops` skill** - the two upgrades a Craft/Twig site keeps meeting: Laravel Mix or Webpack to Vite via craft-vite, and Vue 2 to Vue 3 through `@vue/compat`. It leads with a migrate-or-replace table (most agency Vue is a handful of widgets that Alpine or plain HTML does better) and one sequencing rule: the bundler and the framework never move in the same deploy.
 - 🛡️ **`security-ops` speaks PHP, Twig, Craft and OWASP Top 10:2025** - one-topic references for Twig escaping and template injection, Craft CSRF, `allowAnonymous` and GraphQL scoping, PHP deserialisation, Composer audit and DDEV-versus-production drift; PHP and Craft checks in the scanner; `Axx:2025` tags with a 2021 crosswalk so older reports stay readable.
@@ -106,7 +107,7 @@ Each one is a **currency layer over the model's priors** - React, Vue, Next.js, 
 - **Production-mined, not tutorial-shaped.** 200 KB on SQLite/D1 carries the migration that times out but applies and the `.batch()` semantics that bite; 152 KB on Postgres; 104 KB on TypeScript's TS 7 adoption path; `hono-ops` distilled from a live multi-tenant Worker. The gotchas the docs don't mention are the ones an agent walks straight into.
 - **Version-aware, not newest-wins.** `nextjs-ops`' audit reads the project's installed major and gates its rules on *that* - it won't demand a v16 idiom of a v14 codebase. A skill that only knows the latest is a liability on any repo older than a month.
 - **Pinned and verified.** Eleven stack skills carry an `assets/*-facts.json` with an `as_of` date, and pillar 3's verifiers check it against the world. The claim "modern TypeScript" is machine-enforced, not asserted.
-- **Nearly free to carry.** ~100 tokens per skill until one triggers, then references load on demand. 110 skills cost roughly 10k tokens of descriptions; the 5.6 MB behind them costs nothing until you're actually in that stack.
+- **Nearly free to carry.** ~100 tokens per skill until one triggers, then references load on demand. 111 skills cost roughly 10k tokens of descriptions; the 5.6 MB behind them costs nothing until you're actually in that stack.
 
 And the payoff loops back to pillar 1. A `fleet-worker`'s isolated config dir starts clean - you *provision* skills into it. A GLM worker with `hono-ops` loaded writes better Hono than GLM alone, which is why the skill's own docs call provisioning *"often the cheapest way to lift a weak model's output on a specialized task."* The stack skills are what turn "a cheaper brain" from a cost-cut into a real option: the discipline layers decide *what* an agent may do, and the stack layers decide whether what it does is any good.
 
@@ -129,7 +130,7 @@ claude-mods/
 ├── .claude-plugin/     # Plugin metadata
 ├── agents/             # Expert subagents (3)
 ├── commands/           # Slash commands (3)
-├── skills/             # Custom skills (110)
+├── skills/             # Custom skills (111)
 ├── output-styles/      # Response personalities
 ├── hooks/              # Hook examples & docs
 ├── rules/              # Claude Code rules
@@ -280,6 +281,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | Skill | Description |
 |-------|-------------|
 | [docker-ops](skills/docker-ops/) | Dockerfile best practices, multi-stage builds, Compose, optimization |
+| [ddev-ops](skills/ddev-ops/) | DDEV local environments - version pinning, `config.local.yaml` and `.env` files, snapshots and sanitised pulls, Mutagen/WSL2, add-ons, Xdebug, troubleshooting, plus a `.ddev/` landmine auditor |
 | [ci-cd-ops](skills/ci-cd-ops/) | GitHub Actions, release automation, testing pipelines |
 | [container-orchestration](skills/container-orchestration/) | Kubernetes, Helm, pod patterns |
 | [nginx-ops](skills/nginx-ops/) | Nginx reverse proxy, SSL/TLS, load balancing, performance tuning |
@@ -545,7 +547,7 @@ Requires a model that supports `tool_reference` blocks: Sonnet 4.5, Haiku 4.5, O
 
 ### Skill Description Budget
 
-With 90+ skills installed (this plugin alone ships 110), skill descriptions can overflow the listing budget. All skill names are always listed, but descriptions share a budget of **1% of the model context window** — on overflow, least-invoked skills lose their descriptions first and **silently stop auto-triggering** (explicit `/name` invocation still works). Each skill's combined `description` + `when_to_use` is also truncated at **1,536 chars**, so trigger phrases belong at the front.
+With 90+ skills installed (this plugin alone ships 111), skill descriptions can overflow the listing budget. All skill names are always listed, but descriptions share a budget of **1% of the model context window** — on overflow, least-invoked skills lose their descriptions first and **silently stop auto-triggering** (explicit `/name` invocation still works). Each skill's combined `description` + `when_to_use` is also truncated at **1,536 chars**, so trigger phrases belong at the front.
 
 - **Check:** run `/doctor` — it shows whether the budget is overflowing and which skills are affected.
 - **Fix:** demote or disable skills you don't use via `skillOverrides` in settings (`"on"` / `"name-only"` / `"user-invocable-only"` / `"off"` per skill, or `/skills` + `Space`). Plugin skills are managed via `/plugin` instead.

@@ -1,0 +1,15 @@
+# Fixture: a DELIBERATE minefield for scripts/audit-ddev-config.py. Every line below is a
+# landmine the auditor must report; tests/run.sh asserts each one is.
+# No php_version and no database on purpose (php-unpinned, db-unpinned).
+name: minefield
+type: craftcms
+docroot: web
+nodejs_version: erbium   # Node 12 by codename (node-eol)
+composer_version: "1"    # composer-v1
+performance_mode: mutagen   # perf-mode-committed
+router_http_port: "80"      # router-ports-committed
+router_https_port: "443"
+xdebug_enabled: true        # xdebug-committed
+mutagen_enabled: false      # obsolete-key: ignored by DDEV, so Mutagen stays on
+upload_dirs:
+  - storage                 # upload-dir-misplaced: resolves to web/storage

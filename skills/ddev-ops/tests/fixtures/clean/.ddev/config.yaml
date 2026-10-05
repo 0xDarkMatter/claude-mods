@@ -1,0 +1,24 @@
+# Fixture: the CLEAN control for scripts/audit-ddev-config.py - the minefield's settings
+# written the right way. tests/run.sh asserts the audit exits 0 here; a check that fires
+# on this file is a false positive.
+name: clean
+type: craftcms
+docroot: web
+php_version: "8.3"
+database:
+  type: mysql
+  version: "8.0"
+nodejs_version: "22"
+composer_version: "2"
+webserver_type: nginx-fpm
+upload_dirs:
+  - uploads        # gitignored, absent on a fresh clone - must not be flagged
+  - ../storage     # Craft's storage/ sits beside the docroot
+web_extra_exposed_ports:
+  - name: vite
+    container_port: 5173
+    http_port: 5172
+    https_port: 5173
+hooks:
+  post-import-db:
+    - exec: php craft up --interactive=0

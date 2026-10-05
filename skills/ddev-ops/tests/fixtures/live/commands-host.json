@@ -1,0 +1,7 @@
+[
+  {"name": "README.txt", "type": "file"},
+  {"name": "dbeaver", "type": "file"}, {"name": "heidisql", "type": "file"}, {"name": "launch", "type": "file"},
+  {"name": "mailpit", "type": "file"}, {"name": "mysqlworkbench.example", "type": "file"},
+  {"name": "phpmyadmin", "type": "file"}, {"name": "querious", "type": "file"}, {"name": "self-upgrade", "type": "file"},
+  {"name": "sequelace", "type": "file"}, {"name": "tableplus", "type": "file"}, {"name": "tablepro", "type": "file"}
+]
