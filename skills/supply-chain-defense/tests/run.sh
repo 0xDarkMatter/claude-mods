@@ -25,13 +25,10 @@ WGHOOK="$SKILL/../../hooks/worktree-guard.sh"   # not supply-chain, but its dete
 # either output channel. Which channel (additionalContext JSON vs stderr + exit 2)
 # is pinned by tests/hooks.sh, which the installed layout does not ship.
 SCAN="$SKILL/scripts/scan-extensions.sh"
-# Pick a python that actually executes — skips the Windows Store `python3` stub
-# (an app-execution alias that exits non-zero non-interactively).
-PYTHON=""
-for c in python python3 py; do
-  if command -v "$c" >/dev/null 2>&1 && "$c" -c "" >/dev/null 2>&1; then PYTHON="$c"; break; fi
-done
-[[ -z "$PYTHON" ]] && { echo "no working python found" >&2; exit 1; }
+# The skill's own launcher picks the interpreter (first of python3/python/py
+# that really runs 3.8+, skipping the Windows Store `python3` alias), so the
+# suite resolves Python exactly the way the docs tell an agent to.
+PYTHON="$(bash "$SCRIPTS/run-python.sh" --which)" || { echo "no Python 3.8+ found (scripts/run-python.sh --which)" >&2; exit 1; }
 SB="$(mktemp -d)"; trap 'rm -rf "$SB"' EXIT
 
 PASS=0; FAIL=0
@@ -42,6 +39,38 @@ expect_has()  { case "$3" in *"$2"*) ok "$1";; *) no "$1 (missing '$2')";; esac;
 expect_lacks() { case "$3" in *"$2"*) no "$1 (unexpected '$2')";; *) ok "$1";; esac; }
 
 echo "=== supply-chain-defense self-test ==="
+
+# ── run-python.sh (launcher: first of python3/python/py that is really 3.8+) ─
+# On Windows `python3` is often the Microsoft Store alias (prints a hint, exits
+# 49, runs nothing), and an old interpreter passes a bare "import sys" probe yet
+# can't run these scripts. Fake both on PATH ahead of a `py` that wraps the real
+# interpreter: the launcher must skip them and land on py.
+echo "-- run-python.sh --"
+RP="$SCRIPTS/run-python.sh"
+REAL_PY="$(command -v "$PYTHON")"
+FK="$SB/fakepy"; mkdir -p "$FK/skip" "$FK/first" "$FK/none"
+printf '#!/bin/sh\necho "Python was not found; run without arguments to install from the Microsoft Store" >&2\nexit 49\n' > "$FK/stub"
+# Pre-3.8 stand-in: answers "import sys" (as a real 3.7 would), fails the version
+# gate, and dies on anything else the way 3.7 dies on 3.8+ syntax.
+printf '#!/bin/sh\ncase "$*" in *version_info*) exit 1 ;; "-c import sys"*) exit 0 ;; esac\necho "SyntaxError: invalid syntax" >&2; exit 1\n' > "$FK/old"
+printf '#!/bin/sh\nexec "%s" "$@"\n' "$REAL_PY" > "$FK/real"
+chmod +x "$FK/stub" "$FK/old" "$FK/real"
+cp "$FK/stub" "$FK/skip/python3"; cp "$FK/old" "$FK/skip/python"; cp "$FK/real" "$FK/skip/py"
+for n in python3 python py; do cp "$FK/real" "$FK/first/$n"; done
+cp "$FK/stub" "$FK/none/python3"; cp "$FK/old" "$FK/none/python"; cp "$FK/stub" "$FK/none/py"
+bash "$RP" --help >/dev/null 2>&1; expect_exit "launcher --help" 0 $?
+bash "$RP" >/dev/null 2>&1;        expect_exit "launcher no args -> 2" 2 $?
+out="$(PATH="$FK/skip:$PATH" bash "$RP" --which 2>/dev/null)"
+[[ "$out" == "py" ]] && ok "skips Store-stub python3 + pre-3.8 python, picks py" || no "want py past the broken python3/python, got '$out'"
+out="$(PATH="$FK/first:$PATH" bash "$RP" --which 2>/dev/null)"
+[[ "$out" == "python3" ]] && ok "first working candidate wins (python3)" || no "want python3 first, got '$out'"
+out="$(PATH="$FK/skip:$PATH" bash "$RP" -c 'import sys; print(sys.version_info >= (3, 8))' 2>/dev/null)"
+expect_has "runs code through the picked interpreter" "True" "$out"
+PATH="$FK/skip:$PATH" bash "$RP" "$SCRIPTS/exposure-check.py" --help >/dev/null 2>&1
+expect_exit "runs a skill script past a broken python3" 0 $?
+err="$(PATH="$FK/none" "$BASH" "$RP" --which 2>&1 >/dev/null)"; rc=$?
+expect_exit "no usable python -> 5" 5 "$rc"
+expect_has "missing-dep hint names the version floor" "3.8" "$err"
 
 # ── exposure-check.py ──────────────────────────────────────────────────────
 echo "-- exposure-check.py --"
@@ -476,7 +505,7 @@ case "$tdo" in *$'\033'*) no "exposure-check stdout leaked ANSI";; *) ok "exposu
 # and that framing must be 7-bit ASCII with no TERM_ASCII to ask for it.
 echo "-- standalone (skill folder copied alone) --"
 mkdir -p "$SB/alone"; cp -R "$SKILL" "$SB/alone/"
-AS="$SB/alone/supply-chain-defense/scripts"
+AS="$SB/alone/$(basename "$SKILL")/scripts"   # a pack may rename the folder
 [[ -e "$SB/alone/_lib" ]] && no "standalone copy has a sibling _lib (test is void)" || ok "standalone copy has no sibling _lib"
 plain_ascii() { # desc want-exit cmd...  (stderr must be 7-bit; stdout discarded)
   local d="$1" want="$2" e rc; shift 2
@@ -498,7 +527,7 @@ for s in integrity-audit preinstall-check scan-extensions; do
   bash "$AS/$s.sh" --help >/dev/null 2>&1; expect_exit "alone: $s.sh --help" 0 $?
 done
 for s in exposure-check config-drift-check postinstall-audit; do
-  "$PYTHON" "$AS/$s.py" --help >/dev/null 2>&1; expect_exit "alone: $s.py --help" 0 $?
+  bash "$AS/run-python.sh" "$AS/$s.py" --help >/dev/null 2>&1; expect_exit "alone: run-python.sh $s.py --help" 0 $?
 done
 for fc in "" 1; do   # FORCE_COLOR=1 is the branch that would open a term.sh panel
   t="alone${fc:+ FORCE_COLOR}"
