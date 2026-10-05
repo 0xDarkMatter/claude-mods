@@ -8,6 +8,20 @@ feature releases live in the README "Recent Updates" section.
 
 ### Added
 
+- **`frontend-upgrade-ops` skill** - the two front-end upgrades a Craft CMS/Twig
+  site keeps meeting, as one portable unit. Laravel Mix or raw Webpack to Vite via
+  craft-vite: a Mix-API translation table, source rewrites, Tailwind v3 kept as-is,
+  legacy builds, the DDEV dev server (one port in four places, and the `cors` /
+  `allowedHosts` defaults that broke `*.ddev.site` setups in Vite 6.0.9), Twig tags and
+  asset URLs. Vue 2 to Vue 3 via `@vue/compat`: warning burn-down, the breaking
+  changes that bite on Twig pages (`inline-template`, the mount container), Vuex to
+  Pinia, a plugin replacement table, and mounting Vue islands in Twig - including the
+  landmine that removing compat removes the template compiler, and client-side
+  template injection through in-DOM templates. Leads with a migrate-or-replace table
+  (Alpine, vanilla, native HTML) and a bundler-first sequencing rule. Its verifier
+  probes npm and Packagist, and watches `@vitejs/plugin-vue2`'s peer range because
+  the upgrade order depends on it stopping at Vite 7.
+
 - **`deploy-gating` rule** - a child session never deploys. Background agents, chips,
   workflow/fleet workers, headless and scheduled runs, and CI-autofix or review-triage
   loops may build, test and commit, but stop at the deploy boundary and report the

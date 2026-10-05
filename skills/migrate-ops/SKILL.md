@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Edit Write Bash Glob Grep Agent"
 metadata:
   author: claude-mods
-  related-skills: testing-ops, debug-ops, git-ops, refactor-ops
+  related-skills: testing-ops, debug-ops, git-ops, refactor-ops, frontend-upgrade-ops
 ---
 
 # Migrate Operations
@@ -82,6 +82,7 @@ Which framework are you upgrading?
 │  ├─ Check: Replace event bus with mitt or provide/inject
 │  ├─ Check: Update v-model syntax (modelValue prop)
 │  ├─ Tool: Migration build (@vue/compat) for incremental migration
+│  ├─ Server-rendered Craft/Twig site, or Laravel Mix/Webpack to Vite: use the frontend-upgrade-ops skill
 │  └─ Load: ./references/framework-upgrades.md
 │
 ├─ Laravel 12 → 13

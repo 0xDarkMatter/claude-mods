@@ -151,6 +151,15 @@ jobs:
           if [ "$rc" -eq 7 ]; then echo "::warning::nextjs-ops live check unreachable (npm registry) - skipped"; fi
           exit 0
 
+      - name: frontend-upgrade-ops packages vs npm + Packagist (majors + plugin-vue2 peer range)
+        run: |
+          set +e
+          python skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py --live
+          rc=$?
+          if [ "$rc" -eq 10 ]; then echo "::error::frontend-upgrade-ops drift - Vite/Vue/Pinia/craft-vite shipped a major past the documented line, a package is gone, or @vitejs/plugin-vue2 widened its vite peer range (the Mix-to-Vite sequencing advice depends on it)"; exit 1; fi
+          if [ "$rc" -eq 7 ]; then echo "::warning::frontend-upgrade-ops live check unreachable (npm/Packagist) - skipped"; fi
+          exit 0
+
       - name: GitHub Action refs still resolve
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
