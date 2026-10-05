@@ -745,6 +745,23 @@ $LibDir = Join-Path $PSScriptRoot '..\..\_lib'
 Initialize-Term
 ```
 
+### Portable skills: the lib is optional
+
+A skill that is copied standalone into other plugins (`supply-chain-defense`,
+`prompt-injection-defense`) has no `skills/_lib/` beside it, so it must not source
+the lib unconditionally. Guard the source, keep a plain fallback, and keep that
+fallback 7-bit ASCII - with no lib there is no glyph registry to fall back through:
+
+```bash
+__lib="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../_lib" 2>/dev/null && pwd || true)"
+if [ -n "${__lib:-}" ] && [ -f "$__lib/term.sh" ]; then . "$__lib/term.sh"; term_init 2; __HAVE_TERM=1
+else __HAVE_TERM=0; fi   # fallback: plain "== section ==" framing, no panel
+```
+
+Stdout data and exit codes must not depend on which branch ran. The skill's
+`tests/run.sh` copies the folder alone and asserts the fallback framing is ASCII -
+see the "standalone" block in `skills/supply-chain-defense/tests/run.sh`.
+
 ### Helpers
 
 ```bash

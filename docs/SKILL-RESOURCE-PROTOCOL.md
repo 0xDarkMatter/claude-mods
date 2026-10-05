@@ -59,6 +59,17 @@ A script under `scripts/` is an **agent-facing tool**. It MUST satisfy all of:
 Default to **stdlib + common shell tools** (`jq`, `git`, `curl`). Check optional tools
 with `command -v` and exit `5` (missing-dep) with an install hint, never a stack trace.
 
+**Portable skills** - ones copied standalone into other plugins, today
+`supply-chain-defense` and `prompt-injection-defense` - must run with nothing beside
+their folder: no `../../` dependency; `skills/_lib/term.sh` sourced only behind a guard
+with a 7-bit ASCII fallback ([TERMINAL-DESIGN.md](TERMINAL-DESIGN.md) §9); `.py`
+scripts launched through a bundled `scripts/run-python.sh`, which runs the first of
+`python3` / `python` / `py` that really is 3.8+ (on Windows `python3` is often the
+Microsoft Store alias, which exits 49 without running anything, and an `env python3`
+shebang lands on it too). Their `tests/run.sh` copies the folder alone and runs every
+script's `--help` and offline mode. The launcher is duplicated per skill on purpose;
+`tests/check-resources.sh` fails if the copies drift.
+
 ---
 
 ## 3. First-comment-block contract

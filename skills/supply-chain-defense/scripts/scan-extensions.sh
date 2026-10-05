@@ -54,6 +54,9 @@ HAS_JQ=0; command -v jq >/dev/null 2>&1 && HAS_JQ=1
 # Terminal design system: framing on stderr (term_init 2); the inventory/--json
 # data product stays plain on stdout. Full panel for a human at a TTY (or
 # FORCE_COLOR); piped/quiet keeps the legacy "== section ==" framing.
+# The lib is OPTIONAL: this skill is copied standalone into other plugins with no
+# skills/_lib beside it, so the fallback must work and stay 7-bit ASCII (pinned by
+# the "standalone" block in tests/run.sh). Never source it unconditionally.
 __lib="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../_lib" 2>/dev/null && pwd || true)"
 if [ -n "${__lib:-}" ] && [ -f "$__lib/term.sh" ]; then . "$__lib/term.sh"; term_init 2; __HAVE_TERM=1
 else __HAVE_TERM=0; TERM_DOT="|"; fi

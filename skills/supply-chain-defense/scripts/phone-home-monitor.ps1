@@ -59,7 +59,9 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 # Shared terminal design system (skills/_lib/term.ps1) - colorized, ASCII-aware
 # stderr framing; the TSV/--json data product stays plain on stdout. term.ps1
-# honors NO_COLOR / FORCE_COLOR / TERM_ASCII. Degrade to plain if the lib is gone.
+# honors NO_COLOR / FORCE_COLOR / TERM_ASCII. Degrade to plain if the lib is gone:
+# this skill is copied standalone into other plugins with no skills/_lib beside it
+# (pinned by the "standalone" block in tests/run.sh), so never dot-source it blindly.
 $__scTermLib = Join-Path $ScriptDir '..\..\_lib\term.ps1'
 if (Test-Path $__scTermLib) { . $__scTermLib; Initialize-Term }
 else { function Get-TermColor { param($Token, $Text) return $Text } }

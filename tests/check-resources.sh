@@ -360,6 +360,20 @@ else
     pass "install.ps1 absent - installer check skipped"
 fi
 
+echo "== portable skills: duplicated python launcher stays identical"
+# scripts/run-python.sh is copied into every skill that ships .py scripts on
+# purpose: each skill folder must run when copied alone into another plugin, so
+# it cannot reach one shared copy. The price is drift; this is the fence.
+__rp_ref=""
+for f in skills/*/scripts/run-python.sh; do
+    [ -f "$f" ] || continue
+    bash -n "$f" 2>/dev/null && pass "bash -n $f" || bad "bash -n $f"
+    if [ -z "$__rp_ref" ]; then __rp_ref="$f"; continue; fi
+    cmp -s "$__rp_ref" "$f" && pass "$f identical to $__rp_ref" \
+        || bad "$f drifted from $__rp_ref - keep every copy byte-identical"
+done
+[ -n "$__rp_ref" ] || bad "no skills/*/scripts/run-python.sh found (portable python launcher missing)"
+
 echo
 if [ "$fail" -eq 0 ]; then echo "resource checks: clean"; exit 0; fi
 echo "resource checks: failures above"; exit 1

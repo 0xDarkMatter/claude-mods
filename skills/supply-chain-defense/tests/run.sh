@@ -25,13 +25,10 @@ WGHOOK="$SKILL/../../hooks/worktree-guard.sh"   # not supply-chain, but its dete
 # either output channel. Which channel (additionalContext JSON vs stderr + exit 2)
 # is pinned by tests/hooks.sh, which the installed layout does not ship.
 SCAN="$SKILL/scripts/scan-extensions.sh"
-# Pick a python that actually executes — skips the Windows Store `python3` stub
-# (an app-execution alias that exits non-zero non-interactively).
-PYTHON=""
-for c in python python3 py; do
-  if command -v "$c" >/dev/null 2>&1 && "$c" -c "" >/dev/null 2>&1; then PYTHON="$c"; break; fi
-done
-[[ -z "$PYTHON" ]] && { echo "no working python found" >&2; exit 1; }
+# The skill's own launcher picks the interpreter (first of python3/python/py
+# that really runs 3.8+, skipping the Windows Store `python3` alias), so the
+# suite resolves Python exactly the way the docs tell an agent to.
+PYTHON="$(bash "$SCRIPTS/run-python.sh" --which)" || { echo "no Python 3.8+ found (scripts/run-python.sh --which)" >&2; exit 1; }
 SB="$(mktemp -d)"; trap 'rm -rf "$SB"' EXIT
 
 PASS=0; FAIL=0
@@ -42,6 +39,38 @@ expect_has()  { case "$3" in *"$2"*) ok "$1";; *) no "$1 (missing '$2')";; esac;
 expect_lacks() { case "$3" in *"$2"*) no "$1 (unexpected '$2')";; *) ok "$1";; esac; }
 
 echo "=== supply-chain-defense self-test ==="
+
+# ── run-python.sh (launcher: first of python3/python/py that is really 3.8+) ─
+# On Windows `python3` is often the Microsoft Store alias (prints a hint, exits
+# 49, runs nothing), and an old interpreter passes a bare "import sys" probe yet
+# can't run these scripts. Fake both on PATH ahead of a `py` that wraps the real
+# interpreter: the launcher must skip them and land on py.
+echo "-- run-python.sh --"
+RP="$SCRIPTS/run-python.sh"
+REAL_PY="$(command -v "$PYTHON")"
+FK="$SB/fakepy"; mkdir -p "$FK/skip" "$FK/first" "$FK/none"
+printf '#!/bin/sh\necho "Python was not found; run without arguments to install from the Microsoft Store" >&2\nexit 49\n' > "$FK/stub"
+# Pre-3.8 stand-in: answers "import sys" (as a real 3.7 would), fails the version
+# gate, and dies on anything else the way 3.7 dies on 3.8+ syntax.
+printf '#!/bin/sh\ncase "$*" in *version_info*) exit 1 ;; "-c import sys"*) exit 0 ;; esac\necho "SyntaxError: invalid syntax" >&2; exit 1\n' > "$FK/old"
+printf '#!/bin/sh\nexec "%s" "$@"\n' "$REAL_PY" > "$FK/real"
+chmod +x "$FK/stub" "$FK/old" "$FK/real"
+cp "$FK/stub" "$FK/skip/python3"; cp "$FK/old" "$FK/skip/python"; cp "$FK/real" "$FK/skip/py"
+for n in python3 python py; do cp "$FK/real" "$FK/first/$n"; done
+cp "$FK/stub" "$FK/none/python3"; cp "$FK/old" "$FK/none/python"; cp "$FK/stub" "$FK/none/py"
+bash "$RP" --help >/dev/null 2>&1; expect_exit "launcher --help" 0 $?
+bash "$RP" >/dev/null 2>&1;        expect_exit "launcher no args -> 2" 2 $?
+out="$(PATH="$FK/skip:$PATH" bash "$RP" --which 2>/dev/null)"
+[[ "$out" == "py" ]] && ok "skips Store-stub python3 + pre-3.8 python, picks py" || no "want py past the broken python3/python, got '$out'"
+out="$(PATH="$FK/first:$PATH" bash "$RP" --which 2>/dev/null)"
+[[ "$out" == "python3" ]] && ok "first working candidate wins (python3)" || no "want python3 first, got '$out'"
+out="$(PATH="$FK/skip:$PATH" bash "$RP" -c 'import sys; print(sys.version_info >= (3, 8))' 2>/dev/null)"
+expect_has "runs code through the picked interpreter" "True" "$out"
+PATH="$FK/skip:$PATH" bash "$RP" "$SCRIPTS/exposure-check.py" --help >/dev/null 2>&1
+expect_exit "runs a skill script past a broken python3" 0 $?
+err="$(PATH="$FK/none" "$BASH" "$RP" --which 2>&1 >/dev/null)"; rc=$?
+expect_exit "no usable python -> 5" 5 "$rc"
+expect_has "missing-dep hint names the version floor" "3.8" "$err"
 
 # ── exposure-check.py ──────────────────────────────────────────────────────
 echo "-- exposure-check.py --"
@@ -467,6 +496,70 @@ ascii_pure "postinstall"     "$PYTHON" "$SCRIPTS/postinstall-audit.py" --root "$
 # stdout data stays plain even under FORCE_COLOR (the pipeable contract).
 tdo="$(FORCE_COLOR=1 env HOME="$TDE" "$PYTHON" "$SCRIPTS/exposure-check.py" --root "$TDE" --no-extensions 2>/dev/null)"
 case "$tdo" in *$'\033'*) no "exposure-check stdout leaked ANSI";; *) ok "exposure-check stdout stays plain data";; esac
+
+# ── standalone: the skill folder copied ALONE (portable-pack contract) ─────
+# This folder is copied on its own into other plugins, with no sibling
+# skills/_lib, no repo hooks/, no ~/.claude layout. Copy just this skill to a
+# bare temp dir and prove every script still answers --help and runs offline.
+# The bash scripts must drop to their plain framing when _lib/term.sh is absent,
+# and that framing must be 7-bit ASCII with no TERM_ASCII to ask for it.
+echo "-- standalone (skill folder copied alone) --"
+mkdir -p "$SB/alone"; cp -R "$SKILL" "$SB/alone/"
+AS="$SB/alone/$(basename "$SKILL")/scripts"   # a pack may rename the folder
+[[ -e "$SB/alone/_lib" ]] && no "standalone copy has a sibling _lib (test is void)" || ok "standalone copy has no sibling _lib"
+plain_ascii() { # desc want-exit cmd...  (stderr must be 7-bit; stdout discarded)
+  local d="$1" want="$2" e rc; shift 2
+  e="$("$@" 2>&1 1>/dev/null)"; rc=$?
+  expect_exit "$d" "$want" "$rc"
+  if printf '%s' "$e" | LC_ALL=C grep -q '[^[:print:][:cntrl:]]'; then
+    no "$d: framing has non-ASCII without _lib"
+  else ok "$d: framing plain ASCII without _lib"; fi
+}
+AW="$SB/alone-proj"; mkdir -p "$AW/.github/workflows" "$SB/alone-zizmor" "$SB/alone-nonet" "$SB/alone-ext/pub.tool-1.0.0"
+printf 'on: push\njobs: { b: { runs-on: ubuntu-latest, steps: [ { run: "echo ok" } ] } }\n' > "$AW/.github/workflows/ci.yml"
+printf '{"publisher":"pub","name":"tool","version":"1.0.0"}' > "$SB/alone-ext/pub.tool-1.0.0/package.json"
+# Shims keep the run offline and deterministic: a silent "installed" zizmor (its
+# own output is not ours to police) and a curl whose every registry fetch fails.
+printf '#!/bin/sh\nexit 0\n' > "$SB/alone-zizmor/zizmor"
+printf '#!/bin/sh\nexit 6\n' > "$SB/alone-nonet/curl"
+chmod +x "$SB/alone-zizmor/zizmor" "$SB/alone-nonet/curl"
+for s in integrity-audit preinstall-check scan-extensions; do
+  bash "$AS/$s.sh" --help >/dev/null 2>&1; expect_exit "alone: $s.sh --help" 0 $?
+done
+for s in exposure-check config-drift-check postinstall-audit; do
+  bash "$AS/run-python.sh" "$AS/$s.py" --help >/dev/null 2>&1; expect_exit "alone: run-python.sh $s.py --help" 0 $?
+done
+for fc in "" 1; do   # FORCE_COLOR=1 is the branch that would open a term.sh panel
+  t="alone${fc:+ FORCE_COLOR}"
+  plain_ascii "$t: integrity-audit, workflows + zizmor" 0 \
+    env FORCE_COLOR="$fc" HOME="$TDE" APPDATA="$TDE" PATH="$SB/alone-zizmor:$PATH" bash "$AS/integrity-audit.sh" "$AW"
+  plain_ascii "$t: preinstall-check, registry down -> 7" 7 \
+    env FORCE_COLOR="$fc" PATH="$SB/alone-nonet:$PATH" bash "$AS/preinstall-check.sh" lodash@4.17.21
+  plain_ascii "$t: scan-extensions inventory" 0 \
+    env FORCE_COLOR="$fc" HOME="$TDE" SC_EXT_DIRS="$SB/alone-ext" bash "$AS/scan-extensions.sh"
+done
+if command -v zizmor >/dev/null 2>&1; then
+  echo "  SKIP  alone: integrity-audit zizmor-absent branch (zizmor installed here)"
+else
+  plain_ascii "alone: integrity-audit, workflows, no zizmor" 0 \
+    env HOME="$TDE" APPDATA="$TDE" bash "$AS/integrity-audit.sh" "$AW"
+fi
+# Offline modes, and the bundled catalog still resolves inside the copy.
+"$PYTHON" "$AS/exposure-check.py" --root "$SB/exposed" --no-extensions --findings-only >/dev/null 2>&1
+expect_exit "alone: exposure-check finds IOC via copied catalog -> 10" 10 $?
+"$PYTHON" "$AS/config-drift-check.py" --root "$SB/cd-clean" >/dev/null 2>&1
+expect_exit "alone: config-drift-check offline -> 0" 0 $?
+"$PYTHON" "$AS/postinstall-audit.py" --root "$SB/pa-clean" --no-cache >/dev/null 2>&1
+expect_exit "alone: postinstall-audit offline -> 0" 0 $?
+if command -v pwsh >/dev/null 2>&1 && [[ "$_PHM_WIN" == 1 ]]; then
+  APHM="$AS/phone-home-monitor.ps1"; ACLEAN="$SB/phm-clean.json"
+  command -v cygpath >/dev/null 2>&1 && { APHM="$(cygpath -w "$APHM")"; ACLEAN="$(cygpath -w "$ACLEAN")"; }
+  pwsh -NoProfile -File "$APHM" --help >/dev/null 2>&1; expect_exit "alone: phone-home-monitor --help" 0 $?
+  pwsh -NoProfile -File "$APHM" -InputJson "$ACLEAN" >/dev/null 2>&1
+  expect_exit "alone: phone-home-monitor clean replay -> 0" 0 $?
+else
+  echo "  SKIP  alone: phone-home-monitor.ps1 needs pwsh on Windows"
+fi
 
 # ── summary ────────────────────────────────────────────────────────────────
 echo "=== $PASS passed, $FAIL failed ==="

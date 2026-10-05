@@ -170,6 +170,12 @@ Requires Sonnet 4+ or Opus 4+.
   `tests/plugin-validate.sh`, which waives that one error until 2026-10-31 and fails on
   any other. Never widen the waiver; the fix is renaming the plugin. Scripts here run
   under `set -e`, so capture its exit 3 with `|| rc=$?`, never `; rc=$?`.
+- **Portable skills must run copied alone.** `supply-chain-defense` and
+  `prompt-injection-defense` are copied standalone into other plugins: no `../../`
+  dependency, `_lib/term.sh` only behind a guard, and `scripts/run-python.sh` is
+  duplicated in each **on purpose** - don't DRY it into `_lib`
+  (`tests/check-resources.sh` fails if the copies drift). Each suite's "standalone"
+  block copies the folder alone and proves it.
 
 ## Testing
 

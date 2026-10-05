@@ -129,6 +129,20 @@ feature releases live in the README "Recent Updates" section.
   bands the code chart splits, and the self-test fails if two bands overlap, since
   the scanner and the sanitizer would then name different bands.
 
+- **`supply-chain-defense` `preinstall-check.sh` never exited 7 on an unreachable
+  registry** - `fetch()` set the unavailable flag inside `$(...)`, a subshell, so the
+  assignment died with it and a dead registry looked like "outside cooldown" (exit 0).
+  Callers now set the flag from fetch's exit status. Found by the new copy-alone test,
+  which also caught `integrity-audit.sh` printing em dashes in its zizmor lines (its
+  plain fallback framing is now 7-bit ASCII, as is its `TERM_ASCII=1` output).
+
+- **The unicode hooks could pick a Python too old to run the scanner** -
+  `session-start-unicode-scan.sh` and `pre-commit-unicode-scan.sh` probed candidates
+  with a bare `import sys`, which a pre-3.8 interpreter passes. With one ahead on PATH
+  the SessionStart hook printed an empty advisory for a clean project, and the
+  pre-commit gate let a critical bidi override through. Both now take the first of
+  `python3`/`python`/`py` that is really 3.8+, and their fix hints use the launcher.
+
 - **`prompt-injection-defense` missed line separators and invisible fillers** -
   `scan-hidden-unicode.py` reported `ok<U+2028>=== FORGED ===` as clean, though a
   model may read `U+2028` as a new line that no reviewer sees. The scanner split
@@ -328,6 +342,21 @@ feature releases live in the README "Recent Updates" section.
   Contents list. The skill's suite now fails on an over-length reference, a stale
   Contents list, a repo citation of a reference that no longer exists, or a
   secret-shaped example value.
+- **`supply-chain-defense` and `prompt-injection-defense` are self-contained and
+  portable** - each folder now runs when copied alone into another plugin. Both ship
+  `scripts/run-python.sh`, which runs the `.py` scripts with the first of
+  `python3`/`python`/`py` that is really Python 3.8+ (on Windows `python3` is often the
+  Microsoft Store alias, which exits 49 without running anything); the copies are
+  duplicated on purpose and `tests/check-resources.sh` fails if they drift. Every doc
+  example launches through it. Each suite gains a "standalone" block that copies the
+  folder alone and runs every script's `--help` and offline mode. Both SKILL.md files
+  now lead with the procedure and decision tables and push depth into references
+  (supply-chain-defense ~9.6k -> ~3.6k estimated tokens), with no content dropped: workflows A-L and the script / hook /
+  portability detail move to new references, and the three references over 300 lines
+  split by topic (`tooling-by-layer.md`, `repo-integrity-response.md`,
+  `line-breaks-and-controls.md`, `codepoint-bands.md`). Every reference over 100 lines
+  carries a table of contents, and both descriptions carry a "Use when" clause.
+
 - **Rules made machine- and person-agnostic.** Rules ship in a public plugin, so
   author-specific incidents, repos and phrasing ("the user corrected this on…") are
   retold generically with the lesson kept: `release-review`, `public-posts`,

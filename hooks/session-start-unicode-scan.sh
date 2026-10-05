@@ -22,9 +22,15 @@ set -uo pipefail   # NOT -e: a transient error must never block session start
 
 # ── Resolve project dir WITHOUT hard-requiring python (stdin JSON .cwd → env → PWD) ──
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+# First of python3/python/py that really runs 3.8+ (same probe as the skill's
+# scripts/run-python.sh). A bare "import sys" also passes a pre-3.8 interpreter,
+# which then fails the scanner and turned a clean project into an empty advisory.
+# </dev/null: the probe must not touch stdin - the hook's JSON is read below.
 PY=""
 for c in python3 python py; do
-  command -v "$c" >/dev/null 2>&1 && "$c" -c "import sys" >/dev/null 2>&1 && { PY="$c"; break; }
+  command -v "$c" >/dev/null 2>&1 \
+    && "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' </dev/null >/dev/null 2>&1 \
+    && { PY="$c"; break; }
 done
 PROJ=""
 if [ ! -t 0 ]; then
@@ -97,6 +103,7 @@ printf '%s\n' "$OUT" | head -40
 echo ""
 echo "What a reviewer sees in an editor is NOT what the model reads (the renderer hides"
 echo "these bytes). Inspect raw bytes and neutralise before acting on the affected file:"
-echo "  python <skills>/prompt-injection-defense/scripts/sanitize-content.py <file> -o <file>.clean"
+echo "  S=<skills>/prompt-injection-defense/scripts"
+echo "  bash \$S/run-python.sh \$S/sanitize-content.py <file> -o <file>.clean"
 echo "See the prompt-injection-defense skill for the full procedure."
 exit 0   # advisory only — never block the session

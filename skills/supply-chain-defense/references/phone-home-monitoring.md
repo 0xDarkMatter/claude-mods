@@ -12,6 +12,15 @@ last tripwire, and the one that works even when you don't know what landed.
 `scripts/phone-home-monitor.ps1` is the operational tool. This reference is the
 tooling evaluation behind it and the wiring guide for the preferred capture source.
 
+## Contents
+
+1. [Tooling evaluation (tool-first: what already exists)](#tooling-evaluation-tool-first-what-already-exists)
+2. [Wiring Sysmon (one-time, elevated)](#wiring-sysmon-one-time-elevated)
+3. [What the script flags (rules → severity)](#what-the-script-flags-rules--severity)
+4. [Continuous capture (the daemon question)](#continuous-capture-the-daemon-question)
+5. [Triage — a finding is not yet an incident](#triage--a-finding-is-not-yet-an-incident)
+6. [Known limitations (honest list)](#known-limitations-honest-list)
+
 ## Tooling evaluation (tool-first: what already exists)
 
 | Source | What it gives | Cost / friction | Verdict |
