@@ -159,6 +159,16 @@ echo "== frontend-upgrade-ops: Vite/Vue/craft-vite fact/staleness verifier"
 run "frontend-upgrade-facts --offline consistent" 0 "$PY" skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py --offline
 run "frontend-upgrade-facts --help"               0 "$PY" skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py --help
 
+echo "== repo-doctor: AGENTS.md toolchain + Claude Code memory-docs verifier"
+# --offline: the protocol still states every encoded Claude Code fact and the two
+# scripts agree on the 200-line ceiling. --live runs in freshness.yml only.
+run "memory-docs --offline consistent" 0 "$PY" skills/repo-doctor/scripts/check-memory-docs.py --offline
+run "memory-docs --help"               0 "$PY" skills/repo-doctor/scripts/check-memory-docs.py --help
+run "repo-scan --help"                 0 "$PY" skills/repo-doctor/scripts/repo-scan.py --help
+run "repo-scan unknown section"        2 "$PY" skills/repo-doctor/scripts/repo-scan.py --only bogus
+run "agents-md --help"                 0 "$PY" skills/repo-doctor/scripts/agents-md.py --help
+run "agents-md no subcommand"          2 "$PY" skills/repo-doctor/scripts/agents-md.py
+
 echo "== protocol: every new verifier is executable + compiles"
 for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/claude-api-ops/scripts/context-budget.py \
@@ -177,7 +187,10 @@ for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/craftcms-ops/scripts/check-craft-facts.py \
          skills/web-perf-ops/scripts/check-web-perf-facts.py \
          skills/web-perf-ops/scripts/triage-vitals.py \
-         skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py; do
+         skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py \
+         skills/repo-doctor/scripts/check-memory-docs.py \
+         skills/repo-doctor/scripts/repo-scan.py \
+         skills/repo-doctor/scripts/agents-md.py; do
     "$PY" -m py_compile "$s" 2>/dev/null && pass "py_compile $(basename "$s")" || bad "py_compile $(basename "$s")"
 done
 bash -n skills/terraform-ops/scripts/check-action-refs.sh 2>/dev/null \
