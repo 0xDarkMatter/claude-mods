@@ -1,0 +1,25 @@
+{
+  "schema": "claude-mods.web-perf-ops.facts/v1",
+  "as_of": "2026-10-05",
+  "_comment": "Single source for every threshold web-perf-ops rates against. SKILL.md's threshold table must match these numbers (check-web-perf-facts.py --offline) and triage-vitals.py reads them directly. good = 'good if <= this'; poor = 'poor if > this'; between is needs-improvement. Times in ms; CLS unitless. Assessed at the 75th percentile of page loads; mobile and desktop are assessed separately but share the same thresholds.",
+  "percentile": 75,
+  "inp_replaced_fid": "2024-03-12",
+  "thresholds": {
+    "LCP":  {"good": 2500, "poor": 4000, "core": true,  "source": "web-vitals LCPThresholds; web.dev/articles/lcp"},
+    "INP":  {"good": 200,  "poor": 500,  "core": true,  "source": "web-vitals INPThresholds; web.dev/articles/inp"},
+    "CLS":  {"good": 0.1,  "poor": 0.25, "core": true,  "source": "web-vitals CLSThresholds; web.dev/articles/cls"},
+    "FCP":  {"good": 1800, "poor": 3000, "core": false, "source": "web-vitals FCPThresholds; web.dev/articles/fcp"},
+    "TTFB": {"good": 800,  "poor": 1800, "core": false, "source": "web-vitals TTFBThresholds; web.dev/articles/ttfb ('rough guide')"},
+    "TBT":  {"good": 200,  "poor": 600,  "core": false, "source": "Lighthouse mobile scoring control points (p10 / median); lab-only proxy for INP"}
+  },
+  "packages": {
+    "web_vitals":          {"name": "web-vitals",          "documented_major": "6",    "prose_token": "web-vitals v6"},
+    "lighthouse":          {"name": "lighthouse",          "documented_major": "13",   "prose_token": "Lighthouse 13"},
+    "lhci":                {"name": "@lhci/cli",           "documented_major": "0.15", "prose_token": "@lhci/cli",
+                            "bundled_lighthouse_major": "12",
+                            "_why": "LHCI 0.15 pins lighthouse 12.6.1, so CI runs Lighthouse 12 audit ids (legacy + insight coexist), not 13's. If LHCI moves to 13, budgets-ci.md's audit-id guidance must be revisited."},
+    "chrome_devtools_mcp": {"name": "chrome-devtools-mcp", "documented_major": "1",    "prose_token": "chrome-devtools-mcp"},
+    "partytown":           {"name": "@qwik.dev/partytown", "documented_major": "0.14", "prose_token": "@qwik.dev/partytown",
+                            "_why": "@builder.io/partytown is deprecated on npm (last 0.10.3, 2024-12-20); the project moved to QwikDev and still calls itself beta."}
+  }
+}

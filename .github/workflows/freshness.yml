@@ -160,6 +160,15 @@ jobs:
           if [ "$rc" -eq 7 ]; then echo "::warning::craftcms-ops live check unreachable (Packagist) - skipped"; fi
           exit 0
 
+      - name: web-perf-ops Core Web Vitals thresholds + tool majors (web-vitals source, npm)
+        run: |
+          set +e
+          python skills/web-perf-ops/scripts/check-web-perf-facts.py --live
+          rc=$?
+          if [ "$rc" -eq 10 ]; then echo "::error::web-perf-ops drift - Google moved a Core Web Vitals threshold, a tool shipped a new major or was deprecated, or @lhci/cli changed its bundled Lighthouse (audit ids move with it)"; exit 1; fi
+          if [ "$rc" -eq 7 ]; then echo "::warning::web-perf-ops live check unreachable (unpkg / npm registry) - skipped"; fi
+          exit 0
+
       - name: GitHub Action refs still resolve
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
