@@ -1,7 +1,7 @@
 # Pull-only DDEV provider recipe for a SANITISED database dump.
 #
 # Copy to .ddev/providers/<name>.yaml (the file name becomes `ddev pull <name>`), fill in
-# the two variables, then:
+# dburl, then:
 #   ddev auth ssh -f ~/.ssh/<one-key-scoped-to-the-dump-host>
 #   ddev pull <name>
 #
@@ -12,18 +12,21 @@
 #   * It pulls an artifact that was ANONYMISED WHERE THE DATA LIVES (a scheduled job on
 #     the server or a staging copy). Sanitising after download is too late: the personal
 #     data has already reached the laptop. See references/database.md.
-#   * Files are skipped by default (uploads are rarely needed and may hold personal data).
-#     Point filesurl at a curated archive before enabling files_pull_command.
-#   * The dburl guard below refuses a path that does not name a sanitised dump - a speed
-#     bump against pointing the recipe at a raw production backup.
+#   * NO files_pull_command, on purpose. With no stanza DDEV prints "No files_pull_command
+#     provided, so skipping files pull" and leaves local uploads alone. A stanza that
+#     downloads NOTHING is dangerous: DDEV still imports the (empty) .downloads/files
+#     folder, and its import EMPTIES the upload directory first, wiping local uploads
+#     (DDEV v1.25.4 provider.go doFilesPullCommand/doFilesImport, ImportFiles). Add a
+#     files stanza only when it always fetches a real, curated archive.
+#   * The dburl guard refuses a path that does not name a sanitised dump - a speed bump
+#     against pointing the recipe at a raw production backup. Name the dump file
+#     accordingly rather than editing the guard away.
 #
 # This file does not carry DDEV's generated-file marker, so DDEV never overwrites it.
 
 environment_variables:
   # user@host:path of the sanitised dump, written upstream by e.g. smile/gdpr-dump.
-  dburl: deploy@dump-host.example.com:dumps/sanitized.sql.gz
-  # Optional curated uploads archive (tar.gz). Leave empty to skip files.
-  filesurl: ""
+  dburl: deploy@dump-host.example.com:dumps/sanitised.sql.gz
 
 auth_command:
   command: |
@@ -35,18 +38,8 @@ db_pull_command:
     # set -x   # uncomment to trace
     set -eu -o pipefail
     case "${dburl}" in
-      *sanitized*|*anonymised*|*anonymized*) ;;
+      *sanitised*|*sanitized*|*anonymised*|*anonymized*) ;;
       *) echo "Refusing: dburl does not name a sanitised dump (${dburl})." >&2; exit 1 ;;
     esac
     rsync -az "${dburl}" /var/www/html/.ddev/.downloads/db.sql.gz
-  service: web
-
-files_pull_command:
-  command: |
-    set -eu -o pipefail
-    if [ -z "${filesurl}" ]; then echo "files: skipped (filesurl empty)" >&2; exit 0; fi
-    cd /var/www/html/.ddev/.downloads
-    rm -f files.tar.gz
-    rsync -az "${filesurl}" files.tar.gz
-    tar -xzf files.tar.gz -C files/
   service: web

@@ -5,12 +5,18 @@ Each check is a quiet failure with its reason sourced from DDEV's docs or source
 (v1.25.4), and most were seen in a 2026-10-05 read of 36 DDEV-based agency
 repositories: a taken-over `craft` command shadowing DDEV's built-in (19 repos), router
 ports and performance_mode committed for the whole team (18 and 14), host SSH-agent
-forwarding into containers (13), upload_dirs written relative to the project root when
-DDEV resolves them from the docroot (8), and keys DDEV no longer reads (it parses
-config.yaml non-strictly, so they are ignored, not rejected). The rest - unpinned PHP
-or database versions that move with DDEV's defaults, CRLF command files DDEV skips,
-push stanzas in provider recipes, secrets in committed env files - come from DDEV's
-documentation.
+forwarding into containers (15), upload_dirs written relative to the project root when
+DDEV resolves them from the docroot (8), a committed `name:` (all 36 - a collision as
+soon as a second git worktree starts), and keys DDEV no longer reads. The rest -
+unpinned PHP or database versions that move with DDEV's defaults, CRLF command files
+DDEV skips, push stanzas in provider recipes, a files_pull_command that fetches nothing
+(DDEV then empties the upload directory - read from its source, not runtime-tested),
+secrets in committed env files - come from DDEV's documentation and source.
+
+How DDEV reads config, mirrored here: config.yaml first, then every committed
+config.*.yaml / config.*.yml (not *.local.*) in name order. Since v1.25.2 it merges them
+with Viper: scalars override, LISTS APPEND unless that file sets `override_config: true`,
+and unknown keys are ignored rather than rejected (so retired keys silently do nothing).
 
 Facts (defaults, end-of-life floors, obsolete keys, built-in command names) are read
 from assets/ddev-facts.json - the one place they live; check-ddev-facts.py keeps that
@@ -23,17 +29,19 @@ it cannot read is reported, not guessed.
 
 Usage:   audit-ddev-config.py [PROJECT_DIR] [--json] [--ignore CHECK]... [--catalog FILE] [-q]
 Input:   PROJECT_DIR (default "."), which must contain .ddev/config.yaml. No stdin.
-Output:  stdout = findings, one per line: severity<TAB>check<TAB>file<TAB>detail,
-         or the --json envelope (schema claude-mods.ddev-ops.audit/v1). Data only.
-         Secret values are never printed - only the key name.
+Output:  stdout = findings sorted high, medium, low; one per line:
+         severity<TAB>check<TAB>file<TAB>detail, or the --json envelope
+         (schema claude-mods.ddev-ops.audit/v1). Data only. Secret values are never
+         printed - only the key name.
 Stderr:  the verdict line, notices, errors.
 Exit:    0 clean, 2 usage, 3 no .ddev/config.yaml or catalog missing,
          4 config or catalog unreadable, 10 findings reported
 
 Checks:  php-unpinned php-out-of-range php-eol db-unpinned node-eol composer-v1
          obsolete-key perf-mode-committed router-ports-committed xdebug-committed
-         upload-dir-misplaced upload-dir-outside shadowed-command crlf-command
-         ssh-agent-forwarded provider-push committed-secret
+         name-in-worktree upload-dir-misplaced upload-dir-outside shadowed-command
+         crlf-command ssh-agent-forwarded provider-push provider-files-noop
+         committed-secret
 
 Examples:
   audit-ddev-config.py                         # audit the project in the current directory
@@ -62,9 +70,10 @@ DEFAULT_CATALOG = Path(__file__).resolve().parent.parent / "assets" / "ddev-fact
 CHECKS = (
     "php-unpinned", "php-out-of-range", "php-eol", "db-unpinned", "node-eol", "composer-v1",
     "obsolete-key", "perf-mode-committed", "router-ports-committed", "xdebug-committed",
-    "upload-dir-misplaced", "upload-dir-outside", "shadowed-command", "crlf-command",
-    "ssh-agent-forwarded", "provider-push", "committed-secret",
+    "name-in-worktree", "upload-dir-misplaced", "upload-dir-outside", "shadowed-command",
+    "crlf-command", "ssh-agent-forwarded", "provider-push", "provider-files-noop", "committed-secret",
 )
+SEVERITY_RANK = {"high": 0, "medium": 1, "low": 2}
 
 KEY_RE = re.compile(r"^([A-Za-z_][\w-]*):(?:\s+(.*))?$")
 ITEM_RE = re.compile(r"^\s+-\s*(.*)$")
@@ -75,6 +84,7 @@ SECRET_KEY_RE = re.compile(
     r"(TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|PRIVATE_KEY|SECURITY_KEY|ACCESS_KEY|AUTH_KEY|CREDENTIALS?)", re.I)
 # DDEV's own local-only credentials (db/db, root/root) are not secrets; nor is a ${VAR} reference.
 HARMLESS_VALUES = {"", "db", "root"}
+GENERATED = "#ddev-generated"
 
 
 class ConfigError(Exception):
@@ -190,6 +200,69 @@ def inside(child: Path, root: Path) -> bool:
         return False
 
 
+def is_local(p: Path) -> bool:
+    return ".local." in p.name
+
+
+NOOP_LINE = re.compile(r"^(#.*|set\s+-.*|true|:|exit\s+0)?$")
+
+
+def files_pull_body(recipe_text: str) -> list[str] | None:
+    """Meaningful lines of a recipe's files_pull_command script, or None when absent.
+
+    Comments, `set -...`, `true`, `:` and `exit 0` count as nothing, so [] means a stanza
+    that downloads nothing."""
+    m = re.search(r"^files_pull_command:\s*\n((?:[ \t]+.*\n?|\s*\n)*)", recipe_text, re.M)
+    if not m:
+        return None
+    block = m.group(1)
+    cmd = re.search(r"^\s+command:\s*(.*)$", block, re.M)
+    if not cmd:
+        return []
+    inline = cmd.group(1).strip()
+    if inline and inline not in ("|", ">", "|-", ">-"):
+        lines = [inline.strip("'\"")]
+    else:
+        after = block[cmd.end():].splitlines()
+        lines = []
+        for ln in after:
+            if re.match(r"^\s{2}[A-Za-z_]+:", ln) and not re.match(r"^\s{4,}", ln):
+                break  # next key of the stanza (e.g. service:)
+            lines.append(ln.strip())
+    return [ln for ln in lines if not NOOP_LINE.match(ln)]
+
+
+def read_config_files(project: Path, files: list[Path], strict: bool) -> list[tuple[Path, dict]]:
+    out = []
+    for f in files:
+        try:
+            out.append((f, parse_yaml_subset(f.read_text(encoding="utf-8", errors="replace"), rel(f, project))))
+        except ConfigError as exc:
+            if strict:
+                print(f"error: {exc}", file=sys.stderr)
+                raise SystemExit(EX_UNPARSEABLE)
+            # a local file is the developer's own business; never fail on it
+    return out
+
+
+def merge(configs: list[tuple[Path, dict]]) -> tuple[dict, dict]:
+    """DDEV's merge: scalars override, lists append unless the file sets override_config.
+
+    Returns (merged values, source file per key; for lists, a parallel list of sources)."""
+    merged: dict = {}
+    source: dict = {}
+    for f, d in configs:
+        replace = str(d.get("override_config", "")).strip().lower() == "true"
+        for k, v in d.items():
+            if isinstance(v, list) and isinstance(merged.get(k), list) and not replace:
+                merged[k] = merged[k] + v
+                source[k] = source[k] + [f] * len(v)
+            else:
+                merged[k] = v
+                source[k] = [f] * len(v) if isinstance(v, list) else f
+    return merged, source
+
+
 # === Audit ===
 
 def audit(project: Path, cat: dict) -> list[dict]:
@@ -199,42 +272,28 @@ def audit(project: Path, cat: dict) -> list[dict]:
     def add(sev: str, check: str, path: Path, detail: str) -> None:
         findings.append({"severity": sev, "check": check, "file": rel(path, project), "detail": detail})
 
-    # Committed config = config.yaml plus every config.*.yaml that is not *.local.yaml
-    # (DDEV's generated .ddev/.gitignore excludes config.local.yaml and config.*.local.yaml).
-    committed: list[tuple[Path, dict]] = []
     main_cfg = ddev / "config.yaml"
-    files = [main_cfg] + sorted(p for p in ddev.glob("config.*.yaml") if not p.name.endswith(".local.yaml"))
-    for f in files:
-        try:
-            committed.append((f, parse_yaml_subset(f.read_text(encoding="utf-8", errors="replace"), rel(f, project))))
-        except ConfigError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            raise SystemExit(EX_UNPARSEABLE)
-    local_files = [ddev / "config.local.yaml"] + sorted(ddev.glob("config.*.local.yaml"))
-    local_cfg: dict = {}
-    for f in local_files:
-        if f.is_file():
-            try:
-                local_cfg.update(parse_yaml_subset(f.read_text(encoding="utf-8", errors="replace"), rel(f, project)))
-            except ConfigError:
-                pass  # a local file is the developer's own business; never fail on it
+    overrides = sorted(p for p in ddev.glob("config.*.y*ml") if not is_local(p))
+    committed = read_config_files(project, [main_cfg] + overrides, strict=True)
+    local_files = sorted(p for p in ddev.glob("config.*.y*ml") if is_local(p) or p.stem == "config.local")
+    local_cfg, _ = merge(read_config_files(project, local_files, strict=False))
+    cfg, source = merge(committed)
 
-    def first(key: str) -> tuple[Path, object] | None:
-        found = None
-        for f, d in committed:  # later override files win, as in DDEV's merge
-            if key in d and d[key] not in ("", [], {}):
-                found = (f, d[key])
-        return found
+    def pinned(key: str) -> tuple[Path, object] | None:
+        val = cfg.get(key)
+        if val in (None, "", [], {}):
+            return None
+        src = source[key]
+        return (src[-1] if isinstance(src, list) else src), val
 
-    cfg = committed[0][1]
     defaults = cat["defaults"]
 
     # PHP
-    php = first("php_version")
+    php = pinned("php_version")
     if php is None and "php_version" not in local_cfg:
         add("high", "php-unpinned", main_cfg,
             f"no php_version: the project follows DDEV's default ({defaults['php_version']} today; it moved "
-            "from 8.3 to 8.4 in v1.25.0). Pin production's PHP minor.")
+            "from 8.3 to 8.4 in v1.25.0). Pin production's minor, e.g. `php_version: \"8.3\"`.")
     elif php is not None:
         f, val = php
         pv = version_tuple(str(val))
@@ -249,13 +308,14 @@ def audit(project: Path, cat: dict) -> list[dict]:
                 "Check production runs the same minor and plan the upgrade.")
 
     # Database
-    if first("database") is None and "database" not in local_cfg:
-        add("medium", "db-unpinned", main_cfg,
-            f"no database pinned: the engine comes from DDEV's defaults ({defaults['database']} generally; "
-            "mysql:8.0 for craftcms when written by `ddev config`), and switching engines later needs a migration.")
+    if pinned("database") is None and "database" not in local_cfg:
+        add("high", "db-unpinned", main_cfg,
+            f"no database pinned: this project runs DDEV's default engine ({defaults['database']} today) "
+            "whatever production uses, and switching engines later needs a data migration. Pin production's, "
+            "e.g. `database: {type: mysql, version: \"8.0\"}`.")
 
     # Node
-    node = first("nodejs_version")
+    node = pinned("nodejs_version")
     if node is not None:
         f, val = node
         major = node_major(str(val), cat["node_codenames"])
@@ -264,15 +324,15 @@ def audit(project: Path, cat: dict) -> list[dict]:
                 f"nodejs_version {val!r} is Node {major}, end of life upstream (oldest supported: "
                 f"{cat['eol_floor']['nodejs']}). Old build chains often pin it; plan the upgrade.")
 
-    comp = first("composer_version")
+    comp = pinned("composer_version")
     if comp is not None and str(comp[1]).strip().startswith("1"):
-        add("low", "composer-v1", comp[0], "composer_version 1 is end of life; move to 2 (`composer_version: \"2\"`).")
+        add("low", "composer-v1", comp[0], "composer_version 1 is end of life; set `composer_version: \"2\"`.")
 
     # Keys DDEV no longer reads
     for f, d in committed:
         for key, why in cat["obsolete_keys"].items():
             if not key.startswith("_") and key in d:
-                add("medium", "obsolete-key", f, f"{key}: {why}")
+                add("medium", "obsolete-key", f, f"{key}: {why} Delete the line.")
 
     # Per-developer settings committed for the whole team
     for f, d in committed:
@@ -280,23 +340,36 @@ def audit(project: Path, cat: dict) -> list[dict]:
         if pm and pm != "global":
             add("medium", "perf-mode-committed", f,
                 f"performance_mode: {pm} is committed, so it applies to every teammate. Mutagen helps on macOS and "
-                "traditional Windows, not on Linux/WSL2; set it in config.local.yaml or `ddev config global`.")
+                "traditional Windows, not on Linux/WSL2; move it to config.local.yaml or `ddev config global`.")
         ports = [k for k in ("router_http_port", "router_https_port") if str(d.get(k, "")).strip()]
         if ports:
-            add("low", "router-ports-committed", f,
+            add("medium", "router-ports-committed", f,
                 f"{', '.join(ports)} committed: project values override global config, so a teammate with a port "
-                "clash cannot fix it with `ddev config global`. Remove them from the project.")
+                "clash cannot fix it with `ddev config global`. Delete them from the project.")
         if str(d.get("xdebug_enabled", "")).strip().lower() == "true":
             add("low", "xdebug-committed", f,
-                "xdebug_enabled: true slows every request for everyone; toggle per session with `ddev xdebug on`.")
+                "xdebug_enabled: true slows every request for everyone; delete it and use `ddev xdebug on` per session.")
+
+    # A committed name: collides when this checkout is a git worktree of a repo whose other
+    # checkout runs the same project name (DDEV project names are unique per machine).
+    dotgit = project / ".git"
+    if dotgit.is_file() and "name" not in local_cfg:
+        gitdir = dotgit.read_text(encoding="utf-8", errors="replace")
+        named = pinned("name")
+        if re.search(r"gitdir:.*[/\\]worktrees[/\\]", gitdir) and named is not None:
+            add("medium", "name-in-worktree", named[0],
+                f"this checkout is a git worktree but config.yaml pins `name: {named[1]}`, so it collides with the "
+                "repository's other checkouts. Set a unique `name:` in .ddev/config.local.yaml, or remove `name:` "
+                "from the committed config (DDEV then uses the directory name).")
 
     # upload_dirs resolve from the DOCROOT (calculateHostUploadDirFullPath joins onto it).
     docroot = str(cfg.get("docroot", "") or "").strip().strip("/")
     base = project / docroot if docroot else project
-    uploads = first("upload_dirs")
-    if uploads is not None:
-        f, val = uploads
-        for entry in (val if isinstance(val, list) else [str(val)]):
+    uploads = cfg.get("upload_dirs")
+    if uploads not in (None, "", []):
+        entries = uploads if isinstance(uploads, list) else [str(uploads)]
+        srcs = source["upload_dirs"] if isinstance(source["upload_dirs"], list) else [source["upload_dirs"]] * len(entries)
+        for entry, f in zip(entries, srcs):
             entry = entry.strip()
             if not entry:
                 continue
@@ -322,7 +395,7 @@ def audit(project: Path, cat: dict) -> list[dict]:
                     add("high", "crlf-command", cmd,
                         "CRLF line endings: DDEV skips this command with a warning. Convert to LF and pin "
                         "`.ddev/commands/** text eol=lf` in .gitattributes.")
-                if cmd.name in builtins.get(svc_dir.name, set()) and b"#ddev-generated" not in raw:
+                if cmd.name in builtins.get(svc_dir.name, set()) and GENERATED.encode() not in raw:
                     add("medium", "shadowed-command", cmd,
                         f"shadows DDEV's built-in `ddev {cmd.name}` (project commands register first), freezing an "
                         "old copy. Delete it unless the override is deliberate.")
@@ -335,18 +408,33 @@ def audit(project: Path, cat: dict) -> list[dict]:
         if hit:
             add("high", "ssh-agent-forwarded", comp_file,
                 "forwards the host SSH agent into a container: every process there (Composer and npm scripts "
-                "included) can sign with every key that agent holds. Use `ddev auth ssh -f <one scoped key>` instead.")
+                "included) can sign with every key that agent holds. Delete the file and use "
+                "`ddev auth ssh -f <one scoped key>` instead.")
 
-    # Provider recipes that can push
+    # Provider recipes that can push. DDEV writes acquia/lagoon/pantheon/platform/upsun.yaml
+    # into every project (#ddev-generated, gitignored, push stanzas included): those are
+    # DDEV's, regenerated on start and never committed, so only the team's own recipes count.
     prov = ddev / "providers"
     if prov.is_dir():
         for recipe in sorted(prov.glob("*.y*ml")):
             text = recipe.read_text(encoding="utf-8", errors="replace")
+            if GENERATED in text:
+                continue
             stanzas = [s for s in ("db_push_command", "files_push_command") if re.search(rf"^{s}:", text, re.M)]
             if stanzas:
                 add("medium", "provider-push", recipe,
                     f"{' and '.join(stanzas)} present: `ddev push` overwrites the upstream database/files. Remove the "
                     "push stanzas from any recipe that can reach production.")
+            # A files_pull_command that fetches nothing still makes DDEV import the (empty)
+            # .downloads/files folder, and the import EMPTIES the upload directory first
+            # (v1.25.4 provider.go doFilesPullCommand -> doFilesImport -> ImportFiles). With
+            # no stanza at all DDEV skips files safely; a files_import_command takes over.
+            body = files_pull_body(text)
+            if body is not None and not body and not re.search(r"^files_import_command:", text, re.M):
+                add("high", "provider-files-noop", recipe,
+                    "files_pull_command fetches nothing (e.g. just `true`), so `ddev pull` imports an empty folder and "
+                    "empties the project's upload directory. Delete the files_pull_command stanza (DDEV then skips "
+                    "files), or make it always fetch a real archive.")
 
     # Credentials in committed env files (.local twins are gitignored from v1.25.4)
     for env in sorted(ddev.glob(".env*")):
@@ -363,7 +451,10 @@ def audit(project: Path, cat: dict) -> list[dict]:
         if keys:
             add("medium", "committed-secret", env,
                 f"credential-looking value(s) for {', '.join(sorted(set(keys)))} in a committed env file. Move them "
-                f"to {env.name}.local (gitignored, DDEV v1.25.4+) and commit an .example listing the keys.")
+                f"to {env.name}.local (gitignored, DDEV v1.25.4+) and commit an {env.name}.example listing the keys "
+                "with `git add -f` (DDEV's .ddev/.gitignore ignores *.example).")
+
+    findings.sort(key=lambda x: SEVERITY_RANK.get(x["severity"], 9))  # stable: check order within a severity
     return findings
 
 

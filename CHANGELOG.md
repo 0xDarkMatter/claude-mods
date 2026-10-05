@@ -24,17 +24,23 @@ feature releases live in the README "Recent Updates" section.
   11 new fixture cases (48 in all), each seen failing first; 10 mutants killed.
 
 - **`ddev-ops` skill** - DDEV local environments, owned in one place. A 2026-10-05 read of
-  36 DDEV-based agency repositories shaped it: `scripts/audit-ddev-config.py` runs 17
+  36 DDEV-based agency repositories shaped it: `scripts/audit-ddev-config.py` runs 19
   checks, most seen there and each with its reason from DDEV's docs or source (v1.25.4):
   unpinned PHP and database versions, end-of-life PHP and Node.js, per-developer settings
   committed for the team (`performance_mode`, router ports, Xdebug), keys DDEV now
-  ignores, `upload_dirs` written from the project root when DDEV resolves them from the
-  docroot, project commands that shadow DDEV's built-ins, CRLF command files, host
-  SSH-agent forwarding into containers, provider recipes that can push, and credentials
-  in committed env files (named, never printed). Seven references cover configuration and
-  env files, database workflows and sanitised pulls (with a pull-only recipe asset),
-  Mutagen, WSL2 and Docker providers, add-ons, commands and hooks, Node and dev-server
-  ports, Xdebug and sharing, and a troubleshooting runbook. `check-ddev-facts.py` keeps
+  ignores, a committed `name:` in a git worktree, `upload_dirs` written from the project
+  root when DDEV resolves them from the docroot, project commands that shadow DDEV's
+  built-ins, CRLF command files, host SSH-agent forwarding into containers, provider
+  recipes that can push or whose files stanza fetches nothing (DDEV then empties the
+  upload directory), and credentials in committed env files (named, never printed). It
+  merges `config.*.y*ml` overrides the way DDEV does (lists append) and skips DDEV's own
+  generated recipes. Eight references cover configuration, CI parity and env files,
+  scripting DDEV (`-j` output, commands that destroy data, several git worktrees),
+  database workflows and sanitised pulls (with a database-only recipe asset), Mutagen,
+  WSL2 and Docker providers, add-ons, commands, hooks, web-server config and networking,
+  Node and dev-server ports, Xdebug and sharing, and a troubleshooting runbook. Three
+  independent reviews (coverage against DDEV's docs, a claim-by-claim accuracy check
+  against v1.25.4 source, 14 cold-start scenarios) fed the final version. `check-ddev-facts.py` keeps
   the facts the auditor uses (defaults, end-of-life floors, built-in command names)
   current: `--offline` in PR CI, `--live` weekly in `freshness.yml`. The skill runs when
   copied alone and follows the team-plugin port limits (description starts "Use when ",

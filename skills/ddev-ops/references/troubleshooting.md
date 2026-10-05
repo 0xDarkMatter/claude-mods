@@ -1,14 +1,15 @@
 # Troubleshooting Runbook
 
 Facts from DDEV's troubleshooting, command and Docker-installation docs at DDEV v1.25.4,
-checked 2026-10-05. `ddev debug` still works as an alias of `ddev utility`.
+and its source, checked 2026-10-06. `ddev debug` still works as an alias of
+`ddev utility`.
 
 ## Contents
 
 - [First moves](#first-moves)
 - [Symptom table](#symptom-table)
 - [Ports, the router and several projects](#ports-the-router-and-several-projects)
-- [CI and DDEV](#ci-and-ddev)
+- [Disk space](#disk-space)
 - [Asking for help](#asking-for-help)
 
 ## First moves
@@ -17,66 +18,80 @@ checked 2026-10-05. `ddev debug` still works as an alias of `ddev utility`.
    old release.
 2. **Quick assessment:** `ddev utility diagnose` checks Docker, networking, DNS, HTTPS and
    the current project (`DDEV_DIAGNOSE_FULL=true` adds a test project).
-3. **Clean restart:** `ddev poweroff && ddev start`.
+3. **Clean restart:** `ddev poweroff && ddev start`. Note that `poweroff` stops every
+   project on the machine.
 4. **Logs:** `ddev logs` (web), `ddev logs -s db`, `ddev logs -f` to follow.
 5. **Back out customisations:** `ddev utility check-custom-config` lists every non-default
    file (PHP/nginx/MySQL overrides, compose files, commands, env files). Move them aside
    and retry.
-6. **Isolate the project:** a trivial project in a new folder
-   (`ddev config --auto`, an `index.php` with `phpinfo()`, `ddev start`). If that works,
-   the problem is this project's config - run `scripts/audit-ddev-config.py`.
+6. **Isolate the project:** in a new folder, run `ddev config --auto`, add an `index.php`
+   containing `phpinfo()`, and `ddev start`. If that works, the problem is this project's
+   config: run `scripts/audit-ddev-config.py`.
 
 ## Symptom table
 
 | Symptom | First command | Usual cause and fix |
 |---|---|---|
-| "Port 443 is not available, using 33001 instead" | `ddev utility port-diagnose` | Another process holds 80/443 (Apache, nginx, another Docker environment). Stop it, or set router ports globally (below) |
+| "Cannot connect to the Docker daemon" | `docker context ls` | The provider isn't running, or the active context points at another engine. Start it or `docker context use <name>` |
+| "Port 443 is not available, using 33001 instead" | `ddev utility port-diagnose` | Another process holds 80/443 (Apache, nginx, IIS, another Docker environment). Stop it, then `ddev poweroff && ddev start`: DDEV keeps the substitute port until the router is recreated. Or set router ports globally (below) |
 | `Ports are not available ... bind` errors | `ddev utility port-diagnose --allow-sudo` | Leftover containers or root-owned `docker-proxy`; `ddev poweroff`, restart Docker |
-| "web service unhealthy", "container failed to become ready" | `ddev logs` | A broken custom config, a failing `post-start`, or no disk space |
-| "No such container: ddev-router" | `ddev poweroff` | Stale router state; start again |
-| "No space left on device" | `docker system df` | `ddev delete images`, prune Docker, enlarge the provider's disk; on WSL2 check both disks |
+| `403 authentication required` or `unauthorized` pulling images | `docker logout` | Stale Docker Hub credentials; log out and retry |
+| A build complains about buildx | `docker buildx version` | DDEV requires the buildx plugin (v1.25.1+): `brew install docker-buildx` / `apt-get install docker-buildx-plugin` |
+| `apt-get update` fails during an image build | `ddev utility rebuild` | WSL2 clock drift, or a packet-inspection VPN breaking TLS; on a VPN add its CA via `.ddev/web-build` |
+| "web service unhealthy", "container failed to become ready" | `ddev logs` | Most often a user-defined `nginx-site.conf` or `apache-site.conf` (keep `/phpstatus`; test with `ddev exec nginx -t`), else a failing `post-start` or no disk space |
+| 404 "No input file specified" (nginx) or 403 Forbidden (Apache) | `ddev describe` | `docroot` in `config.yaml` doesn't contain `index.php` |
+| "No such container: ddev-router" | `ddev poweroff` | DDEV's fix: `ddev poweroff`, then `docker rm -f $(docker ps -aq)` and `docker rmi -f $(docker images -q)`. That removes **every** container and image on the machine, not just DDEV's; database volumes survive. Ask first |
 | Browser cannot reach the project URL | `ddev utility diagnose` | DNS rebinding blocked by the router, a VPN or proxy, or offline name resolution (`ddev hostname`) |
 | Certificate warning | `ddev utility tls-diagnose` | `mkcert -install` not run; on WSL2, `$CAROOT` not pointing at the Windows mkcert directory |
 | `ddev start` refuses after editing `database:` | `ddev utility check-db-match` | Data made by another server: [database.md](database.md#changing-the-database-engine) |
-| Database errors on a big import | `ddev logs -s db` | Collation from a newer server, or the wrong engine pinned |
+| Unknown collation on import | `ddev logs -s db` | Import with `ddev import-db`, which translates newer collations ([database.md](database.md#import-troubleshooting)) |
+| Second checkout won't start: project root already set | `ddev list` | Same `name:` as another checkout: [automation-and-worktrees.md](automation-and-worktrees.md#several-checkouts-of-one-repository) |
 | Custom command missing from `ddev -h` | `ddev start` output | CRLF endings (skipped with a warning), no `## Usage:` line, `ProjectTypes` mismatch |
 | A built-in command behaves oddly or is outdated | `ls .ddev/commands/*/` | A project copy shadows it ([extending.md](extending.md#custom-commands)) |
 | Files differ between host and container | `ddev mutagen status` | Mutagen lag or a conflict: `ddev mutagen sync`, then `ddev mutagen reset` ([performance.md](performance.md#mutagen)) |
 | Very slow first start | `ddev mutagen st -l` | Mutagen syncing huge files: fix `upload_dirs` |
-| Xdebug never stops at breakpoints | `ddev utility xdebug-diagnose` | Firewall or endpoint security on 9003, path mapping, `xdebug_ide_location` set |
+| Xdebug never stops at breakpoints | `ddev utility xdebug-diagnose` | Firewall or endpoint security on 9003, path mapping, `xdebug_ide_location` set, or on WSL2 the VS Code extensions not enabled in the distro |
+| git inside the container: "detected dubious ownership" | `ddev exec git status` | Mark the repo safe for the container user: `.ddev/homeadditions/.gitconfig` with `[safe]` `directory = /var/www/html` (a pattern several agency repos use) |
 | Image build fails after a DDEV upgrade | `ddev utility rebuild` | `webimage_extra_packages` names gone from Debian Trixie; fix them |
 | `post-start` hook fails writing `/usr/local/bin` | `ddev logs` | Since v1.25.3 that path is not writable; use `~/.local/bin` |
-| Setting seems ignored | `ddev utility configyaml --full-yaml` (merged result) | Misspelled or retired key (DDEV ignores unknown keys), or a `config.local.yaml` override |
+| Setting seems ignored | `ddev utility configyaml --full-yaml` (merged result) | Misspelled or retired key (DDEV ignores unknown keys), a `config.local.yaml` override, or a list an override file appended to |
 
 ## Ports, the router and several projects
 
 - **Every running project shares one router** (Traefik) on ports 80 and 443, routed by
   hostname. Several DDEV projects never conflict with each other; conflicts come from
-  non-DDEV processes on those ports.
+  non-DDEV processes on those ports, or from two checkouts claiming one project name.
 - **Change router ports globally, not per project:**
   `ddev config global --router-http-port=8080 --router-https-port=8443`, then remove any
   `router_http_port`/`router_https_port` from the project's `config.yaml`. Project values
   win over global ones, so a committed `"80"`/`"443"` stops a teammate fixing a clash.
-- **Mailpit, XHGui and exposed dev-server ports** are also router ports; port-diagnose
-  checks them inside a project directory.
+- **`port-diagnose` covers the router's HTTP and HTTPS ports plus Mailpit and XHGui** (run
+  it inside the project). It does not check `web_extra_exposed_ports`. On WSL2 it checks
+  both the Linux and the Windows side.
 - **The router outlives the last project** since v1.25.0: `ddev poweroff` frees 80/443.
-- **`ddev list`** shows every project and its state; `ddev poweroff` stops them all
-  (`ddev stop --all` also removes them from DDEV's global project list).
-- Project Traefik customisation lives in one file, `.ddev/traefik/config/<project>.yaml`;
-  global Traefik config in `~/.ddev/traefik/custom-global-config/`.
-- Docker providers that cannot bind privileged ports (Podman rootless, some macOS
-  setups) need the global router ports above.
+- **`ddev list`** shows every project and its state; `ddev poweroff` stops them all. To
+  drop a project from DDEV's list without deleting anything: `ddev stop --unlist`.
+- **Traefik customisation:** add extra `*.yaml` files beside the generated
+  `.ddev/traefik/config/<project>.yaml`; DDEV merges them. Global Traefik config goes in
+  `~/.ddev/traefik/custom-global-config/`.
+- **Podman rootless on macOS** cannot bind 80/443 and needs the global router ports above.
+- **CI** doesn't run DDEV in the repositories surveyed; keeping CI on DDEV's PHP is in
+  [config-and-env.md](config-and-env.md#ci-and-production-parity).
 
-## CI and DDEV
+## Disk space
 
-DDEV can run in CI (DDEV maintains a GitHub Action that installs it), but a 2026-10-05
-read of 36 DDEV-based agency repositories found none whose workflows do: CI ran
-`composer install` and the deploy directly on the runner. The consequence that matters:
+Safe, data-preserving recovery, in this order:
 
-- **Three PHP versions must agree**: `php_version` in `.ddev/config.yaml`, the CI
-  runner's PHP, and production's. Read the CI version from `.ddev/config.yaml` rather
-  than hard-coding it in the workflow, so the two cannot drift.
-- `composer.json` `config.platform.php` should match all three.
+1. See what's big: `docker system df` and `ddev utility mutagen-diagnose --all`.
+2. `ddev delete images` removes previous DDEV image versions.
+3. `docker builder prune` removes the build cache.
+4. `ddev mutagen reset` in a project with a bloated sync volume.
+5. On macOS, enlarge the provider's disk image (keep usage under ~80%); on WSL2, check
+   both the Windows drive and the WSL2 disk.
+
+Anything that removes databases needs the user's OK first: `ddev delete`, `ddev clean`,
+`ddev stop --remove-data` and `docker volume prune -a`. See the table in
+[automation-and-worktrees.md](automation-and-worktrees.md#commands-that-destroy-data).
 
 ## Asking for help
 

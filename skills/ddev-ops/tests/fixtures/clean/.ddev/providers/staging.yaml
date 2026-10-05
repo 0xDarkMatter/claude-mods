@@ -1,4 +1,5 @@
-# Fixture: a pull-only provider recipe (no push stanzas).
+# Fixture: a pull-only provider recipe (no push stanzas, and no files_pull_command at all:
+# a stanza that fetches nothing makes `ddev pull` empty the upload directory).
 environment_variables:
   dburl: deploy@staging.example.com:dumps/sanitized.sql.gz
 
@@ -7,7 +8,3 @@ db_pull_command:
     set -eu -o pipefail
     rsync -az "${dburl}" /var/www/html/.ddev/.downloads/db.sql.gz
   service: web
-
-files_pull_command:
-  command: |
-    true

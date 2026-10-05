@@ -34,7 +34,7 @@
     "krypton": "24"
   },
   "obsolete_keys": {
-    "_comment": "DDEV parses config.yaml non-strictly (yaml.Unmarshal), so a key it no longer defines is silently ignored rather than rejected.",
+    "_comment": "DDEV loads config.yaml non-strictly (via Viper since v1.25.2, no unused-key error), so a key it no longer defines is silently ignored rather than rejected.",
     "nfs_mount_enabled": "NFS support was removed in v1.25.0; the key is ignored. Use performance_mode.",
     "mutagen_enabled": "Replaced by performance_mode; the key is ignored, so Mutagen follows the global default.",
     "upload_dir": "Deprecated single-value form; DDEV migrates it, but write upload_dirs (a list)."
