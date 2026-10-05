@@ -63,6 +63,7 @@ On "INIT:" message at session start:
 | `skills/parallel-ops/` | Router for the parallel/recurring-agent-work family (fleet-ops, fleet-worker, fleetflow — own repo — loop-ops, iterate, spawn) - read first when it's unclear which one owns a fan-out/schedule/delegation ask |
 | [`fleetflow`](https://github.com/0xDarkMatter/fleetflow) (own repo) | Heterogeneous GLM/Codex/Grok/Pi/Anthropic worker fleets from one session; extracted 2026-08-01, mounted as `/fleetflow` via junction at `~/.claude/skills/fleetflow` |
 | `tests/validate.sh` | Frontmatter + naming gate; enforces the description-budget cap (combined description+when_to_use, hard-fails over budget) |
+| `tests/spec.sh` | Agent Skills spec gate: the spec's own validator (`skills-ref`, pinned, via `uv`) on every skill, allowing Claude Code's documented fields top-level; fixture self-test first; WARNs on bodies over ~5k tokens. Policy: `docs/SKILL-SUBAGENT-REFERENCE.md` |
 | `tests/doc-drift.sh` | Counts-on-disk vs docs gate; also checks section-map markers and skill-frontmatter ghost references (related-skills/depends-on naming a skill not on disk) |
 | `tests/agnostic.sh` | Public-repo gate: fails on user-profile paths with real names, plus anything in the author's PRIVATE deny list; legit look-alikes go in `tests/agnostic-allow.txt` |
 | `tests/hooks.sh` | Hook contract tests: feeds the opt-in hooks the stdin JSON Claude Code sends, asserts exit 2 + stderr to block and no false positives; `HOOKS_DIR=<dir>` runs it against another copy (e.g. to prove it fails on a regression) |
@@ -141,6 +142,12 @@ Requires Sonnet 4+ or Opus 4+.
   file colocated in the same `tests/` dir — editing the skill's output format
   without regenerating the fixture is a silent, not loud, break (diff the fixture,
   don't just eyeball the code change).
+- **Skill frontmatter: two parsers disagree.** Claude Code reads its own fields
+  (`when_to_use`, `argument-hint`, `effort`, ...) ONLY at the top level, so moving them
+  under `metadata` to "satisfy the spec" silently disables them. The spec's validator
+  parses with strictyaml, which rejects flow-style YAML (`[a, b]`) that Claude Code
+  accepts. `tests/spec.sh` encodes both. `claude plugin validate` checks neither,
+  because it never reads SKILL.md.
 - Never touch `.claude/worktrees/` or any repo's git worktree state (see
   `rules/worktree-boundaries.md`) — it looks orphaned and isn't.
 - **This repo is public — keep it agnostic.** `tests/agnostic.sh` (in `just check` and
@@ -167,6 +174,6 @@ Requires Sonnet 4+ or Opus 4+.
 ## Testing
 
 ```bash
-just check        # THE gate: validate + doc-drift + agnostic + hook contracts + resource contracts + skill suites + e2e suites
+just check        # THE gate: validate + spec + doc-drift + agnostic + hook contracts + resource contracts + skill suites + e2e suites
 just check-fast   # same minus the behavioural suites (per-skill and e2e)
 ```

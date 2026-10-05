@@ -6,9 +6,10 @@
 default:
     @just --list
 
-# THE gate: frontmatter/naming + doc-drift + agnostic + hook contracts + resource contracts + skill suites + e2e suites
+# THE gate: frontmatter/naming + Agent Skills spec + doc-drift + agnostic + hook contracts + resource contracts + skill suites + e2e suites
 check:
     @bash tests/validate.sh
+    @bash tests/spec.sh
     @bash tests/doc-drift.sh
     @bash tests/agnostic.sh
     @bash tests/hooks.sh
@@ -18,6 +19,7 @@ check:
 # Fast gate: everything except the behavioural suites (per-skill and e2e)
 check-fast:
     @bash tests/validate.sh
+    @bash tests/spec.sh
     @bash tests/doc-drift.sh
     @bash tests/agnostic.sh
     @bash tests/hooks.sh
