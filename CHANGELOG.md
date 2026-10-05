@@ -27,6 +27,25 @@ feature releases live in the README "Recent Updates" section.
   `ddev.md`, which now holds only Craft-specific facts; `security-ops`,
   `frontend-upgrade-ops` and `docker-ops` link to it.
 
+- **AGENTS.md create / audit / upgrade / survey in `repo-doctor`** - an extension of
+  the skill that already owned the entry-doc standard, not a new skill (decision record:
+  `docs/plans/AGENTS-MD-2026-10.md`). `references/agents-md-protocol.md` supersedes
+  `entry-docs.md`: what an AGENTS.md holds and leaves out, a 150-line target with a
+  200-line ceiling, splitting into things that load on demand (never `@` imports), and
+  CLAUDE.md shadowing as verified against Claude Code's memory docs (2026-10-05).
+  `scripts/repo-scan.py` is a deterministic, read-only deep scan: every fact cites
+  `file:line` or a command, it follows CodeDeploy hooks into the scripts they call, never
+  opens secret files, never runs repo tooling, and mines git history for landmine
+  *questions* (co-change coupling, hot spots, fix and revert clusters, config edits
+  followed by rebuilds or migrations). `scripts/agents-md.py` drafts an AGENTS.md from
+  those facts through four archetype templates (`scaffold`; `--write` only creates),
+  audits one (`audit`; `--diff` prints a `git apply`-able patch that never moves or drops
+  the Landmines section), and surveys a GitHub org through GET-only `gh api` calls
+  (`survey --org`). `scripts/check-memory-docs.py` is the staleness tripwire for the
+  encoded Claude Code facts: offline in PR CI, live in `freshness.yml`. doc-scanner hands
+  AGENTS.md generation to the scaffold, and its contradicting generation templates are
+  gone.
+
 - **Agent Skills spec gate (`tests/spec.sh`)** - every skill is checked by the spec's
   own reference validator, `skills-ref` (pinned 0.1.1, run through `uv` with its whole
   dependency tree frozen past a 7-day cooldown), in `just check`, `check-fast` and CI.
@@ -192,6 +211,13 @@ feature releases live in the README "Recent Updates" section.
   left behind: SAFE only when clean, with HEAD in base, no rebase/bisect in progress,
   and an archived owner placed there by path. Each of the eleven new cases was seen
   failing, either on the old code or against a deliberately broken guard.
+- **CLAUDE.md beside AGENTS.md is a shadow, not a pattern** - Claude Code reads AGENTS.md
+  only when no `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` is present (unless
+  the CLAUDE.md imports `@AGENTS.md`). `rules/agentic-quality.md` recommended a one-line
+  CLAUDE.md *pointer*, which hides the file it points to; it now requires the import.
+  repo-doctor's scorer warned only "fine if deltas-only" and now flags the shadow, and its
+  entry-doc budget drops from 250 to Claude Code's 200 lines.
+
 - **The reserved-name waiver counted only the first validated file.** CI's Claude Code
   validates `marketplace.json` and `plugin.json` and prints one error block per file;
   `tests/plugin-validate.sh` read only the first count, so CI went red while the local

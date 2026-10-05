@@ -169,6 +169,16 @@ run "audit-ddev-config --help"        0 "$PY" skills/ddev-ops/scripts/audit-ddev
 run "audit-ddev-config minefield"    10 "$PY" skills/ddev-ops/scripts/audit-ddev-config.py skills/ddev-ops/tests/fixtures/minefield
 run "audit-ddev-config clean control" 0 "$PY" skills/ddev-ops/scripts/audit-ddev-config.py skills/ddev-ops/tests/fixtures/clean
 
+echo "== repo-doctor: AGENTS.md toolchain + Claude Code memory-docs verifier"
+# --offline: the protocol still states every encoded Claude Code fact and the two
+# scripts agree on the 200-line ceiling. --live runs in freshness.yml only.
+run "memory-docs --offline consistent" 0 "$PY" skills/repo-doctor/scripts/check-memory-docs.py --offline
+run "memory-docs --help"               0 "$PY" skills/repo-doctor/scripts/check-memory-docs.py --help
+run "repo-scan --help"                 0 "$PY" skills/repo-doctor/scripts/repo-scan.py --help
+run "repo-scan unknown section"        2 "$PY" skills/repo-doctor/scripts/repo-scan.py --only bogus
+run "agents-md --help"                 0 "$PY" skills/repo-doctor/scripts/agents-md.py --help
+run "agents-md no subcommand"          2 "$PY" skills/repo-doctor/scripts/agents-md.py
+
 echo "== protocol: every new verifier is executable + compiles"
 for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/claude-api-ops/scripts/context-budget.py \
@@ -189,7 +199,10 @@ for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/web-perf-ops/scripts/triage-vitals.py \
          skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py \
          skills/ddev-ops/scripts/check-ddev-facts.py \
-         skills/ddev-ops/scripts/audit-ddev-config.py; do
+         skills/ddev-ops/scripts/audit-ddev-config.py \
+         skills/repo-doctor/scripts/check-memory-docs.py \
+         skills/repo-doctor/scripts/repo-scan.py \
+         skills/repo-doctor/scripts/agents-md.py; do
     "$PY" -m py_compile "$s" 2>/dev/null && pass "py_compile $(basename "$s")" || bad "py_compile $(basename "$s")"
 done
 bash -n skills/terraform-ops/scripts/check-action-refs.sh 2>/dev/null \

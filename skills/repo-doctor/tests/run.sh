@@ -169,6 +169,31 @@ OUT="$(run_json)"
     && ok "4-equals markers count as a section map" \
     || no "wide-markers monster" "marker pattern too narrow"
 
+# 17-19. CLAUDE.md beside AGENTS.md: Claude Code reads only the CLAUDE.md unless it
+# imports AGENTS.md (code.claude.com/docs/en/memory, "When Claude Code reads AGENTS.md").
+echo "# Claude notes - plan mode for src/" > CLAUDE.md
+git add -A; git commit -qm "docs: claude notes"
+OUT="$(run_json)"
+[ "$(get 'sum(1 for f in d["data"]["findings"] if f["severity"]=="warn" and "shadows AGENTS.md" in f["msg"])')" = "1" ] \
+    && ok "a CLAUDE.md without @AGENTS.md is a shadowing warning" || no "shadow warning" "not flagged"
+printf '@AGENTS.md\n\n# Claude notes - plan mode for src/\n' > CLAUDE.md
+git add -A; git commit -qm "docs: import agents"
+OUT="$(run_json)"
+[ "$(get 'sum(1 for f in d["data"]["findings"] if "shadows AGENTS.md" in f["msg"])')" = "0" ] \
+    && ok "a CLAUDE.md that imports @AGENTS.md does not shadow" || no "import" "still flagged"
+"$PY" -c "print('\n'.join(['# Agent Instructions', '## Landmines', '1. x'] + ['line %d' % i for i in range(220)]))" > AGENTS.md
+git add -A; git commit -qm "docs: grow agents"
+OUT="$(run_json)"
+[ "$(get 'sum(1 for f in d["data"]["findings"] if "AGENTS.md is" in f["msg"] and "budget ~200" in f["msg"])')" = "1" ] \
+    && ok "entry-doc budget is Claude Code's 200 lines" || no "200-line budget" "not flagged at 223 lines"
+
 echo
 echo "repo-doctor tests: $pass passed, $fail failed"
-[ "$fail" -eq 0 ] && exit 0 || exit 1
+# The AGENTS.md tooling has its own suites; one runner, one verdict.
+sub=0
+for suite in repo-scan agents-md; do
+    echo
+    echo "--- $suite"
+    bash "$HERE/$suite.sh" || sub=1
+done
+[ "$fail" -eq 0 ] && [ "$sub" -eq 0 ]

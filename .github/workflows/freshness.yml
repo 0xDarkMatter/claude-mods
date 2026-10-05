@@ -189,6 +189,15 @@ jobs:
           if [ "$rc" -eq 7 ]; then echo "::warning::ddev-ops live check unreachable (GitHub API / raw docs / endoflife.date) - skipped"; fi
           exit 0
 
+      - name: repo-doctor AGENTS.md protocol vs Claude Code memory docs
+        run: |
+          set +e
+          python skills/repo-doctor/scripts/check-memory-docs.py --live
+          rc=$?
+          if [ "$rc" -eq 10 ]; then echo "::error::Claude Code's memory docs no longer state a fact the AGENTS.md protocol encodes (version floor, shadowing, the Project instructions setting, the 200-line target) - re-read the page and fix agents-md-protocol.md section 4"; exit 1; fi
+          if [ "$rc" -eq 7 ]; then echo "::warning::memory-docs live check unreachable (code.claude.com) - skipped"; fi
+          exit 0
+
       - name: GitHub Action refs still resolve
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
