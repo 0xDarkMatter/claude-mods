@@ -221,7 +221,7 @@ Output: per-row pass/fail/warn, then a summary score and list of fixes. Fixes ar
 
 ## Operations
 
-Atomic GH-side actions that don't fit the three multi-step modes. Each operation that writes author voice to a third-party surface (issue/PR body, comment, review body, release notes, merge commit subject/body) is governed by **hard rule 8** and [public-posts](~/.claude/rules/public-posts.md): quote the exact body in chat, name the send command, wait for explicit approval, then send. Mechanical actions (labels, assign, close-without-message, mark-ready) skip preview.
+Atomic GH-side actions that don't fit the three multi-step modes. Each operation that writes author voice to a third-party surface (issue/PR body, comment, review body, release notes, merge commit subject/body) is governed by **hard rule 8** and [public-posts](../../rules/public-posts.md): quote the exact body in chat, name the send command, wait for explicit approval, then send. Mechanical actions (labels, assign, close-without-message, mark-ready) skip preview.
 
 ### Issues
 
