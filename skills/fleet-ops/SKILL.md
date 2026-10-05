@@ -151,7 +151,7 @@ from deletion.
 
 ### Buckets — first match wins, and the order is the safety argument
 
-Only **SAFE** is ever removable: merged, clean, no open session claiming it, and for a `.claude/worktrees/` tree an archived session positively claiming it. A live claimant or the invoking tree is **KEEP**; an unreadable store, detached HEAD, dirty, unmerged or unattributable tree is **REVIEW**, never touched under any flag. Removal uses `git worktree remove` (never `rm -rf`), re-verifies against a fresh scan right before each delete, and `--all-repos` never removes. Prune cannot see writes by absolute path, so it must never be the only guard. Table, claim rules and the near-miss behind them: [references/prune.md](references/prune.md).
+Only **SAFE** is ever removable: merged, clean, no open session claiming it, and for a `.claude/worktrees/` tree an archived session positively claiming it. A live claimant (archiving is not activity) or the invoking tree is **KEEP**; an unreadable store or archive flag, unproven detached HEAD, dirty, unmerged or unattributable tree is **REVIEW**, never touched under any flag. Removal uses `git worktree remove` (never `rm -rf`), re-verifies against a fresh scan right before each delete, and `--all-repos` never removes. Prune cannot see writes by absolute path, so it must never be the only guard. Table, claim rules and the near-miss behind them: [references/prune.md](references/prune.md).
 
 ### Landmine: removing a worktree out from under a live session
 

@@ -155,6 +155,24 @@ feature releases live in the README "Recent Updates" section.
   tool-discovery (Claude Code renamed it in 2.1.63; `Task(...)` still aliases). spawn
   no longer promises a new agent is available at once in every case: the first agent in
   a new `agents/` directory needs a session restart.
+- **`fleet prune` kept the worktrees of archived sessions as "live session"** - archiving
+  a Desktop session stops it, and the stop appends records to its transcript ~2s before
+  Desktop rewrites the wrapper with `isArchived: true`. `sessions.sh` read that write as
+  activity, so for ten minutes after every archive (longer through the 15-minute index
+  cache) prune kept the session's trees and the land gate refused its lane. After ten
+  sessions were archived, all 17 of their merged, clean worktrees stayed KEEP and had to
+  be removed by hand. Now an archived session is live only if its transcript was written
+  after the archive (the wrapper's mtime, plus 60s), so a terminal `claude --resume`
+  still counts. `fleet prune` re-reads every claimant fresh (new `sessions.sh state`)
+  rather than trusting a cache built before the archive. An `isArchived` that is missing
+  or not a boolean reads `?`, is treated as live/open (never archived), and the reason
+  says so. Archived + dirty or unmerged stays REVIEW, naming the owner as archived.
+  Two kinds of leftover become removable on exact evidence. One is a lane the session
+  `EnterWorktree`'d into, proven by the cwd its transcript last recorded (the lossy
+  directory key alone still proves nothing). The other is a detached tree archiving
+  left behind: SAFE only when clean, with HEAD in base, no rebase/bisect in progress,
+  and an archived owner placed there by path. Each of the eleven new cases was seen
+  failing, either on the old code or against a deliberately broken guard.
 - **The reserved-name waiver counted only the first validated file.** CI's Claude Code
   validates `marketplace.json` and `plugin.json` and prints one error block per file;
   `tests/plugin-validate.sh` read only the first count, so CI went red while the local

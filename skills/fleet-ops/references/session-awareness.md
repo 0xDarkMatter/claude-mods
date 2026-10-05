@@ -28,6 +28,18 @@ instance's store. Until 2026-09-28 the gate read the wrapper alone, from the
 primary instance alone — so a session deep in a long turn, or running in a
 `--user-data-dir` instance, read as idle and did not block a land.
 
+**An archived session is not active**, unless its transcript was written after the
+archive. Archiving stops the session, and the stop itself appends records
+(`last-prompt`, `cost-state`) to the transcript ~2s before Desktop rewrites the
+wrapper with `isArchived: true`. Read naively, that write made every just-archived
+session "live" for `session_live_secs`: the land gate refused its lane, and `fleet
+prune` kept its worktrees (2026-10-05). Desktop stores no archive time, so the
+wrapper's mtime stands in for it, and only a transcript write more than 60s newer
+counts. That is what a `claude --resume` from a terminal would produce, and it
+still blocks. An `isArchived` that is missing or not a boolean reads `?` (every
+wrapper seen carries a boolean, so anything else is a format change). That is
+never presumed archived: the session keeps timestamp liveness and counts as open.
+
 **Self-ownership is exempt.** The hazard is a *concurrent* writer, and the session
 running `fleet land` is not one — it is blocked inside that call, so it is provably not
 mid-commit, and the worktree being rebased "out from under a live session" is the one it
@@ -88,4 +100,4 @@ prints the right one for your surface after every `READY` and `CONFLICT`.
 
 ## `scripts/sessions.sh`
 
-- `scripts/sessions.sh` — branch → owning-session and directory → claiming-session resolver, read off every Desktop instance's session store plus the CLI transcripts on disk (deployed alongside signal.sh so lane sessions can resolve MAIN). `sessions.sh stores` shows what it read; `sessions.sh at <path>` shows who claims a directory (`--fresh`: liveness re-read, the land gate's view). Enrichment only: exits 3 and stays silent wherever the store or `jq` is missing, and every caller treats that as "no info"
+- `scripts/sessions.sh` — branch → owning-session and directory → claiming-session resolver, read off every Desktop instance's session store plus the CLI transcripts on disk (deployed alongside signal.sh so lane sessions can resolve MAIN). `sessions.sh stores` shows what it read; `sessions.sh at <path>` shows who claims a directory (`--fresh`: liveness re-read, the land gate's view); `sessions.sh state <id>...` re-reads liveness, the archive flag (`1`/`0`/`?`) and an archived session's last transcript cwd straight off disk, which is what `fleet prune` reads before it classifies. Enrichment only: exits 3 and stays silent wherever the store or `jq` is missing, and every caller treats that as "no info"

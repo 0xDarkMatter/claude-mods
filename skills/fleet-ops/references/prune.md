@@ -16,11 +16,11 @@ The full bucket table and the order that makes it safe, how a session claims a w
 | 1b | git reports the directory gone | **REVIEW** (that's `git worktree prune`'s job) |
 | 2 | any session claiming it is LIVE | **KEEP** |
 | 3 | session store unreadable, or `session_check=off` | **REVIEW** |
-| 4 | detached HEAD | **REVIEW** |
+| 4 | detached HEAD — **SAFE** only if clean, no git operation in progress (rebase, bisect, ...), HEAD already in `base_branch`, no open claim, and an archived session positively claims it | **REVIEW** |
 | 5 | uncommitted or untracked changes | **REVIEW** |
 | 6 | commits not yet in `base_branch` | **REVIEW** |
 | 7 | merged + clean, no open session claims it — and for `.claude/worktrees/`, an archived session positively does | **SAFE** |
-| 8 | anything else (incl. an open owner, or a `.claude/worktrees/` tree no session record mentions) | **REVIEW** |
+| 8 | anything else (incl. an open owner, an owner whose archive flag cannot be read, or a `.claude/worktrees/` tree no session record mentions) | **REVIEW** |
 
 Only **SAFE** is ever removable. **KEEP** means one thing — hands off, not yours
 to judge. Everything else lands in **REVIEW**, which is reported and never
@@ -36,7 +36,33 @@ read is the **union** of every Desktop instance's store — the primary and each
 config` lists which ones answered. Liveness is the newer of the wrapper's
 `lastActivityAt` and the transcript's mtime, because Desktop rewrites the
 wrapper only at turn boundaries: a session deep in one long turn reads idle on
-the wrapper alone.
+the wrapper alone. An **archived** session is live only if its transcript was
+written after the archive (below).
+
+**Archived owners (2026-10-05).** Ten sessions were archived after their lanes
+landed, and a dry run still listed all 17 of their worktrees as KEEP, "live
+session ... (by transcript)". Archiving stops a session, and the stop appends
+records to its transcript ~2s before the wrapper gets `isArchived: true`. That
+write read as activity for ten minutes, and the index cache carried it for up to
+fifteen more. Now:
+
+- An archived session counts as live only on a transcript write newer than the
+  archive (the wrapper's mtime, plus 60s). A terminal `claude --resume` of it
+  still keeps its trees.
+- `fleet prune` re-reads every claimant of the repo's worktrees fresh
+  (`sessions.sh state`) before classifying. The cache `fleet land` built is
+  older than the archive, and it would still say "open".
+- An `isArchived` that is missing or not a boolean is unreadable. It is treated
+  as live/open, never as archived, and the reason says "archive flag unreadable".
+- Archived + dirty or unmerged stays REVIEW, and the reason names the owner as
+  archived. Detached leftovers follow rule 4.
+
+**Positive evidence is an exact path.** An archived session proves a tree by its
+wrapper's `cwd`/`worktreePath`, or by the cwd its transcript last recorded
+(read fresh by `fleet prune`). The latter is the only record of a lane the
+session `EnterWorktree`'d into: its wrapper's `cwd` and `gitAnchors` name only
+the tree it was spawned in. The transcript *directory* key alone never proves
+anything, because `lane.x` and `lane-x` encode to the same key.
 
 **The near-miss that shaped this (2026-09-28).** A dry run in a real repo
 classified 12 of 17 worktrees SAFE, "merged + clean, no session owns it" — five
@@ -67,9 +93,10 @@ Those directories are Claude Code's own session worktrees, and
 *they may look orphaned and aren't*. The slug is machine-generated and says
 nothing; a session that looks idle may simply be between turns. Prune marks them
 `!` in the table, and SAFE requires an archived session that positively claims
-the tree — by branch, or by exact `cwd`/`worktreePath` — so one can only be
-removed on positive evidence, never on the absence of a signal. (The docs
-promised this before the code kept it; since 2026-09-28 it does.)
+the tree — by branch, by exact `cwd`/`worktreePath`, or by the exact cwd its
+transcript last recorded — so one can only be removed on positive evidence,
+never on the absence of a signal. (The docs promised this before the code kept
+it; since 2026-09-28 it does.)
 
 Three further guards, all on the irreversible direction:
 
@@ -77,8 +104,9 @@ Three further guards, all on the irreversible direction:
    on its own, and it unregisters the worktree instead of leaving a stale
    administrative entry behind.
 2. **Re-verify immediately before deleting.** Classification reads a session
-   index with a long TTL (15 min); a session can wake, be unarchived, or move
-   into a tree between the table and the delete. So `--remove` first re-runs the
+   index with a long TTL (15 min), refreshed only for the sessions already in
+   it; a session can wake, be unarchived, or move into a tree between the table
+   and the delete. So `--remove` first re-runs the
    *same* classifier against a forced-fresh scan of every store (this can take
    a minute), skips any row that is no longer SAFE, and then re-checks each
    survivor's owner liveness and dirtiness once more right before its delete.

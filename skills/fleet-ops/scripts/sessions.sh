@@ -32,11 +32,26 @@
 # A that moved into lane B still claims only A in its wrapper (measured
 # 2026-09-28: 27 entries in the spawn worktree, 258 in the lane it moved to).
 #
+# ARCHIVED IS NOT LIVE, unless something wrote after the archive. Archiving
+# stops the session, and the stop appends bookkeeping records (last-prompt,
+# cost-state) to its transcript ~2s BEFORE Desktop rewrites the wrapper with
+# isArchived:true (measured on 10 sessions, 2026-10-05). Read naively, that
+# write is activity: for LIVE_SECS after every archive the session read live,
+# and `fleet prune` kept all ten sessions' worktrees as "live session". Desktop
+# records no archive time, but the archive rewrite IS the wrapper's mtime, so an
+# archived session is live only on a transcript write newer than that mtime plus
+# ARCHIVE_GRACE_SECS — what a `claude --resume` from a terminal would produce.
+# The flag is TRI-STATE: 1 archived, 0 open, ? unreadable. Every wrapper seen
+# (2,187) carries a boolean, so anything else is a format change, and unreadable
+# is never presumed archived: it keeps the timestamp liveness and reads as open.
+# A T row (CLI/headless) has no Desktop record and cannot be archived: 0.
+#
 # SECTION MAP (grep the `# --- name ---` banners to jump):
 #   paths       norm_path / path_key — the two forms paths are compared in
 #   discovery   which session stores and transcript roots exist (fork-free)
 #   scan        one pass over both -> wide rows; the cache; index/paths views
-#   liveness    live_many — the fresh read every gate decision rests on
+#   liveness    live_many — the fresh read every gate decision rests on;
+#               `state`, the same read plus the archive flag, for prune
 #   self        which session is calling (the land gate's self-exemption)
 #   owner       branch -> newest owning session
 #   main        the repo's coordinator session
@@ -51,6 +66,7 @@
 #     escapes backslashes) and compare cleanly against git's output.
 #   - Attribution only ever ADDS claims. Nothing here can turn "someone owns
 #     this" into "nobody does" — prune's SAFE bucket depends on that direction.
+#     An archived claimant is still a claim; only its liveness changes.
 #
 # Exit: 0 ok · 2 usage · 3 unavailable (no store / no jq) — advisory, not error.
 set -uo pipefail
@@ -61,6 +77,14 @@ SELF=$(basename "$0")
 # live writer. Desktop refreshes lastActivityAt per turn, so a session that is
 # open-but-thinking still reads live. 10 min matches summon's picker.
 LIVE_SECS=${FLEET_SESSION_LIVE_SECS:-600}
+
+# How much newer than an archived wrapper's mtime a transcript write must be to
+# count as activity (see ARCHIVED IS NOT LIVE). The shutdown write precedes the
+# archive rewrite by ~2s; 60s absorbs a reversed order, a late flush and 2s
+# filesystem mtime granularity, while a genuinely resumed session reads live
+# again within a minute of its first write. Not an env knob on purpose: it is a
+# fact about Desktop's write order, not a preference.
+ARCHIVE_GRACE_SECS=60
 
 usage() {
     cat <<EOF
@@ -81,6 +105,10 @@ USAGE
                                   written in <path> right now, which the cache
                                   cannot know yet — the land gate's read.
   $SELF live <sessionId>          1 if that session is live, else 0
+  $SELF state <sessionId>...      The fresh read prune takes before it
+                                  classifies: liveness and the archive flag
+                                  straight off disk (no cache), plus the last
+                                  cwd an ARCHIVED session's transcript recorded.
   $SELF self                      The CALLING session's own store id, if it can
                                   be resolved and verified against the store.
                                   Exit 3 (silent) when it cannot.
@@ -89,14 +117,21 @@ USAGE
 
 OUTPUT (TSV columns)
   index/owner/main:
-    branch  sessionId  title  lastActivityMs  cwd  archived(0|1)  live(0|1)
+    branch  sessionId  title  lastActivityMs  cwd  archived(0|1|?)  live(0|1)
   paths/at:
-    key  path  sessionId  title  lastActivityMs  archived(0|1)  live(0|1)  via
+    key  path  sessionId  title  lastActivityMs  archived(0|1|?)  live(0|1)  via
     key   the path in Claude Code's project-dir encoding, lowercased
     path  the normalised path, or empty when only the encoded key is known
     via   cwd | worktree | transcript | live-cwd
+  state:
+    sessionId  live(0|1)  archived(0|1|?|-)  lastCwd
+    -        no wrapper was read (a cli:<id>, or the wrapper is gone)
+    lastCwd  normalised; only for an archived session, else empty
+  archived is ? when the wrapper's isArchived is missing or not a boolean:
+  unreadable, so it is treated as open, never as archived.
   lastActivityMs is the newer of the wrapper's lastActivityAt and the
-  transcript's mtime; live is computed from it.
+  transcript's mtime; live is computed from it — except that an ARCHIVED
+  session is live only if its transcript was written after the archive.
 
 ENVIRONMENT
   FLEET_SESSION_STORE       session-store dirs, ';'-separated. Replaces
@@ -122,6 +157,9 @@ EXAMPLES
 
   # which sessions claim this worktree, by any route?
   $SELF at 'X:\\repo\\.claude\\worktrees\\lane-a'
+
+  # fresh liveness + archive flag for two sessions, bypassing the cache
+  $SELF state local_0a1b2c3d local_4e5f6a7b
 
 EXIT
   0 ok (zero rows is still ok)   2 usage   3 store or jq unavailable
@@ -281,6 +319,34 @@ file_mtime_s() {
     stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0
 }
 
+# The batched-stat format "mtime path" into _STATFMT. The flavour is PROBED once,
+# never tried-then-fallen-back: on GNU, `stat -f` means --file-system and would
+# splice filesystem dumps into the listing.
+_STATFMT=()
+stat_flavour() {
+    (( ${#_STATFMT[@]} )) && return 0
+    if stat -c '%Y' / >/dev/null 2>&1; then _STATFMT=(-c '%Y %n'); else _STATFMT=(-f '%m %N'); fi
+}
+
+# "mtime path" lines of wrapper files (stdin) -> "sessionId<TAB>mtimeMs". The
+# wrapper is named by its session id (<store>/.../local_<uuid>.json), so the
+# filename is the join key. This mtime is the archive moment (see header).
+stat_to_ids() {
+    awk 'NF >= 2 { m = $1 + 0; p = $0; sub(/^[^ ]+ /, "", p); n = split(p, a, "/")
+                   f = a[n]; sub(/\.json$/, "", f); printf "%s\t%.0f\n", f, m * 1000 }'
+}
+
+# The last cwd transcript $1 recorded, or empty. JSON escapes each backslash as
+# a pair; the pair becomes '/' here so the value normalises like every other
+# path. Only the tail is read: transcripts run to tens of MB.
+last_cwd_of() {
+    local lc
+    lc=$(tail -c 262144 "$1" 2>/dev/null | grep -o '"cwd":"[^"]*"' | tail -n1)
+    lc=${lc#\"cwd\":\"}; lc=${lc%\"}
+    lc=${lc//\\\\//}    # an assignment, unquoted: inside "..." this pattern means something else
+    printf '%s' "$lc"
+}
+
 # id  title  cwd  worktreePath  lastActivityAt  archived  cliSessionId  branches
 # Concatenated JSON objects are a valid jq input stream, so one cat + one jq
 # handles hundreds of wrappers in two processes rather than 2N. Piping also
@@ -306,7 +372,7 @@ scan_wrappers() {
           (.cwd | s | gsub("\\\\"; "/")),
           (.worktreePath | s | gsub("\\\\"; "/")),
           ((.lastActivityAt // 0) | if type == "number" then floor | tostring else "0" end),
-          (if .isArchived == true then "1" else "0" end),
+          (.isArchived | if . == true then "1" elif . == false then "0" else "?" end),
           (.cliSessionId | s),
           ( ([ .branch ] + (.writtenBranches | if type == "array" then . else [] end))
             | map(select(type == "string" and . != "")) | unique | join(" ") )
@@ -317,6 +383,17 @@ scan_wrappers() {
     printf '%s\n' "$out"
 }
 
+# sessionId  mtimeMs — every wrapper in the same age window as scan_wrappers.
+# A second walk of the stores, ~0.5s for 828 wrappers here (2026-10-05) against
+# a cold scan of ~40s: the price of telling an archive's own shutdown write from
+# a session that was resumed after it.
+scan_wrapper_mtimes() {
+    local age_days=${FLEET_SESSION_MAX_AGE_DAYS:-60}
+    stat_flavour
+    find "$@" -name 'local_*.json' -type f -mtime "-${age_days}" \
+        -exec stat "${_STATFMT[@]}" {} + 2>/dev/null | stat_to_ids
+}
+
 # cli  lastMs  txdir  livecwd — one row per CLI session with a transcript.
 # Depth 2 only (<root>/<encoded-cwd>/<cliSessionId>.jsonl): subagent
 # transcripts one level further down roughly double the walk (3.0s -> 6.8s
@@ -324,16 +401,14 @@ scan_wrappers() {
 # REVIEW, neither of which prune removes. `live_many` — the gates' fresh read —
 # does count them, for just the sessions it is asked about.
 # stat is batched through -exec +: a handful of processes, not one per file.
-# The flavour is PROBED, never tried-then-fallen-back: on GNU, `stat -f` means
-# --file-system and would splice filesystem dumps into the listing.
 scan_transcripts() {
     load_dirs
     (( ${#TROOTS[@]} )) || return 0
-    local age_days=${FLEET_SESSION_MAX_AGE_DAYS:-60} now_s listing fmt=()
+    local age_days=${FLEET_SESSION_MAX_AGE_DAYS:-60} now_s listing
     now_s=$(date +%s)
-    if stat -c '%Y' / >/dev/null 2>&1; then fmt=(-c '%Y %n'); else fmt=(-f '%m %N'); fi
+    stat_flavour
     listing=$(find "${TROOTS[@]}" -mindepth 2 -maxdepth 2 -type f -name '*.jsonl' -mtime "-${age_days}" \
-                -exec stat "${fmt[@]}" {} + 2>/dev/null)
+                -exec stat "${_STATFMT[@]}" {} + 2>/dev/null)
     [[ -n "$listing" ]] || return 0
     local cli ms d p lc
     printf '%s\n' "$listing" | awk -v now="$now_s" -v win="$LIVE_SECS" '
@@ -349,19 +424,17 @@ scan_transcripts() {
         }' \
     | while IFS=$'\t' read -r cli ms d p; do
         lc=""
-        if [[ -n "$p" ]]; then
-            # Last "cwd" the transcript recorded. JSON escapes each backslash
-            # as a pair; turn the pair into '/' so it normalises like the rest.
-            lc=$(tail -c 262144 "$p" 2>/dev/null | grep -o '"cwd":"[^"]*"' | tail -n1)
-            lc=${lc#\"cwd\":\"}; lc=${lc%\"}
-            lc=${lc//\\\\//}
-        fi
+        [[ -n "$p" ]] && lc=$(last_cwd_of "$p")
         printf '%s\t%s\t%s\t%s\n' "$cli" "$ms" "$d" "$lc"
     done
 }
 
 # The join. Liveness = the NEWER of the wrapper's lastActivityAt and the
 # transcript's mtime: the wrapper alone reads a mid-turn session as idle.
+# For an ARCHIVED wrapper only a transcript write newer than the archive counts
+# (header); its archive moment is the OLDEST copy's mtime, so a wrapper held in
+# two stores can only gain liveness from the duplicate, never lose it. No mtime
+# read means no archive moment, and the timestamp rule applies unchanged.
 # Big epoch-ms values go through printf %.0f — mawk (Debian/Ubuntu's default
 # awk) prints integers above 2^31 in exponent form under plain `print`.
 scan_all() {
@@ -369,19 +442,23 @@ scan_all() {
     (( ${#STORES[@]} )) || { echo "$SELF: no Claude session store on this machine" >&2; return 3; }
     command -v jq >/dev/null 2>&1 || { echo "$SELF: jq not found — session enrichment off" >&2; return 3; }
 
-    local wrappers tx
+    local wrappers tx wmt
     wrappers=$(scan_wrappers "${STORES[@]}") || return 3
     tx=$(scan_transcripts)
+    wmt=$(scan_wrapper_mtimes "${STORES[@]}")
     local now_ms=$(( $(date +%s) * 1000 )) win_ms=$(( LIVE_SECS * 1000 ))
-    awk -F'\t' -v now="$now_ms" -v win="$win_ms" '
+    awk -F'\t' -v now="$now_ms" -v win="$win_ms" -v grace="$(( ARCHIVE_GRACE_SECS * 1000 ))" '
         FILENAME == ARGV[1] { if ($1 != "") { tm[$1] = $2 + 0; td[$1] = $3; tc[$1] = $4 }; next }
+        FILENAME == ARGV[2] { if ($1 != "" && (!($1 in wm) || $2 + 0 < wm[$1])) wm[$1] = $2 + 0; next }
         $1 != "" {
-            lm = $5 + 0; d = ""; lc = ""; cli = $7
+            lm = $5 + 0; d = ""; lc = ""; cli = $7; t = 0
             if (cli != "" && (cli in tm)) {
-                seen[cli] = 1; d = td[cli]; lc = tc[cli]
-                if (tm[cli] > lm) lm = tm[cli]
+                seen[cli] = 1; d = td[cli]; lc = tc[cli]; t = tm[cli]
+                if (t > lm) lm = t
             }
-            live = (lm > 0 && now - lm <= win) ? 1 : 0
+            act = lm
+            if ($6 == "1" && ($1 in wm)) act = (t > wm[$1] + grace) ? t : 0
+            live = (act > 0 && now - act <= win) ? 1 : 0
             if (!live) lc = ""
             printf "W\t%s\t%s\t%.0f\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n", $1, $2, lm, $3, $4, $6, live, $8, d, lc
         }
@@ -390,7 +467,7 @@ scan_all() {
                 if (!(c in seen) && now - tm[c] <= win)
                     printf "T\tcli:%s\t%s\t%.0f\t\t\t0\t1\t\t%s\t%s\n", c,
                            "(no Desktop record - CLI or headless session)", tm[c], td[c], tc[c]
-        }' <(printf '%s\n' "$tx") <(printf '%s\n' "$wrappers")
+        }' <(printf '%s\n' "$tx") <(printf '%s\n' "$wmt") <(printf '%s\n' "$wrappers")
 }
 
 # CACHED, AND THE CACHE IS NOT OPTIONAL. A cold scan walks every wrapper in
@@ -425,7 +502,9 @@ set_cache_file() {
         h=$(( (h * 33 + c) & 0x7fffffff ))
     done
     d=${TMPDIR:-/tmp}
-    CACHE_FILE="${d%/}/fleet-sessions-v2-${UID:-0}-${h}.tsv"
+    # v3: archived became tri-state and archive-aware liveness (2026-10-05). A
+    # v2 file holds rows computed the old way; the version keeps it unread.
+    CACHE_FILE="${d%/}/fleet-sessions-v3-${UID:-0}-${h}.tsv"
 }
 
 # Current epoch seconds without forking where bash can (4.2+); date otherwise.
@@ -493,15 +572,16 @@ build_views() {
 }
 
 # --- liveness ----------------------------------------------------------------
-# id  lastActivityAt  cliSessionId — one row per wrapper FILE given. jq's status
-# is checked, as in scan_wrappers: one unparseable file (a wrapper caught
-# mid-rewrite) stops jq mid-stream, and every wrapper after it would silently
-# read as idle. On failure each file is therefore read on its own.
+# id  lastActivityAt  cliSessionId  archived(1|0|?) — one row per wrapper FILE
+# given. jq's status is checked, as in scan_wrappers: one unparseable file (a
+# wrapper caught mid-rewrite) stops jq mid-stream, and every wrapper after it
+# would silently read as idle. On failure each file is therefore read on its own.
 wrapper_live_meta() {
     local q='def s: if type == "string" then . else "" end;
         [ (.sessionId | s),
           ((.lastActivityAt // 0) | if type == "number" then floor | tostring else "0" end),
-          (.cliSessionId | s) ] | @tsv'
+          (.cliSessionId | s),
+          (.isArchived | if . == true then "1" elif . == false then "0" else "?" end) ] | @tsv'
     local out rc f
     out=$(cat "$@" 2>/dev/null | jq -r "$q" 2>/dev/null; exit "${PIPESTATUS[1]}"); rc=$?
     if (( rc != 0 )); then
@@ -511,33 +591,42 @@ wrapper_live_meta() {
     printf '%s\n' "$out" | tr -d '\r'    # CRLF from a Windows-native jq — see scan_wrappers
 }
 
-# Authoritative liveness, bypassing the cache: "id<TAB>1|0" for each session id
-# given, in the order given. Accepts store ids (local_<uuid>) and T-row ids
-# (cli:<uuid>); an unknown id is 0.
+# Authoritative liveness, bypassing the cache: "id<TAB>live<TAB>archived" for
+# each session id given, in the order given; archived is 1|0|? off the wrapper,
+# or - when none was read. Accepts store ids (local_<uuid>) and T-row ids
+# (cli:<uuid>); an unknown id is 0 and -. With LM_CWD=1 (`state`) a 4th column
+# carries an archived session's last recorded cwd.
 # The cache trades staleness for speed, and stale-idle-but-actually-live is the
 # one direction that would let the land gate through when it should refuse — so
 # every gate decision re-reads here. Live = the newer of the wrapper's
 # lastActivityAt and the session's newest transcript write, its subagents'
 # included (a session fanned out to subagents can go quiet in its own file while
-# they work). A wrapper found in several stores takes its newest timestamp.
+# they work); for an archived session, only a write newer than the archive
+# (header). A wrapper found in several stores takes its newest timestamp, and
+# counts as archived only when every copy says so.
 # BATCHED ON PURPOSE: one walk of the stores and one of the transcript roots, for
 # any number of ids. The per-session read it replaced cost ~3s here (it globbed
 # every root twice), so `at --fresh` on a checkout with a few dozen past
 # claimants took ~48s one session at a time and ~9s batched (measured
 # 2026-09-28). The walk finds exactly what those globs did:
 # <root>/<dir>/<cli>.jsonl and <root>/<dir>/<cli>/subagents/*.jsonl.
+LM_CWD=0
 live_many() {
     (( $# )) || return 0
     load_dirs
-    local id la c f fmt=() files=() names=() stats=() clis=() wmeta="" tmeta=""
+    local id la c ar f files=() names=() stats=() clis=() wmeta="" wmt="" tmeta=""
     for id in "$@"; do [[ -z "$id" || "$id" == cli:* ]] || names+=(-o -name "$id.json"); done
     if (( ${#names[@]} && ${#STORES[@]} )) && command -v jq >/dev/null 2>&1; then
         while IFS= read -r f; do [[ -n "$f" ]] && files+=("$f"); done \
             < <(find "${STORES[@]}" -type f \( "${names[@]:1}" \) 2>/dev/null)
-        (( ${#files[@]} )) && wmeta=$(wrapper_live_meta "${files[@]}")
+        if (( ${#files[@]} )); then
+            wmeta=$(wrapper_live_meta "${files[@]}")
+            stat_flavour
+            wmt=$(printf '%s\0' "${files[@]}" | xargs -0 stat "${_STATFMT[@]}" 2>/dev/null | stat_to_ids)
+        fi
     fi
 
-    while IFS=$'\t' read -r id la c; do [[ -n "$c" ]] && clis+=("$c"); done <<< "$wmeta"
+    while IFS=$'\t' read -r id la c ar; do [[ -n "$c" ]] && clis+=("$c"); done <<< "$wmeta"
     for id in "$@"; do [[ "$id" == cli:* ]] && clis+=("${id#cli:}"); done
     names=()
     for c in ${clis[@]+"${clis[@]}"}; do names+=(-o -name "$c.jsonl" -o -name "$c"); done
@@ -552,38 +641,77 @@ live_many() {
         done < <(find "${TROOTS[@]}" -mindepth 2 -maxdepth 2 \( "${names[@]:1}" \) 2>/dev/null)
     fi
     if (( ${#stats[@]} )); then
-        # Probed, never tried-then-fallen-back — see scan_transcripts.
-        if stat -c '%Y' / >/dev/null 2>&1; then fmt=(-c '%Y %n'); else fmt=(-f '%m %N'); fi
-        tmeta=$(printf '%s\0' "${stats[@]}" | xargs -0 stat "${fmt[@]}" 2>/dev/null | awk '
+        stat_flavour
+        # cli  newestMs  newestOwnTranscript — the session's own file, not a
+        # subagent's, is where `state` reads the last recorded cwd.
+        tmeta=$(printf '%s\0' "${stats[@]}" | xargs -0 stat "${_STATFMT[@]}" 2>/dev/null | awk '
             NF >= 2 {
                 m = $1 + 0; p = $0; sub(/^[^ ]+ /, "", p); n = split(p, a, "/")
-                c = (n > 2 && a[n-1] == "subagents") ? a[n-2] : a[n]; sub(/\.jsonl$/, "", c)
+                sa = (n > 2 && a[n-1] == "subagents")
+                c = sa ? a[n-2] : a[n]; sub(/\.jsonl$/, "", c)
                 if (!(c in b) || m > b[c]) b[c] = m
+                if (!sa && (!(c in om) || m > om[c])) { om[c] = m; op[c] = p }
             }
-            END { for (c in b) printf "%s\t%.0f\n", c, b[c] * 1000 }')
+            END { for (c in b) printf "%s\t%.0f\t%s\n", c, b[c] * 1000, op[c] }')
     fi
 
-    local now_s; now_s=$(date +%s)
-    awk -F'\t' -v now="$(( now_s * 1000 ))" -v win="$(( LIVE_SECS * 1000 ))" '
-        FILENAME == ARGV[1] { if ($1 != "") t[$1] = $2 + 0; next }
-        FILENAME == ARGV[2] {
-            if ($1 != "" && (!($1 in la) || $2 + 0 > la[$1])) { la[$1] = $2 + 0; cl[$1] = $3 }
+    local now_s rows; now_s=$(date +%s)
+    rows=$(awk -F'\t' -v now="$(( now_s * 1000 ))" -v win="$(( LIVE_SECS * 1000 ))" \
+               -v grace="$(( ARCHIVE_GRACE_SECS * 1000 ))" '
+        FILENAME == ARGV[1] { if ($1 != "") { t[$1] = $2 + 0; tp[$1] = $3 }; next }
+        FILENAME == ARGV[2] { if ($1 != "" && (!($1 in wm) || $2 + 0 < wm[$1])) wm[$1] = $2 + 0; next }
+        FILENAME == ARGV[3] {
+            if ($1 == "") next
+            if (!($1 in la) || $2 + 0 > la[$1]) { la[$1] = $2 + 0; cl[$1] = $3 }
+            # Archived only if EVERY copy says so; open outranks unreadable.
+            if (!($1 in ar) || $4 == "0" || ($4 == "?" && ar[$1] == "1")) ar[$1] = $4
             next
         }
         $0 != "" {
-            last = 0; c = ""
+            last = 0; c = ""; a = "-"
             if (substr($0, 1, 4) == "cli:") c = substr($0, 5)
-            else if ($0 in la) { last = la[$0]; c = cl[$0] }
-            if (c != "" && (c in t) && t[c] > last) last = t[c]
-            printf "%s\t%d\n", $0, (last > 0 && now - last <= win) ? 1 : 0
-        }' <(printf '%s\n' "$tmeta") <(printf '%s\n' "$wmeta") <(printf '%s\n' "$@")
+            else if ($0 in la) { last = la[$0]; c = cl[$0]; a = ar[$0] }
+            tx = (c != "" && (c in t)) ? t[c] : 0
+            if (a == "1" && ($0 in wm)) last = (tx > wm[$0] + grace) ? tx : 0
+            else if (tx > last) last = tx
+            live = (last > 0 && now - last <= win) ? 1 : 0
+            printf "%s\t%d\t%s\t%s\n", $0, live, a, (c != "" && (c in tp)) ? tp[c] : ""
+        }' <(printf '%s\n' "$tmeta") <(printf '%s\n' "$wmt") <(printf '%s\n' "$wmeta") <(printf '%s\n' "$@"))
+    [[ -n "$rows" ]] || return 0
+    if (( LM_CWD )); then
+        local live p lc
+        while IFS=$'\t' read -r id live ar p; do
+            [[ -n "$id" ]] || continue
+            lc=""
+            [[ "$ar" == 1 && -n "$p" ]] && lc=$(last_cwd_of "$p")
+            [[ -n "$lc" ]] && lc=$(norm_path "$lc")
+            printf '%s\t%s\t%s\t%s\n' "$id" "$live" "$ar" "$lc"
+        done <<< "$rows"
+    else
+        printf '%s\n' "$rows" | cut -f1-3
+    fi
 }
 
 # One session's liveness: "1" or "0". A one-id call into live_many, so there is
 # exactly one definition of "live" for every gate that asks.
 session_live_now() {
-    local r; r=$(live_many "${1:-}"); r=${r##*$'\t'}
-    if [[ "$r" == 1 ]]; then printf '1'; else printf '0'; fi
+    local r id live; r=$(live_many "${1:-}")
+    IFS=$'\t' read -r id live _ <<< "$r"
+    if [[ "$live" == 1 ]]; then printf '1'; else printf '0'; fi
+}
+
+# The fresh read `fleet prune` takes over every session claiming one of its
+# worktrees, before it classifies anything. The cached index is up to 15
+# minutes old and `fleet land` builds it, so the usual sequence — land, archive,
+# prune — read rows written before the archive: every just-archived owner still
+# looked open. The last-cwd column is what lets an archived session's TRANSCRIPT
+# claim (a lossy directory key) count as evidence: it must name the tree exactly.
+cmd_state() {
+    (( $# )) || { echo "usage: $SELF state <sessionId>..." >&2; return 2; }
+    load_dirs
+    (( ${#STORES[@]} )) || return 3
+    command -v jq >/dev/null 2>&1 || return 3
+    LM_CWD=1 live_many "$@"
 }
 
 # --- self --------------------------------------------------------------------
@@ -728,7 +856,7 @@ cmd_main() {
 # file belongs to its first path component (<cli>/subagents/<agent>.jsonl):
 # a session fanned out to subagents can go quiet in its own file meanwhile.
 live_transcripts_under() {
-    local key=${1:-} d dirs=() now_s fmt=()
+    local key=${1:-} d dirs=() now_s
     [[ -n "$key" ]] || return 0
     load_dirs
     (( ${#TROOTS[@]} )) || return 0
@@ -736,10 +864,9 @@ live_transcripts_under() {
         < <(find "${TROOTS[@]}" -mindepth 1 -maxdepth 1 -type d -iname "$key" 2>/dev/null)
     (( ${#dirs[@]} )) || return 0
     now_s=$(date +%s)
-    # Probed, never tried-then-fallen-back — see scan_transcripts.
-    if stat -c '%Y' / >/dev/null 2>&1; then fmt=(-c '%Y %n'); else fmt=(-f '%m %N'); fi
+    stat_flavour
     find "${dirs[@]}" -mindepth 1 -maxdepth 3 -type f -name '*.jsonl' \
-            -mmin "-$(( LIVE_SECS / 60 + 2 ))" -exec stat "${fmt[@]}" {} + 2>/dev/null \
+            -mmin "-$(( LIVE_SECS / 60 + 2 ))" -exec stat "${_STATFMT[@]}" {} + 2>/dev/null \
     | awk -v key="$key" -v now="$now_s" -v win="$LIVE_SECS" '
         NF >= 2 {
             m = $1 + 0; p = $0; sub(/^[^ ]+ /, "", p)
@@ -777,7 +904,8 @@ wrappers_for_clis() {
         ($want | split("\n")) as $w
         | (.cliSessionId | s) as $c
         | select($c != "" and any($w[]; . == $c))
-        | [ $c, (.sessionId | s), (.title | s), (if .isArchived == true then "1" else "0" end) ]
+        | [ $c, (.sessionId | s), (.title | s),
+            (.isArchived | if . == true then "1" elif . == false then "0" else "?" end) ]
         | @tsv
     ' 2>/dev/null | tr -d '\r'    # CRLF from a Windows-native jq — see scan_wrappers
     return 0
@@ -800,22 +928,24 @@ freshen_claims() {
                     print k, "", "cli:" $1, "(no Desktop record - CLI or headless session)", $2, 0, 1, "transcript"
             }' <(wrappers_for_clis ${clis[@]+"${clis[@]}"}) <(printf '%s\n' "$tx"))
     fi
-    # Every cached claimant's liveness, re-read in one batch. A session the probe
-    # just saw writing here is live by that direct observation, and the map
-    # lists it last so nothing can read it back down to idle.
+    # Every claimant's liveness and archive flag, re-read in one batch, the
+    # probe's included. A session the probe just saw writing here is live by
+    # that direct observation, and the map lists it last so nothing can read it
+    # back down to idle — UNLESS it is archived. An archive's own shutdown write
+    # is exactly what the probe sees for LIVE_SECS afterwards, so an archived
+    # session's verdict is live_many's: live only on a write after the archive.
     local ids=()
     while IFS= read -r id; do [[ -n "$id" ]] && ids+=("$id"); done \
-        < <(printf '%s\n' "$rows" | awk -F'\t' 'NF && !s[$3]++ { print $3 }')
+        < <(printf '%s\n%s\n' "$rows" "$probe" | awk -F'\t' 'NF && !s[$3]++ { print $3 }')
     fresh_map=$(live_many ${ids[@]+"${ids[@]}"}
-                printf '%s\n' "$probe" | awk -F'\t' -v OFS='\t' 'NF { print $3, 1 }')
-    # Cached rows first (live column overwritten), then the probe's; one row
-    # per (session, route).
-    {
-        awk -F'\t' -v OFS='\t' '
-            FILENAME == ARGV[1] { if ($1 != "") L[$1] = $2; next }
-            NF { if ($3 in L) $7 = L[$3]; print }' <(printf '%s' "$fresh_map") <(printf '%s\n' "$rows")
-        printf '%s\n' "$probe"
-    } | awk -F'\t' 'NF && !seen[$3 FS $8]++'
+                printf '%s\n' "$probe" | awk -F'\t' -v OFS='\t' 'NF && $6 != "1" { print $3, 1, "-" }')
+    # Cached rows first, then the probe's, live and archived columns
+    # overwritten from the map; one row per (session, route).
+    awk -F'\t' -v OFS='\t' '
+        FILENAME == ARGV[1] { if ($1 != "") { L[$1] = $2; if ($3 != "-" && $3 != "") A[$1] = $3 }; next }
+        NF { if ($3 in L) $7 = L[$3]; if ($3 in A) $6 = A[$3]; print }' \
+        <(printf '%s' "$fresh_map") <(printf '%s\n' "$rows" "$probe") \
+    | awk -F'\t' 'NF && !seen[$3 FS $8]++'
 }
 
 cmd_at() {
@@ -860,6 +990,7 @@ case "${1:---help}" in
     main)           cmd_main; exit $? ;;
     live)           shift; [[ -z "${1:-}" ]] && { echo "usage: $SELF live <sessionId>" >&2; exit 2; }
                     session_live_now "$1"; echo; exit 0 ;;
+    state)          shift; cmd_state "$@"; exit $? ;;
     self)           self_session_id || exit 3; exit 0 ;;
     *)              echo "$SELF: unknown command '$1'" >&2; usage >&2; exit 2 ;;
 esac
