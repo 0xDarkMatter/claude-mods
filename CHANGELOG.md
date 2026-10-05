@@ -128,6 +128,12 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **`fleet release` no longer flakes on Windows when a state file is briefly held.**
+  The MAIN pin and the daemon PID files were removed with a bare `rm -f`, which fails
+  (EBUSY) while another process has the file open; the test discarded that error, so it
+  read as a resolution bug. A `remove_state_file` helper now retries for up to
+  `FLEET_RM_RETRY_SECS` (default 5) and counts success only when the file is gone, else
+  exits 1 naming it. New cases hold the pin open for real and failed against the old code.
 - **Gates went red when Claude Code reserved the plugin name** - Claude Code 2.1.287
   launched Claude Mods and reserved plugin names that pass as Anthropic's own, naming
   `claude-mods` explicitly. `claude plugin validate` now rejects it (install and load
