@@ -80,7 +80,12 @@
     "pnpm11_settings_file": "pnpm-workspace.yaml",
     "bun_text_lockfile": "bun.lock",
     "ddev_node_auto": "nodejs_version: auto",
-    "composer_why_not": "composer why-not php"
+    "composer_why_not": "composer why-not php",
+    "composer_v1_end": "2026-05-30"
+  },
+  "composer": {
+    "_comment": "From https://getcomposer.org/versions: the '1' channel is marked eol with maintenance-until. pm-audit's php.composer.v1 message quotes it; --live re-reads it.",
+    "v1_maintenance_until": "2026-05-30"
   },
   "native_cli_names": {
     "_comment": "Tools whose official channel is NOT the npm package of that bare name (winget/brew/apt/cargo/GitHub releases). `npx <name>` runs whatever owns that npm name - possibly a squatter. pm-audit flags npx.native-cli on these.",

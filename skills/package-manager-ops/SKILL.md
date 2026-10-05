@@ -92,7 +92,10 @@ A read-only scan of one repo root. It finds conflicting lockfiles, lockfiles tha
 disagree with their manifests, Node and PHP pins that are missing, disagree with each
 other or with DDEV, or name end-of-life releases, unpinned `npx`/`dlx` use in scripts,
 docs and CI, native CLIs routed through npx, Bower and node-sass, and committed registry
-credentials (reported by file and line, never by value).
+credentials (reported by file and line, never by value). From CI configs, Dockerfiles and
+appspec hook scripts it reports unfrozen installs, deploys without `--no-dev`, Composer 1,
+and credentials written into a Docker build context. It lists nested package roots and
+flags them when they use another manager.
 
 ```bash
 bash scripts/run-python.sh scripts/pm-audit.py path/to/repo
@@ -103,8 +106,9 @@ bash scripts/run-python.sh scripts/pm-audit.py --no-docs --as-of 2027-01-01 path
 - Exit `0` clean, `10` findings, `2` usage, `3` path missing. Plain output is one TSV
   row per finding: severity, id, file, message, fix. Advisory notes go to stderr.
 - `--as-of` moves the end-of-life line (PHP 8.2 dies on 2026-12-31: ask before you
-  ship). `--no-docs` skips the docs/CI walk; package.json scripts are still checked.
-- It reads root manifests only. Every finding id, its meaning and its fix are in
+  ship). `--no-docs` skips the npx walk of docs; package.json scripts and the CI and
+  deploy checks still run.
+- It audits root manifests; run it again on each nested root it lists. Every finding id, its meaning and its fix are in
   [diagnostics.md](references/diagnostics.md#pm-audit-finding-ids). DDEV's own
   `.ddev/` config is `ddev-ops`' auditor; pm-audit only checks that DDEV agrees.
 - `scripts/run-python.sh` picks the first real Python 3.8+ (`python3`, `python`, `py`),

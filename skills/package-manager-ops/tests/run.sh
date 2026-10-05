@@ -199,6 +199,14 @@ row(proc.returncode == 0, f"--no-docs skips README npx (exit {proc.returncode})"
 dest = tmp / "m" / "npx-unpinned-script"
 proc = subprocess.run([sys.executable, audit, "--json", "--no-docs", "--as-of", "2026-10-05", str(dest)], capture_output=True, text=True)
 row(proc.returncode == 10, f"--no-docs still checks package.json scripts (exit {proc.returncode})")
+# The engine-strict note is npm advice: present for an npm repo without it, absent for pnpm.
+def notes_of(case):
+    d = tmp / "m" / case
+    (d / ".npmrc").unlink(missing_ok=True)
+    p = subprocess.run([sys.executable, audit, "--json", "--as-of", "2026-10-05", str(d)], capture_output=True, text=True)
+    return {n["id"] for n in json.loads(p.stdout)["meta"]["notes"]} if p.stdout.strip().startswith("{") else set()
+row("js.engines.unenforced" in notes_of("clean"), "engines note fires for an npm repo without engine-strict")
+row("js.engines.unenforced" not in notes_of("clean-pnpm"), "engines note stays silent for a pnpm repo (.npmrc advice is npm's)")
 # The EOL check is date-driven: Node 22 is fine on 2026-10-05 and dead after 2027-04-30.
 dest = tmp / "m" / "node-pin-disagree-nvmrc"
 proc = subprocess.run([sys.executable, audit, "--json", "--as-of", "2027-05-01", str(dest)], capture_output=True, text=True)

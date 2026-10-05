@@ -2,8 +2,9 @@
 """Read-only package-manager audit of one repo root: lockfiles, Node/PHP pins, npx use, legacy tools.
 
 Usage:   pm-audit.py [--json] [--no-docs] [--as-of YYYY-MM-DD] [--facts FILE] [--limit N] PATH
-Input:   argv only. PATH is a repo root. Root manifests only: workspaces and nested
-         packages are not walked (doc/script files ARE walked for npx use).
+Input:   argv only. PATH is a repo root. Root manifests are audited; nested package
+         roots are only listed (and flagged when they use another manager). Docs,
+         scripts, CI configs, Dockerfiles and appspec hook scripts are read too.
 Output:  stdout = one TSV row per finding: severity, id, file[:line], message, fix.
          --json: {"data": [finding...], "meta": {...}} with schema
          claude-mods.package-manager-ops.pm-audit/v1. Data only.
@@ -19,16 +20,17 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   ddev.node.unpinned  php.require.missing  php.platform.unset
   php.pin.disagree  php.eol  php.lockfile.missing  php.lockfile.stale
   npx.unpinned  npx.native-cli  legacy.bower  legacy.node-sass
-  registry.token.committed  registry.authjson.committed
+  registry.token.committed  registry.authjson.committed  registry.credentials.image
+  js.manager.mixed  deploy.install.unfrozen  deploy.composer.dev  php.composer.v1
 
-It never prints a secret: a committed token is reported as file:line only.
+It never prints a secret: a committed or CI-written credential is reported as file:line only.
 
 Why one file: the skill folder must run when copied alone into another plugin, launched
 through scripts/run-python.sh with nothing on sys.path, so this stays a single stdlib
 module. Jump by section marker instead of splitting it:
   === version ranges ===   npm semver + Composer constraint intervals (admits())
   === small readers ===    JSON/JSONC, a block-mapping YAML subset, markdown code lines
-  === the audit ===        Audit: js, node_pins, php, npx, legacy, secrets
+  === the audit ===        Audit: js, nested, node_pins, php, npx, deploy, legacy, secrets
   main()                   argv, output envelope, exit codes
 
 Examples:
@@ -40,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import fnmatch
 import json
 import os
 import re
@@ -76,6 +79,34 @@ SKIP_DIRS = {".git", "node_modules", "vendor", "bower_components", ".yarn", ".pn
 # agent config that would repeat one finding a dozen times.
 DOT_DIRS_SCANNED = {".github", ".gitlab", ".circleci", ".buildkite", ".husky", ".ddev", ".devcontainer"}
 HOOK_DIRS = {".husky", ".ddev"}
+# CI configs: every install there must be frozen. A workflow is a *deploy* (production
+# install, so `composer install` needs --no-dev) when it ships something and runs no tests;
+# a test job legitimately installs dev packages. Dockerfiles (not *dev*/*test*) and AWS
+# CodeDeploy appspec hook scripts always build or run production.
+CI_GLOBS = (".github/workflows/*.yml", ".github/workflows/*.yaml", ".gitlab-ci.yml",
+            "bitbucket-pipelines.yml", "azure-pipelines.yml", ".circleci/config.yml",
+            "buildspec*.yml", "Jenkinsfile")
+DEPLOY_MARKERS = re.compile(
+    r"docker\s+(?:buildx\s+)?(?:build|push)|aws\s+(?:ecr|deploy|s3\s+sync)|codedeploy|ansible-playbook|"
+    r"action-ansible-playbook|ansistrano|\brsync\s|\bscp\s|wrangler\s+deploy|vercel\s+(?:deploy|--prod)|"
+    r"netlify\s+deploy|kubectl\s+apply|helm\s+upgrade|(?:serverless|sls)\s+deploy|fly(?:ctl)?\s+deploy|"
+    r"\bdep\s+deploy|envoy\s+run", re.I)
+TEST_MARKERS = re.compile(r"phpunit|\bpest\b|codecept|artisan\s+test|composer\s+(?:run(?:-script)?\s+)?test\b", re.I)
+INSTALL_CMD = re.compile(r"(?:^|[\s;&|(\"'`])(npm|yarn|pnpm|bun|composer(?:\.phar)?)(?=\s|$)([^;&|\n]*)")
+COMPOSER_V1 = re.compile(r"composer:v1\b|composer\s+self-update\s+--1\b|(?:FROM|--from=)\s*composer:1(?:[.\s]|$)", re.I)
+# Group 1 = target path, group 2 = the credential file name.
+CRED_WRITE = re.compile(r"(?:>{1,2}|\btee(?:\s+-a)?)\s*[\"']?([^\s\"'<>|;&]*?(auth\.json|\.npmrc))\b")
+CRED_CONFIG = re.compile(r"composer\s+config\s+(?!-g\b|--global\b)(?:--\S+\s+)*(?:http-basic|bearer|github-oauth|gitlab-token|gitlab-oauth|bitbucket-oauth)\.")
+COPY_CONTEXT = re.compile(r"^\s*(?:ADD|COPY)\s+(?:--\S+\s+)*\.\/?\s", re.I)
+# Nested lockfiles below these are test data or someone else's tree, not package roots.
+NESTED_SKIP = {"fixtures", "__fixtures__", "test-fixtures"}
+# CMS plugin trees put widget packages 8+ levels down (src/plugins/x/src/templates/...).
+NESTED_MAX_DEPTH = 10
+# In YAML CI configs only these keys hold commands the runner executes; anything else
+# (a release `body:`, an `env:` value) is text, even when it quotes a command.
+YAML_COMMAND_KEY = re.compile(r"^(\s*)(?:-\s+)?(run|script|before_script|after_script|commands|command)\s*:\s*(.*)$")
+# Lockfile maintenance, not an install: refreshing the lock is the point of these.
+LOCK_ONLY = ("--package-lock-only", "--lockfile-only", "--mode=update-lockfile", "--lock")
 DOC_SUFFIXES = {".md", ".markdown", ".sh", ".bash", ".ps1", ".yml", ".yaml", ".mk"}
 DOC_NAMES = {"makefile", "justfile", "dockerfile", "procfile"}
 MAX_DOC_BYTES = 512 * 1024
@@ -299,6 +330,29 @@ def code_lines(text: str, markdown: bool):
             yield n, " ; ".join(spans)
 
 
+def yaml_command_lines(text: str):
+    """Yield (line_no, command) from a YAML CI config: inline `run: cmd` values, and the
+    lines of block scalars or lists under a command key. Comments are skipped."""
+    owner = None  # indent of the command key whose block we are inside
+    for n, line in enumerate(text.splitlines(), 1):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if owner is not None and indent <= owner:
+            owner = None
+        m = YAML_COMMAND_KEY.match(line)
+        if m:
+            value = m.group(3).strip()
+            if value and value[0] not in "|>":
+                yield n, value
+                owner = None
+            else:
+                owner = len(m.group(1))
+            continue
+        if owner is not None:
+            yield n, re.sub(r"^\s*-\s+", "", line)
+
+
 def rel(root: Path, p: Path) -> str:
     try:
         return p.relative_to(root).as_posix()
@@ -339,9 +393,11 @@ class Audit:
 
     def run(self):
         self.js()
+        self.nested()
         self.node_pins()
         self.php()
         self.npx()
+        self.deploy()
         self.legacy()
         self.secrets()
         return self
@@ -564,7 +620,11 @@ class Audit:
                      "no Node version pin (.nvmrc, .node-version, engines.node, devEngines, volta, .tool-versions)",
                      "add .nvmrc with the production major and engines.node to match")
             return
-        if eng and not re.search(r"^\s*engine-strict\s*=\s*true\b", read_text(self.root / ".npmrc") or "", re.M):
+        # engine-strict is npm's switch; pnpm and Yarn treat engines their own way, so
+        # telling a pnpm repo to edit .npmrc would be wrong advice.
+        pm_name = str(self.pkg.get("packageManager") or "").partition("@")[0]
+        npm_repo = {m for m in self.meta["managers"] if m != "composer"} <= {"npm"} and pm_name in ("", "npm")
+        if eng and npm_repo and not re.search(r"^\s*engine-strict\s*=\s*true\b", read_text(self.root / ".npmrc") or "", re.M):
             self.note("js.engines.unenforced", "package.json",
                       "engines.node is advisory to npm unless .npmrc sets engine-strict=true")
 
@@ -637,12 +697,15 @@ class Audit:
                          "composer.json requires packages missing from composer.lock: " + ", ".join(missing[:8]),
                          "run `composer update <package>` for the new requirement and commit composer.lock")
         php_req = req.get("php")
-        if not php_req:
+        # A composer.json that requires no packages (`{"name": ...}`, used to make a JS
+        # asset repo installable through Composer) resolves nothing: PHP pins are noise.
+        resolves = bool(pkgs)
+        if not php_req and resolves:
             self.add("warn", "php.require.missing", "composer.json",
                      "no require.php - nothing stops installing on a PHP the code cannot run on",
                      'add "php": "^<production major.minor>" to require')
         platform = ((c.get("config") or {}).get("platform") or {}).get("php") if isinstance(c.get("config"), dict) else None
-        if not platform and not is_lib:
+        if not platform and not is_lib and resolves:
             self.add("warn", "php.platform.unset", "composer.json",
                      "no config.platform.php - `composer update` resolves for whatever PHP runs it, not production",
                      'set config.platform.php to the production PHP version, e.g. "8.3.0" (references/version-pinning.md)')
@@ -800,6 +863,157 @@ class Audit:
                     if re.search(r"npx|dlx|bunx|bun x|npm exec", line):
                         inspect(rel(self.root, p), n, line, False)
         self.meta["files_scanned"] = scanned
+
+    # ---- nested package roots (pm-audit audits the root; it only lists these) ----
+    def nested(self):
+        root_mgrs = {JS_LOCKFILES[n] for n in JS_LOCKFILES if (self.root / n).is_file()}
+        found: list[tuple[str, str]] = []
+        for dirpath, dirnames, filenames in os.walk(self.root):
+            parts = Path(dirpath).relative_to(self.root).parts
+            dirnames[:] = [] if len(parts) >= NESTED_MAX_DEPTH else sorted(
+                d for d in dirnames if d not in SKIP_DIRS and d not in NESTED_SKIP and not d.startswith("."))
+            if parts:
+                found += [(Path(dirpath, f).relative_to(self.root).as_posix(), JS_LOCKFILES[f])
+                          for f in sorted(filenames) if f in JS_LOCKFILES]
+        self.meta["nested_lockfiles"] = [p for p, _ in found]
+        if not found:
+            return
+        self.note("js.nested.roots", found[0][0],
+                  f"{len(found)} nested package root(s) with their own lockfile ("
+                  + ", ".join(f"{p} [{m}]" for p, m in found[:6])
+                  + ") - pm-audit audits only the root; run it on each")
+        base = root_mgrs or {found[0][1]}
+        odd = [(p, m) for p, m in found if m not in base]
+        if odd:
+            self.add("warn", "js.manager.mixed", odd[0][0],
+                     f"the root uses {', '.join(sorted(base))} but nested packages use another manager: "
+                     + ", ".join(f"{p} [{m}]" for p, m in odd[:6]),
+                     "one manager per repo: convert the odd ones out (references/detect-and-choose.md)")
+
+    # ---- CI and deploy: frozen installs, --no-dev, Composer 1, credentials in images ----
+    def deploy(self):
+        files: list[tuple[Path, str]] = []  # (path, "ci" | "deploy")
+        for g in CI_GLOBS:
+            files += [(p, "ci") for p in sorted(self.root.glob(g)) if p.is_file()]
+        dockerfiles = [p for p in sorted(self.root.glob("Dockerfile*"))
+                       if p.is_file() and not re.search(r"dev|test", p.name, re.I)]
+        files += [(p, "deploy") for p in dockerfiles]
+        appspec = self.root / "appspec.yml"
+        if appspec.is_file():
+            for loc in re.findall(r"^\s*-?\s*location:\s*[\"']?([^\s\"'#]+)", read_text(appspec) or "", re.M):
+                hook = (self.root / loc).resolve()
+                if hook.is_file() and self.root in hook.parents:
+                    files.append((hook, "deploy"))
+        yarn_lock = read_text(self.root / "yarn.lock") if (self.root / "yarn.lock").is_file() else ""
+        pm = str((self.pkg or {}).get("packageManager") or "")
+        berry = "__metadata:" in (yarn_lock or "")[:2000] or bool(re.match(r"yarn@[2-9]", pm))
+        writes: list[tuple[str, int, str]] = []
+        seen: set = set()
+
+        def flag(fid, rel, n, msg, fix, sev="warn"):
+            if (fid, rel, n) not in seen:
+                seen.add((fid, rel, n))
+                self.add(sev, fid, rel, msg, fix, n)
+
+        for path, kind in files:
+            text = read_text(path) or ""
+            rel = path.relative_to(self.root).as_posix()
+            ci = kind == "ci"
+            prod = kind == "deploy" or (bool(DEPLOY_MARKERS.search(text)) and not TEST_MARKERS.search(text))
+            every = list(code_lines(text, False))
+            # setup inputs (`tools: composer:v1`) are not commands, so Composer 1 is read
+            # from every line; installs and credential writes only from command keys.
+            commands = list(yaml_command_lines(text)) if path.suffix in (".yml", ".yaml") else every
+            for n, line in every:
+                if COMPOSER_V1.search(line):
+                    end = ((self.facts.get("composer") or {}).get("v1_maintenance_until")) or "2026-05-30"
+                    flag("php.composer.v1", rel, n, f"Composer 1 in {rel} - it reached end of life ({end})",
+                         "use Composer 2 (`tools: composer:v2`, the composer:2 image); see references/legacy-exits.md")
+            for n, line in commands:
+                m = CRED_WRITE.search(line) if ci else None
+                # ~/.npmrc, $HOME/... and absolute paths sit outside the build context.
+                if m and not re.match(r"(~|\$\{?HOME|/)", m.group(1)):
+                    writes.append((rel, n, m.group(2)))
+                elif ci and CRED_CONFIG.search(line):
+                    writes.append((rel, n, "auth.json"))
+                for m in INSTALL_CMD.finditer(line):
+                    self._install_line(m.group(1), m.group(2).split(), rel, n, ci, prod, berry, flag)
+            if ci:
+                self._ramsey(text, rel, prod, flag)
+        if writes:
+            copies = [p.name for p in dockerfiles if any(COPY_CONTEXT.match(l) for l in (read_text(p) or "").splitlines())]
+            ignore = [l.strip() for l in (read_text(self.root / ".dockerignore") or "").splitlines()
+                      if l.strip() and not l.strip().startswith("#")]
+            def base_pat(pat):  # "/auth.json", "**/auth.json" -> "auth.json" (no str.removeprefix: 3.8)
+                pat = pat.lstrip("/")
+                return pat[3:] if pat.startswith("**/") else pat
+
+            for rel, n, cred in writes:
+                excluded = any(not pat.startswith("!") and fnmatch.fnmatch(cred, base_pat(pat))
+                               for pat in ignore) and f"!{cred}" not in ignore and f"!/{cred}" not in ignore
+                if copies and not excluded:
+                    flag("registry.credentials.image", rel, n,
+                         f"CI writes {cred} into the Docker build context, {copies[0]} copies the whole context "
+                         f"and .dockerignore does not exclude it - the credentials ship inside the image",
+                         f"pass the credential as a step env (COMPOSER_AUTH / NODE_AUTH_TOKEN) instead of a file, "
+                         f"add {cred} to .dockerignore, and rotate credentials already pushed in images", "error")
+
+    def _install_line(self, tool, toks, rel, n, ci, prod, berry, flag):
+        """One package-manager invocation from a CI/deploy line -> findings."""
+        unfrozen = "deploy.install.unfrozen"
+        fix = "use the frozen install: npm ci / yarn install --immutable / pnpm install --frozen-lockfile / " \
+              "bun ci / composer install (references/install-semantics.md)"
+        sub = toks[0] if toks else ""
+        if any(t in ("-v", "--version", "-h", "--help") for t in toks):
+            return
+        if any(t in LOCK_ONLY or t == "--no-install" for t in toks):
+            return  # a deliberate lockfile refresh (version-bump or dependency-bot job)
+        if tool == "npm" and sub in ("install", "i", "in", "add"):
+            # Bare or `npm install <pkg>`: both resolve and can rewrite the lockfile. Only a
+            # global tool install (-g, which never touches the project) is left alone.
+            if not any(t in ("-g", "--global") or t.startswith("--location=global") for t in toks):
+                flag(unfrozen, rel, n, f"`npm {sub}` in {rel} can rewrite the lockfile and resolve new versions", fix)
+        elif tool == "yarn" and (not toks or sub == "install" or sub.startswith("-")):
+            frozen = any(t in ("--frozen-lockfile", "--immutable") for t in toks) or (ci and berry)
+            if not frozen:
+                cmd = ("yarn " + " ".join(toks[:2])).strip()
+                flag(unfrozen, rel, n, f"`{cmd}` in {rel} without --frozen-lockfile/--immutable", fix)
+        elif tool == "pnpm" and sub in ("install", "i"):
+            if "--no-frozen-lockfile" in toks or (not ci and "--frozen-lockfile" not in toks):
+                flag(unfrozen, rel, n, f"`pnpm {sub}` in {rel} is not frozen here (pnpm freezes by default only on CI)", fix)
+        elif tool == "bun" and sub in ("install", "i"):
+            if not any(t in ("--frozen-lockfile", "--production") for t in toks):
+                flag(unfrozen, rel, n, f"`bun {sub}` in {rel} without --frozen-lockfile (Bun never freezes on its own)", fix)
+        elif tool.startswith("composer"):
+            if sub in ("update", "u", "upgrade", "require", "remove"):
+                flag(unfrozen, rel, n, f"`composer {sub}` in {rel} resolves new versions instead of installing the lock", fix)
+            elif sub in ("install", "i") and prod and "--no-dev" not in toks:
+                flag("deploy.composer.dev", rel, n, f"`composer {sub}` without --no-dev in a deploy ({rel}) ships dev packages",
+                     "add --no-dev --optimize-autoloader (references/install-semantics.md#deploy-patterns)")
+
+    def _ramsey(self, text, rel, prod, flag):
+        """ramsey/composer-install is `composer install` (or update) behind action inputs."""
+        lines = text.splitlines()
+        for i, line in enumerate(lines):
+            if not re.search(r"uses:\s*[\"']?ramsey/composer-install", line):
+                continue
+            indent = len(line) - len(line.lstrip(" -"))
+            opts, versions = "", "locked"
+            for nxt in lines[i + 1:]:
+                if nxt.strip() and (len(nxt) - len(nxt.lstrip(" "))) <= indent - 2 and nxt.lstrip().startswith("-"):
+                    break
+                m = re.match(r"\s*composer-options:\s*[\"']?(.*?)[\"']?\s*$", nxt)
+                opts = m.group(1) if m else opts
+                m = re.match(r"\s*dependency-versions:\s*[\"']?(\w+)", nxt)
+                versions = m.group(1) if m else versions
+            if versions in ("highest", "lowest"):
+                flag("deploy.install.unfrozen", rel, i + 1,
+                     f"ramsey/composer-install with dependency-versions: {versions} runs `composer update` in {rel}",
+                     "drop dependency-versions (default: locked) so CI installs the lock")
+            elif prod and "--no-dev" not in opts.split():
+                flag("deploy.composer.dev", rel, i + 1,
+                     f"ramsey/composer-install without --no-dev in a deploy ({rel}) ships dev packages",
+                     'set composer-options: "--no-dev --optimize-autoloader" (references/install-semantics.md#deploy-patterns)')
 
     # ---- legacy tools ----
     def legacy(self):

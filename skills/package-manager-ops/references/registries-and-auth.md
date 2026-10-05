@@ -116,6 +116,15 @@ GitHub Actions with npm:
 Never `echo` a token to "debug" it, and never write one into a file that a later step
 uploads as an artefact.
 
+**The Docker build context is an artefact too.** A step that writes `auth.json` or a
+token-bearing `.npmrc` into the workspace, followed by `docker build .` with a Dockerfile
+that does `ADD .` or `COPY . .`, bakes the credential into an image layer, and every
+image pushed since carries it. pm-audit reports this as `registry.credentials.image`.
+Pass `COMPOSER_AUTH` or `NODE_AUTH_TOKEN` as step environment instead of writing a file;
+if a file is unavoidable, list it in `.dockerignore` (and in `.gitignore`). If images
+already shipped with it, rotate the credential: deleting it from the next image does not
+remove it from the old layers.
+
 ## Mirrors and proxies
 
 - npm, pnpm and Yarn 1: `registry=https://proxy.example.com/` in the project `.npmrc`

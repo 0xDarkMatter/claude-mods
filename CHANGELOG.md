@@ -8,6 +8,21 @@ feature releases live in the README "Recent Updates" section.
 
 ### Added
 
+- **pm-audit reads CI and deploy configs** - `package-manager-ops`' audit now covers the
+  places a lockfile is actually installed: GitHub/GitLab/Bitbucket/CodeBuild configs,
+  Dockerfiles and AWS CodeDeploy `appspec.yml` hook scripts. New findings:
+  `deploy.install.unfrozen` (`npm install`, unfrozen Yarn/pnpm/Bun, `composer update`
+  in CI or a deploy), `deploy.composer.dev` (a deploy without `--no-dev`, including the
+  ramsey/composer-install action), `php.composer.v1` (end of life since 2026-05-30), and
+  `registry.credentials.image` (CI writes `auth.json` or `.npmrc` into a Docker build
+  context that a Dockerfile copies whole). `js.manager.mixed` flags nested package roots
+  that use another manager than the root, and a `js.nested.roots` note lists them.
+  Running the audit over real agency repositories found each gap and three false
+  positives, now fixed: YAML is read only inside command keys (a command quoted in a
+  release body is text), lockfile-only refreshes pass, and a stub `composer.json` with
+  no packages no longer asks for PHP pins. The engine-strict note is now npm-only.
+  11 new fixture cases (48 in all), each seen failing first; 10 mutants killed.
+
 - **`ddev-ops` skill** - DDEV local environments, owned in one place. A 2026-10-05 read of
   36 DDEV-based agency repositories shaped it: `scripts/audit-ddev-config.py` runs 17
   checks, most seen there and each with its reason from DDEV's docs or source (v1.25.4):
