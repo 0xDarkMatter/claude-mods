@@ -1,6 +1,6 @@
 ---
 name: security-ops
-description: "Security audit orchestrator - parallel dependency scanning, SAST pattern detection, auth/config review. Dispatches 3 audit agents simultaneously, consolidates into OWASP-mapped severity report. Triggers on: security review, security audit, OWASP, XSS, SQL injection, CSRF, authentication, authorization, secrets management, input validation, secure coding, vulnerability scan, dependency audit."
+description: "Security audit orchestrator - parallel dependency scanning, SAST pattern detection, auth/config review. Dispatches 3 audit agents simultaneously, consolidates into OWASP-mapped severity report. Triggers on: security review, security audit, OWASP, XSS, SQL injection, CSRF, authentication, authorization, secrets management, input validation, secure coding, vulnerability scan, dependency audit. Use when auditing or hardening an app before release - e.g. 'security review this PR', 'scan our dependencies for CVEs', 'check the auth and session config', 'find hardcoded secrets'."
 license: MIT
 allowed-tools: "Read Edit Write Bash Glob Grep Agent TaskCreate TaskUpdate"
 metadata:
@@ -125,7 +125,8 @@ You are a security code scanner. Your job is to find vulnerability patterns in s
 ## Domain Knowledge
 First, read these files for scan patterns and OWASP context:
 - Read: skills/security-ops/scripts/security-scan.sh
-- Read: skills/security-ops/references/owasp-detailed.md
+- Read: skills/security-ops/references/owasp-top10-a01-a05.md
+- Read: skills/security-ops/references/owasp-top10-a06-a10.md
 
 ## Scope
 - Files to scan: {scope from T1 - changed files or full codebase}
@@ -174,6 +175,7 @@ You are a security reviewer specializing in authentication, authorization, and s
 ## Domain Knowledge
 First, read these files for auth patterns and header requirements:
 - Read: skills/security-ops/references/auth-patterns.md
+- Read: skills/security-ops/references/auth-account-protection.md
 - Read: skills/security-ops/references/secure-headers.md
 
 ## Scope
@@ -258,7 +260,7 @@ You are handling a security remediation dispatched by the security-ops orchestra
 
 ## Domain Knowledge
 First, read for context:
-- Read: skills/security-ops/references/owasp-detailed.md
+- Read: the owasp-top10-*.md half that holds the finding's category (A01-A05 or A06-A10)
 - Read: [Preload column for the finding's language]
 
 ## Finding to Fix
@@ -334,8 +336,10 @@ If agent dispatch fails, fall back to inline scanning:
 | File | Contents |
 |------|----------|
 | `references/audit-quickref.md` | OWASP table, input validation, output encoding, auth checklist, secrets rules |
-| `references/owasp-detailed.md` | Full OWASP Top 10 with examples and prevention strategies |
-| `references/auth-patterns.md` | JWT, OAuth2, session management, bcrypt, argon2, MFA |
+| `references/owasp-top10-a01-a05.md` | OWASP A01-A05 (access control, crypto, injection, design, misconfig) with examples |
+| `references/owasp-top10-a06-a10.md` | OWASP A06-A10 (components, authn, integrity, logging, SSRF) with examples |
+| `references/auth-patterns.md` | Password hashing, session management, JWT, OAuth2 |
+| `references/auth-account-protection.md` | MFA (TOTP, backup codes), rate limiting, lockout, password reset |
 | `references/crypto-patterns.md` | AES-GCM, RSA, key management, hashing, digital signatures |
 | `references/secure-headers.md` | CSP, HSTS, X-Frame-Options, Referrer-Policy, Permissions-Policy |
 

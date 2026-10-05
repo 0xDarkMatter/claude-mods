@@ -2,6 +2,17 @@
 
 Secure cryptographic implementations.
 
+## Contents
+
+- Symmetric Encryption
+- Key Derivation
+- Hashing
+- Digital Signatures
+- Secure Random
+- Key Storage
+- Common Mistakes
+- Quick Reference
+
 ## Symmetric Encryption
 
 ### AES-GCM (Recommended)
@@ -246,15 +257,9 @@ def decrypt_with_kms(ciphertext: bytes) -> bytes:
 
 ## Common Mistakes
 
-### DON'T: Use ECB Mode
-
-```python
-# WRONG - ECB reveals patterns
-cipher = Cipher(algorithms.AES(key), modes.ECB())
-
-# CORRECT - Use GCM or CBC with HMAC
-cipher = Cipher(algorithms.AES(key), modes.GCM(iv))
-```
+ECB mode (use GCM) and MD5/SHA-1 for passwords (use bcrypt/Argon2) are shown as
+WRONG/CORRECT pairs under A02 in `owasp-top10-a01-a05.md`; password hashing in full is
+in `auth-patterns.md`.
 
 ### DON'T: Reuse Nonces/IVs
 
@@ -277,24 +282,12 @@ def encrypt(data, key):
 from cryptography.fernet import Fernet
 ```
 
-### DON'T: Use MD5 or SHA1 for Security
-
-```python
-# WRONG - Weak hash
-import hashlib
-hash = hashlib.md5(password.encode())
-
-# CORRECT - Use bcrypt for passwords
-import bcrypt
-hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt())
-```
-
 ## Quick Reference
 
 | Purpose | Algorithm | Library |
 |---------|-----------|---------|
 | Password hashing | bcrypt, Argon2 | `bcrypt`, `argon2-cffi` |
-| Symmetric encryption | AES-256-GCM | `cryptography` |
+| Symmetric encryption | AES-GCM, 256-bit key | `cryptography` |
 | Key derivation | PBKDF2, Argon2 | `cryptography`, `argon2` |
 | Data integrity | SHA-256 | `hashlib` |
 | Message auth | HMAC-SHA256 | `hmac` |

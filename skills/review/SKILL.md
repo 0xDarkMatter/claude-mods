@@ -175,7 +175,8 @@ model: "sonnet"
 Prompt includes:
   - Skill preloading (domain knowledge):
     "First, read these files for review context:
-     - Read: skills/security-ops/references/owasp-detailed.md
+     - Read: skills/security-ops/references/owasp-top10-a01-a05.md
+     - Read: skills/security-ops/references/owasp-top10-a06-a10.md
      - Read: skills/testing-ops/SKILL.md
      - Read: [Preload column for the matched file pattern]"
   - Diff content

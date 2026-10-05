@@ -88,6 +88,80 @@ else
   printf '  SKIP  rg-absent shim unavailable on this host (CI runs it for real)\n'
 fi
 
+printf '%s\n' '-- skill shape (port-friendly contract) --'
+# This block asserts on the skill's OWN frontmatter and files (SKILL-CREATION-PROTOCOL
+# Step 5: state such contracts at the assertion site). A trim/split pass must keep:
+#   * a "Use when ..." clause of <=500 chars inside `description` - other harnesses
+#     read `description` only, never Claude Code's `when_to_use`, so it lives there
+#   * every references/*.md <=300 lines, cited from SKILL.md; any over 100 lines opens
+#     with a "## Contents" list naming each of its ## sections (a stale list fails)
+#   * every skills/security-ops/references/*.md path cited ANYWHERE in the repo exists:
+#     review, testgen and techdebt `Read:` these by backtick path, which no link gate sees
+#   * no secret-shaped example values - placeholders like <your-key> only, and no
+#     cipher-with-key-size literals, so downstream leak scanners stay quiet
+REFS="$SKILL/references"
+desc="$(awk 'NR==1 && /^---$/ {f=1; next} f && /^---$/ {exit} f && /^description:/ {sub(/^description:[ ]*/, ""); print}' "$SKILL/SKILL.md")"
+desc="${desc%\"}"
+use_when="${desc#*Use when}"
+if [[ "$use_when" == "$desc" ]]; then
+    no 'description carries a "Use when" clause'
+else
+    clause="Use when${use_when}"
+    (( ${#clause} <= 500 )) && ok "Use-when clause is ${#clause} chars (<=500)" || no "Use-when clause is ${#clause} chars (>500)"
+fi
+
+over=''; uncited=''; toc_bad=''
+for ref in "$REFS"/*.md; do
+    name="$(basename "$ref")"
+    lines="$(wc -l <"$ref" | tr -d ' ')"
+    (( lines <= 300 )) || over+=" $name($lines)"
+    grep -q "references/$name" "$SKILL/SKILL.md" || uncited+=" $name"
+    (( lines > 100 )) || continue
+    toc_gap="$(awk '
+        /^[[:space:]]*(```|~~~)/ { fence = !fence; next }
+        fence { next }
+        /^## / {
+            h = substr($0, 4)
+            if (h == "Contents") { in_toc = 1; seen = NR; next }
+            in_toc = 0; heads[++n] = h; next
+        }
+        in_toc { toc = toc "\n" $0 }
+        END {
+            if (!seen || seen > 15) { print "no ## Contents in first 15 lines"; exit }
+            for (i = 1; i <= n; i++) if (index(toc, heads[i]) == 0) print "missing: " heads[i]
+        }' "$ref")"
+    [[ -z "$toc_gap" ]] || toc_bad+=" $name[${toc_gap//$'\n'/; }]"
+done
+[[ -z "$over" ]] && ok 'every reference is <=300 lines' || no "references over 300 lines:$over"
+[[ -z "$uncited" ]] && ok 'every reference is cited from SKILL.md' || no "references not cited from SKILL.md:$uncited"
+[[ -z "$toc_bad" ]] && ok 'references over 100 lines carry a current Contents list' || no "Contents list missing or stale:$toc_bad"
+
+REPO="$(cd "$SKILL/../.." && pwd)"
+if [[ -f "$REPO/.claude-plugin/plugin.json" ]]; then
+    ghosts=''
+    while IFS= read -r cited; do
+        [[ -f "$SKILL/references/$cited" ]] || ghosts+=" $cited"
+    done < <(cd "$REPO" && rg -o --no-filename 'security-ops/references/[A-Za-z0-9._-]+\.md' \
+                 skills agents commands rules docs README.md AGENTS.md 2>/dev/null \
+             | sed 's#.*/##' | sort -u)
+    [[ -z "$ghosts" ]] && ok 'every repo citation of a security-ops reference resolves' || no "cited but missing:$ghosts"
+else
+    printf '  SKIP  repo-wide citation check (not running inside the claude-mods repo)\n'
+fi
+
+# Secret-shaped = a credential-named key assigned a literal of 8+ chars that is not a
+# <placeholder>, $variable, {template} or URL (no ':' - `token_url='https://..'` is not
+# a secret); env-file form is a bare KEY=token running to end of line, so code like
+# `SECRET_KEY=os.environ[..]` (dot breaks the token) stays quiet.
+read -r pat_quoted <<'RE'
+(api_?key|secret|passw(or)?d|token|security_?key)\w*['"]?\s*(=>|=|:)\s*['"][^'"<$\s{:]{8,}['"]
+RE
+read -r pat_env <<'RE'
+^\s*[A-Za-z_]*(API_?KEY|SECRET|PASSWORD|TOKEN|SECURITY_KEY)[A-Za-z_]*=[A-Za-z0-9+/=_-]{8,}\s*$
+RE
+leaks="$( { rg -n -i "$pat_quoted" "$SKILL/SKILL.md" "$REFS"; rg -n "$pat_env" "$SKILL/SKILL.md" "$REFS"; rg -n -F 'AES-256' "$SKILL/SKILL.md" "$REFS"; } 2>/dev/null)"
+[[ -z "$leaks" ]] && ok 'no secret-shaped example values in SKILL.md or references' || no "secret-shaped examples: ${leaks//$'\n'/ | }"
+
 printf '\n=== %d passed, %d failed ===\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]] || exit 1
 exit 0
