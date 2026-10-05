@@ -125,7 +125,7 @@ These are claude-mods bookkeeping fields that neither spec defines. They live un
 7. **Body under ~5,000 tokens** (about 18,000 characters). After auto-compaction Claude
    Code re-attaches only the first 5,000 tokens of each invoked skill (25,000 across all
    skills), so anything later silently drops. The spec also recommends under 5,000 tokens
-   and under 500 lines. `tests/spec.sh` warns above the line and never fails; put the
+   and under 500 lines. `tests/skill-size.sh` warns above the line and never fails; put the
    load-bearing instructions first and move detail into `references/`
 
 ### Validation

@@ -15,10 +15,10 @@ feature releases live in the README "Recent Updates" section.
   fields (`when_to_use`, `argument-hint`, `effort`, ...) stay top-level, because Claude
   Code reads them nowhere else. Anything else outside the spec's six is rejected, which
   catches typos like `when-to-use` that Claude Code ignores silently. The gate also
-  checks that `metadata` values are strings (a spec rule `skills-ref` can't see), warns
-  on skill bodies over ~5,000 tokens (Claude Code keeps only that much of a skill after
-  compaction), and lists the skills that can't be uploaded to claude.ai as-is. A
-  fixture self-test runs first, so a validator that passes everything fails the gate.
+  checks that `metadata` values are strings (a spec rule `skills-ref` can't see) and
+  lists the skills that can't be uploaded to claude.ai as-is. Skill size stays with
+  `tests/skill-size.sh`. A fixture self-test runs first, so a validator that passes
+  everything fails the gate.
   The frontmatter docs (`rules/naming-conventions.md`, `docs/SKILL-SUBAGENT-REFERENCE.md`,
   `docs/SKILL-CREATION-PROTOCOL.md`) now state one rule. They had contradicted each other,
   and two of them called `claude plugin validate` authoritative for skills, though it

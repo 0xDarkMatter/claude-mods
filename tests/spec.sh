@@ -27,7 +27,7 @@
 #   - Zero skills found: FAIL, not a vacuous pass.
 #
 # Usage:  bash tests/spec.sh
-# Exit :  0 clean (size warnings allowed), 1 spec violation or the gate could not run
+# Exit :  0 clean, 1 spec violation or the gate could not run
 
 set -uo pipefail
 

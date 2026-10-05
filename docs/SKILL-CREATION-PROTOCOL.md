@@ -75,7 +75,7 @@ claude-mods house rules layered on top (checklist, not a restatement):
 The load-bearing rules it owns: the **`description` is the trigger** (put every "when to
 use" cue there, never in the body); keep the **body under 500 lines and ~5,000 tokens**
 (after auto-compaction Claude Code keeps only the first 5,000 tokens of an invoked skill,
-so a longer tail silently drops; `tests/spec.sh` warns); split detail into
+so a longer tail silently drops; `tests/skill-size.sh` warns); split detail into
 `references/*.md` (one concept per file, linked from SKILL.md); **don't ship**
 README/CHANGELOG/INSTALL files inside a skill.
 

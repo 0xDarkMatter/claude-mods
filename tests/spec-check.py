@@ -19,9 +19,6 @@ SUPPLEMENTS (clearly not skills-ref rules)
   - metadata values must be strings. This IS a spec rule, but skills-ref 0.1.1 cannot
     see it: its parser stringifies every metadata value, so a block list passes as the
     text "['a', 'b']".
-  - size WARN when a body exceeds ~5,000 tokens (chars / 3.6). After auto-compaction
-    Claude Code keeps only the first 5,000 tokens of each invoked skill, so a longer
-    skill silently loses its tail. Warn only - it never fails the gate.
   - docs sync: every CLAUDE_CODE_FIELDS entry must have a row in the field table in
     docs/SKILL-SUBAGENT-REFERENCE.md, so the doc and the gate cannot drift apart.
 
@@ -30,8 +27,11 @@ SELF-TEST FIRST
   expect.txt must fail with that substring among its findings; a case without one must
   pass. A gate that passes everything is broken, so either violation fails the run.
 
+NOT HERE: skill size. The ~5,000-token body guidance (a spec recommendation, not a
+validator rule) is owned by tests/skill-size.sh - keep one size check, not two.
+
 Usage: python tests/spec-check.py <repo-root>    (normally via: bash tests/spec.sh)
-Exit:  0 clean (size warnings allowed), 10 findings or self-test failure, 2 usage
+Exit:  0 clean, 10 findings or self-test failure, 2 usage
 """
 
 import importlib.metadata
@@ -64,9 +64,6 @@ CLAUDE_CODE_FIELDS = frozenset({
     "shell",
 })
 
-TOKEN_WARN = 5000       # Claude Code's per-skill re-attach budget after compaction
-CHARS_PER_TOKEN = 3.6   # rough English-prose estimate; a warning threshold, not a count
-
 REFERENCE_DOC = Path("docs/SKILL-SUBAGENT-REFERENCE.md")
 FIXTURES = Path("tests/fixtures/spec")
 
@@ -94,19 +91,19 @@ def metadata_string_errors(content: str) -> list[str]:
     return []
 
 
-def check(skill_dir: Path) -> tuple[list[str], list[str], set[str]]:
-    """Validate one skill directory. Returns (errors, warnings, claude_code_fields_used)."""
+def check(skill_dir: Path) -> tuple[list[str], set[str]]:
+    """Validate one skill directory. Returns (errors, claude_code_fields_used)."""
     skill_md = find_skill_md(skill_dir)
     if skill_md is None:
-        return ["Missing required file: SKILL.md"], [], set()
+        return ["Missing required file: SKILL.md"], set()
 
     # Same read as skills_ref.validator.validate() in the 0.1.1 wheel: utf-8, and a
     # BOM is NOT stripped, so a BOM-prefixed file fails here exactly as it does there.
     content = skill_md.read_text(encoding="utf-8")
     try:
-        metadata, body = parse_frontmatter(content)
+        metadata, _ = parse_frontmatter(content)
     except ParseError as error:
-        return [str(error)], [], set()
+        return [str(error)], set()
 
     used = CLAUDE_CODE_FIELDS & metadata.keys()
     for field in used:
@@ -114,15 +111,7 @@ def check(skill_dir: Path) -> tuple[list[str], list[str], set[str]]:
 
     errors = validate_metadata(metadata, skill_dir)
     errors += metadata_string_errors(content)
-
-    warnings = []
-    est_tokens = len(body) / CHARS_PER_TOKEN
-    if est_tokens > TOKEN_WARN:
-        warnings.append(
-            f"body is ~{est_tokens:,.0f} tokens (> {TOKEN_WARN:,}); after compaction "
-            f"Claude Code keeps only the first {TOKEN_WARN:,}, so the tail drops"
-        )
-    return errors, warnings, used
+    return errors, used
 
 
 def self_test(root: Path) -> list[str]:
@@ -136,7 +125,7 @@ def self_test(root: Path) -> list[str]:
 
     problems = []
     for case in cases:
-        errors, _, _ = check(case)
+        errors, _ = check(case)
         expect = case / "expect.txt"
         if expect.is_file():
             needle = expect.read_text(encoding="utf-8").strip()
@@ -187,9 +176,9 @@ def main(argv: list[str]) -> int:
         print("FAIL: found zero skills under skills/ - broken path, not a pass")
         return EXIT_FINDINGS
 
-    warned, claude_code_only = 0, []
+    claude_code_only = []
     for skill in skills:
-        errors, warnings, used = check(skill)
+        errors, used = check(skill)
         for error in errors:
             print(f"FAIL: skills/{skill.name} - {error}")
             if error.startswith("Unexpected fields"):
@@ -198,9 +187,6 @@ def main(argv: list[str]) -> int:
                     f"{REFERENCE_DOC.as_posix()}; anything else is a typo or belongs under metadata)"
                 )
         failures += len(errors)
-        for warning in warnings:
-            print(f"WARN: skills/{skill.name} - {warning}")
-        warned += len(warnings)
         if used:
             claude_code_only.append(skill.name)
 
@@ -210,7 +196,7 @@ def main(argv: list[str]) -> int:
             "claude.ai uploads and the Skills API would reject them as-is: "
             + ", ".join(claude_code_only)
         )
-    print(f"Results: {len(skills)} skills, {failures} failed, {warned} size warnings")
+    print(f"Results: {len(skills)} skills, {failures} failed")
     return EXIT_FINDINGS if failures else 0
 
 
