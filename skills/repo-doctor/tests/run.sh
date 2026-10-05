@@ -173,7 +173,7 @@ echo
 echo "repo-doctor tests: $pass passed, $fail failed"
 # The AGENTS.md tooling has its own suites; one runner, one verdict.
 sub=0
-for suite in repo-scan; do
+for suite in repo-scan agents-md; do
     echo
     echo "--- $suite"
     bash "$HERE/$suite.sh" || sub=1
