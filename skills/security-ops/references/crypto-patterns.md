@@ -258,7 +258,7 @@ def decrypt_with_kms(ciphertext: bytes) -> bytes:
 ## Common Mistakes
 
 ECB mode (use GCM) and MD5/SHA-1 for passwords (use bcrypt/Argon2) are shown as
-WRONG/CORRECT pairs under A02 in `owasp-top10-a01-a05.md`; password hashing in full is
+WRONG/CORRECT pairs under A04:2025 in `owasp-top10-a01-a05.md`; password hashing in full is
 in `auth-patterns.md`.
 
 ### DON'T: Reuse Nonces/IVs

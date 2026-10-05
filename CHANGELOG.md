@@ -35,6 +35,16 @@ feature releases live in the README "Recent Updates" section.
   `.env.example.*` files; `dependency-audit.sh` runs `composer audit --locked`. A
   stack-routing table in SKILL.md maps detection to references.
 
+- **`security-ops` speaks OWASP Top 10:2025** - findings, agent prompts, the
+  consolidation step and the report template now tag `Axx:2025` IDs, verified against
+  top10.owasp.org/2025. The OWASP references gain an A03 Software Supply Chain Failures
+  section (routing behavioural work to `supply-chain-defense` and Composer to
+  `php-composer-supply-chain.md`), an A10 Mishandling of Exceptional Conditions section
+  (fail-closed handlers, rollback, generic errors, unchecked PHP returns), SSRF folded
+  into A01, and a review checklist of `rg` patterns each. `audit-quickref.md` carries a
+  2021-to-2025 crosswalk so older reports stay readable. Filenames are unchanged - they
+  name ID ranges, which 2025 kept.
+
 - **`deploy-gating` rule** - a child session never deploys. Background agents, chips,
   workflow/fleet workers, headless and scheduled runs, and CI-autofix or review-triage
   loops may build, test and commit, but stop at the deploy boundary and report the
