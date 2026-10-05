@@ -66,6 +66,7 @@ On "INIT:" message at session start:
 | `tests/spec.sh` | Agent Skills spec gate: the spec's own validator (`skills-ref`, pinned, via `uv`) on every skill, allowing Claude Code's documented fields top-level; fixture self-test first. Size is not checked here (that is `tests/skill-size.sh`). Policy: `docs/SKILL-SUBAGENT-REFERENCE.md` |
 | `tests/doc-drift.sh` | Counts-on-disk vs docs gate; also checks section-map markers and skill-frontmatter ghost references (related-skills/depends-on naming a skill not on disk) |
 | `tests/agnostic.sh` | Public-repo gate: fails on user-profile paths with real names, plus anything in the author's PRIVATE deny list; legit look-alikes go in `tests/agnostic-allow.txt` |
+| `tests/skill-size.sh` | Warns when a SKILL.md body passes ~5,000 estimated tokens (chars / 3.6, frontmatter excluded) - after auto-compaction Claude Code keeps only the first 5,000 tokens of each invoked skill, so procedure and hard rules go first and detail goes in `references/`. `--report` lists every skill, `--strict` fails instead of warning; built-in self-test refuses to pass blind |
 | `tests/hooks.sh` | Hook contract tests: feeds the opt-in hooks the stdin JSON Claude Code sends, asserts exit 2 + stderr to block and no false positives; `HOOKS_DIR=<dir>` runs it against another copy (e.g. to prove it fails on a regression) |
 
 ## Quick Reference

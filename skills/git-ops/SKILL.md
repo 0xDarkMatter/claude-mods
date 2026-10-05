@@ -205,85 +205,11 @@ Proceed with execution. Follow T3 execution protocol:
 
 ## Dispatch Mechanics
 
-### Background Agent (Default for T2/T3)
-
-```python
-# Dispatch to git-agent, runs in background, Sonnet model
-Agent(
-    subagent_type="git-agent",
-    model="sonnet",
-    run_in_background=True,  # Frees main session
-    prompt="..."             # From dispatch templates above
-)
-```
-
-The main session continues working while the agent handles git operations. Results arrive asynchronously.
-
-### Foreground Agent (When Result Needed Immediately)
-
-For operations where the user is waiting on the result (e.g., "commit this then let's move on"):
-
-```python
-Agent(
-    subagent_type="git-agent",
-    model="sonnet",
-    run_in_background=False,  # Wait for result
-    prompt="..."
-)
-```
-
-### Worktree Isolation (Only When Requested)
-
-When the user explicitly asks for worktree isolation (e.g., "do this in a separate worktree", "prepare a branch without touching my working tree"):
-
-```python
-Agent(
-    subagent_type="git-agent",
-    model="sonnet",
-    isolation="worktree",     # Isolated repo copy
-    run_in_background=True,
-    prompt="..."
-)
-```
+Background is the default for T2/T3, foreground when the user is waiting on the result, worktree isolation only when asked. Call shapes: [references/dispatch.md](references/dispatch.md).
 
 ## Fallback: When git-agent Is Unavailable
 
-If `git-agent` is not registered as a subagent type (e.g., plugin not installed, agent files missing), fall back to `general-purpose` with the git-agent identity inlined in the prompt.
-
-**Detection:** If dispatching to `git-agent` fails or the subagent type is not listed in available agents, switch to fallback mode automatically.
-
-**Fallback dispatch template:**
-
-```python
-Agent(
-    subagent_type="general-purpose",  # Fallback
-    model="sonnet",
-    run_in_background=True,
-    prompt="""You are acting as a git operations agent. You are precise, safety-conscious,
-and follow the three-tier safety system:
-- T1 (read-only): execute freely
-- T2 (safe writes): execute on instruction, verify before and after
-- T3 (destructive): preflight report only unless explicitly told to execute
-
-{original dispatch prompt here}
-"""
-)
-```
-
-**Key differences from primary dispatch:**
-- Uses `general-purpose` instead of `git-agent` subagent type
-- Inlines the safety tier protocol directly in the prompt (the agent won't have git-agent's system prompt)
-- Everything else stays the same - context gathering, templates, foreground/background choice
-
-**When to use each:**
-
-| Condition | Dispatch Method |
-|-----------|----------------|
-| `git-agent` available | Primary: `subagent_type="git-agent"` |
-| `git-agent` unavailable | Fallback: `subagent_type="general-purpose"` with inlined protocol |
-| No agent dispatch possible | Last resort: execute T2 operations inline (main context) |
-
-The last-resort inline path should only be used for simple T2 operations (single commit, simple push). Complex workflows (PR creation, release, changelog) should always use an agent.
+If `git-agent` is not available, dispatch `general-purpose` with the tier protocol inlined in the prompt; inline execution is a last resort for simple T2 operations only. Template: [references/dispatch.md](references/dispatch.md).
 
 ## Extended Operations
 
@@ -309,49 +235,9 @@ When user asks to "create a release", "bump version", or "tag a release":
 
 4. **Hand off to `github-ops`** for the remote half: push commits, push tag, create the GitHub release with notes, update repo metadata if warranted. Do not call `gh release create` from git-ops — that crosses the local/remote boundary. See `skills/github-ops/SKILL.md` mode `update`.
 
-### Changelog Generation
+### Other extended operations
 
-When user asks to "generate changelog" or "update CHANGELOG.md":
-
-1. **Inline (T1):** Gather commit history for the range
-2. **Dispatch to git-agent (T2):** Categorise commits, format as Keep a Changelog, write file
-
-### PR Workflow (Full Cycle)
-
-When user says "create a PR" or "open a PR":
-
-1. **Inline (T1):** Check branch state, diff against main
-2. **Gather context:** What was the user working on? What does the conversation tell us about the goal?
-3. **Dispatch to git-agent (T2):** Create PR with contextual title and body
-4. **Report:** PR number, URL, summary
-
-### Branch Cleanup
-
-When user asks to "clean up branches" or "delete merged branches":
-
-1. **Inline (T1):** List merged branches
-   ```bash
-   git branch --merged main | grep -v "main\|master\|\*"
-   ```
-2. **Show list to user** - this is a T3 preflight (deletion)
-3. **On confirmation:** Dispatch to git-agent to delete them
-
-### Semantic Versioning Analysis
-
-When user asks "what should the next version be":
-
-1. **Inline (T1):** Analyse commits since last tag
-2. Categorise by Conventional Commits
-3. Report recommended bump with reasoning
-
-### Conflict Resolution Support
-
-When user encounters merge conflicts:
-
-1. **Inline (T1):** `git status` to show conflicted files
-2. **Inline (T1):** Read conflict markers in each file
-3. **Present options:** ours, theirs, manual resolution
-4. **After resolution:** Dispatch to git-agent (T2) for staging and continue
+Changelog generation, the full PR cycle, branch cleanup (deleting branches is a T3 preflight), semver analysis and conflict-resolution support: [references/extended-operations.md](references/extended-operations.md).
 
 ## Worktree Operations
 
@@ -368,31 +254,7 @@ Worktrees are first-class in this skill. The classification is:
 
 ### Lane provisioning (the collision remedy)
 
-`scripts/new-lane.sh <slug> [base-branch]` is the fast, model-invocable way to isolate parallel
-work — the remedy the peer-writer guards (`session-start-unicode-scan.sh` at boot,
-`pre-write-peer-guard.sh` mid-session) point you to. It:
-
-- creates branch `lane/<slug>` **in-repo** at `<main>/.claude/worktrees/<slug>` — the native
-  Claude Code worktree location: tidy (no sibling dirs scattered across the parent) and gitignored
-  so `git add -A` can't stage its gitlinks — off `[base-branch]` (default: current branch);
-- **ensures the gitignore precondition**: if `.claude/worktrees/` isn't gitignored it adds the entry
-  first (the in-repo location is only safe when ignored), so the default is safe in *any* repo;
-- **`--sibling`** places it outside the repo at `<repo>/../<repo>-<slug>` instead — use when you need
-  structural isolation from repo-scoped destructive ops (`git clean -ff`, `rm -rf <repo>`) or in a
-  repo that can't gitignore the dir;
-- anchors at the **main** worktree root, so invoking it from inside a lane won't nest worktrees;
-- **carries over gitignored env files** (`.dev.vars`, `.env*`, `.secrets`) the fresh worktree
-  would otherwise lack, so the lane runs immediately;
-- prints the worktree path on stdout (everything else on stderr), so it composes:
-  `cd "$(bash scripts/new-lane.sh hotfix main)"`;
-- refuses if the branch or path already exists — never clobbers.
-
-Lane work durability: **committed** lane work lives in the shared object store and survives even
-deletion of the worktree dir (recover via `git worktree add <path> lane/<slug>`); only *uncommitted*
-work is at risk from `git clean -ff` / `rm -rf`. Land early/often — see `rules/worktree-boundaries.md`.
-
-Run it **inline** (deterministic, non-destructive); land the lane back via the Worktree Land
-Procedure below or `fleet-ops`. Reach for it whenever two sessions would otherwise share one checkout.
+`bash scripts/new-lane.sh [--sibling] <slug> [base]`: branch `lane/<slug>` at `.claude/worktrees/<slug>`, gitignore ensured, env files carried, never clobbers. Committed lane work survives worktree deletion; land early. Details: [references/lane-provisioning.md](references/lane-provisioning.md).
 
 ### Survey-first discipline
 
@@ -421,49 +283,7 @@ Dispatch this to `git-agent` as a T2 operation with the worktree path + trunk na
 
 ### Land all — batch-land every pending lane (T1 plan → fleet-ops execution)
 
-The front-door for "I've got 4-5 chips/sessions/worktrees, land the ones that are
-done." git-ops **discovers and classifies**; `fleet-ops` **executes** the sequential,
-test-gated landing. No duplicated landing logic — the two compose.
-
-**Triggers:** "land everything", "land all my worktrees", "land the pending chips",
-"clean up and land what's done", "where are we and land it".
-
-**Procedure:**
-
-1. **Survey (T1, read-only).** Run `scripts/land-all.sh --porcelain` (add `--recent-days N`
-   if the user's lanes span longer than a week). Each candidate branch is classified:
-
-   | Status | Meaning | Default action |
-   |--------|---------|----------------|
-   | `LANDABLE` | clean, ahead, not merged, recent, no live writer | **land** |
-   | `STALE` | clean + ahead but last commit > `--recent-days` old | park (offer to prune/archive, or land explicitly) |
-   | `WIP` | uncommitted tracked changes | park — commit in-lane first |
-   | `ACTIVE` | a session is writing it **right now** (recent file activity) | **never land** — park |
-   | `MERGED` | already an ancestor of trunk (incl. nothing ahead) | prune candidate |
-
-2. **Confirm the plan (`AskUserQuestion`, HARD RULE).** Present the three groups — *land these
-   LANDABLE / park these WIP+ACTIVE+STALE / prune these MERGED* — and get explicit go.
-   Never skip this: landing is outward-facing on the trunk. Surface `far behind (N)` notes so the
-   user knows which lands may conflict.
-
-3. **Execute via fleet-ops.** For the confirmed landable set:
-   ```bash
-   bash $HOME/.claude/skills/fleet-ops/scripts/fleet.sh track <landable-branches...>
-   bash $HOME/.claude/skills/fleet-ops/scripts/fleet.sh land --all --running
-   ```
-   fleet-ops lands **oldest-first**, runs the test gate, **auto-rebases** the remaining lanes after
-   each land, and marks any lane that hits a real conflict `CONFLICT` — it does **not** guess a
-   resolution. This is a T2 write; dispatch through `git-agent` or run inline if the user is waiting.
-
-4. **Escalate conflicts, don't auto-resolve.** A `CONFLICT` lane stops being landed and is reported.
-   Offer: resolve in the lane, skip it, or revert (`fleet revert <branch>`). Sequential + auto-rebase
-   *minimises* conflicts (each lane rebases onto a trunk that already has the prior lands); genuine
-   semantic conflicts are always the user's call.
-
-5. **Offer cleanup (survey-first, T3).** After landing, the `MERGED` branches and any
-   now-landed worktrees are prune candidates. Follow **Survey-first discipline** + the T3 Remove
-   preflight — never auto-`git worktree remove`; confirm per worktree. Respect
-   `rules/worktree-boundaries.md` throughout: `ACTIVE`/orphan/unregistered trees are never touched.
+Survey with `scripts/land-all.sh --porcelain`, **confirm the land / park / prune plan with the user before anything lands (HARD RULE)**, land via `fleet-ops`, escalate every CONFLICT instead of resolving it, then survey-first cleanup. Full procedure: [references/land-all.md](references/land-all.md).
 
 **Safety invariants:** `ACTIVE` lanes (live peer writer) are never landed — this is the
 worktree-boundaries live-writer guard applied to landing. `WIP` needs an explicit commit first.
@@ -550,3 +370,7 @@ For detailed patterns, load:
 - `./references/rebase-patterns.md` - Interactive rebase workflows and safety
 - `./references/stash-patterns.md` - Stash operations and workflows
 - `./references/advanced-git.md` - Bisect, cherry-pick, worktrees, reflog, conflicts
+- `./references/dispatch.md` - Agent call shapes (background, foreground, worktree isolation) and the fallback when git-agent is unavailable
+- `./references/extended-operations.md` - Changelog, full PR cycle, branch cleanup, semver analysis, conflict-resolution support
+- `./references/lane-provisioning.md` - What `new-lane.sh` creates and enforces, and lane-work durability
+- `./references/land-all.md` - Batch landing in full: triggers, status table, fleet-ops commands, conflicts, cleanup

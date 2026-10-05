@@ -1,0 +1,10 @@
+# Native Scheduling Primitives at a Glance
+
+What each native Claude Code scheduling primitive gives you, and what it does not. Parameters, limits and failure semantics in full: [native-scheduling.md](native-scheduling.md).
+
+| Native primitive | What it gives you | What it does NOT give you |
+|---|---|---|
+| **`/loop`** — a *bundled* skill ([docs](https://code.claude.com/docs/en/scheduled-tasks)), driving `CronCreate`/`CronList`/`CronDelete`; `ScheduleWakeup` for its self-paced mode | Fixed-cron or Claude-paced ticks (delay clamped 60 s–1 h), a built-in maintenance prompt, `.claude/loop.md` to override it, `Esc` to stop | **Session-scoped and in-memory** — fires only while the session is idle, dies with the conversation, and every recurring job **self-deletes after 7 days**. No state spine, no budget, no gate. L1-supervised only. |
+| **Desktop scheduled tasks** — the `scheduled-tasks` MCP server ([docs](https://code.claude.com/docs/en/desktop-scheduled-tasks)) | Durable local ticks (≥1 min) with local files, a **fresh session per run**, a per-task permission mode with saved approvals, a task folder, run history, an Active/Paused toggle | The worktree toggle is **off by default** (runs against uncommitted changes); one catch-up only for a missed window; a Manual-mode task **stalls** on an unapproved tool. No STATE spine, no token budget, no verify gate. |
+| **Cloud routines** — `/schedule` ([docs](https://code.claude.com/docs/en/routines)) | Machine-off ticks (≥1 h), plus **native event triggers**: an API `/fire` endpoint and GitHub `pull_request`/`release` events with filters. A real push guard on non-`claude/` branches | **No permission mode at all** and **every connector attaches by default**; no local files (fresh clone); green run status ≠ task success. The boundary must come from repos + environment + connectors. |
+| **`/goal`** ([docs](https://code.claude.com/docs/en/goal)) | A native *completion* gate — keep going until a fast model confirms the condition | Not a cadence, and not an audit trail. |

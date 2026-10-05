@@ -267,6 +267,20 @@ The cadence fires; the work is done by the layers this repo already ships:
 The point of the ladder: the cadence mechanism *changes* (session `/loop` → scheduled
 `claude -p`) exactly when the autonomy does, and the audit gates the transition.
 
+## Choosing the host (end-to-end workflow, step 7)
+
+7. **Schedule** the L1 run on the declared host — the **recipe selector** in
+   [references/claude-code-loops.md](claude-code-loops.md) prescribes which,
+   because they're not interchangeable: connector-driven (email/Asana, no local code) →
+   **cloud routine**; touches local code → **Desktop scheduled task**; sustained &
+   token-sensitive → a **cache-warm daemon** (`claude -p` inside the cache TTL you paid
+   for), *not* `/loop` (which grows a session and chews tokens); fixed-criteria long task →
+   **`/goal`**; quick supervised polling → `/loop`. Per-primitive limits:
+   [references/native-scheduling.md](native-scheduling.md). (L1 is read-only —
+   it just writes `STATE.md` + a report.)
+
+---
+
 ## See also
 
 - [native-scheduling.md](native-scheduling.md) — the primitives themselves: verified parameters, limits and failure semantics per host.

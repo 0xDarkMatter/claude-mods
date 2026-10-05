@@ -6,7 +6,7 @@
 default:
     @just --list
 
-# THE gate: frontmatter/naming + Agent Skills spec + doc-drift + agnostic + hook contracts + resource contracts + skill suites + e2e suites
+# THE gate: frontmatter/naming + Agent Skills spec + doc-drift + agnostic + hook contracts + resource contracts + skill size (warn) + skill suites + e2e suites
 check:
     @bash tests/validate.sh
     @bash tests/spec.sh
@@ -14,6 +14,7 @@ check:
     @bash tests/agnostic.sh
     @bash tests/hooks.sh
     @bash tests/check-resources.sh
+    @bash tests/skill-size.sh
     @bash tests/run-skill-tests.sh
 
 # Fast gate: everything except the behavioural suites (per-skill and e2e)
@@ -24,6 +25,7 @@ check-fast:
     @bash tests/agnostic.sh
     @bash tests/hooks.sh
     @bash tests/check-resources.sh
+    @bash tests/skill-size.sh
 
 # Everything in tests/justfile is reachable from root too
 test:

@@ -168,63 +168,7 @@ Which dark mode strategy?
 
 ## Component Patterns Quick Reference
 
-```html
-<!-- Card -->
-<div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
-  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Title</h3>
-  <p class="text-gray-600 dark:text-gray-400">Content here.</p>
-</div>
-
-<!-- Button variants -->
-<button class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 transition-colors">Primary</button>
-<button class="bg-gray-200 text-gray-800 px-4 py-2 rounded-lg hover:bg-gray-300 transition-colors">Secondary</button>
-<button class="border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors">Outline</button>
-<button class="text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-50 transition-colors">Ghost</button>
-
-<!-- Form input -->
-<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email</label>
-<input type="email"
-  class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
-         bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100
-         focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-  placeholder="you@example.com">
-
-<!-- Navbar -->
-<nav class="bg-white dark:bg-gray-900 shadow">
-  <div class="max-w-7xl mx-auto px-4 flex items-center justify-between h-16">
-    <a href="/" class="text-xl font-bold text-gray-900 dark:text-white">Logo</a>
-    <div class="hidden md:flex items-center gap-6">
-      <a href="#" class="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">Home</a>
-      <a href="#" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">CTA</a>
-    </div>
-  </div>
-</nav>
-
-<!-- Modal overlay -->
-<div class="fixed inset-0 z-50 flex items-center justify-center">
-  <div class="fixed inset-0 bg-black/50" aria-hidden="true"></div>
-  <div class="relative bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 w-full max-w-md mx-4" role="dialog" aria-modal="true">
-    <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Modal Title</h2>
-    <p class="text-gray-600 dark:text-gray-400 mb-6">Modal content goes here.</p>
-    <div class="flex justify-end gap-3">
-      <button class="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg">Cancel</button>
-      <button class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Confirm</button>
-    </div>
-  </div>
-</div>
-
-<!-- Badge -->
-<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">Active</span>
-
-<!-- Alert -->
-<div class="flex items-start gap-3 p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800" role="alert">
-  <span class="text-red-600 dark:text-red-400 mt-0.5" aria-hidden="true">&#10007;</span>
-  <div>
-    <h4 class="text-sm font-medium text-red-800 dark:text-red-300">Error</h4>
-    <p class="text-sm text-red-700 dark:text-red-400 mt-1">Something went wrong. Please try again.</p>
-  </div>
-</div>
-```
+Copy-paste snippets for a card, button variants, a form input, navbar, modal overlay, badge and alert: [Component Patterns Quick Reference](references/component-patterns.md#component-patterns-quick-reference), at the top of the component reference that goes deeper per component.
 
 ## Tailwind v4 Quick Reference
 
@@ -283,108 +227,7 @@ Which dark mode strategy?
 
 ## Animation Patterns
 
-### Transition Utilities
-
-```html
-<!-- Color transition (most common) -->
-<button class="bg-blue-600 hover:bg-blue-700 transition-colors duration-150">
-  Hover me
-</button>
-
-<!-- Multiple properties -->
-<div class="transform hover:scale-105 hover:shadow-lg transition-all duration-200 ease-in-out">
-  Scale and shadow on hover
-</div>
-
-<!-- Specific properties -->
-<div class="transition-[transform,opacity] duration-300 ease-out">
-  Only transform and opacity animate
-</div>
-```
-
-### Built-in Animations
-
-```html
-<!-- Spin (loading spinners) -->
-<svg class="animate-spin h-5 w-5 text-blue-600" viewBox="0 0 24 24">
-  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/>
-  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-</svg>
-
-<!-- Pulse (skeleton loaders) -->
-<div class="animate-pulse bg-gray-200 dark:bg-gray-700 h-4 rounded w-3/4"></div>
-
-<!-- Ping (notification indicator) -->
-<span class="relative flex h-3 w-3">
-  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-  <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
-</span>
-
-<!-- Bounce -->
-<div class="animate-bounce">&#8595;</div>
-```
-
-### Custom Keyframes (v3 Config)
-
-```js
-// tailwind.config.js (v3)
-module.exports = {
-  theme: {
-    extend: {
-      keyframes: {
-        'fade-in': {
-          '0%': { opacity: '0', transform: 'translateY(10px)' },
-          '100%': { opacity: '1', transform: 'translateY(0)' },
-        },
-        'slide-in-right': {
-          '0%': { transform: 'translateX(100%)' },
-          '100%': { transform: 'translateX(0)' },
-        },
-      },
-      animation: {
-        'fade-in': 'fade-in 0.3s ease-out',
-        'slide-in-right': 'slide-in-right 0.3s ease-out',
-      },
-    },
-  },
-}
-```
-
-### Custom Keyframes (v4 CSS)
-
-```css
-/* v4: Define in CSS with @theme */
-@theme {
-  --animate-fade-in: fade-in 0.3s ease-out;
-  --animate-slide-in-right: slide-in-right 0.3s ease-out;
-}
-
-@keyframes fade-in {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes slide-in-right {
-  from { transform: translateX(100%); }
-  to { transform: translateX(0); }
-}
-```
-
-### Entry Animations with @starting-style (v4)
-
-```css
-/* Dialog that animates in from transparent/translated */
-dialog[open] {
-  opacity: 1;
-  transform: translateY(0);
-  transition: opacity 0.3s, transform 0.3s;
-
-  @starting-style {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-}
-```
+Transition utilities, built-in animations (spin, pulse, ping, bounce), custom keyframes for v3 config and v4 `@theme`, and `@starting-style` entry animations: [references/animation-patterns.md](references/animation-patterns.md).
 
 ## State Modifiers Quick Reference
 
@@ -468,6 +311,7 @@ dialog[open] {
 | `references/component-patterns.md` | Cards, buttons, forms, navigation, modals, tables, alerts, badges, avatars, dropdowns, tooltips, skeleton loaders, accessibility | ~700 |
 | `references/v4-migration.md` | CSS-first config, @theme, @plugin, removed utilities, container queries, @starting-style, migration steps, breaking changes | ~500 |
 | `references/configuration.md` | Theme config (v3+v4), colors, spacing, typography, plugins, @layer, @apply, custom variants, dark mode, container queries | ~500 |
+| `references/animation-patterns.md` | Transition utilities, built-in animations, custom keyframes (v3 config, v4 CSS), `@starting-style` entry animations | ~110 |
 
 ## Staleness Verifier
 

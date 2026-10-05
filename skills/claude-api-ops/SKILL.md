@@ -107,32 +107,7 @@ for block in response.content:        # content is a list of typed blocks
 print(response.stop_reason, response.usage.input_tokens, response.usage.output_tokens)
 ```
 
-```typescript
-// npm install @anthropic-ai/sdk
-import Anthropic from "@anthropic-ai/sdk";
-
-const client = new Anthropic();
-
-const response = await client.messages.create({
-  model: "claude-opus-5",
-  max_tokens: 16000,
-  messages: [{ role: "user", content: "Explain CRDTs in one paragraph." }],
-});
-for (const block of response.content) {
-  if (block.type === "text") console.log(block.text);  // narrow the union first
-}
-```
-
-Streaming (default to it for long outputs — non-streaming above ~16K
-`max_tokens` risks SDK HTTP timeouts):
-
-```python
-with client.messages.stream(model="claude-opus-5", max_tokens=64000,
-                            messages=[{"role": "user", "content": "Write a long report"}]) as stream:
-    for text in stream.text_stream:
-        print(text, end="", flush=True)
-    final = stream.get_final_message()   # full Message after streaming
-```
+TypeScript and streaming versions: [references/sdk-examples.md](references/sdk-examples.md). Stream long outputs; non-streaming above ~16K `max_tokens` risks SDK HTTP timeouts.
 
 Full params, response shape, stop reasons, errors, retries, rate limits:
 [references/messages-api.md](references/messages-api.md)
@@ -170,21 +145,7 @@ Details and gotchas: [references/structured-outputs.md](references/structured-ou
 
 ## Tool Use (quick reference)
 
-```python
-tools = [{
-    "name": "get_weather",
-    "description": "Get current weather. Call when the user asks about weather conditions.",
-    "input_schema": {
-        "type": "object",
-        "properties": {"location": {"type": "string", "description": "City, e.g. Paris"}},
-        "required": ["location"],
-    },
-}]
-response = client.messages.create(model="claude-opus-5", max_tokens=16000,
-                                  tools=tools, messages=messages)
-if response.stop_reason == "tool_use":
-    ...  # execute, send tool_result back, loop
-```
+Tool definition shape (`name`, `description`, JSON Schema `input_schema`) and the `stop_reason` check that drives the loop: [references/sdk-examples.md](references/sdk-examples.md).
 
 `tool_choice`: `{"type": "auto"}` (default) | `{"type": "any"}` | `{"type":
 "tool", "name": "..."}` | `{"type": "none"}`. Add
@@ -230,115 +191,13 @@ The budget is real because attention degrades with length (**context rot** — n
 pairwise relationships), not just because tokens cost money. A 1M window is a
 capacity, not a target.
 
-### The three tiers
+**Compact only as a deliberate response to a named constraint** (context, cost or latency ceiling): under caching, appending usually wins, and capping tool output at the tool boundary is the underrated lever. Keep the static prefix first; reordering breaks the cache silently. First-party clearing: `context_management` (beta `context-management-2025-06-27`), always with `clear_at_least`.
 
-Every candidate fact lives in exactly one place. Choosing deliberately is most of the job.
-
-| Tier | Where | Cost | Use when |
-|---|---|---|---|
-| **1 — In context** | `tools` / `system` / `messages`, every call | Paid every turn (≈0.1× cached) | It steers *most* turns |
-| **2 — On disk, read on demand** | A file the agent can read; only the **path** stays in context | Paid only when read | The agent can tell from a *name* that it needs this |
-| **3 — Retrieved** | Index / search tool behind a query | Paid only on a hit, plus a relevance gamble | The corpus is too large to enumerate |
-
-When a prompt is too big, **demote before you delete** — a path is ~10 tokens; the
-file it names may be 10,000.
-
-**This repo already runs on the tier-1/tier-2 split.** A skill's `description` is
-always resident (tier 1, so it must carry the routing signal); `SKILL.md` loads on a
-match; `references/*.md` load only when cited and needed. "Description is the
-trigger", "body under 500 lines", "one concept per reference", "every reference must
-be cited" are context-engineering rules wearing authoring clothes.
-
-### Cache-aware prompt architecture
-
-Requests render `tools` → `system` → `messages`, and the cache is a **prefix match**.
-So **static prefix first, volatile content last** — put the `cache_control` breakpoint
-at the end of the stable part and let per-request content fall after it.
-
-Reordering a prompt destroys the cache **silently**: no error, just a different prefix
-hash, `cache_read_input_tokens: 0`, and a 1.25–2× bill where you expected 0.1×. The
-usage block is the only symptom, which is why asserting `cache_read_input_tokens > 0`
-in staging is a real test.
-
-### The compaction decision
-
-**Under modern prompt caching, keeping the full history has been measured to beat
-summarisation on cost, latency AND recall at the same time.** A 2026 production-tutor
-evaluation (660 turns, 11 configurations) put keep-everything at 92–100% fact recall,
-$0.11/turn and 17 s TTFT, against 38–58% recall, $0.24/turn and 21 s for its
-clear-plus-summarise preset. Summarising rewrites the cached prefix and forfeits the
-0.1× discount — the cheap move is usually to **append**. (That study ran on a
-non-Claude model; what transfers is the *mechanism*, and Claude's flat 0.1× cache
-read makes it stronger, not weaker. Full caveats in
-[references/compaction.md](references/compaction.md).)
-
-So: **compact only as a deliberate response to a named constraint.**
-
-| Constraint | Diagnose | Try first |
-|---|---|---|
-| **Context ceiling** — it will not fit | Projected tokens > window | Cap tool output → payloads to files → server-side clearing |
-| **Cost ceiling** — the bill is unacceptable | Compare against *cached* cost, not uncached | **Verify the cache is hitting** → tier down → cap tool output |
-| **Latency target** — TTFT too slow at depth | Confirm growth is in the prefix | Cap tool output → lower `effort` → stream |
-
-Capping tool output at the tool boundary is the underrated lever: it shrinks context
-**without rewriting the cached prefix** (the same study measured −38% cost/turn with
-no recall loss). Clearing and summarising both break the cache; they are what people
-reach for first and should reach for last.
-
-First-party clearing is `context_management` (beta `context-management-2025-06-27`):
-`clear_tool_uses_20250919` and `clear_thinking_20251015`, applied server-side. Always
-set `clear_at_least` — it stops a trigger paying a full cache re-write to save a
-handful of tokens. Pair with the memory tool so durable conclusions are written out
-before raw material is cleared.
-
-### Agentic specifics
-
-- **Tool results are the growth term**, not the system prompt. Design tools to return
-  decisions, not dumps.
-- **Summarise vs write-to-file:** needed later *in full* → write to a file, return the
-  path. Only the *conclusion* matters → summarise **at the tool boundary** (free of
-  cache cost, unlike rewriting history after the fact).
-- **Sub-agents are context isolation**, not just parallelism: 80K tokens of
-  exploration are billed once inside the child and discarded; the parent sees a
-  ~1–2K-token distillation. Costs: cold cache in the child, a lossy hand-off. Skip it
-  when the subtask needs most of the parent's context to make sense.
-
-Full doctrine — tiers, progressive disclosure, instrumentation:
-[references/context-engineering.md](references/context-engineering.md).
-Compaction economics, `context_management` parameters, memory tool:
-[references/compaction.md](references/compaction.md).
-For Claude Code's own context surface see the `claude-code-ops` skill; for
-prompts re-sent on a cadence, `loop-ops`; for cross-provider fan-out, `fleetflow`.
+One-page version (tiers, cache-aware order, compaction table, agentic specifics): [references/context-engineering-quickref.md](references/context-engineering-quickref.md). Full doctrine: [references/context-engineering.md](references/context-engineering.md). Compaction economics and `context_management`: [references/compaction.md](references/compaction.md).
 
 ## Claude Agent SDK (quick reference)
 
-```python
-# pip install claude-agent-sdk   (Python >= 3.10)
-import asyncio
-from claude_agent_sdk import query, ClaudeAgentOptions
-
-async def main():
-    async for message in query(
-        prompt="Find and fix the bug in auth.py",
-        options=ClaudeAgentOptions(allowed_tools=["Read", "Edit", "Bash"]),
-    ):
-        if hasattr(message, "result"):
-            print(message.result)
-
-asyncio.run(main())
-```
-
-```typescript
-// npm install @anthropic-ai/claude-agent-sdk
-import { query } from "@anthropic-ai/claude-agent-sdk";
-
-for await (const message of query({
-  prompt: "Find and fix the bug in auth.ts",
-  options: { allowedTools: ["Read", "Edit", "Bash"] },
-})) {
-  if ("result" in message) console.log(message.result);
-}
-```
+Minimal `query()` loops in Python (`pip install claude-agent-sdk`, Python >= 3.10) and TypeScript (`npm install @anthropic-ai/claude-agent-sdk`): [references/sdk-examples.md](references/sdk-examples.md).
 
 Built-in tools (Read/Write/Edit/Bash/Glob/Grep/WebSearch/WebFetch/...), hooks
 (`PreToolUse`, `PostToolUse`, ...), subagents, MCP servers, sessions
@@ -370,88 +229,14 @@ Built-in tools (Read/Write/Edit/Bash/Glob/Grep/WebSearch/WebFetch/...), hooks
 
 ## Resources & Verification
 
-This skill ships a staleness verifier and two copy-and-adapt starter assets. The
-model table and pricing above are the facts most likely to drift — run the
-verifier when you suspect they're stale.
+Worked invocations and caveats for each: [references/resources.md](references/resources.md).
 
-**`scripts/check-model-table.py`** — guards the Current Models table (this file)
-and the per-model prompt-cache minimum table
-([references/caching-and-cost.md](references/caching-and-cost.md)) against drift.
-Two modes per the [resource protocol §7](../../docs/SKILL-RESOURCE-PROTOCOL.md):
-
-```bash
-# Structural (default, no network): every row well-formed, ids carry no date
-# suffix, prices numeric, the two files agree on the model lineup. It also
-# guards the cache-economics constants that are stated in more than one file
-# (0.1x read, 1.25x/2x writes, 4 breakpoints, 20-block lookback, the
-# context-management beta id), asserts each doctrine reference carries a
-# "verified <ISO date>" stamp, and checks SKILL.md <-> references/ citation
-# integrity in both directions. It then scans every file in the skill for model
-# ids: an id in neither the table nor the Legacy list is flagged "unknown", and
-# a LEGACY id sitting where a reader would copy it (model=..., "model": ...,
-# --model ...) is flagged "retired" - append a `legacy-ok` comment to that line
-# for a deliberate migration example. Exit 4 on any contradiction.
-python skills/claude-api-ops/scripts/check-model-table.py --offline
-python skills/claude-api-ops/scripts/check-model-table.py --offline --json | python -m json.tool
-
-# Live (advisory, needs ANTHROPIC_API_KEY): curls the Models API and compares
-# its id set against the documented ids. Exit 10 if a documented id is gone or a
-# newer alias id is missing from the table; exit 7 (not a failure) if the key is
-# unset or the API is unreachable. Live mode checks model-ID coverage ONLY — the
-# API returns no pricing, so pricing/context drift stays an --offline + docs concern.
-ANTHROPIC_API_KEY=sk-... python skills/claude-api-ops/scripts/check-model-table.py --live
-```
-
-**`scripts/context-budget.py`** — append-vs-compact calculator. Models both paths
-in dollars over the turns you actually have left, checks the context ceiling
-first, and exits **10** when cost favours compaction, **0** when appending wins:
-
-```bash
-# Short session — appending is cheaper (exit 0)
-python skills/claude-api-ops/scripts/context-budget.py \
-    --history-tokens 25000 --turns-remaining 5 --base-rate 0.30
-
-# Deep session — cost favours compaction (exit 10)
-python skills/claude-api-ops/scripts/context-budget.py \
-    --history-tokens 120000 --turns-remaining 40 --base-rate 2.00 --json
-```
-
-Two results worth knowing before you trust it: the break-even turn count is
-**scale-invariant** (history size and price cancel out — it tracks the summary
-ratio, not how big or costly the conversation is), and it prices **cost only**.
-Recall loss is not in the model, so "compact" means cheaper, not better.
-
-**`assets/cached-agent-loop.py`** — the cache-aware sibling of the minimal loop
-below, and the executable form of the Context Engineering section: breakpoint at
-the end of the static prefix, a rolling breakpoint on the newest turn, an
-intermediate anchor every ~15 blocks so long tool-heavy turns don't jump the
-20-block lookback, tool output capped at the boundary, and a per-turn
-`cache_read_input_tokens` check that warns when the prefix silently changed.
-Copy it when the agent is long-running; copy `agentic-loop.py` when it isn't.
-
-The footgun it encodes: `cache_control` is a key on a content block, so it can
-only be set on a **dict**. Appending `response.content` verbatim (SDK block
-objects) or using the `"content": "a string"` shorthand leaves nowhere to put a
-marker — every breakpoint aimed at those turns is discarded with no error and no
-warning. Normalise content to dict blocks before placing breakpoints.
-
-**`assets/recall-probe.py`** — the "measure it on your workload" harness:
-plants a fact, buries it under N turns, probes for it, and reports recall, cost
-per turn and TTFT for **append** vs **compact**. Makes real API calls, so start
-small (`--turns 6 --trials 1`). Replace the synthetic filler turns with traffic
-from your own logs — that is the point of running it.
-
-**`assets/agentic-loop.py`** — a minimal, runnable tool-use loop (define a tool,
-call `messages.create`, loop while `stop_reason == "tool_use"`, append
-`tool_result`, re-request until `end_turn`). Copy it as the starting point when
-building a manual agent loop; the `>>> ADAPT` marks show what to change.
-
-**`assets/output-schema.json`** — a known-good structured-outputs request body in
-the canonical `output_config.format` shape (with `additionalProperties: false`
-and a `required` array). Copy and reshape `schema.properties` when adding JSON
-outputs; see [references/structured-outputs.md](references/structured-outputs.md)
-for the rules. (Supported on every current model — Fable 5, Opus 5, Sonnet 5,
-Haiku 4.5 — and the legacy 4.5–4.8 line.)
+- `scripts/check-model-table.py`: staleness verifier for the model table, cache constants and citations (`--offline`; `--live` needs a key).
+- `scripts/context-budget.py`: append-vs-compact cost calculator (exit 10 = compacting is cheaper).
+- `assets/cached-agent-loop.py`: cache-aware loop for long-running agents.
+- `assets/recall-probe.py`: append vs compact recall, cost and TTFT harness (real API calls).
+- `assets/agentic-loop.py`: minimal tool-use loop to copy.
+- `assets/output-schema.json`: known-good `output_config.format` request body.
 
 ## Reference Files
 
@@ -464,17 +249,13 @@ Haiku 4.5 — and the legacy 4.5–4.8 line.)
 | [references/agent-sdk.md](references/agent-sdk.md) | Python + TS Agent SDK, ClaudeAgentOptions, hooks, MCP, sessions, SDK vs raw API |
 | [references/context-engineering.md](references/context-engineering.md) | Context budget, the three tiers, progressive disclosure, cache-aware ordering, tool-result bloat, sub-agents as isolation, instrumentation |
 | [references/compaction.md](references/compaction.md) | When compaction is justified, break-even arithmetic, context_management edits, memory tool, how to compact well |
+| [references/context-engineering-quickref.md](references/context-engineering-quickref.md) | One-page context engineering: three tiers, cache-aware order, the compaction decision table, agentic specifics |
+| [references/resources.md](references/resources.md) | The shipped verifier, calculator and assets with worked invocations; the full live-docs list |
+| [references/sdk-examples.md](references/sdk-examples.md) | TypeScript Messages API call, streaming, Agent SDK `query()` loops (Python + TS) |
 
 ## Live Documentation
 
 When cached facts may be stale, WebFetch (append `.md` for clean markdown):
 
 - Models/pricing: `https://platform.claude.com/docs/en/about-claude/models/overview.md`
-- Messages API: `https://platform.claude.com/docs/en/api/messages`
-- Tool use: `https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview.md`
-- Prompt caching: `https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md`
-- Structured outputs: `https://platform.claude.com/docs/en/build-with-claude/structured-outputs.md`
-- Batches: `https://platform.claude.com/docs/en/build-with-claude/batch-processing.md`
-- Agent SDK: `https://code.claude.com/docs/en/agent-sdk/overview`
-- Context editing: `https://platform.claude.com/docs/en/build-with-claude/context-editing`
-- Context engineering: `https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents`
+- Messages API, tool use, caching, structured outputs, batches, Agent SDK, context editing and engineering: [references/resources.md](references/resources.md)

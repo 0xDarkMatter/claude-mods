@@ -45,6 +45,26 @@ resolved to a mechanism. A loop = **(trigger × posture × locus) + the [state s
 
 ---
 
+## At a glance (one line per pattern)
+
+| Pattern | Trigger · Locus | Tier | One-line job |
+|---|---|---|---|
+| `daily-scan` | cadence · local | L1 | discover + prioritize, report only |
+| `pr-watch` | event\|cadence · connector | L1 | watch review state, surface stuck PRs |
+| `ci-watch` | **event** · local | L2 | triage build failures, propose a fix |
+| `dep-bump` | cadence · local | L2 | patch-only bumps behind cooldown + guard |
+| `changelog-gen` | event(tag)\|cadence · local | L1 | draft release notes for approval |
+| `merge-hygiene` | cadence · local | L1 | dead branches, stale flags |
+| `issue-sort` | cadence · connector | L1 | classify + label, propose only |
+| `metric-chase` | **goal** · local | L2 | drive a metric (coverage/latency/eval) via `iterate` |
+| `regression-watch` | cadence\|event · local | L1 | run a benchmark/eval, flag a regression |
+| `digest` | cadence · **connector** | L1 | summarize email/Asana/news (cloud routine) |
+| `backfill` | **goal** · local | L2 | drain a migration/queue **to completion** |
+| `monitor` | **event** · local | L1 | error/deploy webhook → triage + page |
+| `freshness` | cadence · local | L1 | re-check docs/data/deps vs reality |
+
+---
+
 ## The catalog
 
 Each row: the axes, the recommended native mechanism, the job (gate → what it escalates),

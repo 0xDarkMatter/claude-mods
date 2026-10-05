@@ -84,7 +84,7 @@ SELECT DISTINCT product_id FROM q_product WHERE org LIKE '%acme%';
 SELECT DISTINCT org FROM q_product WHERE org LIKE '%acme%';
 ```
 
-In the worked example below the proof shot returned 6.75 ms against a 171.83 ms control —
+In the [worked example](references/covering-index-worked-example.md) the proof shot returned 6.75 ms against a 171.83 ms control —
 enough to justify the index without touching production schema.
 
 ## EXPLAIN QUERY PLAN — the 60-second read
@@ -117,51 +117,7 @@ expression indexes, ANALYZE/`sqlite_stat1`, and the full catalogue of planner de
 
 ### The unseekable-predicate trap (worked example)
 
-A leading-wildcard `LIKE '%x%'` can **never** use a B-tree — SQLite optimises `LIKE` only
-for an anchored prefix (`'x%'`). So a plain index on that column changes nothing, people
-observe no improvement, and conclude "indexing didn't help here". The index wasn't wrong;
-the *shape* was. The fix is to make the scan **covering**, so the unavoidable full pass
-reads narrow index entries instead of wide rows.
-
-```sql
--- Column order is load-bearing: FILTERED column first, PROJECTED column second.
-CREATE INDEX q_product_org_product ON q_product(org, product_id);
-```
-
-> **Worked example — one database, not a constant.** Measured 2026-08-04 against a live
-> Cloudflare D1 (`atdw-mirror`, region OC, colo SYD), 12 runs each, median of server-side
-> `sql_duration_ms`; 73-column table, 58k rows.
-> Before: `SCAN q_product USING INDEX q_product_org`, **171.83 ms**, 60,736 rows read.
-> The identical statement shape over an already-covered column: **6.75 ms**, 58,433 rows
-> read. **~25x faster with rows-read essentially unchanged** — proof that the win came from
-> row width, not from touching fewer rows. Your table's numbers will differ; the *shape* of
-> the result is what transfers.
->
-> Two further findings from the same session worth internalising:
-> - Once the covering index existed, SQLite **dropped the `GROUP BY` temp B-tree by itself**.
->   A hand-rewrite to avoid the grouping measured 5.99 ms vs 5.85 ms — noise. Don't
->   hand-optimise around a temp B-tree until you have re-read the plan post-index.
-> - An unindexed `MAX()` riding inside a batch another query was already sending cost
->   **28.09 ms and 58,432 rows scanned on every response across four tools**, while the
->   statement without it cost 0.17 ms / 2 rows. The same `MAX()` over an indexed column:
->   0.17 ms / 1 row. It never showed up in per-query timing because it added no round trip.
-
-### Verify the planner's choice with and without statistics
-
-A covering index may only be *chosen* once `ANALYZE` has populated `sqlite_stat1` — and
-many hosted engines never run `ANALYZE` for you. Test both states before you rely on it:
-
-```sql
-ANALYZE;                                  -- populate sqlite_stat1
-EXPLAIN QUERY PLAN SELECT ...;            -- record the plan
-
-DELETE FROM sqlite_stat1;                 -- simulate a never-analyzed database
-ANALYZE sqlite_master;                    -- force the planner to reload (now-empty) stats
-EXPLAIN QUERY PLAN SELECT ...;            -- same plan? then you are safe either way
-```
-
-In the worked example the covering index was chosen in **both** states — verified, not
-assumed. Do the same check rather than inheriting that result.
+The measured D1 case behind this advice (why a plain index on `LIKE '%x%'` changes nothing, the fix, before/after numbers) and the with/without-`sqlite_stat1` planner check: [references/covering-index-worked-example.md](references/covering-index-worked-example.md).
 
 ## Index design in one table
 
@@ -244,16 +200,7 @@ dance, versioned migration runners).
 
 The engine is the same; the envelope is not.
 
-| Host | Connection model | Watch out for |
-|---|---|---|
-| `sqlite3` CLI | Direct file | `.timer on` for real timings; `.mode`/`.headers` for output |
-| Python `sqlite3` | Direct file, per-connection pragmas | Implicit transaction handling; `check_same_thread` |
-| Python `aiosqlite` | Thread-backed async wrapper | Still one writer; see `./references/async-patterns.md` |
-| `node:sqlite` | Synchronous, built into Node | No external dependency; API still stabilising |
-| `better-sqlite3` | Synchronous, native addon | Fastest Node option; prepared statements are the unit of reuse |
-| `bun:sqlite` | Synchronous, built into Bun | API close to better-sqlite3, not identical |
-| **Cloudflare D1** | HTTP/RPC to a managed SQLite | Billed on **rows read**; 100-parameter cap; no `PRAGMA` surface |
-| libSQL / Turso | Server or embedded replica | Replica staleness; syntax extensions beyond stock SQLite |
+Per-host connection model and traps: [Hosts at a glance](references/hosts.md#hosts-at-a-glance). On D1, cost is **rows read**, bound parameters cap at 100, and there is no `PRAGMA` surface.
 
 **Deep dive**: `./references/hosts.md` for per-host connection recipes and traps.
 
@@ -300,13 +247,7 @@ when the plan is clean.
 python3 scripts/eqp-triage.py --db app.db \
   --sql "SELECT DISTINCT product_id FROM q_product WHERE org LIKE '%acme%'"
 
-# Triage a plan captured elsewhere (D1, a log, a colleague's paste)
-wrangler d1 execute atdw-mirror --remote --json \
-  --command "EXPLAIN QUERY PLAN SELECT product_id FROM q_product WHERE org LIKE '%acme%'" \
-  | python3 scripts/eqp-triage.py
-
-# Machine-readable findings
-python3 scripts/eqp-triage.py --db app.db --sql "SELECT ..." --json | jq '.data[]'
+# More: triage a plan piped from D1 or a log, and --json output -> references/eqp-triage.md
 ```
 
 ## Gotchas
@@ -344,6 +285,8 @@ python3 scripts/eqp-triage.py --db app.db --sql "SELECT ..." --json | jq '.data[
 | `./references/async-patterns.md` | Python `aiosqlite` depth: async CRUD, batching, pooling |
 | `./references/operations.md` | Integrity checks, corruption recovery, VACUUM, backups, size and page tuning |
 | `./references/testing.md` | In-memory vs file databases, fixtures, deterministic seeding, migration tests |
+| `./references/covering-index-worked-example.md` | The measured D1 covering-index case behind the advice above; the with/without-statistics planner check |
+| `./references/eqp-triage.md` | More `eqp-triage.py` invocations: a plan piped from D1 or a log, `--json` output |
 
 ## See also
 
