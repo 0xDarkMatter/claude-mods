@@ -1452,6 +1452,105 @@ export TMPDIR=$SUITE_TMPDIR FLEET_SESSION_NOCACHE=1
 [ -d "$AREPO/.claude/worktrees/idle-open" ] && ok "idle-open worktree survived --remove" || no "idle-open worktree was REMOVED"
 [ -d "$AREPO/.claude/worktrees/orphan" ] && ok "unclaimed native worktree survived --remove" || no "unclaimed native worktree was REMOVED"
 
+# -- prune: archived owners (the 2026-10-05 regressions) ------------------------
+# Ten Desktop sessions were archived after their lanes landed, and a dry run
+# still put every one of their worktrees under KEEP, "live session ... (by
+# transcript)" / "(by cwd)". Archiving STOPS the session, and the stop appends
+# bookkeeping records to its transcript ~2s before Desktop rewrites the wrapper
+# with isArchived:true, so for the next 10 minutes the transcript mtime made an
+# archived session read live. A human removed 17 merged, clean worktrees by
+# hand. Every case below is on the shape observed: the wrapper's
+# lastActivityAt hours old, the transcript seconds old.
+echo "-- prune archived owners (2026-10-05 regressions) --"
+# bucket<TAB>reason for a .claude/worktrees/<slug> tree.
+pr(){ bash "$FLEET" prune --porcelain 2>/dev/null \
+      | awk -F'\t' -v n="/worktrees/$1" 'substr($1, length($1) - length(n) + 1) == n { print $3 "\t" $4 }'; }
+set_age(){ # file ageSecs
+  local t=$(( $(date +%s) - $2 ))
+  touch -d "@$t" "$1" 2>/dev/null || touch -t "$(date -r "$t" +%Y%m%d%H%M.%S)" "$1"
+}
+
+mk_awt arch-now claude/arch-now
+mk_wrap local_archnow "Archived just now" "$(bs_path "$(awt_path arch-now)")" 7200 claude/arch-now true cli-archnow
+mk_tx cli-archnow "$(bs_path "$(awt_path arch-now)")" 3       # the archive's own shutdown records
+[ "$(pa arch-now)" = SAFE ] && ok "owner archived seconds ago + merged + clean => SAFE" \
+  || no "just-archived owner's worktree classified '$(pa arch-now)'"
+[ "$(bash "$SESSIONS" live local_archnow 2>/dev/null)" = "0" ] \
+  && ok "live <id>: an archived session's shutdown write is not activity (land gate)" || no "live <id> reads a just-archived session live"
+
+mk_awt arch-dirty claude/arch-dirty
+echo scratch > "$(awt_path arch-dirty)/UNSAVED.txt"
+mk_wrap local_archdirty "Archived, left files" "$(bs_path "$(awt_path arch-dirty)")" 7200 claude/arch-dirty true cli-archdirty
+mk_tx cli-archdirty "$(bs_path "$(awt_path arch-dirty)")" 3
+case "$(pr arch-dirty)" in
+  REVIEW*DIRTY*"owner archived"*) ok "archived owner + dirty => REVIEW, and the reason says the owner is archived";;
+  *) no "archived + dirty classified '$(pr arch-dirty)'";; esac
+
+# A wrapper whose isArchived is missing or not a boolean (Desktop changed its
+# format): the flag cannot be read, so the session is NOT presumed archived.
+mk_awt flag-gone claude/flag-gone
+mk_wrap local_flaggone "Flag unreadable" "$(bs_path "$(awt_path flag-gone)")" 7200 claude/flag-gone null cli-flaggone
+mk_tx cli-flaggone "$(bs_path "$(awt_path flag-gone)")" 3
+case "$(pr flag-gone)" in
+  KEEP*"archive flag unreadable"*) ok "unreadable archive flag => KEEP (treated as live), and says so";;
+  *) no "unreadable archive flag classified '$(pr flag-gone)'";; esac
+
+# Archived an hour ago, yet its transcript was written seconds ago: something
+# resumed it (a terminal `claude --resume`). Archived must not mean "never live".
+mk_awt resumed claude/resumed
+mk_wrap local_resumed "Archived, then resumed" "$(bs_path "$(awt_path resumed)")" 7200 claude/resumed true cli-resumed
+set_age "$ASTORE/local_resumed.json" 3600
+mk_tx cli-resumed "$(bs_path "$(awt_path resumed)")" 3
+[ "$(pa resumed)" = KEEP ] && ok "a transcript written after the archive => still live, KEEP" \
+  || no "session written to after its archive classified '$(pa resumed)'"
+
+# A lane the session EnterWorktree'd into: its wrapper never names the lane
+# (cwd and gitAnchors stay on its spawn tree), only its transcript does. The
+# directory key alone is lossy, so the transcript's recorded cwd must be EXACTLY
+# this tree — a neighbour whose name encodes the same (key.clash) is not.
+mk_awt lane-entered lane/entered-arch
+mk_wrap local_entarch "Entered, landed, archived" "$(bs_path "$SB/spawn-gone")" 7200 claude/spawn-gone true cli-entarch
+mk_tx cli-entarch "$(bs_path "$(awt_path lane-entered)")" 7200
+[ "$(pa lane-entered)" = SAFE ] && ok "archived session's transcript cwd is exactly the lane => SAFE" \
+  || no "entered lane of an archived session classified '$(pa lane-entered)'"
+mk_awt key-clash lane/key-clash
+mk_wrap local_clash "Worked next door" "$(bs_path "$SB/spawn-clash")" 7200 claude/spawn-clash true cli-clash
+mk_tx cli-clash "$(bs_path "$AREPO/.claude/worktrees/key.clash")" 7200
+[ "$(pa key-clash)" = REVIEW ] && ok "a transcript-key collision is not evidence => REVIEW" \
+  || no "key-colliding transcript condemned '$(pa key-clash)'"
+
+# What archiving leaves behind: the session's own tree, HEAD detached, branch
+# deleted. Removable only while its commit is in base and nothing is in flight.
+mk_awt left-behind claude/left-behind
+git -C "$(awt_path left-behind)" checkout -q --detach
+git -C "$AREPO" branch -q -D claude/left-behind
+mk_wrap local_leftbehind "Archived, tree left" "$(bs_path "$(awt_path left-behind)")" 7200 claude/left-behind true
+[ "$(pa left-behind)" = SAFE ] && ok "detached leftover of an archived session, HEAD in base => SAFE" \
+  || no "archived detached leftover classified '$(pa left-behind)'"
+git -C "$(awt_path left-behind)" bisect start >/dev/null 2>&1
+[ "$(pa left-behind)" = REVIEW ] && ok "...but a bisect in progress there => REVIEW" \
+  || no "detached tree mid-bisect classified '$(pa left-behind)'"
+git -C "$(awt_path left-behind)" bisect reset >/dev/null 2>&1
+mk_awt left-ahead claude/left-ahead
+LAWT=$(awt_path left-ahead)
+echo more > "$LAWT/more.txt"; git -C "$LAWT" add -A; git -C "$LAWT" -c user.email=w@t -c user.name=w commit -qm more
+git -C "$LAWT" checkout -q --detach; git -C "$AREPO" branch -q -D claude/left-ahead
+mk_wrap local_leftahead "Archived, commit not in base" "$(bs_path "$LAWT")" 7200 claude/left-ahead true
+[ "$(pa left-ahead)" = REVIEW ] && ok "detached leftover with a commit not in base => REVIEW" \
+  || no "detached tree holding an unmerged commit classified '$(pa left-ahead)'"
+
+# Archived AFTER the index was cached (a `fleet land` builds it): the cached row
+# still says open, so prune must re-read the flag, not wait out the 15-min TTL.
+unset FLEET_SESSION_NOCACHE; SUITE_TMPDIR=$TMPDIR
+export TMPDIR="$SB/acache"; mkdir -p "$TMPDIR"
+mk_awt arch-late claude/arch-late
+mk_wrap local_archlate "Landed, then archived" "$(bs_path "$(awt_path arch-late)")" 7200 claude/arch-late false
+[ "$(pa arch-late)" = REVIEW ] && ok "premise: an open owner keeps 'arch-late' REVIEW" || no "premise failed: 'arch-late' is '$(pa arch-late)'"
+mk_wrap local_archlate "Landed, then archived" "$(bs_path "$(awt_path arch-late)")" 7200 claude/arch-late true
+[ "$(pa arch-late)" = SAFE ] && ok "an archive newer than the cached index is read fresh => SAFE" \
+  || no "prune trusted the cached archive flag ('$(pa arch-late)')"
+export TMPDIR=$SUITE_TMPDIR FLEET_SESSION_NOCACHE=1
+
 # -- land gate: directory claims (the 2026-09-28 follow-up) ---------------------
 # The land gate joined owners on BRANCH alone, so it was blind in the same two
 # ways prune was above: wrapper branch drift (a session in worktree
