@@ -144,6 +144,12 @@ No loop ships without one. It's the difference between "the loops are misbehavin
 a minute" and "the loops are misbehaving, where's the breaker?". Put the exact mechanism
 in `kill_switch:` and make checking it the first action of every run, before the work.
 
+## What a native host does not give you
+
+A native host gives you a *place* for this spine (a Desktop task's folder) but never the
+spine itself: no host writes `STATE.md`, enforces a token budget, or records what the loop
+*decided*. Run history says a tick happened; the run-log says what it did and cost.
+
 ## See also
 
 - [risk-tiers.md](risk-tiers.md) — the autonomy ladder the config's `tier` selects.
