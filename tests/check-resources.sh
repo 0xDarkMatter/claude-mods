@@ -143,6 +143,10 @@ run "app-router-audit --help"           0 "$PY" skills/nextjs-ops/scripts/audit-
 run "app-router-audit fixture scan"    10 "$PY" skills/nextjs-ops/scripts/audit-app-router.py skills/nextjs-ops/tests/fixtures/app-sample
 run "app-router-audit clean control"    0 "$PY" skills/nextjs-ops/scripts/audit-app-router.py skills/nextjs-ops/tests/fixtures/app-sample/app/clean/page.tsx
 
+echo "== craftcms-ops: Craft + plugin major-version staleness verifier"
+run "craft-facts --offline consistent" 0 "$PY" skills/craftcms-ops/scripts/check-craft-facts.py --offline
+run "craft-facts --help"               0 "$PY" skills/craftcms-ops/scripts/check-craft-facts.py --help
+
 echo "== protocol: every new verifier is executable + compiles"
 for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/claude-api-ops/scripts/context-budget.py \
@@ -157,7 +161,8 @@ for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/hono-ops/scripts/check-hono-facts.py \
          skills/hono-ops/scripts/route-inventory.py \
          skills/nextjs-ops/scripts/check-nextjs-facts.py \
-         skills/nextjs-ops/scripts/audit-app-router.py; do
+         skills/nextjs-ops/scripts/audit-app-router.py \
+         skills/craftcms-ops/scripts/check-craft-facts.py; do
     "$PY" -m py_compile "$s" 2>/dev/null && pass "py_compile $(basename "$s")" || bad "py_compile $(basename "$s")"
 done
 bash -n skills/terraform-ops/scripts/check-action-refs.sh 2>/dev/null \
@@ -191,6 +196,7 @@ purity "fleet-doctor"  bash skills/fleet-worker/scripts/fleet-doctor.sh --offlin
 purity "pricing-sync"  "$PY" skills/loop-ops/scripts/check-pricing-sync.py --offline
 purity "native-facts"  "$PY" skills/loop-ops/scripts/check-native-facts.py --offline
 purity "r-facts"       "$PY" skills/r-ops/scripts/check-r-facts.py --offline
+purity "craft-facts"   "$PY" skills/craftcms-ops/scripts/check-craft-facts.py --offline
 grep -q '_lib/term.sh' skills/terraform-ops/scripts/check-action-refs.sh \
     && pass "check-action-refs sources term.sh" || bad "check-action-refs missing term.sh"
 grep -q '_lib/term.sh' skills/fleet-worker/scripts/fleet-doctor.sh \

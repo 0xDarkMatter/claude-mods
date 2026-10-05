@@ -226,7 +226,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [vue-ops](skills/vue-ops/) | Vue 3 Composition API, Pinia, Vue Router, Nuxt 3 |
 | [astro-ops](skills/astro-ops/) | Astro islands, content collections, rendering strategies, deployment |
 | [laravel-ops](skills/laravel-ops/) | Laravel Eloquent, architecture, authentication, testing with Pest |
-| [craftcms-ops](skills/craftcms-ops/) | Craft CMS 5 - entries/sections/fields, Matrix-as-entries, Twig, element queries, GraphQL, plugins |
+| [craftcms-ops](skills/craftcms-ops/) | Craft CMS 3/4/5 agency builds - Matrix-as-entries, Twig + escaping, eager loading, SEOmatic, Blitz, Formie, CKEditor, craft-vite, DDEV, Codeception, upgrades, performance |
 | [payloadcms-ops](skills/payloadcms-ops/) | Payload CMS 3 (Next.js-native) - collections/globals, Local API, access control, hooks, fields |
 | [hono-ops](skills/hono-ops/) | Hono v4 on Cloudflare Workers - app composition + sub-app mounting, middleware ordering/auth boundaries, typed errors + onError, zValidator vs hand-rolled validation, SPA co-serving, hc RPC vs typed clients, vitest-pool-workers testing, streaming/SSE/WebSockets; route-inventory + middleware-order linter, staleness verifier |
 | [cli-ops](skills/cli-ops/) | Production CLI tool patterns - agentic workflows, stream separation, exit codes |

@@ -1,0 +1,16 @@
+{
+  "schema": "claude-mods.craftcms-ops.facts/v1",
+  "as_of": "2026-10-05",
+  "_comment": "documented_major = newest STABLE major the skill documents for the current Craft line, read from https://repo.packagist.org/p2/<package>.json on as_of. prose_token = the phrase the skill prose must keep stating. Bump both, plus the 'Versions verified' note in SKILL.md, in the same commit. Checked by scripts/check-craft-facts.py.",
+  "facts": [
+    {"key": "craft",         "package": "craftcms/cms",                  "documented_major": 5, "prose_token": "Craft 5.x"},
+    {"key": "seomatic",      "package": "nystudio107/craft-seomatic",    "documented_major": 5, "prose_token": "SEOmatic 5"},
+    {"key": "blitz",         "package": "putyourlightson/craft-blitz",   "documented_major": 5, "prose_token": "Blitz 5"},
+    {"key": "formie",        "package": "verbb/formie",                  "documented_major": 3, "prose_token": "Formie 3"},
+    {"key": "ckeditor",      "package": "craftcms/ckeditor",             "documented_major": 5, "prose_token": "CKEditor plugin 5.x"},
+    {"key": "vite",          "package": "nystudio107/craft-vite",        "documented_major": 5, "prose_token": "craft-vite 5"},
+    {"key": "imageoptimize", "package": "nystudio107/craft-imageoptimize", "documented_major": 5, "prose_token": "ImageOptimize 5"},
+    {"key": "imagerx",       "package": "spacecatninja/imager-x",        "documented_major": 6, "prose_token": "Imager-X 6"},
+    {"key": "codeception",   "package": "codeception/codeception",       "documented_major": 5, "prose_token": "Codeception 5"}
+  ]
+}
