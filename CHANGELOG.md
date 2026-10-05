@@ -253,6 +253,12 @@ feature releases live in the README "Recent Updates" section.
 
 ### Changed
 
+- **`security-ops` fits the compaction budget.** The three T2 audit-agent prompts, the
+  T3 remediation preflight and the report template moved verbatim to
+  `references/audit-agent-prompts.md`; `SKILL.md` keeps routing, tiers, detection,
+  consolidation and a one-table summary of what each agent reads and reports. The body
+  drops from about 5,200 to 3,400 estimated tokens, under the 5,000 Claude Code keeps
+  after auto-compaction, so the orchestration no longer falls off the end.
 - **`security-ops` references split to a 300-line ceiling.** The OWASP guide is now
   `owasp-top10-a01-a05.md` + `owasp-top10-a06-a10.md` (the `review`, `testgen` and
   `techdebt` preloads point at both), MFA/rate-limiting/lockout moved to
