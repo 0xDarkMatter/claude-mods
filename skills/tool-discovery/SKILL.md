@@ -121,4 +121,4 @@ Task tool → subagent_type: "firecrawl-expert"
 
 For complete catalogs, load:
 - `./references/agents-catalog.md` - All agents with capabilities
-- `./references/skills-catalog.md` - All skills with details
+- `./references/skills-catalog.md` - Detail for a subset of skills, plus a selection guide (not the full list)

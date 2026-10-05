@@ -163,13 +163,13 @@ Filter with `Get-WinEvent -FilterHashtable` (far faster than `Where-Object`); th
 | Symptom | First check | Common cause |
 |---------|-------------|--------------|
 | Mapped drive shows `Disconnected` / UNC path unreachable | Is this a network mapping? `Get-SmbMapping` | Hand to `net-ops` — not a local storage fault |
-| Slow boot, used to be fast | `startup-audit.ps1` | Bloat accumulation (Docker, Adobe CC, Electron apps) |
+| Slow boot, used to be fast | `boot-perf.ps1`, then `health-audit.ps1` startup section | Bloat accumulation (Docker, Adobe CC, Electron apps) |
 | Slow boot, getting worse | `disk-health.ps1` | Failing drive — Windows waiting on probe timeouts |
 | Random freezes + hard restarts | `disk-health.ps1` + `crash-triage.ps1` | storahci resets cascading into kernel hang |
 | BSOD on wake from sleep | `crash-triage.ps1` (BugCheck `0x9F`) | Driver power state failure (often GPU, USB) |
 | BSOD with WHEA before it | `crash-triage.ps1` (BugCheck `0x124`) | Hardware fault — RAM, CPU, PCIe lane |
 | Sluggish but not crashing | `health-audit.ps1` performance section | Background process pileup |
-| Login takes minutes | `startup-audit.ps1` | Slow startup item synchronously blocking shell |
+| Login takes minutes | `boot-perf.ps1` (post-boot time), then `safe-disable-startup.ps1 -List` | Slow startup item synchronously blocking shell |
 
 ## Recovery Patterns
 

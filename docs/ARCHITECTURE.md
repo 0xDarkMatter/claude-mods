@@ -14,7 +14,7 @@ Claude Code provides a layered extension system that allows customization at mul
 | **AGENTS.md** | Cross-platform agent instructions | Project | Always (user message) |
 | **Rules** | Modular, topic-specific instructions | Project/User | Always or path-conditional |
 | **Skills** | Dynamic capability packages | Project/User | On-demand when relevant |
-| **Agents** | Specialized subagent prompts | Project/User | When spawned via Task tool |
+| **Agents** | Specialized subagent prompts | Project/User | When spawned via the Agent tool |
 | **Commands** | Custom slash commands | Project/User | When invoked by user |
 | **Output Styles** | Response personality | Project/User | When selected |
 | **Hooks** | Lifecycle shell scripts | Project/User | At specific events |
@@ -216,7 +216,7 @@ Skills are structured capability packages that Claude can discover and load dyna
 ### Benefits
 
 - **Progressive disclosure**: Metadata always loaded, full content on-demand
-- **Unbounded size**: Can include extensive references, scripts, templates
+- **Unbounded resources**: References, scripts and templates cost nothing until read. The SKILL.md body itself is bounded: under 500 lines and ~5,000 tokens (the size rule in [SKILL-SUBAGENT-REFERENCE.md](SKILL-SUBAGENT-REFERENCE.md#rules-for-claude-mods-skills))
 - **Organized**: Each skill is a self-contained directory
 - **Triggers**: Natural language descriptions help Claude recognize when to use them
 
@@ -255,15 +255,10 @@ skills/
 ```yaml
 ---
 name: testing-ops
-description: Test architecture, mocking strategies, and coverage patterns. Triggers on: write tests, test strategy, mocking, fixtures, coverage.
+description: Test architecture, mocking strategies, and coverage patterns. Use when writing or improving tests, designing test infrastructure, or choosing a mocking strategy.
 ---
 
 # Testing Patterns
-
-## When to Use
-- User asks to write or improve tests
-- Discussing test architecture
-- Setting up test infrastructure
 
 ## Quick Reference
 - Unit tests: `vitest` with `@testing-library/react`
@@ -271,9 +266,12 @@ description: Test architecture, mocking strategies, and coverage patterns. Trigg
 - Mocking: `vi.mock()` for modules, `msw` for API
 
 ## Detailed Patterns
-See @references/mocking-strategies.md for advanced mocking.
-See @references/fixtures.md for test data patterns.
+- Advanced mocking: [references/mocking-strategies.md](references/mocking-strategies.md)
+- Test data: [references/test-data-patterns.md](references/test-data-patterns.md)
 ```
+
+"When to use" belongs in the `description`, which is all Claude sees before the skill
+loads; a "When to Use" section in the body is read only after the decision is made.
 
 ### References
 
@@ -286,7 +284,7 @@ See @references/fixtures.md for test data patterns.
 
 ### Overview
 
-Agents are specialized system prompts that Claude can spawn as subagents via the Task tool. Each agent runs in its own context with specific expertise, tool permissions, and instructions - ideal for domain-specific tasks that benefit from focused context.
+Agents are specialized system prompts that Claude can spawn as subagents via the Agent tool (named Task before Claude Code 2.1.63; `Task(...)` still works as an alias). Each agent runs in its own context with specific expertise, tool permissions, and instructions - ideal for domain-specific tasks that benefit from focused context.
 
 ### Benefits
 
@@ -300,16 +298,16 @@ Agents are specialized system prompts that Claude can spawn as subagents via the
 
 **Level: LOW (Advisory)**
 
-Agent outputs are **advisory, not authoritative**. When you spawn an agent via the Task tool, it runs independently and returns output. The parent agent can choose to ignore, modify, or override that output.
+Agent outputs are **advisory, not authoritative**. When you spawn an agent via the Agent tool, it runs independently and returns output. The parent agent can choose to ignore, modify, or override that output.
 
 | Aspect | Authority Level | Notes |
 |--------|-----------------|-------|
 | Agent's own instructions | High (within its context) | Agent follows its own system prompt |
 | Agent output to parent | Low | Parent can ignore or override |
-| Tool access | Restricted | No MCP tools, limited bash |
+| Tool access | Inherited | The main session's built-in and MCP tools, unless the agent's `tools` list narrows them |
 | Context | Fresh | Doesn't see parent's conversation |
 
-**Critical limitation**: Subagents do NOT have access to MCP server tools (browser automation, custom MCP servers). Only the main session has MCP access.
+**Tool inheritance**: a subagent with no `tools` field gets the main conversation's tools, MCP servers included; a `tools` list narrows that. A background subagent keeps every MCP tool but only a subset of the built-ins. Subagents can spawn their own subagents, three layers deep by default. Source: [Claude Code Subagents](https://code.claude.com/docs/en/sub-agents).
 
 ### Structure
 
@@ -344,7 +342,7 @@ When Claude encounters a scraping-specific question, it can spawn the firecrawl-
 User: "How do I extract structured data from this Cloudflare-protected site?"
 
 Claude: I'll consult the firecrawl-expert agent for specialized guidance.
-[Uses Task tool with subagent_type="firecrawl-expert"]
+[Uses the Agent tool with subagent_type="firecrawl-expert"]
 ```
 
 ### References
@@ -359,6 +357,8 @@ Claude: I'll consult the firecrawl-expert agent for specialized guidance.
 ### Overview
 
 Slash commands are user-invoked shortcuts that expand into prompts. They provide quick access to common workflows, complex multi-step operations, or standardized procedures.
+
+Claude Code has merged custom commands into skills: `.claude/commands/deploy.md` and `.claude/skills/deploy/SKILL.md` both create `/deploy`, and Anthropic's plugin docs say to prefer `skills/` for new work. claude-mods keeps only `/sync`, `/save` and `/git-ops` as commands.
 
 ### Benefits
 
@@ -377,7 +377,7 @@ Commands execute with high authority because they represent explicit user intent
 |--------|-----------|
 | Command invocation | Explicit user request - high priority |
 | Command content | Treated as user instructions |
-| Can spawn agents | Yes, with Task tool |
+| Can spawn agents | Yes, with the Agent tool |
 | Can invoke skills | Yes, via Skill tool |
 
 ### Structure
@@ -524,16 +524,24 @@ Hooks have the highest practical authority because they execute deterministicall
 
 **Key insight**: Hooks = "must do", CLAUDE.md = "should do".
 
-### Hook Types
+### Common Hook Events
 
 | Hook | Trigger | Use Case |
 |------|---------|----------|
+| `SessionStart` | Session begins, resumes, or restarts after `/clear` or compaction | Load context, run a one-shot scan |
+| `UserPromptSubmit` | Before a prompt is processed | Validate or enrich the prompt, can block |
 | `PreToolUse` | Before tool execution | Validate inputs, security checks, can block |
 | `PostToolUse` | After tool execution | Format code, run tests, lint |
 | `Notification` | On specific events | Alerts, logging, external notifications |
 | `Stop` | When Claude stops | Cleanup, summaries, commit reminders |
 
+These are the common ones, not the full list. The complete event catalog, with matchers,
+stdin fields and blocking rules, is in
+[`claude-code-ops/references/hooks-reference.md`](../skills/claude-code-ops/references/hooks-reference.md).
+
 ### Configuration Example
+
+Each matcher entry holds a list of handler objects, not bare strings:
 
 ```json
 {
@@ -541,13 +549,17 @@ Hooks have the highest practical authority because they execute deterministicall
     "PreToolUse": [
       {
         "matcher": "Bash",
-        "hooks": ["bash .claude/hooks/validate-command.sh"]
+        "hooks": [
+          { "type": "command", "command": "bash .claude/hooks/validate-command.sh" }
+        ]
       }
     ],
     "PostToolUse": [
       {
         "matcher": "Write|Edit",
-        "hooks": ["bash .claude/hooks/format-file.sh $FILE_PATH"]
+        "hooks": [
+          { "type": "command", "command": "bash .claude/hooks/format-file.sh" }
+        ]
       }
     ]
   }
@@ -556,10 +568,13 @@ Hooks have the highest practical authority because they execute deterministicall
 
 ### Example Hook Script
 
+A hook receives its input as JSON on stdin (`tool_name`, `tool_input`, `cwd`, ...), not
+as arguments or environment variables.
+
 **`.claude/hooks/format-file.sh`**:
 ```bash
 #!/bin/bash
-FILE="$1"
+FILE="$(jq -r '.tool_input.file_path // empty')"
 
 case "$FILE" in
   *.ts|*.tsx)
@@ -595,7 +610,7 @@ Plugins are packaged collections of commands, agents, skills, hooks, and MCP ser
 
 ### Benefits
 
-- **One-command install**: `/plugin install owner/repo`
+- **One-command install**: `/plugin marketplace add owner/repo`, then `/plugin install <plugin>@<marketplace>`
 - **Bundled extensions**: Multiple components in one package
 - **Marketplaces**: Discover community plugins
 - **Version control**: Track and update plugins
@@ -611,13 +626,20 @@ Plugins don't have their own authority level - each component within a plugin op
 ```
 my-plugin/
 ├── .claude-plugin/
-│   └── plugin.json        # Manifest
-├── commands/              # Slash commands
+│   └── plugin.json        # Manifest (optional)
+├── skills/                # Skill packages, one <name>/SKILL.md each
+├── commands/              # Slash commands (prefer skills/ for new work)
 ├── agents/                # Subagent definitions
-├── skills/                # Skill packages
-├── hooks/                 # Hook scripts
-└── rules/                 # Rules files
+├── hooks/
+│   └── hooks.json         # Hook configuration
+├── output-styles/         # Output styles
+└── .mcp.json              # MCP servers
 ```
+
+Components are found by this layout; the manifest needs a path field only for a
+component kept somewhere else. **Rules are not a plugin component** (nor is a
+`CLAUDE.md` at the plugin root): claude-mods ships its `rules/` through
+`scripts/install.sh` / `install.ps1` instead.
 
 ### Manifest Example
 
@@ -627,19 +649,19 @@ my-plugin/
   "name": "my-plugin",
   "version": "1.0.0",
   "description": "My awesome Claude Code extensions",
-  "components": {
-    "commands": ["commands/review.md"],
-    "agents": ["agents/expert.md"],
-    "skills": ["skills/patterns"],
-    "rules": ["rules/conventions.md"]
-  }
+  "author": { "name": "Your Name" },
+  "license": "MIT"
 }
 ```
+
+There is no `components` key: Claude Code strips unknown top-level fields, so a
+component list there is silently ignored. `claude plugin validate` checks the manifest.
 
 ### References
 
 - [Claude Code Plugins](https://www.anthropic.com/news/claude-code-plugins) - Official announcement
 - [Plugin Documentation](https://code.claude.com/docs/en/plugins)
+- [Plugin manifest reference](https://code.claude.com/docs/en/plugins-reference) - every `plugin.json` field and the standard layout
 
 ---
 
@@ -689,8 +711,8 @@ Understanding how components interact and their authority levels:
 │  AUTHORITY: LOW (Advisory)                                      │
 │  ┌───────────────────────────────────────────────────────────┐  │
 │  │  Agent outputs (can be ignored by parent)                 │  │
-│  │  - Run in separate process                                │  │
-│  │  - No MCP tool access                                     │  │
+│  │  - Run in a separate context window                       │  │
+│  │  - Inherit the session's tools unless `tools` narrows     │  │
 │  │  - Fresh context each invocation                          │  │
 │  └───────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
@@ -704,7 +726,7 @@ Understanding when to use Skills versus Agents is one of the most important arch
 
 **Skills are for knowledge, Agents are for execution.** When you need Claude to *know* something - domain expertise, constraints, patterns, verification rules - use a Skill. The skill content becomes part of Claude's instructions with high authority. When you need Claude to *do* something in parallel, in the background, or with a different model for cost optimization - use an Agent. Agent outputs are advisory and can be ignored; they're workers, not authorities.
 
-**The critical difference is authority and context.** Skills share context with the main conversation and have high authority - Claude treats skill content as rules to follow. Agents run in isolated contexts with fresh memory each time, and their outputs are merely suggestions the parent can override. Additionally, agents have a significant limitation: they cannot access MCP server tools (browser automation, custom MCP servers). If your workflow needs MCP tools, skills or the main session are your only options.
+**The critical difference is authority and context.** Skills share context with the main conversation and have high authority - Claude treats skill content as rules to follow. Agents run in isolated contexts with fresh memory each time, and their outputs are merely suggestions the parent can override. Tool access rarely decides it: an agent inherits the main session's tools, MCP servers included, unless its `tools` list narrows them.
 
 **The hybrid pattern is often optimal.** The most powerful architecture combines both: a Skill provides the authoritative knowledge and orchestration rules (what to do, when, and why), while Agents handle the actual execution (running tasks cheaply with Haiku, analyzing results in parallel with Sonnet). The skill tells Claude it *must* spawn certain agents; the agents do the work efficiently. Don't create agents with `model: inherit` - if you're not using a different model for cost savings or parallel execution, use a skill instead.
 
@@ -718,7 +740,7 @@ Understanding when to use Skills versus Agents is one of the most important arch
 | Cross-platform compatibility | AGENTS.md | Medium-High | Works with Cursor, Codex, etc. |
 | Topic-specific rules | `.claude/rules/` | High | Modular, can be path-conditional |
 | Domain expertise | Skills | High | Progressive loading, auto-routing |
-| Parallel task execution | Agents | Low | Separate process, can use cheaper models |
+| Parallel task execution | Agents | Low | Separate context, can use cheaper models |
 | Workflow shortcuts | Commands | High | User-invoked, explicit intent |
 | Different personality | Output Styles | Highest | System prompt modification |
 | Deterministic automation | Hooks | Absolute | Always runs, can block |

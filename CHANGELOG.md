@@ -364,6 +364,15 @@ feature releases live in the README "Recent Updates" section.
   ran and which had drifted to 7 FAILs, is repaired and now runs in
   `tests/run-skill-tests.sh`.
 
+- **Skills and docs pointed at files that don't exist.** `windows-ops` told the agent
+  to run `startup-audit.ps1` and `event-search.ps1`, which never existed; it now names
+  the scripts that do the job. `skill-creator` told it to run `init_skill.py` and
+  `package_skill.py`, which this copy never bundled (upstream has since dropped
+  `init_skill.py`); Steps 3 and 5 now scaffold by hand and list the pre-zip checks.
+  `docs/ARCHITECTURE.md` said subagents have no MCP access (they inherit the session's
+  tools), showed a hooks config Claude Code rejects and a plugin manifest
+  `components` key that doesn't exist, and called the Agent tool by its old Task name.
+
 ### Changed
 
 - **`craftcms-ops` refreshed for real agency builds.** Ten new one-topic references -
@@ -439,6 +448,18 @@ feature releases live in the README "Recent Updates" section.
   every original line still exists in the skill, and each skill's own suite stays
   green. Bodies now sit at ~4,000-4,800 tokens. supply-chain-defense and the
   vendored skill-creator were left alone.
+- **One skill size rule, stated once.** The docs disagreed (500 lines with no token
+  budget and a contents list past 300 lines in one, under 300 lines in the template).
+  "The size rule" in `docs/SKILL-SUBAGENT-REFERENCE.md` now holds it with its sources -
+  body under 500 lines and ~5,000 tokens, references one level deep, a Contents list
+  on any reference past 100 lines - and the other docs point there. `skill-creator`,
+  the last skill over budget, now leads with its procedure and keeps anatomy and
+  progressive-disclosure detail in references, so `tests/skill-size.sh` reports clean.
+- **Craft-stack skills cross-linked** - `craftcms-ops`, `web-perf-ops`,
+  `frontend-upgrade-ops` and `tailwind-ops` route to each other where the work crosses
+  (Mix-to-Vite cutovers take a lab metrics baseline; Tailwind v4 waits until after the
+  Vite move). `docs/00_INDEX.md` indexes `docs/`, and `AGENTS.md` gains a landmine for
+  "keep both sides" conflict resolutions that drop a line both sides added.
 
 ## [3.8.0] - 2026-08-31
 

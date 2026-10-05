@@ -1,6 +1,8 @@
 # Skills Catalog
 
-Complete reference for all available skills.
+Detail cards for a subset of skills, then a selection guide. **Not the full list**: the
+session's available-skills listing names every installed skill, and the claude-mods
+README has one row per skill (gated by `tests/doc-drift.sh`).
 
 ## Language & Framework Skills
 
@@ -149,21 +151,6 @@ Quick reference for common patterns and syntax.
 - Vendor-neutral index strategies
 
 **References:** window-functions.md, indexing-strategies.md
-
----
-
-### tailwind-ops
-
-**Triggers:** tailwind, utility classes, responsive design, tailwind config, dark mode
-
-**Use For:**
-- Responsive breakpoints
-- Layout patterns (flex, grid)
-- Component patterns (cards, forms, navbars)
-- Dark mode configuration
-- State modifiers
-
-**References:** component-patterns.md
 
 ---
 
@@ -511,6 +498,7 @@ Project and development workflow automation.
 | Vue/Nuxt | vue-ops, typescript-ops |
 | Astro | astro-ops, typescript-ops |
 | PHP/Laravel | laravel-ops |
+| Craft CMS / Twig | craftcms-ops, frontend-upgrade-ops (Mix to Vite, Vue 2 to 3), web-perf-ops |
 | Python | python-env, structural-search |
 | API design | api-design-ops, rest-ops |
 | Docker/containers | docker-ops, container-orchestration |
@@ -539,6 +527,8 @@ Project and development workflow automation.
 | Configure nginx | nginx-ops |
 | Set up auth | auth-ops |
 | Add monitoring | monitoring-ops |
+| Page speed, Core Web Vitals | web-perf-ops |
+| Server-side profiling, load tests | perf-ops |
 
 ### By Complexity
 

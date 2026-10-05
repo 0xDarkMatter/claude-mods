@@ -15,7 +15,7 @@ single source of truth for that layer — go there for detail, come back here fo
 | Layer | Authority | Owns |
 |---|---|---|
 | Authoring method | `skill-creator` skill (`Skill` tool) | concrete-examples → plan → init → edit → package → iterate; description-as-trigger; progressive disclosure |
-| Frontmatter fields | [SKILL-SUBAGENT-REFERENCE.md](SKILL-SUBAGENT-REFERENCE.md) | allowed top-level keys, `metadata` block, license/author rules |
+| Frontmatter fields + size | [SKILL-SUBAGENT-REFERENCE.md](SKILL-SUBAGENT-REFERENCE.md) | allowed top-level keys, `metadata` block, license/author rules, the size rule (body and references) |
 | Naming & layout | [naming-conventions.md](../rules/naming-conventions.md) | `-ops` suffix, kebab-case, the three subdirs |
 | Resource contract | [SKILL-RESOURCE-PROTOCOL.md](SKILL-RESOURCE-PROTOCOL.md) | scripts/assets/references: streams, exit codes, `--help`, `--json`, staleness verifier |
 | Terminal output | [TERMINAL-DESIGN.md](TERMINAL-DESIGN.md) | TTY glyphs/panels via `skills/_lib/term.sh` |
@@ -43,7 +43,8 @@ Repo-specific gates before you scaffold anything:
 
 ## Step 1 — Scaffold
 
-→ method: `skill-creator` Step 3 (`init_skill.py`).
+→ method: `skill-creator` Step 3 (a hand-made skeleton; this repo's copy bundles no
+`init_skill.py`, and Anthropic's upstream has dropped it).
 
 The skill directory MUST contain `scripts/`, `references/`, and `assets/` — create them
 even if empty, with a `.gitkeep` (→ naming-conventions, "Directory Structure"). The
@@ -54,8 +55,8 @@ directory name is kebab-case and matches the frontmatter `name` exactly.
 → authority: [SKILL-SUBAGENT-REFERENCE.md](SKILL-SUBAGENT-REFERENCE.md) — "Skill
 Frontmatter - the rule": the six Agent Skills spec fields plus Claude Code's documented
 fields, all top-level. That is the only legal field list. `skill-creator` says to use only
-`name` and `description`, and its `package_skill.py` rejects anything outside the six. That
-is the claude.ai upload rule. A claude-mods skill may also use Claude Code's fields when it
+`name` and `description`, and Anthropic's upstream `package_skill.py` (not bundled here)
+rejects anything outside the six. That is the claude.ai upload rule. A claude-mods skill may also use Claude Code's fields when it
 needs their behaviour, at the cost of not being uploadable as-is.
 
 claude-mods house rules layered on top (checklist, not a restatement):
@@ -70,14 +71,17 @@ claude-mods house rules layered on top (checklist, not a restatement):
 
 ## Step 3 — Body (progressive disclosure)
 
-→ authority: `skill-creator` ("Progressive Disclosure", "What to Not Include").
+→ authority: `skill-creator` ("Progressive Disclosure", "What to Not Include") for
+method; "The size rule" in [SKILL-SUBAGENT-REFERENCE.md](SKILL-SUBAGENT-REFERENCE.md#rules-for-claude-mods-skills)
+for limits.
 
-The load-bearing rules it owns: the **`description` is the trigger** (put every "when to
-use" cue there, never in the body); keep the **body under 500 lines and ~5,000 tokens**
+The load-bearing rules: the **`description` is the trigger** (put every "when to use"
+cue there, never in the body); keep the **body under 500 lines and ~5,000 tokens**
 (after auto-compaction Claude Code keeps only the first 5,000 tokens of an invoked skill,
 so a longer tail silently drops; `tests/skill-size.sh` warns); split detail into
-`references/*.md` (one concept per file, linked from SKILL.md); **don't ship**
-README/CHANGELOG/INSTALL files inside a skill.
+`references/*.md` (one concept per file, linked directly from SKILL.md, a `## Contents`
+list once a file passes 100 lines); **don't ship** README/CHANGELOG/INSTALL files inside
+a skill.
 
 ## Step 4 — Resources (scripts / assets / references)
 
@@ -136,8 +140,9 @@ commit:
       hand-rolled reimplementation.
 - [ ] `claude plugin validate` passes. It checks the plugin and marketplace manifests
       only; it does not read SKILL.md frontmatter.
-- [ ] `skill-creator` Step 5 `package_skill.py` if a distributable `.skill` is needed. It
-      accepts only the six spec fields, so strip Claude Code fields from the packaged copy.
+- [ ] `skill-creator` Step 5 if a distributable `.skill` is needed (a zip of the folder;
+      upstream `package_skill.py` automates it). claude.ai accepts only the six spec
+      fields, so strip Claude Code fields from the packaged copy.
 - [ ] Commit per [commit-style.md](../rules/commit-style.md) (`feat(skills): …`).
 
 ---
@@ -146,9 +151,9 @@ commit:
 
 ```
 0 warranted?  → skill-creator §1-2 + ARCHITECTURE (skill vs rule vs agent)
-1 scaffold    → skill-creator init_skill.py; 3 subdirs (naming-conventions)
+1 scaffold    → skill-creator Step 3 (mkdir); 3 subdirs (naming-conventions)
 2 frontmatter → SKILL-SUBAGENT-REFERENCE (+ license:MIT, metadata.author)
-3 body        → skill-creator (description=trigger, <500 lines / ~5k tokens, progressive disclosure)
+3 body        → skill-creator + size rule (description=trigger, <500 lines AND ~5k tokens, refs 1 deep, Contents past 100 lines)
 4 resources   → SKILL-RESOURCE-PROTOCOL (§10 gate; staleness verifier if external facts)
 5 tests       → tests/run.sh → run-skill-tests.sh; verifier → check-resources.sh
 6 integrate   → doc-drift.sh: README row + count bumps + no ghost links

@@ -20,6 +20,16 @@ Built on the [Agent Skills specification](https://agentskills.io/specification) 
 
 ## Recent Updates
 
+**Unreleased** (October 2026, not yet tagged)
+- ⚡ **`web-perf-ops` skill** - Core Web Vitals, method first: field data (CrUX, RUM) decides whether there is a problem, lab data explains it, and each fix targets the failing metric's dominant subpart rather than the Lighthouse score. `triage-vitals.py` rates a Lighthouse, PageSpeed or CrUX report and routes every finding to the reference that holds the fix; a Craft lever map covers Blitz, transforms, craft-vite and the queue.
+- 🔼 **`frontend-upgrade-ops` skill** - the two upgrades a Craft/Twig site keeps meeting: Laravel Mix or Webpack to Vite via craft-vite, and Vue 2 to Vue 3 through `@vue/compat`. It leads with a migrate-or-replace table (most agency Vue is a handful of widgets that Alpine or plain HTML does better) and one sequencing rule: the bundler and the framework never move in the same deploy.
+- 🛡️ **`security-ops` speaks PHP, Twig, Craft and OWASP Top 10:2025** - one-topic references for Twig escaping and template injection, Craft CSRF, `allowAnonymous` and GraphQL scoping, PHP deserialisation, Composer audit and DDEV-versus-production drift; PHP and Craft checks in the scanner; `Axx:2025` tags with a 2021 crosswalk so older reports stay readable.
+- 🏗️ **`craftcms-ops` rebuilt for real agency builds** - one-topic references for SEOmatic, Blitz, Formie, CKEditor, DDEV, Codeception and the 3-to-4-to-5 upgrade, checked against the vendor docs (which overturned several common assumptions: Blitz Hints is gone, CKEditor 5.x dropped global configs, Vite 5+ moved the manifest), plus a verifier that watches the plugin majors on Packagist. `a11y-ops` gains the matching Twig reference.
+- ✂️ **Skills that survive compaction** - after auto-compaction Claude Code keeps only the first 5,000 tokens of each invoked skill, so a long SKILL.md silently loses its tail mid-session. `tests/skill-size.sh` warns past that line, the skills over it now lead with their procedure and keep the detail in `references/`, and the docs state one size rule with its sources.
+- ✅ **Agent Skills spec gate** - `tests/spec.sh` runs the spec's own reference validator, `skills-ref`, over every skill in `just check` and CI, with the one deliberate deviation written down: Claude Code's own fields stay top-level, because Claude Code reads them nowhere else.
+- 🧳 **Portable security skills** - `supply-chain-defense` and `prompt-injection-defense` now run when copied alone into another plugin. The copy-alone test promptly caught a registry-down check that could never exit 7 and hooks that could pick a Python too old to run the scanner.
+- 🚦 **`deploy-gating` rule** - a child session never deploys: background agents, chips, fleet workers and scheduled runs build, test and commit, then stop and report the exact command. The case agents miss is spelled out: merging to a branch that deploys on merge *is* a deploy.
+
 **v3.8.0** (August 2026)
 - ♿ **`a11y-ops` skill** - accessibility as a dated legal requirement, not a quality preference. Carries the standards-and-law map (EAA supervision live since June, **ADA Title II deadlines extended to April 2027/2028** - most published advice still quotes the old dates), a four-pass audit workflow built around the fact that automated tooling finds only ~30-40% of WCAG failures, and `scan-a11y.py` as a static pre-flight with an exit-10 CI signal.
 - 📊 **`evals-ops` skill** - the harness discipline everything else in agent engineering depends on: you cannot tune a prompt, retriever or memory layer without a measurable suite. Separates outcome / step / trajectory scoring, treats the golden set as four frozen buckets, counters the documented LLM-as-a-judge biases, and ships `judge-calibration.py`, `goldenset-audit.py` and `eval-baseline.py` - the last of which computes the noise floor a gate's threshold should sit below.
@@ -186,15 +196,15 @@ All skills comply with the [Agent Skills specification](https://agentskills.io/s
 
 ```
 skill-name/
-├── SKILL.md              # Core workflow (< 500 lines)
+├── SKILL.md              # Core workflow (< 500 lines and ~5k tokens)
 ├── scripts/              # Executable code (optional)
 ├── references/           # Documentation loaded as needed (optional)
 └── assets/               # Output templates/files (optional)
 ```
 
 **Progressive Loading:**
-1. Metadata (name + description) - Always in context (~100 words)
-2. SKILL.md body - Loaded when skill triggers (<5k words)
+1. Metadata (name + description) - Always in context (~100 tokens)
+2. SKILL.md body - Loaded when skill triggers (< 5,000 tokens; after auto-compaction Claude Code keeps only the first 5,000)
 3. Bundled resources - Loaded only when Claude needs them
 
 Skills carry the full layout by convention - a directory may sit empty until it's needed, so bundled resources always have an obvious home. In practice 95 skills ship references and 61 ship scripts.

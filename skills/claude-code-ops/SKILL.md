@@ -81,7 +81,7 @@ Hook types: `command` (sync/`async`/`asyncRewake`), `http`, `mcp_tool`, `prompt`
 
 - Substitutions: `$ARGUMENTS`, `$ARGUMENTS[N]`, `$N` (0-based!), `$name`, `${CLAUDE_SKILL_DIR}`, `${CLAUDE_SESSION_ID}`, `${CLAUDE_EFFORT}`.
 - `` !`command` `` runs at load time and inlines output (dynamic context injection).
-- Body persists all session; keep SKILL.md < 500 lines, details in supporting files.
+- Body persists all session, but auto-compaction re-attaches only its first 5,000 tokens (25,000 across skills); keep SKILL.md < 500 lines and ~5k tokens, details in supporting files.
 - Description + `when_to_use` capped at 1,536 chars in the listing; listing budget = 1% of context window — `/doctor` reports overflow.
 
 ## Headless in 30 Seconds

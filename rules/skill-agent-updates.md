@@ -11,10 +11,14 @@ it first, then drill into whichever adjacent doc a step cites.
 |----------|-----|
 | Skills | https://code.claude.com/docs/en/skills |
 | Sub-agents | https://code.claude.com/docs/en/sub-agents |
+| Agent Skills spec | https://agentskills.io/specification |
+| Skill authoring best practices | https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices |
 
 These APIs change frequently. The protocol's adjacent docs: `docs/SKILL-SUBAGENT-REFERENCE.md`
-(frontmatter fields, subagent decision frameworks), `rules/naming-conventions.md` (naming +
-layout), and `docs/SKILL-RESOURCE-PROTOCOL.md` (the resource contract, below).
+(frontmatter fields, the size rule, subagent decision frameworks), `rules/naming-conventions.md`
+(naming + layout), and `docs/SKILL-RESOURCE-PROTOCOL.md` (the resource contract, below).
+The size rule in one line: SKILL.md body under 500 lines and ~5,000 tokens, references
+linked directly from SKILL.md, a `## Contents` list on any reference past 100 lines.
 
 ## Skill resources (scripts / assets / references)
 

@@ -38,7 +38,7 @@ cd claude-mods && ./scripts/install.sh  # or .\scripts\install.ps1 on Windows
 | `tools/` | Modern CLI toolkit documentation |
 | `tests/` | Validation scripts + justfile |
 | `scripts/` | Install scripts |
-| `docs/` | ARCHITECTURE.md, SKILL-CREATION-PROTOCOL.md (start here to build a skill), SKILL-SUBAGENT-REFERENCE.md, SKILL-RESOURCE-PROTOCOL.md, WORKFLOWS.md, PLAN.md, RESERVED-COMMANDS.md, TERMINAL-DESIGN.md; `archive/` (completed-migration records), `references/` (vendored guides) |
+| `docs/` | Design docs and protocols, indexed one line each in `docs/00_INDEX.md`; to build a skill start at SKILL-CREATION-PROTOCOL.md |
 
 ## Session Init
 
@@ -149,6 +149,13 @@ Requires Sonnet 4+ or Opus 4+.
   parses with strictyaml, which rejects flow-style YAML (`[a, b]`) that Claude Code
   accepts. `tests/spec.sh` encodes both. `claude plugin validate` checks neither,
   because it never reads SKILL.md.
+- **"Keep both sides" conflict resolutions drop shared lines.** Git hoists lines both
+  sides added identically (a trailing `exit 0`, a blank separator) out of the conflict
+  block and keeps one copy, so a union of the two blocks loses the copy one side needed
+  (a lost blank line between two new CHANGELOG entries, 2026-10-05). Check the result as
+  ours + theirs - base: in a merge, `git diff HEAD -- <file>` must add and remove the
+  same lines as `git diff $(git merge-base HEAD MERGE_HEAD) MERGE_HEAD -- <file>`, and
+  likewise with `HEAD` and `MERGE_HEAD` swapped.
 - Never touch `.claude/worktrees/` or any repo's git worktree state (see
   `rules/worktree-boundaries.md`) — it looks orphaned and isn't.
 - **This repo is public — keep it agnostic.** `tests/agnostic.sh` (in `just check` and
@@ -181,6 +188,11 @@ Requires Sonnet 4+ or Opus 4+.
 ## Testing
 
 ```bash
-just check        # THE gate: validate + spec + doc-drift + agnostic + hook contracts + resource contracts + skill suites + e2e suites
+just check        # THE gate: validate + spec + doc-drift + agnostic + hook contracts + resource contracts + skill size (warn-only) + skill suites + e2e suites
 just check-fast   # same minus the behavioural suites (per-skill and e2e)
 ```
+
+CI (`.github/workflows/validate.yml`) also runs three gates `just check` does not:
+`tests/plugin-validate.sh --self-test`, `tests/check-exec-bits.sh`, and
+`tests/install-guard.sh` (Windows runner only). Run them by hand before landing a change
+to the manifests, a script's mode, or `scripts/install.ps1`.

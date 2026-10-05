@@ -81,12 +81,14 @@ Splitting rules:
 **Laravel Mix** has had no release since 6.0.49 (2022-06). It still builds, but it
 won't get modern defaults. On Mix sites the quick wins are a modern `browserslist`,
 `mix.extract()`, and removing unused polyfills. The real fix is moving to Vite; the
-migration mechanics belong to `vue-ops` / `migrate-ops`, not here.
+migration mechanics belong to `frontend-upgrade-ops` (Craft/Twig sites) or `migrate-ops`
+(other stacks), not here. Measure the Mix build first so the cutover has a baseline.
 
 **Vue 2 on a CMS site**: if templates are written in the DOM (Twig outputs `<my-widget>`
 markup that Vue compiles in the browser), the page ships the **full build with the
 template compiler**, about 30% more Vue. Precompiled single-file components need only
-the runtime build. Vue 2 has been end-of-life since 2023-12-31.
+the runtime build. Vue 2 has been end-of-life since 2023-12-31; moving those widgets to
+Vue 3 SFC islands, or to Alpine, is `frontend-upgrade-ops`.
 
 ## Third-party tags and GTM
 

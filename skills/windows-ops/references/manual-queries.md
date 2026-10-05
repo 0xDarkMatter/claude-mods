@@ -157,4 +157,4 @@ If `0` or no dumps exist after recent crashes:
 | `StartTime` | DateTime | `(Get-Date).AddDays(-7)` |
 | `EndTime` | DateTime | `(Get-Date)` |
 
-Use `scripts/event-search.ps1` for common patterns (events in time window, by provider, correlated across logs).
+There is no bundled event-search wrapper: build the query from the keys above (time window, provider, ID, several logs at once). `scripts/crash-triage.ps1` and `scripts/disk-health.ps1` already run the common crash and storage queries.

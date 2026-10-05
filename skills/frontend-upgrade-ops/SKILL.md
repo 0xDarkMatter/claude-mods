@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Edit Write Bash Glob Grep"
 metadata:
   author: claude-mods
-  related-skills: "migrate-ops, vue-ops, craftcms-ops, tailwind-ops, playwright-ops, security-ops"
+  related-skills: "migrate-ops, vue-ops, craftcms-ops, web-perf-ops, tailwind-ops, playwright-ops, security-ops"
 ---
 
 # Frontend Upgrade Operations
@@ -92,7 +92,8 @@ rg -n "mix\(|craft\.vite|data-vue-island|inline-template|new Vue\(" templates/ s
 Work top to bottom; each line links to the detail.
 
 - [ ] Branch from a green build; record a **parity baseline** - screenshots of every
-      page type + the network panel's JS/CSS list on the Mix build
+      page type + the network panel's JS/CSS list on the Mix build, plus lab LCP/CLS/TBT
+      for the key templates (median of 5 runs, method in `web-perf-ops`)
 - [ ] `npm pkg set type="module"` (or name configs `.mjs`/`.cjs` explicitly)
 - [ ] `vite.config.js`: `base`, `build.manifest`, `outDir: web/dist`, entries in
       `build.rolldownOptions.input` ([config](references/mix-webpack-to-vite.md#a-viteconfigjs-for-a-craft-site))
@@ -115,7 +116,9 @@ Work top to bottom; each line links to the detail.
       ([legacy](references/mix-webpack-to-vite.md#legacy-browser-builds))
 - [ ] HMR works for CSS + JS; Twig edits reload (`vite-plugin-restart`)
 - [ ] `vite build` in CI/deploy; `web/dist/` gitignored; no hashed files committed
-- [ ] Parity check against the baseline: every page type, fonts, icons, console clean
+- [ ] Parity check against the baseline: every page type, fonts, icons, console clean,
+      and the lab metrics - async CSS and `modulepreload` move LCP and CLS
+      (`web-perf-ops` has the LCP/CLS fixes)
 - [ ] Deploy keeps the previous build until full-page caches are purged
 - [ ] Delete `webpack.mix.js`, `mix-manifest.json`, old `web/js` + `web/css`,
       `laravel-mix` and webpack-only devDependencies - in a follow-up commit
@@ -189,6 +192,7 @@ reference against its cited source, then bump `documented_major` - never just th
 | `migrate-ops` | Generic upgrade strategy, rollback, codemods, other frameworks |
 | `vue-ops` | Steady-state Vue 3: Composition API, Pinia, Vue Router, testing |
 | `craftcms-ops` | Steady-state Craft 5: Twig, element queries, Matrix-as-entries |
+| `web-perf-ops` | Before/after Core Web Vitals for the cutover; LCP/INP/CLS fixes once on Vite |
 | `tailwind-ops` | The separate Tailwind v3 to v4 migration |
 | `playwright-ops` | Page-type smoke tests for the parity checks |
 | `security-ops` | Reviewing in-DOM template injection and `VITE_*` exposure |
