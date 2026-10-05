@@ -42,20 +42,6 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
-- **`supply-chain-defense` `preinstall-check.sh` never exited 7 on an unreachable
-  registry** - `fetch()` set the unavailable flag inside `$(...)`, a subshell, so the
-  assignment died with it and a dead registry looked like "outside cooldown" (exit 0).
-  Callers now set the flag from fetch's exit status. Found by the new copy-alone test,
-  which also caught `integrity-audit.sh` printing em dashes in its zizmor lines (its
-  plain fallback framing is now 7-bit ASCII, as is its `TERM_ASCII=1` output).
-
-- **The unicode hooks could pick a Python too old to run the scanner** -
-  `session-start-unicode-scan.sh` and `pre-commit-unicode-scan.sh` probed candidates
-  with a bare `import sys`, which a pre-3.8 interpreter passes. With one ahead on PATH
-  the SessionStart hook printed an empty advisory for a clean project, and the
-  pre-commit gate let a critical bidi override through. Both now take the first of
-  `python3`/`python`/`py` that is really 3.8+, and their fix hints use the launcher.
-
 - **`prompt-injection-defense` left terminal controls and most default-ignorables
   unbanded** - the hidden-Unicode catalog now covers every Default_Ignorable code
   point (4174 in UCD 18.0) and every C0/C1 control except TAB, LF and CR, and the
@@ -69,6 +55,20 @@ feature releases live in the README "Recent Updates" section.
   shorthand format controls. Catalog v0.3.0 adds an optional `ranges` field for
   bands the code chart splits, and the self-test fails if two bands overlap, since
   the scanner and the sanitizer would then name different bands.
+
+- **`supply-chain-defense` `preinstall-check.sh` never exited 7 on an unreachable
+  registry** - `fetch()` set the unavailable flag inside `$(...)`, a subshell, so the
+  assignment died with it and a dead registry looked like "outside cooldown" (exit 0).
+  Callers now set the flag from fetch's exit status. Found by the new copy-alone test,
+  which also caught `integrity-audit.sh` printing em dashes in its zizmor lines (its
+  plain fallback framing is now 7-bit ASCII, as is its `TERM_ASCII=1` output).
+
+- **The unicode hooks could pick a Python too old to run the scanner** -
+  `session-start-unicode-scan.sh` and `pre-commit-unicode-scan.sh` probed candidates
+  with a bare `import sys`, which a pre-3.8 interpreter passes. With one ahead on PATH
+  the SessionStart hook printed an empty advisory for a clean project, and the
+  pre-commit gate let a critical bidi override through. Both now take the first of
+  `python3`/`python`/`py` that is really 3.8+, and their fix hints use the launcher.
 
 - **`prompt-injection-defense` missed line separators and invisible fillers** -
   `scan-hidden-unicode.py` reported `ok<U+2028>=== FORGED ===` as clean, though a

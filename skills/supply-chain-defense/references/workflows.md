@@ -65,7 +65,7 @@ scripts run:
   `enable-pre-post-scripts=false`. This neuters the `postinstall` vector outright.
 - Validate the lockfile itself with `lockfile-lint` — catches a lockfile whose
   resolved URLs point at a non-registry host (lockfile injection). See
-  [tooling-landscape.md](tooling-landscape.md).
+  [tooling-by-layer.md](tooling-by-layer.md#lockfile-lint--detect-lockfile-injection).
 
 ## D. Audit GitHub Actions for stale OIDC trust (≈half a day)
 
@@ -148,7 +148,8 @@ break. A match is an incident: isolate, rotate, remove the package.
 For **fleet-scale** exposure response across many macOS/Linux endpoints (with far
 broader ecosystem + extension + MCP coverage), use Perplexity's **Bumblebee** —
 whose catalog format this borrows. It does not run on Windows; `exposure-check.py`
-is the cross-platform local equivalent. See [tooling-landscape.md](tooling-landscape.md).
+is the cross-platform local equivalent. See
+[tooling-by-layer.md](tooling-by-layer.md#exposure-response--bumblebee--exposure-checkpy).
 
 ## J. Outbound phone-home monitoring (Windows — the post-compromise tripwire)
 
