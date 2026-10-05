@@ -70,9 +70,14 @@ If 2+ documentation files exist, offer to consolidate:
 
 ### Step 5: No Documentation Found
 
-If none found, offer to generate AGENTS.md based on:
-- Project structure and tech stack
-- Patterns observed in codebase
+If none found, offer to draft an AGENTS.md with the repo-doctor skill's scaffold. It
+builds the draft from a sourced deep scan (declared scripts only, landmine questions
+from git history) instead of guessing:
+
+```bash
+# run from the repo-doctor skill's directory
+python scripts/agents-md.py scaffold --repo path/to/project > AGENTS.draft.md
+```
 
 ## Priority Order
 
@@ -86,9 +91,10 @@ If none found, offer to generate AGENTS.md based on:
 
 For detailed patterns, load:
 - `./references/file-patterns.md` - Complete list of files to scan
-- `./references/templates.md` - AGENTS.md generation templates
+- `./references/templates.md` - the consolidation template (merging several platform docs)
 
-When generating a NEW AGENTS.md, follow the entry-doc standard in
-`rules/agentic-quality.md` (Landmines section mandatory, ~150-line budget) —
-skeleton at the repo-doctor skill's `assets/AGENTS-template.md`. To AUDIT an
-existing doc set rather than generate one, hand off to `repo-doctor`.
+The AGENTS.md standard itself (contents, the 150/200-line budget, CLAUDE.md shadowing)
+is the repo-doctor skill's `references/agents-md-protocol.md`. When consolidating, keep
+the result to that standard, and if a CLAUDE.md must remain, make its first line
+`@AGENTS.md`: Claude Code reads only the CLAUDE.md files when one exists. To AUDIT or
+UPGRADE an existing AGENTS.md, hand off to repo-doctor's `agents-md.py audit --diff`.
