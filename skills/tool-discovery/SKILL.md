@@ -1,6 +1,6 @@
 ---
 name: tool-discovery
-description: "Recommend the right agents and skills for any task. Covers both heavyweight agents (Task tool) and lightweight skills (Skill tool). Triggers on: which agent, which skill, what tool should I use, help me choose, recommend agent, find the right tool."
+description: "Recommend the right agents and skills for any task. Covers both heavyweight agents (Agent tool) and lightweight skills (Skill tool). Triggers on: which agent, which skill, what tool should I use, help me choose, recommend agent, find the right tool."
 license: MIT
 allowed-tools: "Read Glob"
 metadata:
@@ -88,10 +88,11 @@ For Cloudflare/Workers, Cypress/E2E, shell scripting, Claude Code extension work
 Skill tool → skill: "file-search"
 ```
 
-**Agents:**
+**Agents** (the Agent tool was named Task before Claude Code 2.1.63; `Task(...)` still
+works as an alias):
 ```
-Task tool → subagent_type: "firecrawl-expert"
-         → prompt: "Your task"
+Agent tool → subagent_type: "firecrawl-expert"
+          → prompt: "Your task"
 ```
 
 ## Match by Task Type

@@ -88,7 +88,10 @@ Global/User-level: ~/.claude/agents/[platform]-expert.md (or C:\Users\[username]
 - **Project Agent** (`.claude/agents/`): Specific to the current project, can be version controlled and shared with team
 - **Global Agent** (`~/.claude/agents/`): Available across all projects on your machine
 
-After creation, the agent is immediately available for use with the Task tool.
+After creation, Claude Code picks the file up within seconds and the agent is available
+through the Agent tool (named Task before Claude Code 2.1.63; `Task(...)` still works as an
+alias). The one exception: the first agent in an `agents/` directory that did not exist when
+the session started needs a session restart to load.
 
 ## Claude Code Agent Documentation
 
@@ -276,7 +279,8 @@ Agent: [Generates 4 selected agents in ~/.claude/agents/]
    - If "Create File" or "Both": Use Write tool with appropriate path and complete YAML frontmatter + system prompt
    - If "Show in Chat" or "Both": Display complete markdown (including frontmatter) in code block
    - Confirm creation with full file path
-   - Remind user agent is immediately available via Task tool
+   - Remind user the agent is available via the Agent tool within seconds (restart first if
+     this created the `agents/` directory)
 
 **Important**: Always use a single AskUserQuestion call with multiple questions (2-4) to create the multi-tab interface. Never ask questions sequentially one at a time.
 
