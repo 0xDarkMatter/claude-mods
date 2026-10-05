@@ -125,7 +125,7 @@ writing a file and hoping someone polls it.
 ```
 fleet main                  Show the coordinator (sessionId, title, live|idle, cwd)
 fleet main claim [<id>]     Pin explicitly — for when several sessions share the root
-fleet main release          Clear the pin, fall back to the cwd heuristic
+fleet main release          Clear the pin, fall back to the cwd heuristic (exit 1 if it can't)
 fleet owner <branch>        Who owns this lane, and are they still writing?
 ```
 
@@ -419,6 +419,8 @@ Tested and working on:
 Requirements: `bash 3.2+`, `git 2.5+` (worktree support), `awk`, `grep`, `head`, `stat`. All standard.
 
 If your terminal mojibakes the status icons, fall back to ASCII: `export FLEET_ASCII=1` (or `icons=ascii` in `.claude/fleet/config`). Output panels follow `docs/TERMINAL-DESIGN.md` via `skills/_lib/term.sh`.
+
+Held files (Windows): a process that has a file open without delete-sharing (antivirus or the search indexer, briefly, after a write) makes deleting it fail. Fleet's state-file deletes (the MAIN pin, the daemon PID file) therefore retry for up to `FLEET_RM_RETRY_SECS` (default 5, `0` = one try), count success only when the file is gone, and otherwise exit 1 naming the file. They never report "cleared" over a pin that is still there.
 
 Long-path warning (Windows only): `fleet init` worktrees nest under `.fleet-worktrees/<name>/`. Keep lane names short if your repo lives deep, or enable `core.longpaths=true`.
 

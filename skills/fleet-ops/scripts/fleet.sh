@@ -328,6 +328,39 @@ set_lane_state() {
   fi
 }
 
+# Delete a fleet state file (the MAIN pin, the daemon PID file) and PROVE it is
+# gone, or fail out loud. These files are read back with `[[ -f ]]`, so one that
+# survives its delete keeps meaning exactly what it meant before.
+#
+# One bare `rm -f` is not enough on Windows. A process holding the file open
+# WITHOUT delete-sharing (the Win32/.NET default; antivirus and the search
+# indexer do it for a moment after a write) makes the delete fail with EBUSY.
+# `-f` does not hide that error, but a single attempt loses a race that a short
+# wait wins. On 2026-10-05 the fleet-ops suite failed once under load with
+# "release did not restore heuristic" and passed on rerun. A held pin reproduces
+# that exactly (tests/run.sh "held-pin-release"): the pin survives and MAIN
+# stays pinned. So: retry for up to FLEET_RM_RETRY_SECS (default 5, 0 = one try),
+# judge success by the path being gone rather than by rm's status, and when
+# giving up name the file, say why, and return 1.
+# Callers print "cleared" only AFTER this returns 0.
+remove_state_file() {
+  local f=$1 what=$2 err="" warned=0 wait=${FLEET_RM_RETRY_SECS:-5}
+  [[ "$wait" =~ ^[0-9]+$ ]] || wait=5
+  local deadline=$(( SECONDS + wait ))
+  while :; do
+    if err=$(rm -f -- "$f" 2>&1) && [[ ! -e "$f" ]]; then return 0; fi
+    (( SECONDS < deadline )) || break
+    if (( ! warned )); then
+      echo "fleet: $what is held open by another process; retrying for up to ${wait}s (${err:-still present after rm})" >&2
+      warned=1
+    fi
+    sleep 0.2
+  done
+  echo "fleet: ERROR: could not remove $what ($f): ${err:-still present after rm}" >&2
+  echo "fleet:   another process is holding it open (antivirus, the search indexer, an editor). Close it and re-run." >&2
+  return 1
+}
+
 scrub_diff() {
   # echoes hits (one per line) for given branch's diff vs base. Empty = clean.
   # ADDED lines only ('+…', not the '+++' file header): deletion lines, context
@@ -749,8 +782,11 @@ cmd_main() {
       printf '%s\n' "$id"
       ;;
     release)
-      if [[ -f "$pin" ]]; then rm -f "$pin"; echo "MAIN pin cleared" >&2
-      else echo "no MAIN pin to clear" >&2; fi
+      if [[ ! -f "$pin" ]]; then echo "no MAIN pin to clear" >&2; return 0; fi
+      # A pin that survives keeps overriding the heuristic, so a failed delete
+      # is a failed release (exit 1), never a "cleared".
+      remove_state_file "$pin" "MAIN pin" || return 1
+      echo "MAIN pin cleared" >&2
       ;;
     *) echo "usage: fleet main [show|claim [<sessionId>]|release]" >&2; return 2 ;;
   esac
@@ -1868,7 +1904,7 @@ land_one() {
                FLEET_TRANSCRIPT_ROOTS FLEET_SESSION_LIVE_SECS FLEET_SESSION_CACHE_TTL \
                FLEET_SESSION_MAX_AGE_DAYS FLEET_SELF_SESSION_ID \
                FLEET_NO_PRUNE_HINT FLEET_PRUNE_ROOTS FLEET_PRUNE_MAX_REPOS \
-               FLEET_ASCII
+               FLEET_ASCII FLEET_RM_RETRY_SECS
          eval "$TEST_CMD" ) >>"$LOG" 2>&1; then
       log "PASS: $branch landed"
     else
@@ -2044,7 +2080,7 @@ cmd_stop() {
   pid=$(cat "$PID_FILE")
   if ! kill -0 "$pid" 2>/dev/null; then
     log "stale PID file (pid $pid not alive) — clearing"
-    rm -f "$PID_FILE"
+    remove_state_file "$PID_FILE" "stale PID file" || return 1
     return 0
   fi
   log "sending SIGTERM to daemon (pid $pid)"
@@ -2057,7 +2093,7 @@ cmd_stop() {
   done
   log "daemon didn't exit on SIGTERM, sending SIGKILL"
   kill -KILL "$pid" 2>/dev/null || true
-  rm -f "$PID_FILE"
+  remove_state_file "$PID_FILE" "daemon PID file" || return 1
 }
 
 # Every merge commit on $BASE_BRANCH whose subject is EXACTLY "merge: <branch>",
@@ -2198,7 +2234,13 @@ daemon_request_stop() {
 daemon_cleanup() {
   # PID file first: it is the one step that must happen. `log` can fail (its
   # stderr may be gone after a SIGHUP), and under errexit that ends the handler.
-  rm -f "$PID_FILE"
+  # The helper's stderr is dropped for the same reason: its retry notice must
+  # not be what kills the handler. A file that survives anyway is recorded in
+  # activity.log. The next start/stop sees a dead pid and clears it as stale,
+  # unless that pid has been reused by then.
+  remove_state_file "$PID_FILE" "daemon PID file" 2>/dev/null \
+    || log "WARNING: daemon PID file survived exit (held open); next fleet start/stop clears it as stale" \
+    || true
   if [[ -n "$DAEMON_SLEEP_PID" ]]; then kill "$DAEMON_SLEEP_PID" 2>/dev/null || true; fi
   log "daemon stopping (pid $$)" || true
 }
@@ -2220,7 +2262,7 @@ cmd_start() {
       exit 1
     else
       log "stale PID file (pid $existing_pid not alive) — clearing"
-      rm -f "$PID_FILE"
+      remove_state_file "$PID_FILE" "stale PID file" || exit 1
     fi
   fi
 
