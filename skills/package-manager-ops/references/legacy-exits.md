@@ -12,6 +12,7 @@ repository, php.net, Packagist and the Composer docs.
 - [node-sass to Dart Sass](#node-sass-to-dart-sass)
 - [Yarn 1 to npm or Yarn 4](#yarn-1-to-npm-or-yarn-4)
 - [npm lockfileVersion 1](#npm-lockfileversion-1)
+- [Composer 1 to Composer 2](#composer-1-to-composer-2)
 - [End-of-life Node](#end-of-life-node)
 - [End-of-life PHP](#end-of-life-php)
 
@@ -86,6 +87,22 @@ which means the Node toolchain behind it predates Node 15. Run a normal `npm ins
 with a current npm once, review the diff (it rewrites the whole file), build, and commit.
 Then make sure CI and deploy also run a current npm; npm 6 cannot read a version 3 lock
 at all.
+
+## Composer 1 to Composer 2
+
+getcomposer.org lists Composer 1 (last release 1.10.28) as end of life: its maintenance
+ended 2026-05-30. Composer 2 shipped on 2020-10-24, so anything still pinned to 1 is a CI
+image or a DDEV setting nobody revisited.
+
+1. Find every pin: `tools: composer:v1` in a setup-php step, `composer self-update --1`,
+   `FROM composer:1` / `COPY --from=composer:1` in Dockerfiles, and DDEV's
+   `composer_version` (DDEV's setting is `ddev-ops` territory; pm-audit reports the rest
+   as `php.composer.v1`).
+2. Check plugins: Composer 2 only loads plugins that support `composer-plugin-api` 2,
+   and Composer 2.2+ also needs each one listed in `config.allow-plugins`. Old plugins are
+   the usual blocker; `composer outdated --direct` shows which have newer releases.
+3. Switch every pin to 2 in one commit, run `composer install` with Composer 2, and
+   commit the lock it rewrites (it records `plugin-api-version`).
 
 ## End-of-life Node
 

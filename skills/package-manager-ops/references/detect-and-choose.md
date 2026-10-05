@@ -55,6 +55,11 @@ silently. Resolve it in one commit:
    (`npm ci` fails with no `package-lock.json`), and optionally the losing filename in
    `.gitignore`.
 
+The same applies one level down. A repo whose root uses Yarn 1 while nested widget
+packages (each with its own `package-lock.json`) build with `npm ci` asks every
+developer to switch managers by directory. pm-audit reports it as `js.manager.mixed`;
+convert the odd ones out to the manager the deploy already uses.
+
 ## Declaring the manager: packageManager, Corepack, devEngines
 
 **`packageManager`** names one manager and an exact version:

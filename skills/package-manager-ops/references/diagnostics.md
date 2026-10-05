@@ -19,7 +19,17 @@ docs.npmjs.com (v12), getcomposer.org (checked against 2.10.3) and the Composer 
 
 `bash scripts/run-python.sh scripts/pm-audit.py <repo>` exits 10 when it reports any of
 these, 0 when clean. Notes on stderr (for example `js.packagemanager.unset`,
-`js.yarn.classic`, `js.engines.unenforced`) are advice and never change the exit code.
+`js.yarn.classic`, `js.engines.unenforced`, `js.nested.roots`) are advice and never
+change the exit code. pm-audit audits the root manifests; `js.nested.roots` lists nested
+package roots that carry their own lockfile, so run it again on each of those.
+
+It also reads CI configs (`.github/workflows/`, `.gitlab-ci.yml`, `bitbucket-pipelines.yml`,
+`buildspec*.yml` and similar), Dockerfiles and AWS CodeDeploy `appspec.yml` hook scripts. In
+YAML only command keys (`run:`, `script:`, `commands:`) count, so a command quoted in a
+release body is not read as one. A workflow is treated as a deploy when it ships something
+(`docker push`, `aws ecr`, `rsync`, `ansible-playbook`, ...) and runs no tests; a test job
+legitimately installs dev packages. Lockfile-only refreshes (`--package-lock-only`,
+`--lockfile-only`, `composer update --lock`) are maintenance and pass.
 
 | Id | Severity | Means | Fix in |
 |---|---|---|---|
@@ -48,6 +58,11 @@ these, 0 when clean. Notes on stderr (for example `js.packagemanager.unset`,
 | `legacy.node-sass` | warn | node-sass in package.json | [legacy-exits.md](legacy-exits.md#node-sass-to-dart-sass) |
 | `registry.token.committed` | error | a literal token in `.npmrc` or `.yarnrc.yml` | [registries-and-auth.md](registries-and-auth.md#when-a-token-was-committed) |
 | `registry.authjson.committed` | error | a root `auth.json` that is not gitignored | [registries-and-auth.md](registries-and-auth.md#when-a-token-was-committed) |
+| `registry.credentials.image` | error | CI writes `auth.json` or `.npmrc` into the build context, a Dockerfile copies the whole context, `.dockerignore` lets it through | [registries-and-auth.md](registries-and-auth.md#ci-wiring) |
+| `js.manager.mixed` | warn | nested package roots use a different manager than the root | [detect-and-choose.md](detect-and-choose.md#two-lockfiles-pick-one) |
+| `deploy.install.unfrozen` | warn | CI or a deploy runs `npm install`, a non-frozen Yarn/pnpm/Bun install, or `composer update`/`require` | [install-semantics.md](install-semantics.md#the-one-table) |
+| `deploy.composer.dev` | warn | a deploy (Dockerfile, appspec hook, deploying workflow) runs `composer install` without `--no-dev` | [install-semantics.md](install-semantics.md#deploy-patterns) |
+| `php.composer.v1` | warn | CI or a Dockerfile uses Composer 1, end of life since 2026-05-30 | [legacy-exits.md](legacy-exits.md#composer-1-to-composer-2) |
 
 The end-of-life checks read dated tables from `assets/package-manager-facts.json`; pass
 `--as-of YYYY-MM-DD` to ask "is this still supported on the day we ship?".

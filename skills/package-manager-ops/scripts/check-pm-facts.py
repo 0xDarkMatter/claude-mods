@@ -14,7 +14,8 @@ supported. Two modes guard it:
     * SKILL.md carries a dated "as of <year>" currency note
   --live (scheduled freshness.yml, never a PR gate):
     * npm packages: latest dist-tag major vs documented_major
-    * Composer: getcomposer.org/versions stable major; GitHub repos: latest release major
+    * Composer: getcomposer.org/versions stable major and the 1.x end-of-life date;
+      GitHub repos: latest release major
     * Node: nodejs/Release schedule.json end dates, released lines, LTS codenames
     * PHP: php.net supported-versions + eol pages vs the security_end table
     * text_watch: each status page still contains its phrase (e.g. Volta "unmaintained")
@@ -175,6 +176,12 @@ def check_offline(facts: dict, skill_dir: Path) -> list[dict]:
                 bad(f"php {ver}", "dates out of order (want initial < active_end <= security_end)")
         except ValueError as exc:
             bad(f"php {ver}", f"non-ISO date: {exc}")
+    v1_end = (facts.get("composer") or {}).get("v1_maintenance_until")
+    if v1_end is not None:
+        try:
+            _iso(v1_end)
+        except ValueError:
+            bad("composer v1", f"v1_maintenance_until {v1_end!r} is not an ISO date")
     for key, w in (facts.get("text_watch") or {}).items():
         if key != "_comment" and not (isinstance(w, dict) and str(w.get("url", "")).startswith("https://") and w.get("contains")):
             bad(f"text_watch {key}", "needs an https url and a 'contains' phrase")
@@ -315,6 +322,15 @@ def check_live(facts: dict, timeout: float) -> tuple[list[dict], list[dict]]:
             unreach.append({"subject": name, "issue": f"source unreachable: {shown}"})
         elif live > info["documented_major"]:
             drift.append({"subject": name, "issue": f"live major {live} ({shown}) ahead of documented {info['documented_major']}"})
+    v1_end = (facts.get("composer") or {}).get("v1_maintenance_until")
+    if v1_end:
+        status, body = fetch_json(COMPOSER_VERSIONS, timeout)
+        one = (body.get("1") or [{}])[0] if status == "ok" and isinstance(body, dict) else None
+        if one is None:
+            unreach.append({"subject": "composer v1", "issue": f"{COMPOSER_VERSIONS}: {body}"})
+        elif not one.get("eol") or one.get("maintenance-until") != v1_end:
+            drift.append({"subject": "composer v1", "issue": f"getcomposer.org says eol={one.get('eol')} "
+                          f"maintenance-until={one.get('maintenance-until')}, facts say {v1_end}"})
     for d, u in (live_node(facts, timeout, today), live_php(facts, timeout)):
         drift += d
         unreach += u
