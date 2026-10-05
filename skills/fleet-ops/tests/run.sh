@@ -25,7 +25,7 @@ unset FLEET_SKIP_SESSION_CHECK FLEET_SESSION_STORE FLEET_SESSION_NOCACHE \
       FLEET_TRANSCRIPT_ROOTS \
       FLEET_SESSION_LIVE_SECS FLEET_SESSION_CACHE_TTL FLEET_SESSION_MAX_AGE_DAYS \
       FLEET_SELF_SESSION_ID FLEET_NO_PRUNE_HINT FLEET_PRUNE_ROOTS \
-      FLEET_PRUNE_MAX_REPOS FLEET_ASCII
+      FLEET_PRUNE_MAX_REPOS FLEET_ASCII FLEET_RM_RETRY_SECS
 
 command -v git >/dev/null 2>&1 || { echo "SKIP: git not available"; exit 0; }
 
@@ -995,16 +995,117 @@ case "$mrow" in *local_boss*) ok "fleet main resolves the repo-root session";; *
 bash "$FLEET" main claim local_hot >/dev/null 2>&1
 case "$(bash "$FLEET" main show 2>/dev/null)" in
   *local_hot*) ok "explicit pin overrides the cwd heuristic";; *) no "pin did not override";; esac
-bash "$FLEET" main release >/dev/null 2>&1
-case "$(bash "$FLEET" main show 2>/dev/null)" in
-  *local_boss*) ok "release restores heuristic resolution";; *) no "release did not restore heuristic";; esac
+# Assert the release OUTCOME, not just the follow-up read. This used to discard
+# release's exit code and stderr, so a delete that failed (2026-10-05, a held
+# file on Windows) surfaced only as "release did not restore heuristic" and was
+# indistinguishable from a resolution bug.
+PIN="$SREPO/.claude/fleet/main"
+rerr="$(bash "$FLEET" main release 2>&1 >/dev/null)"; rx=$?
+[ "$rx" -eq 0 ] && [ ! -e "$PIN" ] && ok "release removes the pin (exit 0)" \
+  || no "release left the pin behind (exit $rx): $rerr"
+mrow="$(bash "$FLEET" main show 2>&1)"
+case "$mrow" in
+  *local_boss*) ok "release restores heuristic resolution";; *) no "release did not restore heuristic (show: $mrow)";; esac
+
+# -- held-pin-release: a delete that fails must never read as a release -------
+# The 2026-10-05 flake (237/238, green on rerun). On Windows, a process holding
+# a file open WITHOUT delete-sharing (the Win32/.NET default; antivirus and
+# indexers do it briefly after a write) makes `rm -f` fail with EBUSY. One
+# attempt lost that race under load and left the pin in place. These cases hold
+# the pin for real rather than mocking rm:
+#   Windows  a PowerShell process opens it with FileShare.Read (no Delete)
+#   POSIX    its directory goes read-only (unlink needs write on the directory)
+# Read-only FILES do not work as a stand-in: Git Bash deletes them anyway
+# (noacl mount), as it does files in a read-only directory.
+# The hold is dropped only after release has REPORTED hitting it, so the order
+# is forced rather than timed. A host that cannot hold a file SKIPs: the hold is
+# the harness's precondition, not the behaviour under test.
+HOLD_PID=""; HOLD_DIR=""; HOLD_GO=""
+hold_file(){ # path → 0 once the hold is in place
+  HOLD_PID=""; HOLD_DIR=""; HOLD_GO=""
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      command -v powershell.exe >/dev/null 2>&1 || return 1
+      local ready="$SB/hold.ready" w r g i
+      HOLD_GO="$SB/hold.go"; rm -f "$ready" "$HOLD_GO"
+      w=$(cygpath -w "$1"); r=$(cygpath -w "$ready"); g=$(cygpath -w "$HOLD_GO")
+      # Self-expires after 120s so a killed suite cannot strand a handle in $SB.
+      powershell.exe -NoProfile -NonInteractive -Command "
+        \$h = [IO.File]::Open('$w', 'Open', 'Read', 'Read')
+        Set-Content -LiteralPath '$r' -Value ready
+        \$t = [Diagnostics.Stopwatch]::StartNew()
+        while (-not (Test-Path -LiteralPath '$g') -and \$t.Elapsed.TotalSeconds -lt 120) { Start-Sleep -Milliseconds 50 }
+        \$h.Close()" >/dev/null 2>&1 &
+      HOLD_PID=$!
+      for i in $(seq 1 600); do
+        [ -f "$ready" ] && return 0
+        kill -0 "$HOLD_PID" 2>/dev/null || break
+        sleep 0.1
+      done
+      unhold_file; return 1 ;;
+    *)
+      HOLD_DIR=$(dirname "$1"); chmod a-w "$HOLD_DIR"
+      # root ignores directory permissions: no hold possible, so no test.
+      if ( : > "$HOLD_DIR/.hold-probe" ) 2>/dev/null; then
+        rm -f "$HOLD_DIR/.hold-probe"; unhold_file; return 1
+      fi
+      return 0 ;;
+  esac
+}
+unhold_file(){
+  if [ -n "$HOLD_PID" ]; then : > "$HOLD_GO"; wait "$HOLD_PID" 2>/dev/null; HOLD_PID=""; fi
+  if [ -n "$HOLD_DIR" ]; then chmod u+w "$HOLD_DIR"; HOLD_DIR=""; fi
+}
+
+bash "$FLEET" main claim local_hot >/dev/null 2>&1
+if hold_file "$PIN"; then
+  # Held past the retry window: release must fail out loud, not claim success.
+  rerr="$(FLEET_RM_RETRY_SECS=0 bash "$FLEET" main release 2>&1 >/dev/null)"; rx=$?
+  [ -f "$PIN" ]; pin_kept=$?
+  unhold_file
+  [ "$rx" -ne 0 ] && [ "$pin_kept" -eq 0 ] && ok "held pin: release exits non-zero (exit $rx)" \
+    || no "held pin: release exit $rx, pin kept=$([ "$pin_kept" -eq 0 ] && echo yes || echo no)"
+  case "$rerr" in
+    *"MAIN pin cleared"*) no "held pin: release printed 'cleared' anyway: $rerr";;
+    *"could not remove MAIN pin"*) ok "held pin: release names the failure on stderr";;
+    *) no "held pin: no clear error on stderr: $rerr";; esac
+else
+  echo "  SKIP  held-pin release (cannot hold a file open on this host)"
+fi
+
+if hold_file "$PIN"; then
+  # Held briefly: release must wait it out. The hold drops once release has said
+  # it is retrying (or has exited, which is the unfixed failure), never on a timer.
+  FLEET_RM_RETRY_SECS=120 bash "$FLEET" main release >/dev/null 2>"$SB/release.err" & RPID=$!
+  for i in $(seq 1 600); do
+    grep -q 'retrying' "$SB/release.err" 2>/dev/null && break
+    kill -0 "$RPID" 2>/dev/null || break
+    sleep 0.1
+  done
+  unhold_file
+  wait "$RPID"; rx=$?
+  [ "$rx" -eq 0 ] && [ ! -e "$PIN" ] && ok "briefly held pin: release waits out the hold (exit 0)" \
+    || no "briefly held pin: release failed (exit $rx): $(cat "$SB/release.err")"
+  case "$(bash "$FLEET" main show 2>/dev/null)" in
+    *local_boss*) ok "briefly held pin: heuristic resolution restored";;
+    *) no "briefly held pin: MAIN still pinned after release";; esac
+else
+  echo "  SKIP  briefly-held-pin release (cannot hold a file open on this host)"
+fi
 
 # Status annotates lanes with their owner's liveness, in ASCII.
 mk_lane_in "$SREPO" shown-lane s.txt
 mk_session local_shown "Shown session" "$SREPO/wt3" 5 claude/shown shown-lane
 bash "$FLEET" track shown-lane >/dev/null 2>&1
 sv="$(bash "$FLEET" status 2>&1)"
-case "$sv" in *"[live]"*) ok "status annotates a live owner";; *) no "status missing [live] annotation";; esac
+case "$sv" in *"[live]"*) ok "status annotates a live owner";; *) no "status missing [live] annotation"
+  # Failed once inside a landing gate (2026-10-05, a good lane reverted) and
+  # passed on rerun, with nothing recorded about why. Dump what status printed
+  # and what a direct store read says now. A row that is present and live here
+  # means the miss was transient in status's own read of the store.
+  printf '%s\n' "$sv" | sed 's/^/        status | /'
+  bash "$SESSIONS" views 2>&1 | grep -E 'shown-lane|jq|store|unavailable' | sed 's/^/        views  | /'
+  echo "        views  | rc=${PIPESTATUS[0]}" ;; esac
 # Whole panel, not just the annotated row. This was row-scoped because fleet's
 # summary line and footer authored a literal U+00B7 that survived TERM_ASCII=1;
 # those now interpolate $TERM_DOT, so the entire session-aware panel — chrome,

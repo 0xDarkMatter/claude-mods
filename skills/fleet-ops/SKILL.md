@@ -111,7 +111,7 @@ writing a file and hoping someone polls it.
 ```
 fleet main                  Show the coordinator (sessionId, title, live|idle, cwd)
 fleet main claim [<id>]     Pin explicitly — for when several sessions share the root
-fleet main release          Clear the pin, fall back to the cwd heuristic
+fleet main release          Clear the pin, fall back to the cwd heuristic (exit 1 if it can't)
 fleet owner <branch>        Who owns this lane, and are they still writing?
 ```
 
@@ -191,6 +191,8 @@ Handles tracked native worktrees, `fleet init` worktrees, separate clones and mi
 Runs on Linux and macOS (bash 3.2+), Git Bash, and PowerShell 7 calling `bash`; needs `git 2.5+` and standard tools. Platform table: [references/scope.md](references/scope.md).
 
 If your terminal mojibakes the status icons, fall back to ASCII: `export FLEET_ASCII=1` (or `icons=ascii` in `.claude/fleet/config`). Output panels follow `docs/TERMINAL-DESIGN.md` via `skills/_lib/term.sh`.
+
+Held files (Windows): antivirus or the indexer can briefly hold a file so it cannot be deleted. State-file deletes (MAIN pin, daemon PID file) retry for up to `FLEET_RM_RETRY_SECS` (default 5), then exit 1 naming the file.
 
 Long-path warning (Windows only): `fleet init` worktrees nest under `.fleet-worktrees/<name>/`. Keep lane names short if your repo lives deep, or enable `core.longpaths=true`.
 
