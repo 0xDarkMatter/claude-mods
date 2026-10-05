@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Edit Write Bash Glob Grep"
 metadata:
   author: claude-mods
-  related-skills: "supply-chain-defense, frontend-upgrade-ops, javascript-ops, typescript-ops, docker-ops, craftcms-ops, ci-cd-ops, security-ops"
+  related-skills: "supply-chain-defense, frontend-upgrade-ops, javascript-ops, typescript-ops, docker-ops, ddev-ops, craftcms-ops, ci-cd-ops, security-ops"
 ---
 
 # Package Manager Operations
@@ -105,7 +105,8 @@ bash scripts/run-python.sh scripts/pm-audit.py --no-docs --as-of 2027-01-01 path
 - `--as-of` moves the end-of-life line (PHP 8.2 dies on 2026-12-31: ask before you
   ship). `--no-docs` skips the docs/CI walk; package.json scripts are still checked.
 - It reads root manifests only. Every finding id, its meaning and its fix are in
-  [diagnostics.md](references/diagnostics.md#pm-audit-finding-ids).
+  [diagnostics.md](references/diagnostics.md#pm-audit-finding-ids). DDEV's own
+  `.ddev/` config is `ddev-ops`' auditor; pm-audit only checks that DDEV agrees.
 - `scripts/run-python.sh` picks the first real Python 3.8+ (`python3`, `python`, `py`),
   stepping over the Windows Store `python3` stub. The skill folder runs copied alone.
 
@@ -135,7 +136,8 @@ the table and the prose together.
 | JavaScript language and Node runtime patterns | `javascript-ops` |
 | TypeScript and `tsconfig` | `typescript-ops` |
 | Container images, multi-stage `npm ci` and `composer install` layers | `docker-ops` |
-| Craft CMS itself, including Craft on DDEV | `craftcms-ops` |
+| DDEV itself: config keys and defaults, `.ddev/` audit, pulls, Mutagen, add-ons | `ddev-ops` |
+| Craft CMS itself | `craftcms-ops` |
 | CI pipeline design and action pinning | `ci-cd-ops` |
 
 This skill covers running build scripts, not configuring bundlers, and day-to-day

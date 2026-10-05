@@ -38,14 +38,16 @@ feature releases live in the README "Recent Updates" section.
   the now-default blocking of dependency install scripts in npm 12, pnpm, Yarn 4.14+ and
   Bun; registries and auth; caches and CI; Windows, DDEV and Apple Silicon gotchas; and
   exits from Bower, node-sass, Yarn 1, lockfile v1 and end-of-life Node and PHP.
-  `scripts/pm-audit.py` is a read-only repo audit (26 finding ids; exit 10 on findings),
+  `scripts/pm-audit.py` is a read-only repo audit (25 finding ids; exit 10 on findings),
   tested against 37 fixture cases that were each seen failing first.
   `scripts/check-pm-facts.py` guards the Node and PHP end-of-life tables pm-audit reads,
   offline in PR CI and live (nodejs.org, php.net, npm, Composer, GitHub) in
   `freshness.yml`. The skill runs copied alone, so it joins the portable skills and
-  carries its own byte-identical `run-python.sh`. `javascript-ops` drops its stale
-  package-manager section for a pointer; `supply-chain-defense`, `frontend-upgrade-ops`,
-  `javascript-ops` and `docker-ops` link to it.
+  carries its own byte-identical `run-python.sh`. DDEV's own config stays with
+  `ddev-ops`' auditor: pm-audit reads DDEV's PHP and Node only to check that they agree
+  with the repo's other pins. `javascript-ops` drops its stale package-manager section for
+  a pointer; `supply-chain-defense`, `frontend-upgrade-ops`, `javascript-ops`,
+  `docker-ops` and `ddev-ops` link to it.
 
 - **Agent Skills spec gate (`tests/spec.sh`)** - every skill is checked by the spec's
   own reference validator, `skills-ref` (pinned 0.1.1, run through `uv` with its whole

@@ -69,19 +69,14 @@ The host can have entirely different ones.
   (esbuild, rollup, sass-embedded); the Linux container then fails with a missing or
   wrong binary, and vice versa. Pick one side per repo (the container, if the dev server
   runs there) and delete `node_modules` when switching.
-- **Node in DDEV**: `nodejs_version` takes a major, a version, `auto` (reads
-  `.node-version`, `.nvmrc`, then `engines.node`) or `engine`. Unset, it follows DDEV's
-  default (the current LTS when that DDEV release shipped), so `nodejs_version: auto`
-  keeps one source of truth. A change applies when the image rebuilds: `ddev restart`.
-- **PHP in DDEV**: `php_version` takes major.minor; the stable DDEV v1.25.4 accepts 5.6
-  through 8.5, defaulting to 8.4. DDEV's docs site also shows a `latest` version that
-  documents unreleased values; trust `/en/stable/`.
-- **Corepack in DDEV**: `corepack_enable: true` runs `corepack enable` in the container.
-- **The project URL** for a dev server or a test comes from `ddev describe` (or
-  `ddev launch --print-url`); don't hard-code a hostname into scripts.
+- **Make DDEV's pins agree with the repo's**: `nodejs_version: auto` reads `.nvmrc`, so
+  one file pins Node everywhere; `php_version` matches `config.platform.php`
+  ([version-pinning.md](version-pinning.md#the-recommended-node-pin-set)).
 
-Vite dev-server wiring inside DDEV (ports, CORS, HMR) is `frontend-upgrade-ops`; Craft
-specifics are `craftcms-ops`.
+DDEV itself (what `nodejs_version` and `php_version` accept, defaults that move between
+DDEV releases, `corepack_enable`, rebuilding after a change, Mutagen and `upload_dirs`
+for `node_modules`) is `ddev-ops`. Vite dev-server wiring inside DDEV is
+`frontend-upgrade-ops`; Craft specifics are `craftcms-ops`.
 
 ## macOS on Apple Silicon
 

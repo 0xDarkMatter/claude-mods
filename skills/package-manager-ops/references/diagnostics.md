@@ -34,8 +34,7 @@ these, 0 when clean. Notes on stderr (for example `js.packagemanager.unset`,
 | `js.node.unpinned` | warn | nothing pins Node | [version-pinning.md](version-pinning.md#the-recommended-node-pin-set) |
 | `js.node.eol` | warn | a pinned (or the only admitted) Node is end of life | [legacy-exits.md](legacy-exits.md#end-of-life-node) |
 | `node.pin.disagree` | warn | `.nvmrc`, `engines`, `devEngines`, DDEV and friends name different majors | [version-pinning.md](version-pinning.md#what-reads-which-node-pin) |
-| `ddev.node.unpinned` | warn | DDEV has no `nodejs_version`, so it follows DDEV's default | [platform-gotchas.md](platform-gotchas.md#ddev-host-or-container) |
-| `ddev.php.unpinned` | warn | DDEV has no `php_version` | [platform-gotchas.md](platform-gotchas.md#ddev-host-or-container) |
+| `ddev.node.unpinned` | warn | DDEV has no `nodejs_version`, so it follows DDEV's default | [version-pinning.md](version-pinning.md#the-recommended-node-pin-set); values in `ddev-ops` |
 | `php.manifest.invalid` | error | composer.json is not valid JSON | `composer validate` |
 | `php.require.missing` | warn | no `require.php` | [version-pinning.md](version-pinning.md#the-three-php-pins-and-what-each-means) |
 | `php.platform.unset` | warn | no `config.platform.php` in a project | [version-pinning.md](version-pinning.md#the-three-php-pins-and-what-each-means) |
@@ -52,6 +51,11 @@ these, 0 when clean. Notes on stderr (for example `js.packagemanager.unset`,
 
 The end-of-life checks read dated tables from `assets/package-manager-facts.json`; pass
 `--as-of YYYY-MM-DD` to ask "is this still supported on the day we ship?".
+
+DDEV's own configuration (an unpinned `php_version` or database, values DDEV no longer
+ships, committed Mutagen or router ports) is audited by `ddev-ops`'
+`audit-ddev-config.py`. pm-audit reads DDEV's PHP and Node only to check that they agree
+with the repo's other pins, so the two audits never report the same fact.
 
 ## npm ls, explain and query
 

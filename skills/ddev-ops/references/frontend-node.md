@@ -47,6 +47,9 @@ is Node.js 24.
   `node_modules` built on macOS or Windows can fail inside the container.
 - With Mutagen on, add `node_modules` to `upload_dirs` so thousands of files are not
   synced ([performance.md](performance.md#upload_dirs)).
+- Which install command, one lockfile, `.nvmrc` and `engines` that agree with
+  `nodejs_version`, and pinned `npx`: `package-manager-ops`, whose `pm-audit.py` checks a
+  repo's Node and PHP pins against `.ddev/config.yaml`.
 
 ## Running a dev server
 

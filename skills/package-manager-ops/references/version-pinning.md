@@ -62,12 +62,10 @@ CI then uses `node-version-file: .nvmrc`, and the deploy host installs the same 
 Pin the major in `.nvmrc` unless you have a reason to pin a minor: a major pin follows
 security releases automatically.
 
-DDEV details: `nodejs_version` takes a major (`"22"` installs the newest 22.x), a partial
-or full version, `auto` (reads `.node-version`, `.nvmrc`, then `engines.node`), `engine`
-(reads only `engines.node`), or `""` for the image default. Unset, it follows DDEV's
-default, the current LTS at the time that DDEV release shipped, so a DDEV upgrade can move
-the container's Node under you. The version is fixed when the image builds; after
-changing it, `ddev restart`.
+Unset, DDEV's `nodejs_version` follows DDEV's own default, which moves between DDEV
+releases, so a DDEV upgrade can change the container's Node under you (pm-audit reports
+`ddev.node.unpinned`). Every value `nodejs_version` and `php_version` accept, and the
+rebuild a change needs, is in `ddev-ops`.
 
 ## Version managers
 

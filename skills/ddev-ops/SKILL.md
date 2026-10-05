@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Edit Write Bash Glob Grep"
 metadata:
   author: claude-mods
-  related-skills: "craftcms-ops, security-ops, frontend-upgrade-ops, docker-ops, web-perf-ops"
+  related-skills: "craftcms-ops, security-ops, frontend-upgrade-ops, docker-ops, web-perf-ops, package-manager-ops"
 ---
 
 # DDEV Operations

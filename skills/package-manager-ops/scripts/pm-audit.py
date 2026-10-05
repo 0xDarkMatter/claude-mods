@@ -16,7 +16,7 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   js.lockfile.conflict  js.lockfile.missing  js.lockfile.stale  js.lockfile.v1
   js.lockfile.shrinkwrap  js.pnpm.field-ignored
   js.packagemanager.mismatch  js.node.unpinned  js.node.eol  node.pin.disagree
-  ddev.node.unpinned  ddev.php.unpinned  php.require.missing  php.platform.unset
+  ddev.node.unpinned  php.require.missing  php.platform.unset
   php.pin.disagree  php.eol  php.lockfile.missing  php.lockfile.stale
   npx.unpinned  npx.native-cli  legacy.bower  legacy.node-sass
   registry.token.committed  registry.authjson.committed
@@ -660,11 +660,9 @@ class Audit:
             po = (lock.get("platform-overrides") or {}).get("php") if isinstance(lock.get("platform-overrides"), dict) else None
             put("composer.lock platform-overrides.php", po)
         if self.ddev is not None:
-            pv = self.ddev.get("php_version")
-            if not put(".ddev/config.yaml php_version", pv) and not pv:
-                self.add("warn", "ddev.php.unpinned", ".ddev/config.yaml",
-                         "no php_version - the container runs DDEV's default PHP, which moves with DDEV upgrades",
-                         "set php_version to the production PHP major.minor")
+            # An unset php_version is ddev-ops' finding (audit-ddev-config.py php-unpinned);
+            # here DDEV's PHP only feeds the agreement and end-of-life checks below.
+            put(".ddev/config.yaml php_version", self.ddev.get("php_version"))
         self.meta["php_pins"] = {**{k: f"{v[0]}.{v[1]}" for k, v in exact.items()},
                                  **({"composer.json require.php": str(php_req)} if php_req else {})}
         problems = []
