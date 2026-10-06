@@ -195,6 +195,21 @@ TOOLING_CONFIGS = (
 )
 CMS_LABELS = {"Craft CMS", "Drupal", "Laravel", "Statamic", "WordPress", "Symfony",
               "Silverstripe", "TYPO3"}
+# Root files that mark a static site. agents-md.py picks its static-site archetype only
+# on one of these; any other repo with no web manifest gets the generic archetype.
+STATIC_SITE_FILES = ((r"index\.html?", "plain HTML"), (r"mkdocs\.ya?ml", "MkDocs"),
+                     (r"hugo\.(toml|ya?ml|json)", "Hugo"),
+                     (r"\.eleventy\.js|eleventy\.config\.[cm]?js", "Eleventy"),
+                     (r"docusaurus\.config\.(js|ts)", "Docusaurus"),
+                     (r"gatsby-config\.(js|ts)", "Gatsby"))
+# Test suites declared by convention, not config: shell scripts under a tests/ or
+# spec/ folder, and the runner among them (run.sh, run-<x>.sh, all.sh, test.sh).
+TESTS_DIR_RE = re.compile(r"(^|/)(tests?|spec)/")
+SHELL_RUNNER_RE = re.compile(r"(^|/)(run([-_][\w-]+)?|all|test)\.sh$")
+TEST_FILE_RE = re.compile(r"(^|/)(test_[^/]+\.py|[^/]+_test\.(py|go|rs)|[^/]+\.(test|spec)\.[jt]sx?|"
+                          r"[^/]+Test\.php|[^/]+\.bats)$")
+# Fixture folders hold deliberate fakes: a secret-like name there is a test input.
+FIXTURE_DIR_RE = re.compile(r"(^|/)(fixtures?|__fixtures__|testdata|test[-_]data)/", re.I)
 
 # === HELPERS ===
 
@@ -579,7 +594,9 @@ class Scan:
 
     # -- repo ---------------------------------------------------------------------
     def s_repo(self) -> dict:
-        out = {"name": self.repo.name, "is_git": self.is_git, "tracked_files": len(self.files),
+        name, name_source = self._repo_name()
+        out = {"name": name, "name_source": name_source, "is_git": self.is_git,
+               "tracked_files": len(self.files),
                "source": "cmd: git ls-files" if self.is_git else "filesystem walk"}
         if self.is_git:
             out["head"] = (self.git("rev-parse", "--short", "HEAD") or "").strip() or None
@@ -587,6 +604,24 @@ class Scan:
             count = (self.git("rev-list", "--count", "HEAD") or "").strip()
             out["commits"] = int(count) if count.isdigit() else 0
         return out
+
+    def _repo_name(self) -> tuple[str, str]:
+        """The origin remote's name, else the main checkout's folder. A linked worktree's
+        own folder is a lane name (the scaffold once titled a draft after one). Only the
+        URL's last segment is kept: a remote URL can embed credentials."""
+        if self.is_git:
+            url = (self.git("remote", "get-url", "origin") or "").strip()
+            m = re.search(r"([^/:\\]+?)(?:\.git)?/*$", url)
+            if url and m:
+                return m.group(1), "cmd: git remote get-url origin"
+            common = (self.git("rev-parse", "--git-common-dir") or "").strip()
+            if common:
+                p = Path(common)
+                p = (p if p.is_absolute() else self.repo / p).resolve()
+                name = p.parent.name if p.name == ".git" else re.sub(r"\.git$", "", p.name)
+                if name:
+                    return name, "cmd: git rev-parse --git-common-dir"
+        return self.repo.name, "directory name"
 
     # -- languages ------------------------------------------------------------------
     def s_languages(self) -> dict:
@@ -639,6 +674,9 @@ class Scan:
         ws = self._workspaces()
         if ws:
             out["workspaces"] = ws
+        static = self._static_site()
+        if static:
+            out["static_site"] = static
         out["tooling_configs"] = [{"tool": tool, "path": rel, "source": src(rel)}
                                   for rel in self.files for pat, tool in TOOLING_CONFIGS
                                   if re.search(pat, rel)]
@@ -833,6 +871,18 @@ class Scan:
         if cargo and "[workspace]" in cargo:
             out.append({"tool": "Cargo workspace", "globs": [],
                         "source": src("Cargo.toml", line_of(cargo, "[workspace]"))})
+        return out
+
+    def _static_site(self) -> list[dict]:
+        root = [f for f in self.files if "/" not in f]
+        out = []
+        for pat, tool in STATIC_SITE_FILES:
+            hit = next((f for f in root if re.fullmatch(pat, f, re.I)), None)
+            if hit:
+                out.append({"tool": tool, "source": src(hit)})
+        # _config.yml alone is too generic a name; Jekyll also has layouts or posts.
+        if self.has("_config.yml") and any(f.startswith(("_layouts/", "_posts/")) for f in self.files):
+            out.append({"tool": "Jekyll", "source": src("_config.yml")})
         return out
 
     # === SCAN DDEV DEPLOY CI ===
@@ -1049,7 +1099,32 @@ class Scan:
             out.append({"framework": "pytest", "config": src("pyproject.toml",
                                                              line_of(py, "[tool.pytest.ini_options]")),
                         "suites": []})
+        out += self._convention_tests()
         out.sort(key=lambda t: (t["framework"], t["config"]))
+        return out
+
+    def _convention_tests(self) -> list[dict]:
+        """Suites no config file declares. `config` is the file that stands for the suite:
+        the shallowest shell runner, the first .bats file, go.mod, Cargo.toml."""
+        out = []
+
+        def depth(f: str) -> tuple:
+            return f.count("/"), f
+        sh = [f for f in self.files if f.endswith(".sh") and TESTS_DIR_RE.search(f)]
+        if sh:
+            runners = sorted((f for f in sh if SHELL_RUNNER_RE.search(f)), key=depth)
+            out.append({"framework": "Shell scripts", "config": (runners or sorted(sh, key=depth))[0],
+                        "files": len(sh), "suites": [{"name": r, "source": src(r)} for r in runners[:8]],
+                        "runners": len(runners)})
+        bats = sorted(f for f in self.files if f.endswith(".bats"))
+        if bats:
+            out.append({"framework": "Bats", "config": bats[0], "files": len(bats), "suites": []})
+        go = [f for f in self.files if f.endswith("_test.go")]
+        if go:
+            out.append({"framework": "go test", "config": "go.mod" if self.has("go.mod") else sorted(go)[0],
+                        "files": len(go), "suites": []})
+        if self.has("Cargo.toml") and any(re.search(r"(^|/)tests/[^/]+\.rs$", f) for f in self.files):
+            out.append({"framework": "cargo test", "config": "Cargo.toml", "suites": []})
         return out
 
     def s_generated(self) -> dict:
@@ -1220,9 +1295,11 @@ class Scan:
                             "churn": churn})
         commits.reverse()  # oldest first, so "followed by" means later
         gen_roots = [g["path"] for g in self.s_generated()["tracked"]]
+        tracked = self.fileset
 
         def noise(p: str) -> bool:
-            return p.rsplit("/", 1)[-1] in LOCKFILES or bool(self.generated_kind(p))
+            # A file no longer tracked (deleted, renamed away) can't hold a landmine today.
+            return p not in tracked or p.rsplit("/", 1)[-1] in LOCKFILES or bool(self.generated_kind(p))
 
         def prose(p: str) -> bool:
             # Docs churn with every change by design: as hot spots or "fragile" files
@@ -1303,7 +1380,7 @@ class Scan:
             return None
         edits, followed, fams, example = Counter(), Counter(), defaultdict(Counter), {}
         for i, c in enumerate(commits):
-            for cfg in (p for p in c["files"] if CONFIG_RE.search(p)):
+            for cfg in (p for p in c["files"] if CONFIG_RE.search(p) and p in self.fileset):
                 edits[cfg] += 1
                 hit = None
                 for later in commits[i: i + FOLLOWUP_WINDOW + 1]:
@@ -1334,61 +1411,98 @@ class Scan:
 # evidence that raised it; the scaffold lists them under Landmines as TODO(owner).
 
 
+def is_test(path: str) -> bool:
+    return bool(TESTS_DIR_RE.search(path) or TEST_FILE_RE.search(path))
+
+
+def own_test(test: str, other: str) -> bool:
+    """True when `test` tests code that `other` belongs to: its owner is the folder above
+    tests/ (or the test file's own folder), and `other` lives under it. A test changing
+    with its code is how test-first work looks, not a coupling rule worth asking about."""
+    m = TESTS_DIR_RE.search(test)
+    if m:
+        owner = test[:m.start()] + m.group(1)
+    elif TEST_FILE_RE.search(test):
+        owner = test.rsplit("/", 1)[0] + "/" if "/" in test else ""
+    else:
+        return False
+    return not is_test(other) and other.startswith(owner)
+
+
 def candidates(d: dict) -> list[dict]:
     out: list[dict] = []
 
-    def add(kind: str, question: str, evidence: list[str]) -> None:
-        out.append({"kind": kind, "question": question, "evidence": evidence})
-    for s in d.get("secrets_skipped", [])[:3]:
+    def add(kind: str, question: str, evidence: list[str], paths: list[str] | None = None) -> None:
+        # paths: the repo files the question is about; agents-md.py audit uses them to
+        # tell which questions an existing AGENTS.md already answers.
+        out.append({"kind": kind, "question": question, "evidence": evidence, "paths": paths or []})
+    for s in [s for s in d.get("secrets_skipped", []) if not FIXTURE_DIR_RE.search(s["path"])][:3]:
         add("tracked-secret", f"`{s['path']}` is tracked and looks like a secrets file (the scan "
-            "did not open it). Should it be ignored, and have its values been rotated?", [s["source"]])
+            "did not open it). Should it be ignored, and have its values been rotated?", [s["source"]],
+            [s["path"]])
     dep = d.get("deploy") or {}
     for h in ((dep.get("appspec") or {}).get("hooks") or [])[:3]:
         cmds = "; ".join(c["command"] for c in h["commands"][:2])
         add("deploy", f"Deploys run `{h['location']}` at {h['event']}"
             + (f" (it runs `{cmds}`)" if cmds else "")
             + ". Which branch triggers a deployment (a merge to it is a deploy)?",
-            [h["source"]] + [c["source"] for c in h["commands"][:2]])
+            [h["source"]] + [c["source"] for c in h["commands"][:2]], [h["location"]])
     for s in (dep.get("ci_deploy_steps") or [])[:2]:
         br = ", ".join(s["push_branches"]) or "the configured triggers"
         add("deploy", f"CI job `{s['job']}` in `{s['workflow']}` deploys on push to {br}. Is that "
-            "branch protected, and may agents ever merge to it?", [s["source"]])
+            "branch protected, and may agents ever merge to it?", [s["source"]], [s["workflow"]])
     gen = d.get("generated") or {}
     for g in [g for g in gen.get("tracked", []) if g["reason"] not in ("minified asset", "source map")][:3]:
         why = f"declared by {g['declared_by']}" if g.get("declared_by") else g["reason"]
         add("generated", f"`{g['path']}` ({g['files']} files) is tracked but looks like build "
             f"output or vendored code ({why}). Is it committed on purpose, and must it be "
-            "regenerated rather than hand-edited?", [g["source"]] + ([g["declared_by"]] if g.get("declared_by") else []))
+            "regenerated rather than hand-edited?", [g["source"]] + ([g["declared_by"]] if g.get("declared_by") else []),
+            [g["path"]])
     hist = d.get("history") or {}
-    grouped = set()
-    for g in hist.get("groups", [])[:2]:
+    grouped: set = set()
+    asked = 0
+    for g in hist.get("groups", []):
+        members = [f for f in g if not any(own_test(f, o) for o in g if o != f)]
+        if len(members) < 3 or asked == 2:
+            continue
+        asked += 1
         grouped.update(g)
-        add("coupling", f"{len(g)} files keep changing together: " + ", ".join(f"`{f}`" for f in g[:5])
-            + ". Is that a rule (a generated set, a registry, mirrored config)?", [hist["source"]])
-    for c in [c for c in hist.get("coupling", []) if not set(c["files"]) <= grouped][:4]:
+        add("coupling", f"{len(members)} files keep changing together: " + ", ".join(f"`{f}`" for f in members[:5])
+            + ". Is that a rule (a generated set, a registry, mirrored config)?", [hist["source"]], members)
+    pairs = [c for c in hist.get("coupling", []) if not set(c["files"]) <= grouped
+             and not own_test(*c["files"]) and not own_test(*reversed(c["files"]))]
+    for c in pairs[:4]:
         a, b = c["files"]
         add("coupling", f"`{a}` and `{b}` changed together in {c['together']} of the {c['either']} "
-            "commits that touched either. Must one change whenever the other does?", [c["source"]])
+            "commits that touched either. Must one change whenever the other does?", [c["source"]], [a, b])
     for f in hist.get("config_followups", [])[:3]:
         add("config-followup", f"Edits to `{f['config']}` were followed by {f['family']} changes "
             f"(e.g. `{f['example']}`) within {f['window']} commits in {f['followed']} of "
             f"{f['edits']} cases. Is a rebuild, migration or sync required after changing it?",
-            [f["source"]])
+            [f["source"]], [f["config"]])
+    # One question per file: a fragile file that is also a hot spot says so here instead
+    # of raising a second, near-identical hot-spot question.
+    hot = {h["path"]: h for h in hist.get("hotspots", [])}
+    fragile_paths = set()
     for f in hist.get("fragile", [])[:3]:
+        h = hot.get(f["path"])
+        also = (f" It is also among the most-changed files ({h['commits']} of "
+                f"{hist.get('commits_used', 0)} commits).") if h else ""
+        fragile_paths.add(f["path"])
         add("fragile", f"`{f['path']}` was touched by {f['fix_commits']} fix commit(s) and "
-            f"{f['reverts']} revert(s) in the scanned history. What keeps breaking here, and how "
-            "is it checked?", [f["source"]] + [f"git: {e}" for e in f["examples"][:2]])
+            f"{f['reverts']} revert(s) in the scanned history.{also} What keeps breaking here, and "
+            "how is it checked?", [f["source"]] + [f"git: {e}" for e in f["examples"][:2]], [f["path"]])
     ddev = d.get("ddev") or {}
     for h in (ddev.get("hooks") or [])[:2]:
         add("ddev-hook", f"DDEV runs `{h['command']}` on {h['event']}. Does it have side effects "
             "an agent should know about (database import, migrations, a rebuild)?", [h["source"]])
-    for h in hist.get("hotspots", [])[:2]:
+    for h in [h for h in hist.get("hotspots", []) if h["path"] not in fragile_paths][:2]:
         add("hotspot", f"`{h['path']}` is among the most-changed files ({h['commits']} of "
             f"{hist.get('commits_used', 0)} commits). What must an agent know before editing it?",
-            [h["source"]])
+            [h["source"]], [h["path"]])
     for o in (d.get("outliers") or [])[:2]:
         add("outlier", f"`{o['path']}` is {o['lines']} lines. Must it stay one file (then say why "
-            "in a guard comment), or is it due a split?", [o["source"]])
+            "in a guard comment), or is it due a split?", [o["source"]], [o["path"]])
     for w in ((d.get("manifests") or {}).get("workspaces") or [])[:1]:
         globs = ", ".join(w["globs"][:4]) or w["tool"]
         add("workspaces", f"The repo declares workspaces ({globs}). Does any package have its own "

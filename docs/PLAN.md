@@ -106,11 +106,12 @@ Build spec, dogfood findings and the survey behind it:
 
 - [x] repo-doctor creates, audits, upgrades and org-surveys AGENTS.md (`repo-scan.py`,
       `agents-md.py`, archetype templates, memory-docs tripwire); landed `42d6862`
-- [ ] Close the plan's "Known gaps", the size check first: a line-only budget is how
-      this repo's own 199-line AGENTS.md passes at 16.8 KB
-- [ ] Dogfood: bring this repo's AGENTS.md under the 150-line target (Installation to
-      README, drop the generic tips that restate global rules, split the 2,325-char
-      overview line)
+- [x] Fix the five gaps dogfooding found (size budget, split order, candidate noise,
+      generic archetype, convention-found tests); see the plan
+- [x] Dogfood: this repo's AGENTS.md from 199 lines / 16,744 chars to 172 / 13,293
+      (Installation to README, generic tips dropped, the 2,313-char line split)
+- [ ] Owner pass on this repo's AGENTS.md: answer or rule out the 10 scan candidates the
+      audit lists, and trim Landmines toward the 150-line target
 - [ ] Team rollout: a pilot needs the team lead's OK, then repo owners run scan,
       scaffold and audit in their own checkouts. In a repo that deploys on merge, the
       AGENTS.md merge is a deploy and stays the owner's (`rules/deploy-gating.md`)

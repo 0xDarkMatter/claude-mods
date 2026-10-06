@@ -186,6 +186,12 @@ git add -A; git commit -qm "docs: grow agents"
 OUT="$(run_json)"
 [ "$(get 'sum(1 for f in d["data"]["findings"] if "AGENTS.md is" in f["msg"] and "budget ~200" in f["msg"])')" = "1" ] \
     && ok "entry-doc budget is Claude Code's 200 lines" || no "200-line budget" "not flagged at 223 lines"
+# Size too: 43 long lines cost what 250 wrapped ones do (agents-md-protocol.md section 3).
+"$PY" -c "print('\n'.join(['# Agent Instructions', '## Landmines', '1. x'] + ['- ' + 'word ' * 100 for i in range(40)]))" > AGENTS.md
+git add -A; git commit -qm "docs: widen agents"
+OUT="$(run_json)"
+[ "$(get 'sum(1 for f in d["data"]["findings"] if "AGENTS.md is" in f["msg"] and "16,000 characters" in f["msg"])')" = "1" ] \
+    && ok "entry-doc budget also counts characters (16,000)" || no "char budget" "not flagged at 43 lines of 500 chars"
 
 echo
 echo "repo-doctor tests: $pass passed, $fail failed"

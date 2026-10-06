@@ -17,7 +17,7 @@ that genuinely didn't change (then touch it in the next honest commit, don't chu
 |---|---|---|---|
 | AGENTS.md or CLAUDE.md exists | crit if absent (score 0) | Agents enter blind; every session re-derives the repo | `agents-md.py scaffold` (sourced draft); hand skeleton: assets/AGENTS-template.md |
 | Landmines section | warn | The highest-value lines in the file; absence means non-obvious breakage is tribal knowledge | Add `## Landmines`: what breaks, why, procedure (agents-md-protocol.md section 1) |
-| Length ≤ 200 lines | warn above | Claude Code's documented target ("longer files consume more context and reduce adherence"); the house target is 150 | `agents-md.py audit --diff` proposes the split (protocol section 3) |
+| Length ≤ 200 lines and ≤ 16,000 characters | warn above | Claude Code's documented target ("longer files consume more context and reduce adherence"); the house target is 150. The character limit is 200 lines at 80 characters, so long lines can't hide the cost | `agents-md.py audit --diff` proposes the split (protocol section 3) |
 | Touched within 15 commits | warn above | Commit-lag is the real staleness metric; mtime lies (audit: 100+-commit drift behind week-old mtimes) | Verify claims vs code; update in the same commit as the fix |
 | CLAUDE.md or .claude/CLAUDE.md without an `@AGENTS.md` import | warn, -1 | Claude Code then reads only the CLAUDE.md files: AGENTS.md is invisible to every Claude session, prose pointers included | Put `@AGENTS.md` on its first line (protocol section 4); the full check (CLAUDE.local.md, parents, nested) is `agents-md.py audit` |
 | CLAUDE.md imports AGENTS.md but duplicates it | warn | Duplicates diverge into contradictions | Keep Claude-only deltas below the import |

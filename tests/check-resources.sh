@@ -171,7 +171,8 @@ run "audit-ddev-config clean control" 0 "$PY" skills/ddev-ops/scripts/audit-ddev
 
 echo "== repo-doctor: AGENTS.md toolchain + Claude Code memory-docs verifier"
 # --offline: the protocol still states every encoded Claude Code fact and the two
-# scripts agree on the 200-line ceiling. --live runs in freshness.yml only.
+# scripts agree on the 200-line and 16,000-character ceilings. --live runs in
+# freshness.yml only.
 run "memory-docs --offline consistent" 0 "$PY" skills/repo-doctor/scripts/check-memory-docs.py --offline
 run "memory-docs --help"               0 "$PY" skills/repo-doctor/scripts/check-memory-docs.py --help
 run "repo-scan --help"                 0 "$PY" skills/repo-doctor/scripts/repo-scan.py --help

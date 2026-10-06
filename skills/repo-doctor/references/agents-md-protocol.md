@@ -66,6 +66,13 @@ Claude Code warns at startup and in `/status` when an instruction file runs over
 recommended length. The house target is lower because an AGENTS.md is read by every
 tool, every session. In the 2026-10 survey, 6 of 14 existing files ran past 200 lines.
 
+**Size counts too: target 12,000 characters, ceiling 16,000 characters** (150 and 200
+lines at 80 characters). The line budget assumes wrapped prose, and a file with long
+lines reaches the same context cost in fewer lines: claude-mods' own AGENTS.md once sat
+at 199 lines and 16,744 characters, one line alone 2,313. The audit and the scorer check
+both measures, and the audit lists lines over 500 characters. Characters / 3.6 is the
+rough token count.
+
 **`@path` imports do not shrink anything.** Imported files load at launch with the file
 that imports them, so splitting with imports reorganises but costs the same context.
 Split into things that load *on demand*:
@@ -79,8 +86,10 @@ Split into things that load *on demand*:
 
 **What never moves:** the overview, Commands and Landmines. A subsystem's landmines may
 move into that subsystem's nested AGENTS.md, but the owner makes that move, never the
-tool. `agents-md.py audit --diff` proposes moves for the largest movable sections until
-the file is back under 150 lines, and reports when that is not enough.
+tool. Once a file is over either ceiling, `agents-md.py audit --diff` proposes moves
+until it is back under both targets, in this order: human setup prose first (it doesn't
+belong at any size), then the other movable sections largest first, then Structure and
+Conventions (required and short, so they go last). It reports when that is not enough.
 
 ## 4. CLAUDE.md interplay (shadowing)
 
@@ -203,7 +212,8 @@ that subdirectory (section 3), and a CLAUDE.md beside it shadows it (section 4).
 | Need | Claude Code built-in | repo-doctor |
 |---|---|---|
 | Outdated or contradictory instructions, references to missing files or commands (semantic) | `/doctor prompt-audit` (v2.1.283+; covers AGENTS.md; LLM-run, interactive, proposes edits) | Not duplicated: run prompt-audit for the semantic pass |
-| Over-length | Startup and `/status` warning | `agents-md.py audit`: size finding plus a concrete split diff |
+| Over-length | Startup and `/status` warning | `agents-md.py audit`: lines and characters, long lines, and a concrete split diff |
+| Unanswered landmines | None | Audit: scan candidates whose files the doc never names |
 | Trim derivable content | `/doctor` checkup (v2.1.206+): trims checked-in **CLAUDE.md** | Section 2 here; audit flags setup prose |
 | Which files loaded | `/memory`, `/context` (this session, this machine) | Audit: shadowing by CLAUDE.md, `.claude/CLAUDE.md`, CLAUDE.local.md, parent dirs, nested dirs, symlink-as-text. Offline and CI-able |
 | Dead commands | prompt-audit (semantic) | Audit: deterministic check against package.json, composer.json, Makefile, justfile and script paths |
@@ -221,8 +231,11 @@ Put the deterministic audit in CI; run `/doctor prompt-audit` by hand.
    fact carries a source (`file:line` or the command), and git history yields landmine
    *candidates*: co-changing files, churn hot spots, fix and revert clusters, config
    edits followed by build or migration changes. Candidates are questions, never facts.
+   Only tracked files raise them; test fixtures, a file changing with its own tests, and
+   a second question about the same file are left out.
 2. `python scripts/agents-md.py scaffold --repo <path> --facts facts.json`: prints a
-   draft built from the archetype template (`assets/agents-md/`). Commands come only
+   draft built from the archetype template (`assets/agents-md/`: PHP CMS, Node app,
+   Python service, static site, and generic for anything else). Commands come only
    from declared scripts and config, tagged `untested`. Everything unverifiable is a
    `TODO(owner):` question, and the landmine candidates sit under Landmines as
    questions.
@@ -242,12 +255,13 @@ Put the deterministic audit in CI; run `/doctor prompt-audit` by hand.
 `@AGENTS.md` import for a shadowing CLAUDE.md, an annotation on each dead command, and
 the split moves. Review it, then `git apply`. The patch only adds, annotates or moves.
 **It never deletes or moves the Landmines section**, and moved sections leave a link
-behind.
+behind. The audit also lists the scan's landmine candidates whose files the doc never
+names (`uncovered_candidates` in `--json`): answer each as a landmine, or rule it out.
 
 ### Survey an org
 
 `agents-md.py survey --org <owner>` lists, per repo: AGENTS.md / CLAUDE.md presence,
-shadowing, line count, commits since the last touch, and section coverage. Add `--json`
+shadowing, line count and size, commits since the last touch, and section coverage. Add `--json`
 for the envelope. It is GET-only through `gh api` (plus `gh repo list`), clones nothing,
 and writes nothing anywhere.
 

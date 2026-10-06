@@ -643,6 +643,27 @@ feature releases live in the README "Recent Updates" section.
   `docs/00_INDEX.md`, and gained the AGENTS.md follow-ups. The build plan records what
   shipped and five gaps found by running the tools on this repo.
 
+- **`repo-doctor`'s AGENTS.md tools passed this repo's own 199-line, 16,744-character entry doc**
+  (one line ran 2,313 characters). Running them on this repo found five gaps, now
+  fixed, each with a test seen failing first:
+  - Size: a 16,000-character ceiling and 12,000 target (200 and 150 lines at 80
+    characters) in `agents-md.py audit`, the scorer and `survey` (new `over-size`
+    status, size column), a long-line finding, and `check-memory-docs.py` checking the
+    scripts and protocol agree.
+  - Split order: setup prose moves first at any size and the Structure map last, where
+    the largest section used to go first. "Quick reference" no longer counts as a
+    Commands heading, so tips under it can move.
+  - Landmine questions: only tracked files raise them, not test fixtures, not a file
+    changing with its own tests, and one question per file. Each names its `paths`, and
+    the audit lists the questions the doc never answers.
+  - Scaffold: a `generic` archetype for repos with no web manifest (static-site now
+    needs a marker such as `mkdocs.yml`), the Structure table keeps large areas, the
+    title comes from the origin remote or main checkout rather than a worktree folder,
+    and `just default` is skipped.
+  - `repo-scan.py` finds shell suites and their runner, Bats, `go test` and
+    `cargo test` by convention.
+  This repo's AGENTS.md went to 172 lines / 13,293 characters with Landmines untouched.
+
 ### Changed
 
 - **`craftcms-ops` refreshed for real agency builds.** Ten new one-topic references -

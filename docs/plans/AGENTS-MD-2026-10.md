@@ -65,28 +65,32 @@ nothing links to it, `--offline` runs in `tests/check-resources.sh` (so in `just
 and PR CI), and `--live` runs in `freshness.yml`. What comes next is in
 [docs/PLAN.md](../PLAN.md) (Phase 5).
 
-## Known gaps (dogfood, 2026-10-06)
+## Gaps found by dogfooding, and fixed (2026-10-06)
 
-Found by running `repo-scan.py`, `agents-md.py audit --diff` and `scaffold` on this repo.
-Its own AGENTS.md audits clean (3 infos, empty patch) at 199 lines, which hides the first
-gap.
+Running `repo-scan.py`, `agents-md.py audit --diff` and `scaffold` on this repo found
+five gaps. Its own AGENTS.md audited clean (3 infos, empty patch) at 199 lines, which hid
+the first. All five are fixed on `lane/agents-md-followup`, each with a test seen failing
+first.
 
-1. **The budget counts lines, not size.** 199 lines is 16.8 KB, and one overview line is
-   2,325 characters. Add a size check (chars / 3.6, the `tests/skill-size.sh` estimate)
-   and a long-line finding, or the 200-line ceiling is easy to game by accident.
-2. **The split plan moves the largest sections first.** At 201 lines it would move the
-   Structure map out and leave the Installation section the protocol excludes. Move
-   excluded content (setup prose) first and the structure map last. A heading like
-   "Quick Reference" counts as Commands, so the generic tips under it never move.
-3. **Landmine candidates carry noise.** They cite paths no longer tracked (a renamed
-   skill), flag a test fixture as a tracked secret, read a script and its own test
-   suite changing together as coupling, ask two questions about one file (fragile and
-   hot spot), and don't mark questions an existing Landmine already answers. About a
-   third of this repo's 14 candidates were noise.
-4. **The scaffold assumes one of four archetypes.** Anything that isn't PHP, Python or
-   Node falls back to `static-site` and gets publishing questions. The Structure table
-   ranks areas by kind before size and keeps 12, so it dropped `skills/` (1,367 files)
-   and kept a one-file folder. The title uses the checkout's directory name, which in a
-   worktree is the worktree's name, and `just default` is listed as a command.
-5. **The tests scan finds frameworks by config file only**, so shell suites (and Go or
-   Rust conventions) come back as `tests: []`.
+1. **The budget counted lines, not size.** 199 lines held 16,744 characters, one
+   line 2,313. Now: a 16,000-character ceiling and 12,000 target (200 and 150 lines at
+   80 characters) in the audit, the scorer and the survey (`over-size`), a long-line
+   finding, and `check-memory-docs.py` gating that the scripts and protocol agree.
+2. **The split plan moved the largest sections first**, so at 201 lines it moved the
+   Structure map and kept Installation. Now setup prose moves first at any size, then
+   the rest largest first, then Structure and Conventions. "Quick reference" no longer
+   counts as a Commands heading.
+3. **Landmine candidates carried noise** (about a third of 14). Now only tracked files
+   raise them; fixture folders, a file changing with its own tests, and a second
+   question about one file are left out; each candidate names its `paths`, and the
+   audit lists the ones the doc never mentions.
+4. **The scaffold assumed one of four archetypes.** Now a `generic` archetype covers
+   repos without a web manifest (static-site needs a real marker such as `mkdocs.yml`),
+   the Structure table always keeps areas holding 5% of the files, the title comes from
+   the origin remote or the main checkout, and `just default` is skipped.
+5. **The tests scan found frameworks by config file only.** Shell suites (with their
+   runner), Bats, `go test` and `cargo test` are now found by convention.
+
+Applying the fixed audit took this repo's AGENTS.md from 199 lines / 16,744 characters
+to 172 / 13,293 with Landmines untouched. The rest of the way to 150 is in Landmines, which only
+an owner trims.

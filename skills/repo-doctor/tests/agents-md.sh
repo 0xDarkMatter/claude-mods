@@ -126,6 +126,23 @@ done
 OUT="$("$PY" "$AM" scaffold --repo "$TMP/arch-python" --json 2>/dev/null)"
 check "python draft uses the repo's own manager (uv)" \
       "{'uv sync','uv run pytest'} <= {c['command'] for c in D['commands']}"
+R="$TMP/arch-mkdocs"; mkdir -p "$R/docs"; echo "site_name: x" > "$R/mkdocs.yml"; echo "# x" > "$R/docs/index.md"
+OUT="$("$PY" "$AM" scaffold --repo "$R" --json 2>/dev/null)"
+check "an mkdocs site gets the static-site archetype" "D['archetype']=='static-site'"
+# A repo with no web manifest used to fall back to static-site and get publishing
+# questions; tooling and script repos get the generic archetype instead.
+R="$TMP/arch-generic"; init_repo "$R"; mkdir -p "$R/tests"
+echo 'echo hi' > "$R/tool.sh"; echo 'bash tool.sh' > "$R/tests/run.sh"
+printf 'default:\n\tjust --list\n\ncheck:\n\tbash tests/run.sh\n' > "$R/justfile"
+for d in 01 02 03 04 05 06 07 08 09 10 11 12 13; do mkdir -p "$R/d$d"; echo "# $d" > "$R/d$d/README.md"; done
+mkdir -p "$R/media"; for i in $(seq 1 40); do echo "$i" > "$R/media/f$i.bin"; done
+commit "$R" "feat: tool"
+OUT="$("$PY" "$AM" scaffold --repo "$R" --json 2>/dev/null)"
+check "a script repo with no web manifest gets the generic archetype" \
+      "D['archetype']=='generic' and 'directory is published' not in D['draft']"
+check "the Structure table keeps the largest area past 12 rows" "'| \`media/\` |' in D['draft']"
+check "a just 'default' recipe is not listed as a command" \
+      "'just default' not in D['draft'] and 'just check' in D['draft']"
 init_repo "$TMP/shadowed"; good_agents "$TMP/shadowed"; rm "$TMP/shadowed/AGENTS.md"
 echo "# Claude notes" > "$TMP/shadowed/CLAUDE.md"
 "$PY" "$AM" scaffold --repo "$TMP/shadowed" 2>"$TMP/err" >/dev/null
@@ -256,6 +273,54 @@ commit "$B" "docs: bulky agents"
 OUT="$("$PY" "$AM" audit --repo "$B" --no-parents --json 2>/dev/null)"
 check "a doc that can't be split under target says so (landmines stay)" \
       "D['split_plan']==[] and any(f['id']=='split-insufficient' for f in D['findings'])"
+# Size, not just lines: 199 lines can hold 16,744 characters when lines run long. The ceiling
+# also counts characters (200 lines at 80 characters).
+W="$TMP/wide"; init_repo "$W"; echo '{"name":"w","scripts":{"build":"node b.js"}}' > "$W/package.json"
+"$PY" - "$W/AGENTS.md" <<'EOF'
+import sys
+L = ["# Agent Instructions - wide", "", "A fixture whose lines run long. " + "word " * 400, "",
+     "## Commands", "", "```bash", "npm run build", "```", "", "## Landmines", "",
+     "1. **Rule** - keep it.", "", "## Setup", "", "Install the toolchain first.", "",
+     "## Background", ""] + ["History of the project, told at length. " * 15 for _ in range(25)]
+L += ["", "## Structure", "", "| Path | What |", "|---|---|"] + [f"| `d{i}/` | part {i} |" for i in range(10)]
+open(sys.argv[1], "w", newline="\n").write("\n".join(L) + "\n")
+EOF
+commit "$W" "docs: wide agents"
+OUT="$("$PY" "$AM" audit --repo "$W" --no-parents --json 2>/dev/null)"
+check "a short file past 16,000 characters is over the ceiling" \
+      "D['lines']<100 and D['chars']>16000 and any(f['id']=='over-ceiling' and 'characters' in f['msg'] for f in D['findings'])"
+check "very long lines are reported with the longest line number" \
+      "any(f['id']=='long-lines' and 'line 3' in f['msg'] for f in D['findings'])"
+check "size split: setup first, the structure map stays" \
+      "[p['section'] for p in D['split_plan']]==['Setup','Background']"
+# Order of moves: excluded content (setup) first even when small, the structure map
+# last; a generic "Quick reference" heading is not a Commands section.
+T="$TMP/tiers"; init_repo "$T"; echo '{"name":"t","scripts":{"build":"node b.js"}}' > "$T/package.json"
+"$PY" - "$T/AGENTS.md" <<'EOF'
+import sys
+L = ["# Agent Instructions - tiers", "", "Fixture for the order of split moves.", "",
+     "## Commands", "", "```bash", "npm run build", "```", "", "## Landmines", ""]
+L += [f"{i}. **Rule {i}** - keep invariant {i} intact." for i in range(1, 96)]
+L += ["", "## Install", ""] + [f"Step {i}: install tool {i}." for i in range(6)]
+L += ["", "## Quick reference", ""] + [f"- Tip {i}: prefer the modern tool." for i in range(55)]
+L += ["", "## Structure", "", "| Path | What |", "|---|---|"] + [f"| `d{i}/` | part {i} |" for i in range(27)]
+open(sys.argv[1], "w", newline="\n").write("\n".join(L) + "\n")
+EOF
+commit "$T" "docs: tiers agents"
+OUT="$("$PY" "$AM" audit --repo "$T" --no-parents --json 2>/dev/null)"
+check "split order: small setup section first, structure map kept" \
+      "{p['section']:p['destination'] for p in D['split_plan']}=={'Install':'README.md','Quick reference':'docs/agents/quick-reference.md'}"
+# Landmine candidates the doc doesn't mention yet are listed (info), so an upgrade
+# shows which git-history questions the Landmines section never answered.
+U="$TMP/uncov"; init_repo "$U"; good_agents "$U"; echo "x" > "$U/x.js"; echo "y" > "$U/y.js"; echo "z" > "$U/z.js"
+commit "$U" "feat: init"
+for i in 1 2 3 4; do echo "$i" >> "$U/x.js"; echo "$i" >> "$U/y.js"; commit "$U" "feat: xy $i"; done
+for i in 1 2 3; do echo "$i" >> "$U/z.js"; commit "$U" "fix: z bug $i"; done
+echo "2. **x.js and y.js** - change them together." >> "$U/AGENTS.md"; commit "$U" "docs: landmine"
+OUT="$("$PY" "$AM" audit --repo "$U" --no-parents --json 2>/dev/null)"; rc=$?
+check "uncovered candidates: the fragile file, not the documented pair" \
+      "[c['paths'] for c in D['uncovered_candidates']]==[['z.js']] and any(f['id']=='uncovered-candidates' and f['severity']=='info' for f in D['findings'])"
+[ "$rc" -eq 0 ] && ok "  ...an info finding, so the audit still exits 0" || no "uncovered exit" "$rc"
 M="$TMP/missing"; init_repo "$M"; echo x > "$M/f"; commit "$M" "x"
 OUT="$("$PY" "$AM" audit --repo "$M" --no-parents --json 2>/dev/null)"; rc=$?
 check "no AGENTS.md is crit" "D['findings'][0]['id']=='missing-agents-md'"
@@ -292,6 +357,7 @@ repo("symlink", {"AGENTS.md": (good, F), "CLAUDE.md": ("AGENTS.md", "120000")})
 repo("none", {"README.md": ("# none\n", F)})
 repo("claudeonly", {"CLAUDE.md": ("# Claude\n", F)})
 repo("big", {"AGENTS.md": (big, F)}, ahead=20)
+repo("wide", {"AGENTS.md": (good + "\n" + "long line " * 1700 + "\n", F)})
 repo("local", {"AGENTS.md": (good, F), "CLAUDE.local.md": ("mine\n", F)})
 repo("empty", {}, branch=None)
 repo("old", {"AGENTS.md": (good, F)}, archived=True)
@@ -303,13 +369,15 @@ export AGENTS_MD_GH FAKE_GH_FIXTURE FAKE_GH_LOG
 AGENTS_MD_GH="$(winpath "$HERE/fake-gh.py")"; FAKE_GH_FIXTURE="$(winpath "$FX")"; FAKE_GH_LOG="$(winpath "$LOG")"
 OUT="$(cd "$EMPTY" && "$PY" "$AM" survey --org acme --json 2>/dev/null)"; rc=$?
 check "survey envelope and repo count (archived excluded)" \
-      "d['meta']['schema']=='claude-mods.repo-doctor.agents-md-survey/v1' and d['meta']['repos']==9"
+      "d['meta']['schema']=='claude-mods.repo-doctor.agents-md-survey/v1' and d['meta']['repos']==10"
 check "per-repo status" \
-      "{r['repo'].split('/')[1]:r['status'] for r in D}=={'good':'ok','shadow':'shadowed','imports':'ok','symlink':'ok','none':'missing','claudeonly':'claude-only','big':'over-200,stale','local':'shadowed,claude-local-committed','empty':'empty'}"
+      "{r['repo'].split('/')[1]:r['status'] for r in D}=={'good':'ok','shadow':'shadowed','imports':'ok','symlink':'ok','none':'missing','claudeonly':'claude-only','big':'over-200,stale','wide':'over-size','local':'shadowed,claude-local-committed','empty':'empty'}"
 check "line count, staleness and coverage reported" \
       "[(r['lines'],r['commits_since'],r['coverage']) for r in D if r['repo']=='acme/good']==[(24,2,'OCL-SV')]"
+check "the survey reports size and flags a short file that is too wide" \
+      "[(r['lines'] < 200, r['chars'] > 16000) for r in D if r['repo']=='acme/wide']==[(True,True)]"
 check "roll-up counts" \
-      "(d['meta']['agents_md_only'],d['meta']['claude_md_only'],d['meta']['both'],d['meta']['neither'],d['meta']['shadowed'])==(2,1,4,1,2)"
+      "(d['meta']['agents_md_only'],d['meta']['claude_md_only'],d['meta']['both'],d['meta']['neither'],d['meta']['shadowed'],d['meta']['over_size'])==(3,1,4,1,2,1)"
 [ "$rc" -eq 10 ] && ok "survey with issues exits 10" || no "survey exit" "$rc"
 "$PY" - "$LOG" <<'EOF' && ok "survey calls are GET-only (repo list + api, no write flags)" || no "GET-only" "a write-capable call was made"
 import json, sys
@@ -320,7 +388,7 @@ EOF
 [ -z "$(ls -A "$EMPTY")" ] && ok "survey writes nothing (cwd still empty)" || no "no writes" "$(ls -A "$EMPTY")"
 TABLE="$(cd "$EMPTY" && "$PY" "$AM" survey --org acme 2>/dev/null)"
 printf '%s' "$TABLE" | head -1 | grep -q '^REPO .*AGENTS.*CLAUDE.*SHADOW.*LINES.*SINCE.*COVER.*STATUS' \
-    && [ "$(printf '%s\n' "$TABLE" | wc -l)" -eq 10 ] && ok "table: header plus one row per repo" || no "table" "$TABLE"
+    && [ "$(printf '%s\n' "$TABLE" | wc -l)" -eq 11 ] && ok "table: header plus one row per repo" || no "table" "$TABLE"
 OUT="$("$PY" "$AM" survey --remote acme/good --json 2>/dev/null)"; rc=$?
 check "--remote surveys one repo" "len(D)==1 and D[0]['status']=='ok'"
 [ "$rc" -eq 0 ] && ok "a clean single-repo survey exits 0" || no "remote exit" "$rc"

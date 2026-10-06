@@ -67,8 +67,15 @@ FACTS = (
     ("windows-symlink", "on Windows use the @AGENTS.md import, not a symlink",
      "use the @AGENTS.md import instead", "use the @AGENTS.md import if anyone clones on Windows"),
 )
-# Constants that must equal the documented 200-line ceiling (scripts beside this file).
-CEILINGS = (("agents-md.py", r"^CEILING_LINES = (\d+)"), ("repo-doctor.py", r"^ENTRY_LEAN_LINES = (\d+)"))
+# Constants that must equal the documented ceilings (scripts beside this file): 200
+# lines, and the house size ceiling of 200 lines at 80 characters. (file, pattern,
+# expected value, what it is.)
+CEILINGS = (("agents-md.py", r"^CEILING_LINES = (\d+)", "200", "200-line ceiling"),
+            ("repo-doctor.py", r"^ENTRY_LEAN_LINES = (\d+)", "200", "200-line ceiling"),
+            ("agents-md.py", r"^CEILING_CHARS = (\d+)", "16000", "16,000-character ceiling"),
+            ("repo-doctor.py", r"^ENTRY_LEAN_CHARS = (\d+)", "16000", "16,000-character ceiling"))
+# The protocol must state the size ceiling the scripts enforce.
+SIZE_PHRASE = "16,000 characters"
 
 
 def norm(text: str) -> str:
@@ -80,10 +87,13 @@ def offline() -> list[dict]:
     proto = norm(PROTOCOL.read_text(encoding="utf-8"))
     rows = [{"id": fid, "claim": claim, "ok": norm(phrase) in proto}
             for fid, claim, _, phrase in FACTS]
-    for name, pat in CEILINGS:
+    for name, pat, want, what in CEILINGS:
         m = re.search(pat, (HERE / name).read_text(encoding="utf-8"), re.M)
-        rows.append({"id": f"ceiling-{name}", "claim": f"{name} uses the 200-line ceiling",
-                     "ok": bool(m) and m.group(1) == "200"})
+        kind = "chars" if "CHARS" in pat else "lines"
+        rows.append({"id": f"ceiling-{kind}-{name}", "claim": f"{name} uses the {what}",
+                     "ok": bool(m) and m.group(1) == want})
+    rows.append({"id": "ceiling-chars-protocol", "claim": "the protocol states the 16,000-character ceiling",
+                 "ok": SIZE_PHRASE in proto})
     return rows
 
 
