@@ -5,7 +5,8 @@ What each pm-audit finding means, how to read `npm ls`, `npm explain` and
 conflicts, and the "works on my machine" checklist. Facts verified 2026-10-05 against
 docs.npmjs.com (v12), getcomposer.org (checked against 2.10.3) and the Composer CHANGELOG;
 the pnpm placeholder row 2026-10-06 against pnpm.io (`npmrc`) and the pnpm 11.5.3 and
-10.34.2 releases.
+10.34.2 releases; the CI-runner and ERESOLVE notes 2026-10-06 against docs.github.com
+(hosted runners) and the npm/cli source (`explain-eresolve.js`).
 
 ## Contents
 
@@ -49,8 +50,9 @@ only where `vendor/` ships:
 
 - a Dockerfile or an appspec hook script, always;
 - a GitHub Actions **job** that ships something (`docker push`, `aws deploy`, an `aws s3 cp`
-  upload, `rsync`, `ansible-playbook`, ...) and runs no tests. Each job runs on a fresh
-  runner and shares files only through artifact actions, so a lint or test job beside the
+  upload, `rsync`, `ansible-playbook`, ...) and runs no tests. On GitHub-hosted runners
+  each job starts on a fresh machine (self-hosted runners can keep state) and shares files
+  only through artifacts (or a cache key it restores), so a lint or test job beside the
   deploy job may install dev packages. A job that hands `vendor/` to the deploy job as an
   artifact is not followed;
 - any other CI file judged **as a whole**, with the same rule. In GitLab CI and Bitbucket
@@ -191,9 +193,10 @@ the sparse paths.)
 ## ERESOLVE
 
 npm could not build a tree that satisfies every peer range. Read the three lines that
-matter: *while resolving* (the package with the peer requirement), *found* (what you
-have), *could not resolve dependency* (what it wants). The fix is a compatible version,
-not a flag; [upgrades.md](upgrades.md#peer-dependency-conflicts-eresolve) walks through it.
+matter: *while resolving* (the package npm was placing, often your project or a
+workspace), *found* (what you have), *could not resolve dependency* (the conflicting peer
+range and the package declaring it). The fix is a compatible version, not a flag;
+[upgrades.md](upgrades.md#peer-dependency-conflicts-eresolve) walks through it.
 
 ## Integrity failures
 

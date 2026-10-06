@@ -15,6 +15,7 @@ nvm-windows and Volta repositories, Packagist, and the Composer docs and source 
 - [PHP release lines today](#php-release-lines-today)
 - [The three PHP pins and what each means](#the-three-php-pins-and-what-each-means)
 - [Ranges, exact pins and overrides](#ranges-exact-pins-and-overrides)
+- [Maintaining the facts](#maintaining-the-facts)
 
 ## Node release lines today
 
@@ -154,3 +155,19 @@ Forcing a transitive version:
 
 Every override is a promise to remove it later: leave a comment in the PR saying which
 advisory or bug it works around, and check `npm ls <pkg>` after.
+
+## Maintaining the facts
+
+For whoever maintains this skill. The end-of-life tables above and the tool majors live in
+one place, `assets/package-manager-facts.json`, which pm-audit reads at run time.
+`scripts/check-pm-facts.py` guards it (paths are relative to the skill folder):
+
+```bash
+bash scripts/run-python.sh scripts/check-pm-facts.py --offline   # PR CI: tables valid, prose names every fact
+bash scripts/run-python.sh scripts/check-pm-facts.py --live      # weekly: nodejs.org, php.net, npm, Composer, GitHub
+```
+
+`--live` exits `10` on drift (a new Node or PHP line, a moved date, a new manager major,
+Volta or Corepack changing status) and `7` when a source is unreachable, which is
+advisory. After drift, re-verify the affected reference against its source, then update
+the table and the prose together.

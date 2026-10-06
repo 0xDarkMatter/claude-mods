@@ -2,8 +2,9 @@
 
 How to see what is behind, move it in an order that keeps the site building, read a peer
 conflict instead of silencing it, and refresh a lockfile without touching anything else.
-Facts verified 2026-10-06 against docs.npmjs.com, yarnpkg.com and the Yarn source,
-pnpm.io, the npm-check-updates README, and the Composer docs and CHANGELOG at 2.10.3.
+Facts verified 2026-10-06 against docs.npmjs.com (including `npm dedupe`), yarnpkg.com
+and the Yarn source, pnpm.io, the npm-check-updates README, and the Composer docs and
+CHANGELOG at 2.10.3.
 
 ## Contents
 
@@ -12,6 +13,7 @@ pnpm.io, the npm-check-updates README, and the Composer docs and CHANGELOG at 2.
 - [Upgrade order](#upgrade-order)
 - [Peer dependency conflicts (ERESOLVE)](#peer-dependency-conflicts-eresolve)
 - [Composer: why and why-not](#composer-why-and-why-not)
+- [Duplicate versions](#duplicate-versions)
 - [Lockfile-only refresh](#lockfile-only-refresh)
 
 ## Survey what is behind
@@ -102,6 +104,28 @@ can reproduce. `--force` is broader (it also overrides engine checks and more): 
   version.
 - `composer why-not php 8.4`: which packages would stop you running on PHP 8.4, the
   first command of any PHP upgrade ([legacy-exits.md](legacy-exits.md#end-of-life-php)).
+
+## Duplicate versions
+
+Two copies of one package at different versions, or a transitive package you did not
+expect: find who pulls each copy first (`npm explain <pkg>`, `yarn why <pkg>`,
+`pnpm why <pkg>`; see [diagnostics.md](diagnostics.md#npm-ls-explain-and-query)).
+
+- **The ranges overlap** and the lock kept an older copy: collapse them on a dev machine
+  and commit the lockfile.
+
+  | Manager | Dedupe | Check only, for CI |
+  |---|---|---|
+  | npm | `npm dedupe` | `npm find-dupes` (dedupe as a dry run) |
+  | Yarn 4 | `yarn dedupe` (keeps the highest version) | `yarn dedupe --check` (exit 1 on duplicates) |
+  | pnpm | `pnpm dedupe` | `pnpm dedupe --check` (non-zero when it would change the lock) |
+
+- **The ranges don't overlap**: no dedupe can help. Upgrade the dependent that holds the
+  old range, or, as a recorded and temporary decision, force one version with an
+  override ([version-pinning.md](version-pinning.md#ranges-exact-pins-and-overrides)).
+
+Composer has no dedupe: `vendor/` holds one version of each package, so two incompatible
+constraints fail resolution instead (`composer why-not`, above).
 
 ## Lockfile-only refresh
 

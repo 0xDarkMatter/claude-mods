@@ -245,6 +245,30 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **package-manager-ops docs and routing review** - a second facts pass, each claim
+  re-checked against its primary source, plus SKILL.md design fixes. Offline installs:
+  `npm ci --offline` is offline, `--prefer-offline` still fetches cache misses.
+  Committing `.yarn/cache` is Yarn's offline mirror; zero-installs also needs PnP and a
+  committed `.pnp.cjs`. A build that differs with and without a cache can be pnpm's
+  `sideEffectsCache` replaying a postinstall, not only an unfrozen install. Composer's
+  dump-autoload spells the flags `--optimize` and `--apcu`, not the install-side names.
+  A stale `content-hash` only warns on `composer install`; a missing or unsatisfied
+  required package fails with exit 4, and `composer validate` exits 2 on a stale lock
+  by default, so run it before a deploy install. ERESOLVE's *while resolving* line names
+  the package npm was placing (often your project or a workspace), not the one with the
+  peer range. Also: pnpm links by hard link or copy-on-write clone, Yarn's global folder
+  differs on Windows and under `XDG_DATA_HOME`, and a fresh job per run holds only on
+  GitHub-hosted runners. In SKILL.md, the two-lockfile rule is scoped to one JS lockfile
+  per package root (a `composer.lock` beside it is normal), Bun's built-in trusted list
+  is named, a missing native binary is checked against platform and optional packages
+  before install-script policy, and ERESOLVE, EINTEGRITY, merge conflicts and "works on
+  my machine" each route to their own section. New rows cover switching managers,
+  offline CI, Composer autoload, duplicate versions (a new dedupe section in
+  `upgrades.md`) and one-workspace installs. The description gains those triggers and
+  names what the skill is not for. The facts-maintenance procedure moved to
+  `version-pinning.md`, and a note gives the `${CLAUDE_SKILL_DIR}` form of the script
+  paths.
+
 - **pm-audit and check-pm-facts, from a cross-model code review** - every claim was first
   reproduced in a throwaway repo, and each fix is now pinned by a test seen failing first,
   then killed by a mutant. pm-audit: credentials in a quoted command or package URL
