@@ -268,6 +268,27 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **`fleet owner` and the land gate see a session that moved into a lane** - a Desktop
+  session `EnterWorktree`'d into a lane, committed there and stayed live, yet `fleet
+  owner` and `sessions.sh at --fresh` called the lane unowned, and a second session ported
+  its work as an orphan while `fleet sweep` kept the same tree as a live session's. Three
+  causes. Since about 2026-09-24 Desktop writes each `writtenBranches` entry as
+  `<worktreePath>\0<branch>`, and `sessions.sh` read the pair as one branch name, so the
+  name join matched no session on the new format; the pair is now split, the branch
+  feeding the index and the path a new `written` claim on that worktree, which holds
+  while the session is idle. A Desktop resume files the transcript back under the launch
+  dir, so only the cwd its records carry still names the lane, and the index keeps that
+  only for a session live when it was built; `at --fresh` now reads every live
+  transcript's last recorded cwd, wherever it is filed (a Git Bash `/x/...` cwd folds to
+  `x:/...`). And `owner` joined on the branch name alone: it is now the winning row of a
+  new `sessions.sh claimants`, which joins by name and by the worktree the branch is
+  checked out in, the claims prune and sweep already used. The land gate reads
+  `claimants --fresh` once instead of three separate joins, and `at` resolves a relative
+  path, which before matched nothing. A fixture block in `fleet-ops/tests/run.sh`
+  reproduces the incident; each of its 11 ownership and refusal assertions fails on the
+  old code. Expect more refusals than in the two weeks before: a lane is again refused
+  while any session that wrote its branch is live, as the gate always intended.
+
 - **The pre-commit hidden-Unicode gate scanned the working tree, not the commit.**
   `hooks/pre-commit-unicode-scan.sh` took names from `git diff --cached` but passed
   the files on disk to the scanner and skipped names missing there. A file staged

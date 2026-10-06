@@ -2,6 +2,13 @@
 
 How fleet-ops decides a lane's owner is still writing, what the self-ownership exemption requires, how to override, and which session channels work where.
 
+## Contents
+
+- [The live-owner gate](#the-live-owner-gate)
+- [`fleet owner` sees a session that moved in (2026-10-06)](#fleet-owner-sees-a-session-that-moved-in-2026-10-06)
+- [Where each channel works (verified 2026-08-03)](#where-each-channel-works-verified-2026-08-03)
+- [`scripts/sessions.sh`](#scriptssessionssh)
+
 ### The live-owner gate
 
 `fleet land` refuses a lane whose owning session was active within
@@ -9,18 +16,66 @@ How fleet-ops decides a lane's owner is still writing, what the self-ownership e
 landing merges a branch the session may still be committing to, and then rebases every
 other lane's worktree **out from under a live session**.
 
-The join is `writtenBranches` from the session wrapper, not just the checked-out
+The name join is `writtenBranches` from the session wrapper, not just the checked-out
 branch — a session working in worktree `claude/foo-bar` routinely commits its real work
-to `lane/thing`, and only `writtenBranches` connects the two.
+to `lane/thing`, and only `writtenBranches` connects the two. Since about 2026-09-24
+Desktop writes each entry as `<worktreePath>\0<branch>` (a NUL between), where it once
+wrote the bare branch, and the store holds both shapes. `sessions.sh` splits a pair:
+the branch half joins the index, and the path half is a claim on that worktree (route
+`written`).
 
 **It also joins on the directory.** Any session claiming the worktree the lane branch
-is checked out in (wrapper `cwd`/`worktreePath`, transcript directory, live `cwd` — the
-claims [prune](../SKILL.md#prune--worktree-housekeeping) uses) blocks, whatever branch its wrapper
-records: branch drift and `EnterWorktree` both defeat the branch join (2026-09-28). The
-read is `sessions.sh at --fresh`. The cached index may nominate claimants but never
-decides: each one's liveness is re-read, and transcripts being written in the worktree
-are read off disk, so a session that arrived after the index was built still blocks.
-Blind spot: a shell that `cd`'d in since the last index, or writes by absolute path.
+is checked out in blocks, whatever branch its wrapper records: branch drift and
+`EnterWorktree` both defeat the name join (2026-09-28). The routes are the ones
+[prune](../SKILL.md#prune--worktree-housekeeping) uses: wrapper `cwd`/`worktreePath`,
+a `writtenBranches` path (`written`), the transcript's directory, and the transcript's
+last recorded cwd (`live-cwd`). Both joins come from one read, `sessions.sh claimants
+--fresh <branch>`, and `fleet owner` reads the same claims (below). The cached index may
+nominate claimants but never decides: each one's liveness is re-read, and two routes
+are read straight off disk, so a session that arrived after the index was built still
+blocks: a transcript being written in the worktree, and a live transcript whose last
+recorded cwd is the worktree or inside it, wherever the file is filed (~2s over ~15k
+transcripts). Blind spot: a write by absolute path from a session whose cwd is
+elsewhere.
+
+### `fleet owner` sees a session that moved in (2026-10-06)
+
+A Desktop session spawned in one worktree `EnterWorktree`'d into lane L, committed
+there and stayed live. `fleet owner L` and `sessions.sh at --fresh` both reported no
+owner, and a second session, taking the lane for orphaned, ported it to a new branch.
+Four minutes later `fleet sweep` kept the same tree as `live session: ... (fresh
+read)`. Three things hid the owner:
+
+1. **The pairs.** Its `writtenBranches` named L as `<L's path>\0L`, read whole as one
+   branch name that no lane ever equalled. Every name join was blind to every session
+   on the new format.
+2. **The resume.** When Desktop resumes a session that moved, it files the transcript
+   under the wrapper's `cwd` again (the launch dir, a copy beside the old one) and
+   re-enters L from the `worktree-state` records the transcript keeps. Only each
+   record's `cwd` still names L, and the index records it only for a session live when
+   the index was built. The earlier read's `paths` held no claim on L at all; sweep's
+   index was most likely rebuilt (15-minute TTL) while the session was live.
+3. **`owner` joined on the name alone.** Sweep and prune read the directory claims
+   too; `owner` never had.
+
+So `owner` is now the winning row of `claimants`: every session claiming the branch by
+name or by its worktree, live first under `--fresh`, then open over archived, then the
+newest, with its routes in column 8. The `written` claim holds while the owner is idle,
+and `--fresh` reads every live transcript's recorded cwd. `at` also resolves a relative
+path against the caller's directory; before, `at .claude/worktrees/x` compared the
+relative string with stored absolute paths and printed nothing, which reads as "no
+owner". A `/x/...` cwd (Git Bash form, found in nested `git_state` records) is folded
+to `x:/...` so it matches. The suite's `-- owner: a session that moved into the lane --`
+block reproduces all of it. Prune counts a `written` claim as a claim (it keeps a
+tree), never as proof that an archived session finished there (it cannot make a tree
+SAFE).
+
+Expect more refusals than in the two weeks before the fix, all of them the gate working
+as documented: the split restores the name join for every session on the new format,
+so a lane is refused while any session that wrote its branch was active within
+`session_live_secs`, wherever that session is working now. A lane session that hands
+off and stays busy elsewhere holds its lane until it has been idle that long; `fleet
+owner --fresh` names it, and its `written` row in `at` stays (idle) after that.
 
 "Active" means the newer of the wrapper's `lastActivityAt` and the session's last
 transcript write (its subagents' included), searched across every Desktop
@@ -100,4 +155,4 @@ prints the right one for your surface after every `READY` and `CONFLICT`.
 
 ## `scripts/sessions.sh`
 
-- `scripts/sessions.sh` — branch → owning-session and directory → claiming-session resolver, read off every Desktop instance's session store plus the CLI transcripts on disk (deployed alongside signal.sh so lane sessions can resolve MAIN). `sessions.sh stores` shows what it read; `sessions.sh at <path>` shows who claims a directory (`--fresh`: liveness re-read, the land gate's view); `sessions.sh state <id>...` re-reads liveness, the archive flag (`1`/`0`/`?`) and an archived session's last transcript cwd straight off disk, which is what `fleet prune` reads before it classifies; `sessions.sh where <id>...` names the Desktop instance (store) holding each session, since the `ccd_session_mgmt` tools reach only their own instance's sessions. Enrichment only: exits 3 and stays silent wherever the store or `jq` is missing, and every caller treats that as "no info"
+- `scripts/sessions.sh` — branch → owning-session and directory → claiming-session resolver, read off every Desktop instance's session store plus the CLI transcripts on disk (deployed alongside signal.sh so lane sessions can resolve MAIN). `sessions.sh stores` shows what it read; `sessions.sh at <path>` shows who claims a directory (`--fresh`: liveness re-read plus the disk probes); `sessions.sh claimants <branch>` lists every session claiming a branch by name or by its worktree (`--fresh` is the land gate's read), and `sessions.sh owner <branch>` prints the one that wins; `sessions.sh state <id>...` re-reads liveness, the archive flag (`1`/`0`/`?`) and an archived session's last transcript cwd straight off disk, which is what `fleet prune` reads before it classifies; `sessions.sh where <id>...` names the Desktop instance (store) holding each session, since the `ccd_session_mgmt` tools reach only their own instance's sessions. Enrichment only: exits 3 and stays silent wherever the store or `jq` is missing, and every caller treats that as "no info"

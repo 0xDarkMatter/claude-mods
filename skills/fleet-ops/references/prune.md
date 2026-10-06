@@ -28,9 +28,13 @@ touched under any flag.
 
 **How a session claims a worktree.** By its branch (checked-out or
 `writtenBranches`), by its wrapper's `cwd` or `worktreePath` (compared
-normalised: slashes, case, `X:` vs `/x/`), by the directory its CLI transcript
-is filed under (`EnterWorktree` moves it there; the wrapper's `cwd` never
-changes), and, while live, by the last `cwd` its transcript recorded. The store
+normalised: slashes, case, `X:` vs `/x/`), by the worktree path a
+`writtenBranches` pair names (`written`: Desktop writes `<path>\0<branch>` since
+about 2026-09-24), by the directory its CLI transcript is filed under
+(`EnterWorktree` moves it there; the wrapper's `cwd` never changes, and a resume
+files it back under that `cwd`), and, while live, by the last `cwd` its
+transcript recorded. `fleet owner` and the land gate read these same claims
+([session-awareness](session-awareness.md#fleet-owner-sees-a-session-that-moved-in-2026-10-06)). The store
 read is the **union** of every Desktop instance's store — the primary and each
 `--user-data-dir` instance under `~/.claude-desktop-profiles/` — and `fleet
 config` lists which ones answered. Liveness is the newer of the wrapper's
@@ -59,9 +63,10 @@ fifteen more. Now:
 
 **Positive evidence is an exact path.** An archived session proves a tree by its
 wrapper's `cwd`/`worktreePath`, or by the cwd its transcript last recorded
-(read fresh by `fleet prune`). The latter is the only record of a lane the
-session `EnterWorktree`'d into: its wrapper's `cwd` and `gitAnchors` name only
-the tree it was spawned in. The transcript *directory* key alone never proves
+(read fresh by `fleet prune`). For a lane the session `EnterWorktree`'d into,
+that cwd is the only proof: its wrapper's `cwd` and `gitAnchors` name only the
+tree it was spawned in. A `written` claim names the lane too, but it only keeps
+a tree; it is not proof yet. The transcript *directory* key alone never proves
 anything, because `lane.x` and `lane-x` encode to the same key.
 
 **The near-miss that shaped this (2026-09-28).** A dry run in a real repo
