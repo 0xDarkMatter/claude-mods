@@ -367,6 +367,15 @@ expect_has "local L3 bypass still demands isolation" "isolated VM/container" "$o
 out="$(bash "$DOCTOR" --offline "$SB/desk-l2.yaml" 2>/dev/null)"
 expect_has "desktop-task flags the out-of-band worktree toggle" "toggle is on" "$out"
 
+# R5. The cloud boundary regex must match each element ALONE. cloud-ok names connectors
+# AND environment, so a dead `connectors?` alternative (its word boundary once landed as
+# a raw 0x08 byte, which no text can match) hid behind `environment`. Name connectors only.
+sed 's|^escalation:.*|escalation: "connectors pruned to GitHub read only; never merge"|' \
+  "$SB/cloud-1h.yaml" > "$SB/cloud-connectors-only.yaml"
+out="$(bash "$DOCTOR" --offline "$SB/cloud-connectors-only.yaml" 2>/dev/null)"; rc=$?
+expect_exit "cloud boundary naming only connectors is accepted -> 0" 0 "$rc"
+expect_has  "connectors-only boundary reports the ok row" "boundary names repos/environment/connectors" "$out"
+
 # ── loop-estimate: validation errors ───────────────────────────────────────────
 "$PYTHON" "$COST" --pattern pr-watch --cadence 10m --model claude-nope >/dev/null 2>&1; expect_exit "unknown model -> 4" 4 $?
 "$PYTHON" "$COST" --pattern not-a-pattern --cadence 10m --model claude-haiku-4-5 >/dev/null 2>&1; expect_exit "unknown pattern -> 4" 4 $?
