@@ -141,10 +141,10 @@ ec 3 "pm-audit missing facts -> 3" "$PY" "$AUDIT" --facts "$TMP/nope.json" "$HER
 # -- 3. fixture matrix: clean controls exit 0, every finding id is produced ----------
 while IFS='|' read -r verdict msg; do
   [[ "$verdict" == PASS ]] && ok "$msg" || no "$msg"
-done < <("$PY" - "$HERE/fixtures" "$AUDIT" "$TMP" <<'PY'
+done < <("$PY" - "$HERE/fixtures" "$AUDIT" "$TMP" "$SKILL/references/diagnostics.md" <<'PY'
 import json, shutil, subprocess, sys
 from pathlib import Path
-fixtures, audit, tmp = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3])
+fixtures, audit, tmp, diagnostics = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3]), Path(sys.argv[4])
 def row(ok, msg): print(f"{'PASS' if ok else 'FAIL'}|{msg}")
 
 def materialise(src: Path, dest: Path):
@@ -191,6 +191,12 @@ for line in Path(audit).read_text(encoding="utf-8").splitlines():
         doc_ids.update(s.split())
 row(doc_ids and doc_ids <= covered, f"every documented finding id has a fixture ({len(doc_ids)} ids)"
     + ("" if doc_ids <= covered else f" - uncovered: {sorted(doc_ids - covered)}"))
+# ...and a row in the diagnostics table, which the docstring promises explains each id.
+# A new id can otherwise ship with a fixture but nothing telling the reader what to fix.
+diag_text = diagnostics.read_text(encoding="utf-8") if diagnostics.is_file() else ""
+rowless = sorted(i for i in doc_ids if f"| `{i}` |" not in diag_text)
+row(doc_ids and not rowless, f"every documented finding id has a diagnostics.md row ({len(doc_ids)} ids)"
+    + (f" - missing: {rowless}" if rowless else ""))
 
 # A committed token is reported by file:line only - the value must never be echoed.
 dest = tmp / "m" / "registry-token-committed"
@@ -231,6 +237,12 @@ row(yf and all(f["severity"] == "error" and "npm 12 refuses" in f["message"] and
     "npm install --frozen-lockfile: an error - npm 12 refuses it, npm up to 11 installs unfrozen, fix npm ci")
 ci = [f for f in found("deploy-npm-ci-yarn-flag", "deploy.npm.yarn-flag") if "npm ci" in f["message"]]
 row(ci and all("already frozen" in f["fix"] for f in ci), "npm ci --frozen-lockfile: drop the flag, npm ci is already frozen")
+# A bare name and an `@latest`/`@next` spec run what that dist-tag names, which need not be
+# the newest published version (a release published under another tag never moves latest).
+bare = [f["message"] for f in found("npx-unpinned-docs", "npx.unpinned") if f["message"].startswith("`npx create-vite` ")]
+tag = [f["message"] for f in found("npx-unpinned-script", "npx.unpinned") if "eslint@latest" in f["message"]]
+row(bare and tag and all("dist-tag" in m and "newest" not in m for m in bare + tag),
+    f"npx.unpinned names the dist-tag for a bare name and for @latest, never 'newest' ({bare + tag})")
 plain = found("deploy-npm-install", "deploy.install.unfrozen")
 row(plain and not any("Yarn flag" in f["message"] for f in plain), "plain npm install keeps the generic unfrozen message")
 # CI that builds in a subfolder: the finding names that package root, and the root's
@@ -250,6 +262,11 @@ row(nocif and "CI installs" not in nocif[0]["message"], "without CI the lockfile
 stale = found("php-lockfile-stale-dev-only", "php.lockfile.stale")
 row(stale and "fixture/tool (locked only in packages-dev)" in stale[0]["message"],
     "a require locked only in packages-dev is named as such (Composer reads require from packages)")
+# `composer update --lock` must read the old lock and rethrows its parse error; only a full
+# update regenerates an unparseable one (Installer::doUpdate, Composer 2.10.3).
+broken = found("php-lockfile-invalid", "php.lockfile.stale")
+row(broken and all("--lock" not in f["fix"] and "`composer update`" in f["fix"] for f in broken),
+    f"an unparseable composer.lock is fixed from git or a full update, never update --lock ({[f['fix'] for f in broken]})")
 # EOL findings say what the repo pins, not what production runs.
 for case, fid in (("php-eol", "php.eol"), ("js-node-eol", "js.node.eol"), ("php-eol-ci", "php.eol"), ("js-node-eol-ci", "js.node.eol")):
     fs = found(case, fid)

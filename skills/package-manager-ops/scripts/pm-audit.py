@@ -77,6 +77,10 @@ DEP_TYPES = ("dependencies", "devDependencies", "optionalDependencies")
 LOCAL_SPEC = re.compile(r"^(workspace:|file:|link:|portal:|patch:|exec:|git[+:]|github:|https?:)")
 COMPOSER_PLATFORM = re.compile(r"^(php(-64bit|-ipv6|-zts|-debug)?|hhvm|ext-.+|lib-.+|composer(-plugin-api|-runtime-api)?)$", re.I)
 EXACT_SEMVER = re.compile(r"^v?\d+\.\d+\.\d+([-+][0-9A-Za-z.+-]+)?$")
+# A dist-tag spec (`@latest`, `@next`, `@beta`). npm-package-arg calls a spec a tag when it
+# is neither a semver version nor a range; approximated here as a leading letter that does
+# not open a loose range (`v1`, `x`, `X.2`).
+DIST_TAG = re.compile(r"^(?![vV]\d)(?![xX](?:$|\.))[A-Za-z][\w.-]*$")
 # Directories never worth walking for npx usage: dependencies, build output, VCS.
 SKIP_DIRS = {".git", "node_modules", "vendor", "bower_components", ".yarn", ".pnpm-store",
              "dist", "build", "coverage", ".cache", ".next", ".nuxt", "storage", "cpresources",
@@ -617,8 +621,11 @@ class Audit:
             head = (read_text(yarn_lock) or "")[:2000]
             flavour = "berry" if "__metadata:" in head else "classic"
             if flavour == "classic":
+                # Not "security fixes only": the README says that of contributions, but the
+                # 1.22.20-1.22.22 hotfixes were not security fixes. No version here - a new
+                # release would make it stale where check-pm-facts cannot see it.
                 self.note("js.yarn.classic", "yarn.lock",
-                          "Yarn 1 (classic) lockfile - Yarn 1 takes security fixes only; plan a move to npm or Yarn 4 (references/legacy-exits.md)")
+                          "Yarn 1 (classic) lockfile - Yarn 1 is in maintenance mode and ships only an occasional hotfix; plan a move to npm or Yarn 4 (references/legacy-exits.md)")
             ym = re.match(r"\d+", pm_ver) if pm_name == "yarn" else None
             if ym:
                 major = int(ym.group(0))
@@ -887,8 +894,12 @@ class Audit:
                          "composer.json has packages but no composer.lock - `composer install` resolves fresh every time",
                          "run `composer update` once (in DDEV: `ddev composer update`) and commit composer.lock")
         elif not isinstance(lock, dict):
+            # Not `composer update --lock`: it must read the old lock and rethrows the parse
+            # error. Only a full update ignores a broken lock (Installer::doUpdate, 2.10.3).
             self.add("error", "php.lockfile.stale", "composer.lock", "composer.lock is not valid JSON",
-                     "regenerate it with `composer update --lock`")
+                     "take a valid copy from git (mid-merge: `git checkout --theirs composer.lock`, then re-run "
+                     "the other branch's composer commands), or regenerate it with a full `composer update` "
+                     "and review every version change")
         else:
             # WHY replace/provide and the require / require-dev split: this mirrors Composer's
             # own lock check (Locker::getMissingRequirementInfo). A root `require` is met from
@@ -1073,9 +1084,17 @@ class Audit:
                     continue  # the repo documenting its own published package for its users
                 if len([f for f in self.findings if f["id"] == "npx.unpinned"]) >= self.limit:
                     continue
-                what = (f"runs whatever is newest in range '{ver}' - not an exact version" if ver
-                        else "fetches and runs the newest published version")
-                self.add("warn", "npx.unpinned", file, f"`{launcher} {pkg}` {what}",
+                # WHY "dist-tag", not "newest": a bare name resolves through the `latest`
+                # dist-tag (npm-pick-manifest, pnpm's `tag` setting, `yarn add`, bunx), and a
+                # release published under another tag never moves it. A range is no better
+                # described as "newest in range": npm-pick-manifest prefers `latest` when it fits.
+                if not ver:
+                    what = "runs whatever version the `latest` dist-tag names"
+                elif DIST_TAG.match(ver):
+                    what = f"runs whatever version the `{ver}` dist-tag names"
+                else:
+                    what = f"lets the registry pick any version in range '{ver}'"
+                self.add("warn", "npx.unpinned", file, f"`{launcher} {pkg}` {what} - not an exact version",
                          f"add {base} as a devDependency, or pin it: {launcher} {base}@<exact version>",
                          line_no)
 

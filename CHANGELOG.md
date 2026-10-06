@@ -268,6 +268,21 @@ feature releases live in the README "Recent Updates" section.
   checks in the new blocks, 44 fail on the old code, and 12 fail with only the
   dead-land half in place.
 
+- **pm-audit wording matched to the sources** - `npx.unpinned` said a bare name runs "the
+  newest published version" and that `npx eslint@latest` runs the "newest in range
+  'latest'". Both run what a dist-tag names (npm-pick-manifest, pnpm, `yarn add` and bunx
+  all resolve a bare name through `latest`), so the message now says that, and a range
+  reads "lets the registry pick any version in range". The `js.yarn.classic` note no
+  longer says Yarn 1 takes security fixes only: its recent releases were hotfixes. The fix
+  for an unparseable `composer.lock` suggested `composer update --lock`, which reads the
+  old lock and rethrows the parse error (Composer 2.10.3 `Installer::doUpdate`); it now
+  points to git or a full `composer update`. `install-semantics.md` says `update --lock`
+  also runs the install step unless `--no-install`, and `legacy-exits.md` gives the Yarn 1
+  hotfix picture. `diagnostics.md` gains the missing `registry.pnpm.placeholder-ignored`
+  row, and the suite now fails when a documented finding id has no diagnostics row. New
+  fixture `php-lockfile-invalid`; the three new assertions were each seen failing first.
+  The facts store also watches the Yarn README's "occasional hotfix" line.
+
 - **package-manager-ops facts review** - two model reviewers read eight references, and
   every disputed claim was checked against primary sources (npm/cli 12.2.0, Composer
   2.10.3, pnpm.io, yarnpkg.com, bun.com). 30 corrections, the ones that change advice

@@ -4,7 +4,7 @@ Which install command belongs where, what each one promises, and why a lockfile 
 under you. Facts verified 2026-10-05 against docs.npmjs.com (v11 and v12), yarnpkg.com,
 classic.yarnpkg.com, pnpm.io, bun.com and getcomposer.org (checked against the Composer
 2.10.3 tag, because getcomposer.org/doc is built from `main` and documents unreleased
-features).
+features); `composer update --lock` re-checked 2026-10-06 against the 2.10.3 source.
 
 ## Contents
 
@@ -80,9 +80,11 @@ before installing. Set it after the install, or for the build command only.
   `--with-all-dependencies`, when its dependencies must move too).
 - When `composer.json` changed after the lock was written, install warns: "The lock file
   is not up to date with the latest changes in composer.json". Fix it on a dev machine
-  with `composer update <the package you changed>`. `composer update --lock` only
-  refreshes the hash and package metadata (mirrors, URLs); use it for edits that cannot
-  change resolution, such as a description.
+  with `composer update <the package you changed>`. `composer update --lock` rewrites the
+  hash and package metadata (mirrors, URLs) without moving any version, then installs from
+  the new lock like any update; add `--no-install` to touch the lock alone. Use it for
+  edits that cannot change resolution, such as a description. It reads the old lock, so it
+  cannot repair one that is not valid JSON: take a copy from git or run a full update.
 - `composer update --no-install` (since 2.0) resolves and writes the lock without
   installing: useful for a lockfile-only refresh.
 - Composer 2.9.0 started blocking packages with security advisories during `update` by

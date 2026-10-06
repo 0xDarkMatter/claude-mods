@@ -61,8 +61,11 @@ npm install --save-dev sass
 
 ## Yarn 1 to npm or Yarn 4
 
-Yarn 1 entered maintenance mode in January 2020; its README says the codebase will only
-accept security fixes, and the last release is 1.22.22 (2024-03-09).
+Yarn 1 entered maintenance mode in January 2020. Its README says the codebase will only
+accept security fixes, but also that the repository is kept for "the occasional hotfix",
+and the recent releases were hotfixes, not security fixes: the last, 1.22.22
+(2024-03-09), fixed a punycode warning and a hoisting bug. Feature work and other bug
+fixes go to Yarn 4 (yarnpkg/berry).
 
 **To npm** (the usual choice for a server-rendered site):
 

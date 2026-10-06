@@ -3,7 +3,9 @@
 What each pm-audit finding means, how to read `npm ls`, `npm explain` and
 `composer why`, the anatomy of ERESOLVE and integrity failures, lockfile merge
 conflicts, and the "works on my machine" checklist. Facts verified 2026-10-05 against
-docs.npmjs.com (v12), getcomposer.org (checked against 2.10.3) and the Composer CHANGELOG.
+docs.npmjs.com (v12), getcomposer.org (checked against 2.10.3) and the Composer CHANGELOG;
+the pnpm placeholder row 2026-10-06 against pnpm.io (`npmrc`) and the pnpm 11.5.3 and
+10.34.2 releases.
 
 ## Contents
 
@@ -79,6 +81,7 @@ only where `vendor/` ships:
 | `registry.token.committed` | error | a literal token in `.npmrc` or `.yarnrc.yml` | [registries-and-auth.md](registries-and-auth.md#when-a-token-was-committed) |
 | `registry.authjson.committed` | error | a root `auth.json` that is not gitignored | [registries-and-auth.md](registries-and-auth.md#when-a-token-was-committed) |
 | `registry.credentials.image` | error | CI writes `auth.json` or `.npmrc` into the build context, a Dockerfile copies the whole context, `.dockerignore` lets it through | [registries-and-auth.md](registries-and-auth.md#ci-wiring) |
+| `registry.pnpm.placeholder-ignored` | warn | a pnpm repo's project `.npmrc` has a `${...}` in a registry, proxy or auth setting, which pnpm 11.5.3+ (and 10.34.2+) ignores with only a warning | [registries-and-auth.md](registries-and-auth.md#pnpm-no-placeholders-in-the-project-npmrc) |
 | `js.manager.mixed` | warn | nested package roots use a different manager than the root | [detect-and-choose.md](detect-and-choose.md#two-lockfiles-pick-one) |
 | `deploy.install.unfrozen` | warn | CI or a deploy runs `npm install`, a non-frozen Yarn/pnpm/Bun install, or `composer update`/`require`; names the nested root it runs in | [install-semantics.md](install-semantics.md#the-one-table) |
 | `deploy.install.unlocked` | warn | CI installs in a nested folder that has a `package.json` or `composer.json` but no lockfile, so every run resolves fresh | [install-semantics.md](install-semantics.md#the-one-table) |
