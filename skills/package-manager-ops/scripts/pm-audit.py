@@ -29,7 +29,8 @@ Why one file: the skill folder must run when copied alone into another plugin, l
 through scripts/run-python.sh with nothing on sys.path, so this stays a single stdlib
 module. Jump by section marker instead of splitting it:
   === version ranges ===   npm semver + Composer constraint intervals (admits())
-  === small readers ===    JSON/JSONC, a block-mapping YAML subset, markdown code lines
+  === small readers ===    JSON/JSONC, a block-mapping YAML subset, markdown code lines,
+                           GitHub Actions job boundaries (workflow_jobs)
   === the audit ===        Audit: js, nested, node_pins, php, npx, deploy, legacy, secrets
   main()                   argv, output envelope, exit codes
 
@@ -79,15 +80,19 @@ SKIP_DIRS = {".git", "node_modules", "vendor", "bower_components", ".yarn", ".pn
 # agent config that would repeat one finding a dozen times.
 DOT_DIRS_SCANNED = {".github", ".gitlab", ".circleci", ".buildkite", ".husky", ".ddev", ".devcontainer"}
 HOOK_DIRS = {".husky", ".ddev"}
-# CI configs: every install there must be frozen. A workflow is a *deploy* (production
-# install, so `composer install` needs --no-dev) when it ships something and runs no tests;
-# a test job legitimately installs dev packages. Dockerfiles (not *dev*/*test*) and AWS
+# CI configs: every install there must be frozen, in every job. A GitHub Actions job (any
+# other CI file as a whole: see Audit._ship_scope) *ships* (production install, so
+# `composer install` needs --no-dev) when it has a deploy marker and runs no tests; a test
+# or lint job legitimately installs dev packages. Dockerfiles (not *dev*/*test*) and AWS
 # CodeDeploy appspec hook scripts always build or run production.
 CI_GLOBS = (".github/workflows/*.yml", ".github/workflows/*.yaml", ".gitlab-ci.yml",
             "bitbucket-pipelines.yml", "azure-pipelines.yml", ".circleci/config.yml",
             "buildspec*.yml", "Jenkinsfile")
+# `aws s3 cp|mv` counts only as an upload (local source, s3:// target): a job that fetches
+# its .env from S3 with `aws s3 cp s3://... .env` ships nothing.
 DEPLOY_MARKERS = re.compile(
     r"docker\s+(?:buildx\s+)?(?:build|push)|aws\s+(?:ecr|deploy|s3\s+sync)|codedeploy|ansible-playbook|"
+    r"aws\s+s3\s+(?:cp|mv)\s+(?:-\S+\s+)*[\"']?(?!s3://)[^\s\"'-][^\s\"']*[\"']?\s+(?:-\S+\s+)*[\"']?s3://|"
     r"action-ansible-playbook|ansistrano|\brsync\s|\bscp\s|wrangler\s+deploy|vercel\s+(?:deploy|--prod)|"
     r"netlify\s+deploy|kubectl\s+apply|helm\s+upgrade|(?:serverless|sls)\s+deploy|fly(?:ctl)?\s+deploy|"
     r"\bdep\s+deploy|envoy\s+run", re.I)
@@ -107,6 +112,10 @@ NESTED_MAX_DEPTH = 10
 YAML_COMMAND_KEY = re.compile(r"^(\s*)(?:-\s+)?(run|script|before_script|after_script|commands|command)\s*:\s*(.*)$")
 # Lockfile maintenance, not an install: refreshing the lock is the point of these.
 LOCK_ONLY = ("--package-lock-only", "--lockfile-only", "--mode=update-lockfile", "--lock")
+# Yarn's freeze flags. npm has no such option: up to 11.1 it drops an unknown flag
+# silently, 11.2+ warns "Unknown cli config" and installs unfrozen anyway, and 12.0
+# refuses the command (EUNKNOWNCONFIG, npm/cli#9276; #9729 relaxed only .npmrc keys).
+YARN_FREEZE_FLAGS = ("--frozen-lockfile", "--immutable")
 DOC_SUFFIXES = {".md", ".markdown", ".sh", ".bash", ".ps1", ".yml", ".yaml", ".mk"}
 DOC_NAMES = {"makefile", "justfile", "dockerfile", "procfile"}
 MAX_DOC_BYTES = 512 * 1024
@@ -351,6 +360,34 @@ def yaml_command_lines(text: str):
             continue
         if owner is not None:
             yield n, re.sub(r"^\s*-\s+", "", line)
+
+
+def workflow_jobs(text: str):
+    """GitHub Actions workflow -> [(first_line, last_line)], 1-based and inclusive, one per
+    child of the top-level `jobs:` key. The job indent is read from the first child, not
+    assumed: 2-space and 4-space workflows are both common. A block scalar's lines are
+    always deeper than the key that owns them, so indentation alone finds every boundary.
+    None when there is no block-style `jobs:` (the caller then judges the whole file)."""
+    lines = text.splitlines()
+    start = next((i for i, l in enumerate(lines) if re.match(r"^jobs\s*:\s*(?:#.*)?$", l)), None)
+    if start is None:
+        return None
+    jobs: list = []
+    indent = None
+    for i in range(start + 1, len(lines)):
+        line = lines[i]
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        depth = len(line) - len(line.lstrip(" "))
+        if depth == 0:
+            break  # the next top-level key closes `jobs:`
+        if indent is None:
+            indent = depth
+        if depth <= indent:
+            jobs.append([i + 1, i + 1])
+        elif jobs:
+            jobs[-1][1] = i + 1
+    return [tuple(j) for j in jobs] or None
 
 
 def rel(root: Path, p: Path) -> str:
@@ -700,11 +737,27 @@ class Audit:
         # A composer.json that requires no packages (`{"name": ...}`, used to make a JS
         # asset repo installable through Composer) resolves nothing: PHP pins are noise.
         resolves = bool(pkgs)
-        if not php_req and resolves:
-            self.add("warn", "php.require.missing", "composer.json",
-                     "no require.php - nothing stops installing on a PHP the code cannot run on",
-                     'add "php": "^<production major.minor>" to require')
         platform = ((c.get("config") or {}).get("platform") or {}).get("php") if isinstance(c.get("config"), dict) else None
+        # WHY a project with config.platform.php gets a note, not a finding (Composer 2.10.3,
+        # checked at the tag because getcomposer.org/doc is built from main): install and
+        # update test the root require.php against the faked platform, not the real PHP
+        # (doc/06-config.md "platform": on PHP 5.6 "it will install fine as it assumes
+        # 7.0.3"), so it cannot stop an install on the wrong PHP. Every installed package's
+        # own php constraint still binds resolution, and the generated platform_check.php
+        # refuses to boot below the highest php floor of the root AND every non-dev package
+        # (AutoloadGenerator::getPlatformCheck). A missing root require.php costs only the
+        # stated range, and a floor above all the dependencies'. A library keeps the warn:
+        # `config` is root-only, so to a consumer's resolver require.php is the only PHP
+        # constraint the package has.
+        if not php_req and resolves:
+            if platform and not is_lib:
+                self.note("php.require.missing", "composer.json",
+                          f"no require.php - config.platform.php ({platform}) already sets the PHP Composer resolves for, "
+                          "and platform_check.php still enforces the packages' PHP floor; add require.php to state the range")
+            else:
+                self.add("warn", "php.require.missing", "composer.json",
+                         "no require.php - nothing stops installing on a PHP the code cannot run on",
+                         'add "php": "^<production major.minor>" to require')
         if not platform and not is_lib and resolves:
             self.add("warn", "php.platform.unset", "composer.json",
                      "no config.platform.php - `composer update` resolves for whatever PHP runs it, not production",
@@ -919,7 +972,7 @@ class Audit:
             text = read_text(path) or ""
             rel = path.relative_to(self.root).as_posix()
             ci = kind == "ci"
-            prod = kind == "deploy" or (bool(DEPLOY_MARKERS.search(text)) and not TEST_MARKERS.search(text))
+            ships = self._ship_scope(rel, kind, text)
             every = list(code_lines(text, False))
             # setup inputs (`tools: composer:v1`) are not commands, so Composer 1 is read
             # from every line; installs and credential writes only from command keys.
@@ -937,9 +990,9 @@ class Audit:
                 elif ci and CRED_CONFIG.search(line):
                     writes.append((rel, n, "auth.json"))
                 for m in INSTALL_CMD.finditer(line):
-                    self._install_line(m.group(1), m.group(2).split(), rel, n, ci, prod, berry, flag)
+                    self._install_line(m.group(1), m.group(2).split(), rel, n, ci, ships(n), berry, flag)
             if ci:
-                self._ramsey(text, rel, prod, flag)
+                self._ramsey(text, rel, ships, flag)
         if writes:
             copies = [p.name for p in dockerfiles if any(COPY_CONTEXT.match(l) for l in (read_text(p) or "").splitlines())]
             ignore = [l.strip() for l in (read_text(self.root / ".dockerignore") or "").splitlines()
@@ -958,8 +1011,48 @@ class Audit:
                          f"pass the credential as a step env (COMPOSER_AUTH / NODE_AUTH_TOKEN) instead of a file, "
                          f"add {cred} to .dockerignore, and rotate credentials already pushed in images", "error")
 
-    def _install_line(self, tool, toks, rel, n, ci, prod, berry, flag):
-        """One package-manager invocation from a CI/deploy line -> findings."""
+    def _ship_scope(self, rel, kind, text):
+        """line number -> does what that line installs ship? Only deploy.composer.dev asks.
+
+        WHY per job for GitHub Actions: each job starts on a fresh runner and passes files
+        to another job only through explicit artifact actions (docs.github.com, "workflow
+        artifacts": they "pass files between jobs in a workflow"). A test or lint job's
+        `composer install` therefore never becomes the vendor/ a deploy job ships. The
+        common fed / bed ("Backend Test") / tag / deploy template lints in one job and ships
+        from another with --no-dev; judging the file whole flagged the lint job in every
+        repo that used it (27 of 27 in one sweep, all false).
+
+        WHY GitLab CI, Bitbucket Pipelines and the rest stay whole-file: there a later job
+        or step receives every earlier artifact by default (GitLab: "later jobs fetch a copy
+        of all artifacts from jobs in earlier stages"; Bitbucket downloads all unless a step
+        sets `download: false`), and jobs inherit commands through `extends:`, `default:`
+        and YAML anchors, so a job's own block is not what it runs. Splitting those needs
+        artifact and inheritance tracking, which is not worth it here.
+
+        Known gap: a GitHub job that uploads vendor/ as an artifact for a shipping job is
+        not followed - each job is read alone.
+        """
+        if kind == "deploy":
+            return lambda _n: True  # Dockerfiles and appspec hooks always build production
+        def ships_text(t):
+            return bool(DEPLOY_MARKERS.search(t)) and not TEST_MARKERS.search(t)
+        jobs = workflow_jobs(text) if rel.startswith(".github/workflows/") else None
+        if jobs is None:
+            whole = ships_text(text)
+            return lambda _n: whole
+        lines = text.splitlines()
+        verdicts = [(a, b, ships_text("\n".join(lines[a - 1:b]))) for a, b in jobs]
+        return lambda n: next((v for a, b, v in verdicts if a <= n <= b), False)
+
+    def _install_line(self, tool, toks, rel, n, ci, ships, berry, flag):
+        """One package-manager invocation from a CI/deploy line -> findings. `ships`: this
+        line's install ends up in what is deployed (see _ship_scope)."""
+        # WHY deploy.install.unfrozen ignores `ships` (every CI job, not only shipping ones):
+        # the managers document the frozen install for CI as a whole - npm ci is "meant to
+        # be used in automated environments such as test platforms, continuous integration,
+        # and deployment", Yarn 4 and pnpm freeze by default when they detect CI - and a
+        # front-end job that uploads its build for the deploy job to download ships that
+        # install with no deploy marker of its own. A per-job rule would miss exactly that.
         unfrozen = "deploy.install.unfrozen"
         fix = "use the frozen install: npm ci / yarn install --immutable / pnpm install --frozen-lockfile / " \
               "bun ci / composer install (references/install-semantics.md)"
@@ -972,7 +1065,15 @@ class Audit:
             # Bare or `npm install <pkg>`: both resolve and can rewrite the lockfile. Only a
             # global tool install (-g, which never touches the project) is left alone.
             if not any(t in ("-g", "--global") or t.startswith("--location=global") for t in toks):
-                flag(unfrozen, rel, n, f"`npm {sub}` in {rel} can rewrite the lockfile and resolve new versions", fix)
+                yarn_flag = next((t.split("=")[0] for t in toks if t.split("=")[0] in YARN_FREEZE_FLAGS), None)
+                if yarn_flag:
+                    # Its own message: the author believes this install is frozen.
+                    flag(unfrozen, rel, n,
+                         f"`npm {sub} {yarn_flag}` in {rel}: {yarn_flag} is a Yarn flag; npm ignores it and "
+                         f"installs unfrozen (npm 11.2+ warns about the unknown flag, npm 12 refuses the command)",
+                         "use npm ci, which installs exactly package-lock.json (references/install-semantics.md#npm-ci-versus-npm-install)")
+                else:
+                    flag(unfrozen, rel, n, f"`npm {sub}` in {rel} can rewrite the lockfile and resolve new versions", fix)
         elif tool == "yarn" and (not toks or sub == "install" or sub.startswith("-")):
             frozen = any(t in ("--frozen-lockfile", "--immutable") for t in toks) or (ci and berry)
             if not frozen:
@@ -987,11 +1088,11 @@ class Audit:
         elif tool.startswith("composer"):
             if sub in ("update", "u", "upgrade", "require", "remove"):
                 flag(unfrozen, rel, n, f"`composer {sub}` in {rel} resolves new versions instead of installing the lock", fix)
-            elif sub in ("install", "i") and prod and "--no-dev" not in toks:
+            elif sub in ("install", "i") and ships and "--no-dev" not in toks:
                 flag("deploy.composer.dev", rel, n, f"`composer {sub}` without --no-dev in a deploy ({rel}) ships dev packages",
                      "add --no-dev --optimize-autoloader (references/install-semantics.md#deploy-patterns)")
 
-    def _ramsey(self, text, rel, prod, flag):
+    def _ramsey(self, text, rel, ships, flag):
         """ramsey/composer-install is `composer install` (or update) behind action inputs."""
         lines = text.splitlines()
         for i, line in enumerate(lines):
@@ -1010,7 +1111,7 @@ class Audit:
                 flag("deploy.install.unfrozen", rel, i + 1,
                      f"ramsey/composer-install with dependency-versions: {versions} runs `composer update` in {rel}",
                      "drop dependency-versions (default: locked) so CI installs the lock")
-            elif prod and "--no-dev" not in opts.split():
+            elif ships(i + 1) and "--no-dev" not in opts.split():
                 flag("deploy.composer.dev", rel, i + 1,
                      f"ramsey/composer-install without --no-dev in a deploy ({rel}) ships dev packages",
                      'set composer-options: "--no-dev --optimize-autoloader" (references/install-semantics.md#deploy-patterns)')

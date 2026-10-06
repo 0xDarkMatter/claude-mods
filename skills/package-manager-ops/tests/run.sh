@@ -12,7 +12,10 @@
 # itself would treat the fixture manifests (node-sass, bower, fake tokens) as real.
 # A case = the `clean` control + the case's own files on top, minus each path in
 # `_delete`; `_expect` lists the exact finding ids pm-audit must report (empty = the
-# case is a clean control and must exit 0).
+# case is a clean control and must exit 0). An optional `_lines` pins the exact
+# `id file:line` rows for every id it names, for cases whose point is WHICH line fires
+# (the per-job deploy scope). It is coupled to the fixture's line numbers: after
+# editing a fixture, re-read its `_lines` (rg -n), never re-count by hand.
 #
 # FRONTMATTER CONTRACT - this suite asserts on SKILL.md's own frontmatter shape:
 #   * top-level keys limited to the six Agent Skills spec fields (portable as one unit)
@@ -164,7 +167,8 @@ for case in cases:
     proc = subprocess.run([sys.executable, audit, "--json", "--as-of", "2026-10-05", str(dest)],
                           capture_output=True, text=True)
     try:
-        got = sorted({f["id"] for f in json.loads(proc.stdout)["data"]})
+        data = json.loads(proc.stdout)["data"]
+        got = sorted({f["id"] for f in data})
     except Exception as exc:  # noqa: BLE001 - any parse failure is a test failure
         row(False, f"{case.name}: unparseable --json output ({exc}); stderr={proc.stderr.strip()[-200:]}")
         continue
@@ -172,6 +176,11 @@ for case in cases:
     row(got == want and code_ok,
         f"{case.name}: ids {got or '[]'} exit {proc.returncode}" + ("" if got == want and code_ok else f" (want {want or '[]'} exit {10 if want else 0})"))
     covered.update(want)
+    if (case / "_lines").is_file():
+        want_rows = sorted(l.strip() for l in (case / "_lines").read_text().splitlines() if l.strip())
+        pinned = {r.split()[0] for r in want_rows}
+        got_rows = sorted(f"{f['id']} {f['file']}:{f['line']}" for f in data if f["id"] in pinned)
+        row(got_rows == want_rows, f"{case.name}: lines {got_rows}" + ("" if got_rows == want_rows else f" (want {want_rows})"))
 
 # Every id the audit documents must have a fixture that produces it.
 doc_ids = set()
@@ -207,6 +216,19 @@ def notes_of(case):
     return {n["id"] for n in json.loads(p.stdout)["meta"]["notes"]} if p.stdout.strip().startswith("{") else set()
 row("js.engines.unenforced" in notes_of("clean"), "engines note fires for an npm repo without engine-strict")
 row("js.engines.unenforced" not in notes_of("clean-pnpm"), "engines note stays silent for a pnpm repo (.npmrc advice is npm's)")
+# A project that pins config.platform.php gets a missing require.php as a note, not a finding.
+row("php.require.missing" in notes_of("clean-php-require-platform-pinned"), "missing require.php is a note when config.platform.php is set")
+# `npm install --frozen-lockfile` gets its own message: the author believes it is frozen.
+def unfrozen(case):
+    d = tmp / "m" / case
+    p = subprocess.run([sys.executable, audit, "--json", "--as-of", "2026-10-05", str(d)], capture_output=True, text=True)
+    data = json.loads(p.stdout)["data"] if p.stdout.strip().startswith("{") else []
+    return [f for f in data if f["id"] == "deploy.install.unfrozen"]
+yarn = unfrozen("deploy-npm-frozen-flag")
+row(yarn and all("--frozen-lockfile is a Yarn flag; npm ignores it" in f["message"] and "npm ci" in f["fix"] for f in yarn),
+    "npm install --frozen-lockfile is reported as a Yarn flag npm ignores, fix npm ci")
+plain = unfrozen("deploy-npm-install")
+row(plain and not any("Yarn flag" in f["message"] for f in plain), "plain npm install keeps the generic unfrozen message")
 # The EOL check is date-driven: Node 22 is fine on 2026-10-05 and dead after 2027-04-30.
 dest = tmp / "m" / "node-pin-disagree-nvmrc"
 proc = subprocess.run([sys.executable, audit, "--json", "--as-of", "2027-05-01", str(dest)], capture_output=True, text=True)

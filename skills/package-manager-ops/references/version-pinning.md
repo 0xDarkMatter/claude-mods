@@ -113,6 +113,15 @@ Because the platform pin pretends, check the real server at deploy:
 platform and DDEV versions, or `composer update` cannot resolve. A library (anything not
 `"type": "project"`) sets `require.php` but not `config.platform`.
 
+What `require.php` adds once a project has the platform pin, per Composer 2.10.3: install
+and update check it against the pretended PHP, not the real one, so it cannot stop an
+install on the wrong PHP. The generated `platform_check.php` already refuses to boot below
+the highest `php` floor of the root and every installed non-dev package. So in that case
+`require.php` states the supported range and adds a floor only when it is higher than every
+dependency's; pm-audit reports it as a note. In a library it stays a warning: `config` is
+root-only, so a consumer's resolver sees no PHP constraint for the package except
+`require.php`.
+
 ## Ranges, exact pins and overrides
 
 For applications the lockfile is the pin; ranges in the manifest only say what an
