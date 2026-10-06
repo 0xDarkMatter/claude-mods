@@ -4,7 +4,9 @@ Which install command belongs where, what each one promises, and why a lockfile 
 under you. Facts verified 2026-10-05 against docs.npmjs.com (v11 and v12), yarnpkg.com,
 classic.yarnpkg.com, pnpm.io, bun.com and getcomposer.org (checked against the Composer
 2.10.3 tag, because getcomposer.org/doc is built from `main` and documents unreleased
-features); `composer update --lock` re-checked 2026-10-06 against the 2.10.3 source.
+features); `composer update --lock`, the stale-lock behaviour and the autoloader flags
+re-checked 2026-10-06 against the 2.10.3 source (`UpdateCommand.php`, `Installer.php`,
+`Locker.php`, `ValidateCommand.php`) and the autoloader-optimization article.
 
 ## Contents
 
@@ -74,17 +76,25 @@ before installing. Set it after the install, or for the build command only.
 ## composer install versus composer update
 
 - `composer install` with a `composer.lock` installs exactly the locked versions. With
-  no lock it resolves and writes one, which is why a missing lock is a finding.
+  no lock it resolves and writes one, so it is not frozen the way `npm ci` is; that is
+  why a missing lock is a finding.
 - `composer update` resolves `composer.json` constraints, rewrites `composer.lock`,
   then installs. Scope it: `composer update vendor/package` (add `-W`,
   `--with-all-dependencies`, when its dependencies must move too).
-- When `composer.json` changed after the lock was written, install warns: "The lock file
-  is not up to date with the latest changes in composer.json". Fix it on a dev machine
-  with `composer update <the package you changed>`. `composer update --lock` rewrites the
-  hash and package metadata (mirrors, URLs) without moving any version, then installs from
-  the new lock like any update; add `--no-install` to touch the lock alone. Use it for
-  edits that cannot change resolution, such as a description. It reads the old lock, so it
-  cannot repair one that is not valid JSON: take a copy from git or run a full update.
+- When `composer.json` changed after the lock was written (a stale `content-hash`),
+  install only warns, "The lock file is not up to date with the latest changes in
+  composer.json", and installs the lock anyway. It fails, exit 4, only when a required
+  package is missing from the lock or the locked version does not satisfy the
+  constraint (the `allow-missing-requirements` config lets it continue). Fix it on a dev
+  machine with `composer update <the package you changed>`. `composer update --lock`
+  rewrites the hash and package metadata (mirrors, URLs) without moving any version, then
+  installs from the new lock like any update; add `--no-install` to touch the lock alone.
+  Use it for edits that cannot change resolution, such as a description. It reads the old
+  lock, so it cannot repair one that is not valid JSON: take a copy from git or run a full
+  update.
+- So check before a deploy install: `composer validate` checks lock freshness by default
+  and exits 2 on a stale lock (`--no-check-lock` skips that; `config.lock: false` makes
+  it a warning).
 - `composer update --no-install` (since 2.0) resolves and writes the lock without
   installing: useful for a lockfile-only refresh.
 - Composer 2.9.0 started blocking packages with security advisories during `update` by
@@ -96,9 +106,9 @@ Autoloader levels for production (`composer install` or `composer dump-autoload`
 
 | Flag | Level | Use when |
 |---|---|---|
-| `-o`, `--optimize-autoloader` | classmap | always in production |
+| `-o` (`--optimize-autoloader` on install, `--optimize` on dump-autoload) | classmap | always in production |
 | `-a`, `--classmap-authoritative` | classmap only, implies `-o` | no class is generated or added at run time |
-| `--apcu-autoloader` | APCu cache of lookups | APCu is installed and `-a` is not safe |
+| `--apcu-autoloader` (install) / `--apcu` (dump-autoload) | APCu cache of lookups | APCu is installed and `-a` is not safe |
 
 ## Why a lockfile changes under you
 
@@ -132,4 +142,6 @@ Line endings are the other classic: see
    stops the app at boot when the PHP is too old.
 
 Never deploy a lockfile that CI did not install. A deploy that runs its own `install`
-step has a different tree from the one your tests ran against.
+step can end up with a different tree from the one your tests ran against (`--no-dev`,
+another runtime, scripts, or a lockfile CI never installed), so run `composer validate`
+before a deploy's `composer install`.
