@@ -223,6 +223,32 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **pm-audit matched to what the tools do, from a finding-by-finding check of a sweep** -
+  real repositories showed four places where `package-manager-ops`' audit misled. (1)
+  `php.lockfile.stale` follows Composer's own lock check: a requirement met by a locked
+  package's `replace` or `provide` (a renamed plugin, `symfony/symfony` replacing a
+  component, a client providing `psr/http-client-implementation`) is satisfied, and a
+  root `require` locked only in `packages-dev` is now reported, as Composer refuses it.
+  (2) CI that builds in a subfolder: a literal `working-directory:` (step, or job
+  `defaults.run`), `${{ env.X }}` from the workflow or job `env:`, and `cd` inside a
+  command block place each install in its package root. Findings name that root, the
+  root's `js.lockfile.missing` becomes a note when CI installs only nested roots that have
+  a lockfile, and the new `deploy.install.unlocked` reports CI installing in a folder with
+  a manifest but no lockfile. (3) `js.lockfile.conflict` names the lockfile CI installs
+  from and the unused one. (4) `php.eol` and `js.node.eol` say what the repo pins and ask
+  to confirm the server's version; literal `node-version` (actions/setup-node) and
+  `php-version` (shivammathur/setup-php) in workflows now feed the pin agreement and
+  end-of-life checks. Also new: `deploy.global.unpinned`, an unpinned `npm install -g` in
+  CI or a Dockerfile, which fetches the newest version on every run; and
+  `deploy.npm.yarn-flag`, an error for a Yarn flag (`--frozen-lockfile`, `--immutable`)
+  on `npm ci` or `npm install`. npm's own source: v11.1.0 drops it silently, v11.2.0
+  warns "Unknown cli config", and npm 12 refuses the command (EUNKNOWNCONFIG), so the
+  build fails. `npm install --frozen-lockfile` moved there from `deploy.install.unfrozen`.
+  `references/diagnostics.md` gains "Auditing many repos": read-only sparse partial
+  clones, Windows notes, auditing the branch that deploys, and the shapes to verify by
+  hand. 17 new fixture cases; every new check failed against the old code, and each of
+  35 mutants was killed.
+
 - **pm-audit judged deploys per file, not per job** - a read-only run over 88 real agency
   repositories found three accuracy problems in `package-manager-ops`' audit. (1)
   `deploy.composer.dev` flagged the lint job of a common GitHub Actions template

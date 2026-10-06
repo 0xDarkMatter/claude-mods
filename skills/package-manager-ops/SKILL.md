@@ -93,9 +93,11 @@ disagree with their manifests, Node and PHP pins that are missing, disagree with
 other or with DDEV, or name end-of-life releases, unpinned `npx`/`dlx` use in scripts,
 docs and CI, native CLIs routed through npx, Bower and node-sass, and committed registry
 credentials (reported by file and line, never by value). From CI configs, Dockerfiles and
-appspec hook scripts it reports unfrozen installs, deploys without `--no-dev`, Composer 1,
-and credentials written into a Docker build context. It lists nested package roots and
-flags them when they use another manager.
+appspec hook scripts it reports unfrozen installs, Yarn flags on npm, unpinned global
+installs, deploys without `--no-dev`, Composer 1, and credentials written into a Docker
+build context; it follows a CI build into the subfolder it runs in. It lists nested
+package roots and flags them when they use another manager, or when CI installs in one
+that has no lockfile.
 
 ```bash
 bash scripts/run-python.sh scripts/pm-audit.py path/to/repo
@@ -111,6 +113,8 @@ bash scripts/run-python.sh scripts/pm-audit.py --no-docs --as-of 2027-01-01 path
 - It audits root manifests; run it again on each nested root it lists. Every finding id, its meaning and its fix are in
   [diagnostics.md](references/diagnostics.md#pm-audit-finding-ids). DDEV's own
   `.ddev/` config is `ddev-ops`' auditor; pm-audit only checks that DDEV agrees.
+- Sweeping many repos: read-only sparse clones, the branch that deploys, and the
+  findings to check by hand are in [diagnostics.md](references/diagnostics.md#auditing-many-repos).
 - `scripts/run-python.sh` picks the first real Python 3.8+ (`python3`, `python`, `py`),
   stepping over the Windows Store `python3` stub. The skill folder runs copied alone.
 

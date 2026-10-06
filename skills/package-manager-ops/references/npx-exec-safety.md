@@ -49,7 +49,8 @@ npm 12 also blocks dependency install scripts by default; `--allow-scripts` lets
    `npm install -g corepack`.
 
 pm-audit flags `npx.unpinned` in package.json scripts, and in the code of docs, CI, git
-hooks and shell files. It skips exact `pkg@x.y.z` pins, packages the repo already
+hooks and shell files, and `deploy.global.unpinned` for an `npm install -g` without an
+exact version in CI and Dockerfiles. It skips exact `pkg@x.y.z` pins, packages the repo already
 declares, and docs that show the repo's own published package. It does not walk
 dot-directories other than CI, hook and DDEV ones (`.github`, `.husky`, `.ddev` and
 similar), because vendored agent-config copies would repeat one finding many times.
