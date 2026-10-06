@@ -10,8 +10,10 @@ DDEV resolves them from the docroot (8), a committed `name:` (all 36 - a collisi
 soon as a second git worktree starts), and keys DDEV no longer reads. The rest -
 unpinned PHP or database versions that move with DDEV's defaults, CRLF command files
 DDEV skips, push stanzas in provider recipes, a files_pull_command that fetches nothing
-(DDEV then empties the upload directory - read from its source, not runtime-tested),
-secrets in committed env files - come from DDEV's documentation and source.
+(DDEV then empties the upload directory), secrets in committed env files, per-developer
+.local files committed to git - come from DDEV's documentation and source. The
+files_pull_command case and the untracked .ddev/.gitignore behind the .local-file check
+were also reproduced in throwaway projects on DDEV v1.25.4 (2026-10-06).
 
 How DDEV reads config, mirrored here: config.yaml first, then every committed
 config.*.yaml / config.*.yml (not *.local.*) in name order. Since v1.25.2 it merges them
@@ -20,7 +22,9 @@ and unknown keys are ignored rather than rejected (so retired keys silently do n
 
 Facts (defaults, end-of-life floors, obsolete keys, built-in command names) are read
 from assets/ddev-facts.json - the one place they live; check-ddev-facts.py keeps that
-file current. Read-only: the script never writes to the project.
+file current. Read-only: the script never writes to the project, and the one git call
+it makes disables core.fsmonitor, the setting through which a repository could make
+`git ls-files` run a command of its choosing.
 
 The YAML reader is deliberately minimal (stdlib only, so the skill folder runs when
 copied alone): top-level `key: value`, block and flow lists of scalars, and one level
@@ -41,7 +45,12 @@ Checks:  php-unpinned php-out-of-range php-eol db-unpinned node-eol composer-v1
          obsolete-key perf-mode-committed router-ports-committed xdebug-committed
          name-in-worktree upload-dir-misplaced upload-dir-outside shadowed-command
          crlf-command ssh-agent-forwarded provider-push provider-files-noop
-         committed-secret
+         committed-secret local-file-committed
+
+The one check that asks git (local-file-committed) runs when PROJECT_DIR is inside a
+git checkout (its own .git or a parent's) and is skipped silently outside one, where
+nothing can be tracked. Git missing or failing inside a checkout skips it with a notice
+naming the reason. --ignore local-file-committed skips the git call too.
 
 Examples:
   audit-ddev-config.py                         # audit the project in the current directory
@@ -51,11 +60,14 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import os
 import re
+import shlex
+import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 EX_OK = 0
 EX_USAGE = 2
@@ -72,6 +84,7 @@ CHECKS = (
     "obsolete-key", "perf-mode-committed", "router-ports-committed", "xdebug-committed",
     "name-in-worktree", "upload-dir-misplaced", "upload-dir-outside", "shadowed-command",
     "crlf-command", "ssh-agent-forwarded", "provider-push", "provider-files-noop", "committed-secret",
+    "local-file-committed",
 )
 SEVERITY_RANK = {"high": 0, "medium": 1, "low": 2}
 
@@ -84,7 +97,23 @@ SECRET_KEY_RE = re.compile(
     r"(TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|PRIVATE_KEY|SECURITY_KEY|ACCESS_KEY|AUTH_KEY|CREDENTIALS?)", re.I)
 # DDEV's own local-only credentials (db/db, root/root) are not secrets; nor is a ${VAR} reference.
 HARMLESS_VALUES = {"", "db", "root"}
+# A whole value that is only a variable reference ($VAR, ${VAR}, ${VAR:-x}) is resolved
+# elsewhere - unless single-quoted, which makes dotenv and Compose read it literally.
+VAR_REF_RE = re.compile(r"^\$(\{[^}]*\}|[A-Za-z_]\w*)$")
 GENERATED = "#ddev-generated"
+# Per-developer files DDEV's generated .ddev/.gitignore lists (pkg/ddevapp/config.go,
+# v1.25.4), lower-case for a case-insensitive match. Only directly in .ddev/: that is
+# where DDEV reads them from.
+LOCAL_PATTERNS = ("config.local.y*ml", "config.*.local.y*ml", ".env.local", ".env.*.local")
+# The repository-selection variables `git rev-parse --local-env-vars` lists. An auditor
+# started from a git hook inherits GIT_DIR / GIT_INDEX_FILE, which `git -C` does NOT
+# override, so they are dropped from the git call's environment.
+GIT_LOCAL_ENV = frozenset((
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT",
+    "GIT_OBJECT_DIRECTORY", "GIT_DIR", "GIT_WORK_TREE", "GIT_IMPLICIT_WORK_TREE", "GIT_GRAFT_FILE",
+    "GIT_INDEX_FILE", "GIT_NO_REPLACE_OBJECTS", "GIT_REPLACE_REF_BASE", "GIT_PREFIX",
+    "GIT_SHALLOW_FILE", "GIT_COMMON_DIR",
+))
 
 
 class ConfigError(Exception):
@@ -232,6 +261,78 @@ def files_pull_body(recipe_text: str) -> list[str] | None:
     return [ln for ln in lines if not NOOP_LINE.match(ln)]
 
 
+def looks_like_credential(key: str, raw_value: str) -> bool:
+    """A credential-named key with a real value: not DDEV's db/root, not a bare $VAR reference."""
+    if not SECRET_KEY_RE.search(key):
+        return False
+    raw = raw_value.strip()
+    value = _scalar(raw)
+    if value in HARMLESS_VALUES:
+        return False
+    return raw.startswith("'") or not VAR_REF_RE.match(value)
+
+
+def credential_keys(env_file: Path) -> list[str] | None:
+    """Names (never values) of env-file keys holding a credential; None if unreadable."""
+    try:
+        text = env_file.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    keys = []
+    for line in text.splitlines():
+        m = re.match(r"^\s*(?:export\s+)?([A-Za-z_][\w]*)\s*=\s*(.*)$", line)
+        if m and looks_like_credential(m.group(1), m.group(2)):
+            keys.append(m.group(1))
+    return sorted(set(keys))
+
+
+def local_config_facts(cfg_file: Path) -> tuple[list[str] | None, bool]:
+    """(credential names in web_environment, sets name:) for a config.*.local file.
+
+    Names are None when the file can't be read or parsed."""
+    try:
+        data = parse_yaml_subset(cfg_file.read_text(encoding="utf-8", errors="replace"), cfg_file.name)
+    except (OSError, ConfigError):
+        return None, False
+    env = data.get("web_environment")
+    keys = []
+    for item in env if isinstance(env, list) else []:
+        key, sep, value = str(item).partition("=")
+        if sep and looks_like_credential(key.strip(), value):
+            keys.append(key.strip())
+    return sorted(set(keys)), bool(str(data.get("name", "") or "").strip())
+
+
+def in_git_checkout(project: Path) -> bool:
+    """PROJECT or a parent holds .git (dir, or a worktree's/submodule's file)."""
+    return any((d / ".git").exists() for d in (project, *project.parents))
+
+
+def tracked_paths(project: Path) -> tuple[set[str] | None, str]:
+    """(.ddev/ paths git tracks, relative to PROJECT and posix-style; reason when None).
+
+    The index, not HEAD: a staged file is already on its way into a commit. Run from
+    PROJECT, `ls-files` prints paths relative to it, also for a project in a
+    subdirectory of its repository."""
+    env = {k: v for k, v in os.environ.items() if k not in GIT_LOCAL_ENV}
+    # core.fsmonitor names a command git RUNS while reading the index; an audited repo
+    # must not get to run code through a read-only audit.
+    cmd = ["git", "-c", "core.fsmonitor=false", "-C", str(project), "ls-files", "-z", "--", ".ddev"]
+    try:
+        res = subprocess.run(cmd, capture_output=True, timeout=30, env=env)
+    except FileNotFoundError:
+        return None, "git is not installed"
+    except subprocess.TimeoutExpired:
+        return None, "git did not answer within 30s"
+    except OSError as exc:
+        return None, f"git could not run ({exc})"
+    if res.returncode != 0:
+        lines = res.stderr.decode("utf-8", errors="replace").strip().splitlines()
+        return None, lines[0] if lines else f"git exited {res.returncode}"
+    # fsdecode keeps an odd byte in a file name round-trippable instead of replacing it.
+    return {os.fsdecode(p) for p in res.stdout.split(b"\0") if p}, ""
+
+
 def read_config_files(project: Path, files: list[Path], strict: bool) -> list[tuple[Path, dict]]:
     out = []
     for f in files:
@@ -265,7 +366,7 @@ def merge(configs: list[tuple[Path, dict]]) -> tuple[dict, dict]:
 
 # === Audit ===
 
-def audit(project: Path, cat: dict) -> list[dict]:
+def audit(project: Path, cat: dict, skip: frozenset = frozenset()) -> list[dict]:
     ddev = project / ".ddev"
     findings: list[dict] = []
 
@@ -406,10 +507,19 @@ def audit(project: Path, cat: dict) -> list[dict]:
         hit = "ssh-auth.sock" in text or re.search(r"\$\{?SSH_AUTH_SOCK", text) or re.search(
             r"SSH_AUTH_SOCK\s*[=:]\s*['\"]?(?!/home/\.ssh-agent)/", text)
         if hit:
+            # Both outcomes argue for deleting it: a live socket hands out signing, and a
+            # dead one still breaks SSH when the file also repoints SSH_AUTH_SOCK (Docker
+            # Desktop for Windows mounts an empty root-owned directory there, seen on
+            # v1.25.4). A bare `${SSH_AUTH_SOCK}:/path` bind leaves SSH_AUTH_SOCK alone.
+            detail = ("forwards the host SSH agent into a container: wherever that socket exists (Docker Desktop on "
+                      "macOS and Linux and OrbStack serve /run/host-services/ssh-auth.sock; a ${SSH_AUTH_SOCK} bind "
+                      "forwards on native Linux Docker), every process there - Composer and npm scripts included - can "
+                      "sign with every key that agent holds.")
+            if re.search(r"SSH_AUTH_SOCK\s*[=:]", text):
+                detail += (" It also repoints SSH_AUTH_SOCK, so where the socket is missing (seen on Docker Desktop "
+                           "for Windows) SSH in the container stops using keys loaded with `ddev auth ssh`.")
             add("high", "ssh-agent-forwarded", comp_file,
-                "forwards the host SSH agent into a container: every process there (Composer and npm scripts "
-                "included) can sign with every key that agent holds. Delete the file and use "
-                "`ddev auth ssh -f <one scoped key>` instead.")
+                detail + " Delete the file and use `ddev auth ssh -f <one scoped key>`.")
 
     # Provider recipes that can push. DDEV writes acquia/lagoon/pantheon/platform/upsun.yaml
     # into every project (#ddev-generated, gitignored, push stanzas included): those are
@@ -436,23 +546,59 @@ def audit(project: Path, cat: dict) -> list[dict]:
                     "empties the project's upload directory. Delete the files_pull_command stanza (DDEV then skips "
                     "files), or make it always fetch a real archive.")
 
-    # Credentials in committed env files (.local twins are gitignored from v1.25.4)
+    # Credentials in committed env files. The .local twins are skipped here: whether one is
+    # in git is local-file-committed's question, answered from the index below.
     for env in sorted(ddev.glob(".env*")):
         if not env.is_file() or env.name.endswith((".local", ".example")):
             continue
-        keys = []
-        for line in env.read_text(encoding="utf-8", errors="replace").splitlines():
-            m = re.match(r"^\s*(?:export\s+)?([A-Za-z_][\w]*)\s*=\s*(.*)$", line)
-            if not m or not SECRET_KEY_RE.search(m.group(1)):
-                continue
-            value = _scalar(m.group(2))
-            if value not in HARMLESS_VALUES and not value.startswith("$"):
-                keys.append(m.group(1))
-        if keys:
+        keys = credential_keys(env)
+        if keys is None:
+            print(f"notice: could not read {rel(env, project)}; committed-secret not checked for it", file=sys.stderr)
+        elif keys:
             add("medium", "committed-secret", env,
-                f"credential-looking value(s) for {', '.join(sorted(set(keys)))} in a committed env file. Move them "
-                f"to {env.name}.local (gitignored, DDEV v1.25.4+) and commit an {env.name}.example listing the keys "
-                "with `git add -f` (DDEV's .ddev/.gitignore ignores *.example).")
+                f"credential-looking value(s) for {', '.join(keys)} in a committed env file. Move them to "
+                f"{env.name}.local, keep it out of git (add `.ddev/.env*.local` to the project root's .gitignore: "
+                "DDEV's own rule exists only once it has run in that checkout), and commit an "
+                f"{env.name}.example listing the keys with `git add -f` (DDEV's .ddev/.gitignore ignores *.example).")
+
+    # Per-developer files in git. Git ignores them through DDEV's generated .ddev/.gitignore,
+    # but that file is untracked itself: a fresh clone or worktree has none until `ddev config`
+    # or a successful `ddev start` writes it, so a `git add -A` before then commits them
+    # (reproduced on v1.25.4, where a start that failed on a name clash wrote nothing).
+    # Tracked, they stop being local: every checkout inherits the overrides, a `name:` among
+    # them collides again, and credentials travel with the repository.
+    # Walks git's own list, not the disk: that catches case-only renames and files deleted
+    # from the working tree but still in the index.
+    if "local-file-committed" not in skip and in_git_checkout(project):
+        tracked, why = tracked_paths(project)
+        if tracked is None:
+            print(f"notice: local-file-committed not checked: {why}", file=sys.stderr)
+        for path in sorted(tracked or ()):
+            pp = PurePosixPath(path)
+            if pp.parent != PurePosixPath(".ddev") or not any(
+                    fnmatch.fnmatchcase(pp.name.lower(), pat) for pat in LOCAL_PATTERNS):
+                continue
+            f = project / pp
+            sets_name = False
+            if pp.name.lower().startswith(".env"):
+                keys = credential_keys(f)
+                kind = "per-developer env file"
+            else:
+                keys, sets_name = local_config_facts(f)
+                kind = "per-developer config override, which now applies to every checkout"
+            if keys:
+                sev, what = "high", (f"holds credential-looking value(s) for {', '.join(keys)}. If it was ever "
+                                     "committed or pushed, rotate them.")
+            else:
+                sev, what = "medium", ("is a " + kind + "." if keys is not None
+                                       else "could not be read to check it for credentials.")
+            if sets_name:
+                what += " It sets `name:`, so every checkout claims the same DDEV project."
+            add(sev, "local-file-committed", f,
+                f"tracked by git (staged or committed), but it {what} Git ignores it only once DDEV has written "
+                ".ddev/.gitignore, which a fresh clone or worktree lacks. Run "
+                f"`git rm --cached -- {shlex.quote(path)}` and add `.ddev/config*.local.y*ml` and "
+                "`.ddev/.env*.local` to the project root's .gitignore.")
 
     findings.sort(key=lambda x: SEVERITY_RANK.get(x["severity"], 9))  # stable: check order within a severity
     return findings
@@ -491,7 +637,7 @@ def main(argv: list[str]) -> int:
         print(f"error: no .ddev/config.yaml under {args.project}", file=sys.stderr)
         return EX_NOTFOUND
     cat = load_catalog(Path(args.catalog))
-    findings = [f for f in audit(project, cat) if f["check"] not in args.ignore]
+    findings = [f for f in audit(project, cat, frozenset(args.ignore)) if f["check"] not in args.ignore]
 
     if args.json:
         print(json.dumps({"data": findings,

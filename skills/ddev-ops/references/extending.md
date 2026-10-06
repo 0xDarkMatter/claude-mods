@@ -44,7 +44,8 @@ ddev restart
   - set the variables the add-on's own README documents in `.ddev/.env.<addon>`, for
     example `ddev dotenv set .ddev/.env.redis --redis-docker-image=redis:7` for
     ddev-redis v2 (DDEV's docs still show an older `--redis-tag` variable);
-  - put tokens in `.ddev/.env.<addon>.local` (gitignored, v1.25.4);
+  - put tokens in `.ddev/.env.<addon>.local` (v1.25.4), kept out of git as
+    [config-and-env.md](config-and-env.md#what-to-commit) says;
   - or override in a separate `docker-compose.<name>_extra.yaml` so updates do not
     clobber your change.
 - **`ddev add-on remove` deletes only files carrying `#ddev-generated`.** Any other file the
@@ -208,9 +209,15 @@ container.
   - Every process in the container can then ask that agent to sign with every key it
     holds. That includes Composer plugins and scripts, npm lifecycle scripts and CMS
     plugin code.
-  - It happens on every start, for every teammate who clones the repository.
+  - It happens on every start, for every teammate whose machine has that socket.
+    `/run/host-services/ssh-auth.sock` is the agent socket of Docker Desktop on macOS and
+    Linux, and of OrbStack; a `${SSH_AUTH_SOCK}` bind forwards on native Linux Docker.
   - A password manager's agent typically holds all of a developer's keys. The private key
     never leaves the agent, but signing is all an attacker needs.
-  - The forwarding socket path also only exists on some Docker providers.
+  - On Docker Desktop for Windows (WSL2) it breaks SSH instead. Observed with DDEV
+    v1.25.4: `ddev start` succeeded, Docker mounted an empty root-owned directory at that
+    path, and the file's `SSH_AUTH_SOCK` setting pointed there. `ssh-add -l` in `web`
+    failed with "Permission denied". A key loaded with `ddev auth ssh` was still in
+    DDEV's agent, but nothing in `web` used it any more. Other providers weren't tested.
 - `scripts/audit-ddev-config.py` flags the forwarding (`ssh-agent-forwarded`).
 - Stale host keys: `ddev exec ssh-keygen -f /home/.ssh-agent/known_hosts -R <host>`.

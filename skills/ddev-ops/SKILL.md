@@ -36,7 +36,8 @@ setting committed for the whole team.
 3. **Run everything through DDEV** - `ddev composer`, `ddev php`, `ddev npm`,
    `ddev exec` - so commands use the container's PHP and Node, not the host's.
 4. **Snapshot before anything risky**, with a unique name:
-   `ddev snapshot --name=before-<task>-$(date +%Y%m%d%H%M)`.
+   `ddev snapshot --name=before-<task>-$(date +%Y%m%d%H%M%S)`. A reused name saves
+   nothing and still exits 0.
 5. **Ask before destroying data** (Hard rule 11).
 
 ## Hard rules
@@ -50,16 +51,19 @@ repositories; the rest are quiet failures DDEV's own docs and source describe.
 2. **Per-developer settings never go in `config.yaml`.**
    - That means `performance_mode`, `router_http_port`/`router_https_port`,
      `xdebug_enabled: true`, `bind_all_interfaces` and `host_db_port`.
-   - They belong in `.ddev/config.local.yaml` (gitignored) or `ddev config global`.
+   - They belong in `.ddev/config.local.yaml` or `ddev config global`.
    - Project values beat global ones, so a committed value pins every teammate.
+   - Git ignores the `.local` files only after DDEV has run in that checkout, because
+     its `.ddev/.gitignore` isn't committed. Add `.ddev/config*.local.y*ml` and
+     `.ddev/.env*.local` to the project root's `.gitignore`.
 3. **Retired keys do nothing.** DDEV loads config non-strictly:
    `mutagen_enabled: false` and `nfs_mount_enabled` are ignored, not obeyed.
 4. **`upload_dirs` resolve from the docroot.** With `docroot: web`, `storage` means
    `web/storage`; folders beside the docroot are `../storage` and `../node_modules`.
    Setting the list replaces the type's defaults; override files append to it.
 5. **No secrets in committed `.ddev/.env*` files.** Use the `.local` twin
-   (`.ddev/.env.web.local`, gitignored since v1.25.4). Commit a `.example` with
-   `git add -f`, since DDEV's `.gitignore` hides `*.example`.
+   (`.ddev/.env.web.local`, v1.25.4+), kept out of git as rule 2 says. Commit a
+   `.example` with `git add -f`, since DDEV's `.gitignore` hides `*.example`.
 6. **Never forward the host SSH agent into containers.** Every process in them -
    Composer and npm scripts included - could sign with every key the agent holds. Load
    one scoped key with `ddev auth ssh -f <key>`.
@@ -69,7 +73,7 @@ repositories; the rest are quiet failures DDEV's own docs and source describe.
    - Delete `db_push_command`/`files_push_command` from your own recipes that can reach
      production.
    - A `files_pull_command` that fetches nothing makes `ddev pull` empty the upload
-     directory. Omit the stanza instead.
+     directory, and the pull still exits 0. Omit the stanza instead.
 8. **Don't keep project copies of DDEV's built-in commands** (`craft`, `npm`,
    `artisan`, `wp`...). A project command shadows the built-in and freezes an old
    version. Command files must have LF endings: DDEV skips CRLF ones with only a warning.
@@ -95,6 +99,8 @@ repositories; the rest are quiet failures DDEV's own docs and source describe.
   `ddev launch --print-url`.
 - **Single-quote `ddev exec` commands** that contain `$`, pipes or redirects, so they
   expand inside the container.
+- **Exit 0 isn't always success:** a duplicate `ddev snapshot` name and
+  `ddev add-on remove` leaving files behind both exit 0.
 
 Details, the destroys-data table and worktree setup:
 [automation-and-worktrees.md](references/automation-and-worktrees.md).
@@ -151,7 +157,8 @@ Details, the destroys-data table and worktree setup:
   - folders and commands: `upload-dir-misplaced`, `upload-dir-outside`,
     `shadowed-command`, `crlf-command`;
   - safety: `ssh-agent-forwarded`, `provider-push`, `provider-files-noop`,
-    `committed-secret`.
+    `committed-secret`, `local-file-committed` (reads git's index, with the repo's
+    `core.fsmonitor` command disabled).
 - **Exit codes:** 0 clean, 10 findings, 3 no `.ddev/config.yaml`, 4 unreadable config,
   2 usage.
 - **It reads config the way DDEV does:** overrides merge, lists append. It skips DDEV's
@@ -180,6 +187,8 @@ Never write a real-looking project hostname in examples: say "the project URL fr
   `cmd/ddev/cmd/commands.go`.
 - **Also:** the add-on registry (addons.ddev.com) and endoflife.date.
 
-Read 2026-10-05 and re-checked by an independent accuracy review on 2026-10-06. DDEV
+Read 2026-10-05 and re-checked by an independent accuracy review on 2026-10-06. What
+the references mark "Observed" was reproduced that day in throwaway projects on DDEV
+v1.25.4 (Docker Desktop, WSL2). DDEV
 publishes no agent skill for its users; its own repository's `AGENTS.md` and `.claude/`
 serve people contributing to DDEV.

@@ -122,7 +122,7 @@ must agree on PHP: `.ddev/config.yaml`, the CI runner and production.
 |---|---|---|
 | Team-wide, mirrors production | `.ddev/config.yaml` | yes |
 | An add-on's or feature's settings | `.ddev/config.<name>.yaml` (merged after `config.yaml`) | yes |
-| One developer's machine: Mutagen, extra hostnames, a fixed DB port, a per-checkout `name` | `.ddev/config.local.yaml` or `config.<name>.local.yaml` | no (DDEV gitignores them) |
+| One developer's machine: Mutagen, extra hostnames, a fixed DB port, a per-checkout `name` | `.ddev/config.local.yaml` or `config.<name>.local.yaml` | no (gitignored once DDEV has run; see below) |
 | Every project on this machine | `ddev config global --<flag>` (`~/.ddev/global_config.yaml`) | n/a |
 | Container env vars for the team | `.ddev/.env`, `.ddev/.env.<service>` | yes |
 | Secrets and per-developer env | `.ddev/.env.local`, `.ddev/.env.<service>.local` (v1.25.4+) | no |
@@ -157,6 +157,11 @@ plain `git add` silently skips it.
 - `.downloads/`, and generated files you have not taken over
 
 Never edit or commit `.ddev/.gitignore`: DDEV regenerates it to track which files it owns.
+Because it isn't committed, a fresh clone or worktree ignores none of the `.local` files
+until a `ddev config` or a successful `ddev start` writes it. A `git add -A` before then
+commits them. Add `.ddev/config*.local.y*ml` and `.ddev/.env*.local` to the `.gitignore`
+in the project root (the folder holding `.ddev/`, which in a monorepo isn't the repository
+root). The auditor flags tracked ones (`local-file-committed`).
 
 **`#ddev-generated`:** a file carrying this line belongs to DDEV, which may rewrite it on
 `ddev start`. Deleting the line takes the file over - it is now yours, and it stops
@@ -187,7 +192,8 @@ your version and merge. Prefer snippets over take-overs
   container, so code can fence off DDEV-only settings.
 - **File names** follow `.env[.<service>[.<label>]][.local]`: `.ddev/.env` reaches every
   container, `.ddev/.env.web` only `web`, a label (`.env.web.myaddon`) keeps sources apart,
-  and a trailing `.local` keeps the file out of git.
+  and a trailing `.local` marks it per-developer: git ignores it once DDEV has run in the
+  checkout, and always with the `.gitignore` lines under [What to commit](#what-to-commit).
 - **Order (later wins):**
   1. `web_environment`, global then project.
   2. The env files: global before project. Within each, `.env`, then `.env.local`, then

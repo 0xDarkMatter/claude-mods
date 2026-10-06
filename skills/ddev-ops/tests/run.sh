@@ -141,7 +141,10 @@ for id in php-unpinned db-unpinned node-eol composer-v1 obsolete-key perf-mode-c
           ssh-agent-forwarded provider-push provider-files-noop; do
   printf '%s\n' "$out" | cut -f2 | grep -qx "$id" && ok "minefield reports $id" || bad "minefield misses $id"
 done
-ec 0 "clean fixture -> exit 0 (no false positives)" "${run_py[@]}" "$audit" "$fixtures/clean"
+# Audit a COPY: in place, the fixture sits in this repository with its config.local.yaml
+# tracked, which local-file-committed rightly reports for projects inside a repo.
+cp -R "$fixtures/clean" "$tmp/clean0"
+ec 0 "clean fixture -> exit 0 (no false positives)" "${run_py[@]}" "$audit" "$tmp/clean0"
 
 # Generated variants: files git would normalise (CRLF) or must never hold (credentials).
 cp -R "$fixtures/minefield" "$tmp/mf"
@@ -217,6 +220,87 @@ printf 'gitdir: /repos/site/.git/worktrees/feature-x\n' > "$tmp/wt/.git"
 has "$(checks_of "$tmp/wt")" name-in-worktree && ok "committed name: in a worktree -> name-in-worktree" || bad "worktree name collision missed"
 printf 'gitdir: /repos/site/.git/modules/theme\n' > "$tmp/wt/.git"
 has "$(checks_of "$tmp/wt")" name-in-worktree && bad "submodule .git file flagged as worktree" || ok "submodule .git file not flagged"
+
+# A single-quoted value is literal in a dotenv file, so '$...' is a credential; only an
+# unquoted ${VAR} / $VAR reference is resolved elsewhere and safe to skip.
+cp -R "$fixtures/clean" "$tmp/lit"
+printf "LITERAL_API_TOKEN='\$%s'\nREF_API_TOKEN=\${FROM_HOST}\n" "$fake" > "$tmp/lit/.ddev/.env.web"
+lit_out="$("${run_py[@]}" "$audit" "$tmp/lit" 2>/dev/null)"
+printf '%s\n' "$lit_out" | grep -q $'committed-secret\t.*LITERAL_API_TOKEN' \
+  && ok "single-quoted \$ value -> committed-secret" || bad "single-quoted \$ value skipped as a variable"
+printf '%s\n' "$lit_out" | grep -q 'REF_API_TOKEN' && bad '${VAR} reference flagged' || ok '${VAR} reference not flagged'
+
+# local-file-committed. DDEV keeps config.local.yaml and .env*.local out of git through
+# its generated .ddev/.gitignore, which is untracked itself: a fresh clone or worktree has
+# none until DDEV first runs, so a `git add -A` then commits them (seen on DDEV v1.25.4).
+# These cases build real repositories. Unset git's repository-selection variables first,
+# or an exported GIT_DIR (a git hook's environment) would aim every `git -C` elsewhere.
+if command -v git >/dev/null 2>&1; then
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY
+  G() { git -c core.autocrlf=false -c user.name=t -c user.email=t@example.invalid "$@"; }
+  repo() { rm -rf "$1"; cp -R "$fixtures/clean" "$1"; G -C "$1" init -q >/dev/null 2>&1; G -C "$1" add -f .ddev/config.yaml; }
+  lfc() { "${run_py[@]}" "$audit" "$@" 2>/dev/null | grep $'\tlocal-file-committed\t' || true; }
+
+  repo "$tmp/lc"; G -C "$tmp/lc" add -f .ddev/config.local.yaml
+  lfc "$tmp/lc" | grep $'^medium\tlocal-file-committed\t.ddev/config.local.yaml\t' | grep -qF 'git rm --cached -- .ddev/config.local.yaml' \
+    && ok "staged config.local.yaml -> local-file-committed, with the git rm remedy" || bad "staged config.local.yaml missed (or no remedy)"
+  G -C "$tmp/lc" rm -q --cached .ddev/config.local.yaml
+  ec 0 "config.local.yaml on disk but untracked -> clean" "${run_py[@]}" "$audit" "$tmp/lc"
+  printf 'performance_mode: none\n' > "$tmp/lc/.ddev/config.feature.local.yaml"
+  : > "$tmp/lc/.ddev/.env.local"
+  G -C "$tmp/lc" add -f .ddev/config.feature.local.yaml .ddev/.env.local
+  lc_out="$(lfc "$tmp/lc")"
+  printf '%s\n' "$lc_out" | grep -q $'\t.ddev/config.feature.local.yaml\t' \
+    && ok "tracked config.<name>.local.yaml flagged" || bad "tracked config.<name>.local.yaml missed"
+  printf '%s\n' "$lc_out" | grep -q $'^medium\tlocal-file-committed\t.ddev/.env.local\t' \
+    && ok "tracked .env.local without credentials -> medium" || bad "tracked .env.local without credentials not medium"
+
+  # Credentials, in an env twin or a local config's web_environment, are high; the value
+  # never appears on stdout, stderr or in --json. A tracked name: is called out.
+  repo "$tmp/lcs"
+  printf 'PAYMENT_API_TOKEN=%s\n' "$fake" > "$tmp/lcs/.ddev/.env.web.local"
+  printf 'name: shared-local\nweb_environment:\n  - STRIPE_SECRET_KEY=%s\n' "$fake" > "$tmp/lcs/.ddev/config.local.yaml"
+  G -C "$tmp/lcs" add -f .ddev/.env.web.local .ddev/config.local.yaml
+  lcs_all="$("${run_py[@]}" "$audit" "$tmp/lcs" 2>&1; "${run_py[@]}" "$audit" "$tmp/lcs" --json 2>&1)"
+  printf '%s\n' "$lcs_all" | grep -q $'^high\tlocal-file-committed\t.ddev/.env.web.local\t.*PAYMENT_API_TOKEN' \
+    && ok "tracked .env.web.local credential -> high, key named" || bad "tracked .env.web.local credential missed"
+  printf '%s\n' "$lcs_all" | grep -q $'^high\tlocal-file-committed\t.ddev/config.local.yaml\t.*STRIPE_SECRET_KEY' \
+    && ok "tracked config.local.yaml web_environment credential -> high" || bad "config.local.yaml web_environment credential missed"
+  printf '%s\n' "$lcs_all" | grep $'^high\tlocal-file-committed\t.ddev/config.local.yaml' | grep -qF '`name:`' \
+    && ok "tracked config.local.yaml name: called out" || bad "tracked config.local.yaml name: not called out"
+  printf '%s\n' "$lcs_all" | grep -qF "$fake" && bad "tracked .local secret VALUE printed" || ok "tracked .local secret value never printed (stdout, stderr, --json)"
+
+  # Where the project sits: a real git worktree (.git is a file), and a project in a
+  # subdirectory of its repository (no .git of its own).
+  repo "$tmp/lcw"; G -C "$tmp/lcw" add -f .ddev/config.local.yaml; G -C "$tmp/lcw" commit -qm init
+  G -C "$tmp/lcw" worktree add -q "$tmp/lcw-wt" -b wt >/dev/null 2>&1
+  has "$(checks_of "$tmp/lcw-wt")" local-file-committed \
+    && ok "tracked config.local.yaml in a git worktree flagged" || bad "git worktree case missed"
+  mkdir -p "$tmp/mono"; G -C "$tmp/mono" init -q >/dev/null 2>&1; cp -R "$fixtures/clean" "$tmp/mono/site"
+  G -C "$tmp/mono" add -f site/.ddev/config.yaml site/.ddev/config.local.yaml
+  has "$(checks_of "$tmp/mono/site")" local-file-committed \
+    && ok "project in a repo subdirectory checked" || bad "repo-subdirectory project skipped"
+
+  # Git failing must be said, not look clean: a .git file pointing nowhere.
+  repo "$tmp/lcb"; rm -rf "$tmp/lcb/.git"; printf 'gitdir: %s/nowhere\n' "$tmp" > "$tmp/lcb/.git"
+  lcb_err="$("${run_py[@]}" "$audit" "$tmp/lcb" 2>&1 >/dev/null || true)"
+  printf '%s\n' "$lcb_err" | grep -q '^notice: local-file-committed not checked' \
+    && ok "git failure -> notice naming the skipped check" || bad "git failure left silent"
+
+  # An exported GIT_DIR must not aim the check at another repository's index.
+  repo "$tmp/lco"; G -C "$tmp/lco" add -f .ddev/config.local.yaml
+  repo "$tmp/lcp"
+  ec 0 "inherited GIT_DIR ignored (this repo tracks no local file)" env GIT_DIR="$tmp/lco/.git" "${run_py[@]}" "$audit" "$tmp/lcp"
+
+  # Read-only: no code the audited repository configures may run. git would execute a
+  # repo-local core.fsmonitor command on ls-files.
+  repo "$tmp/lcf"; printf '#!/bin/sh\n: > "%s/fsmonitor-ran"\n' "$tmp" > "$tmp/fsmon.sh"
+  G -C "$tmp/lcf" config core.fsmonitor "sh '$tmp/fsmon.sh'"
+  "${run_py[@]}" "$audit" "$tmp/lcf" >/dev/null 2>&1
+  [ -e "$tmp/fsmonitor-ran" ] && bad "audit ran the repo's core.fsmonitor command" || ok "audit never runs the repo's core.fsmonitor"
+else
+  note "skip" "no git - local-file-committed checks skipped"
+fi
 
 # DDEV merges config.*.y*ml overrides by APPENDING lists unless override_config: true, and
 # reads .yml as well as .yaml. A misplaced entry in config.yaml survives an override file.

@@ -1,7 +1,8 @@
 # Troubleshooting Runbook
 
 Facts from DDEV's troubleshooting, command and Docker-installation docs at DDEV v1.25.4,
-and its source, checked 2026-10-06. `ddev debug` still works as an alias of
+and its source, checked 2026-10-06. "Observed" marks behaviour seen in throwaway projects
+on DDEV v1.25.4 (Docker Desktop, WSL2) that day. `ddev debug` still works as an alias of
 `ddev utility`.
 
 ## Contents
@@ -35,6 +36,7 @@ and its source, checked 2026-10-06. `ddev debug` still works as an alias of
 | "Cannot connect to the Docker daemon" | `docker context ls` | The provider isn't running, or the active context points at another engine. Start it or `docker context use <name>` |
 | "Port 443 is not available, using 33001 instead" | `ddev utility port-diagnose` | Another process holds 80/443 (Apache, nginx, IIS, another Docker environment). Stop it, then `ddev poweroff && ddev start`: DDEV keeps the substitute port until the router is recreated. Or set router ports globally (below) |
 | `Ports are not available ... bind` errors | `ddev utility port-diagnose --allow-sudo` | Leftover containers or root-owned `docker-proxy`; `ddev poweroff`, restart Docker |
+| `failed to start ddev-router ... ports are not available: exposing port TCP 127.0.0.1:8143` (or another router port) | `ddev utility port-diagnose` | A program DDEV's busy-port check can't see holds a router port, typically a Windows process under WSL2. XHGui's ports are published even with XHGui off. Free the port or move it globally (below) |
 | `403 authentication required` or `unauthorized` pulling images | `docker logout` | Stale Docker Hub credentials; log out and retry |
 | A build complains about buildx | `docker buildx version` | DDEV requires the buildx plugin (v1.25.1+): `brew install docker-buildx` / `apt-get install docker-buildx-plugin` |
 | `apt-get update` fails during an image build | `ddev utility rebuild` | WSL2 clock drift, or a packet-inspection VPN breaking TLS; on a VPN add its CA via `.ddev/web-build` |
@@ -65,6 +67,22 @@ and its source, checked 2026-10-06. `ddev debug` still works as an alias of
   `ddev config global --router-http-port=8080 --router-https-port=8443`, then remove any
   `router_http_port`/`router_https_port` from the project's `config.yaml`. Project values
   win over global ones, so a committed `"80"`/`"443"` stops a teammate fixing a clash.
+- **The router publishes far more than 80/443.** By default: HTTP and HTTPS (80/443),
+  Mailpit (8025/8026), XHGui (8143/8142, even when XHGui is off) and the Traefik monitor
+  (10999, on 127.0.0.1). It also publishes every port a running project's add-ons or
+  `web_extra_exposed_ports` expose through it (`determineRouterPorts`).
+  - DDEV swaps a busy router port for a free one ("Port 443 is not available, using
+    33001 instead"), finding it by connecting from where DDEV runs
+    (`netutil.IsPortActive`). It neither checks nor swaps the Traefik monitor port.
+  - On WSL2 that check can miss a Windows program. Observed with Docker Desktop and DDEV
+    v1.25.4: a Windows process listening on 8143 made `ddev start` fail with
+    `/forwards/expose returned unexpected status: 500` (`port-diagnose` checks both
+    sides, so run it then).
+  - To move one: `ddev config global --mailpit-http-port=<p> --mailpit-https-port=<p>`
+    or `--traefik-monitor-port=<p>`. XHGui's ports have no flag in v1.25.4: set
+    `xhgui_http_port` and `xhgui_https_port` in `~/.ddev/global_config.yaml`. A
+    per-project value moves only that project's port; every other project still claims
+    the default.
 - **`port-diagnose` covers the router's HTTP and HTTPS ports plus Mailpit and XHGui** (run
   it inside the project). It does not check `web_extra_exposed_ports`. On WSL2 it checks
   both the Linux and the Windows side.

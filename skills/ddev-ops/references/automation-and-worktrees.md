@@ -4,7 +4,8 @@ How an agent or script should drive DDEV, what destroys data, and how to run sev
 checkouts of one repository (git worktrees) at once. Facts from DDEV's commands, CLI,
 config, FAQ and managing-projects docs at DDEV v1.25.4, its source
 (`pkg/ddevapp/ddevapp.go` `Describe`, `cmd/ddev/cmd/list.go`), and Docker's
-`volume prune` reference, checked 2026-10-06.
+`volume prune` reference, checked 2026-10-06. "Observed" marks behaviour seen in
+throwaway projects on DDEV v1.25.4 (Docker Desktop, WSL2) that day.
 
 ## Contents
 
@@ -29,6 +30,14 @@ config, FAQ and managing-projects docs at DDEV v1.25.4, its source
   shell expand it first.
 - **Gate on the DDEV version** a script needs: `ddev utility match-constraint '>= 1.25.4'`
   (non-zero exit when it doesn't match), or `ddev_version_constraint` in `config.yaml`.
+- **Don't trust exit 0 from these two.** Observed with v1.25.4:
+  - `ddev snapshot` with a name that already exists prints an error, saves nothing and
+    exits 0. The old file is still there, so checking for `.ddev/db_snapshots/<name>-*`
+    afterwards proves nothing. Use a name to the second (`$(date +%Y%m%d%H%M%S)`); a
+    script that must be sure checks that no such file exists *before* it runs.
+  - `ddev add-on remove` exits 0 but leaves files without a `#ddev-generated` line,
+    printing "Unwilling to remove '<path>'" for each. `git status` shows only the ones
+    never committed. Read those lines and delete only files nobody took over on purpose.
 
 ## Machine-readable output
 
@@ -87,7 +96,14 @@ every checkout claim the same project, and the second `ddev start` refuses.
   directory. Run `ddev config global --omit-project-name-by-default` so `ddev config`
   stops writing it back. DDEV's docs recommend this for worktree users.
 - **If the name must stay committed**, override it per checkout in
-  `.ddev/config.local.yaml` (`name: site-feature-x`), which is gitignored.
+  `.ddev/config.local.yaml` (`name: site-feature-x`).
+- **A fresh checkout doesn't ignore `config.local.yaml` yet.** The rule lives in
+  DDEV's generated `.ddev/.gitignore`, which is itself untracked. A new clone or worktree
+  has none until a `ddev config` or a successful `ddev start` writes it, and a start that
+  fails on the name clash doesn't. Observed: `git status` showed
+  `?? .ddev/config.local.yaml`, so a `git add -A` would commit it and every checkout would
+  inherit that name. Add `.ddev/config*.local.y*ml` to the project root's `.gitignore`;
+  the auditor flags a tracked one (`local-file-committed`).
 - **Each checkout starts with an empty database.** `ddev snapshot restore` also offers
   snapshots from sibling worktrees of the same repository (v1.25.4), or use
   `ddev start --seed-snapshot=<name>`.
