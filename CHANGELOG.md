@@ -268,6 +268,22 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **`sessions.sh main` names the coordinator from inside a lane** - run from a lane at
+  `.claude/worktrees/<x>`, it answered with the session sitting in that lane, usually the
+  caller itself, instead of the one in the main checkout (2026-10-06). It took "the repo
+  root" from `git rev-parse --show-toplevel`, which in a linked worktree is the worktree,
+  and read the `.claude/fleet/main` pin from there too. `fleet main` and `fleet sweep`
+  hid it by changing to the main checkout first; a lane resolving MAIN directly, the
+  use `sessions.sh` is deployed beside `signal.sh` for, did not. A new
+  `main_checkout_root` resolves the main checkout from any tree. The obvious one-liners
+  fail in two layouts: in a submodule, `git worktree list`'s first entry and the common
+  dir's parent both point into the superproject's `.git/modules`, and a bare repo's
+  parent is just the folder it sits in, where an unrelated session may be working. A
+  submodule now reads the main checkout from `core.worktree`, and a bare repo has no
+  MAIN (exit 3). Four fixture assertions in `fleet-ops/tests/run.sh`, each seen failing
+  on the old code: a real nested `git worktree add`, the pin read from it, a submodule's
+  worktree, and a bare repo's.
+
 - **A lane's pigeon report reaches the coordinator** - a repo's worktrees share its
   pigeon identity (the git root commit), so a lane that sent `READY` to the coordinator
   in the main checkout was shown its own message by its `check-mail` hook, which then
