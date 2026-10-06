@@ -380,7 +380,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [enforce-uv.sh](hooks/enforce-uv.sh) | PreToolUse | Enforce uv over pip/bare tools in uv projects (`pip install` → `uv add`, bare `pytest`/`ruff` → `uv run`) |
 | [pre-install-scan.sh](hooks/pre-install-scan.sh) | PreToolUse | Advisory on dependency installs (npm/pnpm/yarn/bun/pip/uv/poetry/composer/gem/cargo, incl. `composer update`) - route through Socket, respect cooldown; `SUPPLY_CHAIN_BLOCK=1` for a hard gate |
 | [manifest-dep-scan.sh](hooks/manifest-dep-scan.sh) | PostToolUse | Advisory when the agent edits a dependency manifest (package.json/requirements/composer.json/Cargo.toml/go.mod/Gemfile) - depscore + cooldown the added package; silent on version bumps |
-| [check-mail.sh](hooks/check-mail.sh) | PreToolUse | Check for unread pmail via signal file (no cooldown, zero-cost when empty) |
+| [check-mail.sh](hooks/check-mail.sh) | PreToolUse | Deliver unread pmail (no cooldown, one stat when nothing is new); each session is told once and never about its own sent mail |
 | [session-start-unicode-scan.sh](hooks/session-start-unicode-scan.sh) | SessionStart | One-shot hidden-Unicode scan of project instruction files at boot (silent on clean; says so when a file could not be scanned) |
 | [pre-commit-unicode-scan.sh](hooks/pre-commit-unicode-scan.sh) | Git pre-commit | Block commits that add critical hidden Unicode (bidi, tag-block) to instruction files - scans the staged copy, and blocks one it cannot scan |
 | [config-change-guard.sh](hooks/config-change-guard.sh) | ConfigChange | Scan changed Claude settings files for worm-persistence IOCs the moment they're edited (advisory; `SUPPLY_CHAIN_BLOCK=1` to deny) |
