@@ -1,6 +1,6 @@
 ---
 name: fleet-ops
-description: "Landing discipline for parallel work: sequential test-gated landing queue, pre-land scrub, auto-rebase of in-flight lanes, fleet status, one-shot revert. Native primitives spawn; fleet-ops lands. Triggers: landing queue, land branches, merge queue, test gate, fleet status, land agent-team/background-agent branches, sequential merge."
+description: "Landing discipline for parallel work: sequential test-gated landing queue, pre-land scrub, auto-rebase of in-flight lanes, fleet status, one-shot revert, post-wave sweep. Native primitives spawn; fleet-ops lands and cleans up. Triggers: landing queue, land branches, merge queue, test gate, fleet status, land agent-team/background-agent branches, clean up after a wave, stale worktrees, archive finished sessions."
 license: MIT
 allowed-tools: "Read Bash Glob Grep AskUserQuestion"
 metadata:
@@ -51,6 +51,7 @@ fleet scrub-check <branch>  Dry-run forbidden-pattern check
 fleet config                Print the RESOLVED config — check the test gate is on
 fleet prune [--remove]      Classify finished lane worktrees; DRY RUN by default
 fleet prune --all-repos     Sibling-repo backlog counts (report-only, never removes)
+fleet sweep [--apply]       Post-wave housekeeping in procedure order; report by default
 ```
 
 ## Entry paths
@@ -116,10 +117,8 @@ fleet owner <branch>        Who owns this lane, and are they still writing?
 ```
 
 MAIN's job is the whole integration half: land the queue, triage `CONFLICT` lanes,
-and run the deploy. Lanes build and signal; MAIN integrates. Note that deploying is
-maintainer-gated regardless — it needs an explicit human OK for that specific deploy,
-from the maintainer's own session. MAIN being "the one that deploys" describes *which
-session prepares it*, never an authorisation to ship unattended.
+sweep after the wave, and prepare the deploy. Lanes build and signal; MAIN
+integrates. A deploy still needs an explicit human OK for that specific deploy.
 
 ### The live-owner gate
 
@@ -164,6 +163,10 @@ Only **SAFE** is ever removable: merged, clean, no open session claiming it, and
 visible rather than silently growing. Turn it off with `prune_hint=off` in
 config or `FLEET_NO_PRUNE_HINT=1`.
 
+## Sweep — after a wave
+
+Prune refuses well but cannot drain REVIEW. `fleet sweep` (from MAIN) prints the backlog as next actions in procedure order: worktrees, competing lanes (same files, committed in one and uncommitted in another), worktree-less branches, ghosts/dirs/stashes, sessions to archive. It also sees lanes **landed by content** (squash, cherry-pick) and owners whose lane dir is gone. **Work the list, re-running the sweep after each step**; nothing is cached, so it resumes. `--apply` is zero-loss only (ghost entries, merged unheld branches, unclaimed empty dirs); removal stays `fleet prune --remove`. Sessions are the agent's job, one gated call each: `ARCHIVE-REQUEST` → `send_message`, `ARCHIVE-DIRECT` → `archive_session`, **never** a message, which would resume it into a dead tree. A private never-push list parks branches that must not leave the machine. Detail: [references/sweep.md](references/sweep.md).
+
 ## First-class user interaction (HARD RULE)
 
 When this skill surfaces a decision point, **always use the `AskUserQuestion` tool**. Plain markdown numbered lists are not acceptable for these branches.
@@ -174,6 +177,7 @@ When this skill surfaces a decision point, **always use the `AskUserQuestion` to
 | `init` — worktrees available, mode unset | Worktree or branch-only mode? | Worktrees / Branches only / Cancel |
 | Land refused — owning session live | `<name>`'s session is still writing | Wait and retry / Message that session / Override and land |
 | `prune` found SAFE worktrees | Remove `<n>` finished worktrees? | Remove them / Show the table again / Leave as-is |
+| `sweep` lists sessions to archive | Archive `<n>` finished sessions? | Send the requests / Show the rows / Skip |
 | Lane → `CONFLICT` (rebase fail) | Lane `<name>` has rebase conflict | Resolve in lane / Skip & continue / Revert lane / Untrack |
 | Lane → `FAILED` (post-merge tests red) | Tests broke after `<name>` merged | Auto-revert / Investigate first / Accept failure |
 | Pre-land scrub hits | Forbidden patterns in `<name>` diff | Block landing / Override (note reason) / Open to edit |
@@ -184,21 +188,17 @@ For non-branching status updates ("here's what happened, here's what landed"), p
 
 ## What it handles vs what it does not
 
-Handles tracked native worktrees, `fleet init` worktrees, separate clones and mixed lanes, with test-gated landing, auto-rebase, scrub, revert and prune; refuses a dirty `main`. Out of scope: spawning or monitoring sessions, deleting worktrees a session owns, several sessions on one working tree (refused), uncommitted work at signal time (rejected), cross-lane external state like migrations (order lands by hand), force-pushed lanes (caught at land time only). Detail: [references/scope.md](references/scope.md).
+Any branch with commits can be a lane; a dirty `main` is refused. Out of scope: spawning or monitoring sessions, several sessions on one working tree (refused), uncommitted work at signal time, cross-lane external state like migrations (order lands by hand). Full table: [references/scope.md](references/scope.md).
 
 ## Compatibility
 
 Runs on Linux and macOS (bash 3.2+), Git Bash, and PowerShell 7 calling `bash`; needs `git 2.5+` and standard tools. Platform table: [references/scope.md](references/scope.md).
 
-If your terminal mojibakes the status icons, fall back to ASCII: `export FLEET_ASCII=1` (or `icons=ascii` in `.claude/fleet/config`). Output panels follow `docs/TERMINAL-DESIGN.md` via `skills/_lib/term.sh`.
-
-Held files (Windows): antivirus or the indexer can briefly hold a file so it cannot be deleted. State-file deletes (MAIN pin, daemon PID file) retry for up to `FLEET_RM_RETRY_SECS` (default 5), then exit 1 naming the file.
-
-Long-path warning (Windows only): `fleet init` worktrees nest under `.fleet-worktrees/<name>/`. Keep lane names short if your repo lives deep, or enable `core.longpaths=true`.
+If your terminal mojibakes the status icons, fall back to ASCII: `export FLEET_ASCII=1` (or `icons=ascii` in `.claude/fleet/config`). Output panels follow `docs/TERMINAL-DESIGN.md` via `skills/_lib/term.sh`. Windows notes (held files, long paths): [references/scope.md](references/scope.md).
 
 ## Headless agent compatibility
 
-**Don't put manually-created fleet worktrees under `.claude/`.** Claude Code applies a global sensitive-file guard to anything under `.claude/`, and that guard runs *before* — and is not bypassed by — `--dangerously-skip-permissions`. Headless lane sessions (`claude -p ... --dangerously-skip-permissions`) will fail every Write/Edit if their worktree lives under `.claude/`.
+**Don't put manually-created fleet worktrees under `.claude/`**: headless lane sessions (`claude -p`) fail every Write/Edit there, whatever their permission flags. Why: [references/scope.md](references/scope.md).
 
 ## Configuration
 
@@ -208,10 +208,11 @@ Optional `.claude/fleet/config`, one `key=value` per line, **parsed, never sourc
 
 - `references/workflow.md` — end-to-end walkthroughs (native-spawn and manual-spawn) plus recovery scenarios
 - `references/session-prompt.md` — lane brief to embed in `claude --bg` prompts, teammate spawn prompts, or manual sessions
-- Detail moved out of this file, one topic each: `references/configuration.md`, `references/session-awareness.md`, `references/prune.md`, `references/landing.md`, `references/daemon.md`, `references/native-spawn.md`, `references/scope.md`
+- Detail moved out of this file, one topic each: `references/configuration.md`, `references/session-awareness.md`, `references/prune.md`, `references/sweep.md`, `references/landing.md`, `references/daemon.md`, `references/native-spawn.md`, `references/scope.md`
 
 ## Scripts
 
-- `scripts/fleet.sh` — main CLI (init, track, start/stop, status, land, revert, scrub-check, prune, config, main, owner)
+- `scripts/fleet.sh` — main CLI (init, track, start/stop, status, land, revert, scrub-check, prune, sweep, config, main, owner)
 - `scripts/signal.sh` — branch-aware signaler (deployed to `.claude/fleet/signal.sh`); prints the MAIN handoff after READY/CONFLICT
 - `scripts/sessions.sh` — resolves a branch or directory to its owning session across every Desktop store and the CLI transcripts; exits 3 silently without the store or `jq`. Detail: [references/session-awareness.md](references/session-awareness.md)
+- `scripts/sweep.sh` — `fleet sweep`: the post-wave pass. `--porcelain`/`--json` rows (phase, subject, verdict, detail, action); exit 10 on findings. E.g. `fleet sweep --porcelain | awk -F'\t' '$3=="ARCHIVE-REQUEST"'`. Detail: [references/sweep.md](references/sweep.md)

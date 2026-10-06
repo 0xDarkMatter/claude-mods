@@ -8,6 +8,28 @@ feature releases live in the README "Recent Updates" section.
 
 ### Added
 
+- **`fleet sweep`: post-wave housekeeping in one ordered pass** - after a wave of chips,
+  background agents or fleet lanes, `fleet prune` refused correctly but could not drain:
+  a real 36-tree backlog read 0 SAFE, 31 REVIEW, with no next step for any of them. The
+  sweep (`fleet-ops/scripts/sweep.sh`, `references/sweep.md`) reads prune's buckets and adds
+  what prune cannot see. It finds lanes landed by content (`git merge-tree`: squash,
+  cherry-pick) and competing lanes, i.e. the same files committed in one and uncommitted in
+  another (shared ledgers and per-tree config excluded). It lists merged worktree-less
+  branches, ghost entries, unregistered dirs and stale stashes, and names the sessions to
+  archive. Each row carries the exact next action, and re-running after each step resumes
+  the procedure, since nothing is cached. Archiving is agent-driven, one gated call each:
+  a finished, idle session gets a `send_message` asking it to archive itself, while a
+  session whose lane dir is gone is archived directly and never messaged, because a
+  message would resume it into a dead tree. The live run found 7 such sessions, and 2 of
+  22 empty orphan dirs still in use as an open session's cwd. `--apply` acts only on the
+  zero-loss classes (ghost entries, merged unheld branches deleted by compare-and-swap,
+  unclaimed empty dirs), each re-verified before it acts. A private never-push list
+  (`~/.claude/never-push.txt`, never in a repo) parks branches whose history must not
+  leave the machine and flags any with a remote copy as `LEAKED`. `parallel-ops` routes
+  "clean up after a wave" to it, and git-ops' stale-branch hygiene check now points at it
+  instead of a `git branch cleanup` command that does not exist. 32 fixture assertions in
+  `fleet-ops/tests/sweep.sh`; nine guards, each seen failing against a mutant first.
+
 - **pm-audit reads CI and deploy configs** - `package-manager-ops`' audit now covers the
   places a lockfile is actually installed: GitHub/GitLab/Bitbucket/CodeBuild configs,
   Dockerfiles and AWS CodeDeploy `appspec.yml` hook scripts. New findings:

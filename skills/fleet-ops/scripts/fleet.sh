@@ -2579,6 +2579,12 @@ case "${1:-}" in
   revert)       shift; cmd_revert "$@" ;;
   scrub-check)  shift; cmd_scrub_check "$@" ;;
   prune)        shift; cmd_prune "$@" ;;
+  # The post-wave sweep lives in its own script (scripts/sweep.sh) and builds
+  # on prune rather than inside it. Back to the caller's dir first: the cd at
+  # the top of this file would otherwise make prune's "you are standing in it"
+  # guard protect the main checkout instead of the tree the caller is in.
+  sweep)        shift; cd "$INVOKED_FROM" 2>/dev/null || true
+                exec bash "$SCRIPT_DIR/sweep.sh" "$@" ;;
   config)       shift; cmd_config "$@" ;;
   main)         shift; cmd_main "$@" ;;
   owner)        shift; [[ -z "${1:-}" ]] && { echo "usage: fleet owner <branch>" >&2; exit 1; }
@@ -2602,6 +2608,9 @@ Usage:
                               default; --remove deletes only the SAFE ones,
                               after a typed confirmation. --all-repos reports
                               sibling repos and can never remove.
+  fleet sweep [--apply]       Post-wave housekeeping, in procedure order:
+                              landed? competing? leftovers? who is done?
+                              Report by default; --apply = zero-loss only.
   fleet config                Print resolved config (is the test gate actually on?)
   fleet main [show|claim|release]
                               The coordinator session for this repo (lands,

@@ -105,7 +105,7 @@ GIT_DIR=$(git rev-parse --git-dir 2>/dev/null)
 
 **Why it's bad:** Merged-but-undeleted branches are noise that obscures what's actually in flight.
 
-**Flag it:** Report the count. Suggest `git branch cleanup` to review and delete.
+**Flag it:** Report the count. Suggest `fleet sweep` (fleet-ops): its `--apply` deletes merged, worktree-less branches no open session holds, zero-loss, after a typed confirm.
 
 ### Anti-pattern 3: WIP commits on a pushed branch 🟡
 
@@ -268,6 +268,8 @@ and presenting the output to the user. The survey categorises each worktree as:
 - `in-flight` — not merged, not dirty → probably still in active use
 - `GHOST` — registered but filesystem gone → `git worktree prune` fixes
 - `UNREGISTERED` / orphan — filesystem dir with no git entry → **DO NOT touch without explicit review**
+
+After a **wave** of parallel lanes, run `fleet sweep` (fleet-ops) instead: it adds what this survey cannot see — lanes landed by content, competing lanes, which orphan dirs an open session still uses, and which finished sessions to ask to archive.
 
 ### Worktree Land Procedure (T2)
 
