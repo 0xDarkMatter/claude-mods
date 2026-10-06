@@ -25,7 +25,9 @@ unset FLEET_SKIP_SESSION_CHECK FLEET_SESSION_STORE FLEET_SESSION_NOCACHE \
       FLEET_TRANSCRIPT_ROOTS \
       FLEET_SESSION_LIVE_SECS FLEET_SESSION_CACHE_TTL FLEET_SESSION_MAX_AGE_DAYS \
       FLEET_SELF_SESSION_ID FLEET_NO_PRUNE_HINT FLEET_PRUNE_ROOTS \
-      FLEET_PRUNE_MAX_REPOS FLEET_ASCII FLEET_RM_RETRY_SECS
+      FLEET_PRUNE_MAX_REPOS FLEET_ASCII FLEET_RM_RETRY_SECS \
+      FLEET_NEVER_PUSH FLEET_SWEEP_LEDGER FLEET_SWEEP_KEEP FLEET_SWEEP_STALE_DAYS \
+      FLEET_SWEEP_MIN_DIR_AGE
 
 command -v git >/dev/null 2>&1 || { echo "SKIP: git not available"; exit 0; }
 
@@ -1748,6 +1750,8 @@ grep -q "cli:cli-peerwt" "$LLOG" 2>/dev/null && ok "the refusal names the peer, 
 unset FLEET_SESSION_NOCACHE; hermetic_sessions
 cd "$REPO"
 fi
+
+. "$HERE/sweep.sh"   # `fleet sweep` cases, in their own file (see its header)
 
 echo "=== $PASS passed, $FAIL failed ==="
 [ "$FAIL" -eq 0 ] || exit 1

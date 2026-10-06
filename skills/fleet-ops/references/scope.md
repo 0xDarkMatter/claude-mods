@@ -17,6 +17,7 @@ What fleet-ops handles, what it deliberately does not, and what is planned.
 | One-shot revert | ✅ `fleet revert <branch>` |
 
 | Pruning finished lane worktrees | ✅ `fleet prune` — dry-run by default, removes only provably-finished trees |
+| Post-wave sweep (landed by content, competing lanes, branch/dir/stash leftovers, sessions to archive) | ✅ `fleet sweep` — report by default; `--apply` is zero-loss only ([sweep.md](sweep.md)) |
 
 | Out of scope | Why |
 |------|-----|
@@ -47,4 +48,19 @@ Tested and working on:
 | Windows | Git Bash (mintty) | Forward-slash paths; Unicode icons render in mintty/Windows Terminal |
 | Windows | PowerShell 7 (calling `bash`) | Works if `bash` is on PATH |
 
-Requirements: `bash 3.2+`, `git 2.5+` (worktree support), `awk`, `grep`, `head`, `stat`. All standard.
+Requirements: `bash 3.2+`, `git 2.5+` (worktree support), `awk`, `grep`, `head`, `stat`. All standard. `fleet sweep` needs `git 2.23+` (`%(worktreepath)`); content-landed detection uses `git merge-tree --write-tree` (2.38+) and falls back to `git cherry` below that.
+
+**Headless lanes and `.claude/`.** Claude Code applies a global sensitive-file
+guard to anything under `.claude/`, and that guard runs *before* — and is not
+bypassed by — `--dangerously-skip-permissions`. Headless lane sessions
+(`claude -p ... --dangerously-skip-permissions`) fail every Write/Edit if their
+worktree lives under `.claude/`, which is why `fleet init` defaults to
+`.fleet-worktrees/` at the repo top.
+
+**Held files (Windows).** Antivirus or the indexer can briefly hold a file so it
+cannot be deleted. State-file deletes (MAIN pin, daemon PID file) retry for up to
+`FLEET_RM_RETRY_SECS` (default 5), then exit 1 naming the file.
+
+**Long paths (Windows only).** `fleet init` worktrees nest under
+`.fleet-worktrees/<name>/`. Keep lane names short if your repo lives deep, or
+enable `core.longpaths=true`.

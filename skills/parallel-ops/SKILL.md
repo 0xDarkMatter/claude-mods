@@ -1,6 +1,6 @@
 ---
 name: parallel-ops
-description: "Router for parallel or recurring agent work across six skills. Covers: parallel agents, fan out work, delegate to workers, run overnight, scheduled loop, land branches, mixed-model fleet, orchestrate workers, background agents at scale. Triggers on: which skill for parallel work, fan out agents, spawn workers, run this overnight, schedule a loop, land my branches, heterogeneous fleet, delegate to cheaper model, autonomous loop."
+description: "Router for parallel or recurring agent work across six skills. Covers: parallel agents, fan out work, delegate to workers, run overnight, scheduled loop, land branches, mixed-model fleet, orchestrate workers, background agents at scale. Triggers on: which skill for parallel work, fan out agents, spawn workers, run this overnight, schedule a loop, land my branches, clean up after a wave, heterogeneous fleet, delegate to cheaper model, autonomous loop."
 when_to_use: "Use first when parallel or recurring agent work is needed but the right skill among fleet-ops, fleet-worker, fleetflow, loop-ops, iterate, spawn is unclear - e.g. run several agents at once, set up something that runs overnight, delegate this cheaply."
 license: MIT
 allowed-tools: "Read"
@@ -26,6 +26,7 @@ you need, and stop reading here.
 | Work that RECURS on a schedule across sessions — cron, routine, unattended ticks | [loop-ops](../loop-ops/) | [iterate](../iterate/) is one continuous session, not a schedule |
 | Drive ONE mechanical metric to a target in one continuous session (even a long overnight one) | [iterate](../iterate/) | [loop-ops](../loop-ops/) is the scheduler *around* sessions, not the session itself |
 | Land/merge branches that parallel work produced | [fleet-ops](../fleet-ops/) | the terminus for every branch-producing row above (in-process subagents and prompt authoring produce no branches) |
+| Clean up AFTER a wave: what landed, competing lanes, stale worktrees and branches, archive finished sessions | [fleet-ops](../fleet-ops/) `fleet sweep` | `fleet prune` alone removes only provably-finished trees; the sweep turns the rest into next actions. fleetflow's own `.fleetflow/` runs stay with its `ff-sweep` |
 | Author a static expert-agent prompt FILE (not a runtime worker) | [spawn](../spawn/) | listed only to catch the name collision with "spawn workers" |
 
 Tie-breakers for the two classic overlaps: "many files, cheap models" is
@@ -61,7 +62,7 @@ land or inner + outer.
 
 ## See also
 
-- [fleet-ops](../fleet-ops/) — landing discipline: test-gated queue, pre-land scrub, auto-rebase, revert
+- [fleet-ops](../fleet-ops/) — landing discipline: test-gated queue, pre-land scrub, auto-rebase, revert, and the post-wave `fleet sweep`
 - [fleet-worker](../fleet-worker/) — one cheap headless worker (GLM, Sonnet, Haiku) fanned out and gated
 - fleetflow — heterogeneous cross-provider fleet (GLM + Codex + Grok + Pi + Anthropic); extracted to its own repo at [0xDarkMatter/fleetflow](https://github.com/0xDarkMatter/fleetflow), still invocable as `/fleetflow` via the junction at `~/.claude/skills/fleetflow`
 - [loop-ops](../loop-ops/) — outer-loop design: risk tiers, kill switch, scheduling
