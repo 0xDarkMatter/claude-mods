@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Bash Glob Grep Agent TaskCreate TaskUpdate"
 metadata:
   author: claude-mods
-  related-skills: review, ci-cd-ops, push-gate
+  related-skills: review, ci-cd-ops, push-preflight
 ---
 
 # Git Ops
@@ -279,7 +279,7 @@ For landing a branch from a worktree onto the trunk (rebase + test + ff):
 2. Fetch trunk, rebase worktree branch onto it
 3. Run project test command (detect from `package.json` / `pyproject.toml` / `justfile`)
 4. On test pass: fast-forward trunk to the rebased tip
-5. Do NOT push — that's a separate explicit step (and should go through `push-gate`)
+5. Do NOT push — that's a separate explicit step (and should go through `push-preflight`)
 
 Dispatch this to `git-agent` as a T2 operation with the worktree path + trunk name.
 

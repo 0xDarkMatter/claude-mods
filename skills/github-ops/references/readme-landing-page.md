@@ -286,7 +286,7 @@ unstated answer, that answer was the bullet.
 - Forbidden-file checklist (`.env`, `*.pem`, `id_rsa`)
 - Upstream divergence detection
 - Interactive confirmation prompt
-- Configurable via `.push-gate.toml`
+- Configurable via `.push-preflight.toml`
 ```
 
 Six true statements about the implementation. Every one of them makes the reader do the

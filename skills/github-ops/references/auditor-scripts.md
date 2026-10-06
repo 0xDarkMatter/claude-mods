@@ -58,7 +58,7 @@ bash scripts/check-issues.sh --json | jq '.data[] | select(.external)'
 
 Exit `0` = nothing you're missing (no open issues, or all are yours and fresh); `10` = external/stale issues present (the things to look at); `7` = unavailable (not a GitHub remote, gh unauthed/offline) — advisory, never a hard failure; `2` usage; `5` gh not installed.
 
-**Wired into the pre-push gate** ([push-gate](../../push-gate)): `preflight.sh` calls this in `--advisory` mode as a post-gate step, so every push surfaces unseen external/stale issues for the target remote. It is **read-only, timeout-bounded, and never affects the gate verdict** — silent when gh is absent/unauthed or the remote isn't GitHub. Run it standalone any time, or across repos, to find what you've missed. For acting on what it surfaces (view/triage/comment/close), see `references/issue-ops.md`.
+**Wired into the pre-push gate** ([push-preflight](../../push-preflight)): `preflight.sh` calls this in `--advisory` mode as a post-gate step, so every push surfaces unseen external/stale issues for the target remote. It is **read-only, timeout-bounded, and never affects the gate verdict** — silent when gh is absent/unauthed or the remote isn't GitHub. Run it standalone any time, or across repos, to find what you've missed. For acting on what it surfaces (view/triage/comment/close), see `references/issue-ops.md`.
 
 ## Security posture (the other blind spot)
 

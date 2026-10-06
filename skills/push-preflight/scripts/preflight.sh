@@ -20,7 +20,7 @@ set -euo pipefail
 # Optional --cwd <path> must come before positional args
 REPO_ROOT=""
 if [ "${1:-}" = "--cwd" ]; then
-  REPO_ROOT="${2:?"push-gate: --cwd requires a path argument"}"
+  REPO_ROOT="${2:?"push-preflight: --cwd requires a path argument"}"
   shift 2
 fi
 
@@ -30,7 +30,7 @@ BRANCH="${2:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [ -z "$REMOTE" ] || [ -z "$BRANCH" ]; then
-  echo "push-gate: usage: preflight.sh [--cwd <repo-root>] <remote> <branch>" >&2
+  echo "push-preflight: usage: preflight.sh [--cwd <repo-root>] <remote> <branch>" >&2
   exit 6
 fi
 
@@ -40,7 +40,7 @@ fi
 
 divider() { printf '%.0s─' $(seq 1 63); echo; }
 
-echo "push-gate preflight :: target = ${REMOTE}/${BRANCH}"
+echo "push-preflight :: target = ${REMOTE}/${BRANCH}"
 divider
 
 # ── Step 1–2: verify remote, fetch ────────────────────────────────────────────
@@ -56,7 +56,7 @@ echo "STEP 1  OK    remote '${REMOTE}' = ${REMOTE_URL}"
 # Reject local-path remotes (use `git push . HEAD:main` pattern directly, no gate needed)
 case "$REMOTE_URL" in
   /*|[A-Za-z]:*|\.*|file:*)
-    echo "STEP 1  INFO  '${REMOTE}' looks local-filesystem; push-gate is for network remotes"
+    echo "STEP 1  INFO  '${REMOTE}' looks local-filesystem; push-preflight is for network remotes"
     echo "          proceeding anyway (you can skip the gate for local updateInstead pushes)"
     ;;
 esac
@@ -168,11 +168,11 @@ if [ -f "$ISSUE_CHECK" ]; then
 fi
 
 divider
-echo "push-gate: ALL GATES PASSED"
+echo "push-preflight: ALL GATES PASSED"
 echo ""
 echo "Ready to push:"
 echo "  git push ${REMOTE} ${BRANCH}"
 echo ""
-echo "push-gate does not execute the push itself. Run it explicitly to"
+echo "push-preflight does not execute the push itself. Run it explicitly to"
 echo "preserve 'two-human-steps' separation between gate and action."
 exit 0

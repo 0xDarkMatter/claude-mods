@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Write Edit Bash Glob Grep"
 metadata:
   author: claude-mods
-  related-skills: git-ops, push-gate, ci-cd-ops
+  related-skills: git-ops, push-preflight, ci-cd-ops
 ---
 
 # GitHub Ops
@@ -17,7 +17,7 @@ Sits alongside two related skills:
 ```
 LOCAL                          BRIDGE              REMOTE (GitHub)
 ─────                          ──────              ───────────────
-git-ops                        push-gate           github-ops  (this skill)
+git-ops                        push-preflight      github-ops  (this skill)
 ```
 
 Ownership by concern, row by row: [references/delegation-and-authorship.md](references/delegation-and-authorship.md).
@@ -26,7 +26,7 @@ Ownership by concern, row by row: [references/delegation-and-authorship.md](refe
 
 1. **Visibility defaults to private.** Pass `--private` to `gh repo create` unless the user has explicitly said "public" / "make it public" for this specific repo. See `references/repo-visibility.md`.
 2. **Major version bumps require explicit approval.** Default to minor; patch for fix-only ranges. Never auto-suggest a 1.0.0 from `BREAKING CHANGE:` markers — surface and ask. See `references/release-strategy.md`.
-3. **Always run `push-gate` before any push to a remote.** No exceptions. If push-gate refuses, do not proceed — fix the cause and re-run.
+3. **Always run `push-preflight` before any push to a remote.** No exceptions. If push-preflight refuses, do not proceed — fix the cause and re-run.
 4. **Delegate local git operations to `git-ops`.** Don't reimplement commit/tag/push logic. github-ops orchestrates the GitHub-side calls (`gh`) and the README/CHANGELOG edits; git-ops handles git itself.
 5. **README "Recent Updates" updates on every release.** This is the one README touch that always happens, regardless of how minor the release. See `references/readme-recent-updates.md` for the canonical claude-mods style.
 6. **Never push without confirming visibility decision.** When creating a new repo, surface visibility as a flippable line in the plan ("creating as **private** — say 'public' to flip"), not buried in flag soup.
@@ -91,12 +91,12 @@ Triggered by: "publish to github", "create repo on github", "push to github" (wh
    gh repo create <org>/<repo> --private --source=. --remote=origin \
      --description "<one-line — distilled from the README intro draft in step 2, ≤ 350 chars>" \
      --homepage "<homepage URL or omit>"
-   (NEVER pass --push; we want push-gate to run between)
+   (NEVER pass --push; we want push-preflight to run between)
    Note: the GitHub `--description` is a single line and distinct from the README intro.
    Derive it FROM the intro you just wrote, not from package metadata blindly.
 
-6. Run push-gate preflight:
-   bash $HOME/.claude/skills/push-gate/scripts/preflight.sh --cwd <repo> origin main
+6. Run push-preflight:
+   bash $HOME/.claude/skills/push-preflight/scripts/preflight.sh --cwd <repo> origin main
    On any non-zero exit: stop, report, do not push.
 
 7. Push main + tags:
@@ -159,8 +159,8 @@ Triggered by: "ship a release", "cut a release", "release v0.X.Y", "publish upda
 6. Create local tag via git-ops:
    git tag -a v<N> -m "v<N>"
 
-7. Run push-gate preflight:
-   bash $HOME/.claude/skills/push-gate/scripts/preflight.sh --cwd <repo> origin <branch>
+7. Run push-preflight:
+   bash $HOME/.claude/skills/push-preflight/scripts/preflight.sh --cwd <repo> origin <branch>
    On any non-zero exit: stop, report, do not push.
 
 8. Push commits + tag:
@@ -249,7 +249,7 @@ Defaults: minor on `feat:`, patch on `fix:`-only, major only with approval; READ
 
 ## Authorship, delegation, expansion
 
-For 0xDarkMatter repos set repo-local `user.name` / `user.email` before any commit; rewriting authorship is safe only before the first push. github-ops runs the `gh` calls and README/CHANGELOG edits, git-ops the commits, tags and pushes, push-gate the preflight. Unbuilt expansions (Actions, secrets, branch-protection writes) follow the same boundary: `api.github.com` here, purely local to `git-ops`. Commands and diagram: [references/delegation-and-authorship.md](references/delegation-and-authorship.md).
+For 0xDarkMatter repos set repo-local `user.name` / `user.email` before any commit; rewriting authorship is safe only before the first push. github-ops runs the `gh` calls and README/CHANGELOG edits, git-ops the commits, tags and pushes, push-preflight the preflight. Unbuilt expansions (Actions, secrets, branch-protection writes) follow the same boundary: `api.github.com` here, purely local to `git-ops`. Commands and diagram: [references/delegation-and-authorship.md](references/delegation-and-authorship.md).
 
 ## Files
 
@@ -260,4 +260,4 @@ For 0xDarkMatter repos set repo-local `user.name` / `user.email` before any comm
 
 ## Read-only auditors (the blind spots)
 
-`bash scripts/check-issues.sh --repo <o>/<r>` surfaces external and stale open issues you would otherwise miss (push-gate runs it advisory on every push). `bash scripts/check-security-posture.sh --repo <o>/<r>` (`--org`, `--commands`) audits Dependabot, secret and code scanning, private vulnerability reporting, SECURITY.md and branch protection. **Neither applies a change**: enable commands are text you review and run under hard rule 8. Exit 10 = something to look at. Detail: [references/auditor-scripts.md](references/auditor-scripts.md).
+`bash scripts/check-issues.sh --repo <o>/<r>` surfaces external and stale open issues you would otherwise miss (push-preflight runs it advisory on every push). `bash scripts/check-security-posture.sh --repo <o>/<r>` (`--org`, `--commands`) audits Dependabot, secret and code scanning, private vulnerability reporting, SECURITY.md and branch protection. **Neither applies a change**: enable commands are text you review and run under hard rule 8. Exit 10 = something to look at. Detail: [references/auditor-scripts.md](references/auditor-scripts.md).

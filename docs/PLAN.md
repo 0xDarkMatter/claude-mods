@@ -88,7 +88,7 @@ Theme: subtraction and enforcement, not addition.
       description trim, portability sanitization (process-compose-ops,
       portless-ops, shell-preference.md), dsp-launch retirement,
       description-budget gate flipped WARN→FAIL
-- [ ] Phase 3 — robustness floor: push-gate test suite, verifier-wrap suites,
+- [ ] Phase 3 — robustness floor: push-preflight test suite, verifier-wrap suites,
       security-sensitive suites (security-ops, pigeon, leveldb-ops),
       remaining test backlog, protocol backfill on 2025-12-21 scaffold batch
       (R6 within Phase 3 is done — see below)

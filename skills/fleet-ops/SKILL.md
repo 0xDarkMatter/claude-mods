@@ -7,7 +7,7 @@ metadata:
   author: claude-mods
   status: stable
   experimental-parts: daemon (in-session background polling)
-  related-skills: git-ops, push-gate, claude-code-ops
+  related-skills: git-ops, push-preflight, claude-code-ops
 ---
 
 # Fleet Ops

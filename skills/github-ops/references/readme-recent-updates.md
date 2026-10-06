@@ -17,7 +17,7 @@ Per-version blocks with emoji-prefixed bullets. Use this unless the project's re
 **v2.4.3** (April 2026)
 
 *   🌳 **Worktree-aware `git-ops`** - Folded the briefly-considered `git-status` skill straight into `git-ops` rather than ship a third sibling. T1 inline now exposes `scripts/status.sh` (rich repo overview...)
-*   🛡️ **`push-gate` skill** - Hard pre-push safety gate. Gitleaks + regex layer secret scan, forbidden-file check, divergence check...
+*   🛡️ **`push-preflight` skill** - Hard pre-push safety gate. Gitleaks + regex layer secret scan, forbidden-file check, divergence check...
 *   📌 **`rules/worktree-boundaries.md`** - Hard rule promoted from user-global into the plugin: never `rm -rf .claude/worktrees/`...
 
 **v2.4.1** (April 2026)
@@ -31,7 +31,7 @@ Per-version blocks with emoji-prefixed bullets. Use this unless the project's re
 
 - Version header: `**v2.4.3** (Month YYYY)` — bold version, month-year in parens (NOT ISO date)
 - Each change is a bulleted item under the version
-- Bullet prefix: relevant **emoji** + **bold tagline** (often a skill name in backticks like `` `push-gate` skill `` or a capability label)
+- Bullet prefix: relevant **emoji** + **bold tagline** (often a skill name in backticks like `` `push-preflight` skill `` or a capability label)
 - Followed by ` - ` and a **1–2 sentence** prose description with concrete details (file names, flag names, key counts, links to references)
 - Multiple bullets per version is normal and good — one bullet per discrete change
 - 5–7 most recent versions visible; link "View full changelog →" at the bottom to the commits view

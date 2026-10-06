@@ -6,7 +6,7 @@ allowed-tools: "Read Bash Glob Grep AskUserQuestion"
 metadata:
   author: claude-mods
   status: beta
-  related-skills: fleet-ops, git-ops, push-gate, claude-code-ops
+  related-skills: fleet-ops, git-ops, push-preflight, claude-code-ops
 ---
 
 # fleet-worker
