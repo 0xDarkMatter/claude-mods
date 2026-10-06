@@ -29,6 +29,10 @@ set -uo pipefail
 # stray interactive read (e.g. mail-db's `read_body` cat path) would hang it.
 exec </dev/null
 
+# Inside a Claude Code session this is set, and mail-db.sh keeps a session's own
+# sent mail out of its inbox - every send-then-read case here would read nothing.
+unset CLAUDE_CODE_SESSION_ID
+
 # Resolve script paths to ABSOLUTE before we change directory below — otherwise
 # the cd would break the relative "$(dirname "$0")" lookups.
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -284,9 +288,9 @@ result=$(bash "$HOOK_SCRIPT" 2>&1)
 assert_contains "hook shows INCOMING PMAIL" "INCOMING PMAIL" "$result"
 assert_contains "hook shows subject" "Hook test" "$result"
 assert_contains "hook shows body" "Should trigger hook" "$result"
-# Signal cleared after first delivery, so second call is silent
+# The hook's seen marker records the delivery, so the second call is silent
 result2=$(bash "$HOOK_SCRIPT" 2>&1)
-assert_empty "hook silent after signal cleared" "$result2"
+assert_empty "hook silent once it has delivered" "$result2"
 # But messages are still unread (hook does NOT auto-read)
 unread_count=$(bash "$MAIL_SCRIPT" count 2>&1)
 assert_contains "messages persist unread after hook" "1" "$unread_count"
@@ -532,9 +536,9 @@ bash "$MAIL_SCRIPT" send "claude-mods" "hook test" "testing hook" >/dev/null 2>&
 result1=$(bash "$HOOK_SCRIPT" 2>&1)
 assert_contains "hook delivers message" "INCOMING PMAIL" "$result1"
 
-# T53: Signal cleared after delivery, second call silent
+# T53: Delivery recorded, second call silent
 result2=$(bash "$HOOK_SCRIPT" 2>&1)
-assert_empty "hook silent after signal cleared (2)" "$result2"
+assert_empty "hook silent once it has delivered (2)" "$result2"
 # Messages still unread - verify then clean up
 bash "$MAIL_SCRIPT" read >/dev/null 2>&1
 

@@ -268,6 +268,21 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **A lane's pigeon report reaches the coordinator** - a repo's worktrees share its
+  pigeon identity (the git root commit), so a lane that sent `READY` to the coordinator
+  in the main checkout was shown its own message by its `check-mail` hook, which then
+  deleted the shared `/tmp` signal: the coordinator's hook never fired, although the
+  rows stayed unread. Delivery is now per session. The signal is a timestamp nothing
+  deletes, and each session keeps its own seen marker beside it, so one session looking
+  hides nothing from another. Messages record their sender's `CLAUDE_CODE_SESSION_ID`
+  (`from_session`), and the hook, `read`, `count`, `unread` and `status` skip the
+  caller's own mail. `read` marks only the messages it showed and no longer deletes the
+  signal. Inside a worktree the hook's footer warns that a bare `pigeon read` takes the
+  coordinator's mail too. A name shared by two projects now warns, lists both hashes,
+  and resolves to the sender's own project when it is one of them, instead of silently
+  picking the most recently registered. 12 new cases in `pigeon/tests/run.sh`, each
+  seen failing against the old scripts or a mutant of the new hook.
+
 - **`fleet owner` and the land gate see a session that moved into a lane** - a Desktop
   session `EnterWorktree`'d into a lane, committed there and stayed live, yet `fleet
   owner` and `sessions.sh at --fresh` called the lane unowned, and a second session ported
