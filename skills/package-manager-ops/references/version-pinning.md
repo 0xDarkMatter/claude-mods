@@ -1,10 +1,10 @@
 # Version Pinning: Node, PHP and Dependency Ranges
 
 Pin the runtime the way you pin dependencies: one declared version, every tool reading
-the same one. Facts verified 2026-10-05 against nodejs/Release `schedule.json`, the
+the same one. Facts verified 2026-10-06 against nodejs/Release `schedule.json`, the
 nodejs.org release-schedule announcement (2026-03-10), php.net supported-versions and EOL
-pages, docs.npmjs.com, docs.ddev.com (stable, v1.25.4), the fnm, nvm-windows and Volta
-repositories, and Packagist.
+pages, docs.npmjs.com, pnpm.io settings, docs.ddev.com (stable, v1.25.4), the fnm,
+nvm-windows and Volta repositories, Packagist, and the Composer docs and source (2.10.3).
 
 ## Contents
 
@@ -59,6 +59,10 @@ package.json engines.node   ">=24 <25"        (or "24.x")
 .ddev/config.yaml           nodejs_version: auto   (reads .nvmrc), or "24"
 ```
 
+The `.npmrc` line is npm's switch. pnpm 11+ reads no such setting from `.npmrc`: put
+`engineStrict: true` in `pnpm-workspace.yaml` instead
+([scripts-and-workspaces.md](scripts-and-workspaces.md#pnpm-settings-moved-to-pnpm-workspaceyaml)).
+
 CI then uses `node-version-file: .nvmrc`, and the deploy host installs the same major.
 Pin the major in `.nvmrc` unless you have a reason to pin a minor: a major pin follows
 security releases automatically.
@@ -111,9 +115,17 @@ records it as `platform-overrides`, which pm-audit compares too, along with a li
 `php-version:` given to shivammathur/setup-php in CI.
 
 Because the platform pin pretends, check the real server at deploy:
-`composer check-platform-reqs --lock --no-dev`. `require.php` must admit the
-platform and DDEV versions, or `composer update` cannot resolve. A library (anything not
-`"type": "project"`) sets `require.php` but not `config.platform`.
+`composer check-platform-reqs --lock --no-dev`. `require.php` must admit
+`config.platform.php`, or `composer update` cannot resolve: Composer resolves for the
+pretended PHP, and DDEV's `php_version` plays no part once the pin is set. Keep DDEV's
+version inside `require.php` anyway, so you test what you declare. At boot,
+`platform_check.php` refuses a PHP below the highest PHP floor of the root and its
+non-dev packages (it checks floors only).
+
+A library sets `require.php` but not `config.platform`. Don't decide that from `type`:
+it defaults to `library`, and applications often leave it out. pm-audit treats a
+`composer.json` with no `type` as a project, and only an explicit non-project `type`
+(`library`, `craft-plugin`...) as a library.
 
 What `require.php` adds once a project has the platform pin, per Composer 2.10.3: install
 and update check it against the pretended PHP, not the real one, so it cannot stop an

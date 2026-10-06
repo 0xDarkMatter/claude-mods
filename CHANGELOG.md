@@ -223,6 +223,26 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **package-manager-ops facts review** - two model reviewers read eight references, and
+  every disputed claim was checked against primary sources (npm/cli 12.2.0, Composer
+  2.10.3, pnpm.io, yarnpkg.com, bun.com). 30 corrections, the ones that change advice
+  first. Plain `yarn up <pkg>` ignores the manifest range and can cross majors; the
+  in-range form is `yarn up -R`. `pnpm update` moves package.json ranges too, unless
+  `--no-save`. npm's `${VAR?}` makes a missing variable an empty string, not an error.
+  Since pnpm 11.5.3 (backported to 10.34.2), a committed
+  `//host/:_authToken=${NPM_TOKEN}` is ignored, so pnpm auth silently fails. The
+  Composer 1 to 2 steps add `composer update --lock --no-install`, because `install`
+  never rewrites a lock. Packagist ended Composer 1 metadata on 2025-09-01.
+  `engine-strict` in `.npmrc` is npm-only; pnpm 11 wants `engineStrict` in
+  `pnpm-workspace.yaml`. npm rewrites an existing `yarn.lock` on every save. Other
+  entries cover npx resolving the `latest` dist-tag, `--no` accepting the npx cache,
+  `bunx --no-install`, extensions under `config.platform`, `plugin-optional`, the pnpm
+  12 workspace-settings rule and Yarn 4 lockfile contents. New pm-audit check
+  `registry.pnpm.placeholder-ignored` (warn) reports those `.npmrc` lines in pnpm repos
+  and leaves npm repos alone. Two new fixture cases (a pnpm positive with pinned lines,
+  an npm control), each seen failing first; four mutants killed. The facts store watches
+  pnpm's `.npmrc` docs and Packagist's Composer 1 notice.
+
 - **pm-audit matched to what the tools do, from a finding-by-finding check of a sweep** -
   real repositories showed four places where `package-manager-ops`' audit misled. (1)
   `php.lockfile.stale` follows Composer's own lock check: a requirement met by a locked

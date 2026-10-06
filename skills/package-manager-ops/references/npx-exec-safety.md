@@ -3,8 +3,9 @@
 `npx some-tool` is the shortest path from a README to arbitrary code on your machine. This
 is the day-to-day discipline. Behavioural security (release-age cooldowns, Socket scans,
 IOC checks, install hooks) belongs to `supply-chain-defense`: one owner per fact. Facts
-verified 2026-10-05 against docs.npmjs.com (`npx`, `npm exec`, v11 and v12), the
-libnpmexec source, yarnpkg.com, pnpm.io and bun.com.
+verified 2026-10-06 against docs.npmjs.com (`npx`, `npm exec`, v11 and v12), the
+libnpmexec and npm-pick-manifest source, yarnpkg.com, pnpm.io, bun.com and
+getcomposer.org.
 
 ## Contents
 
@@ -21,12 +22,15 @@ Since npm 7, `npx` is `npm exec`:
 1. A bin already in the project (`node_modules/.bin`) or installed globally is used
    first. A name without a version matches whatever the project has installed.
 2. Otherwise the package is fetched into the npx cache and run. An unversioned name
-   resolves to the newest published version at that moment.
+   resolves to whatever the `latest` dist-tag points to at that moment (npm's `tag`
+   setting). npm falls back to the highest other version only if that one is deprecated
+   or doesn't support the running Node.
 3. Before fetching, npx prompts, **unless stdin is not a TTY or a CI environment is
    detected, in which case `--yes` is assumed**. In CI, `npx tool` installs and runs
    whatever `tool` is today, with only a log line.
-4. `--no` refuses to fetch: the command fails if the package is not already local.
-   `--no-install` is a deprecated spelling that npm converts to `--no`.
+4. `--no` refuses to install: the command fails unless the bin is already in the
+   project, installed globally, or in the npx cache. `--no-install` is a deprecated
+   spelling that npm converts to `--no`.
 
 npm 12 also blocks dependency install scripts by default; `--allow-scripts` lets an
 `npx` or `-g` install run them. See
@@ -71,7 +75,7 @@ from its own channel and call it directly. pm-audit reports these as `npx.native
 | `npx`, `npm exec` | local bin, else fetches | `pkg@1.2.3` | `npx --no pkg` |
 | `yarn dlx` (Yarn 4) | always a temporary environment | `yarn dlx pkg@1.2.3`, or `-p pkg@1.2.3` for extra packages | use `yarn exec` / `yarn run` |
 | `pnpm dlx`, `pnpx`, `pnx` (pnpm 11+ alias) | fetches into a temporary store | `pnx pkg@1.2.3` | use `pnpm exec` |
-| `bunx`, `bun x` | local bin, else fetches | `bunx pkg@1.2.3` | - |
+| `bunx`, `bun x` | local bin, else fetches | `bunx pkg@1.2.3` | `bunx --no-install pkg` |
 | Yarn 1 | no dlx; uses `npx` | - | `yarn run` |
 
 pnpm 11+ applies its `minimumReleaseAge` setting (default one day) to `pnx` as well as to
@@ -84,8 +88,10 @@ installs; that setting is a supply-chain control, so its policy lives in
   directory on `PATH`. It never fetches anything, which makes it the PHP analogue of
   `npx --no`.
 - `composer global require vendor/tool` installs into `COMPOSER_HOME` for the whole user,
-  outside any lockfile. Prefer `require-dev` in the project so the version is locked and
-  every developer and CI run gets the same one. When a global tool is unavoidable, pin it:
+  outside the project's lockfile: global commands run as a separate project there, with
+  its own `composer.json` and `composer.lock`. Prefer `require-dev` in the project so the
+  version is locked and every developer and CI run gets the same one. When a global tool is unavoidable, pin it:
   `composer global require "vendor/tool:1.2.3"`.
-- Composer has no `dlx`; `composer create-project vendor/skeleton dir 1.2.*` is the
-  scaffolding equivalent, and the version argument is the pin.
+- Composer has no `dlx`; `composer create-project vendor/skeleton dir 1.2.3` is the
+  scaffolding equivalent. The version argument is a pin only when it is exact: `1.2.*`
+  is a range (>=1.2.0 <1.3.0).

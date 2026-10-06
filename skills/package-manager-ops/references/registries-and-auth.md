@@ -1,14 +1,17 @@
 # Private Registries, Auth and Mirrors
 
 Pointing npm, Yarn, pnpm and Composer at private packages and mirrors without a credential
-ever reaching git. Facts verified 2026-10-05 against docs.npmjs.com (`npmrc`, v12),
-yarnpkg.com (`.yarnrc.yml`), the pnpm 11 release notes, the actions/setup-node README,
-and getcomposer.org (authentication and repositories articles, checked against 2.10.3).
+ever reaching git. Facts verified 2026-10-06 against docs.npmjs.com (`npmrc` and
+`config`, v12) and the npm/cli source, yarnpkg.com (`.yarnrc.yml`) and the Yarn source,
+pnpm.io (`npmrc`, settings) with the pnpm 11.0 and 11.5.3 release notes, the
+actions/setup-node README, and getcomposer.org (authentication and repositories
+articles, checked against 2.10.3).
 
 ## Contents
 
 - [The rule](#the-rule)
-- [npm and pnpm: .npmrc](#npm-and-pnpm-npmrc)
+- [npm: .npmrc](#npm-npmrc)
+- [pnpm: no placeholders in the project .npmrc](#pnpm-no-placeholders-in-the-project-npmrc)
 - [Yarn 4: .yarnrc.yml](#yarn-4-yarnrcyml)
 - [Composer: auth.json, COMPOSER_AUTH and repositories](#composer-authjson-composer_auth-and-repositories)
 - [CI wiring](#ci-wiring)
@@ -19,14 +22,15 @@ and getcomposer.org (authentication and repositories articles, checked against 2
 
 The **project** file says *where* packages come from and *which variable* holds the
 credential. The credential itself lives in the environment, the user-level config, or the
-CI secret store. Committed config contains `${NPM_TOKEN}`, never a token. pm-audit reports
-a literal token as `registry.token.committed` (by file and line; it never prints the
-value) and a committed `auth.json` as `registry.authjson.committed`.
+CI secret store. Committed npm and Yarn config contains `${NPM_TOKEN}`, never a token;
+pnpm ignores even the placeholder, so a pnpm repo commits no auth line at all. pm-audit
+reports a literal token as `registry.token.committed` (by file and line; it never prints
+the value) and a committed `auth.json` as `registry.authjson.committed`.
 
-## npm and pnpm: .npmrc
+## npm: .npmrc
 
 ```ini
-# .npmrc (committed)
+# .npmrc (committed; read by npm and Yarn 1, not usable this way by pnpm)
 @acme:registry=https://npm.example.com/
 //npm.example.com/:_authToken=${NPM_TOKEN}
 engine-strict=true
@@ -36,12 +40,43 @@ engine-strict=true
   default registry.
 - Auth keys must be scoped to a registry URL (`//host/path/:_authToken=`). npm refuses
   unscoped auth settings.
-- `${VAR}` is expanded from the environment. If the variable is unset npm leaves the text
-  as is; write `${VAR?}` to make a missing variable an error instead of a confusing 401.
+- `${VAR}` is expanded from the environment. If the variable is unset, npm leaves the
+  text as is and sends it as the token. `${VAR?}` turns a missing variable into an empty
+  string, not an error. Neither fails loudly, so check the variable in CI before the
+  install (`test -n "$NPM_TOKEN"`).
 - The real token goes in the user's `~/.npmrc` (written by `npm login --registry` or
   `npm config set //npm.example.com/:_authToken <token>`), or in the environment.
-- pnpm reads `.npmrc` for registries and auth. From pnpm 11 that is all it reads there;
-  every other setting moved to `pnpm-workspace.yaml`.
+- `engine-strict=true` here is npm-only. pnpm 11+ reads no such setting from `.npmrc`; it
+  wants `engineStrict: true` in `pnpm-workspace.yaml`.
+
+## pnpm: no placeholders in the project .npmrc
+
+pnpm reads `.npmrc` for registry and auth settings. Network settings (`httpProxy`,
+`httpsProxy`, `noProxy`, `localAddress`, `strictSsl`, `gitShallowHosts`) are still read
+there to ease migration; everything else goes in `pnpm-workspace.yaml` or the global
+`~/.config/pnpm/config.yaml`.
+
+Since pnpm 11.5.3 (2026-06-10, backported to 10.34.2), a `${...}` in the project `.npmrc`
+is ignored, with only a warning, in these positions: `registry`, `@scope:registry`, proxy
+URLs, any `//host/...` key, `_authToken`, `_auth`, `_password`, `username`,
+`tokenHelper`, `cert` and `key`. Registry URLs in `pnpm-workspace.yaml` are covered too.
+It is a security fix (GHSA-3qhv-2rgh-x77r): a cloned repo could otherwise send your CI
+token to a registry of its choosing. So the committed auth line above works for npm
+only; under pnpm, auth silently fails. pm-audit reports it as
+`registry.pnpm.placeholder-ignored`.
+
+Put the token where pnpm still expands it:
+
+- `pnpm config set //npm.example.com/:_authToken "$NPM_TOKEN"`, which writes the
+  user-level config, never the repo;
+- the user's `~/.npmrc`, where `${NPM_TOKEN}` still expands;
+- the environment: `pnpm_config_//npm.example.com/:_authToken` (11.6+), or
+  `pnpm_config__auth` as JSON (11.10+);
+- in GitHub Actions, setup-node's `registry-url`, which writes a user-level `.npmrc`.
+
+A registry URL that is not secret can be written literally in the project `.npmrc`.
+`PNPM_CONFIG_NPMRC_AUTH_FILE=.npmrc` declares the project file trusted again; set it only
+in CI that never runs untrusted pull requests.
 
 ## Yarn 4: .yarnrc.yml
 
@@ -104,7 +139,8 @@ GitHub Actions with npm:
     NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 ```
 
-`setup-node` writes a temporary `.npmrc` that reads `NODE_AUTH_TOKEN`. For Composer, set
+`setup-node` writes a temporary user-level `.npmrc` that reads `NODE_AUTH_TOKEN`, so it
+works for pnpm too (`pnpm install --frozen-lockfile` in place of `npm ci`). For Composer, set
 `COMPOSER_AUTH` from a secret on the install step:
 
 ```yaml
@@ -129,9 +165,13 @@ remove it from the old layers.
 
 - npm, pnpm and Yarn 1: `registry=https://proxy.example.com/` in the project `.npmrc`
   sends every unscoped package through the mirror. Yarn 4 uses `npmRegistryServer`.
-- Lockfiles record where each package resolved from (npm's `resolved`, Yarn's
-  resolution, pnpm's tarball URL when non-default). A team split between the public
-  registry and a mirror produces lockfile churn on every install. Pick one registry per
+- Lockfiles record where packages came from: npm's and Yarn 1's `resolved` URL, and
+  pnpm's tarball URL when it is not the default. Yarn 4 records only `name@npm:version`,
+  plus an `__archiveUrl` when a registry serves a non-standard tarball path.
+- A team split between the public registry and a mirror mixes hosts in the lockfile:
+  each new or updated entry records whichever registry resolved it. npm's default
+  `replace-registry-host=npmjs` fetches `registry.npmjs.org` URLs through a configured
+  mirror (not the reverse) and never rewrites stored entries. Pick one registry per
   repo, commit it in project config, and keep personal registry overrides out of the
   repo.
 - A mirror that serves a different tarball for the same version fails integrity checks
@@ -144,6 +184,7 @@ remove it from the old layers.
 1. **Revoke it first** at the registry or Packagist. Removing the line does not help:
    the token is in git history, in every clone and in any fork.
 2. Replace the line with a `${VAR}` reference and move the real value to the
-   environment or user config.
+   environment or user config. In a pnpm repo, delete the line instead and use one of
+   the pnpm options above.
 3. Check the registry's audit log for use of the token.
 4. Rewriting history is optional once the token is dead, and needs the team's agreement.

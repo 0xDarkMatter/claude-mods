@@ -2,8 +2,8 @@
 
 How to see what is behind, move it in an order that keeps the site building, read a peer
 conflict instead of silencing it, and refresh a lockfile without touching anything else.
-Facts verified 2026-10-05 against docs.npmjs.com, yarnpkg.com, pnpm.io and the Composer
-CHANGELOG at 2.10.3.
+Facts verified 2026-10-06 against docs.npmjs.com, yarnpkg.com and the Yarn source,
+pnpm.io, the npm-check-updates README, and the Composer docs and CHANGELOG at 2.10.3.
 
 ## Contents
 
@@ -19,7 +19,7 @@ CHANGELOG at 2.10.3.
 | Manager | Command | Shows |
 |---|---|---|
 | npm | `npm outdated` | current, wanted (newest in range), latest |
-| npm, major view | `npx npm-check-updates@23.1.0` | every dependency's latest, including majors; `-u` rewrites package.json |
+| npm, major view | `npx npm-check-updates@23.1.0` | the latest of dependencies, devDependencies, optionalDependencies and `packageManager`, including majors (peers only with `--dep`); `-u` rewrites package.json |
 | Yarn 1 / 4 | `yarn upgrade-interactive` | built in to both; Yarn 4 bundles every official plugin |
 | pnpm | `pnpm outdated`, `pnpm update --interactive --latest` | `-i -L` picks across majors |
 | Composer | `composer outdated --direct` | add `--major-only`, `--minor-only` or `--patch-only`; `--strict` exits non-zero when anything is outdated |
@@ -30,12 +30,19 @@ tool.
 
 ## In-range updates versus majors
 
-- **In range** (safe by your own declaration): `npm update`, `yarn up` (Yarn 4) or
-  `yarn upgrade` (Yarn 1), `pnpm update`, `composer update`. These move within the
-  existing ranges and rewrite only the lockfile (and, for npm, package.json when
-  `save` applies).
+- **In range** (safe by your own declaration): these move within the existing ranges.
+  - `npm update`, `yarn upgrade` (Yarn 1) and `composer update` rewrite only the lockfile
+    (npm also writes package.json when `save` applies).
+  - `yarn up -R <pkg>` (Yarn 4) re-resolves `<pkg>` within the existing ranges and
+    changes only the lockfile.
+  - `pnpm update` also moves each package.json range up to the resolved version, keeping
+    the operator (`^1.1.0` becomes `^1.4.2`), and updates catalog entries in
+    `pnpm-workspace.yaml`. `pnpm update --no-save` changes the lockfile only.
 - **Across a major** (a deliberate change): `npm install vite@^9`,
-  `yarn up vite@^9`, `pnpm add vite@^9`, `composer require vendor/pkg:^6`.
+  `yarn up vite@^9`, `pnpm add vite@^9`, `composer require vendor/pkg:^6`. A plain
+  `yarn up vite` belongs here too: it ignores the range in package.json, takes the
+  newest version (majors included) and rewrites package.json. Both `yarn up` forms need
+  package names; with none they change nothing.
 - **Composer helpers**: `composer bump` (2.4.0+) raises each constraint in
   `composer.json` to the version currently installed, so the manifest stops admitting
   versions you no longer test; use it on applications, not libraries.
@@ -105,7 +112,7 @@ Refresh metadata or resolve without installing:
 | npm | `npm install --package-lock-only` |
 | Yarn 4 | `yarn install --mode=update-lockfile` |
 | pnpm | `pnpm install --lockfile-only` |
-| Composer | `composer update --no-install` (resolve and write the lock); `composer update --lock` (hash and metadata only) |
+| Composer | `composer update --no-install` (resolve and write the lock); `composer update --lock --no-install` (hash and metadata only; without `--no-install` the install step runs too) |
 
 Review the diff: a lockfile-only refresh that moves dozens of versions is an update, and
 deserves the same testing as one.

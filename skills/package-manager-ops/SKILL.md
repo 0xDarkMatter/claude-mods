@@ -17,7 +17,7 @@ tools. Written for server-rendered sites (Craft CMS, Laravel, WordPress) on DDEV
 Vite or Laravel Mix build, where these mistakes are common: two lockfiles, unpinned
 Node, no `require.php`, end-of-life PHP and `npx` in READMEs.
 
-> Facts verified as of 2026-10-05 against docs.npmjs.com, yarnpkg.com, pnpm.io, bun.com,
+> Facts verified as of 2026-10-06 against docs.npmjs.com, yarnpkg.com, pnpm.io, bun.com,
 > getcomposer.org (checked against the 2.10.3 tag), nodejs.org, php.net and
 > docs.ddev.com. Current majors: npm 12 (since 2026-07-08; Node 24 and 26 still bundle
 > npm 11), pnpm 12, Yarn 4, Composer 2 (2.10.3), Bun 1. Each reference cites its sources.
@@ -53,7 +53,8 @@ Node, no `require.php`, end-of-life PHP and `npx` in READMEs.
 3. **Never switch managers by deleting the lockfile.** Import it (`pnpm import`, npm reading
    `yarn.lock`, Yarn 4 migrating a v1 lock) so resolved versions survive.
 4. **Pin the runtimes and make every pin agree.** Node: `.nvmrc`, `engines.node` with
-   `engine-strict=true`, DDEV `nodejs_version` (or `auto`). PHP: `require.php` (range),
+   `engine-strict=true` in `.npmrc` (pnpm: `engineStrict` in `pnpm-workspace.yaml`), DDEV
+   `nodejs_version` (or `auto`). PHP: `require.php` (range),
    `config.platform.php` (production's exact version) and DDEV `php_version` (same
    major.minor). Production pins name supported releases.
 5. **Run package managers where the code runs.** In a DDEV project that is
@@ -63,8 +64,10 @@ Node, no `require.php`, end-of-life PHP and `npx` in READMEs.
    without asking. Never route a native CLI (rg, fd, sd, jq) through npx: its npm name
    is not its official channel.
 7. **Credentials live in the environment.** Committed `.npmrc`/`.yarnrc.yml` hold
-   `${NPM_TOKEN}`; Composer uses global `auth.json` or `COMPOSER_AUTH`. A committed
-   token is revoked first, removed second.
+   `${NPM_TOKEN}` for npm and Yarn. pnpm 11.5.3+ ignores that placeholder in a project
+   `.npmrc`, so a pnpm token goes in user config or the environment. Composer uses
+   global `auth.json` or `COMPOSER_AUTH`. A committed token is revoked first, removed
+   second.
 8. **Read the error before the flag.** `--legacy-peer-deps`, `--force` and
    `--no-scripts` hide the problem from everyone except you; if one is truly needed, it
    goes in project config with a comment, so every machine resolves the same tree.
@@ -91,13 +94,13 @@ and npm 12, pnpm 10+, Yarn 4.14+ and Bun all block dependency install scripts by
 A read-only scan of one repo root. It finds conflicting lockfiles, lockfiles that
 disagree with their manifests, Node and PHP pins that are missing, disagree with each
 other or with DDEV, or name end-of-life releases, unpinned `npx`/`dlx` use in scripts,
-docs and CI, native CLIs routed through npx, Bower and node-sass, and committed registry
-credentials (reported by file and line, never by value). From CI configs, Dockerfiles and
-appspec hook scripts it reports unfrozen installs, Yarn flags on npm, unpinned global
-installs, deploys without `--no-dev`, Composer 1, and credentials written into a Docker
-build context; it follows a CI build into the subfolder it runs in. It lists nested
-package roots and flags them when they use another manager, or when CI installs in one
-that has no lockfile.
+docs and CI, native CLIs routed through npx, Bower and node-sass, committed registry
+credentials (reported by file and line, never by value), and `.npmrc` placeholders pnpm
+ignores. From CI configs, Dockerfiles and appspec hook scripts it reports unfrozen
+installs, Yarn flags on npm, unpinned global installs, deploys without `--no-dev`,
+Composer 1, and credentials written into a Docker build context; it follows a CI build
+into the subfolder it runs in. It lists nested package roots and flags them when they use
+another manager, or when CI installs in one that has no lockfile.
 
 ```bash
 bash scripts/run-python.sh scripts/pm-audit.py path/to/repo

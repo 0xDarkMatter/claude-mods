@@ -3,9 +3,9 @@
 Running a project's scripts, what runs implicitly during an install, why dependency
 install scripts no longer run by default anywhere, Composer scripts and plugins, and
 monorepo workspaces. Configuring the bundler a script calls belongs to
-`frontend-upgrade-ops`. Facts verified 2026-10-05 against docs.npmjs.com (v11 and v12, the
+`frontend-upgrade-ops`. Facts verified 2026-10-06 against docs.npmjs.com (v11 and v12, the
 npm CHANGELOG), yarnpkg.com and the Yarn 4.14.0 release, pnpm.io and the pnpm 10, 11 and 12
-release notes, bun.com, and getcomposer.org (checked against the 2.10.3 tag).
+release notes, bun.com, and getcomposer.org (docs and CHANGELOG at the 2.10.3 tag).
 
 ## Contents
 
@@ -64,17 +64,20 @@ lists above.
   `post-root-package-install`, `post-create-project-cmd` and more. Craft's starter
   project, for example, runs Craft's own setup from `post-create-project-cmd`.
 - Run a named script: `composer run-script <name>` (alias `composer run <name>`).
-- Skip scripts: `--no-scripts` on any command, or `COMPOSER_SKIP_SCRIPTS` with a
-  comma-separated list of event names.
+- Skip scripts: `--no-scripts` on any command, or `COMPOSER_SKIP_SCRIPTS` (2.8.6+) with
+  a comma-separated list of event names.
 - Plugins (packages of type `composer-plugin`) execute code inside Composer. Composer
   2.2+ only loads plugins listed in `config.allow-plugins`; interactively it asks, and a
-  non-interactive run (CI, deploy) fails on an unlisted one. The fix is a reviewed entry
-  (`composer config allow-plugins.vendor/plugin true`), committed, never a blanket
-  `true`.
+  non-interactive run (CI, deploy) fails on an unlisted one, unless the plugin sets
+  `extra.plugin-optional: true` (Composer 2.5.3+), in which case it is skipped without a
+  word. The fix is a reviewed entry (`composer config allow-plugins.vendor/plugin true`),
+  committed, never a blanket `true`.
 
 ## Workspaces and monorepos
 
-One lockfile at the root covers every workspace in all three JS managers.
+One lockfile at the root covers every workspace: always in npm and Yarn, and by default
+in pnpm (`sharedWorkspaceLockfile: false` in `pnpm-workspace.yaml` gives each project its
+own).
 
 | Manager | Declare | Run one | Run all |
 |---|---|---|---|
@@ -99,12 +102,19 @@ own lockfiles (they should not).
 
 ## pnpm settings moved to pnpm-workspace.yaml
 
-pnpm 11 stopped reading the `pnpm` field of package.json. `overrides`,
-`patchedDependencies`, `allowBuilds` and every other setting now live in
-`pnpm-workspace.yaml`, which a single-package repo also has. `.npmrc` is reduced to
-registry and auth settings, and `npm_config_*` environment variables are no longer read
-(use `pnpm_config_*`). A repo upgraded from pnpm 10 with a `pnpm` field in package.json
-silently loses those settings; pm-audit reports it as `js.pnpm.field-ignored`.
+pnpm 11 stopped reading the `pnpm` field of package.json. A repo upgraded from pnpm 10
+with that field silently loses those settings; pm-audit reports it as
+`js.pnpm.field-ignored`. `overrides`, `patchedDependencies`, `allowBuilds` and every
+other project setting now live in `pnpm-workspace.yaml`, which a single-package repo also
+has. User-wide settings go in the global `~/.config/pnpm/config.yaml`.
+
+`.npmrc` keeps registry and auth settings, plus network settings (`httpProxy`,
+`httpsProxy`, `noProxy`, `localAddress`, `strictSsl`, `gitShallowHosts`) that are still
+read there to ease migration. Nothing else counts there: `engine-strict=true` needs to
+become `engineStrict: true` in `pnpm-workspace.yaml`. `npm_config_*` environment
+variables are no longer read (use `pnpm_config_*`). Since 11.5.3, a `${...}` in a
+registry or auth setting of the project `.npmrc` is ignored
+([registries-and-auth.md](registries-and-auth.md#pnpm-no-placeholders-in-the-project-npmrc)).
 
 ```yaml
 # pnpm-workspace.yaml
@@ -116,5 +126,7 @@ overrides:
 
 Let `pnpm approve-builds` write the `allowBuilds` entries rather than hand-editing them.
 
-pnpm 12 warns about an unrecognised setting in this file, and fails when the project pins
-a pnpm version that satisfies the running one.
+pnpm 12 reports an unrecognised setting in this file. If the project pins a pnpm version
+and the running pnpm satisfies that pin, it fails with
+`ERR_PNPM_UNRECOGNIZED_WORKSPACE_SETTINGS`; otherwise it warns. `pnpm config` subcommands
+never fail on it.
