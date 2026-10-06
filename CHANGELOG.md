@@ -283,6 +283,22 @@ feature releases live in the README "Recent Updates" section.
   fixture `php-lockfile-invalid`; the three new assertions were each seen failing first.
   The facts store also watches the Yarn README's "occasional hotfix" line.
 
+- **Freshness job no longer passes when a verifier crashes** - every step in
+  `.github/workflows/freshness.yml` mapped only exit 10 (fail) and 7 (warn), then ended in
+  a bare `exit 0`. Any other code passed green with no annotation: an uncaught exception
+  (1), a usage slip (2), facts missing or unparseable (3/4), a missing tool (5, 127). A
+  real route was package-manager-ops' `check-pm-facts.py`: an upstream Node date gaining a
+  time part (`2027-04-20T00:00:00Z`) raises an uncaught ValueError, and the weekly job
+  would report green while checking nothing. All 19 steps now hand their verifier to one
+  helper, `.github/scripts/freshness-step.sh`, which keeps each step's drift and warning
+  messages and fails any other code as `<skill> verifier crashed or was misused (exit N)`,
+  naming its protocol class. The ffmpeg and yt-dlp installs now warn when they fail; the
+  verifier's exit 7 still keeps a mirror blip advisory. `tests/check-resources.sh` pins the
+  mapping for 0, 7, 10, 1-6 and a missing command, and fails a PR whose freshness step
+  reads `$?` itself or runs a `--live` verifier outside the helper. Its 10 new checks
+  fail against the old workflow and against a helper with the old catch-all restored.
+  SKILL-RESOURCE-PROTOCOL.md section 7 states the rule.
+
 - **package-manager-ops facts review** - two model reviewers read eight references, and
   every disputed claim was checked against primary sources (npm/cli 12.2.0, Composer
   2.10.3, pnpm.io, yarnpkg.com, bun.com). 30 corrections, the ones that change advice

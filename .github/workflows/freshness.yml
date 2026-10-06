@@ -3,8 +3,13 @@ name: Freshness (live drift checks)
 # Live staleness checks for skills that encode fast-moving external facts
 # (SKILL-RESOURCE-PROTOCOL.md §7). These hit the network, so they run on a
 # schedule — NEVER as a PR gate. A network blip / rate-limit exits 7 and is
-# treated as "skip, retry next run"; only a confirmed drift (exit 10) fails
-# the job loudly.
+# treated as "skip, retry next run"; a confirmed drift (exit 10) fails the job
+# loudly, and so does ANY other exit code: a verifier that crashed or was
+# misused checked nothing, and must never read as "no drift".
+#
+# Every verifier runs through .github/scripts/freshness-step.sh, which owns that
+# mapping. Don't read `$?` in a step: tests/check-resources.sh fails the PR if a
+# `--live` command is not the one handed to the helper after `--`.
 
 on:
   schedule:
@@ -29,24 +34,21 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          set +e
-          python skills/claude-api-ops/scripts/check-model-table.py --live
-          rc=$?
-          # 0 = in sync, 7 = unavailable (no key / unreachable) -> advisory skip,
-          # 10 = drift -> fail. Anything else is a real error.
-          if [ "$rc" -eq 10 ]; then echo "::error::model table drifted from the live Models API"; exit 1; fi
-          if [ "$rc" -eq 7 ]; then echo "::warning::model-table live check unavailable (no key / unreachable) — skipped"; fi
-          exit 0
+          bash .github/scripts/freshness-step.sh --name claude-api-ops \
+            --drift "model table drifted from the live Models API" \
+            --unavailable "model-table live check unavailable (no key / unreachable) — skipped" \
+            -- python skills/claude-api-ops/scripts/check-model-table.py --live
 
       - name: ffmpeg-ops docs vs an installed ffmpeg
         run: |
-          set +e
-          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
-          bash skills/ffmpeg-ops/scripts/verify-commands.sh --live
-          rc=$?
-          if [ "$rc" -eq 10 ]; then echo "::error::ffmpeg-ops docs drifted from current ffmpeg (renamed/removed filter or option)"; exit 1; fi
-          if [ "$rc" -eq 7 ]; then echo "::warning::ffmpeg unavailable on runner — live check skipped"; fi
-          exit 0
+          # An apt failure leaves ffmpeg absent, which the verifier reports as exit 7:
+          # a mirror blip is UNAVAILABLE, not drift, so warn here instead of failing.
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg \
+            || echo "::warning::apt could not install ffmpeg - the live check will report it unavailable"
+          bash .github/scripts/freshness-step.sh --name ffmpeg-ops \
+            --drift "ffmpeg-ops docs drifted from current ffmpeg (renamed/removed filter or option)" \
+            --unavailable "ffmpeg unavailable on runner — live check skipped" \
+            -- bash skills/ffmpeg-ops/scripts/verify-commands.sh --live
 
       - name: Set up Deno (JS runtime for yt-dlp YouTube extraction)
         # YouTube now needs a JS runtime to solve its nsig challenge; yt-dlp
@@ -61,163 +63,132 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set +e
           # Runner constraint: GH-hosted images lack uv; locally prefer `uv tool install yt-dlp`.
-          python -m pip install --quiet yt-dlp
-          bash skills/ytdlp-ops/scripts/check-ytdlp-version.sh --live
-          rc=$?
-          if [ "$rc" -eq 10 ]; then echo "::error::ytdlp-ops: yt-dlp >60 days behind latest release, a documented flag vanished, or the smoke extraction hit an extractor-internal error (real drift)"; exit 1; fi
-          if [ "$rc" -eq 7 ]; then echo "::warning::ytdlp-ops live check advisory (network/API/yt-dlp unavailable, or the smoke test could not verify extraction — YouTube bot-gates this runner IP) — not a failure"; fi
-          exit 0
+          # A failed install leaves yt-dlp absent, which the verifier reports as exit 7.
+          python -m pip install --quiet yt-dlp \
+            || echo "::warning::pip could not install yt-dlp - the live check will report it unavailable"
+          bash .github/scripts/freshness-step.sh --name ytdlp-ops \
+            --drift "ytdlp-ops: yt-dlp >60 days behind latest release, a documented flag vanished, or the smoke extraction hit an extractor-internal error (real drift)" \
+            --unavailable "ytdlp-ops live check advisory (network/API/yt-dlp unavailable, or the smoke test could not verify extraction — YouTube bot-gates this runner IP) — not a failure" \
+            -- bash skills/ytdlp-ops/scripts/check-ytdlp-version.sh --live
 
       - name: mapbox-ops facts vs live (style URLs + GL JS major)
         run: |
-          set +e
-          python skills/mapbox-ops/scripts/check-mapbox-facts.py --live
-          rc=$?
-          if [ "$rc" -eq 10 ]; then echo "::error::mapbox-ops drift — a third-party style URL 404'd or GL JS shipped a major past v3"; exit 1; fi
-          if [ "$rc" -eq 7 ]; then echo "::warning::mapbox-ops live check unreachable — skipped"; fi
-          exit 0
+          bash .github/scripts/freshness-step.sh --name mapbox-ops \
+            --drift "mapbox-ops drift — a third-party style URL 404'd or GL JS shipped a major past v3" \
+            --unavailable "mapbox-ops live check unreachable — skipped" \
+            -- python skills/mapbox-ops/scripts/check-mapbox-facts.py --live
 
       - name: typescript-ops packages vs npm registry (typescript/zod/valibot majors)
         run: |
-          set +e
-          python skills/typescript-ops/scripts/check-typescript-facts.py --live
-          rc=$?
-          if [ "$rc" -eq 10 ]; then echo "::error::typescript-ops drift — a package's latest npm major moved past the documented major"; exit 1; fi
-          if [ "$rc" -eq 7 ]; then echo "::warning::typescript-ops live check unreachable (npm registry) — skipped"; fi
-          exit 0
+          bash .github/scripts/freshness-step.sh --name typescript-ops \
+            --drift "typescript-ops drift — a package's latest npm major moved past the documented major" \
+            --unavailable "typescript-ops live check unreachable (npm registry) — skipped" \
+            -- python skills/typescript-ops/scripts/check-typescript-facts.py --live
 
       - name: threejs-ops packages vs npm registry (existence + three major)
         run: |
-          set +e
-          python skills/threejs-ops/scripts/check-three-facts.py --live
-          rc=$?
-          if [ "$rc" -eq 10 ]; then echo "::error::threejs-ops drift — a committed npm package is gone, or three left the 0.<release> scheme"; exit 1; fi
-          if [ "$rc" -eq 7 ]; then echo "::warning::threejs-ops live check unreachable (npm registry) — skipped"; fi
-          exit 0
+          bash .github/scripts/freshness-step.sh --name threejs-ops \
+            --drift "threejs-ops drift — a committed npm package is gone, or three left the 0.<release> scheme" \
+            --unavailable "threejs-ops live check unreachable (npm registry) — skipped" \
+            -- python skills/threejs-ops/scripts/check-three-facts.py --live
 
       - name: figma-ops router + community inventory vs live index
         run: |
-          set +e
-          node skills/figma-ops/scripts/verify-freshness.mjs --live
-          rc=$?
-          if [ "$rc" -eq 10 ]; then echo "::error::figma-ops drift — the router names a plugin skill that no longer exists, or the community index lists skills references/skill-map.md doesn't"; exit 1; fi
-          if [ "$rc" -eq 7 ]; then echo "::warning::figma-ops live check unreachable (GitHub raw) — skipped"; fi
-          exit 0
+          bash .github/scripts/freshness-step.sh --name figma-ops \
+            --drift "figma-ops drift — the router names a plugin skill that no longer exists, or the community index lists skills references/skill-map.md doesn't" \
+            --unavailable "figma-ops live check unreachable (GitHub raw) — skipped" \
+            -- node skills/figma-ops/scripts/verify-freshness.mjs --live
 
       - name: loop-ops native-scheduling limits vs published docs
         run: |
-          set +e
-          python skills/loop-ops/scripts/check-native-facts.py --live
-          rc=$?
-          if [ "$rc" -eq 10 ]; then echo "::error::loop-ops drift — a native scheduling limit changed upstream; re-verify references/native-scheduling.md"; exit 1; fi
-          if [ "$rc" -eq 7 ]; then echo "::warning::loop-ops live check unreachable (code.claude.com docs) — skipped"; fi
-          exit 0
+          bash .github/scripts/freshness-step.sh --name loop-ops \
+            --drift "loop-ops drift — a native scheduling limit changed upstream; re-verify references/native-scheduling.md" \
+            --unavailable "loop-ops live check unreachable (code.claude.com docs) — skipped" \
+            -- python skills/loop-ops/scripts/check-native-facts.py --live
 
       - name: r-ops recommended packages still on CRAN
         run: |
-          set +e
-          python skills/r-ops/scripts/check-r-facts.py --live
-          rc=$?
-          if [ "$rc" -eq 10 ]; then echo "::error::r-ops drift — a recommended CRAN package no longer resolves (archived/removed)"; exit 1; fi
-          if [ "$rc" -eq 7 ]; then echo "::warning::r-ops live check unreachable (CRAN/crandb) — skipped"; fi
-          exit 0
+          bash .github/scripts/freshness-step.sh --name r-ops \
+            --drift "r-ops drift — a recommended CRAN package no longer resolves (archived/removed)" \
+            --unavailable "r-ops live check unreachable (CRAN/crandb) — skipped" \
+            -- python skills/r-ops/scripts/check-r-facts.py --live
 
       - name: isometric-ops cited packages vs npm registry
         run: |
-          set +e
-          python skills/isometric-ops/scripts/check-iso-facts.py --live
-          rc=$?
-          if [ "$rc" -eq 10 ]; then echo "::error::isometric-ops drift — a cited npm package is gone or renamed"; exit 1; fi
-          if [ "$rc" -eq 7 ]; then echo "::warning::isometric-ops live check unreachable (npm registry) — skipped"; fi
-          exit 0
+          bash .github/scripts/freshness-step.sh --name isometric-ops \
+            --drift "isometric-ops drift — a cited npm package is gone or renamed" \
+            --unavailable "isometric-ops live check unreachable (npm registry) — skipped" \
+            -- python skills/isometric-ops/scripts/check-iso-facts.py --live
 
       - name: hono-ops packages vs npm registry (existence + hono major)
         run: |
-          set +e
-          python skills/hono-ops/scripts/check-hono-facts.py --live
-          rc=$?
-          if [ "$rc" -eq 10 ]; then echo "::error::hono-ops drift — a named npm package is gone, or hono shipped a major past v4"; exit 1; fi
-          if [ "$rc" -eq 7 ]; then echo "::warning::hono-ops live check unreachable (npm registry) — skipped"; fi
-          exit 0
+          bash .github/scripts/freshness-step.sh --name hono-ops \
+            --drift "hono-ops drift — a named npm package is gone, or hono shipped a major past v4" \
+            --unavailable "hono-ops live check unreachable (npm registry) — skipped" \
+            -- python skills/hono-ops/scripts/check-hono-facts.py --live
 
       - name: nextjs-ops packages vs npm registry (existence + Next.js/React majors)
         run: |
-          set +e
-          python skills/nextjs-ops/scripts/check-nextjs-facts.py --live
-          rc=$?
-          if [ "$rc" -eq 10 ]; then echo "::error::nextjs-ops drift - a named npm package is gone, or Next.js/React shipped a major past the documented line (caching + rendering semantics move with the major)"; exit 1; fi
-          if [ "$rc" -eq 7 ]; then echo "::warning::nextjs-ops live check unreachable (npm registry) - skipped"; fi
-          exit 0
+          bash .github/scripts/freshness-step.sh --name nextjs-ops \
+            --drift "nextjs-ops drift - a named npm package is gone, or Next.js/React shipped a major past the documented line (caching + rendering semantics move with the major)" \
+            --unavailable "nextjs-ops live check unreachable (npm registry) - skipped" \
+            -- python skills/nextjs-ops/scripts/check-nextjs-facts.py --live
 
       - name: craftcms-ops Craft + plugin majors vs Packagist
         run: |
-          set +e
-          python skills/craftcms-ops/scripts/check-craft-facts.py --live
-          rc=$?
-          if [ "$rc" -eq 10 ]; then echo "::error::craftcms-ops drift - a package left Packagist, or Craft/a plugin shipped a stable major past the documented line (e.g. Craft 6, Formie 4)"; exit 1; fi
-          if [ "$rc" -eq 7 ]; then echo "::warning::craftcms-ops live check unreachable (Packagist) - skipped"; fi
-          exit 0
+          bash .github/scripts/freshness-step.sh --name craftcms-ops \
+            --drift "craftcms-ops drift - a package left Packagist, or Craft/a plugin shipped a stable major past the documented line (e.g. Craft 6, Formie 4)" \
+            --unavailable "craftcms-ops live check unreachable (Packagist) - skipped" \
+            -- python skills/craftcms-ops/scripts/check-craft-facts.py --live
 
       - name: web-perf-ops Core Web Vitals thresholds + tool majors (web-vitals source, npm)
         run: |
-          set +e
-          python skills/web-perf-ops/scripts/check-web-perf-facts.py --live
-          rc=$?
-          if [ "$rc" -eq 10 ]; then echo "::error::web-perf-ops drift - Google moved a Core Web Vitals threshold, a tool shipped a new major or was deprecated, or @lhci/cli changed its bundled Lighthouse (audit ids move with it)"; exit 1; fi
-          if [ "$rc" -eq 7 ]; then echo "::warning::web-perf-ops live check unreachable (unpkg / npm registry) - skipped"; fi
-          exit 0
+          bash .github/scripts/freshness-step.sh --name web-perf-ops \
+            --drift "web-perf-ops drift - Google moved a Core Web Vitals threshold, a tool shipped a new major or was deprecated, or @lhci/cli changed its bundled Lighthouse (audit ids move with it)" \
+            --unavailable "web-perf-ops live check unreachable (unpkg / npm registry) - skipped" \
+            -- python skills/web-perf-ops/scripts/check-web-perf-facts.py --live
 
       - name: frontend-upgrade-ops packages vs npm + Packagist (majors + plugin-vue2 peer range)
         run: |
-          set +e
-          python skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py --live
-          rc=$?
-          if [ "$rc" -eq 10 ]; then echo "::error::frontend-upgrade-ops drift - Vite/Vue/Pinia/craft-vite shipped a major past the documented line, a package is gone, or @vitejs/plugin-vue2 widened its vite peer range (the Mix-to-Vite sequencing advice depends on it)"; exit 1; fi
-          if [ "$rc" -eq 7 ]; then echo "::warning::frontend-upgrade-ops live check unreachable (npm/Packagist) - skipped"; fi
-          exit 0
+          bash .github/scripts/freshness-step.sh --name frontend-upgrade-ops \
+            --drift "frontend-upgrade-ops drift - Vite/Vue/Pinia/craft-vite shipped a major past the documented line, a package is gone, or @vitejs/plugin-vue2 widened its vite peer range (the Mix-to-Vite sequencing advice depends on it)" \
+            --unavailable "frontend-upgrade-ops live check unreachable (npm/Packagist) - skipped" \
+            -- python skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py --live
 
       - name: ddev-ops facts vs DDEV releases, docs, built-in commands + PHP/Node EOL
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set +e
-          python skills/ddev-ops/scripts/check-ddev-facts.py --live
-          rc=$?
-          if [ "$rc" -eq 10 ]; then echo "::error::ddev-ops drift - DDEV shipped a new minor, changed a default (PHP/database/Node.js) or a built-in command, or a PHP/Node.js line reached end of life; re-verify assets/ddev-facts.json and the prose"; exit 1; fi
-          if [ "$rc" -eq 7 ]; then echo "::warning::ddev-ops live check unreachable (GitHub API / raw docs / endoflife.date) - skipped"; fi
-          exit 0
+          bash .github/scripts/freshness-step.sh --name ddev-ops \
+            --drift "ddev-ops drift - DDEV shipped a new minor, changed a default (PHP/database/Node.js) or a built-in command, or a PHP/Node.js line reached end of life; re-verify assets/ddev-facts.json and the prose" \
+            --unavailable "ddev-ops live check unreachable (GitHub API / raw docs / endoflife.date) - skipped" \
+            -- python skills/ddev-ops/scripts/check-ddev-facts.py --live
 
       - name: repo-doctor AGENTS.md protocol vs Claude Code memory docs
         run: |
-          set +e
-          python skills/repo-doctor/scripts/check-memory-docs.py --live
-          rc=$?
-          if [ "$rc" -eq 10 ]; then echo "::error::Claude Code's memory docs no longer state a fact the AGENTS.md protocol encodes (version floor, shadowing, the Project instructions setting, the 200-line target) - re-read the page and fix agents-md-protocol.md section 4"; exit 1; fi
-          if [ "$rc" -eq 7 ]; then echo "::warning::memory-docs live check unreachable (code.claude.com) - skipped"; fi
-          exit 0
+          bash .github/scripts/freshness-step.sh --name repo-doctor \
+            --drift "Claude Code's memory docs no longer state a fact the AGENTS.md protocol encodes (version floor, shadowing, the Project instructions setting, the 200-line target) - re-read the page and fix agents-md-protocol.md section 4" \
+            --unavailable "memory-docs live check unreachable (code.claude.com) - skipped" \
+            -- python skills/repo-doctor/scripts/check-memory-docs.py --live
 
       - name: package-manager-ops Node/PHP tables + manager majors (nodejs.org, php.net, npm, Composer, GitHub)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set +e
-          python skills/package-manager-ops/scripts/check-pm-facts.py --live
-          rc=$?
-          if [ "$rc" -eq 10 ]; then echo "::error::package-manager-ops drift - a Node or PHP release line or date moved, a manager shipped a new major, or Corepack/Volta/node-sass/Yarn 1/Bower changed status (pm-audit's end-of-life table depends on it)"; exit 1; fi
-          if [ "$rc" -eq 7 ]; then echo "::warning::package-manager-ops live check unreachable (nodejs.org / php.net / npm / getcomposer.org / GitHub) - skipped"; fi
-          exit 0
+          bash .github/scripts/freshness-step.sh --name package-manager-ops \
+            --drift "package-manager-ops drift - a Node or PHP release line or date moved, a manager shipped a new major, or Corepack/Volta/node-sass/Yarn 1/Bower changed status (pm-audit's end-of-life table depends on it)" \
+            --unavailable "package-manager-ops live check unreachable (nodejs.org / php.net / npm / getcomposer.org / GitHub) - skipped" \
+            -- python skills/package-manager-ops/scripts/check-pm-facts.py --live
 
       - name: GitHub Action refs still resolve
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set +e
-          # Scan every shipped workflow asset + the repo's own workflows.
-          targets="skills/terraform-ops/assets/github-actions-terraform.yml .github/workflows/*.yml"
-          bash skills/terraform-ops/scripts/check-action-refs.sh --live $targets
-          rc=$?
-          if [ "$rc" -eq 10 ]; then echo "::error::a GitHub Action 'uses:' ref no longer resolves"; exit 1; fi
-          if [ "$rc" -eq 7 ]; then echo "::warning::action-ref live check rate-limited / unreachable — skipped"; fi
-          exit 0
+          # Scan every shipped workflow asset + the repo's own workflows. A glob that
+          # matches nothing reaches the verifier literally, exits 3 and fails the step.
+          bash .github/scripts/freshness-step.sh --name terraform-ops \
+            --drift "a GitHub Action 'uses:' ref no longer resolves" \
+            --unavailable "action-ref live check rate-limited / unreachable — skipped" \
+            -- bash skills/terraform-ops/scripts/check-action-refs.sh --live \
+               skills/terraform-ops/assets/github-actions-terraform.yml .github/workflows/*.yml

@@ -197,6 +197,16 @@ check-model-table.py --live         # exit 10 if live Models API disagrees with 
 The scheduled job runs `--live` weekly; on exit `10` it fails loudly (or opens an issue)
 naming the exact drift. The skill stays trustworthy without making honest PRs flaky.
 
+**The scheduled job treats every other exit code as a failure.** Each step hands its
+verifier to one helper, [`.github/scripts/freshness-step.sh`](../.github/scripts/freshness-step.sh):
+`0` passes, `7` warns and passes, `10` fails with the step's drift message, and any other
+code fails as "verifier crashed or was misused (exit N)". A verifier that dies before
+comparing anything (an uncaught exception exits `1`; facts it cannot find or parse exit
+`3`/`4`) has checked nothing, so it must not read as "no drift". The steps once ended in
+a bare `exit 0`, so such a crash passed green every week. For verifier authors, this means
+exit `0` only after the comparison has run. [`tests/check-resources.sh`](../tests/check-resources.sh)
+pins the helper's mapping and fails a PR whose freshness step reads `$?` itself.
+
 ---
 
 ## 8. The resource-scaffold checklist
