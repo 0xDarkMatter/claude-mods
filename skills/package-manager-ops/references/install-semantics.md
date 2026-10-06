@@ -45,6 +45,12 @@ it must. That is right on a dev machine after editing dependencies and wrong eve
 else. `npm install --package-lock-only` refreshes the lock without touching
 `node_modules`.
 
+`npm install --frozen-lockfile` is not a frozen install. The flag is Yarn's, and npm has
+no such option. npm up to 11.1 drops it silently, 11.2 and later warn about an "Unknown
+cli config" and install unfrozen anyway, and npm 12 refuses the command, because unknown
+CLI flags became errors (npm/cli#9276; #9729 relaxed that only for `.npmrc` keys). The
+frozen npm install is `npm ci`.
+
 Production-only: `--omit=dev` (the old `--production` flag is a deprecated alias for it).
 `omit` defaults to `dev` when `NODE_ENV=production`, which surprises builds: a build step
 that needs Vite or Sass (devDependencies) fails if the CI sets `NODE_ENV=production`

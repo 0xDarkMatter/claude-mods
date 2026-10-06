@@ -223,6 +223,24 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **pm-audit judged deploys per file, not per job** - a read-only run over 88 real agency
+  repositories found three accuracy problems in `package-manager-ops`' audit. (1)
+  `deploy.composer.dev` flagged the lint job of a common GitHub Actions template
+  (front-end build, backend lint, tag, deploy) in 27 repositories, all false: the deploy
+  job ships with `--no-dev`. GitHub Actions workflows are now split into jobs (any
+  indent width) and only a job that ships is asked for `--no-dev`; an `aws s3 cp` upload
+  now counts as shipping. GitLab CI and Bitbucket Pipelines stay whole-file, because
+  their later jobs receive every earlier artifact by default. `deploy.install.unfrozen`
+  stays in every job: a front-end job whose build is deployed ships its install. (2)
+  `npm install --frozen-lockfile` gets its own message. The flag is Yarn's: npm up to 11.1
+  ignores it, 11.2 and later warn and install unfrozen, and npm 12 refuses the command.
+  (3) `php.require.missing` is a note, not a warning, in a project that sets
+  `config.platform.php`. Per Composer 2.10.3, install checks `require.php` against the
+  pretended PHP, and `platform_check.php` already enforces the packages' PHP floor. A
+  library still gets the warning. Six new fixture cases and an optional `_lines` pin
+  that asserts which line fires; each case was seen failing first, and 8 mutants were
+  killed.
+
 - **`fleet stop` SIGKILLed the daemon mid-gate** - its fixed "5s grace, then
   SIGKILL" did not know a land was running, and the daemon defers SIGTERM until
   the land finishes. With any `test_cmd` slower than 5s, the merge stayed on the

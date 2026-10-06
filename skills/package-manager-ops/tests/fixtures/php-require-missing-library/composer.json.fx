@@ -1,6 +1,6 @@
 {
-  "name": "fixture/site",
-  "type": "project",
+  "name": "fixture/plugin",
+  "type": "craft-plugin",
   "require": {
     "craftcms/cms": "^5.8"
   },
@@ -8,6 +8,9 @@
     "yiisoft/yii2-shell": "^2.0.3"
   },
   "config": {
+    "platform": {
+      "php": "8.4.0"
+    },
     "sort-packages": true
   }
 }

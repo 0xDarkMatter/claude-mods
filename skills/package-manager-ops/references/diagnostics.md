@@ -26,10 +26,24 @@ package roots that carry their own lockfile, so run it again on each of those.
 It also reads CI configs (`.github/workflows/`, `.gitlab-ci.yml`, `bitbucket-pipelines.yml`,
 `buildspec*.yml` and similar), Dockerfiles and AWS CodeDeploy `appspec.yml` hook scripts. In
 YAML only command keys (`run:`, `script:`, `commands:`) count, so a command quoted in a
-release body is not read as one. A workflow is treated as a deploy when it ships something
-(`docker push`, `aws ecr`, `rsync`, `ansible-playbook`, ...) and runs no tests; a test job
-legitimately installs dev packages. Lockfile-only refreshes (`--package-lock-only`,
+release body is not read as one. Lockfile-only refreshes (`--package-lock-only`,
 `--lockfile-only`, `composer update --lock`) are maintenance and pass.
+
+Frozen installs are required in every CI job, whether it ships or not: the managers
+document the frozen install for CI as a whole, and a front-end job whose build a deploy job
+downloads ships its install without any deploy marker of its own. `--no-dev` is required
+only where `vendor/` ships:
+
+- a Dockerfile or an appspec hook script, always;
+- a GitHub Actions **job** that ships something (`docker push`, `aws deploy`, an `aws s3 cp`
+  upload, `rsync`, `ansible-playbook`, ...) and runs no tests. Each job runs on a fresh
+  runner and shares files only through artifact actions, so a lint or test job beside the
+  deploy job may install dev packages. A job that hands `vendor/` to the deploy job as an
+  artifact is not followed;
+- any other CI file judged **as a whole**, with the same rule. In GitLab CI and Bitbucket
+  Pipelines a later job downloads every earlier artifact by default, and jobs inherit
+  commands through `extends:`, `default:` and anchors, so one job's block is not the
+  whole story.
 
 | Id | Severity | Means | Fix in |
 |---|---|---|---|
@@ -46,7 +60,7 @@ legitimately installs dev packages. Lockfile-only refreshes (`--package-lock-onl
 | `node.pin.disagree` | warn | `.nvmrc`, `engines`, `devEngines`, DDEV and friends name different majors | [version-pinning.md](version-pinning.md#what-reads-which-node-pin) |
 | `ddev.node.unpinned` | warn | DDEV has no `nodejs_version`, so it follows DDEV's default | [version-pinning.md](version-pinning.md#the-recommended-node-pin-set); values in `ddev-ops` |
 | `php.manifest.invalid` | error | composer.json is not valid JSON | `composer validate` |
-| `php.require.missing` | warn | no `require.php` | [version-pinning.md](version-pinning.md#the-three-php-pins-and-what-each-means) |
+| `php.require.missing` | warn | no `require.php` in a library, or in a project without `config.platform.php` (with the platform pin it is only a note) | [version-pinning.md](version-pinning.md#the-three-php-pins-and-what-each-means) |
 | `php.platform.unset` | warn | no `config.platform.php` in a project | [version-pinning.md](version-pinning.md#the-three-php-pins-and-what-each-means) |
 | `php.pin.disagree` | warn | DDEV `php_version`, `config.platform.php`, the lock's platform override and `require.php` disagree | [version-pinning.md](version-pinning.md#the-three-php-pins-and-what-each-means) |
 | `php.eol` | warn | a pinned (or the only admitted) PHP is past security support | [legacy-exits.md](legacy-exits.md#end-of-life-php) |
@@ -60,8 +74,8 @@ legitimately installs dev packages. Lockfile-only refreshes (`--package-lock-onl
 | `registry.authjson.committed` | error | a root `auth.json` that is not gitignored | [registries-and-auth.md](registries-and-auth.md#when-a-token-was-committed) |
 | `registry.credentials.image` | error | CI writes `auth.json` or `.npmrc` into the build context, a Dockerfile copies the whole context, `.dockerignore` lets it through | [registries-and-auth.md](registries-and-auth.md#ci-wiring) |
 | `js.manager.mixed` | warn | nested package roots use a different manager than the root | [detect-and-choose.md](detect-and-choose.md#two-lockfiles-pick-one) |
-| `deploy.install.unfrozen` | warn | CI or a deploy runs `npm install`, a non-frozen Yarn/pnpm/Bun install, or `composer update`/`require` | [install-semantics.md](install-semantics.md#the-one-table) |
-| `deploy.composer.dev` | warn | a deploy (Dockerfile, appspec hook, deploying workflow) runs `composer install` without `--no-dev` | [install-semantics.md](install-semantics.md#deploy-patterns) |
+| `deploy.install.unfrozen` | warn | CI or a deploy runs `npm install` (with its own message for `npm install --frozen-lockfile`: a Yarn flag npm does not freeze on), a non-frozen Yarn/pnpm/Bun install, or `composer update`/`require` | [install-semantics.md](install-semantics.md#the-one-table) |
+| `deploy.composer.dev` | warn | `composer install` without `--no-dev` where `vendor/` ships: a Dockerfile, an appspec hook, a shipping GitHub Actions job, or another CI file that ships | [install-semantics.md](install-semantics.md#deploy-patterns) |
 | `php.composer.v1` | warn | CI or a Dockerfile uses Composer 1, end of life since 2026-05-30 | [legacy-exits.md](legacy-exits.md#composer-1-to-composer-2) |
 
 The end-of-life checks read dated tables from `assets/package-manager-facts.json`; pass
