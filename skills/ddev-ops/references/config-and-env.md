@@ -125,7 +125,7 @@ must agree on PHP: `.ddev/config.yaml`, the CI runner and production.
 | One developer's machine: Mutagen, extra hostnames, a fixed DB port, a per-checkout `name` | `.ddev/config.local.yaml` or `config.<name>.local.yaml` | no (gitignored once DDEV has run; see below) |
 | Every project on this machine | `ddev config global --<flag>` (`~/.ddev/global_config.yaml`) | n/a |
 | Container env vars for the team | `.ddev/.env`, `.ddev/.env.<service>` | yes |
-| Secrets and per-developer env | `.ddev/.env.local`, `.ddev/.env.<service>.local` (v1.25.4+) | no |
+| Secrets and per-developer env | `.ddev/.env.local`, `.ddev/.env.<service>.local` (v1.25.4+) | no (gitignored once DDEV has run; see below) |
 
 - Override files *merge* into `config.yaml`. Set `override_config: true` inside one when
   it must *replace* values, for example to empty a list (`additional_hostnames: []`).

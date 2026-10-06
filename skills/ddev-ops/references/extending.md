@@ -214,10 +214,12 @@ container.
     Linux, and of OrbStack; a `${SSH_AUTH_SOCK}` bind forwards on native Linux Docker.
   - A password manager's agent typically holds all of a developer's keys. The private key
     never leaves the agent, but signing is all an attacker needs.
-  - On Docker Desktop for Windows (WSL2) it breaks SSH instead. Observed with DDEV
-    v1.25.4: `ddev start` succeeded, Docker mounted an empty root-owned directory at that
-    path, and the file's `SSH_AUTH_SOCK` setting pointed there. `ssh-add -l` in `web`
-    failed with "Permission denied". A key loaded with `ddev auth ssh` was still in
-    DDEV's agent, but nothing in `web` used it any more. Other providers weren't tested.
+  - On Docker Desktop for Windows (WSL2), a file that also sets `SSH_AUTH_SOCK` breaks
+    SSH instead. Observed with DDEV v1.25.4: `ddev start` succeeded, Docker mounted an
+    empty root-owned directory at that path, and `SSH_AUTH_SOCK` pointed there. `ssh-add
+    -l` in `web` failed with "Permission denied". A key loaded with `ddev auth ssh` was
+    still in DDEV's agent and answered when asked through DDEV's socket explicitly, but
+    anything relying on `SSH_AUTH_SOCK` no longer reached it. Other providers weren't
+    tested.
 - `scripts/audit-ddev-config.py` flags the forwarding (`ssh-agent-forwarded`).
 - Stale host keys: `ddev exec ssh-keygen -f /home/.ssh-agent/known_hosts -R <host>`.

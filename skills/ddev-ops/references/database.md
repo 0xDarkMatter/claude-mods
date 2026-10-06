@@ -47,15 +47,18 @@ ddev snapshot --cleanup                 # delete all (prompts; -y skips); --name
 
 - **Names must be unique, and a clash still exits 0.** Reusing one prints "snapshot ...
   already exists" in red and saves nothing, but DDEV reports it as a warning
-  (`cmd/ddev/cmd/snapshot.go`), so the exit code is 0. Put a timestamp to the second in
-  any name a script or hook reuses. The old file survives a clash, so checking for
-  `.ddev/db_snapshots/<name>-*` afterwards proves nothing; check that none exists before.
+  (`cmd/ddev/cmd/snapshot.go`, which does the same for every snapshot error), so the exit
+  code is 0. Put a timestamp to the second in any name a script or hook reuses. To be
+  sure, check that no `.ddev/db_snapshots/<name>-*` exists before and that one does after;
+  the old file survives a clash, so existence afterwards alone proves nothing.
 - **Take one before** every migration, CMS upgrade, content import or `ddev pull`. DDEV's
   provider docs suggest a `pre-pull` hook for the pull case. Timestamp its name: with a
   fixed name every pull after the first runs with no new snapshot, and
   `fail_on_hook_fail: true` can't stop it, because it only reacts to a non-zero exit.
   Observed with v1.25.4: with a fixed name the second pull exited 0 and re-imported over
-  the data; with the timestamped hook below, each pull left its own snapshot.
+  the data; with the timestamped hook below, each pull left its own snapshot. For a pull
+  that must stop when no snapshot was saved, the hook has to check for the file itself and
+  exit non-zero, with `fail_on_hook_fail: true` set.
 
   ```yaml
   hooks:

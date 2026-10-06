@@ -31,10 +31,11 @@ throwaway projects on DDEV v1.25.4 (Docker Desktop, WSL2) that day.
 - **Gate on the DDEV version** a script needs: `ddev utility match-constraint '>= 1.25.4'`
   (non-zero exit when it doesn't match), or `ddev_version_constraint` in `config.yaml`.
 - **Don't trust exit 0 from these two.** Observed with v1.25.4:
-  - `ddev snapshot` with a name that already exists prints an error, saves nothing and
-    exits 0. The old file is still there, so checking for `.ddev/db_snapshots/<name>-*`
-    afterwards proves nothing. Use a name to the second (`$(date +%Y%m%d%H%M%S)`); a
-    script that must be sure checks that no such file exists *before* it runs.
+  - `ddev snapshot` exits 0 even when it saves nothing: a name that already exists, or any
+    other snapshot error, is reported but not returned. Use a name to the second
+    (`$(date +%Y%m%d%H%M%S)`). A script that must be sure checks that no
+    `.ddev/db_snapshots/<name>-*` exists before and that one does after; existence
+    afterwards alone proves nothing, since a clash leaves the old file there.
   - `ddev add-on remove` exits 0 but leaves files without a `#ddev-generated` line,
     printing "Unwilling to remove '<path>'" for each. `git status` shows only the ones
     never committed. Read those lines and delete only files nobody took over on purpose.

@@ -69,7 +69,7 @@ on DDEV v1.25.4 (Docker Desktop, WSL2) that day. `ddev debug` still works as an 
   win over global ones, so a committed `"80"`/`"443"` stops a teammate fixing a clash.
 - **The router publishes far more than 80/443.** By default: HTTP and HTTPS (80/443),
   Mailpit (8025/8026), XHGui (8143/8142, even when XHGui is off) and the Traefik monitor
-  (10999, on 127.0.0.1). It also publishes every port a running project's add-ons or
+  (10999). It also publishes every port a running project's add-ons or
   `web_extra_exposed_ports` expose through it (`determineRouterPorts`).
   - DDEV swaps a busy router port for a free one ("Port 443 is not available, using
     33001 instead"), finding it by connecting from where DDEV runs

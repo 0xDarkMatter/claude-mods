@@ -157,8 +157,8 @@ Details, the destroys-data table and worktree setup:
   - folders and commands: `upload-dir-misplaced`, `upload-dir-outside`,
     `shadowed-command`, `crlf-command`;
   - safety: `ssh-agent-forwarded`, `provider-push`, `provider-files-noop`,
-    `committed-secret`, `local-file-committed` (reads git's index, with the repo's
-    `core.fsmonitor` command disabled).
+    `committed-secret`, `local-file-committed` (reads git's index; never runs a git or
+    fsmonitor command the audited repository supplies).
 - **Exit codes:** 0 clean, 10 findings, 3 no `.ddev/config.yaml`, 4 unreadable config,
   2 usage.
 - **It reads config the way DDEV does:** overrides merge, lists append. It skips DDEV's

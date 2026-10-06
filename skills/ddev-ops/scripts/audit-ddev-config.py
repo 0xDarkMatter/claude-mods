@@ -22,9 +22,10 @@ and unknown keys are ignored rather than rejected (so retired keys silently do n
 
 Facts (defaults, end-of-life floors, obsolete keys, built-in command names) are read
 from assets/ddev-facts.json - the one place they live; check-ddev-facts.py keeps that
-file current. Read-only: the script never writes to the project, and the one git call
-it makes disables core.fsmonitor, the setting through which a repository could make
-`git ls-files` run a command of its choosing.
+file current. Read-only, and it runs no code the audited repository supplies: it never
+writes to the project; it runs git by its absolute PATH location, never a git inside the
+project or the current directory (find_git); and every git call disables core.fsmonitor,
+the setting through which a repository could make git run a command of its choosing.
 
 The YAML reader is deliberately minimal (stdlib only, so the skill folder runs when
 copied alone): top-level `key: value`, block and flow lists of scalars, and one level
@@ -64,7 +65,6 @@ import fnmatch
 import json
 import os
 import re
-import shlex
 import subprocess
 import sys
 from pathlib import Path, PurePosixPath
@@ -97,9 +97,15 @@ SECRET_KEY_RE = re.compile(
     r"(TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|PRIVATE_KEY|SECURITY_KEY|ACCESS_KEY|AUTH_KEY|CREDENTIALS?)", re.I)
 # DDEV's own local-only credentials (db/db, root/root) are not secrets; nor is a ${VAR} reference.
 HARMLESS_VALUES = {"", "db", "root"}
-# A whole value that is only a variable reference ($VAR, ${VAR}, ${VAR:-x}) is resolved
-# elsewhere - unless single-quoted, which makes dotenv and Compose read it literally.
-VAR_REF_RE = re.compile(r"^\$(\{[^}]*\}|[A-Za-z_]\w*)$")
+# Variable references in an env value (see only_references): plain $VAR / ${VAR}, and the
+# ${VAR<op>x} forms whose x may be a literal. Single quotes switch interpolation off.
+REF_RE = re.compile(r"\$\{[A-Za-z_]\w*\}|\$[A-Za-z_]\w*")
+REF_OP_RE = re.compile(r"\$\{[A-Za-z_]\w*(:?[-+?])([^{}$]*)\}")
+# Paths a shell takes unquoted; anything else gets no ready-to-paste command.
+SAFE_PATH_RE = re.compile(r"^[\w./-]+$")
+# A compose file SETTING SSH_AUTH_SOCK to a path other than DDEV's own agent socket. Not a
+# `$SSH_AUTH_SOCK:` / `${SSH_AUTH_SOCK}:` bind, which reads the variable but leaves it alone.
+REPOINT_RE = re.compile(r"(?<![\w${])SSH_AUTH_SOCK\s*[=:]\s*['\"]?(?!/home/\.ssh-agent)/")
 GENERATED = "#ddev-generated"
 # Per-developer files DDEV's generated .ddev/.gitignore lists (pkg/ddevapp/config.go,
 # v1.25.4), lower-case for a case-insensitive match. Only directly in .ddev/: that is
@@ -261,23 +267,36 @@ def files_pull_body(recipe_text: str) -> list[str] | None:
     return [ln for ln in lines if not NOOP_LINE.match(ln)]
 
 
+def only_references(value: str) -> bool:
+    """VALUE is built only from $VAR / ${VAR} references and separators, no literal text.
+
+    ${VAR:-x}, ${VAR-x}, ${VAR:+x} and ${VAR+x} count only when x is harmless (empty, db,
+    root) or itself a reference, since x is a literal Compose may hand the container;
+    ${VAR:?msg} never supplies a value. Nested defaults unwind from the inside out."""
+    v = value
+    for _ in range(8):
+        nxt = REF_OP_RE.sub(lambda m: "" if m.group(1).endswith("?") or m.group(2) in HARMLESS_VALUES
+                            else m.group(0), REF_RE.sub("", v))
+        if nxt == v:
+            break
+        v = nxt
+    return v != value and not re.search(r"[A-Za-z0-9$]", v)
+
+
 def looks_like_credential(key: str, raw_value: str) -> bool:
-    """A credential-named key with a real value: not DDEV's db/root, not a bare $VAR reference."""
+    """A credential-named key with a literal value: not DDEV's db/root, not only references."""
     if not SECRET_KEY_RE.search(key):
         return False
     raw = raw_value.strip()
     value = _scalar(raw)
     if value in HARMLESS_VALUES:
         return False
-    return raw.startswith("'") or not VAR_REF_RE.match(value)
+    # Single quotes make dotenv and Compose read the value literally - no interpolation.
+    return raw.startswith("'") or not only_references(value)
 
 
-def credential_keys(env_file: Path) -> list[str] | None:
-    """Names (never values) of env-file keys holding a credential; None if unreadable."""
-    try:
-        text = env_file.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
+def env_credential_keys(text: str) -> list[str]:
+    """Names (never values) of env-file keys holding a credential."""
     keys = []
     for line in text.splitlines():
         m = re.match(r"^\s*(?:export\s+)?([A-Za-z_][\w]*)\s*=\s*(.*)$", line)
@@ -286,21 +305,35 @@ def credential_keys(env_file: Path) -> list[str] | None:
     return sorted(set(keys))
 
 
-def local_config_facts(cfg_file: Path) -> tuple[list[str] | None, bool]:
-    """(credential names in web_environment, sets name:) for a config.*.local file.
-
-    Names are None when the file can't be read or parsed."""
+def read_text(path: Path) -> str | None:
     try:
-        data = parse_yaml_subset(cfg_file.read_text(encoding="utf-8", errors="replace"), cfg_file.name)
-    except (OSError, ConfigError):
-        return None, False
-    env = data.get("web_environment")
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def local_config_facts(text: str, name: str) -> tuple[list[str], bool, bool]:
+    """(credential names in web_environment, sets name:, fully read) for a config.*.local file.
+
+    "Fully read" is False when the minimal YAML reader can't take a web_environment entry
+    apart (a block scalar, a quoted flow list) or can't parse the file: then a credential
+    may hide where this can't see, and the caller says so instead of guessing."""
+    try:
+        data: dict | None = parse_yaml_subset(text, name)
+    except ConfigError:
+        data = None
+    complete = data is not None and not re.search(r"^web_environment:\s*\[[^\n]*['\"]", text, re.M)
+    sets_name = bool(re.search(r"^name:\s*\S", text, re.M))
+    env = data.get("web_environment") if data else None
     keys = []
     for item in env if isinstance(env, list) else []:
+        if str(item).strip() in ("|", "|-", "|+", ">", ">-", ">+"):
+            complete = False
+            continue
         key, sep, value = str(item).partition("=")
         if sep and looks_like_credential(key.strip(), value):
             keys.append(key.strip())
-    return sorted(set(keys)), bool(str(data.get("name", "") or "").strip())
+    return sorted(set(keys)), sets_name, complete
 
 
 def in_git_checkout(project: Path) -> bool:
@@ -308,29 +341,77 @@ def in_git_checkout(project: Path) -> bool:
     return any((d / ".git").exists() for d in (project, *project.parents))
 
 
-def tracked_paths(project: Path) -> tuple[set[str] | None, str]:
-    """(.ddev/ paths git tracks, relative to PROJECT and posix-style; reason when None).
+def find_git(project: Path) -> str | None:
+    """Absolute path of the git on PATH - never one in the current directory or PROJECT.
+
+    A bare "git" lets Windows' CreateProcess try the current directory before PATH (unless
+    NoDefaultCurrentDirectoryInExePath is set), so a git.exe committed to the audited
+    repository would run: reproduced 2026-10-06 on a stock environment. Only absolute PATH
+    entries outside the project count, and on Windows only git.exe (no .bat/.cmd shims,
+    whose argument handling cmd.exe rewrites)."""
+    names = ("git.exe",) if os.name == "nt" else ("git",)
+    try:
+        cwd: Path | None = Path.cwd().resolve()
+    except OSError:
+        cwd = None
+    proj = project.resolve()
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if not entry or not os.path.isabs(entry):
+            continue
+        try:
+            d = Path(entry).resolve()
+        except OSError:
+            continue
+        if d == cwd or d == proj or proj in d.parents:
+            continue
+        for n in names:
+            cand = d / n
+            if cand.is_file() and os.access(str(cand), os.X_OK):
+                return str(cand)
+    return None
+
+
+def run_git(git: str, project: Path, *args: str) -> subprocess.CompletedProcess:
+    """git ARGS in PROJECT, sealed from what the audited repo or the caller could inject.
+
+    - core.fsmonitor=false: the setting names a command git RUNS while reading the index.
+    - GIT_LOCAL_ENV dropped: an inherited GIT_DIR / GIT_INDEX_FILE would aim git at
+      another repository, and `-C` does not override them.
+    Raises OSError / subprocess.SubprocessError (incl. TimeoutExpired) to the caller."""
+    env = {k: v for k, v in os.environ.items() if k not in GIT_LOCAL_ENV}
+    return subprocess.run([git, "-c", "core.fsmonitor=false", "-C", str(project), *args],
+                          capture_output=True, timeout=30, env=env)
+
+
+def tracked_paths(project: Path) -> tuple[str | None, set[str] | None, str]:
+    """(git, .ddev/ paths git tracks relative to PROJECT and posix-style, reason when None).
 
     The index, not HEAD: a staged file is already on its way into a commit. Run from
     PROJECT, `ls-files` prints paths relative to it, also for a project in a
     subdirectory of its repository."""
-    env = {k: v for k, v in os.environ.items() if k not in GIT_LOCAL_ENV}
-    # core.fsmonitor names a command git RUNS while reading the index; an audited repo
-    # must not get to run code through a read-only audit.
-    cmd = ["git", "-c", "core.fsmonitor=false", "-C", str(project), "ls-files", "-z", "--", ".ddev"]
+    git = find_git(project)
+    if git is None:
+        return None, None, "no git on PATH outside the project"
     try:
-        res = subprocess.run(cmd, capture_output=True, timeout=30, env=env)
-    except FileNotFoundError:
-        return None, "git is not installed"
+        res = run_git(git, project, "ls-files", "-z", "--", ".ddev")
     except subprocess.TimeoutExpired:
-        return None, "git did not answer within 30s"
-    except OSError as exc:
-        return None, f"git could not run ({exc})"
+        return git, None, "git did not answer within 30s"
+    except (OSError, subprocess.SubprocessError) as exc:
+        return git, None, f"git could not run ({exc})"
     if res.returncode != 0:
         lines = res.stderr.decode("utf-8", errors="replace").strip().splitlines()
-        return None, lines[0] if lines else f"git exited {res.returncode}"
+        return git, None, lines[0] if lines else f"git exited {res.returncode}"
     # fsdecode keeps an odd byte in a file name round-trippable instead of replacing it.
-    return {os.fsdecode(p) for p in res.stdout.split(b"\0") if p}, ""
+    return git, {os.fsdecode(p) for p in res.stdout.split(b"\0") if p}, ""
+
+
+def staged_text(git: str, project: Path, path: str) -> str | None:
+    """The index's copy of PATH (relative to PROJECT): what the next commit will contain."""
+    try:
+        res = run_git(git, project, "cat-file", "blob", f":./{path}")
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return res.stdout.decode("utf-8", errors="replace") if res.returncode == 0 else None
 
 
 def read_config_files(project: Path, files: list[Path], strict: bool) -> list[tuple[Path, dict]]:
@@ -366,8 +447,11 @@ def merge(configs: list[tuple[Path, dict]]) -> tuple[dict, dict]:
 
 # === Audit ===
 
-def audit(project: Path, cat: dict, skip: frozenset = frozenset()) -> list[dict]:
+def audit(project: Path, cat: dict, skip: frozenset = frozenset(), skipped: list | None = None) -> list[dict]:
+    """Findings for PROJECT. SKIP: checks not to run (git is not even called for
+    local-file-committed). SKIPPED: filled with {check, reason} for checks that could not run."""
     ddev = project / ".ddev"
+    skipped = [] if skipped is None else skipped
     findings: list[dict] = []
 
     def add(sev: str, check: str, path: Path, detail: str) -> None:
@@ -515,7 +599,7 @@ def audit(project: Path, cat: dict, skip: frozenset = frozenset()) -> list[dict]
                       "macOS and Linux and OrbStack serve /run/host-services/ssh-auth.sock; a ${SSH_AUTH_SOCK} bind "
                       "forwards on native Linux Docker), every process there - Composer and npm scripts included - can "
                       "sign with every key that agent holds.")
-            if re.search(r"SSH_AUTH_SOCK\s*[=:]", text):
+            if REPOINT_RE.search(text):
                 detail += (" It also repoints SSH_AUTH_SOCK, so where the socket is missing (seen on Docker Desktop "
                            "for Windows) SSH in the container stops using keys loaded with `ddev auth ssh`.")
             add("high", "ssh-agent-forwarded", comp_file,
@@ -551,15 +635,20 @@ def audit(project: Path, cat: dict, skip: frozenset = frozenset()) -> list[dict]
     for env in sorted(ddev.glob(".env*")):
         if not env.is_file() or env.name.endswith((".local", ".example")):
             continue
-        keys = credential_keys(env)
-        if keys is None:
+        text = read_text(env)
+        if text is None:
             print(f"notice: could not read {rel(env, project)}; committed-secret not checked for it", file=sys.stderr)
-        elif keys:
-            add("medium", "committed-secret", env,
-                f"credential-looking value(s) for {', '.join(keys)} in a committed env file. Move them to "
-                f"{env.name}.local, keep it out of git (add `.ddev/.env*.local` to the project root's .gitignore: "
-                "DDEV's own rule exists only once it has run in that checkout), and commit an "
-                f"{env.name}.example listing the keys with `git add -f` (DDEV's .ddev/.gitignore ignores *.example).")
+            skipped.append({"check": "committed-secret", "reason": f"could not read {rel(env, project)}"})
+            continue
+        keys = env_credential_keys(text)
+        if keys:
+            # high, like a tracked .local twin: either way the value travels with the repository
+            add("high", "committed-secret", env,
+                f"credential-looking value(s) for {', '.join(keys)} in an env file meant to be committed. If it "
+                f"was ever committed or pushed, rotate them. Move them to {env.name}.local, keep that out of git "
+                "(add `.ddev/.env*.local` to the project root's .gitignore: DDEV's own rule exists only once it "
+                f"has run in that checkout), and commit an {env.name}.example listing the keys with `git add -f` "
+                "(DDEV's .ddev/.gitignore ignores *.example).")
 
     # Per-developer files in git. Git ignores them through DDEV's generated .ddev/.gitignore,
     # but that file is untracked itself: a fresh clone or worktree has none until `ddev config`
@@ -568,37 +657,50 @@ def audit(project: Path, cat: dict, skip: frozenset = frozenset()) -> list[dict]
     # Tracked, they stop being local: every checkout inherits the overrides, a `name:` among
     # them collides again, and credentials travel with the repository.
     # Walks git's own list, not the disk: that catches case-only renames and files deleted
-    # from the working tree but still in the index.
+    # from the working tree but still in the index. Contents come from the index AND the
+    # disk: the staged copy is what the next commit carries, whatever the disk now says.
     if "local-file-committed" not in skip and in_git_checkout(project):
-        tracked, why = tracked_paths(project)
+        git, tracked, why = tracked_paths(project)
         if tracked is None:
             print(f"notice: local-file-committed not checked: {why}", file=sys.stderr)
+            skipped.append({"check": "local-file-committed", "reason": why})
         for path in sorted(tracked or ()):
             pp = PurePosixPath(path)
             if pp.parent != PurePosixPath(".ddev") or not any(
                     fnmatch.fnmatchcase(pp.name.lower(), pat) for pat in LOCAL_PATTERNS):
                 continue
             f = project / pp
-            sets_name = False
-            if pp.name.lower().startswith(".env"):
-                keys = credential_keys(f)
-                kind = "per-developer env file"
-            else:
-                keys, sets_name = local_config_facts(f)
-                kind = "per-developer config override, which now applies to every checkout"
+            texts = [t for t in (staged_text(git, project, path) if git else None, read_text(f)) if t is not None]
+            keys: list[str] = []
+            sets_name, complete = False, True
+            is_env = pp.name.lower().startswith(".env")
+            for t in texts:
+                if is_env:
+                    keys += env_credential_keys(t)
+                else:
+                    k, named, full = local_config_facts(t, pp.name)
+                    keys, sets_name, complete = keys + k, sets_name or named, complete and full
+            keys = sorted(set(keys))
+            kind = ("a per-developer env file" if is_env
+                    else "a per-developer config override, which now applies to every checkout")
             if keys:
                 sev, what = "high", (f"holds credential-looking value(s) for {', '.join(keys)}. If it was ever "
                                      "committed or pushed, rotate them.")
+            elif not texts:
+                sev, what = "medium", "could not be read from git's index or the disk to check it for credentials."
+            elif not complete:
+                sev, what = "medium", (f"is {kind}, and part of it uses YAML this auditor can't read: check it for "
+                                       "credentials by hand.")
             else:
-                sev, what = "medium", ("is a " + kind + "." if keys is not None
-                                       else "could not be read to check it for credentials.")
+                sev, what = "medium", f"is {kind}."
             if sets_name:
                 what += " It sets `name:`, so every checkout claims the same DDEV project."
+            remove = (f"run `git rm --cached -- {path}`" if SAFE_PATH_RE.match(path)
+                      else "run `git rm --cached` on it (quote the name for your shell)")
             add(sev, "local-file-committed", f,
                 f"tracked by git (staged or committed), but it {what} Git ignores it only once DDEV has written "
-                ".ddev/.gitignore, which a fresh clone or worktree lacks. Run "
-                f"`git rm --cached -- {shlex.quote(path)}` and add `.ddev/config*.local.y*ml` and "
-                "`.ddev/.env*.local` to the project root's .gitignore.")
+                f".ddev/.gitignore, which a fresh clone or worktree lacks. From the project directory, {remove}, "
+                "and add `.ddev/config*.local.y*ml` and `.ddev/.env*.local` to the project root's .gitignore.")
 
     findings.sort(key=lambda x: SEVERITY_RANK.get(x["severity"], 9))  # stable: check order within a severity
     return findings
@@ -637,19 +739,22 @@ def main(argv: list[str]) -> int:
         print(f"error: no .ddev/config.yaml under {args.project}", file=sys.stderr)
         return EX_NOTFOUND
     cat = load_catalog(Path(args.catalog))
-    findings = [f for f in audit(project, cat, frozenset(args.ignore)) if f["check"] not in args.ignore]
+    skipped: list[dict] = []
+    findings = [f for f in audit(project, cat, frozenset(args.ignore), skipped) if f["check"] not in args.ignore]
 
     if args.json:
+        # meta.skipped: checks that could not run, so a JSON reader can't mistake them for clean
         print(json.dumps({"data": findings,
                           "meta": {"count": len(findings), "schema": SCHEMA,
-                                   "facts_as_of": cat.get("as_of", "")}}, indent=2))
+                                   "facts_as_of": cat.get("as_of", ""), "skipped": skipped}}, indent=2))
     else:
         for f in findings:
             print(f"{f['severity']}\t{f['check']}\t{f['file']}\t{f['detail']}")
     if not args.quiet:
         by = {s: sum(1 for f in findings if f["severity"] == s) for s in ("high", "medium", "low")}
         verdict = "FINDINGS" if findings else "CLEAN"
-        print(f"audit-ddev-config: {verdict} ({by['high']} high, {by['medium']} medium, {by['low']} low)",
+        unchecked = f"; NOT CHECKED: {', '.join(sorted({s['check'] for s in skipped}))}" if skipped else ""
+        print(f"audit-ddev-config: {verdict} ({by['high']} high, {by['medium']} medium, {by['low']} low){unchecked}",
               file=sys.stderr)
     return EX_FINDINGS if findings else EX_OK
 
