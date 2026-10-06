@@ -19,7 +19,8 @@ supported. Two modes guard it:
     * Node: nodejs/Release schedule.json end dates, released lines, LTS codenames
     * PHP: php.net supported-versions + eol pages vs the security_end table
     * text_watch: each status page still contains its phrase (e.g. Volta "unmaintained")
-    Gone (404) or changed is DRIFT; transient failure is UNAVAILABLE (exit 7).
+    Gone (404), changed, or answering in a new format (a timestamp where a date was) is
+    DRIFT; transient failure is UNAVAILABLE (exit 7). A malformed catalogue is exit 4.
 
 Usage:   check-pm-facts.py [--offline | --live] [--facts FILE] [--skill DIR] [--json] [--timeout S]
 Input:   argv flags only (no stdin). GITHUB_TOKEN (optional) raises the GitHub API limit.
@@ -39,6 +40,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import math
 import os
 import re
 import sys
@@ -94,48 +96,93 @@ def _iso(s) -> dt.date:
     return dt.date.fromisoformat(str(s))
 
 
+def _iso_or_none(s):
+    """An upstream date, or None when it is not YYYY-MM-DD (the source changed its format:
+    the caller reports that as drift instead of crashing on it)."""
+    try:
+        return dt.date.fromisoformat(str(s))
+    except ValueError:
+        return None
+
+
+def _shape(data) -> None:
+    """Raise ValueError naming the first part of the catalogue whose type is wrong. Every
+    field the offline and live checks read is checked here, so a bad catalogue is exit 4
+    with a message, never a TypeError traceback halfway through a check."""
+    def strs(v):
+        return isinstance(v, list) and all(isinstance(x, str) and x for x in v)
+    if not isinstance(data, dict):
+        raise ValueError(f"top level is {type(data).__name__}, not an object")
+    if data.get("schema") != SCHEMA:
+        raise ValueError(f"schema {data.get('schema')!r} != {SCHEMA!r}")
+    pk = data.get("packages")
+    if not isinstance(pk, dict) or not [k for k in pk if k != "_comment"]:
+        raise ValueError("'packages' must be a non-empty object")
+    for name, info in pk.items():
+        if name == "_comment":
+            continue
+        if not isinstance(info, dict) or not isinstance(info.get("documented_major"), int) \
+                or isinstance(info.get("documented_major"), bool):
+            raise ValueError(f"package {name!r} needs an integer documented_major")
+        if info.get("registry") not in REGISTRIES:
+            raise ValueError(f"package {name!r} registry must be one of {REGISTRIES}")
+        if not strs(info.get("prose")) or not info["prose"]:
+            raise ValueError(f"package {name!r} needs a non-empty list of string prose tokens")
+    for section, fields in (("node", ("lts", "maintenance", "end")), ("php", ("initial", "active_end", "security_end"))):
+        sec = data.get(section)
+        rel = sec.get("releases") if isinstance(sec, dict) else None
+        if not isinstance(rel, dict):
+            raise ValueError(f"{section}.releases must be an object")
+        for ver, entry in rel.items():
+            if ver == "_comment":
+                continue
+            if not re.match(r"^\d+$" if section == "node" else r"^\d+\.\d+$", ver):
+                raise ValueError(f"{section}.releases key {ver!r} is not a {'major' if section == 'node' else 'major.minor'}")
+            if not isinstance(entry, dict) or not all(isinstance(entry[f], str) for f in fields if f in entry):
+                raise ValueError(f"{section}.releases[{ver!r}] must be an object of date strings")
+    codes = data["node"].get("lts_codenames", {})
+    if not isinstance(codes, dict) or not all(isinstance(v, int) for k, v in codes.items() if k != "_comment"):
+        raise ValueError("node.lts_codenames must map names to integer majors")
+    cli = data.get("native_cli_names")
+    if not (isinstance(cli, dict) and strs(cli.get("names"))):
+        raise ValueError("native_cli_names.names must be a list of strings")
+    for key in ("dated_facts", "text_watch", "composer"):
+        if key in data and not isinstance(data[key], dict):
+            raise ValueError(f"{key} must be an object")
+
+
 def load_facts(path: Path) -> dict:
     if not path.is_file():
         print(f"error: facts catalogue not found: {path}", file=sys.stderr)
         raise SystemExit(EX_NOTFOUND)
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if data.get("schema") != SCHEMA:
-            raise ValueError(f"schema {data.get('schema')!r} != {SCHEMA!r}")
-        pk = data.get("packages")
-        if not isinstance(pk, dict) or not [k for k in pk if k != "_comment"]:
-            raise ValueError("'packages' must be a non-empty object")
-        for name, info in pk.items():
-            if name == "_comment":
-                continue
-            if not isinstance(info, dict) or not isinstance(info.get("documented_major"), int):
-                raise ValueError(f"package {name!r} needs an integer documented_major")
-            if info.get("registry") not in REGISTRIES:
-                raise ValueError(f"package {name!r} registry must be one of {REGISTRIES}")
-            if not isinstance(info.get("prose"), list) or not info["prose"]:
-                raise ValueError(f"package {name!r} missing prose tokens")
-        if not isinstance((data.get("node") or {}).get("releases"), dict):
-            raise ValueError("node.releases must be an object")
-        if not isinstance((data.get("php") or {}).get("releases"), dict):
-            raise ValueError("php.releases must be an object")
-        names = (data.get("native_cli_names") or {}).get("names")
-        if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
-            raise ValueError("native_cli_names.names must be a list of strings")
+        text = path.read_text(encoding="utf-8-sig")
+    except OSError as exc:
+        print(f"error: cannot read facts catalogue {path}: {exc}", file=sys.stderr)
+        raise SystemExit(EX_NOTFOUND)
+    try:
+        data = json.loads(text)
+        _shape(data)
         return data
-    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+    except (json.JSONDecodeError, ValueError) as exc:
         print(f"error: could not parse facts {path}: {exc}", file=sys.stderr)
         raise SystemExit(EX_UNPARSEABLE)
 
 
 def read_corpus(skill_dir: Path) -> tuple[str, str]:
+    """SKILL.md, and SKILL.md plus every references/*.md file (a directory that happens to
+    end in .md is not one). An unreadable file is exit 3 with its name, not a traceback."""
     doc = skill_dir / "SKILL.md"
     if not doc.is_file():
         print(f"error: SKILL.md not found under {skill_dir}", file=sys.stderr)
         raise SystemExit(EX_NOTFOUND)
-    skill_md = doc.read_text(encoding="utf-8", errors="replace")
-    parts = [skill_md] + [r.read_text(encoding="utf-8", errors="replace")
-                          for r in sorted((skill_dir / "references").glob("*.md"))]
-    return skill_md, "\n".join(parts)
+    files = [doc] + [r for r in sorted((skill_dir / "references").glob("*.md")) if r.is_file()]
+    try:
+        parts = [f.read_text(encoding="utf-8", errors="replace") for f in files]
+    except OSError as exc:
+        print(f"error: cannot read {exc.filename or skill_dir}: {exc.strerror or exc}", file=sys.stderr)
+        raise SystemExit(EX_NOTFOUND)
+    return parts[0], "\n".join(parts)
 
 
 def check_offline(facts: dict, skill_dir: Path) -> list[dict]:
@@ -154,25 +201,35 @@ def check_offline(facts: dict, skill_dir: Path) -> list[dict]:
     for key, token in (facts.get("dated_facts") or {}).items():
         if key != "_comment" and str(token) not in corpus:
             bad("(dated fact)", f"{key}={token!r} not stated in skill prose")
+    def ordered(rel, fields, strict):
+        """True when the dates present follow each other; strict[i] says whether the step
+        from fields[i] to fields[i + 1] must be strictly later (an equal pair is a typo:
+        no release enters LTS and maintenance on the same day)."""
+        got = [(k, _iso(rel[k])) for k in fields if k in rel]
+        return all(b > a if strict[fields.index(kb) - 1] else b >= a
+                   for (_, a), (kb, b) in zip(got, got[1:]))
+
     node = facts["node"]
     for major, rel in node["releases"].items():
+        if major == "_comment":
+            continue
         try:
-            seq = [_iso(rel[k]) for k in ("lts", "maintenance", "end") if k in rel]
             if "end" not in rel:
                 bad(f"node {major}", "missing 'end' date")
-            elif seq != sorted(seq):
+            elif not ordered(rel, ("lts", "maintenance", "end"), (True, True)):
                 bad(f"node {major}", "dates out of order (want lts < maintenance < end)")
         except ValueError as exc:
             bad(f"node {major}", f"non-ISO date: {exc}")
     for cn, major in (node.get("lts_codenames") or {}).items():
-        if str(major) not in node["releases"]:
+        if cn != "_comment" and str(major) not in node["releases"]:
             bad(f"node codename {cn}", f"maps to {major}, which has no releases entry")
     for ver, rel in facts["php"]["releases"].items():
+        if ver == "_comment":
+            continue
         try:
-            seq = [_iso(rel[k]) for k in ("initial", "active_end", "security_end") if k in rel]
             if "security_end" not in rel:
                 bad(f"php {ver}", "missing 'security_end' date")
-            elif seq != sorted(seq):
+            elif not ordered(rel, ("initial", "active_end", "security_end"), (True, False)):
                 bad(f"php {ver}", "dates out of order (want initial < active_end <= security_end)")
         except ValueError as exc:
             bad(f"php {ver}", f"non-ISO date: {exc}")
@@ -222,6 +279,13 @@ def major_of(version: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def _first(v) -> dict:
+    """The first entry of an upstream list when it is an object, else {}: getcomposer.org
+    answers {"stable": [{"version": ...}]}, and a reshaped answer must read as "no version"
+    rather than crash."""
+    return v[0] if isinstance(v, list) and v and isinstance(v[0], dict) else {}
+
+
 def live_package(name: str, info: dict, timeout: float) -> tuple[str, int | None, str]:
     reg = info["registry"]
     if reg == "npm":
@@ -229,7 +293,7 @@ def live_package(name: str, info: dict, timeout: float) -> tuple[str, int | None
         ver = body.get("version") if status == "ok" and isinstance(body, dict) else None
     elif reg == "composer":
         status, body = fetch_json(COMPOSER_VERSIONS, timeout)
-        ver = (body.get("stable") or [{}])[0].get("version") if status == "ok" and isinstance(body, dict) else None
+        ver = _first(body.get("stable")).get("version") if status == "ok" and isinstance(body, dict) else None
     else:
         status, body = fetch_json(f"{GITHUB}/{name}/releases/latest", timeout)
         ver = body.get("tag_name") if status == "ok" and isinstance(body, dict) else None
@@ -248,10 +312,18 @@ def live_node(facts: dict, timeout: float, today: dt.date) -> tuple[list, list]:
     codes = {k.lower(): v for k, v in (facts["node"].get("lts_codenames") or {}).items()}
     for key, s in sched.items():
         m = re.match(r"^v(\d+)$", key)
-        if not m:
+        if not m or int(m.group(1)) < 10:
             continue
         major = m.group(1)
-        if int(major) < 10:
+        # WHY drift, not a crash: a reshaped schedule.json (a timestamp where a date was, a
+        # list where an object was) means the verifier must be re-read against the source.
+        if not isinstance(s, dict):
+            drift.append({"subject": f"node {major}", "issue": f"schedule.json format changed: entry is {type(s).__name__}"})
+            continue
+        bad = [k for k in ("start", "lts", "maintenance", "end") if s.get(k) and _iso_or_none(s[k]) is None]
+        if bad:
+            drift.append({"subject": f"node {major}", "issue": "schedule.json format changed: "
+                          + ", ".join(f"{k} {s[k]!r}" for k in bad) + " is not YYYY-MM-DD"})
             continue
         started = s.get("start") and _iso(s["start"]) <= today
         mine = rel.get(major)
@@ -279,6 +351,12 @@ def live_php(facts: dict, timeout: float) -> tuple[list, list]:
     drift, unreach = [], []
     s1, sup = fetch(PHP_SUPPORTED, timeout, "text/html")
     s2, eol = fetch(PHP_EOL, timeout, "text/html")
+    gone = [u for u, s in ((PHP_SUPPORTED, s1), (PHP_EOL, s2)) if s == "notfound"]
+    if gone:
+        # Gone (404/410) is drift, as the module docstring says and live_node does: the
+        # page moved, so the table can no longer be checked until the URL is updated.
+        drift.append({"subject": "php.net", "issue": f"{', '.join(gone)} is gone (404) - find the page's new URL"})
+        return drift, unreach
     if s1 != "ok" or s2 != "ok":
         unreach.append({"subject": "php.net", "issue": f"supported={s1}:{sup if s1 != 'ok' else ''} eol={s2}:{eol if s2 != 'ok' else ''}"})
         return drift, unreach
@@ -296,7 +374,7 @@ def live_php(facts: dict, timeout: float) -> tuple[list, list]:
     if len(live) < 5:
         unreach.append({"subject": "php.net", "issue": f"page layout changed? parsed only {len(live)} branch(es)"})
         return drift, unreach
-    mine = facts["php"]["releases"]
+    mine = {k: v for k, v in facts["php"]["releases"].items() if k != "_comment"}
     for v, end in mine.items():
         if v in live and live[v] != end["security_end"]:
             drift.append({"subject": f"php {v}", "issue": f"security_end {end['security_end']} != php.net {live[v]}"})
@@ -325,7 +403,7 @@ def check_live(facts: dict, timeout: float) -> tuple[list[dict], list[dict]]:
     v1_end = (facts.get("composer") or {}).get("v1_maintenance_until")
     if v1_end:
         status, body = fetch_json(COMPOSER_VERSIONS, timeout)
-        one = (body.get("1") or [{}])[0] if status == "ok" and isinstance(body, dict) else None
+        one = _first(body.get("1")) if status == "ok" and isinstance(body, dict) else None
         if one is None:
             unreach.append({"subject": "composer v1", "issue": f"{COMPOSER_VERSIONS}: {body}"})
         elif not one.get("eol") or one.get("maintenance-until") != v1_end:
@@ -337,6 +415,9 @@ def check_live(facts: dict, timeout: float) -> tuple[list[dict], list[dict]]:
     for key, w in (facts.get("text_watch") or {}).items():
         if key == "_comment":
             continue
+        if not (isinstance(w, dict) and isinstance(w.get("url"), str) and isinstance(w.get("contains"), str)):
+            drift.append({"subject": key, "issue": "text_watch entry needs a url and a 'contains' phrase"})
+            continue
         status, body = fetch(w["url"], timeout, "text/plain, text/html")
         if status == "notfound":
             drift.append({"subject": key, "issue": f"{w['url']} is gone (404)"})
@@ -347,7 +428,22 @@ def check_live(facts: dict, timeout: float) -> tuple[list[dict], list[dict]]:
     return drift, unreach
 
 
+def safe_streams():
+    """WHY: piped stdout on Windows defaults to cp1252, and one non-ASCII prose token in a
+    drift row raised UnicodeEncodeError mid-report. stdout is data, so it is UTF-8 always;
+    stderr keeps its encoding (Term picks ASCII glyphs from it) but escapes the rest."""
+    for stream, kw in ((sys.stdout, {"encoding": "utf-8", "errors": "backslashreplace"}),
+                       (sys.stderr, {"errors": "backslashreplace"})):
+        reconfigure = getattr(stream, "reconfigure", None)
+        try:
+            if reconfigure:
+                reconfigure(**kw)
+        except ValueError:
+            pass
+
+
 def main(argv: list[str]) -> int:
+    safe_streams()
     p = argparse.ArgumentParser(
         prog="check-pm-facts.py",
         description="Verify package-manager-ops' release tables and tool majors stay named (offline) "
@@ -368,6 +464,11 @@ def main(argv: list[str]) -> int:
         args = p.parse_args(argv)
     except SystemExit as exc:
         return EX_USAGE if exc.code not in (0, None) else EX_OK
+    # socket timeouts must be finite and positive: 0 means non-blocking (every probe then
+    # "fails" at once) and a negative value raises ValueError deep inside urllib.
+    if not (math.isfinite(args.timeout) and args.timeout > 0):
+        print(f"error: --timeout wants seconds > 0, got {args.timeout}", file=sys.stderr)
+        return EX_USAGE
 
     facts = load_facts(Path(args.facts))
     t = Term(sys.stderr)
