@@ -49,7 +49,9 @@ else. `npm install --package-lock-only` refreshes the lock without touching
 no such option. npm up to 11.1 drops it silently, 11.2 and later warn about an "Unknown
 cli config" and install unfrozen anyway, and npm 12 refuses the command, because unknown
 CLI flags became errors (npm/cli#9276; #9729 relaxed that only for `.npmrc` keys). The
-frozen npm install is `npm ci`.
+frozen npm install is `npm ci`. `npm ci --frozen-lockfile` (or `--immutable`) is the same
+mistake: `npm ci` is already frozen, npm up to 11 ignores the flag, and npm 12 refuses the
+command. Drop the flag. pm-audit reports both as `deploy.npm.yarn-flag`, an error.
 
 Production-only: `--omit=dev` (the old `--production` flag is a deprecated alias for it).
 `omit` defaults to `dev` when `NODE_ENV=production`, which surprises builds: a build step

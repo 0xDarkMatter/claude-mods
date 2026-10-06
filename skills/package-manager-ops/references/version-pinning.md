@@ -42,6 +42,7 @@ end-of-life table from `assets/package-manager-facts.json`.
 | `volta.node` in package.json | Volta, which is unmaintained (its README recommends moving to mise) |
 | `.tool-versions`, `mise.toml` | asdf, mise |
 | `.ddev/config.yaml` `nodejs_version` | the DDEV web container |
+| `node-version:` of actions/setup-node | the CI runner only (pm-audit compares a literal value with the pins above) |
 
 `engines` without `engine-strict=true` only warns, so on its own it pins nothing. Note
 that `engines` also tells *consumers* of a published package what it supports; for an
@@ -106,7 +107,8 @@ Craft; check the PHP, not just the CMS.
 Why the platform pin matters: `composer update` resolves for whatever PHP runs it. A
 developer with PHP 8.5 on the host gets packages that need 8.5, and production on 8.3
 fatals. With `config.platform.php` every machine resolves for production. The lock
-records it as `platform-overrides`, which pm-audit compares too.
+records it as `platform-overrides`, which pm-audit compares too, along with a literal
+`php-version:` given to shivammathur/setup-php in CI.
 
 Because the platform pin pretends, check the real server at deploy:
 `composer check-platform-reqs --lock --no-dev`. `require.php` must admit the

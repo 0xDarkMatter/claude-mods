@@ -3,8 +3,9 @@
 
 Usage:   pm-audit.py [--json] [--no-docs] [--as-of YYYY-MM-DD] [--facts FILE] [--limit N] PATH
 Input:   argv only. PATH is a repo root. Root manifests are audited; nested package
-         roots are only listed (and flagged when they use another manager). Docs,
-         scripts, CI configs, Dockerfiles and appspec hook scripts are read too.
+         roots are only listed (and flagged when they use another manager, or when CI
+         installs in one that has no lockfile). Docs, scripts, CI configs, Dockerfiles
+         and appspec hook scripts are read too.
 Output:  stdout = one TSV row per finding: severity, id, file[:line], message, fix.
          --json: {"data": [finding...], "meta": {...}} with schema
          claude-mods.package-manager-ops.pm-audit/v1. Data only.
@@ -22,6 +23,7 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   npx.unpinned  npx.native-cli  legacy.bower  legacy.node-sass
   registry.token.committed  registry.authjson.committed  registry.credentials.image
   js.manager.mixed  deploy.install.unfrozen  deploy.composer.dev  php.composer.v1
+  deploy.install.unlocked  deploy.npm.yarn-flag  deploy.global.unpinned
 
 It never prints a secret: a committed or CI-written credential is reported as file:line only.
 
@@ -30,7 +32,8 @@ through scripts/run-python.sh with nothing on sys.path, so this stays a single s
 module. Jump by section marker instead of splitting it:
   === version ranges ===   npm semver + Composer constraint intervals (admits())
   === small readers ===    JSON/JSONC, a block-mapping YAML subset, markdown code lines,
-                           GitHub Actions job boundaries (workflow_jobs)
+                           GitHub Actions job and step boundaries (workflow_jobs,
+                           enclosing_item), CI working directories (join_dir)
   === the audit ===        Audit: js, nested, node_pins, php, npx, deploy, legacy, secrets
   main()                   argv, output envelope, exit codes
 
@@ -46,6 +49,7 @@ import datetime as dt
 import fnmatch
 import json
 import os
+import posixpath
 import re
 import sys
 from pathlib import Path
@@ -112,10 +116,24 @@ NESTED_MAX_DEPTH = 10
 YAML_COMMAND_KEY = re.compile(r"^(\s*)(?:-\s+)?(run|script|before_script|after_script|commands|command)\s*:\s*(.*)$")
 # Lockfile maintenance, not an install: refreshing the lock is the point of these.
 LOCK_ONLY = ("--package-lock-only", "--lockfile-only", "--mode=update-lockfile", "--lock")
-# Yarn's freeze flags. npm has no such option: up to 11.1 it drops an unknown flag
-# silently, 11.2+ warns "Unknown cli config" and installs unfrozen anyway, and 12.0
-# refuses the command (EUNKNOWNCONFIG, npm/cli#9276; #9729 relaxed only .npmrc keys).
+# Yarn's freeze flags. npm has no such option, so what happens is npm's unknown-flag rule,
+# read in npm/cli's config loader at each tag: v11.1.0 has no unknown-config check (the
+# flag is dropped silently); v11.2.0 added checkUnknown, which warns `Unknown cli config
+# "--frozen-lockfile". This will stop working in the next major version of npm.` and runs
+# on; v12 (BaseCommand.validateCli) throws EUNKNOWNCONFIG before the command runs
+# (npm/cli#9276; #9729 later relaxed only unknown .npmrc keys). npm 12 is `latest` since
+# 2026-07-08, so on npm ci or npm install this is a failed build, hence an error.
 YARN_FREEZE_FLAGS = ("--frozen-lockfile", "--immutable")
+NPM_INSTALL = ("install", "i", "in", "add")
+NPM_CI = ("ci", "clean-install", "ic", "install-clean")  # npm ci and its documented aliases
+# `npm install -g` options that take a value, so the value is not read as a package.
+GLOBAL_FLAG_WITH_VALUE = {"--prefix", "--registry", "--cache", "--userconfig", "--tag"}
+# A registry package as typed on a command line: name or @scope/name, optional @version.
+PKG_SPEC = re.compile(r"^(@[a-z0-9][\w.-]*/)?[a-z0-9][\w.-]*(@\S+)?$", re.I)
+# CI working directories: `${{ env.X }}` is resolved from the workflow/job env: block;
+# GitHub's workspace (`${{ github.workspace }}`, $GITHUB_WORKSPACE) is the checkout root.
+ENV_REF = re.compile(r"\$\{\{\s*env\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
+WORKSPACE_ROOT = re.compile(r"^(?:\$\{\{\s*github\.workspace\s*\}\}|\$\{?GITHUB_WORKSPACE\}?)(?:/|$)")
 DOC_SUFFIXES = {".md", ".markdown", ".sh", ".bash", ".ps1", ".yml", ".yaml", ".mk"}
 DOC_NAMES = {"makefile", "justfile", "dockerfile", "procfile"}
 MAX_DOC_BYTES = 512 * 1024
@@ -340,9 +358,13 @@ def code_lines(text: str, markdown: bool):
 
 
 def yaml_command_lines(text: str):
-    """Yield (line_no, command) from a YAML CI config: inline `run: cmd` values, and the
-    lines of block scalars or lists under a command key. Comments are skipped."""
+    """Yield (line_no, command, key_line_no) from a YAML CI config: inline `run: cmd`
+    values, and the lines of block scalars or lists under a command key. key_line_no is
+    the command key's own line. Every line under one key runs in one shell (a `run: |`
+    block on GitHub; GitLab and Bitbucket run a `script:` list as one shell script), so
+    a `cd` carries to the lines after it within the key. Comments are skipped."""
     owner = None  # indent of the command key whose block we are inside
+    owner_n = 0
     for n, line in enumerate(text.splitlines(), 1):
         if not line.strip() or line.lstrip().startswith("#"):
             continue
@@ -353,13 +375,13 @@ def yaml_command_lines(text: str):
         if m:
             value = m.group(3).strip()
             if value and value[0] not in "|>":
-                yield n, value
+                yield n, value, n
                 owner = None
             else:
-                owner = len(m.group(1))
+                owner, owner_n = len(m.group(1)), n
             continue
         if owner is not None:
-            yield n, re.sub(r"^\s*-\s+", "", line)
+            yield n, re.sub(r"^\s*-\s+", "", line), owner_n
 
 
 def workflow_jobs(text: str):
@@ -390,6 +412,92 @@ def workflow_jobs(text: str):
     return [tuple(j) for j in jobs] or None
 
 
+def indent_of(line: str) -> int:
+    return len(line) - len(line.lstrip(" "))
+
+
+def scalar(v: str) -> str:
+    """A YAML plain or quoted scalar as text: trailing comment and outer quotes dropped."""
+    v = re.sub(r"\s+#.*$", "", v).strip()
+    return v[1:-1] if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"" else v
+
+
+def enclosing_item(lines, k):
+    """0-based line k of a YAML file -> (first, last, key_col) of the innermost sequence
+    item (`- key: ...`, a GitHub Actions step) holding it, 0-based and inclusive; key_col
+    is the column of the item's own keys. None when no item holds the line. Indentation
+    alone decides: a parent key (`with:`) is shallower than its children, and the item's
+    dash is shallower than every key of the item."""
+    col = indent_of(lines[k])
+    start = k if lines[k].lstrip().startswith("- ") else None
+    i = k
+    while start is None:
+        i -= 1
+        if i < 0:
+            return None
+        s = lines[i]
+        if not s.strip() or s.lstrip().startswith("#") or indent_of(s) >= col:
+            continue
+        if s.lstrip().startswith("- "):
+            start = i
+        else:
+            col = indent_of(s)  # a parent mapping key: keep climbing
+    key_col = len(lines[start]) - len(lines[start].lstrip()[1:].lstrip())  # first char after "- "
+    end = start
+    for j in range(start + 1, len(lines)):
+        s = lines[j]
+        if s.strip() and not s.lstrip().startswith("#"):
+            if indent_of(s) < key_col:
+                break
+            end = j
+    return start, end, key_col
+
+
+def item_value(lines, item, key):
+    """The scalar of the item's first `key:` line, or None. Asked only for step keys
+    (`uses`, `working-directory`) that never also appear nested inside a step."""
+    first, last, _ = item
+    for j in range(first, last + 1):
+        m = re.match(r"^(?:\s*-\s+|\s*)" + re.escape(key) + r"\s*:\s*(.*)$", lines[j])
+        if m:
+            return scalar(m.group(1))
+    return None
+
+
+def dig(d, *keys):
+    """d[k1][k2]... when every step is a mapping and the end is a string, else None."""
+    for k in keys:
+        d = d.get(k) if isinstance(d, dict) else None
+    return d if isinstance(d, str) else None
+
+
+def join_dir(base, target, env):
+    """A CI working directory or `cd` target, resolved against base (repo-relative, "" =
+    the root) -> repo-relative path, or None when it cannot be known without running CI:
+    an unknown base, an unset `${{ env.X }}`, any other variable or expression, an
+    absolute path, or a path that leaves the repo."""
+    if base is None:
+        return None
+    t = ENV_REF.sub(lambda m: env[m.group(1)] if isinstance(env.get(m.group(1)), str) else "$?", scalar(target))
+    ws = WORKSPACE_ROOT.match(t)
+    if ws:
+        base, t = "", t[ws.end():]
+    if not t:
+        return base
+    if "$" in t or "`" in t or t.startswith(("/", "~", "-")) or any(c in t for c in "*?"):
+        return None
+    p = posixpath.normpath(posixpath.join(base, t))
+    if p == ".":
+        return ""
+    return None if p == ".." or p.startswith("../") else p
+
+
+def split_spec(pkg: str):
+    """'@scope/name@1.2' -> ('@scope/name', '1.2'); no version -> (pkg, '')."""
+    at = pkg.rfind("@")
+    return (pkg[:at], pkg[at + 1:]) if at > 0 else (pkg, "")
+
+
 def rel(root: Path, p: Path) -> str:
     try:
         return p.relative_to(root).as_posix()
@@ -409,6 +517,10 @@ class Audit:
         self.pkg = read_json(root / "package.json") if (root / "package.json").is_file() else None
         self.composer = read_json(root / "composer.json") if (root / "composer.json").is_file() else None
         self.ddev = self._read_ddev()
+        self.native = {n.lower() for n in (facts.get("native_cli_names") or {}).get("names", [])}
+        # Every install deploy() reads in CI and deploy files: {family, manager, cwd, kind,
+        # file, line, cmd}. cwd is the package root it runs in ("" = root, None = unknown).
+        self.installs: list[dict] = []
 
     def add(self, sev, fid, file, msg, fix, line=None):
         self.findings.append({"id": fid, "severity": sev, "file": file, "line": line,
@@ -429,12 +541,12 @@ class Audit:
         return merged
 
     def run(self):
+        self.deploy()  # first: js() asks where CI installs (self.installs); output is sorted later
         self.js()
         self.nested()
         self.node_pins()
         self.php()
         self.npx()
-        self.deploy()
         self.legacy()
         self.secrets()
         return self
@@ -453,9 +565,16 @@ class Audit:
                          "fix the JSON before any install")
             return
         if len(present) > 1:
-            self.add("error", "js.lockfile.conflict", ", ".join(present),
-                     f"{len(present)} JS lockfiles at the root ({', '.join(present)}); each manager reads only its own",
-                     "pick one manager, delete the other lockfile(s), reinstall with that manager, commit")
+            msg = f"{len(present)} JS lockfiles at the root ({', '.join(present)}); each manager reads only its own"
+            fix = "pick one manager, delete the other lockfile(s), reinstall with that manager, commit"
+            live = self._ci_root_lockfile(present)
+            if live:
+                inst, keep = live
+                gone = [p for p in present if p != keep]
+                msg += (f" - CI installs with `{inst['cmd']}` ({inst['file']}:{inst['line']}), so {keep} is live and "
+                        f"{' and '.join(gone)} {'is' if len(gone) == 1 else 'are'} unused")
+                fix = f"delete {', '.join(gone)}, keep {keep}, and install with {inst['manager']} everywhere"
+            self.add("error", "js.lockfile.conflict", ", ".join(present), msg, fix)
         if "npm-shrinkwrap.json" in present and "package-lock.json" not in present:
             self.add("warn", "js.lockfile.shrinkwrap", "npm-shrinkwrap.json",
                      "npm 12 no longer reads npm-shrinkwrap.json, so `npm ci` finds no lockfile",
@@ -468,9 +587,16 @@ class Audit:
                      "move the settings into pnpm-workspace.yaml (references/scripts-and-workspaces.md)")
         has_deps = any(self.pkg.get(t) for t in DEP_TYPES)
         if not present and has_deps:
-            self.add("warn", "js.lockfile.missing", "package.json",
-                     "dependencies declared but no lockfile committed - every install resolves fresh",
-                     "run the chosen manager's install once and commit its lockfile")
+            built = self._nested_builds()
+            if built:
+                self.note("js.lockfile.missing", "package.json",
+                          f"dependencies declared but no root lockfile; CI installs only in "
+                          f"{', '.join(d + '/' for d in built)} (each with its own lockfile) - nothing in CI installs "
+                          "this package.json, so commit a lockfile here only if something else does")
+            else:
+                self.add("warn", "js.lockfile.missing", "package.json",
+                         "dependencies declared but no lockfile committed - every install resolves fresh",
+                         "run the chosen manager's install once and commit its lockfile")
         pm = str(self.pkg.get("packageManager") or "")
         pm_name, _, pm_ver = pm.partition("@")
         if not pm:
@@ -499,6 +625,26 @@ class Audit:
                              "install once with the pinned Yarn to convert the lockfile, or fix the pin")
         for n in present:
             self._lock_consistency(n, flavour)
+
+    def _ci_root_lockfile(self, present):
+        """(first CI install at the root, its lockfile) when every root install in CI uses
+        one manager and that manager owns exactly one of the present lockfiles, else None.
+        Dockerfiles and installs whose directory is unknown never decide it."""
+        root = [i for i in self.installs if i["kind"] == "ci" and i["cwd"] == "" and i["family"] == "js"]
+        if len({i["manager"] for i in root}) != 1:
+            return None
+        owned = [p for p in present if JS_LOCKFILES[p] == root[0]["manager"]]
+        return (root[0], owned[0]) if len(owned) == 1 else None
+
+    def _nested_builds(self):
+        """Nested package roots with a lockfile that CI and deploy files install in, when
+        every JS install there is nested. A root install, or one whose directory pm-audit
+        cannot place (a Dockerfile, a matrix path), returns [] so the root keeps its
+        js.lockfile.missing warning."""
+        js = [i for i in self.installs if i["family"] == "js"]
+        if not js or any(not i["cwd"] for i in js):
+            return []
+        return sorted({i["cwd"] for i in js if any((self.root / i["cwd"] / f).is_file() for f in JS_LOCKFILES)})
 
     def _declared(self):
         out = {}
@@ -597,20 +743,23 @@ class Audit:
         exact: dict[str, int] = {}
         ranges: dict[str, str] = {}
 
-        def exact_from(src: str, raw: str):
+        def exact_from(src: str, raw: str, quiet: bool = False):
+            """quiet: a CI setup-node value, where an alias (lts/*, latest) is a CI choice,
+            not a repo pin to report."""
             v = raw.strip().splitlines()[0].strip() if raw.strip() else ""
             low = v.lower()
             if low.startswith("lts/"):
                 cn = low[4:]
                 if cn in codenames:
                     exact[src] = int(codenames[cn])
-                else:
+                elif not quiet:
                     self.note("js.node.floating", src, f"'{v}' floats to whatever LTS is newest - not a pin")
                 return
             if src.startswith(".ddev") and low in ("auto", "engine"):
                 return  # DDEV reads .node-version/.nvmrc/engines itself: agrees by construction
             if low in ("node", "stable", "latest", "current", "lts", "auto", "system"):
-                self.note("js.node.floating", src, f"'{v}' is an alias, not a version pin")
+                if not quiet:
+                    self.note("js.node.floating", src, f"'{v}' is an alias, not a version pin")
                 return
             m = re.match(r"^v?(\d+)", v)
             if m:
@@ -657,6 +806,13 @@ class Audit:
                      "no Node version pin (.nvmrc, .node-version, engines.node, devEngines, volta, .tool-versions)",
                      "add .nvmrc with the production major and engines.node to match")
             return
+        # CI's setup-node versions join the agreement and end-of-life checks below, but never
+        # count as the repo's own pin (above): a developer's machine does not read them.
+        repo_exact = dict(exact)
+        for src, tool, v in self._setup_pins():
+            if tool == "node":
+                exact_from(src, v, quiet=True)
+        self.meta["node_pins"] = {**{k: str(v) for k, v in exact.items()}, **ranges}
         # engine-strict is npm's switch; pnpm and Yarn treat engines their own way, so
         # telling a pnpm repo to edit .npmrc would be wrong advice.
         pm_name = str(self.pkg.get("packageManager") or "").partition("@")[0]
@@ -674,7 +830,7 @@ class Audit:
                 ok = admits(spec, (major, 0, 0), (major + 1, 0, 0))
                 if ok is False:
                     problems.append(f"{src} '{spec}' excludes {esrc}={major}")
-        if not exact and len(ranges) > 1:
+        if not repo_exact and len(ranges) > 1:
             specs = list(ranges.items())
             for i in range(len(specs)):
                 for j in range(i + 1, len(specs)):
@@ -693,15 +849,19 @@ class Audit:
         ends = {int(k): dt.date.fromisoformat(v["end"]) for k, v in eol.items()
                 if k.isdigit() and isinstance(v, dict) and v.get("end")}
         dead = [(s, m) for s, m in exact.items() if m in ends and ends[m] < self.as_of]
+        # WHY "the repo pins" and the server hint: the production runtime is not in the
+        # repo, so pm-audit can say only what the code targets; the server may differ.
         if dead:
             self.add("warn", "js.node.eol", dead[0][0],
-                     "end-of-life Node pinned: " + ", ".join(f"{s}={m} (EOL {ends[m]})" for s, m in dead),
+                     "the repo pins end-of-life Node: " + ", ".join(f"{s}={m} (EOL {ends[m]})" for s, m in dead)
+                     + " - confirm the server's Node version too",
                      "move to a supported LTS major (references/version-pinning.md)")
-        elif not exact:
+        elif not repo_exact:
             supported = [m for m, end in ends.items() if end >= self.as_of]
             for src, spec in ranges.items():
                 if supported and not any(admits(spec, (m, 0, 0), (m + 1, 0, 0)) for m in supported):
-                    self.add("warn", "js.node.eol", src, f"{src} '{spec}' admits no supported Node release",
+                    self.add("warn", "js.node.eol", src,
+                             f"{src} '{spec}' targets no supported Node release - confirm the server's Node version too",
                              "widen or move the range to a supported LTS major")
 
     # ---- Composer / PHP ----
@@ -727,11 +887,33 @@ class Audit:
             self.add("error", "php.lockfile.stale", "composer.lock", "composer.lock is not valid JSON",
                      "regenerate it with `composer update --lock`")
         else:
-            locked = {str(p.get("name", "")).lower() for p in (lock.get("packages") or []) + (lock.get("packages-dev") or [])}
-            missing = sorted(n for n in pkgs if n.lower() not in locked)
+            # WHY replace/provide and the require / require-dev split: this mirrors Composer's
+            # own lock check (Locker::getMissingRequirementInfo). A root `require` is met from
+            # the lock's `packages` only (getLockedRepository(false)), a `require-dev` from
+            # `packages` + `packages-dev`, and either by a package of that name OR one that
+            # lists it under `replace` or `provide` (findPackagesWithReplacersAndProviders):
+            # a renamed plugin replacing its old name, symfony/symfony replacing the
+            # component the root asks for, guzzle providing psr/http-client-implementation.
+            # Composer refuses the install (exit 4) only when nothing qualifies (installer
+            # fixture outdated-lock-file-fails-install.test). Presence only: constraints
+            # are not compared.
+            def met(entries):
+                out = set()
+                for p in entries if isinstance(entries, list) else []:
+                    if isinstance(p, dict):
+                        out.add(str(p.get("name", "")).lower())
+                        for k in ("replace", "provide"):
+                            if isinstance(p.get(k), dict):
+                                out.update(str(x).lower() for x in p[k])
+                return out
+            prod = met(lock.get("packages"))
+            dev = prod | met(lock.get("packages-dev"))
+            missing = sorted({n for n in req if not COMPOSER_PLATFORM.match(n) and n.lower() not in prod}
+                             | {n for n in req_dev if not COMPOSER_PLATFORM.match(n) and n.lower() not in dev})
             if missing:
+                shown = [n + (" (locked only in packages-dev)" if n in req and n.lower() in dev else "") for n in missing]
                 self.add("warn", "php.lockfile.stale", "composer.lock",
-                         "composer.json requires packages missing from composer.lock: " + ", ".join(missing[:8]),
+                         "composer.json requires packages missing from composer.lock: " + ", ".join(shown[:8]),
                          "run `composer update <package>` for the new requirement and commit composer.lock")
         php_req = req.get("php")
         # A composer.json that requires no packages (`{"name": ...}`, used to make a JS
@@ -779,6 +961,12 @@ class Audit:
             # An unset php_version is ddev-ops' finding (audit-ddev-config.py php-unpinned);
             # here DDEV's PHP only feeds the agreement and end-of-life checks below.
             put(".ddev/config.yaml php_version", self.ddev.get("php_version"))
+        # CI's setup-php versions join the agreement and end-of-life checks, not the
+        # range-only check below, which asks what the repo itself admits.
+        repo_exact = dict(exact)
+        for src, tool, v in self._setup_pins():
+            if tool == "php":
+                put(src, v)
         self.meta["php_pins"] = {**{k: f"{v[0]}.{v[1]}" for k, v in exact.items()},
                                  **({"composer.json require.php": str(php_req)} if php_req else {})}
         problems = []
@@ -799,19 +987,23 @@ class Audit:
                 for k, v in rel_tbl.items()
                 if re.match(r"^\d+\.\d+$", k) and isinstance(v, dict) and v.get("security_end")}
         dead = [(s, v) for s, v in exact.items() if v in ends and ends[v] < self.as_of]
+        # WHY "the repo pins" and the server hint: see the same wording in node_pins().
         if dead:
             self.add("warn", "php.eol", dead[0][0],
-                     "end-of-life PHP: " + ", ".join(f"{s}={v[0]}.{v[1]} (security support ended {ends[v]})" for s, v in dead),
+                     "the repo pins end-of-life PHP: "
+                     + ", ".join(f"{s}={v[0]}.{v[1]} (security support ended {ends[v]})" for s, v in dead)
+                     + " - confirm the server's PHP version too",
                      "plan the PHP upgrade: `composer why-not php <target>` lists the blockers (references/legacy-exits.md)")
-        elif not exact and php_req:
+        elif not repo_exact and php_req:
             live = [v for v, end in ends.items() if end >= self.as_of]
             if live and not any(admits(str(php_req), (a, b, 0), (a, b + 1, 0), "composer") for a, b in live):
-                self.add("warn", "php.eol", "composer.json", f"require.php '{php_req}' admits no supported PHP release",
+                self.add("warn", "php.eol", "composer.json",
+                         f"require.php '{php_req}' targets no supported PHP release - confirm the server's PHP version too",
                          "raise the constraint to a supported PHP (references/legacy-exits.md)")
 
     # ---- npx / dlx / exec ----
     def npx(self):
-        native = {n.lower() for n in (self.facts.get("native_cli_names") or {}).get("names", [])}
+        native = self.native
         declared = set(self._declared()) if self.pkg else set()
         # The repo's own package name and declared bins: docs showing them are the
         # publisher's instructions to users, not a dependency of this repo.
@@ -853,10 +1045,9 @@ class Audit:
                 pkg = pkg.strip("'\"`),")
                 if pkg.endswith((".", ":", ";")):
                     continue  # sentence punctuation: "...the pinned npx fallback." is prose
-                if not re.match(r"^(@[a-z0-9][\w.-]*/)?[a-z0-9][\w.-]*(@\S+)?$", pkg, re.I):
+                if not PKG_SPEC.match(pkg):
                     continue  # prose like "npx is..." or a placeholder
-                at = pkg.rfind("@")
-                base, ver = (pkg[:at], pkg[at + 1:]) if at > 0 else (pkg, "")
+                base, ver = split_spec(pkg)
                 # Dedupe on the full spec: a pinned `x@1.2.3` must not hide a later bare `x`.
                 key = (file, pkg.lower())
                 if key in seen:
@@ -957,9 +1148,6 @@ class Audit:
                 hook = (self.root / loc).resolve()
                 if hook.is_file() and self.root in hook.parents:
                     files.append((hook, "deploy"))
-        yarn_lock = read_text(self.root / "yarn.lock") if (self.root / "yarn.lock").is_file() else ""
-        pm = str((self.pkg or {}).get("packageManager") or "")
-        berry = "__metadata:" in (yarn_lock or "")[:2000] or bool(re.match(r"yarn@[2-9]", pm))
         writes: list[tuple[str, int, str]] = []
         seen: set = set()
 
@@ -973,24 +1161,39 @@ class Audit:
             rel = path.relative_to(self.root).as_posix()
             ci = kind == "ci"
             ships = self._ship_scope(rel, kind, text)
+            start_dir = self._start_dirs(rel, kind, text)
             every = list(code_lines(text, False))
             # setup inputs (`tools: composer:v1`) are not commands, so Composer 1 is read
-            # from every line; installs and credential writes only from command keys.
-            commands = list(yaml_command_lines(text)) if path.suffix in (".yml", ".yaml") else every
+            # from every line; installs and credential writes only from command keys. Outside
+            # YAML each line is its own block: a Jenkinsfile `sh` step is its own shell, and
+            # Dockerfile and hook-script directories are never placed (see _start_dirs).
+            commands = (list(yaml_command_lines(text)) if path.suffix in (".yml", ".yaml")
+                        else [(n, line, n) for n, line in every])
+            block, cwd, env = None, None, {}
             for n, line in every:
                 if COMPOSER_V1.search(line):
                     end = ((self.facts.get("composer") or {}).get("v1_maintenance_until")) or "2026-05-30"
                     flag("php.composer.v1", rel, n, f"Composer 1 in {rel} - it reached end of life ({end})",
                          "use Composer 2 (`tools: composer:v2`, the composer:2 image); see references/legacy-exits.md")
-            for n, line in commands:
+            for n, line, key_n in commands:
                 m = CRED_WRITE.search(line) if ci else None
                 # ~/.npmrc, $HOME/... and absolute paths sit outside the build context.
                 if m and not re.match(r"(~|\$\{?HOME|/)", m.group(1)):
                     writes.append((rel, n, m.group(2)))
                 elif ci and CRED_CONFIG.search(line):
                     writes.append((rel, n, "auth.json"))
-                for m in INSTALL_CMD.finditer(line):
-                    self._install_line(m.group(1), m.group(2).split(), rel, n, ci, ships(n), berry, flag)
+                if key_n != block:
+                    block = key_n
+                    cwd, env = start_dir(key_n)
+                # A `cd` moves the rest of its shell block; installs run where it left off.
+                # INSTALL_CMD never matches across ; or &&, so splitting there loses nothing.
+                for seg in re.split(r"&&|;", line):
+                    cd = re.match(r"^\s*cd\s+(\S+)\s*$", seg)
+                    if cd:
+                        cwd = join_dir(cwd, cd.group(1), env)
+                        continue
+                    for m in INSTALL_CMD.finditer(seg):
+                        self._install_line(m.group(1), m.group(2).split(), rel, n, kind, ships(n), cwd, flag)
             if ci:
                 self._ramsey(text, rel, ships, flag)
         if writes:
@@ -1044,53 +1247,180 @@ class Audit:
         verdicts = [(a, b, ships_text("\n".join(lines[a - 1:b]))) for a, b in jobs]
         return lambda n: next((v for a, b, v in verdicts if a <= n <= b), False)
 
-    def _install_line(self, tool, toks, rel, n, ci, ships, berry, flag):
+    def _start_dirs(self, rel, kind, text):
+        """key line -> (directory its command block starts in, env) where the directory is
+        repo-relative ("" = the root, None = unknown); a `cd` then moves it (deploy()).
+
+        WHY only CI files are placed: a Dockerfile's WORKDIR and an appspec hook's working
+        directory are paths in the image or on the server, not in the repo. GitHub Actions
+        starts a step in its `working-directory:`, else the job's `defaults.run.working-
+        directory`; every other CI system starts scripts at the checkout root. A value is
+        resolved only when literal or `${{ env.X }}` from the workflow or job `env:` block
+        (contexts those keys may use: docs.github.com, Contexts, "Context availability");
+        anything else (matrix, inputs, step outputs) leaves the directory unknown, never
+        guessed. Known gap: workflow-level `defaults.run` and step-level `env:` are not read.
+        """
+        if kind != "ci":
+            return lambda _k: (None, {})
+        if not rel.startswith(".github/workflows/"):
+            return lambda _k: ("", {})
+        lines = text.splitlines()
+        doc = mini_yaml(text)
+
+        def mapping(v) -> dict:
+            return v if isinstance(v, dict) else {}
+        top_env, job_cfg = mapping(doc.get("env")), mapping(doc.get("jobs"))
+        jobs = workflow_jobs(text) or []
+
+        def start(k):
+            name = next((lines[a - 1].strip().rstrip(":").strip("'\"") for a, b in jobs if a <= k <= b), None)
+            job = mapping(job_cfg.get(name))
+            env = {**top_env, **mapping(job.get("env"))}
+            item = enclosing_item(lines, k - 1)
+            wd = item_value(lines, item, "working-directory") if item else None
+            if wd is None:
+                wd = dig(job, "defaults", "run", "working-directory")
+            return ("" if wd is None else join_dir("", wd, env)), env
+        return start
+
+    def _setup_pins(self):
+        """Literal versions handed to actions/setup-node (node-version) and
+        shivammathur/setup-php (php-version) in GitHub workflows -> [(src, tool, value)].
+        Only those keys of those actions: another action's look-alike input is not the
+        runtime CI builds on. An expression (${{ matrix.node }}) or a list is not a pin, and
+        node-version-file points at a file the pin checks already read."""
+        out = []
+        wanted = {"node-version": "actions/setup-node", "php-version": "shivammathur/setup-php"}
+        for g in (".github/workflows/*.yml", ".github/workflows/*.yaml"):
+            for p in sorted(self.root.glob(g)):
+                lines = (read_text(p) or "").splitlines()
+                for i, line in enumerate(lines):
+                    m = re.match(r"^\s*(node-version|php-version)\s*:\s*(.*)$", line)
+                    if not m:
+                        continue
+                    v = scalar(m.group(2))
+                    if not v or v.startswith(("$", "[", "{")):
+                        continue
+                    item = enclosing_item(lines, i)
+                    uses = (item_value(lines, item, "uses") or "") if item else ""
+                    if uses.split("@")[0].lower() == wanted[m.group(1)]:
+                        out.append((f"{rel(self.root, p)}:{i + 1} {m.group(1)}", m.group(1).split("-")[0], v))
+        return out
+
+    def _berry(self, d):
+        """Is the Yarn of package root d (repo-relative) Yarn 2+? Its yarn.lock format
+        decides, else its packageManager pin."""
+        p = self.root / d
+        lock = (read_text(p / "yarn.lock") or "") if (p / "yarn.lock").is_file() else ""
+        pkg = self.pkg if not d else (read_json(p / "package.json") if (p / "package.json").is_file() else None)
+        pm = str(pkg.get("packageManager") or "") if isinstance(pkg, dict) else ""
+        return "__metadata:" in lock[:2000] or bool(re.match(r"yarn@[2-9]", pm))
+
+    def _install_line(self, tool, toks, rel, n, kind, ships, cwd, flag):
         """One package-manager invocation from a CI/deploy line -> findings. `ships`: this
-        line's install ends up in what is deployed (see _ship_scope)."""
+        line's install ends up in what is deployed (see _ship_scope). `cwd`: the package
+        root it runs in, repo-relative ("" = the root, None = unknown; see _start_dirs)."""
         # WHY deploy.install.unfrozen ignores `ships` (every CI job, not only shipping ones):
         # the managers document the frozen install for CI as a whole - npm ci is "meant to
         # be used in automated environments such as test platforms, continuous integration,
         # and deployment", Yarn 4 and pnpm freeze by default when they detect CI - and a
         # front-end job that uploads its build for the deploy job to download ships that
         # install with no deploy marker of its own. A per-job rule would miss exactly that.
+        ci = kind == "ci"
         unfrozen = "deploy.install.unfrozen"
         fix = "use the frozen install: npm ci / yarn install --immutable / pnpm install --frozen-lockfile / " \
               "bun ci / composer install (references/install-semantics.md)"
         sub = toks[0] if toks else ""
+        where = f" (in {cwd}/)" if cwd else ""
         if any(t in ("-v", "--version", "-h", "--help") for t in toks):
             return
         if any(t in LOCK_ONLY or t == "--no-install" for t in toks):
             return  # a deliberate lockfile refresh (version-bump or dependency-bot job)
-        if tool == "npm" and sub in ("install", "i", "in", "add"):
-            # Bare or `npm install <pkg>`: both resolve and can rewrite the lockfile. Only a
-            # global tool install (-g, which never touches the project) is left alone.
-            if not any(t in ("-g", "--global") or t.startswith("--location=global") for t in toks):
-                yarn_flag = next((t.split("=")[0] for t in toks if t.split("=")[0] in YARN_FREEZE_FLAGS), None)
-                if yarn_flag:
-                    # Its own message: the author believes this install is frozen.
-                    flag(unfrozen, rel, n,
-                         f"`npm {sub} {yarn_flag}` in {rel}: {yarn_flag} is a Yarn flag; npm ignores it and "
-                         f"installs unfrozen (npm 11.2+ warns about the unknown flag, npm 12 refuses the command)",
-                         "use npm ci, which installs exactly package-lock.json (references/install-semantics.md#npm-ci-versus-npm-install)")
-                else:
-                    flag(unfrozen, rel, n, f"`npm {sub}` in {rel} can rewrite the lockfile and resolve new versions", fix)
-        elif tool == "yarn" and (not toks or sub == "install" or sub.startswith("-")):
-            frozen = any(t in ("--frozen-lockfile", "--immutable") for t in toks) or (ci and berry)
+        if tool == "npm" and sub in NPM_INSTALL and any(
+                t in ("-g", "--global") or t.startswith("--location=global") for t in toks):
+            self._global_install(sub, toks, rel, n, flag)  # a tool install: never the project's lockfile
+            return
+        family = "php" if tool.startswith("composer") else "js"
+        installs = {"npm": sub in NPM_INSTALL + NPM_CI, "yarn": not toks or sub == "install" or sub.startswith("-"),
+                    "pnpm": sub in ("install", "i", "ci"), "bun": sub in ("install", "i", "ci")
+                    }.get(tool, sub in ("install", "i"))
+        if installs:
+            self.installs.append({"family": family, "manager": "composer" if family == "php" else tool, "cwd": cwd,
+                                  "kind": kind, "file": rel, "line": n, "cmd": " ".join([tool] + toks[:3])})
+            manifest = "composer.json" if family == "php" else "package.json"
+            locks = ("composer.lock",) if family == "php" else tuple(JS_LOCKFILES)
+            pdir = self.root / cwd if cwd else None
+            # WHY nested only: a root without its lockfile is already js/php.lockfile.missing.
+            # Supersedes unfrozen: with no lockfile there, "use npm ci" would fail too.
+            if pdir and (pdir / manifest).is_file() and not any((pdir / f).is_file() for f in locks):
+                what = ("npm ci fails without one" if tool == "npm" and sub in NPM_CI
+                        else "every run resolves its dependencies fresh")
+                flag("deploy.install.unlocked", rel, n,
+                     f"`{' '.join([tool] + toks[:1])}` in {rel} runs in {cwd}/, which has a {manifest} but no lockfile - {what}",
+                     f"install once in {cwd}/ with the repo's manager, commit the lockfile, then use the frozen install there "
+                     "(references/install-semantics.md#the-one-table)")
+                return
+        if tool == "npm" and (sub in NPM_INSTALL or sub in NPM_CI):
+            yarn_flag = next((t.split("=")[0] for t in toks if t.split("=")[0] in YARN_FREEZE_FLAGS), None)
+            if yarn_flag:
+                # Its own id, an error: npm 12 (`latest`) refuses the command outright.
+                older = ("npm up to 11 ignores the flag (11.2+ warns \"Unknown cli config\") and installs unfrozen"
+                         if sub in NPM_INSTALL else
+                         "npm up to 11 ignores it (11.2+ warns \"Unknown cli config\"); npm ci is frozen without it")
+                flag("deploy.npm.yarn-flag", rel, n,
+                     f"`npm {sub} {yarn_flag}` in {rel}: {yarn_flag} is a Yarn flag, not npm's - npm 12 refuses the "
+                     f"command (EUNKNOWNCONFIG), so the build fails; {older}",
+                     ("use npm ci, which installs exactly package-lock.json" if sub in NPM_INSTALL
+                      else f"drop {yarn_flag}: npm ci is already frozen to package-lock.json")
+                     + " (references/install-semantics.md#npm-ci-versus-npm-install)", "error")
+            elif sub in NPM_INSTALL:
+                # Bare or `npm install <pkg>`: both resolve and can rewrite the lockfile.
+                flag(unfrozen, rel, n, f"`npm {sub}` in {rel}{where} can rewrite the lockfile and resolve new versions", fix)
+        elif tool == "yarn" and installs:
+            frozen = any(t in ("--frozen-lockfile", "--immutable") for t in toks) or (ci and self._berry(cwd or ""))
             if not frozen:
                 cmd = ("yarn " + " ".join(toks[:2])).strip()
-                flag(unfrozen, rel, n, f"`{cmd}` in {rel} without --frozen-lockfile/--immutable", fix)
+                flag(unfrozen, rel, n, f"`{cmd}` in {rel}{where} without --frozen-lockfile/--immutable", fix)
         elif tool == "pnpm" and sub in ("install", "i"):
             if "--no-frozen-lockfile" in toks or (not ci and "--frozen-lockfile" not in toks):
-                flag(unfrozen, rel, n, f"`pnpm {sub}` in {rel} is not frozen here (pnpm freezes by default only on CI)", fix)
+                flag(unfrozen, rel, n, f"`pnpm {sub}` in {rel}{where} is not frozen here (pnpm freezes by default only on CI)", fix)
         elif tool == "bun" and sub in ("install", "i"):
             if not any(t in ("--frozen-lockfile", "--production") for t in toks):
-                flag(unfrozen, rel, n, f"`bun {sub}` in {rel} without --frozen-lockfile (Bun never freezes on its own)", fix)
+                flag(unfrozen, rel, n, f"`bun {sub}` in {rel}{where} without --frozen-lockfile (Bun never freezes on its own)", fix)
         elif tool.startswith("composer"):
             if sub in ("update", "u", "upgrade", "require", "remove"):
-                flag(unfrozen, rel, n, f"`composer {sub}` in {rel} resolves new versions instead of installing the lock", fix)
+                flag(unfrozen, rel, n, f"`composer {sub}` in {rel}{where} resolves new versions instead of installing the lock", fix)
             elif sub in ("install", "i") and ships and "--no-dev" not in toks:
                 flag("deploy.composer.dev", rel, n, f"`composer {sub}` without --no-dev in a deploy ({rel}) ships dev packages",
                      "add --no-dev --optimize-autoloader (references/install-semantics.md#deploy-patterns)")
+
+    def _global_install(self, sub, toks, rel, n, flag):
+        """`npm install -g <pkg>...` in CI or a deploy. WHY flagged: it leaves the lockfile
+        alone (so deploy.install.unfrozen rightly skips it), but each run installs whatever
+        is newest for that spec - the exposure of an unpinned npx, with the same checks: an
+        exact version or a $VARIABLE pin passes and a native CLI is npx.native-cli. PKG_SPEC
+        already rejects paths, tarballs, URLs and git specs, which are not registry fetches."""
+        pkgs, skip = [], False
+        for t in toks[1:]:
+            if skip or t in GLOBAL_FLAG_WITH_VALUE:
+                skip = not skip  # the flag's value is not a package
+                continue
+            p = t.strip("'\"")
+            if not p.startswith("-") and PKG_SPEC.match(p):
+                pkgs.append(p)
+        unpinned = []
+        for p in pkgs:
+            base, ver = split_spec(p)
+            if base.lower() in self.native:
+                flag("npx.native-cli", rel, n,
+                     f"a global npm install of {p} in {rel} routes a native CLI through the npm registry - the npm name is not the tool's official channel",
+                     f"install {base} from its own channel (winget/brew/apt/cargo) and call it directly", "error")
+            elif not (EXACT_SEMVER.match(ver) or ver.startswith("$")):
+                unpinned.append(p)
+        if unpinned:
+            flag("deploy.global.unpinned", rel, n,
+                 f"a global npm install of {', '.join(unpinned)} in {rel} fetches the newest matching version on every run",
+                 f"pin it: npm {sub} -g {split_spec(unpinned[0])[0]}@<exact version> (references/npx-exec-safety.md#the-rules)")
 
     def _ramsey(self, text, rel, ships, flag):
         """ramsey/composer-install is `composer install` (or update) behind action inputs."""

@@ -187,7 +187,7 @@ doc_ids = set()
 for line in Path(audit).read_text(encoding="utf-8").splitlines():
     s = line.strip()
     if s and all(tok.count(".") >= 1 and tok.replace(".", "").replace("-", "").isalnum() for tok in s.split()) \
-            and s.split()[0].split(".")[0] in {"js", "php", "node", "ddev", "npx", "legacy", "registry"}:
+            and s.split()[0].split(".")[0] in {"js", "php", "node", "ddev", "npx", "legacy", "registry", "deploy"}:
         doc_ids.update(s.split())
 row(doc_ids and doc_ids <= covered, f"every documented finding id has a fixture ({len(doc_ids)} ids)"
     + ("" if doc_ids <= covered else f" - uncovered: {sorted(doc_ids - covered)}"))
@@ -218,17 +218,45 @@ row("js.engines.unenforced" in notes_of("clean"), "engines note fires for an npm
 row("js.engines.unenforced" not in notes_of("clean-pnpm"), "engines note stays silent for a pnpm repo (.npmrc advice is npm's)")
 # A project that pins config.platform.php gets a missing require.php as a note, not a finding.
 row("php.require.missing" in notes_of("clean-php-require-platform-pinned"), "missing require.php is a note when config.platform.php is set")
-# `npm install --frozen-lockfile` gets its own message: the author believes it is frozen.
-def unfrozen(case):
+def audit_json(case):
     d = tmp / "m" / case
     p = subprocess.run([sys.executable, audit, "--json", "--as-of", "2026-10-05", str(d)], capture_output=True, text=True)
-    data = json.loads(p.stdout)["data"] if p.stdout.strip().startswith("{") else []
-    return [f for f in data if f["id"] == "deploy.install.unfrozen"]
-yarn = unfrozen("deploy-npm-frozen-flag")
-row(yarn and all("--frozen-lockfile is a Yarn flag; npm ignores it" in f["message"] and "npm ci" in f["fix"] for f in yarn),
-    "npm install --frozen-lockfile is reported as a Yarn flag npm ignores, fix npm ci")
-plain = unfrozen("deploy-npm-install")
+    return json.loads(p.stdout) if p.stdout.strip().startswith("{") else {"data": [], "meta": {}}
+def found(case, fid):
+    return [f for f in audit_json(case)["data"] if f["id"] == fid]
+# A Yarn freeze flag on npm is an error: npm 12 refuses the command (EUNKNOWNCONFIG).
+yf = found("deploy-npm-frozen-flag", "deploy.npm.yarn-flag")
+row(yf and all(f["severity"] == "error" and "npm 12 refuses" in f["message"] and "installs unfrozen" in f["message"]
+               and "use npm ci" in f["fix"] for f in yf),
+    "npm install --frozen-lockfile: an error - npm 12 refuses it, npm up to 11 installs unfrozen, fix npm ci")
+ci = [f for f in found("deploy-npm-ci-yarn-flag", "deploy.npm.yarn-flag") if "npm ci" in f["message"]]
+row(ci and all("already frozen" in f["fix"] for f in ci), "npm ci --frozen-lockfile: drop the flag, npm ci is already frozen")
+plain = found("deploy-npm-install", "deploy.install.unfrozen")
 row(plain and not any("Yarn flag" in f["message"] for f in plain), "plain npm install keeps the generic unfrozen message")
+# CI that builds in a subfolder: the finding names that package root, and the root's
+# missing lockfile is only a note when nothing in CI installs the root.
+sub = found("deploy-ci-subfolder-unfrozen", "deploy.install.unfrozen")
+row(sub and all("(in theme/)" in f["message"] for f in sub), "an install under working-directory: names the package root it runs in")
+for case in ("deploy-ci-subfolder-unfrozen", "clean-ci-subfolder-cd", "clean-ci-subfolder-env"):
+    row("js.lockfile.missing" in notes_of(case), f"{case}: root js.lockfile.missing is a note when CI builds only a nested root with a lockfile")
+ul = found("deploy-ci-subfolder-unlocked", "deploy.install.unlocked")
+row(ul and "runs in app/client/" in ul[0]["message"], "an install in a nested folder with no lockfile names that folder")
+# Two root lockfiles: when CI installs with one manager, say which file is live.
+conf = found("js-lockfile-conflict-ci-yarn", "js.lockfile.conflict")
+row(conf and "`yarn install --frozen-lockfile`" in conf[0]["message"] and "package-lock.json is unused" in conf[0]["message"]
+    and conf[0]["fix"].startswith("delete package-lock.json"), "lockfile conflict names the one CI installs with and the unused one")
+nocif = found("js-lockfile-conflict", "js.lockfile.conflict")
+row(nocif and "CI installs" not in nocif[0]["message"], "without CI the lockfile conflict names no live lockfile")
+stale = found("php-lockfile-stale-dev-only", "php.lockfile.stale")
+row(stale and "fixture/tool (locked only in packages-dev)" in stale[0]["message"],
+    "a require locked only in packages-dev is named as such (Composer reads require from packages)")
+# EOL findings say what the repo pins, not what production runs.
+for case, fid in (("php-eol", "php.eol"), ("js-node-eol", "js.node.eol"), ("php-eol-ci", "php.eol"), ("js-node-eol-ci", "js.node.eol")):
+    fs = found(case, fid)
+    row(fs and all("confirm the server's" in f["message"] for f in fs), f"{case}: {fid} asks to confirm the server's version")
+pins = audit_json("php-eol-ci")["meta"].get("php_pins", {})
+row(pins.get(".github/workflows/test.yml:11 php-version") == "7.1", f"CI setup-php php-version '7.1' is read as a pin ({pins})")
+row("js.node.floating" not in notes_of("clean-ci-pins"), "CI lts/* and matrix node-version values are skipped, not noted as floating pins")
 # The EOL check is date-driven: Node 22 is fine on 2026-10-05 and dead after 2027-04-30.
 dest = tmp / "m" / "node-pin-disagree-nvmrc"
 proc = subprocess.run([sys.executable, audit, "--json", "--as-of", "2027-05-01", str(dest)], capture_output=True, text=True)

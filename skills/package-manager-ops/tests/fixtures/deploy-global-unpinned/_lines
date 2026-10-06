@@ -1,0 +1,4 @@
+deploy.global.unpinned .github/workflows/deploy.yml:10
+deploy.global.unpinned .github/workflows/deploy.yml:11
+deploy.global.unpinned Dockerfile:2
+npx.native-cli .github/workflows/deploy.yml:11
