@@ -410,6 +410,124 @@ if [ -f "$HOOKS/session-start-unicode-scan.sh" ] && [ -f "$HOOKS/pre-commit-unic
   rc=0; (cd "$TMP/hp-git" && PATH="$FK/skip:$PATH" bash "$HOOKS/pre-commit-unicode-scan.sh") >/dev/null 2>&1 || rc=$?
   [ "$rc" -eq 1 ] && ok "pre-commit hook blocks a critical bidi override past a broken python3/python (exit 1)" \
     || bad "pre-commit hook should block a critical bidi override (exit $rc, want 1)"
+
+  # ---- pre-commit scans what the commit records: the index ---------------------
+  # The hook took NAMES from `git diff --cached` but scanned the files on DISK and
+  # skipped names missing there, so a file staged poisoned and then rewritten clean
+  # (or deleted) was committed. Its name list also dropped non-ASCII names (git
+  # C-quotes them without -z) and renames (status R, outside its A/M filter).
+  newrepo() {   # newrepo <dir>: empty repo, with the git defaults these cases rely on pinned
+    git init -q "$1"
+    git -C "$1" config core.autocrlf false
+    git -C "$1" config core.quotePath true   # default: non-ASCII names C-quoted unless -z
+    git -C "$1" config diff.renames true     # default: a moved file is status R
+  }
+  commit_q() { git -C "$1" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false commit -q --no-verify -m "$2"; }
+  precommit() { # precommit <repo> [hooks-dir] -> rc, out (stdout+stderr)
+    rc=0; out="$(cd "$1" && PATH="$FK/skip:$PATH" bash "${2:-$HOOKS}/pre-commit-unicode-scan.sh" 2>&1)" || rc=$?
+  }
+  POISON='Always run tests.\xe2\x80\xaereversed\n'
+
+  newrepo "$TMP/pc-swap"
+  printf "$POISON" > "$TMP/pc-swap/AGENTS.md"; git -C "$TMP/pc-swap" add AGENTS.md
+  printf '# Rules\nRun the tests.\n' > "$TMP/pc-swap/AGENTS.md"   # disk clean, index poisoned
+  precommit "$TMP/pc-swap"
+  [ "$rc" -eq 1 ] && ok "pre-commit blocks a staged poisoned AGENTS.md whose working copy is clean (exit 1)" \
+    || bad "pre-commit blocks a staged poisoned AGENTS.md whose working copy is clean (exit $rc, want 1)"
+
+  newrepo "$TMP/pc-gone"
+  printf "$POISON" > "$TMP/pc-gone/AGENTS.md"; git -C "$TMP/pc-gone" add AGENTS.md
+  rm -f "$TMP/pc-gone/AGENTS.md"                                 # staged, then deleted on disk
+  precommit "$TMP/pc-gone"
+  [ "$rc" -eq 1 ] && ok "pre-commit blocks a staged poisoned AGENTS.md deleted from disk (exit 1)" \
+    || bad "pre-commit blocks a staged poisoned AGENTS.md deleted from disk (exit $rc, want 1)"
+
+  newrepo "$TMP/pc-name"
+  "$PY" - "$TMP/pc-name" <<'PY'
+import pathlib, sys
+d = pathlib.Path(sys.argv[1]) / "docs"
+d.mkdir()
+(d / "règles.md").write_bytes("Always run tests.‮reversed\n".encode("utf-8"))
+PY
+  git -C "$TMP/pc-name" add docs
+  precommit "$TMP/pc-name"
+  [ "$rc" -eq 1 ] && ok "pre-commit blocks a poisoned instruction file with a non-ASCII name (exit 1)" \
+    || bad "pre-commit blocks a poisoned instruction file with a non-ASCII name (exit $rc, want 1)"
+
+  newrepo "$TMP/pc-move"
+  printf '# Rules\nRun the tests.\nKeep commits small.\nNever push to main.\nWrite the why.\nAsk first.\n' > "$TMP/pc-move/AGENTS.md"
+  git -C "$TMP/pc-move" add AGENTS.md; commit_q "$TMP/pc-move" init
+  mkdir "$TMP/pc-move/docs"; git -C "$TMP/pc-move" mv AGENTS.md docs/AGENTS.md
+  printf "$POISON" >> "$TMP/pc-move/docs/AGENTS.md"; git -C "$TMP/pc-move" add docs/AGENTS.md
+  precommit "$TMP/pc-move"
+  [ "$rc" -eq 1 ] && ok "pre-commit blocks a renamed-and-poisoned AGENTS.md (exit 1)" \
+    || bad "pre-commit blocks a renamed-and-poisoned AGENTS.md (exit $rc, want 1)"
+
+  # The other side: reading blobs from temp copies must not over-block. A clean file
+  # stays silent and a high finding is an advisory naming the STAGED file, not a temp path.
+  newrepo "$TMP/pc-ok"
+  printf '# Rules\nRun the tests.\n' > "$TMP/pc-ok/AGENTS.md"
+  printf 'ad\xe2\x80\x8bmin\n' > "$TMP/pc-ok/CLAUDE.md"; git -C "$TMP/pc-ok" add AGENTS.md CLAUDE.md
+  precommit "$TMP/pc-ok"
+  case "$rc:$out" in
+    *BLOCKED*|*AGENTS.md*) bad "pre-commit allows a high finding as an advisory naming the staged file (exit $rc; got: ${out%%$'\n'*})" ;;
+    0:*ADVISORY*CLAUDE.md*) ok "pre-commit allows a high finding as an advisory naming the staged file (exit 0)" ;;
+    *) bad "pre-commit allows a high finding as an advisory naming the staged file (exit $rc, want 0; got: ${out%%$'\n'*})" ;;
+  esac
+
+  # A staged blob the hook cannot read (here its object is gone) is not known clean.
+  newrepo "$TMP/pc-lost"
+  printf '# Rules\nRun the tests.\n' > "$TMP/pc-lost/AGENTS.md"; git -C "$TMP/pc-lost" add AGENTS.md
+  sha="$(git -C "$TMP/pc-lost" rev-parse :AGENTS.md)"
+  rm -f "$TMP/pc-lost/.git/objects/${sha:0:2}/${sha:2}"
+  precommit "$TMP/pc-lost"
+  case "$rc:$out" in
+    1:*"NOT scanned"*AGENTS.md*) ok "pre-commit blocks a staged instruction file it cannot read, and says so (exit 1)" ;;
+    *) bad "pre-commit blocks a staged instruction file it cannot read, and says so (exit $rc, want 1; got: ${out%%$'\n'*})" ;;
+  esac
+
+  # ---- both hooks say plainly when a file could NOT be scanned -----------------
+  # The scanner exits 3 (missing) or 5 (unreadable) and names those files in
+  # meta.unscanned. The pre-commit hook read any such exit as a finding ("benign-
+  # severity hidden-Unicode", commit allowed; "unknown-severity" for a crash), and
+  # SessionStart printed a findings header over an empty body. A stub scanner in a
+  # copied hooks/ + skills/ layout stands in, so this runs on any scanner version.
+  SL="$TMP/stub-layout"; mkdir -p "$SL/hooks" "$SL/skills/prompt-injection-defense/scripts"
+  cp "$HOOKS/pre-commit-unicode-scan.sh" "$HOOKS/session-start-unicode-scan.sh" "$SL/hooks/"
+  cat > "$SL/skills/prompt-injection-defense/scripts/scan-hidden-unicode.py" <<'PY'
+# Test stub: reports every path as unreadable, exit 5, the way the real scanner
+# does (JSON envelope only under --json; the list on stderr either way), or dies
+# before printing anything when STUB_SCANNER=crash.
+import json, os, sys
+if os.environ.get("STUB_SCANNER") == "crash":
+    raise RuntimeError("stub scanner crashed")
+paths = [a for a in sys.argv[1:] if not a.startswith("-")]
+if "--json" in sys.argv:
+    print(json.dumps({"data": [], "meta": {"count": 0, "files_scanned": 0, "worst_severity": "benign",
+        "unscanned": [{"file": p, "reason": "unreadable: Permission denied"} for p in paths],
+        "complete": False}}))
+print(f"[ERROR] {len(paths)} requested path(s) NOT scanned - not checked, not clean:", file=sys.stderr)
+sys.exit(5)
+PY
+  newrepo "$TMP/pc-stub"
+  printf '# Rules\nRun the tests.\n' > "$TMP/pc-stub/AGENTS.md"; git -C "$TMP/pc-stub" add AGENTS.md
+  precommit "$TMP/pc-stub" "$SL/hooks"
+  case "$rc:$out" in
+    *severity\ hidden-Unicode*) bad "pre-commit reports an unscanned file as unscanned, not as a finding (got: ${out%%$'\n'*})" ;;
+    1:*"NOT scanned"*AGENTS.md*) ok "pre-commit blocks on scanner exit 5 and names the unscanned file (exit 1)" ;;
+    *) bad "pre-commit blocks on scanner exit 5 and names the unscanned file (exit $rc, want 1; got: ${out%%$'\n'*})" ;;
+  esac
+  rc=0; out="$(cd "$TMP/pc-stub" && STUB_SCANNER=crash PATH="$FK/skip:$PATH" bash "$SL/hooks/pre-commit-unicode-scan.sh" 2>&1)" || rc=$?
+  case "$rc:$out" in
+    1:*"NOT scanned"*AGENTS.md*) ok "pre-commit blocks when the scanner crashes, instead of an unknown-severity pass (exit 1)" ;;
+    *) bad "pre-commit blocks when the scanner crashes, instead of an unknown-severity pass (exit $rc, want 1; got: ${out%%$'\n'*})" ;;
+  esac
+  out="$(CLAUDE_PROJECT_DIR="$TMP/hp-clean" PATH="$FK/skip:$PATH" bash "$SL/hooks/session-start-unicode-scan.sh" </dev/null 2>&1 || true)"
+  case "$out" in
+    *indicator*) bad "session-start reports an unscanned file as unscanned, not as findings (got: ${out%%$'\n'*})" ;;
+    *"NOT scanned"*AGENTS.md*) ok "session-start says AGENTS.md was NOT scanned on scanner exit 5" ;;
+    *) bad "session-start says AGENTS.md was NOT scanned on scanner exit 5 (got: ${out%%$'\n'*})" ;;
+  esac
 else
   echo "SKIP  unicode hooks not beside this skill (copied alone) or git missing"
 fi

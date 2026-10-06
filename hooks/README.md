@@ -15,10 +15,10 @@ Claude Code hooks allow you to run custom scripts at key workflow points.
 | `check-mail.sh` | PreToolUse | Check for unread pigeon pmail via signal file (zero-cost when empty) |
 | `config-change-guard.sh` | ConfigChange | Worm-persistence tripwire: when a Claude settings file changes mid-session, scan just that file for the vetted IOC set (curl\|sh, base64-decode eval, Invoke-Expression+Download, /dev/tcp, reads of `.claude/settings` / `.aws/credentials`). Silent on clean; on a finding, a desktop notification (`terminalSequence`, interactive sessions only - ConfigChange discards `systemMessage`, so no text reaches you or the model). `SUPPLY_CHAIN_BLOCK=1` blocks the change (exit 2). Fast single-file sibling of `supply-chain-defense`'s `integrity-audit.sh`. |
 | `worktree-guard.sh` | PreToolUse (Bash) | Enforce `rules/worktree-boundaries.md`: flags `rm` on `.claude/worktrees`, `git worktree remove/prune` against worktrees, `git rm` on worktree gitlinks, and `git add -A`/`.` in a repo that has a `.claude/worktrees` dir. Sessions whose cwd is inside their own worktree are exempt. Advisory by default; `WORKTREE_GUARD_BLOCK=1` hard-denies (exit 2). |
-| `session-start-unicode-scan.sh` | SessionStart | One-shot hidden-Unicode scan of the project's instruction files (CLAUDE.md/AGENTS.md/SKILL.md/.cursorrules) at session boot. Silent on clean; advisory on a finding. Pairs with `prompt-injection-defense`. |
+| `session-start-unicode-scan.sh` | SessionStart | One-shot hidden-Unicode scan of the project's instruction files (CLAUDE.md/AGENTS.md/SKILL.md/.cursorrules) at session boot. Silent on clean; advisory on a finding, and a separate "NOT scanned" advisory naming any file the scanner could not read. Pairs with `prompt-injection-defense`. |
 | `pre-write-peer-guard.sh` | PreToolUse (Edit\|Write) | Mid-session peer-writer guard (`rules/worktree-boundaries.md`): before writing a file, warn if it was freshly modified by something that isn't this session — the signature of a live peer session sharing the checkout. Uses the touched-ledger to tell own edits apart. Advisory by default; `GUARD_BLOCK=1` denies the write. Auto-wired with its ledger companion. |
 | `session-touched-ledger.sh` | PostToolUse (Edit\|Write) | Companion to `pre-write-peer-guard.sh`: records every file this session writes to `~/.claude/.session-touched/<session_id>.list` so the guard can distinguish this session's edits from a peer's. Silent, never blocks. Auto-wired with the peer guard. |
-| `pre-commit-unicode-scan.sh` | git pre-commit | Refuse commits that ADD hidden Unicode to instruction files. Silent on clean, warn on `high`, **block on `critical`** (tag-block / bidi override). Override once with `PROMPT_INJECTION_ALLOW=1`. |
+| `pre-commit-unicode-scan.sh` | git pre-commit | Refuse commits that ADD hidden Unicode to instruction files. Scans the **staged (index) copy**, not the file on disk, including renamed and non-ASCII-named files. Silent on clean, warn on `high`, **block on `critical`** (tag-block / bidi override) **or on a staged instruction file it could not scan**. Override once with `PROMPT_INJECTION_ALLOW=1`. |
 
 ## Auto-wired vs opt-in
 
@@ -116,8 +116,10 @@ ln -sf ../../hooks/pre-commit-unicode-scan.sh .git/hooks/pre-commit
 ```
 
 Both resolve the scanner relative to themselves, so they work whether claude-mods is
-run from the repo or installed under `~/.claude/`. Blocks only on `critical`; override
-a single commit with `PROMPT_INJECTION_ALLOW=1 git commit ...`.
+run from the repo or installed under `~/.claude/`. The pre-commit gate blocks on
+`critical`, or when a staged instruction file could not be scanned (unreadable blob,
+broken scanner) - a gate that could not look does not report clean. Override a single
+commit with `PROMPT_INJECTION_ALLOW=1 git commit ...`.
 
 A hook run through a symlink resolves the link first, so it finds the `skills/` beside
 its real path, not beside `.git/hooks/`. If the pre-commit gate still finds no scanner,

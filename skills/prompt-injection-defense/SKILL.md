@@ -148,7 +148,10 @@ all are silent on clean:
   `AGENTS.md` is checkable, since the harness loads them before any skill or Read
   hook can see them.
 - **git pre-commit gate** (`hooks/pre-commit-unicode-scan.sh`) - refuses commits that
-  *add* hidden Unicode to instruction files; blocks on `critical`, warns on `high`.
+  *add* hidden Unicode to instruction files; blocks on `critical`, warns on `high`. It
+  scans the staged (index) copy, never the file on disk, and blocks a staged file it
+  could not scan. Both hooks report a file they could not scan as "NOT scanned",
+  never as clean.
 - **`rules/prompt-injection.md`** - makes the agent scan on entering an unfamiliar
   repo and sanitize fetched/MCP content on ingest, without being asked.
 
