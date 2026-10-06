@@ -636,6 +636,13 @@ feature releases live in the README "Recent Updates" section.
   tools), showed a hooks config Claude Code rejects and a plugin manifest
   `components` key that doesn't exist, and called the Agent tool by its old Task name.
 
+- **`docs/ARCHITECTURE.md` contradicted the AGENTS.md protocol.** It said a CLAUDE.md
+  overrides AGENTS.md and told Claude-only teams to use CLAUDE.md. Any CLAUDE.md stops
+  AGENTS.md loading at all, so the section now gives the two portable shapes and links
+  the protocol. `docs/PLAN.md` dropped its second docs index, which had drifted from
+  `docs/00_INDEX.md`, and gained the AGENTS.md follow-ups. The build plan records what
+  shipped and five gaps found by running the tools on this repo.
+
 ### Changed
 
 - **`craftcms-ops` refreshed for real agency builds.** Ten new one-topic references -

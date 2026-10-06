@@ -59,4 +59,34 @@ part a human can't easily produce by hand.
 
 ## Status
 
-Built on `lane/agents-md`. Landing, push and install are the coordinator's call.
+**Shipped.** Landed on `main` as `42d6862` (from `lane/agents-md`) and pushed with
+`24ac6d1` on 2026-10-06. Every row of "What ships" exists: `entry-docs.md` is gone and
+nothing links to it, `--offline` runs in `tests/check-resources.sh` (so in `just check`
+and PR CI), and `--live` runs in `freshness.yml`. What comes next is in
+[docs/PLAN.md](../PLAN.md) (Phase 5).
+
+## Known gaps (dogfood, 2026-10-06)
+
+Found by running `repo-scan.py`, `agents-md.py audit --diff` and `scaffold` on this repo.
+Its own AGENTS.md audits clean (3 infos, empty patch) at 199 lines, which hides the first
+gap.
+
+1. **The budget counts lines, not size.** 199 lines is 16.8 KB, and one overview line is
+   2,325 characters. Add a size check (chars / 3.6, the `tests/skill-size.sh` estimate)
+   and a long-line finding, or the 200-line ceiling is easy to game by accident.
+2. **The split plan moves the largest sections first.** At 201 lines it would move the
+   Structure map out and leave the Installation section the protocol excludes. Move
+   excluded content (setup prose) first and the structure map last. A heading like
+   "Quick Reference" counts as Commands, so the generic tips under it never move.
+3. **Landmine candidates carry noise.** They cite paths no longer tracked (a renamed
+   skill), flag a test fixture as a tracked secret, read a script and its own test
+   suite changing together as coupling, ask two questions about one file (fragile and
+   hot spot), and don't mark questions an existing Landmine already answers. About a
+   third of this repo's 14 candidates were noise.
+4. **The scaffold assumes one of four archetypes.** Anything that isn't PHP, Python or
+   Node falls back to `static-site` and gets publishing questions. The Structure table
+   ranks areas by kind before size and keeps 12, so it dropped `skills/` (1,367 files)
+   and kept a one-file folder. The title uses the checkout's directory name, which in a
+   worktree is the worktree's name, and `just default` is listed as a command.
+5. **The tests scan finds frameworks by config file only**, so shell suites (and Go or
+   Rust conventions) come back as `tests: []`.
