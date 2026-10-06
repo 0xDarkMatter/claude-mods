@@ -429,6 +429,57 @@ for f in skills/*/scripts/run-python.sh; do
 done
 [ -n "$__rp_ref" ] || bad "no skills/*/scripts/run-python.sh found (portable python launcher missing)"
 
+echo "== freshness workflow: a verifier that crashes fails the weekly job"
+# freshness.yml once mapped only 10 (fail) and 7 (warn) and ended every step in a
+# bare `exit 0`, so a verifier that crashed (1), was misused (2) or could not read
+# its facts (3/4) passed green every week while checking nothing. The mapping now
+# lives in one helper: pin its contract here, and keep every --live step on it.
+# FRESHNESS_YML / FRESHNESS_STEP point these checks at another copy (e.g. main's
+# old workflow, or a helper with the catch-all removed) to watch them fail.
+__fy="${FRESHNESS_YML:-.github/workflows/freshness.yml}"
+__fs="${FRESHNESS_STEP:-.github/scripts/freshness-step.sh}"
+__ft="$(mktemp -d)"
+printf '#!/usr/bin/env bash\nexit "$1"\n' > "$__ft/stub.sh"
+fstep() { # desc, want-exit, want-annotation (ERE; '' = none), helper args...
+    local desc="$1" want="$2" pat="$3" out got ann; shift 3
+    out="$(bash "$__fs" "$@" 2>/dev/null)"; got=$?
+    ann="$(printf '%s\n' "$out" | grep -E '^::(error|warning)::')"
+    if [ "$got" -ne "$want" ]; then bad "$desc (want exit $want, got $got)"
+    elif [ -z "$pat" ] && [ -n "$ann" ]; then bad "$desc (want no annotation, got: $ann)"
+    elif [ -n "$pat" ] && ! printf '%s\n' "$ann" | grep -qE "$pat"; then
+        bad "$desc (annotation '${ann:-<none>}' does not match $pat)"
+    else pass "$desc (exit $got)"; fi
+}
+__fa=(--name stub-ops --drift "stub drifted" --unavailable "stub unreachable")
+fstep "verifier exit 0 passes quietly"  0 ''                              "${__fa[@]}" -- bash "$__ft/stub.sh" 0
+fstep "verifier exit 7 warns and passes" 0 '^::warning::stub unreachable$' "${__fa[@]}" -- bash "$__ft/stub.sh" 7
+fstep "verifier exit 10 fails as drift" 1 '^::error::stub drifted$'       "${__fa[@]}" -- bash "$__ft/stub.sh" 10
+for __c in 1 2 3 4 5 6; do
+    fstep "verifier exit $__c fails as a crash" 1 "^::error::stub-ops verifier crashed or was misused \\(exit $__c\\)" \
+        "${__fa[@]}" -- bash "$__ft/stub.sh" "$__c"
+done
+fstep "missing verifier command fails" 1 '^::error::stub-ops verifier crashed or was misused \(exit 127\)' \
+    "${__fa[@]}" -- "$__ft/no-such-verifier"
+fstep "helper call without -- is a usage error"   2 '^::error::freshness-step\.sh:' "${__fa[@]}" bash "$__ft/stub.sh" 0
+fstep "helper call without --drift is a usage error" 2 '^::error::freshness-step\.sh:' \
+    --name stub-ops --unavailable u -- bash "$__ft/stub.sh" 0
+rm -rf "$__ft"
+bash -n "$__fs" 2>/dev/null && pass "bash -n freshness-step.sh" || bad "bash -n freshness-step.sh"
+# Comment lines are stripped first: the workflow header names `$?` and --live on purpose.
+__fy_code="$(grep -vE '^\s*#' "$__fy")"
+if printf '%s\n' "$__fy_code" | grep -qE 'set \+e|\$\?'; then
+    bad "$__fy reads exit codes itself (set +e / \$?) - hand the verifier to freshness-step.sh"
+else pass "$__fy never reads \$? itself"; fi
+__fy_stray="$(printf '%s\n' "$__fy_code" | grep -E -- '--live' | grep -vE '^\s*-- ')"
+if [ -n "$__fy_stray" ]; then
+    bad "$__fy runs a --live verifier outside freshness-step.sh: $(printf '%s\n' "$__fy_stray" | head -1 | sed 's/^ *//')"
+else pass "$__fy hands every --live verifier to the helper after --"; fi
+__fy_live="$(printf '%s\n' "$__fy_code" | grep -cE -- '--live')"
+__fy_help="$(printf '%s\n' "$__fy_code" | grep -cE 'bash \.github/scripts/freshness-step\.sh ')"
+if [ "$__fy_live" -gt 0 ] && [ "$__fy_live" -eq "$__fy_help" ]; then
+    pass "$__fy: one helper call per live check ($__fy_live)"
+else bad "$__fy: $__fy_help helper calls for $__fy_live live checks - want one each"; fi
+
 echo
 if [ "$fail" -eq 0 ]; then echo "resource checks: clean"; exit 0; fi
 echo "resource checks: failures above"; exit 1
