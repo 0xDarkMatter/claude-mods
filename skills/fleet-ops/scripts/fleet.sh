@@ -881,8 +881,9 @@ session_enabled() {
     && [[ -f "$SESSIONS_SH" ]]
 }
 
-# TSV row for the session owning $1, or empty. $2=--fresh forces an
-# authoritative liveness read (used by the land gate).
+# TSV row for the session owning $1 (by name, or by a claim on its worktree:
+# `sessions.sh owner`), or empty. $2=--fresh forces an authoritative liveness
+# read; `fleet owner` and prune's pre-delete re-check use it.
 lane_owner() {
   session_enabled || return 0
   local branch=$1 fresh=${2:-}
@@ -1014,44 +1015,28 @@ session_is_self() {
   [[ -n "$SELF_SESSION_ID" && "$1" == "$SELF_SESSION_ID" ]]
 }
 
-# Every OTHER live session that also owns branch $1 (excluding session $2), as
-# "id<TAB>title" rows. Liveness is re-read per candidate rather than taken from
-# the cached index — same standard as `owner --fresh`, because this decides a
-# refusal, and the index cache has a 15-minute TTL.
-peer_live_owners() {
-  local branch=$1 self=$2 row id
-  load_session_index
-  [[ -z "$SESSION_INDEX_CACHE" ]] && return 0
-  while IFS= read -r row; do
-    [[ -z "$row" ]] && continue
-    id=$(sfield "$row" 2)
-    [[ "$id" == "$self" ]] && continue
-    [[ "$(bash "$SESSIONS_SH" live "$id" 2>/dev/null)" == "1" ]] || continue
-    printf '%s\t%s\n' "$id" "$(sfield "$row" 3)"
-  done < <(printf '%s\n' "$SESSION_INDEX_CACHE" | awk -F'\t' -v w="$branch" '$1 == w')
-  return 0
-}
-
-# Live DIRECTORY claims on worktree $1, one row per session:
-# "id<TAB>title<TAB>routes" (routes: cwd,worktree,transcript,live-cwd).
-# The branch join alone is blind in the two ways prune hit on 2026-09-28: a
-# wrapper's branch drifts from what its worktree has checked out (a session in
-# worktree vigilant-grothendieck recorded branch claude/keen-mccarthy), and a
-# session that EnterWorktree'd into a lane records that only in its
-# transcript. Either way the branch join finds no live owner, and the gate
-# merged — then rebased — under a session still writing in that worktree.
-# `at --fresh`, never the cached `at`: this decides a refusal, and the index is
-# up to 15 minutes old. See cmd_at in sessions.sh for what "fresh" covers.
-worktree_live_claims() {
+# Every LIVE claim on branch $1, one row per session and worktree:
+# "id<TAB>title<TAB>how" — "owns <branch>" for a claim by name, "working in
+# <worktree> (by <routes>)" for a claim on the worktree it is checked out in.
+# This is `sessions.sh claimants --fresh`: the same claim logic as `fleet owner`
+# and prune, with every claimant's liveness re-read, because this decides a
+# refusal and the index is up to 15 minutes old. Joining on the name alone was
+# blind three ways, each of which merged and then rebased under a live session:
+# a wrapper's branch drifting from its worktree's (2026-09-28), a session that
+# EnterWorktree'd into the lane (the same day), and Desktop's writtenBranches
+# turning into "<path>\0<branch>" pairs no lane name equalled (2026-10-06).
+live_claims_on() {
   session_enabled || return 0
   FLEET_SESSION_LIVE_SECS="$SESSION_LIVE_SECS" \
-    bash "$SESSIONS_SH" at --fresh "$1" 2>/dev/null </dev/null \
-    | awk -F'\t' -v OFS='\t' '
+    bash "$SESSIONS_SH" claimants --fresh "$1" 2>/dev/null </dev/null \
+    | awk -F'\t' -v OFS='\t' -v b="$1" '
         NF && $7 == "1" {
-          if (!($3 in t)) { o[++n] = $3; t[$3] = $4; r[$3] = $8 }
-          else if (index("," r[$3] ",", "," $8 ",") == 0) r[$3] = r[$3] "," $8
+          k = $2 SUBSEP (($8 == "branch") ? "" : $9)
+          if (!(k in t)) { o[++n] = k; id[k] = $2; t[k] = $3; p[k] = $9; nm[k] = ($8 == "branch") }
+          if ($8 != "branch" && index("," r[k] ",", "," $8 ",") == 0) r[k] = r[k] (r[k] == "" ? "" : ",") $8
         }
-        END { for (i = 1; i <= n; i++) print o[i], t[o[i]], r[o[i]] }' || true
+        END { for (i = 1; i <= n; i++) { k = o[i]
+                print id[k], t[k], nm[k] ? "owns " b : "working in " p[k] " (by " r[k] ")" } }' || true
 }
 
 # Collapse "id<TAB>title<TAB>how" rows ($1) to one per session, first-seen
@@ -1077,10 +1062,10 @@ log_claimants() {
 # be committing to, and then rebasing its worktree out from under it.
 #
 # "Working on" is the union of two joins, because each is blind where the
-# other sees: the BRANCH join (the newest session that checked out or wrote
-# the lane branch, via `owner --fresh`) and the DIRECTORY join (any session
-# claiming the worktree the branch is checked out in — worktree_live_claims).
-# Neither trusts the cached index's liveness; both re-read it.
+# other sees: the NAME join (every session that checked out or wrote the lane
+# branch) and the DIRECTORY join (any session claiming the worktree the branch
+# is checked out in). Both come from one `claimants --fresh` read
+# (live_claims_on), which never trusts the cached index's liveness.
 #
 # SELF-OWNERSHIP IS EXEMPT, and the reason is the whole design: that hazard is
 # about a CONCURRENT writer. A session landing its own lane is not one — it is
@@ -1091,28 +1076,17 @@ log_claimants() {
 # for the peers it genuinely protects. A narrow exemption beats a blunt one.
 #
 # It stays conservative in both directions: unresolvable self never matches,
-# and self must be the ONLY live claimant — by either join, plus every other
-# live writer of the branch (peer_live_owners). A second live session is the
-# real hazard, and refuses exactly as before. A CLI or headless session has no
-# store record, so it can never prove it is self: working in the lane's
-# worktree, it refuses even its own land.
+# and self must be the ONLY live claimant — by either join, and the name join
+# lists every session that wrote the branch, not just the newest. A second
+# live session is the real hazard, and refuses exactly as before. A CLI or
+# headless session has no store record, so it can never prove it is self:
+# working in the lane's worktree, it refuses even its own land.
 # Returns 0 = safe to land, 1 = refuse.
 session_land_gate() {
   local branch=$1
   session_enabled || return 0
-  local claimants="" row wt claims
-  row=$(lane_owner "$branch" --fresh)
-  if [[ -n "$row" && "$(sfield "$row" 7)" == "1" ]]; then
-    claimants="$(sfield "$row" 2)"$'\t'"$(sfield "$row" 3)"$'\t'"owns $branch"$'\n'
-  fi
-  while IFS= read -r wt; do
-    [[ -n "$wt" ]] || continue
-    claims=$(worktree_live_claims "$wt")
-    [[ -n "$claims" ]] || continue
-    claimants+=$(printf '%s\n' "$claims" \
-      | awk -F'\t' -v OFS='\t' -v wt="$wt" 'NF { print $1, $2, "working in " wt " (by " $3 ")" }')$'\n'
-  done <<< "$(worktree_path_for "$branch")"
-  claimants=$(merge_claimants "$claimants")
+  local claimants
+  claimants=$(merge_claimants "$(live_claims_on "$branch")")
   [[ -z "$claimants" ]] && return 0      # nobody live → allow
 
   local id title how others="" self_in=0
@@ -1122,11 +1096,7 @@ session_land_gate() {
   done <<< "$claimants"
 
   if [[ $self_in -eq 1 ]]; then
-    local peers
-    peers=$(peer_live_owners "$branch" "$SELF_SESSION_ID")
-    [[ -n "$peers" ]] && others+=$(printf '%s\n' "$peers" \
-      | awk -F'\t' -v OFS='\t' -v b="$branch" 'NF { print $1, $2, "also writes " b }')$'\n'
-    others=$(merge_claimants "$others")
+    others=$(printf '%s' "$others" | awk 'NF')
     if [[ -z "$others" ]]; then
       log "landing own lane: $branch is claimed only by THIS session ($SELF_SESSION_ID) — not a concurrent writer"
       return 0

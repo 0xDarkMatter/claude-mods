@@ -31,6 +31,21 @@
 # transcript; the wrapper's cwd never changes, so a session created in worktree
 # A that moved into lane B still claims only A in its wrapper (measured
 # 2026-09-28: 27 entries in the spawn worktree, 258 in the lane it moved to).
+# A RESUME UNDOES THAT. When Desktop resumes such a session (an app restart),
+# the transcript is filed under the wrapper's cwd again, a copy beside the old
+# one, while the session re-enters lane B from the `worktree-state` records it
+# keeps. From then on only the cwd each record carries names B. The index reads
+# that cwd only while a session is live; `at --fresh` reads it for every live
+# transcript, wherever it is filed (2026-10-06, below).
+#
+# WRITTENBRANCHES IS PAIRS. Since about 2026-09-24 Desktop writes each entry as
+# "<worktreePath>\0<branch>" (a NUL between them), where it once wrote the bare
+# branch; the store holds both shapes. Read whole, a pair was one long "branch"
+# no lane name ever equalled, so every owner lookup by writtenBranches came back
+# empty. On 2026-10-06 `fleet owner` called a live session's lane unowned and a
+# second session ported its work as an orphan. Now the branch half feeds the
+# index and the path half is a claim on that worktree (route `written`), which
+# holds while the session is idle, unlike the transcript's recorded cwd.
 #
 # ARCHIVED IS NOT LIVE, unless something wrote after the archive. Archiving
 # stops the session, and the stop appends bookkeeping records (last-prompt,
@@ -53,9 +68,11 @@
 #   liveness    live_many — the fresh read every gate decision rests on;
 #               `state`, the same read plus the archive flag, for prune
 #   self        which session is calling (the land gate's self-exemption)
-#   owner       branch -> newest owning session
 #   main        the repo's coordinator session
-#   at          directory -> claims; --fresh is the land gate's read
+#   at          directory -> claims; --fresh adds what the index cannot know
+#   claimants   branch -> every claim: its name, or the worktree it is checked
+#               out in (the `at` read). --fresh is the land gate's read
+#   owner       branch -> the one claimant that wins (live, open, newest)
 #   where       session -> the Desktop instance (store) holding it
 #
 # INVARIANTS
@@ -93,18 +110,27 @@ $SELF — map fleet lane branches to the Claude sessions that own them
 
 USAGE
   $SELF index                     All branch->session rows (TSV)
-  $SELF owner [--fresh] <branch>  The one session owning <branch> (newest wins).
-                                  --fresh re-reads that session's liveness
-                                  directly, bypassing the cache — use it for
-                                  any gate that must not act on stale data.
+  $SELF claimants [--fresh] <branch>
+                                  Every session claiming <branch>: by name
+                                  (checked out or written), or by a claim on
+                                  the worktree it is checked out in (\`at\`,
+                                  read from the current repo). --fresh is the
+                                  land gate's read: every claimant's liveness
+                                  re-read, plus the \`at --fresh\` additions.
+  $SELF owner [--fresh] <branch>  The one claimant that wins: live first (with
+                                  --fresh), then open over archived, then the
+                                  newest. Use --fresh for any gate that must
+                                  not act on stale data.
   $SELF main                      The MAIN/coordinator session for this repo
   $SELF paths                     All path->session claims (TSV, see below)
   $SELF views                     index + paths from one scan, tagged I / P
-  $SELF at [--fresh] <path>       The claims on one directory (a worktree).
+  $SELF at [--fresh] <path>       The claims on one directory (a worktree); a
+                                  relative <path> is the caller's directory's.
                                   --fresh re-reads every claimant's liveness
-                                  and adds sessions whose transcript is being
-                                  written in <path> right now, which the cache
-                                  cannot know yet — the land gate's read.
+                                  and adds what the cache cannot know yet: a
+                                  live transcript filed under <path>, or one
+                                  whose last recorded cwd is <path> or inside
+                                  it, wherever it is filed.
   $SELF live <sessionId>          1 if that session is live, else 0
   $SELF state <sessionId>...      The fresh read prune takes before it
                                   classifies: liveness and the archive flag
@@ -119,13 +145,21 @@ USAGE
   $SELF --help
 
 OUTPUT (TSV columns)
-  index/owner/main:
+  index/main:
     branch  sessionId  title  lastActivityMs  cwd  archived(0|1|?)  live(0|1)
+  owner:
+    the same seven, then  via  the routes that one session claims by,
+    comma-joined: branch, and the paths/at routes below
+  claimants:
+    branch  sessionId  title  lastActivityMs  cwd  archived  live  via  path
+    one row per (session, route); path is the worktree a directory claim is on,
+    empty for via=branch. cwd is empty for a session the index has not seen.
   paths/at:
     key  path  sessionId  title  lastActivityMs  archived(0|1|?)  live(0|1)  via
     key   the path in Claude Code's project-dir encoding, lowercased
     path  the normalised path, or empty when only the encoded key is known
-    via   cwd | worktree | transcript | live-cwd
+    via   cwd | worktree | written | transcript | live-cwd
+          written: a worktree its wrapper's writtenBranches says it wrote in
   state:
     sessionId  live(0|1)  archived(0|1|?|-)  lastCwd
     -        no wrapper was read (a cli:<id>, or the wrapper is gone)
@@ -161,6 +195,9 @@ EXAMPLES
 
   # every lane branch with a live owner
   $SELF index | awk -F'\\t' '\$7==1 {print \$1, \$3}'
+
+  # every session on this lane, by name or by its worktree, liveness re-read
+  $SELF claimants --fresh lane/projection-control
 
   # which sessions claim this worktree, by any route?
   $SELF at 'X:\\repo\\.claude\\worktrees\\lane-a'
@@ -309,14 +346,17 @@ find_wrapper() {
 # One pass over every store and transcript root yields WIDE rows, one per
 # session; `index` (branch-keyed) and `paths` (directory-keyed) are both
 # projections of them:
-#   W  id  title  lastMs  cwd  worktreePath  archived  live  branches  txdir  livecwd
+#   W  id  title  lastMs  cwd  worktreePath  archived  live  branches  txdir  livecwd  written
 # branches  space-separated (git forbids spaces in ref names): the checked-out
-#           `branch` AND every `writtenBranches` entry — the latter is what
-#           matches a fleet lane, because a session in worktree `claude/foo`
-#           may commit its real work to `lane/thing`.
+#           `branch` AND every `writtenBranches` entry's branch — the latter is
+#           what matches a fleet lane, because a session in worktree
+#           `claude/foo` may commit its real work to `lane/thing`.
 # txdir     the transcript's encoded project dir, lowercased — where the
-#           session is working NOW, which the wrapper's cwd does not track.
+#           session is working NOW, which the wrapper's cwd does not track
+#           (until a resume files it back under that cwd: header).
 # livecwd   the last cwd the transcript recorded; read only while live.
+# written   the worktree paths the `writtenBranches` pairs name, separated by
+#           \037 (US): a path may hold a space, and none holds a US.
 # Transcripts with no wrapper in any store (CLI and headless sessions) are T
 # rows, emitted only while live: with no archive flag, recency is the one
 # thing they can prove.
@@ -346,15 +386,26 @@ stat_to_ids() {
 # The last cwd transcript $1 recorded, or empty. JSON escapes each backslash as
 # a pair; the pair becomes '/' here so the value normalises like every other
 # path. Only the tail is read: transcripts run to tens of MB.
+# A record can also carry a nested git_state whose cwd is in Git Bash form
+# (/x/repo/...), and it is often the LAST "cwd" in the line (seen 2026-10-06).
+# The awk joins fold backslashes and case but not /x/ -> x:/, so a '/'-rooted
+# value goes through norm_path here (cygpath, Windows only; a no-op elsewhere).
 last_cwd_of() {
     local lc
     lc=$(tail -c 262144 "$1" 2>/dev/null | grep -o '"cwd":"[^"]*"' | tail -n1)
     lc=${lc#\"cwd\":\"}; lc=${lc%\"}
     lc=${lc//\\\\//}    # an assignment, unquoted: inside "..." this pattern means something else
+    [[ "$lc" == /* ]] && lc=$(norm_path "$lc")
     printf '%s' "$lc"
 }
 
-# id  title  cwd  worktreePath  lastActivityAt  archived  cliSessionId  branches
+# id  title  cwd  worktreePath  lastActivityAt  archived  cliSessionId  branches  written
+# A writtenBranches entry is split at its first NUL ("<path>\0<branch>", header):
+# the branch half joins `branches`, the path half `written`. A bare entry (the
+# older shape) is all branch. The split happens here, in jq, because a NUL can
+# never reach bash: $(...) drops it, and @tsv escapes it to a literal "\0".
+# split, not index + slice: jq 1.6's string index counts bytes and slicing
+# counts codepoints, so a non-ASCII path would be cut in the wrong place.
 # Concatenated JSON objects are a valid jq input stream, so one cat + one jq
 # handles hundreds of wrappers in two processes rather than 2N. Piping also
 # sidesteps the POSIX-vs-Windows path problem: a Windows jq cannot open
@@ -374,16 +425,20 @@ scan_wrappers() {
     local age_days=${FLEET_SESSION_MAX_AGE_DAYS:-60} out rc
     out=$(find "$@" -name 'local_*.json' -type f -mtime "-${age_days}" -exec cat {} + 2>/dev/null | jq -r '
         def s: if type == "string" then . else "" end;
-        [ (.sessionId | s),
-          (.title | s),
-          (.cwd | s | gsub("\\\\"; "/")),
-          (.worktreePath | s | gsub("\\\\"; "/")),
-          ((.lastActivityAt // 0) | if type == "number" then floor | tostring else "0" end),
-          (.isArchived | if . == true then "1" elif . == false then "0" else "?" end),
-          (.cliSessionId | s),
-          ( ([ .branch ] + (.writtenBranches | if type == "array" then . else [] end))
-            | map(select(type == "string" and . != "")) | unique | join(" ") )
-        ] | @tsv
+        ( .writtenBranches | if type == "array" then map(select(type == "string" and . != "")) else [] end
+          | map(split("\u0000") | if length > 1 then [.[0], (.[1:] | join("\u0000"))] else ["", .[0]] end)
+        ) as $wb
+        | [ (.sessionId | s),
+            (.title | s),
+            (.cwd | s | gsub("\\\\"; "/")),
+            (.worktreePath | s | gsub("\\\\"; "/")),
+            ((.lastActivityAt // 0) | if type == "number" then floor | tostring else "0" end),
+            (.isArchived | if . == true then "1" elif . == false then "0" else "?" end),
+            (.cliSessionId | s),
+            ( ([ .branch | s ] + ($wb | map(.[1])))
+              | map(select(. != "")) | unique | join(" ") ),
+            ( $wb | map(.[0] | gsub("\\\\"; "/")) | map(select(. != "")) | unique | join("\u001f") )
+          ] | @tsv
     ' 2>/dev/null | tr -d '\r'; exit "${PIPESTATUS[1]}")
     rc=$?
     (( rc == 0 )) || { echo "$SELF: session store scan failed (jq exit $rc) — treating as unavailable" >&2; return 3; }
@@ -467,12 +522,12 @@ scan_all() {
             if ($6 == "1" && ($1 in wm)) act = (t > wm[$1] + grace) ? t : 0
             live = (act > 0 && now - act <= win) ? 1 : 0
             if (!live) lc = ""
-            printf "W\t%s\t%s\t%.0f\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n", $1, $2, lm, $3, $4, $6, live, $8, d, lc
+            printf "W\t%s\t%s\t%.0f\t%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\n", $1, $2, lm, $3, $4, $6, live, $8, d, lc, $9
         }
         END {
             for (c in tm)
                 if (!(c in seen) && now - tm[c] <= win)
-                    printf "T\tcli:%s\t%s\t%.0f\t\t\t0\t1\t\t%s\t%s\n", c,
+                    printf "T\tcli:%s\t%s\t%.0f\t\t\t0\t1\t\t%s\t%s\t\n", c,
                            "(no Desktop record - CLI or headless session)", tm[c], td[c], tc[c]
         }' <(printf '%s\n' "$tx") <(printf '%s\n' "$wmt") <(printf '%s\n' "$wrappers")
 }
@@ -509,9 +564,10 @@ set_cache_file() {
         h=$(( (h * 33 + c) & 0x7fffffff ))
     done
     d=${TMPDIR:-/tmp}
-    # v3: archived became tri-state and archive-aware liveness (2026-10-05). A
-    # v2 file holds rows computed the old way; the version keeps it unread.
-    CACHE_FILE="${d%/}/fleet-sessions-v3-${UID:-0}-${h}.tsv"
+    # v3: archived became tri-state and archive-aware liveness (2026-10-05).
+    # v4: writtenBranches pairs split, and the `written` column (2026-10-07). An
+    # older file holds rows computed the old way; the version keeps it unread.
+    CACHE_FILE="${d%/}/fleet-sessions-v4-${UID:-0}-${h}.tsv"
 }
 
 # Current epoch seconds without forking where bash can (4.2+); date otherwise.
@@ -553,8 +609,11 @@ project_index() {
 }
 # paths: key  path  sessionId  title  lastMs  archived  live  via
 # A session claims a directory by its wrapper cwd, its wrapper worktreePath,
-# its transcript's project dir (encoded — key only), and, while live, the last
-# cwd its transcript recorded.
+# each worktree its writtenBranches pairs name (`written`), its transcript's
+# project dir (encoded — key only), and, while live, the last cwd its
+# transcript recorded. `written` is the one route that names a lane the session
+# moved into AND survives it going idle; prune still never counts it as proof
+# that a tree is abandoned (prune_archived_proof in fleet.sh), only as a claim.
 project_paths() {
     LC_ALL=C awk -F'\t' -v OFS='\t' -v pre="${1:-}" '
         function np(p) { gsub(/\\/, "/", p); sub(/\/+$/, "", p); return tolower(p) }
@@ -562,6 +621,10 @@ project_paths() {
         $1 == "W" || $1 == "T" {
             if ($5 != "")                     print pre enc($5),  np($5),  $2, $3, $4, $7, $8, "cwd"
             if ($6 != "" && np($6) != np($5)) print pre enc($6),  np($6),  $2, $3, $4, $7, $8, "worktree"
+            n = ($12 != "") ? split($12, w, "\037") : 0
+            for (i = 1; i <= n; i++)
+                if (w[i] != "" && np(w[i]) != np($5) && np(w[i]) != np($6))
+                                              print pre enc(w[i]), np(w[i]), $2, $3, $4, $7, $8, "written"
             if ($10 != "")                    print pre tolower($10), "",   $2, $3, $4, $7, $8, "transcript"
             if ($11 != "")                    print pre enc($11), np($11), $2, $3, $4, $7, $8, "live-cwd"
         }'
@@ -764,37 +827,6 @@ self_session_id() {
     return 3
 }
 
-# --- owner -------------------------------------------------------------------
-# Newest activity wins; a non-archived session outranks an archived one, since a
-# branch reused after its original session was archived belongs to the new one.
-cmd_owner() {
-    local fresh=0
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --fresh) fresh=1; shift ;;
-            -*) echo "$SELF: unknown flag '$1'" >&2; return 2 ;;
-            *) break ;;
-        esac
-    done
-    local branch=${1:-}
-    [[ -z "$branch" ]] && { echo "usage: $SELF owner [--fresh] <branch>" >&2; return 2; }
-    local idx
-    idx=$(build_index) || return 3
-    local row
-    row=$(printf '%s\n' "$idx" \
-      | awk -F'\t' -v want="$branch" '$1 == want' \
-      | sort -t"$(printf '\t')" -k6,6n -k4,4nr \
-      | head -n1)
-    [[ -z "$row" ]] && return 0
-    if (( fresh )); then
-        # Overwrite the cached liveness column with a direct read.
-        local id; id=$(printf '%s' "$row" | cut -f2)
-        local now; now=$(session_live_now "$id")
-        row=$(printf '%s' "$row" | awk -F'\t' -v OFS='\t' -v L="$now" '{$7=L; print}')
-    fi
-    printf '%s\n' "$row"
-}
-
 # --- main --------------------------------------------------------------------
 # MAIN = the coordinator session for this repo. Resolution order:
 #   1. explicit pin in .claude/fleet/main (a sessionId) — survives restarts and
@@ -835,25 +867,28 @@ cmd_main() {
 
 # --- at ----------------------------------------------------------------------
 # Every claim on directory $1, by any route: an exact normalised-path match on
-# a wrapper cwd / worktreePath / live transcript cwd, or an encoded-key match on
-# a transcript's project dir. The key match is lossy by construction (every
-# non-alphanumeric is '-'), so callers must treat a key-only claim as grounds
-# to KEEP a tree, never as positive evidence that it is abandoned.
+# a wrapper cwd / worktreePath / writtenBranches path / live transcript cwd, or
+# an encoded-key match on a transcript's project dir. The key match is lossy by
+# construction (every non-alphanumeric is '-'), so callers must treat a
+# key-only claim as grounds to KEEP a tree, never as evidence it is abandoned.
 #
-# --fresh is the land gate's read, held to the standard `owner --fresh` set:
-# the cache may NOMINATE a claimant, it never DECIDES one is idle. Every
-# nominated session's liveness is re-read directly, and the claim route the
-# cache is blind to by construction — a session writing its transcript into
-# this directory right now, because it started or EnterWorktree'd here after
-# the index was built — is read straight off disk. Deliberately NOT a fresh
-# full scan: that took 60s on a busy machine (measured 2026-09-28) and every
-# `fleet land` would pay it; this costs a few seconds.
-# What it still cannot see: a session whose Bash cwd moved here after the
-# index was built while its transcript stays filed elsewhere (the live-cwd
-# route) — the same class as a write by absolute path, which nothing records.
-# The inverse staleness is the safe one: a session that has since LEFT still
-# counts while it is live, because its cached claim is kept and only its
-# liveness is refreshed.
+# --fresh is the land gate's read: the cache may NOMINATE a claimant, it never
+# DECIDES one is idle. Every nominated session's liveness is re-read directly,
+# and the two routes the cache is blind to by construction are read straight
+# off disk: a transcript filed in this directory and being written now (a
+# session that started or EnterWorktree'd here after the index was built), and
+# a live transcript whose last recorded cwd is here, wherever it is filed. The
+# second is the resumed session (header): filed under its launch dir, working
+# in the lane, and seen by the index only if it was live when the index was
+# built. On 2026-10-06 one was not; `at --fresh` and `owner --fresh` both
+# called its lane unowned while it was committing there. Deliberately NOT a
+# fresh full scan: that took 60s on a busy machine (measured 2026-09-28) and
+# every `fleet land` would pay it; this costs a few seconds (the cwd probe ~2s
+# of it, over 14,706 transcripts on 2026-10-07).
+# What it still cannot see: a write by absolute path from a session whose cwd
+# is elsewhere, which nothing records. The inverse staleness is the safe one: a
+# session that has since LEFT still counts while it is live, because its cached
+# claim is kept and only its liveness is refreshed.
 
 # cli  lastMs — every session whose transcript, or one of its subagents',
 # is filed under encoded key $1 and was written inside the live window. One
@@ -888,6 +923,43 @@ live_transcripts_under() {
     return 0
 }
 
+# cli  lastMs — every session whose newest transcript was written inside the
+# live window and last recorded a cwd that is directory $1 (normalised) or
+# inside it, wherever the transcript is filed. Inside counts: a shell that cd'd
+# into a subdirectory is still working in the tree. Newest file per session,
+# because a resume leaves two copies (header) and only one is still written.
+# Depth 2 only, as in scan_transcripts: a session quiet in its own file while
+# its subagents work is caught by the cached claims and live_many instead.
+# The walk stats every transcript once (~2.5s of a ~5s `at --fresh` here,
+# 14,706 transcripts, 2026-10-07), and nothing cheaper says which are live: an
+# append does not touch the directory's mtime. Only the few inside the window
+# have their tail read, and one awk compares them all.
+live_cwd_in() {
+    local n=${1:-} now_s listing cli ms p
+    [[ -n "$n" ]] || return 0
+    load_dirs
+    (( ${#TROOTS[@]} )) || return 0
+    now_s=$(date +%s)
+    stat_flavour
+    listing=$(find "${TROOTS[@]}" -mindepth 2 -maxdepth 2 -type f -name '*.jsonl' \
+                -mmin "-$(( LIVE_SECS / 60 + 2 ))" -exec stat "${_STATFMT[@]}" {} + 2>/dev/null)
+    [[ -n "$listing" ]] || return 0
+    printf '%s\n' "$listing" | awk -v now="$now_s" -v win="$LIVE_SECS" '
+        NF >= 2 {
+            m = $1 + 0; p = $0; sub(/^[^ ]+ /, "", p)
+            if (now - m > win) next
+            k = split(p, a, "/"); c = a[k]; sub(/\.jsonl$/, "", c)
+            if (!(c in best) || m > best[c]) { best[c] = m; path[c] = p }
+        }
+        END { for (c in best) printf "%s\t%.0f\t%s\n", c, best[c] * 1000, path[c] }' \
+    | while IFS=$'\t' read -r cli ms p; do
+        printf '%s\t%s\t%s\n' "$cli" "$ms" "$(last_cwd_of "$p")"
+    done | awk -F'\t' -v OFS='\t' -v n="$n" '
+        { c = $3; gsub(/\\/, "/", c); sub(/\/+$/, "", c); c = tolower(c)
+          if (c != "" && (c == n || index(c, n "/") == 1)) print $1, $2 }'
+    return 0
+}
+
 # cli  id  title  archived — the Desktop wrapper carrying each CLI session id
 # given, found by content across EVERY store (~1.6s over ~2,000 wrappers), so
 # attribution never waits on the cache either. This is what lets the land
@@ -918,21 +990,24 @@ wrappers_for_clis() {
     return 0
 }
 
-# The --fresh read of claim rows $2 (the `at` TSV) on the directory keyed $1.
+# The --fresh read of claim rows $3 (the `at` TSV) on the directory normalised
+# as $2, keyed $1.
 freshen_claims() {
-    local key=$1 rows=$2 tx probe="" id fresh_map=""
-    tx=$(live_transcripts_under "$key")
+    local key=$1 n=$2 rows=$3 tx probe="" id fresh_map=""
+    # cli  lastMs  via  path — both disk probes, attributed in one pass below.
+    tx=$( live_transcripts_under "$key" | awk -F'\t' -v OFS='\t' 'NF { print $1, $2, "transcript", "" }'
+          live_cwd_in "$n" | awk -F'\t' -v OFS='\t' -v n="$n" 'NF { print $1, $2, "live-cwd", n }' )
     if [[ -n "$tx" ]]; then
-        local clis=() cli ms
-        while IFS=$'\t' read -r cli ms; do [[ -n "$cli" ]] && clis+=("$cli"); done <<< "$tx"
-        # One row per (live transcript, wrapper carrying its id), else cli:<id>.
+        local clis=() cli rest
+        while IFS=$'\t' read -r cli rest; do [[ -n "$cli" ]] && clis+=("$cli"); done <<< "$tx"
+        # One row per (live transcript, route, wrapper carrying its id), else cli:<id>.
         probe=$(awk -F'\t' -v OFS='\t' -v k="$key" '
-            FILENAME == ARGV[1] { if ($1 != "") { n[$1]++; w[$1, n[$1]] = $2 "\t" $3 "\t" $4 }; next }
+            FILENAME == ARGV[1] { if ($1 != "") { c[$1]++; w[$1, c[$1]] = $2 "\t" $3 "\t" $4 }; next }
             $1 != "" {
-                if ($1 in n)
-                    for (i = 1; i <= n[$1]; i++) { split(w[$1, i], a, "\t"); print k, "", a[1], a[2], $2, a[3], 1, "transcript" }
+                if ($1 in c)
+                    for (i = 1; i <= c[$1]; i++) { split(w[$1, i], a, "\t"); print k, $4, a[1], a[2], $2, a[3], 1, $3 }
                 else
-                    print k, "", "cli:" $1, "(no Desktop record - CLI or headless session)", $2, 0, 1, "transcript"
+                    print k, $4, "cli:" $1, "(no Desktop record - CLI or headless session)", $2, 0, 1, $3
             }' <(wrappers_for_clis ${clis[@]+"${clis[@]}"}) <(printf '%s\n' "$tx"))
     fi
     # Every claimant's liveness and archive flag, re-read in one batch, the
@@ -966,12 +1041,142 @@ cmd_at() {
     done
     local p=${1:-}
     [[ -z "$p" ]] && { echo "usage: $SELF at [--fresh] <path>" >&2; return 2; }
-    local n k rows
-    n=$(norm_path "$p"); k=$(path_key "$n")
-    rows=$(build_paths) || return $?
-    rows=$(printf '%s\n' "$rows" | awk -F'\t' -v n="$n" -v k="$k" 'NF && (($2 != "" && $2 == n) || $1 == k)')
-    (( fresh )) && rows=$(freshen_claims "$k" "$rows")
+    local n k paths
+    n=$(norm_path "$(abs_path "$p")"); k=$(path_key "$n")
+    paths=$(build_paths) || return $?
+    dir_claims "$fresh" "$n" "$k" "$paths"
+}
+
+# The `at` rows on the directory normalised as $2 (key $3), among path claims
+# $4 (the `paths` TSV). $1 = 1 is the --fresh read.
+dir_claims() {
+    local rows
+    rows=$(printf '%s\n' "$4" | awk -F'\t' -v n="$2" -v k="$3" 'NF && (($2 != "" && $2 == n) || $1 == k)')
+    (( $1 )) && rows=$(freshen_claims "$3" "$2" "$rows")
     [[ -n "$rows" ]] && printf '%s\n' "$rows"
+    return 0
+}
+
+# $1 made absolute against the caller's directory. Every stored claim is an
+# absolute path, so a relative one compared as typed matched nothing, and
+# `at .claude/worktrees/x` printed no claims at all: indistinguishable from "no
+# owner". A directory that exists is resolved by cd (which also settles ./ and
+# ../); one that does not is joined to $PWD as written.
+abs_path() {
+    local p=${1:-}
+    case "$p" in
+        /*|\\*|[A-Za-z]:*) printf '%s' "$p" ;;
+        *) if [[ -d "$p" ]] && (CDPATH='' cd -- "$p" 2>/dev/null && pwd); then :
+           else printf '%s/%s' "$PWD" "${p#./}"; fi ;;
+    esac
+}
+
+# --- claimants / owner --------------------------------------------------------
+# Who is working on branch $1. ONE claim logic for every reader that asks it —
+# `owner`, `fleet owner`, the land gate, prune's pre-delete re-check — and it is
+# the one prune and sweep classify by: a session claims a branch by NAME (it is
+# checked out, or written, per the index) or by a claim on the WORKTREE the
+# branch is checked out in (the `at` routes). Until 2026-10-07 owner joined on
+# the name alone, so a session that EnterWorktree'd into a lane, whose wrapper
+# names only the tree it was spawned in, owned nothing it was working on; on
+# 2026-10-06 sweep (reading directory claims) kept such a lane as a live
+# session's tree while `fleet owner` called it unowned.
+# The worktrees come from `git worktree list` in the CURRENT directory's repo:
+# fleet.sh runs from the repo root, and any worktree of the repo lists the same
+# set. Outside a repo only the name join applies.
+
+# Every worktree with branch $1 checked out, git's path form, one per line.
+# The path is everything after "worktree ", never awk's $2 (a space would cut
+# it), as in fleet.sh's worktree_path_for.
+branch_worktrees() {
+    git worktree list --porcelain 2>/dev/null | awk -v want="branch refs/heads/$1" '
+        /^worktree / { p = substr($0, 10) }
+        $0 == want   { print p }'
+    return 0
+}
+
+# branch  id  title  lastMs  cwd  archived  live  via  path — one row per
+# (session, route[, worktree]). $1 = 1 is the --fresh read, `at --fresh`'s for
+# each worktree. The name claims ride in the first worktree's batch, put in the
+# `at` shape (key and path empty, via=branch): one live_many walk for both
+# joins, not two (each ~1s here). Git refuses a second checkout of a branch
+# without --force, so there is normally one worktree, or none: then the name
+# claims are re-read alone (freshen_claims skips both probes on an empty key).
+claimants_of() {
+    local fresh=$1 branch=$2 names paths wt wts=() n k rows out="" i
+    load_wide || return $?
+    names=$(project_index <<< "$WIDE" | awk -F'\t' -v OFS='\t' -v b="$branch" \
+        '$1 == b { print "", "", $2, $3, $4, $6, $7, "branch" }')
+    paths=$(project_paths <<< "$WIDE")
+    while IFS= read -r wt; do [[ -n "$wt" ]] && wts+=("$wt"); done < <(branch_worktrees "$branch")
+    (( ${#wts[@]} )) || wts=("")
+    for (( i = 0; i < ${#wts[@]}; i++ )); do
+        wt=${wts[$i]} n="" k="" rows=""
+        if [[ -n "$wt" ]]; then
+            n=$(norm_path "$wt"); k=$(path_key "$n")
+            rows=$(printf '%s\n' "$paths" | awk -F'\t' -v n="$n" -v k="$k" 'NF && (($2 != "" && $2 == n) || $1 == k)')
+        fi
+        (( i == 0 )) && rows=$(printf '%s\n%s' "$names" "$rows" | awk 'NF')
+        (( fresh )) && [[ -n "$rows" || -n "$k" ]] && rows=$(freshen_claims "$k" "$n" "$rows")
+        [[ -n "$rows" ]] || continue
+        # at rows -> claimant rows; a session's cwd comes from its wide row,
+        # and is empty for one only the disk probe has seen.
+        out+=$(awk -F'\t' -v OFS='\t' -v b="$branch" -v wt="$wt" '
+            FILENAME == ARGV[1] { if ($1 == "W" || $1 == "T") cwd[$2] = $5; next }
+            NF { print b, $3, $4, $5, (($3 in cwd) ? cwd[$3] : ""), $6, $7, $8, (($8 == "branch") ? "" : wt) }' \
+            <(printf '%s\n' "$WIDE") <(printf '%s\n' "$rows"))$'\n'
+    done
+    printf '%s' "$out" | awk 'NF'
+    return 0
+}
+
+cmd_claimants() {
+    local fresh=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --fresh) fresh=1; shift ;;
+            -*) echo "$SELF: unknown flag '$1'" >&2; return 2 ;;
+            *) break ;;
+        esac
+    done
+    [[ -z "${1:-}" ]] && { echo "usage: $SELF claimants [--fresh] <branch>" >&2; return 2; }
+    claimants_of "$fresh" "$1" || return 3
+}
+
+# The one claimant that wins. With --fresh a LIVE one first: that is the
+# gate's question, and a live claimant must not lose to a newer idle one. Then
+# an open one over an archived one (a branch reused after its first session was
+# archived belongs to the new one), then the newest. One row per session, its
+# routes comma-joined in column 8; live, lastMs and cwd are the best any of its
+# rows report.
+cmd_owner() {
+    local fresh=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --fresh) fresh=1; shift ;;
+            -*) echo "$SELF: unknown flag '$1'" >&2; return 2 ;;
+            *) break ;;
+        esac
+    done
+    local branch=${1:-}
+    [[ -z "$branch" ]] && { echo "usage: $SELF owner [--fresh] <branch>" >&2; return 2; }
+    local rows row keys=(-k6,6n -k4,4nr)
+    rows=$(claimants_of "$fresh" "$branch") || return 3
+    [[ -n "$rows" ]] || return 0
+    (( fresh )) && keys=(-k7,7nr "${keys[@]}")
+    row=$(printf '%s\n' "$rows" | awk -F'\t' -v OFS='\t' '
+        NF {
+            id = $2
+            if (!(id in t)) { o[++n] = id; b[id] = $1; t[id] = $3; a[id] = $6; v[id] = $8 }
+            else if (index("," v[id] ",", "," $8 ",") == 0) v[id] = v[id] "," $8
+            if ($4 + 0 > m[id] + 0) m[id] = $4
+            if ($7 == "1") l[id] = 1
+            if (c[id] == "" && $5 != "") c[id] = $5
+        }
+        END { for (i = 1; i <= n; i++) { id = o[i]
+                  printf "%s\t%s\t%s\t%.0f\t%s\t%s\t%d\t%s\n", b[id], id, t[id], m[id], c[id], a[id], l[id] + 0, v[id] } }' \
+      | sort -t"$(printf '\t')" "${keys[@]}" | head -n1)
+    [[ -n "$row" ]] && printf '%s\n' "$row"
     return 0
 }
 
@@ -1046,6 +1251,7 @@ case "${1:---help}" in
     stores)         cmd_stores; exit $? ;;
     where)          shift; cmd_where "$@"; exit $? ;;
     owner)          shift; cmd_owner "$@"; exit $? ;;
+    claimants)      shift; cmd_claimants "$@"; exit $? ;;
     main)           cmd_main; exit $? ;;
     live)           shift; [[ -z "${1:-}" ]] && { echo "usage: $SELF live <sessionId>" >&2; exit 2; }
                     session_live_now "$1"; echo; exit 0 ;;

@@ -2031,6 +2031,89 @@ landed lane/crowded && no "lane merged over a live peer in the worktree" || ok "
 grep -q "cli:cli-peerwt" "$LLOG" 2>/dev/null && ok "the refusal names the peer, not self" \
   || no "refusal log does not name the peer"
 
+# -- owner: a session that moved into the lane (2026-10-06) ---------------------
+# A Desktop session spawned in one worktree EnterWorktree'd into another lane,
+# committed there and stayed live. `fleet owner` and `sessions.sh at --fresh`
+# both said nobody owned the lane, so a second session ported it as an orphan,
+# while `fleet sweep` four minutes later kept it as a live session's tree. Three
+# things hid the owner, each reproduced here in the shape observed on disk:
+#   - writtenBranches entries are "<worktreePath>\0<branch>" (Desktop's format
+#     since late 2026-09) and were read as one branch name, so none ever matched
+#   - after a Desktop resume the transcript is filed under the LAUNCH dir; only
+#     its recorded cwd names the lane, and the index records that cwd only for a
+#     session that was live when the index was built
+#   - owner joined on branch alone, never on the worktree the branch is in
+# The index is built while both sessions are idle, then they wake: the cached
+# read is stale by construction, as it was for the session that ported the lane.
+echo "-- owner: a session that moved into the lane --"
+unset FLEET_SESSION_NOCACHE; SUITE_TMPDIR=$TMPDIR
+export TMPDIR="$SB/mcache"; mkdir -p "$TMPDIR"
+printf '.claude/\n' >> "$LREPO/.git/info/exclude"
+LAUNCH="$LREPO/.claude/worktrees/launch-pad"    # where both were spawned: their wrapper cwd, forever
+git -C "$LREPO" worktree add -q -b claude/launch-pad "$LAUNCH" main
+mk_llane lane/moved-in      "$LREPO/.claude/worktrees/moved-in"
+mk_llane lane/resumed-quiet "$LREPO/.claude/worktrees/resumed-quiet"
+MOVED="$(lwt lane/moved-in)" QUIET="$(lwt lane/resumed-quiet)"
+# A transcript re-filed under the launch dir by a resume, its last record working
+# in lane $2: natively at the top level, and in Git Bash form inside a nested
+# git_state, whose cwd is the line's LAST "cwd" (both shapes seen in one record).
+mk_refiled_tx(){ # cliId laneGitPath ageSecs
+  local d f t=$(( $(date +%s) - $3 ))
+  d="$ATX/$(enc_cc "$(bs_path "$LAUNCH")")"; f="$d/$1.jsonl"; mkdir -p "$d"
+  jq -cn --arg n "$(bs_path "$2")" --arg u "$(cygpath -u "$2" 2>/dev/null || printf '%s' "$2")" \
+    '{type:"assistant", cwd:$n, serverClassifierContext:{context:{git_state:{cwd:$u}}}}' > "$f"
+  touch -d "@$t" "$f" 2>/dev/null || touch -t "$(date -r "$t" +%Y%m%d%H%M.%S)" "$f"
+}
+# The mover: Desktop's pair form, built with jq so the NUL and the backslashes
+# are encoded exactly as Desktop writes them.
+jq -n --arg c "$(bs_path "$LAUNCH")" --arg l "$(bs_path "$MOVED")" \
+      --argjson la "$(( ($(date +%s) - 7200) * 1000 ))" '
+  {sessionId:"local_mover2", title:"Moved in, then resumed", cwd:$c, worktreePath:$c,
+   lastActivityAt:$la, isArchived:false, branch:"claude/launch-pad", cliSessionId:"cli-mover2",
+   writtenBranches:[($l + "\u0000lane/moved-in"), ($c + "\u0000claude/launch-pad")]}' \
+  > "$ASTORE/local_mover2.json"
+mk_refiled_tx cli-mover2 "$MOVED" 7200
+# Entered and resumed, but nothing written yet: no writtenBranches entry names
+# the lane, so only the transcript's recorded cwd can.
+mk_wrap local_quiet "Entered, resumed, not written yet" "$(bs_path "$LAUNCH")" 7200 claude/launch-pad false cli-quiet
+mk_refiled_tx cli-quiet "$QUIET" 7200
+bash "$SESSIONS" paths >/dev/null 2>&1          # the index is built while both are idle
+mk_refiled_tx cli-mover2 "$MOVED" 5             # ...and then they wake
+mk_refiled_tx cli-quiet  "$QUIET" 5
+
+row="$(bash "$SESSIONS" owner --fresh lane/moved-in 2>/dev/null)"
+case "$row" in *local_mover2*) ok "owner reads a writtenBranches '<worktree>\\0<branch>' pair as the branch";;
+  *) no "owner missed the session whose writtenBranches pairs the lane with its worktree";; esac
+[ "$(printf '%s' "$row" | cut -f7)" = "1" ] && ok "owner --fresh reads the woken mover live" \
+  || no "owner --fresh did not read the mover live (row: $row)"
+case "$(bash "$FLEET" owner lane/moved-in 2>/dev/null)" in *local_mover2*) ok "fleet owner names the session that moved into the lane";;
+  *) no "fleet owner reported no owner for a lane a live session moved into";; esac
+case "$(bash "$SESSIONS" at --fresh "$MOVED" 2>/dev/null)" in *local_mover2*) ok "at --fresh names the mover on the lane's worktree";;
+  *) no "at --fresh missed a live session that moved into the worktree";; esac
+case "$(bash "$SESSIONS" at --fresh .claude/worktrees/moved-in 2>/dev/null)" in *local_mover2*) ok "at resolves a relative path against the caller's directory";;
+  *) no "at with a relative path matched nothing";; esac
+case "$(bash "$SESSIONS" at --fresh "$QUIET" 2>/dev/null)" in *local_quiet*) ok "at --fresh reads a live transcript's recorded cwd, wherever the file is filed";;
+  *) no "at --fresh missed a resumed session whose transcript is filed under its launch dir";; esac
+case "$(bash "$SESSIONS" owner --fresh lane/resumed-quiet 2>/dev/null)" in *local_quiet*) ok "owner joins on the worktree the branch is checked out in";;
+  *) no "owner ignored a live session working in the branch's worktree";; esac
+bash "$FLEET" land lane/moved-in >/dev/null 2>&1; lx=$?
+[ "$lx" -ne 0 ] && ok "a live session that moved into the lane blocks the land (exit $lx)" \
+  || no "the lane was landed under a live session that moved into it"
+grep -q "local_mover2.*by written" "$LLOG" 2>/dev/null && ok "the refusal says the mover wrote the lane's worktree" \
+  || no "refusal log does not name local_mover2 by its written claim"
+bash "$FLEET" land lane/resumed-quiet >/dev/null 2>&1; lx=$?
+[ "$lx" -ne 0 ] && ok "a resumed session working in the lane blocks the land (exit $lx)" \
+  || no "the lane was landed under a resumed session working in it"
+# Control: only liveness changes, and both lanes land. The mover still owns its
+# lane while idle: the written claim is what prune and sweep classify by then.
+mk_refiled_tx cli-mover2 "$MOVED" 7200; mk_refiled_tx cli-quiet "$QUIET" 7200
+case "$(bash "$SESSIONS" owner --fresh lane/moved-in 2>/dev/null)" in
+  *local_mover2*written*) ok "an idle mover still owns the lane, by its written claim";;
+  *) no "the mover's claim on the lane vanished once it went idle";; esac
+bash "$FLEET" land lane/moved-in >/dev/null 2>&1;      ee "control: the moved-into lane lands once its owner is idle" 0 $?
+bash "$FLEET" land lane/resumed-quiet >/dev/null 2>&1; ee "control: the resumed lane lands once its owner is idle" 0 $?
+export TMPDIR=$SUITE_TMPDIR FLEET_SESSION_NOCACHE=1
+
 unset FLEET_SESSION_NOCACHE; hermetic_sessions
 cd "$REPO"
 fi
