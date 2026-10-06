@@ -166,8 +166,10 @@ run "ddev-facts --help"               0 "$PY" skills/ddev-ops/scripts/check-ddev
 run "ddev-facts --live vs fixtures"   0 "$PY" skills/ddev-ops/scripts/check-ddev-facts.py --live --today 2026-10-05 --fixtures skills/ddev-ops/tests/fixtures/live
 run "audit-ddev-config --help"        0 "$PY" skills/ddev-ops/scripts/audit-ddev-config.py --help
 # The minefield fixture is the landmine set (exit 10 = findings); the clean fixture is the control.
+# --ignore local-file-committed: audited in place, the clean fixture's config.local.yaml is
+# tracked in THIS repository on purpose, which that check rightly reports.
 run "audit-ddev-config minefield"    10 "$PY" skills/ddev-ops/scripts/audit-ddev-config.py skills/ddev-ops/tests/fixtures/minefield
-run "audit-ddev-config clean control" 0 "$PY" skills/ddev-ops/scripts/audit-ddev-config.py skills/ddev-ops/tests/fixtures/clean
+run "audit-ddev-config clean control" 0 "$PY" skills/ddev-ops/scripts/audit-ddev-config.py skills/ddev-ops/tests/fixtures/clean --ignore local-file-committed
 
 echo "== repo-doctor: AGENTS.md toolchain + Claude Code memory-docs verifier"
 # --offline: the protocol still states every encoded Claude Code fact and the two

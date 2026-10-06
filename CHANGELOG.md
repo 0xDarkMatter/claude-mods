@@ -46,7 +46,7 @@ feature releases live in the README "Recent Updates" section.
   11 new fixture cases (48 in all), each seen failing first; 10 mutants killed.
 
 - **`ddev-ops` skill** - DDEV local environments, owned in one place. A 2026-10-05 read of
-  36 DDEV-based agency repositories shaped it: `scripts/audit-ddev-config.py` runs 19
+  36 DDEV-based agency repositories shaped it: `scripts/audit-ddev-config.py` runs 20
   checks, most seen there and each with its reason from DDEV's docs or source (v1.25.4):
   unpinned PHP and database versions, end-of-life PHP and Node.js, per-developer settings
   committed for the team (`performance_mode`, router ports, Xdebug), keys DDEV now
@@ -54,9 +54,10 @@ feature releases live in the README "Recent Updates" section.
   root when DDEV resolves them from the docroot, project commands that shadow DDEV's
   built-ins, CRLF command files, host SSH-agent forwarding into containers, provider
   recipes that can push or whose files stanza fetches nothing (DDEV then empties the
-  upload directory), and credentials in committed env files (named, never printed). It
-  merges `config.*.y*ml` overrides the way DDEV does (lists append) and skips DDEV's own
-  generated recipes. Eight references cover configuration, CI parity and env files,
+  upload directory), credentials in committed env files (named, never printed), and
+  per-developer `.local` files in git. It merges `config.*.y*ml` overrides the way DDEV
+  does (lists append) and skips DDEV's own generated recipes. Eight references cover
+  configuration, CI parity and env files,
   scripting DDEV (`-j` output, commands that destroy data, several git worktrees),
   database workflows and sanitised pulls (with a database-only recipe asset), Mutagen,
   WSL2 and Docker providers, add-ons, commands, hooks, web-server config and networking,
@@ -68,7 +69,29 @@ feature releases live in the README "Recent Updates" section.
   copied alone and follows the team-plugin port limits (description starts "Use when ",
   no project-hostname placeholders). Generic DDEV material moved out of `craftcms-ops`'
   `ddev.md`, which now holds only Craft-specific facts; `security-ops`,
-  `frontend-upgrade-ops` and `docker-ops` link to it.
+  `frontend-upgrade-ops` and `docker-ops` link to it. Throwaway projects on DDEV v1.25.4
+  (Docker Desktop, WSL2) then confirmed what they could reach, including the emptied
+  upload directory, and corrected four claims:
+  - a reused `ddev snapshot` name saves nothing yet exits 0, so `fail_on_hook_fail` can't
+    catch a fixed-name pre-pull hook;
+  - git ignores `.local` files only once DDEV has written its untracked
+    `.ddev/.gitignore`. The skill now has teams add `.ddev/config*.local.y*ml` and
+    `.ddev/.env*.local` to their own `.gitignore`. The `local-file-committed` check flags
+    tracked ones from git's index, judging the staged copy as well as the disk: high
+    for credentials, including a local config's `web_environment`;
+  - a host SSH-agent forwarding file that also sets `SSH_AUTH_SOCK` breaks `ddev auth ssh`
+    on Docker Desktop for Windows;
+  - the router publishes Mailpit, XHGui and Traefik-monitor ports besides 80/443.
+
+  Two three-model review rounds (Codex, Gemini, Claude Opus) found the rest; each finding
+  was checked against source or a live run before acting, and three were disproved. The
+  one serious bug: on a stock Windows setup the auditor ran a `git.exe` committed to the
+  repository it audited. It now resolves git from `PATH` outside the project, disables
+  the repository's `core.fsmonitor`, drops an inherited `GIT_DIR` or `GIT_INDEX_FILE`,
+  and names any check it could not run (stderr and `--json` `meta.skipped`). Credential
+  detection now treats `${VAR:-literal}` and single-quoted values as literals, but
+  `${A}_${B}` as references. The suite gained 31 checks, each seen failing first, and
+  all 21 mutants of the new code were killed.
 
 - **AGENTS.md create / audit / upgrade / survey in `repo-doctor`** - an extension of
   the skill that already owned the entry-doc standard, not a new skill (decision record:

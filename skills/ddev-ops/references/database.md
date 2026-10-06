@@ -2,6 +2,8 @@
 
 Facts from DDEV's database-management, hosting-provider, customisation and command docs
 at DDEV v1.25.4, and its source (`provider.go`, `ddevapp.go`), checked 2026-10-06.
+"Observed" marks behaviour seen in throwaway projects on DDEV v1.25.4 (Docker Desktop,
+WSL2) that day.
 
 ## Contents
 
@@ -37,18 +39,26 @@ A snapshot saves the whole database server state (every database) to
 `.ddev/db_snapshots/`, zstd-compressed since v1.25.0.
 
 ```bash
-ddev snapshot --name=before-upgrade-$(date +%Y%m%d%H%M)   # names must be unique
+ddev snapshot --name=before-upgrade-$(date +%Y%m%d%H%M%S)   # names must be unique
 ddev snapshot --list                    # size and database version of each
 ddev snapshot restore <name>            # or: --latest, or no name for a picker
 ddev snapshot --cleanup                 # delete all (prompts; -y skips); --name <x> for one
 ```
 
-- **Names must be unique:** reusing one fails with "snapshot ... already exists". Put a
-  timestamp in any name a script or hook reuses.
+- **Names must be unique, and a clash still exits 0.** Reusing one prints "snapshot ...
+  already exists" in red and saves nothing, but DDEV reports it as a warning
+  (`cmd/ddev/cmd/snapshot.go`, which does the same for every snapshot error), so the exit
+  code is 0. Put a timestamp to the second in any name a script or hook reuses. To be
+  sure, check that no `.ddev/db_snapshots/<name>-*` exists before and that one does after;
+  the old file survives a clash, so existence afterwards alone proves nothing.
 - **Take one before** every migration, CMS upgrade, content import or `ddev pull`. DDEV's
-  provider docs suggest a `pre-pull` hook for the pull case. A hook that fails only
-  warns, unless `fail_on_hook_fail: true`, which aborts the pull, so a fixed name would
-  fail silently from the second pull on:
+  provider docs suggest a `pre-pull` hook for the pull case. Timestamp its name: with a
+  fixed name every pull after the first runs with no new snapshot, and
+  `fail_on_hook_fail: true` can't stop it, because it only reacts to a non-zero exit.
+  Observed with v1.25.4: with a fixed name the second pull exited 0 and re-imported over
+  the data; with the timestamped hook below, each pull left its own snapshot. For a pull
+  that must stop when no snapshot was saved, the hook has to check for the file itself and
+  exit non-zero, with `fail_on_hook_fail: true` set.
 
   ```yaml
   hooks:
@@ -114,10 +124,12 @@ deploy pipeline.
   - `db_push_command` / `files_push_command`.
 - **`files_pull_command` can wipe your uploads.** If the stanza exists but downloads
   nothing (DDEV's docs suggest `true` when "nothing has to be done"), DDEV imports the
-  empty download folder, and the import **empties the upload directory first**. With no
-  stanza, DDEV skips files and touches nothing. This is from DDEV v1.25.4's source
-  (`doFilesPullCommand` -> `doFilesImport` -> `ImportFiles`), not runtime-tested. Delete
-  the stanza, or always pass `--skip-files`. The auditor flags it (`provider-files-noop`).
+  empty download folder, and the import **empties the upload directory first**
+  (`doFilesPullCommand` -> `doFilesImport` -> `ImportFiles`). Observed with v1.25.4: the
+  pull exited 0 with the upload folder empty. With no stanza DDEV printed "No
+  files_pull_command provided, so skipping files pull" and the files survived, as they
+  did with `--skip-files`. Delete the stanza, or always pass `--skip-files`. The auditor
+  flags it (`provider-files-noop`).
 - **A plain VPS over SSH,** dumping live (load a key first with `ddev auth ssh -f <key>`):
 
   ```yaml
