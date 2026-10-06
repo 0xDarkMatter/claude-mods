@@ -33,9 +33,15 @@ Rules:
       bash .claude/fleet/signal.sh CONFLICT "<one-line reason>"
     then stop and explain.
   - Do not merge to main yourself. The fleet landing queue handles that.
+  - Before you branch from or rebase onto main (starting out, or fixing a
+    CONFLICT), run `fleet status`. A tip it marks PROVISIONAL is a merge still
+    under its land's test gate: NOT landed, and a red gate resets it. Wait
+    until `fleet landing` exits 0, then branch or rebase.
 
 Begin.
 ```
+
+The last rule exists because `fleet land` merges first and gates second: for the whole gate, `main`'s tip is a `merge: <lane>` commit that a red gate hard-resets. Lanes that read it as landed have branched from it and rebased onto it. Details: [landing.md](landing.md#provisional-main).
 
 ---
 

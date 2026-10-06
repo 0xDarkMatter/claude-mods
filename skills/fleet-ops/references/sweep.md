@@ -25,6 +25,12 @@ cached or journalled: every verdict is recomputed from git and the session
 store, so a step you finished disappears and a step that half-worked shows what
 is left. That is what makes it resumable after an interruption.
 
+0. **Wait while `main` is not settled.** Every verdict is judged against `main`'s
+   tip. While a land holds it (`PROVISIONAL`: merged, gate still running) or it
+   holds an `UNTESTED-MERGE`, the lane being landed reads as merged and would be
+   routed to removal. So the sweep's first row says so, every other action
+   becomes `wait`, the next steps are just WAIT, and `--apply` refuses (exit 5).
+   Re-run once `fleet landing` exits 0. See [landing.md](landing.md#provisional-main).
 1. **Settle competing pairs** (phase 2). Pick the winner before landing either.
 2. **Land** `LAND` rows (`fleet land <branch>`); hand `REBASE` rows back to their lane.
 3. **Inspect** `INSPECT` trees: commit the work in its lane, or discard it after review.
@@ -40,6 +46,9 @@ whose classifier the sweep reads (`--porcelain`) and never reimplements.
 
 | Phase | Verdict | Means | Next action |
 |---|---|---|---|
+| landing | `PROVISIONAL` | a land holds `main`: about to merge, merged and gating, or rebasing the other lanes | wait; re-run once `fleet landing` exits 0 |
+| landing | `UNTESTED-MERGE` | a dead land left a merge no gate judged | verify, then `fleet land` (green) or `fleet revert` (red) |
+| landing | `DEAD-LAND` | a dead land left nothing untested (informational) | none; the next land clears it |
 | worktree | `KEEP` | prune's KEEP, or a claimant is live on a fresh read | none |
 | worktree | `REMOVE` | prune's SAFE | `fleet prune --remove` |
 | worktree | `GHOST` | git lists it, the directory is gone | `--apply` (`git worktree prune`) |

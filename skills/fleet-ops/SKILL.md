@@ -47,6 +47,7 @@ fleet land <branch>         Manual land + rebase others
 fleet land --all [--running]  Batch-land all READY lanes oldest-first (--running
                             also lands vetted RUNNING lanes; used by git-ops "land all")
 fleet revert <branch>       Revert merge commit on main
+fleet landing [--porcelain] Is main safe to branch from? Exit 0 yes, 10 wait
 fleet scrub-check <branch>  Dry-run forbidden-pattern check
 fleet config                Print the RESOLVED config — check the test gate is on
 fleet prune [--remove]      Classify finished lane worktrees; DRY RUN by default
@@ -69,15 +70,19 @@ N > 1 on one shared working tree           → REFUSE. Worktrees or separate clo
 
 ## Landing pipeline
 
-`fleet land <branch>` (and the daemon, per READY lane):
+`fleet land <branch>` (and the daemon, per READY lane) first takes the landing marker ([below](#provisional-main--the-landing-marker)), then:
 
 1. **Scrub** — `git diff main...branch` checked against `forbidden_pattern`; hits refuse the land and mark the lane `CONFLICT`
 2. **Clean-base check** — refuses if `main` has uncommitted tracked changes
 3. **Merge** — `--no-ff` with message `merge: <branch>` (what `fleet revert` finds later). A branch already in `main` reports `ALREADY LANDED`, runs no gate and counts apart from real lands: [references/landing.md](references/landing.md)
-4. **Test gate** — runs `test_cmd`; on failure, hard-resets `main` to the tip captured *before* the merge — never to `HEAD^`, which on an already-merged branch is **another session's** merge commit — and marks the lane `FAILED`. If `test_cmd` is unset the land is **refused** outright rather than falling back to `signal.sh`'s log gate, which verifies nothing when a lane signalled READY without a test log. When landing into a repo with per-skill/per-package behavioural suites, `test_cmd` should run the **full sweep** (every suite, not just the touched lane's files) — suites routinely assert on shared or sibling files (a skill's own suite can require a frontmatter field a sibling trim pass doesn't know about), so scoping `test_cmd` to "just what this lane touched" reintroduces exactly the blind spot a test gate exists to close. **Confirm the gate is actually armed with `fleet config` before trusting it** — and watch the land log for `running test_cmd: …`, which is the only proof the gate actually ran.
+4. **Test gate** — runs `test_cmd`; on failure, hard-resets `main` to the tip captured *before* the merge (never `HEAD^`, which on an already-merged branch is **another session's** merge) and marks the lane `FAILED`. An unset `test_cmd` **refuses** the land: `signal.sh`'s log gate alone verifies nothing. Make `test_cmd` the **full suite sweep**, not just the lane's files ([why](references/landing.md#step-4-test-gate-in-full)). **Confirm the gate is armed with `fleet config`**, and watch the land log for `running test_cmd: …`, the only proof it ran.
 5. **Rebase others** — every still-active lane is rebased onto the new `main` (in its own worktree if it has one); a rebase conflict marks that lane `CONFLICT`
 
 `fleet revert <branch>` reverts the merge whose subject is **exactly** `merge: <branch>` (`git revert -m 1`), the latest if it landed twice; a conflicting revert is aborted cleanly and the lane returns to `RUNNING`. Detail: [references/landing.md](references/landing.md).
+
+### Provisional `main` — the landing marker
+
+Every land (`fleet land`, each lane of `land --all`, the daemon) holds `.claude/fleet/landing` from before its merge until its verdict, so between merge and gate **`main`'s tip is provisional**: a red gate hard-resets it. `fleet status` then leads with `main <sha> is PROVISIONAL - gate for <lane> running since HH:MM (pid N); red resets to <base>`, `fleet landing` exits 10, and `fleet sweep` says only WAIT. **Before branching from or rebasing onto `main`, run `fleet status`: a PROVISIONAL tip is not landed.** The marker is a lock too (a second land refuses, naming the holder). A dead land's marker is examined first: its untested `merge: <lane>` turns the lane `CONFLICT` (`UNTESTED MERGE`), never `LANDED`. Detail: [references/landing.md](references/landing.md).
 
 ## Daemon lifecycle (experimental)
 
@@ -92,7 +97,7 @@ bash .claude/fleet/signal.sh READY <test-log> <exit-code>   # refuses dirty tree
 bash .claude/fleet/signal.sh CONFLICT "<reason>"
 ```
 
-The `<exit-code>` (the test command's own `$?` / `${PIPESTATUS[0]}`) is the authoritative verdict — pass it whenever you have it. Without it, `signal.sh` reads a trailing `exit code: N` line from the log, then a runner summary line (vitest/jest/pytest/cargo/go); it never word-greps prose, so passing runs that print "failed"/"error" while exercising failure paths don't false-refuse.
+The `<exit-code>` (the test command's own `$?` / `${PIPESTATUS[0]}`) is the authoritative verdict; pass it whenever you have it. Without it, `signal.sh` falls back to the log, never word-grepping prose: [references/session-prompt.md](references/session-prompt.md#per-language-test-cmd-snippets).
 
 ## Session awareness — MAIN, lane owners, and the live-owner gate
 
@@ -103,11 +108,10 @@ lanes can hand off to.
 
 ### MAIN — one coordinator per repo
 
-**MAIN is the session whose cwd is the repo root.** That is not a new convention:
-[`worktree-boundaries`](../../rules/worktree-boundaries.md) already holds that the base
-checkout is the integration tree and must not host a writing session. `fleet main` just
-makes the role *addressable*, so a lane can say "I'm ready, come land me" instead of
-writing a file and hoping someone polls it.
+**MAIN is the session whose cwd is the repo root**: the integration tree, which hosts no
+writing session ([`worktree-boundaries`](../../rules/worktree-boundaries.md)). `fleet main`
+makes that role *addressable*, so a lane can say "come land me" instead of writing a file
+and hoping someone polls it.
 
 ```
 fleet main                  Show the coordinator (sessionId, title, live|idle, cwd)
@@ -122,7 +126,7 @@ integrates. A deploy still needs an explicit human OK for that specific deploy.
 
 ### The live-owner gate
 
-`fleet land` **refuses a lane whose owning session was active within `session_live_secs` (default 600)**: it would merge a branch that session may still be committing to and rebase worktrees out from under it. Ownership joins on `writtenBranches` and on the lane's worktree directory, across every Desktop instance's store. A lane session landing its own finished work is exempt only as the sole live claimant. Override: `session_check=off`, or `FLEET_SKIP_SESSION_CHECK=1` for one run (stripped before `test_cmd`).
+`fleet land` **refuses a lane whose owning session was active within `session_live_secs` (default 600)**: it would merge a branch that session may still be committing to and rebase worktrees out from under it. A lane session landing its own finished work is exempt only as the sole live claimant. Override: `session_check=off`, or `FLEET_SKIP_SESSION_CHECK=1` for one run (stripped before `test_cmd`).
 
 Channels: lane files (`signal.sh`) work everywhere, `ccd_session_mgmt` is Desktop-only and agent-only, `pigeon` is the portable fallback. Mechanics and history: [references/session-awareness.md](references/session-awareness.md).
 
@@ -141,12 +145,10 @@ fleet prune --porcelain      TSV to stdout: path, branch, bucket, reason
 fleet prune --all-repos      Sibling-repo counts. Report-only, always
 ```
 
-**Dry run is the default, and that is deliberate.** Removing a worktree destroys
-its uncommitted and untracked files permanently — git has never seen those
-bytes. Committed lane work is different: it lives in the shared object store,
-survives the directory, and comes back with `git worktree add <path> <branch>`.
-Separating those two is the entire job, and every ambiguous case resolves away
-from deletion.
+**Dry run is the default, deliberately.** Removing a worktree destroys its
+uncommitted and untracked files for good; committed lane work survives in the
+object store (`git worktree add <path> <branch>`). Telling those apart is the
+whole job, and every ambiguous case resolves away from deletion.
 
 ### Buckets — first match wins, and the order is the safety argument
 
@@ -158,14 +160,13 @@ Only **SAFE** is ever removable: merged, clean, no open session claiming it, and
 
 ### Seeing the backlog
 
-`fleet status` adds one line when a repo has prunable worktrees
-(`! 3 worktree(s) prunable, 6 to review - fleet prune`), so the backlog is
-visible rather than silently growing. Turn it off with `prune_hint=off` in
-config or `FLEET_NO_PRUNE_HINT=1`.
+`fleet status` adds `! 3 worktree(s) prunable, 6 to review - fleet prune` when
+there is a backlog, so it cannot grow unseen. Off: `prune_hint=off` in config or
+`FLEET_NO_PRUNE_HINT=1`.
 
 ## Sweep — after a wave
 
-Prune refuses well but cannot drain REVIEW. `fleet sweep` (from MAIN) prints the backlog as next actions in procedure order: worktrees, competing lanes (same files, committed in one and uncommitted in another), worktree-less branches, ghosts/dirs/stashes, sessions to archive. It also sees lanes **landed by content** (squash, cherry-pick) and owners whose lane dir is gone. **Work the list, re-running the sweep after each step**; nothing is cached, so it resumes. `--apply` is zero-loss only (ghost entries, merged unheld branches, unclaimed empty dirs); removal stays `fleet prune --remove`. Sessions are the agent's job, one gated call each: `ARCHIVE-REQUEST` → `send_message`, `ARCHIVE-DIRECT` → `archive_session`, **never** a message, which would resume it into a dead tree. A private never-push list parks branches that must not leave the machine. Detail: [references/sweep.md](references/sweep.md).
+Prune refuses well but cannot drain REVIEW. `fleet sweep` (from MAIN) prints the backlog as next actions in procedure order: worktrees, competing lanes (same files, committed in one and uncommitted in another), worktree-less branches, ghosts/dirs/stashes, sessions to archive. It also sees lanes **landed by content** (squash, cherry-pick) and owners whose lane dir is gone. **Work the list, re-running the sweep after each step**; nothing is cached, so it resumes. `--apply` is zero-loss only (ghost entries, merged unheld branches, unclaimed empty dirs); removal stays `fleet prune --remove`. Sessions are the agent's job, one gated call each: `ARCHIVE-REQUEST` → `send_message`, `ARCHIVE-DIRECT` → `archive_session`, **never** a message, which would resume it into a dead tree. Detail: [references/sweep.md](references/sweep.md).
 
 ## First-class user interaction (HARD RULE)
 

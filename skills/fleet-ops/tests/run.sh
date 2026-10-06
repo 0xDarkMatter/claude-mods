@@ -553,7 +553,7 @@ echo "-- fleet stop: a stale landing marker cannot disarm the SIGKILL backstop -
 bash -c 'trap "" TERM; exec sleep 60' & WEDGED=$!
 sleep 0.5
 echo "$WEDGED" > "$DPIDF"
-printf '%s\t%s\t%s\n' 999999 "$(date +%s)" d-two > "$DREPO/.claude/fleet/landing"
+printf '%s\t%s\t%s\t%s\n' 999999 "$(date +%s)" "$(git -C "$DREPO" rev-parse main)" d-two > "$DREPO/.claude/fleet/landing"
 STALE_OUT="$SB/stop-stale.out"
 bash "$FLEET" stop >"$STALE_OUT" 2>&1 & STOPPID=$!
 if exits_within "$STOPPID" 150; then
@@ -569,6 +569,290 @@ esac
 exits_within "$WEDGED" 30 || { no "wedged fake daemon survived fleet stop"; kill -KILL "$WEDGED" 2>/dev/null; }
 wait 2>/dev/null
 rm -f "$DREPO/.claude/fleet/landing" "$DPIDF"
+
+# -- a land that died mid-gate: its untested merge is flagged, never blessed ----
+# Regression, 2026-10-05. A land that dies without its gate's verdict (kill -9, a
+# crash, OOM, a torn-down process tree, an agent's Bash tool timing out a slow
+# `fleet land`) leaves its merge on main untested and the lane still READY. The
+# next land took land_one's "Already up to date" path and marked it LANDED,
+# blessing a merge no gate ever passed. Every land now holds .claude/fleet/landing
+# until its verdict, and a marker whose process is gone is examined before any
+# land. fake_dead_land leaves exactly what such a land leaves: land_one's own
+# merge commit, the lane untouched, and the marker naming the base tip BEFORE.
+echo "-- a land that died mid-gate: its untested merge is flagged, never blessed --"
+DLREPO="$SB/deadland"; mkdir -p "$DLREPO"
+git -C "$DLREPO" init -q -b main
+git -C "$DLREPO" config user.email t@t; git -C "$DLREPO" config user.name t
+git -C "$DLREPO" config core.autocrlf false
+echo base > "$DLREPO/f"; git -C "$DLREPO" add -A; git -C "$DLREPO" commit -qm init
+cd "$DLREPO"
+bash "$FLEET" init s-dmn s-dmn2 s-land s-reuse s-clean s-busy s-kill s-reb1 s-reb2 s-mid >/dev/null 2>&1
+SCFG="$DLREPO/.claude/fleet/config"; SLOG="$DLREPO/.claude/fleet/activity.log"
+SMARK="$DLREPO/.claude/fleet/landing"
+printf 'test_cmd=true\npoll_interval=1\nsession_check=off\n' > "$SCFG"
+s_state(){ head -n1 "$DLREPO/.claude/fleet/lanes/$1" 2>/dev/null; }
+s_note(){ sed -n 2p "$DLREPO/.claude/fleet/lanes/$1" 2>/dev/null; }
+# Commit file $2 (default <lane>.txt) on lane $1 and signal READY.
+s_ready(){
+  local file=${2:-$1.txt}
+  ( cd "$DLREPO/.fleet-worktrees/$1" && echo "$1" > "$file" && git add "$file" \
+      && git commit -qm "work $1" && bash "$DLREPO/.claude/fleet/signal.sh" READY ) >/dev/null 2>&1
+}
+# A PID that provably names no process: the child has exited and been reaped.
+dead_pid(){ bash -c 'exit 0' & local p=$!; wait "$p" 2>/dev/null; echo "$p"; }
+# What a land killed after `git merge` and before its gate leaves behind.
+fake_dead_land(){  # lane, marker pid
+  local before; before="$(git -C "$DLREPO" rev-parse main)"
+  git -C "$DLREPO" merge -q --no-ff "$1" -m "merge: $1" >/dev/null 2>&1
+  printf '%s\t%s\t%s\t%s\n' "$2" "$(date +%s)" "$before" "$1" > "$SMARK"
+}
+
+# (a) The next daemon pass, the case first seen. s-dmn2 is a clean READY lane
+# landed in the same pass, so its PASS line proves that pass actually ran.
+s_ready s-dmn; s_ready s-dmn2
+fake_dead_land s-dmn "$(dead_pid)"
+dmn_merge="$(git -C "$DLREPO" rev-parse main)"
+DPIDF="$DLREPO/.claude/fleet/daemon.pid"   # daemon_up / reap_daemon read it
+daemon_up || no "daemon did not come up (dead-land case)"
+for ((i = 0; i < 300; i++)); do grep -q "PASS: s-dmn2 landed" "$SLOG" 2>/dev/null && break; sleep 0.1; done
+case "$(s_state s-dmn)" in
+  CONFLICT) ok "daemon flags a dead land's untested merge CONFLICT" ;;
+  *)        no "daemon left a dead land's untested merge as $(s_state s-dmn), not CONFLICT" ;;
+esac
+grep -q "ALREADY LANDED: s-dmn " "$SLOG" && no "daemon blessed the untested merge via ALREADY LANDED" \
+  || ok "daemon did not bless the untested merge"
+grep -q "UNTESTED MERGE on main: s-dmn$" "$SLOG" && ok "loud UNTESTED MERGE warning names the lane" \
+  || no "no UNTESTED MERGE warning for s-dmn"
+grep -q "fleet revert s-dmn" "$SLOG" && ok "warning gives the revert command" || no "warning omits fleet revert"
+case "$(s_note s-dmn)" in *"UNTESTED MERGE"*) ok "lane note says why it is CONFLICT";; *) no "lane note: $(s_note s-dmn)";; esac
+git -C "$DLREPO" merge-base --is-ancestor "$dmn_merge" main && ok "recovery left the merge on main (never rewrites history)" \
+  || no "recovery rewrote main"
+case "$(s_state s-dmn2)" in LANDED) ok "other READY lanes still land";; *) no "s-dmn2 = $(s_state s-dmn2)";; esac
+# The daemon may still hold its OWN marker here (s-dmn2's rebase pass), so ask
+# only whether the dead land's marker is gone.
+case "$(cut -f4 "$SMARK" 2>/dev/null)" in
+  s-dmn) no "the dead land's marker survived the daemon's pass" ;;
+  *)     ok "the dead land's marker cleared" ;;
+esac
+bash "$FLEET" stop >/dev/null 2>&1
+exits_within "$DPID" 50 || { no "daemon alive after fleet stop (dead-land case)"; reap_daemon; }
+wait 2>/dev/null
+# The settle path: once verified, a LATER `fleet land` records it LANDED.
+bash "$FLEET" land s-dmn >/dev/null 2>&1; ee "a later fleet land settles a verified merge" 0 $?
+case "$(s_state s-dmn)" in LANDED) ok "settled lane is LANDED";; *) no "settled lane = $(s_state s-dmn)";; esac
+
+# (b) `fleet land` itself: the call that finds the untested merge must not bless
+# it on the next line.
+s_ready s-land
+fake_dead_land s-land "$(dead_pid)"
+out="$(bash "$FLEET" land s-land 2>&1)"; rc=$?
+ee "fleet land refuses the untested merge it just found" 1 $rc
+case "$(s_state s-land)" in CONFLICT) ok "fleet land flags it CONFLICT";; *) no "fleet land left it $(s_state s-land)";; esac
+case "$out" in *"ALREADY LANDED"*) no "fleet land blessed the untested merge";; *) ok "fleet land did not bless it";; esac
+case "$out" in *"UNTESTED MERGE"*) ok "fleet land warns about the untested merge";; *) no "no warning from fleet land";; esac
+
+# (c) A reused PID: the marker names a LIVE process that is not fleet. On
+# Windows PIDs come back fast; kill -0 alone would call the dead land live and
+# refuse every land forever without ever examining it.
+s_ready s-reuse
+sleep 30 & REUSED=$!
+fake_dead_land s-reuse "$REUSED"
+out="$(bash "$FLEET" land s-reuse 2>&1)"; rc=$?
+kill "$REUSED" 2>/dev/null; wait "$REUSED" 2>/dev/null
+ee "a reused pid cannot pass a dead land off as live" 1 $rc
+case "$(s_state s-reuse)" in CONFLICT) ok "dead land behind a reused pid still flagged";; *) no "reused pid: s-reuse = $(s_state s-reuse)";; esac
+case "$out" in *"another land is in progress"*) no "reused pid read as a live land";; *) ok "reused pid not read as a live land";; esac
+
+# (d) The dead land never merged (base tip unchanged): nothing to flag, the lane
+# lands normally through its gate.
+s_ready s-clean
+printf '%s\t%s\t%s\t%s\n' "$(dead_pid)" "$(date +%s)" "$(git -C "$DLREPO" rev-parse main)" s-clean > "$SMARK"
+out="$(bash "$FLEET" land s-clean 2>&1)"; rc=$?
+ee "a dead land that never merged re-lands normally" 0 $rc
+case "$out" in *"nothing merged"*) ok "recovery says nothing merged";; *) no "recovery did not report the unmoved base";; esac
+case "$out" in *"PASS: s-clean landed"*) ok "re-land ran its gate";; *) no "re-land skipped its gate";; esac
+case "$(s_state s-clean)" in LANDED) ok "re-landed lane is LANDED";; *) no "s-clean = $(s_state s-clean)";; esac
+[ -f "$SMARK" ] && no "marker of a land that never merged left behind" || ok "marker of a land that never merged cleared"
+
+# (e) One land at a time: a LIVE fleet process holds the marker. The holder's
+# command line names fleet, as a real `fleet land` does.
+s_ready s-busy
+# Reaps its own sleep on TERM: an orphan whose cwd is inside $SB would block the
+# suite's rm -rf on Windows.
+printf 'trap '\''kill $c 2>/dev/null; exit'\'' TERM; sleep 30 & c=$!; wait "$c"\n' > "$SB/fleet-holder.sh"
+bash "$SB/fleet-holder.sh" & HOLDER=$!
+busy_before="$(git -C "$DLREPO" rev-parse main)"
+printf '%s\t%s\t%s\t%s\n' "$HOLDER" "$(date +%s)" "$busy_before" s-other > "$SMARK"
+out="$(bash "$FLEET" land s-busy 2>&1)"; rc=$?
+ee "fleet land refuses while another land holds the marker" 1 $rc
+case "$out" in *"another land is in progress"*"pid $HOLDER"*) ok "refusal names the land in progress";; *) no "refusal unclear: $out";; esac
+eq "no merge beside a land in progress" "$busy_before" "$(git -C "$DLREPO" rev-parse main)"
+case "$(head -n1 "$SMARK" 2>/dev/null)" in "$HOLDER"*) ok "the live land's marker is left alone";; *) no "live marker was touched";; esac
+kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null
+bash "$FLEET" land s-busy >/dev/null 2>&1; ee "lands once the holder is gone" 0 $?
+
+# (f) A `fleet land` killed mid-gate, as an agent's Bash tool timeout does. The
+# gate blocks on a sentinel so the kill provably lands between merge and verdict.
+s_ready s-kill
+cat > "$SCFG" <<'EOF'
+test_cmd=n=0; until [ -f .claude/fleet/go ] || [ $n -ge 300 ]; do sleep 0.1; n=$((n+1)); done
+poll_interval=1
+session_check=off
+EOF
+gates_before="$(grep -c "running test_cmd" "$SLOG" 2>/dev/null)"
+bash "$FLEET" land s-kill >/dev/null 2>&1 & KLP=$!
+for ((i = 0; i < 300; i++)); do
+  [ "$(grep -c "running test_cmd" "$SLOG" 2>/dev/null)" -gt "$gates_before" ] && break; sleep 0.1
+done
+# Asserted by content, not existence: a marker some earlier case left behind
+# must not pass for this land's own.
+eq "fleet land holds the marker while its gate runs" "$KLP s-kill" "$(awk -F'\t' '{print $1" "$4}' "$SMARK" 2>/dev/null)"
+kill -KILL "$KLP" 2>/dev/null; wait "$KLP" 2>/dev/null
+touch "$DLREPO/.claude/fleet/go"   # let the orphaned gate finish
+sleep 0.5
+eq "a fleet land killed mid-gate leaves its marker" "$KLP s-kill" "$(awk -F'\t' '{print $1" "$4}' "$SMARK" 2>/dev/null)"
+# What a peer reading main sees meanwhile: an UNTESTED merge, never "landed".
+case "$(bash "$FLEET" status 2>&1)" in
+  *"holds an UNTESTED merge of s-kill"*) ok "status flags the dead land's merge UNTESTED" ;;
+  *) no "status hides the dead land's untested merge" ;;
+esac
+bash "$FLEET" landing >/dev/null 2>&1; ee "fleet landing says wait over a dead land's merge" 10 $?
+printf 'test_cmd=true\npoll_interval=1\nsession_check=off\n' > "$SCFG"
+rm -f "$DLREPO/.claude/fleet/go"
+out="$(bash "$FLEET" land s-kill 2>&1)"; rc=$?
+ee "rerun after a killed fleet land refuses to bless it" 1 $rc
+case "$out" in *"ALREADY LANDED"*) no "rerun blessed the killed land's merge";; *) ok "rerun did not bless it";; esac
+case "$(s_state s-kill)" in CONFLICT) ok "killed land's merge flagged CONFLICT";; *) no "s-kill = $(s_state s-kill)";; esac
+# Recovery cleared the marker, but main is no more settled than before: the
+# flagged lane keeps saying so until a human runs fleet land or fleet revert.
+bash "$FLEET" landing >/dev/null 2>&1; ee "fleet landing still says wait after recovery flags it" 10 $?
+
+# (g) The dead land's rebase pass left ANOTHER lane's worktree stuck mid-rebase.
+# s-reb1 landed (verdict recorded) and s-reb2 conflicts with it, so its rebase
+# stops half-done, as a rebase_others killed mid-way leaves it.
+s_ready s-reb1 shared.txt; s_ready s-reb2 shared.txt
+reb_before="$(git -C "$DLREPO" rev-parse main)"
+git -C "$DLREPO" merge -q --no-ff s-reb1 -m "merge: s-reb1" >/dev/null 2>&1
+printf 'LANDED\n' > "$DLREPO/.claude/fleet/lanes/s-reb1"
+git -C "$DLREPO/.fleet-worktrees/s-reb2" rebase main >/dev/null 2>&1
+printf '%s\t%s\t%s\t%s\n' "$(dead_pid)" "$(date +%s)" "$reb_before" s-reb1 > "$SMARK"
+out="$(bash "$FLEET" land --all 2>&1)"
+case "$(s_state s-reb2)" in CONFLICT) ok "lane stuck mid-rebase flagged CONFLICT";; *) no "s-reb2 = $(s_state s-reb2)";; esac
+case "$(s_note s-reb2)" in *rebase*) ok "its note names the rebase";; *) no "s-reb2 note: $(s_note s-reb2)";; esac
+case "$out" in *"rebase --abort"*) ok "warning gives the rebase --abort command";; *) no "warning omits rebase --abort";; esac
+case "$out" in *"LANDING: s-reb2"*) no "land --all landed a lane stuck mid-rebase";; *) ok "land --all skipped the lane stuck mid-rebase";; esac
+reb_gd="$(git -C "$DLREPO/.fleet-worktrees/s-reb2" rev-parse --absolute-git-dir)"
+[ -d "$reb_gd/rebase-merge" ] && ok "the lane's rebase is left for its owner" || no "fleet aborted a rebase in a lane's worktree"
+git -C "$DLREPO/.fleet-worktrees/s-reb2" rebase --abort >/dev/null 2>&1
+
+# (h) The main checkout itself is mid-merge: the dead land's conflicting merge
+# never finished. The plain "uncommitted tracked changes" refusal named the
+# symptom, never the cause.
+( cd "$DLREPO/.fleet-worktrees/s-mid" && echo mid > f && git commit -qam "work s-mid" ) >/dev/null 2>&1
+echo main-side > "$DLREPO/f"; git -C "$DLREPO" commit -qam "main side" >/dev/null 2>&1
+git -C "$DLREPO" merge -q --no-ff s-mid -m "merge: s-mid" >/dev/null 2>&1
+printf '%s\t%s\t%s\t%s\n' "$(dead_pid)" "$(date +%s)" "$(git -C "$DLREPO" rev-parse main)" s-mid > "$SMARK"
+out="$(bash "$FLEET" land s-mid 2>&1)"; rc=$?
+ee "a main checkout left mid-merge refuses the land" 1 $rc
+case "$out" in *"mid-merge"*"merge --abort"*) ok "refusal names the half-done merge and its fix";; *) no "refusal unclear: $out";; esac
+[ -f "$SMARK" ] && ok "marker kept until a human finishes the merge" || no "marker dropped with main still mid-merge"
+git -C "$DLREPO" merge --abort >/dev/null 2>&1
+rm -f "$SMARK"
+
+# -- a manual land: main is PROVISIONAL while its gate runs; one land at a time --
+# Regression, 2026-10-06. `fleet land` merges first and gates second, so for the
+# whole gate main's tip is a merge that a red gate hard-resets. Twice in one day
+# a peer session saw that merge, read it as landed, and branched from it or
+# rebased onto it and started a second gate beside the first. Nothing on disk
+# said "provisional": only the daemon wrote a marker, and `fleet status` said
+# nothing about main. A gate that blocks on a sentinel holds the window open.
+echo "-- a manual land: main is PROVISIONAL while its gate runs; one land at a time --"
+PVREPO="$SB/provisional"; mkdir -p "$PVREPO"
+git -C "$PVREPO" init -q -b main
+git -C "$PVREPO" config user.email t@t; git -C "$PVREPO" config user.name t
+git -C "$PVREPO" config core.autocrlf false
+echo base > "$PVREPO/f"; git -C "$PVREPO" add -A; git -C "$PVREPO" commit -qm init
+cd "$PVREPO"
+bash "$FLEET" init pv-one pv-two >/dev/null 2>&1
+PVMARK="$PVREPO/.claude/fleet/landing"; PVLOG="$PVREPO/.claude/fleet/activity.log"
+for l in pv-one pv-two; do
+  ( cd "$PVREPO/.fleet-worktrees/$l" && echo "$l" > "$l.txt" && git add "$l.txt" \
+      && git commit -qm "work $l" && bash "$PVREPO/.claude/fleet/signal.sh" READY ) >/dev/null 2>&1
+done
+# A long sentinel cap: the two sweep runs below happen inside the window.
+cat > "$PVREPO/.claude/fleet/config" <<'EOF'
+test_cmd=n=0; until [ -f .claude/fleet/go ] || [ $n -ge 1800 ]; do sleep 0.1; n=$((n+1)); done
+session_check=off
+EOF
+pv_before="$(git -C "$PVREPO" rev-parse main)"
+bash "$FLEET" landing >/dev/null 2>&1; ee "fleet landing says go when nothing lands" 0 $?
+case "$(bash "$FLEET" status 2>&1)" in
+  *PROVISIONAL*) no "status says PROVISIONAL with no land running" ;;
+  *)             ok "no PROVISIONAL line when nothing lands" ;;
+esac
+
+bash "$FLEET" land pv-one >/dev/null 2>&1 & PVP=$!
+for ((i = 0; i < 300; i++)); do grep -q "running test_cmd" "$PVLOG" 2>/dev/null && break; sleep 0.1; done
+pv_tip="$(git -C "$PVREPO" rev-parse main)"
+[ "$pv_tip" != "$pv_before" ] && ok "the merge is on main before its gate rules" || no "no merge on main while the gate runs"
+eq "manual fleet land holds the marker while test_cmd runs" "$PVP pv-one $pv_before" \
+  "$(awk -F'\t' '{print $1" "$4" "$3}' "$PVMARK" 2>/dev/null)"
+out="$(bash "$FLEET" status 2>&1)"
+case "$out" in
+  *"main ${pv_tip:0:7} is PROVISIONAL - gate for pv-one running since "*) ok "status leads with: main is PROVISIONAL" ;;
+  *) no "status hides the provisional tip: $out" ;;
+esac
+case "$out" in
+  *"(pid $PVP); red resets to ${pv_before:0:7}"*) ok "the line names the holder and what red resets to" ;;
+  *) no "PROVISIONAL line lacks the pid or the reset target" ;;
+esac
+bash "$FLEET" landing >/dev/null 2>&1; ee "fleet landing says wait while the gate runs" 10 $?
+out="$(bash "$FLEET" landing --porcelain 2>/dev/null)"
+case "$out" in
+  PROVISIONAL$'\t'"$pv_tip"$'\t'"$pv_before"$'\t'pv-one$'\t'"$PVP"$'\t'*) ok "porcelain row: state, tip, base, lane, pid" ;;
+  *) no "porcelain row: $out" ;;
+esac
+
+# A second land, concurrently, as the 2026-10-06 peer did: refused, by name.
+out="$(bash "$FLEET" land pv-two 2>&1)"; rc=$?
+ee "a second concurrent fleet land refuses" 1 $rc
+case "$out" in
+  *"another land is in progress"*"pid $PVP on pv-one"*) ok "the refusal names the land that holds main" ;;
+  *) no "refusal unclear: $out" ;;
+esac
+eq "no merge beside the land in progress" "$pv_tip" "$(git -C "$PVREPO" rev-parse main)"
+case "$(head -n1 "$PVREPO/.claude/fleet/lanes/pv-two")" in
+  READY) ok "the refused lane stays READY" ;;
+  *)     no "the refused lane = $(head -n1 "$PVREPO/.claude/fleet/lanes/pv-two")" ;;
+esac
+
+# fleet sweep: the same line, and nothing in it acts on the provisional tip.
+# pv-one reads MERGED right now, so without the guard its row would say REMOVE.
+out="$(bash "$FLEET" sweep --porcelain 2>/dev/null)"
+case "${out%%$'\n'*}" in
+  landing$'\t'main$'\t'PROVISIONAL$'\t'*"is PROVISIONAL - gate for pv-one"*) ok "sweep's first row is the PROVISIONAL tip" ;;
+  *) no "sweep's first row: ${out%%$'\n'*}" ;;
+esac
+# Every other row's action is "wait": on main's code pv-one's said VERIFY-OWNER,
+# "archived => prune can remove it", for work only a provisional merge holds.
+acting="$(printf '%s\n' "$out" | awk -F'\t' 'NF && $1 != "landing" && $5 != "-" && $5 !~ /^wait: /')"
+eq "every other sweep row says wait, none acts on the tip" "" "$acting"
+out="$(bash "$FLEET" sweep --apply --yes 2>&1)"; rc=$?
+ee "sweep --apply refuses on a provisional tip" 5 $rc
+case "$out" in *"Next: WAIT"*) ok "sweep's only next step is WAIT";; *) no "sweep did not say wait";; esac
+case "$out" in
+  *"Next, in order"*|*"fleet prune --remove"*) no "sweep suggested acting on the provisional tip" ;;
+  *) ok "sweep suggests nothing that acts on the tip" ;;
+esac
+
+touch "$PVREPO/.claude/fleet/go"
+wait "$PVP"; ee "the held land finishes green" 0 $?
+case "$(bash "$FLEET" status 2>&1)" in
+  *PROVISIONAL*) no "PROVISIONAL outlived the land" ;;
+  *)             ok "PROVISIONAL gone once the gate ruled" ;;
+esac
+bash "$FLEET" landing >/dev/null 2>&1; ee "fleet landing says go after the verdict" 0 $?
+[ -f "$PVMARK" ] && no "marker left after the land" || ok "marker released after the land"
 cd "$CREPO"
 
 # -- already-merged branch: the two-sessions-one-branch case -------------------

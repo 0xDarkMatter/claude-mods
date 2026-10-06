@@ -2,6 +2,13 @@
 
 End-to-end walkthroughs plus recovery scenarios. The native-primitives routing table and CLI surface live in `SKILL.md` — this doc is the operational manual.
 
+## Contents
+
+- [Path A — native spawn, fleet landing](#path-a--native-spawn-fleet-landing)
+- [Path B — manual spawn (`fleet init`)](#path-b--manual-spawn-fleet-init)
+- [Recovery](#recovery)
+- [Common patterns](#common-patterns)
+
 There are two ways work enters the fleet: **native spawn** (preferred — agent teams or background agents do the parallel work) and **manual spawn** (`fleet init` creates lanes you point sessions at). Landing is identical for both.
 
 ## Path A — native spawn, fleet landing
@@ -88,6 +95,8 @@ fleet status
 
 One panel: every lane grouped by state (`RUNNING / READY / CONFLICT / FAILED / LANDED`) with age and commits-ahead. `fleet status --verbose` adds worktree paths and notes.
 
+While a land's gate runs, the panel's first line reads `main <sha> is PROVISIONAL - gate for <lane> running since HH:MM (pid N); red resets to <base>`. That tip is not landed yet, so no session branches from it or rebases onto it until the line is gone (`fleet landing` exits 0). See [landing.md](landing.md#provisional-main).
+
 ### 5. Cleanup
 
 When all lanes are terminal (`LANDED` or `FAILED`), the daemon exits. To tear down:
@@ -102,9 +111,21 @@ Only remove worktrees that `fleet init` created. Native sessions' worktrees unde
 
 `fleet init` is idempotent — keep `.claude/fleet/` for the next round if you want.
 
-If a previous daemon was killed without cleanup, `fleet start` auto-detects the stale `daemon.pid` and clears it.
+If a previous daemon was killed without cleanup, `fleet start` auto-detects the stale `daemon.pid` and clears it. A land it was in the middle of is examined the same way, by `fleet start` and by `fleet land`. See the next section.
 
 ## Recovery
+
+### `CONFLICT` lane noted `UNTESTED MERGE` (a land died mid-gate)
+
+A land was cut short after its merge and before its gate's verdict (kill -9, crash, a tool timeout), so the merge is on `main` and no gate has judged it. `fleet status` says `main <sha> holds an UNTESTED merge of <lane>` until it is settled. Run the gate yourself:
+
+```bash
+git checkout main && <test_cmd>
+fleet land <lane-branch>     # green: records it LANDED, rebases the other lanes
+fleet revert <lane-branch>   # red: reverts the merge, lane back to RUNNING
+```
+
+A lane noted `rebase onto main cut short` is stuck mid-rebase in its own worktree. Its owner finishes it, or runs `git -C <worktree> rebase --abort`, then re-signals READY.
 
 ### `CONFLICT` lane (rebase or merge failed)
 
