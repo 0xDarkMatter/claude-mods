@@ -56,6 +56,7 @@
 #   owner       branch -> newest owning session
 #   main        the repo's coordinator session
 #   at          directory -> claims; --fresh is the land gate's read
+#   where       session -> the Desktop instance (store) holding it
 #
 # INVARIANTS
 #   - stdout is DATA ONLY (TSV). Notes go to stderr.
@@ -113,6 +114,8 @@ USAGE
                                   be resolved and verified against the store.
                                   Exit 3 (silent) when it cannot.
   $SELF stores                    The session stores and transcript roots read
+  $SELF where <sessionId>...      Which Desktop instance (store) holds each
+                                  session: one row per store a wrapper is in
   $SELF --help
 
 OUTPUT (TSV columns)
@@ -127,6 +130,10 @@ OUTPUT (TSV columns)
     sessionId  live(0|1)  archived(0|1|?|-)  lastCwd
     -        no wrapper was read (a cli:<id>, or the wrapper is gone)
     lastCwd  normalised; only for an archived session, else empty
+  where:
+    sessionId  label  store
+    label    primary, a ~/.claude-desktop-profiles/<name> profile's <name>,
+             or the store dir's own name; an id in no store prints no row
   archived is ? when the wrapper's isArchived is missing or not a boolean:
   unreadable, so it is treated as open, never as archived.
   lastActivityMs is the newer of the wrapper's lastActivityAt and the
@@ -979,6 +986,57 @@ cmd_stores() {
     return 0
 }
 
+# --- where -------------------------------------------------------------------
+# Which Desktop instance holds each session. The ccd_session_mgmt tools
+# (archive_session, send_message) act only on sessions in the CALLING session's
+# own instance: on 2026-10-06, 5 of 9 archive_session calls a coordinator made
+# from one profile failed "Session ... not found" (4 lived in the primary store,
+# 1 in another profile). A report that names a session to act on must therefore
+# also name the instance it lives in, and the caller compares it with its own
+# (`where $(sessions.sh self)`).
+#
+# The label is read off the store path at runtime and never stored anywhere:
+# profile directory names are the user's own, often personal.
+#   <userData>/claude-code-sessions where userData is .../Claude  -> primary
+#   ~/.claude-desktop-profiles/<name>/claude-code-sessions        -> <name>
+#   anything else (an override, a fixture)                        -> its dir name
+store_label() {
+    local s=${1//\\//} parent
+    s=${s%/}
+    if [[ "$s" == */claude-code-sessions ]]; then
+        parent=${s%/claude-code-sessions}
+        if [[ "${parent%/*}" == */.claude-desktop-profiles ]]; then
+            printf '%s' "${parent##*/}"
+        elif [[ "${parent##*/}" == Claude ]]; then
+            printf 'primary'
+        else
+            printf '%s' "${parent##*/}"
+        fi
+        return 0
+    fi
+    printf '%s' "${s##*/}"
+}
+
+# id  label  store, one row per (session, store holding its wrapper). A wrapper
+# copied into two stores (a transfer between instances) prints two rows; which
+# of them a Desktop window actually shows is the caller's question.
+cmd_where() {
+    (( $# )) || { echo "usage: $SELF where <sessionId>..." >&2; return 2; }
+    load_dirs
+    (( ${#STORES[@]} )) || return 3
+    local id st f names=()
+    for id in "$@"; do [[ -z "$id" || "$id" == cli:* ]] || names+=(-o -name "$id.json"); done
+    (( ${#names[@]} )) || return 0
+    for st in "${STORES[@]}"; do
+        while IFS= read -r f; do
+            [[ -n "$f" ]] || continue
+            f=${f##*/}
+            printf '%s\t%s\t%s\n' "${f%.json}" "$(store_label "$st")" "$st"
+        done < <(find "$st" -type f \( "${names[@]:1}" \) 2>/dev/null)
+    done
+    return 0
+}
+
 case "${1:---help}" in
     -h|--help|help) usage; exit 0 ;;
     index)          build_index; exit $? ;;
@@ -986,6 +1044,7 @@ case "${1:---help}" in
     views)          build_views; exit $? ;;
     at)             shift; cmd_at "$@"; exit $? ;;
     stores)         cmd_stores; exit $? ;;
+    where)          shift; cmd_where "$@"; exit $? ;;
     owner)          shift; cmd_owner "$@"; exit $? ;;
     main)           cmd_main; exit $? ;;
     live)           shift; [[ -z "${1:-}" ]] && { echo "usage: $SELF live <sessionId>" >&2; exit 2; }
