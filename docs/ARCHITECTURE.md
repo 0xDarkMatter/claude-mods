@@ -11,7 +11,7 @@ Claude Code provides a layered extension system that allows customization at mul
 | Component | Purpose | Scope | Loaded When |
 |-----------|---------|-------|-------------|
 | **CLAUDE.md** | Memory & instructions | Global/Project | Always (system prompt) |
-| **AGENTS.md** | Cross-platform agent instructions | Project | Always (user message) |
+| **AGENTS.md** | Cross-platform agent instructions | Project | Only when no CLAUDE.md shadows it, or through an `@AGENTS.md` import |
 | **Rules** | Modular, topic-specific instructions | Project/User | Always or path-conditional |
 | **Skills** | Dynamic capability packages | Project/User | On-demand when relevant |
 | **Agents** | Specialized subagent prompts | Project/User | When spawned via the Agent tool |
@@ -45,9 +45,14 @@ CLAUDE.md content is injected into the system prompt, giving it high authority o
 | Enterprise policy | Highest | Mandatory - cannot be overridden |
 | User global (`~/.claude/CLAUDE.md`) | High | Should follow unless project overrides |
 | Project (`.claude/CLAUDE.md`) | High | Primary project instructions |
-| Project local (`CLAUDE.local.md`) | Highest (project) | Personal overrides, highest project priority |
+| Project local (`CLAUDE.local.md`) | High | Personal, uncommitted additions |
 
-Claude reads memories **recursively** from cwd up to root, merging all found files. Later files (closer to project root) can override earlier ones.
+Claude reads memories **recursively** from cwd up to root and concatenates them: root to
+working directory, `CLAUDE.local.md` after `CLAUDE.md` at each level. The docs give the
+load order but no precedence rule, and say Claude "may pick one arbitrarily" when two
+instructions conflict, so remove a contradiction rather than rely on order. Any
+`CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` here or above also stops Claude Code
+reading AGENTS.md (section 2).
 
 ### Example
 
@@ -78,59 +83,41 @@ See @docs/architecture.md for system overview.
 
 ### Overview
 
-AGENTS.md is a cross-platform standard for agent instructions, supported by Claude Code, Cursor, Codex, and other AI coding tools. While Claude Code uses CLAUDE.md natively, AGENTS.md provides compatibility when collaborating with developers using different tools.
+AGENTS.md is the cross-tool standard for agent instructions ([agents.md](https://agents.md)),
+read by Claude Code, Cursor, Codex and others. In this repo's doctrine it is the single
+source of truth for a repo's entry doc (`rules/agentic-quality.md`), and CLAUDE.md holds
+only Claude-specific deltas.
 
-### Benefits
+### Loading: fallback, not override
 
-- **Cross-platform**: Works with Claude Code, Cursor, Codex, Amp, and others
-- **Team collaboration**: Developers with different AI tools can share context
-- **Standardized format**: Community-driven specification at [agents.md](https://agents.md)
-- **Fallback**: Claude Code reads AGENTS.md if CLAUDE.md is absent
+Claude Code (v2.1.277+) reads AGENTS.md **only as a fallback**: when no `CLAUDE.md`,
+`.claude/CLAUDE.md` or `CLAUDE.local.md` sits in the working directory or above it. A
+CLAUDE.md doesn't outrank AGENTS.md; it stops AGENTS.md loading at all, and a CLAUDE.md
+that mentions AGENTS.md in prose loads nothing. A repo has two portable shapes:
 
-### Authority
+| Shape | Use when |
+|-------|----------|
+| AGENTS.md and no CLAUDE.md | The default: nothing Claude-specific to say |
+| A CLAUDE.md whose first line is `@AGENTS.md`, deltas below | Claude-only behaviour (a hook, plan mode for a path), or sessions too old to read AGENTS.md |
 
-**Level: MEDIUM-HIGH (User Message)**
+The user-level **Project instructions** setting can load both, but Claude Code ignores
+it in project and local settings, so a repo can't rely on it.
 
-AGENTS.md is loaded as a user message (not system prompt), giving it slightly lower authority than CLAUDE.md but still high priority in context. Claude treats it as important project context that should guide behavior.
+### Size
 
-| Comparison | CLAUDE.md | AGENTS.md |
-|------------|-----------|-----------|
-| Injection point | System prompt | User message |
-| Authority | Higher | Slightly lower |
-| Cross-platform | Claude Code only | Universal |
-| Override behavior | Can override AGENTS.md | Cannot override CLAUDE.md |
-
-### Example
-
-```markdown
-# Agent Instructions
-
-## Project Overview
-This is a Next.js 14 application with App Router.
-
-## Key Directories
-- `src/app/` - Route handlers and pages
-- `src/components/` - React components
-- `src/lib/` - Utility functions
-
-## Conventions
-- Use server components by default
-- Client components must be marked with 'use client'
-- All database queries go through Prisma
-```
-
-### When to Use
-
-| Scenario | Use |
-|----------|-----|
-| Claude Code only team | CLAUDE.md |
-| Mixed AI tools team | AGENTS.md (or both) |
-| Open source project | AGENTS.md for broader compatibility |
+Target 150 lines, ceiling 200 (Claude Code's documented target for instruction files).
+`@` imports load at launch, so they don't shrink anything: split into a nested AGENTS.md,
+path-scoped `.claude/rules/`, or linked `docs/`.
 
 ### References
 
-- [AGENTS.md Specification](https://agents.md) - Official standard
-- [GitHub Issue #6235](https://github.com/anthropics/claude-code/issues/6235) - Claude Code support discussion
+- `skills/repo-doctor/references/agents-md-protocol.md` - the protocol: contents,
+  exclusions, size and split, shadowing landmines, staleness. Its tools scaffold, audit
+  and survey AGENTS.md files
+- `skills/repo-doctor/assets/AGENTS-template.md` - hand-fill skeleton with the mandatory
+  Landmines section
+- [How Claude remembers your project](https://code.claude.com/docs/en/memory) - official
+  docs, sections "AGENTS.md" and "Choose which instruction files load"
 
 ---
 
@@ -699,9 +686,9 @@ Understanding how components interact and their authority levels:
 │  ├───────────────────────────────────────────────────────────┤  │
 │  │  Project .claude/rules/*.md                               │  │
 │  ├───────────────────────────────────────────────────────────┤  │
-│  │  Project AGENTS.md                                        │  │
+│  │  Project AGENTS.md (read only if no CLAUDE.md here)       │  │
 │  ├───────────────────────────────────────────────────────────┤  │
-│  │  CLAUDE.local.md (highest project-level priority)         │  │
+│  │  CLAUDE.local.md (personal; also shadows AGENTS.md)       │  │
 │  ├───────────────────────────────────────────────────────────┤  │
 │  │  Skills (full content when loaded)                        │  │
 │  ├───────────────────────────────────────────────────────────┤  │
@@ -736,8 +723,8 @@ Understanding when to use Skills versus Agents is one of the most important arch
 
 | Need | Use | Authority | Why |
 |------|-----|-----------|-----|
-| Project-wide instructions | CLAUDE.md | High | Always loaded, system prompt |
-| Cross-platform compatibility | AGENTS.md | Medium-High | Works with Cursor, Codex, etc. |
+| Project-wide instructions | AGENTS.md | High | One entry doc for every tool; loads unless a CLAUDE.md shadows it |
+| Claude-only deltas | CLAUDE.md starting `@AGENTS.md` | High | A hook or plan mode for a path; without the import it hides AGENTS.md |
 | Topic-specific rules | `.claude/rules/` | High | Modular, can be path-conditional |
 | Domain expertise | Skills | High | Progressive loading, auto-routing |
 | Parallel task execution | Agents | Low | Separate context, can use cheaper models |

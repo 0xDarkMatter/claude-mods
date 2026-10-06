@@ -59,4 +59,38 @@ part a human can't easily produce by hand.
 
 ## Status
 
-Built on `lane/agents-md`. Landing, push and install are the coordinator's call.
+**Shipped.** Landed on `main` as `42d6862` (from `lane/agents-md`) and pushed with
+`24ac6d1` on 2026-10-06. Every row of "What ships" exists: `entry-docs.md` is gone and
+nothing links to it, `--offline` runs in `tests/check-resources.sh` (so in `just check`
+and PR CI), and `--live` runs in `freshness.yml`. What comes next is in
+[docs/PLAN.md](../PLAN.md) (Phase 5).
+
+## Gaps found by dogfooding, and fixed (2026-10-06)
+
+Running `repo-scan.py`, `agents-md.py audit --diff` and `scaffold` on this repo found
+five gaps. Its own AGENTS.md audited clean (3 infos, empty patch) at 199 lines, which hid
+the first. All five are fixed on `lane/agents-md-followup`, each with a test seen failing
+first.
+
+1. **The budget counted lines, not size.** 199 lines held 16,744 characters, one
+   line 2,313. Now: a 16,000-character ceiling and 12,000 target (200 and 150 lines at
+   80 characters) in the audit, the scorer and the survey (`over-size`), a long-line
+   finding, and `check-memory-docs.py` gating that the scripts and protocol agree.
+2. **The split plan moved the largest sections first**, so at 201 lines it moved the
+   Structure map and kept Installation. Now setup prose moves first at any size, then
+   the rest largest first, then Structure and Conventions. "Quick reference" no longer
+   counts as a Commands heading.
+3. **Landmine candidates carried noise** (about a third of 14). Now only tracked files
+   raise them; fixture folders, a file changing with its own tests, and a second
+   question about one file are left out; each candidate names its `paths`, and the
+   audit lists the ones the doc never mentions.
+4. **The scaffold assumed one of four archetypes.** Now a `generic` archetype covers
+   repos without a web manifest (static-site needs a real marker such as `mkdocs.yml`),
+   the Structure table always keeps areas holding 5% of the files, the title comes from
+   the origin remote or the main checkout, and `just default` is skipped.
+5. **The tests scan found frameworks by config file only.** Shell suites (with their
+   runner), Bats, `go test` and `cargo test` are now found by convention.
+
+Applying the fixed audit took this repo's AGENTS.md from 199 lines / 16,744 characters
+to 172 / 13,293 with Landmines untouched. The rest of the way to 150 is in Landmines, which only
+an owner trims.

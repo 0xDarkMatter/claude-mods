@@ -3,7 +3,7 @@
 **Goal**: A centralized repository of custom Claude Code commands, agents, and skills that enhance Claude Code's native capabilities with persistent session state, specialized expert agents, and streamlined workflows.
 
 **Created**: 2025-11-27
-**Last Updated**: 2026-08-31
+**Last Updated**: 2026-10-06
 **Status**: Active Development
 
 > Historical record of what shipped lives in [CHANGELOG.md](../CHANGELOG.md) and the
@@ -26,20 +26,8 @@ Counts are enforced by the CI doc-drift gate (see roadmap) — if this table rot
 
 ## Docs Map
 
-One line per canonical doc; update in the same commit as any docs/ change.
-
-| Doc | Why you'd read it |
-|-----|-------------------|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Component model + skill-vs-rule-vs-agent split — read before structural changes |
-| [SKILL-CREATION-PROTOCOL.md](SKILL-CREATION-PROTOCOL.md) | THE sequenced lifecycle for building a skill — start here |
-| [SKILL-SUBAGENT-REFERENCE.md](SKILL-SUBAGENT-REFERENCE.md) | Legal frontmatter fields + subagent decision frameworks |
-| [SKILL-RESOURCE-PROTOCOL.md](SKILL-RESOURCE-PROTOCOL.md) | Contract for skill scripts/assets — streams, exit codes, verifiers |
-| [TERMINAL-DESIGN.md](TERMINAL-DESIGN.md) | Terminal Panel Design System for TTY output |
-| [WORKFLOWS.md](WORKFLOWS.md) | 10 workflow patterns from Anthropic best practices |
-| [RESERVED-COMMANDS.md](RESERVED-COMMANDS.md) | Command names that collide with Claude Code built-ins |
-| [AUTO-MODE-CLASSIFIER.md](AUTO-MODE-CLASSIFIER.md) | The two-gate auto-mode permission model behind loop-engineering |
-
-Subdirs: `archive/` (completed-migration records, retired) · `references/` (vendored guides) · `plans/` (dated build specs for named execution waves, e.g. QUALITY-2026-07.md).
+The one docs index is [00_INDEX.md](00_INDEX.md). This file kept a second copy until
+2026-10, and it drifted; don't add one back.
 
 ---
 
@@ -110,6 +98,25 @@ Theme: subtraction and enforcement, not addition.
 - [ ] Deferred follow-ons — skill-telemetry, marketplace submission,
       claude-mods-local formalization, push-cadence advisory (wave's Phase 4,
       not this repo's Phase 4 heading)
+
+### Phase 5 — AGENTS.md toolchain (2026-10)
+
+Build spec, dogfood findings and the survey behind it:
+[docs/plans/AGENTS-MD-2026-10.md](plans/AGENTS-MD-2026-10.md).
+
+- [x] repo-doctor creates, audits, upgrades and org-surveys AGENTS.md (`repo-scan.py`,
+      `agents-md.py`, archetype templates, memory-docs tripwire); landed `42d6862`
+- [x] Fix the five gaps dogfooding found (size budget, split order, candidate noise,
+      generic archetype, convention-found tests); see the plan
+- [x] Dogfood: this repo's AGENTS.md from 199 lines / 16,744 chars to 172 / 13,293
+      (Installation to README, generic tips dropped, the 2,313-char line split)
+- [ ] Owner pass on this repo's AGENTS.md: answer or rule out the 10 scan candidates the
+      audit lists, and trim Landmines toward the 150-line target
+- [ ] Team rollout: a pilot needs the team lead's OK, then repo owners run scan,
+      scaffold and audit in their own checkouts. In a repo that deploys on merge, the
+      AGENTS.md merge is a deploy and stays the owner's (`rules/deploy-gating.md`)
+- [ ] Team-plugin port: the protocol, `repo-scan.py`, `agents-md.py` and the archetype
+      templates as one folder. The team plugin owns its copy and lands its own fixes
 
 ---
 

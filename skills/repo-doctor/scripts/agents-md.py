@@ -79,8 +79,16 @@ SCHEMA_AUDIT = "claude-mods.repo-doctor.agents-md-audit/v1"
 SCHEMA_SURVEY = "claude-mods.repo-doctor.agents-md-survey/v1"
 TARGET_LINES = 150      # house target (rules/agentic-quality.md)
 CEILING_LINES = 200     # Claude Code memory docs: "target under 200 lines per CLAUDE.md file"
+# The line budget assumes wrapped prose. A file that reaches the same context cost in
+# fewer, longer lines is over the same budget, so size is checked too: 80 characters a
+# line. repo-doctor.py's ENTRY_LEAN_CHARS must match (check-memory-docs.py gates it).
+CHARS_PER_LINE = 80
+TARGET_CHARS = TARGET_LINES * CHARS_PER_LINE     # 12,000
+CEILING_CHARS = 16000                            # CEILING_LINES * CHARS_PER_LINE
+LONG_LINE_CHARS = 500   # one such line costs what six or more wrapped lines do
 FRESH_COMMITS = 15      # same threshold as repo-doctor.py's entry_docs dimension
 MIN_MOVE_LINES = 10     # sections shorter than this are not worth a split move
+POINTER_CHARS = 120     # what a moved section leaves behind: heading, blank, link line, blank
 EX_OK, EX_ERR, EX_USAGE, EX_NOTFOUND, EX_PRECOND, EX_UNAVAIL, EX_FINDINGS = 0, 1, 2, 3, 5, 7, 10
 
 # Section grammar: the first rule whose pattern matches a ## or ### heading names it.
@@ -89,8 +97,10 @@ SECTION_RULES = (
     ("landmines", r"landmine|gotcha|pitfall|footgun|hazard|trap|caveat|warning|known issue|"
                   r"sharp edge|watch out|beware|danger|don'?t"),
     ("deploy", r"deploy|release|shipping|hosting|ci ?/ ?cd|pipeline|production|infrastructure"),
+    # Not "quick reference": that heading holds tips as often as commands, and Commands
+    # sections never move in a split, so a wrong match pins prose in place.
     ("commands", r"command|script|build|test|running|\brun\b|develop|workflow|task|"
-                 r"quick ?(start|reference)|usage|\bcheck|cli\b|make|just"),
+                 r"quick ?start|usage|\bcheck|cli\b|make|just"),
     ("structure", r"structure|layout|director|folder|architecture|\bmap\b|key (files|paths)|"
                   r"codebase|where|ownership|organi[sz]ation|modules|packages"),
     ("conventions", r"convention|style|standard|guideline|rules?\b|naming|pattern|coding|practice"),
@@ -216,7 +226,12 @@ def analyze_doc(text: str) -> dict:
         for line in lines[i + 1: end]:
             if re.match(r"^\s*(\d+[.)]|[-*+])\s+\S", line) and TODO_OWNER not in line:
                 items += 1
-    return {"lines": len(lines), "sections": cover, "landmine_items": items,
+    widths = [len(l) for l in lines]
+    longest = max(range(len(widths)), key=lambda i: widths[i]) if widths else 0
+    return {"lines": len(lines), "chars": sum(widths) + len(widths),   # LF-equivalent size
+            "long_lines": sum(w > LONG_LINE_CHARS for w in widths),
+            "longest_line": {"line": longest + 1, "chars": widths[longest] if widths else 0},
+            "sections": cover, "landmine_items": items,
             "owner_todos": text.count(TODO_OWNER), "untested": text.count(UNTESTED),
             "draft_header": DRAFT_MARK in text,
             "setup_headings": [t for _, lvl, t in headings(lines)
@@ -379,9 +394,22 @@ def command_entries(f: dict) -> list[tuple[str, str, str, str]]:
             if ddev and exe.startswith("vendor/"):
                 exe = "ddev exec " + exe
             out.append(("Tests", exe, cfg, f"{fw} config"))
+    for t in tests:
+        # Suites found by convention (repo-scan _convention_tests): offer the runner only
+        # at the top of a tests/ folder, where it plausibly runs everything.
+        fw, cfg = t["framework"], t["config"]
+        if fw == "Shell scripts" and t.get("runners") and re.match(r"^(tests?|spec)/[^/]+\.sh$", cfg) \
+                and cfg.lower() not in declared:
+            out.append(("Tests", f"bash {cfg}", cfg, "shell test runner"))
+        elif fw == "go test" and "go test" not in declared:
+            out.append(("Tests", "go test ./...", cfg, "Go tests"))
+        elif fw == "cargo test" and "cargo test" not in declared:
+            out.append(("Tests", "cargo test", cfg, "Rust tests"))
     for name, key, prog in (("makefile", "targets", "make"), ("justfile", "recipes", "just")):
         block = m.get(name) or {}
-        for t in [t for t in block.get(key, []) if not t.get("alias_of")][:8]:
+        # A just recipe named "default" lists the others by convention; `just` alone runs it.
+        for t in [t for t in block.get(key, []) if not t.get("alias_of")
+                  and not (prog == "just" and t["name"] == "default")][:8]:
             out.append(("Tasks", f"{prog} {t['name']}", t["source"], f"{prog} target"))
     seen = {c[1] for c in out}
     ci_runs = []
@@ -526,8 +554,16 @@ def render_structure(f: dict) -> str:
     dd = f.get("ddev") or {}
     rank = {"source": 0, "generated": 1, "tests": 2, "config": 3, "tooling": 4, "ci": 5,
             "docs": 6, "assets": 7}
+
+    def order(a: dict) -> tuple:
+        return rank.get(a["kind"], 9), -a["files"], a["path"]
+    # Areas holding 5% or more of the files always get a row, whatever their kind: a
+    # kind-first cut once dropped a 1,367-file folder and kept a one-file one.
+    total = sum(a["files"] for a in areas) or 1
+    major = [a for a in areas if a["files"] * 20 >= total]
+    rest = sorted((a for a in areas if a not in major), key=order)
     rows = ["| Path | What lives there |", "|---|---|"]
-    for a in sorted(areas, key=lambda a: (rank.get(a["kind"], 9), -a["files"], a["path"]))[:12]:
+    for a in sorted((major + rest)[:max(12, len(major))], key=order):
         p, n, kind = a["path"], a["files"], a["kind"]
         exts = " ".join(a["top_extensions"])
         if kind == "generated" or p in gen:
@@ -633,7 +669,9 @@ def choose_archetype(f: dict) -> str:
         if tools & {"Eleventy", "Gatsby"} and not tools & server:
             return "static-site"
         return "node-app"
-    return "static-site"
+    # Without a web manifest, only a real static-site marker (repo-scan STATIC_SITE_FILES)
+    # earns static-site; tooling, script and infra repos get the generic archetype.
+    return "static-site" if m.get("static_site") else "generic"
 
 
 def render_draft(f: dict, archetype: str) -> str:
@@ -900,17 +938,35 @@ def gh_anchor(title: str) -> str:
 
 
 def split_plan(lines: list[str], repo: Path) -> list[dict]:
-    """Moves for the largest movable ## sections until the doc is back under target."""
-    total = len(lines)
-    if total <= CEILING_LINES:
+    """Moves until the doc is back under target in lines AND characters. Order: human
+    setup prose first (it doesn't belong in AGENTS.md at any size), then the other
+    movable sections largest first, then Structure and Conventions (both required and
+    short, so they go last). The overview, Commands, Landmines and Deploy never move."""
+    total, chars = len(lines), sum(len(l) + 1 for l in lines)
+    if total <= CEILING_LINES and chars <= CEILING_CHARS:
         return []
+
+    def size(s: dict) -> tuple[int, int]:
+        return s["end"] - s["start"], sum(len(l) + 1 for l in lines[s["start"]: s["end"]])
+
+    def weight(s: dict) -> int:   # in wrapped 80-character lines
+        n, c = size(s)
+        return max(n, -(-c // CHARS_PER_LINE))
+
+    def tier(s: dict) -> int:
+        if SETUP_HEADING.match(s["title"]):
+            return 0
+        return 2 if s["key"] in ("structure", "conventions") else 1
+
     plan = []
     secs = [s for s in h2_sections(lines)
             if s["key"] not in ("commands", "landmines", "deploy", "overview")]
-    for s in sorted(secs, key=lambda s: (-(s["end"] - s["start"]), s["start"])):
-        size = s["end"] - s["start"]
-        if total <= TARGET_LINES or size < MIN_MOVE_LINES:
+    for s in sorted(secs, key=lambda s: (tier(s), -weight(s), s["start"])):
+        if total <= TARGET_LINES and chars <= TARGET_CHARS:
             break
+        if tier(s) and weight(s) < MIN_MOVE_LINES:
+            continue
+        n, c = size(s)
         body = "\n".join(lines[s["start"] + 1: s["end"]])
         if SETUP_HEADING.match(s["title"]):
             dest, kind, why = "README.md", "readme", "human setup prose belongs in README"
@@ -924,9 +980,10 @@ def split_plan(lines: list[str], repo: Path) -> list[dict]:
                         and not any((repo / top / c).exists() for c in CLAUDE_FILES):
                     dest, kind = f"{top}/AGENTS.md", "nested"
                     why = f"{cnt} of {len(refs)} path references are under {top}/"
-        plan.append({"section": s["title"], "start": s["start"], "end": s["end"], "lines": size,
-                     "destination": dest, "kind": kind, "why": why})
-        total -= size - 3
+        plan.append({"section": s["title"], "start": s["start"], "end": s["end"], "lines": n,
+                     "chars": c, "destination": dest, "kind": kind, "why": why})
+        total -= n - 3
+        chars -= max(0, c - POINTER_CHARS)
     plan.sort(key=lambda p: p["start"])
     return plan
 
@@ -977,6 +1034,16 @@ def build_patch(files: dict[str, tuple[str | None, str]]) -> str:
     return "".join(out)
 
 
+def uncovered_candidates(text: str, cands: list[dict]) -> list[dict]:
+    """Candidates whose files the doc never names. A path counts when it appears whole:
+    `x.js` is not covered by `src/x.js` or `x.json`; a folder is covered by any file in it."""
+    def named(path: str) -> bool:
+        p = re.escape(path.rstrip("/"))
+        return re.search(r"(?<![\w./-])" + p + r"(?![\w-])", text) is not None
+    return [{"kind": c["kind"], "question": c["question"], "paths": c["paths"]}
+            for c in cands if c.get("paths") and not any(named(p) for p in c["paths"])]
+
+
 def cmd_audit(args) -> int:
     repo = Path(args.repo).resolve()
     if not repo.is_dir():
@@ -1002,16 +1069,25 @@ def cmd_audit(args) -> int:
         eol = "\r\n" if "\r\n" in text else "\n"
         lines = text.splitlines()
         an = analyze_doc(text)
-        data.update({"lines": an["lines"], "sections": an["sections"],
-                     "coverage": coverage_letters(an["sections"])})
-        if an["lines"] > CEILING_LINES:
+        data.update({"lines": an["lines"], "chars": an["chars"], "est_tokens": round(an["chars"] / 3.6),
+                     "sections": an["sections"], "coverage": coverage_letters(an["sections"])})
+        if an["lines"] > CEILING_LINES or an["chars"] > CEILING_CHARS:
+            over = (f"{an['lines']} lines, over the {CEILING_LINES}-line ceiling" if an["lines"] > CEILING_LINES
+                    else f"{an['chars']:,} characters in {an['lines']} lines, over the {CEILING_CHARS:,}-character "
+                         f"ceiling ({CEILING_LINES} lines at {CHARS_PER_LINE} characters)")
             finds.append({"id": "over-ceiling", "severity": "warn", "path": rel,
-                          "msg": f"{an['lines']} lines, over the {CEILING_LINES}-line ceiling (Claude Code: "
-                                 "longer files consume more context and reduce adherence). See the split plan"})
-        elif an["lines"] > TARGET_LINES:
+                          "msg": f"{over}. Claude Code: longer files consume more context and reduce "
+                                 "adherence. See the split plan"})
+        elif an["lines"] > TARGET_LINES or an["chars"] > TARGET_CHARS:
             finds.append({"id": "over-target", "severity": "info", "path": rel,
-                          "msg": f"{an['lines']} lines: under the {CEILING_LINES} ceiling, over the "
-                                 f"{TARGET_LINES}-line target"})
+                          "msg": f"{an['lines']} lines and {an['chars']:,} characters: under the ceiling, over "
+                                 f"the {TARGET_LINES}-line / {TARGET_CHARS:,}-character target"})
+        if an["long_lines"]:
+            ll = an["longest_line"]
+            finds.append({"id": "long-lines", "severity": "info", "path": f"{rel}:{ll['line']}",
+                          "msg": f"{an['long_lines']} line(s) over {LONG_LINE_CHARS} characters (longest: "
+                                 f"line {ll['line']}, {ll['chars']:,} characters). Each costs what several "
+                                 "wrapped lines do: wrap it, or move the detail to a linked doc"})
         deploys = bool((f.get("deploy") or {}).get("appspec") or (f.get("deploy") or {}).get("ci_deploy_steps")
                        or (f.get("deploy") or {}).get("surfaces"))
         for key in SECTION_ORDER:
@@ -1058,11 +1134,14 @@ def cmd_audit(args) -> int:
         plan = split_plan(new, repo)
         data["split_plan"] = [{k: v for k, v in p.items() if k not in ("start", "end")} for p in plan]
         left = an["lines"] - sum(p["lines"] - 3 for p in plan)   # each move leaves 3 lines
-        if an["lines"] > CEILING_LINES and left > TARGET_LINES:
+        left_chars = an["chars"] - sum(max(0, p["chars"] - POINTER_CHARS) for p in plan)
+        if (an["lines"] > CEILING_LINES or an["chars"] > CEILING_CHARS) \
+                and (left > TARGET_LINES or left_chars > TARGET_CHARS):
             finds.append({"id": "split-insufficient", "severity": "info", "path": rel,
-                          "msg": f"about {left} lines remain after moving every movable section: the "
-                                 "bulk is in Commands or Landmines, which the patch never moves. Trim "
-                                 "them by hand, or move a subsystem's landmines into its nested AGENTS.md"})
+                          "msg": f"about {left} lines and {left_chars:,} characters remain after moving every "
+                                 "movable section: the bulk is in the overview, Commands or Landmines, which "
+                                 "the patch never moves. Trim them by hand (long lines first), or move a "
+                                 "subsystem's landmines into its nested AGENTS.md"})
         # Pass 1, document order: append each moved body to its destination file.
         # Pass 2, bottom-up: replace each moved section's body in AGENTS.md with a link,
         # so earlier line ranges stay valid. The heading line always stays behind.
@@ -1104,6 +1183,15 @@ def cmd_audit(args) -> int:
         finds += c_finds
         for name, (old, newc) in c_edits.items():
             files[name] = (old, newc)
+        uncovered = uncovered_candidates(text, f.get("candidates") or [])
+        data["uncovered_candidates"] = uncovered
+        if uncovered:
+            shown = ", ".join(f"`{c['paths'][0]}`" for c in uncovered[:5])
+            more = f" and {len(uncovered) - 5} more" if len(uncovered) > 5 else ""
+            finds.append({"id": "uncovered-candidates", "severity": "info", "path": rel,
+                          "msg": f"{len(uncovered)} landmine candidate(s) from the repo scan name files "
+                                 f"{rel} never mentions: {shown}{more}. Answer each as a landmine or "
+                                 "rule it out (--json lists the questions)"})
     sev_rank = {"crit": 0, "warn": 1, "info": 2}
     finds.sort(key=lambda x: (sev_rank[x["severity"]], x["id"], x["path"]))
     data["findings"] = finds
@@ -1183,7 +1271,7 @@ def blob_text(base: list[str], full: str, sha: str) -> str | None:
 
 def survey_repo(base: list[str], full: str, branch: str | None) -> dict:
     row: dict = {"repo": full, "default_branch": branch, "agents_md": False, "claude_md": [],
-                 "shadowed": False, "lines": None, "commits_since": None, "coverage": None,
+                 "shadowed": False, "lines": None, "chars": None, "commits_since": None, "coverage": None,
                  "sections": None, "nested_agents_md": 0, "issues": [], "status": "ok"}
     if not branch:
         row.update(status="empty", issues=[])
@@ -1213,9 +1301,12 @@ def survey_repo(base: list[str], full: str, branch: str | None) -> dict:
             issues.append("unreadable")
         else:
             an = analyze_doc(text)
-            row.update(lines=an["lines"], sections=an["sections"], coverage=coverage_letters(an["sections"]))
+            row.update(lines=an["lines"], chars=an["chars"], sections=an["sections"],
+                       coverage=coverage_letters(an["sections"]))
             if an["lines"] > CEILING_LINES:
                 issues.append("over-200")
+            elif an["chars"] > CEILING_CHARS:
+                issues.append("over-size")   # under 200 lines, but long lines make it as costly
             if not (an["sections"]["commands"] and an["sections"]["landmines"]):
                 issues.append("incomplete")
             if an["owner_todos"] or an["draft_header"]:
@@ -1292,6 +1383,7 @@ def cmd_survey(args) -> int:
             "neither": sum(1 for r in rows if "missing" in r["issues"]),
             "shadowed": sum(1 for r in rows if r["shadowed"]),
             "over_200_lines": sum(1 for r in rows if "over-200" in r["issues"]),
+            "over_size": sum(1 for r in rows if "over-size" in r["issues"]),
             "stale": sum(1 for r in rows if "stale" in r["issues"]),
             "incomplete": sum(1 for r in rows if "incomplete" in r["issues"]),
             "unreadable": sum(1 for r in rows if r["status"] == "unreadable"),
@@ -1300,17 +1392,19 @@ def cmd_survey(args) -> int:
         emit_json({"data": rows, "meta": meta})
     else:
         width = max([len(r["repo"]) for r in rows] + [4])
-        print(f"{'REPO'.ljust(width)}  AGENTS  CLAUDE  SHADOW  LINES  SINCE  COVER   STATUS")
+        print(f"{'REPO'.ljust(width)}  AGENTS  CLAUDE  SHADOW  LINES     KB  SINCE  COVER   STATUS")
         for r in rows:
             claude = "+".join("L" if c["path"] == "CLAUDE.local.md" else "C" for c in r["claude_md"]) or "-"
+            kb = f"{r['chars'] / 1000:.1f}" if r["chars"] else "-"
             print(f"{r['repo'].ljust(width)}  {'yes' if r['agents_md'] else '-':<6}  {claude:<6}  "
-                  f"{'YES' if r['shadowed'] else '-':<6}  {str(r['lines'] or '-'):>5}  "
+                  f"{'YES' if r['shadowed'] else '-':<6}  {str(r['lines'] or '-'):>5}  {kb:>5}  "
                   f"{str(r['commits_since'] if r['commits_since'] is not None else '-'):>5}  "
                   f"{r['coverage'] or '-':<6}  {r['status']}")
         eecho("coverage letters: O overview, C commands, L landmines, D deploy, S structure, V conventions")
         eecho(f"summary: {meta['repos']} repos, {meta['agents_md_only']} AGENTS.md only, "
               f"{meta['claude_md_only']} CLAUDE.md only, {meta['both']} both, {meta['neither']} neither, "
-              f"{meta['shadowed']} shadowed, {meta['over_200_lines']} over 200 lines, {meta['stale']} stale")
+              f"{meta['shadowed']} shadowed, {meta['over_200_lines']} over 200 lines, "
+              f"{meta['over_size']} over 16 KB in fewer lines, {meta['stale']} stale")
     flagged = any(r["issues"] and r["status"] != "empty" for r in rows)
     return EX_FINDINGS if flagged else EX_OK
 
@@ -1335,7 +1429,7 @@ def main() -> int:
     sp.add_argument("--repo", default=".")
     sp.add_argument("--facts", help="saved `repo-scan.py --json` output")
     sp.add_argument("--archetype", default="auto",
-                    choices=["auto", "php-cms", "node-app", "python-service", "static-site"])
+                    choices=["auto", "php-cms", "node-app", "python-service", "static-site", "generic"])
     sp.add_argument("--write", action="store_true", help="create <repo>/AGENTS.md (never overwrites)")
     sp.add_argument("--json", action="store_true")
     ap_a = sub.add_parser("audit", help="audit an AGENTS.md; --diff proposes an upgrade patch")

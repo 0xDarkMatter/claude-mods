@@ -2,27 +2,18 @@
 
 ## Project Overview
 
-This is **claude-mods** - a collection of custom extensions for Claude Code:
+This is **claude-mods** - a collection of custom extensions for Claude Code. Human install
+and usage live in [README.md](README.md); this file is for agents working on the repo.
 - **3 expert agents** for pure context-isolation/worker roles (git-agent, firecrawl-expert, project-organizer) - every domain-knowledge agent became an `-ops` skill (v3.0, skills-first)
 - **3 commands** for session management and git orchestration (/sync, /save, /git-ops)
-- **112 skills** for CLI tools, patterns, workflows, and development tasks (incl. `package-manager-ops` for day-to-day npm/Yarn/pnpm/Bun/Composer use - one lockfile, frozen installs, Node and PHP pins that agree with DDEV, pinned npx, legacy exits - with the read-only `pm-audit` repo scanner; `ddev-ops` for DDEV local environments - version pinning, sanitised pulls, Mutagen/WSL2, add-ons - with an auditor for the `.ddev/` mistakes that break teams; `frontend-upgrade-ops` for moving server-rendered Craft/Twig sites off Laravel Mix/Webpack onto Vite and off Vue 2 — or replacing small widgets with Alpine; `figma-ops` as the router for the Figma MCP skill family plus the capture→curate→compose workflows (moodboards, reference boards, loose-plus arrangements) none of the official or community Figma skills cover — read it first when a Figma request is ambiguous; `a11y-ops` for WCAG 2.2 conformance and the EAA/ADA deadlines that now make it a legal requirement; `evals-ops` for the eval-harness discipline every other agent-engineering change depends on; `nextjs-ops` for App Router caching, the server/client boundary and Server Actions; `icon-ops` for sourcing/normalising icons and brand marks without flattening a trademark; `rembg-ops` for transparent-PNG cutouts of flat illustration/sticker/avatar art with a deterministic fallback ladder past rembg's ML failure modes; `parallel-ops` as the router for the parallel/recurring-agent-work family — fleet-ops, fleet-worker, fleetflow (extracted to [its own repo](https://github.com/0xDarkMatter/fleetflow), mounted as a skill via junction), loop-ops, iterate, spawn — read it first when that family is ambiguous; `repo-doctor` for agentic-quality repo audits; `svg-brand-tint-ops` for zero-dep in-browser SVG brand-recolour + Potrace-stage raster vectorising; `r-ops` for tidyverse-first modern R / data analysis; `loop-ops` for outer-loop design discipline; `ffmpeg-ops` for probe-first media processing and EDL-driven editing; `supply-chain-defense` for behavioural-first dependency security; `prompt-injection-defense` for instruction-integrity scanning; `pypi-ops` for OIDC Trusted Publishing to PyPI; `net-ops` for network troubleshooting; `windows-ops` / `mac-ops` for workstation diagnostics; `fleet-worker` for cheap parallel worker delegation)
+- **112 skills** for CLI tools, patterns, workflows and development tasks. Two routers come
+  first when a family is ambiguous: `parallel-ops` (fleet-ops, fleet-worker, fleetflow,
+  loop-ops, iterate, spawn) and `figma-ops` (the Figma MCP skills). README.md lists them all
 - **13 output styles** for response personality (Vesper, Spartan, Mentor, Executive, Pair, Atlas, Coach, Harbour, Meridian, Noir, Roast, Sage, Scout)
-- **13 hooks** for pre-commit linting, post-edit formatting, dangerous command warnings, uv enforcement, dependency-install + manifest-edit supply-chain advisories, hidden-Unicode scanning (session-start + pre-commit), live config-change + worktree guards, mid-session peer-writer guard + touched-files ledger, and pmail notifications - security set auto-wired via plugin hooks.json
+- **13 hooks**: linting, formatting, dangerous-command warnings, uv enforcement,
+  supply-chain advisories, hidden-Unicode scans, config and worktree guards, a peer-writer
+  guard and touched-files ledger, pmail notifications. Plugin hooks.json wires the security set
 - **Pigeon** inter-session messaging (`pigeon send/read/reply`) - SQLite-backed pmail at `~/.claude/pmail.db`
-
-## Installation
-
-```bash
-# Step 1: Add the marketplace
-/plugin marketplace add 0xDarkMatter/claude-mods
-
-# Step 2: Install the plugin (globally)
-/plugin install claude-mods@0xDarkMatter-claude-mods
-
-# Or clone and run install script
-git clone https://github.com/0xDarkMatter/claude-mods.git
-cd claude-mods && ./scripts/install.sh  # or .\scripts\install.ps1 on Windows
-```
 
 ## Key Directories
 
@@ -58,52 +49,34 @@ On "INIT:" message at session start:
 | `hooks/README.md` | Pre/post execution hook examples |
 | `skills/pigeon/` | Inter-session pmail - send, read, reply, broadcast, search across projects |
 | `skills/auto-skill/` | Auto-detect skill-worthy workflows; Stop hook suggests after complex sessions. `/auto-skill on/off/status` to toggle |
-| `skills/supply-chain-defense/` | Behavioural-first dependency security - Socket.dev depscore MCP, exposure-check (IOC match across npm/pnpm/yarn/bun/PyPI/Composer/Cargo/Go/RubyGems + extensions), integrity-audit (persistence), scan-extensions, install/manifest hooks. Paired with `rules/supply-chain.md` |
-| `skills/repo-doctor/` | Agentic-quality auditor - scores any repo (entry docs, comments, structure, gates, doc-pairing) with --json + --strict CI gate - and the AGENTS.md toolchain: `repo-scan.py` (sourced facts + git-history landmine questions), `agents-md.py` scaffold / `audit --diff` / read-only `survey --org`, `references/agents-md-protocol.md`. Paired with `rules/agentic-quality.md` |
+| `skills/supply-chain-defense/` | Behavioural-first dependency security: Socket.dev depscore MCP, IOC exposure checks (npm and its kin, PyPI, Composer, Cargo, Go, RubyGems, editor extensions), persistence audit. Paired with `rules/supply-chain.md` |
+| `skills/repo-doctor/` | Agentic-quality scorer (`--json`, `--strict` CI gate) and the AGENTS.md toolchain: `repo-scan.py`, `agents-md.py` scaffold / `audit --diff` / `survey --org`. Paired with `rules/agentic-quality.md` |
 | `skills/parallel-ops/` | Router for the parallel/recurring-agent-work family (fleet-ops, fleet-worker, fleetflow — own repo — loop-ops, iterate, spawn) - read first when it's unclear which one owns a fan-out/schedule/delegation ask, or the cleanup after a wave (`fleet sweep`) |
 | [`fleetflow`](https://github.com/0xDarkMatter/fleetflow) (own repo) | Heterogeneous GLM/Codex/Grok/Pi/Anthropic worker fleets from one session; extracted 2026-08-01, mounted as `/fleetflow` via junction at `~/.claude/skills/fleetflow` |
 | `tests/validate.sh` | Frontmatter + naming gate; enforces the description-budget cap (combined description+when_to_use, hard-fails over budget) |
 | `tests/spec.sh` | Agent Skills spec gate: the spec's own validator (`skills-ref`, pinned, via `uv`) on every skill, allowing Claude Code's documented fields top-level; fixture self-test first. Size is not checked here (that is `tests/skill-size.sh`). Policy: `docs/SKILL-SUBAGENT-REFERENCE.md` |
 | `tests/doc-drift.sh` | Counts-on-disk vs docs gate; also checks section-map markers and skill-frontmatter ghost references (related-skills/depends-on naming a skill not on disk) |
 | `tests/agnostic.sh` | Public-repo gate: fails on user-profile paths with real names, plus anything in the author's PRIVATE deny list; legit look-alikes go in `tests/agnostic-allow.txt` |
-| `tests/skill-size.sh` | Warns when a SKILL.md body passes ~5,000 estimated tokens (chars / 3.6, frontmatter excluded) - after auto-compaction Claude Code keeps only the first 5,000 tokens of each invoked skill, so procedure and hard rules go first and detail goes in `references/`. `--report` lists every skill, `--strict` fails instead of warning; built-in self-test refuses to pass blind |
-| `tests/reference-contents.sh` | Warns when a `references/*.md` over 100 lines lacks a `## Contents` list in its first 15 lines, or the list misses a `##` heading (the size rule). Its parser is `skills/security-ops/tests/reference-contents.awk`, shared with that skill's hard check, so don't move it. One summary line by default; `--report` lists files, `--strict` fails; fixture self-test first |
+| `tests/skill-size.sh` | Warns when a SKILL.md body passes ~5,000 tokens (chars / 3.6): after compaction only the first 5,000 tokens of a skill survive, so hard rules go first. `--report`, `--strict` |
+| `tests/reference-contents.sh` | Warns when a `references/*.md` over 100 lines lacks a complete `## Contents` list. Its parser is `skills/security-ops/tests/reference-contents.awk`, shared with that skill: don't move it |
 | `tests/hooks.sh` | Hook contract tests: feeds the opt-in hooks the stdin JSON Claude Code sends, asserts exit 2 + stderr to block and no false positives; `HOOKS_DIR=<dir>` runs it against another copy (e.g. to prove it fails on a regression) |
 
-## Quick Reference
+## Repo Tools
 
-**CLI Tools:** Use `rg` over grep, `fd` over find, `eza` over ls, `bat` over cat, `markitdown` for documents
+- **Session state:** `/save` captures tasks, plan and git context (cache schema v3.1:
+  full task objects, session ID for `--resume`, PR linkage for `--from-pr`, a summary in
+  native MEMORY.md); `/sync` restores it.
+- **Pigeon (pmail):** `pigeon send <project> "subject" "body"` | `pigeon read` | `pigeon reply <id> "body"` | `pigeon status` | `pigeon broadcast "subject" "body"`. Attach files with `--attach <path>`. Disable per-project: `touch .claude/pigeon.disable`. DB at `~/.claude/pmail.db`, scripts at `~/.claude/pigeon/`.
 
-**Web Fetching:** WebFetch → Jina (`r.jina.ai/`) → `firecrawl` → firecrawl-expert agent
+## Conventions
 
-**Extended Thinking:** "think" < "think hard" < "think harder" < "ultrathink"
-
-**Tasks API:** Use `TaskCreate`, `TaskList`, `TaskUpdate`, `TaskGet` for task management. Tasks are session-scoped (don't persist). Use `/save` to capture and `/sync` to restore.
-
-**Session Cache:** v3.1 schema stores full task objects, session ID (for `--resume`), PR linkage (for `--from-pr`), and writes a summary to native MEMORY.md. Backwards compatible with v3.0.
-
-**Pigeon (pmail):** `pigeon send <project> "subject" "body"` | `pigeon read` | `pigeon reply <id> "body"` | `pigeon status` | `pigeon broadcast "subject" "body"`. Attach files with `--attach <path>`. Disable per-project: `touch .claude/pigeon.disable`. DB at `~/.claude/pmail.db`, scripts at `~/.claude/pigeon/`.
-
-## Performance
-
-**MCP Tool Search:** When using multiple MCP servers, enable tool search to save context:
-
-```json
-// .claude/settings.local.json
-{
-  "env": {
-    "ENABLE_TOOL_SEARCH": "true"
-  }
-}
-```
-
-| Value | Behavior |
-|-------|----------|
-| `"auto"` | Enable when MCP tools > 10% context (default) |
-| `"true"` | Always enabled (recommended with many MCP servers) |
-| `"false"` | Disabled, all tools loaded upfront |
-
-Requires Sonnet 4+ or Opus 4+.
+- Names, layout and frontmatter: `rules/naming-conventions.md`. Commits: Conventional
+  Commits (`rules/commit-style.md`).
+- A new skill starts at `docs/SKILL-CREATION-PROTOCOL.md`; its scripts follow
+  `docs/SKILL-RESOURCE-PROTOCOL.md` (stdout is data only, semantic exit codes, `--help`
+  with EXAMPLES).
+- Counts in README.md, AGENTS.md and docs/PLAN.md move with the files on disk in the same
+  commit (`tests/doc-drift.sh` fails otherwise).
 
 ## Landmines
 

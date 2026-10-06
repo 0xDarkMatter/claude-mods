@@ -21,8 +21,8 @@ refuses to overwrite one (there is deliberately no `--force`).
 
 ## AGENTS.md: create, audit, upgrade, survey
 
-The protocol (what goes in, what stays out, the 150/200-line budget and how to split,
-CLAUDE.md shadowing, staleness in commits) is
+The protocol (what goes in, what stays out, the 150/200-line and 12,000/16,000-character
+budget and how to split, CLAUDE.md shadowing, staleness in commits) is
 [references/agents-md-protocol.md](references/agents-md-protocol.md). Read it before
 writing or judging an entry doc. The load-bearing fact: **Claude Code reads AGENTS.md
 only when no `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` sits in the working
@@ -50,7 +50,7 @@ Workflow rules:
 
 1. **Scan before drafting.** The scaffold's archetype templates
    ([assets/agents-md/](assets/agents-md/): PHP CMS + DDEV + bundler, Node/TS app,
-   Python service, static site) hold slots, not claims. Everything the scan can't
+   Python service, static site, generic) hold slots, not claims. Everything the scan can't
    verify becomes a `TODO(owner):` question.
 2. **The owner finishes the draft.** Answer or delete every `TODO(owner)`, run each
    command once and drop its `[untested]` tag, delete the DRAFT comment. The audit flags
@@ -60,7 +60,8 @@ Workflow rules:
    `@AGENTS.md` import for a shadowing CLAUDE.md, annotations on dead commands, and moves
    for oversized sections (setup prose to README, subsystem detail to a nested
    AGENTS.md, the rest to `docs/agents/`). It leaves the overview, Commands, Landmines and
-   Deploy where they are.
+   Deploy where they are. The audit also lists scan candidates whose files the doc
+   never names: each is a landmine to write or rule out.
 4. **Pair with Claude Code's own checks.** `/doctor prompt-audit` does the semantic pass
    (outdated or contradictory instructions); this tooling is the deterministic, CI-able
    one (protocol section 7).
@@ -83,7 +84,7 @@ Six dimensions, 0-5 each, weighted into a letter grade:
 
 | Dimension | Measures | Weight |
 |---|---|---|
-| `entry_docs` | AGENTS.md/CLAUDE.md present · Landmines section · 200-line budget · freshness in **commits-since-touched** · a CLAUDE.md that shadows AGENTS.md | 2.0 |
+| `entry_docs` | AGENTS.md/CLAUDE.md present · Landmines section · 200-line / 16,000-character budget · freshness in **commits-since-touched** · a CLAUDE.md that shadows AGENTS.md | 2.0 |
 | `docs_health` | README · docs/ index when >6 files · ghost links in the index | 1.5 |
 | `comments` | contract blocks on the largest source files · section markers in files >400 lines | 2.0 |
 | `structure` | monster files (>800 warn, >1500 crit; generated exempt) · repo-root junk | 2.0 |

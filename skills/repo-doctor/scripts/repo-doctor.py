@@ -12,7 +12,7 @@ Exit:    0 report produced (grade >= B, or --strict not set and repo readable),
          10 --strict and grade below B (CI gate), 2 usage error, 3 not a git repo
 
 Dimensions scored (0-5 each, weighted into the grade):
-  entry_docs   AGENTS.md/CLAUDE.md presence, Landmines section, 200-line budget,
+  entry_docs   AGENTS.md/CLAUDE.md presence, Landmines section, 200-line / 16,000-char budget,
                freshness measured in commits-since-touched (never days), and a
                CLAUDE.md that shadows AGENTS.md (no @AGENTS.md import); the deep
                AGENTS.md audit is scripts/agents-md.py
@@ -91,6 +91,9 @@ MONSTER_WARN, MONSTER_CRIT = 800, 1500
 # consume more context and reduce adherence." The house target is 150
 # (references/agents-md-protocol.md section 3); this scorer warns at the ceiling.
 ENTRY_LEAN_LINES = 200
+# Size too: the line budget assumes wrapped prose, so 200 lines at 80 characters. Must
+# equal agents-md.py's CEILING_CHARS (check-memory-docs.py gates both).
+ENTRY_LEAN_CHARS = 16000
 # A CLAUDE.md (or .claude/CLAUDE.md) imports AGENTS.md with an `@path` line. Keep in
 # lockstep with classify_claude() in agents-md.py, which owns the full shadowing audit.
 AGENTS_IMPORT = re.compile(r"(?:^|\s)@(?:\./|\.\./)?AGENTS\.md\b")
@@ -208,13 +211,21 @@ class Audit:
             self.add("entry_docs", "warn",
                      f"{entry.name} has no Landmines/gotchas section — the "
                      "highest-value lines for agents are missing", entry.name)
-        if lines <= ENTRY_LEAN_LINES:
+        chars = len(text.replace("\r\n", "\n"))
+        self.facts["entry_doc_chars"] = chars
+        if lines <= ENTRY_LEAN_LINES and chars <= ENTRY_LEAN_CHARS:
             score += 1
-        else:
+        elif lines > ENTRY_LEAN_LINES:
             self.add("entry_docs", "warn",
                      f"{entry.name} is {lines} lines (budget ~{ENTRY_LEAN_LINES}) — "
                      "agents pay this token cost every session; push walkthroughs "
                      "into docs/ and link them", entry.name)
+        else:
+            self.add("entry_docs", "warn",
+                     f"{entry.name} is {chars:,} characters in {lines} lines (budget "
+                     f"~{ENTRY_LEAN_CHARS:,} characters, {ENTRY_LEAN_LINES} lines at 80) — "
+                     "long lines cost what wrapped ones do; wrap them or push detail "
+                     "into docs/ and link it", entry.name)
         since = commits_since_touch(self.repo, entry.name)
         self.facts["entry_doc_commits_since"] = since
         if since is not None and since <= FRESH_COMMITS:

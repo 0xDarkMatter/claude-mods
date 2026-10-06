@@ -103,6 +103,54 @@ check "landmine candidates cover every planted pattern" \
       "{c['kind'] for c in D['candidates']}>={'tracked-secret','deploy','generated','coupling','config-followup','fragile','ddev-hook','hotspot','outlier'}"
 check "every candidate is phrased as a question" "all(c['question'].rstrip().endswith('?') for c in D['candidates'])"
 
+# ---- candidate noise, test suites, repo name ----------------------------------
+# Each pattern below once raised a landmine question an owner had to delete by hand
+# (dogfood on this repo, 2026-10-06), or hid a fact the draft needed.
+N="$TMP/noise"; init_repo "$N"
+mkdir -p "$N"/{pkg/tests,old,cfg,core,tests/fixtures/app,tests/unit,cmd}
+echo "x = 1" > "$N/pkg/lib.py"; echo "def test(): pass" > "$N/pkg/tests/test_lib.py"
+echo "a" > "$N/old/gone.py"; echo "b" > "$N/old/gone2.py"
+echo "a: 1" > "$N/cfg/a.yml"; echo "b: 1" > "$N/cfg/b.yml"
+echo "e = 0" > "$N/core/engine.py"; echo "K=fixture" > "$N/tests/fixtures/app/.env"
+printf '#!/bin/bash\nfor t in tests/unit/*.sh; do bash "$t"; done\n' > "$N/tests/run.sh"
+echo 'echo ok' > "$N/tests/unit/check_one.sh"; echo '@test "x" { true; }' > "$N/tests/smoke.bats"
+printf 'module example.com/n\n' > "$N/go.mod"; echo "package main" > "$N/cmd/main_test.go"
+commit "$N" "feat: initial"
+for i in 1 2 3 4; do
+    echo "# $i" >> "$N/pkg/lib.py"; echo "# $i" >> "$N/pkg/tests/test_lib.py"; commit "$N" "feat: lib $i"
+    echo "# $i" >> "$N/old/gone.py"; echo "# $i" >> "$N/old/gone2.py"; commit "$N" "feat: old $i"
+    echo "# $i" >> "$N/cfg/a.yml"; echo "# $i" >> "$N/cfg/b.yml"; commit "$N" "feat: cfg $i"
+done
+for i in 1 2 3 4 5 6; do
+    echo "# $i" >> "$N/core/engine.py"
+    if [ "$i" -le 3 ]; then commit "$N" "fix: engine bug $i"; else commit "$N" "feat: engine $i"; fi
+done
+gitq "$N" rm -rq old; gitq "$N" commit -qm "chore: drop old"
+OUT="$("$PY" "$SCAN" --repo "$N" --json --no-tokei 2>/dev/null)"
+check "a deleted file raises no question" \
+      "not any('old/gone' in c['question'] for c in D['candidates'])"
+check "a test fixture's secret-like file is skipped but raises no question" \
+      "'tests/fixtures/app/.env' in [s['path'] for s in D['secrets_skipped']] and not [c for c in D['candidates'] if c['kind']=='tracked-secret']"
+check "code changing with its own test is not a coupling question" \
+      "not any('pkg/lib.py' in c['question'] and 'test_lib.py' in c['question'] for c in D['candidates'])"
+check "  ...while a real coupled pair still is" \
+      "any(c['kind']=='coupling' and 'cfg/a.yml' in c['question'] for c in D['candidates'])"
+check "a file that is fragile and a hot spot gets one question" \
+      "[c['kind'] for c in D['candidates'] if 'core/engine.py' in c['question']]==['fragile'] and any('most-changed' in c['question'] for c in D['candidates'] if c['kind']=='fragile')"
+check "every history candidate names the paths it asks about" \
+      "all(c.get('paths') for c in D['candidates'] if c['kind'] in ('coupling','fragile','hotspot','outlier'))"
+check "shell, Bats and Go suites are found without a config file" \
+      "{'Shell scripts','Bats','go test'} <= {t['framework'] for t in D['tests']}"
+check "  ...and the shell runner is named" \
+      "[t['config'] for t in D['tests'] if t['framework']=='Shell scripts']==['tests/run.sh']"
+gitq "$N" worktree add -q "$TMP/noise-wt" -b wt 2>/dev/null
+OUT="$("$PY" "$SCAN" --repo "$TMP/noise-wt" --only repo --json 2>/dev/null)"
+check "a worktree is named after its main checkout, not its own folder" "D['repo']['name']=='noise'"
+gitq "$N" remote add origin "https://example.com/acme/widget.git"
+OUT="$("$PY" "$SCAN" --repo "$N" --only repo --json 2>/dev/null)"
+check "the origin remote names the repo when there is one" \
+      "D['repo']['name']=='widget' and D['repo']['name_source'].startswith('cmd: git remote')"
+
 # ---- clean control -----------------------------------------------------------
 C="$TMP/clean"; init_repo "$C"; mkdir -p "$C/src"
 echo "# Clean" > "$C/README.md"; echo "print(1)" > "$C/src/app.py"; commit "$C" "feat: one"
