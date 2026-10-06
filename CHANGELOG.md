@@ -245,6 +245,30 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **pm-audit and check-pm-facts, from a cross-model code review** - every claim was first
+  reproduced in a throwaway repo, and each fix is now pinned by a test seen failing first,
+  then killed by a mutant. pm-audit: credentials in a quoted command or package URL
+  (`--registry=https://user:token@host`) are masked at the one place findings are recorded,
+  and a test greps all output of every fake-secret fixture. npx counts a bin a declared
+  package provides (`tsc`, `mix`, `playwright`, `commitlint`) as local, read from the
+  lockfile, `node_modules/` or a small alias table. `--no`/`--no-install` never fire, and
+  every `-p` is checked. A declared package at a dist-tag, or at a range its installed
+  version misses, is reported. CI commands are read as the shell gets them: quoted and
+  folded YAML, backslash continuations (Dockerfile `RUN` too) and Jenkinsfile `sh` strings.
+  An install counts only as the command word (`echo "npm install"` is text). Options before
+  the subcommand, `--prefix`/`--dir`/`--cwd`/`--working-dir`, workspace members sharing the
+  root lockfile and Yarn's `enableImmutableInstalls: false` are honoured. `require.php` is
+  read in Composer's dialect (`>8.2` admits 8.2.1, `!=` excludes one version). A BOM'd
+  manifest parses, UTF-16 scripts are read, and output survives a cp1252 pipe. A manifest
+  or facts file that is JSON but not an object is a finding or exit 4, not a traceback.
+  `auth.json` asks git (tracked means committed), else matches `.gitignore` as git does.
+  `registry.credentials.image` needs a later `docker build` in the same job whose context
+  holds the file; it skips `COPY --from` and matches `.dockerignore` as Docker does. An
+  empty `_authToken=""` is not a token. DDEV's own end-of-life pin is left to `ddev-ops`.
+  check-pm-facts: a php.net 404 is drift, an upstream date-format change is drift instead of
+  a traceback, the catalogue is type-checked (exit 4), dates must strictly increase,
+  `--timeout` must be positive, and stdout is encoding-safe.
+
 - **A land's untested merge read as landed, whether the land was live or dead** -
   `fleet land` merges first and gates second, so for the whole gate (20-45 minutes on
   this repo) `main`'s tip is a `merge: <lane>` commit that a red gate hard-resets. On

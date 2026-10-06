@@ -1,0 +1,3 @@
+npx.unpinned tools/release.sh:2
+npx.unpinned tools/release.sh:3
+npx.unpinned tools/release.sh:5

@@ -16,6 +16,9 @@
 # `id file:line` rows for every id it names, for cases whose point is WHICH line fires
 # (the per-job deploy scope). It is coupled to the fixture's line numbers: after
 # editing a fixture, re-read its `_lines` (rg -n), never re-count by hand.
+# A fake secret in a fixture is spelled FIXTURE-LITERAL-VALUE or FIXTURE-URL-SECRET: the
+# leak check runs every fixture holding one in both output modes and fails if the string
+# appears anywhere. A secret spelled any other way is never looked for.
 #
 # FRONTMATTER CONTRACT - this suite asserts on SKILL.md's own frontmatter shape:
 #   * top-level keys limited to the six Agent Skills spec fields (portable as one unit)
@@ -142,7 +145,7 @@ ec 3 "pm-audit missing facts -> 3" "$PY" "$AUDIT" --facts "$TMP/nope.json" "$HER
 while IFS='|' read -r verdict msg; do
   [[ "$verdict" == PASS ]] && ok "$msg" || no "$msg"
 done < <("$PY" - "$HERE/fixtures" "$AUDIT" "$TMP" "$SKILL/references/diagnostics.md" <<'PY'
-import json, shutil, subprocess, sys
+import json, os, shutil, subprocess, sys
 from pathlib import Path
 fixtures, audit, tmp, diagnostics = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3]), Path(sys.argv[4])
 def row(ok, msg): print(f"{'PASS' if ok else 'FAIL'}|{msg}")
@@ -198,14 +201,25 @@ rowless = sorted(i for i in doc_ids if f"| `{i}` |" not in diag_text)
 row(doc_ids and not rowless, f"every documented finding id has a diagnostics.md row ({len(doc_ids)} ids)"
     + (f" - missing: {rowless}" if rowless else ""))
 
-# A committed token is reported by file:line only - the value must never be echoed.
+# pm-audit never prints a secret. Every fixture that holds a fake one (a committed token,
+# credentials in a registry or tarball URL) runs in both output modes, and the value must
+# appear nowhere in stdout or stderr.
+SECRETS = ("FIXTURE-LITERAL-VALUE", "FIXTURE-URL-SECRET")
+leaky = [c for c in cases if any(s in f.read_text(encoding="utf-8", errors="replace")
+                                 for f in c.rglob("*.fx") for s in SECRETS)]
+row(len(leaky) >= 3, f"{len(leaky)} fixture case(s) carry a fake secret")
+for case in leaky:
+    for mode in (["--json"], []):
+        proc = subprocess.run([sys.executable, audit, *mode, "--as-of", "2026-10-05", str(tmp / "m" / case.name)],
+                              capture_output=True, encoding="utf-8", errors="replace")
+        shown = [s for s in SECRETS if s in proc.stdout + proc.stderr]
+        row(proc.returncode in (0, 10) and not shown,
+            f"{case.name}: no secret printed ({'json' if mode else 'tsv'}, exit {proc.returncode})"
+            + (f" - printed {shown}" if shown else ""))
 dest = tmp / "m" / "registry-token-committed"
-proc = subprocess.run([sys.executable, audit, "--json", "--as-of", "2026-10-05", str(dest)], capture_output=True, text=True)
-row("FIXTURE-LITERAL-VALUE" not in proc.stdout + proc.stderr, "token value never printed (stdout + stderr)")
 proc = subprocess.run([sys.executable, audit, "--as-of", "2026-10-05", str(dest)], capture_output=True, text=True)
 rows = [r for r in proc.stdout.splitlines() if r]
 row(rows and all(len(r.split("\t")) == 5 for r in rows), f"plain output: {len(rows)} TSV row(s), 5 columns each")
-row("FIXTURE-LITERAL-VALUE" not in proc.stdout + proc.stderr, "token value never printed (plain mode)")
 
 # --no-docs must still read package.json scripts but skip the docs walk.
 dest = tmp / "m" / "npx-unpinned-docs"
@@ -279,6 +293,72 @@ dest = tmp / "m" / "node-pin-disagree-nvmrc"
 proc = subprocess.run([sys.executable, audit, "--json", "--as-of", "2027-05-01", str(dest)], capture_output=True, text=True)
 ids = {f["id"] for f in json.loads(proc.stdout)["data"]} if proc.stdout.strip().startswith("{") else set()
 row("js.node.eol" in ids, "--as-of moves the EOL line (Node 22 dead on 2027-05-01)")
+# npx of a bin that is not a package name: the advice names the package that provides it.
+adv = found("npx-unpinned-bin-advice", "npx.unpinned")
+row(adv and "typescript" in adv[0]["fix"] and "add tsc " not in adv[0]["fix"],
+    "npx tsc advice names typescript, the package that provides tsc" + (f" (fix: {adv[0]['fix']!r})" if adv else ""))
+# DDEV's own end-of-life pin is ddev-ops' fact: pm-audit names it only as a pointer.
+for case, fid in (("php-eol", "php.eol"), ("js-node-eol", "js.node.eol")):
+    fs = found(case, fid)
+    row(fs and all(not f["file"].startswith(".ddev") and "ddev-ops" in f["message"] for f in fs),
+        f"{case}: {fid} lists the repo's own pins and leaves DDEV's to ddev-ops")
+
+def fresh(name):
+    d = tmp / "d" / name
+    materialise(fixtures / "clean", d)
+    return d
+def run(d, *args, env=None):
+    return subprocess.run([sys.executable, audit, *args, "--as-of", "2026-10-05", str(d)],
+                          capture_output=True, env=env)
+def ids_of(p):
+    try:
+        return {f["id"] for f in json.loads(p.stdout.decode("utf-8"))["data"]}
+    except Exception:  # noqa: BLE001 - any parse failure reads as "no ids"
+        return None
+# Encodings: a UTF-8 BOM manifest parses (npm accepts it), a UTF-16 PowerShell script is
+# read, and a non-ASCII file name prints on a cp1252 stdout instead of a traceback.
+d = fresh("bom")
+(d / "package.json").write_bytes(b"\xef\xbb\xbf" + (d / "package.json").read_bytes())
+p = run(d, "--json")
+row(p.returncode == 0, f"a UTF-8 BOM package.json parses (exit {p.returncode}, ids {ids_of(p)})")
+d = fresh("utf16")
+(d / "build.ps1").write_bytes("﻿npx eslint .\r\n".encode("utf-16-le"))
+p = run(d, "--json")
+row(ids_of(p) == {"npx.unpinned"}, f"a UTF-16LE PowerShell script is read (ids {ids_of(p)})")
+d = fresh("cp1252")
+(d / "构建.sh").write_text("npx eslint .\n", encoding="utf-8")
+env = {k: v for k, v in os.environ.items() if k != "PYTHONUTF8"}
+env["PYTHONIOENCODING"] = "cp1252"
+p = run(d, env=env)
+row(p.returncode == 10 and b"Traceback" not in p.stderr,
+    f"a non-ASCII file name prints on a cp1252 stdout (exit {p.returncode})")
+# JSON of the wrong shape inside a valid manifest or lock: findings, never a traceback.
+d = fresh("shapes")
+(d / "package.json").write_text(json.dumps({"name": "x", "dependencies": ["eslint"], "scripts": ["npx eslint"],
+                                            "engines": "24", "bin": ["x"], "workspaces": "packages/*"}))
+(d / "package-lock.json").write_text(json.dumps({"lockfileVersion": 3, "packages": []}))
+(d / "composer.json").write_text(json.dumps({"name": "x/y", "require": ["php"], "require-dev": "x", "config": []}))
+(d / "composer.lock").write_text(json.dumps({"packages": {}, "platform-overrides": []}))
+p = run(d, "--json")
+row(p.returncode in (0, 10) and ids_of(p) is not None and b"Traceback" not in p.stderr,
+    f"maps of the wrong type in valid JSON are skipped (exit {p.returncode})")
+for body in ("[]", "null"):
+    (tmp / "facts-bad.json").write_text(body)
+    p = run(fresh("facts-" + body), "--facts", str(tmp / "facts-bad.json"))
+    row(p.returncode == 4 and b"Traceback" not in p.stderr, f"--facts holding {body} exits 4 (exit {p.returncode})")
+# A tracked auth.json is committed even when .gitignore lists it (git is the authority).
+if shutil.which("git"):
+    d = fresh("git-tracked-authjson")
+    (d / "auth.json").write_text('{"http-basic": {}}\n')
+    subprocess.run(["git", "init", "-q", str(d)], capture_output=True)
+    subprocess.run(["git", "-C", str(d), "add", "-f", "auth.json"], capture_output=True)
+    p = run(d, "--json")
+    hit = [f for f in (json.loads(p.stdout.decode("utf-8"))["data"] if ids_of(p) is not None else [])
+           if f["id"] == "registry.authjson.committed"]
+    row(hit and "tracked by git" in hit[0]["message"] and "git rm --cached" in hit[0]["fix"],
+        f"a git-tracked auth.json is reported as tracked although .gitignore lists it (ids {ids_of(p)})")
+else:
+    row(True, "git-tracked auth.json case skipped: no git on PATH")
 PY
 )
 
@@ -289,6 +369,7 @@ spec = importlib.util.spec_from_file_location("a", sys.argv[1])
 a = importlib.util.module_from_spec(spec); spec.loader.exec_module(a)
 N = lambda m: ((m, 0, 0), (m + 1, 0, 0))
 P = lambda x, y: ((x, y, 0), (x, y + 1, 0))
+V = lambda x, y, z: ((x, y, z), (x, y, z + 1))
 cases = [
   ("^24.1.0", N(24), "npm", True), ("^24.1.0", N(25), "npm", False),
   (">=22 <25", N(24), "npm", True), (">=22 <25", N(25), "npm", False),
@@ -300,11 +381,21 @@ cases = [
   ("8.2.* || 8.3.*", P(8, 3), "composer", True), ("^7.4 | ^8.0", P(8, 1), "composer", True),
   ("^7.4", P(8, 1), "composer", False), (">=8.2,<8.5", P(8, 4), "composer", True),
   ("^8.4@dev", P(8, 4), "composer", True), ("^0.3", N(0), "npm", True),
+  # Composer pads a partial version for a plain comparator (>8.2 is >8.2.0.0, admitting
+  # 8.2.1) where npm reads an X-range (>8.2 is >=8.3.0); a bare 8.2 is exactly 8.2.0.
+  (">8.2", P(8, 2), "composer", True), (">8.2", P(8, 2), "npm", False),
+  ("<=8.2", P(8, 2), "composer", True), ("<=8.2", V(8, 2, 5), "composer", False), ("<=8.2", V(8, 2, 5), "npm", True),
+  ("8.2", V(8, 2, 3), "composer", False), ("8.2", V(8, 2, 3), "npm", True),
+  # != excludes one version (Composer only), and <> is its alias.
+  ("!=8.3.0", V(8, 3, 0), "composer", False), ("!=8.3.0", P(8, 3), "composer", True),
+  ("8.3.0 !=8.3.0", P(8, 3), "composer", False), ("<>8.3.0", V(8, 3, 0), "composer", False),
+  (">=8.2 !=8.2.5", V(8, 2, 5), "composer", False),
 ]
 bad = [f"{s!r}/{d}" for s, iv, d, want in cases if a.admits(s, iv[0], iv[1], d) is not want]
 bad += ["unparseable returns None"] if a.admits("banana", (1,0,0), (2,0,0)) is not None else []
+bad += ["npm has no != (None)"] if a.admits("!=1.0.0", (1,0,0), (2,0,0), "npm") is not None else []
 print("ok" if not bad else "bad:" + "; ".join(bad))' "$AUDIT" 2>&1)"
-[[ "$rng" == ok ]] && ok "range parser: npm + Composer dialects (20 cases)" || no "range parser: $rng"
+[[ "$rng" == ok ]] && ok "range parser: npm + Composer dialects (32 cases)" || no "range parser: $rng"
 
 # -- 5. facts verifier contract (§7) -------------------------------------------------
 if [[ -f "$V" ]]; then
@@ -329,11 +420,58 @@ badtype = json.loads(json.dumps(facts)); badtype["packages"]["npm"]["documented_
 (tmp / "badtype.json").write_text(json.dumps(badtype))
 order = json.loads(json.dumps(facts)); order["php"]["releases"]["8.4"]["active_end"] = "2030-01-01"
 (tmp / "order.json").write_text(json.dumps(order))
+def variant(name, edit):
+    d = json.loads(json.dumps(facts)); edit(d)
+    (tmp / name).write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+(tmp / "list.json").write_text("[]"); (tmp / "null.json").write_text("null")
+variant("prose-int.json", lambda d: d["packages"]["npm"].__setitem__("prose", [123]))
+variant("release-null.json", lambda d: d["node"]["releases"].__setitem__("22", None))
+variant("node-equal.json", lambda d: d["node"]["releases"]["22"].__setitem__("maintenance", d["node"]["releases"]["22"]["lts"]))
+variant("php-equal.json", lambda d: d["php"]["releases"]["8.4"].__setitem__("active_end", d["php"]["releases"]["8.4"]["initial"]))
+variant("unicode.json", lambda d: d["packages"]["npm"]["prose"].append("安装"))
 PY
   ec 10 "uncited package -> 10"        "$PY" "$V" --offline --skill "$SKILL" --facts "$TMP/uncited.json"
   ec 10 "unstated dated fact -> 10"    "$PY" "$V" --offline --skill "$SKILL" --facts "$TMP/dated.json"
   ec 10 "active_end after security_end -> 10" "$PY" "$V" --offline --skill "$SKILL" --facts "$TMP/order.json"
   ec 4 "non-integer major -> 4"        "$PY" "$V" --offline --skill "$SKILL" --facts "$TMP/badtype.json"
+  ec 4 "facts holding [] -> 4"         "$PY" "$V" --offline --skill "$SKILL" --facts "$TMP/list.json"
+  ec 4 "facts holding null -> 4"       "$PY" "$V" --offline --skill "$SKILL" --facts "$TMP/null.json"
+  ec 4 "a prose token that is not a string -> 4" "$PY" "$V" --offline --skill "$SKILL" --facts "$TMP/prose-int.json"
+  ec 4 "a null release entry -> 4"     "$PY" "$V" --offline --skill "$SKILL" --facts "$TMP/release-null.json"
+  ec 10 "node lts == maintenance (strict order) -> 10" "$PY" "$V" --offline --skill "$SKILL" --facts "$TMP/node-equal.json"
+  ec 10 "php initial == active_end (strict order) -> 10" "$PY" "$V" --offline --skill "$SKILL" --facts "$TMP/php-equal.json"
+  ec 2 "--timeout -1 -> 2"             "$PY" "$V" --live --timeout -1
+  ec 2 "--timeout 0 -> 2"              "$PY" "$V" --live --timeout 0
+  out="$(PYTHONIOENCODING=cp1252 "$PY" "$V" --offline --skill "$SKILL" --facts "$TMP/unicode.json" 2>&1)"; rc=$?
+  [[ "$rc" == 10 && "$out" != *Traceback* ]] && ok "a non-ASCII drift row prints on a cp1252 stdout (exit $rc)" \
+    || no "a non-ASCII drift row on a cp1252 stdout (want 10, no traceback; got $rc)"
+  # A directory named like a reference is not a reference: skipped, not a crash.
+  mkdir -p "$TMP/dirref" && cp -R "$SKILL/SKILL.md" "$SKILL/references" "$TMP/dirref/" && mkdir -p "$TMP/dirref/references/zz-folder.md"
+  ec 0 "a directory named *.md under references/ is skipped" "$PY" "$V" --offline --skill "$TMP/dirref" --facts "$FACTS"
+  # Live classification without the network: a php.net page that is gone (404) is drift,
+  # and a schedule.json date in a new format is drift with a message, not a traceback.
+  live="$("$PY" - "$V" "$FACTS" <<'PY' 2>&1
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("v", sys.argv[1])
+v = importlib.util.module_from_spec(spec); spec.loader.exec_module(v)
+facts = json.load(open(sys.argv[2], encoding="utf-8"))
+bad = []
+v.fetch = lambda url, timeout, accept="": ("notfound", 404)
+d, u = v.live_php(facts, 1.0)
+if not d or u:
+    bad.append(f"php.net 404: drift={d} unreach={u}")
+v.fetch_json = lambda url, timeout: ("ok", {"v24": {"start": "2024-04-24T00:00:00Z", "lts": "2024-10-29", "end": "2027-04-30"}})
+try:
+    d, u = v.live_node(facts, 1.0, v.dt.date(2026, 10, 5))
+    if not any("format" in x["issue"] for x in d):
+        bad.append(f"schedule date format: drift={d}")
+except Exception as exc:  # noqa: BLE001 - the point is that nothing escapes
+    bad.append(f"schedule date format raised {exc!r}")
+print("ok" if not bad else "bad:" + "; ".join(bad))
+PY
+)"
+  [[ "$live" == ok ]] && ok "live: php.net 404 is drift; an upstream date-format change is drift, not a traceback" \
+    || no "live classification: $live"
 else
   no "verifier missing: scripts/check-pm-facts.py"
 fi

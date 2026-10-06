@@ -26,17 +26,24 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   js.manager.mixed  deploy.install.unfrozen  deploy.composer.dev  php.composer.v1
   deploy.install.unlocked  deploy.npm.yarn-flag  deploy.global.unpinned
 
-It never prints a secret: a committed or CI-written credential is reported as file:line only.
+It never prints a secret: a committed or CI-written credential is reported as file:line only,
+and every finding and note passes through redact() in Audit.add()/Audit.note() - the one
+choke point - so credentials inside a quoted command or URL (https://user:token@host) are
+masked whatever check quoted them. tests/run.sh greps all output of every fake-secret fixture.
 
 Why one file: the skill folder must run when copied alone into another plugin, launched
 through scripts/run-python.sh with nothing on sys.path, so this stays a single stdlib
-module. Jump by section marker instead of splitting it:
+module (Python 3.8+). Jump by section marker instead of splitting it:
   === version ranges ===   npm semver + Composer constraint intervals (admits())
-  === small readers ===    JSON/JSONC, a block-mapping YAML subset, markdown code lines,
+  === small readers ===    BOM-aware text, JSON/JSONC, a block-mapping YAML subset, markdown
+                           code lines, YAML CI commands as the shell gets them, Dockerfile
+                           RUN and Jenkinsfile steps, shell words in command position
+                           (simple_commands, command_tools, cli_parts, docker_build),
                            GitHub Actions job and step boundaries (workflow_jobs,
-                           enclosing_item), CI working directories (join_dir)
-  === the audit ===        Audit: js, nested, node_pins, php, npx, deploy, legacy, secrets,
-                           pnpm_placeholders
+                           enclosing_item), CI working directories (join_dir), gitignore /
+                           dockerignore matching, read-only git queries (git_says), redact()
+  === the audit ===        Audit: js, nested, node_pins, php, npx, deploy (+ the credential
+                           image check), legacy, secrets, pnpm_placeholders
   main()                   argv, output envelope, exit codes
 
 Examples:
@@ -48,11 +55,13 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import fnmatch
 import json
 import os
 import posixpath
 import re
+import shlex
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -79,7 +88,8 @@ COMPOSER_PLATFORM = re.compile(r"^(php(-64bit|-ipv6|-zts|-debug)?|hhvm|ext-.+|li
 EXACT_SEMVER = re.compile(r"^v?\d+\.\d+\.\d+([-+][0-9A-Za-z.+-]+)?$")
 # A dist-tag spec (`@latest`, `@next`, `@beta`). npm-package-arg calls a spec a tag when it
 # is neither a semver version nor a range; approximated here as a leading letter that does
-# not open a loose range (`v1`, `x`, `X.2`).
+# not open a loose range (`v1`, `x`, `X.2`). npx resolves a tag on the registry every run,
+# so a declared local copy never satisfies one either (npx() reports it).
 DIST_TAG = re.compile(r"^(?![vV]\d)(?![xX](?:$|\.))[A-Za-z][\w.-]*$")
 # Directories never worth walking for npx usage: dependencies, build output, VCS.
 SKIP_DIRS = {".git", "node_modules", "vendor", "bower_components", ".yarn", ".pnpm-store",
@@ -107,12 +117,55 @@ DEPLOY_MARKERS = re.compile(
     r"netlify\s+deploy|kubectl\s+apply|helm\s+upgrade|(?:serverless|sls)\s+deploy|fly(?:ctl)?\s+deploy|"
     r"\bdep\s+deploy|envoy\s+run", re.I)
 TEST_MARKERS = re.compile(r"phpunit|\bpest\b|codecept|artisan\s+test|composer\s+(?:run(?:-script)?\s+)?test\b", re.I)
-INSTALL_CMD = re.compile(r"(?:^|[\s;&|(\"'`])(npm|yarn|pnpm|bun|composer(?:\.phar)?)(?=\s|$)([^;&|\n]*)")
+# An install counts only where the shell runs it: the command word of a simple command
+# (command_tools). `echo "npm install"` and `echo npm install` print text; neither installs.
+TOOLS = {"npm": "npm", "yarn": "yarn", "pnpm": "pnpm", "bun": "bun", "composer": "composer",
+         "composer.phar": "composer"}
+# Words that run the command after them unchanged, so the word after them (past their own
+# options) is still in command position: privilege and environment wrappers, shell
+# keywords, Corepack's shims, `timeout <duration>`. ddev, php, sh -c and docker run/exec
+# have their own rules in command_tools().
+WRAPPERS = {"sudo", "env", "time", "exec", "command", "nice", "nohup", "corepack", "timeout",
+            "if", "then", "else", "elif", "do", "while", "until", "!", "{"}
+WRAPPER_VALUE_OPTS = {"sudo": {"-u", "-g", "-C", "-D", "-p", "-r", "-t", "-U"}, "env": {"-u", "-C", "-S"},
+                      "nice": {"-n"}, "timeout": {"-s", "-k", "--signal", "--kill-after"}}
+ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# Package-manager options that take a separate value, so `npm --prefix client ci` reads
+# `ci` as the subcommand, not `client`; and the option that moves the package root
+# (npm -C is --prefix, pnpm -C is --dir, composer -d is --working-dir).
+CLI_VALUE_OPTS = {
+    "npm": {"--prefix", "-C", "--registry", "--cache", "--userconfig", "--globalconfig", "--loglevel",
+            "-w", "--workspace", "--tag", "--omit", "--include", "--location", "--install-strategy"},
+    "pnpm": {"--dir", "-C", "--filter", "-F", "--registry", "--reporter", "--store-dir", "--loglevel"},
+    "yarn": {"--cwd", "--registry", "--cache-folder", "--modules-folder", "--network-timeout", "--mutex"},
+    "bun": {"--cwd", "--registry", "--filter", "-c", "--config"},
+    "composer": {"--working-dir", "-d"},
+}
+CLI_DIR_OPTS = {"npm": ("--prefix", "-C"), "pnpm": ("--dir", "-C"), "yarn": ("--cwd",), "bun": ("--cwd",),
+                "composer": ("--working-dir", "-d")}
+# `docker build` options that take a separate value, so it is not read as the context.
+DOCKER_VALUE_OPTS = {"-f", "--file", "-t", "--tag", "--build-arg", "--target", "--platform", "--secret",
+                     "--ssh", "--label", "--cache-from", "--cache-to", "--network", "--progress", "-o",
+                     "--output", "--iidfile", "--add-host", "--build-context", "--shm-size", "--ulimit",
+                     "--metadata-file", "--builder", "--annotation", "--attest", "--allow", "-m", "--memory"}
 COMPOSER_V1 = re.compile(r"composer:v1\b|composer\s+self-update\s+--1\b|(?:FROM|--from=)\s*composer:1(?:[.\s]|$)", re.I)
 # Group 1 = target path, group 2 = the credential file name.
 CRED_WRITE = re.compile(r"(?:>{1,2}|\btee(?:\s+-a)?)\s*[\"']?([^\s\"'<>|;&]*?(auth\.json|\.npmrc))\b")
 CRED_CONFIG = re.compile(r"composer\s+config\s+(?!-g\b|--global\b)(?:--\S+\s+)*(?:http-basic|bearer|github-oauth|gitlab-token|gitlab-oauth|bitbucket-oauth)\.")
-COPY_CONTEXT = re.compile(r"^\s*(?:ADD|COPY)\s+(?:--\S+\s+)*\.\/?\s", re.I)
+# A COPY/ADD of the whole build context. Group 1 = its flags: `COPY --from=<stage> . /app`
+# copies from another stage's filesystem, never the context (copies_context()).
+COPY_CONTEXT = re.compile(r"^\s*(?:ADD|COPY)\s+((?:--\S+\s+)*)\.\/?\s", re.I)
+# Credentials a command line can carry, masked by redact() before any finding or note is
+# recorded: URL userinfo (scheme://user:pass@host or scheme://token@host; npm-package-arg
+# accepts such a tarball URL as a package spec, and --registry takes one), an npm/Yarn auth
+# key given a value (`--//host/:_authToken=X`, `npmAuthToken: X`), and token-like query
+# parameters. The userinfo class is greedy up to the last @ before the host, so a raw @ in
+# a password cannot leave its tail behind.
+SECRET_SHAPES = (
+    (re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s'\"`]+@"), r"\1***@"),
+    (re.compile(r"(?i)(_authToken|_auth|_password|npmAuthToken|npmAuthIdent)(\s*[=:]\s*)[^\s'\"`&;]+"), r"\1\2***"),
+    (re.compile(r"(?i)([?&](?:access_token|token|auth|key|secret|password|sig|signature)=)[^&\s'\"`#]+"), r"\1***"),
+)
 # Nested lockfiles below these are test data or someone else's tree, not package roots.
 NESTED_SKIP = {"fixtures", "__fixtures__", "test-fixtures"}
 # CMS plugin trees put widget packages 8+ levels down (src/plugins/x/src/templates/...).
@@ -133,9 +186,26 @@ YARN_FREEZE_FLAGS = ("--frozen-lockfile", "--immutable")
 NPM_INSTALL = ("install", "i", "in", "add")
 NPM_CI = ("ci", "clean-install", "ic", "install-clean")  # npm ci and its documented aliases
 # `npm install -g` options that take a value, so the value is not read as a package.
-GLOBAL_FLAG_WITH_VALUE = {"--prefix", "--registry", "--cache", "--userconfig", "--tag"}
+GLOBAL_FLAG_WITH_VALUE = {"--prefix", "-C", "--registry", "--cache", "--userconfig", "--tag", "--loglevel"}
 # A registry package as typed on a command line: name or @scope/name, optional @version.
-PKG_SPEC = re.compile(r"^(@[a-z0-9][\w.-]*/)?[a-z0-9][\w.-]*(@\S+)?$", re.I)
+# The version may not hold '/', ':' or '@': `name@https://user:token@host/x.tgz`, `name@git+...`,
+# `name@file:..` and `name@npm:alias` are not registry ranges, and splitting one at an '@'
+# put part of a URL's credentials into the fix text (split_spec()).
+PKG_SPEC = re.compile(r"^(@[a-z0-9][\w.-]*/)?[a-z0-9][\w.-]*(@[^\s/:@]+)?$", re.I)
+# Bins whose name differs from the package that ships them, each the package's own
+# package.json "bin" keys. Only the fallback: npx runs a local bin before it fetches
+# anything (libnpmexec checks node_modules/.bin first), and the npm lockfile's
+# packages[...].bin, Yarn 2+'s yarn.lock `bin:` and node_modules/<pkg>/package.json say
+# which package owns a bin authoritatively (Audit._local_bins). pnpm and Yarn 1 locks
+# record no bin names, and an audit clone has no node_modules/, hence this table.
+BIN_ALIASES = {
+    "typescript": ("tsc", "tsserver"), "laravel-mix": ("mix",), "@playwright/test": ("playwright",),
+    "@commitlint/cli": ("commitlint",), "@angular/cli": ("ng",), "@vue/cli-service": ("vue-cli-service",),
+    "npm-run-all": ("npm-run-all", "run-s", "run-p"), "@biomejs/biome": ("biome",),
+    "@tailwindcss/cli": ("tailwindcss",), "postcss-cli": ("postcss",), "@babel/cli": ("babel",),
+    "@11ty/eleventy": ("eleventy",), "@lhci/cli": ("lhci",), "concurrently": ("concurrently", "conc"),
+    "grunt-cli": ("grunt",), "gulp-cli": ("gulp",),
+}
 # CI working directories: `${{ env.X }}` is resolved from the workflow/job env: block;
 # GitHub's workspace (`${{ github.workspace }}`, $GITHUB_WORKSPACE) is the checkout root.
 ENV_REF = re.compile(r"\$\{\{\s*env\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
@@ -156,12 +226,18 @@ FLAG_WITH_VALUE = {"-p", "--package", "-c", "--call", "-w", "--workspace", "--ca
 # Versions are (major, minor, patch) tuples; every comparator becomes a half-open
 # interval [lo, hi). Unknown syntax returns None so callers skip rather than accuse.
 # npm grammar: https://github.com/npm/node-semver#ranges
-# Composer grammar: https://getcomposer.org/doc/articles/versions.md
-# The one dialect difference that matters: Composer ~1.2 means >=1.2 <2.0, npm ~1.2
-# means >=1.2.0 <1.3.0.
+# Composer grammar: https://getcomposer.org/doc/articles/versions.md, as implemented in
+# composer/semver src/VersionParser.php (parseConstraint). The dialect differences:
+#   ~1.2      Composer >=1.2 <2.0; npm >=1.2.0 <1.3.0.
+#   >8.2      Composer pads a partial version for every plain comparator (normalize() ->
+#   <=8.2     8.2.0.0), so >8.2 is >8.2.0 (admits 8.2.1) and <=8.2 is <=8.2.0; npm reads
+#   8.2       an X-range (>8.2 is >=8.3.0). A bare 8.2 is exactly 8.2.0 in Composer
+#             (its X-range regex needs a literal .* or .x), any 8.2.x in npm.
+#   !=, <>    Composer only: every version but one. npm has no such comparator (None).
 # =============================================================================
 INF = (10**9, 0, 0)
 PARTIAL = re.compile(r"^v?(\d+|[xX*])(?:\.(\d+|[xX*]))?(?:\.(\d+|[xX*]))?(?:[-+][0-9A-Za-z.+-]*)?$")
+WILDCARD = re.compile(r"(?:^v?|\.)[xX*](?:\.|$|[-+])")
 
 
 def _partial(s: str):
@@ -191,7 +267,9 @@ def _bump(parts):
 
 
 def _comparator(tok: str, dialect: str):
-    m = re.match(r"^(>=|<=|>|<|==|=|\^|~>|~|!=)?\s*(.+)$", tok)
+    """One comparator -> the list of (lo, hi) intervals whose union it admits (two for an
+    exclusion), or None when unparseable."""
+    m = re.match(r"^(>=|<=|<>|>|<|==|=|\^|~>|~|!=)?\s*(.+)$", tok)
     if not m:
         return None
     op, ver = m.group(1) or "", m.group(2)
@@ -199,39 +277,46 @@ def _comparator(tok: str, dialect: str):
     parts = _partial(ver)
     if parts is None:
         return None
-    if op == "!=":
-        return ((0, 0, 0), INF)
+    if dialect == "composer" and op in ("", "=", "==", ">", ">=", "<", "<=", "!=", "<>") and not WILDCARD.search(ver):
+        v = _floor(parts)
+        nxt = (v[0], v[1], v[2] + 1)  # the next version: pins are x.y.z, a 4th part never matters
+        return {"": [(v, nxt)], "=": [(v, nxt)], "==": [(v, nxt)], ">": [(nxt, INF)], ">=": [(v, INF)],
+                "<": [((0, 0, 0), v)], "<=": [((0, 0, 0), nxt)],
+                "!=": [((0, 0, 0), v), (nxt, INF)], "<>": [((0, 0, 0), v), (nxt, INF)]}[op]
+    if op in ("!=", "<>"):
+        return None  # npm has no exclusion; a Composer wildcard exclusion (!=8.2.*) is not modelled
     full = len(parts) == 3
     if op in ("", "=", "=="):
-        return (_floor(parts), _bump(parts) if not full else (parts[0], parts[1], parts[2] + 1)) if parts else ((0, 0, 0), INF)
+        return [(_floor(parts), _bump(parts) if not full else (parts[0], parts[1], parts[2] + 1)) if parts else ((0, 0, 0), INF)]
     if op == ">=":
-        return (_floor(parts), INF)
+        return [(_floor(parts), INF)]
     if op == ">":
-        return (_bump(parts) if not full else (parts[0], parts[1], parts[2] + 1), INF)
+        return [(_bump(parts) if not full else (parts[0], parts[1], parts[2] + 1), INF)]
     if op == "<":
-        return ((0, 0, 0), _floor(parts))
+        return [((0, 0, 0), _floor(parts))]
     if op == "<=":
-        return ((0, 0, 0), _bump(parts) if not full else (parts[0], parts[1], parts[2] + 1))
+        return [((0, 0, 0), _bump(parts) if not full else (parts[0], parts[1], parts[2] + 1))]
     if op == "^":
         if not parts:
-            return ((0, 0, 0), INF)
+            return [((0, 0, 0), INF)]
         lo = _floor(parts)
         nz = next((i for i, v in enumerate(parts) if v != 0), None)
         if nz is None:  # ^0, ^0.0, ^0.0.0
-            return (lo, _bump(parts))
-        return (lo, _bump(parts[: nz + 1]))
+            return [(lo, _bump(parts))]
+        return [(lo, _bump(parts[: nz + 1]))]
     if op in ("~", "~>"):
         if not parts:
-            return ((0, 0, 0), INF)
+            return [((0, 0, 0), INF)]
         lo = _floor(parts)
         if dialect == "composer" and len(parts) == 2:
-            return (lo, _bump(parts[:1]))  # ~8.2 -> <9.0.0
-        return (lo, _bump(parts[:2]) if len(parts) >= 2 else _bump(parts[:1]))
+            return [(lo, _bump(parts[:1]))]  # ~8.2 -> <9.0.0
+        return [(lo, _bump(parts[:2]) if len(parts) >= 2 else _bump(parts[:1]))]
     return None
 
 
 def parse_range(spec: str, dialect: str = "npm"):
-    """Range string -> list of AND-sets, each a list of (lo, hi) intervals. None if unparseable."""
+    """Range string -> list of AND-sets, each a list of (lo, hi) intervals. None if unparseable.
+    An exclusion (Composer !=) admits two intervals, so its AND-set splits in two."""
     if spec is None:
         return None
     spec = str(spec).strip()
@@ -249,18 +334,18 @@ def parse_range(spec: str, dialect: str = "npm"):
             hi = (b[0], b[1], b[2] + 1) if len(b) == 3 else _bump(b)
             out.append([(_floor(a), hi)])
             continue
-        alt = re.sub(r"(>=|<=|>|<|==|=|\^|~>|~|!=)\s+", r"\1", alt)  # ">= 8.2" -> ">=8.2"
+        alt = re.sub(r"(>=|<=|<>|>|<|==|=|\^|~>|~|!=)\s+", r"\1", alt)  # ">= 8.2" -> ">=8.2"
         toks = [t for t in re.split(r"[\s,]+", alt) if t]
         if not toks:
             out.append([((0, 0, 0), INF)])
             continue
-        ivs = []
+        sets: list = [[]]
         for t in toks:
-            iv = _comparator(t, dialect)
-            if iv is None:
+            ivs = _comparator(t, dialect)
+            if ivs is None:
                 return None
-            ivs.append(iv)
-        out.append(ivs)
+            sets = [s + [iv] for s in sets for iv in ivs]
+        out.extend(sets)
     return out
 
 
@@ -281,10 +366,24 @@ def admits(spec: str, lo, hi, dialect: str = "npm"):
 # === small readers ===
 # =============================================================================
 def read_text(p: Path) -> str | None:
+    """A file's text, honouring a BOM: UTF-16 when one says so (Windows PowerShell 5.1
+    writes .ps1 files that way), else UTF-8 with any UTF-8 BOM dropped (npm and Composer
+    both accept a BOM'd manifest, and json.loads rejects one). Undecodable bytes become
+    U+FFFD rather than an error."""
     try:
-        return p.read_text(encoding="utf-8", errors="replace")
+        raw = p.read_bytes()
     except OSError:
         return None
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return raw.decode("utf-16", errors="replace")
+    return raw.decode("utf-8-sig", errors="replace")
+
+
+def obj(v) -> dict:
+    """v when it is a JSON object, else {}: a valid manifest can still hold a list or a
+    string where a map belongs (`"dependencies": ["eslint"]`), and .get/.items on it would
+    end the audit with a traceback."""
+    return v if isinstance(v, dict) else {}
 
 
 def read_json(p: Path):
@@ -363,31 +462,322 @@ def code_lines(text: str, markdown: bool):
             yield n, " ; ".join(spans)
 
 
+def _join_continued(rows):
+    """[(line_no, text)] -> the same with backslash-newline continuations joined onto the
+    line that starts them (the shell and Docker both join them before running anything).
+    Blank and `#` comment lines are dropped; Docker drops comment lines inside a RUN
+    continuation too."""
+    out, buf, start = [], None, 0
+    for n, s in rows:
+        if not s.strip() or s.lstrip().startswith("#"):
+            continue
+        buf, start = (s.strip(), n) if buf is None else (buf + " " + s.strip(), start)
+        if buf.endswith("\\"):
+            buf = buf[:-1].rstrip()
+            continue
+        out.append((start, buf))
+        buf = None
+    if buf is not None:
+        out.append((start, buf))
+    return out
+
+
+def _block_scalar(style: str, rows):
+    """The lines of a YAML block scalar -> [(line_no, command)]: a literal block (|) is one
+    shell script, read line by line with continuations joined; a folded block (>, >-)
+    joins its lines with spaces, a blank line ending one command."""
+    if style == "|":
+        return _join_continued(rows)
+    out, buf, start = [], [], 0
+    for n, s in rows + [(0, "")]:
+        if not s.strip():
+            if buf:
+                out.append((start, " ".join(buf)))
+            buf = []
+            continue
+        if not buf:
+            start = n
+        buf.append(s.strip())
+    return out
+
+
+def _scalar_value(first: list, rows: list):
+    """An inline YAML scalar plus any deeper lines it continues on -> [(line_no, text)].
+    A block indicator (| or >) hands the rows to _block_scalar; a plain or quoted scalar
+    folds its lines with spaces, as YAML does, then loses its quotes."""
+    v = first[0][1].strip() if first else ""
+    if v[:1] in ("|", ">"):
+        return _block_scalar(v[0], rows)
+    parts = [(n, s.strip()) for n, s in first + rows if s.strip() and not s.lstrip().startswith("#")]
+    return [(parts[0][0], scalar(" ".join(s for _, s in parts)))] if parts else []
+
+
 def yaml_command_lines(text: str):
-    """Yield (line_no, command, key_line_no) from a YAML CI config: inline `run: cmd`
-    values, and the lines of block scalars or lists under a command key. key_line_no is
-    the command key's own line. Every line under one key runs in one shell (a `run: |`
-    block on GitHub; GitLab and Bitbucket run a `script:` list as one shell script), so
-    a `cd` carries to the lines after it within the key. Comments are skipped."""
-    owner = None  # indent of the command key whose block we are inside
-    owner_n = 0
-    for n, line in enumerate(text.splitlines(), 1):
+    """Yield (line_no, command, key_line_no) from a YAML CI config, each command as the shell
+    receives it: an inline value unquoted (`run: "npm ci"`), a folded (`>-`) or multi-line
+    plain scalar joined into one line, a literal block (`|`) line by line with backslash
+    continuations joined, and each item of a sequence (a `script:` list, its items quoted,
+    folded or literal in turn). key_line_no is the command key's own line. Every command
+    under one key runs in one shell (a `run: |` block on GitHub; GitLab and Bitbucket run a
+    `script:` list as one shell script), so a `cd` carries to the lines after it within the
+    key. Comments are skipped.
+
+    A key's block is every line deeper than the key's own column, plus a sequence written at
+    the key's column (`script:` followed by `- npm ci`, which YAML allows)."""
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = None if line.lstrip().startswith("#") else YAML_COMMAND_KEY.match(line)
+        i += 1
+        if not m:
+            continue
+        key_n, col, value = i, m.start(2), m.group(3)
+        rows = []
+        while i < len(lines):
+            s = lines[i]
+            if s.strip() and indent_of(s) <= col and not (
+                    not value.strip() and indent_of(s) == col and s.lstrip().startswith("-")):
+                break
+            rows.append((i + 1, s))
+            i += 1
+        if value.strip():
+            for n, cmd in _scalar_value([(key_n, value)], rows):
+                yield n, cmd, key_n
+            continue
+        head = next((s for _, s in rows if s.strip() and not s.lstrip().startswith("#")), "")
+        if re.match(r"^\s*[A-Za-z_][\w-]*\s*:(?:\s|$)", head):
+            i = key_n  # a mapping, not a script (CircleCI `- run:` / `command: npm ci`): read its keys
+            continue
+        items, item_col = [], None
+        for n, s in rows:
+            if s.strip() and not s.lstrip().startswith("#") and item_col is None:
+                item_col = indent_of(s) if s.lstrip().startswith("-") else -1
+            if item_col == -1:  # not a sequence: a plain scalar on the following lines
+                items = [[[], rows]]
+                break
+            if s.strip() and indent_of(s) == item_col and s.lstrip().startswith("-"):
+                items.append([[(n, s.lstrip()[1:])], []])
+            elif items:
+                items[-1][1].append((n, s))
+        for first, rest in items:
+            for n, cmd in _scalar_value([(fn, fs) for fn, fs in first if fs.strip()], rest):
+                yield n, cmd, key_n
+
+
+def dockerfile_commands(text: str):
+    """A Dockerfile's RUN instructions -> [(line_no, shell command)], as Docker runs them:
+    continuations joined (comment lines inside one dropped), RUN's own flags (--mount=...,
+    --network=...) removed, the exec form RUN ["composer", "install"] read as its words, and
+    a BuildKit heredoc body (RUN <<EOF ... EOF) read line by line. Other instructions
+    (FROM, COPY, CMD) install nothing at build time."""
+    lines = text.splitlines()
+    out, i = [], 0
+    while i < len(lines):
+        n, line = i + 1, lines[i]
+        i += 1
         if not line.strip() or line.lstrip().startswith("#"):
             continue
-        indent = len(line) - len(line.lstrip(" "))
-        if owner is not None and indent <= owner:
-            owner = None
-        m = YAML_COMMAND_KEY.match(line)
-        if m:
-            value = m.group(3).strip()
-            if value and value[0] not in "|>":
-                yield n, value, n
-                owner = None
-            else:
-                owner, owner_n = len(m.group(1)), n
+        while line.rstrip().endswith("\\") and i < len(lines):
+            nxt = lines[i]
+            i += 1
+            if not nxt.lstrip().startswith("#"):
+                line = line.rstrip()[:-1] + " " + nxt.strip()
+        m = re.match(r"^\s*(?:ONBUILD\s+)?RUN\s+(.*)$", line, re.I)
+        if not m:
             continue
-        if owner is not None:
-            yield n, re.sub(r"^\s*-\s+", "", line), owner_n
+        body = re.sub(r"^(?:--\S+\s+)*", "", m.group(1).strip())
+        doc = re.search(r"<<-?\s*[\"']?(\w+)[\"']?", body)
+        if doc:
+            end = doc.group(1)
+            rows = []
+            while i < len(lines) and lines[i].strip() != end:
+                rows.append((i + 1, lines[i]))
+                i += 1
+            i += 1  # the closing delimiter
+            out += _join_continued(rows)
+            body = body[:doc.start()]
+        elif body.startswith("["):
+            try:
+                words = json.loads(body)
+                body = " ".join(shlex.quote(str(w)) for w in words) if isinstance(words, list) else body
+            except json.JSONDecodeError:
+                pass
+        if body.strip():
+            out.append((n, body))
+    return out
+
+
+def jenkins_commands(text: str):
+    """A Jenkinsfile's `sh` / `bat` / `powershell` steps -> [(line_no, command)]: the string
+    each runs, single- or double-quoted on one line, or a triple-quoted script read line by
+    line. The Groovy around them is not a shell."""
+    step = re.compile(r"\b(?:sh|bat|powershell|pwsh)\s*\(?\s*(?:script\s*:\s*)?('''|\"\"\"|'|\")")
+    lines = text.splitlines()
+    out, i = [], 0
+    while i < len(lines):
+        n, line = i + 1, lines[i]
+        i += 1
+        m = step.search(line)
+        if not m:
+            continue
+        q, rest = m.group(1), line[m.end():]
+        end = rest.find(q)
+        if len(q) == 1 or end >= 0:
+            out.append((n, rest[:end] if end >= 0 else rest))
+            continue
+        rows = [(n, rest)]
+        while i < len(lines):
+            s = lines[i]
+            i += 1
+            k = s.find(q)
+            rows.append((i, s[:k] if k >= 0 else s))
+            if k >= 0:
+                break
+        out += _join_continued(rows)
+    return out
+
+
+def _shell_tokens(line: str):
+    """A shell line -> its words and operators (&&, ||, ;, |, &, (, ), redirections), quotes
+    removed the way the shell removes them. GitHub `${{ expr }}` is first closed up into one
+    word so a `cd ${{ env.DIR }}` stays two words. Unbalanced quotes (a line cut out of a
+    longer script) fall back to a plain split."""
+    line = re.sub(r"\$\{\{\s*(.*?)\s*\}\}", lambda m: "${{" + re.sub(r"\s+", "", m.group(1)) + "}}", line)
+    lex = shlex.shlex(line, posix=True, punctuation_chars=True)
+    lex.whitespace_split = True  # only whitespace and ();<>|& split words (Python 3.8+)
+    try:
+        return list(lex)
+    except ValueError:
+        return re.findall(r"&&|\|\||[;&|()]|[^\s;&|()]+", line)
+
+
+def simple_commands(line: str):
+    """A shell line -> its simple commands as word lists, in order. A subshell's ( and ) come
+    back as one-word lists so the caller can undo a `cd` made inside it. Redirections and
+    their targets are dropped (with a bare fd number before them: 2>&1)."""
+    out, cur, toks, i = [], [], _shell_tokens(line), 0
+    while i < len(toks):
+        t = toks[i]
+        i += 1
+        if t in ("(", ")"):
+            if cur:
+                out.append(cur)
+            out.append([t])
+            cur = []
+        elif t and set(t) <= set("<>&|") and ("<" in t or ">" in t):
+            if cur and cur[-1].isdigit():
+                cur.pop()
+            i += 1  # the redirection's target
+        elif t and set(t) <= set(";&|"):
+            if cur:
+                out.append(cur)
+            cur = []
+        else:
+            cur.append(t)
+    if cur:
+        out.append(cur)
+    return out
+
+
+def command_tools(words):
+    """One simple command -> [(tool, args)] for each package-manager run it makes, with the
+    tool normalised (composer.phar -> composer). The tool must be in command position: the
+    first word after variable assignments and transparent wrappers (WRAPPERS, past their own
+    options), `ddev [exec]`, `php [-d k=v] composer.phar`, the command inside
+    `docker run|exec` / `docker compose run|exec`, or a script given to `sh -c` (read
+    recursively). Anything else that merely mentions npm is text, not an install."""
+    i = 0
+    while i < len(words):
+        w = words[i]
+        base = posixpath.basename(w).lower()
+        if ASSIGNMENT.match(w):
+            i += 1
+        elif base in WRAPPERS:
+            i += 1
+            while i < len(words) and words[i].startswith("-"):
+                i += 2 if words[i] in WRAPPER_VALUE_OPTS.get(base, ()) else 1
+            if base == "timeout" and i < len(words):
+                i += 1  # the duration
+        elif base == "ddev":
+            i += 1
+            if i < len(words) and words[i] in ("exec", "."):
+                i += 1
+                while i < len(words) and words[i].startswith("-"):
+                    i += 2 if words[i] in ("-s", "--service", "-d", "--dir") else 1
+        elif base in ("sh", "bash", "zsh", "dash"):
+            j = next((j for j in range(i + 1, len(words) - 1) if re.match(r"^-[a-zA-Z]*c[a-zA-Z]*$", words[j])), None)
+            return [] if j is None else [t for cmd in simple_commands(words[j + 1]) for t in command_tools(cmd)]
+        elif base in ("docker", "podman", "docker-compose") and any(x in ("run", "exec") for x in words[i + 1:]):
+            j = next(k for k in range(i + 1, len(words)) if words[k] in ("run", "exec"))
+            k = next((k for k in range(j + 1, len(words)) if posixpath.basename(words[k]).lower() in TOOLS), None)
+            return [] if k is None else command_tools(words[k:])
+        elif base == "php":
+            i += 1
+            while i < len(words) and words[i].startswith("-"):
+                i += 2 if words[i] in ("-d", "-c") else 1
+            if i < len(words) and posixpath.basename(words[i]).lower() in TOOLS:
+                return [("composer", words[i + 1:])]
+            return []
+        elif base in TOOLS:
+            return [(TOOLS[base], words[i + 1:])]
+        else:
+            return []
+    return []
+
+
+def cli_parts(tool: str, toks):
+    """A package manager's arguments -> (subcommand, its index or None, the value of the
+    option that moves the package root or None). Options are skipped wherever they sit, so
+    `npm --silent install` is an install and `npm --prefix client ci` runs in client/."""
+    vals, dirs = CLI_VALUE_OPTS.get(tool, set()), CLI_DIR_OPTS.get(tool, ())
+    sub, idx, where, i = "", None, None, 0
+    while i < len(toks):
+        t = toks[i]
+        name, eq, val = t.partition("=")
+        if t.startswith("-") and t != "-":
+            if name in dirs:
+                where = val if eq else (toks[i + 1] if i + 1 < len(toks) else None)
+            i += 2 if (name in vals and not eq) else 1
+            continue
+        if idx is None:
+            sub, idx = t, i
+        i += 1
+    return sub, idx, where
+
+
+def docker_build(words):
+    """`docker build` / `docker buildx build` / `docker image build` words -> (context,
+    dockerfile or None), or None when this is not a build or its context is not a local
+    path (stdin `-`, a git or https URL). Docker reads -f relative to the current directory
+    and defaults it to <context>/Dockerfile."""
+    i = 0
+    while i < len(words) and (ASSIGNMENT.match(words[i]) or words[i] in ("sudo", "time")):
+        i += 1
+    if i >= len(words) or posixpath.basename(words[i]).lower() not in ("docker", "podman"):
+        return None
+    rest = words[i + 1:]
+    if rest[:1] == ["build"]:
+        args = rest[1:]
+    elif rest[:2] in (["buildx", "build"], ["image", "build"], ["builder", "build"]):
+        args = rest[2:]
+    else:
+        return None
+    ctx, dfile, j = None, None, 0
+    while j < len(args):
+        a = args[j]
+        name, eq, val = a.partition("=")
+        if a.startswith("-") and a != "-":
+            if name in ("-f", "--file"):
+                dfile = val if eq else (args[j + 1] if j + 1 < len(args) else None)
+            j += 2 if (name in DOCKER_VALUE_OPTS and not eq) else 1
+            continue
+        if ctx is None:
+            ctx = a
+        j += 1
+    if ctx is None or ctx == "-" or "://" in ctx or ctx.startswith("git@"):
+        return None
+    return ctx, dfile
 
 
 def workflow_jobs(text: str):
@@ -423,9 +813,14 @@ def indent_of(line: str) -> int:
 
 
 def scalar(v: str) -> str:
-    """A YAML plain or quoted scalar as text: trailing comment and outer quotes dropped."""
-    v = re.sub(r"\s+#.*$", "", v).strip()
-    return v[1:-1] if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"" else v
+    """A YAML plain or quoted scalar as text: outer quotes and a trailing comment dropped.
+    A quoted scalar ends at its closing quote (a '#' inside it is text); '' inside single
+    quotes and \\" or \\\\ inside double quotes are unescaped."""
+    v = v.strip()
+    m = re.match(r"'((?:[^']|'')*)'", v) if v[:1] == "'" else re.match(r'"((?:[^"\\]|\\.)*)"', v) if v[:1] == '"' else None
+    if m:
+        return m.group(1).replace("''", "'") if v[0] == "'" else re.sub(r'\\(["\\/])', r"\1", m.group(1))
+    return re.sub(r"(?:^|\s+)#.*$", "", v).strip()
 
 
 def enclosing_item(lines, k):
@@ -499,9 +894,146 @@ def join_dir(base, target, env):
 
 
 def split_spec(pkg: str):
-    """'@scope/name@1.2' -> ('@scope/name', '1.2'); no version -> (pkg, '')."""
-    at = pkg.rfind("@")
+    """'@scope/name@1.2' -> ('@scope/name', '1.2'); no version -> (pkg, ''). Splits at the
+    first '@' after a scope: the last one was a URL's userinfo in `name@https://u:t@host`,
+    which put the credentials into the fix text (PKG_SPEC now refuses such specs too)."""
+    at = pkg.find("@", 1)
     return (pkg[:at], pkg[at + 1:]) if at > 0 else (pkg, "")
+
+
+def redact(text) -> str:
+    """text with every SECRET_SHAPES credential masked. Audit.add() and Audit.note() call it
+    on every field they record: the one choke point behind "never prints a secret"."""
+    text = "" if text is None else str(text)
+    for pat, rep in SECRET_SHAPES:
+        text = pat.sub(rep, text)
+    return text
+
+
+def yaml_list(text: str, key: str) -> list:
+    """The string items of a top-level YAML sequence (`packages:` in pnpm-workspace.yaml),
+    block or flow style; [] when absent."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        m = re.match(r"^" + re.escape(key) + r"\s*:\s*(.*)$", line)
+        if not m:
+            continue
+        v = m.group(1).strip()
+        if v.startswith("["):
+            return [scalar(x) for x in v.strip("[]").split(",") if x.strip()]
+        out = []
+        for s in lines[i + 1:]:
+            if not s.strip() or s.lstrip().startswith("#"):
+                continue
+            item = re.match(r"^\s*-\s+(.*)$", s)
+            if not item:
+                break
+            out.append(scalar(item.group(1)))
+        return out
+    return []
+
+
+def glob_rx(pat: str):
+    """A gitignore / dockerignore / workspace glob -> regex over a /-separated path: * and ?
+    stay inside one segment, ** spans any number of segments (none included), [...] is a
+    character class ([!...] negated), a backslash escapes."""
+    out, i = "", 0
+    while i < len(pat):
+        c = pat[i]
+        if pat.startswith("**/", i):
+            out, i = out + "(?:.*/)?", i + 3
+        elif pat.startswith("**", i):
+            out, i = out + ".*", i + 2
+        elif c == "*":
+            out, i = out + "[^/]*", i + 1
+        elif c == "?":
+            out, i = out + "[^/]", i + 1
+        elif c == "[" and pat.find("]", i + 2) > 0:
+            j = pat.find("]", i + 2)
+            body = pat[i + 1:j]
+            out += "[" + ("^" + body[1:] if body.startswith("!") else body).replace("\\", "\\\\") + "]"
+            i = j + 1
+        elif c == "\\" and i + 1 < len(pat):
+            out, i = out + re.escape(pat[i + 1]), i + 2
+        else:
+            out, i = out + re.escape(c), i + 1
+    return re.compile(out + r"\Z")
+
+
+def gitignored(lines, path: str) -> bool:
+    """Is path (a repo-relative file) ignored by these root .gitignore lines? git's rules
+    (git-scm.com/docs/gitignore): the last matching line wins and `!` re-includes; a
+    pattern with a slash before its end is anchored at the root, one without matches the
+    name at any depth; a trailing slash matches directories only (here a parent of path).
+    The fallback when git cannot answer (git_says); git's "a file under an excluded
+    directory cannot be re-included" rule is not modelled."""
+    parts, ignored = path.split("/"), False
+    for raw in lines:
+        line = raw.rstrip()
+        if not line or line.startswith("#"):
+            continue
+        neg = line.startswith("!")
+        line = line[1:] if neg or line.startswith("\\") else line
+        dir_only, line = line.endswith("/"), line.rstrip("/")
+        if not line:
+            continue
+        anchored, rx = "/" in line, glob_rx(line.lstrip("/"))
+        for k in range(1, len(parts) + 1):
+            if dir_only and k == len(parts):
+                continue
+            cand = "/".join(parts[:k]) if anchored else parts[k - 1]
+            if rx.match(cand):
+                ignored = not neg
+                break
+    return ignored
+
+
+def dockerignored(lines, path: str) -> bool:
+    """Is path (relative to the build context) excluded by these .dockerignore lines?
+    Docker's rules (docs.docker.com/build/concepts/context/#dockerignore-files and
+    moby/patternmatcher): every pattern is anchored at the context root (a leading / is
+    dropped, so `.npmrc` excludes only the root file and `**/.npmrc` any), the last matching
+    line wins, `!` re-includes, and a pattern matching a parent directory excludes what is
+    inside it (`*` excludes config/.npmrc; a later `!**` lets it back in)."""
+    parts, excluded = path.split("/"), False
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        neg = line.startswith("!")
+        line = posixpath.normpath(line[1:].strip() if neg else line).lstrip("/")
+        if line in ("", "."):
+            continue
+        rx = glob_rx(line)
+        if any(rx.match("/".join(parts[:k])) for k in range(1, len(parts) + 1)):
+            excluded = not neg
+    return excluded
+
+
+def git_says(root: Path, *args):
+    """Exit code (0 or 1) of a read-only git query run in root, or None when git is absent,
+    root is not in a work tree, or git refuses (128: dubious ownership, no repo).
+    core.fsmonitor is forced off: a repo's own .git/config may name a program git runs
+    when it reads the index, and pm-audit audits repos it did not write."""
+    git = shutil.which("git")
+    if not git:
+        return None
+    try:
+        p = subprocess.run([git, "-c", "core.fsmonitor=false", "-C", str(root), *args], stdin=subprocess.DEVNULL,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return p.returncode if p.returncode in (0, 1) else None
+
+
+def copies_context(text) -> bool:
+    """Does a Dockerfile COPY or ADD its whole build context (`COPY . /app`)? A copy from
+    another stage (`COPY --from=builder . /app`) reads that stage's filesystem instead."""
+    for line in (text or "").splitlines():
+        m = COPY_CONTEXT.match(line)
+        if m and not re.search(r"--from\b", m.group(1)):
+            return True
+    return False
 
 
 def rel(root: Path, p: Path) -> str:
@@ -520,20 +1052,31 @@ class Audit:
         self.findings: list[dict] = []
         self.notes: list[dict] = []
         self.meta: dict = {"managers": [], "lockfiles": [], "node_pins": {}, "php_pins": {}}
-        self.pkg = read_json(root / "package.json") if (root / "package.json").is_file() else None
-        self.composer = read_json(root / "composer.json") if (root / "composer.json").is_file() else None
+        # A manifest that is not a JSON object is unreadable to every check: None here, and
+        # js()/php() report *.manifest.invalid for the file that exists.
+        self.pkg = self._manifest("package.json")
+        self.composer = self._manifest("composer.json")
         self.ddev = self._read_ddev()
-        self.native = {n.lower() for n in (facts.get("native_cli_names") or {}).get("names", [])}
+        self.native = {str(n).lower() for n in obj(facts.get("native_cli_names")).get("names") or []}
         # Every install deploy() reads in CI and deploy files: {family, manager, cwd, kind,
         # file, line, cmd}. cwd is the package root it runs in ("" = root, None = unknown).
         self.installs: list[dict] = []
 
+    def _manifest(self, name):
+        data = read_json(self.root / name) if (self.root / name).is_file() else None
+        return data if isinstance(data, dict) else None
+
+    # WHY redaction lives here, not at each check: findings quote commands and specs from
+    # the repo, and any of them can carry a credential (`npm ci --registry=https://u:t@host`
+    # in the lockfile-conflict message, `yarn --registry=...` in an unfrozen-install one).
+    # Masking every field of every record is the only way "never prints a secret" survives
+    # the next check someone adds. Don't bypass these two methods to append a record.
     def add(self, sev, fid, file, msg, fix, line=None):
-        self.findings.append({"id": fid, "severity": sev, "file": file, "line": line,
-                              "message": msg, "fix": fix})
+        self.findings.append({"id": fid, "severity": sev, "file": redact(file), "line": line,
+                              "message": redact(msg), "fix": redact(fix)})
 
     def note(self, nid, file, msg):
-        self.notes.append({"id": nid, "file": file, "message": msg})
+        self.notes.append({"id": nid, "file": redact(file), "message": redact(msg)})
 
     # ---- DDEV: config.yaml, then config.*.yaml in name order (later files win) ----
     def _read_ddev(self):
@@ -568,7 +1111,7 @@ class Audit:
         self.meta["managers"] = managers
         if self.pkg is None:
             if (self.root / "package.json").is_file():
-                self.add("error", "js.manifest.invalid", "package.json", "package.json is not valid JSON",
+                self.add("error", "js.manifest.invalid", "package.json", "package.json is not valid JSON, or not a JSON object",
                          "fix the JSON before any install")
             return
         if len(present) > 1:
@@ -592,7 +1135,7 @@ class Audit:
                      "package.json has a `pnpm` field (" + ", ".join(sorted(self.pkg["pnpm"])[:5])
                      + ") - pnpm 11+ no longer reads it, so those settings are silently dropped",
                      "move the settings into pnpm-workspace.yaml (references/scripts-and-workspaces.md)")
-        has_deps = any(self.pkg.get(t) for t in DEP_TYPES)
+        has_deps = any(obj(self.pkg.get(t)) for t in DEP_TYPES)
         if not present and has_deps:
             built = self._nested_builds()
             if built:
@@ -661,8 +1204,71 @@ class Audit:
         if not self.pkg:
             return out
         for t in DEP_TYPES:
-            for name, spec in (self.pkg.get(t) or {}).items():
+            for name, spec in obj(self.pkg.get(t)).items():
                 out[name] = (t, str(spec))
+        return out
+
+    def _lock_entry(self, name):
+        """The npm lockfile's top-level entry for a package (packages["node_modules/<name>"],
+        lockfile v2/v3), or {}."""
+        for f in ("package-lock.json", "npm-shrinkwrap.json"):
+            if (self.root / f).is_file():
+                return obj(obj(obj(read_json(self.root / f)).get("packages")).get("node_modules/" + name))
+        return {}
+
+    def _installed(self, name):
+        """The version of a declared package the repo installs: the npm lockfile's, else
+        node_modules/<name>/package.json's, else the declared spec when it is exact. None
+        when unknown (a pnpm or Yarn lock, an uninstalled range)."""
+        v = self._lock_entry(name).get("version") or obj(read_json(self.root / "node_modules" / name / "package.json")
+                                                         if (self.root / "node_modules" / name / "package.json").is_file()
+                                                         else None).get("version")
+        if not v:
+            spec = self._declared().get(name, ("", ""))[1]
+            v = spec if EXACT_SEMVER.match(spec) else None
+        m = re.match(r"^v?(\d+)\.(\d+)\.(\d+)", str(v or ""))
+        return tuple(int(x) for x in m.groups()) if m else None
+
+    def _local_bins(self):
+        """bin name -> the declared package that provides it, for npx's local-first lookup.
+        A declared package's own name always counts (as before); then, strongest first, the
+        npm lockfile's packages[...].bin, Yarn 2+'s yarn.lock `bin:` blocks,
+        node_modules/<pkg>/package.json "bin", and BIN_ALIASES. Declared packages only: a
+        transitive bin that happens to be hoisted into node_modules/.bin is still worth
+        declaring, so it keeps its finding."""
+        declared = set(self._declared())
+        out = {n: n for n in declared}
+
+        def take(pkg, bin_field):
+            if isinstance(bin_field, dict):
+                for b in bin_field:
+                    out.setdefault(str(b), pkg)
+            elif isinstance(bin_field, str) and bin_field:
+                out.setdefault(pkg.split("/")[-1], pkg)  # "bin": "cli.js" is named after the package
+
+        for n in declared:
+            take(n, self._lock_entry(n).get("bin"))
+        berry = (read_text(self.root / "yarn.lock") or "") if (self.root / "yarn.lock").is_file() else ""
+        if "__metadata:" in berry[:2000]:
+            owner, in_bin = None, False
+            for line in berry.splitlines():
+                if line and not line[0].isspace():
+                    key = line.rstrip(":").split(",")[0].strip().strip('"')
+                    owner = key[:key.find("@", 1)] if key.find("@", 1) > 0 else None
+                    in_bin = False
+                elif re.match(r"^  bin:\s*$", line):
+                    in_bin = True
+                elif in_bin and re.match(r"^    \S", line) and owner in declared:
+                    out.setdefault(line.strip().split(":")[0].strip('"'), owner)
+                elif not re.match(r"^    ", line):
+                    in_bin = False
+        for n in declared:
+            nm = self.root / "node_modules" / n / "package.json"
+            if nm.is_file():
+                take(n, obj(read_json(nm)).get("bin"))
+        for n in declared:
+            for b in BIN_ALIASES.get(n, ()):
+                out.setdefault(b, n)
         return out
 
     def _lock_consistency(self, name: str, flavour):
@@ -679,15 +1285,15 @@ class Audit:
                 self.add("warn", "js.lockfile.v1", name,
                          "lockfileVersion 1 (written by npm 6 or older) - the toolchain that maintains this repo predates npm 7",
                          "install with a current npm and commit the upgraded lockfile (references/legacy-exits.md)")
-                names = set((lock.get("dependencies") or {}).keys())
+                names = set(obj(lock.get("dependencies")).keys())
                 missing = [n for n in declared if n not in names]
             else:
-                rootpkg = (lock.get("packages") or {}).get("")
+                rootpkg = obj(lock.get("packages")).get("")
                 if not isinstance(rootpkg, dict):
                     return
                 locked = {}
                 for t in DEP_TYPES:
-                    for n, s in (rootpkg.get(t) or {}).items():
+                    for n, s in obj(rootpkg.get(t)).items():
                         locked[n] = str(s)
                 missing = [n for n in declared if n not in locked]
                 changed = [n for n in declared if n in locked and locked[n] != declared[n][1]]
@@ -716,13 +1322,12 @@ class Audit:
             changed = [n for n in declared if locked.get(n) not in (None, declared[n][1]) and n in locked]
             extra = [n for n in locked if n not in declared]
         elif name == "bun.lock":
-            lock = read_jsonc(p)
-            ws = ((lock or {}).get("workspaces") or {}).get("")
+            ws = obj(obj(read_jsonc(p)).get("workspaces")).get("")
             if not isinstance(ws, dict):
                 return
             locked = {}
             for t in DEP_TYPES:
-                for n, s in (ws.get(t) or {}).items():
+                for n, s in obj(ws.get(t)).items():
                     locked[n] = str(s)
             missing = [n for n in declared if n not in locked]
             changed = [n for n in declared if n in locked and locked[n] != declared[n][1]]
@@ -748,8 +1353,8 @@ class Audit:
     def node_pins(self):
         if self.pkg is None:
             return
-        node = self.facts.get("node", {})
-        codenames = {k.lower(): v for k, v in (node.get("lts_codenames") or {}).items()}
+        node = obj(self.facts.get("node"))
+        codenames = {str(k).lower(): v for k, v in obj(node.get("lts_codenames")).items()}
         exact: dict[str, int] = {}
         ranges: dict[str, str] = {}
 
@@ -853,38 +1458,43 @@ class Audit:
                      "Node pins disagree - " + "; ".join(problems),
                      "choose the production Node major and make every pin say it")
 
-        eol = node.get("releases") or {}
-
         # Unknown majors (a future line, a typo) are never called end-of-life.
-        ends = {int(k): dt.date.fromisoformat(v["end"]) for k, v in eol.items()
-                if k.isdigit() and isinstance(v, dict) and v.get("end")}
-        dead = [(s, m) for s, m in exact.items() if m in ends and ends[m] < self.as_of]
+        ends = {int(k): dt.date.fromisoformat(v["end"]) for k, v in obj(node.get("releases")).items()
+                if str(k).isdigit() and isinstance(v, dict) and v.get("end")}
+        # WHY DDEV's own pin is left out of the end-of-life finding: one owner per fact.
+        # ddev-ops' audit-ddev-config.py reports an end-of-life nodejs_version (node-eol), so
+        # here DDEV joins only the agreement check above, and is named as a pointer when the
+        # repo's other pins are dead too.
+        ddev_dead = [m for s, m in exact.items() if s.startswith(".ddev/") and m in ends and ends[m] < self.as_of]
+        dead = [(s, m) for s, m in exact.items() if not s.startswith(".ddev/") and m in ends and ends[m] < self.as_of]
+        aside = (f"; DDEV's nodejs_version {ddev_dead[0]} is end of life as well, which ddev-ops' audit-ddev-config reports"
+                 if ddev_dead else "")
         # WHY "the repo pins" and the server hint: the production runtime is not in the
         # repo, so pm-audit can say only what the code targets; the server may differ.
         if dead:
             self.add("warn", "js.node.eol", dead[0][0],
                      "the repo pins end-of-life Node: " + ", ".join(f"{s}={m} (EOL {ends[m]})" for s, m in dead)
-                     + " - confirm the server's Node version too",
+                     + " - confirm the server's Node version too" + aside,
                      "move to a supported LTS major (references/version-pinning.md)")
-        elif not repo_exact:
+        elif not any(not s.startswith(".ddev/") for s in repo_exact):
             supported = [m for m, end in ends.items() if end >= self.as_of]
             for src, spec in ranges.items():
                 if supported and not any(admits(spec, (m, 0, 0), (m + 1, 0, 0)) for m in supported):
                     self.add("warn", "js.node.eol", src,
-                             f"{src} '{spec}' targets no supported Node release - confirm the server's Node version too",
-                             "widen or move the range to a supported LTS major")
+                             f"{src} '{spec}' targets no supported Node release - confirm the server's Node version too"
+                             + aside, "widen or move the range to a supported LTS major")
 
     # ---- Composer / PHP ----
     def php(self):
         c = self.composer
         if c is None:
             if (self.root / "composer.json").is_file():
-                self.add("error", "php.manifest.invalid", "composer.json", "composer.json is not valid JSON",
+                self.add("error", "php.manifest.invalid", "composer.json", "composer.json is not valid JSON, or not a JSON object",
                          "fix the JSON; `composer validate` shows where")
             return
         is_lib = str(c.get("type", "project")) not in ("project", "")
-        req = c.get("require") or {}
-        req_dev = c.get("require-dev") or {}
+        req = obj(c.get("require"))
+        req_dev = obj(c.get("require-dev"))
         pkgs = [n for n in list(req) + list(req_dev) if not COMPOSER_PLATFORM.match(n)]
         lock_p = self.root / "composer.lock"
         lock = read_json(lock_p) if lock_p.is_file() else None
@@ -933,7 +1543,7 @@ class Audit:
         # A composer.json that requires no packages (`{"name": ...}`, used to make a JS
         # asset repo installable through Composer) resolves nothing: PHP pins are noise.
         resolves = bool(pkgs)
-        platform = ((c.get("config") or {}).get("platform") or {}).get("php") if isinstance(c.get("config"), dict) else None
+        platform = obj(obj(c.get("config")).get("platform")).get("php")
         # WHY a project with config.platform.php gets a note, not a finding (Composer 2.10.3,
         # checked at the tag because getcomposer.org/doc is built from main): install and
         # update test the root require.php against the faked platform, not the real PHP
@@ -969,11 +1579,10 @@ class Audit:
 
         put("composer.json config.platform.php", platform)
         if isinstance(lock, dict):
-            po = (lock.get("platform-overrides") or {}).get("php") if isinstance(lock.get("platform-overrides"), dict) else None
-            put("composer.lock platform-overrides.php", po)
+            put("composer.lock platform-overrides.php", obj(lock.get("platform-overrides")).get("php"))
         if self.ddev is not None:
-            # An unset php_version is ddev-ops' finding (audit-ddev-config.py php-unpinned);
-            # here DDEV's PHP only feeds the agreement and end-of-life checks below.
+            # An unset or end-of-life php_version is ddev-ops' finding (audit-ddev-config.py
+            # php-unpinned, php-eol); here DDEV's PHP feeds the agreement check below.
             put(".ddev/config.yaml php_version", self.ddev.get("php_version"))
         # CI's setup-php versions join the agreement and end-of-life checks, not the
         # range-only check below, which asks what the repo itself admits.
@@ -994,31 +1603,32 @@ class Audit:
             self.add("warn", "php.pin.disagree", ", ".join(sorted(set(exact) | ({"composer.json require.php"} if php_req else set()))),
                      "PHP pins disagree - " + "; ".join(problems),
                      "set DDEV php_version and config.platform.php to production PHP; make require.php admit it")
-        rel_tbl = (self.facts.get("php") or {}).get("releases") or {}
-
         # Unknown branches (8.6 before the table learns it) are never called end-of-life.
-        ends = {tuple(map(int, k.split("."))): dt.date.fromisoformat(v["security_end"])
-                for k, v in rel_tbl.items()
-                if re.match(r"^\d+\.\d+$", k) and isinstance(v, dict) and v.get("security_end")}
-        dead = [(s, v) for s, v in exact.items() if v in ends and ends[v] < self.as_of]
+        ends = {tuple(map(int, str(k).split("."))): dt.date.fromisoformat(v["security_end"])
+                for k, v in obj(obj(self.facts.get("php")).get("releases")).items()
+                if re.match(r"^\d+\.\d+$", str(k)) and isinstance(v, dict) and v.get("security_end")}
+        # WHY DDEV's pin is left out of php.eol: ddev-ops owns it (see node_pins()).
+        ddev_dead = [v for s, v in exact.items() if s.startswith(".ddev/") and v in ends and ends[v] < self.as_of]
+        dead = [(s, v) for s, v in exact.items() if not s.startswith(".ddev/") and v in ends and ends[v] < self.as_of]
+        aside = (f"; DDEV's php_version {ddev_dead[0][0]}.{ddev_dead[0][1]} is end of life as well, which ddev-ops' "
+                 "audit-ddev-config reports" if ddev_dead else "")
         # WHY "the repo pins" and the server hint: see the same wording in node_pins().
         if dead:
             self.add("warn", "php.eol", dead[0][0],
                      "the repo pins end-of-life PHP: "
                      + ", ".join(f"{s}={v[0]}.{v[1]} (security support ended {ends[v]})" for s, v in dead)
-                     + " - confirm the server's PHP version too",
+                     + " - confirm the server's PHP version too" + aside,
                      "plan the PHP upgrade: `composer why-not php <target>` lists the blockers (references/legacy-exits.md)")
-        elif not repo_exact and php_req:
+        elif not any(not s.startswith(".ddev/") for s in repo_exact) and php_req:
             live = [v for v, end in ends.items() if end >= self.as_of]
             if live and not any(admits(str(php_req), (a, b, 0), (a, b + 1, 0), "composer") for a, b in live):
                 self.add("warn", "php.eol", "composer.json",
-                         f"require.php '{php_req}' targets no supported PHP release - confirm the server's PHP version too",
-                         "raise the constraint to a supported PHP (references/legacy-exits.md)")
+                         f"require.php '{php_req}' targets no supported PHP release - confirm the server's PHP version too"
+                         + aside, "raise the constraint to a supported PHP (references/legacy-exits.md)")
 
     # ---- npx / dlx / exec ----
     def npx(self):
         native = self.native
-        declared = set(self._declared()) if self.pkg else set()
         # The repo's own package name and declared bins: docs showing them are the
         # publisher's instructions to users, not a dependency of this repo.
         own = {str(self.pkg.get("name", ""))} if self.pkg else set()
@@ -1028,78 +1638,117 @@ class Audit:
         # An unreadable package.json hides which bins are local; guessing "remote" would
         # turn one js.manifest.invalid into a cascade of false npx.unpinned findings.
         locals_unknown = self.pkg is None and (self.root / "package.json").is_file()
+        local_bins = self._local_bins() if self.pkg else {}
+        provides = {b: p for p, bs in BIN_ALIASES.items() for b in bs if b != p}
         seen: set = set()
+
+        def parse(toks):
+            """A launcher's arguments -> (every -p/--package spec, the command word, refuses).
+            refuses: --no / --no-install, with which npx and bunx run a bin only if it is
+            already local, global or cached and never fetch one (references/npx-exec-safety.md)."""
+            pkgs, refuses, i = [], False, 0
+            while i < len(toks):
+                t = toks[i]
+                if t in ("-p", "--package"):
+                    if i + 1 < len(toks):
+                        pkgs.append(toks[i + 1])
+                    i += 2
+                elif t.startswith("--package="):
+                    pkgs.append(t.split("=", 1)[1])
+                    i += 1
+                elif t in ("--no", "--no-install"):
+                    refuses, i = True, i + 1
+                elif t in FLAG_WITH_VALUE:
+                    i += 2
+                elif t.startswith("-"):
+                    i += 1  # including `--`, which only ends the launcher's own options
+                else:
+                    return pkgs, t, refuses
+            return pkgs, None, refuses
 
         def inspect(file: str, line_no, text: str, in_script: bool):
             for m in LAUNCHER.finditer(text):
                 launcher = re.sub(r"\s+", " ", m.group(1))
-                toks = m.group(2).split()
-                pkg, i = None, 0
-                while i < len(toks):
-                    t = toks[i]
-                    if t == "--":
-                        i += 1
-                        continue
-                    if t in ("-p", "--package"):
-                        pkg = toks[i + 1] if i + 1 < len(toks) else None
-                        break
-                    if t.startswith("--package="):
-                        pkg = t.split("=", 1)[1]
-                        break
-                    if t in FLAG_WITH_VALUE:
-                        i += 2
-                        continue
-                    if t.startswith("-"):
-                        i += 1
-                        continue
-                    pkg = t
-                    break
-                if not pkg:
+                pkgs, cmd, refuses = parse(m.group(2).split())
+                if refuses and launcher in ("npx", "npm exec", "bunx", "bun x"):
                     continue
-                pkg = pkg.strip("'\"`),")
-                if pkg.endswith((".", ":", ";")):
-                    continue  # sentence punctuation: "...the pinned npx fallback." is prose
-                if not PKG_SPEC.match(pkg):
-                    continue  # prose like "npx is..." or a placeholder
-                base, ver = split_spec(pkg)
-                # Dedupe on the full spec: a pinned `x@1.2.3` must not hide a later bare `x`.
-                key = (file, pkg.lower())
-                if key in seen:
-                    continue
-                seen.add(key)
-                if base.lower() in native:
-                    self.add("error", "npx.native-cli", file,
-                             f"`{launcher} {pkg}` routes a native CLI through the npm registry - the npm name is not the tool's official channel",
-                             f"install {base} from its own channel (winget/brew/apt/cargo) and call it directly",
-                             line_no)
-                    continue
-                # `pkg@${VERSION}` / `pkg@$VERSION`: pinned by the variable, checked where it is set.
-                if EXACT_SEMVER.match(ver) or ver.startswith("$") or locals_unknown:
-                    continue
-                if base in declared:
-                    if in_script:
-                        self.note("npx.redundant", file, f"`{launcher} {base}` in a script: {base} is a local dependency; npm run already puts node_modules/.bin on PATH")
-                    continue
-                if base in own and not in_script:
-                    continue  # the repo documenting its own published package for its users
-                if len([f for f in self.findings if f["id"] == "npx.unpinned"]) >= self.limit:
-                    continue
-                # WHY "dist-tag", not "newest": a bare name resolves through the `latest`
-                # dist-tag (npm-pick-manifest, pnpm's `tag` setting, `yarn add`, bunx), and a
-                # release published under another tag never moves it. A range is no better
-                # described as "newest in range": npm-pick-manifest prefers `latest` when it fits.
-                if not ver:
-                    what = "runs whatever version the `latest` dist-tag names"
-                elif DIST_TAG.match(ver):
-                    what = f"runs whatever version the `{ver}` dist-tag names"
-                else:
-                    what = f"lets the registry pick any version in range '{ver}'"
-                self.add("warn", "npx.unpinned", file, f"`{launcher} {pkg}` {what} - not an exact version",
-                         f"add {base} as a devDependency, or pin it: {launcher} {base}@<exact version>",
+                # With -p the command word is a bin of those packages; without, it is the package.
+                for spec in pkgs or ([cmd] if cmd else []):
+                    check(file, line_no, launcher, spec, in_script, bin_word=not pkgs)
+
+        def check(file, line_no, launcher, pkg, in_script, bin_word):
+            pkg = pkg.strip("'\"`),")
+            if pkg.endswith((".", ":", ";")):
+                return  # sentence punctuation: "...the pinned npx fallback." is prose
+            if not PKG_SPEC.match(pkg):
+                return  # prose like "npx is...", a placeholder, a URL/git/file/alias spec
+            base, ver = split_spec(pkg)
+            # Dedupe on the full spec: a pinned `x@1.2.3` must not hide a later bare `x`.
+            key = (file, pkg.lower())
+            if key in seen:
+                return
+            seen.add(key)
+            if base.lower() in native:
+                self.add("error", "npx.native-cli", file,
+                         f"`{launcher} {pkg}` routes a native CLI through the npm registry - the npm name is not the tool's official channel",
+                         f"install {base} from its own channel (winget/brew/apt/cargo) and call it directly",
                          line_no)
+                return
+            # `pkg@${VERSION}` / `pkg@$VERSION`: pinned by the variable, checked where it is set.
+            if EXACT_SEMVER.match(ver) or ver.startswith("$") or locals_unknown:
+                return
+            # A bare command word runs a local bin when a declared package provides it (npx
+            # tsc with typescript installed); a requested version names the package itself.
+            local = local_bins.get(base) if (bin_word and not ver) else (base if base in local_bins.values() else None)
+            limited = len([f for f in self.findings if f["id"] == "npx.unpinned"]) >= self.limit
+            if local and not ver:
+                if in_script:
+                    self.note("npx.redundant", file, f"`{launcher} {base}` in a script: {local} is a local dependency; npm run already puts node_modules/.bin on PATH")
+                return
+            if local:
+                # WHY a declared package is exempt only when the local copy satisfies the
+                # request: npx compares the requested spec with the installed version and
+                # fetches on a miss, and resolves a dist-tag on the registry every time.
+                installed = self._installed(local)
+                tag = DIST_TAG.match(ver) is not None
+                if not tag:
+                    if installed is not None:
+                        if admits(ver, installed, (installed[0], installed[1], installed[2] + 1)) is not False:
+                            return
+                    else:
+                        decl = parse_range(self._declared()[local][1]) or []
+                        spans = [(max(iv[0] for iv in s), min(iv[1] for iv in s)) for s in decl]
+                        if not decl or any(admits(ver, lo, hi) is not False for lo, hi in spans if lo < hi):
+                            return  # unknown, or the declared range can satisfy it: don't accuse
+                if limited:
+                    return
+                what = (f"runs whatever version the `{ver}` dist-tag names, which the local {local} does not pin" if tag else
+                        f"asks for '{ver}', which the local {local} "
+                        + (f"({'.'.join(map(str, installed))}) " if installed else "") + "does not satisfy, so it fetches one")
+                self.add("warn", "npx.unpinned", file, f"`{launcher} {pkg}` {what}",
+                         f"drop @{ver} to run the local {local}, or pin it: {launcher} {base}@<exact version>", line_no)
+                return
+            if base in own and not in_script:
+                return  # the repo documenting its own published package for its users
+            if limited:
+                return
+            # WHY "dist-tag", not "newest": a bare name resolves through the `latest`
+            # dist-tag (npm-pick-manifest, pnpm's `tag` setting, `yarn add`, bunx), and a
+            # release published under another tag never moves it. A range is no better
+            # described as "newest in range": npm-pick-manifest prefers `latest` when it fits.
+            if not ver:
+                what = "runs whatever version the `latest` dist-tag names"
+            elif DIST_TAG.match(ver):
+                what = f"runs whatever version the `{ver}` dist-tag names"
+            else:
+                what = f"lets the registry pick any version in range '{ver}'"
+            owner = provides.get(base) if bin_word and not ver else None
+            fix = (f"add {owner} (it provides {base}) as a devDependency, or pin it: {launcher} -p {owner}@<exact version> {base}"
+                   if owner else f"add {base} as a devDependency, or pin it: {launcher} {base}@<exact version>")
+            self.add("warn", "npx.unpinned", file, f"`{launcher} {pkg}` {what} - not an exact version", fix, line_no)
 
         if self.pkg:
-            for name, cmd in (self.pkg.get("scripts") or {}).items():
+            for name, cmd in obj(self.pkg.get("scripts")).items():
                 inspect(f"package.json scripts.{name}", None, str(cmd), True)
         if not self.docs:
             return
@@ -1170,7 +1819,12 @@ class Audit:
                 hook = (self.root / loc).resolve()
                 if hook.is_file() and self.root in hook.parents:
                     files.append((hook, "deploy"))
-        writes: list[tuple[str, int, str]] = []
+        # Credential files CI writes: (file, line, name, repo-relative path or None when it
+        # lands outside the repo or cannot be placed), and `docker build`s: (file, line,
+        # context dir, Dockerfile path; None when unplaceable). _image_leaks() pairs them.
+        writes: list = []
+        builds: list = []
+        scopes: dict = {}
         seen: set = set()
 
         def flag(fid, rel, n, msg, fix, sev="warn"):
@@ -1185,56 +1839,124 @@ class Audit:
             ships = self._ship_scope(rel, kind, text)
             start_dir = self._start_dirs(rel, kind, text)
             every = list(code_lines(text, False))
-            # setup inputs (`tools: composer:v1`) are not commands, so Composer 1 is read
-            # from every line; installs and credential writes only from command keys. Outside
-            # YAML each line is its own block: a Jenkinsfile `sh` step is its own shell, and
-            # Dockerfile and hook-script directories are never placed (see _start_dirs).
-            commands = (list(yaml_command_lines(text)) if path.suffix in (".yml", ".yaml")
-                        else [(n, line, n) for n, line in every])
-            block, cwd, env = None, None, {}
+            # Commands as the shell receives them: YAML command keys only (a command quoted in
+            # a release body is text), Dockerfile RUN instructions, a Jenkinsfile's sh steps,
+            # and otherwise (appspec hook scripts) each line with continuations joined. Setup
+            # inputs (`tools: composer:v1`) are not commands, so Composer 1 is read from every
+            # line. Outside YAML each command is its own block: a Jenkinsfile `sh` step is its
+            # own shell, and Dockerfile and hook-script directories are never placed.
+            if path.suffix in (".yml", ".yaml"):
+                commands = list(yaml_command_lines(text))
+            elif path.name.lower().startswith("dockerfile"):
+                commands = [(n, c, n) for n, c in dockerfile_commands(text)]
+            elif path.name == "Jenkinsfile":
+                commands = [(n, c, n) for n, c in jenkins_commands(text)]
+            else:
+                commands = [(n, c, n) for n, c in _join_continued(list(enumerate(text.splitlines(), 1)))]
+            if ci:
+                scopes[rel] = self._job_scope(rel, text)
+            block, cwd, env, stack = None, None, {}, []
             for n, line in every:
                 if COMPOSER_V1.search(line):
-                    end = ((self.facts.get("composer") or {}).get("v1_maintenance_until")) or "2026-05-30"
+                    end = obj(self.facts.get("composer")).get("v1_maintenance_until") or "2026-05-30"
                     flag("php.composer.v1", rel, n, f"Composer 1 in {rel} - it reached end of life ({end})",
                          "use Composer 2 (`tools: composer:v2`, the composer:2 image); see references/legacy-exits.md")
             for n, line, key_n in commands:
-                m = CRED_WRITE.search(line) if ci else None
-                # ~/.npmrc, $HOME/... and absolute paths sit outside the build context.
-                if m and not re.match(r"(~|\$\{?HOME|/)", m.group(1)):
-                    writes.append((rel, n, m.group(2)))
-                elif ci and CRED_CONFIG.search(line):
-                    writes.append((rel, n, "auth.json"))
                 if key_n != block:
-                    block = key_n
+                    block, stack = key_n, []
                     cwd, env = start_dir(key_n)
-                # A `cd` moves the rest of its shell block; installs run where it left off.
-                # INSTALL_CMD never matches across ; or &&, so splitting there loses nothing.
-                for seg in re.split(r"&&|;", line):
-                    cd = re.match(r"^\s*cd\s+(\S+)\s*$", seg)
-                    if cd:
-                        cwd = join_dir(cwd, cd.group(1), env)
+                # A credential write is placed where its block's shell stands; ~/.npmrc,
+                # $HOME/..., absolute and ../ paths come back None (outside any context).
+                m = CRED_WRITE.search(line) if ci else None
+                if m:
+                    writes.append((rel, n, m.group(2), join_dir(cwd, m.group(1), env)))
+                elif ci and CRED_CONFIG.search(line):
+                    writes.append((rel, n, "auth.json", join_dir(cwd, "auth.json", env)))
+                # A `cd` moves the rest of its shell block (undone at the end of a subshell);
+                # installs and builds run where it left off.
+                for words in simple_commands(line):
+                    if words == ["("]:
+                        stack.append(cwd)
                         continue
-                    for m in INSTALL_CMD.finditer(seg):
-                        self._install_line(m.group(1), m.group(2).split(), rel, n, kind, ships(n), cwd, flag)
+                    if words == [")"]:
+                        cwd = stack.pop() if stack else cwd
+                        continue
+                    if words[0] in ("cd", "pushd") and len(words) == 2:
+                        cwd = join_dir(cwd, words[1], env)
+                        continue
+                    built = docker_build(words) if ci else None
+                    if built:
+                        ctx = join_dir(cwd, built[0], env)
+                        dfile = (join_dir(cwd, built[1], env) if built[1]
+                                 else posixpath.join(ctx, "Dockerfile") if ctx is not None else None)
+                        builds.append((rel, n, ctx, dfile))
+                    for tool, args in command_tools(words):
+                        self._install_line(tool, args, rel, n, kind, ships(n), cwd, flag, env)
             if ci:
                 self._ramsey(text, rel, ships, flag)
-        if writes:
-            copies = [p.name for p in dockerfiles if any(COPY_CONTEXT.match(l) for l in (read_text(p) or "").splitlines())]
-            ignore = [l.strip() for l in (read_text(self.root / ".dockerignore") or "").splitlines()
-                      if l.strip() and not l.strip().startswith("#")]
-            def base_pat(pat):  # "/auth.json", "**/auth.json" -> "auth.json" (no str.removeprefix: 3.8)
-                pat = pat.lstrip("/")
-                return pat[3:] if pat.startswith("**/") else pat
+                builds += self._action_builds(rel, text, start_dir)
+        self._image_leaks(writes, builds, scopes, flag)
 
-            for rel, n, cred in writes:
-                excluded = any(not pat.startswith("!") and fnmatch.fnmatch(cred, base_pat(pat))
-                               for pat in ignore) and f"!{cred}" not in ignore and f"!/{cred}" not in ignore
-                if copies and not excluded:
-                    flag("registry.credentials.image", rel, n,
-                         f"CI writes {cred} into the Docker build context, {copies[0]} copies the whole context "
-                         f"and .dockerignore does not exclude it - the credentials ship inside the image",
-                         f"pass the credential as a step env (COMPOSER_AUTH / NODE_AUTH_TOKEN) instead of a file, "
-                         f"add {cred} to .dockerignore, and rotate credentials already pushed in images", "error")
+    def _job_scope(self, rel, text):
+        """line -> the GitHub Actions job holding it (its first line), or 0 for a file judged
+        whole. Same split as _ship_scope: GitHub jobs share files only through artifacts,
+        while GitLab and Bitbucket hand every earlier artifact to later jobs by default."""
+        jobs = workflow_jobs(text) if rel.startswith(".github/workflows/") else None
+        if not jobs:
+            return lambda _n: 0
+        return lambda n: next((a for a, b in jobs if a <= n <= b), -n)
+
+    def _action_builds(self, rel, text, start_dir):
+        """docker/build-push-action steps -> builds, like a `docker build` line. Its default
+        context is the Git context (the commit fetched again, not the runner's workspace;
+        github.com/docker/build-push-action "Git context"), so a file an earlier step wrote
+        reaches the image only when `context:` names a path."""
+        lines, out = text.splitlines(), []
+        for i, line in enumerate(lines):
+            if not re.search(r"uses:\s*[\"']?docker/build-push-action@", line):
+                continue
+            item = enclosing_item(lines, i)
+            ctx = item_value(lines, item, "context") if item else None
+            if ctx is None or "://" in ctx:
+                continue
+            env = start_dir(i + 1)[1]
+            c = join_dir("", ctx, env)
+            f = item_value(lines, item, "file")
+            out.append((rel, i + 1, c, join_dir("", f, env) if f else
+                        (posixpath.join(c, "Dockerfile") if c is not None else None)))
+        return out
+
+    def _image_leaks(self, writes, builds, scopes, flag):
+        """registry.credentials.image: CI writes a credential file and a LATER build in the
+        same job (same file outside GitHub) has it inside its context, uses a Dockerfile
+        that copies the whole context, and has no .dockerignore line excluding it.
+
+        WHY each link (each one a false finding seen in review): a job's files exist only
+        on its own runner; a path outside the context (../.npmrc, ~/.npmrc) never reaches
+        the daemon; `COPY --from=<stage> .` reads another stage; .dockerignore is matched
+        on the path inside the context, root-anchored, last match winning (dockerignored()),
+        and Docker prefers <Dockerfile>.dockerignore next to the Dockerfile (BuildKit)."""
+        for rel, n, cred, path in writes:
+            if path is None:
+                continue
+            scope = scopes.get(rel, lambda _n: 0)
+            for brel, bn, ctx, dfile in builds:
+                if brel != rel or bn <= n or ctx is None or dfile is None or scope(bn) != scope(n):
+                    continue
+                inside = path if ctx == "" else (path[len(ctx) + 1:] if path.startswith(ctx + "/") else None)
+                df = self.root / dfile
+                if inside is None or not df.is_file() or not copies_context(read_text(df)):
+                    continue
+                ign = self.root / (dfile + ".dockerignore")
+                ign = ign if ign.is_file() else self.root / ctx / ".dockerignore"
+                if dockerignored((read_text(ign) or "").splitlines() if ign.is_file() else [], inside):
+                    continue
+                flag("registry.credentials.image", rel, n,
+                     f"CI writes {cred} into the Docker build context ({path}), the build at line {bn} copies the "
+                     f"whole context ({dfile}) and .dockerignore does not exclude it - the credentials ship inside the image",
+                     f"pass the credential as a step env (COMPOSER_AUTH / NODE_AUTH_TOKEN) instead of a file, "
+                     f"add {inside} to .dockerignore, and rotate credentials already pushed in images", "error")
+                break
 
     def _ship_scope(self, rel, kind, text):
         """line number -> does what that line installs ship? Only deploy.composer.dev asks.
@@ -1288,16 +2010,13 @@ class Audit:
             return lambda _k: ("", {})
         lines = text.splitlines()
         doc = mini_yaml(text)
-
-        def mapping(v) -> dict:
-            return v if isinstance(v, dict) else {}
-        top_env, job_cfg = mapping(doc.get("env")), mapping(doc.get("jobs"))
+        top_env, job_cfg = obj(doc.get("env")), obj(doc.get("jobs"))
         jobs = workflow_jobs(text) or []
 
         def start(k):
             name = next((lines[a - 1].strip().rstrip(":").strip("'\"") for a, b in jobs if a <= k <= b), None)
-            job = mapping(job_cfg.get(name))
-            env = {**top_env, **mapping(job.get("env"))}
+            job = obj(job_cfg.get(name))
+            env = {**top_env, **obj(job.get("env"))}
             item = enclosing_item(lines, k - 1)
             wd = item_value(lines, item, "working-directory") if item else None
             if wd is None:
@@ -1338,10 +2057,64 @@ class Audit:
         pm = str(pkg.get("packageManager") or "") if isinstance(pkg, dict) else ""
         return "__metadata:" in lock[:2000] or bool(re.match(r"yarn@[2-9]", pm))
 
-    def _install_line(self, tool, toks, rel, n, kind, ships, cwd, flag):
+    def _lock_root(self, d, family):
+        """The package root (repo-relative) whose lockfile an install in d uses: d when it has
+        one, else the nearest enclosing npm / Yarn / pnpm workspace root that lists d as a
+        member and has a lockfile, else None. WHY: a workspace member shares the root's
+        lockfile (npm and Yarn always; pnpm unless sharedWorkspaceLockfile is false), so
+        asking it for its own reported every monorepo app as unlocked. Composer has no
+        workspaces: a path repository keeps its own composer.lock."""
+        locks = ("composer.lock",) if family == "php" else tuple(JS_LOCKFILES)
+        has = lambda x: any((self.root / x / f).is_file() for f in locks)  # noqa: E731
+        if has(d):
+            return d
+        parts = d.split("/") if d and family == "js" else []
+        for k in range(len(parts) - 1, -1, -1):
+            anc, member = "/".join(parts[:k]), "/".join(parts[k:])
+            if has(anc) and self._workspace_member(anc, member):
+                return anc
+        return None
+
+    def _workspace_member(self, anc, member):
+        """Does the workspace rooted at anc list member (a path relative to anc)? pnpm reads
+        pnpm-workspace.yaml `packages:`; npm and Yarn read package.json `workspaces` (a list,
+        or {packages: [...]}). Globs as in those files, a leading ! excluding."""
+        root = self.root / anc
+
+        def listed(pats):
+            hit = lambda p: bool(glob_rx(re.sub(r"^\./", "", p.strip()).rstrip("/")).match(member))  # noqa: E731
+            pats = [p for p in pats if isinstance(p, str)]
+            return (any(hit(p) for p in pats if not p.startswith("!"))
+                    and not any(hit(p[1:]) for p in pats if p.startswith("!")))
+
+        ws = root / "pnpm-workspace.yaml"
+        if ws.is_file():
+            text = read_text(ws) or ""
+            shared = not re.search(r"^sharedWorkspaceLockfile\s*:\s*['\"]?false\b", text, re.M) and not re.search(
+                r"^\s*shared-workspace-lockfile\s*=\s*false\b", read_text(root / ".npmrc") or "", re.M)
+            if shared and listed(yaml_list(text, "packages")):
+                return True
+        w = obj(read_json(root / "package.json") if (root / "package.json").is_file() else None).get("workspaces")
+        w = w if isinstance(w, list) else obj(w).get("packages")
+        return isinstance(w, list) and listed(w)
+
+    def _yarn_immutable_off(self, d):
+        """Does Yarn 2+'s config turn CI's immutable default off for package root d?
+        `enableImmutableInstalls: false` in a .yarnrc.yml there or in a parent (Yarn merges
+        them, the nearest winning; yarnpkg.com/configuration/yarnrc#enableImmutableInstalls)."""
+        parts = d.split("/") if d else []
+        for k in range(len(parts), -1, -1):
+            f = self.root.joinpath(*parts[:k], ".yarnrc.yml")
+            m = re.search(r"^enableImmutableInstalls\s*:\s*(\S+)", read_text(f) or "", re.M) if f.is_file() else None
+            if m:
+                return scalar(m.group(1)).lower() == "false"
+        return False
+
+    def _install_line(self, tool, toks, rel, n, kind, ships, cwd, flag, env=None):
         """One package-manager invocation from a CI/deploy line -> findings. `ships`: this
         line's install ends up in what is deployed (see _ship_scope). `cwd`: the package
-        root it runs in, repo-relative ("" = the root, None = unknown; see _start_dirs)."""
+        root it runs in, repo-relative ("" = the root, None = unknown; see _start_dirs),
+        moved by the tool's own --prefix / --dir / --cwd / --working-dir (cli_parts)."""
         # WHY deploy.install.unfrozen ignores `ships` (every CI job, not only shipping ones):
         # the managers document the frozen install for CI as a whole - npm ci is "meant to
         # be used in automated environments such as test platforms, continuous integration,
@@ -1352,33 +2125,37 @@ class Audit:
         unfrozen = "deploy.install.unfrozen"
         fix = "use the frozen install: npm ci / yarn install --immutable / pnpm install --frozen-lockfile / " \
               "bun ci / composer install (references/install-semantics.md)"
-        sub = toks[0] if toks else ""
+        sub, idx, moved = cli_parts(tool, toks)
+        if moved is not None:
+            cwd = join_dir(cwd, moved, env or {})
         where = f" (in {cwd}/)" if cwd else ""
         if any(t in ("-v", "--version", "-h", "--help") for t in toks):
             return
         if any(t in LOCK_ONLY or t == "--no-install" for t in toks):
             return  # a deliberate lockfile refresh (version-bump or dependency-bot job)
-        if tool == "npm" and sub in NPM_INSTALL and any(
+        if tool == "npm" and idx is not None and sub in NPM_INSTALL and any(
                 t in ("-g", "--global") or t.startswith("--location=global") for t in toks):
-            self._global_install(sub, toks, rel, n, flag)  # a tool install: never the project's lockfile
+            # a tool install: never the project's lockfile
+            self._global_install(sub, toks[:idx] + toks[idx + 1:], rel, n, flag)
             return
-        family = "php" if tool.startswith("composer") else "js"
-        installs = {"npm": sub in NPM_INSTALL + NPM_CI, "yarn": not toks or sub == "install" or sub.startswith("-"),
+        family = "php" if tool == "composer" else "js"
+        installs = {"npm": sub in NPM_INSTALL + NPM_CI, "yarn": sub in ("", "install"),
                     "pnpm": sub in ("install", "i", "ci"), "bun": sub in ("install", "i", "ci")
                     }.get(tool, sub in ("install", "i"))
+        lock_root = self._lock_root(cwd, family) if cwd is not None else None
         if installs:
             self.installs.append({"family": family, "manager": "composer" if family == "php" else tool, "cwd": cwd,
                                   "kind": kind, "file": rel, "line": n, "cmd": " ".join([tool] + toks[:3])})
             manifest = "composer.json" if family == "php" else "package.json"
-            locks = ("composer.lock",) if family == "php" else tuple(JS_LOCKFILES)
             pdir = self.root / cwd if cwd else None
             # WHY nested only: a root without its lockfile is already js/php.lockfile.missing.
             # Supersedes unfrozen: with no lockfile there, "use npm ci" would fail too.
-            if pdir and (pdir / manifest).is_file() and not any((pdir / f).is_file() for f in locks):
+            if pdir and (pdir / manifest).is_file() and lock_root is None:
                 what = ("npm ci fails without one" if tool == "npm" and sub in NPM_CI
                         else "every run resolves its dependencies fresh")
                 flag("deploy.install.unlocked", rel, n,
-                     f"`{' '.join([tool] + toks[:1])}` in {rel} runs in {cwd}/, which has a {manifest} but no lockfile - {what}",
+                     f"`{' '.join([tool] + ([sub] if sub else []))}` in {rel} runs in {cwd}/, which has a {manifest} but "
+                     f"no lockfile - {what}",
                      f"install once in {cwd}/ with the repo's manager, commit the lockfile, then use the frozen install there "
                      "(references/install-semantics.md#the-one-table)")
                 return
@@ -1399,17 +2176,22 @@ class Audit:
                 # Bare or `npm install <pkg>`: both resolve and can rewrite the lockfile.
                 flag(unfrozen, rel, n, f"`npm {sub}` in {rel}{where} can rewrite the lockfile and resolve new versions", fix)
         elif tool == "yarn" and installs:
-            frozen = any(t in ("--frozen-lockfile", "--immutable") for t in toks) or (ci and self._berry(cwd or ""))
+            # Yarn 2+ freezes by itself on CI unless --no-immutable or its own config says not to.
+            home = lock_root if lock_root is not None else (cwd or "")
+            off = self._yarn_immutable_off(home) or "--no-immutable" in toks
+            frozen = any(t in ("--frozen-lockfile", "--immutable") for t in toks) or (ci and self._berry(home) and not off)
             if not frozen:
                 cmd = ("yarn " + " ".join(toks[:2])).strip()
-                flag(unfrozen, rel, n, f"`{cmd}` in {rel}{where} without --frozen-lockfile/--immutable", fix)
+                why = (" - .yarnrc.yml sets enableImmutableInstalls: false, so CI does not freeze it"
+                       if self._yarn_immutable_off(home) and self._berry(home) else "")
+                flag(unfrozen, rel, n, f"`{cmd}` in {rel}{where} without --frozen-lockfile/--immutable{why}", fix)
         elif tool == "pnpm" and sub in ("install", "i"):
             if "--no-frozen-lockfile" in toks or (not ci and "--frozen-lockfile" not in toks):
                 flag(unfrozen, rel, n, f"`pnpm {sub}` in {rel}{where} is not frozen here (pnpm freezes by default only on CI)", fix)
         elif tool == "bun" and sub in ("install", "i"):
             if not any(t in ("--frozen-lockfile", "--production") for t in toks):
                 flag(unfrozen, rel, n, f"`bun {sub}` in {rel}{where} without --frozen-lockfile (Bun never freezes on its own)", fix)
-        elif tool.startswith("composer"):
+        elif tool == "composer":
             if sub in ("update", "u", "upgrade", "require", "remove"):
                 flag(unfrozen, rel, n, f"`composer {sub}` in {rel}{where} resolves new versions instead of installing the lock", fix)
             elif sub in ("install", "i") and ships and "--no-dev" not in toks:
@@ -1421,9 +2203,10 @@ class Audit:
         alone (so deploy.install.unfrozen rightly skips it), but each run installs whatever
         is newest for that spec - the exposure of an unpinned npx, with the same checks: an
         exact version or a $VARIABLE pin passes and a native CLI is npx.native-cli. PKG_SPEC
-        already rejects paths, tarballs, URLs and git specs, which are not registry fetches."""
+        rejects paths, tarball URLs (with or without credentials in them), git and alias
+        specs, which are not registry fetches. toks: every argument but the subcommand."""
         pkgs, skip = [], False
-        for t in toks[1:]:
+        for t in toks:
             if skip or t in GLOBAL_FLAG_WITH_VALUE:
                 skip = not skip  # the flag's value is not a package
                 continue
@@ -1489,12 +2272,25 @@ class Audit:
                 if line.lstrip().startswith(("#", ";")):
                     continue
                 m = re.search(pat, line)
-                if m and not m.group(2).strip("'\"").startswith("${"):
+                value = m.group(2).strip().strip("'\"") if m else ""
+                # An empty value (`_authToken=""`) holds no token, and ${...} is a reference.
+                if m and value and not value.startswith("${"):
                     self.add("error", "registry.token.committed", f, f"literal {m.group(1)} on line {n} (value not shown)",
                              "revoke the token, replace it with an env reference like ${NPM_TOKEN}", n)
         if (self.root / "auth.json").is_file():
-            ignored = re.search(r"^/?auth\.json\s*$", read_text(self.root / ".gitignore") or "", re.M)
-            if ignored:
+            # WHY git decides when it can: a tracked file is committed whatever .gitignore
+            # says, and git knows every ignore source (.git/info/exclude, the global
+            # excludesFile). Outside a work tree (an export, a test fixture) the root
+            # .gitignore is matched with git's own rules (gitignored()).
+            tracked = git_says(self.root, "ls-files", "--error-unmatch", "--", "auth.json")
+            ignored = git_says(self.root, "check-ignore", "-q", "--", "auth.json") if tracked != 0 else 1
+            if ignored is None:
+                ignored = 0 if gitignored((read_text(self.root / ".gitignore") or "").splitlines(), "auth.json") else 1
+            if tracked == 0:
+                self.add("error", "registry.authjson.committed", "auth.json",
+                         "Composer auth.json at the repo root is tracked by git, so it is committed even if .gitignore lists it",
+                         "revoke the credentials, `git rm --cached auth.json`, gitignore it, use COMPOSER_AUTH in CI")
+            elif ignored == 0:
                 self.note("registry.authjson.ignored", "auth.json", "auth.json present but gitignored (good)")
             else:
                 self.add("error", "registry.authjson.committed", "auth.json",
@@ -1537,20 +2333,52 @@ class Audit:
 
 
 def load_facts(path: Path) -> dict:
+    """The facts catalogue, shape-checked: a JSON object with the facts/v1 schema whose
+    sections the audit reads (node, php, composer, native_cli_names, and the two release
+    tables) are objects. Exit 3 when missing or unreadable, 4 when not that shape."""
     if not path.is_file():
         print(f"error: facts file not found: {path}", file=sys.stderr)
         raise SystemExit(EX_NOTFOUND)
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8-sig")
+    except OSError as exc:
+        print(f"error: cannot read facts {path}: {exc}", file=sys.stderr)
+        raise SystemExit(EX_NOTFOUND)
+    try:
+        data = json.loads(text)
+        if not isinstance(data, dict):
+            raise ValueError(f"top level is {type(data).__name__}, not an object")
         if data.get("schema") != FACTS_SCHEMA:
             raise ValueError(f"schema {data.get('schema')!r} != {FACTS_SCHEMA!r}")
+        for key in ("node", "php", "composer", "native_cli_names"):
+            if key in data and not isinstance(data[key], dict):
+                raise ValueError(f"{key} must be an object")
+        for key in ("node", "php"):
+            if "releases" in obj(data.get(key)) and not isinstance(data[key]["releases"], dict):
+                raise ValueError(f"{key}.releases must be an object")
         return data
     except (json.JSONDecodeError, ValueError) as exc:
         print(f"error: could not parse facts {path}: {exc}", file=sys.stderr)
         raise SystemExit(EX_UNPARSEABLE)
 
 
+def safe_streams():
+    """WHY: stdout piped on Windows defaults to the ANSI code page (cp1252), and one finding
+    naming a non-ASCII file raised UnicodeEncodeError halfway through the report. stdout
+    is data, so it is UTF-8 always; stderr keeps the console's encoding but escapes what it
+    cannot encode. Streams a caller replaced (io.StringIO) have no reconfigure."""
+    for stream, kw in ((sys.stdout, {"encoding": "utf-8", "errors": "backslashreplace"}),
+                       (sys.stderr, {"errors": "backslashreplace"})):
+        reconfigure = getattr(stream, "reconfigure", None)
+        try:
+            if reconfigure:
+                reconfigure(**kw)
+        except ValueError:
+            pass
+
+
 def main(argv: list[str]) -> int:
+    safe_streams()
     p = argparse.ArgumentParser(
         prog="pm-audit.py",
         description="Read-only package-manager audit of a repo root (lockfiles, Node/PHP pins, npx, legacy tools).",

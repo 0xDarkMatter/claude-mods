@@ -29,11 +29,16 @@ package roots that carry their own lockfile, so run it again on each of those.
 It also reads CI configs (`.github/workflows/`, `.gitlab-ci.yml`, `bitbucket-pipelines.yml`,
 `buildspec*.yml` and similar), Dockerfiles and AWS CodeDeploy `appspec.yml` hook scripts. In
 YAML only command keys (`run:`, `script:`, `commands:`) count, so a command quoted in a
-release body is not read as one. Lockfile-only refreshes (`--package-lock-only`,
+release body is not read as one. Commands are read as the shell gets them: quoted and
+folded (`>-`) YAML scalars, backslash continuations (in Dockerfile `RUN` too) and a
+Jenkinsfile's `sh` strings. An install counts only as the command word, so
+`echo "npm install"` is text. Lockfile-only refreshes (`--package-lock-only`,
 `--lockfile-only`, `composer update --lock`) are maintenance and pass. Each CI install is
 placed in the package root it runs in: a literal `working-directory:` (the step's, else
-the job's `defaults.run`), `${{ env.X }}` from the workflow or job `env:`, and `cd`
-within one command block. A matrix path or any other expression leaves it unplaced. A
+the job's `defaults.run`), `${{ env.X }}` from the workflow or job `env:`, `cd` within
+one command block, and the tool's own `--prefix` / `--dir` / `--cwd` / `--working-dir`.
+A matrix path or any other expression leaves it unplaced. A workspace member (npm or Yarn
+`workspaces`, `pnpm-workspace.yaml`) installs from its workspace root's lockfile. A
 literal `node-version` given to actions/setup-node and `php-version` given to
 shivammathur/setup-php count as pins for the agreement and end-of-life checks.
 
@@ -62,29 +67,29 @@ only where `vendor/` ships:
 | `js.lockfile.shrinkwrap` | warn | only `npm-shrinkwrap.json`, which npm 12 ignores | [detect-and-choose.md](detect-and-choose.md#lockfile-to-manager) |
 | `js.pnpm.field-ignored` | warn | a `pnpm` field pnpm 11+ no longer reads | [scripts-and-workspaces.md](scripts-and-workspaces.md#pnpm-settings-moved-to-pnpm-workspaceyaml) |
 | `js.packagemanager.mismatch` | error | `packageManager` names a manager (or Yarn flavour) the lockfile is not from | [detect-and-choose.md](detect-and-choose.md#declaring-the-manager-packagemanager-corepack-devengines) |
-| `js.manifest.invalid` | error | package.json is not valid JSON | - |
+| `js.manifest.invalid` | error | package.json is not valid JSON, or not a JSON object | - |
 | `js.node.unpinned` | warn | nothing pins Node | [version-pinning.md](version-pinning.md#the-recommended-node-pin-set) |
-| `js.node.eol` | warn | a Node the repo pins (or the only one it admits) is end of life; the server's own Node is not in the repo, so confirm it | [legacy-exits.md](legacy-exits.md#end-of-life-node) |
+| `js.node.eol` | warn | a Node the repo pins (or the only one it admits) is end of life; the server's own Node is not in the repo, so confirm it. DDEV's `nodejs_version` alone never raises it: that is `ddev-ops`' finding | [legacy-exits.md](legacy-exits.md#end-of-life-node) |
 | `node.pin.disagree` | warn | `.nvmrc`, `engines`, `devEngines`, DDEV, CI's setup-node and friends name different majors | [version-pinning.md](version-pinning.md#what-reads-which-node-pin) |
 | `ddev.node.unpinned` | warn | DDEV has no `nodejs_version`, so it follows DDEV's default | [version-pinning.md](version-pinning.md#the-recommended-node-pin-set); values in `ddev-ops` |
-| `php.manifest.invalid` | error | composer.json is not valid JSON | `composer validate` |
+| `php.manifest.invalid` | error | composer.json is not valid JSON, or not a JSON object | `composer validate` |
 | `php.require.missing` | warn | no `require.php` in a library, or in a project without `config.platform.php` (with the platform pin it is only a note) | [version-pinning.md](version-pinning.md#the-three-php-pins-and-what-each-means) |
 | `php.platform.unset` | warn | no `config.platform.php` in a project | [version-pinning.md](version-pinning.md#the-three-php-pins-and-what-each-means) |
-| `php.pin.disagree` | warn | DDEV `php_version`, `config.platform.php`, the lock's platform override, CI's setup-php and `require.php` disagree | [version-pinning.md](version-pinning.md#the-three-php-pins-and-what-each-means) |
-| `php.eol` | warn | a PHP the repo pins (or the only one it admits) is past security support; confirm the server's own PHP | [legacy-exits.md](legacy-exits.md#end-of-life-php) |
+| `php.pin.disagree` | warn | DDEV `php_version`, `config.platform.php`, the lock's platform override, CI's setup-php and `require.php` disagree (`require.php` read as Composer reads it: `>8.2` admits 8.2.1, `!=` excludes one version) | [version-pinning.md](version-pinning.md#the-three-php-pins-and-what-each-means) |
+| `php.eol` | warn | a PHP the repo pins (or the only one it admits) is past security support; confirm the server's own PHP. DDEV's `php_version` alone never raises it: that is `ddev-ops`' finding | [legacy-exits.md](legacy-exits.md#end-of-life-php) |
 | `php.lockfile.missing` | warn | a project with packages but no `composer.lock` | [install-semantics.md](install-semantics.md#composer-install-versus-composer-update) |
 | `php.lockfile.stale` | warn | `composer.json` requires packages the lock lacks, judged as Composer does: a locked package's `replace` or `provide` meets a requirement, and `require` is met only from `packages` | [install-semantics.md](install-semantics.md#composer-install-versus-composer-update) |
-| `npx.unpinned` | warn | `npx`/`dlx`/`bunx` of an unpinned, undeclared package | [npx-exec-safety.md](npx-exec-safety.md#the-rules) |
+| `npx.unpinned` | warn | `npx`/`dlx`/`bunx` of an unpinned, undeclared package (every `-p` counts; a bin a declared package provides, like `tsc`, is local), or of a declared one at a dist-tag or a range its installed version misses. `--no`/`--no-install` never fetch, so never fire | [npx-exec-safety.md](npx-exec-safety.md#the-rules) |
 | `npx.native-cli` | error | a native CLI (rg, fd, sd, jq...) through npx, or a global npm install of one in CI | [npx-exec-safety.md](npx-exec-safety.md#never-route-a-native-cli-through-npx) |
 | `legacy.bower` | warn | `bower.json` or `.bowerrc` | [legacy-exits.md](legacy-exits.md#bower-to-npm) |
 | `legacy.node-sass` | warn | node-sass in package.json | [legacy-exits.md](legacy-exits.md#node-sass-to-dart-sass) |
-| `registry.token.committed` | error | a literal token in `.npmrc` or `.yarnrc.yml` | [registries-and-auth.md](registries-and-auth.md#when-a-token-was-committed) |
-| `registry.authjson.committed` | error | a root `auth.json` that is not gitignored | [registries-and-auth.md](registries-and-auth.md#when-a-token-was-committed) |
-| `registry.credentials.image` | error | CI writes `auth.json` or `.npmrc` into the build context, a Dockerfile copies the whole context, `.dockerignore` lets it through | [registries-and-auth.md](registries-and-auth.md#ci-wiring) |
+| `registry.token.committed` | error | a literal, non-empty token in `.npmrc` or `.yarnrc.yml` | [registries-and-auth.md](registries-and-auth.md#when-a-token-was-committed) |
+| `registry.authjson.committed` | error | a root `auth.json` that git tracks, or that is not ignored (git decides; without git, the root `.gitignore` by git's rules: `**/`, `!`, last match wins) | [registries-and-auth.md](registries-and-auth.md#when-a-token-was-committed) |
+| `registry.credentials.image` | error | CI writes `auth.json` or `.npmrc` inside the context of a later `docker build` in the same job, its Dockerfile copies the whole context (not `COPY --from`), and `.dockerignore` (root-anchored, last match wins) lets it through | [registries-and-auth.md](registries-and-auth.md#ci-wiring) |
 | `registry.pnpm.placeholder-ignored` | warn | a pnpm repo's project `.npmrc` has a `${...}` in a registry, proxy or auth setting, which pnpm 11.5.3+ (and 10.34.2+) ignores with only a warning | [registries-and-auth.md](registries-and-auth.md#pnpm-no-placeholders-in-the-project-npmrc) |
 | `js.manager.mixed` | warn | nested package roots use a different manager than the root | [detect-and-choose.md](detect-and-choose.md#two-lockfiles-pick-one) |
-| `deploy.install.unfrozen` | warn | CI or a deploy runs `npm install`, a non-frozen Yarn/pnpm/Bun install, or `composer update`/`require`; names the nested root it runs in | [install-semantics.md](install-semantics.md#the-one-table) |
-| `deploy.install.unlocked` | warn | CI installs in a nested folder that has a `package.json` or `composer.json` but no lockfile, so every run resolves fresh | [install-semantics.md](install-semantics.md#the-one-table) |
+| `deploy.install.unfrozen` | warn | CI or a deploy runs `npm install`, a non-frozen Yarn/pnpm/Bun install (Yarn 2+ counts as frozen on CI unless `.yarnrc.yml` sets `enableImmutableInstalls: false`), or `composer update`/`require`; names the nested root it runs in | [install-semantics.md](install-semantics.md#the-one-table) |
+| `deploy.install.unlocked` | warn | CI installs in a nested folder that has a `package.json` or `composer.json` but no lockfile, and no workspace root's lockfile covers it, so every run resolves fresh | [install-semantics.md](install-semantics.md#the-one-table) |
 | `deploy.npm.yarn-flag` | error | a Yarn flag (`--frozen-lockfile`, `--immutable`) on `npm ci` or `npm install`: npm 12 refuses the command | [install-semantics.md](install-semantics.md#npm-ci-versus-npm-install) |
 | `deploy.global.unpinned` | warn | `npm install -g <pkg>` in CI or a deploy without an exact version | [npx-exec-safety.md](npx-exec-safety.md#the-rules) |
 | `deploy.composer.dev` | warn | `composer install` without `--no-dev` where `vendor/` ships: a Dockerfile, an appspec hook, a shipping GitHub Actions job, or another CI file that ships | [install-semantics.md](install-semantics.md#deploy-patterns) |
@@ -96,7 +101,9 @@ The end-of-life checks read dated tables from `assets/package-manager-facts.json
 DDEV's own configuration (an unpinned `php_version` or database, values DDEV no longer
 ships, committed Mutagen or router ports) is audited by `ddev-ops`'
 `audit-ddev-config.py`. pm-audit reads DDEV's PHP and Node only to check that they agree
-with the repo's other pins, so the two audits never report the same fact.
+with the repo's other pins. An end-of-life DDEV pin is `ddev-ops`' finding: `php.eol` and
+`js.node.eol` list the repo's own end-of-life pins and only point at DDEV's, so the two
+audits never report the same fact.
 
 ## Auditing many repos
 
