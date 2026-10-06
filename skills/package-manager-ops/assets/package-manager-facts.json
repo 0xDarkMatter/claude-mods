@@ -65,10 +65,12 @@
     "volta_unmaintained": {"url": "https://raw.githubusercontent.com/volta-cli/volta/main/README.md", "contains": "unmaintained"},
     "node_sass_eol":      {"url": "https://raw.githubusercontent.com/sass/node-sass/master/README.md", "contains": "end of life"},
     "yarn1_security_only": {"url": "https://raw.githubusercontent.com/yarnpkg/yarn/master/README.md", "contains": "only accept security fixes"},
-    "bower_recommends_alternatives": {"url": "https://bower.io/", "contains": "we recommend"}
+    "bower_recommends_alternatives": {"url": "https://bower.io/", "contains": "we recommend"},
+    "pnpm_npmrc_placeholders_ignored": {"url": "https://raw.githubusercontent.com/pnpm/pnpm.io/main/docs/npmrc.md", "contains": "placeholder in any of these positions is ignored"},
+    "packagist_composer1_shutdown": {"url": "https://repo.packagist.org/packages.json", "contains": "shutdown on September 1st 2025"}
   },
   "dated_facts": {
-    "_comment": "Point-in-time facts the prose must state verbatim; --offline fails if a token disappears from SKILL.md/references.",
+    "_comment": "Point-in-time facts the prose must state verbatim; --offline fails if a token disappears from SKILL.md/references. The pnpm_npmrc_* and packagist_* entries were verified 2026-10-06 against the pnpm v11.5.3 and v10.34.2 releases, pnpm.io/npmrc and Packagist's shutdown notice; pm-audit's registry.pnpm.placeholder-ignored message names the same versions, so change both together.",
     "corepack_unbundled_node": "25.0.0",
     "devengines_npm": "10.9.0",
     "composer_latest": "2.10.3",
@@ -81,7 +83,11 @@
     "bun_text_lockfile": "bun.lock",
     "ddev_node_auto": "nodejs_version: auto",
     "composer_why_not": "composer why-not php",
-    "composer_v1_end": "2026-05-30"
+    "composer_v1_end": "2026-05-30",
+    "pnpm_npmrc_placeholder_fix": "11.5.3",
+    "pnpm_npmrc_placeholder_backport": "10.34.2",
+    "pnpm_npmrc_placeholder_date": "2026-06-10",
+    "packagist_composer1_shutdown": "2025-09-01"
   },
   "composer": {
     "_comment": "From https://getcomposer.org/versions: the '1' channel is marked eol with maintenance-until. pm-audit's php.composer.v1 message quotes it; --live re-reads it.",

@@ -22,6 +22,7 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   php.pin.disagree  php.eol  php.lockfile.missing  php.lockfile.stale
   npx.unpinned  npx.native-cli  legacy.bower  legacy.node-sass
   registry.token.committed  registry.authjson.committed  registry.credentials.image
+  registry.pnpm.placeholder-ignored
   js.manager.mixed  deploy.install.unfrozen  deploy.composer.dev  php.composer.v1
   deploy.install.unlocked  deploy.npm.yarn-flag  deploy.global.unpinned
 
@@ -34,7 +35,8 @@ module. Jump by section marker instead of splitting it:
   === small readers ===    JSON/JSONC, a block-mapping YAML subset, markdown code lines,
                            GitHub Actions job and step boundaries (workflow_jobs,
                            enclosing_item), CI working directories (join_dir)
-  === the audit ===        Audit: js, nested, node_pins, php, npx, deploy, legacy, secrets
+  === the audit ===        Audit: js, nested, node_pins, php, npx, deploy, legacy, secrets,
+                           pnpm_placeholders
   main()                   argv, output envelope, exit codes
 
 Examples:
@@ -549,6 +551,7 @@ class Audit:
         self.npx()
         self.legacy()
         self.secrets()
+        self.pnpm_placeholders()
         return self
 
     # ---- JS managers and lockfiles ----
@@ -1478,6 +1481,40 @@ class Audit:
                 self.add("error", "registry.authjson.committed", "auth.json",
                          "Composer auth.json at the repo root and not gitignored",
                          "revoke the credentials, gitignore auth.json, use COMPOSER_AUTH in CI")
+
+    # ---- pnpm ignores ${...} in a registry or auth position of the project .npmrc ----
+    # pnpm 11.5.3 (2026-06-10, backported to 10.34.2; GHSA-3qhv-2rgh-x77r, pnpm.io/npmrc)
+    # stopped expanding env placeholders in a repository-controlled .npmrc in these
+    # positions: registry, @scope:registry, proxy URLs, any //host/ key, and the credential
+    # keys below. The setting is dropped with only a warning, so a committed
+    # `//host/:_authToken=${NPM_TOKEN}` silently stops authenticating. npm still expands it,
+    # so this fires only when pnpm is the repo's manager: pnpm-lock.yaml at the root, or
+    # packageManager naming pnpm with no other JS lockfile (a mismatch is its own finding).
+    # Keys compare lower-cased with '-' dropped (https-proxy == httpsProxy). A commented-out
+    # line never matches: its key starts with '#' or ';'. Only the key name is reported,
+    # never the line's value.
+    def pnpm_placeholders(self):
+        no_expand = {"registry", "proxy", "httpproxy", "httpsproxy", "_authtoken", "_auth",
+                     "_password", "username", "tokenhelper", "cert", "key"}
+        lockfiles = [n for n in self.meta["lockfiles"] if n in JS_LOCKFILES]
+        pm = str(self.pkg.get("packageManager") or "") if isinstance(self.pkg, dict) else ""
+        if "pnpm-lock.yaml" not in lockfiles and not (pm.startswith("pnpm@") and not lockfiles):
+            return
+        text = read_text(self.root / ".npmrc") if (self.root / ".npmrc").is_file() else None
+        for n, line in enumerate((text or "").splitlines(), 1):
+            s = line.strip()
+            if "=" not in s or "${" not in s:
+                continue
+            key = s.split("=", 1)[0].strip()
+            name = key.rsplit(":", 1)[-1] if key.startswith("//") else key
+            norm = name.lower().replace("-", "")
+            if key.startswith("//") or norm in no_expand or (key.startswith("@") and norm.endswith(":registry")):
+                self.add("warn", "registry.pnpm.placeholder-ignored", ".npmrc",
+                         f"`{name}` on line {n} uses a ${{...}} placeholder; pnpm 11.5.3+ and 10.34.2+ ignore it "
+                         "in a project .npmrc with only a warning, so the setting silently drops out",
+                         "move the token out of the repo: `pnpm config set //host/:_authToken \"$NPM_TOKEN\"`, "
+                         "the user's ~/.npmrc, or a pnpm_config_ env var; write a non-secret registry or proxy URL "
+                         "literally (references/registries-and-auth.md)", n)
 
 
 def load_facts(path: Path) -> dict:

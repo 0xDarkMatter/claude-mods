@@ -2,8 +2,8 @@
 
 The same lockfile behaves differently on a Windows laptop, inside a DDEV container and on
 an Apple Silicon Mac. These are the failures that look like dependency bugs and are not.
-Facts verified 2026-10-05 against docs.npmjs.com, the npm/cli issue tracker, docs.ddev.com
-(stable, v1.25.4) and the nvm-windows and fnm repositories.
+Facts verified 2026-10-06 against docs.npmjs.com, the npm/cli issue tracker, docs.ddev.com
+(stable, v1.25.4), the Composer docs (2.10.3) and the nvm-windows and fnm repositories.
 
 ## Contents
 
@@ -60,10 +60,13 @@ The host can have entirely different ones.
 
 - **Run package managers where the code runs**: `ddev composer install`, `ddev npm ci`,
   `ddev npm run build`, `ddev exec <cmd>`. Composer in the container resolves against the
-  container's PHP and extensions, which match production when `php_version` matches.
+  container's PHP and extensions. The PHP matches production when `php_version` does; the
+  extensions match only if the DDEV image and production load the same ones.
 - **Composer on the host** with a different PHP resolves for the host PHP unless
   `config.platform.php` is set. Set it ([version-pinning.md](version-pinning.md#the-three-php-pins-and-what-each-means)),
-  then the host is safe for `composer update` too.
+  and the host resolves for production's PHP. Extensions are still the host's: pin or
+  hide any that differ in `config.platform` (`"ext-foo": "1.2.3"`, `"ext-foo": false`),
+  and run `composer check-platform-reqs` against production.
 - **Never install `node_modules` from both sides.** The project directory is shared with
   the container. A host install on macOS or Windows writes that OS's native binaries
   (esbuild, rollup, sass-embedded); the Linux container then fails with a missing or

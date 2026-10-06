@@ -1,10 +1,10 @@
 # Legacy Exits: Bower, node-sass, Yarn 1, Old Lockfiles and End-of-Life PHP
 
 Each of these still installs today, which is why it survives. Each also stops a repo from
-moving: Bower and node-sass pin the build to a dead toolchain, Yarn 1 takes only security
-fixes, and an end-of-life PHP gets no security fixes at all. Facts verified 2026-10-05
+moving: Bower and node-sass pin the build to a dead toolchain, Yarn 1 is in maintenance
+mode, and an end-of-life PHP gets no security fixes at all. Facts verified 2026-10-06
 against bower.io, the node-sass README, sass-lang.com, classic.yarnpkg.com and the Yarn
-repository, php.net, Packagist and the Composer docs.
+repository, docs.npmjs.com, php.net, Packagist and the Composer docs and source (2.10.3).
 
 ## Contents
 
@@ -82,9 +82,11 @@ dependency build scripts by default, so approve the native packages
 
 ## npm lockfileVersion 1
 
-A `package-lock.json` with `"lockfileVersion": 1` was last written by npm 6 or older,
-which means the Node toolchain behind it predates Node 15. Run a normal `npm install`
-with a current npm once, review the diff (it rewrites the whole file), build, and commit.
+A `package-lock.json` with `"lockfileVersion": 1` was written by npm 5 or 6 (Node 14 or
+older), or by a newer npm set to `lockfile-version=1`. Check `.npmrc` first: if it pins
+1, a normal install keeps writing version 1, so remove that line. Then run a normal
+`npm install` with a current npm once, review the diff (it rewrites the whole file),
+build, and commit.
 Then make sure CI and deploy also run a current npm; npm 6 cannot read a version 3 lock
 at all.
 
@@ -94,6 +96,11 @@ getcomposer.org lists Composer 1 (last release 1.10.28) as end of life: its main
 ended 2026-05-30. Composer 2 shipped on 2020-10-24, so anything still pinned to 1 is a CI
 image or a DDEV setting nobody revisited.
 
+Packagist.org shut down Composer 1 metadata on 2025-09-01; `repo.packagist.org/packages.json`
+now carries a warning saying so. Packagist's own notice says `composer install` from an
+existing lock still works, because the lock holds each package's download URL. Anything
+that resolves (`update`, `require`, a new package) no longer works with Composer 1.
+
 1. Find every pin: `tools: composer:v1` in a setup-php step, `composer self-update --1`,
    `FROM composer:1` / `COPY --from=composer:1` in Dockerfiles, and DDEV's
    `composer_version` (DDEV's setting is `ddev-ops` territory; pm-audit reports the rest
@@ -101,8 +108,13 @@ image or a DDEV setting nobody revisited.
 2. Check plugins: Composer 2 only loads plugins that support `composer-plugin-api` 2,
    and Composer 2.2+ also needs each one listed in `config.allow-plugins`. Old plugins are
    the usual blocker; `composer outdated --direct` shows which have newer releases.
-3. Switch every pin to 2 in one commit, run `composer install` with Composer 2, and
-   commit the lock it rewrites (it records `plugin-api-version`).
+3. Switch every pin to 2 in one commit. Run `composer install` with Composer 2 to prove
+   the lock installs; `install` never rewrites an existing lock.
+4. Run `composer update --lock --no-install`. It rewrites the lock's hash and metadata
+   and records `plugin-api-version` without moving any version. Commit that lock.
+   Skipping this step breaks CI later: with a lock below plugin API 2.2.0 and no
+   `allow-plugins` config, a non-interactive run that loads a plugin throws and asks for
+   `composer update --lock`.
 
 ## End-of-life Node
 

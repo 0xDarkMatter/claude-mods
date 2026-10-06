@@ -2,8 +2,8 @@
 
 Which manager a repo uses, what to do when it uses two, how to declare the choice so tools
 enforce it, and how to switch managers without losing the versions you already run.
-Facts verified 2026-10-05 against docs.npmjs.com (v11 and v12), yarnpkg.com, pnpm.io,
-bun.com and the Node.js repository.
+Facts verified 2026-10-06 against docs.npmjs.com (v11 and v12), the npm/cli source,
+yarnpkg.com and the Yarn 1 repository, pnpm.io, bun.com and the Node.js repository.
 
 ## Contents
 
@@ -16,7 +16,10 @@ bun.com and the Node.js repository.
 ## Lockfile to manager
 
 The lockfile is the ground truth. `package.json` says what is allowed; the lockfile says
-what was installed, and only the manager that wrote it reads it.
+what was installed. Each manager installs from its own lockfile and reads another's only
+to migrate: npm uses `yarn.lock` when there is no `package-lock.json`, `pnpm import`
+converts npm and Yarn 1 locks, and Bun migrates a Yarn 1, npm or pnpm lock when there is
+no `bun.lock`.
 
 | File at the repo root | Manager | Tell-tale |
 |---|---|---|
@@ -29,17 +32,19 @@ what was installed, and only the manager that wrote it reads it.
 | `deno.lock` | Deno | `deno.json` |
 | `composer.lock` | Composer | always alongside `composer.json` |
 
-npm also reads `yarn.lock` as resolution guidance when no `package-lock.json` exists
+npm reads `yarn.lock` as resolution guidance when no `package-lock.json` exists
 (npm 12 order: `package-lock.json`, then `yarn.lock`). That is a migration aid, not a
-second source of truth.
+second source of truth. npm also rewrites an existing `yarn.lock` from its own tree
+every time it saves the lock.
 
 `bash scripts/run-python.sh scripts/pm-audit.py <repo>` reports all of this at once.
 
 ## Two lockfiles: pick one
 
 Two lockfiles mean two people (or a developer and the deploy) install different trees.
-Each manager resolves from its own file and ignores the other, so they drift apart
-silently. Resolve it in one commit:
+Yarn, pnpm and Bun each resolve from their own file and ignore the other. npm uses
+`package-lock.json` when it has one, but every save also rewrites `yarn.lock` from npm's
+tree. Either way the files drift apart silently. Resolve it in one commit:
 
 1. **Find what production installs.** The deploy decides, because that is what is
    live. Read the deploy and CI config: an AWS CodeDeploy `appspec.yml` hook script,
@@ -52,7 +57,8 @@ silently. Resolve it in one commit:
    refreshed lockfile and a `packageManager` field together.
 4. **Say why in the commit body**: which lockfile won and what decided it.
 5. **Stop it recurring**: the `packageManager` field (below), a frozen install in CI
-   (`npm ci` fails with no `package-lock.json`), and optionally the losing filename in
+   (`npm ci` fails with no `package-lock.json`; npm 11 and earlier also accept
+   `npm-shrinkwrap.json`, npm 12 dropped it), and optionally the losing filename in
    `.gitignore`.
 
 The same applies one level down. A repo whose root uses Yarn 1 while nested widget
@@ -124,8 +130,9 @@ There is no universally right manager; there is a wrong one per repo, which is "
 - **pnpm** earns its place in monorepos and disk-heavy machines (content-addressed store,
   strict `node_modules`). From pnpm 11, its settings live in `pnpm-workspace.yaml`.
 - **Yarn 4** is right where a repo is already on Berry. Starting a new repo on Yarn 1 is
-  never right: it has been in maintenance mode since January 2020 and only takes
-  security fixes.
+  never right: it has been in maintenance mode since January 2020, and its README says it
+  will only accept security fixes. Occasional hotfixes still ship (1.22.22 fixed a
+  punycode warning and a hoisting bug), but nothing new will.
 - **Bun** fits Bun-runtime projects; as a manager for a Node site it is one more tool
   every developer and CI image must carry.
 
