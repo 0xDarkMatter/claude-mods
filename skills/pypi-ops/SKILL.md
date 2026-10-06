@@ -26,8 +26,8 @@ A release spans several skills; pypi-ops owns the **registry** step. Chain them:
    (cooldown + behavioural scan). The build runs dependency code *before* it
    touches your publish credential, so a poisoned build dep can steal the token.
 2. **Preflight** — `scripts/publish-preflight.sh --build .` (this skill).
-3. **Bump → tag → push** — `git-ops` (its push-gate scans for secrets / forbidden
-   files before the tag goes up).
+3. **Bump → tag → push** — `git-ops` (its push-preflight scans for secrets /
+   forbidden files before the tag goes up).
 4. **CI publishes** via OIDC — this skill's `assets/publish.yml`; you approve at
    the `pypi` environment gate.
 5. **Release page** (optional, GitHub) — `github-ops`, human-reviewed notes.

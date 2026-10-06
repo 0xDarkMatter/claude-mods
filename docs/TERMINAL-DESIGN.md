@@ -510,7 +510,7 @@ Same atoms, no grouping. Sorted by age. State moves to a per-leaf indicator at t
 For genuinely flat data — a PR's checks, a service's health summary. No sections, no tree connectors, just leaves under the panel `│`.
 
 ```
-╭── ⚡ push-gate ───────────────────────────  refusing ───●
+╭── ⚡ push-preflight ──────────────────────  refusing ───●
 │
 │   ✓  secret scan
 │   ✓  forbidden files

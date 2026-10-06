@@ -108,7 +108,7 @@ Then draft 2–3 paragraphs, read them back as if you'd never seen the repo, and
 ### Before (the thin version)
 
 ```markdown
-# push-gate
+# push-preflight
 
 > Pre-push safety checks for git.
 
@@ -119,11 +119,11 @@ Then draft 2–3 paragraphs, read them back as if you'd never seen the repo, and
 ### After (the 3-paragraph version)
 
 ```markdown
-# push-gate
+# push-preflight
 
 > Pre-push safety gate for any `git push` to a remote — secret scan, forbidden-file check, divergence check, explicit confirm.
 
-`push-gate` is a Claude Code skill that intercepts pushes to GitHub, GitLab,
+`push-preflight` is a Claude Code skill that intercepts pushes to GitHub, GitLab,
 Bitbucket, or any other remote and runs a fast preflight before the bytes
 leave your machine. It layers `gitleaks` with a regex-based secret scan,
 checks for files that shouldn't be in the repo (private keys, `.env`, large
@@ -132,7 +132,7 @@ upstream, and requires an explicit "yes" before the push proceeds.
 
 It exists because the worst time to discover a leaked AWS key is *after* it's
 in someone else's clone. Pre-commit hooks help, but they only run on commit
-and they're easy to bypass; CI scanners catch leaks too late. `push-gate`
+and they're easy to bypass; CI scanners catch leaks too late. `push-preflight`
 sits at the last useful checkpoint — the moment between "I've staged
 everything" and "the world has it" — and refuses to let a known-bad push
 through. Refusal is hard, not advisory: there's no `--force-anyway` flag,
@@ -141,7 +141,7 @@ because if there were, you'd use it.
 It's most useful for solo developers who don't have org-level secret
 scanning, for repos that mix public and private code, and for the mid-pour
 late-night push where careful review has politely left the building. If you
-already run gitleaks pre-commit and have CI guards on every push, `push-gate`
+already run gitleaks pre-commit and have CI guards on every push, `push-preflight`
 is redundant — go enjoy your weekend. If you don't, it's a small skill that
 will eventually save you from a very large incident.
 

@@ -1,4 +1,4 @@
-# push-gate gitleaks config — the full built-in rule set PLUS an allowlist for
+# push-preflight gitleaks config — the full built-in rule set PLUS an allowlist for
 # tokens that are PUBLIC BY DESIGN and therefore not secrets. Loaded via --config
 # from scan-secrets.sh. `useDefault = true` keeps every built-in gitleaks rule
 # active; the allowlist only carves out known-public token shapes.

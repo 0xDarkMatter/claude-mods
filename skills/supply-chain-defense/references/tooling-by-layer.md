@@ -165,7 +165,7 @@ for the token-theft vector that pinning and scanning don't cover.
 ### gitleaks
 
 Secret scanning to catch leaked npm/PyPI/cloud tokens before they ship. Already
-used by `git-ops`' push gate. Relevant here for the token-rotation workflow.
+used by the `push-preflight` secret scan. Relevant here for the token-rotation workflow.
 
 ## Layer 4 — self-integrity + exposure response
 

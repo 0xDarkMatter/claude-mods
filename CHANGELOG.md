@@ -883,6 +883,18 @@ feature releases live in the README "Recent Updates" section.
 
 ### Changed
 
+- **`push-gate` renamed `push-preflight`.** It runs six checks before a push (secret
+  scan, clean tree, forbidden files, fast-forward, size and open-issue advisories), so
+  the name now matches `scripts/preflight.sh`. `secret-scan` was rejected: it would
+  undersell the skill and imply a history audit, which stays with `security-ops`. The
+  description leads with the secret scan, because the description is what selects the
+  skill. The regex layer's allowlist is now `.push-preflight-allow`; `.pushgate-allow`
+  is still read, with a one-line deprecation notice on stderr, and when both exist their
+  entries are combined so a half-migrated repo keeps every allow. The installers remove
+  the old `skills/push-gate`. **Migration:** `git mv .pushgate-allow
+  .push-preflight-allow` in each repo that has one, and point scripts at
+  `skills/push-preflight/scripts/preflight.sh`.
+
 - **`craftcms-ops` refreshed for real agency builds.** Ten new one-topic references -
   SEOmatic, Blitz, Formie, CKEditor, DDEV, Codeception, Twig output security,
   craft-vite, the 3 → 4 → 5 upgrade path, and Craft-side performance - plus the old

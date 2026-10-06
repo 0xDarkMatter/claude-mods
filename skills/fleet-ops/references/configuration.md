@@ -29,9 +29,10 @@ Zero-config works for the common case.
 `FORBIDDEN_PATTERN` in `scripts/fleet.sh`) refuses the two scrub markers —
 `TODO_` + `SCRUB` and `FIXME_` + `BEFORE_LAND`, spelled split here deliberately —
 plus lone triple-X markers via the term `(^|[^X])X{3}[^a-zX]`. A run of four or
-more X's is a `mktemp` template (`push-gate-paths.` plus six X's) and passes; a
-bare triple-X followed by a non-letter (a space, a colon) still refuses. A
-template false-refused a landing on 2026-09-01, hence the run-aware form.
+more X's is a `mktemp` template (e.g. `push-preflight-paths.` plus six X's) and
+passes; a bare triple-X followed by a non-letter (a space, a colon) still
+refuses. A template false-refused a landing on 2026-09-01, hence the run-aware
+form.
 
 Mind the self-reference: the scrub greps every **added** diff line, so writing a
 contiguous marker token — or a triple-X run — into docs, comments, or a config

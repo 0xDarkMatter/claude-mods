@@ -1,13 +1,13 @@
 # Ownership, Delegation and Authorship
 
-Who owns which concern across git-ops, push-gate and github-ops; how github-ops delegates the local half; git authorship for 0xDarkMatter repos; and the planned expansions with the boundary rule that governs them.
+Who owns which concern across git-ops, push-preflight and github-ops; how github-ops delegates the local half; git authorship for 0xDarkMatter repos; and the planned expansions with the boundary rule that governs them.
 
 ## Who owns what
 
 | Concern | Owner |
 |---|---|
 | Commits, branches, local tags, rebases, worktrees, stash | `git-ops` |
-| Pre-push secret scan + dirty-tree refusal + confirm | `push-gate` |
+| Pre-push secret scan + dirty-tree refusal + confirm | `push-preflight` |
 | `gh repo create`, push to remote, tag push | **`github-ops`** |
 | Repo description / homepage / topics / visibility | **`github-ops`** |
 | `gh release create` + release notes | **`github-ops`** |
@@ -46,8 +46,8 @@ This is safe pre-publish only. After push, treat history as immutable and set au
 ## Delegation pattern
 
 ```
-github-ops           git-ops              push-gate
-─────────            ───────              ─────────
+github-ops           git-ops              push-preflight
+─────────            ───────              ──────────────
 mode `new`:
   audit
   edit README   ───► commit (T2)
