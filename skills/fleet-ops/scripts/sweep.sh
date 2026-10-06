@@ -27,6 +27,11 @@
 #   * Messaging sessions is agent-only. ccd_session_mgmt is a Desktop MCP server
 #     a script cannot call, so the sweep NAMES the sessions and the agent sends,
 #     one gated call each (references/sweep.md has the protocol and template).
+#     Those tools reach only the agent's own Desktop instance, so every session
+#     row names the instance it lives in, and one that lives in another gets
+#     "do it from that window" instead of a call that cannot reach it.
+#   * Two private lists, never in a repo: never-push (history must not leave
+#     the machine: PARK) and held lanes (must not land yet: ON-HOLD).
 #
 # SECTION MAP (grep the `=== NAME ===` banners):
 #   ARGS          flags, env, --help
@@ -87,6 +92,10 @@ ENVIRONMENT
   FLEET_NEVER_PUSH       ';'-separated never-push list files. Default:
                          ~/.claude/never-push.txt and <git-dir>/info/never-push.
                          One glob per line, '#' comments. Keep it OUT of the repo.
+  FLEET_HELD_LANES       ';'-separated hold list files: lanes that must not land
+                         (or be rebased) until someone approves. Default:
+                         ~/.claude/held-lanes.txt and <git-dir>/info/held-lanes.
+                         '<glob> <reason...>' per line, '#' comments. Private too.
   FLEET_SWEEP_STALE_DAYS default for --stale-days
   FLEET_SWEEP_MIN_DIR_AGE seconds an empty dir must be old before --apply
                          removes it (default 3600: it may be mid-creation)
@@ -232,28 +241,61 @@ lane_state() {
 }
 file_mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo "$NOW"; }
 
-# The never-push list is PRIVATE by design: it names branches whose history
-# leaks identifiers that must never reach a remote, so it lives outside every
-# repo (and never in this public one). Set-but-empty FLEET_NEVER_PUSH disables it.
+# Two PRIVATE branch lists, read the same way: '#' comments, blank lines and CRs
+# dropped, each line trimmed. Both live outside every repo (and never in this
+# public one), because their contents name work that is not public.
+#   list_lines <env-var-name> <default-file>... -> one cleaned line per entry
+# The env var, when set, replaces the defaults (';'-separated files); set but
+# empty turns the list off - the test suite's hermetic switch.
+list_lines() {
+  local var=$1 f line files=(); shift
+  if [[ -n "${!var+x}" ]]; then IFS=';' read -r -a files <<< "${!var}"; else files=("$@"); fi
+  for f in ${files[@]+"${files[@]}"}; do
+    [[ -n "$f" && -f "$f" ]] || continue
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      line=${line%%#*}; line=${line//$'\r'/}
+      line="${line#"${line%%[![:space:]]*}"}"; line="${line%"${line##*[![:space:]]}"}"
+      [[ -n "$line" ]] && printf '%s\n' "$line"
+    done < "$f"
+  done
+  return 0
+}
+
+# The never-push list names branches whose history leaks identifiers that must
+# never reach a remote. One glob per line, the whole line.
 NP=()
-if [[ -n "${FLEET_NEVER_PUSH+x}" ]]; then
-  IFS=';' read -r -a NP_FILES <<< "$FLEET_NEVER_PUSH"
-else
-  NP_FILES=("${HOME:-/nonexistent}/.claude/never-push.txt" "$GCD/info/never-push")
-fi
-for f in ${NP_FILES[@]+"${NP_FILES[@]}"}; do
-  [[ -n "$f" && -f "$f" ]] || continue
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    line=${line%%#*}; line=${line//$'\r'/}
-    line="${line#"${line%%[![:space:]]*}"}"; line="${line%"${line##*[![:space:]]}"}"
-    [[ -n "$line" ]] && NP+=("$line")
-  done < "$f"
-done
+while IFS= read -r line; do [[ -n "$line" ]] && NP+=("$line"); done \
+  < <(list_lines FLEET_NEVER_PUSH "${HOME:-/nonexistent}/.claude/never-push.txt" "$GCD/info/never-push")
 never_push() {
   local p
   # $p unquoted on purpose: each entry is a glob pattern.
   # shellcheck disable=SC2053
   for p in ${NP[@]+"${NP[@]}"}; do [[ "$1" == $p ]] && return 0; done
+  return 1
+}
+
+# The hold list names lanes that must not land until someone approves: the
+# maintainer's own call, or a review outside this repo. A SEPARATE list, not a
+# never-push entry with a reason, because the two mean opposite things:
+#   never-push  permanent; the history must never leave the machine. The branch
+#               never lands, sits out of overlap, and a remote copy is LEAKED.
+#   held        temporary; the work WILL land, once approved. It still competes
+#               for files (a rival lane must know), and a remote copy is often
+#               the review itself - as a never-push entry it would read LEAKED.
+# '<glob> <reason...>' per line; the reason is printed in the ON-HOLD row.
+HOLD_PAT=() HOLD_WHY=()
+while IFS= read -r line; do
+  [[ -n "$line" ]] || continue
+  pat=${line%%[[:space:]]*}; why=${line#"$pat"}; why="${why#"${why%%[![:space:]]*}"}"
+  HOLD_PAT+=("$pat"); HOLD_WHY+=("${why:-no reason given}")
+done < <(list_lines FLEET_HELD_LANES "${HOME:-/nonexistent}/.claude/held-lanes.txt" "$GCD/info/held-lanes")
+# held_reason <branch> -> prints the first matching entry's reason; 1 if not held.
+held_reason() {
+  local i
+  # shellcheck disable=SC2053
+  for ((i = 0; i < ${#HOLD_PAT[@]}; i++)); do
+    [[ -n "$1" && "$1" == ${HOLD_PAT[$i]} ]] && { printf '%s' "${HOLD_WHY[$i]}"; return 0; }
+  done
   return 1
 }
 # remote \t branch-name, for every remote-tracking ref (awk, not sed: a \t in a
@@ -269,8 +311,8 @@ remote_copy() { printf '%s\n' "$REMOTE_REFS" | awk -F'\t' -v b="$1" '$2 == b && 
 # DELETE-MERGED and ASK-ARCHIVE would act on it (2026-10-06: peers treated such a
 # tip as landed twice in a day). So ask fleet.sh, the marker's one reader, first.
 # When it says wait (exit 10), the report still prints, but the next steps say
-# only "wait", and --apply refuses. Snapshot semantics: --apply asks again right
-# before it acts.
+# only "wait", and --apply refuses. Snapshot semantics: the report asks again
+# just before it prints (OUTPUT), and --apply again right before it acts.
 #   landing_check -> sets L_STATE / L_LANE / L_LINE; status 0 settled, 10 wait
 # The reply is `fleet landing --porcelain`: state, tip, base, lane, pid, start,
 # verdict line, tab-separated, "-" for an empty field (so `read` never shifts).
@@ -287,17 +329,22 @@ landing_check() {
   fi
   return "$rc"
 }
+# The landing row for the current L_STATE (none when CLEAR). OUTPUT calls it
+# again after a re-ask, so the row can never disagree with the last answer.
+landing_row() {
+  case "$L_STATE" in
+    CLEAR) : ;;
+    STALE) row landing "$BASE" DEAD-LAND "$L_LINE" "-" ;;
+    UNTESTED) row landing "$BASE" UNTESTED-MERGE "$L_LINE" \
+                "verify $BASE (its test_cmd), then fleet land $L_LANE (green) or fleet revert $L_LANE (red)" ;;
+    UNKNOWN) row landing "$BASE" UNKNOWN "$L_LINE" "fleet landing; treat $BASE as provisional until it answers" ;;
+    *) row landing "$BASE" PROVISIONAL "$L_LINE" "wait for the land's verdict (fleet landing exits 0), then re-run fleet sweep" ;;
+  esac
+}
 L_STATE="" L_LANE="" L_LINE="" SETTLED=1
 landing_check || SETTLED=0
 # First row, so --porcelain readers meet it before any verdict it qualifies.
-case "$L_STATE" in
-  CLEAR) : ;;
-  STALE) row landing "$BASE" DEAD-LAND "$L_LINE" "-" ;;
-  UNTESTED) row landing "$BASE" UNTESTED-MERGE "$L_LINE" \
-              "verify $BASE (its test_cmd), then fleet land $L_LANE (green) or fleet revert $L_LANE (red)" ;;
-  UNKNOWN) row landing "$BASE" UNKNOWN "$L_LINE" "fleet landing; treat $BASE as provisional until it answers" ;;
-  *) row landing "$BASE" PROVISIONAL "$L_LINE" "wait for the land's verdict (fleet landing exits 0), then re-run fleet sweep" ;;
-esac
+landing_row
 
 
 # === EVIDENCE =================================================================
@@ -414,14 +461,30 @@ cwd_sessions() {
     NF >= 7 { c = np($5); if ((index(c, r1) == 1 || index(c, r2) == 1) && !s[$2]++) print $2 "\t" $5 "\t" $3 "\t" $6 "\t" $7 }' \
     <(printf '%s\n' "$SIDX")
 }
-CLAIMS="" CWDS=""
+MERGED_SET=$(g for-each-ref --merged="$BASE" --format='%(refname:short)' refs/heads 2>/dev/null)
+CLAIMS="" CWDS="" FRESH=""
 if [[ $STORE_OK -eq 1 ]]; then
   CLAIMS=$(claims_join "")
   CWDS=$(cwd_sessions)
-  ids=$( { printf '%s\n' "$CLAIMS" | cut -f2; printf '%s\n' "$CWDS" | cut -f1; } | sed '/^$/d' | sort -u)
+  # Sessions the cached index calls OPEN and whose record names a merged,
+  # worktree-less branch: phase 3 calls that branch HELD because of them. They
+  # join this fresh read, or that test runs on the 15-minute cache while phase 4
+  # runs on this read, and the two disagree right after an archive (2026-10-06:
+  # a branch stayed HELD "by open session X" in the same report that already
+  # treated X's dir as free). Cached-archived namers are left out: they already
+  # hold nothing, and an unarchive since only makes a zero-loss delete wait.
+  # (awk -F'\t' keeps an empty field; only bash `read` collapses tabs.)
+  namers=$(LC_ALL=C awk -F'\t' 'FILENAME == ARGV[1] { if ($1 != "" && $2 == "") M[$1] = 1; next }
+                                NF >= 7 && ($1 in M) && $6 != "1" { print $2 }' \
+    <(g for-each-ref --merged="$BASE" --format='%(refname:short)%09%(worktreepath)' refs/heads 2>/dev/null) \
+    <(printf '%s\n' "$SIDX"))
+  ids=$( { printf '%s\n' "$CLAIMS" | cut -f2; printf '%s\n' "$CWDS" | cut -f1; printf '%s\n' "$namers"; } | sed '/^$/d' | sort -u)
   if [[ -n "$ids" ]]; then
-    # shellcheck disable=SC2086
-    state=$(FLEET_SESSION_LIVE_SECS="$LIVE_SECS" bash "$SESSIONS_SH" state $ids 2>/dev/null </dev/null) || state=""
+    # Chunked: every id is a command-line argument here and a `-name` clause in
+    # sessions.sh's find, and a Windows command line stops at 32K characters.
+    # xargs gives each run /dev/null as stdin, as the old `</dev/null` did.
+    state=$(printf '%s\n' "$ids" | xargs -n 150 env FLEET_SESSION_LIVE_SECS="$LIVE_SECS" bash "$SESSIONS_SH" state 2>/dev/null) || state=""
+    FRESH=$state
     if [[ -n "$state" ]]; then
       CLAIMS=$(claims_join "$state")
       CWDS=$(awk -F'\t' -v OFS='\t' 'FILENAME == ARGV[1] { if ($1 != "") { L[$1] = $2; if ($3 != "-" && $3 != "") A[$1] = $3 }; next }
@@ -434,7 +497,6 @@ claims_of() { printf '%s\n' "$CLAIMS" | awk -F'\t' -v p="$1" '$1 == p'; }
 # === VERDICTS =================================================================
 # --- phase 3 facts first: branch landed-ness feeds the session "done" test -----
 say "checking local branches..."
-MERGED_SET=$(g for-each-ref --merged="$BASE" --format='%(refname:short)' refs/heads 2>/dev/null)
 BR_OK=""   # branch \t 1|0 — "is its work in base" for every local branch
 # %(worktreepath) is git 2.23+. Older git rejects the whole format, and an empty
 # phase would read as "no leftover branches" - so say so instead (UNKNOWN is a
@@ -526,6 +588,42 @@ done <<< "${CWDS//$'\t'/$US}"
 DIRECT=$(printf '%s%s' "$DIRECT" "$HOLLOW_LIST" | awk -F'\t' 'NF && !s[$1]++')
 is_direct() { printf '%s\n' "$DIRECT" | cut -f1 | grep -qxF -- "$1"; }
 
+# --- which Desktop instance holds each named session ---------------------------
+# sessions.sh reads EVERY Desktop instance's store (the primary and each
+# --user-data-dir profile), but archive_session and send_message reach only the
+# sessions of the instance the calling agent runs in. A row that names a
+# session therefore names its instance too, and when this run can tell which
+# instance it is in (the store holding `sessions.sh self`), a session that lives
+# elsewhere gets "do it from the <label> Desktop window", never a tool call that
+# fails "Session ... not found" (5 of 9 such calls on 2026-10-06).
+#   INST       id \t label \t store, from `sessions.sh where`
+#   HERE       the one store holding this session, or "" when unknown: not a
+#              Desktop session, or its wrapper sits in two stores
+#   ONE_STORE  1 when the machine has a single store - then every session is here
+INST="" HERE="" ONE_STORE=0
+if [[ $STORE_OK -eq 1 ]]; then
+  [[ $(bash "$SESSIONS_SH" stores 2>/dev/null | grep -c '^store') -eq 1 ]] && ONE_STORE=1
+  named=$( { printf '%s\n' "$DIRECT" "$SESS" | cut -f1; printf '%s\n' "$SELF_ID"; } | grep '^local_' | sort -u)
+  [[ -n "$named" ]] && INST=$(printf '%s\n' "$named" | xargs -n 150 bash "$SESSIONS_SH" where 2>/dev/null)
+  if [[ -n "$SELF_ID" ]]; then
+    HERE=$(printf '%s\n' "$INST" | awk -F'\t' -v id="$SELF_ID" '$1 == id { n++; s = $3 } END { if (n == 1) print s }')
+  fi
+fi
+# inst_label <id> -> its instance label(s), '+'-joined; empty when not found.
+inst_label() { printf '%s\n' "$INST" | awk -F'\t' -v id="$1" '$1 == id { l = l (l == "" ? "" : "+") $2 } END { print l }'; }
+# inst_reach <id> -> here | away | unknown, for the agent that runs this sweep.
+inst_reach() {
+  [[ $ONE_STORE -eq 1 ]] && { echo here; return; }
+  [[ -z "$HERE" ]] && { echo unknown; return; }
+  if printf '%s\n' "$INST" | awk -F'\t' -v id="$1" -v s="$HERE" '$1 == id && $3 == s { f = 1 } END { exit !f }'; then
+    echo here
+  elif [[ -n "$(inst_label "$1")" ]]; then echo away
+  else echo unknown; fi
+}
+# sref <id> -> "id [label]", the form every row uses to name a session.
+sref() { local l; l=$(inst_label "$1"); printf '%s%s' "$1" "${l:+ [$l]}"; }
+N_AWAY=0
+
 # --- phase 1: worktrees -------------------------------------------------------
 N_ARCH_ASK=0
 for ((i = 0; i < NW; i++)); do
@@ -537,6 +635,7 @@ for ((i = 0; i < NW; i++)); do
   live=$(printf '%s\n' "$cl" | awk -F'\t' '$5 == "1" && !f { print $3; f = 1 }')
   open_ids=$(printf '%s\n' "$cl" | awk -F'\t' 'NF && $4 != "1" && $5 != "1" { print $2 }' | sort -u)
   run=""; [[ "$br" == fleetflow/*/* ]] && { run=${br#fleetflow/}; run=${run%%/*}; }
+  hold=""; [[ -n "$br" ]] && hold=$(held_reason "$br")
 
   if [[ ${W_GONE[$i]} -eq 1 || ! -d "$p" ]]; then
     row worktree "$p" GHOST "directory gone; git still lists it" "git worktree prune  (fleet sweep --apply)"
@@ -549,7 +648,7 @@ for ((i = 0; i < NW; i++)); do
   elif [[ -n "$br" ]] && never_push "$br"; then
     row worktree "$p" PARK "branch is on the private never-push list" "never land or push it; remove the tree by hand when done"
   elif printf '%s\n' "$COMPETING" | grep -qxF -- "$label"; then
-    row worktree "$p" COMPETING "shares files with $(competes_with "$label") (phase 2)" "settle the pair before landing either"
+    row worktree "$p" COMPETING "shares files with $(competes_with "$label") (phase 2)${hold:+; ON HOLD: $hold}" "settle the pair before landing either"
   elif [[ "$dirty" -gt 0 ]]; then
     row worktree "$p" INSPECT "$dirty uncommitted: ${W_DSAMPLE[$i]}" "commit it in its lane, or discard after review"
   elif [[ "$st" == MERGED || "$st" == CONTENT ]]; then
@@ -563,7 +662,7 @@ for ((i = 0; i < NW; i++)); do
         if [[ "$(sess_field "$id" 3)" != 1 ]]; then
           blocker="owner '$(sess_field "$id" 2)' still has unlanded work: $(sess_field "$id" 4)"; break
         fi
-        if is_direct "$id"; then direct="$direct${direct:+, }$id"; else ask="$ask${ask:+, }$id"; fi
+        if is_direct "$id"; then direct="$direct${direct:+, }$(sref "$id")"; else ask="$ask${ask:+, }$(sref "$id")"; fi
       done <<< "$open_ids"
       if [[ -n "$blocker" ]]; then
         row worktree "$p" OWNER-BUSY "$how; $blocker" "land the blocker first, then re-run"
@@ -581,6 +680,11 @@ for ((i = 0; i < NW; i++)); do
     else
       row worktree "$p" VERIFY-OWNER "merged + clean; prune: $reason" "find its session (search_session_transcripts '$slug'); archived => prune can remove it"
     fi
+  elif [[ -n "$hold" ]]; then
+    # Unlanded and on the hold list: never LAND, and never REBASE either - a
+    # rebase rewrites the SHAs an outside review is reading.
+    how="merges cleanly"; [[ "$st" == CONFLICT ]] && how="conflicts with $BASE"
+    row worktree "$p" ON-HOLD "held: $hold; ${W_AHEAD[$i]} commit(s), $how" "do not land or rebase it until the hold is lifted (references/sweep.md)"
   elif [[ "$st" == CONFLICT ]]; then
     row worktree "$p" REBASE "${W_AHEAD[$i]} commit(s) conflict with $BASE in ${W_CONF[$i]}" "rebase in the lane, or hand it back to its session"
   elif [[ -z "$br" ]]; then
@@ -598,6 +702,8 @@ while IFS=$US read -r a b n files ua ub; do
   [[ "$ua" == 1 ]] && who="$a"; [[ "$ub" == 1 ]] && who="$who${who:+, }$b"
   note="$n file(s): $(printf '%s' "$files" | cut -d, -f1-4)"; [[ $n -gt 4 ]] && note="$note,..."
   [[ -n "$who" ]] && note="$note; uncommitted in $who"
+  # A held lane still competes (it will land), but it cannot be the winner now.
+  for l in "$a" "$b"; do h=$(held_reason "$l") && note="$note; $l ON HOLD: $h"; done
   row compete "$a <> $b" OVERLAP "$note" "pick the winner: land it, then rebase or drop the other"
 done <<< "${PAIRS//$'\t'/$US}"
 
@@ -618,7 +724,13 @@ for r in ${B_ROWS[@]+"${B_ROWS[@]}"}; do
     if [[ "$b" =~ $KEEP_RE ]]; then continue; fi
     ls=$(lane_state "$b")
     if [[ -n "$ls" && "$ls" != LANDED ]]; then row branch "$b" TRACKED "fleet lane in state $ls" "-"; continue; fi
-    holder=$(printf '%s\n' "$SIDX" | awk -F'\t' -v b="$b" 'NF >= 7 && $1 == b && $6 != "1" && !f { print $3; f = 1 }')
+    # The archive flag comes from the fresh read (EVIDENCE) when it has one, so
+    # this phase agrees with phase 4; the cached index only fills a gap, and a
+    # session with a write since its archive still holds the branch.
+    holder=$(LC_ALL=C awk -F'\t' -v b="$b" '
+      FILENAME == ARGV[1] { if ($1 != "") { L[$1] = $2; if ($3 != "-" && $3 != "") A[$1] = $3 }; next }
+      NF >= 7 && $1 == b && !f { a = ($2 in A) ? A[$2] : $6; if (a != "1" || L[$2] == "1") { print $3; f = 1 } }' \
+      <(printf '%s\n' "$FRESH") <(printf '%s\n' "$SIDX"))
     if [[ -n "$holder" ]]; then row branch "$b" HELD "named by open session '$holder'" "-"; continue; fi
     row branch "$b" DELETE-MERGED "every commit is in $BASE$gone" "git branch -d $b  (fleet sweep --apply)"
   elif [[ "$s" == CONTENT ]]; then
@@ -626,7 +738,9 @@ for r in ${B_ROWS[@]+"${B_ROWS[@]}"}; do
   else
     n=$(g rev-list --count "$BASE..$b" 2>/dev/null || echo "?")
     d=$(age_days "$cdate")
-    if [[ "$d" -ge "$STALE_DAYS" ]]; then
+    if hold=$(held_reason "$b"); then
+      row branch "$b" ON-HOLD "held: $hold; $n commit(s) not in $BASE, ${d}d old, no worktree$gone" "do not land or rebase it until the hold is lifted (references/sweep.md)"
+    elif [[ "$d" -ge "$STALE_DAYS" ]]; then
       row branch "$b" STALE "$n commit(s) not in $BASE, last ${d}d ago$gone" "land, park, or delete by hand (git branch -D) after review"
     else
       row branch "$b" UNLANDED "$n commit(s) not in $BASE, ${d}d old, no worktree$gone" "fleet land $b when its work is done"
@@ -644,7 +758,7 @@ for d in ${ORPHANS[@]+"${ORPHANS[@]}"}; do
   if [[ "$n" -gt 0 ]]; then
     row hygiene "$d" ORPHAN-DIR "$n entr(y/ies), not a registered worktree" "review by hand; never rm -rf a .claude/worktrees/ dir"
   elif [[ -n "$holder" ]]; then
-    row hygiene "$d" HOLLOW "empty, but open session $holder still has it as its cwd" "archive that session first (phase 5), then it is removable"
+    row hygiene "$d" HOLLOW "empty, but open session $(sref "$holder") still has it as its cwd" "archive that session first (phase 5), then it is removable"
   elif [[ $STORE_OK -ne 1 ]]; then
     row hygiene "$d" EMPTY-DIR "empty; session store unreadable, so no claim can be ruled out" "rmdir by hand once no session uses it"
   elif [[ $(( NOW - $(file_mtime "$d") )) -lt $MIN_DIR_AGE ]]; then
@@ -666,14 +780,33 @@ done <<< "$(g stash list --format='%gd%x1f%ct%x1f%gs' 2>/dev/null)"
 [[ -d "$REPO_ROOT/.fleetflow" ]] && row hygiene "$REPO_ROOT/.fleetflow" FLEETFLOW-RUNS "fleetflow run dirs present" "ff-sweep.sh --list (fleetflow owns .fleetflow/)"
 
 # --- phase 5 rows: sessions -----------------------------------------------------
+# Every detail opens with the session's Desktop instance, "[label] ", so the
+# panel's truncation can never cut it off. The action is a tool call only when
+# the session is reachable from here (see "which Desktop instance" above).
+#   here     the tool call, as before
+#   away     another instance: the window to do it from; no tool call at all
+#   unknown  several stores, and this run cannot tell which one it is in: the
+#            tool call, qualified with the window it works from
 # DIRECT (computed before phase 1) first; they are excluded from the archive
 # REQUESTS below even when all their work is landed.
 while IFS=$US read -r id where title live; do
   [[ -z "$id" || "$id" == "$SELF_ID" || "$id" == "$MAIN_ID" ]] && continue
+  il=$(inst_label "$id"); reach=$(inst_reach "$id"); tag="${il:+[$il] }"
+  [[ -z "$il" ]] && reach=here   # no wrapper found: no window to name
+  [[ $reach == away ]] && N_AWAY=$((N_AWAY + 1))
   if [[ "$live" == 1 ]]; then
-    row session "$id" "SPINNING?" "$title | LIVE, but its lane dir $where is gone or hollow" "check its CPU now (references/prune.md landmine); stop it, then archive"
+    case $reach in
+      here) act="check its CPU now (references/prune.md landmine); stop it, then archive" ;;
+      *)    act="check its CPU now (prune.md landmine); stop and archive it from the $il Desktop window" ;;
+    esac
+    row session "$id" "SPINNING?" "$tag$title | LIVE, but its lane dir $where is gone or hollow" "$act"
   else
-    row session "$id" ARCHIVE-DIRECT "$title | its lane dir $where is gone or hollow" "archive_session $id (gated) - do NOT send_message"
+    case $reach in
+      here)    act="archive_session $id (gated) - do NOT send_message" ;;
+      away)    act="archive it from the $il Desktop window's sidebar, unopened - no tool here reaches it" ;;
+      unknown) act="archive_session $id from a session in the $il Desktop window (gated) - do NOT send_message" ;;
+    esac
+    row session "$id" ARCHIVE-DIRECT "$tag$title | its lane dir $where is gone or hollow" "$act"
   fi
 done <<< "${DIRECT//$'\t'/$US}"
 while IFS=$US read -r id title done blk trees; do
@@ -688,13 +821,38 @@ while IFS=$US read -r id title done blk trees; do
     done
   done
   if [[ "$id" == cli:* ]]; then
-    row session "$id" ARCHIVE-REQUEST "$title | done: $trees | landed: ${landed:--}" "terminal session: no archive API - close it, or pigeon its project"
+    row session "$id" ARCHIVE-REQUEST "[terminal] $title | done: $trees | landed: ${landed:--}" "terminal session: no archive API - close it, or pigeon its project"
   else
-    row session "$id" ARCHIVE-REQUEST "$title | done: $trees | landed: ${landed:--}" "send_message: ask it to archive itself (references/sweep.md)"
+    il=$(inst_label "$id"); reach=$(inst_reach "$id")
+    [[ -z "$il" ]] && reach=here
+    case $reach in
+      here)    act="send_message: ask it to archive itself (references/sweep.md)" ;;
+      away)    act="ask it to archive itself from the $il Desktop window - not reachable from here" ;;
+      unknown) act="send_message from a session in the $il Desktop window: ask it to archive itself (references/sweep.md)" ;;
+    esac
+    [[ $reach == away ]] && N_AWAY=$((N_AWAY + 1))
+    row session "$id" ARCHIVE-REQUEST "${il:+[$il] }$title | done: $trees | landed: ${landed:--}" "$act"
   fi
 done <<< "${SESS//$'\t'/$US}"
 
 # === OUTPUT ===================================================================
+# Asked AGAIN just before any row is printed. The sweep takes minutes on a busy
+# machine, and a land that began after the first ask left a whole report of
+# verdicts judged against a tip about to move, with no "wait" anywhere
+# (2026-10-06). Only settled -> unsettled matters: a land that ended mid-run
+# cannot make an earlier read wrong, so an unsettled first answer stands. The
+# landing row is rebuilt and kept first.
+if [[ $SETTLED -eq 1 ]]; then
+  l0=$L_STATE l1=$L_LANE l2=$L_LINE
+  if landing_check; then
+    L_STATE=$l0 L_LANE=$l1 L_LINE=$l2
+  else
+    SETTLED=0
+    body=$(printf '%s' "$ROWS" | awk -F'\t' 'NF && $1 != "landing"')
+    ROWS=""; landing_row
+    [[ -n "$body" ]] && ROWS="${ROWS}${body}"$'\n'
+  fi
+fi
 # On an unsettled tip the verdicts stay (they are what git says right now), but
 # no row may carry an action: the lane being landed reads MERGED and would show
 # REMOVE -> fleet prune --remove for work a red gate is about to take back out.
@@ -704,7 +862,7 @@ if [[ $SETTLED -eq 0 ]]; then
   ROWS=$(printf '%s' "$ROWS" | awk -F'\t' -v OFS='\t' -v w="wait: $BASE is not settled (see the landing row)" \
     'NF { if ($1 != "landing" && $5 != "-") $5 = w; print }')$'\n'
 fi
-INFO_RE='^(KEEP|PARK|TRACKED|HELD|STASH|OWNER-BUSY|FLEETFLOW-RUNS|DEAD-LAND)$'
+INFO_RE='^(KEEP|PARK|TRACKED|HELD|ON-HOLD|STASH|OWNER-BUSY|FLEETFLOW-RUNS|DEAD-LAND)$'
 FINDINGS=$(printf '%s' "$ROWS" | awk -F'\t' -v re="$INFO_RE" 'NF && $3 !~ re' | grep -c . || true)
 cnt() { printf '%s' "$ROWS" | awk -F'\t' -v v="$1" 'NF && $3 == v' | grep -c . || true; }
 
@@ -778,7 +936,8 @@ else
   # is what makes the sweep resumable: do one step, re-run, read what is left.
   {
     n_comp=$(cnt OVERLAP) n_land=$(cnt LAND) n_reb=$(cnt REBASE) n_insp=$(cnt INSPECT)
-    n_req=$(cnt ARCHIVE-REQUEST) n_dir=$(( $(cnt ARCHIVE-DIRECT) + $(cnt 'SPINNING?') ))
+    n_req=$(cnt ARCHIVE-REQUEST) n_dir=$(( $(cnt ARCHIVE-DIRECT) + $(cnt 'SPINNING?') )) away=""
+    [[ $N_AWAY -gt 0 ]] && away="; $N_AWAY of them only from another Desktop window (each row names it)"
     n_rm=$(cnt REMOVE) n_zero=$(( $(cnt DELETE-MERGED) + (ghosts > 0 ? 1 : 0) + ${#EMPTY_OK[@]} ))
     n_hand=$(( $(cnt CONTENT-LANDED) + $(cnt VERIFY-OWNER) + $(cnt ORPHAN-DIR) + $(cnt STALE) + $(cnt STALE-STASH) + $(cnt LEAKED) + $(cnt UNLANDED) + $(cnt FLEETFLOW) ))
     # A tip that is not settled makes every step below act on work that may
@@ -799,7 +958,7 @@ else
       [[ $n_comp -gt 0 ]] && { k=$((k+1)); echo "    $k. settle $n_comp competing pair(s): pick a winner before landing either"; }
       [[ $((n_land + n_reb)) -gt 0 ]] && { k=$((k+1)); echo "    $k. land $n_land lane(s) (fleet land <branch>); $n_reb need a rebase in their lane first"; }
       [[ $n_insp -gt 0 ]] && { k=$((k+1)); echo "    $k. inspect $n_insp tree(s) with uncommitted work"; }
-      [[ $((n_req + n_dir)) -gt 0 ]] && { k=$((k+1)); echo "    $k. sessions: $n_req archive request(s) (send_message), $n_dir to archive directly - agent step, one gated call each"; }
+      [[ $((n_req + n_dir)) -gt 0 ]] && { k=$((k+1)); echo "    $k. sessions: $n_req archive request(s) (send_message), $n_dir to archive directly - agent step, one gated call each$away"; }
       [[ $n_rm -gt 0 ]] && { k=$((k+1)); echo "    $k. remove $n_rm SAFE worktree(s): fleet prune --remove"; }
       [[ $n_zero -gt 0 ]] && { k=$((k+1)); echo "    $k. zero-loss hygiene ($n_zero): fleet sweep --apply"; }
       [[ $n_hand -gt 0 ]] && { k=$((k+1)); echo "    $k. by hand, after review: $n_hand row(s) (content-landed, verify-owner, orphan dirs, stale, leaked)"; }

@@ -1228,6 +1228,23 @@ prune_dirty_count() {
   git -C "$1" status --porcelain 2>/dev/null | grep -c '.' || true
 }
 
+# After a FAILED `git worktree remove`: did git finish everything but the
+# directory itself? True only when the path is no longer a registered worktree
+# AND is an empty directory, so a real failure (dirty, locked, half-deleted)
+# still reads as one.
+prune_left_empty() {
+  local want regs w
+  [[ -d "$1" && -z "$(ls -A "$1" 2>/dev/null)" ]] || return 1
+  want=$(prune_norm "$(prune_native "$1")")
+  # Captured, then compared: an early-exiting `grep -q` at the end of a pipe
+  # turns the whole pipe into SIGPIPE under pipefail.
+  regs=$(git -C "$REPO_ROOT" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p') || return 1
+  while IFS= read -r w; do
+    [[ -n "$w" && "$(prune_norm "$w")" == "$want" ]] && return 1
+  done <<< "$regs"
+  return 0
+}
+
 prune_row() {
   PRUNE_ROWS="${PRUNE_ROWS}$1"$'\t'"$2"$'\t'"$3"$'\t'"$4"$'\n'
 }
@@ -1686,6 +1703,13 @@ prune_remove_safe() {
     local err=""
     if err=$(git -C "$REPO_ROOT" worktree remove "$p" 2>&1); then
       prune_log "removed worktree: $p (branch $br)"
+      removed=$((removed + 1))
+    elif prune_left_empty "$p"; then
+      # Windows: git emptied and unregistered the tree, then could not delete
+      # the directory itself because a process still holds it (a shell or an
+      # editor standing in it). The worktree IS gone; only an empty dir is left,
+      # and calling that "FAILED" sent the operator looking for lost work.
+      prune_log "removed worktree: $p (branch $br) - but the empty directory is still held by another process (${err##*: }). It is an empty leftover now: 'fleet sweep' lists it, and 'fleet sweep --apply' removes it once nothing holds it."
       removed=$((removed + 1))
     else
       prune_log "FAILED to remove $p - left in place: ${err:-unknown error}"

@@ -13,8 +13,10 @@ archive. It reports by default; `--apply` does only the zero-loss part.
 - [Landed by content](#landed-by-content)
 - [Competing work](#competing-work)
 - [Sessions: requests vs direct archives](#sessions-requests-vs-direct-archives)
+- [Desktop instances: act from the right window](#desktop-instances-act-from-the-right-window)
 - [--apply: the zero-loss classes](#--apply-the-zero-loss-classes)
 - [The never-push list](#the-never-push-list)
+- [The hold list](#the-hold-list)
 - [Limits](#limits)
 
 ## The procedure
@@ -30,11 +32,14 @@ is left. That is what makes it resumable after an interruption.
    holds an `UNTESTED-MERGE`, the lane being landed reads as merged and would be
    routed to removal. So the sweep's first row says so, every other action
    becomes `wait`, the next steps are just WAIT, and `--apply` refuses (exit 5).
+   It asks at the start and again just before it prints. A land that begins
+   mid-run, which on a busy machine is minutes long, still turns the report to
+   `wait`.
    Re-run once `fleet landing` exits 0. See [landing.md](landing.md#provisional-main).
 1. **Settle competing pairs** (phase 2). Pick the winner before landing either.
-2. **Land** `LAND` rows (`fleet land <branch>`); hand `REBASE` rows back to their lane.
+2. **Land** `LAND` rows (`fleet land <branch>`); hand `REBASE` rows back to their lane. Leave `ON-HOLD` rows alone.
 3. **Inspect** `INSPECT` trees: commit the work in its lane, or discard it after review.
-4. **Sessions** (phase 5): send each `ARCHIVE-REQUEST`, archive each `ARCHIVE-DIRECT`. Agent step, one gated call each.
+4. **Sessions** (phase 5): send each `ARCHIVE-REQUEST`, archive each `ARCHIVE-DIRECT`. Agent step, one gated call each, and only for sessions in your own Desktop instance. A row whose session lives in another instance names that window instead ([below](#desktop-instances-act-from-the-right-window)).
 5. **Remove** `REMOVE` worktrees with `fleet prune --remove`. Archived owners now let prune prove them SAFE.
 6. **Zero-loss hygiene**: `fleet sweep --apply`.
 7. **By hand, with an OK**: `CONTENT-LANDED`, `VERIFY-OWNER`, `ORPHAN-DIR`, `STALE`, `STALE-STASH`, `LEAKED`.
@@ -61,23 +66,29 @@ whose classifier the sweep reads (`--porcelain`) and never reimplements.
 | worktree | `VERIFY-OWNER` | merged + clean, prune cannot prove the owner archived | find the session (below) |
 | worktree | `FLEETFLOW` | a landed fleetflow lane | `ff-clean.sh --run <run>` |
 | worktree | `LAND` / `REBASE` | unlanded; merges cleanly / conflicts with base | `fleet land` / rebase in the lane |
-| compete | `OVERLAP` | the pair and the shared files; "uncommitted in X" names the side | pick a winner |
+| worktree | `ON-HOLD` | unlanded, and on the [hold list](#the-hold-list); the detail opens with the hold's reason | none: no land, no rebase, until the hold is lifted |
+| compete | `OVERLAP` | the pair and the shared files; "uncommitted in X" names the side, "X ON HOLD" a side that cannot win yet | pick a winner |
 | branch | `DELETE-MERGED` | worktree-less, every commit in base, nobody holds it | `--apply` |
-| branch | `HELD` | merged, but an open session's record names it | none (deleted once it archives) |
+| branch | `HELD` | merged, but an open session's record names it (archive flag read fresh) | none (deleted once it archives) |
+| branch | `ON-HOLD` | worktree-less, unlanded, on the hold list | none, as above |
 | branch | `TRACKED` | a fleet lane file in a non-terminal state names it | none |
 | branch | `CONTENT-LANDED` / `STALE` / `UNLANDED` | as the words say, with ages | by hand |
 | branch | `PARK` / `LEAKED` | never-push branch; with a remote copy it is `LEAKED` | `LEAKED`: review with the owner now |
 | hygiene | `EMPTY-DIR` | empty, unregistered, unclaimed, older than an hour | `--apply` (`rmdir`) |
-| hygiene | `HOLLOW` | empty, but an open session's cwd | archive that session first |
+| hygiene | `HOLLOW` | empty, but an open session's cwd (named `id [instance]`) | archive that session first |
 | hygiene | `ORPHAN-DIR` | unregistered with content | review by hand; never `rm -rf` |
 | hygiene | `STALE-STASH` | older than `--stale-days` | inspect; the stack is shared, drop by hand |
 | session | `ARCHIVE-REQUEST` | open, idle, every tree and written branch landed | `send_message` (below) |
 | session | `ARCHIVE-DIRECT` | open, and its lane dir is gone or no longer a worktree | `archive_session` — never message it |
 | session | `SPINNING?` | LIVE, and its lane dir is gone | check its CPU now ([prune.md](prune.md), landmine) |
 
+Every session row's detail opens with `[instance]`, the Desktop instance its
+session lives in (`[terminal]` for a CLI session). Its action is a tool call
+only when that instance is yours; otherwise it names the window to act from.
+
 Exit code: `0` nothing to act on (after `--apply`: every step it took
 succeeded), `10` findings, `1` an `--apply` step failed, `2` usage, `5`
-precondition. `KEEP`, `PARK`, `HELD`, `TRACKED`, `OWNER-BUSY`,
+precondition. `KEEP`, `PARK`, `HELD`, `ON-HOLD`, `TRACKED`, `OWNER-BUSY`,
 `STASH` and `FLEETFLOW-RUNS` are informational and never make it 10.
 
 ## Landed by content
@@ -142,6 +153,33 @@ with `git worktree add` and `EnterWorktree`, whose claim is not in any record.
 
 Never asked: live sessions, this session, MAIN, and archived sessions.
 
+## Desktop instances: act from the right window
+
+A machine can run several Desktop instances side by side: the primary one,
+plus one per `--user-data-dir` profile (`~/.claude-desktop-profiles/<name>`).
+Each keeps its own session store, and `sessions.sh` reads all of them
+(`sessions.sh stores`). The `ccd_session_mgmt` tools do not: `archive_session`
+and `send_message` reach only the sessions of the instance the calling agent
+runs in. On 2026-10-06 a coordinator acted on a sweep's 9 `ARCHIVE-DIRECT` rows
+from one profile. Five failed with "Session ... not found": 4 sessions lived in
+the primary store and 1 in another profile.
+
+So every session row names its instance: `[primary]`, or the profile's
+directory name. The label is read off the store path at run time and never
+written into a repo, since profile names are often personal.
+`sessions.sh where <id>` prints a session's instance and store. The sweep finds
+its own instance through `sessions.sh self`, the store holding the calling
+session, and splits rows three ways:
+
+| The session's instance is | Action in the row |
+|---|---|
+| this one (or the machine has one store) | the tool call, as before |
+| another one | the window to use: archive it from that window's sidebar **without opening it** (opening resumes it into a dead tree), or ask it there |
+| unknown: several stores, and `self` does not resolve (a terminal run, or a wrapper in two stores) | the tool call, plus the window it works from |
+
+The next-steps line counts the rows that only another window can do. `HOLLOW`
+and `ASK-ARCHIVE` rows name their sessions as `id [instance]` too.
+
 ## --apply: the zero-loss classes
 
 After a typed `apply` (or `--yes`), and each re-verified immediately before it acts:
@@ -180,12 +218,57 @@ overlap, and is never deleted by `--apply`. If it has an upstream or any
 remote-tracking copy, it reads `LEAKED`. Never write the list's contents into a
 public repo; it would publish what it protects.
 
+## The hold list
+
+Some lanes are finished but must not land yet: the maintainer wants to land
+one personally, or another waits on a review outside the repo. Without a hold
+the sweep offered both as `LAND`. Name them in a second private list:
+`~/.claude/held-lanes.txt` and/or `<git-common-dir>/info/held-lanes`.
+`FLEET_HELD_LANES` (`;`-separated files) replaces both, and set-but-empty turns
+it off. One `<glob> <reason>` per line, `#` comments:
+
+```
+lane/billing-rewrite    lands only with the maintainer
+lane/api-v2             waits on the partner's security review
+```
+
+A matching unlanded lane reads `ON-HOLD` with its reason, in phase 1 (with a
+worktree) and phase 3 (without), in place of `LAND`, `REBASE`, `UNLANDED` and
+`STALE`. `ON-HOLD` is informational, so it never makes the exit 10. To lift a
+hold, delete its line. A held lane that has landed anyway just reads as landed.
+
+**Why a separate list, not a reason column on never-push.** The two mean
+opposite things:
+
+| | never-push | held |
+|---|---|---|
+| Lasts | for good: the history must never leave the machine | until someone approves |
+| Lands? | never | yes, later |
+| Overlap | left out (it never lands) | **kept**: a rival lane must know it will land |
+| Remote copy | `LEAKED`: review with the owner now | expected: an outside review usually needs one |
+| Rebase | n/a | **refused**: it rewrites the SHAs a reviewer is reading |
+
+Folding holds into never-push would mark every pushed review branch `LEAKED`.
+It would also drop held lanes from overlap, so a rival lane could land over
+one unnoticed.
+
 ## Limits
 
 - **Writes by absolute path are invisible**, as for prune: a session that never
   entered a tree but writes into it leaves no claim. Check your own lanes first.
 - **Branch names in the session index are machine-wide.** A same-named branch
   in another repo can make a merged branch `HELD`. That errs toward keeping.
+  `HELD` takes each open namer's archive flag from the same fresh read as
+  phases 4 and 5, so a session archived since the index was cached (15 minutes)
+  holds nothing. Only namers the cache still calls open are re-read: one the
+  cache calls archived but that was unarchived since only delays a zero-loss delete.
+- **The hold list is the sweep's, not the queue's.** `fleet land` does not read
+  it, so a held lane still lands if someone runs `fleet land` on it by hand.
+  The hold stops the sweep from suggesting it.
+- **An instance is a store, not an account.** A store files wrappers per
+  account (`<store>/<account>/<workspace>/`). The sweep has not been shown that
+  a session filed under another account in the same store is unreachable, so
+  it treats the whole store as one instance.
 - **A transcript-directory claim is lossy** (`lane.x` and `lane-x` share a key).
   For prune it can only keep a tree; here it can attach a session to a
   neighbour's tree and so to a wrong archive request. The request is a polite

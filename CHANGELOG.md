@@ -319,6 +319,31 @@ feature releases live in the README "Recent Updates" section.
   an npm control), each seen failing first; four mutants killed. The facts store watches
   pnpm's `.npmrc` docs and Packagist's Composer 1 notice.
 
+- **`fleet sweep` from its first real run** - acting on the report exposed five gaps.
+  (1) Sessions in other Desktop instances: `sessions.sh` reads every instance's store
+  (the primary and each `--user-data-dir` profile), but `archive_session` and
+  `send_message` reach only the caller's own instance. A coordinator in one profile
+  saw 5 of 9 `ARCHIVE-DIRECT` calls fail "Session ... not found". Every session row
+  now opens with `[instance]` (read off the store path at run time, never written
+  down). A session that lives elsewhere gets "do it from the <instance> Desktop window",
+  never a tool call, and the next-steps line counts those rows. The new
+  `sessions.sh where <id>` names a session's store. (2) Held lanes were offered `LAND`.
+  A private hold list (`~/.claude/held-lanes.txt`, `<glob> <reason>` per line) makes
+  them `ON-HOLD`, with the reason, in place of `LAND`, `REBASE`, `UNLANDED` and
+  `STALE`. It is a separate list, not a never-push annotation: a held lane still
+  competes for files, and its review copy on a remote is expected, where never-push
+  would call it `LEAKED`. (3) The branch phase judged `HELD` on the 15-minute cached
+  index, so a session archived since still held its branch while the hygiene phase,
+  reading fresh, already treated it as gone. Its open namers now join the same fresh
+  read. (4) `fleet prune --remove` on Windows reported `FAILED` when git had emptied and
+  unregistered the tree but a process still held the empty directory. Prune now
+  reports it removed, plus an empty leftover that `fleet sweep --apply` clears. (5) The
+  sweep asked `fleet landing` once, at the start, so a land that began mid-run left a
+  report of live actions on a tip about to move. It now asks again just before it
+  prints, and the report turns to `wait`. 12 new checks in
+  `fleet-ops/tests/sweep.sh`: 8 fail on the old code, 2 fail with the second ask
+  removed, and the 2 controls each fail against a mutant.
+
 - **pm-audit matched to what the tools do, from a finding-by-finding check of a sweep** -
   real repositories showed four places where `package-manager-ops`' audit misled. (1)
   `php.lockfile.stale` follows Composer's own lock check: a requirement met by a locked

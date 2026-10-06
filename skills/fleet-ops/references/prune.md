@@ -102,7 +102,14 @@ Three further guards, all on the irreversible direction:
 
 1. **`git worktree remove`, never `rm -rf`.** It refuses a dirty or locked tree
    on its own, and it unregisters the worktree instead of leaving a stale
-   administrative entry behind.
+   administrative entry behind. On Windows it can still fail with `Permission
+   denied` *after* emptying and unregistering the tree, because a process (a
+   shell or editor standing in it) holds the directory itself. Prune checks for
+   exactly that end state: unregistered and empty. It reports the tree as
+   removed, plus an empty leftover. `fleet sweep` lists that leftover
+   (`HOLLOW` while a session's cwd, `KEEP` for its first hour, then
+   `EMPTY-DIR`), and `fleet sweep --apply` removes it once nothing holds it.
+   Anything else still reads `FAILED`.
 2. **Re-verify immediately before deleting.** Classification reads a session
    index with a long TTL (15 min), refreshed only for the sessions already in
    it; a session can wake, be unarchived, or move into a tree between the table
