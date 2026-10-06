@@ -65,6 +65,7 @@
     "volta_unmaintained": {"url": "https://raw.githubusercontent.com/volta-cli/volta/main/README.md", "contains": "unmaintained"},
     "node_sass_eol":      {"url": "https://raw.githubusercontent.com/sass/node-sass/master/README.md", "contains": "end of life"},
     "yarn1_security_only": {"url": "https://raw.githubusercontent.com/yarnpkg/yarn/master/README.md", "contains": "only accept security fixes"},
+    "yarn1_occasional_hotfix": {"url": "https://raw.githubusercontent.com/yarnpkg/yarn/master/README.md", "contains": "the occasional hotfix"},
     "bower_recommends_alternatives": {"url": "https://bower.io/", "contains": "we recommend"},
     "pnpm_npmrc_placeholders_ignored": {"url": "https://raw.githubusercontent.com/pnpm/pnpm.io/main/docs/npmrc.md", "contains": "placeholder in any of these positions is ignored"},
     "packagist_composer1_shutdown": {"url": "https://repo.packagist.org/packages.json", "contains": "shutdown on September 1st 2025"}
