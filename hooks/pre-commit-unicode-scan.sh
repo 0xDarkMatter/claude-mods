@@ -8,6 +8,10 @@
 #
 # Install (per repo):
 #   ln -sf ../../hooks/pre-commit-unicode-scan.sh .git/hooks/pre-commit
+#   # The hook follows that link to the skills/ beside its real path. Git Bash's
+#   # `ln -s` copies unless symlinks are enabled: the copy still finds this repo's
+#   # scanner but keeps the hook code it was copied with, so there use a wrapper:
+#   #   printf '#!/bin/sh\nexec bash hooks/pre-commit-unicode-scan.sh\n' > .git/hooks/pre-commit
 #   # or, if combining with other pre-commit logic, call it from your existing hook:
 #   #   bash hooks/pre-commit-unicode-scan.sh || exit 1
 #
@@ -28,14 +32,47 @@
 set -uo pipefail   # NOT -e: only an explicit critical finding should block
 
 # ── Locate the scanner (repo + installed layouts share the hooks/ ↔ skills/ sibling) ─
-SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+# Resolve this file's REAL path first. The documented install is a symlink, and git
+# runs it as .git/hooks/pre-commit: BASH_SOURCE names the link, not its target, so
+# the sibling lookup searched .git/skills/, found nothing, and the gate allowed
+# every commit. `readlink -f` where it exists; macOS before 12.3 has no -f, so
+# there follow the chain by hand (a relative target is relative to the link's dir).
+SELF="${BASH_SOURCE[0]}"
+SELF_REAL="$(readlink -f -- "$SELF" 2>/dev/null)" || SELF_REAL=""
+if [ -z "$SELF_REAL" ]; then
+  SELF_REAL="$SELF"; hops=0
+  while [ -L "$SELF_REAL" ] && [ "$hops" -lt 40 ]; do   # bounded: a link loop must not hang the commit
+    link="$(readlink -- "$SELF_REAL")" || break
+    case "$link" in /*) SELF_REAL="$link" ;; *) SELF_REAL="$(dirname -- "$SELF_REAL")/$link" ;; esac
+    hops=$((hops + 1))
+  done
+fi
+SELF_DIR="$(cd "$(dirname -- "$SELF_REAL")" 2>/dev/null && pwd)"
+REL="skills/prompt-injection-defense/scripts/scan-hidden-unicode.py"
 SCANNER=""
-for cand in \
-  "$SELF_DIR/../skills/prompt-injection-defense/scripts/scan-hidden-unicode.py" \
-  "$HOME/.claude/skills/prompt-injection-defense/scripts/scan-hidden-unicode.py"; do
+for cand in "$SELF_DIR/../$REL" "$HOME/.claude/$REL"; do
   [ -f "$cand" ] && { SCANNER="$cand"; break; }
 done
-[ -n "$SCANNER" ] || exit 0   # scanner not installed → don't break commits
+# A COPY in .git/hooks/ has no link to follow, and Git Bash's `ln -s` copies unless
+# symlinks are enabled. So last, the repo being committed to, and only when it
+# ships this hook beside the scanner: the layout the documented
+# `ln -sf ../../hooks/...` points into, whose hook code you already chose to run.
+# It runs the work tree's scanner, so it comes after the installed copy and never
+# for a repo that merely has a skills/ folder.
+if [ -z "$SCANNER" ]; then
+  TOP="$(git rev-parse --show-toplevel 2>/dev/null)" || TOP=""
+  [ -n "$TOP" ] && [ -f "$TOP/hooks/pre-commit-unicode-scan.sh" ] && [ -f "$TOP/$REL" ] && SCANNER="$TOP/$REL"
+fi
+# Not found → warn and allow, never a silent exit 0. A git hook runs only because
+# someone installed it, so a missing scanner is a broken install, and silence looked
+# exactly like a clean commit (how the symlink bug above went unnoticed). Not a
+# block: the gate is opt-in, and a machine without the skill must still commit.
+if [ -z "$SCANNER" ]; then
+  echo "prompt-injection pre-commit: scanner not found, so staged instruction files were NOT" >&2
+  echo "  scanned (looked beside $SELF_REAL, in ~/.claude/skills and in this repo). Install" >&2
+  echo "  the prompt-injection-defense skill, or remove this hook. Commit allowed." >&2
+  exit 0
+fi
 
 # First of python3/python/py that really runs 3.8+ (same probe as the skill's
 # scripts/run-python.sh). A bare "import sys" also passes a pre-3.8 interpreter,

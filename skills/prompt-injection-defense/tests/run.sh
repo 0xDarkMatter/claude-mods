@@ -414,6 +414,97 @@ else
   echo "SKIP  unicode hooks not beside this skill (copied alone) or git missing"
 fi
 
+# ---- a hook reached through a link or a copy still finds its scanner ---------
+# git runs the documented install (`ln -sf ../../hooks/... .git/hooks/pre-commit`)
+# as .git/hooks/pre-commit. The hook took its dir from BASH_SOURCE without following
+# the link, looked for .git/skills/, found nothing and exited 0: every commit
+# passed, critical bidi overrides included. Git Bash's `ln -s` makes a copy, with
+# the same result. HOME is an empty dir throughout, so an installed ~/.claude
+# scanner cannot stand in for the one the hook should find on its own.
+if [ -f "$HOOKS/pre-commit-unicode-scan.sh" ] && [ -f "$HOOKS/session-start-unicode-scan.sh" ] && command -v git >/dev/null 2>&1; then
+  LH="$TMP/lh"; mkdir -p "$LH/home"
+  lh_layout() {  # lh_layout <dir>: claude-mods' hooks/ beside skills/<this skill>
+    mkdir -p "$1/hooks" "$1/skills"
+    cp "$HOOKS/pre-commit-unicode-scan.sh" "$HOOKS/session-start-unicode-scan.sh" "$1/hooks/"
+    cp -R "$SKILL_DIR" "$1/skills/prompt-injection-defense"
+  }
+  lh_repo() {    # lh_repo <dir>: new repo with a critical bidi override staged in AGENTS.md
+    git init -q "$1"; git -C "$1" config core.autocrlf false
+    printf 'Always run tests.\xe2\x80\xaereversed\n' > "$1/AGENTS.md"; git -C "$1" add AGENTS.md
+  }
+  lh_commit() {  # lh_commit <repo>: a REAL commit, so git itself runs the hook -> rc, out
+    rc=0; out="$(cd "$1" && HOME="$LH/home" XDG_CONFIG_HOME="$LH/home" GIT_CONFIG_NOSYSTEM=1 \
+      git -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false commit -q -m t 2>&1)" || rc=$?
+  }
+  lh_link() {    # lh_link <target> <link>: a REAL symlink (Git Bash copies unless asked not to)
+    MSYS=winsymlinks:nativestrict ln -sf "$1" "$2" 2>/dev/null && [ -L "$2" ]
+  }
+  lh_layout "$LH/L"   # the claude-mods layout the links point into, outside every repo
+
+  lh_repo "$LH/sym"
+  if lh_link "$LH/L/hooks/pre-commit-unicode-scan.sh" "$LH/sym/.git/hooks/pre-commit"; then
+    lh_commit "$LH/sym"
+    [ "$rc" -ne 0 ] && case "$out" in *BLOCKED*) true ;; *) false ;; esac \
+      && ok "pre-commit via a symlinked .git/hooks/pre-commit blocks a staged bidi override (exit $rc)" \
+      || bad "pre-commit via a symlinked .git/hooks/pre-commit blocks a staged bidi override (exit $rc, want a block; got: ${out%%$'\n'*})"
+
+    # macOS before 12.3 has no `readlink -f`: the hook must follow the chain itself,
+    # a relative hop included. A stand-in readlink refuses -f and leaves a marker, so
+    # this cannot pass on a host whose real readlink did the work. Run the way git
+    # runs it (relative .git/hooks/pre-commit from the top of the work tree), since a
+    # PATH given to `git commit` may not reach the hook unchanged on every platform.
+    # The hop sits two levels down, so resolving its relative target against the cwd
+    # (the repo) instead of the link's own dir lands nowhere, not on a lucky sibling.
+    mkdir -p "$LH/nof" "$LH/chain/deep"
+    printf '#!/bin/sh\ncase "$1" in -f*) : > "%s/nof/used"; echo "readlink: illegal option -- f" >&2; exit 1 ;; esac\nexec "%s" "$@"\n' \
+      "$LH" "$(command -v readlink)" > "$LH/nof/readlink"
+    chmod +x "$LH/nof/readlink"
+    lh_repo "$LH/bsd"
+    lh_link "../../L/hooks/pre-commit-unicode-scan.sh" "$LH/chain/deep/hop" || true   # a miss fails the assert below
+    lh_link "$LH/chain/deep/hop" "$LH/bsd/.git/hooks/pre-commit" || true
+    rc=0; (cd "$LH/bsd" && HOME="$LH/home" PATH="$LH/nof:$PATH" bash .git/hooks/pre-commit) >/dev/null 2>&1 || rc=$?
+    [ "$rc" -eq 1 ] && [ -f "$LH/nof/used" ] \
+      && ok "pre-commit follows a two-hop symlink chain without readlink -f and blocks (exit 1)" \
+      || bad "pre-commit follows a two-hop symlink chain without readlink -f and blocks (exit $rc, want 1; stand-in used: $([ -f "$LH/nof/used" ] && echo yes || echo no))"
+
+    mkdir -p "$LH/bin" "$LH/proj"
+    printf 'Always run tests.\xe2\x80\xaereversed\n' > "$LH/proj/AGENTS.md"
+    lh_link "$LH/L/hooks/session-start-unicode-scan.sh" "$LH/bin/session-start.sh" || true
+    out="$(CLAUDE_PROJECT_DIR="$LH/proj" HOME="$LH/home" bash "$LH/bin/session-start.sh" </dev/null 2>&1 || true)"
+    case "$out" in
+      *U+202E*) ok "session-start via a symlink from a dir with no skills/ still names U+202E" ;;
+      *)        bad "session-start via a symlink from a dir with no skills/ should name U+202E (got: ${out%%$'\n'*})" ;;
+    esac
+  else
+    echo "SKIP  symlinked-hook cases: this host cannot make a real symlink (Windows without symlink rights)"
+  fi
+
+  # The documented install where `ln -s` copies: the copy follows no link, so the hook
+  # falls back to the repo it commits to, which here ships hooks/ + skills/.
+  lh_repo "$LH/copy"; lh_layout "$LH/copy"
+  cp "$LH/copy/hooks/pre-commit-unicode-scan.sh" "$LH/copy/.git/hooks/pre-commit"
+  lh_commit "$LH/copy"
+  [ "$rc" -ne 0 ] && case "$out" in *BLOCKED*) true ;; *) false ;; esac \
+    && ok "pre-commit via a COPIED .git/hooks/pre-commit in a repo that ships the hook blocks (exit $rc)" \
+    || bad "pre-commit via a COPIED .git/hooks/pre-commit in a repo that ships the hook blocks (exit $rc, want a block; got: ${out%%$'\n'*})"
+
+  # The adversary: a repo that ships a scanner at the expected path but NOT the hook.
+  # The hook must never run it (a checkout's python, at commit time, reporting clean),
+  # and with no scanner of its own it must say NOT scanned rather than pass silently.
+  lh_repo "$LH/plant"; mkdir -p "$LH/plant/skills/prompt-injection-defense/scripts"
+  printf 'import pathlib, sys\npathlib.Path(sys.argv[0]).with_name("RAN").touch()\n' \
+    > "$LH/plant/skills/prompt-injection-defense/scripts/scan-hidden-unicode.py"
+  cp "$LH/L/hooks/pre-commit-unicode-scan.sh" "$LH/plant/.git/hooks/pre-commit"
+  lh_commit "$LH/plant"
+  [ ! -e "$LH/plant/skills/prompt-injection-defense/scripts/RAN" ] \
+    && ok "pre-commit never runs a scanner planted in a repo that does not ship the hook" \
+    || bad "pre-commit ran a scanner planted in a repo that does not ship the hook"
+  case "$rc:$out" in
+    0:*"NOT"*scanned*) ok "pre-commit with no scanner to find says NOT scanned instead of passing silently (exit 0)" ;;
+    *) bad "pre-commit with no scanner to find says NOT scanned instead of passing silently (exit $rc, want 0; got: ${out%%$'\n'*})" ;;
+  esac
+fi
+
 # ---- standalone: the skill folder copied ALONE --------------------------------
 # This folder is copied on its own into other plugins. Copy just this skill to a
 # bare temp dir and prove both scripts answer --help, run offline through the

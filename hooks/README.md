@@ -108,6 +108,9 @@ These two are wired differently from the `Bash`/`Write|Edit` matchers above.
 
 ```bash
 ln -sf ../../hooks/pre-commit-unicode-scan.sh .git/hooks/pre-commit
+# Git Bash's `ln -s` copies unless symlinks are enabled. The copy still finds this
+# repo's scanner but keeps the hook code it was copied with; use a wrapper there:
+#   printf '#!/bin/sh\nexec bash hooks/pre-commit-unicode-scan.sh\n' > .git/hooks/pre-commit
 # already have a pre-commit hook? call it from yours instead:
 #   bash hooks/pre-commit-unicode-scan.sh || exit 1
 ```
@@ -115,6 +118,12 @@ ln -sf ../../hooks/pre-commit-unicode-scan.sh .git/hooks/pre-commit
 Both resolve the scanner relative to themselves, so they work whether claude-mods is
 run from the repo or installed under `~/.claude/`. Blocks only on `critical`; override
 a single commit with `PROMPT_INJECTION_ALLOW=1 git commit ...`.
+
+A hook run through a symlink resolves the link first, so it finds the `skills/` beside
+its real path, not beside `.git/hooks/`. If the pre-commit gate still finds no scanner,
+it says so on every commit and lets the commit through: a broken install is never
+silent. The SessionStart hook stays silent then, because it is auto-wired and a setup
+without the skill is legitimate.
 
 ## Hook Types
 
