@@ -8,6 +8,22 @@ feature releases live in the README "Recent Updates" section.
 
 ### Added
 
+- **`tests/skill-hygiene.sh`: a ratchet against four quiet skill failures.**
+  - **A side file SKILL.md never names.** The router can't find it. A named folder covers
+    its files, and `_lib/` helpers are exempt.
+  - **A `related-skills` entry the body never mentions.** The model never sees frontmatter
+    metadata, so that hand-off never happens.
+  - **`python scripts/x.py` run relative to the cwd.** From a project root it exits 127, or
+    runs the project's own script (docker/skills #102).
+  - **Two skills claiming one `metadata.owns` token.**
+
+  The 159 violations that predate the gate are listed in `tests/skill-hygiene-baseline.txt`:
+  a new violation fails, and so does a baseline line whose violation was fixed, so the list
+  only shrinks. Each run starts with a self-test on a throwaway skills tree. The gate runs in
+  `just check`, `check-fast` and CI. The Skill Resource Protocol now names the
+  `"<skill-dir>/scripts/..."` form. docker-ops and kubernetes-ops name every related skill;
+  portless-ops and process-compose-ops gain `owns`.
+
 - **windows-ops: a WSL reference** (`references/wsl.md`), replacing the old "WSL issues -
   separate domain" line. It covers:
   - `.wslconfig` versus `wsl.conf`, and the 8-second rule: a setting applies only after

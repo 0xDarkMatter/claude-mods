@@ -5,6 +5,7 @@ license: MIT
 allowed-tools: "Read Write Bash Edit"
 metadata:
   author: claude-mods
+  owns: "portless, local-https-proxy, named-local-urls, local-ca-trust"
   related-skills: process-compose-ops, mcp-ops, cli-ops
   upstream: https://github.com/vercel-labs/portless
 ---

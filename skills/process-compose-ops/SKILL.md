@@ -5,6 +5,7 @@ license: MIT
 allowed-tools: "Read Write Bash Edit"
 metadata:
   author: claude-mods
+  owns: "process-compose, local-service-supervision"
   related-skills: portless-ops, docker-ops, cli-ops
   upstream: https://github.com/F1bonacc1/process-compose
 ---

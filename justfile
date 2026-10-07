@@ -6,12 +6,13 @@
 default:
     @just --list
 
-# THE gate: frontmatter/naming + Agent Skills spec + doc-drift + agnostic + hook contracts + resource contracts + skill size (warn) + reference contents (warn) + skill suites + e2e suites + procsub-guard mutations
+# THE gate: frontmatter/naming + Agent Skills spec + doc-drift + agnostic + skill hygiene (ratchet) + hook contracts + resource contracts + skill size (warn) + reference contents (warn) + skill suites + e2e suites + procsub-guard mutations
 check:
     @bash tests/validate.sh
     @bash tests/spec.sh
     @bash tests/doc-drift.sh
     @bash tests/agnostic.sh
+    @bash tests/skill-hygiene.sh
     @bash tests/hooks.sh
     @bash tests/check-resources.sh
     @bash tests/skill-size.sh
@@ -25,6 +26,7 @@ check-fast:
     @bash tests/spec.sh
     @bash tests/doc-drift.sh
     @bash tests/agnostic.sh
+    @bash tests/skill-hygiene.sh
     @bash tests/hooks.sh
     @bash tests/check-resources.sh
     @bash tests/skill-size.sh

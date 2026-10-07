@@ -68,6 +68,8 @@ routing traffic in most clusters.
 | Dockerfiles, images, Compose, the local engine | docker-ops |
 | Cluster infrastructure as code | terraform-ops |
 | Metrics, alerts, dashboards | monitoring-ops |
+| Pipelines that build, scan and deploy to a cluster | ci-cd-ops |
+| A security review of RBAC, secrets handling or the app itself | security-ops |
 
 Argo CD has no official agent skill (argoproj-labs ships an MCP server).
 

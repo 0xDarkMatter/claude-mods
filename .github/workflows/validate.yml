@@ -57,6 +57,9 @@ jobs:
       - name: Agnostic gate (no author-specific identifiers in a public repo)
         run: bash tests/agnostic.sh
 
+      - name: Skill hygiene ratchet (orphan side files, unnamed related skills, relative script calls, duplicate owns)
+        run: bash tests/skill-hygiene.sh
+
       - name: Hook contract tests (stdin JSON in, exit 2 + stderr to block)
         run: bash tests/hooks.sh
 

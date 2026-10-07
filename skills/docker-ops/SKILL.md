@@ -72,6 +72,7 @@ a volume someone needed. The rules below stop those first.
 | `.wslconfig`, WSL networking modes, WSL disks in general | windows-ops ([wsl.md](../windows-ops/references/wsl.md)) |
 | `npm ci` vs `npm install`, lockfiles inside a RUN | package-manager-ops |
 | CI pipelines that build and push | ci-cd-ops |
+| Go or Rust build specifics (CGO, static and musl binaries, toolchain caches) | go-ops, rust-ops |
 
 ## Tools
 

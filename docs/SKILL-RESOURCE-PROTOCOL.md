@@ -54,7 +54,11 @@ A script under `scripts/` is an **agent-facing tool**. It MUST satisfy all of:
 6. **Bash:** `set -uo pipefail` (use `-e` only when every failure is fatal), all
    expansions quoted. **Python:** passes `python -m py_compile`, `argparse` for args.
 7. **Agent safety** (§6) — validate inputs; never `shell=True` with agent-supplied data.
-8. **Cited from `SKILL.md`** with a complete worked invocation, not a bare path.
+8. **Cited from `SKILL.md`** with a complete worked invocation, not a bare path. Write the
+   path from the skill's folder, `python "<skill-dir>/scripts/x.py"`, never
+   `python scripts/x.py`: the agent runs it from the user's project root, where a relative
+   path exits 127 or runs the project's own `scripts/x.py` (docker/skills #102).
+   `tests/skill-hygiene.sh` fails a new relative call.
 
 Default to **stdlib + common shell tools** (`jq`, `git`, `curl`). Check optional tools
 with `command -v` and exit `5` (missing-dep) with an install hint, never a stack trace.
