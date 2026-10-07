@@ -524,6 +524,21 @@ def toml_strings(val: str) -> list[str]:
 # === SCAN INVENTORY ===
 
 
+# Manifests that are not this repo's contracts: dependency trees and test fixtures.
+NOT_A_CONTRACT_RE = re.compile(r"(^|/)(node_modules|vendor|bower_components|tests?|spec|__tests__|fixtures?|"
+                               r"__fixtures__|testdata|examples?)/")
+
+
+def glob_member(path: str, glob: str) -> bool:
+    """Workspace globs match one path segment per `*`, as npm, pnpm and yarn do; only
+    `**` crosses folders. (fnmatch's `*` crosses `/`, which made a fixture deep inside a
+    member a member too.)"""
+    parts, gparts = path.strip("/").split("/"), glob.strip("/").split("/")
+    if "**" in gparts:
+        return fnmatch.fnmatchcase(path.strip("/"), glob.strip("/").replace("**", "*"))
+    return len(parts) == len(gparts) and all(fnmatch.fnmatchcase(a, b) for a, b in zip(parts, gparts))
+
+
 class Scan:
     def __init__(self, repo: Path, max_commits: int, use_tokei: bool):
         self.repo = repo
@@ -1463,8 +1478,7 @@ class Scan:
         out = set()
         for workspace in self._workspaces(""):
             for pattern in workspace.get("globs", []):
-                pattern = pattern.rstrip("/")
-                out.update(d for d in manifests if fnmatch.fnmatchcase(d, pattern))
+                out.update(d for d in manifests if glob_member(d, pattern))
         return [d + "/" for d in sorted(out)]
 
     @staticmethod
@@ -1473,9 +1487,12 @@ class Scan:
         return max(hits, key=len) if hits else ""
 
     def _manifest_dirs(self) -> list[str]:
+        """Folders with their own manifest. A vendored package or a test fixture's manifest
+        is not a contract of this repo, so neither counts (nor do their entry points)."""
         names = {"package.json", "composer.json", "pyproject.toml", "go.mod", "Cargo.toml"}
         return sorted({rel.rsplit("/", 1)[0] + "/" for rel in self.files
-                       if "/" in rel and rel.rsplit("/", 1)[-1] in names})
+                       if "/" in rel and rel.rsplit("/", 1)[-1] in names and not self.generated_kind(rel)
+                       and not NOT_A_CONTRACT_RE.search(rel)})
 
     def s_manifests_by_dir(self) -> dict:
         dirs = set(self._workspace_dirs())
@@ -1759,7 +1776,7 @@ class Scan:
             local_exts = Counter(os.path.splitext(rel)[1].lower() for rel, _ in under
                                  if os.path.splitext(rel)[1].lower() in SOURCE_EXTS)
             local_lang = local_exts.most_common(1)[0][0] if local_exts else None
-            if local_lang and repo_lang and local_lang != repo_lang:
+            if local_lang and repo_lang and EXT_LANG.get(local_lang, local_lang) != EXT_LANG.get(repo_lang, repo_lang):
                 signal("stack-differs", f"{EXT_LANG.get(local_lang, local_lang)} vs repo "
                        f"{EXT_LANG.get(repo_lang, repo_lang)}", "cmd: git ls-files")
             if directory in churned:
@@ -1803,9 +1820,10 @@ class Scan:
             head = "\n".join(text.splitlines()[:8])
             header = re.search(r"<!--\s*Source:\s*([^>]*?)\s*-->", head, re.I)
             if header:
-                named = header.group(1).strip().replace("\\", "/").lstrip("./")
-                resolved = named if named in self.fileset or any(f.startswith(named.rstrip("/") + "/")
-                                                                 for f in self.files) else None
+                named = posixpath.normpath(header.group(1).strip().replace("\\", "/"))
+                inside = not (named == ".." or named.startswith(("../", "/")) or re.match(r"^[A-Za-z]:", named))
+                resolved = named if inside and (named in self.fileset or any(
+                    f.startswith(named.rstrip("/") + "/") for f in self.files)) else None
                 out.append({"path": rel, "generator": "source-header",
                             "source_of_truth": resolved, "source": src(rel, line_of(text, header.group(0)))})
             elif ruler_source and (rel == "AGENTS.md" or re.search(r"generated.*ruler|ruler.*generated", head, re.I)):
@@ -1846,10 +1864,11 @@ class Scan:
             for key, kind in (("main", "manifest-main"), ("bin", "manifest-bin"),
                               ("exports", "manifest-exports")):
                 for value in strings(data.get(key)):
-                    name = posixpath.normpath((root.rstrip("/") + "/" if root else "")
-                                              + value.lstrip("./"))
+                    name = posixpath.normpath((root.rstrip("/") + "/" if root else "") + value)
                     add(name, kind, src(path, line_of(text, value) or json_key_line(text, key)))
         for rel in self.files:
+            if self.generated_kind(rel) or NOT_A_CONTRACT_RE.search(rel):
+                continue   # a vendored package's index is not this repo's entry point
             base = rel.rsplit("/", 1)[-1]
             if re.match(r"^index\.[A-Za-z0-9]+$", base) and os.path.splitext(rel)[1].lower() in SOURCE_EXTS:
                 add(rel, "index", src(rel))
@@ -1877,9 +1896,9 @@ class Scan:
             reasons.append(f"{contract_areas} code areas with contract signals")
         if len(workspaces) >= 3:
             reasons.append(f"{len(workspaces)} workspace members")
-        root_doc = self.read("AGENTS.md") or self.read("CLAUDE.md") or ""
-        structure = re.search(r"^#{1,3}\s+Structure\s*$([\s\S]*?)(?=^#{1,3}\s|\Z)",
-                              root_doc, re.I | re.M)
+        root_doc = self.read("AGENTS.md") or self.read(".claude/AGENTS.md") or self.read("CLAUDE.md") or ""
+        structure = re.search(r"^#{1,3}\s+[^\n]*\b(?:structure|layout|director(?:y|ies)|folders?|code ?map)\b"
+                              r"[^\n]*$([\s\S]*?)(?=^#{1,3}\s|\Z)", root_doc, re.I | re.M)
         if structure:
             body = structure.group(1).strip("\n")
             if len(body.splitlines()) > 25 or len(body) > 2000:

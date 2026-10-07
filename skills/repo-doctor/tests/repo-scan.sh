@@ -212,6 +212,65 @@ OUT="$("$PY" "$SCAN" --repo "$GT" --only gates --json --no-tokei 2>/dev/null)"
 check "boundary_config_in_a_subfolder_is_scoped_to_it" \
       "any(g['tool']=='dependency-cruiser' and g['scope']=='db/' and g['config']=='.dependency-cruiser.cjs' for g in D['gates']) and any(g['config']=='scripts/check-root.sh' and g['scope']=='' for g in D['gates'])"
 
+# ---- refute regressions (2026-10-07 adversarial review) ------------------------
+# One fixture whose every folder makes a nesting rule bite: a farm of 9 plugins that
+# would each qualify alone, an app with a manifest and tests but no deploy, a big folder
+# with nothing but size, a .tsx package in a .ts repo, workspace fixtures deep inside a
+# member, committed vendor packages, and dotted paths in a Source header and a main.
+RR="$TMP/refute"; init_repo "$RR"
+"$PY" - "$RR" <<'EOF'
+import json, os, sys
+r = sys.argv[1]
+def w(path, text="x\n"):
+    os.makedirs(os.path.dirname(f"{r}/{path}") or r, exist_ok=True)
+    open(f"{r}/{path}", "w", newline="\n").write(text)
+w("package.json", json.dumps({"name": "rr", "private": True, "workspaces": ["packages/*", "apps/*"]}))
+for i in range(1, 10):
+    w(f"plugins/p{i:02d}/package.json", json.dumps({"name": f"p{i}"}))
+    w(f"plugins/p{i:02d}/tests/run.sh", "echo ok\n")
+    for k in range(15):
+        w(f"plugins/p{i:02d}/src/m{k}.ts", "export const m = 1\n")
+w("apps/api/package.json", json.dumps({"name": "api"}))
+w("apps/api/tests/run.sh", "echo ok\n")
+for k in range(15):
+    w(f"apps/api/src/a{k}.ts", "export const a = 1\n")
+# big/ has a manifest (one contract signal) and 300 files: any points for size would
+# give it the second signal and the 4 points a recommendation needs.
+w("big/package.json", json.dumps({"name": "big"}))
+for k in range(300):
+    w(f"big/b{k}.ts", "export const b = 1\n")
+w("packages/ui/package.json", json.dumps({"name": "ui"}))
+w("packages/ui/.dependency-cruiser.cjs", "module.exports = { forbidden: [] }\n")
+for k in range(15):
+    w(f"packages/ui/src/c{k}.tsx", "export const c = 1\n")
+w("packages/ui/test/fixtures/f0/package.json", json.dumps({"name": "fixture"}))
+for i in range(5):
+    w(f"vendor/acme/pkg{i}/package.json", json.dumps({"name": f"acme{i}", "main": "index.js"}))
+    w(f"vendor/acme/pkg{i}/index.js", "module.exports = 1\n")
+w("site/package.json", json.dumps({"name": "site", "main": ".output/server/index.mjs"}))
+w("site/.output/server/index.mjs", "export default 1\n")
+w(".agents/src.md", "# Source rules\n")
+w("AGENTS.md", "<!-- Source: .agents/src.md -->\n# Agents\n")
+w("shared/AGENTS.md", "# Shared\n")
+w("sub/AGENTS.md", "<!-- Source: ../shared/AGENTS.md -->\n# Sub\n")
+EOF
+commit "$RR" "feat: refute fixture"
+OUT="$("$PY" "$SCAN" --repo "$RR" --json --no-tokei 2>/dev/null)"
+rec="{r['dir'] for r in D['nesting']['recommend']}"
+check "tool_farm_gets_one_protocol_doc_not_nine" \
+      "not any(x.startswith('plugins/p') for x in $rec) and any(f['parent']=='plugins/' and f['members']==9 for f in D['nesting']['farms'])"
+check "never_recommends_nesting_for_size_alone" "'big/' not in $rec"
+check "apps_without_deploy_or_cluster_are_not_nested" "'apps/api/' not in $rec"
+check "tsx_in_a_ts_repo_is_not_a_different_stack" \
+      "'packages/ui/' not in $rec and not any(s['kind']=='stack-differs' for r in D['nesting']['recommend'] for s in r['signals'])"
+check "workspace_glob_matches_one_segment" \
+      "'packages/ui/test/fixtures/f0/' not in D['manifests_by_dir'] and 'packages/ui/test/fixtures/f0/' not in D['architecture']['layout']"
+# 9 plugins + api + ui + site + big = 13 areas; the 5 vendor packages and the fixture don't count.
+check "vendor_manifests_neither_warrant_nor_enter_the_map" \
+      "'13 code areas with contract signals' in D['architecture']['reasons'] and not any(e['name'].startswith('vendor/') for e in D['architecture']['entry_points'])"
+check "dotted_paths_keep_their_dot" \
+      "{x['path']:x['source_of_truth'] for x in D['generated_entry_docs']}=={'AGENTS.md':'.agents/src.md','sub/AGENTS.md':None} and any(e['name']=='site/.output/server/index.mjs' for e in D['architecture']['entry_points'])"
+
 # ---- clean control -----------------------------------------------------------
 C="$TMP/clean"; init_repo "$C"; mkdir -p "$C/src"
 echo "# Clean" > "$C/README.md"; echo "print(1)" > "$C/src/app.py"; commit "$C" "feat: one"
