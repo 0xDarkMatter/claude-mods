@@ -251,6 +251,29 @@ shadow_case dotclaude ".claude/CLAUDE.md importing @../AGENTS.md is fine" .claud
 check "  ...and raises no crit" "not [f for f in D['findings'] if f['severity']=='crit']"
 shadow_case local "an untracked CLAUDE.local.md warns (personal shadow)" CLAUDE.local.md "my notes" shadowed-by-claude-local
 shadow_case localc "a committed CLAUDE.local.md is crit" CLAUDE.local.md "my notes" claude-local-committed commit
+# A CLAUDE.md that copies AGENTS.md (what `/import` writes) must become the import plus
+# the lines that differ. Prepending the import to the copy loads the content twice.
+CP="$TMP/copy"; init_repo "$CP"; good_agents "$CP"
+{ cat "$CP/AGENTS.md"; echo; echo "Use plan mode for anything under src/."; } > "$CP/CLAUDE.md"
+commit "$CP" "docs: claude copy"
+OUT="$("$PY" "$AM" audit --repo "$CP" --no-parents --json 2>/dev/null)"
+check "claude_md_copy_is_flagged_as_a_copy" "'shadowed-copy' in {f['id'] for f in D['findings']}"
+"$PY" "$AM" audit --repo "$CP" --no-parents --diff > "$TMP/copy.patch" 2>/dev/null
+gitq "$CP" apply "$(winpath "$TMP/copy.patch")" 2>/dev/null
+"$PY" - "$CP/CLAUDE.md" <<'EOF' && ok "claude_md_copy_is_replaced_not_imported_twice" || no "copy fix" "$(head -3 "$CP/CLAUDE.md")"
+import sys
+lines = [l for l in open(sys.argv[1]).read().splitlines() if l.strip()]
+sys.exit(0 if lines == ["@AGENTS.md", "Use plan mode for anything under src/."] else 1)
+EOF
+CI2="$TMP/import-copy"; init_repo "$CI2"; good_agents "$CI2"
+{ echo "@AGENTS.md"; echo; cat "$CI2/AGENTS.md"; } > "$CI2/CLAUDE.md"
+commit "$CI2" "docs: import plus copy"
+OUT="$("$PY" "$AM" audit --repo "$CI2" --no-parents --json 2>/dev/null)"
+check "import_plus_copy_is_flagged" "'claude-imports-duplicate' in {f['id'] for f in D['findings']}"
+"$PY" "$AM" audit --repo "$CI2" --no-parents --diff > "$TMP/import-copy.patch" 2>/dev/null
+gitq "$CI2" apply "$(winpath "$TMP/import-copy.patch")" 2>/dev/null
+[ "$(grep -cv '^[[:space:]]*$' "$CI2/CLAUDE.md")" = "1" ] && ok "import_plus_copy_keeps_only_the_import" \
+    || no "import+copy fix" "$(cat "$CI2/CLAUDE.md" | head -3)"
 N="$TMP/nested"; init_repo "$N"; good_agents "$N"; mkdir -p "$N/sub"
 echo "# Sub rules" > "$N/sub/AGENTS.md"; echo "# Sub claude" > "$N/sub/CLAUDE.md"; commit "$N" "docs"
 OUT="$("$PY" "$AM" audit --repo "$N" --no-parents --json 2>/dev/null)"

@@ -274,7 +274,52 @@ def import_line(rel: str, agents_rel: str = "AGENTS.md") -> str:
     return "@" + path
 
 
+# A CLAUDE.md-family file whose non-blank lines mostly repeat AGENTS.md is a copy (what
+# Claude Code's `/import` writes). Its fix is the import plus the lines that differ:
+# prepending the import to the copy would load the same text twice.
+COPY_RATIO = 0.6
+COPY_MIN_LINES = 3
+
+
+def is_agents_import(line: str) -> bool:
+    s = line.strip()
+    return s.startswith("@") and s.endswith("AGENTS.md")
+
+
+def split_copy(text: str, agents_text: str) -> tuple[int, list[str]]:
+    """(lines repeated from AGENTS.md, the other lines in order, blank runs collapsed).
+    Import lines count as neither and are dropped from the kept lines."""
+    agents = {l.strip() for l in agents_text.splitlines() if l.strip()}
+    repeated, kept = 0, []
+    for line in text.splitlines():
+        s = line.strip()
+        if s and s in agents:
+            repeated += 1
+        elif s and is_agents_import(s):
+            continue
+        elif s or (kept and kept[-1].strip()):
+            kept.append(line)
+    while kept and not kept[-1].strip():
+        kept.pop()
+    return repeated, kept
+
+
+def is_copy(text: str, agents_text: str) -> bool:
+    repeated, kept = split_copy(text, agents_text)
+    others = sum(1 for l in kept if l.strip())
+    return repeated >= COPY_MIN_LINES and repeated >= COPY_RATIO * (repeated + others)
+
+
+def import_with_deltas(text: str, agents_text: str, imp: str) -> str:
+    eol = "\r\n" if "\r\n" in text else "\n"
+    _, kept = split_copy(text, agents_text)
+    return imp + eol + (eol + eol.join(kept) + eol if kept else "")
+
+
 SHADOW_MSG = {
+    "copy": "{f} repeats AGENTS.md, so Claude Code reads this copy instead and the two drift "
+            "apart (Claude Code's `/import` writes such a file). Replace it with `{imp}` plus "
+            "only the lines that differ",
     "standalone": "{f} shadows AGENTS.md: with any CLAUDE.md, .claude/CLAUDE.md or "
                   "CLAUDE.local.md present, Claude Code reads the CLAUDE.md files only. "
                   "Put `{imp}` on its first line (keep Claude-only deltas below it) or "
@@ -876,7 +921,16 @@ def shadow_findings(repo: Path, agents_rel: str, no_parents: bool) -> tuple[list
             continue
         text = read_raw(p)
         kind = classify_claude(text, name, agents_rel)
-        if kind == "imports":
+        agents_text = read_raw(repo / agents_rel) if (repo / agents_rel).is_file() else ""
+        if kind in ("standalone", "pointer-prose") and name != "CLAUDE.local.md" \
+                and is_copy(text, agents_text):
+            kind = "copy"
+        if kind == "imports" and is_copy(text, agents_text):
+            finds.append({"id": "claude-imports-duplicate", "severity": "warn", "path": name,
+                          "msg": f"{name} imports AGENTS.md and also repeats it, so the same text "
+                                 "loads twice. Keep the import and only the Claude-only lines"})
+            edits[name] = (text, import_with_deltas(text, agents_text, imp))
+        elif kind == "imports":
             finds.append({"id": "claude-imports", "severity": "info", "path": name,
                           "msg": f"{name} imports AGENTS.md: fine, provided it holds Claude-only deltas"})
         elif name == "CLAUDE.local.md":
@@ -894,6 +948,8 @@ def shadow_findings(repo: Path, agents_rel: str, no_parents: bool) -> tuple[list
                           "msg": SHADOW_MSG[kind].format(f=name, imp=imp)})
             if kind == "symlink-text":
                 edits[name] = (text, imp + "\n")
+            elif kind == "copy":
+                edits[name] = (text, import_with_deltas(text, agents_text, imp))
             else:
                 eol = "\r\n" if "\r\n" in text else "\n"
                 edits[name] = (text, imp + eol + eol + text)
