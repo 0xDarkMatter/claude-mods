@@ -1895,10 +1895,16 @@ def own_test(test: str, other: str) -> bool:
 def candidates(d: dict) -> list[dict]:
     out: list[dict] = []
 
-    def add(kind: str, question: str, evidence: list[str], paths: list[str] | None = None) -> None:
+    def add(kind: str, question: str, evidence: list[str], paths: list[str] | None = None,
+            count: int | None = None) -> None:
         # paths: the repo files the question is about; agents-md.py audit uses them to
         # tell which questions an existing AGENTS.md already answers.
-        out.append({"kind": kind, "question": question, "evidence": evidence, "paths": paths or []})
+        # count: the evidence size (shared commits for coupling, fix plus revert commits
+        # for fragile, commits for a hot spot, lines for an outlier, follow-ups for a
+        # config edit; None where no number applies). A ruled-out line records it, and
+        # the question returns once the evidence grows past it.
+        out.append({"kind": kind, "question": question, "evidence": evidence, "paths": paths or [],
+                    "count": count})
     for s in [s for s in d.get("secrets_skipped", []) if not FIXTURE_DIR_RE.search(s["path"])][:3]:
         add("tracked-secret", f"`{s['path']}` is tracked and looks like a secrets file (the scan "
             "did not open it). Should it be ignored, and have its values been rotated?", [s["source"]],
@@ -1931,18 +1937,20 @@ def candidates(d: dict) -> list[dict]:
         asked += 1
         grouped.update(g)
         add("coupling", f"{len(members)} files keep changing together: " + ", ".join(f"`{f}`" for f in members[:5])
-            + ". Is that a rule (a generated set, a registry, mirrored config)?", [hist["source"]], members)
+            + ". Is that a rule (a generated set, a registry, mirrored config)?", [hist["source"]], members,
+            max((c["together"] for c in hist.get("coupling", []) if set(c["files"]) <= set(g)), default=None))
     pairs = [c for c in hist.get("coupling", []) if not set(c["files"]) <= grouped
              and not own_test(*c["files"]) and not own_test(*reversed(c["files"]))]
     for c in pairs[:4]:
         a, b = c["files"]
         add("coupling", f"`{a}` and `{b}` changed together in {c['together']} of the {c['either']} "
-            "commits that touched either. Must one change whenever the other does?", [c["source"]], [a, b])
+            "commits that touched either. Must one change whenever the other does?", [c["source"]], [a, b],
+            c["together"])
     for f in hist.get("config_followups", [])[:3]:
         add("config-followup", f"Edits to `{f['config']}` were followed by {f['family']} changes "
             f"(e.g. `{f['example']}`) within {f['window']} commits in {f['followed']} of "
             f"{f['edits']} cases. Is a rebuild, migration or sync required after changing it?",
-            [f["source"]], [f["config"]])
+            [f["source"]], [f["config"]], f["followed"])
     # One question per file: a fragile file that is also a hot spot says so here instead
     # of raising a second, near-identical hot-spot question.
     hot = {h["path"]: h for h in hist.get("hotspots", [])}
@@ -1954,7 +1962,8 @@ def candidates(d: dict) -> list[dict]:
         fragile_paths.add(f["path"])
         add("fragile", f"`{f['path']}` was touched by {f['fix_commits']} fix commit(s) and "
             f"{f['reverts']} revert(s) in the scanned history.{also} What keeps breaking here, and "
-            "how is it checked?", [f["source"]] + [f"git: {e}" for e in f["examples"][:2]], [f["path"]])
+            "how is it checked?", [f["source"]] + [f"git: {e}" for e in f["examples"][:2]], [f["path"]],
+            f["fix_commits"] + f["reverts"])
     ddev = d.get("ddev") or {}
     for h in (ddev.get("hooks") or [])[:2]:
         add("ddev-hook", f"DDEV runs `{h['command']}` on {h['event']}. Does it have side effects "
@@ -1962,10 +1971,10 @@ def candidates(d: dict) -> list[dict]:
     for h in [h for h in hist.get("hotspots", []) if h["path"] not in fragile_paths][:2]:
         add("hotspot", f"`{h['path']}` is among the most-changed files ({h['commits']} of "
             f"{hist.get('commits_used', 0)} commits). What must an agent know before editing it?",
-            [h["source"]], [h["path"]])
+            [h["source"]], [h["path"]], h["commits"])
     for o in (d.get("outliers") or [])[:2]:
         add("outlier", f"`{o['path']}` is {o['lines']} lines. Must it stay one file (then say why "
-            "in a guard comment), or is it due a split?", [o["source"]], [o["path"]])
+            "in a guard comment), or is it due a split?", [o["source"]], [o["path"]], o["lines"])
     for w in ((d.get("manifests") or {}).get("workspaces") or [])[:1]:
         globs = ", ".join(w["globs"][:4]) or w["tool"]
         add("workspaces", f"The repo declares workspaces ({globs}). Does any package have its own "

@@ -344,6 +344,26 @@ OUT="$("$PY" "$AM" audit --repo "$U" --no-parents --json 2>/dev/null)"; rc=$?
 check "uncovered candidates: the fragile file, not the documented pair" \
       "[c['paths'] for c in D['uncovered_candidates']]==[['z.js']] and any(f['id']=='uncovered-candidates' and f['severity']=='info' for f in D['findings'])"
 [ "$rc" -eq 0 ] && ok "  ...an info finding, so the audit still exits 0" || no "uncovered exit" "$rc"
+# The ruled-out record (docs/agents/ruled-out.md, contract 1.4 of REPO-DOCTOR-ABC):
+# one line per decision, honoured only while the evidence stays at or below its @count.
+# z.js is fragile with 3 fix commits.
+mkdir -p "$U/docs/agents"
+ruled() { printf '%s\n' "$1" > "$U/docs/agents/ruled-out.md"; OUT="$("$PY" "$AM" audit --repo "$U" --no-parents --json 2>/dev/null)"; }
+ruled '- [fragile] `z.js` @3: legacy parser, replaced next quarter'
+check "ruled_out_line_silences_its_candidate" \
+      "D['uncovered_candidates']==[] and D['ruled_out']==1"
+ruled '- [fragile] `z.js` @2: legacy parser'
+check "ruled_out_lapses_when_evidence_grows" \
+      "[c['paths'] for c in D['uncovered_candidates']]==[['z.js']] and 'ruled-out-lapsed' in {f['id'] for f in D['findings']}"
+ruled '- [coupling] `gone.js` `other.js` @4: a pair that no longer exists'
+check "stale_ruled_out_line_is_reported" "'ruled-out-stale' in {f['id'] for f in D['findings']}"
+ruled '- [fragile] `z.js` @3: maybe it is fine (proposed)'
+check "proposed_line_is_not_honoured" \
+      "D['ruled_out']==0 and [c['paths'] for c in D['uncovered_candidates']]==[['z.js']]"
+ruled '- [fragile] `z.js` @3: was fine until 2000-01-01'
+check "expired_line_is_not_honoured" \
+      "D['ruled_out']==0 and 'ruled-out-expired' in {f['id'] for f in D['findings']}"
+rm -rf "$U/docs/agents"
 M="$TMP/missing"; init_repo "$M"; echo x > "$M/f"; commit "$M" "x"
 OUT="$("$PY" "$AM" audit --repo "$M" --no-parents --json 2>/dev/null)"; rc=$?
 check "no AGENTS.md is crit" "D['findings'][0]['id']=='missing-agents-md'"

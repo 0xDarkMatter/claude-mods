@@ -58,6 +58,7 @@ from __future__ import annotations
 import argparse
 import base64
 import difflib
+import fnmatch
 import json
 import os
 import re
@@ -66,6 +67,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import date
 from pathlib import Path
 from urllib.parse import quote
 
@@ -1090,6 +1092,76 @@ def build_patch(files: dict[str, tuple[str | None, str]]) -> str:
     return "".join(out)
 
 
+# The ruled-out record (contract 1.4 in docs/plans/REPO-DOCTOR-ABC-2026-10.md). One line
+# per owner decision that a scan candidate is not a landmine:
+#   - [<kind>] `<path-or-glob>` [`<path-or-glob>` ...] @<count>: <reason>[ until YYYY-MM-DD][ (proposed)]
+# <count> is the candidate's evidence when it was ruled out (repo-scan's candidate "count").
+# The line is honoured only while the current evidence stays at or below it, so a question
+# returns when the evidence grows (the ESLint bulk-suppression / PHPStan baseline model).
+# Who and when come from git blame on this file, so the line never stores them. A line
+# marked (proposed) is an agent's suggestion and is reported, never honoured.
+RULED_OUT = "docs/agents/ruled-out.md"
+RULED_RE = re.compile(r"^\s*[-*]\s+\[(?P<kind>[\w-]+)\]\s+(?P<paths>(?:`[^`]+`\s*)+)"
+                      r"@(?P<count>\d+)\s*:\s*(?P<reason>.+?)\s*$")
+
+
+def parse_ruled_out(text: str) -> tuple[list[dict], list[int]]:
+    """(entries, line numbers that start like an entry but do not parse)."""
+    entries, unparsed = [], []
+    for n, line in enumerate(text.splitlines(), 1):
+        if not re.match(r"^\s*[-*]\s+\[", line):
+            continue
+        m = RULED_RE.match(line)
+        reason = m.group("reason") if m else ""
+        proposed = reason.endswith("(proposed)")
+        reason = reason[:-len("(proposed)")].rstrip() if proposed else reason
+        until = re.search(r"\s*\buntil (\d{4}-\d{2}-\d{2})$", reason)
+        reason = reason[:until.start()].rstrip() if until else reason
+        if not m or not reason:
+            unparsed.append(n)
+            continue
+        entries.append({"line": n, "kind": m.group("kind"), "patterns": re.findall(r"`([^`]+)`", m.group("paths")),
+                        "count": int(m.group("count")), "reason": reason,
+                        "until": until.group(1) if until else None, "proposed": proposed})
+    return entries, unparsed
+
+
+def ruled_out_matches(entry: dict, cand: dict) -> bool:
+    """Same kind, and every path the candidate names matches one of the line's patterns."""
+    paths = cand.get("paths") or []
+    return entry["kind"] == cand.get("kind") and bool(paths) and all(
+        any(fnmatch.fnmatchcase(p.rstrip("/"), pat.rstrip("/")) for pat in entry["patterns"]) for p in paths)
+
+
+def apply_ruled_out(cands: list[dict], entries: list[dict], today: str) -> tuple[list[dict], int, list[dict]]:
+    """(candidates still open, how many were honoured, findings about the record itself)."""
+    finds, honoured = [], set()
+    for e in entries:
+        where = f"{RULED_OUT}:{e['line']}"
+        hits = [i for i, c in enumerate(cands) if ruled_out_matches(e, c)]
+        if not hits:
+            finds.append({"id": "ruled-out-stale", "severity": "info", "path": where,
+                          "msg": "this ruled-out line matches no current candidate: delete it"})
+            continue
+        if e["proposed"]:
+            finds.append({"id": "ruled-out-proposed", "severity": "info", "path": where,
+                          "msg": "a proposed ruled-out line: an owner removes '(proposed)' to accept it"})
+            continue
+        if e["until"] and e["until"] < today:
+            finds.append({"id": "ruled-out-expired", "severity": "info", "path": where,
+                          "msg": f"this ruled-out line expired on {e['until']}: the question is open again"})
+            continue
+        for i in hits:
+            count = cands[i].get("count")
+            if count is not None and count > e["count"]:
+                finds.append({"id": "ruled-out-lapsed", "severity": "info", "path": where,
+                              "msg": f"the evidence grew from @{e['count']} to {count} since this was ruled "
+                                     "out: the question is open again"})
+            else:
+                honoured.add(i)
+    return [c for i, c in enumerate(cands) if i not in honoured], len(honoured), finds
+
+
 def uncovered_candidates(text: str, cands: list[dict]) -> list[dict]:
     """Candidates whose files the doc never names. A path counts when it appears whole:
     `x.js` is not covered by `src/x.js` or `x.json`; a folder is covered by any file in it."""
@@ -1239,7 +1311,16 @@ def cmd_audit(args) -> int:
         finds += c_finds
         for name, (old, newc) in c_edits.items():
             files[name] = (old, newc)
-        uncovered = uncovered_candidates(text, f.get("candidates") or [])
+        cands = f.get("candidates") or []
+        data["ruled_out"] = 0
+        if (repo / RULED_OUT).is_file():
+            entries, unparsed = parse_ruled_out(read_raw(repo / RULED_OUT))
+            cands, data["ruled_out"], r_finds = apply_ruled_out(cands, entries, date.today().isoformat())
+            finds += r_finds
+            finds += [{"id": "ruled-out-unparsed", "severity": "info", "path": f"{RULED_OUT}:{n}",
+                       "msg": "this line looks like a ruled-out entry but does not parse: "
+                              "- [kind] `path` @count: reason"} for n in unparsed]
+        uncovered = uncovered_candidates(text, cands)
         data["uncovered_candidates"] = uncovered
         if uncovered:
             shown = ", ".join(f"`{c['paths'][0]}`" for c in uncovered[:5])
@@ -1266,8 +1347,9 @@ def cmd_audit(args) -> int:
         head = f"agents-md audit: {rel or 'no AGENTS.md'}"
         if rel:
             head += f" ({data['lines']} lines, coverage {data['coverage']}, "
-            head += (f"{data['commits_since']} commits since last touch)" if data["commits_since"] is not None
-                     else "not committed yet)")
+            head += (f"{data['commits_since']} commits since last touch" if data["commits_since"] is not None
+                     else "not committed yet")
+            head += f", {data['ruled_out']} ruled out)" if data.get("ruled_out") else ")"
         print(head)
         for x in finds:
             print(f"  {x['severity'].upper():<5} {x['msg']} [{x['path']}]")
