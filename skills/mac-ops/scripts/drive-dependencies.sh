@@ -15,6 +15,9 @@
 set -u
 
 TARGET=""
+# Saved because the loop below shifts $@ empty; restored after it so the
+# standard flags still reach parse_common_flags and maybe_filter_self.
+SAVED_ARGS=("$@")
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -v|--volume) TARGET="$2"; shift 2 ;;
@@ -32,6 +35,10 @@ EOF
         *) shift ;;
     esac
 done
+# Without this restore every standard flag was silently ignored (--redact
+# output meant for sharing went out unredacted). ${a[@]+...} is the bash
+# 3.2-safe expansion of a possibly empty array under set -u.
+set -- ${SAVED_ARGS[@]+"${SAVED_ARGS[@]}"}
 
 if [[ -z "$TARGET" ]]; then
     echo "Error: -v <mount-point> required (e.g. -v /Volumes/Backup)" >&2
