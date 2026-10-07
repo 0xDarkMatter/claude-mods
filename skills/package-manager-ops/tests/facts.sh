@@ -50,6 +50,11 @@ def _crash(kind, exc, tb):
 
 sys.excepthook = _crash
 
+# This opt-in fault is the mutation proof for the process-substitution guard. Without the
+# excepthook above, Bash loses the producer's exit status and the outer tally stays green.
+if os.environ.get("FACTS_HARNESS_CRASH") == "1":
+    raise RuntimeError("intentional facts harness crash")
+
 
 def load():
     spec = importlib.util.spec_from_file_location("v", str(verifier))
