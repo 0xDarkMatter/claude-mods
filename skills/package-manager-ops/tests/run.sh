@@ -279,6 +279,12 @@ mutation("pin span judges every selectable version", "clean-engine-floor-partial
          'admits(spec, lo, hi, dialect) is False', 'admits(spec, lo, (lo[0], lo[1], lo[2] + 1), dialect) is False')
 mutation("dev Dockerfile is not a production PHP pin", "clean-php-floor-dev-dockerfile",
          'if re.search(r"dev|test", path.name, re.I):', 'if False:')
+mutation("vite partners judged by peers, not majors", "clean-paired-peers-valid",
+         'peer_check("vite", "@vitejs/")', 'compare("vite", {n for n in root if n.startswith("@vitejs/")}, 1)')
+mutation("vue-template-compiler must equal vue exactly", "js-dep-vue2-compiler-patch",
+         'compare("vue", {"vue-template-compiler"}, 3)', 'compare("vue", {"vue-template-compiler"}, 2)')
+mutation("cross-root drift is major-only", "clean-nested-minor-drift",
+         'if len({version[0] for _path, version in rows}) > 1:', 'if len({version for _path, version in rows}) > 1:')
 mutation("additional install sites", "install-sites",
          '("package.json", "composer.json", "justfile", "Makefile")', '("never",)')
 

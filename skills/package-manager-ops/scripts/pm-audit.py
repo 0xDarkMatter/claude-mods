@@ -2264,15 +2264,23 @@ class Audit:
                      "one manager per repo: convert the odd ones out (references/detect-and-choose.md)")
 
     def paired_drift(self):
-        """Coupled package versions at one root, then exact-version drift across roots.
+        """Coupled package versions at one root, then MAJOR drift across package roots.
         Lockfile versions win over manifest specs because these checks describe what the
-        frozen install actually places, not what a later update might select."""
+        frozen install actually places, not what a later update might select.
+
+        Guard: vite and tailwindcss partners are judged by the `peerDependencies` range the
+        partner's own lock entry declares, never by matching majors. Most @vitejs/* and
+        @tailwindcss/* packages are versioned on their own (@tailwindcss/typography 0.5.x
+        peers `tailwindcss >=3.0.0 || >=4.0.0`; @vitejs/plugin-vue 6 peers vite ^5-^8), so a
+        major comparison flagged ordinary Tailwind 3 and Vite 7 sites. No peer data, or a
+        range the parser cannot read, is not evidence. Vue 2's vue-template-compiler must
+        equal vue exactly: its entry point throws "Vue packages version mismatch" otherwise."""
 
         def root_versions(directory):
             base = self.root / directory
             pkg = read_json(base / "package.json") if (base / "package.json").is_file() else None
             declared = {str(name) for section in DEP_TYPES for name in obj(obj(pkg).get(section))}
-            versions = {}
+            versions, peers = {}, {}
             lock = read_json(base / "package-lock.json") if (base / "package-lock.json").is_file() else None
             for key, row in obj(obj(lock).get("packages")).items():
                 if not key.startswith("node_modules/") or "/node_modules/" in key:
@@ -2281,16 +2289,18 @@ class Audit:
                 m = re.match(r"^v?(\d+)\.(\d+)\.(\d+)", str(obj(row).get("version") or ""))
                 if name in declared and m:
                     versions[name] = tuple(int(x) for x in m.groups())
+                    peers[name] = obj(obj(row).get("peerDependencies"))
             for name in declared - set(versions):
                 spec = next((str(obj(obj(pkg).get(section)).get(name)) for section in DEP_TYPES
                              if name in obj(obj(pkg).get(section))), "")
                 m = re.match(r"^v?(\d+)\.(\d+)\.(\d+)$", spec)
                 if m:
                     versions[name] = tuple(int(x) for x in m.groups())
-            return versions
+            return versions, peers
 
-        root = root_versions(Path())
+        root, peers = root_versions(Path())
         problems = []
+        dotted = lambda v: ".".join(map(str, v))  # noqa: E731
 
         def compare(base, partners, width):
             if base not in root:
@@ -2298,29 +2308,49 @@ class Audit:
             left = root[base][:width]
             for name in sorted(partners):
                 if name in root and root[name][:width] != left:
-                    problems.append(f"{base} {'.'.join(map(str, root[base]))} vs {name} {'.'.join(map(str, root[name]))}")
+                    problems.append(f"{base} {dotted(root[base])} vs {name} {dotted(root[name])}")
+
+        def peer_check(base, prefix):
+            if base not in root:
+                return
+            v = root[base]
+            for name in sorted(n for n in root if n.startswith(prefix)):
+                spec = peers.get(name, {}).get(base)
+                if isinstance(spec, str) and admits(spec, v, (v[0], v[1], v[2] + 1), "npm") is False:
+                    problems.append(f"{name} {dotted(root[name])} declares peer {base} {spec}, but {base} {dotted(v)} is locked")
 
         vue = root.get("vue")
         if vue:
-            compare("vue", {"vue-template-compiler" if vue[0] == 2 else "@vue/compiler-sfc"}, 2)
-        compare("vite", {n for n in root if n.startswith("@vitejs/")}, 1)
-        compare("tailwindcss", {n for n in root if n.startswith("@tailwindcss/")}, 1)
+            if vue[0] == 2:
+                compare("vue", {"vue-template-compiler"}, 3)
+            else:
+                compare("vue", {"@vue/compiler-sfc"}, 2)
+        peer_check("vite", "@vitejs/")
+        peer_check("tailwindcss", "@tailwindcss/")
 
+        # Nested roots (a theme, a plugin's own front end) are separate installs: patch or
+        # minor differences between them are normal, so only a different MAJOR is reported,
+        # and it is reported at the nested lockfile, not the root's.
         roots = {Path()}
         for lock in self.meta.get("nested_lockfiles", []):
             roots.add(Path(lock).parent)
         seen = {}
         for directory in sorted(roots, key=lambda p: p.as_posix()):
-            for name, version in root_versions(directory).items():
+            for name, version in root_versions(directory)[0].items():
                 seen.setdefault(name, []).append((directory.as_posix() or ".", version))
+        cross, drift_file = [], None
         for name, rows in sorted(seen.items()):
-            if len({version for _path, version in rows}) > 1:
-                problems.append(f"{name} drifts across roots: " + ", ".join(
-                    f"{path}={'.'.join(map(str, version))}" for path, version in rows))
+            if len({version[0] for _path, version in rows}) > 1:
+                cross.append(f"{name} majors differ across package roots: " + ", ".join(
+                    f"{path}={dotted(version)}" for path, version in rows))
+                paths = {p for p, _v in rows}
+                drift_file = drift_file or next((lock for lock in self.meta.get("nested_lockfiles", [])
+                                                 if Path(lock).parent.as_posix() in paths), None)
+        fix = "upgrade coupled packages together and align shared dependencies across package roots"
         if problems:
-            self.add("warn", "js.dep.paired-drift", "package-lock.json",
-                     "; ".join(problems[:8]),
-                     "upgrade coupled packages together and align shared dependencies across package roots")
+            self.add("warn", "js.dep.paired-drift", "package-lock.json", "; ".join(problems[:8]), fix)
+        if cross:
+            self.add("warn", "js.dep.paired-drift", drift_file or "package-lock.json", "; ".join(cross[:8]), fix)
 
     def lock_sources(self):
         """Lockfile source/integrity shape checks only. supply-chain-defense owns whether
