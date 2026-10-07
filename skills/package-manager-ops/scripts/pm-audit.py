@@ -22,7 +22,7 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   php.pin.disagree  php.eol  php.lockfile.missing  php.lockfile.stale
   php.composer.safety-off
   php.package.abandoned
-  npx.unpinned  npx.native-cli  legacy.bower  legacy.node-sass
+  npx.unpinned  npx.native-cli  legacy.bower  legacy.node-sass  legacy.package
   registry.token.committed  registry.authjson.committed  registry.credentials.image
   registry.pnpm.placeholder-ignored
   js.manager.mixed  deploy.install.unfrozen  deploy.composer.dev  php.composer.v1
@@ -2448,15 +2448,58 @@ class Audit:
 
     # ---- legacy tools ----
     def legacy(self):
+        table = self.facts.get("legacy_packages")
+        if not isinstance(table, list):
+            self.blind("legacy", "facts legacy_packages missing or invalid")
+            table = []
+        raised = set()
+
+        def emit(entry, file):
+            key = (entry.get("id"), entry.get("name"), file)
+            if key in raised:
+                return
+            raised.add(key)
+            self.add("warn", entry.get("id") or "legacy.package", file,
+                     f"{entry.get('name')} is legacy: {entry.get('reason')}",
+                     f"replace with {entry.get('replacement')} ({entry.get('see')})")
+
+        def applies(name, spec, versions):
+            if versions == "*":
+                return True
+            installed = self._installed(name)
+            if installed:
+                return admits(versions, installed, (installed[0], installed[1], installed[2] + 1)) is True
+            parsed = parse_range(spec)
+            if parsed is None:
+                return False
+            for branch in parsed:
+                lo = max([VZERO] + [iv[0] for iv in branch])
+                hi = min([VINF] + [iv[1] for iv in branch])
+                if lo < hi and admits(versions, lo, hi) is True:
+                    return True
+            return False
+
         for f in ("bower.json", ".bowerrc"):
             if (self.root / f).is_file():
-                self.add("warn", "legacy.bower", f, "Bower manifest - Bower is a legacy front-end manager",
-                         "move each Bower package to npm (references/legacy-exits.md)")
+                entry = next((e for e in table if isinstance(e, dict) and e.get("name") == "bower"), None)
+                if entry:
+                    emit(entry, f)
+                else:
+                    self.add("warn", "legacy.bower", f, "Bower manifest - Bower is a legacy front-end manager",
+                             "move each Bower package to npm (references/legacy-exits.md)")
                 break
-        if self.pkg and "node-sass" in self._declared():
-            self.add("warn", "legacy.node-sass", "package.json",
-                     "node-sass is deprecated and does not build on current Node",
-                     "replace with sass (Dart Sass); sass-loader picks it up (references/legacy-exits.md)")
+        declared = self._declared()
+        composer_declared = {**{str(k): str(v) for k, v in obj((self.composer or {}).get("require")).items()},
+                             **{str(k): str(v) for k, v in obj((self.composer or {}).get("require-dev")).items()}}
+        for entry in table:
+            if not isinstance(entry, dict):
+                continue
+            ecosystem, name, versions = entry.get("ecosystem"), str(entry.get("name") or ""), str(entry.get("versions") or "")
+            if ecosystem == "npm" and name in declared and applies(name, declared[name][1], versions):
+                emit(entry, "package.json")
+            elif ecosystem == "composer" and name in composer_declared and (versions == "*" or
+                    admits(versions, (0, 0, 0), VINF) is True):
+                emit(entry, "composer.json")
 
     # ---- committed registry credentials (values never printed) ----
     def secrets(self):

@@ -343,6 +343,16 @@ def ids_of(p):
         return {f["id"] for f in json.loads(p.stdout.decode("utf-8"))["data"]}
     except Exception:  # noqa: BLE001 - any parse failure reads as "no ids"
         return None
+# Missing research tables are an explicit blind spot, not a crash or a clean legacy pass.
+d = fresh("missing-legacy-facts")
+facts_path = Path(audit).resolve().parent.parent / "assets" / "package-manager-facts.json"
+facts = json.loads(facts_path.read_text(encoding="utf-8")); facts.pop("legacy_packages")
+missing_facts = tmp / "facts-without-legacy.json"; missing_facts.write_text(json.dumps(facts))
+p = run(d, "--json", "--facts", str(missing_facts))
+meta = json.loads(p.stdout.decode("utf-8"))["meta"] if p.stdout.strip().startswith(b"{") else {}
+legacy_check = next((c for c in meta.get("checks", []) if c.get("check") == "legacy"), {})
+row(legacy_check.get("status") == "skipped" and "legacy_packages" in legacy_check.get("reason", ""),
+    f"missing legacy_packages marks the legacy family skipped ({legacy_check})")
 # Encodings: a UTF-8 BOM manifest parses (npm accepts it), a UTF-16 PowerShell script is
 # read, and a non-ASCII file name prints on a cp1252 stdout instead of a traceback.
 d = fresh("bom")

@@ -88,6 +88,7 @@ workflow, job or step scope (or an earlier Dockerfile `ENV`) satisfy the same ru
 | `npx.native-cli` | error | a native CLI (rg, fd, sd, jq...) through npx, or a global npm install of one in CI | [npx-exec-safety.md](npx-exec-safety.md#never-route-a-native-cli-through-npx) |
 | `legacy.bower` | warn | `bower.json` or `.bowerrc` | [legacy-exits.md](legacy-exits.md#bower-to-npm) |
 | `legacy.node-sass` | warn | node-sass in package.json | [legacy-exits.md](legacy-exits.md#node-sass-to-dart-sass) |
+| `legacy.package` | warn | a dependency matches the facts catalogue's versioned legacy-package table (initially Laravel Mix, Vue 2/compiler, webpack 4, request and PhantomJS) | [legacy-exits.md](legacy-exits.md) |
 | `registry.token.committed` | error | a literal, non-empty token in `.npmrc` or `.yarnrc.yml` | [registries-and-auth.md](registries-and-auth.md#when-a-token-was-committed) |
 | `registry.authjson.committed` | error | a root `auth.json` that git tracks, or that is not ignored (git decides; without git, the root `.gitignore` by git's rules: `**/`, `!`, last match wins) | [registries-and-auth.md](registries-and-auth.md#when-a-token-was-committed) |
 | `registry.credentials.image` | error | CI writes `auth.json` or `.npmrc` inside the context of a later `docker build` in the same job, its Dockerfile copies the whole context (not `COPY --from`), and `.dockerignore` (root-anchored, last match wins) lets it through | [registries-and-auth.md](registries-and-auth.md#ci-wiring) |
