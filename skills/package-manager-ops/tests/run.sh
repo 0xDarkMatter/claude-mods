@@ -289,6 +289,8 @@ mutation("yarn npm-alias names its target", "clean-yarn-alias-source",
          'name = real_name(key[:at], key[at + 1:]) if at > 0 else key', 'name = key[:at] if at > 0 else key')
 mutation("lockfileVersion 1 tree is read", "js-lockfile-source-v1",
          'v1_tree(obj(lock).get("dependencies"), filename)\n', 'pass\n')
+mutation("local tooling keeps CI-only rules out", "install-sites",
+         '        if kind == "automation":\n            return\n', '')
 mutation("additional install sites", "install-sites",
          '("package.json", "composer.json", "justfile", "Makefile")', '("never",)')
 

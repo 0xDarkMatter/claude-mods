@@ -1146,15 +1146,16 @@ class Audit:
         self.meta["checks"].append({"check": family, "status": status,
                                     "reason": "; ".join(dict.fromkeys(reasons))})
 
+    def _has_tooling_inputs(self):
+        """Local tooling deploy() also reads, for the rules that hold everywhere."""
+        return any((self.root / name).is_file() for name in ("package.json", "composer.json", "justfile", "Makefile")) \
+            or (self.root / ".ddev" / "config.yaml").is_file() \
+            or any(p.is_file() for p in (self.root / ".ddev" / "commands").glob("**/*"))
+
     def _has_deploy_inputs(self):
         if any(p.is_file() for g in CI_GLOBS for p in self.root.glob(g)):
             return True
         if any(p.is_file() and not re.search(r"dev|test", p.name, re.I) for p in self.root.glob("Dockerfile*")):
-            return True
-        if any((self.root / name).is_file() for name in ("package.json", "composer.json", "justfile", "Makefile")):
-            return True
-        if (self.root / ".ddev" / "config.yaml").is_file() or any(
-                p.is_file() for p in (self.root / ".ddev" / "commands").glob("**/*")):
             return True
         appspec = self.root / "appspec.yml"
         if not appspec.is_file():
@@ -1261,7 +1262,12 @@ class Audit:
 
     def run(self):
         # Deploy stays first because js.lockfile asks which manager CI actually installs.
-        self._check("deploy", (self.deploy,), "" if self._has_deploy_inputs() else "no CI or deploy files")
+        # No CI or deploy file: local tooling is still read for unpinned global installs, but
+        # the family must not report `pass` for CI checks it never ran.
+        has_deploy = self._has_deploy_inputs()
+        if not has_deploy:
+            self.blind("deploy", "no CI or deploy files")
+        self._check("deploy", (self.deploy,), "" if has_deploy or self._has_tooling_inputs() else "no CI or deploy files")
         has_js = (self.root / "package.json").is_file() or any((self.root / n).is_file() for n in JS_LOCKFILES)
         self._check("js.lockfile", (self.js, self.nested, self.paired_drift, self.lock_sources), "" if has_js else "no package.json or JS lockfile")
         self._check("node.pins", (self.node_pins,), "" if (self.root / "package.json").is_file() else "no package.json")
@@ -2512,7 +2518,15 @@ class Audit:
                 values = []
                 for value in obj(scripts).values():
                     values += value if isinstance(value, list) else [value]
-                commands = [(i + 1, str(command), i + 1) for i, command in enumerate(values) if isinstance(command, str)]
+                # Report the script's own FILE line: find its JSON-encoded text in order
+                # (None if the file spells it differently, e.g. with \u escapes).
+                text_lines, cursor, commands = text.splitlines(), 0, []
+                for command in (c for c in values if isinstance(c, str)):
+                    needle = json.dumps(command, ensure_ascii=False)
+                    at = next((i for i in range(cursor, len(text_lines)) if needle in text_lines[i]), None)
+                    cursor = at if at is not None else cursor
+                    line_no = at + 1 if at is not None else None
+                    commands.append((line_no, command, line_no))
             elif kind == "automation" and path == ddev_config:
                 commands = [(i, scalar(m.group(1)), i) for i, line in enumerate(text.splitlines(), 1)
                             if (m := re.match(r"^\s*(?:-\s*)?(?:exec(?:-host|-container)?|command)\s*:\s*(.*)$", line))]
@@ -2528,6 +2542,10 @@ class Audit:
                 commands = [(n, c, n) for n, c in jenkins_commands(text)]
             else:
                 commands = [(n, c, n) for n, c in _join_continued(list(enumerate(text.splitlines(), 1)))]
+                if path.name in ("Makefile", "justfile"):
+                    # Recipe prefixes are not part of the command: Make's @ (silent), - (ignore
+                    # errors) and + (always run), just's @ and -.
+                    commands = [(n, re.sub(r"^(\s*)[@+-]+", r"\1", c), k) for n, c, k in commands]
             if ci:
                 scopes[rel] = self._job_scope(rel, text)
             block, cwd, env, stack = None, None, {}, []
@@ -2914,6 +2932,12 @@ class Audit:
                 t in ("-g", "--global") or t.startswith("--location=global") for t in toks):
             # a tool install: never the project's lockfile
             self._global_install(sub, toks[:idx] + toks[idx + 1:], rel, n, flag)
+            return
+        # Guard: local tooling (package/composer scripts, justfile, Makefile, DDEV hooks and
+        # commands) is where a developer is MEANT to run `npm install` or `composer update`.
+        # Only the unpinned global install above is wrong there too; every rule below
+        # describes a CI or deploy run and must not fire on a dev-machine recipe.
+        if kind == "automation":
             return
         family = "php" if tool == "composer" else "js"
         global_require = sub == "global" and any(t == "require" for t in toks[(idx + 1 if idx is not None else 0):])

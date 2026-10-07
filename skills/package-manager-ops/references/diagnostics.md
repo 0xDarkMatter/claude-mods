@@ -47,8 +47,12 @@ Local composite actions under `.github/actions/` and local reusable workflows un
 never fetched. A missing local target marks the deploy check skipped with its path rather
 than allowing an incomplete scan to read as a pass.
 Package scripts, Composer scripts, DDEV hooks/commands, Just recipes and Make recipes are
-also executable install sites. Their package-manager commands feed the same frozen/global
-install findings as CI; npx-family commands feed the existing npx findings.
+local tooling: a developer is meant to run `npm install` or `composer update` there, so
+only the rules that hold everywhere apply - an unpinned global install
+(`deploy.global.unpinned`, at the script's own file line), the Composer installer check and
+the npx findings. The frozen-install, `--no-dev` and ad-hoc Composer rules stay CI and
+deploy rules. A repo with local tooling but no CI or deploy file still reports the deploy
+check skipped, so a clean result there is never read as "CI is fine".
 
 Frozen installs are required in every CI job, whether it ships or not: the managers
 document the frozen install for CI as a whole, and a front-end job whose build a deploy job
@@ -116,7 +120,7 @@ workflow, job or step scope (or an earlier Dockerfile `ENV`) satisfy the same ru
 | `deploy.install.unfrozen` | warn | CI or a deploy runs `npm install`, a non-frozen Yarn/pnpm/Bun install (Yarn 2+ counts as frozen on CI unless `.yarnrc.yml` sets `enableImmutableInstalls: false`), or `composer update`/`require`; names the nested root it runs in | [install-semantics.md](install-semantics.md#the-one-table) |
 | `deploy.install.unlocked` | warn | CI installs in a nested folder that has a `package.json` or `composer.json` but no lockfile, and no workspace root's lockfile covers it, so every run resolves fresh | [install-semantics.md](install-semantics.md#the-one-table) |
 | `deploy.npm.yarn-flag` | error | a Yarn flag (`--frozen-lockfile`, `--immutable`) on `npm ci` or `npm install`: npm 12 refuses the command | [install-semantics.md](install-semantics.md#npm-ci-versus-npm-install) |
-| `deploy.global.unpinned` | warn | `npm install -g <pkg>` in CI or a deploy without an exact version | [npx-exec-safety.md](npx-exec-safety.md#the-rules) |
+| `deploy.global.unpinned` | warn | `npm install -g <pkg>` without an exact version in CI, a deploy, or local tooling (package/Composer scripts, Just/Make recipes, DDEV hooks) | [npx-exec-safety.md](npx-exec-safety.md#the-rules) |
 | `deploy.composer.dev` | warn | `composer install` without `--no-dev`, `--update-no-dev` or an applicable `COMPOSER_NO_DEV=1` where `vendor/` ships: a Dockerfile, an appspec hook, a shipping GitHub Actions job, or another CI file that ships | [install-semantics.md](install-semantics.md#deploy-patterns) |
 | `deploy.composer.safety-off` | warn | a shipping Composer command disables advisory/malware blocking, audit, or all platform requirements through a flag or environment setting | [install-semantics.md](install-semantics.md#deploy-patterns) |
 | `deploy.composer.adhoc` | warn | CI or deploy runs `composer require`, `composer global require` or `composer update` instead of installing the committed lock | [install-semantics.md](install-semantics.md#composer-install-versus-composer-update) |
