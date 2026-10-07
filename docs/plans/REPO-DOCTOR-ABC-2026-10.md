@@ -140,7 +140,7 @@ not honoured.
 | scorer | Builder | build | codex | `skills/repo-doctor/scripts/repo-doctor.py`, `skills/repo-doctor/tests/run.sh`, `skills/repo-doctor/references/scoring-rubric.md` | spec N7 scorer bullets | auto |
 | entrydocs | Builder | build | sonnet | `skills/repo-doctor/scripts/agents-md.py`, `skills/repo-doctor/tests/agents-md.sh`, `skills/repo-doctor/tests/fake-gh.py`, `skills/repo-doctor/assets/agents-md/nested.md`, `skills/repo-doctor/assets/agents-md/architecture.md` | Lane A; spec N2 to N6, N7 survey, N8; Lane C's guided/assisted split in `scaffold --json`; contracts 1.3, 1.4 | review |
 | docs | Composer | build | sonnet | `skills/repo-doctor/references/agents-md-protocol.md`, `skills/repo-doctor/references/monorepo-structure.md`, `skills/repo-doctor/references/owner-interview.md`, `skills/repo-doctor/SKILL.md`, `skills/repo-doctor/scripts/check-memory-docs.py`, `rules/agentic-quality.md`, `docs/PLAN.md`, `CHANGELOG.md`, `docs/plans/NESTED-ENTRY-DOCS-2026-10.md` | spec N9, Lane C workflow doc, the new Claude Code facts in check-memory-docs | review |
-| refute | Adversary | verify | grok | (none: reports findings only) | attacks the integrated tree against the spec | review |
+| refute | Adversary | verify | opus | (none: reports findings only) | attacks the integrated tree against the spec | review |
 
 Registries the orchestrator (Warden) applies during integration: the
 `check-tool-profiles.py --offline` line in `tests/check-resources.sh`, and its
@@ -184,7 +184,8 @@ Never drop:
 ## 6. Verify plan
 
 - **Per lane:** the orchestrator runs that lane's suites plus `tests/check-resources.sh` and reviews the three-dot diff before merging.
-- **After docs:** one Adversary on Grok, a different provider from every builder (codex, sonnet), attacks the integrated tree against the spec and its Done-when list.
+- **After docs:** one Adversary on Opus attacks the integrated tree against the spec and its Done-when list. Opus is a different model from the Sonnet builders and a different provider from the Codex ones. No third provider is available on this machine: the grok CLI is off limits by standing user rule, GLM's endpoint is unreachable, and pi has no provider key in the environment. The full `just check` and the orchestrator's review back it up.
+- **Plan refute:** Codex, a different provider from the orchestrator that wrote the plan.
 - **Before handing to MAIN:** the full `just check` on the integrated branch, run once.
 
 ## 7. Chip seats
