@@ -411,6 +411,6 @@ For every production deployment, address:
 - **typescript-ops** - TypeScript patterns used throughout Astro projects
 - **tailwind-ops** - Tailwind CSS integration with Astro (`@astrojs/tailwind`)
 - **javascript-ops** - Core JS patterns for client-side island code
-- **container-orchestration** - Docker patterns for self-hosted Astro (Node adapter)
+- **docker-ops** - Docker patterns for self-hosted Astro (Node adapter)
 - [Astro Documentation](https://docs.astro.build)
 - [Astro Integration Guide](https://docs.astro.build/en/guides/integrations-guide/)

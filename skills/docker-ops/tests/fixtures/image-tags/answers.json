@@ -1,0 +1,49 @@
+{
+ "node:24-slim": {
+  "status": 200,
+  "platforms": [
+   "linux/amd64",
+   "linux/arm64"
+  ]
+ },
+ "gcr.io/distroless/nodejs24-debian13:nonroot": {
+  "status": 200,
+  "platforms": [
+   "linux/amd64",
+   "linux/arm64"
+  ]
+ },
+ "ghcr.io/astral-sh/uv:0.9.0": {
+  "status": 200,
+  "platforms": [
+   "linux/amd64",
+   "linux/arm64"
+  ]
+ },
+ "postgres:99-bookworm": {
+  "status": 404
+ },
+ "redis:8.2-alpine": {
+  "status": 429
+ },
+ "quay.io/acmecorp/tool:2.1": {
+  "status": 200,
+  "platforms": [
+   "linux/amd64"
+  ]
+ },
+ "golang:1.27-trixie": {
+  "status": 200,
+  "platforms": [
+   "linux/amd64",
+   "linux/arm64"
+  ]
+ },
+ "registry.k8s.io/pause:3.10": {
+  "status": 200,
+  "platforms": [
+   "linux/amd64",
+   "linux/arm64"
+  ]
+ }
+}

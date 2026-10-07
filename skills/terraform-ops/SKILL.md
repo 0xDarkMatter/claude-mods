@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: ci-cd-ops, docker-ops, container-orchestration
+  related-skills: ci-cd-ops, docker-ops, kubernetes-ops
 ---
 
 # Terraform Operations

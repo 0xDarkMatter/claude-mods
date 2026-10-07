@@ -501,7 +501,7 @@ Project and development workflow automation.
 | Craft CMS / Twig | craftcms-ops, frontend-upgrade-ops (Mix to Vite, Vue 2 to 3), web-perf-ops |
 | Python | python-env, structural-search |
 | API design | api-design-ops, rest-ops |
-| Docker/containers | docker-ops, container-orchestration |
+| Docker/containers | docker-ops (files and engine), kubernetes-ops (Kubernetes, Helm) |
 | CI/CD | ci-cd-ops, git-ops |
 | CSS/Tailwind | tailwind-ops |
 | Nginx/web server | nginx-ops |

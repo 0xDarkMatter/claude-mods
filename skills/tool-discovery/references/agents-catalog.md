@@ -12,7 +12,7 @@ Code 2.1.63; `Task(...)` still works as an alias).
 | `cloudflare-expert`, `wrangler-expert` | `cloudflare-ops` skill |
 | `cypress-expert` | `cypress-ops` skill |
 | `bash-expert` | `bash-ops` skill |
-| `aws-fargate-ecs-expert` | `container-orchestration` skill |
+| `aws-fargate-ecs-expert` | `kubernetes-ops` skill (ECS choice notes; AWS's aws-containers skill for depth) |
 | `claude-architect` | `claude-code-ops` skill |
 | `craftcms-expert` | `craftcms-ops` skill |
 | `payloadcms-expert` | `payloadcms-ops` skill |

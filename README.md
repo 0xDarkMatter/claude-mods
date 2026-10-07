@@ -283,10 +283,10 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 #### Infrastructure Skills
 | Skill | Description |
 |-------|-------------|
-| [docker-ops](skills/docker-ops/) | Dockerfile best practices, multi-stage builds, Compose, optimization |
+| [docker-ops](skills/docker-ops/) | Docker on your machine and in your repo - Dockerfiles, Compose, BuildKit, image supply chain, and the engine underneath (Docker Desktop, OrbStack, Colima, Podman, Rancher): contexts, ports, disk reclaim. Ships a repo auditor, a read-only machine doctor and an image-tag checker |
 | [ddev-ops](skills/ddev-ops/) | DDEV local environments - version pinning, `config.local.yaml` and `.env` files, snapshots and sanitised pulls, Mutagen/WSL2, add-ons, Xdebug, troubleshooting, plus a `.ddev/` landmine auditor |
 | [ci-cd-ops](skills/ci-cd-ops/) | GitHub Actions, release automation, testing pipelines |
-| [container-orchestration](skills/container-orchestration/) | Kubernetes, Helm, pod patterns |
+| [kubernetes-ops](skills/kubernetes-ops/) | Kubernetes and Helm 4 - manifests, probes, Pod Security Standards, Gateway API and the move off retired ingress-nginx, safe kubectl; ECS choice notes |
 | [nginx-ops](skills/nginx-ops/) | Nginx reverse proxy, SSL/TLS, load balancing, performance tuning |
 | [cloudflare-ops](skills/cloudflare-ops/) | Cloudflare Workers/Pages - wrangler (deploy, jsonc config), bindings (KV/D1/R2/DO/Queues/AI), edge deploy + CI |
 | [auth-ops](skills/auth-ops/) | JWT, OAuth2, sessions, RBAC/ABAC, passkeys, MFA |

@@ -171,6 +171,20 @@ run "audit-ddev-config --help"        0 "$PY" skills/ddev-ops/scripts/audit-ddev
 run "audit-ddev-config minefield"    10 "$PY" skills/ddev-ops/scripts/audit-ddev-config.py skills/ddev-ops/tests/fixtures/minefield
 run "audit-ddev-config clean control" 0 "$PY" skills/ddev-ops/scripts/audit-ddev-config.py skills/ddev-ops/tests/fixtures/clean --ignore local-file-committed
 
+echo "== docker-ops: container-tooling facts verifier + Dockerfile/Compose auditor + image-tag checker"
+run "docker-facts --offline consistent" 0 "$PY" skills/docker-ops/scripts/check-docker-facts.py --offline
+run "docker-facts --help"               0 "$PY" skills/docker-ops/scripts/check-docker-facts.py --help
+# Live comparisons exercised offline against recorded sources (no network in PR CI).
+run "docker-facts --live vs fixtures"   0 "$PY" skills/docker-ops/scripts/check-docker-facts.py --live --today 2026-10-07 --fixtures skills/docker-ops/tests/fixtures/facts
+run "docker-audit --help"               0 "$PY" skills/docker-ops/scripts/docker-audit.py --help
+# The bad fixture is the landmine set (exit 10 = findings); the clean fixture is the control.
+run "docker-audit bad fixture"         10 "$PY" skills/docker-ops/scripts/docker-audit.py skills/docker-ops/tests/fixtures/bad
+run "docker-audit clean control"        0 "$PY" skills/docker-ops/scripts/docker-audit.py skills/docker-ops/tests/fixtures/clean
+run "docker-doctor --help"              0 "$PY" skills/docker-ops/scripts/docker-doctor.py --help
+run "check-image-tags --help"           0 "$PY" skills/docker-ops/scripts/check-image-tags.py --help
+# Offline inventory of the image references both container skills recommend: exit 4 on a malformed one.
+run "image refs in docker-ops + kubernetes-ops well formed" 0 "$PY" skills/docker-ops/scripts/check-image-tags.py skills/docker-ops/SKILL.md skills/docker-ops/references skills/docker-ops/assets skills/kubernetes-ops
+
 echo "== repo-doctor: AGENTS.md toolchain + Claude Code memory-docs verifier"
 # --offline: the protocol still states every encoded Claude Code fact and the two
 # scripts agree on the 200-line and 16,000-character ceilings. --live runs in

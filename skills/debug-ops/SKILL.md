@@ -277,5 +277,5 @@ jq -r 'select(.level == "error") | .error_type' app.log | sort | uniq -c | sort 
 - **security-ops** -- Security-specific debugging (auth failures, injection, CSRF)
 - **monitoring-ops** -- Production observability, alerting, dashboards
 - **code-stats** -- Measure code complexity and identify bug-prone areas
-- **container-orchestration** -- Docker and Kubernetes debugging context
+- **docker-ops** -- container debugging (exit codes, distroless, builds); **kubernetes-ops** -- pod debugging
 - **git-ops** -- Git bisect workflow and history investigation
