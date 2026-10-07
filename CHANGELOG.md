@@ -933,6 +933,7 @@ feature releases live in the README "Recent Updates" section.
   `build-push.sh` is retired: it wrapped plain `docker build`/`push` and defaulted to
   `:latest`, which the new auditor reports. docker-ops documents `docker buildx build --push`
   instead. Both installers remove an installed `container-orchestration`.
+
 - **`push-gate` renamed `push-preflight`.** It runs six checks before a push (secret
   scan, clean tree, forbidden files, fast-forward, size and open-issue advisories), so
   the name now matches `scripts/preflight.sh`. `secret-scan` was rejected: it would
