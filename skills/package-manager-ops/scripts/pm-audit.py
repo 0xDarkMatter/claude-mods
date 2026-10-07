@@ -26,6 +26,7 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   registry.pnpm.placeholder-ignored
   js.manager.mixed  deploy.install.unfrozen  deploy.composer.dev  php.composer.v1
   deploy.composer.safety-off
+  deploy.composer.adhoc
   deploy.install.unlocked  deploy.npm.yarn-flag  deploy.global.unpinned
 
 It never prints a secret: a committed or CI-written credential is reported as file:line only,
@@ -2297,6 +2298,12 @@ class Audit:
             self._global_install(sub, toks[:idx] + toks[idx + 1:], rel, n, flag)
             return
         family = "php" if tool == "composer" else "js"
+        global_require = sub == "global" and any(t == "require" for t in toks[(idx + 1 if idx is not None else 0):])
+        if tool == "composer" and (sub in ("update", "u", "upgrade", "require") or global_require):
+            action = "global require" if global_require else sub
+            flag("deploy.composer.adhoc", rel, n,
+                 f"`composer {action}` in {rel}{where} resolves dependencies during CI/deploy",
+                 "change composer.json on a development machine, commit composer.lock, then run composer install")
         if tool == "composer" and ships:
             unsafe = [t for t in toks if t in ("--no-security-blocking", "--no-blocking", "--ignore-platform-reqs")]
             unsafe += [name for name in ("COMPOSER_NO_SECURITY_BLOCKING", "COMPOSER_NO_AUDIT")
