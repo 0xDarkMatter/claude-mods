@@ -1,0 +1,4 @@
+deploy.global.unpinned
+deploy.composer.adhoc
+deploy.install.unfrozen
+npx.unpinned

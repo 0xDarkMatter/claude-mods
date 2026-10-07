@@ -228,10 +228,18 @@ def mutation(label, case_name, old, new):
     proc = subprocess.run([sys.executable, str(mutant), "--json", "--as-of", as_of, str(tmp / "m" / case_name)],
                           capture_output=True, text=True)
     try:
-        got = sorted({f["id"] for f in json.loads(proc.stdout)["data"]})
+        data = json.loads(proc.stdout)["data"]
+        got = sorted({f["id"] for f in data})
     except Exception:
-        got = None
-    row(got != want or proc.returncode != (10 if want else 0), f"mutation {label}: fixture catches broken rule")
+        data, got = [], None
+    lines_changed = False
+    if (case / "_lines").is_file():
+        want_rows = sorted(line.strip() for line in (case / "_lines").read_text().splitlines() if line.strip())
+        pinned = {line.split()[0] for line in want_rows}
+        got_rows = sorted(f"{f['id']} {f['file']}:{f['line']}" for f in data if f["id"] in pinned)
+        lines_changed = got_rows != want_rows
+    row(got != want or lines_changed or proc.returncode != (10 if want else 0),
+        f"mutation {label}: fixture catches broken rule")
 
 for fid, case_name in (
     ("js.engine.floor", "js-engine-floor"),
@@ -261,6 +269,8 @@ mutation("legacy facts lookup", "legacy-node-sass",
          'table = self.facts.get("legacy_packages")', 'table = self.facts.get("mutant_legacy_packages")')
 mutation("local composite action", "deploy-local-uses",
          'if not raw.startswith("./"):', 'if True:')
+mutation("additional install sites", "install-sites",
+         '("package.json", "composer.json", "justfile", "Makefile")', '("never",)')
 
 # Every id the audit documents must have a fixture that produces it.
 doc_ids = set()

@@ -1145,6 +1145,11 @@ class Audit:
             return True
         if any(p.is_file() and not re.search(r"dev|test", p.name, re.I) for p in self.root.glob("Dockerfile*")):
             return True
+        if any((self.root / name).is_file() for name in ("package.json", "composer.json", "justfile", "Makefile")):
+            return True
+        if (self.root / ".ddev" / "config.yaml").is_file() or any(
+                p.is_file() for p in (self.root / ".ddev" / "commands").glob("**/*")):
+            return True
         appspec = self.root / "appspec.yml"
         if not appspec.is_file():
             return False
@@ -2334,6 +2339,13 @@ class Audit:
         dockerfiles = [p for p in sorted(self.root.glob("Dockerfile*"))
                        if p.is_file() and not re.search(r"dev|test", p.name, re.I)]
         files += [(p, "deploy") for p in dockerfiles]
+        files += [(self.root / name, "automation") for name in
+                  ("package.json", "composer.json", "justfile", "Makefile")
+                  if (self.root / name).is_file()]
+        ddev_config = self.root / ".ddev" / "config.yaml"
+        if ddev_config.is_file():
+            files.append((ddev_config, "automation"))
+        files += [(p, "automation") for p in sorted((self.root / ".ddev" / "commands").glob("**/*")) if p.is_file()]
         appspec = self.root / "appspec.yml"
         if appspec.is_file():
             for loc in re.findall(r"^\s*-?\s*location:\s*[\"']?([^\s\"'#]+)", read_text(appspec) or "", re.M):
@@ -2371,7 +2383,16 @@ class Audit:
             # inputs (`tools: composer:v1`) are not commands, so Composer 1 is read from every
             # line. Outside YAML each command is its own block: a Jenkinsfile `sh` step is its
             # own shell, and Dockerfile and hook-script directories are never placed.
-            if path.suffix in (".yml", ".yaml"):
+            if kind == "automation" and path.name in ("package.json", "composer.json"):
+                scripts = obj(read_json(path)).get("scripts")
+                values = []
+                for value in obj(scripts).values():
+                    values += value if isinstance(value, list) else [value]
+                commands = [(i + 1, str(command), i + 1) for i, command in enumerate(values) if isinstance(command, str)]
+            elif kind == "automation" and path == ddev_config:
+                commands = [(i, scalar(m.group(1)), i) for i, line in enumerate(text.splitlines(), 1)
+                            if (m := re.match(r"^\s*(?:-\s*)?(?:exec(?:-host|-container)?|command)\s*:\s*(.*)$", line))]
+            elif path.suffix in (".yml", ".yaml"):
                 commands = list(yaml_command_lines(text))
                 local_commands, missing = self._local_uses_commands(rel, text)
                 commands += local_commands
@@ -2609,6 +2630,8 @@ class Audit:
         """
         if kind == "deploy":
             return lambda _n: True  # Dockerfiles and appspec hooks always build production
+        if kind == "automation":
+            return lambda _n: False
         def ships_text(t):
             return bool(DEPLOY_MARKERS.search(t)) and not TEST_MARKERS.search(t)
         jobs = workflow_jobs(text) if rel.startswith(".github/workflows/") else None
@@ -2632,6 +2655,8 @@ class Audit:
         anything else (matrix, inputs, step outputs) leaves the directory unknown, never
         guessed. Known gap: workflow-level `defaults.run` and step-level `env:` are not read.
         """
+        if kind == "automation":
+            return lambda _k: ("", {})
         if kind != "ci":
             return lambda _k: (None, {})
         if not rel.startswith(".github/workflows/"):

@@ -1,0 +1,9 @@
+deploy.composer.adhoc composer.json:1
+deploy.global.unpinned package.json:2
+deploy.install.unfrozen .ddev/commands/host/setup:2
+deploy.install.unfrozen .ddev/config.yaml:6
+deploy.install.unfrozen Makefile:2
+deploy.install.unfrozen composer.json:1
+deploy.install.unfrozen justfile:2
+deploy.install.unfrozen package.json:1
+npx.unpinned package.json scripts.preview:None

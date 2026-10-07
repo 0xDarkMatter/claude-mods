@@ -46,6 +46,9 @@ Local composite actions under `.github/actions/` and local reusable workflows un
 `.github/workflows/` are read recursively at the calling job's scope. Remote actions are
 never fetched. A missing local target marks the deploy check skipped with its path rather
 than allowing an incomplete scan to read as a pass.
+Package scripts, Composer scripts, DDEV hooks/commands, Just recipes and Make recipes are
+also executable install sites. Their package-manager commands feed the same frozen/global
+install findings as CI; npx-family commands feed the existing npx findings.
 
 Frozen installs are required in every CI job, whether it ships or not: the managers
 document the frozen install for CI as a whole, and a front-end job whose build a deploy job
