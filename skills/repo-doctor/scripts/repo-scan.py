@@ -1715,35 +1715,43 @@ class Scan:
         farm_members = {member for _, _, members in farm_groups for member in members}
         # Farm members are reconstructed from their parent+shape below; keeping them out of
         # ordinary recommendations is what prevents one stamped doc per identical sibling.
-        for directory in directories:
+        weights = {"own-manifest": 2, "own-tests": 2, "own-deploy": 2,
+                   "landmine-cluster": 2, "own-gate": 1, "stack-differs": 1, "churn": 1}
+
+        def assess(directory: str, inner: list[str]) -> tuple[list[dict], bool]:
+            """(signals, recommended?). inner: recommended folders below this one, whose
+            files and landmines are not this folder's evidence."""
             signals = []
 
             def signal(kind: str, detail: str, source: str) -> None:
                 signals.append({"kind": kind, "detail": detail, "source": source})
 
+            def mine(rel: str) -> bool:
+                return not any(rel.startswith(d) for d in inner)
+
+            under = [(rel, local) for rel, local in self._files_under(directory) if mine(rel)]
             manifests = [name for name in ("package.json", "composer.json", "pyproject.toml",
                                             "go.mod", "Cargo.toml") if self.has(directory + name)]
             if manifests:
                 signal("own-manifest", ", ".join(manifests), src(directory + manifests[0]))
-            test_files = [rel for rel, local in self._files_under(directory)
+            test_files = [rel for rel, local in under
                           if (SHELL_RUNNER_RE.search(local) and TESTS_DIR_RE.search(local))
                           or re.search(r"(^|/)(pytest\.ini|phpunit\.xml(\.dist)?|vitest\.config\.[^/]+|"
                                        r"jest\.config\.[^/]+|playwright\.config\.[^/]+)$", local)]
             if test_files:
                 signal("own-tests", test_files[0], src(test_files[0]))
-            deploy = [(rel, kind) for rel, local in self._files_under(directory)
+            deploy = [(rel, kind) for rel, local in under
                       for pattern, kind in DEPLOY_SURFACES if re.search(pattern, local)]
             if deploy:
                 signal("own-deploy", deploy[0][1], src(deploy[0][0]))
-            local_landmines = self._landmines_in(directory)
+            local_landmines = [c for c in self._landmines_in(directory) if any(mine(x) for x in c["paths"])]
             if len(local_landmines) >= 2:
                 evidence = local_landmines[0]["evidence"][0]
                 signal("landmine-cluster", f"{len(local_landmines)} history candidates", evidence)
             local_gates = [gate for gate in gates if gate["scope"] == directory]
             if local_gates:
                 signal("own-gate", local_gates[0]["tool"], local_gates[0]["source"])
-            local_exts = Counter(os.path.splitext(rel)[1].lower()
-                                 for rel, _ in self._files_under(directory)
+            local_exts = Counter(os.path.splitext(rel)[1].lower() for rel, _ in under
                                  if os.path.splitext(rel)[1].lower() in SOURCE_EXTS)
             local_lang = local_exts.most_common(1)[0][0] if local_exts else None
             if local_lang and repo_lang and local_lang != repo_lang:
@@ -1752,19 +1760,26 @@ class Scan:
             if directory in churned:
                 signal("churn", f">={int(NEST_CHURN_RATIO * 100)}% of scanned commits",
                        f"cmd: git log --no-merges -n{self.max_commits} --name-only")
-            weights = {"own-manifest": 2, "own-tests": 2, "own-deploy": 2,
-                       "landmine-cluster": 2, "own-gate": 1, "stack-differs": 1,
-                       "churn": 1}
             contract = [s for s in signals if s["kind"] != "churn"]
-            points = sum(weights[s["kind"]] for s in signals)
             contract_points = sum(weights[s["kind"]] for s in contract)
             in_farm = directory in farm_members
             app_ok = not directory.startswith("apps/") or any(
                 s["kind"] in ("own-deploy", "landmine-cluster") for s in contract)
-            if (contract_points >= MIN_NEST_CONTRACT_POINTS
-                    and len({s["kind"] for s in contract}) >= MIN_NEST_CONTRACT_SIGNALS
-                    and app_ok and (not in_farm or len(local_landmines) >= 2)):
-                recommend.append({"dir": directory, "points": points, "signals": signals,
+            return signals, (contract_points >= MIN_NEST_CONTRACT_POINTS
+                             and len({s["kind"] for s in contract}) >= MIN_NEST_CONTRACT_SIGNALS
+                             and app_ok and (not in_farm or len(local_landmines) >= 2))
+
+        first = {d: assess(d, []) for d in directories}
+        qualified = [d for d in directories if first[d][1]]
+        for directory in qualified:
+            # A parent (packages/) collects its children's tests and landmines. It earns a
+            # doc of its own only on evidence left after its recommended children take
+            # theirs; otherwise it would get a second doc for engine's contract.
+            inner = [d for d in qualified if d != directory and d.startswith(directory)]
+            signals, ok = assess(directory, inner) if inner else first[directory]
+            if ok:
+                recommend.append({"dir": directory, "points": sum(weights[s["kind"]] for s in signals),
+                                  "signals": signals,
                                   "existing": {"agents_md": self.has(directory + "AGENTS.md"),
                                                "claude_md": self.has(directory + "CLAUDE.md")}})
         self._cache["nesting"] = {"recommend": recommend, "farms": farm_rows,

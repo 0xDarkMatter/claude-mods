@@ -177,6 +177,9 @@ check "layout_fingerprint_is_stable_and_sorted" \
       "D['architecture']['layout']==sorted(D['architecture']['layout']) and D['architecture']['layout_fingerprint']==__import__('hashlib').sha1(('\\n'.join(D['architecture']['layout'])).encode()).hexdigest()"
 check "entry_points_are_named_with_sources" \
       "any(e['name']=='packages/engine/src/index.ts' and e['kind']=='manifest-main' and e['source'].startswith('packages/engine/package.json:') for e in D['architecture']['entry_points']) and all(e['source'] for e in D['architecture']['entry_points'])"
+# packages/ holds engine's tests and landmines; its own doc would restate engine's.
+check "nesting_skips_a_parent_whose_signals_come_from_a_nested_child" \
+      "'packages/engine/' in {r['dir'] for r in D['nesting']['recommend']} and 'packages/' not in {r['dir'] for r in D['nesting']['recommend']}"
 check "manifests_by_dir_has_engine_scripts" \
       "{s['name'] for s in D['manifests_by_dir']['packages/engine/']['package_json']['scripts']}=={'test','check:deps'}"
 check "generated_entry_doc_detects_ruler" \
