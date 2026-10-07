@@ -184,6 +184,21 @@ for case in cases:
         pinned = {r.split()[0] for r in want_rows}
         got_rows = sorted(f"{f['id']} {f['file']}:{f['line']}" for f in data if f["id"] in pinned)
         row(got_rows == want_rows, f"{case.name}: lines {got_rows}" + ("" if got_rows == want_rows else f" (want {want_rows})"))
+    if (case / "_checks").is_file():
+        expected = json.loads((case / "_checks").read_text())
+        checks = {c.get("check"): c for c in json.loads(proc.stdout).get("meta", {}).get("checks", [])}
+        wrong = []
+        for family, want_check in expected.items():
+            got_check = checks.get(family, {})
+            if got_check.get("status") != want_check["status"]:
+                wrong.append(f"{family} status={got_check.get('status')!r}")
+            if want_check.get("reason_contains") not in got_check.get("reason", ""):
+                wrong.append(f"{family} reason={got_check.get('reason')!r}")
+        row(not wrong, f"{case.name}: per-family check status is explicit" + (f" ({'; '.join(wrong)})" if wrong else ""))
+    if (case / "_manager_majors").is_file():
+        expected = json.loads((case / "_manager_majors").read_text())
+        got_majors = json.loads(proc.stdout).get("meta", {}).get("manager_majors")
+        row(got_majors == expected, f"{case.name}: manager majors {got_majors}" + ("" if got_majors == expected else f" (want {expected})"))
 
 # Every id the audit documents must have a fixture that produces it.
 doc_ids = set()

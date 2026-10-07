@@ -808,6 +808,17 @@ def workflow_jobs(text: str):
     return [tuple(j) for j in jobs] or None
 
 
+def yaml_parse_problem(text: str):
+    """A reason this scanner must not claim it parsed a CI YAML file. This deliberately
+    catches only byte/indentation failures YAML itself rejects; unsupported valid YAML is
+    handled conservatively by the line readers instead of being mislabeled invalid."""
+    if "\ufffd" in text:
+        return "invalid text encoding"
+    if any(re.match(r"^[ ]*\t", line) for line in text.splitlines()):
+        return "tab indentation is invalid YAML"
+    return None
+
+
 def indent_of(line: str) -> int:
     return len(line) - len(line.lstrip(" "))
 
@@ -1051,7 +1062,9 @@ class Audit:
         self.root, self.facts, self.as_of, self.docs, self.limit = root, facts, as_of, docs, limit
         self.findings: list[dict] = []
         self.notes: list[dict] = []
-        self.meta: dict = {"managers": [], "lockfiles": [], "node_pins": {}, "php_pins": {}}
+        self.meta: dict = {"managers": [], "lockfiles": [], "node_pins": {}, "php_pins": {},
+                           "checks": [], "manager_majors": {k: None for k in ("npm", "pnpm", "yarn", "bun", "composer")}}
+        self._blind: dict[str, list[str]] = {}
         # A manifest that is not a JSON object is unreadable to every check: None here, and
         # js()/php() report *.manifest.invalid for the file that exists.
         self.pkg = self._manifest("package.json")
@@ -1078,6 +1091,79 @@ class Audit:
     def note(self, nid, file, msg):
         self.notes.append({"id": nid, "file": redact(file), "message": redact(msg)})
 
+    def blind(self, family, reason):
+        """Record incomplete coverage at the check-family boundary. A partial scan that
+        found nothing is skipped, never pass: otherwise a clean result could be blind."""
+        self._blind.setdefault(family, []).append(reason)
+
+    def _check(self, family, funcs, skip_reason=""):
+        before = len(self.findings)
+        if not skip_reason:
+            for func in funcs:
+                func()
+        reasons = ([skip_reason] if skip_reason else []) + self._blind.pop(family, [])
+        status = "fail" if len(self.findings) > before else "skipped" if reasons else "pass"
+        self.meta["checks"].append({"check": family, "status": status,
+                                    "reason": "; ".join(dict.fromkeys(reasons))})
+
+    def _has_deploy_inputs(self):
+        if any(p.is_file() for g in CI_GLOBS for p in self.root.glob(g)):
+            return True
+        if any(p.is_file() and not re.search(r"dev|test", p.name, re.I) for p in self.root.glob("Dockerfile*")):
+            return True
+        appspec = self.root / "appspec.yml"
+        if not appspec.is_file():
+            return False
+        return any((self.root / loc).is_file() for loc in re.findall(
+            r"^\s*-?\s*location:\s*[\"']?([^\s\"'#]+)", read_text(appspec) or "", re.M))
+
+    def _manager_majors(self):
+        """Manager major evidence, strongest first: packageManager, manager-native lock
+        format, then literal CI setup pins. Null means the repository supplies no evidence."""
+        out = {k: None for k in ("npm", "pnpm", "yarn", "bun", "composer")}
+
+        def take(name, value):
+            m = re.search(r"\d+", str(value or ""))
+            if name in out and out[name] is None and m:
+                out[name] = int(m.group(0))
+
+        pm = str((self.pkg or {}).get("packageManager") or "")
+        if "@" in pm:
+            name, version = pm.split("@", 1)
+            take(name, version)
+        npm_lock = next((self.root / n for n in ("package-lock.json", "npm-shrinkwrap.json")
+                         if (self.root / n).is_file()), None)
+        if npm_lock and out["npm"] is None:
+            lock_version = obj(read_json(npm_lock)).get("lockfileVersion")
+            out["npm"] = {1: 6, 2: 7, 3: 7}.get(lock_version)
+        yarn = self.root / "yarn.lock"
+        if yarn.is_file() and out["yarn"] is None:
+            out["yarn"] = 2 if "__metadata:" in (read_text(yarn) or "")[:2000] else 1
+        pnpm = self.root / "pnpm-lock.yaml"
+        if pnpm.is_file() and out["pnpm"] is None:
+            m = re.search(r"^lockfileVersion\s*:\s*[\"']?([0-9]+)", read_text(pnpm) or "", re.M)
+            if m:
+                out["pnpm"] = int(m.group(1))
+        if any((self.root / n).is_file() for n in ("bun.lock", "bun.lockb")) and out["bun"] is None:
+            out["bun"] = 1
+        lock = read_json(self.root / "composer.lock") if (self.root / "composer.lock").is_file() else None
+        take("composer", obj(lock).get("plugin-api-version"))
+        for g in (".github/workflows/*.yml", ".github/workflows/*.yaml"):
+            for path in sorted(self.root.glob(g)):
+                lines = (read_text(path) or "").splitlines()
+                for i, line in enumerate(lines):
+                    m = re.search(r"uses:\s*[\"']?(pnpm/action-setup|oven-sh/setup-bun)@", line, re.I)
+                    if m:
+                        item = enclosing_item(lines, i)
+                        key = "version" if m.group(1).lower().startswith("pnpm/") else "bun-version"
+                        take("pnpm" if key == "version" else "bun", item_value(lines, item, key) if item else None)
+                    m = re.search(r"tools\s*:\s*[\"']?[^\n#]*composer:v?(\d+)", line, re.I)
+                    if m:
+                        take("composer", m.group(1))
+                    for manager, version in re.findall(r"\b(?:corepack\s+(?:prepare|use)\s+)?(npm|pnpm|yarn|bun)@(\d+)", line, re.I):
+                        take(manager.lower(), version)
+        return out
+
     # ---- DDEV: config.yaml, then config.*.yaml in name order (later files win) ----
     def _read_ddev(self):
         d = self.root / ".ddev"
@@ -1090,15 +1176,17 @@ class Audit:
         return merged
 
     def run(self):
-        self.deploy()  # first: js() asks where CI installs (self.installs); output is sorted later
-        self.js()
-        self.nested()
-        self.node_pins()
-        self.php()
-        self.npx()
-        self.legacy()
-        self.secrets()
-        self.pnpm_placeholders()
+        # Deploy stays first because js.lockfile asks which manager CI actually installs.
+        self._check("deploy", (self.deploy,), "" if self._has_deploy_inputs() else "no CI or deploy files")
+        has_js = (self.root / "package.json").is_file() or any((self.root / n).is_file() for n in JS_LOCKFILES)
+        self._check("js.lockfile", (self.js, self.nested), "" if has_js else "no package.json or JS lockfile")
+        self._check("node.pins", (self.node_pins,), "" if (self.root / "package.json").is_file() else "no package.json")
+        self._check("php", (self.php,), "" if (self.root / "composer.json").is_file() else "no composer.json")
+        npx_skip = "package.json absent and docs scan disabled" if not self.docs and not (self.root / "package.json").is_file() else ""
+        self._check("npx", (self.npx,), npx_skip)
+        self._check("legacy", (self.legacy,))
+        self._check("registry", (self.secrets, self.pnpm_placeholders))
+        self.meta["manager_majors"] = self._manager_majors()
         return self
 
     # ---- JS managers and lockfiles ----
@@ -1836,6 +1924,10 @@ class Audit:
             text = read_text(path) or ""
             rel = path.relative_to(self.root).as_posix()
             ci = kind == "ci"
+            problem = yaml_parse_problem(text) if ci and path.suffix in (".yml", ".yaml") else None
+            if problem:
+                self.blind("deploy", f"CI parse failed: {rel} ({problem})")
+                continue
             ships = self._ship_scope(rel, kind, text)
             start_dir = self._start_dirs(rel, kind, text)
             every = list(code_lines(text, False))
