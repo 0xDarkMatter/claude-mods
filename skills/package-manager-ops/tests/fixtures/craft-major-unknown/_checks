@@ -1,0 +1,1 @@
+{"craft": {"status": "skipped", "reason_contains": "newer than facts"}, "php": {"status": "pass", "reason_contains": ""}}

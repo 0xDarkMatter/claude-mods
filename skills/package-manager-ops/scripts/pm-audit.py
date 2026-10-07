@@ -1160,11 +1160,23 @@ class Audit:
         self._blind.setdefault(family, []).append(reason)
 
     def _check(self, family, funcs, skip_reason=""):
+        """Run one check family and record its status. `fail` keeps any blind reason too:
+        findings plus partial coverage must not read as a complete scan.
+
+        Guard: a check that raises is contained HERE, recorded as an internal error (status
+        skipped unless it already found something) with a stderr line, and the run goes on.
+        One crashing parser used to exit 1 and lose the whole report, outside the 0/10
+        contract. Don't remove it to "surface bugs": the suite still fails on the missing ids."""
         before = len(self.findings)
+        errors = []
         if not skip_reason:
             for func in funcs:
-                func()
-        reasons = ([skip_reason] if skip_reason else []) + self._blind.pop(family, [])
+                try:
+                    func()
+                except Exception as exc:  # noqa: BLE001 - see the guard above
+                    errors.append(f"internal error in {func.__name__}: {type(exc).__name__}: {exc}")
+                    print(f"pm-audit: {errors[-1]}", file=sys.stderr)
+        reasons = ([skip_reason] if skip_reason else []) + self._blind.pop(family, []) + errors
         status = "fail" if len(self.findings) > before else "skipped" if reasons else "pass"
         self.meta["checks"].append({"check": family, "status": status,
                                     "reason": "; ".join(dict.fromkeys(reasons))})
@@ -1297,6 +1309,7 @@ class Audit:
         self._check("php", (self.php,), "" if (self.root / "composer.json").is_file() else "no composer.json")
         has_floors = any((self.root / n).is_file() for n in ("package-lock.json", "npm-shrinkwrap.json", "composer.lock"))
         self._check("runtime.floors", (self.runtime_floors,), "" if has_floors else "no npm or Composer lockfile")
+        self._check("craft", (self.craft_eol,), "" if (self.root / "composer.lock").is_file() else "no composer.lock")
         self._check("composer.line", (self.composer_line,))
         self._check("install.policy", (self.install_policy,))
         npx_skip = "package.json absent and docs scan disabled" if not self.docs and not (self.root / "package.json").is_file() else ""
@@ -1827,24 +1840,6 @@ class Audit:
                          f"{name} is marked abandoned; replacement: {replacement}",
                          (f"replace it with {replacement}" if replacement != "none named"
                           else "remove it or choose a maintained replacement after reviewing its dependants"))
-            craft = next((p for p in lock.get("packages", []) if isinstance(p, dict)
-                          and str(p.get("name", "")).lower() == "craftcms/cms"), None)
-            if craft:
-                m = re.match(r"^v?(\d+)", str(craft.get("version") or ""))
-                majors = obj(obj(self.facts.get("craft")).get("majors"))
-                row = majors.get(m.group(1)) if m else None
-                if not isinstance(row, dict):
-                    self.blind("php", "Craft major absent from facts craft.majors")
-                elif row.get("security_end"):
-                    try:
-                        end = dt.date.fromisoformat(str(row["security_end"]))
-                    except ValueError:
-                        self.blind("php", "Craft security_end is not an ISO date")
-                    else:
-                        if end < self.as_of:
-                            self.add("warn", "php.craft.eol", "composer.lock",
-                                     f"craftcms/cms {craft.get('version')} is past security support ({end})",
-                                     "upgrade Craft CMS to a major still receiving security fixes")
         php_req = req.get("php")
         # A composer.json that requires no packages (`{"name": ...}`, used to make a JS
         # asset repo installable through Composer) resolves nothing: PHP pins are noise.
@@ -2012,6 +2007,49 @@ class Audit:
             self.blind("runtime.floors", "no literal production PHP pin (config.platform.php, Dockerfile, setup-php) to check composer.lock against")
         self._floor_misses(needs, pins, "composer", "php.lock.floor", "composer.lock", "PHP",
                            "move every production PHP pin into the range the locked packages accept and run `composer check-platform-reqs --lock`")
+
+    def craft_eol(self):
+        """The locked craftcms/cms major against facts craft.majors security_end.
+
+        Its own check family on purpose: a major the table cannot judge used to mark the
+        whole `php` family skipped, hiding a Craft 2 site (unsupported long before Craft 3)
+        behind the softest status. A major older than the oldest listed is past support by
+        the policy the table records (each major ends before the next one's), so it is a
+        finding; only a NEWER major is unknown. `dev-5.x` branches read as their major."""
+        lock = read_json(self.root / "composer.lock")
+        craft = next((p for p in obj(lock).get("packages") or [] if isinstance(p, dict)
+                      and str(p.get("name", "")).lower() == "craftcms/cms"), None)
+        if not craft:
+            return
+        version = str(craft.get("version") or "")
+        m = re.match(r"^(?:v|dev-)?(\d+)", version)
+        majors = {int(k): v for k, v in obj(obj(self.facts.get("craft")).get("majors")).items() if str(k).isdigit()}
+        if not m or not majors:
+            self.blind("craft", f"cannot read the Craft major ({version or 'no version'}) or facts craft.majors")
+            return
+        major = int(m.group(1))
+        if major < min(majors):
+            oldest = min(majors)
+            self.add("warn", "php.craft.eol", "composer.lock",
+                     f"craftcms/cms {version} predates Craft {oldest}, the oldest major in the support table "
+                     f"(its security support ended {obj(majors[oldest]).get('security_end')})",
+                     "upgrade Craft CMS to a major still receiving security fixes")
+            return
+        row = majors.get(major)
+        if not isinstance(row, dict):
+            self.blind("craft", f"Craft {major} is newer than facts craft.majors")
+            return
+        if not row.get("security_end"):
+            return
+        try:
+            end = dt.date.fromisoformat(str(row["security_end"]))
+        except ValueError:
+            self.blind("craft", f"Craft {major} security_end is not an ISO date")
+            return
+        if end < self.as_of:
+            self.add("warn", "php.craft.eol", "composer.lock",
+                     f"craftcms/cms {version} is past security support ({end})",
+                     "upgrade Craft CMS to a major still receiving security fixes")
 
     def _floor_misses(self, needs, pins, dialect, fid, file, runtime, fix):
         """One finding per lock: each pin whose whole span a locked package's range rejects,
