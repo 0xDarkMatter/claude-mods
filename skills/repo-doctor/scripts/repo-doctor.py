@@ -99,6 +99,11 @@ ENTRY_LEAN_CHARS = 16000
 AGENTS_IMPORT = re.compile(r"(?:^|\s)@(?:\./|\.\./)?AGENTS\.md\b")
 FRESH_COMMITS = 15
 DOCS_INDEX_THRESHOLD = 6
+# Nested AGENTS.md budget (agents-md-protocol.md section 6): 40-line target, 60-line
+# ceiling, characters at 80 a line. Keep in lockstep with agents-md.py's NESTED_* values.
+NESTED_TARGET_LINES = 40
+NESTED_CEILING_LINES = 60
+NESTED_CEILING_CHARS = 4800
 WEIGHTS = {"entry_docs": 2.0, "docs_health": 1.5, "comments": 2.0,
            "structure": 2.0, "enforcement": 1.5, "doc_pairing": 1.0}
 
@@ -183,10 +188,37 @@ class Audit:
         self.findings: list[dict] = []
         self.scores: dict[str, float] = {}
         self.facts: dict = {}
+        self._scan: dict | None = None
 
     def add(self, dim: str, severity: str, msg: str, path: str = "") -> None:
         self.findings.append({"dim": dim, "severity": severity,
                               "msg": msg, "path": path})
+
+    def scan_facts(self) -> dict | None:
+        """Gates, nesting and architecture facts from the sibling repo-scan.py, run once.
+        The scorer stays usable copied alone: without the scanner, those checks are
+        skipped with one info finding and the old rules apply (agents-md.py runs the
+        scanner the same way). The scan only reads files; it never runs repo code."""
+        if self._scan is not None:
+            return self._scan or None
+        self._scan = {}
+        scan = Path(__file__).resolve().parent / "repo-scan.py"
+        data = None
+        if scan.is_file():
+            try:
+                r = subprocess.run([sys.executable, str(scan), "--repo", str(self.repo),
+                                    "--only", "gates,nesting,architecture", "--json", "--no-tokei"],
+                                   capture_output=True, timeout=300, encoding="utf-8", errors="replace")
+                data = json.loads(r.stdout).get("data") if r.returncode == 0 else None
+            except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, AttributeError):
+                data = None
+        if not data:
+            self.add("enforcement", "info",
+                     "repo-scan.py unavailable beside the scorer: gate, nesting and "
+                     "ARCHITECTURE.md checks skipped")
+            return None
+        self._scan = data
+        return data
 
     # -- dimension: entry docs ------------------------------------------------
     def check_entry_docs(self) -> None:
@@ -257,11 +289,45 @@ class Audit:
             else:
                 self.add("entry_docs", "info",
                          f"{rel} imports AGENTS.md: fine while it holds Claude-only deltas")
+        facts = self.scan_facts()
+        if facts is not None:
+            missing = [r["dir"] for r in (facts.get("nesting") or {}).get("recommend", [])
+                       if not (r.get("existing") or {}).get("agents_md")]
+            if missing:
+                score -= 0.5
+                self.add("entry_docs", "warn",
+                         f"the scan recommends nesting for {len(missing)} folder(s) with their own "
+                         f"contract and none has an AGENTS.md: {', '.join(missing[:5])} — draft one "
+                         "with agents-md.py scaffold --dir", entry.name)
+        over = False
+        for rel in sorted(git(self.repo, "ls-files", "*AGENTS.md").splitlines()):
+            if "/" not in rel or re.match(r"(.*/)?(node_modules|vendor|\.claude)/", rel):
+                continue
+            ntext = (self.repo / rel).read_text(encoding="utf-8", errors="replace") \
+                if (self.repo / rel).is_file() else ""
+            nlines, nchars = ntext.count("\n") + 1, len(ntext.replace("\r\n", "\n"))
+            if nlines > NESTED_CEILING_LINES or nchars > NESTED_CEILING_CHARS:
+                over = True
+                self.add("entry_docs", "warn",
+                         f"{rel} is {nlines} lines / {nchars:,} characters, over the nested budget "
+                         f"({NESTED_CEILING_LINES} lines / {NESTED_CEILING_CHARS:,} characters) — keep "
+                         "local deltas and landmines only", rel)
+            elif nlines > NESTED_TARGET_LINES:
+                self.add("entry_docs", "info",
+                         f"{rel} is {nlines} lines, over the {NESTED_TARGET_LINES}-line nested target", rel)
+        if over:
+            score -= 0.5
         self.scores["entry_docs"] = max(score, 0)
 
     # -- dimension: docs health -----------------------------------------------
     def check_docs_health(self) -> None:
         score = 5.0
+        arch = (self.scan_facts() or {}).get("architecture") or {}
+        if arch.get("warranted") and not arch.get("path"):
+            reasons = "; ".join((arch.get("reasons") or [])[:3])
+            self.add("docs_health", "info",
+                     f"an ARCHITECTURE.md is warranted ({reasons}) and missing — draft one "
+                     "with agents-md.py scaffold --architecture")
         if not (self.repo / "README.md").exists():
             score -= 1
             self.add("docs_health", "warn", "no README.md — humans enter blind")
@@ -447,14 +513,36 @@ class Audit:
             self.add("enforcement", "warn",
                      "no single `check` entry point (npm run check / just check) — "
                      "if it isn't one command, agents won't run it")
-        gates = [p.name for p in (self.repo / "scripts").glob("check-*")] \
-            if (self.repo / "scripts").is_dir() else []
-        gates += [p.name for p in (self.repo / "tests").glob("*drift*")] \
+        drift = [p.name for p in (self.repo / "tests").glob("*drift*")] \
             if (self.repo / "tests").is_dir() else []
-        if gates:
-            score += 1
-            self.facts["invariant_gates"] = gates[:5]
+        facts = self.scan_facts()
+        if facts is not None:
+            # A gate counts in full only when `check` or CI runs it (repo-scan's `wired`);
+            # one nothing runs counts half, because a gate no session runs enforces nothing.
+            scanned = facts.get("gates") or []
+            self.facts["gates"] = [{"tool": g["tool"], "config": g.get("scope", "") + g["config"],
+                                    "wired": g.get("wired")} for g in scanned]
+            wired = [g for g in scanned if g.get("wired")]
+            unwired = [g for g in scanned if g.get("wired") is False]
+            gates = [g.get("scope", "") + g["config"] for g in wired] + drift
+            if wired or drift:
+                score += 1
+            elif unwired:
+                score += 0.5
+            if unwired:
+                names = ", ".join(sorted(g.get("scope", "") + g["config"] for g in unwired)[:5])
+                self.add("enforcement", "info" if (wired or drift) else "warn",
+                         f"{len(unwired)} gate(s) the check entry point never runs: {names} — "
+                         "fold them into `check` so every session runs them")
         else:
+            gates = [p.name for p in (self.repo / "scripts").glob("check-*")] \
+                if (self.repo / "scripts").is_dir() else []
+            gates += drift
+            if gates:
+                score += 1
+        if gates:
+            self.facts["invariant_gates"] = gates[:5]
+        elif not (facts and facts.get("gates")):
             self.add("enforcement", "info",
                      "no invariant gate scripts (scripts/check-*.mjs pattern) — "
                      "prose rules rot; 30-line scripts don't")

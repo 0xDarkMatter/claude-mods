@@ -21,6 +21,11 @@ that genuinely didn't change (then touch it in the next honest commit, don't chu
 | Touched within 15 commits | warn above | Commit-lag is the real staleness metric; mtime lies (audit: 100+-commit drift behind week-old mtimes) | Verify claims vs code; update in the same commit as the fix |
 | CLAUDE.md or .claude/CLAUDE.md without an `@AGENTS.md` import | warn, -1 | Claude Code then reads only the CLAUDE.md files: AGENTS.md is invisible to every Claude session, prose pointers included | Put `@AGENTS.md` on its first line (protocol section 4); the full check (CLAUDE.local.md, parents, nested) is `agents-md.py audit` |
 | CLAUDE.md imports AGENTS.md but duplicates it | warn | Duplicates diverge into contradictions | Keep Claude-only deltas below the import |
+| Nesting the scan recommends is absent | warn, -0.5 | A folder with its own contract (own manifest, tests, deploy, landmine cluster) whose rules live only at root makes every session pay for them, and other tools may never see them | `agents-md.py scaffold --dir <folder>` (protocol section 6) |
+| Each nested AGENTS.md within 60 lines / 4,800 characters | warn above, -0.5 once; info over 40 lines | Some tools load every nested AGENTS.md always; a nested doc carries deltas only | Move detail to linked docs; keep local landmines |
+
+The nesting and gate checks read facts from the sibling `repo-scan.py`. Copied without
+it, the scorer skips them with one info finding and keeps the old gate rule.
 
 ## docs_health (weight 1.5)
 
@@ -30,6 +35,7 @@ that genuinely didn't change (then touch it in the next honest commit, don't chu
 | docs/ index when > 6 md files | warn | Un-indexed doc dirs make agents hunt; the audit's index-less 16-file docs/ cost every session a search | assets/docs-index-template.md; delegate volatile lists to `ls` |
 | Index links resolve | warn per ghost | Dead links teach agents to distrust the index | Fix or remove; index carries its own maintenance note |
 | Docs missing from index | info | Coverage drift signal | Add one-line entries |
+| ARCHITECTURE.md warranted and missing | info | Past a few contracted areas, a codemap and the invariants between layers outgrow a short structure map | `agents-md.py scaffold --architecture` |
 
 No docs/ dir at all: not penalised beyond a cap (small repos legitimately keep
 everything in README + AGENTS.md).
@@ -62,7 +68,7 @@ the scorer only checks the two mechanically-checkable proxies.
 | Tests present | 1.5 | Without tests every agent edit is a hope | testing-ops / testgen; name adversarial tests for the adversary |
 | CI workflows | 1.0 | Local-only gates skip on exactly the sessions that forget | Minimal workflow running `check` |
 | Single `check` entry | 1.5 | If verification isn't one command, agents won't run it | `npm run check` / `just check` fanning out typecheck+lint+tests+gates |
-| Invariant gate scripts | 1.0 | Prose rules rot; 30-line scripts don't (the lint:db lesson) | `scripts/check-<invariant>.mjs` per ownership-table rule |
+| Invariant gates | 1.0 if `check` or CI runs one; 0.5 if gates exist but nothing runs them | Prose rules rot; 30-line scripts don't (the lint:db lesson). A gate no session runs enforces nothing. Detected gates: root `scripts/check-*`, `tests/*drift*`, import-linter, tach, dependency-cruiser, eslint-plugin-boundaries, Nx module boundaries, ArchUnit, deptrac, depguard, Go `internal/` | `scripts/check-<invariant>.mjs` per ownership-table rule, run from the check entry point |
 
 ## doc_pairing (weight 1.0)
 
