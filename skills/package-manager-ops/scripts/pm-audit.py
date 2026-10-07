@@ -17,6 +17,7 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   js.manifest.invalid  php.manifest.invalid
   js.lockfile.conflict  js.lockfile.missing  js.lockfile.stale  js.lockfile.v1
   js.lockfile.shrinkwrap  js.pnpm.field-ignored
+  js.dep.non-registry
   js.packagemanager.mismatch  js.node.unpinned  js.node.eol  node.pin.disagree
   ddev.node.unpinned  php.require.missing  php.platform.unset
   php.pin.disagree  php.eol  php.lockfile.missing  php.lockfile.stale
@@ -89,6 +90,7 @@ JS_LOCKFILES = {
 DEP_TYPES = ("dependencies", "devDependencies", "optionalDependencies")
 # Specs that never appear verbatim as yarn/pnpm lock keys; skip rather than guess.
 LOCAL_SPEC = re.compile(r"^(workspace:|file:|link:|portal:|patch:|exec:|git[+:]|github:|https?:)")
+NON_REGISTRY_SPEC = re.compile(r"^(?:git:|git\+|github:|file:|link:)|^https?://[^\s]+\.tgz(?:[?#].*)?$", re.I)
 COMPOSER_PLATFORM = re.compile(r"^(php(-64bit|-ipv6|-zts|-debug)?|hhvm|ext-.+|lib-.+|composer(-plugin-api|-runtime-api)?)$", re.I)
 EXACT_SEMVER = re.compile(r"^v?\d+\.\d+\.\d+([-+][0-9A-Za-z.+-]+)?$")
 # A dist-tag spec (`@latest`, `@next`, `@beta`). npm-package-arg calls a spec a tag when it
@@ -1268,6 +1270,12 @@ class Audit:
                      + ") - pnpm 11+ no longer reads it, so those settings are silently dropped",
                      "move the settings into pnpm-workspace.yaml (references/scripts-and-workspaces.md)")
         has_deps = any(obj(self.pkg.get(t)) for t in DEP_TYPES)
+        for dep_type in DEP_TYPES:
+            for name, spec in obj(self.pkg.get(dep_type)).items():
+                if NON_REGISTRY_SPEC.match(str(spec).strip()):
+                    self.add("warn", "js.dep.non-registry", "package.json",
+                             f"{dep_type}.{name} uses non-registry source {spec!r}",
+                             "publish or mirror the package in the configured registry and pin a normal registry range")
         if not present and has_deps:
             built = self._nested_builds()
             if built:
