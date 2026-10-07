@@ -23,6 +23,7 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   php.pin.disagree  php.eol  php.lockfile.missing  php.lockfile.stale
   php.composer.safety-off
   php.package.abandoned
+  php.dep.non-registry
   npx.unpinned  npx.native-cli  legacy.bower  legacy.node-sass  legacy.package
   registry.token.committed  registry.authjson.committed  registry.credentials.image
   registry.pnpm.placeholder-ignored
@@ -1655,6 +1656,20 @@ class Audit:
             self.add("warn", "php.composer.safety-off", "composer.json",
                      "Composer safety controls are disabled: " + ", ".join(disabled),
                      "restore secure-http/TLS, allow plugins by package name, and keep audit blocking enabled")
+        repo_cfg = c.get("repositories")
+        repositories = repo_cfg if isinstance(repo_cfg, list) else list(repo_cfg.values()) if isinstance(repo_cfg, dict) else []
+        non_registry = [str(r.get("type")) for r in repositories
+                        if isinstance(r, dict) and str(r.get("type", "")).lower() in ("vcs", "path", "artifact")]
+        unstable = [f"{name}={constraint}" for section in ("require", "require-dev")
+                    for name, constraint in obj(c.get(section)).items()
+                    if str(constraint).strip() == "*" or str(constraint).strip().lower().startswith("dev-")]
+        if str(c.get("minimum-stability", "")).lower() == "dev" and c.get("prefer-stable") is not True:
+            unstable.append("minimum-stability=dev without prefer-stable=true")
+        if non_registry or unstable:
+            details = (["repository types: " + ", ".join(non_registry)] if non_registry else []) \
+                + (["unbounded/dev resolution: " + ", ".join(unstable)] if unstable else [])
+            self.add("warn", "php.dep.non-registry", "composer.json", "; ".join(details),
+                     "use Composer registry packages with bounded stable constraints; set prefer-stable=true if dev stability is required")
         is_lib = str(c.get("type", "project")) not in ("project", "")
         req = obj(c.get("require"))
         req_dev = obj(c.get("require-dev"))
