@@ -212,10 +212,13 @@ grep -q 'npm run legacy-build  # agents-md: no "legacy-build" script' "$A/AGENTS
     && ok "dead commands are annotated, not deleted" || no "annotation" "not found"
 n="$(wc -l < "$A/AGENTS.md")"
 [ "$n" -le 200 ] && ok "upgraded AGENTS.md is back under the ceiling ($n lines)" || no "post-split size" "$n"
+grep -qF 'Moved to [docs/agents/background.md](docs/agents/background.md); read it before work on background.' "$A/AGENTS.md" \
+    && ok "split_pointer_names_a_task_trigger" || no "split_pointer_names_a_task_trigger" "$(grep -F 'background.md' "$A/AGENTS.md")"
 commit "$A" "docs: apply agents-md upgrade"
 OUT="$("$PY" "$AM" audit --repo "$A" --no-parents --json 2>/dev/null)"
 check "re-audit: shadowing, size and deploy findings are gone" \
       "not {'shadowed-standalone','over-ceiling','missing-section-deploy'} & {f['id'] for f in D['findings']}"
+check "split_pointers_are_not_bare" "'bare-pointer' not in {f['id'] for f in D['findings']}"
 "$PY" "$AM" audit --repo "$A" --no-parents --diff > "$TMP/p2.patch" 2>/dev/null
 grep -q 'legacy-build' "$TMP/p2.patch" && no "idempotent --diff" "annotation proposed twice" \
     || ok "a second --diff never re-annotates"
@@ -235,6 +238,18 @@ check "clean control: no warn or crit findings" "not [f for f in D['findings'] i
 [ "$rc" -eq 0 ] && ok "clean control exits 0" || no "clean exit" "$rc"
 [ -z "$("$PY" "$AM" audit --repo "$G" --no-parents --diff 2>/dev/null)" ] && ok "clean control: --diff is empty" \
     || no "clean diff" "patch not empty"
+BP="$TMP/pointers"; init_repo "$BP"; good_agents "$BP"
+n="$(wc -l < "$BP/AGENTS.md")"
+{ echo "See [docs/x.md](docs/x.md)."
+  echo "See [the wire doc](docs/wire.md) before changing the wire format."
+  echo "See [When to deploy](docs/deploy.md)."
+  echo "Moved to [docs/y.md](docs/y.md); read it when this topic matters."
+  echo '```'; echo "see \`docs/in-a-fence.md\`"; echo '```'; } >> "$BP/AGENTS.md"
+commit "$BP" "docs: pointers"
+OUT="$("$PY" "$AM" audit --repo "$BP" --no-parents --json 2>/dev/null)"; rc=$?
+check "bare_see_pointer_is_flagged" \
+      "sorted(int(f['path'].split(':')[1]) for f in D['findings'] if f['id']=='bare-pointer')==[$((n+1)),$((n+3)),$((n+4))]"
+[ "$rc" -eq 0 ] && ok "  ...an info finding, so the audit still exits 0" || no "bare-pointer exit" "$rc"
 
 shadow_case() {   # SLUG NAME FILE CONTENT EXPECTED-ID [commit]
     local R="$TMP/sh-$1"; init_repo "$R"; good_agents "$R"; mkdir -p "$R/.claude"
@@ -319,6 +334,7 @@ check "size split: setup first, the structure map stays" \
 # Order of moves: excluded content (setup) first even when small, the structure map
 # last; a generic "Quick reference" heading is not a Commands section.
 T="$TMP/tiers"; init_repo "$T"; echo '{"name":"t","scripts":{"build":"node b.js"}}' > "$T/package.json"
+mkdir -p "$T/src"; echo "x" > "$T/src/hooks.js"
 "$PY" - "$T/AGENTS.md" <<'EOF'
 import sys
 L = ["# Agent Instructions - tiers", "", "Fixture for the order of split moves.", "",
@@ -326,6 +342,7 @@ L = ["# Agent Instructions - tiers", "", "Fixture for the order of split moves."
 L += [f"{i}. **Rule {i}** - keep invariant {i} intact." for i in range(1, 96)]
 L += ["", "## Install", ""] + [f"Step {i}: install tool {i}." for i in range(6)]
 L += ["", "## Quick reference", ""] + [f"- Tip {i}: prefer the modern tool." for i in range(55)]
+L += ["- Hooks live in `src/hooks.js` and `src/more.js`; `origin/main` is a ref, not a folder."]
 L += ["", "## Structure", "", "| Path | What |", "|---|---|"] + [f"| `d{i}/` | part {i} |" for i in range(27)]
 open(sys.argv[1], "w", newline="\n").write("\n".join(L) + "\n")
 EOF
@@ -333,6 +350,9 @@ commit "$T" "docs: tiers agents"
 OUT="$("$PY" "$AM" audit --repo "$T" --no-parents --json 2>/dev/null)"
 check "split order: small setup section first, structure map kept" \
       "{p['section']:p['destination'] for p in D['split_plan']}=={'Install':'README.md','Quick reference':'docs/agents/quick-reference.md'}"
+"$PY" "$AM" audit --repo "$T" --no-parents --diff 2>/dev/null \
+    | grep -qF '+Moved to [docs/agents/quick-reference.md](docs/agents/quick-reference.md); read it before editing `src/**`.' \
+    && ok "split_pointer_names_a_path_trigger" || no "split_pointer_names_a_path_trigger" "no src/** trigger in the patch"
 # Landmine candidates the doc doesn't mention yet are listed (info), so an upgrade
 # shows which git-history questions the Landmines section never answered.
 U="$TMP/uncov"; init_repo "$U"; good_agents "$U"; echo "x" > "$U/x.js"; echo "y" > "$U/y.js"; echo "z" > "$U/z.js"

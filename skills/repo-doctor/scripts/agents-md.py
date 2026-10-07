@@ -995,6 +995,56 @@ def gh_anchor(title: str) -> str:
     return re.sub(r"[^\w\- ]", "", title.lower()).strip().replace(" ", "-")
 
 
+def path_refs(body: str, repo: Path) -> list[str]:
+    """The top-level folder of each backticked path and link in a section, one entry per
+    reference. Only folders that exist count, so `origin/main` or a URL path is not one."""
+    refs = [r.split("/")[0] for r in re.findall(r"`([\w.\-]+/[\w./\-]*)`|\]\(([\w.\-]+/[^)#\s]*)", body)
+            for r in r if r]
+    return [r for r in refs if (repo / r).is_dir()]
+
+
+def path_tops(body: str, repo: Path) -> list[str]:
+    """The folders path_refs names, most-named first."""
+    refs = path_refs(body, repo)
+    return sorted(set(refs), key=lambda d: (-refs.count(d), d))
+
+
+def pointer_trigger(title: str, body: str, repo: Path) -> str:
+    """When to read a moved section: a path trigger when the section names folders, else a
+    task trigger from its title. A pointer without one ("see X") never gets read."""
+    tops = [t for t in path_tops(body, repo) if t not in ("docs", ".github")][:3]
+    if tops:
+        named = [f"`{t}/**`" for t in tops]
+        return "before editing " + (named[0] if len(named) == 1 else ", ".join(named[:-1]) + " or " + named[-1])
+    return f"before work on {title.lower()}"
+
+
+# A pointer line ("See [X](docs/x.md).") that never says when to read its target. The
+# trigger words are searched with link text and code spans removed, so a link titled
+# "When to deploy" is not a trigger. "When this topic matters" is the old split wording.
+POINTER_LINE = re.compile(r"^\s*(?:[-*]\s+|\d+\.\s+)?(?:see|refer to|moved to|details (?:are )?in|"
+                          r"more (?:detail )?in|full [\w ]{1,20} in)\b", re.I)
+POINTER_TARGET = re.compile(r"\]\([^)\s]+\)|`[^`\s]*(?:/|\.md)[^`\s]*`")
+POINTER_TRIGGER = re.compile(r"\b(?:when|whenever|before|after|while|if|once)\b", re.I)
+POINTER_VAGUE = re.compile(r"\bwhen (?:this|the|that) topic matters\b|"
+                           r"\b(?:when|if|as) (?:relevant|needed|necessary|appropriate)\b", re.I)
+
+
+def bare_pointers(lines: list[str]) -> list[int]:
+    """0-based indexes of pointer lines with no trigger, outside code fences."""
+    out, fence = [], False
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("```"):
+            fence = not fence
+            continue
+        if fence or not POINTER_LINE.match(line) or not POINTER_TARGET.search(line):
+            continue
+        rest = re.sub(r"`[^`]*`", "", re.sub(r"\[[^\]]*\]\([^)]*\)", "", line))
+        if POINTER_VAGUE.search(line) or not POINTER_TRIGGER.search(rest):
+            out.append(i)
+    return out
+
+
 def split_plan(lines: list[str], repo: Path) -> list[dict]:
     """Moves until the doc is back under target in lines AND characters. Order: human
     setup prose first (it doesn't belong in AGENTS.md at any size), then the other
@@ -1029,8 +1079,7 @@ def split_plan(lines: list[str], repo: Path) -> list[dict]:
         if SETUP_HEADING.match(s["title"]):
             dest, kind, why = "README.md", "readme", "human setup prose belongs in README"
         else:
-            refs = [r.split("/")[0] for r in re.findall(r"`([\w.\-]+/[\w./\-]*)`|\]\(([\w.\-]+/[^)#\s]*)", body)
-                    for r in r if r]
+            refs = path_refs(body, repo)
             dest, kind, why = f"docs/agents/{slugify(s['title'])}.md", "docs", "detail an agent reads on demand"
             if len(refs) >= 3:
                 top, cnt = max(((d, refs.count(d)) for d in set(refs)), key=lambda x: (x[1], x[0]))
@@ -1242,6 +1291,11 @@ def cmd_audit(args) -> int:
         for h in an["setup_headings"]:
             finds.append({"id": "human-setup-prose", "severity": "info", "path": rel,
                           "msg": f'"{h}" reads like human setup prose: it belongs in README.md'})
+        for i in bare_pointers(lines):
+            finds.append({"id": "bare-pointer", "severity": "info", "path": f"{rel}:{i + 1}",
+                          "msg": "a pointer that never says when to read its target: name the trigger, "
+                                 "as a path (\"before editing `src/engine/**`\") or a task (\"before "
+                                 "changing the wire format\")"})
         new = list(lines)
         for i, cmd, fenced in command_refs(lines):
             why = check_command(cmd, f, repo)
@@ -1293,7 +1347,8 @@ def cmd_audit(args) -> int:
                 pointer = (f"Moved to [{dest}]({dest}), which loads when an agent works under "
                            f"`{dest.rsplit('/', 1)[0]}/`.")
             else:
-                pointer = f"Moved to [{dest}]({dest}); read it when this topic matters."
+                body = "\n".join(lines[p["start"] + 1: p["end"]])
+                pointer = f"Moved to [{dest}]({dest}); read it {pointer_trigger(p['section'], body, repo)}."
             new[p["start"] + 1: p["end"]] = ["", pointer, ""]
         for dest in {p["destination"] for p in plan}:
             old_d, new_d = files[dest]
