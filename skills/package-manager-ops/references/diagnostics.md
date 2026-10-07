@@ -42,6 +42,10 @@ A matrix path or any other expression leaves it unplaced. A workspace member (np
 `workspaces`, `pnpm-workspace.yaml`) installs from its workspace root's lockfile. A
 literal `node-version` given to actions/setup-node and `php-version` given to
 shivammathur/setup-php count as pins for the agreement and end-of-life checks.
+Local composite actions under `.github/actions/` and local reusable workflows under
+`.github/workflows/` are read recursively at the calling job's scope. Remote actions are
+never fetched. A missing local target marks the deploy check skipped with its path rather
+than allowing an incomplete scan to read as a pass.
 
 Frozen installs are required in every CI job, whether it ships or not: the managers
 document the frozen install for CI as a whole, and a front-end job whose build a deploy job

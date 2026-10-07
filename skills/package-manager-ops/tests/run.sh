@@ -254,6 +254,8 @@ mutation("composer no-dev env", "clean-deploy-composer-env",
          'obj(active_env).get("COMPOSER_NO_DEV")', 'False')
 mutation("legacy facts lookup", "legacy-node-sass",
          'table = self.facts.get("legacy_packages")', 'table = self.facts.get("mutant_legacy_packages")')
+mutation("local composite action", "deploy-local-uses",
+         'if not raw.startswith("./"):', 'if True:')
 
 # Every id the audit documents must have a fixture that produces it.
 doc_ids = set()

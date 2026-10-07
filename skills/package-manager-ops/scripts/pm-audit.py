@@ -2175,6 +2175,10 @@ class Audit:
             # own shell, and Dockerfile and hook-script directories are never placed.
             if path.suffix in (".yml", ".yaml"):
                 commands = list(yaml_command_lines(text))
+                local_commands, missing = self._local_uses_commands(rel, text)
+                commands += local_commands
+                for reason in missing:
+                    self.blind("deploy", reason)
             elif path.name.lower().startswith("dockerfile"):
                 commands = [(n, c, n) for n, c in dockerfile_commands(text)]
             elif path.name == "Jenkinsfile":
@@ -2231,6 +2235,47 @@ class Audit:
                 self._ramsey(text, rel, ships, flag, kind)
                 builds += self._action_builds(rel, text, start_dir)
         self._image_leaks(writes, builds, scopes, flag)
+
+    def _local_uses_commands(self, caller, text):
+        """Commands reached through local composite actions or reusable workflows.
+
+        Local references are expanded at the caller's line because GitHub executes them
+        on behalf of that step/job. Remote `uses:` is never fetched. A missing local
+        target makes the deploy family skipped instead of falsely clean."""
+        out, missing = [], []
+
+        def visit(doc, call_line, seen):
+            for i, line in enumerate(doc.splitlines(), 1):
+                m = re.search(r"\buses\s*:\s*[\"']?([^\s\"'#]+)", line)
+                raw = scalar(m.group(1)) if m else ""
+                if not raw.startswith("./"):
+                    continue
+                effective = call_line if call_line is not None else i
+                name = posixpath.normpath(raw[2:])
+                if name == ".." or name.startswith("../"):
+                    missing.append(f"local CI reference leaves repo: {raw} ({caller}:{i})")
+                    continue
+                path = self.root / Path(name)
+                choices = [path] if path.suffix else [path / "action.yml", path / "action.yaml"]
+                target = next((p for p in choices if p.is_file() and self.root in p.parents), None)
+                if target is None:
+                    missing.append(f"local CI reference missing: {raw} ({caller}:{i})")
+                    continue
+                key = target.relative_to(self.root).as_posix()
+                if key in seen:
+                    continue
+                body = read_text(target) or ""
+                # JavaScript and Docker actions do not expose shell steps; package-manager
+                # commands inside their implementation are outside this CI scanner.
+                if key.startswith(".github/actions/") and not re.search(
+                        r"^\s*using\s*:\s*[\"']?composite\b", body, re.M | re.I):
+                    continue
+                seen.add(key)
+                out.extend((effective, command, effective) for _n, command, _key in yaml_command_lines(body))
+                visit(body, effective, seen)
+
+        visit(text, None, set())
+        return out, missing
 
     def _job_scope(self, rel, text):
         """line -> the GitHub Actions job holding it (its first line), or 0 for a file judged
