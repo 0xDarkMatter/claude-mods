@@ -24,6 +24,7 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   ddev.node.unpinned  php.require.missing  php.platform.unset
   php.pin.disagree  php.eol  php.eol-soon  php.lockfile.missing  php.lockfile.stale
   php.composer.safety-off
+  php.composer.eol
   php.package.abandoned
   php.dep.non-registry
   php.lock.floor
@@ -1252,6 +1253,7 @@ class Audit:
         self._check("php", (self.php,), "" if (self.root / "composer.json").is_file() else "no composer.json")
         has_floors = any((self.root / n).is_file() for n in ("package-lock.json", "npm-shrinkwrap.json", "composer.lock"))
         self._check("runtime.floors", (self.runtime_floors,), "" if has_floors else "no npm or Composer lockfile")
+        self._check("composer.line", (self.composer_line,))
         npx_skip = "package.json absent and docs scan disabled" if not self.docs and not (self.root / "package.json").is_file() else ""
         self._check("npx", (self.npx,), npx_skip)
         self._check("legacy", (self.legacy,))
@@ -1950,6 +1952,63 @@ class Audit:
                      f"{package} requires PHP {spec} (floor {'.'.join(map(str, floor))}), above "
                      + ", ".join(f"{src}={'.'.join(map(str, pin))}" for pin, src in low),
                      "raise every production PHP pin to the lock floor and run `composer check-platform-reqs --lock`")
+
+    def composer_line(self):
+        """Composer minor-line evidence against the facts catalogue's support and safety
+        floors. The `major.minor` string is the catalogue key; patch digits are discarded
+        only here so Docker tags, setup-php tools and plugin-api-version compare alike."""
+        evidence = []
+
+        def take(file, raw):
+            m = re.match(r"^(2)\.(\d+)", str(raw or ""))
+            if m:
+                evidence.append((file, f"{m.group(1)}.{m.group(2)}"))
+
+        lock = read_json(self.root / "composer.lock") if (self.root / "composer.lock").is_file() else None
+        if isinstance(lock, dict):
+            take("composer.lock plugin-api-version", lock.get("plugin-api-version"))
+        for g in (".github/workflows/*.yml", ".github/workflows/*.yaml"):
+            for path in sorted(self.root.glob(g)):
+                for m in re.finditer(r"tools\s*:\s*[\"']?[^\n#]*composer:v?(2\.\d+)", read_text(path) or "", re.I):
+                    take(path.relative_to(self.root).as_posix(), m.group(1))
+        for path in sorted(self.root.glob("Dockerfile*")):
+            for m in re.finditer(r"(?:FROM|--from=)\s*composer:(2\.\d+)", read_text(path) or "", re.I):
+                take(path.name, m.group(1))
+        if not evidence:
+            self.blind("composer.line", "no Composer minor-line evidence")
+            return
+        composer = obj(self.facts.get("composer"))
+        lines, floors = composer.get("lines"), composer.get("feature_floors")
+        if not isinstance(lines, dict) or not isinstance(floors, dict):
+            self.blind("composer.line", "facts composer.lines or feature_floors missing or invalid")
+            return
+        raised = set()
+        for file, line in evidence:
+            if (file, line) in raised:
+                continue
+            raised.add((file, line))
+            row = lines.get(line)
+            if not isinstance(row, dict):
+                self.blind("composer.line", f"Composer {line} absent from facts")
+                continue
+            reasons = []
+            end = row.get("end")
+            try:
+                if end and dt.date.fromisoformat(str(end)) < self.as_of:
+                    reasons.append(f"support ended {end}")
+            except ValueError:
+                self.blind("composer.line", f"Composer {line} has an invalid end date in facts")
+                continue
+            cur = tuple(int(x) for x in line.split("."))
+            below = [name.replace("_", " ") for name, floor in floors.items()
+                     if re.match(r"^\d+\.\d+$", str(floor))
+                     and cur < tuple(int(x) for x in str(floor).split("."))]
+            if below:
+                reasons.append("below the " + " and ".join(below) + " feature floor(s)")
+            if reasons:
+                self.add("warn", "php.composer.eol", file,
+                         f"Composer {line} is outside the supported safety baseline: " + "; ".join(reasons),
+                         "use a supported Composer line at or above every safety feature floor")
 
     # ---- npx / dlx / exec ----
     def npx(self):
