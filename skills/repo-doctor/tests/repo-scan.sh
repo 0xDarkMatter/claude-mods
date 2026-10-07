@@ -184,6 +184,17 @@ check "generated_entry_doc_detects_ruler" \
 OUT="$("$PY" "$SCAN" --repo "$M" --only nesting,gates,architecture --json --no-tokei 2>/dev/null)"
 check "new_sections_are_selectable" \
       "d['meta']['sections']==['nesting','gates','architecture'] and set(D)=={'nesting','gates','architecture','secrets_skipped','candidates'}"
+# A check-* script deep in a package is often a tool the package ships, not a gate of
+# this repo (dogfood, 2026-10-07: skill tools like check-issues.sh were counted).
+# It is a gate only at the repo root's scripts/ or when the check entry point runs it.
+GT="$TMP/gates"; init_repo "$GT"; mkdir -p "$GT/scripts" "$GT/pkg/scripts" "$GT/lib/scripts"
+echo 'echo ok' > "$GT/scripts/check-root.sh"; echo 'echo tool' > "$GT/pkg/scripts/check-tool.sh"
+echo 'echo ok' > "$GT/lib/scripts/check-wired.sh"
+printf 'check:\n\tbash lib/scripts/check-wired.sh\n' > "$GT/justfile"
+commit "$GT" "feat: gates"
+OUT="$("$PY" "$SCAN" --repo "$GT" --only gates --json --no-tokei 2>/dev/null)"
+check "shipped_check_script_is_not_a_repo_gate" \
+      "sorted(g['scope']+g['config'] for g in D['gates'] if g['tool']=='invariant test')==['lib/scripts/check-wired.sh','scripts/check-root.sh']"
 
 # ---- clean control -----------------------------------------------------------
 C="$TMP/clean"; init_repo "$C"; mkdir -p "$C/src"

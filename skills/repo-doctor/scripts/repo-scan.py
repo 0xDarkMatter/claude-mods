@@ -1519,16 +1519,24 @@ class Scan:
                 for script in (manifests.get(key) or {}).get("scripts", []):
                     if CHECKISH_RE.search(script["name"]):
                         chunks.append(script.get("command", ""))
-            for recipe in (manifests.get("makefile") or {}).get("targets", []):
-                if CHECKISH_RE.search(recipe["name"]):
-                    chunks.append(recipe["name"])
-            for recipe in (manifests.get("justfile") or {}).get("recipes", []):
-                if CHECKISH_RE.search(recipe["name"]):
-                    chunks.append(recipe["name"])
+            # Recipe bodies, not just names: `check: bash scripts/check-x.sh` wires the
+            # gate through its body. The whole file is read once a check-ish recipe exists.
+            for key, sub, names in (("makefile", "targets", ("Makefile", "makefile", "GNUmakefile")),
+                                    ("justfile", "recipes", ("justfile", "Justfile", ".justfile"))):
+                if any(CHECKISH_RE.search(r["name"]) for r in (manifests.get(key) or {}).get(sub, [])):
+                    chunks.extend(self.read(root + n) or "" for n in names)
         for workflow in self.s_ci()["workflows"]:
             for job in workflow.get("jobs", []):
                 for step in job.get("steps", []):
                     chunks.extend(str(step.get(k) or "") for k in ("name", "run", "uses"))
+        # One level of indirection: a check recipe or CI step that runs a script (say
+        # tests/check-resources.sh) wires every gate that script runs. Deeper chains are
+        # not followed, so a gate three hops away reads as unwired, never the reverse.
+        first = "\n".join(chunks)
+        for rel in sorted(set(re.findall(r"[\w./-]+\.(?:sh|py|mjs|cjs|js|ts)\b", first))):
+            rel = rel[2:] if rel.startswith("./") else rel
+            if rel in self.fileset:
+                chunks.append(self.read(rel) or "")
         return "\n".join(chunks).lower()
 
     def s_gates(self) -> list[dict]:
@@ -1555,7 +1563,13 @@ class Scan:
 
         for rel in self.files:
             base = rel.rsplit("/", 1)[-1]
-            text = self.read(rel) or ""
+            # Read only files whose content decides a gate; reading every tracked file
+            # here cost one bounded read per file on every scan.
+            needs_text = (base in ("pyproject.toml", "project.json")
+                          or re.match(r"eslint\.config\.|\.eslintrc", base)
+                          or re.fullmatch(r"\.golangci\.(yml|yaml|toml|json)", base)
+                          or (is_test(rel) and rel.endswith((".java", ".kt"))))
+            text = (self.read(rel) or "") if needs_text else ""
             lower = text.lower()
             if base == ".importlinter":
                 add("import-linter", rel, tokens=("lint-imports", "import-linter"))
@@ -1581,7 +1595,12 @@ class Scan:
             if re.fullmatch(r"\.golangci\.(yml|yaml|toml|json)", base) and "depguard" in lower:
                 add("depguard", rel, tokens=("golangci", "depguard"))
             if re.search(r"(^|/)scripts/check-[^/]+$", rel):
-                add("invariant test", rel, tokens=(base.lower(), rel.lower()))
+                # A check-* script inside a package is often a tool that package ships to
+                # its users, not a gate of this repo. It counts at the root's scripts/,
+                # or anywhere once the check entry point or CI runs it.
+                tokens = (base.lower(), rel.lower())
+                if rel.startswith("scripts/") or any(t in check_text for t in tokens):
+                    add("invariant test", rel, tokens=tokens)
         internal_roots = sorted({rel.split("/internal/", 1)[0] + "/"
                                  for rel in self.files if "/internal/" in rel})
         for root in internal_roots:
