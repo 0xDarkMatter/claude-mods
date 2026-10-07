@@ -23,6 +23,7 @@ CRITICAL-PATH: scan -> entrydocs -> docs -> refute
 EST: 4-6 hours wall-clock assuming 1-parallel (commit headroom); about 3 hours at 3-parallel
 DETECTED-CONFLICTS: 0
 BOUNDS: max-turns 150 per lane (entrydocs 250); one lane at a time while commit headroom stays under the doctor's reserve
+REFUTED: 2026-10-07 by codex; verdict stands; 5 findings applied to sections 1.1, 1.2, 1.4 and 2
 ```
 
 ## 1. Shared contracts
@@ -66,8 +67,10 @@ data.manifests_by_dir = { "<dir>/": <the same shape as data.manifests> }
   # every workspace member and every nesting.recommend dir; part of the "manifests" section
 
 data.generated_entry_docs = [ { "path": "AGENTS.md", "generator": "ruler|rulesync|source-header",
-                                "source_of_truth": ".ruler/" | null, "source": "<src>" } ]
-  # part of the "docs" section
+                                "source_of_truth": "<repo-relative path>" | null, "source": "<src>" } ]
+  # part of the "docs" section. source_of_truth is ".ruler/" for ruler, ".rulesync/" for
+  # rulesync, the path a "<!-- Source: <path> -->" header names, or null when the header
+  # names nothing resolvable. A consumer patches source_of_truth, never "path".
 ```
 
 `--only` accepts the new names `nesting`, `gates` and `architecture`. The
@@ -89,7 +92,15 @@ schema string stays `claude-mods.repo-doctor.repo-scan/v1`: these are additive.
       "subdirs": "on-read" | "launch-path-only" | "always" | "never",
       "precedence": "concatenate" | "nearest-wins",
       "imports": null | { "syntax": "@path", "max_depth": 4, "skip_code": true, "relative_to": "importing-file" },
-      "always_rules": null | { "glob": ".claude/rules/**/*.md", "unless_frontmatter": "paths" },
+      "rule_sets": [ { "glob": ".claude/rules/**/*.md",
+                       "mode": "always|scoped|description|manual|frontmatter",
+                       "scope_key": "paths" | "applyTo" | "globs" | "fileMatchPattern" | null,
+                       "always_when_scope_missing": true } ],
+        # "frontmatter": the mode comes from each file's frontmatter (e.g. Cursor .mdc
+        # alwaysApply/globs/description, Kiro inclusion). explain counts a rule file as
+        # always-loaded when its effective mode is always, and as glob-loaded when its
+        # scope_key glob matches the folder being explained; description and manual
+        # rules are listed as reachable, never counted as loaded.
       "caps": [ { "scope": "chain|file", "bytes": 32768, "chars": null, "lines": null,
                   "behaviour": "drop-deepest|per-file|advice", "source": "<url>" } ],
       "targets_when": ["GEMINI.md", ".cursor/"],                  # repo files that show it is used; [] = always
@@ -131,6 +142,12 @@ commits for coupling, fix plus revert commits for fragile, commits for hotspot,
 lines for outlier. The reason is required. A `(proposed)` line is reported but
 not honoured.
 
+Honoured lines remove their candidates from `uncovered_candidates`. The audit
+reports the count as `data.ruled_out` (an integer) and on its header line ("N
+ruled out"). The scorer does not consume candidates, so no grade changes;
+"leaves the score" in the spec means exactly this exclusion from the audit's
+counts.
+
 ## 2. Lane table
 
 | id | role | class | model | owns (exclusive) | builds | gate |
@@ -138,8 +155,8 @@ not honoured.
 | scan | Builder | build | codex | `skills/repo-doctor/scripts/repo-scan.py`, `skills/repo-doctor/tests/repo-scan.sh`, `skills/repo-doctor/tests/fixtures.sh` | spec N1, N7 gate detection, N6 `architecture` facts, N8 generated-doc facts, per-folder manifests; contract 1.1 | auto |
 | profiles | Builder | build | sonnet | `skills/repo-doctor/assets/agents-md/tool-profiles.json`, `skills/repo-doctor/scripts/check-tool-profiles.py` | contract 1.2 from the facts in its packet | auto |
 | scorer | Builder | build | codex | `skills/repo-doctor/scripts/repo-doctor.py`, `skills/repo-doctor/tests/run.sh`, `skills/repo-doctor/references/scoring-rubric.md` | spec N7 scorer bullets | auto |
-| entrydocs | Builder | build | sonnet | `skills/repo-doctor/scripts/agents-md.py`, `skills/repo-doctor/tests/agents-md.sh`, `skills/repo-doctor/tests/fake-gh.py`, `skills/repo-doctor/assets/agents-md/nested.md`, `skills/repo-doctor/assets/agents-md/architecture.md` | Lane A; spec N2 to N6, N7 survey, N8; Lane C's guided/assisted split in `scaffold --json`; contracts 1.3, 1.4 | review |
-| docs | Composer | build | sonnet | `skills/repo-doctor/references/agents-md-protocol.md`, `skills/repo-doctor/references/monorepo-structure.md`, `skills/repo-doctor/references/owner-interview.md`, `skills/repo-doctor/SKILL.md`, `skills/repo-doctor/scripts/check-memory-docs.py`, `rules/agentic-quality.md`, `docs/PLAN.md`, `CHANGELOG.md`, `docs/plans/NESTED-ENTRY-DOCS-2026-10.md` | spec N9, Lane C workflow doc, the new Claude Code facts in check-memory-docs | review |
+| entrydocs | Builder | build | sonnet | `skills/repo-doctor/scripts/agents-md.py`, `skills/repo-doctor/tests/agents-md.sh`, `skills/repo-doctor/tests/fake-gh.py`, `skills/repo-doctor/assets/agents-md/nested.md`, `skills/repo-doctor/assets/agents-md/architecture.md` | Lane A; spec N2 to N6, N7 survey and `invariant-ungated`, N8; Lane C's guided/assisted split in `scaffold --json`; contracts 1.3, 1.4 | review |
+| docs | Composer | build | sonnet | `skills/repo-doctor/references/agents-md-protocol.md`, `skills/repo-doctor/references/monorepo-structure.md`, `skills/repo-doctor/references/owner-interview.md`, `skills/repo-doctor/SKILL.md`, `skills/repo-doctor/scripts/check-memory-docs.py`, `rules/agentic-quality.md`, `docs/PLAN.md`, `CHANGELOG.md`, `README.md`, `docs/plans/NESTED-ENTRY-DOCS-2026-10.md` | spec N9, Lane C workflow doc, the new Claude Code facts in check-memory-docs | review |
 | refute | Adversary | verify | opus | (none: reports findings only) | attacks the integrated tree against the spec | review |
 
 Registries the orchestrator (Warden) applies during integration: the
