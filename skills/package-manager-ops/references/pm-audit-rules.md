@@ -49,7 +49,7 @@ and combining it with another format is exit 2).
 | Format | Shape |
 |---|---|
 | `tsv` | One row per finding: severity, id, `file[:line]`, message, fix text. Data only on stdout |
-| `json` | `{"data": [finding...], "meta": {...}}`, schema `claude-mods.package-manager-ops.pm-audit/v1` |
+| `json` | `{"data": [finding...], "meta": {...}}`, schema `claude-mods.package-manager-ops.pm-audit/v2` |
 | `sarif` | SARIF 2.1.0, one run, one rule per catalogue id, `ruleIndex` on every result, the baseline fingerprint in `partialFingerprints["pmAudit/v1"]`, the fix object and confidence under `properties` |
 | `github` | `::warning file=F,line=N::<id> <message>` (`::error` for error severity). `%`, CR and LF are escaped in the message; `:` and `,` also in `file=`. Notes are not printed. Run it from the repo root so `file=` resolves in the checkout |
 
@@ -59,7 +59,7 @@ output contract:
 | Field | Meaning |
 |---|---|
 | `fix` | `{"kind": "command"\|"edit"\|"manual", "text", "command", "safe"}`. `command` is only a command the text itself quotes in backticks, else `null`. `safe` means mechanical, local and reversible with git; it never means skip the review |
-| `fix_text` | The fix as a plain string (what `fix` was before it became an object) |
+| `fix_text` | The fix as a plain string (what `fix` was in schema v1; v2 made `fix` an object) |
 | `confidence` | `high` a fact read from a manifest or lockfile, `medium` a judgement over shell, CI or version arithmetic, `low` a signal that can be legitimate |
 | `docs_url` | The anchor in this file |
 | `fingerprint` | Stable identity, see [Baselines](#baselines) |

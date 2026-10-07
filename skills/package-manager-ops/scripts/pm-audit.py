@@ -11,7 +11,7 @@ Input:   argv only. PATH is a repo root. Root manifests are audited; nested pack
          and appspec hook scripts are read too.
 Output:  stdout = one TSV row per finding: severity, id, file[:line], message, fix.
          --format json (--json): {"data": [finding...], "meta": {...}} with schema
-         claude-mods.package-manager-ops.pm-audit/v1. Data only. sarif is SARIF 2.1.0,
+         claude-mods.package-manager-ops.pm-audit/v2. Data only. sarif is SARIF 2.1.0,
          github is ::warning/::error workflow annotations.
          --rules / --explain print the rule catalogue (no PATH needed).
 Stderr:  header, notes (informational - never findings), verdict line, errors.
@@ -107,7 +107,9 @@ import urllib.parse
 from pathlib import Path
 
 EX_OK, EX_USAGE, EX_NOTFOUND, EX_UNPARSEABLE, EX_FINDINGS = 0, 2, 3, 4, 10
-SCHEMA = "claude-mods.package-manager-ops.pm-audit/v1"
+# v2: a finding's `fix` is an object ({kind, text, command, safe}); v1 had it as a string,
+# which `fix_text` still carries. Bump this whenever an existing field changes type or meaning.
+SCHEMA = "claude-mods.package-manager-ops.pm-audit/v2"
 FACTS_SCHEMA = "claude-mods.package-manager-ops.facts/v1"
 DEFAULT_FACTS = Path(__file__).resolve().parent.parent / "assets" / "package-manager-facts.json"
 
