@@ -137,7 +137,7 @@ not honoured.
 |---|---|---|---|---|---|---|
 | scan | Builder | build | codex | `skills/repo-doctor/scripts/repo-scan.py`, `skills/repo-doctor/tests/repo-scan.sh`, `skills/repo-doctor/tests/fixtures.sh` | spec N1, N7 gate detection, N6 `architecture` facts, N8 generated-doc facts, per-folder manifests; contract 1.1 | auto |
 | profiles | Builder | build | sonnet | `skills/repo-doctor/assets/agents-md/tool-profiles.json`, `skills/repo-doctor/scripts/check-tool-profiles.py` | contract 1.2 from the facts in its packet | auto |
-| scorer | Builder | build | glm | `skills/repo-doctor/scripts/repo-doctor.py`, `skills/repo-doctor/tests/run.sh`, `skills/repo-doctor/references/scoring-rubric.md` | spec N7 scorer bullets | auto |
+| scorer | Builder | build | codex | `skills/repo-doctor/scripts/repo-doctor.py`, `skills/repo-doctor/tests/run.sh`, `skills/repo-doctor/references/scoring-rubric.md` | spec N7 scorer bullets | auto |
 | entrydocs | Builder | build | sonnet | `skills/repo-doctor/scripts/agents-md.py`, `skills/repo-doctor/tests/agents-md.sh`, `skills/repo-doctor/tests/fake-gh.py`, `skills/repo-doctor/assets/agents-md/nested.md`, `skills/repo-doctor/assets/agents-md/architecture.md` | Lane A; spec N2 to N6, N7 survey, N8; Lane C's guided/assisted split in `scaffold --json`; contracts 1.3, 1.4 | review |
 | docs | Composer | build | sonnet | `skills/repo-doctor/references/agents-md-protocol.md`, `skills/repo-doctor/references/monorepo-structure.md`, `skills/repo-doctor/references/owner-interview.md`, `skills/repo-doctor/SKILL.md`, `skills/repo-doctor/scripts/check-memory-docs.py`, `rules/agentic-quality.md`, `docs/PLAN.md`, `CHANGELOG.md`, `docs/plans/NESTED-ENTRY-DOCS-2026-10.md` | spec N9, Lane C workflow doc, the new Claude Code facts in check-memory-docs | review |
 | refute | Adversary | verify | grok | (none: reports findings only) | attacks the integrated tree against the spec | review |
@@ -184,7 +184,7 @@ Never drop:
 ## 6. Verify plan
 
 - **Per lane:** the orchestrator runs that lane's suites plus `tests/check-resources.sh` and reviews the three-dot diff before merging.
-- **After docs:** one Adversary on Grok, a different provider from every builder (codex, sonnet, glm), attacks the integrated tree against the spec and its Done-when list.
+- **After docs:** one Adversary on Grok, a different provider from every builder (codex, sonnet), attacks the integrated tree against the spec and its Done-when list.
 - **Before handing to MAIN:** the full `just check` on the integrated branch, run once.
 
 ## 7. Chip seats
