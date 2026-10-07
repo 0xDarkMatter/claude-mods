@@ -1043,6 +1043,72 @@ def scaffold_architecture(args, repo: Path) -> int:
     return EX_OK
 
 
+def scaffold_questions(f: dict) -> list[dict]:
+    """The draft's owner questions for the interview (spec Lane C). A guided question is one
+    the facts can answer: it carries a recommended answer and its source, for the owner to
+    accept in a word. An assisted one needs the owner and carries only its evidence. Ask
+    only the assisted ones; confirm the guided ones."""
+    m = f.get("manifests") or {}
+    qs: list[dict] = []
+
+    def q(qid: str, text: str, evidence: list[str], rec: tuple[str, str] | None = None) -> None:
+        item = {"id": qid, "question": text, "answerable": "guided" if rec else "assisted", "evidence": evidence}
+        if rec:
+            item["recommended"] = {"answer": rec[0], "source": rec[1]}
+        qs.append(item)
+    desc = next(((d.strip(), path) for key, path in (("package_json", "package.json"), ("composer_json", "composer.json"),
+                                                      ("python", "pyproject.toml"))
+                 for d in [(m.get(key) or {}).get("description")] if isinstance(d, str) and d.strip()), None)
+    q("overview", "In 2-4 lines: what is this repo, what does it produce, and who consumes it?",
+      [desc[1]] if desc else [], desc)
+    if not command_entries(f):
+        q("commands", "Which commands run, test and check this repo?", [])
+    ci = [(st["run"].strip().splitlines()[0], st["source"]) for wf in (f.get("ci") or {}).get("workflows", [])
+          for job in wf.get("jobs", []) for st in job.get("steps", []) if (st.get("run") or "").strip()
+          and re.search(r"(?i)\b(test|lint|check|phpstan|phpunit|pytest|vitest|jest|tsc|eslint|ruff|mypy)\b",
+                        st["run"])]
+    if not has_check(f):
+        q("check-command", "There is no single check command. Which command must pass before a commit?",
+          [s for _, s in ci], ("; ".join(dict.fromkeys(c for c, _ in ci)) + " (what CI runs)", ci[0][1]) if ci else None)
+    dep = f.get("deploy") or {}
+    steps = dep.get("ci_deploy_steps") or []
+    branches = sorted({b for s in steps for b in s.get("push_branches", [])})
+    if steps:
+        rec = None
+        if branches:
+            rec = (", ".join(f"`{b}`" for b in branches) + " deploys on push. A merge to it is a deploy, so "
+                   "agents never merge to it", steps[0]["source"])
+        q("deploy-branch", "Which branch deploys, and may an agent ever merge to it?", [s["source"] for s in steps], rec)
+    elif not dep.get("appspec") and not dep.get("surfaces"):
+        q("deploy-how", "How does this ship, and who may trigger it?", [])
+    dd = (f.get("ddev") or {}).get("config") or {}
+    if dd and m.get("package_json"):
+        nv = dd.get("nodejs_version")
+        q("ddev-node", "Do the Node scripts run on the host or inside DDEV (`ddev npm ...`)?",
+          [nv["source"]] if nv else [], ("inside DDEV: `ddev npm ...`", nv["source"]) if nv else None)
+    py = m.get("python") or {}
+    if py and not py.get("manager"):
+        q("python-deps", "How are the Python dependencies installed? No lockfile or manager config was found.", [])
+    envs = [e for e in f.get("env") or [] if e["names"]]
+    if envs:
+        q("env-vars", "Which environment variables must be set for local work, and where do the values come from?",
+          [e["path"] for e in envs])
+    for w in (m.get("workspaces") or [])[:1]:
+        rec = [r["dir"] for r in (f.get("nesting") or {}).get("recommend") or []]
+        q("nesting", "Does any package need its own nested AGENTS.md?", [w["source"]],
+          (("yes: " + ", ".join(f"`{d}`" for d in rec) + " (agents-md.py scaffold --dir)") if rec
+           else "no: no package has its own contract yet", "repo-scan nesting") if (f.get("nesting") is not None) else None)
+    gates = f.get("gates") or []
+    q("conventions", "Which repo-specific invariants and naming rules does a reviewer always enforce?",
+      [g["source"] for g in gates],
+      ("the rules these gates enforce: " + ", ".join(dict.fromkeys(g["tool"] for g in gates)), gates[0]["source"])
+      if gates else None)
+    for c in f.get("candidates") or []:
+        if c["kind"] != "workspaces" and c.get("paths"):
+            q(f"landmine:{c['kind']}:{c['paths'][0]}", c["question"], list(c.get("evidence") or []))
+    return qs
+
+
 def cmd_scaffold(args) -> int:
     repo = Path(args.repo).resolve()
     if not repo.is_dir():
@@ -1076,7 +1142,10 @@ def cmd_scaffold(args) -> int:
     if args.write:
         return create_file(repo / "AGENTS.md", draft)
     if args.json:
+        qs = scaffold_questions(f)
         emit_json({"data": {"archetype": arch, "lines": n, "owner_questions": draft.count(TODO_OWNER),
+                            "questions": qs, "guided": sum(x["answerable"] == "guided" for x in qs),
+                            "assisted": sum(x["answerable"] == "assisted" for x in qs),
                             "commands": [{"group": g, "command": c, "source": s, "note": t}
                                          for g, c, s, t in command_entries(f)],
                             "candidates": f.get("candidates") or [], "draft": draft},

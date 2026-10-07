@@ -645,6 +645,19 @@ printf '%s' "$EXPL" | grep -q '^rule: ' && printf '%s' "$EXPL" | grep -q '^sourc
 "$PY" "$AM" audit --repo "$DP" --no-parents --explain no-such-finding >/dev/null 2>&1; rc=$?
 [ "$rc" -eq 2 ] && ok "  ...and an unknown finding id exits 2" || no "explain unknown id" "exit $rc"
 
+# scaffold --json splits the owner questions (Lane C): guided ones the facts can answer
+# carry a recommended answer with its source; assisted ones need the owner and carry only
+# their evidence. Only assisted questions should ever reach the owner.
+QJ="$TMP/questions"; init_repo "$QJ"; mkdir -p "$QJ/src" "$QJ/.github/workflows"
+echo '{"name":"q","description":"A queue worker for billing events.","scripts":{"build":"node b.js","test":"node t.js"}}' > "$QJ/package.json"
+printf 'on: push\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm test\n' > "$QJ/.github/workflows/ci.yml"
+echo "x" > "$QJ/src/x.js"; commit "$QJ" "feat: init"
+for i in 1 2 3; do echo "$i" >> "$QJ/src/x.js"; commit "$QJ" "fix: x bug $i"; done
+OUT="$("$PY" "$AM" scaffold --repo "$QJ" --json 2>/dev/null)"
+q() { printf "next(x for x in D['questions'] if x['id']=='%s')" "$1"; }
+check "scaffold_json_splits_guided_from_assisted" \
+      "$(q overview)['answerable']=='guided' and $(q overview)['recommended']=={'answer':'A queue worker for billing events.','source':'package.json'} and $(q check-command)['answerable']=='guided' and 'npm test' in $(q check-command)['recommended']['answer'] and any(x['id'].startswith('landmine:') and x['answerable']=='assisted' and x['evidence'] and 'recommended' not in x for x in D['questions']) and all(x['answerable'] in ('guided','assisted') for x in D['questions']) and (D['guided'],D['assisted'])==(sum(x['answerable']=='guided' for x in D['questions']),sum(x['answerable']=='assisted' for x in D['questions']))"
+
 # ============================== SURVEY ========================================
 FX="$TMP/gh-fixture.json"; LOG="$TMP/gh-calls.jsonl"
 "$PY" - "$FX" <<'EOF'
