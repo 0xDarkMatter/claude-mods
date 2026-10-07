@@ -2520,10 +2520,17 @@ class Audit:
                 seen.add((fid, rel, n))
                 self.add(sev, fid, rel, msg, fix, n)
 
+        # A reusable workflow that a local job calls runs only inside that caller, where
+        # _local_uses_commands() expands it under the caller's job scope; scanning it on its
+        # own as well reported every command twice, once without the job that ships it.
+        called = {posixpath.normpath(m.group(1)) for p, k in files if k == "ci"
+                  for m in re.finditer(r"\buses\s*:\s*[\"']?\./(\.github/workflows/[^\s\"'#@]+)", read_text(p) or "")}
         for path, kind in files:
             text = read_text(path) or ""
             rel = path.relative_to(self.root).as_posix()
             ci = kind == "ci"
+            if ci and rel in called and self._reusable_only(text):
+                continue
             problem = yaml_parse_problem(text) if ci and path.suffix in (".yml", ".yaml") else None
             if problem:
                 self.blind("deploy", f"CI parse failed: {rel} ({problem})")
@@ -2683,13 +2690,31 @@ class Audit:
                      "keep credentials outside the bundle source, or add the credential path to the archive exclude list",
                      "error")
 
+    @staticmethod
+    def _reusable_only(text):
+        """Is `workflow_call` this workflow's only trigger (it never runs on its own)?"""
+        on = mini_yaml(text).get("on")
+        if isinstance(on, str):
+            names = {s.strip() for s in on.strip("[]").split(",") if s.strip()}
+        elif isinstance(on, (dict, list)):
+            names = {str(x) for x in on}
+        else:
+            return False
+        return names == {"workflow_call"}
+
     def _local_uses_commands(self, caller, text):
         """Commands reached through local composite actions or reusable workflows.
 
         Local references are expanded at the caller's line because GitHub executes them
         on behalf of that step/job. Remote `uses:` is never fetched. A missing local
-        target makes the deploy family skipped instead of falsely clean."""
+        target makes the deploy family skipped instead of falsely clean.
+
+        Guards: containment is tested on the RESOLVED path - a symlinked action directory
+        pointing outside the checkout would otherwise be read and quoted in findings. `seen`
+        is the current call chain (a cycle guard), not a global set, so a second job calling
+        the same workflow is still evaluated in its own job's scope."""
         out, missing = [], []
+        root = self.root.resolve()
 
         def visit(doc, call_line, seen):
             for i, line in enumerate(doc.splitlines(), 1):
@@ -2704,7 +2729,11 @@ class Audit:
                     continue
                 path = self.root / Path(name)
                 choices = [path] if path.suffix else [path / "action.yml", path / "action.yaml"]
-                target = next((p for p in choices if p.is_file() and self.root in p.parents), None)
+                found = next((p for p in choices if p.is_file()), None)
+                if found is not None and root not in found.resolve().parents:
+                    missing.append(f"local CI reference resolves outside the repo: {raw} ({caller}:{i})")
+                    continue
+                target = found
                 if target is None:
                     missing.append(f"local CI reference missing: {raw} ({caller}:{i})")
                     continue
@@ -2717,11 +2746,10 @@ class Audit:
                 if key.startswith(".github/actions/") and not re.search(
                         r"^\s*using\s*:\s*[\"']?composite\b", body, re.M | re.I):
                     continue
-                seen.add(key)
                 out.extend((effective, command, effective) for _n, command, _key in yaml_command_lines(body))
-                visit(body, effective, seen)
+                visit(body, effective, seen | {key})
 
-        visit(text, None, set())
+        visit(text, None, frozenset())
         return out, missing
 
     def _job_scope(self, rel, text):

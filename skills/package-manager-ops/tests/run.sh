@@ -297,6 +297,10 @@ mutation("rm before the bundle removes the credential", "clean-bundle-credential
          'if ci and words[0] == "rm":', 'if False:')
 mutation("zip -x@list exclusions are read", "clean-bundle-exclude-list",
          'for a in [a for a in args if a.startswith("-x@")]:', 'for a in []:')
+mutation("a called reusable workflow is reported at its callers only", "deploy-reusable-callers",
+         'if ci and rel in called and self._reusable_only(text):', 'if False:')
+mutation("each caller of a reusable workflow is evaluated", "deploy-reusable-callers",
+         'visit(body, effective, seen | {key})', 'visit(body, effective, seen | {key}); seen |= {key}')
 mutation("additional install sites", "install-sites",
          '("package.json", "composer.json", "justfile", "Makefile")', '("never",)')
 
@@ -496,6 +500,29 @@ else:
     row(True, "git-tracked auth.json case skipped: no git on PATH")
 PY
 )
+
+# A local action directory symlinked OUTSIDE the checkout must not be read: containment is
+# tested on the resolved path. Needs a real symlink - Git Bash copies unless MSYS asks for a
+# native one, and Windows without symlink rights cannot make one, so that host prints SKIP.
+SL="$TMP/symlink-action"
+mkdir -p "$SL/repo/.github/workflows" "$SL/repo/.github/actions" "$SL/outside"
+printf 'runs:\n  using: composite\n  steps:\n    - run: npm install -g outside-repo-tool\n      shell: bash\n' > "$SL/outside/action.yml"
+printf 'name: build\non: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: ./.github/actions/setup\n' \
+  > "$SL/repo/.github/workflows/build.yml"
+if MSYS=winsymlinks:nativestrict ln -s "$SL/outside" "$SL/repo/.github/actions/setup" 2>/dev/null \
+    && [ -L "$SL/repo/.github/actions/setup" ]; then
+  sl="$("$PY" "$AUDIT" --json "$SL/repo" 2>/dev/null | "$PY" -c '
+import json, sys
+d = json.load(sys.stdin)
+leak = [f["id"] for f in d["data"] if "outside-repo-tool" in f["message"]]
+dep = next((c for c in d["meta"]["checks"] if c["check"] == "deploy"), {})
+print("ok" if not leak and dep.get("status") == "skipped" and "outside the repo" in dep.get("reason", "")
+      else f"bad: leak={leak} deploy={dep}")' 2>&1)"
+  [[ "$sl" == ok ]] && ok "symlinked local action outside the repo is not read (deploy skipped)" \
+    || no "symlinked local action outside the repo: $sl"
+else
+  echo "  SKIP  symlinked local action: this host cannot make a real symlink" >&2
+fi
 
 # -- 4. version-range parser (npm semver vs Composer dialects) -----------------------
 rng="$(cd "$(dirname "$AUDIT")" && "$PY" -c '

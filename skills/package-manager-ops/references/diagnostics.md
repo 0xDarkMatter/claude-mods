@@ -43,9 +43,12 @@ A matrix path or any other expression leaves it unplaced. A workspace member (np
 literal `node-version` given to actions/setup-node and `php-version` given to
 shivammathur/setup-php count as pins for the agreement and end-of-life checks.
 Local composite actions under `.github/actions/` and local reusable workflows under
-`.github/workflows/` are read recursively at the calling job's scope. Remote actions are
-never fetched. A missing local target marks the deploy check skipped with its path rather
-than allowing an incomplete scan to read as a pass.
+`.github/workflows/` are read recursively at the calling job's scope, once per calling
+job. A reusable workflow whose only trigger is `workflow_call` and that a local job calls
+is reported at its callers, not again on its own. Remote actions are never fetched. A
+missing local target, or one whose resolved path leaves the checkout (a symlink), marks
+the deploy check skipped with its path rather than allowing an incomplete scan to read as
+a pass.
 Package scripts, Composer scripts, DDEV hooks/commands, Just recipes and Make recipes are
 local tooling: a developer is meant to run `npm install` or `composer update` there, so
 only the rules that hold everywhere apply - an unpinned global install
