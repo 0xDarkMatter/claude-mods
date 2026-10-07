@@ -50,7 +50,8 @@ masked whatever check quoted them. tests/run.sh greps all output of every fake-s
 Why one file: the skill folder must run when copied alone into another plugin, launched
 through scripts/run-python.sh with nothing on sys.path, so this stays a single stdlib
 module (Python 3.8+). Jump by section marker instead of splitting it:
-  === version ranges ===   npm semver + Composer constraint intervals (admits())
+  === version ranges ===   npm semver + Composer constraint intervals (admits()), and the
+                           span a literal pin can select (pin_span())
   === small readers ===    BOM-aware text, JSON/JSONC, a block-mapping YAML subset, markdown
                            code lines, YAML CI commands as the shell gets them, Dockerfile
                            RUN and Jenkinsfile steps, shell words in command position
@@ -58,11 +59,12 @@ module (Python 3.8+). Jump by section marker instead of splitting it:
                            GitHub Actions job and step boundaries (workflow_jobs,
                            enclosing_item), CI working directories (join_dir), gitignore /
                            dockerignore matching, read-only git queries (git_says), redact()
-  === the audit ===        Audit: js (+ paired drift and lock sources), nested, node_pins,
-                           php (+ Craft support), runtime_floors, composer_line,
-                           install_policy, npx, deploy (+ local CI, extra install sites,
-                           credential bundle/image checks), legacy, secrets,
-                           pnpm_placeholders
+  === the audit ===        Audit: _check (family status; contains a crashing check), js
+                           (+ paired drift and lock sources), nested, node_pins, php,
+                           runtime_floors, craft_eol, composer_line, install_policy, npx,
+                           deploy (+ local CI via _local_uses_commands, local tooling,
+                           credential bundle/image checks with npmrc_write_has_secret),
+                           legacy, secrets, pnpm_placeholders
   main()                   argv, output envelope, exit codes
 
 Examples:
