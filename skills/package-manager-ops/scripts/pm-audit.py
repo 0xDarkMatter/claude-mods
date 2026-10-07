@@ -19,9 +19,9 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   js.lockfile.shrinkwrap  js.pnpm.field-ignored
   js.dep.non-registry
   js.root.not-private
-  js.packagemanager.mismatch  js.node.unpinned  js.node.eol  node.pin.disagree
+  js.packagemanager.mismatch  js.node.unpinned  js.node.eol  js.node.eol-soon  node.pin.disagree
   ddev.node.unpinned  php.require.missing  php.platform.unset
-  php.pin.disagree  php.eol  php.lockfile.missing  php.lockfile.stale
+  php.pin.disagree  php.eol  php.eol-soon  php.lockfile.missing  php.lockfile.stale
   php.composer.safety-off
   php.package.abandoned
   php.dep.non-registry
@@ -1507,6 +1507,10 @@ class Audit:
         if self.pkg is None:
             return
         node = obj(self.facts.get("node"))
+        window = self.facts.get("eol_soon_days")
+        if isinstance(window, bool) or not isinstance(window, int) or window < 1:
+            self.blind("node.pins", "facts eol_soon_days missing or invalid")
+            window = None
         codenames = {str(k).lower(): v for k, v in obj(node.get("lts_codenames")).items()}
         exact: dict[str, int] = {}
         ranges: dict[str, str] = {}
@@ -1636,6 +1640,14 @@ class Audit:
                     self.add("warn", "js.node.eol", src,
                              f"{src} '{spec}' targets no supported Node release - confirm the server's Node version too"
                              + aside, "widen or move the range to a supported LTS major")
+        if window is not None:
+            soon = [(s, m) for s, m in exact.items() if not s.startswith(".ddev/") and m in ends
+                    and self.as_of <= ends[m] <= self.as_of + dt.timedelta(days=window)]
+            if soon:
+                self.add("warn", "js.node.eol-soon", soon[0][0],
+                         "the repo pins Node nearing end of life: "
+                         + ", ".join(f"{s}={m} (EOL {ends[m]})" for s, m in soon),
+                         f"schedule the move to the next supported LTS before the {window}-day window closes")
 
     # ---- Composer / PHP ----
     def php(self):
@@ -1645,6 +1657,10 @@ class Audit:
                 self.add("error", "php.manifest.invalid", "composer.json", "composer.json is not valid JSON, or not a JSON object",
                          "fix the JSON; `composer validate` shows where")
             return
+        window = self.facts.get("eol_soon_days")
+        if isinstance(window, bool) or not isinstance(window, int) or window < 1:
+            self.blind("php", "facts eol_soon_days missing or invalid")
+            window = None
         config = obj(c.get("config"))
         disabled = []
         if config.get("allow-plugins") is True:
@@ -1828,6 +1844,14 @@ class Audit:
                 self.add("warn", "php.eol", "composer.json",
                          f"require.php '{php_req}' targets no supported PHP release - confirm the server's PHP version too"
                          + aside, "raise the constraint to a supported PHP (references/legacy-exits.md)")
+        if window is not None:
+            soon = [(s, v) for s, v in exact.items() if not s.startswith(".ddev/") and v in ends
+                    and self.as_of <= ends[v] <= self.as_of + dt.timedelta(days=window)]
+            if soon:
+                self.add("warn", "php.eol-soon", soon[0][0],
+                         "the repo pins PHP nearing end of security support: "
+                         + ", ".join(f"{s}={v[0]}.{v[1]} (security support ends {ends[v]})" for s, v in soon),
+                         f"schedule the PHP upgrade before the {window}-day window closes")
 
     # ---- npx / dlx / exec ----
     def npx(self):

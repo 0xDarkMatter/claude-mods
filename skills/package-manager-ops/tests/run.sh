@@ -177,7 +177,8 @@ for case in cases:
     for d in (case / "_delete").read_text().split() if (case / "_delete").is_file() else []:
         (dest / d).unlink()
     want = sorted(set((case / "_expect").read_text().split()))
-    proc = subprocess.run([sys.executable, audit, "--json", "--as-of", "2026-10-05", str(dest)],
+    as_of = (case / "_as_of").read_text().strip() if (case / "_as_of").is_file() else "2026-10-05"
+    proc = subprocess.run([sys.executable, audit, "--json", "--as-of", as_of, str(dest)],
                           capture_output=True, text=True)
     try:
         data = json.loads(proc.stdout)["data"]
@@ -353,6 +354,13 @@ meta = json.loads(p.stdout.decode("utf-8"))["meta"] if p.stdout.strip().startswi
 legacy_check = next((c for c in meta.get("checks", []) if c.get("check") == "legacy"), {})
 row(legacy_check.get("status") == "skipped" and "legacy_packages" in legacy_check.get("reason", ""),
     f"missing legacy_packages marks the legacy family skipped ({legacy_check})")
+facts = json.loads(facts_path.read_text(encoding="utf-8")); facts.pop("eol_soon_days")
+missing_eol = tmp / "facts-without-eol-window.json"; missing_eol.write_text(json.dumps(facts))
+p = run(fresh("missing-eol-window"), "--json", "--facts", str(missing_eol))
+meta = json.loads(p.stdout.decode("utf-8"))["meta"] if p.stdout.strip().startswith(b"{") else {}
+window_checks = {c.get("check"): c for c in meta.get("checks", [])}
+row(all(window_checks.get(f, {}).get("status") == "skipped" and "eol_soon_days" in window_checks[f].get("reason", "")
+        for f in ("node.pins", "php")), f"missing eol_soon_days skips runtime families ({window_checks})")
 # Encodings: a UTF-8 BOM manifest parses (npm accepts it), a UTF-16 PowerShell script is
 # read, and a non-ASCII file name prints on a cp1252 stdout instead of a traceback.
 d = fresh("bom")

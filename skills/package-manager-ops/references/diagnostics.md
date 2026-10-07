@@ -75,6 +75,7 @@ workflow, job or step scope (or an earlier Dockerfile `ENV`) satisfy the same ru
 | `js.manifest.invalid` | error | package.json is not valid JSON, or not a JSON object | - |
 | `js.node.unpinned` | warn | nothing pins Node | [version-pinning.md](version-pinning.md#the-recommended-node-pin-set) |
 | `js.node.eol` | warn | a Node the repo pins (or the only one it admits) is end of life; the server's own Node is not in the repo, so confirm it. DDEV's `nodejs_version` alone never raises it: that is `ddev-ops`' finding | [legacy-exits.md](legacy-exits.md#end-of-life-node) |
+| `js.node.eol-soon` | warn | a pinned Node major reaches end of life within the facts catalogue's `eol_soon_days` window | [version-pinning.md](version-pinning.md) |
 | `node.pin.disagree` | warn | `.nvmrc`, `engines`, `devEngines`, DDEV, CI's setup-node and friends name different majors | [version-pinning.md](version-pinning.md#what-reads-which-node-pin) |
 | `ddev.node.unpinned` | warn | DDEV has no `nodejs_version`, so it follows DDEV's default | [version-pinning.md](version-pinning.md#the-recommended-node-pin-set); values in `ddev-ops` |
 | `php.manifest.invalid` | error | composer.json is not valid JSON, or not a JSON object | `composer validate` |
@@ -82,6 +83,7 @@ workflow, job or step scope (or an earlier Dockerfile `ENV`) satisfy the same ru
 | `php.platform.unset` | warn | no `config.platform.php` in a project | [version-pinning.md](version-pinning.md#the-three-php-pins-and-what-each-means) |
 | `php.pin.disagree` | warn | DDEV `php_version`, `config.platform.php`, the lock's platform override, CI's setup-php and `require.php` disagree (`require.php` read as Composer reads it: `>8.2` admits 8.2.1, `!=` excludes one version) | [version-pinning.md](version-pinning.md#the-three-php-pins-and-what-each-means) |
 | `php.eol` | warn | a PHP the repo pins (or the only one it admits) is past security support; confirm the server's own PHP. DDEV's `php_version` alone never raises it: that is `ddev-ops`' finding | [legacy-exits.md](legacy-exits.md#end-of-life-php) |
+| `php.eol-soon` | warn | a pinned PHP major.minor reaches the end of security support within the facts catalogue's `eol_soon_days` window | [version-pinning.md](version-pinning.md) |
 | `php.lockfile.missing` | warn | a project with packages but no `composer.lock` | [install-semantics.md](install-semantics.md#composer-install-versus-composer-update) |
 | `php.lockfile.stale` | warn | `composer.json` requires packages the lock lacks, judged as Composer does: a locked package's `replace` or `provide` meets a requirement, and `require` is met only from `packages` | [install-semantics.md](install-semantics.md#composer-install-versus-composer-update) |
 | `php.composer.safety-off` | warn | composer.json disables transport, plugin or advisory/malware/abandoned-package safeguards (`allow-plugins: true`, insecure HTTP/TLS, or an audit block switched off) | [scripts-and-workspaces.md](scripts-and-workspaces.md#composer-scripts-and-plugins) |
