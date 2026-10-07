@@ -86,7 +86,10 @@ is noise).
 - **Nested AGENTS.md** only where a subsystem has its own contract (a design-system
   package, an engine with determinism laws, a per-tool CLI). Nested files carry deltas
   and their own landmines; the root file links each one in an ownership table.
-  Never blanket-nest — duplicated rules rot into contradictions.
+  Never blanket-nest — duplicated rules rot into contradictions. A large repo spreads
+  its entry docs across three layers: a root router, nested AGENTS.md files, and one
+  ARCHITECTURE.md for the codemap and the invariants between layers. repo-doctor checks
+  all three.
 
 ## Structure — folders an agent can guess
 

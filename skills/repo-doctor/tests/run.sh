@@ -193,6 +193,50 @@ OUT="$(run_json)"
 [ "$(get 'sum(1 for f in d["data"]["findings"] if "AGENTS.md is" in f["msg"] and "16,000 characters" in f["msg"])')" = "1" ] \
     && ok "entry-doc budget also counts characters (16,000)" || no "char budget" "not flagged at 43 lines of 500 chars"
 
+# 20-25. Facts from the sibling scanner (repo-scan.py --only gates,nesting,architecture):
+# a gate counts in full only when `check` or CI runs it; nesting the scan recommends
+# but the repo lacks warns; a nested AGENTS.md has its own budget (agents-md-protocol.md
+# section 6); a warranted but missing ARCHITECTURE.md is advisory.
+. "$HERE/fixtures.sh"
+score_of() { "$PY" "$DOCTOR" --repo "$1" --json 2>/dev/null; }
+G1="$TMP/g-wired"; init_repo "$G1"; mkdir -p "$G1/src"; echo 'x' > "$G1/src/a.js"
+echo '{"name":"g","scripts":{"check":"depcruise src","test":"node t.js"}}' > "$G1/package.json"
+echo 'module.exports = {forbidden: []};' > "$G1/.dependency-cruiser.cjs"; commit "$G1" "feat: wired gate"
+OUT="$(score_of "$G1")"
+[ "$(get 'any(g["tool"]=="dependency-cruiser" and g["wired"] for g in d["data"]["facts"].get("gates",[]))')" = "True" ] \
+    && ok "enforcement_credits_detected_gate" || no "detected gate" "$(get 'd["data"]["facts"].get("gates")')"
+G1_ENF="$(get 'd["data"]["scores"]["enforcement"]')"
+G2="$TMP/g-unwired"; init_repo "$G2"; mkdir -p "$G2/src"; echo 'x' > "$G2/src/a.js"
+echo '{"name":"g","scripts":{"check":"echo ok","test":"node t.js"}}' > "$G2/package.json"
+echo 'module.exports = {forbidden: []};' > "$G2/.dependency-cruiser.cjs"; commit "$G2" "feat: unwired gate"
+OUT="$(score_of "$G2")"
+G2_ENF="$(get 'd["data"]["scores"]["enforcement"]')"
+[ "$("$PY" -c "print(round($G1_ENF-$G2_ENF,2))")" = "0.5" ] \
+    && [ "$(get 'sum(1 for f in d["data"]["findings"] if f["dim"]=="enforcement" and "never runs" in f["msg"])')" = "1" ] \
+    && ok "unwired_gate_counts_half" || no "unwired gate" "wired=$G1_ENF unwired=$G2_ENF"
+MR="$TMP/mono"; make_monorepo "$MR"
+OUT="$(score_of "$MR")"
+[ "$(get 'sum(1 for f in d["data"]["findings"] if f["dim"]=="entry_docs" and "nesting" in f["msg"] and f["severity"]=="warn")')" = "1" ] \
+    && ok "nesting_recommended_but_absent_warns" || no "nesting warn" "not flagged"
+[ "$(get 'sum(1 for f in d["data"]["findings"] if f["dim"]=="docs_health" and "ARCHITECTURE.md" in f["msg"] and f["severity"]=="info")')" = "1" ] \
+    && ok "architecture_warranted_and_missing_is_info" || no "architecture info" "not flagged"
+"$PY" -c "print('\n'.join(['# Engine rules','## Landmines','1. x'] + ['- line %d' % i for i in range(70)]))" > "$MR/packages/engine/AGENTS.md"
+commit "$MR" "docs: nested agents"
+OUT="$(score_of "$MR")"
+[ "$(get 'sum(1 for f in d["data"]["findings"] if f["dim"]=="entry_docs" and f["path"]=="packages/engine/AGENTS.md" and f["severity"]=="warn")')" = "1" ] \
+    && ok "nested_doc_over_60_lines_warns" || no "nested budget" "not flagged"
+# Exactly 60 lines ending in a newline is AT the ceiling, not over it: count lines the way
+# agents-md.py does (splitlines), not newlines + 1.
+"$PY" -c "print('\n'.join(['# Engine rules','## Landmines','1. x'] + ['- line %d' % i for i in range(57)]))" > "$MR/packages/engine/AGENTS.md"
+commit "$MR" "docs: nested agents at the ceiling"
+OUT="$(score_of "$MR")"
+[ "$(get 'sum(1 for f in d["data"]["findings"] if f["dim"]=="entry_docs" and f["path"]=="packages/engine/AGENTS.md" and f["severity"]=="warn")')" = "0" ] \
+    && ok "nested_doc_of_exactly_60_lines_is_within_budget" || no "nested at ceiling" "warned at 60 lines"
+mkdir -p "$TMP/alone"; cp "$DOCTOR" "$TMP/alone/repo-doctor.py"
+OUT="$("$PY" "$TMP/alone/repo-doctor.py" --repo "$MR" --json 2>/dev/null)"
+[ "$(get 'any("repo-scan" in f["msg"] for f in d["data"]["findings"])')" = "True" ] \
+    && ok "scorer_survives_missing_repo_scan" || no "missing scan" "no fallback finding"
+
 echo
 echo "repo-doctor tests: $pass passed, $fail failed"
 # The AGENTS.md tooling has its own suites; one runner, one verdict.

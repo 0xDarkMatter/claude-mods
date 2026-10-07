@@ -1,6 +1,6 @@
 ---
 name: repo-doctor
-description: "Audit any repo against the agentic-quality doctrine; create, audit, upgrade or org-survey its AGENTS.md. Triggers on: repo doctor, repo audit, agentic quality, agent-friendly, write AGENTS.md, audit AGENTS.md, upgrade AGENTS.md, AGENTS.md not loading, CLAUDE.md shadows AGENTS.md, AGENTS.md org survey, stale AGENTS.md, monorepo structure, nested CLAUDE.md."
+description: "Audit any repo against the agentic-quality doctrine; create, audit, upgrade or org-survey its AGENTS.md. Triggers on: repo doctor, repo audit, agentic quality, agent-friendly, write AGENTS.md, audit AGENTS.md, upgrade AGENTS.md, AGENTS.md not loading, CLAUDE.md shadows AGENTS.md, AGENTS.md org survey, stale AGENTS.md, monorepo structure, nested AGENTS.md, ARCHITECTURE.md, which instructions load."
 license: MIT
 allowed-tools: "Read Bash Glob Grep Agent"
 metadata:
@@ -15,9 +15,10 @@ in [rules/agentic-quality.md](../../rules/agentic-quality.md) for code, comments
 and structure a cold agent session can navigate), and owns the **AGENTS.md protocol**:
 creating, auditing, upgrading and org-surveying a repo's entry doc.
 
-Read-only by default. The scorer, the scan, the audit and the survey never write. The
-only writing step is `agents-md.py scaffold --write`, which **creates** an AGENTS.md and
-refuses to overwrite one (there is deliberately no `--force`).
+Read-only by default. The scorer, the scan, the audit, `explain` and the survey never
+write. The only writing step is `agents-md.py scaffold --write` (root, `--dir` or
+`--architecture`), which **creates** the file and refuses to overwrite one (there is
+deliberately no `--force`).
 
 ## AGENTS.md: create, audit, upgrade, survey
 
@@ -42,7 +43,14 @@ python scripts/agents-md.py audit --repo path/to/repo                 # exit 10 
 python scripts/agents-md.py audit --repo path/to/repo --diff > agents-md.patch
 git -C path/to/repo apply "$PWD/agents-md.patch"
 
-# 4. Survey a GitHub org: read-only gh api, no clones, writes nothing
+# 4. Nest and map where the scan says so (protocol sections 6 and 10)
+python scripts/agents-md.py scaffold --repo path/to/repo --dir packages/engine --write
+python scripts/agents-md.py scaffold --repo path/to/repo --architecture > ARCHITECTURE.md
+
+# 5. What each tool loads for work in a folder (protocol section 11)
+python scripts/agents-md.py explain --repo path/to/repo packages/engine --tool all
+
+# 6. Survey a GitHub org: read-only gh api, no clones, writes nothing
 python scripts/agents-md.py survey --org my-org --json | jq '.meta'
 ```
 
@@ -52,16 +60,20 @@ Workflow rules:
    ([assets/agents-md/](assets/agents-md/): PHP CMS + DDEV + bundler, Node/TS app,
    Python service, static site, generic) hold slots, not claims. Everything the scan can't
    verify becomes a `TODO(owner):` question.
-2. **The owner finishes the draft.** Answer or delete every `TODO(owner)`, run each
-   command once and drop its `[untested]` tag, delete the DRAFT comment. The audit flags
-   all three until done. Optional synthesis (one read-only Explore subagent per custom
-   code area, at most four, fed the facts JSON) is in the protocol's section 8.
+2. **The owner finishes the draft, through an interview.** `scaffold --json` splits the
+   questions: confirm the guided ones (each has a recommended answer and its source) and
+   ask only the assisted ones, one at a time
+   ([references/owner-interview.md](references/owner-interview.md)). Run each command
+   once and drop its `[untested]` tag, delete the DRAFT comment; the audit flags all
+   three until done. Optional synthesis (one read-only Explore subagent per custom code
+   area, at most four, fed the facts JSON) is in the protocol's section 8.
 3. **The patch never removes landmines.** `--diff` adds missing-section stubs, an
    `@AGENTS.md` import for a shadowing CLAUDE.md, annotations on dead commands, and moves
    for oversized sections (setup prose to README, subsystem detail to a nested
    AGENTS.md, the rest to `docs/agents/`). It leaves the overview, Commands, Landmines and
-   Deploy where they are. The audit also lists scan candidates whose files the doc
-   never names: each is a landmine to write or rule out.
+   Deploy where they are. The audit also lists scan candidates whose files the owning
+   doc never names: each is a landmine to write, or a line in `docs/agents/ruled-out.md`
+   pinned to its evidence count (protocol section 1).
 4. **Pair with Claude Code's own checks.** `/doctor prompt-audit` does the semantic pass
    (outdated or contradictory instructions); this tooling is the deterministic, CI-able
    one (protocol section 7).
@@ -127,9 +139,11 @@ debt**; `review`/code-review judge **diffs**. Don't blur the three.
 ## Nested entry docs and monorepos
 
 Nest an AGENTS.md only where a subsystem has its own contract (invariant law, audience
-or gate); the root links every nested doc, and a CLAUDE.md beside a nested AGENTS.md
-shadows it (protocol section 6). For large multi-subsystem repos the root entry doc is
-judged as a *router* (invariants + ownership table), each contracted package needs its
+or gate). The scan's advisor says where, `scaffold --dir` drafts the doc (40 lines, 60 at
+most), and the audit checks every nested doc against its own folder; a CLAUDE.md beside a
+nested AGENTS.md shadows it (protocol section 6). Past a few contracted areas, an
+ARCHITECTURE.md holds the codemap and the invariants (section 10). The root entry doc is
+then judged as a *router* (invariants + ownership table), each contracted package needs its
 own entry doc and `check`, and cross-package invariants need mechanical gates:
 [references/monorepo-structure.md](references/monorepo-structure.md). Run the scorer
 per package as well as at root.
@@ -139,13 +153,15 @@ per package as well as at root.
 | Resource | What it owns |
 |---|---|
 | [scripts/repo-doctor.py](scripts/repo-doctor.py) | The scorer: six dimensions, findings, grade; `--json` envelope `claude-mods.repo-doctor/v1`; `--strict` CI gate |
-| [scripts/repo-scan.py](scripts/repo-scan.py) | Deep scan: manifests, DDEV, deploy hooks and the scripts they call, CI, tests, generated output, code areas, size outliers, docs, env names, git-history landmine candidates; `--json` (`repo-scan/v1`), `--only` |
-| [scripts/agents-md.py](scripts/agents-md.py) | `scaffold` (`--write` creates only), `audit` (`--diff` patch), `survey --org` / `--remote` (GET-only); exit 10 on findings |
+| [scripts/repo-scan.py](scripts/repo-scan.py) | Deep scan: manifests (per folder too), DDEV, deploy hooks and the scripts they call, CI, tests, generated output, code areas, size outliers, docs, env names, git-history landmine candidates, nesting advice, invariant gates, the architecture map; `--json` (`repo-scan/v1`), `--only`, `--dir` |
+| [scripts/agents-md.py](scripts/agents-md.py) | `scaffold` (root, `--dir`, `--architecture`; `--write` creates only), `audit` (every entry doc; `--diff` patch, `--explain <finding-id>`), `explain` (per-tool load view), `survey --org` / `--remote` (GET-only); exit 10 on findings |
 | [scripts/check-memory-docs.py](scripts/check-memory-docs.py) | Tripwire for the Claude Code facts the protocol encodes: `--offline` in PR CI, `--live` in the scheduled freshness workflow |
+| [scripts/check-tool-profiles.py](scripts/check-tool-profiles.py) | The same tripwire for other tools' loading rules in `assets/agents-md/tool-profiles.json` |
+| [references/owner-interview.md](references/owner-interview.md) | Resolving a draft's questions with the owner: guided versus assisted, one at a time, the test > comment > doc ladder, ruled-out lines |
 | [references/agents-md-protocol.md](references/agents-md-protocol.md) | The AGENTS.md protocol: contents, exclusions, size and split, CLAUDE.md shadowing, staleness, how the tools fit beside `/doctor` |
 | [references/scoring-rubric.md](references/scoring-rubric.md) | Every scorer check: what it measures, threshold, why, and the fix |
 | [references/comment-doctrine.md](references/comment-doctrine.md) | Contract blocks, WHY-only inline, guard comments, section markers, format-at-site, citations |
 | [references/monorepo-structure.md](references/monorepo-structure.md) | Structuring very large monorepos for agentic development |
-| [assets/agents-md/](assets/agents-md/) | Archetype templates the scaffold fills (usable by hand: the slots are documented in each file's header) |
+| [assets/agents-md/](assets/agents-md/) | Archetype, nested and ARCHITECTURE.md templates the scaffold fills (usable by hand: the slots are documented in each file's header), and `tool-profiles.json` |
 | [assets/AGENTS-template.md](assets/AGENTS-template.md) | Hand-fill entry-doc skeleton with the mandatory Landmines section |
 | [assets/docs-index-template.md](assets/docs-index-template.md) | `docs/00_INDEX.md` skeleton with the two anti-rot rules baked in |

@@ -191,6 +191,9 @@ echo "== repo-doctor: AGENTS.md toolchain + Claude Code memory-docs verifier"
 # freshness.yml only.
 run "memory-docs --offline consistent" 0 "$PY" skills/repo-doctor/scripts/check-memory-docs.py --offline
 run "memory-docs --help"               0 "$PY" skills/repo-doctor/scripts/check-memory-docs.py --help
+# Other agent tools' loading facts (tool-profiles.json): structure offline; --live in freshness.yml.
+run "tool-profiles --offline valid"    0 "$PY" skills/repo-doctor/scripts/check-tool-profiles.py --offline
+run "tool-profiles --help"             0 "$PY" skills/repo-doctor/scripts/check-tool-profiles.py --help
 run "repo-scan --help"                 0 "$PY" skills/repo-doctor/scripts/repo-scan.py --help
 run "repo-scan unknown section"        2 "$PY" skills/repo-doctor/scripts/repo-scan.py --only bogus
 run "agents-md --help"                 0 "$PY" skills/repo-doctor/scripts/agents-md.py --help
@@ -231,6 +234,7 @@ for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/ddev-ops/scripts/check-ddev-facts.py \
          skills/ddev-ops/scripts/audit-ddev-config.py \
          skills/repo-doctor/scripts/check-memory-docs.py \
+         skills/repo-doctor/scripts/check-tool-profiles.py \
          skills/repo-doctor/scripts/repo-scan.py \
          skills/repo-doctor/scripts/agents-md.py \
          skills/package-manager-ops/scripts/check-pm-facts.py \

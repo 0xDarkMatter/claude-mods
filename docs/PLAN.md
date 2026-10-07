@@ -117,6 +117,16 @@ Build spec, dogfood findings and the survey behind it:
       AGENTS.md merge is a deploy and stays the owner's (`rules/deploy-gating.md`)
 - [ ] Team-plugin port: the protocol, `repo-scan.py`, `agents-md.py` and the archetype
       templates as one folder. The team plugin owns its copy and lands its own fixes
+- [x] Lane B, nested entry docs and ARCHITECTURE.md: a nesting advisor, nested scaffold
+      and audit, a per-tool `explain` of what loads, gate detection, ARCHITECTURE.md draft
+      and audit. Spec, which also specifies lanes A and C:
+      [docs/plans/NESTED-ENTRY-DOCS-2026-10.md](plans/NESTED-ENTRY-DOCS-2026-10.md)
+- [x] Lane A: `--diff` replaces a CLAUDE.md that copies AGENTS.md (it loaded twice), an
+      evidence-pinned ruled-out record, trigger-bearing split pointers
+- [x] Lane C, tooling half: `scaffold --json` splits guided from assisted questions, and
+      `references/owner-interview.md` is the procedure
+- [ ] Lane C, in practice: run the interview on a real repo before the team rollout
+- [ ] Spec "Later": SARIF output, docs-as-tests coverage for commands, a ranked codemap
 
 ---
 

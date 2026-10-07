@@ -151,12 +151,134 @@ OUT="$("$PY" "$SCAN" --repo "$N" --only repo --json 2>/dev/null)"
 check "the origin remote names the repo when there is one" \
       "D['repo']['name']=='widget' and D['repo']['name_source'].startswith('cmd: git remote')"
 
+# ---- nested entry docs, invariant gates and architecture ----------------------
+M="$TMP/monorepo"
+make_monorepo "$M"
+OUT="$("$PY" "$SCAN" --repo "$M" --json --no-tokei 2>/dev/null)"
+check "recommends_nesting_for_package_with_own_contract" \
+      "'packages/engine/' in {r['dir'] for r in D['nesting']['recommend']}"
+check "never_recommends_nesting_for_size_alone" \
+      "'assets/' not in {r['dir'] for r in D['nesting']['recommend']}"
+check "one_contract_signal_is_not_enough" \
+      "'packages/ui/' not in {r['dir'] for r in D['nesting']['recommend']}"
+check "tool_farm_gets_one_protocol_doc" \
+      "[f['parent'] for f in D['nesting']['farms']]==['tools/'] and not any(r['dir'].startswith('tools/t') for r in D['nesting']['recommend'])"
+check "apps_need_deploy_or_cluster_to_nest" \
+      "any(r['dir']=='apps/web/' and {'own-manifest','own-deploy'} <= {s['kind'] for s in r['signals']} for r in D['nesting']['recommend'])"
+check "gate_detection_credits_dependency_cruiser" \
+      "any(g['tool']=='dependency-cruiser' and g['scope']=='packages/engine/' and g['config']=='.dependency-cruiser.cjs' for g in D['gates'])"
+check "go_internal_dir_counts_as_gate" \
+      "any(g['tool']=='Go internal' and g['scope']=='packages/engine/' for g in D['gates'])"
+check "partial_gate_reports_baseline_size" \
+      "any(g['tool']=='dependency-cruiser' and g['partial']=={'kind':'baseline','path':'packages/engine/.dependency-cruiser-baseline.json','entries':3} for g in D['gates'])"
+check "architecture_warranted_for_monorepo" \
+      "D['architecture']['warranted'] is True and D['architecture']['reasons']"
+check "layout_fingerprint_is_stable_and_sorted" \
+      "D['architecture']['layout']==sorted(D['architecture']['layout']) and D['architecture']['layout_fingerprint']==__import__('hashlib').sha1(('\\n'.join(D['architecture']['layout'])).encode()).hexdigest()"
+check "entry_points_are_named_with_sources" \
+      "any(e['name']=='packages/engine/src/index.ts' and e['kind']=='manifest-main' and e['source'].startswith('packages/engine/package.json:') for e in D['architecture']['entry_points']) and all(e['source'] for e in D['architecture']['entry_points'])"
+# packages/ holds engine's tests and landmines; its own doc would restate engine's.
+check "nesting_skips_a_parent_whose_signals_come_from_a_nested_child" \
+      "'packages/engine/' in {r['dir'] for r in D['nesting']['recommend']} and 'packages/' not in {r['dir'] for r in D['nesting']['recommend']}"
+check "manifests_by_dir_has_engine_scripts" \
+      "{s['name'] for s in D['manifests_by_dir']['packages/engine/']['package_json']['scripts']}=={'test','check:deps'}"
+check "generated_entry_doc_detects_ruler" \
+      "any(x['path']=='AGENTS.md' and x['generator']=='ruler' and x['source_of_truth']=='.ruler/' for x in D['generated_entry_docs'])"
+# --dir reads one more folder's manifests (agents-md.py scaffold --dir); a path that
+# leaves the repo is refused rather than read.
+OUT="$("$PY" "$SCAN" --repo "$M" --only manifests --dir tools/t01 --json --no-tokei 2>/dev/null)"
+check "dir_flag_adds_a_folder_to_manifests_by_dir" \
+      "D['manifests_by_dir']['tools/t01/']['package_json']['name']=='@fixture/tool-01'"
+"$PY" "$SCAN" --repo "$M" --only manifests --dir ../elsewhere --json >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 3 ] && ok "dir_outside_the_repo_exits_3" || no "dir_outside_the_repo_exits_3" "exit $rc"
+OUT="$("$PY" "$SCAN" --repo "$M" --only nesting,gates,architecture --json --no-tokei 2>/dev/null)"
+check "new_sections_are_selectable" \
+      "d['meta']['sections']==['nesting','gates','architecture'] and set(D)=={'nesting','gates','architecture','secrets_skipped','candidates'}"
+# A check-* script deep in a package is often a tool the package ships, not a gate of
+# this repo (dogfood, 2026-10-07: skill tools like check-issues.sh were counted).
+# It is a gate only at the repo root's scripts/ or when the check entry point runs it.
+GT="$TMP/gates"; init_repo "$GT"; mkdir -p "$GT/scripts" "$GT/pkg/scripts" "$GT/lib/scripts"
+echo 'echo ok' > "$GT/scripts/check-root.sh"; echo 'echo tool' > "$GT/pkg/scripts/check-tool.sh"
+echo 'echo ok' > "$GT/lib/scripts/check-wired.sh"
+printf 'check:\n\tbash lib/scripts/check-wired.sh\n' > "$GT/justfile"
+commit "$GT" "feat: gates"
+OUT="$("$PY" "$SCAN" --repo "$GT" --only gates --json --no-tokei 2>/dev/null)"
+check "shipped_check_script_is_not_a_repo_gate" \
+      "sorted(g['scope']+g['config'] for g in D['gates'] if g['tool']=='invariant test')==['lib/scripts/check-wired.sh','scripts/check-root.sh']"
+# A boundary checker in a plain subfolder governs that folder, not the repo; a root
+# check script stays repo-wide.
+mkdir -p "$GT/db"; printf 'module.exports = { forbidden: [] }\n' > "$GT/db/.dependency-cruiser.cjs"; commit "$GT" "db gate"
+OUT="$("$PY" "$SCAN" --repo "$GT" --only gates --json --no-tokei 2>/dev/null)"
+check "boundary_config_in_a_subfolder_is_scoped_to_it" \
+      "any(g['tool']=='dependency-cruiser' and g['scope']=='db/' and g['config']=='.dependency-cruiser.cjs' for g in D['gates']) and any(g['config']=='scripts/check-root.sh' and g['scope']=='' for g in D['gates'])"
+
+# ---- refute regressions (2026-10-07 adversarial review) ------------------------
+# One fixture whose every folder makes a nesting rule bite: a farm of 9 plugins that
+# would each qualify alone, an app with a manifest and tests but no deploy, a big folder
+# with nothing but size, a .tsx package in a .ts repo, workspace fixtures deep inside a
+# member, committed vendor packages, and dotted paths in a Source header and a main.
+RR="$TMP/refute"; init_repo "$RR"
+"$PY" - "$RR" <<'EOF'
+import json, os, sys
+r = sys.argv[1]
+def w(path, text="x\n"):
+    os.makedirs(os.path.dirname(f"{r}/{path}") or r, exist_ok=True)
+    open(f"{r}/{path}", "w", newline="\n").write(text)
+w("package.json", json.dumps({"name": "rr", "private": True, "workspaces": ["packages/*", "apps/*"]}))
+for i in range(1, 10):
+    w(f"plugins/p{i:02d}/package.json", json.dumps({"name": f"p{i}"}))
+    w(f"plugins/p{i:02d}/tests/run.sh", "echo ok\n")
+    for k in range(15):
+        w(f"plugins/p{i:02d}/src/m{k}.ts", "export const m = 1\n")
+w("apps/api/package.json", json.dumps({"name": "api"}))
+w("apps/api/tests/run.sh", "echo ok\n")
+for k in range(15):
+    w(f"apps/api/src/a{k}.ts", "export const a = 1\n")
+# big/ has a manifest (one contract signal) and 300 files: any points for size would
+# give it the second signal and the 4 points a recommendation needs.
+w("big/package.json", json.dumps({"name": "big"}))
+for k in range(300):
+    w(f"big/b{k}.ts", "export const b = 1\n")
+w("packages/ui/package.json", json.dumps({"name": "ui"}))
+w("packages/ui/.dependency-cruiser.cjs", "module.exports = { forbidden: [] }\n")
+for k in range(15):
+    w(f"packages/ui/src/c{k}.tsx", "export const c = 1\n")
+w("packages/ui/test/fixtures/f0/package.json", json.dumps({"name": "fixture"}))
+for i in range(5):
+    w(f"vendor/acme/pkg{i}/package.json", json.dumps({"name": f"acme{i}", "main": "index.js"}))
+    w(f"vendor/acme/pkg{i}/index.js", "module.exports = 1\n")
+w("site/package.json", json.dumps({"name": "site", "main": ".output/server/index.mjs"}))
+w("site/.output/server/index.mjs", "export default 1\n")
+w(".agents/src.md", "# Source rules\n")
+w("AGENTS.md", "<!-- Source: .agents/src.md -->\n# Agents\n")
+w("shared/AGENTS.md", "# Shared\n")
+w("sub/AGENTS.md", "<!-- Source: ../shared/AGENTS.md -->\n# Sub\n")
+EOF
+commit "$RR" "feat: refute fixture"
+OUT="$("$PY" "$SCAN" --repo "$RR" --json --no-tokei 2>/dev/null)"
+rec="{r['dir'] for r in D['nesting']['recommend']}"
+check "tool_farm_gets_one_protocol_doc_not_nine" \
+      "not any(x.startswith('plugins/p') for x in $rec) and any(f['parent']=='plugins/' and f['members']==9 for f in D['nesting']['farms'])"
+check "never_recommends_nesting_for_size_alone" "'big/' not in $rec"
+check "apps_without_deploy_or_cluster_are_not_nested" "'apps/api/' not in $rec"
+check "tsx_in_a_ts_repo_is_not_a_different_stack" \
+      "'packages/ui/' not in $rec and not any(s['kind']=='stack-differs' for r in D['nesting']['recommend'] for s in r['signals'])"
+check "workspace_glob_matches_one_segment" \
+      "'packages/ui/test/fixtures/f0/' not in D['manifests_by_dir'] and 'packages/ui/test/fixtures/f0/' not in D['architecture']['layout']"
+# 9 plugins + api + ui + site + big = 13 areas; the 5 vendor packages and the fixture don't count.
+check "vendor_manifests_neither_warrant_nor_enter_the_map" \
+      "'13 code areas with contract signals' in D['architecture']['reasons'] and not any(e['name'].startswith('vendor/') for e in D['architecture']['entry_points'])"
+check "dotted_paths_keep_their_dot" \
+      "{x['path']:x['source_of_truth'] for x in D['generated_entry_docs']}=={'AGENTS.md':'.agents/src.md','sub/AGENTS.md':None} and any(e['name']=='site/.output/server/index.mjs' for e in D['architecture']['entry_points'])"
+
 # ---- clean control -----------------------------------------------------------
 C="$TMP/clean"; init_repo "$C"; mkdir -p "$C/src"
 echo "# Clean" > "$C/README.md"; echo "print(1)" > "$C/src/app.py"; commit "$C" "feat: one"
 echo "print(2)" >> "$C/src/app.py"; commit "$C" "feat: two"
 OUT="$("$PY" "$SCAN" --repo "$C" --json --no-tokei 2>/dev/null)"
 check "clean control: no candidates, no skipped secrets" "D['candidates']==[] and D['secrets_skipped']==[]"
+check "architecture_silent_for_small_repo" \
+      "D['architecture']['warranted'] is False and D['architecture']['reasons']==[]"
 
 # ---- plain directory, exit codes, standalone copy ----------------------------
 P="$TMP/plain"; mkdir -p "$P"; echo '{"name":"p","scripts":{"go":"node x"}}' > "$P/package.json"
