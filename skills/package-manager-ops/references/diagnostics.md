@@ -70,6 +70,7 @@ workflow, job or step scope (or an earlier Dockerfile `ENV`) satisfy the same ru
 | `js.lockfile.shrinkwrap` | warn | only `npm-shrinkwrap.json`, which npm 12 ignores | [detect-and-choose.md](detect-and-choose.md#lockfile-to-manager) |
 | `js.pnpm.field-ignored` | warn | a `pnpm` field pnpm 11+ no longer reads | [scripts-and-workspaces.md](scripts-and-workspaces.md#pnpm-settings-moved-to-pnpm-workspaceyaml) |
 | `js.dep.non-registry` | warn | package.json points a dependency at git/GitHub, a local file/link, or a direct HTTP(S) tarball rather than the configured registry | [registries-and-auth.md](registries-and-auth.md) |
+| `js.engine.floor` | warn | the strictest dependency `engines.node` floor in package-lock v2/v3 is above a literal production Node pin | [version-pinning.md](version-pinning.md#the-recommended-node-pin-set) |
 | `js.root.not-private` | warn | a root package with dependencies is not private and has no conservative publication signal (`files`, `publishConfig`, exports/main, scoped name, or a non-default version) | [detect-and-choose.md](detect-and-choose.md) |
 | `js.packagemanager.mismatch` | error | `packageManager` names a manager (or Yarn flavour) the lockfile is not from | [detect-and-choose.md](detect-and-choose.md#declaring-the-manager-packagemanager-corepack-devengines) |
 | `js.manifest.invalid` | error | package.json is not valid JSON, or not a JSON object | - |
@@ -89,6 +90,7 @@ workflow, job or step scope (or an earlier Dockerfile `ENV`) satisfy the same ru
 | `php.composer.safety-off` | warn | composer.json disables transport, plugin or advisory/malware/abandoned-package safeguards (`allow-plugins: true`, insecure HTTP/TLS, or an audit block switched off) | [scripts-and-workspaces.md](scripts-and-workspaces.md#composer-scripts-and-plugins) |
 | `php.package.abandoned` | warn | composer.lock marks a package abandoned; when its metadata names a replacement, the finding names it too | [upgrades.md](upgrades.md) |
 | `php.dep.non-registry` | warn | composer.json uses a VCS/path/artifact repository, a `dev-*` or `*` constraint, or `minimum-stability: dev` without `prefer-stable: true` | [registries-and-auth.md](registries-and-auth.md) |
+| `php.lock.floor` | warn | a production package in composer.lock requires a newer PHP than config.platform.php, a PHP container tag, or a literal setup-php pin | [version-pinning.md](version-pinning.md#the-three-php-pins-and-what-each-means) |
 | `npx.unpinned` | warn | `npx`/`dlx`/`bunx` of an unpinned, undeclared package (every `-p` counts; a bin a declared package provides, like `tsc`, is local), or of a declared one at a dist-tag or a range its installed version misses. `--no`/`--no-install` never fetch, so never fire | [npx-exec-safety.md](npx-exec-safety.md#the-rules) |
 | `npx.native-cli` | error | a native CLI (rg, fd, sd, jq...) through npx, or a global npm install of one in CI | [npx-exec-safety.md](npx-exec-safety.md#never-route-a-native-cli-through-npx) |
 | `legacy.bower` | warn | `bower.json` or `.bowerrc` | [legacy-exits.md](legacy-exits.md#bower-to-npm) |

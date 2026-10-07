@@ -234,6 +234,8 @@ def mutation(label, case_name, old, new):
     row(got != want or proc.returncode != (10 if want else 0), f"mutation {label}: fixture catches broken rule")
 
 for fid, case_name in (
+    ("js.engine.floor", "js-engine-floor"),
+    ("php.lock.floor", "php-lock-floor"),
     ("php.composer.safety-off", "php-composer-safety-off"),
     ("deploy.composer.safety-off", "deploy-composer-safety-off"),
     ("deploy.composer.adhoc", "deploy-composer-update"),
@@ -482,8 +484,10 @@ cases = [
 bad = [f"{s!r}/{d}" for s, iv, d, want in cases if a.admits(s, iv[0], iv[1], d) is not want]
 bad += ["unparseable returns None"] if a.admits("banana", (1,0,0), (2,0,0)) is not None else []
 bad += ["npm has no != (None)"] if a.admits("!=1.0.0", (1,0,0), (2,0,0), "npm") is not None else []
+bad += ["npm range floor"] if a.range_floor(">=20.9 <25", "npm") != (20,9,0) else []
+bad += ["Composer range floor"] if a.range_floor("^7.4 | >=8.2.3", "composer") != (7,4,0) else []
 print("ok" if not bad else "bad:" + "; ".join(bad))' "$AUDIT" 2>&1)"
-[[ "$rng" == ok ]] && ok "range parser: npm + Composer dialects (32 cases)" || no "range parser: $rng"
+[[ "$rng" == ok ]] && ok "range parser: npm + Composer dialects (34 cases)" || no "range parser: $rng"
 
 # -- 5. facts verifier contract (§7) -------------------------------------------------
 if [[ -f "$V" ]]; then

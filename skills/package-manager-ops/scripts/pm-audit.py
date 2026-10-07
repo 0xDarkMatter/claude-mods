@@ -18,6 +18,7 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   js.lockfile.conflict  js.lockfile.missing  js.lockfile.stale  js.lockfile.v1
   js.lockfile.shrinkwrap  js.pnpm.field-ignored
   js.dep.non-registry
+  js.engine.floor
   js.root.not-private
   js.packagemanager.mismatch  js.node.unpinned  js.node.eol  js.node.eol-soon  node.pin.disagree
   ddev.node.unpinned  php.require.missing  php.platform.unset
@@ -25,6 +26,7 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   php.composer.safety-off
   php.package.abandoned
   php.dep.non-registry
+  php.lock.floor
   npx.unpinned  npx.native-cli  legacy.bower  legacy.node-sass  legacy.package
   registry.token.committed  registry.authjson.committed  registry.credentials.image
   registry.pnpm.placeholder-ignored
@@ -50,8 +52,9 @@ module (Python 3.8+). Jump by section marker instead of splitting it:
                            GitHub Actions job and step boundaries (workflow_jobs,
                            enclosing_item), CI working directories (join_dir), gitignore /
                            dockerignore matching, read-only git queries (git_says), redact()
-  === the audit ===        Audit: js, nested, node_pins, php, npx, deploy (+ the credential
-                           image check), legacy, secrets, pnpm_placeholders
+  === the audit ===        Audit: js, nested, node_pins, php, runtime_floors, npx, deploy
+                           (+ credential bundle/image checks), legacy, secrets,
+                           pnpm_placeholders, install_policy
   main()                   argv, output envelope, exit codes
 
 Examples:
@@ -369,6 +372,22 @@ def admits(spec: str, lo, hi, dialect: str = "npm"):
         if a < b:
             return True
     return False
+
+
+def range_floor(spec: str, dialect: str = "npm"):
+    """Lowest version admitted by a range, or None when its syntax is unknown/empty.
+    The lock-floor checks compare static declared constraints, so prerelease ordering is
+    deliberately outside this scanner's small parser (the same boundary as admits())."""
+    sets = parse_range(spec, dialect)
+    if sets is None:
+        return None
+    floors = []
+    for ivs in sets:
+        lo = max([(0, 0, 0)] + [iv[0] for iv in ivs])
+        hi = min([INF] + [iv[1] for iv in ivs])
+        if lo < hi:
+            floors.append(lo)
+    return min(floors) if floors else None
 
 
 # =============================================================================
@@ -1230,6 +1249,8 @@ class Audit:
         self._check("js.lockfile", (self.js, self.nested), "" if has_js else "no package.json or JS lockfile")
         self._check("node.pins", (self.node_pins,), "" if (self.root / "package.json").is_file() else "no package.json")
         self._check("php", (self.php,), "" if (self.root / "composer.json").is_file() else "no composer.json")
+        has_floors = any((self.root / n).is_file() for n in ("package-lock.json", "npm-shrinkwrap.json", "composer.lock"))
+        self._check("runtime.floors", (self.runtime_floors,), "" if has_floors else "no npm or Composer lockfile")
         npx_skip = "package.json absent and docs scan disabled" if not self.docs and not (self.root / "package.json").is_file() else ""
         self._check("npx", (self.npx,), npx_skip)
         self._check("legacy", (self.legacy,))
@@ -1852,6 +1873,82 @@ class Audit:
                          "the repo pins PHP nearing end of security support: "
                          + ", ".join(f"{s}={v[0]}.{v[1]} (security support ends {ends[v]})" for s, v in soon),
                          f"schedule the PHP upgrade before the {window}-day window closes")
+
+    # ---- dependency runtime floors against production pins ----
+    def runtime_floors(self):
+        """Static equivalents of npm's engine check and `composer check-platform-reqs
+        --lock`: compare lock-declared dependency floors with literal production pins."""
+        npm_lock = next((self.root / n for n in ("package-lock.json", "npm-shrinkwrap.json")
+                         if (self.root / n).is_file()), None)
+        lock = read_json(npm_lock) if npm_lock else None
+        if npm_lock and not isinstance(lock, dict):
+            self.blind("runtime.floors", f"cannot read {npm_lock.name}")
+        elif isinstance(lock, dict):
+            floors = []
+            for path, package in obj(lock.get("packages")).items():
+                spec = obj(package).get("engines")
+                spec = obj(spec).get("node") if isinstance(spec, dict) else None
+                floor = range_floor(str(spec), "npm") if spec else None
+                if floor is not None:
+                    floors.append((floor, path or "root", str(spec)))
+            highest = max(floors, default=None)
+            pins = []
+            for name in (".nvmrc", ".node-version"):
+                raw = read_text(self.root / name) if (self.root / name).is_file() else None
+                m = re.match(r"^\s*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?", raw or "")
+                if m:
+                    pins.append((tuple(int(x or 0) for x in m.groups()), name))
+            for src, tool, raw in self._setup_pins():
+                m = re.match(r"^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$", raw)
+                if tool == "node" and m:
+                    pins.append((tuple(int(x or 0) for x in m.groups()), src))
+            if highest and pins:
+                floor, package, spec = highest
+                low = [(pin, src) for pin, src in pins if pin < floor]
+                if low:
+                    self.add("warn", "js.engine.floor", npm_lock.name,
+                             f"{package} requires Node {spec} (floor {'.'.join(map(str, floor))}), above "
+                             + ", ".join(f"{src}={'.'.join(map(str, pin))}" for pin, src in low),
+                             "raise every production Node pin to the dependency floor, then run the frozen install")
+
+        composer_lock = self.root / "composer.lock"
+        clock = read_json(composer_lock) if composer_lock.is_file() else None
+        if composer_lock.is_file() and not isinstance(clock, dict):
+            self.blind("runtime.floors", "cannot read composer.lock")
+            return
+        if not isinstance(clock, dict):
+            return
+        floors = []
+        for package in clock.get("packages") if isinstance(clock.get("packages"), list) else []:
+            spec = obj(package).get("require")
+            spec = obj(spec).get("php") if isinstance(spec, dict) else None
+            floor = range_floor(str(spec), "composer") if spec else None
+            if floor is not None:
+                floors.append((floor, str(obj(package).get("name") or "unknown package"), str(spec)))
+        highest = max(floors, default=None)
+        if not highest:
+            return
+        pins = []
+        platform = obj(obj(self.composer or {}).get("config")).get("platform")
+        platform = obj(platform).get("php") if isinstance(platform, dict) else None
+        m = re.match(r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?", str(platform or ""))
+        if m:
+            pins.append((tuple(int(x or 0) for x in m.groups()), "composer.json config.platform.php"))
+        for path in sorted(self.root.glob("Dockerfile*")):
+            for raw in re.findall(r"(?:FROM|--from=)\s*php:(\d+(?:\.\d+){0,2})", read_text(path) or "", re.I):
+                parts = tuple(int(x) for x in raw.split("."))
+                pins.append((parts + (0,) * (3 - len(parts)), path.name))
+        for src, tool, raw in self._setup_pins():
+            m = re.match(r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?$", raw)
+            if tool == "php" and m:
+                pins.append((tuple(int(x or 0) for x in m.groups()), src))
+        floor, package, spec = highest
+        low = [(pin, src) for pin, src in pins if pin < floor]
+        if low:
+            self.add("warn", "php.lock.floor", "composer.lock",
+                     f"{package} requires PHP {spec} (floor {'.'.join(map(str, floor))}), above "
+                     + ", ".join(f"{src}={'.'.join(map(str, pin))}" for pin, src in low),
+                     "raise every production PHP pin to the lock floor and run `composer check-platform-reqs --lock`")
 
     # ---- npx / dlx / exec ----
     def npx(self):
