@@ -40,8 +40,11 @@ materialise() {
     rel="${f#"$1"/}"; mkdir -p "$2/$(dirname "$rel")"; cp "$f" "$2/${rel%.fx}"
   done < <(find "$1" -type f -name '*.fx')
 }
+# Guard: `done < <(find ...)` hides find's exit status, so a missing or emptied fixture dir
+# copies nothing and every later test runs against an empty repo. Count what arrived.
 for d in repo-clean repo-bower lock-conflict lock-conflict-ragged lock-sides; do
   materialise "$FX/$d" "$TMP/$d"
+  [[ -n "$(find "$TMP/$d" -type f -print -quit 2>/dev/null)" ]] || no "fixture $d materialised no files ($FX/$d)"
 done
 
 ec() { local want="$1" lbl="$2"; shift 2; "$@" >/dev/null 2>&1; local got=$?

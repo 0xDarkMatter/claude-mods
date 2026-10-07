@@ -210,11 +210,25 @@ for case in cases:
         expected = json.loads((case / "_manager_majors").read_text())
         got_majors = json.loads(proc.stdout).get("meta", {}).get("manager_majors")
         row(got_majors == expected, f"{case.name}: manager majors {got_majors}" + ("" if got_majors == expected else f" (want {expected})"))
+    if (case / "_install_policy").is_file():
+        expected = json.loads((case / "_install_policy").read_text())
+        got_policy = json.loads(proc.stdout).get("meta", {}).get("install_policy")
+        row(got_policy == expected, f"{case.name}: install policy metadata {got_policy}"
+            + ("" if got_policy == expected else f" (want {expected})"))
 
 # Mutation proof: each new checks-a fixture must reject a scanner whose corresponding
 # rule is broken. Mutants live only under the suite temp directory and never touch source.
+# Guard: a mutant that does not RUN (no JSON, exit outside 0/10) proves nothing and fails
+# the row. Mutants sit in $TMP/mutants/, where pm-audit's default ../assets facts path does
+# not exist, so --facts is passed explicitly: without it every mutant exited 3 and every
+# mutation row "caught" its broken rule vacuously.
 source = Path(audit).read_text(encoding="utf-8")
+facts_file = str(Path(audit).resolve().parent.parent / "assets" / "package-manager-facts.json")
 mutants = tmp / "mutants"; mutants.mkdir(parents=True, exist_ok=True)
+
+def run_mutant(mutant, as_of, target):
+    return subprocess.run([sys.executable, str(mutant), "--json", "--facts", facts_file, "--as-of", as_of, str(target)],
+                          capture_output=True, text=True)
 
 def mutation(label, case_name, old, new):
     if old not in source:
@@ -225,21 +239,45 @@ def mutation(label, case_name, old, new):
     case = fixtures / case_name
     want = sorted(set((case / "_expect").read_text().split()))
     as_of = (case / "_as_of").read_text().strip() if (case / "_as_of").is_file() else "2026-10-05"
-    proc = subprocess.run([sys.executable, str(mutant), "--json", "--as-of", as_of, str(tmp / "m" / case_name)],
-                          capture_output=True, text=True)
+    proc = run_mutant(mutant, as_of, tmp / "m" / case_name)
     try:
-        got = sorted({f["id"] for f in json.loads(proc.stdout)["data"]})
+        envelope = json.loads(proc.stdout)
+        data = envelope["data"]
+        got = sorted({f["id"] for f in data})
     except Exception:
-        got = None
-    row(got != want or proc.returncode != (10 if want else 0), f"mutation {label}: fixture catches broken rule")
+        envelope, data, got = {}, [], None
+    if got is None or proc.returncode not in (0, 10):
+        row(False, f"mutation {label}: mutant did not run (exit {proc.returncode}): {' '.join(proc.stderr.split())[-160:]}")
+        return
+    checks_changed = False
+    if (case / "_checks").is_file():
+        statuses = {c.get("check"): c.get("status") for c in envelope.get("meta", {}).get("checks", [])}
+        checks_changed = any(statuses.get(k) != v.get("status") for k, v in json.loads((case / "_checks").read_text()).items())
+    lines_changed = False
+    if (case / "_lines").is_file():
+        want_rows = sorted(line.strip() for line in (case / "_lines").read_text().splitlines() if line.strip())
+        pinned = {line.split()[0] for line in want_rows}
+        got_rows = sorted(f"{f['id']} {f['file']}:{f['line']}" for f in data if f["id"] in pinned)
+        lines_changed = got_rows != want_rows
+    row(got != want or lines_changed or checks_changed or proc.returncode != (10 if want else 0),
+        f"mutation {label}: fixture catches broken rule" + ("" if got != want or lines_changed or checks_changed
+                                                            or proc.returncode != (10 if want else 0)
+                                                            else f" - MISSED: mutant still gives {got}"))
 
 for fid, case_name in (
+    ("js.engine.floor", "js-engine-floor"),
+    ("php.lock.floor", "php-lock-floor"),
+    ("deploy.bundle.credentials", "deploy-bundle-credentials"),
+    ("php.composer.eol", "php-composer-eol"),
+    ("php.craft.eol", "php-craft-eol"),
+    ("js.dep.paired-drift", "js-dep-paired-drift"),
+    ("js.lockfile.source", "js-lockfile-source"),
+    ("js.install-policy", "js-install-policy"),
     ("php.composer.safety-off", "php-composer-safety-off"),
     ("deploy.composer.safety-off", "deploy-composer-safety-off"),
     ("deploy.composer.adhoc", "deploy-composer-update"),
     ("deploy.composer.installer-unverified", "deploy-composer-installer-unverified"),
     ("php.package.abandoned", "php-package-abandoned"),
-    ("legacy.package", "legacy-package"),
     ("js.dep.non-registry", "js-dep-non-registry"),
     ("php.dep.non-registry", "php-dep-non-registry"),
     ("js.root.not-private", "js-root-not-private"),
@@ -252,6 +290,68 @@ mutation("composer no-dev env", "clean-deploy-composer-env",
          'obj(active_env).get("COMPOSER_NO_DEV")', 'False')
 mutation("legacy facts lookup", "legacy-node-sass",
          'table = self.facts.get("legacy_packages")', 'table = self.facts.get("mutant_legacy_packages")')
+# legacy.package takes its id from the facts entry, so renaming the literal (the loop above)
+# cannot break it; breaking the table lookup does.
+mutation("an unlocked legacy package is judged by its declared range", "legacy-package-unlocked",
+         'return overlaps(spec, "npm", versions)', 'return False')
+mutation("legacy.package facts lookup", "legacy-package",
+         'table = self.facts.get("legacy_packages")', 'table = self.facts.get("mutant_legacy_packages")')
+mutation("local composite action", "deploy-local-uses",
+         'if not raw.startswith("./"):', 'if True:')
+mutation("a pin is not judged by its line's lowest version", "clean-engine-floor-partial-pin",
+         'admits(spec, lo, hi, dialect) is False', 'admits(spec, (lo[0], 0, 0), (lo[0], 0, 1), dialect) is False')
+mutation("a partial pin stands for its newest release", "js-engine-floor-partial-upper",
+         'lo = (parts[0], top, 0) if len(parts) == 1 else (parts[0], parts[1], top)',
+         'lo = (parts[0], 0, 0) if len(parts) == 1 else (parts[0], parts[1], 0)')
+mutation("bundles are ordered by execution, not line", "deploy-local-action-bundle",
+         'if brel != rel or bat <= at or ctx is None or scope(bn) != scope(n):',
+         'if brel != rel or bn <= n or ctx is None or scope(bn) != scope(n):')
+mutation("rm then zip on one line is ordered", "clean-bundle-rm-same-line",
+         'for words in simple_commands(line):\n                    seq += 1', 'for words in simple_commands(line):\n                    pass')
+mutation("a piped .npmrc write is assumed to carry a secret", "deploy-bundle-envsubst",
+         'or re.search(r"(?<!\\|)\\|(?!\\|)\\s*(?!tee\\b)[\\w./-]", line)', 'or False')
+mutation("dev Dockerfile is not a production PHP pin", "clean-php-floor-dev-dockerfile",
+         'if re.search(r"dev|test", path.name, re.I):', 'if False:')
+mutation("vite partners judged by peers, not majors", "clean-paired-peers-valid",
+         'peer_check("vite", "@vitejs/")', 'compare("vite", {n for n in root if n.startswith("@vitejs/")}, 1)')
+mutation("vue-template-compiler must equal vue exactly", "js-dep-vue2-compiler-patch",
+         'compare("vue", {"vue-template-compiler"}, 3)', 'compare("vue", {"vue-template-compiler"}, 2)')
+mutation("cross-root drift is major-only", "clean-nested-minor-drift",
+         'if len({version[0] for _path, version in rows}) > 1:', 'if len({version for _path, version in rows}) > 1:')
+mutation("yarn npm-alias names its target", "clean-yarn-alias-source",
+         'name = real_name(key[:at], key[at + 1:]) if at > 0 else key', 'name = key[:at] if at > 0 else key')
+mutation("lockfileVersion 1 tree is read", "js-lockfile-source-v1",
+         'v1_tree(obj(lock).get("dependencies"), filename)\n', 'pass\n')
+mutation("local tooling keeps CI-only rules out", "install-sites",
+         '        if kind == "automation":\n            return\n', '')
+mutation(".npmrc without a token is not a credential", "clean-bundle-npmrc-scope-only",
+         'if m and not (m.group(2) == ".npmrc" and not npmrc_write_has_secret(line)):', 'if m:')
+mutation("rm before the bundle removes the credential", "clean-bundle-credential-removed",
+         'if ci and words[0] == "rm":', 'if False:')
+mutation("zip -x@list exclusions are read", "clean-bundle-exclude-list",
+         'for a in [a for a in args if a.startswith("-x@")]:', 'for a in []:')
+mutation("a called reusable workflow is reported at its callers only", "deploy-reusable-callers",
+         'if ci and rel in called and self._reusable_only(text):', 'if False:')
+mutation("each caller of a reusable workflow is evaluated", "deploy-reusable-callers",
+         'visit(body, effective, seen | {key})', 'visit(body, effective, seen | {key}); seen |= {key}')
+mutation("additional install sites", "install-sites",
+         '("package.json", "composer.json", "justfile", "Makefile")', '("never",)')
+
+# A check that raises must not lose the report: _check contains it, so the run still exits
+# 0/10 with valid JSON and names the family skipped with the error. Injected into legacy().
+crashing = mutants / "check-raises.py"
+crashing.write_text(source.replace("    def legacy(self):\n",
+                                   "    def legacy(self):\n        raise RuntimeError('injected')\n", 1), encoding="utf-8")
+proc = run_mutant(crashing, "2026-10-05", tmp / "m" / "clean")
+try:
+    legacy_row = next(c for c in json.loads(proc.stdout)["meta"]["checks"] if c["check"] == "legacy")
+except Exception:  # noqa: BLE001 - unparseable output is the failure this guards
+    legacy_row = None
+contained = (proc.returncode == 0 and legacy_row is not None and legacy_row["status"] == "skipped"
+             and "internal error in legacy: RuntimeError" in legacy_row["reason"] and "injected" in proc.stderr)
+# One row = one line: the bash reader scores any extra line as a failed row.
+row(contained, "a check that raises is contained (legacy skipped with the error, report kept)" + (
+    "" if contained else f" - exit {proc.returncode}, legacy {legacy_row}, stderr {' '.join(proc.stderr.split())[-160:]}"))
 
 # Every id the audit documents must have a fixture that produces it.
 doc_ids = set()
@@ -450,6 +550,29 @@ else:
 PY
 )
 
+# A local action directory symlinked OUTSIDE the checkout must not be read: containment is
+# tested on the resolved path. Needs a real symlink - Git Bash copies unless MSYS asks for a
+# native one, and Windows without symlink rights cannot make one, so that host prints SKIP.
+SL="$TMP/symlink-action"
+mkdir -p "$SL/repo/.github/workflows" "$SL/repo/.github/actions" "$SL/outside"
+printf 'runs:\n  using: composite\n  steps:\n    - run: npm install -g outside-repo-tool\n      shell: bash\n' > "$SL/outside/action.yml"
+printf 'name: build\non: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: ./.github/actions/setup\n' \
+  > "$SL/repo/.github/workflows/build.yml"
+if MSYS=winsymlinks:nativestrict ln -s "$SL/outside" "$SL/repo/.github/actions/setup" 2>/dev/null \
+    && [ -L "$SL/repo/.github/actions/setup" ]; then
+  sl="$("$PY" "$AUDIT" --json "$SL/repo" 2>/dev/null | "$PY" -c '
+import json, sys
+d = json.load(sys.stdin)
+leak = [f["id"] for f in d["data"] if "outside-repo-tool" in f["message"]]
+dep = next((c for c in d["meta"]["checks"] if c["check"] == "deploy"), {})
+print("ok" if not leak and dep.get("status") == "skipped" and "outside the repo" in dep.get("reason", "")
+      else f"bad: leak={leak} deploy={dep}")' 2>&1)"
+  [[ "$sl" == ok ]] && ok "symlinked local action outside the repo is not read (deploy skipped)" \
+    || no "symlinked local action outside the repo: $sl"
+else
+  echo "  SKIP  symlinked local action: this host cannot make a real symlink" >&2
+fi
+
 # -- 4. version-range parser (npm semver vs Composer dialects) -----------------------
 rng="$(cd "$(dirname "$AUDIT")" && "$PY" -c '
 import importlib.util, sys
@@ -482,8 +605,10 @@ cases = [
 bad = [f"{s!r}/{d}" for s, iv, d, want in cases if a.admits(s, iv[0], iv[1], d) is not want]
 bad += ["unparseable returns None"] if a.admits("banana", (1,0,0), (2,0,0)) is not None else []
 bad += ["npm has no != (None)"] if a.admits("!=1.0.0", (1,0,0), (2,0,0), "npm") is not None else []
+bad += ["partial pin spans its newest release"] if a.pin_span("20") != ((20,10**6,0), (21,0,0), "20") else []
+bad += ["exact pin spans itself"] if a.pin_span("8.2", exact=True) != ((8,2,0), (8,2,1), "8.2") else []
 print("ok" if not bad else "bad:" + "; ".join(bad))' "$AUDIT" 2>&1)"
-[[ "$rng" == ok ]] && ok "range parser: npm + Composer dialects (32 cases)" || no "range parser: $rng"
+[[ "$rng" == ok ]] && ok "range parser: npm + Composer dialects (34 cases)" || no "range parser: $rng"
 
 # -- 5. facts verifier contract (§7) -------------------------------------------------
 if [[ -f "$V" ]]; then
@@ -569,6 +694,11 @@ fi
 # silently omit their C1 catalogue and estate-tool coverage.
 ec 0 "facts behavioural sub-suite" bash "$HERE/facts.sh"
 ec 0 "estate tools sub-suite"       bash "$HERE/tools.sh"
+# facts.sh feeds its tally from a process substitution; its excepthook must turn a producer
+# crash into a FAIL row. FACTS_HARNESS_CRASH=1 raises inside that producer: the sub-suite
+# has to fail, or its green means nothing.
+FACTS_HARNESS_CRASH=1 bash "$HERE/facts.sh" >/dev/null 2>&1 \
+  && no "facts.sh stays green when its row producer crashes" || ok "facts.sh fails when its row producer crashes"
 
 # -- 7. copy-alone portability: the folder runs with nothing beside it ---------------
 ALONE="$TMP/alone/package-manager-ops"

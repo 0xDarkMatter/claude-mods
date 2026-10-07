@@ -309,6 +309,12 @@ finally:
 # ---- CLI: --help documents the contract --------------------------------------------------
 p = subprocess.run([sys.executable, str(verifier), "--help"], capture_output=True, text=True)
 row(p.returncode == 0 and "--cache-dir" in p.stdout and "Exit:" in p.stdout, "--help lists --cache-dir and the exit codes")
+# Opt-in fault, the proof for the excepthook (tests/run.sh sets it and requires a red run).
+# It sits AFTER the rows on purpose: a crash before any row is already caught by the
+# "harness produced no rows" check below, so only a mid-run crash needs the excepthook -
+# without it Bash loses the producer's exit status and the earlier PASS rows tally green.
+if os.environ.get("FACTS_HARNESS_CRASH") == "1":
+    raise RuntimeError("intentional facts harness crash")
 row(True, "harness ran to its end")
 PY
 )
