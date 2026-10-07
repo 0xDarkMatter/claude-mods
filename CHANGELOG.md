@@ -8,6 +8,23 @@ feature releases live in the README "Recent Updates" section.
 
 ### Added
 
+- **windows-ops: a WSL reference** (`references/wsl.md`), replacing the old "WSL issues -
+  separate domain" line. It covers:
+  - `.wslconfig` versus `wsl.conf`, and the 8-second rule: a setting applies only after
+    the VM fully stops, and a malformed file is ignored without a word.
+  - the keys that matter, and which networking mode ignores which (`localhostForwarding`
+    in mirrored mode, `dnsProxy` outside NAT);
+  - NAT versus mirrored reachability, the Hyper-V firewall, and DNS tunnelling;
+  - why `/mnt/c` is slow and why file watchers miss Windows-side edits there;
+  - each distro's `ext4.vhdx` (found through the `Lxss` key), and resizing, sparse and
+    compacting per WSL version. `--set-sparse` needs `--allow-unsafe` on 2.5.6 to 3.0.1,
+    and `--compact` arrived in 2.9.8 / 3.0.1;
+  - the UTF-16 output trap of `wsl.exe` (`WSL_UTF8=1`).
+
+  Facts come from Microsoft's WSL docs and WSL's own usage strings. net-ops' WSL DNS notes
+  are corrected: with DNS tunnelling on, Windows resolves WSL's names, so NRPT and VPN
+  hooks apply. Its notes and docker-ops' WSL mentions now link to the new reference.
+
 - **docker-ops: Docker on your machine and in your repo** - the engine layer is folded in
   rather than split into a separate runtime skill, because a broken-engine prompt says
   "docker" and would collide with docker-ops anyway. The new SKILL.md opens with ten hard

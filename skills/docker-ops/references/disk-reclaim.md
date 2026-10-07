@@ -67,7 +67,8 @@ Shrinking the engine's data does not shrink the VM disk file on Windows. Read on
 
 ## Windows: WSL's own tools
 
-For WSL distros in general (the `.wslconfig` side is windows-ops' territory):
+For WSL distros in general (the full picture, per WSL version, is windows-ops'
+[wsl.md](../../windows-ops/references/wsl.md)):
 
 - `wsl --manage <distro> --set-sparse true` has been refused since WSL 2.5.6 unless you add
   `--allow-unsafe`; Microsoft cites possible data corruption. WSL 3.0.2 (pre-release in

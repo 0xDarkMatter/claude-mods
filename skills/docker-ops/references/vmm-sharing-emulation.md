@@ -17,7 +17,7 @@ fast bind mounts are and whether amd64 images run on Apple silicon. Facts verifi
 |---|---|---|
 | macOS (Apple silicon) | Apple Virtualization framework (default), Docker VMM | Docker VMM runs Docker's own hypervisor since 4.86 (libkrun before that), without Rosetta; Docker's pages disagree on whether it is still Beta |
 | macOS (Intel) | Apple Virtualization framework; HyperKit (deprecated) | |
-| Windows | WSL 2 (default), Hyper-V, Docker VMM | WSL 2 is the one with tooling; WSL settings themselves belong to windows-ops |
+| Windows | WSL 2 (default), Hyper-V, Docker VMM | WSL 2 is the one with tooling; WSL settings themselves are in windows-ops' [wsl.md](../../windows-ops/references/wsl.md) |
 
 Settings > General (macOS: "Virtual Machine Options") chooses the backend. Switching
 backends does not carry images over: treat it like switching providers.

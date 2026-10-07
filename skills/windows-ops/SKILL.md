@@ -209,7 +209,7 @@ Output follows the claude-mods diagnostic convention:
 - **Source-code-level debugging** → use `debug-ops`
 - **Kernel dump file analysis with WinDbg** — too specialised for this skill; covered by reference doc pointers only
 - **Group Policy diagnostics** — relevant for enterprise but rare on workstations
-- **Linux-on-Windows (WSL) issues** — separate domain
+- **Inside a WSL distro** (Linux packages, services, a Linux app's own bugs) — the Linux-side skills. WSL itself (config, networking modes, disks) is covered: [references/wsl.md](references/wsl.md)
 
 ## Cross-References
 
@@ -221,6 +221,7 @@ Output follows the claude-mods diagnostic convention:
 | Multiple machines exhibit same pattern | Run `health-audit.ps1` on each, diff the outputs |
 | A flagged spinner names a git worktree that no longer exists | `fleet-ops` owns worktree lifecycle — [the teardown-ordering landmine](../fleet-ops/SKILL.md#landmine-removing-a-worktree-out-from-under-a-live-session) |
 | Need to profile inside an app rather than triage the box | `perf-ops` |
+| WSL: `.wslconfig` not applying, NAT vs mirrored networking, the Hyper-V firewall, a distro disk that only grows | [references/wsl.md](references/wsl.md); Docker Desktop's engine and its WSL data disk → `docker-ops` |
 
 ## References
 
@@ -234,6 +235,7 @@ Output follows the claude-mods diagnostic convention:
 - `references/symptom-guide.md` — symptom to signal, by complaint
 - `references/manual-queries.md` — the queries and decoding tables the scripts automate
 - `references/worked-example.md` — one failing-drive case end to end
+- `references/wsl.md` — WSL 2: `.wslconfig` and `wsl.conf`, networking modes, Hyper-V firewall, DNS, `/mnt/c` speed, distro disks (resize, sparse, compact)
 
 When to load each, in full: [references/reference-index.md](references/reference-index.md).
 
