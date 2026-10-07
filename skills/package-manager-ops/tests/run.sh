@@ -275,6 +275,10 @@ mutation("legacy facts lookup", "legacy-node-sass",
          'table = self.facts.get("legacy_packages")', 'table = self.facts.get("mutant_legacy_packages")')
 mutation("local composite action", "deploy-local-uses",
          'if not raw.startswith("./"):', 'if True:')
+mutation("pin span judges every selectable version", "clean-engine-floor-partial-pin",
+         'admits(spec, lo, hi, dialect) is False', 'admits(spec, lo, (lo[0], lo[1], lo[2] + 1), dialect) is False')
+mutation("dev Dockerfile is not a production PHP pin", "clean-php-floor-dev-dockerfile",
+         'if re.search(r"dev|test", path.name, re.I):', 'if False:')
 mutation("additional install sites", "install-sites",
          '("package.json", "composer.json", "justfile", "Makefile")', '("never",)')
 
@@ -507,8 +511,8 @@ cases = [
 bad = [f"{s!r}/{d}" for s, iv, d, want in cases if a.admits(s, iv[0], iv[1], d) is not want]
 bad += ["unparseable returns None"] if a.admits("banana", (1,0,0), (2,0,0)) is not None else []
 bad += ["npm has no != (None)"] if a.admits("!=1.0.0", (1,0,0), (2,0,0), "npm") is not None else []
-bad += ["npm range floor"] if a.range_floor(">=20.9 <25", "npm") != (20,9,0) else []
-bad += ["Composer range floor"] if a.range_floor("^7.4 | >=8.2.3", "composer") != (7,4,0) else []
+bad += ["partial pin spans its newest release"] if a.pin_span("20") != ((20,0,0), (21,0,0), "20") else []
+bad += ["exact pin spans itself"] if a.pin_span("8.2", exact=True) != ((8,2,0), (8,2,1), "8.2") else []
 print("ok" if not bad else "bad:" + "; ".join(bad))' "$AUDIT" 2>&1)"
 [[ "$rng" == ok ]] && ok "range parser: npm + Composer dialects (34 cases)" || no "range parser: $rng"
 

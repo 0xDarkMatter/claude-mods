@@ -383,20 +383,23 @@ def admits(spec: str, lo, hi, dialect: str = "npm"):
     return False
 
 
-def range_floor(spec: str, dialect: str = "npm"):
-    """Lowest version admitted by a range, or None when its syntax is unknown/empty.
-    The lock-floor checks compare static declared constraints, so prerelease ordering is
-    deliberately outside this scanner's small parser (the same boundary as admits())."""
-    sets = parse_range(spec, dialect)
-    if sets is None:
+def pin_span(raw: str, exact: bool = False):
+    """A literal version pin -> (lo, hi, label): the half-open span of versions it can
+    select. A partial pin installs its newest release ("20" -> [20.0.0, 21.0.0), "8.2" ->
+    [8.2.0, 8.3.0)); a full one, or any pin with exact=True (Composer's config.platform,
+    which resolves against exactly that version), selects only itself. None when raw is
+    not a literal pin (`lts/*`, `node`, an expression)."""
+    m = re.match(r"^\s*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?\s*$", raw or "")
+    if not m:
         return None
-    floors = []
-    for ivs in sets:
-        lo = max([(0, 0, 0)] + [iv[0] for iv in ivs])
-        hi = min([INF] + [iv[1] for iv in ivs])
-        if lo < hi:
-            floors.append(lo)
-    return min(floors) if floors else None
+    parts = [int(x) for x in m.groups() if x is not None]
+    lo = tuple(parts + [0] * (3 - len(parts)))
+    if exact or len(parts) == 3:
+        hi = (lo[0], lo[1], lo[2] + 1)
+    else:
+        bumped = parts[:-1] + [parts[-1] + 1]
+        hi = tuple(bumped + [0] * (3 - len(bumped)))
+    return lo, hi, ".".join(map(str, parts))
 
 
 # =============================================================================
@@ -1910,42 +1913,39 @@ class Audit:
 
     # ---- dependency runtime floors against production pins ----
     def runtime_floors(self):
-        """Static equivalents of npm's engine check and `composer check-platform-reqs
-        --lock`: compare lock-declared dependency floors with literal production pins."""
+        """Will each literal production pin run what the lock installs? npm's engine check
+        asks whether the running Node SATISFIES each package's `engines.node`, and `composer
+        check-platform-reqs --lock` the same of PHP; so a pin is judged by the versions it
+        can select (pin_span), never by comparing it with a range's lowest version - that
+        reported `.nvmrc 20` against `^20.19.0 || >=22.12.0` and passed `21.7.3`."""
         npm_lock = next((self.root / n for n in ("package-lock.json", "npm-shrinkwrap.json")
                          if (self.root / n).is_file()), None)
         lock = read_json(npm_lock) if npm_lock else None
         if npm_lock and not isinstance(lock, dict):
             self.blind("runtime.floors", f"cannot read {npm_lock.name}")
         elif isinstance(lock, dict):
-            floors = []
+            needs = []
             for path, package in obj(lock.get("packages")).items():
                 if not path:
                     continue  # the root's engines is a declared pin, not a dependency floor
                 spec = obj(package).get("engines")
                 spec = obj(spec).get("node") if isinstance(spec, dict) else None
-                floor = range_floor(str(spec), "npm") if spec else None
-                if floor is not None:
-                    floors.append((floor, path or "root", str(spec)))
-            highest = max(floors, default=None)
+                if spec:
+                    needs.append((path, str(spec)))
             pins = []
             for name in (".nvmrc", ".node-version"):
                 raw = read_text(self.root / name) if (self.root / name).is_file() else None
-                m = re.match(r"^\s*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?", raw or "")
-                if m:
-                    pins.append((tuple(int(x or 0) for x in m.groups()), name))
+                span = pin_span((raw or "").strip())
+                if span:
+                    pins.append((span, name))
             for src, tool, raw in self._setup_pins():
-                m = re.match(r"^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$", raw)
-                if tool == "node" and m:
-                    pins.append((tuple(int(x or 0) for x in m.groups()), src))
-            if highest and pins:
-                floor, package, spec = highest
-                low = [(pin, src) for pin, src in pins if pin < floor]
-                if low:
-                    self.add("warn", "js.engine.floor", npm_lock.name,
-                             f"{package} requires Node {spec} (floor {'.'.join(map(str, floor))}), above "
-                             + ", ".join(f"{src}={'.'.join(map(str, pin))}" for pin, src in low),
-                             "raise every production Node pin to the dependency floor, then run the frozen install")
+                span = pin_span(raw)
+                if tool == "node" and span:
+                    pins.append((span, src))
+            if needs and not pins:
+                self.blind("runtime.floors", "no literal Node pin (.nvmrc, .node-version, setup-node) to check engines against")
+            self._floor_misses(needs, pins, "npm", "js.engine.floor", npm_lock.name, "Node",
+                               "move every production Node pin into the range the locked packages accept, then run the frozen install")
 
         composer_lock = self.root / "composer.lock"
         clock = read_json(composer_lock) if composer_lock.is_file() else None
@@ -1954,37 +1954,47 @@ class Audit:
             return
         if not isinstance(clock, dict):
             return
-        floors = []
+        needs = []
         for package in clock.get("packages") if isinstance(clock.get("packages"), list) else []:
             spec = obj(package).get("require")
             spec = obj(spec).get("php") if isinstance(spec, dict) else None
-            floor = range_floor(str(spec), "composer") if spec else None
-            if floor is not None:
-                floors.append((floor, str(obj(package).get("name") or "unknown package"), str(spec)))
-        highest = max(floors, default=None)
-        if not highest:
+            if spec:
+                needs.append((str(obj(package).get("name") or "unknown package"), str(spec)))
+        if not needs:
             return
         pins = []
         platform = obj(obj(self.composer or {}).get("config")).get("platform")
         platform = obj(platform).get("php") if isinstance(platform, dict) else None
-        m = re.match(r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?", str(platform or ""))
-        if m:
-            pins.append((tuple(int(x or 0) for x in m.groups()), "composer.json config.platform.php"))
+        span = pin_span(str(platform or ""), exact=True)  # Composer resolves against exactly this version
+        if span:
+            pins.append((span, "composer.json config.platform.php"))
+        # Same production test as deploy(): a Dockerfile.dev / Dockerfile.test image is not
+        # what ships, so its PHP is not a production pin.
         for path in sorted(self.root.glob("Dockerfile*")):
+            if re.search(r"dev|test", path.name, re.I):
+                continue
             for raw in re.findall(r"(?:FROM|--from=)\s*php:(\d+(?:\.\d+){0,2})", read_text(path) or "", re.I):
-                parts = tuple(int(x) for x in raw.split("."))
-                pins.append((parts + (0,) * (3 - len(parts)), path.name))
+                pins.append((pin_span(raw), path.name))
         for src, tool, raw in self._setup_pins():
-            m = re.match(r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?$", raw)
-            if tool == "php" and m:
-                pins.append((tuple(int(x or 0) for x in m.groups()), src))
-        floor, package, spec = highest
-        low = [(pin, src) for pin, src in pins if pin < floor]
-        if low:
-            self.add("warn", "php.lock.floor", "composer.lock",
-                     f"{package} requires PHP {spec} (floor {'.'.join(map(str, floor))}), above "
-                     + ", ".join(f"{src}={'.'.join(map(str, pin))}" for pin, src in low),
-                     "raise every production PHP pin to the lock floor and run `composer check-platform-reqs --lock`")
+            span = pin_span(raw)
+            if tool == "php" and span:
+                pins.append((span, src))
+        if not pins:
+            self.blind("runtime.floors", "no literal production PHP pin (config.platform.php, Dockerfile, setup-php) to check composer.lock against")
+        self._floor_misses(needs, pins, "composer", "php.lock.floor", "composer.lock", "PHP",
+                           "move every production PHP pin into the range the locked packages accept and run `composer check-platform-reqs --lock`")
+
+    def _floor_misses(self, needs, pins, dialect, fid, file, runtime, fix):
+        """One finding per lock: each pin whose whole span a locked package's range rejects,
+        with the first such package. An unparseable range (admits() None) is skipped."""
+        misses = []
+        for (lo, hi, label), src in pins:
+            for package, spec in needs:
+                if admits(spec, lo, hi, dialect) is False:
+                    misses.append(f"{package} requires {runtime} {spec}, which {src}={label} cannot satisfy")
+                    break
+        if misses:
+            self.add("warn", fid, file, "; ".join(misses[:4]), fix)
 
     def composer_line(self):
         """The Composer minor line a build RUNS (setup-php `tools: composer:v2.x`, a
