@@ -236,6 +236,7 @@ def mutation(label, case_name, old, new):
 for fid, case_name in (
     ("js.engine.floor", "js-engine-floor"),
     ("php.lock.floor", "php-lock-floor"),
+    ("deploy.bundle.credentials", "deploy-bundle-credentials"),
     ("php.composer.safety-off", "php-composer-safety-off"),
     ("deploy.composer.safety-off", "deploy-composer-safety-off"),
     ("deploy.composer.adhoc", "deploy-composer-update"),

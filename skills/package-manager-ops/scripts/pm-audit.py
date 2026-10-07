@@ -34,6 +34,7 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   deploy.composer.safety-off
   deploy.composer.adhoc
   deploy.composer.installer-unverified
+  deploy.bundle.credentials
   deploy.install.unlocked  deploy.npm.yarn-flag  deploy.global.unpinned
 
 It never prints a secret: a committed or CI-written credential is reported as file:line only,
@@ -2148,6 +2149,7 @@ class Audit:
         # context dir, Dockerfile path; None when unplaceable). _image_leaks() pairs them.
         writes: list = []
         builds: list = []
+        bundles: list = []
         scopes: dict = {}
         seen: set = set()
 
@@ -2227,6 +2229,9 @@ class Audit:
                         dfile = (join_dir(cwd, built[1], env) if built[1]
                                  else posixpath.join(ctx, "Dockerfile") if ctx is not None else None)
                         builds.append((rel, n, ctx, dfile))
+                    bundled = self._bundle_source(words, cwd, env) if ci else None
+                    if bundled:
+                        bundles.append((rel, n, *bundled))
                     for tool, args in command_tools(words):
                         active_env = {name: self._env_enabled(rel, kind, text, n, name) for name in (
                             "COMPOSER_NO_DEV", "COMPOSER_NO_SECURITY_BLOCKING", "COMPOSER_NO_AUDIT")}
@@ -2235,6 +2240,53 @@ class Audit:
                 self._ramsey(text, rel, ships, flag, kind)
                 builds += self._action_builds(rel, text, start_dir)
         self._image_leaks(writes, builds, scopes, flag)
+        self._bundle_leaks(writes, bundles, scopes, flag)
+
+    def _bundle_source(self, words, cwd, env):
+        """A zip or CodeDeploy push -> (source directory, exclude patterns, label).
+        Archive names and exclude patterns are wire-format inputs: keep their positional
+        parsing here so adding another deploy command cannot silently reinterpret them."""
+        tool = posixpath.basename(words[0]).lower() if words else ""
+        if tool == "zip":
+            args, excludes = words[1:], []
+            if "-x" in args:
+                k = args.index("-x")
+                excludes = [a for a in args[k + 1:] if not a.startswith("-")]
+                args = args[:k]
+            excludes += [a.split("=", 1)[1] for a in args if a.startswith("--exclude=")]
+            positional = [a for a in args if not a.startswith("-")]
+            sources = positional[1:]  # the first positional is the archive path
+            if "." in sources or "./" in sources:
+                return cwd, excludes, "zip archive"
+            if len(sources) == 1:
+                return join_dir(cwd, sources[0], env), excludes, "zip archive"
+        if tool == "aws" and len(words) >= 3 and [w.lower() for w in words[1:3]] == ["deploy", "push"]:
+            source = next((words[i + 1] for i, w in enumerate(words[:-1]) if w == "--source"), None)
+            source = source or next((w.split("=", 1)[1] for w in words if w.startswith("--source=")), None)
+            if source:
+                excludes = [".*"] if "--ignore-hidden-files" in words else []
+                return join_dir(cwd, source, env), excludes, "aws deploy push source"
+        return None
+
+    def _bundle_leaks(self, writes, bundles, scopes, flag):
+        """Credential files created by CI must not enter a later deploy archive/source."""
+        for rel, n, cred, path in writes:
+            if path is None:
+                continue
+            scope = scopes.get(rel, lambda _n: 0)
+            for brel, bn, ctx, excludes, label in bundles:
+                if brel != rel or bn <= n or ctx is None or scope(bn) != scope(n):
+                    continue
+                inside = path if ctx == "" else (path[len(ctx) + 1:] if path.startswith(ctx + "/") else None)
+                if inside is None:
+                    continue
+                excluded = any(glob_rx(pat.lstrip("/" )).match(inside) for pat in excludes)
+                if excluded:
+                    continue
+                flag("deploy.bundle.credentials", rel, n,
+                     f"CI writes {cred} into the later {label} at line {bn}; its exclude list does not remove {inside}",
+                     "keep credentials outside the bundle source, or add the credential path to the archive exclude list",
+                     "error")
 
     def _local_uses_commands(self, caller, text):
         """Commands reached through local composite actions or reusable workflows.
