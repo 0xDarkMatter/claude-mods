@@ -481,6 +481,67 @@ OUT="$("$PY" "$AM" audit --repo "$M" --no-parents --json 2>/dev/null)"; rc=$?
 check "no AGENTS.md is crit" "D['findings'][0]['id']=='missing-agents-md'"
 [ "$rc" -eq 10 ] && ok "no AGENTS.md exits 10" || no "missing exit" "$rc"
 
+# ============================== EXPLAIN =======================================
+# explain <folder> lists what each tool loads for work there, in order, with the reason,
+# from assets/agents-md/tool-profiles.json. Imports resolve from the importing file,
+# skip code spans and fences, stop at a cycle.
+EX="$TMP/explain"; make_monorepo "$EX" >/dev/null 2>&1
+printf '# Engine\n\nApplies to `packages/engine/`.\n' > "$EX/packages/engine/AGENTS.md"
+printf '# Extra\n\n@cyc.md\n' > "$EX/docs/agents/extra.md"; printf '@extra.md\n' > "$EX/docs/agents/cyc.md"
+printf 'x\n' > "$EX/docs/agents/code.md"; printf 'x\n' > "$EX/docs/agents/fenced.md"
+printf '\nNot an import: `@docs/agents/code.md`.\n\n```\n@docs/agents/fenced.md\n```\n' >> "$EX/AGENTS.md"
+commit "$EX" "docs: explain fixture"
+OUT="$("$PY" "$AM" explain --repo "$EX" packages/engine --json 2>/dev/null)"
+tool() { printf "next(x for x in D['tools'] if x['tool']=='%s')" "$1"; }
+check "explain_lists_files_in_load_order_with_reasons" \
+      "[(x['path'],x['reason']) for x in $(tool claude-code)['files']]==[('AGENTS.md','ancestor'),('docs/agents/extra.md','import'),('docs/agents/cyc.md','import'),('packages/engine/AGENTS.md','nested-on-read')] and $(tool claude-code)['totals']['chars']==sum(x['chars'] for x in $(tool claude-code)['files']) and d['meta']['schema']=='claude-mods.repo-doctor.agents-md-explain/v1'"
+check "import_in_code_span_is_not_counted" \
+      "not {'docs/agents/code.md','docs/agents/fenced.md'} & {x['path'] for x in $(tool claude-code)['files']}"
+check "import_cycle_is_reported" "any('cycle' in n for n in $(tool claude-code)['notes'])"
+printf '# Override\n\nApplies to `packages/engine/`.\n' > "$EX/packages/engine/AGENTS.override.md"
+OUT="$("$PY" "$AM" explain --repo "$EX" packages/engine --tool codex --json 2>/dev/null)"
+check "explain_codex_prefers_override_and_one_file_per_dir" \
+      "[(x['path'],x['reason']) for x in $(tool codex)['files']]==[('AGENTS.md','ancestor'),('packages/engine/AGENTS.override.md','ancestor')]"
+printf '# Engine notes for Claude\n' > "$EX/packages/engine/CLAUDE.md"
+OUT="$("$PY" "$AM" explain --repo "$EX" packages/engine --json 2>/dev/null)"
+check "explain_claude_skips_agents_md_beside_claude_md" \
+      "'packages/engine/CLAUDE.md' in [x['path'] for x in $(tool claude-code)['files']] and 'packages/engine/AGENTS.md' not in [x['path'] for x in $(tool claude-code)['files']]"
+OUT="$("$PY" "$AM" explain --repo "$EX" packages/engine --tool all --json 2>/dev/null)"
+check "explain --tool all covers every profile" "len(D['tools'])>=9"
+"$PY" "$AM" explain --repo "$EX" no/such/dir >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 3 ] && ok "explain on a missing folder exits 3" || no "explain missing folder" "exit $rc"
+"$PY" "$AM" explain --repo "$EX" packages/engine --tool nosuch >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 2 ] && ok "explain with an unknown tool exits 2" || no "explain unknown tool" "exit $rc"
+# The audit runs the same engine over the root and every nested folder (data.load[]).
+RS="$TMP/starve"; init_repo "$RS"; mkdir -p "$RS/sub"
+"$PY" - "$RS" <<'EOF'
+import sys
+r = sys.argv[1]
+body = ["# Agent Instructions - big", "", "A fixture whose root fills the Codex budget.", "",
+        "## Commands", "", "```bash", "make check", "```", "", "## Landmines", "",
+        "1. **Rule** - keep it."] + ["- " + "padding text for the budget " * 10 for _ in range(105)]
+open(f"{r}/AGENTS.md", "w", newline="\n").write("\n".join(body) + "\n")
+open(f"{r}/sub/AGENTS.md", "w", newline="\n").write("# Sub\n\nApplies to `sub/`.\n\n" + "- sub note words here\n" * 150)
+open(f"{r}/Makefile", "w", newline="\n").write("check:\n\techo ok\n")
+EOF
+echo "- Before editing \`sub/**\`, read [sub/AGENTS.md](sub/AGENTS.md)." >> "$RS/AGENTS.md"
+commit "$RS" "docs: big root"
+OUT="$("$PY" "$AM" audit --repo "$RS" --no-parents --json 2>/dev/null)"
+check "root_starves_nested_under_codex_cap" \
+      "$(nf root-starves-nested sub/AGENTS.md) and $(nf root-starves-nested AGENTS.md)"
+check "load_chain_over_budget_warns" \
+      "any(f['id']=='load-over-budget' and f['severity']=='warn' for f in D['findings']) and any(x['dir']=='sub/' and x['claude_code_chars']>20800 for x in D['load'])"
+# A tool's caps apply only when the repo visibly targets it (.windsurf/ for Windsurf).
+TC="$TMP/toolcap"; init_repo "$TC"; good_agents "$TC"
+"$PY" -c "import sys;open(sys.argv[1],'a',newline='\n').write(''.join(f'- Note {i}: '+'context words '*8+'\n' for i in range(60)))" "$TC/AGENTS.md"
+commit "$TC" "docs: 7k agents"
+OUT="$("$PY" "$AM" audit --repo "$TC" --no-parents --json 2>/dev/null)"
+check "tool_cap_only_for_targeted_tools" "'tool-cap' not in {f['id'] for f in D['findings']}"
+mkdir -p "$TC/.windsurf"
+OUT="$("$PY" "$AM" audit --repo "$TC" --no-parents --json 2>/dev/null)"
+check "  ...and reported once the repo targets that tool" \
+      "any(f['id']=='tool-cap' and 'Windsurf' in f['msg'] and '6000' in f['msg'] for f in D['findings'])"
+
 # ============================== SURVEY ========================================
 FX="$TMP/gh-fixture.json"; LOG="$TMP/gh-calls.jsonl"
 "$PY" - "$FX" <<'EOF'

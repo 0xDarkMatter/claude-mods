@@ -4,6 +4,7 @@
 Usage:   agents-md.py scaffold [--repo PATH] [--facts FILE] [--archetype A | --dir FOLDER]
                                [--write] [--json]
          agents-md.py audit    [--repo PATH] [--facts FILE] [--diff] [--no-parents] [--json]
+         agents-md.py explain  [--repo PATH] FOLDER [--tool ID|all] [--json]
          agents-md.py survey   (--org OWNER | --remote OWNER/NAME) [--limit N]
                                [--include-archived] [--json]
 Input:   scaffold/audit: a local checkout. Facts come from repo-scan.py (beside this
@@ -18,6 +19,9 @@ Output:  scaffold: the AGENTS.md draft (markdown) on stdout, or the --json envel
            --diff prints ONLY a git-apply-able patch (empty when there is nothing to add).
          survey: one aligned row per repo, or --json
            (claude-mods.repo-doctor.agents-md-survey/v1).
+         explain: the files each tool loads for work in FOLDER, in order, with the reason
+           and size, or --json (claude-mods.repo-doctor.agents-md-explain/v1). Repo files
+           only: user-scope files (~/.claude, ~/.codex) are per-machine and left out.
 Stderr:  progress, summaries, legends, warnings, errors
 Exit:    0 ok (audit/survey: no warn or crit finding), 1 error (repo-scan failed),
          2 usage, 3 repo path (or --dir folder) not found, 5 precondition (AGENTS.md already exists for
@@ -38,6 +42,7 @@ Examples:
   agents-md.py audit --repo path/to/site
   agents-md.py audit --repo path/to/site --diff > agents-md.patch && git apply agents-md.patch
   agents-md.py survey --org my-org --json | jq '.data[] | select(.shadowed)'
+  agents-md.py explain packages/engine --tool all
 
 Protocol: references/agents-md-protocol.md (repo-doctor skill). Facts contract:
 scripts/repo-scan.py (schema claude-mods.repo-doctor.repo-scan/v1).
@@ -53,6 +58,7 @@ scripts/repo-scan.py (schema claude-mods.repo-doctor.repo-scan/v1).
 #   SHADOWING     CLAUDE.md classification (import / symlink / prose pointer / standalone)
 #   FACTS         running repo-scan.py, rendering facts into draft sections
 #   SCAFFOLD      archetype choice, template fill, nested --dir drafts, --write
+#   EXPLAIN       per-tool load engine (tool-profiles.json): files, reasons, sizes, caps
 #   AUDIT         findings, dead commands, staleness, nested docs and root pointers,
 #                 trigger pointers, split plan, the ruled-out record, the --diff patch
 #   SURVEY        gh plumbing (GET only), per-repo remote analysis, table
@@ -66,6 +72,7 @@ import difflib
 import fnmatch
 import json
 import os
+import posixpath
 import re
 import shlex
 import shutil
@@ -102,6 +109,14 @@ POINTER_CHARS = 120     # what a moved section leaves behind: heading, blank, li
 NESTED_TARGET_LINES = 40
 NESTED_CEILING_LINES = 60
 NESTED_CEILING_CHARS = NESTED_CEILING_LINES * CHARS_PER_LINE   # 4,800
+# What Claude Code loads for work in one folder: a root at its ceiling plus one nested doc
+# at its ceiling. A deeper chain than that is paid for on every task in the folder.
+LOAD_CEILING_CHARS = CEILING_CHARS + NESTED_CEILING_CHARS       # 20,800
+SCHEMA_EXPLAIN = "claude-mods.repo-doctor.agents-md-explain/v1"
+# Other tools' loading rules change fast, so they live only in this file, each fact with
+# a source and a verified date behind check-tool-profiles.py --live. Never hard-code a
+# tool's behaviour in this script.
+PROFILES = TEMPLATES / "tool-profiles.json"
 EX_OK, EX_ERR, EX_USAGE, EX_NOTFOUND, EX_PRECOND, EX_UNAVAIL, EX_FINDINGS = 0, 1, 2, 3, 5, 7, 10
 
 # Section grammar: the first rule whose pattern matches a ## or ### heading names it.
@@ -950,6 +965,284 @@ def cmd_scaffold(args) -> int:
     return EX_OK
 
 
+# === EXPLAIN ===
+# One engine answers "what does tool T load for work in folder F", for the explain
+# subcommand and for audit's data.load[]. A tool's rules come from its profile in
+# tool-profiles.json (contract 1.2 in docs/plans/REPO-DOCTOR-ABC-2026-10.md). F is a
+# working folder: the repo root is the launch folder, so the root's files are ancestors;
+# a tool that reads subfolders on demand loads F's chain as nested-on-read, and a tool
+# that reads root-to-cwd (Codex) is taken as launched in F.
+
+# `@path` imports. Not after a word character, backtick or @, so mail addresses and
+# `@x` spans never count; code spans and fences are stripped before matching.
+IMPORT_RE = re.compile(r"(?<![\w`@])@((?:\.{1,2}/|~/|[\w-])[\w./~-]*)")
+
+
+def load_profiles() -> list[dict] | None:
+    try:
+        return json.loads(PROFILES.read_text(encoding="utf-8"))["profiles"]
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def import_targets(text: str) -> list[str]:
+    out, fence = [], False
+    for line in text.splitlines():
+        if line.lstrip().startswith(("```", "~~~")):
+            fence = not fence
+            continue
+        if not fence:
+            out += [m.rstrip(".,;:") for m in IMPORT_RE.findall(re.sub(r"`[^`]*`", "", line))]
+    return out
+
+
+def frontmatter(text: str) -> dict:
+    """Lower-cased keys of a leading --- block: scalars, [a, b] lists and - item lists."""
+    m = re.match(r"\A---[ \t]*\n(.*?)\n---[ \t]*(?:\n|\Z)", text.replace("\r\n", "\n"), re.S)
+    out: dict = {}
+    key = None
+    for line in (m.group(1).splitlines() if m else []):
+        kv = re.match(r"^([\w-]+)\s*:\s*(.*)$", line)
+        if kv:
+            key, val = kv.group(1).lower(), kv.group(2).strip()
+            if val.startswith("[") and val.endswith("]"):
+                out[key] = [v.strip().strip("'\"") for v in val[1:-1].split(",") if v.strip()]
+            else:
+                out[key] = val.strip("'\"") if val else []
+        elif key and isinstance(out.get(key), list) and re.match(r"^\s*-\s+", line):
+            out[key].append(re.sub(r"^\s*-\s+", "", line).strip().strip("'\""))
+    return out
+
+
+def as_globs(v) -> list[str]:
+    if isinstance(v, list):
+        return [x for x in v if x]
+    return [x.strip() for x in str(v or "").split(",") if x.strip()]
+
+
+def rule_mode(fm: dict, rs: dict) -> str:
+    """always | glob | description | manual for one rule file under a frontmatter rule set."""
+    v = {k: str(x).lower() for k, x in fm.items() if not isinstance(x, list)}
+    if v.get("alwaysapply") == "true" or v.get("inclusion") == "always" or v.get("trigger") in ("always_on", "always"):
+        return "always"
+    key = (rs.get("scope_key") or "").lower()
+    if (key and fm.get(key)) or fm.get("globs") or v.get("inclusion") == "filematch" or v.get("trigger") == "glob":
+        return "glob"
+    if not fm and rs.get("always_when_scope_missing"):
+        return "always"
+    if fm.get("description") or v.get("inclusion") == "auto" or v.get("trigger") == "model_decision":
+        return "description"
+    return "manual"
+
+
+def glob_reaches(pattern: str, folder: str) -> bool:
+    """Whether a scope glob can match files in folder: its literal prefix and the folder
+    must nest one way or the other ("**/*.ts" reaches everywhere)."""
+    lit = re.split(r"[*?\[{]", pattern.lstrip("./"), maxsplit=1)[0]
+    return folder.startswith(lit) or lit.startswith(folder)
+
+
+def chain_dirs(folder: str) -> list[str]:
+    parts = [x for x in folder.split("/") if x]
+    return [""] + ["/".join(parts[:i]) + "/" for i in range(1, len(parts) + 1)]
+
+
+def entry_files_in(repo: Path, d: str, prof: dict) -> list[tuple[str, bool]]:
+    """(path, fallback?) for the entry files the profile reads in folder d."""
+    names = prof.get("entry_files") or []
+    has = [n for n in names if (repo / (d + n)).is_file()]
+    if prof.get("per_dir") == "first-match":
+        first = next((n for n in prof.get("first_match_order") or names if (repo / (d + n)).is_file()), None)
+        return [(d + first, first not in ("AGENTS.md", "AGENTS.override.md"))] if first else []
+    if prof.get("per_dir") == "claude-md-shadows-agents-md":
+        claude = [n for n in has if n != "AGENTS.md"]
+        return [(d + n, False) for n in (claude or [n for n in has if n == "AGENTS.md"])]
+    return [(d + n, False) for n in has]
+
+
+def explain_tool(repo: Path, folder: str, prof: dict, nested: list[str]) -> dict:
+    """Contract 1.3's per-tool record, plus notes (cycles, user-scope imports) and
+    reachable (rules that load only on request, never counted)."""
+    files: list[dict] = []
+    notes: list[str] = []
+    reachable: list[dict] = []
+    seen: set[str] = set()
+    imp = prof.get("imports") or None
+
+    def add(rel: str, reason: str, always: bool, depth: int = 0, stack: tuple = ()) -> None:
+        if rel in seen:
+            return
+        seen.add(rel)
+        text = read_raw(repo / rel)
+        files.append({"path": rel, "reason": reason, "bytes": len(text.encode("utf-8")), "chars": len(text),
+                      "lines": len(text.splitlines()), "always_loaded": always})
+        if not imp or depth >= int(imp.get("max_depth") or 0):
+            return
+        for target in import_targets(text):
+            if target.startswith("~/"):
+                notes.append(f"{rel} imports {target}: a user-scope file, left out")
+                continue
+            dest = posixpath.normpath(posixpath.join(posixpath.dirname(rel), target))
+            if dest.startswith("../") or target.startswith("/") or not (repo / dest).is_file():
+                continue
+            if dest in stack + (rel,):
+                notes.append("import cycle: " + " -> ".join(stack + (rel, dest)))
+                continue
+            add(dest, "import", always, depth + 1, stack + (rel,))
+
+    sub = prof.get("subdirs")
+    for i, d in enumerate(chain_dirs(folder)):
+        if i and (sub == "never" or prof.get("ancestors") == "none"):
+            break
+        reason, always = ("ancestor", True) if i == 0 or sub in ("launch-path-only", "always") \
+            else ("nested-on-read", False)
+        for rel, fallback in entry_files_in(repo, d, prof):
+            add(rel, "fallback" if fallback else reason, always)
+    if sub == "always" and prof.get("ancestors") != "none":
+        for n in nested:
+            for rel, _ in entry_files_in(repo, os.path.dirname(n) + "/", prof):
+                add(rel, "always-nested", True)
+    for rs in prof.get("rule_sets") or []:
+        for path in sorted(repo.glob(rs["glob"])):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(repo).as_posix()
+            fm = frontmatter(read_raw(path))
+            mode = rs.get("mode")
+            if mode == "frontmatter":
+                mode = rule_mode(fm, rs)
+            elif mode == "scoped":
+                key = (rs.get("scope_key") or "").lower()
+                mode = "glob" if key and fm.get(key) else ("always" if rs.get("always_when_scope_missing") else "manual")
+            if mode == "always":
+                add(rel, "always-rule", True)
+            elif mode == "glob":
+                key = (rs.get("scope_key") or "globs").lower()
+                if any(glob_reaches(g, folder) for g in as_globs(fm.get(key) or fm.get("globs"))):
+                    add(rel, "glob", False)
+            else:
+                reachable.append({"path": rel, "mode": mode})
+    chars = sum(x["chars"] for x in files)
+    always_chars = sum(x["chars"] for x in files if x["always_loaded"])
+    totals = {"bytes": sum(x["bytes"] for x in files), "chars": chars, "est_tokens": round(chars / 3.6),
+              "always_chars": always_chars, "on_demand_chars": chars - always_chars}
+    caps_hit = []
+    for cap in prof.get("caps") or []:
+        if cap.get("scope") == "chain":
+            if cap.get("bytes") and totals["bytes"] > cap["bytes"]:
+                caps_hit.append({"scope": "chain", "limit": f"{cap['bytes']} bytes", "source": cap.get("source")})
+            continue
+        for x in files:
+            for unit, field in (("lines", "lines"), ("characters", "chars"), ("bytes", "bytes")):
+                lim = cap.get(field)
+                if lim and x[field] > lim:
+                    caps_hit.append({"scope": "file", "limit": f"{lim} {unit}", "source": cap.get("source"),
+                                     "path": x["path"], "behaviour": cap.get("behaviour")})
+    return {"tool": prof["id"], "name": prof.get("name", prof["id"]), "files": files, "totals": totals,
+            "caps_hit": caps_hit, "notes": list(dict.fromkeys(notes)), "reachable": reachable}
+
+
+def cmd_explain(args) -> int:
+    repo = Path(args.repo).resolve()
+    folder = args.folder.replace("\\", "/").strip("/")
+    folder = "" if folder in ("", ".") else folder + "/"
+    if not repo.is_dir() or ".." in folder.split("/") or not (repo / folder).is_dir():
+        eecho(f"agents-md: not a folder inside the repo: {args.folder}")
+        return EX_NOTFOUND
+    profiles = load_profiles()
+    if profiles is None:
+        eecho(f"agents-md: cannot read {PROFILES}")
+        return EX_ERR
+    ids = [x["id"] for x in profiles]
+    if args.tool != "all" and args.tool not in ids:
+        eecho(f"agents-md: unknown --tool {args.tool!r} (known: {', '.join(ids)}, all)")
+        return EX_USAGE
+    nested = nested_doc_paths(repo)
+    chosen = profiles if args.tool == "all" else [x for x in profiles if x["id"] == args.tool]
+    tools = [explain_tool(repo, folder, x, nested) for x in chosen]
+    if args.json:
+        emit_json({"data": {"dir": folder or "./", "tools": tools},
+                   "meta": {"schema": SCHEMA_EXPLAIN, "excluded": "user-scope files"}})
+        return EX_OK
+    print(f"explain {folder or './'} (repo files only; user-scope files such as ~/.claude are per-machine)")
+    for x in tools:
+        print(f"{x['name']}")
+        if not x["files"]:
+            print("  (loads no repo file here)")
+        width = max([len(f["path"]) for f in x["files"]] + [10])
+        for n, f in enumerate(x["files"], 1):
+            print(f"  {n}. {f['path']:<{width}}  {f['reason']:<15} {f['chars']:>7,} chars  "
+                  f"{'always' if f['always_loaded'] else 'on demand'}")
+        tt = x["totals"]
+        print(f"  total {tt['chars']:,} chars (~{tt['est_tokens']:,} tokens): {tt['always_chars']:,} always, "
+              f"{tt['on_demand_chars']:,} on demand")
+        for c in x["caps_hit"]:
+            print(f"  cap: {c.get('path', 'chain')} over {c['limit']} ({c['source']})")
+        for r in x["reachable"]:
+            print(f"  reachable on request: {r['path']} ({r['mode']})")
+        for note in x["notes"]:
+            print(f"  note: {note}")
+    return EX_OK
+
+
+def load_findings(repo: Path, rel: str | None, nested: list[str]) -> tuple[list[dict], list[dict]]:
+    """audit's view of the engine: (findings, data.load[]) for the root and each nested folder."""
+    profiles = load_profiles()
+    if not profiles:
+        return [{"id": "tool-profiles-missing", "severity": "info", "path": str(PROFILES.name),
+                 "msg": "tool-profiles.json is missing beside this script; load checks skipped"}], []
+    by_id = {x["id"]: x for x in profiles}
+    folders = [""] + [os.path.dirname(n) + "/" for n in nested]
+    finds, load, cycles = [], [], {}
+    doc_of = {"": rel or "AGENTS.md", **{os.path.dirname(n) + "/": n for n in nested}}
+    codex = by_id.get("codex")
+    codex_cap = next((c["bytes"] for c in (codex or {}).get("caps", []) if c.get("scope") == "chain"
+                      and c.get("bytes")), None)
+    for fo in folders:
+        cc = explain_tool(repo, fo, by_id["claude-code"], nested) if "claude-code" in by_id else None
+        cx = explain_tool(repo, fo, codex, nested) if codex else None
+        load.append({"dir": fo or "./", "claude_code_chars": cc["totals"]["chars"] if cc else None,
+                     "claude_code_always_chars": cc["totals"]["always_chars"] if cc else None,
+                     "codex_bytes": cx["totals"]["bytes"] if cx else None,
+                     "files": [x["path"] for x in cc["files"]] if cc else []})
+        for note in (cc or {}).get("notes", []):
+            if note.startswith("import cycle"):
+                cycles.setdefault(note, fo)
+        if cc and cc["totals"]["chars"] > LOAD_CEILING_CHARS:
+            finds.append({"id": "load-over-budget", "severity": "warn", "path": doc_of[fo],
+                          "msg": f"Claude Code loads {cc['totals']['chars']:,} characters for work in "
+                                 f"{fo or 'the root'} (over {LOAD_CEILING_CHARS:,}: a root at its ceiling plus one "
+                                 "nested doc). `agents-md.py explain` shows the files"})
+        if fo and cx and codex_cap and cx["totals"]["bytes"] > codex_cap:
+            finds.append({"id": "root-starves-nested", "severity": "warn", "path": doc_of[fo],
+                          "msg": f"the Codex chain to {fo} is {cx['totals']['bytes']:,} bytes, over its "
+                                 f"{codex_cap:,}-byte cap: Codex drops the deepest files first, so "
+                                 f"{doc_of[fo]} goes first"})
+    if nested and rel and codex_cap:
+        root_bytes = len(read_raw(repo / rel).encode("utf-8"))
+        if root_bytes > codex_cap // 2:
+            finds.append({"id": "root-starves-nested", "severity": "warn", "path": rel,
+                          "msg": f"{rel} alone is {root_bytes:,} bytes, over half of Codex's {codex_cap:,}-byte "
+                                 "budget, leaving little for the nested docs below it"})
+    for note in cycles:
+        finds.append({"id": "import-cycle", "severity": "info", "path": rel or "AGENTS.md",
+                      "msg": f"{note}: the loader stops there, but one of the imports is redundant"})
+    seen = set()
+    for prof in profiles:
+        if not prof.get("targets_when") or not any((repo / x.rstrip("/")).exists() for x in prof["targets_when"]):
+            continue
+        for fo in folders:
+            for c in explain_tool(repo, fo, prof, nested)["caps_hit"]:
+                key = (prof["id"], c.get("path"), c["limit"])
+                if c["scope"] != "file" or key in seen:
+                    continue
+                seen.add(key)
+                finds.append({"id": "tool-cap", "severity": "info", "path": c["path"],
+                              "msg": f"{c['path']} is over {prof['name']}'s {c['limit']} cap ({c['behaviour']}; "
+                                     f"source: {c['source']}). The repo targets {prof['name']}"})
+    return finds, load
+
+
 # === AUDIT ===
 
 
@@ -1729,6 +2022,9 @@ def cmd_audit(args) -> int:
                                      f"{od}/AGENTS.md. Move it by hand; the patch never moves a landmine"})
     sev_rank = {"crit": 0, "warn": 1, "info": 2}
     finds.sort(key=lambda x: (sev_rank[x["severity"]], x["id"], x["path"]))
+    l_finds, data["load"] = load_findings(repo, rel, nested)
+    finds += l_finds
+    finds.sort(key=lambda x: (sev_rank[x["severity"]], x["id"], x["path"]))
     for doc in docs:
         doc["findings"] = [x["id"] for x in finds if x["path"].split(":")[0] == doc["path"]]
     data["docs"] = docs
@@ -1961,7 +2257,8 @@ def main() -> int:
         epilog="EXAMPLES:\n"
                "  agents-md.py scaffold --repo path/to/site > AGENTS.draft.md\n"
                "  agents-md.py audit --repo path/to/site --diff > agents-md.patch\n"
-               "  agents-md.py survey --org my-org --json\n",
+               "  agents-md.py survey --org my-org --json\n"
+               "  agents-md.py explain packages/engine --tool all\n",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd")
     sp = sub.add_parser("scaffold", help="draft an AGENTS.md from repo-scan facts")
@@ -1979,6 +2276,11 @@ def main() -> int:
     ap_a.add_argument("--no-parents", action="store_true",
                       help="skip the check for CLAUDE.md files above the repo")
     ap_a.add_argument("--json", action="store_true")
+    ap_e = sub.add_parser("explain", help="what each tool loads for work in a folder")
+    ap_e.add_argument("--repo", default=".")
+    ap_e.add_argument("folder", help="a folder inside the repo (. for the root)")
+    ap_e.add_argument("--tool", default="claude-code", help="a tool-profiles.json id, or all")
+    ap_e.add_argument("--json", action="store_true")
     ap_s = sub.add_parser("survey", help="read-only org survey through gh api")
     ap_s.add_argument("--org", help="GitHub owner (org or user)")
     ap_s.add_argument("--remote", help="survey a single OWNER/NAME")
@@ -1998,7 +2300,8 @@ def main() -> int:
     if args.cmd == "survey" and args.limit < 1:
         eecho("agents-md: --limit must be >= 1")
         return EX_USAGE
-    return {"scaffold": cmd_scaffold, "audit": cmd_audit, "survey": cmd_survey}[args.cmd](args)
+    return {"scaffold": cmd_scaffold, "audit": cmd_audit, "survey": cmd_survey,
+            "explain": cmd_explain}[args.cmd](args)
 
 
 if __name__ == "__main__":

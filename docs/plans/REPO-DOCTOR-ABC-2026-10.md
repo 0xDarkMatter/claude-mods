@@ -128,6 +128,12 @@ fetches each source and checks each `live_phrase` appears (exit 7 if unreachable
   "meta": { "schema": "claude-mods.repo-doctor.agents-md-explain/v1", "excluded": "user-scope files" } }
 ```
 
+Additive fields, as built (2026-10-07):
+- Each tool record also carries `name`, `notes` (import cycles, skipped user-scope imports) and `reachable` (description or manual rules, listed and never counted).
+- Each file carries `lines`.
+- A file-scope `caps_hit` entry adds `path` and `behaviour`.
+- `reason` gains `always-nested`, for a tool that loads every nested AGENTS.md (Kiro).
+
 ### 1.4 Ruled-out record (producer: `entrydocs`; consumer: `docs`)
 
 `docs/agents/ruled-out.md` in the audited repo. One line per decision:
