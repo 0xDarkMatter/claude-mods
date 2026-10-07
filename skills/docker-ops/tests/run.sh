@@ -306,4 +306,82 @@ other="$(grep -vE '^(context inspect|version --format|info --format|system df --
 [ -z "$other" ] && ok "doctor only ever runs read-only docker probes" || bad "doctor ran: $other"
 unset STUB_LOG
 
+# === 13. Image-tag verifier: offline inventory, live classification on canned answers ===
+tags="$here/scripts/check-image-tags.py"
+itf="$fixtures/image-tags"
+out="$("$PY" "$tags" "$itf" 2>/dev/null)"; rc=$?
+expect_exit "image-tags offline with a malformed reference" 4 "$rc"
+has "FROM is inventoried" "$out" $'pinned\tnode:24-slim\tDockerfile:2'
+has "COPY --from=<image> is inventoried" "$out" $'pinned\tghcr.io/astral-sh/uv:0.9.0\tDockerfile:5'
+hasnt "COPY --from=<stage> is not an image" "$out" $'\tbuild\t'
+has "a \${VAR} reference is variable" "$out" $'variable\tpython:${PY_VERSION}-slim'
+has "no tag is floating" "$out" $'floating\tubuntu'
+has "an example name is a placeholder" "$out" $'placeholder\tmyapp:1.0'
+has "an upper-case repository is malformed" "$out" $'malformed\tNode:24'
+has "Compose image: is inventoried" "$out" $'pinned\tpostgres:99-bookworm\tcompose.yaml:3'
+has "Markdown dockerfile fences are read" "$out" $'pinned\tgolang:1.27-trixie\tnotes.md:6'
+has "Markdown yaml fences are read" "$out" $'pinned\tregistry.k8s.io/pause:3.10\tnotes.md:16'
+hasnt "Markdown prose outside fences is not" "$out" "ignored:1.0"
+hasnt "a FROM <stage> inside a fence is not an image" "$out" $'\tbuild\tnotes.md'
+out="$("$PY" "$tags" "$itf" --live --fixtures "$itf/answers.json" 2>/dev/null)"; rc=$?
+expect_exit "image-tags live: a missing tag wins over uncertain" 10 "$rc"
+has "a 404 is missing" "$out" $'missing\tpostgres:99-bookworm'
+has "a 429 is uncertain, not missing" "$out" $'uncertain\tredis:8.2-alpine\tcompose.yaml:5\tHTTP 429'
+has "an absent arm64 image is missing" "$out" "no linux/arm64 image (has linux/amd64)"
+has "a multi-arch tag is ok" "$out" $'ok\tnode:24-slim'
+out="$("$PY" "$tags" "$itf" --live --fixtures "$itf/answers.json" --platforms linux/amd64 --ignore-ref 'postgres:*' 2>/dev/null)"; rc=$?
+expect_exit "image-tags live: only uncertain left is advisory" 7 "$rc"
+has "--platforms narrows the platform check" "$out" $'ok\tquay.io/acmecorp/tool:2.1'
+has "--ignore-ref skips a reference" "$out" $'ignored\tpostgres:99-bookworm'
+"$PY" "$tags" "$itf" --fixtures "$itf/answers.json" >/dev/null 2>&1; expect_exit "--fixtures without --live" 2 $?
+"$PY" "$tags" "$tmp/nope" >/dev/null 2>&1; expect_exit "image-tags missing path" 3 $?
+"$PY" "$tags" "$fixtures/clean" --json 2>/dev/null | "$PY" -c \
+  "import json,sys; d=json.load(sys.stdin); assert d['meta']['schema']=='claude-mods.docker-ops.image-tags/v1' and d['data']" \
+  && ok "image-tags --json envelope" || bad "image-tags --json envelope malformed"
+
+# === 14. Facts verifier: offline prose consistency, live drift on canned sources ===
+facts="$here/scripts/check-docker-facts.py"
+ff="$fixtures/facts"
+mkdir -p "$tmp/fskill/docker-ops/references" "$tmp/fskill/kubernetes-ops"
+"$PY" - "$here/assets/docker-facts.json" "$tmp/fskill" <<'EOF'
+import json, sys, pathlib
+cat = json.load(open(sys.argv[1])); root = pathlib.Path(sys.argv[2])
+own = [t["token"] for t in cat["prose_tokens"] if t.get("skill", "docker-ops") == "docker-ops"]
+k8s = [t["token"] for t in cat["prose_tokens"] if t.get("skill") == "kubernetes-ops"]
+(root / "docker-ops" / "SKILL.md").write_text(f"Versions verified {cat['as_of']}.\n" + "\n".join(own) + "\n")
+(root / "kubernetes-ops" / "SKILL.md").write_text("\n".join(k8s) + "\n")
+EOF
+"$PY" "$facts" --offline --skill "$tmp/fskill/docker-ops" >/dev/null 2>&1; expect_exit "facts offline: every token stated" 0 $?
+"$PY" - "$tmp/fskill/docker-ops/SKILL.md" <<'EOF'
+import sys; p = sys.argv[1]; s = open(p).read(); open(p, "w").write(s.replace("Compose v5", "Compose v2"))
+EOF
+out="$("$PY" "$facts" --offline --skill "$tmp/fskill/docker-ops" 2>/dev/null)"; rc=$?
+expect_exit "facts offline: a dropped token is drift" 10 "$rc"
+has "the dropped token is named" "$out" $'token:compose-major\tdrift'
+rm -rf "$tmp/fskill/kubernetes-ops"
+out="$("$PY" "$facts" --offline --skill "$tmp/fskill/docker-ops" 2>/dev/null)"
+has "kubernetes-ops tokens are skipped when that skill is absent" "$out" $'token:k8s-minor\tskipped'
+out="$("$PY" "$facts" --live --fixtures "$ff" --today 2026-10-07 2>/dev/null)"; rc=$?
+expect_exit "facts live: canned sources match the catalog" 0 "$rc"
+has "a newer release candidate is not drift" "$out" $'release:compose\tok'
+has "the EOL floor is read from endoflife.date" "$out" $'eol:python\tok\toldest supported python line 3.11'
+has "the Desktop compaction watch reads the notes" "$out" "no release from 4.59 to 4.94.0 mentions compaction"
+cp -r "$ff" "$tmp/ffd"
+printf '[{"tag_name": "v6.0.0", "draft": false, "prerelease": false}]\n' > "$tmp/ffd/releases-compose.json"
+printf '## 4.95.0\n\n- Re-enabled VHDX compaction for the WSL data disk.\n\n' | cat - "$ff/desktop-release-notes.md" > "$tmp/ffd/desktop-release-notes.md"
+out="$("$PY" "$facts" --live --fixtures "$tmp/ffd" --today 2026-10-07 2>/dev/null)"; rc=$?
+expect_exit "facts live: upstream moved" 10 "$rc"
+has "a new Compose major is drift" "$out" $'release:compose\tdrift'
+has "a release that mentions compaction is drift" "$out" $'desktop:compaction\tdrift'
+out="$("$PY" "$facts" --live --fixtures "$ff" --today 2027-05-01 2>/dev/null)"
+has "time passing moves an EOL floor (Node 22 ends 2027-04-30)" "$out" $'eol:node\tdrift'
+rm -f "$tmp/ffd/eol-php.json"; cp "$ff/releases-compose.json" "$ff/desktop-release-notes.md" "$tmp/ffd/"
+out="$("$PY" "$facts" --live --fixtures "$tmp/ffd" --today 2026-10-07 2>/dev/null)"; rc=$?
+expect_exit "facts live: an unreachable source is advisory" 7 "$rc"
+has "the unreachable source is named" "$out" $'eol:php\tunavailable'
+"$PY" "$facts" --fixtures "$ff" >/dev/null 2>&1; expect_exit "facts --fixtures without --live" 2 $?
+printf '{"schema": "claude-mods.docker-ops.facts/v1", "as_of": "2026-10-07"}' > "$tmp/thin.json"
+"$PY" "$facts" --catalog "$tmp/thin.json" >/dev/null 2>&1; expect_exit "facts: a catalog without its tables" 4 $?
+"$PY" "$facts" --catalog "$tmp/none.json" >/dev/null 2>&1; expect_exit "facts: a missing catalog" 3 $?
+
 finish

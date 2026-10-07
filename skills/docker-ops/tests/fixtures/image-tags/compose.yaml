@@ -1,0 +1,7 @@
+services:
+  db:
+    image: postgres:99-bookworm
+  cache:
+    image: redis:8.2-alpine
+  tool:
+    image: quay.io/acmecorp/tool:2.1

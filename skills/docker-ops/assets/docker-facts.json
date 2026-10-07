@@ -3,8 +3,123 @@
   "as_of": "2026-10-07",
   "eol_floor": {
     "node": "22",
-    "python": "3.10",
+    "python": "3.11",
     "php": "8.2",
     "golang": "1.26"
-  }
+  },
+  "releases": {
+    "compose": {
+      "repo": "docker/compose",
+      "tag": "v5.6.0",
+      "line": "5",
+      "track": "major"
+    },
+    "wsl": {
+      "repo": "microsoft/WSL",
+      "tag": "3.0.1",
+      "line": "3.0",
+      "track": "minor"
+    },
+    "podman": {
+      "repo": "containers/podman",
+      "tag": "v6.1.3",
+      "line": "6",
+      "track": "major"
+    },
+    "lima": {
+      "repo": "lima-vm/lima",
+      "tag": "v2.2.1",
+      "line": "2",
+      "track": "major"
+    },
+    "colima": {
+      "repo": "abiosoft/colima",
+      "tag": "v0.10.3",
+      "line": "0.10",
+      "track": "minor"
+    },
+    "kubernetes": {
+      "repo": "kubernetes/kubernetes",
+      "tag": "v1.37.0",
+      "line": "1.37",
+      "track": "minor"
+    },
+    "helm": {
+      "repo": "helm/helm",
+      "tag": "v4.3.0",
+      "line": "4",
+      "track": "major"
+    },
+    "gateway_api": {
+      "repo": "kubernetes-sigs/gateway-api",
+      "tag": "v1.6.3",
+      "line": "1.6",
+      "track": "minor"
+    },
+    "trivy_action": {
+      "repo": "aquasecurity/trivy-action",
+      "tag": "v0.36.0",
+      "line": "v0.36.0",
+      "track": "tag",
+      "sha": "ed142fd0673e97e23eac54620cfb913e5ce36c25"
+    }
+  },
+  "desktop": {
+    "compaction_disabled_in": "4.59"
+  },
+  "prose_tokens": [
+    {
+      "key": "compose-major",
+      "token": "Compose v5",
+      "value_of": "releases.compose.line"
+    },
+    {
+      "key": "trivy-pin",
+      "token": "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25",
+      "value_of": "releases.trivy_action.sha"
+    },
+    {
+      "key": "trivy-pin-tag",
+      "token": "# v0.36.0",
+      "value_of": "releases.trivy_action.tag"
+    },
+    {
+      "key": "desktop-compaction",
+      "token": "Docker Desktop 4.59",
+      "value_of": "desktop.compaction_disabled_in"
+    },
+    {
+      "key": "wsl-line",
+      "token": "WSL 3.0",
+      "value_of": "releases.wsl.line"
+    },
+    {
+      "key": "podman-major",
+      "token": "Podman 6",
+      "value_of": "releases.podman.line"
+    },
+    {
+      "key": "node-floor",
+      "token": "Node.js 22",
+      "value_of": "eol_floor.node"
+    },
+    {
+      "key": "k8s-minor",
+      "token": "Kubernetes 1.37",
+      "value_of": "releases.kubernetes.line",
+      "skill": "kubernetes-ops"
+    },
+    {
+      "key": "helm-major",
+      "token": "Helm 4",
+      "value_of": "releases.helm.line",
+      "skill": "kubernetes-ops"
+    },
+    {
+      "key": "gateway-api",
+      "token": "Gateway API v1.6",
+      "value_of": "releases.gateway_api.line",
+      "skill": "kubernetes-ops"
+    }
+  ]
 }
