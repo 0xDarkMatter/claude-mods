@@ -210,6 +210,11 @@ for case in cases:
         expected = json.loads((case / "_manager_majors").read_text())
         got_majors = json.loads(proc.stdout).get("meta", {}).get("manager_majors")
         row(got_majors == expected, f"{case.name}: manager majors {got_majors}" + ("" if got_majors == expected else f" (want {expected})"))
+    if (case / "_install_policy").is_file():
+        expected = json.loads((case / "_install_policy").read_text())
+        got_policy = json.loads(proc.stdout).get("meta", {}).get("install_policy")
+        row(got_policy == expected, f"{case.name}: install policy metadata {got_policy}"
+            + ("" if got_policy == expected else f" (want {expected})"))
 
 # Mutation proof: each new checks-a fixture must reject a scanner whose corresponding
 # rule is broken. Mutants live only under the suite temp directory and never touch source.
@@ -249,6 +254,7 @@ for fid, case_name in (
     ("php.craft.eol", "php-craft-eol"),
     ("js.dep.paired-drift", "js-dep-paired-drift"),
     ("js.lockfile.source", "js-lockfile-source"),
+    ("js.install-policy", "js-install-policy"),
     ("php.composer.safety-off", "php-composer-safety-off"),
     ("deploy.composer.safety-off", "deploy-composer-safety-off"),
     ("deploy.composer.adhoc", "deploy-composer-update"),

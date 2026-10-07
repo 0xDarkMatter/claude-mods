@@ -20,6 +20,7 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   js.dep.non-registry
   js.dep.paired-drift
   js.lockfile.source
+  js.install-policy
   js.engine.floor
   js.root.not-private
   js.packagemanager.mismatch  js.node.unpinned  js.node.eol  js.node.eol-soon  node.pin.disagree
@@ -1263,6 +1264,7 @@ class Audit:
         has_floors = any((self.root / n).is_file() for n in ("package-lock.json", "npm-shrinkwrap.json", "composer.lock"))
         self._check("runtime.floors", (self.runtime_floors,), "" if has_floors else "no npm or Composer lockfile")
         self._check("composer.line", (self.composer_line,))
+        self._check("install.policy", (self.install_policy,))
         npx_skip = "package.json absent and docs scan disabled" if not self.docs and not (self.root / "package.json").is_file() else ""
         self._check("npx", (self.npx,), npx_skip)
         self._check("legacy", (self.legacy,))
@@ -2036,6 +2038,33 @@ class Audit:
                 self.add("warn", "php.composer.eol", file,
                          f"Composer {line} is outside the supported safety baseline: " + "; ".join(reasons),
                          "use a supported Composer line at or above every safety feature floor")
+
+    def install_policy(self):
+        """Record explicit install-execution controls without judging their policy.
+        supply-chain-defense owns which packages may run scripts; this scanner only flags
+        pnpm's blanket bypass because it erases every per-package decision."""
+        workspace = read_text(self.root / "pnpm-workspace.yaml") if (self.root / "pnpm-workspace.yaml").is_file() else ""
+        npmrc = read_text(self.root / ".npmrc") if (self.root / ".npmrc").is_file() else ""
+        yarnrc = read_text(self.root / ".yarnrc.yml") if (self.root / ".yarnrc.yml").is_file() else ""
+        pnpm = obj((self.pkg or {}).get("pnpm"))
+
+        def yaml_set(name, text):
+            return bool(re.search(r"^\s*" + re.escape(name) + r"\s*:", text or "", re.M))
+
+        self.meta["install_policy"] = {
+            "minimumReleaseAge": yaml_set("minimumReleaseAge", workspace) or "minimumReleaseAge" in pnpm,
+            "allowBuilds": yaml_set("allowBuilds", workspace) or "allowBuilds" in pnpm,
+            "trustPolicy": yaml_set("trustPolicy", workspace) or "trustPolicy" in pnpm,
+            "npmrcIgnoreScripts": bool(re.search(r"^\s*ignore-scripts\s*=", npmrc or "", re.M | re.I)),
+            "yarnEnableScripts": yaml_set("enableScripts", yarnrc),
+        }
+        dangerous = bool(re.search(r"^\s*dangerouslyAllowAllBuilds\s*:\s*[\"']?true\b", workspace or "", re.M | re.I)) \
+            or pnpm.get("dangerouslyAllowAllBuilds") is True
+        if dangerous:
+            source = "pnpm-workspace.yaml" if workspace else "package.json"
+            self.add("warn", "js.install-policy", source,
+                     "pnpm dangerouslyAllowAllBuilds=true permits every dependency build script",
+                     "remove the blanket switch and list reviewed packages under allowBuilds")
 
     # ---- npx / dlx / exec ----
     def npx(self):
