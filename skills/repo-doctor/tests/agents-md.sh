@@ -149,6 +149,32 @@ echo "# Claude notes" > "$TMP/shadowed/CLAUDE.md"
 grep -q "CLAUDE.md will shadow" "$TMP/err" && ok "scaffold warns that an existing CLAUDE.md will shadow it" \
     || no "scaffold shadow warning" "$(cat "$TMP/err")"
 
+# ============================== NESTED SCAFFOLD ===============================
+# scaffold --dir drafts <folder>/AGENTS.md: a scope line, the folder's own commands in
+# the form that runs from the root, its own landmine candidates, nothing the root says.
+MO="$TMP/mono"; make_monorepo "$MO" >/dev/null 2>&1
+echo '- `npm -w packages/engine run test` runs the engine suite.' >> "$MO/AGENTS.md"
+printf '{ "name": "@fixture/tool-01", "scripts": { "build": "node b.js" } }\n' > "$MO/tools/t01/package.json"
+commit "$MO" "docs: root names the engine suite"
+OUT="$("$PY" "$AM" scaffold --repo "$MO" --dir packages/engine --json 2>/dev/null)"
+check "nested_scaffold_holds_only_deltas_and_a_scope_line" \
+      "'packages/engine/' + chr(96) + ' and below; extends the root [AGENTS.md](../../AGENTS.md).' in D['draft'] and 'npm -w packages/engine run test' not in D['draft'] and 'packages/engine/src/parse.ts' in D['draft'] and not ({l.strip() for l in D['draft'].splitlines() if len(l.strip())>=12 and not l.startswith('#')} & {l.strip() for l in open(r'$(winpath "$MO/AGENTS.md")', encoding='utf-8')}) and D['lines']<=40"
+check "nested_commands_use_workspace_form" \
+      "'npm -w packages/engine run check:deps' in D['draft'] and 'cd packages/engine' not in D['draft'] and D['workspace_form']"
+OUT="$("$PY" "$AM" scaffold --repo "$MO" --dir tools/t01 --json 2>/dev/null)"
+check "nested_commands_outside_a_workspace_say_where_to_run" \
+      "'Run from ' + chr(96) + 'tools/t01/' in D['draft'] and 'npm run build' in D['draft'] and not D['workspace_form']"
+echo "# UI notes" > "$MO/packages/ui/CLAUDE.md"
+"$PY" "$AM" scaffold --repo "$MO" --dir packages/ui 2>"$TMP/err" >/dev/null
+grep -q "packages/ui/CLAUDE.md will shadow" "$TMP/err" && ok "nested_scaffold_warns_when_claude_md_shadows" \
+    || no "nested_scaffold_warns_when_claude_md_shadows" "$(cat "$TMP/err")"
+"$PY" "$AM" scaffold --repo "$MO" --dir packages/engine --write 2>/dev/null; rc1=$?
+"$PY" "$AM" scaffold --repo "$MO" --dir packages/engine --write 2>/dev/null; rc2=$?
+[ "$rc1" -eq 0 ] && [ "$rc2" -eq 5 ] && grep -q 'and below; extends the root' "$MO/packages/engine/AGENTS.md" \
+    && ok "nested_write_creates_once_then_refuses" || no "nested_write_creates_once_then_refuses" "exits $rc1 then $rc2"
+"$PY" "$AM" scaffold --repo "$MO" --dir ../outside >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 3 ] && ok "nested_dir_outside_the_repo_exits_3" || no "nested_dir_outside_the_repo_exits_3" "exit $rc"
+
 # ============================== AUDIT =========================================
 A="$TMP/aud"; init_repo "$A"; mkdir -p "$A/web/themes/site" "$A/scripts" "$A/src"
 echo '{"name":"aud","version":"1.0.0","scripts":{"build":"node b.js","test":"node t.js"}}' > "$A/package.json"

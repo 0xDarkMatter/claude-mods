@@ -2,7 +2,7 @@
 """repo-scan - deterministic, read-only deep scan of a local checkout into sourced facts.
 
 Usage:   repo-scan.py [--repo PATH] [--only SECTIONS] [--max-commits N] [--no-tokei]
-                      [--json]
+                      [--dir FOLDER ...] [--json]
 Input:   a local directory. A git checkout gets the full scan; a plain directory skips
          history. No network. Never writes anything.
 Output:  --json: {"data": {...}, "meta": {"schema": "claude-mods.repo-doctor.repo-scan/v1",
@@ -17,6 +17,8 @@ Sections (--only takes a comma list; default: all):
   repo languages manifests ddev deploy ci tests generated areas outliers docs env history
   nesting gates architecture
   (candidates are always derived from whichever sections ran)
+  --dir FOLDER adds that folder to data.manifests_by_dir (repeatable); workspace members
+  and nesting recommendations are always in it. agents-md.py scaffold --dir uses it.
 
 Safety:  reads git-tracked files only (a plain directory: everything but vendor and
          build dirs). Never opens secret-like files (.env, auth.json, .npmrc, keys,
@@ -534,6 +536,7 @@ class Scan:
         self._marked: list[str] = []
         self._cache: dict = {}
         self.secrets_skipped: list[dict] = []
+        self.extra_dirs: list[str] = []   # --dir: more folders for manifests_by_dir
 
     def git(self, *args: str) -> str | None:
         return run(["git", "-c", "core.quotepath=false", "-C", str(self.repo), *args])
@@ -1477,6 +1480,7 @@ class Scan:
     def s_manifests_by_dir(self) -> dict:
         dirs = set(self._workspace_dirs())
         dirs.update(r["dir"] for r in self.s_nesting()["recommend"])
+        dirs.update(self.extra_dirs)
         return {d: self._manifests_at(d) for d in sorted(dirs)}
 
     def _partial_gate(self, config: str) -> dict | None:
@@ -2047,6 +2051,8 @@ def main() -> int:
     ap.add_argument("--only", default="", help="comma list of sections (default: all)")
     ap.add_argument("--max-commits", type=int, default=500, help="history window (default 500)")
     ap.add_argument("--no-tokei", action="store_true", help="count languages without tokei")
+    ap.add_argument("--dir", action="append", default=[], metavar="FOLDER",
+                    help="also read the manifests in FOLDER (repeatable)")
     ap.add_argument("--json", action="store_true", help="emit the JSON envelope")
     args = ap.parse_args()
     try:
@@ -2064,6 +2070,12 @@ def main() -> int:
         eecho(f"repo-scan: not a directory: {repo}")
         return 3
     scan = Scan(repo, args.max_commits, not args.no_tokei)
+    for d in args.dir:
+        d = d.replace("\\", "/").strip("/")
+        if not d or d.startswith("..") or not (repo / d).is_dir():
+            eecho(f"repo-scan: --dir {d!r} is not a folder inside the repo")
+            return 3
+        scan.extra_dirs.append(d + "/")
     eecho(f"repo-scan: scanning {repo.name} ({', '.join(only)})")
     data: dict = {}
     for name in only:

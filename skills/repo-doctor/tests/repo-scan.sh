@@ -181,6 +181,13 @@ check "manifests_by_dir_has_engine_scripts" \
       "{s['name'] for s in D['manifests_by_dir']['packages/engine/']['package_json']['scripts']}=={'test','check:deps'}"
 check "generated_entry_doc_detects_ruler" \
       "any(x['path']=='AGENTS.md' and x['generator']=='ruler' and x['source_of_truth']=='.ruler/' for x in D['generated_entry_docs'])"
+# --dir reads one more folder's manifests (agents-md.py scaffold --dir); a path that
+# leaves the repo is refused rather than read.
+OUT="$("$PY" "$SCAN" --repo "$M" --only manifests --dir tools/t01 --json --no-tokei 2>/dev/null)"
+check "dir_flag_adds_a_folder_to_manifests_by_dir" \
+      "D['manifests_by_dir']['tools/t01/']['package_json']['name']=='@fixture/tool-01'"
+"$PY" "$SCAN" --repo "$M" --only manifests --dir ../elsewhere --json >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 3 ] && ok "dir_outside_the_repo_exits_3" || no "dir_outside_the_repo_exits_3" "exit $rc"
 OUT="$("$PY" "$SCAN" --repo "$M" --only nesting,gates,architecture --json --no-tokei 2>/dev/null)"
 check "new_sections_are_selectable" \
       "d['meta']['sections']==['nesting','gates','architecture'] and set(D)=={'nesting','gates','architecture','secrets_skipped','candidates'}"

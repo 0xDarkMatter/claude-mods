@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """agents-md - create, audit/upgrade and survey AGENTS.md files against the protocol.
 
-Usage:   agents-md.py scaffold [--repo PATH] [--facts FILE] [--archetype A] [--write] [--json]
+Usage:   agents-md.py scaffold [--repo PATH] [--facts FILE] [--archetype A | --dir FOLDER]
+                               [--write] [--json]
          agents-md.py audit    [--repo PATH] [--facts FILE] [--diff] [--no-parents] [--json]
          agents-md.py survey   (--org OWNER | --remote OWNER/NAME) [--limit N]
                                [--include-archived] [--json]
@@ -10,14 +11,15 @@ Input:   scaffold/audit: a local checkout. Facts come from repo-scan.py (beside 
          survey: GitHub through the `gh` CLI, GET requests only.
 Output:  scaffold: the AGENTS.md draft (markdown) on stdout, or the --json envelope
            claude-mods.repo-doctor.agents-md-scaffold/v1. --write creates <repo>/AGENTS.md
-           and prints nothing.
+           and prints nothing. --dir drafts <repo>/<FOLDER>/AGENTS.md instead: a nested
+           doc holding only what the root AGENTS.md doesn't say.
          audit: a findings report, or --json (claude-mods.repo-doctor.agents-md-audit/v1).
            --diff prints ONLY a git-apply-able patch (empty when there is nothing to add).
          survey: one aligned row per repo, or --json
            (claude-mods.repo-doctor.agents-md-survey/v1).
 Stderr:  progress, summaries, legends, warnings, errors
 Exit:    0 ok (audit/survey: no warn or crit finding), 1 error (repo-scan failed),
-         2 usage, 3 repo path not found, 5 precondition (AGENTS.md already exists for
+         2 usage, 3 repo path (or --dir folder) not found, 5 precondition (AGENTS.md already exists for
          --write; gh not installed), 7 GitHub unavailable (unauthenticated, offline,
          rate-limited), 10 findings (audit: any warn/crit; survey: any repo with an issue)
 
@@ -31,6 +33,7 @@ Test hook: AGENTS_MD_GH overrides the gh executable (a .py path runs under this 
 Examples:
   agents-md.py scaffold --repo path/to/site > AGENTS.draft.md
   agents-md.py scaffold --repo path/to/site --write
+  agents-md.py scaffold --repo path/to/monorepo --dir packages/engine --write
   agents-md.py audit --repo path/to/site
   agents-md.py audit --repo path/to/site --diff > agents-md.patch && git apply agents-md.patch
   agents-md.py survey --org my-org --json | jq '.data[] | select(.shadowed)'
@@ -67,6 +70,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from datetime import date
 from pathlib import Path
 from urllib.parse import quote
@@ -91,6 +95,11 @@ LONG_LINE_CHARS = 500   # one such line costs what six or more wrapped lines do
 FRESH_COMMITS = 15      # same threshold as repo-doctor.py's entry_docs dimension
 MIN_MOVE_LINES = 10     # sections shorter than this are not worth a split move
 POINTER_CHARS = 120     # what a moved section leaves behind: heading, blank, link line, blank
+# A nested AGENTS.md is paid for by every tool that loads it, and some load them all, so
+# its budget is a fifth of the root's. repo-doctor.py's NESTED_* constants must match.
+NESTED_TARGET_LINES = 40
+NESTED_CEILING_LINES = 60
+NESTED_CEILING_CHARS = NESTED_CEILING_LINES * CHARS_PER_LINE   # 4,800
 EX_OK, EX_ERR, EX_USAGE, EX_NOTFOUND, EX_PRECOND, EX_UNAVAIL, EX_FINDINGS = 0, 1, 2, 3, 5, 7, 10
 
 # Section grammar: the first rule whose pattern matches a ## or ### heading names it.
@@ -337,7 +346,9 @@ SHADOW_MSG = {
 # === FACTS ===
 
 
-def load_facts(repo: Path, facts_file: str | None, only: str | None = None) -> dict | None:
+def load_facts(repo: Path, facts_file: str | None, only: str | None = None,
+               dirs: list[str] | None = None) -> dict | None:
+    """repo-scan facts; dirs adds folders to data.manifests_by_dir (repo-scan --dir)."""
     if facts_file:
         try:
             data = json.loads(Path(facts_file).read_text(encoding="utf-8"))
@@ -348,6 +359,8 @@ def load_facts(repo: Path, facts_file: str | None, only: str | None = None) -> d
     cmd = [sys.executable, str(SCAN), "--repo", str(repo), "--json"]
     if only:
         cmd += ["--only", only]
+    for d in dirs or []:
+        cmd += ["--dir", d]
     try:
         r = subprocess.run(cmd, capture_output=True, timeout=600, encoding="utf-8",
                            errors="replace")
@@ -478,9 +491,14 @@ def render_commands(f: dict) -> str:
     if not entries:
         return (f"- [ ] {TODO_OWNER}: no declared scripts were found. Which commands run, "
                 "test and check this repo?")
+    return "\n".join(["Every command below is declared in the repo but was not run by the generator.",
+                      f"Run each once, then delete its `{UNTESTED}` tag.", ""] + command_block(entries))
+
+
+def command_block(entries: list[tuple[str, str, str, str]]) -> list[str]:
+    """A fenced bash block, one command per line, grouped, each citing its source."""
     width = min(max(len(c[1]) for c in entries) + 2, 40)
-    lines = ["Every command below is declared in the repo but was not run by the generator.",
-             f"Run each once, then delete its `{UNTESTED}` tag.", "", "```bash"]
+    lines = ["```bash"]
     group = None
     for g, cmd, source, note in entries:
         if g != group:
@@ -492,7 +510,7 @@ def render_commands(f: dict) -> str:
         pad = cmd.ljust(width) if len(cmd) < width else cmd + "  "
         lines.append(f"{pad}# {note} ({source}) {UNTESTED}")
     lines.append("```")
-    return "\n".join(lines)
+    return lines
 
 
 def has_check(f: dict) -> bool:
@@ -740,11 +758,162 @@ def render_draft(f: dict, archetype: str) -> str:
     return tmpl
 
 
+def glob_member(d: str, glob: str) -> bool:
+    """Workspace globs match one path segment per `*`; `**` matches any depth."""
+    parts, gparts = d.strip("/").split("/"), glob.strip("/").split("/")
+    if "**" in gparts:
+        return fnmatch.fnmatchcase(d.strip("/"), glob.strip("/").replace("**", "*"))
+    return len(parts) == len(gparts) and all(fnmatch.fnmatchcase(a, b) for a, b in zip(parts, gparts))
+
+
+def workspace_runner(f: dict, d: str, pkg: dict) -> str | None:
+    """The root-runnable prefix for a workspace member's scripts, else None. npm takes
+    the folder; pnpm, yarn and bun take the member's package name."""
+    m = f.get("manifests") or {}
+    if not any(glob_member(d, g) for w in m.get("workspaces") or [] for g in w.get("globs", [])):
+        return None
+    pm = ((m.get("package_json") or {}).get("package_manager") or {}).get("name", "npm")
+    if pm == "npm":
+        return f"npm -w {d.rstrip('/')} run"
+    name = pkg.get("name")
+    return {"pnpm": f"pnpm --filter {name}", "yarn": f"yarn workspace {name}",
+            "bun": f"bun run --filter {name}"}.get(pm) if name else None
+
+
+def nested_commands(f: dict, d: str, root_text: str) -> tuple[str, list, bool]:
+    """(the Commands body, its entries, whether they run from the root). A command the
+    root already names is left out: the nested doc carries deltas only."""
+    mb = dict(((f.get("manifests_by_dir") or {}).get(d)) or {})
+    pkg = mb.get("package_json") or {}
+    prefix = workspace_runner(f, d, pkg) if pkg and not pkg.get("error") else None
+    rooted = []
+    if prefix:
+        for s in sorted(pkg.get("scripts", []), key=lambda s: _script_order(s["name"]))[:12]:
+            rooted.append(("Scripts", f"{prefix} {s['name']}", s["source"], s["command"]))
+        mb.pop("package_json")
+    tests = [t for t in f.get("tests") or [] if str(t.get("config", "")).startswith(d)]
+    local = [e for e in command_entries({"manifests": mb, "tests": tests})
+             if not (prefix and e[0] == "Dependencies")]   # a workspace installs from the root
+    rooted = [e for e in rooted if e[1] not in root_text]
+    local = [e for e in local if e[1] not in root_text]
+    if not rooted and not local:
+        return (f"- [ ] {TODO_OWNER}: which commands build and test `{d}`? Its own manifest "
+                "declares none the root doesn't already list.", [], False)
+    out = [f"Declared in `{d}`; not run by the generator.",
+           f"Run each once, then delete its `{UNTESTED}` tag."]
+    if rooted:
+        out += ["", "Run from the repo root:", ""] + command_block(rooted)
+    if local:
+        out += ["", f"Run from `{d}`:", ""] + command_block(local)
+    return "\n".join(out), rooted + local, bool(rooted)
+
+
+def render_nested(f: dict, d: str, root_rel: str | None, root_text: str) -> tuple[str, dict]:
+    """The nested draft and its --json extras. d ends in "/"."""
+    tmpl = (TEMPLATES / "nested.md").read_text(encoding="utf-8")
+    tmpl = re.sub(r"(?s)\A\s*<!--.*?-->\s*", "", tmpl, count=1)
+    mb = (f.get("manifests_by_dir") or {}).get(d) or {}
+    pkg = mb.get("package_json") or {}
+    rec = next((r for r in (f.get("nesting") or {}).get("recommend") or [] if r["dir"] == d), None)
+    why = ("repo-scan recommends this folder: " + ", ".join(f"{s['kind']} ({s['detail']})" for s in rec["signals"])
+           if rec else "repo-scan does not recommend nesting here; confirm the folder has its own contract")
+    note = "\n".join([f"<!-- {DRAFT_MARK} agents-md.py scaffold --dir from repo-scan facts."]
+                     + textwrap.wrap(why + ".", 84, initial_indent="     ", subsequent_indent="     ")
+                     + [f"     Before committing: answer or delete each {TODO_OWNER}, run each command once",
+                        f"     and drop its {UNTESTED} tag, then delete this comment. -->"])
+    depth = d.count("/")
+    scope = f"Applies to `{d}` and below" + (
+        f"; extends the root [AGENTS.md]({'../' * depth}{root_rel})." if root_rel else ".")
+    desc = next(((v.get("description"), v.get("path")) for v in (mb.get(k) or {} for k in
+                 ("package_json", "composer_json", "python")) if isinstance(v.get("description"), str)
+                 and v["description"].strip()), None)
+    overview = (f"{str(desc[0]).strip()} (description from `{desc[1]}`)" if desc else
+                f"{TODO_OWNER}: one line on what `{d}` is for, beyond what the root says.")
+    commands, entries, rooted = nested_commands(f, d, root_text)
+    cands = [c for c in f.get("candidates") or [] if c.get("paths") and c["kind"] != "workspaces"
+             and all(x.startswith(d) for x in c["paths"])]
+    cands = uncovered_candidates(root_text, cands)
+    lm = [f"- [ ] {TODO_OWNER}: {c['question']} Evidence: "
+          f"{', '.join(dict.fromkeys(cite(e) for e in c['evidence'][:3]))}." for c in cands[:8]]
+    landmines = "\n".join(lm) if lm else (
+        f"- [ ] {TODO_OWNER}: what breaks non-obviously in `{d}` that the root's Landmines don't "
+        "cover? Delete this section if nothing does.")
+    title = pkg.get("name") or d.rstrip("/")
+    for k, v in {"TITLE": title, "DRAFT_NOTE": note, "SCOPE": scope, "OVERVIEW": overview,
+                 "COMMANDS": commands, "LANDMINES": landmines}.items():
+        tmpl = tmpl.replace("{{" + k + "}}", v)
+    # Deltas only: a line the root already carries word for word is dropped (headings,
+    # fences and short lines stay, since they repeat by nature).
+    root_lines = {l.strip() for l in root_text.splitlines()}
+    keep = [l for l in tmpl.splitlines() if len(l.strip()) < 12 or l.lstrip().startswith(("#", "```"))
+            or l.strip() not in root_lines]
+    draft = re.sub(r"\n{3,}", "\n\n", "\n".join(keep)).strip() + "\n"
+    return draft, {"workspace_form": rooted, "signals": rec["signals"] if rec else [],
+                   "commands": [{"group": g, "command": c, "source": s, "note": n} for g, c, s, n in entries],
+                   "candidates": cands}
+
+
+def create_file(dest: Path, text: str) -> int:
+    """Create dest (tmp + rename), never overwrite: EX_OK, or EX_PRECOND on a lost race."""
+    fd, tmp = tempfile.mkstemp(dir=str(dest.parent), prefix=f".{dest.name}.", suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
+    if dest.exists():   # lost a race: someone created it meanwhile
+        os.unlink(tmp)
+        eecho(f"agents-md: {dest} appeared during the scaffold; not overwritten")
+        return EX_PRECOND
+    os.replace(tmp, dest)
+    eecho(f"agents-md: created {dest}")
+    return EX_OK
+
+
+def scaffold_nested(args, repo: Path) -> int:
+    d = args.dir.replace("\\", "/").strip("/")
+    if not d or ".." in d.split("/") or not (repo / d).is_dir():
+        eecho(f"agents-md: --dir {args.dir!r} is not a folder inside {repo}")
+        return EX_NOTFOUND
+    d += "/"
+    dest = repo / d / "AGENTS.md"
+    if args.write and dest.exists():
+        eecho(f"agents-md: {dest} already exists; scaffold never overwrites. Upgrade it with audit --diff")
+        return EX_PRECOND
+    f = load_facts(repo, args.facts, None, [d])
+    if f is None:
+        return EX_ERR
+    root_rel = next((r for r in ("AGENTS.md", ".claude/AGENTS.md") if (repo / r).is_file()), None)
+    root_text = read_raw(repo / root_rel) if root_rel else ""
+    if not root_rel:
+        eecho("agents-md: the repo has no root AGENTS.md; write that first (a nested doc holds deltas only)")
+    draft, extra = render_nested(f, d, root_rel, root_text)
+    n, chars = draft.count("\n"), len(draft)
+    eecho(f"agents-md: nested draft for {d}, {n} lines, {draft.count(TODO_OWNER)} {TODO_OWNER} question(s)")
+    if n > NESTED_CEILING_LINES or chars > NESTED_CEILING_CHARS:
+        eecho(f"agents-md: over the nested ceiling ({NESTED_CEILING_LINES} lines / {NESTED_CEILING_CHARS:,} "
+              "characters): move detail to a linked doc")
+    elif n > NESTED_TARGET_LINES:
+        eecho(f"agents-md: over the {NESTED_TARGET_LINES}-line nested target; prune before committing")
+    for name in CLAUDE_FILES:
+        p = repo / d / name
+        if p.exists() and not p.is_symlink() and classify_claude(read_raw(p), name) != "imports":
+            eecho(f"agents-md: {d}{name} will shadow {d}AGENTS.md in Claude Code; add "
+                  f"`{import_line(name)}` to it")
+    if args.write:
+        return create_file(dest, draft)
+    if args.json:
+        emit_json({"data": {"dir": d, "lines": n, "chars": chars, "owner_questions": draft.count(TODO_OWNER),
+                            **extra, "draft": draft}, "meta": {"schema": SCHEMA_SCAFFOLD}})
+    else:
+        sys.stdout.write(draft)
+    return EX_OK
+
+
 def cmd_scaffold(args) -> int:
     repo = Path(args.repo).resolve()
     if not repo.is_dir():
         eecho(f"agents-md: not a directory: {repo}")
         return EX_NOTFOUND
+    if args.dir:
+        return scaffold_nested(args, repo)
     if args.write and (repo / "AGENTS.md").exists():
         eecho(f"agents-md: {repo / 'AGENTS.md'} already exists; scaffold never overwrites "
               "(an owner's landmines live there). Upgrade it instead: agents-md.py audit --diff")
@@ -767,17 +936,7 @@ def cmd_scaffold(args) -> int:
                 eecho(f"agents-md: {name} will shadow the new AGENTS.md; add `{import_line(name)}` "
                       "to it (agents-md.py audit --diff proposes this)")
     if args.write:
-        dest = repo / "AGENTS.md"
-        fd, tmp = tempfile.mkstemp(dir=str(repo), prefix=".AGENTS.md.", suffix=".tmp")
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(draft)
-        if dest.exists():   # lost a race: someone created it meanwhile
-            os.unlink(tmp)
-            eecho(f"agents-md: {dest} appeared during the scaffold; not overwritten")
-            return EX_PRECOND
-        os.replace(tmp, dest)
-        eecho(f"agents-md: created {dest}")
-        return EX_OK
+        return create_file(repo / "AGENTS.md", draft)
     if args.json:
         emit_json({"data": {"archetype": arch, "lines": n, "owner_questions": draft.count(TODO_OWNER),
                             "commands": [{"group": g, "command": c, "source": s, "note": t}
@@ -1217,8 +1376,7 @@ def uncovered_candidates(text: str, cands: list[dict]) -> list[dict]:
     def named(path: str) -> bool:
         p = re.escape(path.rstrip("/"))
         return re.search(r"(?<![\w./-])" + p + r"(?![\w-])", text) is not None
-    return [{"kind": c["kind"], "question": c["question"], "paths": c["paths"]}
-            for c in cands if c.get("paths") and not any(named(p) for p in c["paths"])]
+    return [c for c in cands if c.get("paths") and not any(named(p) for p in c["paths"])]
 
 
 def cmd_audit(args) -> int:
@@ -1623,7 +1781,8 @@ def main() -> int:
     sp.add_argument("--facts", help="saved `repo-scan.py --json` output")
     sp.add_argument("--archetype", default="auto",
                     choices=["auto", "php-cms", "node-app", "python-service", "static-site", "generic"])
-    sp.add_argument("--write", action="store_true", help="create <repo>/AGENTS.md (never overwrites)")
+    sp.add_argument("--dir", help="draft a nested <FOLDER>/AGENTS.md (deltas from the root only)")
+    sp.add_argument("--write", action="store_true", help="create the AGENTS.md (never overwrites)")
     sp.add_argument("--json", action="store_true")
     ap_a = sub.add_parser("audit", help="audit an AGENTS.md; --diff proposes an upgrade patch")
     ap_a.add_argument("--repo", default=".")
@@ -1644,6 +1803,9 @@ def main() -> int:
         return EX_USAGE
     if args.cmd == "audit" and args.diff and args.json:
         eecho("agents-md: --diff and --json are mutually exclusive (--json already carries data.diff)")
+        return EX_USAGE
+    if args.cmd == "scaffold" and args.dir and args.archetype != "auto":
+        eecho("agents-md: --archetype shapes the root draft; a --dir draft has one shape")
         return EX_USAGE
     if args.cmd == "survey" and args.limit < 1:
         eecho("agents-md: --limit must be >= 1")
