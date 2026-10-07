@@ -1918,6 +1918,8 @@ class Audit:
         elif isinstance(lock, dict):
             floors = []
             for path, package in obj(lock.get("packages")).items():
+                if not path:
+                    continue  # the root's engines is a declared pin, not a dependency floor
                 spec = obj(package).get("engines")
                 spec = obj(spec).get("node") if isinstance(spec, dict) else None
                 floor = range_floor(str(spec), "npm") if spec else None
@@ -2308,6 +2310,11 @@ class Audit:
         """Lockfile source/integrity shape checks only. supply-chain-defense owns whether
         a syntactically plausible registry artifact is trustworthy or malicious."""
         problems = []
+        # A lockfile conflict means no single resolved tree is authoritative. The conflict
+        # finding names the live manager when CI proves it; source-shape diagnostics wait
+        # until the unused lock is removed, avoiding findings from deliberately stale data.
+        if sum((self.root / name).is_file() for name in JS_LOCKFILES) > 1:
+            return
 
         def inspect(name, resolved, integrity, file):
             resolved, integrity = str(resolved or ""), str(integrity or "")
