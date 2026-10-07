@@ -18,6 +18,7 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   js.lockfile.conflict  js.lockfile.missing  js.lockfile.stale  js.lockfile.v1
   js.lockfile.shrinkwrap  js.pnpm.field-ignored
   js.dep.non-registry
+  js.dep.paired-drift
   js.engine.floor
   js.root.not-private
   js.packagemanager.mismatch  js.node.unpinned  js.node.eol  js.node.eol-soon  node.pin.disagree
@@ -1249,7 +1250,7 @@ class Audit:
         # Deploy stays first because js.lockfile asks which manager CI actually installs.
         self._check("deploy", (self.deploy,), "" if self._has_deploy_inputs() else "no CI or deploy files")
         has_js = (self.root / "package.json").is_file() or any((self.root / n).is_file() for n in JS_LOCKFILES)
-        self._check("js.lockfile", (self.js, self.nested), "" if has_js else "no package.json or JS lockfile")
+        self._check("js.lockfile", (self.js, self.nested, self.paired_drift), "" if has_js else "no package.json or JS lockfile")
         self._check("node.pins", (self.node_pins,), "" if (self.root / "package.json").is_file() else "no package.json")
         self._check("php", (self.php,), "" if (self.root / "composer.json").is_file() else "no composer.json")
         has_floors = any((self.root / n).is_file() for n in ("package-lock.json", "npm-shrinkwrap.json", "composer.lock"))
@@ -2207,6 +2208,65 @@ class Audit:
                      f"the root uses {', '.join(sorted(base))} but nested packages use another manager: "
                      + ", ".join(f"{p} [{m}]" for p, m in odd[:6]),
                      "one manager per repo: convert the odd ones out (references/detect-and-choose.md)")
+
+    def paired_drift(self):
+        """Coupled package versions at one root, then exact-version drift across roots.
+        Lockfile versions win over manifest specs because these checks describe what the
+        frozen install actually places, not what a later update might select."""
+
+        def root_versions(directory):
+            base = self.root / directory
+            pkg = read_json(base / "package.json") if (base / "package.json").is_file() else None
+            declared = {str(name) for section in DEP_TYPES for name in obj(obj(pkg).get(section))}
+            versions = {}
+            lock = read_json(base / "package-lock.json") if (base / "package-lock.json").is_file() else None
+            for key, row in obj(obj(lock).get("packages")).items():
+                if not key.startswith("node_modules/") or "/node_modules/" in key:
+                    continue
+                name = key[len("node_modules/"):]
+                m = re.match(r"^v?(\d+)\.(\d+)\.(\d+)", str(obj(row).get("version") or ""))
+                if name in declared and m:
+                    versions[name] = tuple(int(x) for x in m.groups())
+            for name in declared - set(versions):
+                spec = next((str(obj(obj(pkg).get(section)).get(name)) for section in DEP_TYPES
+                             if name in obj(obj(pkg).get(section))), "")
+                m = re.match(r"^v?(\d+)\.(\d+)\.(\d+)$", spec)
+                if m:
+                    versions[name] = tuple(int(x) for x in m.groups())
+            return versions
+
+        root = root_versions(Path())
+        problems = []
+
+        def compare(base, partners, width):
+            if base not in root:
+                return
+            left = root[base][:width]
+            for name in sorted(partners):
+                if name in root and root[name][:width] != left:
+                    problems.append(f"{base} {'.'.join(map(str, root[base]))} vs {name} {'.'.join(map(str, root[name]))}")
+
+        vue = root.get("vue")
+        if vue:
+            compare("vue", {"vue-template-compiler" if vue[0] == 2 else "@vue/compiler-sfc"}, 2)
+        compare("vite", {n for n in root if n.startswith("@vitejs/")}, 1)
+        compare("tailwindcss", {n for n in root if n.startswith("@tailwindcss/")}, 1)
+
+        roots = {Path()}
+        for lock in self.meta.get("nested_lockfiles", []):
+            roots.add(Path(lock).parent)
+        seen = {}
+        for directory in sorted(roots, key=lambda p: p.as_posix()):
+            for name, version in root_versions(directory).items():
+                seen.setdefault(name, []).append((directory.as_posix() or ".", version))
+        for name, rows in sorted(seen.items()):
+            if len({version for _path, version in rows}) > 1:
+                problems.append(f"{name} drifts across roots: " + ", ".join(
+                    f"{path}={'.'.join(map(str, version))}" for path, version in rows))
+        if problems:
+            self.add("warn", "js.dep.paired-drift", "package-lock.json",
+                     "; ".join(problems[:8]),
+                     "upgrade coupled packages together and align shared dependencies across package roots")
 
     # ---- CI and deploy: frozen installs, --no-dev, Composer 1, credentials in images ----
     def deploy(self):

@@ -74,6 +74,7 @@ workflow, job or step scope (or an earlier Dockerfile `ENV`) satisfy the same ru
 | `js.lockfile.shrinkwrap` | warn | only `npm-shrinkwrap.json`, which npm 12 ignores | [detect-and-choose.md](detect-and-choose.md#lockfile-to-manager) |
 | `js.pnpm.field-ignored` | warn | a `pnpm` field pnpm 11+ no longer reads | [scripts-and-workspaces.md](scripts-and-workspaces.md#pnpm-settings-moved-to-pnpm-workspaceyaml) |
 | `js.dep.non-registry` | warn | package.json points a dependency at git/GitHub, a local file/link, or a direct HTTP(S) tarball rather than the configured registry | [registries-and-auth.md](registries-and-auth.md) |
+| `js.dep.paired-drift` | warn | Vue/compiler, Vite/@vitejs or Tailwind/@tailwindcss installed versions disagree, or the same direct dependency resolves differently across nested package roots | [upgrades.md](upgrades.md#duplicate-versions) |
 | `js.engine.floor` | warn | the strictest dependency `engines.node` floor in package-lock v2/v3 is above a literal production Node pin | [version-pinning.md](version-pinning.md#the-recommended-node-pin-set) |
 | `js.root.not-private` | warn | a root package with dependencies is not private and has no conservative publication signal (`files`, `publishConfig`, exports/main, scoped name, or a non-default version) | [detect-and-choose.md](detect-and-choose.md) |
 | `js.packagemanager.mismatch` | error | `packageManager` names a manager (or Yarn flavour) the lockfile is not from | [detect-and-choose.md](detect-and-choose.md#declaring-the-manager-packagemanager-corepack-devengines) |
