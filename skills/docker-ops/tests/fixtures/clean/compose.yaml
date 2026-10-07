@@ -1,0 +1,32 @@
+# Fixture: a Compose file docker-audit.py must find nothing wrong with (false-positive guard).
+services:
+  web:
+    build: .
+    image: ghcr.io/example/web:dev
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET}
+      NODE_ENV: production
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [backend]
+  db:
+    image: postgres:17.6-bookworm
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    networks: [backend]
+networks:
+  backend:
+volumes:
+  dbdata:
+secrets:
+  db_password:
+    file: ./db_password.txt

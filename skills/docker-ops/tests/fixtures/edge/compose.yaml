@@ -1,0 +1,34 @@
+# Fixture: YAML shapes the Compose reader must handle, and Compose-side pragmas.
+x-env: &env
+  LOG_LEVEL: info
+services:
+  api:
+    image: "ghcr.io/example/api:1.0"   # a trailing comment
+    command: >
+      sh -c "echo hello # not a comment
+      && sleep 1"
+    environment:
+      <<: *env
+      GITHUB_TOKEN: "${GITHUB_TOKEN}"
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-sk_fixture_default}
+    ports:
+      - target: 8080
+        published: 8080
+        host_ip: 127.0.0.1
+      - target: 9229
+        published: 9229
+      - "[::1]:9000:9000"
+      - "9230:9230"  # docker-audit ignore=port-all-interfaces reason="the debugger is reached through the VPN"
+    labels: {traefik.enable: "true", "traefik.http.routers.api.rule": "Host(`api.localhost`)"}
+    volumes:
+      # docker-audit ignore=host-escape reason="the fixture's sidecar needs the socket"
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+      - type: volume
+        source: cache
+        target: /cache
+    healthcheck:
+      test: ["CMD", "/app", "healthz"]
+volumes:
+  cache: {}
