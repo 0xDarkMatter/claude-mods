@@ -645,6 +645,15 @@ repo("wide", {"AGENTS.md": (good + "\n" + "long line " * 1700 + "\n", F)})
 repo("local", {"AGENTS.md": (good, F), "CLAUDE.local.md": ("mine\n", F)})
 repo("empty", {}, branch=None)
 repo("old", {"AGENTS.md": (good, F)}, archived=True)
+# Monorepos: workspaces declared in package.json. "flat" has no nested docs and a root over
+# its 150-line target; "mono" covers one of its two packages and has an ARCHITECTURE.md.
+ws = '{"name": "m", "private": true, "workspaces": ["packages/*"]}'
+pkg = lambda n: ('{"name": "%s"}' % n, F)
+repo("flat", {"AGENTS.md": (good + "".join(f"\nnote {i}" for i in range(140)), F), "package.json": (ws, F),
+              "packages/a/package.json": pkg("a"), "packages/b/package.json": pkg("b")})
+repo("mono", {"AGENTS.md": (good, F), "package.json": (ws, F), "ARCHITECTURE.md": ("# Architecture\n", F),
+              "packages/a/package.json": pkg("a"), "packages/a/AGENTS.md": ("# A\n\nApplies to `packages/a/`.\n", F),
+              "packages/b/package.json": pkg("b")})
 api["repos/acme/good"] = {"default_branch": "main"}
 json.dump({"repos": {"acme": repos}, "api": api}, open(sys.argv[1], "w"))
 EOF
@@ -653,15 +662,21 @@ export AGENTS_MD_GH FAKE_GH_FIXTURE FAKE_GH_LOG
 AGENTS_MD_GH="$(winpath "$HERE/fake-gh.py")"; FAKE_GH_FIXTURE="$(winpath "$FX")"; FAKE_GH_LOG="$(winpath "$LOG")"
 OUT="$(cd "$EMPTY" && "$PY" "$AM" survey --org acme --json 2>/dev/null)"; rc=$?
 check "survey envelope and repo count (archived excluded)" \
-      "d['meta']['schema']=='claude-mods.repo-doctor.agents-md-survey/v1' and d['meta']['repos']==10"
+      "d['meta']['schema']=='claude-mods.repo-doctor.agents-md-survey/v1' and d['meta']['repos']==12"
 check "per-repo status" \
-      "{r['repo'].split('/')[1]:r['status'] for r in D}=={'good':'ok','shadow':'shadowed','imports':'ok','symlink':'ok','none':'missing','claudeonly':'claude-only','big':'over-200,stale','wide':'over-size','local':'shadowed,claude-local-committed','empty':'empty'}"
+      "{r['repo'].split('/')[1]:r['status'] for r in D}=={'good':'ok','shadow':'shadowed','imports':'ok','symlink':'ok','none':'missing','claudeonly':'claude-only','big':'over-200,stale','wide':'over-size','local':'shadowed,claude-local-committed','empty':'empty','flat':'flat-monorepo','mono':'ok'}"
 check "line count, staleness and coverage reported" \
       "[(r['lines'],r['commits_since'],r['coverage']) for r in D if r['repo']=='acme/good']==[(24,2,'OCL-SV')]"
 check "the survey reports size and flags a short file that is too wide" \
       "[(r['lines'] < 200, r['chars'] > 16000) for r in D if r['repo']=='acme/wide']==[(True,True)]"
 check "roll-up counts" \
-      "(d['meta']['agents_md_only'],d['meta']['claude_md_only'],d['meta']['both'],d['meta']['neither'],d['meta']['shadowed'],d['meta']['over_size'])==(3,1,4,1,2,1)"
+      "(d['meta']['agents_md_only'],d['meta']['claude_md_only'],d['meta']['both'],d['meta']['neither'],d['meta']['shadowed'],d['meta']['over_size'])==(5,1,4,1,2,1)"
+check "survey_flags_flat_monorepo" \
+      "{r['repo'].split('/')[1]:(r['nested_coverage'],r['architecture_md']) for r in D if r['repo'] in ('acme/flat','acme/mono')}=={'flat':('0/2',None),'mono':('1/2','ARCHITECTURE.md')} and d['meta']['flat_monorepo']==1"
+# The roll-up is the share at the bar (no issue at all) and the five weakest active repos,
+# never an average: an average hides the worst repos.
+check "survey_reports_share_at_bar" \
+      "(d['meta']['at_bar'],d['meta']['active'])==(4,11) and d['meta']['weakest']==['acme/local','acme/claudeonly','acme/none','acme/shadow','acme/big']"
 [ "$rc" -eq 10 ] && ok "survey with issues exits 10" || no "survey exit" "$rc"
 "$PY" - "$LOG" <<'EOF' && ok "survey calls are GET-only (repo list + api, no write flags)" || no "GET-only" "a write-capable call was made"
 import json, sys
@@ -672,7 +687,7 @@ EOF
 [ -z "$(ls -A "$EMPTY")" ] && ok "survey writes nothing (cwd still empty)" || no "no writes" "$(ls -A "$EMPTY")"
 TABLE="$(cd "$EMPTY" && "$PY" "$AM" survey --org acme 2>/dev/null)"
 printf '%s' "$TABLE" | head -1 | grep -q '^REPO .*AGENTS.*CLAUDE.*SHADOW.*LINES.*SINCE.*COVER.*STATUS' \
-    && [ "$(printf '%s\n' "$TABLE" | wc -l)" -eq 11 ] && ok "table: header plus one row per repo" || no "table" "$TABLE"
+    && [ "$(printf '%s\n' "$TABLE" | wc -l)" -eq 13 ] && ok "table: header plus one row per repo" || no "table" "$TABLE"
 OUT="$("$PY" "$AM" survey --remote acme/good --json 2>/dev/null)"; rc=$?
 check "--remote surveys one repo" "len(D)==1 and D[0]['status']=='ok'"
 [ "$rc" -eq 0 ] && ok "a clean single-repo survey exits 0" || no "remote exit" "$rc"

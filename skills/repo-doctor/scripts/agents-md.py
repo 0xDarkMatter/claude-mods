@@ -2395,10 +2395,33 @@ def blob_text(base: list[str], full: str, sha: str) -> str | None:
         return None
 
 
+# How much each survey issue weighs when ranking the weakest repos. A missing or
+# shadowed entry doc is worst: agents enter blind. The roll-up reports the share at the
+# bar and the five weakest, never an average, because an average hides the worst repos.
+ISSUE_WEIGHT = {"missing": 5, "claude-only": 5, "shadowed": 4, "claude-local-committed": 4, "incomplete": 3,
+                "unreadable": 3, "draft": 2, "over-200": 2, "over-size": 2, "flat-monorepo": 2, "stale": 1}
+
+
+def survey_workspaces(base: list[str], full: str, entries: dict) -> list[str]:
+    """Workspace globs from package.json `workspaces` (one more GET) or pnpm-workspace.yaml."""
+    globs: list[str] = []
+    if "package.json" in entries:
+        try:
+            ws = json.loads(blob_text(base, full, entries["package.json"]["sha"]) or "{}").get("workspaces")
+        except (ValueError, AttributeError):
+            ws = None
+        globs += ws if isinstance(ws, list) else (ws or {}).get("packages", []) if isinstance(ws, dict) else []
+    if "pnpm-workspace.yaml" in entries:
+        text = blob_text(base, full, entries["pnpm-workspace.yaml"]["sha"]) or ""
+        globs += [m.strip("'\"") for m in re.findall(r"(?m)^\s*-\s*(\S+)", text) if not m.startswith("!")]
+    return [g for g in globs if isinstance(g, str)]
+
+
 def survey_repo(base: list[str], full: str, branch: str | None) -> dict:
     row: dict = {"repo": full, "default_branch": branch, "agents_md": False, "claude_md": [],
                  "shadowed": False, "lines": None, "chars": None, "commits_since": None, "coverage": None,
-                 "sections": None, "nested_agents_md": 0, "issues": [], "status": "ok"}
+                 "sections": None, "nested_agents_md": 0, "nested_coverage": None, "architecture_md": None,
+                 "issues": [], "status": "ok"}
     if not branch:
         row.update(status="empty", issues=[])
         return row
@@ -2412,6 +2435,12 @@ def survey_repo(base: list[str], full: str, branch: str | None) -> dict:
     row["agents_md"] = rel is not None
     row["nested_agents_md"] = sum(1 for p in entries if p.endswith("/AGENTS.md") and not p.startswith(".claude/")
                                   and not re.search(r"(^|/)(node_modules|vendor)/", p))
+    row["architecture_md"] = next((a for a in ARCH_FILES if a in entries), None)
+    globs = survey_workspaces(base, full, entries)
+    members = sorted({p[:-len("/package.json")] for p in entries if p.endswith("/package.json")
+                      and any(glob_member(p[:-len("/package.json")], g) for g in globs)})
+    if members:
+        row["nested_coverage"] = f"{sum(1 for m in members if m + '/AGENTS.md' in entries)}/{len(members)}"
     kinds = {}
     for name in CLAUDE_FILES:
         e = entries.get(name)
@@ -2435,6 +2464,8 @@ def survey_repo(base: list[str], full: str, branch: str | None) -> dict:
                 issues.append("over-size")   # under 200 lines, but long lines make it as costly
             if not (an["sections"]["commands"] and an["sections"]["landmines"]):
                 issues.append("incomplete")
+            if members and not row["nested_agents_md"] and (an["lines"] > TARGET_LINES or an["chars"] > TARGET_CHARS):
+                issues.append("flat-monorepo")   # workspaces, a root past its target, nothing nested
             if an["owner_todos"] or an["draft_header"]:
                 issues.append("draft")
         commits = gh_api(base, f"repos/{full}/commits?sha={quote(branch, safe='')}&path={quote(rel)}&per_page=1")
@@ -2513,24 +2544,37 @@ def cmd_survey(args) -> int:
             "stale": sum(1 for r in rows if "stale" in r["issues"]),
             "incomplete": sum(1 for r in rows if "incomplete" in r["issues"]),
             "unreadable": sum(1 for r in rows if r["status"] == "unreadable"),
-            "empty": sum(1 for r in rows if r["status"] == "empty")}
+            "empty": sum(1 for r in rows if r["status"] == "empty"),
+            "flat_monorepo": sum(1 for r in rows if "flat-monorepo" in r["issues"]),
+            "architecture_md": sum(1 for r in rows if r["architecture_md"])}
+    active = [r for r in rows if r["status"] != "empty"]
+    meta["active"] = len(active)
+    meta["at_bar"] = sum(1 for r in active if not r["issues"])
+    meta["at_bar_share"] = round(meta["at_bar"] / len(active), 3) if active else None
+    meta["weakest"] = [r["repo"] for r in sorted((r for r in active if r["issues"]), key=lambda r: (
+        -sum(ISSUE_WEIGHT.get(i, 1) for i in r["issues"]), r["repo"]))[:5]]
     if args.json:
         emit_json({"data": rows, "meta": meta})
     else:
         width = max([len(r["repo"]) for r in rows] + [4])
-        print(f"{'REPO'.ljust(width)}  AGENTS  CLAUDE  SHADOW  LINES     KB  SINCE  COVER   STATUS")
+        print(f"{'REPO'.ljust(width)}  AGENTS  CLAUDE  SHADOW  LINES     KB  SINCE  COVER   NEST  ARCH  STATUS")
         for r in rows:
             claude = "+".join("L" if c["path"] == "CLAUDE.local.md" else "C" for c in r["claude_md"]) or "-"
             kb = f"{r['chars'] / 1000:.1f}" if r["chars"] else "-"
             print(f"{r['repo'].ljust(width)}  {'yes' if r['agents_md'] else '-':<6}  {claude:<6}  "
                   f"{'YES' if r['shadowed'] else '-':<6}  {str(r['lines'] or '-'):>5}  {kb:>5}  "
                   f"{str(r['commits_since'] if r['commits_since'] is not None else '-'):>5}  "
-                  f"{r['coverage'] or '-':<6}  {r['status']}")
+                  f"{r['coverage'] or '-':<6}  {r['nested_coverage'] or str(r['nested_agents_md'] or '-'):>4}  "
+                  f"{'yes' if r['architecture_md'] else '-':<4}  {r['status']}")
         eecho("coverage letters: O overview, C commands, L landmines, D deploy, S structure, V conventions")
         eecho(f"summary: {meta['repos']} repos, {meta['agents_md_only']} AGENTS.md only, "
               f"{meta['claude_md_only']} CLAUDE.md only, {meta['both']} both, {meta['neither']} neither, "
               f"{meta['shadowed']} shadowed, {meta['over_200_lines']} over 200 lines, "
-              f"{meta['over_size']} over 16 KB in fewer lines, {meta['stale']} stale")
+              f"{meta['over_size']} over 16 KB in fewer lines, {meta['stale']} stale, "
+              f"{meta['flat_monorepo']} flat monorepo(s)")
+        if active:
+            eecho(f"at the bar: {meta['at_bar']}/{meta['active']} active repos ({meta['at_bar_share']:.0%}); "
+                  f"weakest: {', '.join(meta['weakest']) or 'none'}")
     flagged = any(r["issues"] and r["status"] != "empty" for r in rows)
     return EX_FINDINGS if flagged else EX_OK
 
