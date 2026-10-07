@@ -103,6 +103,36 @@ check "landmine candidates cover every planted pattern" \
       "{c['kind'] for c in D['candidates']}>={'tracked-secret','deploy','generated','coupling','config-followup','fragile','ddev-hook','hotspot','outlier'}"
 check "every candidate is phrased as a question" "all(c['question'].rstrip().endswith('?') for c in D['candidates'])"
 
+# ---- dotfile paths -----------------------------------------------------------
+# str.lstrip("./") strips every leading '.' and '/', not a "./" prefix: it once read
+# .deploy/hook.sh as deploy/hook.sh and cut .output/ off the config that declares it.
+T="$TMP/dotted"; init_repo "$T"; mkdir -p "$T/.deploy" "$T/scripts" "$T/.output/public"
+cat > "$T/appspec.yml" <<'EOF'
+version: 0.0
+os: linux
+hooks:
+  AfterInstall:
+    - location: .deploy/hook.sh
+  ApplicationStart:
+    - location: ./scripts/start.sh
+EOF
+printf '#!/bin/bash\nphp craft up\n' > "$T/.deploy/hook.sh"
+printf '#!/bin/bash\nphp craft queue/run\n' > "$T/scripts/start.sh"
+cat > "$T/vite.config.js" <<'EOF'
+export default {
+  build: { outDir: './.output/public' },
+}
+EOF
+echo "console.log(1)" > "$T/.output/public/app.js"
+commit "$T" "feat: dotted paths"
+OUT="$("$PY" "$SCAN" --repo "$T" --only deploy,generated --json 2>/dev/null)"
+check "an appspec hook in a dot-directory follows into its tracked script" \
+      "[(h['script_exists'],[c['source'] for c in h['commands']]) for h in D['deploy']['appspec']['hooks'] if h['location']=='.deploy/hook.sh']==[(True,['.deploy/hook.sh:2'])]"
+check "  ...while a ./-prefixed hook location still resolves" \
+      "[h['script_exists'] for h in D['deploy']['appspec']['hooks'] if h['location']=='./scripts/start.sh']==[True]"
+check "a dot-directory build output keeps the config that declares it" \
+      "[g.get('declared_by') for g in D['generated']['tracked'] if g['path']=='.output/']==['vite.config.js:2']"
+
 # ---- candidate noise, test suites, repo name ----------------------------------
 # Each pattern below once raised a landmine question an owner had to delete by hand
 # (dogfood on this repo, 2026-10-06), or hid a fact the draft needed.

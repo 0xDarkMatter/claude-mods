@@ -308,6 +308,16 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **repo-scan keeps the leading dot on appspec hooks and build outputs** - `repo-scan.py`
+  normalised two paths with `str.lstrip("./")`, which strips every leading `.` and `/`
+  rather than a `./` prefix. A CodeDeploy hook at `.deploy/hook.sh` was looked up as
+  `deploy/hook.sh`, so its `script_exists` read false and its commands were never
+  followed, and a Vite `outDir: './.output/public'` became `output/public`, so the
+  tracked `.output/` lost the config that declares it. Both paths now go through
+  `posixpath.normpath`, which drops `./` and keeps the dot. Three assertions in
+  `repo-doctor/tests/repo-scan.sh`: the two dotfile cases, seen failing on the old code,
+  and a `./`-prefixed hook, seen failing against a fix that dropped the `./` handling.
+
 - **Test gates no longer pass when a process-substitution producer dies** - a
   `while read ...; done < <(producer)` loop never sees the producer's exit status, so a
   producer that crashed part-way just ended the loop early and the suite passed on
