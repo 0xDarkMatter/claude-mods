@@ -266,6 +266,47 @@ feature releases live in the README "Recent Updates" section.
   craftcms-ops, web-perf-ops, frontend-upgrade-ops) are clean; the rest get their
   lists when next touched.
 
+- **Nested AGENTS.md, ARCHITECTURE.md and per-tool loading in `repo-doctor`** - the
+  AGENTS.md tools now cover a large repo's whole set of entry docs
+  (`docs/plans/NESTED-ENTRY-DOCS-2026-10.md`). `repo-scan.py` adds three sections:
+  - `nesting`: which folders have a contract of their own. Contract signals, never size;
+    one doc for a farm; never a parent for its child's contract.
+  - `gates`: dependency-cruiser, import-linter, tach, eslint boundaries, Nx, ArchUnit,
+    deptrac, Go `internal/` and check scripts, each with its scope and whether `check`
+    runs it.
+  - `architecture`: whether a codemap is warranted, the layout fingerprint, and the entry
+    points.
+
+  `agents-md.py` adds:
+  - `scaffold --dir` (a nested draft that holds only deltas, with the commands in their
+    root-runnable workspace form)
+  - `scaffold --architecture` (matklad's shape: entry points and codemap named, never
+    linked, then a layout fingerprint)
+  - `explain <folder>`: what each of nine tool profiles loads there, in order, with
+    reasons and sizes. The profiles are source-cited facts in
+    `assets/agents-md/tool-profiles.json`, checked by `check-tool-profiles.py --live`.
+
+  The audit now:
+  - checks every nested doc against its own folder: budget, root pointer, scope line,
+    commands against its own manifest, staleness in its own commits
+  - routes each landmine candidate to the doc that owns its files
+  - checks ARCHITECTURE.md for stale names (with the rename git history shows) and
+    layout drift
+  - reports load budgets per tool
+  - flags prose invariants no gate covers, and dead paths with their renames
+  - patches a generated entry doc at its source
+  - replaces a CLAUDE.md that copies AGENTS.md with the import and the lines that differ
+  - explains any finding (`--explain <id>`)
+  - honours `docs/agents/ruled-out.md`, one line per "not a landmine" decision. A line
+    stays honoured only while the evidence stays at or below its `@count`, and an
+    agent's `(proposed)` line never counts.
+
+  `scaffold --json` splits owner questions into guided (a recommended answer with its
+  source) and assisted, for the interview in `references/owner-interview.md`. The scorer
+  credits detected gates (half when nothing runs them) and warns on recommended nesting
+  that is absent. The survey reports nested coverage, `flat-monorepo`, and the share at
+  the bar plus the five weakest repos.
+
 ### Fixed
 
 - **`fleet owner` and the land gate see a session that moved into a lane** - a Desktop

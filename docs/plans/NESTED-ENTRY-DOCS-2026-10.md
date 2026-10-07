@@ -497,6 +497,10 @@ Primary URLs for the facts that get encoded:
 
 ## Status
 
-Spec only. Written 2026-10-07 and revised the same day with the field research. No code
-yet. The build starts on this lane. Lanes A and C are specified above, each to be built
-on its own lane.
+Shipped on `lane/nested-entry-docs`, 2026-10-07: Lanes A and B in full, and Lane C's
+tooling (`scaffold --json` guided/assisted split, `references/owner-interview.md`). One
+fleetflow run built the scan and the tool profiles; the rest was built in the
+orchestrating session as one writer, because it all lives in `agents-md.py`. The run's
+frozen contracts, with the additive fields as built, are in
+`docs/plans/REPO-DOCTOR-ABC-2026-10.md`. Still open: running the interview on a real
+repo, and the "Later" items.

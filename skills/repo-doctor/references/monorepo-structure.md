@@ -10,6 +10,18 @@ ones did that the weak ones didn't.
 
 ---
 
+## Contents
+
+- 1. The organising principle: subsystem = contract boundary
+- 2. Root AGENTS.md is a router, not an encyclopedia
+- 3. Nested entry docs: own-contract packages only
+- 4. Mechanical gates make big shared code safe
+- 5. Navigation aids that scale past folder-guessing
+- 6. File-size discipline under monorepo gravity
+- 7. Parallel agents in one monorepo
+- 8. Extraction: when a subsystem should leave the monorepo
+- 9. Monorepo audit checklist (repo-doctor lens)
+
 ## 1. The organising principle: subsystem = contract boundary
 
 Structure the repo so every top-level unit is a **contract boundary** — a thing with
@@ -51,19 +63,33 @@ that package's entry doc. The audit's weakest monorepo entry docs were encyclope
 that tried to hold every subsystem's rules at root — every session paid for all of
 them, and package-local changes routinely forgot to update the far-away root doc.
 
+`agents-md.py audit` checks the routing: a nested doc the root never names is
+`nested-unlinked`, and `--diff` adds its row to the ownership table in the table's own
+columns. A root landmine that names only one package's paths is reported as belonging in
+that package's doc (`landmine-belongs-nested`); moving it stays the owner's call.
+
 ## 3. Nested entry docs: own-contract packages only
 
 Full policy in [agents-md-protocol.md](agents-md-protocol.md) section 6; the monorepo
 application:
 
 - Every `packages/*` with its own invariant law, audience, or gate → its own
-  AGENTS.md (deltas + local landmines, ~60-line budget).
+  AGENTS.md (deltas + local landmines; target 40 lines, 60 at most).
 - `apps/*` usually DON'T need one — they consume contracts, they don't define them; a
   structure-map line at root suffices.
 - A tool-farm (100+ sibling dirs of the same shape) needs a **protocol doc once** +
   per-tool docs only where a tool has real per-tool knowledge (auth quirks, API
   gotchas). Template-stamped boilerplate docs across 100 dirs are negative value —
   they bury the ones with real content.
+
+These rules are mechanical now. `repo-scan.py`'s nesting advisor scores each candidate
+on its contract signals (own manifest, tests, deploy, landmine cluster, gate), holds apps
+to a deploy or landmine signal, and gives a farm of 8 or more same-shaped siblings one
+doc at its parent. `agents-md.py scaffold --dir <package>` drafts the doc with a scope
+line and the package's own commands in their root-runnable workspace form, and the audit
+checks every nested doc against its own folder (protocol section 6). Past a few
+contracted packages, the codemap and cross-package invariants go in an ARCHITECTURE.md
+(protocol section 10).
 
 ## 4. Mechanical gates make big shared code safe
 
@@ -82,6 +108,23 @@ Directive: **every cross-package invariant in the ownership table has a gate.** 
 without a gate is a request; agents (and humans) will eventually violate it silently.
 Wire all gates into ONE `check` entry point (`npm run check`, `just check`) that fans
 out to per-package checks — if verification isn't one command, it doesn't happen.
+
+Gate detection is mechanical too. `repo-scan.py` (section `gates`) finds the boundary
+checkers below, with each one's scope (its folder) and whether `check` or CI runs it. The
+scorer credits only gates something runs in full; one nothing runs counts half.
+
+| Tool | Detected from |
+|---|---|
+| import-linter, tach | `.importlinter` or `[tool.importlinter]`; `tach.toml` |
+| dependency-cruiser | `.dependency-cruiser.{js,cjs,json}` |
+| eslint-plugin-boundaries, Nx module boundaries | the plugin or `@nx/enforce-module-boundaries` in an eslint config; `project.json` tags |
+| ArchUnit, deptrac | `@ArchTest` / `@AnalyzeClasses` in tests; `deptrac.php` / `deptrac.yaml` |
+| Go | `internal/` folders; `depguard` in `.golangci.*` |
+| Invariant tests | the root's `scripts/check-*`, or one `check` runs |
+
+A gate with a list of tolerated violations (a baseline, a freeze store) is reported as
+partial, with the list's size. The audit flags a prose invariant ("X never imports Y")
+that no detected gate covers as `invariant-ungated`.
 
 ## 5. Navigation aids that scale past folder-guessing
 
@@ -146,12 +189,20 @@ keeps a pointer (skill/package doc → "extracted to <repo>"); no stale paths ba
 
 ## 9. Monorepo audit checklist (repo-doctor lens)
 
-Run `scripts/repo-doctor.py` at root AND per major package, then verify by hand:
+Run `scripts/repo-doctor.py` and `agents-md.py audit` at root (both cover nested docs),
+`scripts/repo-doctor.py` per major package, then verify the rest by hand. Items marked
+*(checked)* are mechanical now:
 
-- [ ] Root AGENTS.md is a router (<150 lines) with an ownership table
+- [ ] Root AGENTS.md is a router (<150 lines) with an ownership table *(checked: size;
+      `nested-unlinked` for the table)*
 - [ ] Every own-contract package has its nested entry doc, linked from the table
-- [ ] Every ownership-table invariant has a named mechanical gate
-- [ ] One `check` command fans out to per-package checks
+      *(checked: the nesting advisor, the scorer's entry_docs, survey's `flat-monorepo`)*
+- [ ] Every ownership-table invariant has a named mechanical gate *(checked:
+      `invariant-ungated`, the scorer's enforcement)*
+- [ ] One `check` command fans out to per-package checks *(checked: gates that `check`
+      never runs count half)*
+- [ ] Past a few contracted packages, an ARCHITECTURE.md holds the codemap *(checked:
+      `architecture-warranted`, then layout and name staleness)*
 - [ ] docs/ has an index; volatile lists delegated to filesystem
 - [ ] No package's core file is a gateless monster
 - [ ] Farms of same-shaped units have a machine-readable registry

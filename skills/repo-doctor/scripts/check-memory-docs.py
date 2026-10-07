@@ -66,6 +66,17 @@ FACTS = (
     ("not-read", "AGENTS.override.md is never read", "AGENTS.override.md", "AGENTS.override.md"),
     ("windows-symlink", "on Windows use the @AGENTS.md import, not a symlink",
      "use the @AGENTS.md import instead", "use the @AGENTS.md import if anyone clones on Windows"),
+    # Nested docs, imports and rules (protocol sections 3, 4 and 6; verified 2026-10-07).
+    ("subdirs-on-demand", "files in subdirectories load on demand, not at launch",
+     "Files in subdirectories load on demand.", "subdirectory files load on demand"),
+    ("nested-on-read", "a nested instruction file loads when Claude reads a file in its folder",
+     "when Claude opens a file there with the Read tool", "loads only when Claude reads a file in that folder"),
+    ("import-depth", "imports recurse at most four hops",
+     "with a maximum depth of four hops", "recurse at most four hops"),
+    ("rules-unconditional", "rules without paths frontmatter load at launch",
+     "Rules without a paths field are loaded unconditionally", "rules without paths frontmatter load at launch"),
+    ("import-copy", "/import appends a one-time copy of AGENTS.md into CLAUDE.md",
+     "appends a one-time copy of instruction files such as AGENTS.md", "/import appends a one-time copy of AGENTS.md"),
 )
 # Constants that must equal the documented ceilings (scripts beside this file): 200
 # lines, and the house size ceiling of 200 lines at 80 characters. (file, pattern,
