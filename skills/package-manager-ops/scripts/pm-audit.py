@@ -173,6 +173,29 @@ COMPOSER_V1 = re.compile(r"composer:v1\b|composer\s+self-update\s+--1\b|(?:FROM|
 # Group 1 = target path, group 2 = the credential file name.
 CRED_WRITE = re.compile(r"(?:>{1,2}|\btee(?:\s+-a)?)\s*[\"']?([^\s\"'<>|;&]*?(auth\.json|\.npmrc))\b")
 CRED_CONFIG = re.compile(r"composer\s+config\s+(?!-g\b|--global\b)(?:--\S+\s+)*(?:http-basic|bearer|github-oauth|gitlab-token|gitlab-oauth|bitbucket-oauth)\.")
+NPMRC_AUTH = re.compile(r"(?:_authToken|_auth|_password)\s*=\s*(\S*)")
+
+
+def npmrc_write_has_secret(line: str) -> bool:
+    """Does a CI line that writes .npmrc put a usable credential in it?
+
+    An .npmrc is not a credential file by itself: `@scope:registry=<url>` carries none.
+    When the line shows its content (echo/printf), only an auth key counts, and a value
+    kept as a literal `${VAR}` inside single quotes stays a placeholder that npm expands at
+    run time - the file holds no secret. Double quotes or no quotes let the SHELL expand it,
+    so the token is written. Content the line does not show (a heredoc, envsubst, curl)
+    is assumed to carry one."""
+    if not re.search(r"\b(?:echo|printf)\b", line):
+        return True
+    keys = list(NPMRC_AUTH.finditer(line))
+    if not keys:
+        return False
+    singles = [(m.start(), m.end()) for m in re.finditer(r"'[^']*'", line)]
+    for key in keys:
+        quoted = any(a < key.start() < b for a, b in singles)
+        if not (quoted and re.match(r"^\$\{?\w+\}?", key.group(1))):
+            return True
+    return False
 # A COPY/ADD of the whole build context. Group 1 = its flags: `COPY --from=<stage> . /app`
 # copies from another stage's filesystem, never the context (copies_context()).
 COPY_CONTEXT = re.compile(r"^\s*(?:ADD|COPY)\s+((?:--\S+\s+)*)\.\/?\s", re.I)
@@ -2488,6 +2511,7 @@ class Audit:
         writes: list = []
         builds: list = []
         bundles: list = []
+        removals: list = []  # (file, line, repo-relative path) of each CI `rm`
         scopes: dict = {}
         seen: set = set()
 
@@ -2561,7 +2585,7 @@ class Audit:
                 # A credential write is placed where its block's shell stands; ~/.npmrc,
                 # $HOME/..., absolute and ../ paths come back None (outside any context).
                 m = CRED_WRITE.search(line) if ci else None
-                if m:
+                if m and not (m.group(2) == ".npmrc" and not npmrc_write_has_secret(line)):
                     writes.append((rel, n, m.group(2), join_dir(cwd, m.group(1), env)))
                 elif ci and CRED_CONFIG.search(line):
                     writes.append((rel, n, "auth.json", join_dir(cwd, "auth.json", env)))
@@ -2582,6 +2606,8 @@ class Audit:
                     if words[0] in ("cd", "pushd") and len(words) == 2:
                         cwd = join_dir(cwd, words[1], env)
                         continue
+                    if ci and words[0] == "rm":
+                        removals += [(rel, n, join_dir(cwd, a, env)) for a in words[1:] if not a.startswith("-")]
                     built = docker_build(words) if ci else None
                     if built:
                         ctx = join_dir(cwd, built[0], env)
@@ -2599,7 +2625,7 @@ class Audit:
                 self._ramsey(text, rel, ships, flag, kind)
                 builds += self._action_builds(rel, text, start_dir)
         self._image_leaks(writes, builds, scopes, flag)
-        self._bundle_leaks(writes, bundles, scopes, flag)
+        self._bundle_leaks(writes, bundles, scopes, flag, removals)
 
     def _bundle_source(self, words, cwd, env):
         """A zip or CodeDeploy push -> (source directory, exclude patterns, label).
@@ -2608,6 +2634,12 @@ class Audit:
         tool = posixpath.basename(words[0]).lower() if words else ""
         if tool == "zip":
             args, excludes = words[1:], []
+            # `-x@list` reads the exclude patterns from a file, one per line.
+            for a in [a for a in args if a.startswith("-x@")]:
+                listed = join_dir(cwd, a[3:], env) if cwd is not None else None
+                body = read_text(self.root / listed) if listed and (self.root / listed).is_file() else None
+                excludes += [p.strip() for p in (body or "").splitlines() if p.strip() and not p.lstrip().startswith("#")]
+            args = [a for a in args if not a.startswith("-x@")]
             if "-x" in args:
                 k = args.index("-x")
                 excludes = [a for a in args[k + 1:] if not a.startswith("-")]
@@ -2627,14 +2659,18 @@ class Audit:
                 return join_dir(cwd, source, env), excludes, "aws deploy push source"
         return None
 
-    def _bundle_leaks(self, writes, bundles, scopes, flag):
-        """Credential files created by CI must not enter a later deploy archive/source."""
+    def _bundle_leaks(self, writes, bundles, scopes, flag, removals=()):
+        """Credential files created by CI must not enter a later deploy archive/source,
+        unless an `rm` of that path in the same job runs between the write and the bundle."""
         for rel, n, cred, path in writes:
             if path is None:
                 continue
             scope = scopes.get(rel, lambda _n: 0)
             for brel, bn, ctx, excludes, label in bundles:
                 if brel != rel or bn <= n or ctx is None or scope(bn) != scope(n):
+                    continue
+                if any(rrel == rel and n < rn < bn and rpath == path and scope(rn) == scope(n)
+                       for rrel, rn, rpath in removals):
                     continue
                 inside = path if ctx == "" else (path[len(ctx) + 1:] if path.startswith(ctx + "/") else None)
                 if inside is None:

@@ -291,6 +291,12 @@ mutation("lockfileVersion 1 tree is read", "js-lockfile-source-v1",
          'v1_tree(obj(lock).get("dependencies"), filename)\n', 'pass\n')
 mutation("local tooling keeps CI-only rules out", "install-sites",
          '        if kind == "automation":\n            return\n', '')
+mutation(".npmrc without a token is not a credential", "clean-bundle-npmrc-scope-only",
+         'if m and not (m.group(2) == ".npmrc" and not npmrc_write_has_secret(line)):', 'if m:')
+mutation("rm before the bundle removes the credential", "clean-bundle-credential-removed",
+         'if ci and words[0] == "rm":', 'if False:')
+mutation("zip -x@list exclusions are read", "clean-bundle-exclude-list",
+         'for a in [a for a in args if a.startswith("-x@")]:', 'for a in []:')
 mutation("additional install sites", "install-sites",
          '("package.json", "composer.json", "justfile", "Makefile")', '("never",)')
 
