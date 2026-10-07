@@ -296,6 +296,7 @@ print_human() { # repo_json
   {
     term_panel_open github-ops "SECURITY POSTURE" "$repo  $vis"
     term_panel_vert
+    # procsub ok: display only; hgaps above parsed this same JSON, and health and exit come from it
     while IFS= read -r ln; do term_panel_line "$ln"; done < <(printf '%s' "$o" | jq -r \
       --arg ok "$(term_mark ok)" --arg bad "$(term_mark bad)" \
       --arg na "$(term_mark na)" --arg unk "$(term_mark unknown)" '
@@ -317,6 +318,7 @@ print_human() { # repo_json
     if [ "$has_gap" -gt 0 ]; then
       term_panel_vert
       term_section "" "enable commands" "$has_gap"
+      # procsub ok: display only; has_gap above counted these rows from the same JSON
       while IFS= read -r ln; do term_panel_line "$(term_color dim "$ln")"; done < <(printf '%s' "$o" | jq -r '.features[]|select(.applicable==true and .state=="off")|.enable_command')
     fi
     term_panel_vert
@@ -349,6 +351,7 @@ if [ -n "$ORG" ]; then
   list="$(runner gh repo list "$ORG" --no-archived --limit 200 --json nameWithOwner 2>/dev/null)" \
     || skip "gh repo list failed for $ORG (not authed / offline / rate-limited?)"
   [ -n "$list" ] || skip "no repos returned for $ORG"
+  # procsub ok: a jq failure leaves repos empty, and the guard below exits 7 (unavailable), never clean
   mapfile -t repos < <(printf '%s' "$list" | jq -r '.[].nameWithOwner' | tr -d '\r')
   [ "${#repos[@]}" -gt 0 ] || skip "no non-archived repos for $ORG"
 

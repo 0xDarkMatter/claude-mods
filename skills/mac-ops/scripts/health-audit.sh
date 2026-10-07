@@ -100,6 +100,8 @@ fi
 
 # APFS verify per mounted APFS volume (read-only — safe)
 note "  APFS volumes:"
+# procsub ok: each volume only ever logs PASS or INFO here, so a diskutil that fails
+# lists none and cannot hide a FAIL.
 while read -r line; do
     [[ -z "$line" ]] && continue
     disk=$(echo "$line" | awk '{print $1}')

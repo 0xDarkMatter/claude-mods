@@ -117,6 +117,7 @@ fi
 {
   term_panel_open github-ops "OPEN ISSUES" "$REPO  $flagged_n of $total flagged"
   term_panel_vert
+  # procsub ok: display only; flagged_n above counted these rows and decides the exit
   while IFS= read -r ln; do term_panel_line "$ln"; done < <(printf '%s' "$analysis" | jq -r --arg m "$(term_mark warn)" '.flagged[]
     | "\($m) #\(.number)  [\(if .external then "external" else "yours" end)\(if .stale then ",stale" else "" end)]  by \(.author.login)  \(.title)"')
   term_panel_vert

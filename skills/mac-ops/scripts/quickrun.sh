@@ -86,6 +86,8 @@ run_subscript() {
     fi
 
     # Collect FAIL and WARN lines for the consolidated summary
+    # procsub ok: both greps read $out in memory (exit 1 = no such lines); these
+    # are lists only, and the counts that decide the verdict come from SUMMARY above.
     while IFS= read -r line; do
         [[ -n "$line" ]] && ALL_FAILS+=("[$label] $line")
     done < <(echo "$out" | grep -E "^\[FAIL\]" | sed 's/^\[FAIL\] //')

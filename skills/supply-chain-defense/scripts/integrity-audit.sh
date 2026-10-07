@@ -10,10 +10,13 @@
 # Input:   optional PROJECT_DIR positional (default: cwd) + $HOME config locations
 # Output:  stdout = findings (tab-separated records, or JSON with --json)
 # Stderr:  section framing, progress, verdict guidance, errors
-# Exit:    0 clean, 2 usage, 5 missing-dep (jq, with --json), 10 review-items-found
+# Exit:    0 clean, 2 usage, 5 missing-dep (jq, with --json) or a section could not
+#          be scanned (its producer failed: see stderr and meta.unscanned) - NOT
+#          clean, 10 review-items-found (wins over 5; it is never a false clean)
 #
 # Note: intentionally NOT `set -e` — a scanner must survive missing files and keep
-# going. Errors are handled explicitly.
+# going. Errors are handled explicitly: a producer (find, grep, jq) that fails is
+# recorded as unscanned, never read as "nothing found".
 #
 # Examples:
 #   integrity-audit.sh
@@ -31,7 +34,7 @@ while [[ $# -gt 0 ]]; do
     -q|--quiet)    QUIET=1 ;;
     -v|--verbose)  VERBOSE=1 ;;
     -h|--help)
-      sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit "$EXIT_OK" ;;
+      sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit "$EXIT_OK" ;;
     -*) echo "ERROR: unknown flag: $1 (try --help)" >&2; exit "$EXIT_USAGE" ;;
     *)  PROJECT_DIR="$1" ;;
   esac
@@ -94,6 +97,18 @@ fi
 
 REVIEW_JSON=()    # array of compact JSON objects
 REVIEW_COUNT=0
+UNSCANNED=()      # "<what>: <why>" per surface whose producer failed
+
+# unscanned <what> <why> — a surface we could not read. Printed even with -q: it
+# is an error, not framing, and it turns a clean verdict into exit 5.
+unscanned() {
+  UNSCANNED+=("$1: $2")
+  if [[ "$PANEL" -eq 1 ]]; then
+    popen; term_status_row bad "NOT scanned  $1" "$2" >&2
+  else
+    printf '   %s[NOT scanned]%s %s: %s\n' "$C_Y" "$C_O" "$1" "$2" >&2
+  fi
+}
 
 # record <category> <source> <kind> <entries-newline-separated>
 record() {
@@ -118,9 +133,12 @@ record() {
   fi
 }
 
+# Returns jq's status: nonzero means the file was NOT read (not JSON - a comment
+# or a truncated write - or the wrong shape), which the caller must report as
+# unscanned. Swallowing it once read every unparseable config as "no hooks".
 json_key_entries() {  # file key -> newline-separated entry list (jq)
   local file=$1 key=$2
-  [[ -f "$file" && "$HAS_JQ" -eq 1 ]] || return 0
+  [[ -f "$file" ]] || return 0
   jq -r --arg k "$key" '
     if (.[$k] // empty) == null then empty
     elif (.[$k]|type)=="object" then (.[$k]|keys[])
@@ -140,17 +158,36 @@ CLAUDE_FILES=(
   "$APPDATA_DIR/Claude/claude_desktop_config.json"                 # Claude Desktop (win)
   "$HOME/.config/Claude/claude_desktop_config.json")              # Claude Desktop (linux)
 # Project-local MCP / Claude configs (skip worktrees — owned by other sessions).
-while IFS= read -r f; do CLAUDE_FILES+=("$f"); done < <(
-  find "$PROJECT_DIR" -maxdepth 4 \
+# procsub guard: find's status is checked before its rows are used. Fed straight
+# into a loop via `< <(find ...)`, a find that died (Windows find.exe ahead of GNU
+# find on PATH, an unreadable PROJECT_DIR) scanned no project config and the run
+# still said Clean. Any find error means some directory went unread.
+rc=0; ferr="$(mktemp)"
+proj_cfgs="$(find "$PROJECT_DIR" -maxdepth 4 \
     \( -name 'settings*.json' -path '*/.claude/*' \
        -o -name '.mcp.json' -o -name 'mcp.json' \
        -o -name 'cline_mcp_settings.json' -o -name 'mcp_settings.json' \) \
-    -not -path '*/worktrees/*' -not -path '*/node_modules/*' 2>/dev/null)
+    -not -path '*/worktrees/*' -not -path '*/node_modules/*' 2>"$ferr")" || rc=$?
+if (( rc != 0 )); then
+  unscanned "project MCP/Claude configs under $PROJECT_DIR" \
+    "find exit $rc: $(head -1 "$ferr" | tr -d '\r')"
+fi
+rm -f "$ferr"
+while IFS= read -r f; do
+  [[ -n "$f" ]] && CLAUDE_FILES+=("$f")
+done <<< "$proj_cfgs"
 for f in "${CLAUDE_FILES[@]}"; do
   [[ -f "$f" ]] || continue
+  if [[ "$HAS_JQ" -eq 0 ]]; then
+    unscanned "$f" "jq not installed - hooks/mcpServers not read"; continue
+  fi
   vinfo "scanning $f"
   for key in hooks mcpServers; do
-    entries=$(json_key_entries "$f" "$key")
+    rc=0; entries=$(json_key_entries "$f" "$key") || rc=$?
+    if (( rc != 0 )); then
+      unscanned "$f" "jq exit $rc - not plain JSON (comments? truncated?) or not an object"
+      break
+    fi
     [[ -n "$entries" ]] && record "aitool_config" "$f" "$key" "$entries"
   done
 done
@@ -186,11 +223,18 @@ if [[ -d "$WF_DIR" ]]; then
     info "NOTE: zizmor not installed - using weaker rg-based OIDC check only."
     info "      Misses pull_request_target / template-injection. Install: uv tool install zizmor"
   fi
+  # procsub guard: grep's status is checked before its rows are used. Exit 1 is
+  # "no workflow grants id-token: write" (clean); 2 is a read error, which fed
+  # straight into the loop looked identical to clean. Matches from the files it
+  # could read are still recorded.
+  rc=0
+  oidc_wfs="$(grep -rlE 'id-token:\s*write' "$WF_DIR" 2>/dev/null)" || rc=$?
+  (( rc <= 1 )) || unscanned "workflows in $WF_DIR" "grep exit $rc - unreadable workflow file(s)"
   while IFS= read -r wf; do
     [[ -z "$wf" ]] && continue
     pub=$(grep -nE 'npm publish|pypi|twine upload|trusted.?publish|registry-url' "$wf" 2>/dev/null)
     record "workflow_oidc" "$wf" "id-token-write" "${pub:-id-token: write present}"
-  done < <(grep -rlE 'id-token:\s*write' "$WF_DIR" 2>/dev/null)
+  done <<< "$oidc_wfs"
 else
   info "no .github/workflows in $PROJECT_DIR"
 fi
@@ -227,7 +271,27 @@ done
 if [[ "$JSON" -eq 1 ]]; then
   printf '%s\n' "${REVIEW_JSON[@]:-}" | jq -s \
     --argjson z "$HAS_ZIZMOR" \
-    '{data:{review: (map(select(length>0)))}, meta:{count:(map(select(length>0))|length), zizmor_used:($z==1), schema:"axiom.tool.integrity-audit.report/v1"}}'
+    --argjson u "$(printf '%s\n' "${UNSCANNED[@]:-}" | jq -R . | jq -sc 'map(select(length>0))')" \
+    '{data:{review: (map(select(length>0)))}, meta:{count:(map(select(length>0))|length), unscanned:$u, zizmor_used:($z==1), schema:"axiom.tool.integrity-audit.report/v1"}}'
+fi
+
+# A clean verdict needs every surface read. Exit 10 already says "not clean, look",
+# so it stands; only a would-be 0 becomes 5.
+if [[ "$REVIEW_COUNT" -eq 0 && ${#UNSCANNED[@]} -gt 0 ]]; then
+  if [[ "$QUIET" -eq 1 ]]; then :   # the [NOT scanned] lines already went out
+  elif [[ "$PANEL" -eq 1 ]]; then
+    popen
+    { term_panel_vert
+      term_panel_close "fix the cause, re-run" "$(term_health critical "${#UNSCANNED[@]} not scanned")"
+    } >&2
+  else
+    printf '%sNOT clean: %d surface(s) could not be scanned - fix the cause and re-run.%s\n' \
+      "$C_Y" "${#UNSCANNED[@]}" "$C_O" >&2
+  fi
+  exit "$EXIT_MISSING_DEP"
+fi
+if [[ "$REVIEW_COUNT" -gt 0 && ${#UNSCANNED[@]} -gt 0 && "$QUIET" -eq 0 ]]; then
+  info "also: ${#UNSCANNED[@]} surface(s) NOT scanned (above) - this review list may be incomplete"
 fi
 
 if [[ "$REVIEW_COUNT" -eq 0 ]]; then

