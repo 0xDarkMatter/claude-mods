@@ -1639,6 +1639,39 @@ def audit_nested(repo: Path, nested: list[str], f: dict, root_rel: str | None,
     return finds, docs, unlinked
 
 
+# A prose invariant: "X never imports Y" or "only X touches Y" (spec N7). Every invariant
+# should have a gate (references/monorepo-structure.md); one without is reported so the
+# rule gets a check before it rots.
+INVARIANT_RE = re.compile(r"(?i)\b(?:never|must not|may not|cannot|can't|does not|doesn't|do not|don't)\s+"
+                          r"(?:imports?|depends? on|calls?|uses?|references?|requires?|reads?|writes?)\b"
+                          r"|\bonly\s.{1,60}?\b(?:touch(?:es)?|imports?|writes?|reads?|calls?|access(?:es)?|owns?)\b")
+
+
+def gate_covers(paths: list[str], gates: list[dict]) -> bool:
+    """A gate covers an invariant when it is repo-wide, or its scope holds every folder
+    the invariant names: a db/ gate checks db's imports, not ui's."""
+    for g in gates:
+        scope = g.get("scope") or ""
+        if not scope or (paths and all((x.rstrip("/") + "/").startswith(scope) for x in paths)):
+            return True
+    return False
+
+
+def ungated(doc: str, lines: list[tuple[int, str]], gates: list[dict]) -> list[dict]:
+    out = []
+    for i, line in lines:
+        if not INVARIANT_RE.search(line):
+            continue
+        paths = named_paths(line)
+        if (paths and not gate_covers(paths, gates)) or (not paths and not gates):
+            shown = re.sub(r"\s+", " ", line.strip())[:90]
+            out.append({"id": "invariant-ungated", "severity": "info", "path": f"{doc}:{i + 1}",
+                        "msg": f"an invariant with no gate: \"{shown}\". Prose rules rot; add a check "
+                               "(dependency-cruiser, import-linter, a scripts/check-* test) and run it from "
+                               "the check entry point"})
+    return out
+
+
 def owner_dir(paths: list[str], nested_dirs: list[str]) -> str | None:
     """The deepest nested-doc folder holding every path, or None (the root owns it)."""
     if not paths:
@@ -1781,6 +1814,8 @@ def audit_architecture(repo: Path, f: dict, root_rel: str | None,
         add("architecture-stale-layout", "warn", "the folder layout changed since the codemap was written ("
             + (detail or "fingerprint differs") + "). Update the codemap, then the fingerprint "
             "(agents-md.py scaffold --architecture prints a fresh one)", text[:m.start()].count("\n") + 1)
+    finds += ungated(ap, [(i, l) for i, l in enumerate(lines) if re.search(r"(?i)architecture invariant", l)],
+                     f.get("gates") or [])
     pointer = bool(root_rel) and "ARCHITECTURE.md" not in root_text
     if pointer:
         finds.append({"id": "architecture-unlinked", "severity": "info", "path": root_rel,
@@ -2077,7 +2112,7 @@ def cmd_audit(args) -> int:
         ".claude/AGENTS.md" if (repo / ".claude/AGENTS.md").is_file() else None)
     nested = nested_doc_paths(repo)
     f = load_facts(repo, args.facts, None if args.facts else
-                   "repo,manifests,ddev,deploy,ci,tests,generated,history,outliers,env,architecture",
+                   "repo,manifests,ddev,deploy,ci,tests,generated,history,outliers,env,architecture,gates",
                    [os.path.dirname(n) + "/" for n in nested])
     if f is None:
         return EX_ERR
@@ -2267,6 +2302,9 @@ def cmd_audit(args) -> int:
                                  "rule it out (--json lists the questions)"})
         for d in docs:
             d["uncovered"] = len(by_doc.get(d["path"], []))
+        prose = [(i, lines[i]) for s in h2_sections(lines) if s["key"] in ("landmines", "conventions")
+                 for i in range(s["start"] + 1, s["end"])]
+        finds += ungated(rel, prose, f.get("gates") or [])
         for i, item in landmine_items(lines):
             od = owner_dir(named_paths(item), nested_dirs)
             if od:

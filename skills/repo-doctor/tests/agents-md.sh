@@ -589,6 +589,27 @@ OUT="$("$PY" "$AM" audit --repo "$SO" --no-parents --json 2>/dev/null)"
 check "structure_overflow_moves_to_architecture" \
       "{p['section']:p['destination'] for p in D['split_plan']}.get('Structure')=='ARCHITECTURE.md'"
 
+# A prose invariant ("X never imports Y", "only X touches Y", an ARCHITECTURE.md callout)
+# is reported when no detected gate covers the folders it names: db/ has a
+# dependency-cruiser config, core/ and ui/ have nothing enforcing the rule.
+IG="$TMP/invariant"; init_repo "$IG"; mkdir -p "$IG/core" "$IG/ui" "$IG/db"
+echo '{"name":"inv","scripts":{"test":"node t.js"}}' > "$IG/package.json"
+for d in core ui db; do echo "export const $d = 1" > "$IG/$d/index.js"; done
+printf 'module.exports = { forbidden: [] }\n' > "$IG/db/.dependency-cruiser.cjs"
+"$PY" - "$IG/AGENTS.md" <<'EOF'
+import sys
+L = ["# Agent Instructions - inv", "", "A fixture for prose invariants.", "", "## Commands", "",
+     "```bash", "npm test", "```", "", "## Landmines", "",
+     "1. **Layering** - `core/` never imports `ui/`.",
+     "2. **Storage** - only `db/` touches the database.", "", "## Conventions", "", "- Keep functions short."]
+open(sys.argv[1], "w", newline="\n").write("\n".join(L) + "\n")
+EOF
+printf '# Architecture - inv\n\n## Invariants\n\nArchitecture Invariant: `ui/` never calls `db/` directly.\n' > "$IG/ARCHITECTURE.md"
+commit "$IG" "docs: invariants"
+OUT="$("$PY" "$AM" audit --repo "$IG" --no-parents --json 2>/dev/null)"
+check "prose_invariant_without_gate_is_flagged" \
+      "sorted(f['path'] for f in D['findings'] if f['id']=='invariant-ungated')==['AGENTS.md:13','ARCHITECTURE.md:5'] and all(f['severity']=='info' for f in D['findings'] if f['id']=='invariant-ungated')"
+
 # ============================== SURVEY ========================================
 FX="$TMP/gh-fixture.json"; LOG="$TMP/gh-calls.jsonl"
 "$PY" - "$FX" <<'EOF'
