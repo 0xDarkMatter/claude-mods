@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """agents-md - create, audit/upgrade and survey AGENTS.md files against the protocol.
 
-Usage:   agents-md.py scaffold [--repo PATH] [--facts FILE] [--archetype A | --dir FOLDER]
-                               [--write] [--json]
+Usage:   agents-md.py scaffold [--repo PATH] [--facts FILE]
+                               [--archetype A | --dir FOLDER | --architecture] [--write] [--json]
          agents-md.py audit    [--repo PATH] [--facts FILE] [--diff] [--no-parents] [--json]
          agents-md.py explain  [--repo PATH] FOLDER [--tool ID|all] [--json]
          agents-md.py survey   (--org OWNER | --remote OWNER/NAME) [--limit N]
@@ -13,7 +13,8 @@ Input:   scaffold/audit: a local checkout. Facts come from repo-scan.py (beside 
 Output:  scaffold: the AGENTS.md draft (markdown) on stdout, or the --json envelope
            claude-mods.repo-doctor.agents-md-scaffold/v1. --write creates <repo>/AGENTS.md
            and prints nothing. --dir drafts <repo>/<FOLDER>/AGENTS.md instead: a nested
-           doc holding only what the root AGENTS.md doesn't say.
+           doc holding only what the root AGENTS.md doesn't say. --architecture drafts
+           ARCHITECTURE.md (entry points and codemap named from facts, never linked).
          audit: a findings report, or --json (claude-mods.repo-doctor.agents-md-audit/v1),
            whose data.docs[] has one record per tracked AGENTS.md (root and nested).
            --diff prints ONLY a git-apply-able patch (empty when there is nothing to add).
@@ -39,6 +40,7 @@ Examples:
   agents-md.py scaffold --repo path/to/site > AGENTS.draft.md
   agents-md.py scaffold --repo path/to/site --write
   agents-md.py scaffold --repo path/to/monorepo --dir packages/engine --write
+  agents-md.py scaffold --repo path/to/monorepo --architecture > ARCHITECTURE.md
   agents-md.py audit --repo path/to/site
   agents-md.py audit --repo path/to/site --diff > agents-md.patch && git apply agents-md.patch
   agents-md.py survey --org my-org --json | jq '.data[] | select(.shadowed)'
@@ -57,7 +59,8 @@ scripts/repo-scan.py (schema claude-mods.repo-doctor.repo-scan/v1).
 #   MARKDOWN      fence-aware heading parser, section coverage, doc analysis
 #   SHADOWING     CLAUDE.md classification (import / symlink / prose pointer / standalone)
 #   FACTS         running repo-scan.py, rendering facts into draft sections
-#   SCAFFOLD      archetype choice, template fill, nested --dir drafts, --write
+#   SCAFFOLD      archetype choice, template fill, nested --dir and --architecture drafts,
+#                 --write
 #   EXPLAIN       per-tool load engine (tool-profiles.json): files, reasons, sizes, caps
 #   AUDIT         findings, dead commands, staleness, nested docs and root pointers,
 #                 trigger pointers, split plan, the ruled-out record, the --diff patch
@@ -113,6 +116,16 @@ NESTED_CEILING_CHARS = NESTED_CEILING_LINES * CHARS_PER_LINE   # 4,800
 # at its ceiling. A deeper chain than that is paid for on every task in the folder.
 LOAD_CEILING_CHARS = CEILING_CHARS + NESTED_CEILING_CHARS       # 20,800
 SCHEMA_EXPLAIN = "claude-mods.repo-doctor.agents-md-explain/v1"
+# ARCHITECTURE.md (spec N6): the root is recommended; docs/ is accepted when it holds a
+# codemap. It has the root entry doc's budget, and its staleness is layout drift, never age.
+ARCH_FILES = ("ARCHITECTURE.md", "docs/ARCHITECTURE.md")
+ARCH_POINTER = "Read [ARCHITECTURE.md]({up}ARCHITECTURE.md) before adding a module or moving code between packages."
+# The layout fingerprint closes the draft: sha1 of the sorted layout (repo-scan
+# data.architecture.layout_fingerprint) and the folders it covered, so the audit can name
+# what was added or removed. Grammar: <!-- layout: <40 hex> (...) <folder/> ... -->
+LAYOUT_RE = re.compile(r"<!--\s*layout:\s*([0-9a-f]{40})(.*?)-->", re.S)
+CODE_EXTS = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".go", ".rs", ".php", ".rb", ".java",
+             ".kt", ".cs", ".c", ".h", ".cpp", ".hpp", ".swift", ".scala", ".vue", ".svelte", ".sh")
 # Other tools' loading rules change fast, so they live only in this file, each fact with
 # a source and a verified date behind check-tool-profiles.py --live. Never hard-code a
 # tool's behaviour in this script.
@@ -924,6 +937,109 @@ def scaffold_nested(args, repo: Path) -> int:
     return EX_OK
 
 
+def render_architecture(f: dict, repo_name: str) -> str:
+    """The ARCHITECTURE.md draft. Facts fill entry points, codemap rows, boundaries and
+    seeded invariant questions, all named and never linked; the rest are owner questions."""
+    tmpl = (TEMPLATES / "architecture.md").read_text(encoding="utf-8")
+    tmpl = re.sub(r"(?s)\A\s*<!--.*?-->\s*", "", tmpl, count=1)
+    a = f.get("architecture") or {}
+    why = ("repo-scan finds it warranted: " + "; ".join(a.get("reasons") or [])) if a.get("warranted") \
+        else "repo-scan does not find it warranted; a short Structure section may do"
+    note = "\n".join([f"<!-- {DRAFT_MARK} agents-md.py scaffold --architecture from repo-scan facts."]
+                     + textwrap.wrap(why + ".", 84, initial_indent="     ", subsequent_indent="     ")
+                     + [f"     Answer or delete each {TODO_OWNER}, then delete this comment. -->"])
+    # One line per file: a file can be a manifest main, an export and an index at once.
+    # Declared entries (a manifest names them) outrank inferred ones (index.*, cmd/).
+    rank = ("manifest-main", "manifest-bin", "manifest-exports", "cmd", "dunder-main", "index")
+    # A farm's members (same-shaped siblings, repo-scan nesting.farms) share one line:
+    # `tools/*/src/index.ts`, not nine.
+    farms = [x["parent"] for x in (f.get("nesting") or {}).get("farms") or []]
+
+    def farm_name(name: str) -> str:
+        parent = next((fp for fp in farms if name.startswith(fp) and name.count("/") > fp.count("/")), None)
+        return parent + "*/" + name[len(parent):].split("/", 1)[1] if parent else name
+    grouped: dict[str, list[dict]] = {}
+    for e in sorted(a.get("entry_points") or [], key=lambda e: (rank.index(e["kind"]) if e["kind"] in rank
+                                                               else len(rank), e["name"])):
+        bucket = grouped.setdefault(farm_name(e["name"]), [])
+        if e["kind"] not in [x["kind"] for x in bucket]:
+            bucket.append(e)
+    rows = []
+    for name, es in list(grouped.items())[:12]:
+        src = None if "*" in name else next((e["source"] for e in es if e["source"].split(":")[0] != name), None)
+        rows.append(f"- `{name}` ({', '.join(e['kind'] for e in es)}" + (f"; {cite(src)})" if src else ")"))
+    entry = "\n".join(rows) or (
+        f"- [ ] {TODO_OWNER}: Where does execution start? No manifest main, bin or exports, index or "
+        "cmd/ entry was found.")
+    mbd = f.get("manifests_by_dir") or {}
+    names = {d: (m.get("package_json") or {}).get("name") or (m.get("composer_json") or {}).get("name")
+             for d, m in mbd.items()}
+    codemap = "\n".join(f"- `{d}`" + (f" ({names[d]})" if names.get(d) else "")
+                        + f": {TODO_OWNER} what lives here; its key modules and types, by name."
+                        for d in a.get("layout") or []) or f"- [ ] {TODO_OWNER}: one line per area."
+    member = {v: d for d, v in names.items() if v}
+    bounds = []
+    for d, m in sorted(mbd.items()):
+        pkg = m.get("package_json") or {}
+        for dep in pkg.get("dependencies", []):
+            if member.get(dep) not in (None, d):
+                bounds.append(f"- `{d}` depends on `{member[dep]}` ({dep}; {cite(pkg.get('path') or d + 'package.json')})")
+    boundaries = "\n".join(bounds) or (f"- [ ] {TODO_OWNER}: Which packages may depend on which? No "
+                                       "workspace-to-workspace dependency was found in the manifests.")
+    inv = []
+    for g in f.get("gates") or []:
+        scope = g.get("scope") or ""
+        cfg = g["config"] if g["config"].startswith(scope) else scope + g["config"]
+        inv.append(f"- [ ] {TODO_OWNER}: {g['tool']} enforces rules from `{cfg}`. State each as an "
+                   "Architecture Invariant and name this gate.")
+    for c in [c for c in f.get("candidates") or [] if c["kind"] == "coupling"][:4]:
+        inv.append(f"- [ ] {TODO_OWNER}: " + " and ".join(f"`{x}`" for x in c["paths"][:3])
+                   + f" change together ({cite(c['evidence'][0])}). Is that an invariant?")
+    invariants = "\n".join(inv[:8]) or (f"- [ ] {TODO_OWNER}: Which rules hold across the codebase, "
+                                        "especially absences (the engine never imports the UI)?")
+    layout = a.get("layout") or []
+    fp = "\n".join([f"<!-- layout: {a.get('layout_fingerprint') or '0' * 40} (repo-doctor: the folders this "
+                    "codemap covers;", "     agents-md.py audit names any added or removed)"]
+                   + textwrap.wrap(" ".join(layout), 84, initial_indent="     ", subsequent_indent="     ")) + " -->"
+    for k, v in {"TITLE": repo_name, "DRAFT_NOTE": note, "ENTRY_POINTS": entry, "CODEMAP": codemap,
+                 "BOUNDARIES": boundaries, "INVARIANTS": invariants, "FINGERPRINT": fp}.items():
+        tmpl = tmpl.replace("{{" + k + "}}", v)
+    return re.sub(r"\n{3,}", "\n\n", tmpl).strip() + "\n"
+
+
+def scaffold_architecture(args, repo: Path) -> int:
+    dest = repo / "ARCHITECTURE.md"
+    if args.write and dest.exists():
+        eecho(f"agents-md: {dest} already exists; scaffold never overwrites. agents-md.py audit checks it")
+        return EX_PRECOND
+    f = load_facts(repo, args.facts)
+    if f is None:
+        return EX_ERR
+    a = f.get("architecture") or {}
+    if not a.get("warranted"):
+        eecho("agents-md: the scan does not find ARCHITECTURE.md warranted (fewer than 2 nesting "
+              "recommendations, 4 contracted areas or 3 workspace members); a Structure section may do")
+    if (repo / "docs/ARCHITECTURE.md").is_file():
+        eecho("agents-md: docs/ARCHITECTURE.md exists; the root location is the recommended one")
+    draft = render_architecture(f, repo.name)
+    n = draft.count("\n")
+    eecho(f"agents-md: ARCHITECTURE.md draft, {n} lines, {draft.count(TODO_OWNER)} {TODO_OWNER} question(s)")
+    if n > CEILING_LINES or len(draft) > CEILING_CHARS:
+        eecho(f"agents-md: over the {CEILING_LINES}-line / {CEILING_CHARS:,}-character budget; prune the codemap")
+    if args.write:
+        return create_file(dest, draft)
+    if args.json:
+        emit_json({"data": {"path": "ARCHITECTURE.md", "lines": n, "chars": len(draft),
+                            "warranted": bool(a.get("warranted")), "reasons": a.get("reasons") or [],
+                            "entry_points": a.get("entry_points") or [],
+                            "layout_fingerprint": a.get("layout_fingerprint"),
+                            "owner_questions": draft.count(TODO_OWNER), "draft": draft},
+                   "meta": {"schema": SCHEMA_SCAFFOLD}})
+    else:
+        sys.stdout.write(draft)
+    return EX_OK
+
+
 def cmd_scaffold(args) -> int:
     repo = Path(args.repo).resolve()
     if not repo.is_dir():
@@ -931,6 +1047,8 @@ def cmd_scaffold(args) -> int:
         return EX_NOTFOUND
     if args.dir:
         return scaffold_nested(args, repo)
+    if args.architecture:
+        return scaffold_architecture(args, repo)
     if args.write and (repo / "AGENTS.md").exists():
         eecho(f"agents-md: {repo / 'AGENTS.md'} already exists; scaffold never overwrites "
               "(an owner's landmines live there). Upgrade it instead: agents-md.py audit --diff")
@@ -1559,6 +1677,131 @@ def named_paths(text: str) -> list[str]:
     return [x.rstrip("/") for x in found if "/" in x and not re.match(r"^(\w+:|\.\./|/)", x)]
 
 
+def arch_path(repo: Path) -> str | None:
+    if (repo / ARCH_FILES[0]).is_file():
+        return ARCH_FILES[0]
+    alt = repo / ARCH_FILES[1]
+    if alt.is_file() and re.search(r"(?im)^#{2,3}\s+code ?map", read_raw(alt)):
+        return ARCH_FILES[1]
+    return None
+
+
+def rename_pairs(repo: Path) -> list[tuple[str, str]]:
+    """(old, new) for every rename in recent history, newest first."""
+    out = git(repo, "log", "-M", "--diff-filter=R", "--name-status", "--format=", "-n", "2000") or ""
+    return [(x[1], x[2]) for x in (line.split("\t") for line in out.splitlines())
+            if len(x) == 3 and x[0].startswith("R")]
+
+
+def renamed_to(path: str, pairs: list[tuple[str, str]]) -> str | None:
+    """Where a vanished file or folder went, from rename history (a folder from its files)."""
+    p = path.rstrip("/")
+    for old, new in pairs:
+        if old == p:
+            return new + ("/" if path.endswith("/") else "")
+        if old.startswith(p + "/"):
+            rest = old[len(p) + 1:]
+            if new.endswith("/" + rest):
+                return new[:-len(rest) - 1] + "/"
+    return None
+
+
+def arch_tokens(lines: list[str]) -> list[tuple[int, str]]:
+    """(0-based line, path) for backticked paths in the codemap and entry-point sections
+    (the whole doc when it has neither). Package names (@scope/x) and globs are skipped."""
+    hs = headings(lines)
+    spans = []
+    for n, (i, lvl, title) in enumerate(hs):
+        if re.search(r"(?i)code ?map|entry ?points?", title):
+            end = next((j for j, l2, _ in hs[n + 1:] if l2 <= lvl), len(lines))
+            spans.append((i, end))
+    spans = spans or [(0, len(lines))]
+    out = []
+    for a, b in spans:
+        for i in range(a, b):
+            for tok in re.findall(r"`([^`\s]+)`", lines[i]):
+                tok = re.sub(r":\d+$", "", tok)
+                if re.search(r"[*?<>{}$@]|://", tok) or tok.startswith("-"):
+                    continue
+                if "/" in tok or re.search(r"\.\w{1,6}$", tok):
+                    out.append((i, tok))
+    return out
+
+
+def audit_architecture(repo: Path, f: dict, root_rel: str | None,
+                       root_text: str) -> tuple[list[dict], dict | None, bool]:
+    """(findings, the data.docs record, whether the root needs a pointer)."""
+    a = f.get("architecture") or {}
+    ap = arch_path(repo)
+    if not ap:
+        if a.get("warranted"):
+            return [{"id": "architecture-warranted", "severity": "info", "path": root_rel or "AGENTS.md",
+                     "msg": "an ARCHITECTURE.md is warranted (" + "; ".join(a.get("reasons") or [])
+                            + ") and missing: agents-md.py scaffold --architecture drafts one"}], None, False
+        return [], None, False
+    finds: list[dict] = []
+    text = read_raw(repo / ap)
+    lines = text.splitlines()
+
+    def add(fid: str, sev: str, msg: str, line: int | None = None) -> None:
+        finds.append({"id": fid, "severity": sev, "path": f"{ap}:{line}" if line else ap, "msg": msg})
+    if ap != ARCH_FILES[0]:
+        add("architecture-location", "info", f"{ap} works, but the root ARCHITECTURE.md is where readers look")
+    if len(lines) > CEILING_LINES or len(text) > CEILING_CHARS:
+        add("architecture-over-budget", "warn", f"{len(lines)} lines and {len(text):,} characters, over the "
+            f"{CEILING_LINES}-line / {CEILING_CHARS:,}-character budget: keep only what rarely changes")
+    marks = [i for i, l in enumerate(lines) if re.search(r"(?i)\boutdated\b|\bTODO:?\s*document|\bFIXME\b", l)]
+    if marks:
+        add("architecture-stale-marker", "info", f"{len(marks)} staleness marker(s) (outdated, TODO: document, "
+            "FIXME): revisit the section, then remove the marker", marks[0] + 1)
+    links = [i for i, l in enumerate(lines) for tgt in re.findall(r"\]\(([^)\s]+)\)", l)
+             if re.search(r"#L\d", tgt) or tgt.split("#")[0].lower().endswith(CODE_EXTS)]
+    if links:
+        add("architecture-links-code", "info", f"{len(links)} link(s) to source files or line anchors, which "
+            "rot as code moves: name the file, module or type instead (readers use symbol search)", links[0] + 1)
+    tracked = set((git(repo, "ls-files") or "").splitlines())
+    dirs = {x.rsplit("/", i)[0] + "/" for x in tracked for i in range(1, x.count("/") + 1)}
+    pairs = None
+    stale = 0
+    for i, tok in arch_tokens(lines):
+        if not tracked or tok.rstrip("/") in tracked or tok.rstrip("/") + "/" in dirs or stale >= 8:
+            continue
+        stale += 1
+        pairs = rename_pairs(repo) if pairs is None else pairs
+        new = renamed_to(tok, pairs)
+        add("architecture-stale-name", "warn", f"`{tok}` no longer exists"
+            + (f": git history renamed it to `{new}`" if new else ": rename or drop it"), i + 1)
+    m = LAYOUT_RE.search(text)
+    if m and a.get("layout_fingerprint") and m.group(1) != a["layout_fingerprint"]:
+        stored = {x for x in m.group(2).split() if x.endswith("/")}
+        cur = set(a.get("layout") or [])
+        added, removed = sorted(cur - stored), sorted(stored - cur)
+        detail = "; ".join(x for x in (("added " + ", ".join(f"`{d}`" for d in added)) if added else "",
+                                       ("removed " + ", ".join(f"`{d}`" for d in removed)) if removed else "") if x)
+        add("architecture-stale-layout", "warn", "the folder layout changed since the codemap was written ("
+            + (detail or "fingerprint differs") + "). Update the codemap, then the fingerprint "
+            "(agents-md.py scaffold --architecture prints a fresh one)", text[:m.start()].count("\n") + 1)
+    pointer = bool(root_rel) and "ARCHITECTURE.md" not in root_text
+    if pointer:
+        finds.append({"id": "architecture-unlinked", "severity": "info", "path": root_rel,
+                      "msg": f"{root_rel} never points to {ap}; --diff adds the line"})
+    doc = {"path": ap, "kind": "architecture", "lines": len(lines), "chars": len(text),
+           "commits_since": staleness(repo, ap)[0]}
+    return finds, doc, pointer
+
+
+def structure_insert(lines: list[str], add: list[str]) -> list[str]:
+    """Append lines at the end of the Structure section, creating it when absent."""
+    st = next((s for s in h2_sections(lines) if s["key"] == "structure"), None)
+    if not st:
+        return lines + ["", "## Structure", ""] + add
+    end = st["end"]
+    while end > st["start"] + 1 and not lines[end - 1].strip():
+        end -= 1
+    gap = [""] if lines[end - 1].lstrip().startswith(("|", "<!--")) else []
+    return lines[:end] + gap + add + lines[end:]
+
+
 def add_root_pointers(lines: list[str], unlinked: list[str], root_rel: str) -> list[str]:
     """Point the root at each unlinked nested doc: a row in an existing ## Ownership table,
     else one trigger-bearing line at the end of the Structure section (created if absent)."""
@@ -1582,15 +1825,8 @@ def add_root_pointers(lines: list[str], unlinked: list[str], root_rel: str) -> l
                 cells[-1] = f"[{d}/AGENTS.md]({up}{d}/AGENTS.md)"
             add.append("| " + " | ".join(cells) + " |")
         return lines[:rows[-1] + 1] + add + lines[rows[-1] + 1:]
-    add = [f"- Before editing `{d}/**`, read [{d}/AGENTS.md]({up}{d}/AGENTS.md)." for d in unlinked]
-    st = next((s for s in secs if s["key"] == "structure"), None)
-    if not st:
-        return lines + ["", "## Structure", ""] + add
-    end = st["end"]
-    while end > st["start"] + 1 and not lines[end - 1].strip():
-        end -= 1
-    gap = [""] if lines[end - 1].lstrip().startswith(("|", "<!--")) else []
-    return lines[:end] + gap + add + lines[end:]
+    return structure_insert(lines, [f"- Before editing `{d}/**`, read [{d}/AGENTS.md]({up}{d}/AGENTS.md)."
+                                    for d in unlinked])
 
 
 def slugify(title: str) -> str:
@@ -1651,7 +1887,7 @@ def bare_pointers(lines: list[str]) -> list[int]:
     return out
 
 
-def split_plan(lines: list[str], repo: Path) -> list[dict]:
+def split_plan(lines: list[str], repo: Path, arch_dest: str | None = None) -> list[dict]:
     """Moves until the doc is back under target in lines AND characters. Order: human
     setup prose first (it doesn't belong in AGENTS.md at any size), then the other
     movable sections largest first, then Structure and Conventions (both required and
@@ -1684,6 +1920,8 @@ def split_plan(lines: list[str], repo: Path) -> list[dict]:
         body = "\n".join(lines[s["start"] + 1: s["end"]])
         if SETUP_HEADING.match(s["title"]):
             dest, kind, why = "README.md", "readme", "human setup prose belongs in README"
+        elif s["key"] == "structure" and arch_dest:
+            dest, kind, why = arch_dest, "architecture", "an overflowing structure map is the codemap"
         else:
             refs = path_refs(body, repo)
             dest, kind, why = f"docs/agents/{slugify(s['title'])}.md", "docs", "detail an agent reads on demand"
@@ -1711,6 +1949,10 @@ def move_header(kind: str, dest: str, title: str, repo_name: str) -> str:
     if kind == "docs":
         return (f"# {title}\n\n<!-- Moved out of AGENTS.md by repo-doctor `agents-md.py audit "
                 "--diff`; AGENTS.md links here. -->\n")
+    if kind == "architecture":
+        return (f"# Architecture - {repo_name}\n\n<!-- Started by repo-doctor `agents-md.py audit --diff` with "
+                "the Structure section moved from AGENTS.md. agents-md.py scaffold --architecture shows "
+                "the full shape. -->\n")
     return f"# {repo_name}\n"
 
 
@@ -1835,7 +2077,7 @@ def cmd_audit(args) -> int:
         ".claude/AGENTS.md" if (repo / ".claude/AGENTS.md").is_file() else None)
     nested = nested_doc_paths(repo)
     f = load_facts(repo, args.facts, None if args.facts else
-                   "repo,manifests,ddev,deploy,ci,tests,generated,history,outliers,env",
+                   "repo,manifests,ddev,deploy,ci,tests,generated,history,outliers,env,architecture",
                    [os.path.dirname(n) + "/" for n in nested])
     if f is None:
         return EX_ERR
@@ -1851,6 +2093,9 @@ def cmd_audit(args) -> int:
         finds += [x for x in c_finds if x["id"] in ("shadowed-by-parent", "nested-shadowed")]
         n_finds, docs, _ = audit_nested(repo, nested, f, None, "")
         finds += n_finds
+        a_finds, a_doc, _ = audit_architecture(repo, f, None, "")
+        finds += a_finds
+        docs += [a_doc] if a_doc else []
     else:
         text = read_raw(repo / rel)
         eol = "\r\n" if "\r\n" in text else "\n"
@@ -1923,7 +2168,8 @@ def cmd_audit(args) -> int:
                           "msg": f"last touched {since} commits ago ({man or 0} of them changed "
                                  "package.json/composer.json/Makefile/justfile): verify every claim, "
                                  "then touch it in the fixing commit"})
-        plan = split_plan(new, repo)
+        arch_dest = arch_path(repo) or (ARCH_FILES[0] if (f.get("architecture") or {}).get("warranted") else None)
+        plan = split_plan(new, repo, arch_dest)
         data["split_plan"] = [{k: v for k, v in p.items() if k not in ("start", "end")} for p in plan]
         left = an["lines"] - sum(p["lines"] - 3 for p in plan)   # each move leaves 3 lines
         left_chars = an["chars"] - sum(max(0, p["chars"] - POINTER_CHARS) for p in plan)
@@ -1953,6 +2199,9 @@ def cmd_audit(args) -> int:
             dest = p["destination"]
             if p["kind"] == "readme":
                 pointer = f"Human setup steps: [README.md](README.md#{gh_anchor(p['section'])})."
+            elif p["kind"] == "architecture":
+                pointer = (f"Moved to the codemap in [{dest}]({dest}); read it before adding a module or "
+                           "moving code between packages.")
             elif p["kind"] == "nested":
                 pointer = (f"Moved to [{dest}]({dest}), which loads when an agent works under "
                            f"`{dest.rsplit('/', 1)[0]}/`.")
@@ -1968,8 +2217,12 @@ def cmd_audit(args) -> int:
         finds += n_finds
         if unlinked:
             new = add_root_pointers(new, unlinked, rel)
+        a_finds, a_doc, a_pointer = audit_architecture(repo, f, rel, text)
+        finds += a_finds
+        if a_pointer and not any(p["kind"] == "architecture" for p in plan):
+            new = structure_insert(new, ["- " + ARCH_POINTER.format(up="../" * rel.count("/"))])
         docs = [{"path": rel, "kind": "root", "lines": an["lines"], "chars": an["chars"],
-                 "commits_since": since}] + n_docs
+                 "commits_since": since}] + n_docs + ([a_doc] if a_doc else [])
         stubs = [stub_for(k, f) for k in ("commands", "landmines", "deploy")
                  if any(x["id"] == f"missing-section-{k}" and x["severity"] == "warn" for x in finds)]
         new_text = eol.join(new)
@@ -2267,6 +2520,7 @@ def main() -> int:
     sp.add_argument("--archetype", default="auto",
                     choices=["auto", "php-cms", "node-app", "python-service", "static-site", "generic"])
     sp.add_argument("--dir", help="draft a nested <FOLDER>/AGENTS.md (deltas from the root only)")
+    sp.add_argument("--architecture", action="store_true", help="draft ARCHITECTURE.md (matklad's shape)")
     sp.add_argument("--write", action="store_true", help="create the AGENTS.md (never overwrites)")
     sp.add_argument("--json", action="store_true")
     ap_a = sub.add_parser("audit", help="audit an AGENTS.md; --diff proposes an upgrade patch")
@@ -2294,7 +2548,10 @@ def main() -> int:
     if args.cmd == "audit" and args.diff and args.json:
         eecho("agents-md: --diff and --json are mutually exclusive (--json already carries data.diff)")
         return EX_USAGE
-    if args.cmd == "scaffold" and args.dir and args.archetype != "auto":
+    if args.cmd == "scaffold" and args.dir and args.architecture:
+        eecho("agents-md: --dir and --architecture draft different files; pick one")
+        return EX_USAGE
+    if args.cmd == "scaffold" and (args.dir or args.architecture) and args.archetype != "auto":
         eecho("agents-md: --archetype shapes the root draft; a --dir draft has one shape")
         return EX_USAGE
     if args.cmd == "survey" and args.limit < 1:

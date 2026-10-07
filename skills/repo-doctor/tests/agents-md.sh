@@ -542,6 +542,53 @@ OUT="$("$PY" "$AM" audit --repo "$TC" --no-parents --json 2>/dev/null)"
 check "  ...and reported once the repo targets that tool" \
       "any(f['id']=='tool-cap' and 'Windsurf' in f['msg'] and '6000' in f['msg'] for f in D['findings'])"
 
+# ============================== ARCHITECTURE ==================================
+# scaffold --architecture drafts ARCHITECTURE.md in matklad's shape: entry points and a
+# codemap NAMED from facts (never linked: links rot), owner questions for the rest, and a
+# layout fingerprint the audit later compares against the tree.
+AR="$TMP/arch"; make_monorepo "$AR" >/dev/null 2>&1; rm -rf "$AR/.ruler"; commit "$AR" "chore: drop ruler"
+OUT="$("$PY" "$AM" scaffold --repo "$AR" --architecture --json 2>/dev/null)"
+check "architecture_draft_names_entry_points_without_links" \
+      "chr(96)+'packages/engine/src/index.ts'+chr(96) in D['draft'] and chr(96)+'packages/engine/'+chr(96) in D['draft'] and not __import__('re').search(r'\]\([^)]*\.(ts|js|py)\b', D['draft']) and __import__('re').search(r'<!-- layout: [0-9a-f]{40}', D['draft']) and 'TODO(owner)' in D['draft'] and D['lines']<=200"
+"$PY" "$AM" scaffold --repo "$AR" --architecture --write 2>/dev/null; rc1=$?
+"$PY" "$AM" scaffold --repo "$AR" --architecture --write 2>/dev/null; rc2=$?
+[ "$rc1" -eq 0 ] && [ "$rc2" -eq 5 ] && ok "architecture --write creates once, then refuses" || no "architecture write" "exits $rc1 then $rc2"
+commit "$AR" "docs: architecture"
+OUT="$("$PY" "$AM" audit --repo "$AR" --no-parents --json 2>/dev/null)"
+check "a fresh architecture doc is not stale" \
+      "not {'architecture-stale-layout','architecture-stale-name'} & {f['id'] for f in D['findings']} and 'architecture' in [x['kind'] for x in D['docs']]"
+check "unlinked_architecture_doc_gets_a_root_pointer" \
+      "any(f['id']=='architecture-unlinked' for f in D['findings']) and '+- Read [ARCHITECTURE.md](ARCHITECTURE.md) before adding a module or moving code between packages.' in (D['diff'] or '').splitlines()"
+mkdir -p "$AR/libs/core"; echo 'export const core = 1' > "$AR/libs/core/x.ts"
+gitq "$AR" mv packages/ui packages/widgets; commit "$AR" "refactor: rename ui to widgets, add libs"
+OUT="$("$PY" "$AM" audit --repo "$AR" --no-parents --json 2>/dev/null)"
+check "architecture_stale_layout_from_fingerprint" \
+      "any(f['id']=='architecture-stale-layout' and 'libs/' in f['msg'] and 'packages/ui/' in f['msg'] for f in D['findings'])"
+check "architecture_stale_name_suggests_rename" \
+      "any(f['id']=='architecture-stale-name' and 'packages/ui/' in f['msg'] and 'packages/widgets/' in f['msg'] for f in D['findings'])"
+printf '\nThis section is outdated.\nSee [the parser](packages/engine/src/parse.ts#L10).\n' >> "$AR/ARCHITECTURE.md"; commit "$AR" "docs: rot"
+OUT="$("$PY" "$AM" audit --repo "$AR" --no-parents --json 2>/dev/null)"
+check "architecture_marker_and_code_links_are_info" \
+      "{f['severity'] for f in D['findings'] if f['id'] in ('architecture-stale-marker','architecture-links-code')}=={'info'} and {'architecture-stale-marker','architecture-links-code'} <= {f['id'] for f in D['findings']}"
+# When ARCHITECTURE.md exists, an overflowing Structure section moves to its codemap,
+# not to docs/agents/structure.md.
+SO="$TMP/overflow"; init_repo "$SO"; echo '{"name":"so","scripts":{"build":"node b.js"}}' > "$SO/package.json"
+printf '# Architecture - so\n\n## Codemap\n\n- `src/`: the code.\n' > "$SO/ARCHITECTURE.md"
+"$PY" - "$SO/AGENTS.md" <<'EOF'
+import sys
+L = ["# Agent Instructions - so", "", "Fixture for the structure overflow.", "",
+     "## Commands", "", "```bash", "npm run build", "```", "", "## Landmines", ""]
+L += [f"{i}. **Rule {i}** - keep invariant {i} intact." for i in range(1, 101)]
+L += ["", "## Background", ""] + [f"Paragraph {i} of history about the project." for i in range(40)]
+L += ["", "## Structure", "", "| Path | What |", "|---|---|"] + [f"| `d{i}/` | part {i} |" for i in range(70)]
+L += ["", "Read [ARCHITECTURE.md](ARCHITECTURE.md) before adding a module."]
+open(sys.argv[1], "w", newline="\n").write("\n".join(L) + "\n")
+EOF
+commit "$SO" "docs: overflow"
+OUT="$("$PY" "$AM" audit --repo "$SO" --no-parents --json 2>/dev/null)"
+check "structure_overflow_moves_to_architecture" \
+      "{p['section']:p['destination'] for p in D['split_plan']}.get('Structure')=='ARCHITECTURE.md'"
+
 # ============================== SURVEY ========================================
 FX="$TMP/gh-fixture.json"; LOG="$TMP/gh-calls.jsonl"
 "$PY" - "$FX" <<'EOF'
