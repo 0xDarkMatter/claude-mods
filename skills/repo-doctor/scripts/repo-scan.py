@@ -1027,7 +1027,9 @@ class Scan:
                     loc = e.get("location") if isinstance(e, dict) else None
                     if not isinstance(loc, str):
                         continue
-                    script = loc.lstrip("/").lstrip("./")
+                    # normpath drops a "./" prefix and keeps a leading dot; lstrip("./")
+                    # would read .deploy/hook.sh as deploy/hook.sh and miss the script.
+                    script = posixpath.normpath(loc.lstrip("/"))
                     hooks.append({"event": str(event), "location": str(loc),
                                   "runas": str(e.get("runas")) if e.get("runas") else None,
                                   "timeout": str(e.get("timeout")) if e.get("timeout") else None,
@@ -1229,7 +1231,8 @@ class Scan:
         for g in tracked:
             g["source"] = "cmd: git ls-files" if self.is_git else "filesystem walk"
             for d in declared:
-                norm = d["path"].lstrip("./").replace("../", "").rstrip("/") + "/"
+                # normpath, not lstrip("./"): './.output' must stay '.output', not 'output'.
+                norm = posixpath.normpath(d["path"]).replace("../", "") + "/"
                 if g["path"].startswith(norm) or norm.startswith(g["path"]):
                     g["declared_by"] = d["source"]
         self.line_counts()
