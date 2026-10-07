@@ -172,6 +172,13 @@ jobs:
             --unavailable "memory-docs live check unreachable (code.claude.com) - skipped" \
             -- python skills/repo-doctor/scripts/check-memory-docs.py --live
 
+      - name: repo-doctor tool profiles vs each agent tool's own docs
+        run: |
+          bash .github/scripts/freshness-step.sh --name repo-doctor-tool-profiles \
+            --drift "an agent tool's docs no longer state a loading fact tool-profiles.json encodes - re-read the source, then fix the profile, its live_phrase and verified date together" \
+            --unavailable "tool-profiles live check: every source unreachable - skipped" \
+            -- python skills/repo-doctor/scripts/check-tool-profiles.py --live
+
       - name: package-manager-ops Node/PHP tables + manager majors (nodejs.org, php.net, npm, Composer, GitHub)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
