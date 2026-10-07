@@ -18,6 +18,7 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   js.lockfile.conflict  js.lockfile.missing  js.lockfile.stale  js.lockfile.v1
   js.lockfile.shrinkwrap  js.pnpm.field-ignored
   js.dep.non-registry
+  js.root.not-private
   js.packagemanager.mismatch  js.node.unpinned  js.node.eol  node.pin.disagree
   ddev.node.unpinned  php.require.missing  php.platform.unset
   php.pin.disagree  php.eol  php.lockfile.missing  php.lockfile.stale
@@ -1271,6 +1272,17 @@ class Audit:
                      + ") - pnpm 11+ no longer reads it, so those settings are silently dropped",
                      "move the settings into pnpm-workspace.yaml (references/scripts-and-workspaces.md)")
         has_deps = any(obj(self.pkg.get(t)) for t in DEP_TYPES)
+        # Guard: keep this biased toward silence. Treat every conventional package-export
+        # signal as publication intent; narrowing it would accuse real libraries of being
+        # deployable sites merely because they intentionally omit private=true.
+        version = str(self.pkg.get("version") or "")
+        published = any(key in self.pkg for key in ("files", "publishConfig", "exports", "main")) \
+            or str(self.pkg.get("name") or "").startswith("@") \
+            or version not in ("", "0.0.0", "1.0.0")
+        if has_deps and self.pkg.get("private") is not True and not published:
+            self.add("warn", "js.root.not-private", "package.json",
+                     "root package has dependencies but is neither private nor recognisably configured for publication",
+                     'set "private": true; if this is a published library, add explicit files/exports/publishConfig metadata')
         for dep_type in DEP_TYPES:
             for name, spec in obj(self.pkg.get(dep_type)).items():
                 if NON_REGISTRY_SPEC.match(str(spec).strip()):
