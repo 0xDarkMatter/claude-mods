@@ -151,12 +151,48 @@ OUT="$("$PY" "$SCAN" --repo "$N" --only repo --json 2>/dev/null)"
 check "the origin remote names the repo when there is one" \
       "D['repo']['name']=='widget' and D['repo']['name_source'].startswith('cmd: git remote')"
 
+# ---- nested entry docs, invariant gates and architecture ----------------------
+M="$TMP/monorepo"
+make_monorepo "$M"
+OUT="$("$PY" "$SCAN" --repo "$M" --json --no-tokei 2>/dev/null)"
+check "recommends_nesting_for_package_with_own_contract" \
+      "'packages/engine/' in {r['dir'] for r in D['nesting']['recommend']}"
+check "never_recommends_nesting_for_size_alone" \
+      "'assets/' not in {r['dir'] for r in D['nesting']['recommend']}"
+check "one_contract_signal_is_not_enough" \
+      "'packages/ui/' not in {r['dir'] for r in D['nesting']['recommend']}"
+check "tool_farm_gets_one_protocol_doc" \
+      "[f['parent'] for f in D['nesting']['farms']]==['tools/'] and not any(r['dir'].startswith('tools/t') for r in D['nesting']['recommend'])"
+check "apps_need_deploy_or_cluster_to_nest" \
+      "any(r['dir']=='apps/web/' and {'own-manifest','own-deploy'} <= {s['kind'] for s in r['signals']} for r in D['nesting']['recommend'])"
+check "gate_detection_credits_dependency_cruiser" \
+      "any(g['tool']=='dependency-cruiser' and g['scope']=='packages/engine/' and g['config']=='packages/engine/.dependency-cruiser.cjs' for g in D['gates'])"
+check "go_internal_dir_counts_as_gate" \
+      "any(g['tool']=='Go internal' and g['scope']=='packages/engine/' for g in D['gates'])"
+check "partial_gate_reports_baseline_size" \
+      "any(g['tool']=='dependency-cruiser' and g['partial']=={'kind':'baseline','path':'packages/engine/.dependency-cruiser-baseline.json','entries':3} for g in D['gates'])"
+check "architecture_warranted_for_monorepo" \
+      "D['architecture']['warranted'] is True and D['architecture']['reasons']"
+check "layout_fingerprint_is_stable_and_sorted" \
+      "D['architecture']['layout']==sorted(D['architecture']['layout']) and D['architecture']['layout_fingerprint']==__import__('hashlib').sha1(('\\n'.join(D['architecture']['layout'])).encode()).hexdigest()"
+check "entry_points_are_named_with_sources" \
+      "any(e['name']=='packages/engine/src/index.ts' and e['kind']=='manifest-main' and e['source'].startswith('packages/engine/package.json:') for e in D['architecture']['entry_points']) and all(e['source'] for e in D['architecture']['entry_points'])"
+check "manifests_by_dir_has_engine_scripts" \
+      "{s['name'] for s in D['manifests_by_dir']['packages/engine/']['package_json']['scripts']}=={'test','check:deps'}"
+check "generated_entry_doc_detects_ruler" \
+      "any(x['path']=='AGENTS.md' and x['generator']=='ruler' and x['source_of_truth']=='.ruler/' for x in D['generated_entry_docs'])"
+OUT="$("$PY" "$SCAN" --repo "$M" --only nesting,gates,architecture --json --no-tokei 2>/dev/null)"
+check "new_sections_are_selectable" \
+      "d['meta']['sections']==['nesting','gates','architecture'] and set(D)=={'nesting','gates','architecture','secrets_skipped','candidates'}"
+
 # ---- clean control -----------------------------------------------------------
 C="$TMP/clean"; init_repo "$C"; mkdir -p "$C/src"
 echo "# Clean" > "$C/README.md"; echo "print(1)" > "$C/src/app.py"; commit "$C" "feat: one"
 echo "print(2)" >> "$C/src/app.py"; commit "$C" "feat: two"
 OUT="$("$PY" "$SCAN" --repo "$C" --json --no-tokei 2>/dev/null)"
 check "clean control: no candidates, no skipped secrets" "D['candidates']==[] and D['secrets_skipped']==[]"
+check "architecture_silent_for_small_repo" \
+      "D['architecture']['warranted'] is False and D['architecture']['reasons']==[]"
 
 # ---- plain directory, exit codes, standalone copy ----------------------------
 P="$TMP/plain"; mkdir -p "$P"; echo '{"name":"p","scripts":{"go":"node x"}}' > "$P/package.json"
