@@ -1395,6 +1395,49 @@ _rule("suppression.unused", "note", "config", "high", "edit",
       "an ignore matched no finding",
       "A waiver for something that no longer fires is dead weight and hides which ignores still matter.",
       "Delete the entry from the config.")
+# Advisory notes. They never fail a run on their own; `--profile pedantic` reports them as
+# warn findings, so each needs a catalogue entry (rule row, docs anchor, SARIF ruleIndex).
+_rule("suppression.inline-error", "note", "config", "high", "edit",
+      "an inline ignore names an error-severity finding",
+      "An inline ignore has no end date and no reviewer, so it may not mute an error such as a committed token.",
+      "Fix the finding, or add a dated entry with a reason to .pm-audit.json.")
+_rule("suppression.inline-no-reason", "note", "config", "high", "edit",
+      "an inline ignore gives no reason",
+      "A waiver nobody explained is indistinguishable from one added to make CI pass.",
+      "Say why after the closing bracket: `pm-audit: ignore[<id>] <reason>`.")
+_rule("js.packagemanager.unset", "note", "lockfile", "high", "edit",
+      "package.json has no packageManager field",
+      "Nothing declares which manager and version the repo expects, so Corepack and CI cannot pin it.",
+      "Add `\"packageManager\": \"<manager>@<exact version>\"` for the manager that owns the lockfile.", safe=True)
+_rule("js.yarn.classic", "note", "legacy", "high", "manual",
+      "a Yarn 1 (classic) lockfile",
+      "Yarn 1 is in maintenance mode and ships only an occasional hotfix.",
+      "Plan a move to npm or Yarn 4 (references/legacy-exits.md).")
+_rule("js.lockfile.binary", "note", "lockfile", "high", "command",
+      "a binary bun.lockb that cannot be checked",
+      "The binary format hides its contents from review and from this scanner; current Bun writes a text bun.lock.",
+      "Run `bun install --save-text-lockfile --frozen-lockfile --lockfile-only`, delete bun.lockb "
+      "and commit bun.lock (bun.com/docs/pm/lockfile).")
+_rule("js.node.floating", "note", "runtime", "high", "edit",
+      "a Node pin that floats (an alias such as lts/* or node)",
+      "A floating pin selects whatever release is newest, so two machines can run different Node majors.",
+      "Pin a major or an exact version.")
+_rule("js.engines.unenforced", "note", "runtime", "high", "edit",
+      "engines.node without engine-strict in .npmrc",
+      "npm only warns about engines unless engine-strict=true, so a wrong Node still installs.",
+      "Add `engine-strict=true` to .npmrc if engines.node must block an install.", safe=True)
+_rule("npx.redundant", "note", "npx", "high", "edit",
+      "a script runs a local dependency through npx",
+      "npm run already puts node_modules/.bin on PATH; npx adds nothing but a chance to fetch.",
+      "Call the binary directly in the script.", safe=True)
+_rule("js.nested.roots", "note", "lockfile", "high", "manual",
+      "nested package roots with their own lockfile",
+      "pm-audit audits the root only; each nested root is its own install with its own pins.",
+      "Run pm-audit on each nested root it lists.")
+_rule("registry.authjson.ignored", "note", "registry", "high", "manual",
+      "auth.json is present and gitignored",
+      "The good state, reported so a clean result shows the credential file was seen and kept out of git.",
+      "Nothing to fix; keep it gitignored and prefer COMPOSER_AUTH in CI.")
 
 CATEGORIES = ("manifest", "lockfile", "deps", "runtime", "php", "npx", "legacy", "registry", "deploy", "config")
 # Profiles: which rules a kind of repo should not be told about. `site` (the default) is the
@@ -2609,13 +2652,18 @@ class Audit:
                 if p.suffix.lower() not in DOC_SUFFIXES and fn.lower() not in DOC_NAMES \
                         and not fn.lower().startswith(("dockerfile", "readme")) and not hook_script:
                     continue
+                # A file the walk could not read is coverage it did not have: say so, so a clean
+                # result cannot hide an oversized or unreadable script (meta.checks npx skipped).
                 try:
                     if p.stat().st_size > MAX_DOC_BYTES:
+                        self.blind("npx", f"skipped a file over {MAX_DOC_BYTES // 1024} KiB: {rel(self.root, p)}")
                         continue
                 except OSError:
+                    self.blind("npx", f"could not stat {rel(self.root, p)}")
                     continue
                 text = read_text(p)
                 if text is None:
+                    self.blind("npx", f"could not read {rel(self.root, p)}")
                     continue
                 scanned += 1
                 md = p.suffix.lower() in (".md", ".markdown") or fn.lower().startswith("readme")
@@ -3654,8 +3702,12 @@ UNSUPPRESSIBLE = {"config.invalid", "suppression.expired", "suppression.unused"}
 CONFIG_NAME = ".pm-audit.json"
 FIX_COMMAND_WORDS = {"npm", "pnpm", "yarn", "bun", "composer", "git", "corepack", "ddev", "rm", "mv"}
 INLINE_IGNORE = re.compile(r"pm-audit:\s*ignore\[([^\]]*)\]([^\n]*)")
-# A line that is ONLY a comment (it may carry an ignore for the line below it).
-COMMENT_ONLY = re.compile(r"^\s*(?:#|//|;|<!--|/\*|\*|--\s)")
+# A line that is ONLY a comment (it may carry an ignore for the line below it). No bare `*`:
+# that is a Markdown list item, not a block-comment continuation. In Markdown files
+# (MARKDOWN_SUFFIXES) inline_ignore() also requires the ignore to sit inside `<!-- -->`,
+# because there `#` starts a heading.
+COMMENT_ONLY = re.compile(r"^\s*(?:#|//|;|<!--|/\*|--\s)")
+MARKDOWN_SUFFIXES = (".md", ".markdown")
 # A local action or reusable workflow call: its findings come from the called file.
 LOCAL_USES_LINE = re.compile(r"\buses\s*:\s*[\"']?\./")
 IGNORE_REASON_MIN = 8   # letters/digits a config reason needs
@@ -3710,20 +3762,28 @@ def file_lines(root: Path, file: str, cache: dict) -> list:
 
 def real_path(root: Path, file: str):
     """The repo file a finding's `file` text points at. `file` is sometimes a location, not a
-    path: "package.json engines.node", "composer.json config.platform.php", or a list
-    "package-lock.json, yarn.lock". Globs, SARIF and annotations need the FILE: an existing
-    path wins as written, then the first ", "-separated entry, then its text before a space.
-    Only ", " separates entries, so a file name containing a bare comma survives."""
+    path: "package.json engines.node", ".github/workflows/ci.yml:9 node-version", or a list
+    "package-lock.json, yarn.lock". Globs, SARIF and annotations need the FILE. The longest
+    space-separated prefix (a trailing `:<line>` dropped) that EXISTS wins - tried on the whole
+    text first, so a name containing a space or ", " (`my job.yml`) survives - then on each
+    ", "-separated entry. Nothing on disk: the first entry's text before its first space."""
     if not file:
         return None
-    if (root / file).exists():
-        return file
+
+    def longest_existing(text):
+        words = text.split(" ")
+        for k in range(len(words), 0, -1):
+            cand = re.sub(r":\d+$", "", " ".join(words[:k]).strip())
+            if cand and (root / cand).exists():
+                return cand
+        return None
+
+    for chunk in [file] + file.split(", "):
+        found = longest_existing(chunk.strip())
+        if found:
+            return found
     first = file.split(", ")[0].strip()
-    head = first.split(" ")[0]
-    for cand in (first, head):
-        if cand and (root / cand).exists():
-            return cand
-    return head or first
+    return re.sub(r":\d+$", "", first.split(" ")[0]) or first
 
 
 def tsv_field(s) -> str:
@@ -3787,8 +3847,7 @@ def load_config(path: Path, as_of: dt.date):
             bad.append(f"{where}.id {rid!r} is not a pm-audit rule (see --rules)")
         elif rid in UNSUPPRESSIBLE:
             bad.append(f"{where}.id {rid!r} cannot be ignored")
-        reason = e.get("reason")
-        if not (isinstance(reason, str) and len(re.findall(r"[0-9A-Za-z]", reason)) >= IGNORE_REASON_MIN):
+        if not reason_ok(e.get("reason")):
             bad.append(f"{where}.reason is required and must say why the finding is tolerated "
                        f"(at least {IGNORE_REASON_MIN} letters or digits)")
         until = e.get("until")
@@ -3841,15 +3900,28 @@ def inline_ignore(root: Path, f: dict, cache: dict):
     rows = file_lines(root, file, cache)
     if 0 < line <= len(rows) and LOCAL_USES_LINE.search(rows[line - 1]):
         return None
+    markdown = file.lower().endswith(MARKDOWN_SUFFIXES)
     for idx in (line - 1, line - 2):
-        if idx == line - 2 and not (0 <= idx < len(rows) and COMMENT_ONLY.match(rows[idx])):
+        if not 0 <= idx < len(rows):
             continue
-        if 0 <= idx < len(rows):
-            for m in INLINE_IGNORE.finditer(rows[idx]):
-                if f["id"] in [x.strip() for x in m.group(1).split(",")]:
-                    reason = re.sub(r"\s*(?:-->|\*/)\s*$", "", m.group(2)).strip()
-                    return ("ok", reason) if reason else ("noreason", None)
+        if idx == line - 2 and not COMMENT_ONLY.match(rows[idx]):
+            continue
+        for m in INLINE_IGNORE.finditer(rows[idx]):
+            # In Markdown an ignore counts only inside an HTML comment: the same words in
+            # prose, a list item or a `#` heading are text, not a directive.
+            if markdown and "<!--" not in rows[idx][:m.start()]:
+                continue
+            if f["id"] in [x.strip() for x in m.group(1).split(",")]:
+                reason = re.sub(r"\s*(?:-->|\*/)\s*$", "", m.group(2)).strip()
+                return ("ok", reason) if reason_ok(reason) else ("noreason", None)
     return None
+
+
+def reason_ok(text) -> bool:
+    """Does a waiver's reason say something? At least IGNORE_REASON_MIN letters or digits in
+    any script (`[^\\W_]` is Unicode-aware), so ".", "ok" and "n/a" fail and a reason written
+    in Chinese or Greek passes."""
+    return isinstance(text, str) and len(re.findall(r"[^\W_]", text)) >= IGNORE_REASON_MIN
 
 
 def apply_policy(a: Audit, cfg, cfg_name: str, profile: str, as_of: dt.date):
@@ -3879,7 +3951,8 @@ def apply_policy(a: Audit, cfg, cfg_name: str, profile: str, as_of: dt.date):
             by = ("inline", hit[1])
         elif hit:
             a.note("suppression.inline-no-reason", f"{f['file']}:{f['line']}",
-                   f"`pm-audit: ignore[{f['id']}]` has no reason, so the finding is still reported")
+                   f"`pm-audit: ignore[{f['id']}]` gives no reason (at least {IGNORE_REASON_MIN} letters or digits), "
+                   "so the finding is still reported")
         if by is None and f["id"] not in UNSUPPRESSIBLE:
             e = next((e for e in live if e["id"] == f["id"] and ignore_matches(e, f)), None)
             if e:
@@ -3902,10 +3975,12 @@ def apply_policy(a: Audit, cfg, cfg_name: str, profile: str, as_of: dt.date):
 
 
 def load_baseline(path: Path):
-    """-> (fingerprints, legacy fingerprints). A baseline is a previous `--json` output. A row
-    without a fingerprint field (a pm-audit that predates them) is fingerprinted from its id,
-    file and message alone - it carries no line text - and is matched against each current
-    finding's message-only fingerprint, so an old baseline keeps working."""
+    """-> (fingerprints, legacy keys). A baseline is a previous `--json` output. A row without
+    a fingerprint field (a pm-audit that predates them) has no line text to tell twins apart,
+    so it matches only the same id, file, message AND line number. Guard: matching such rows
+    on the message alone let a new `composer require evil/backdoor` hide behind a baselined
+    `composer require`. A legacy baseline therefore resurfaces findings whose line moved (the
+    safe failure); regenerate it with this pm-audit to get line-shift-proof fingerprints."""
     text = read_text(path)
     if text is None:
         raise OSError("cannot read file")
@@ -3915,7 +3990,12 @@ def load_baseline(path: Path):
         raise ValueError("no top-level data[] list")
     rows = [r for r in rows if isinstance(r, dict) and "id" in r]
     return ({r["fingerprint"] for r in rows if r.get("fingerprint")},
-            {fingerprint(r) for r in rows if not r.get("fingerprint")})
+            {legacy_key(r) for r in rows if not r.get("fingerprint")})
+
+
+def legacy_key(f: dict) -> tuple:
+    """How a fingerprint-less baseline row is matched: id, file, line and message, exactly."""
+    return (f.get("id"), f.get("file"), f.get("line"), f.get("message"))
 
 
 def exit_code(findings: list, fail_on) -> int:
@@ -4159,21 +4239,25 @@ def main(argv: list[str]) -> int:
                   + (f"; and {len(problems) - 5} more" if len(problems) > 5 else ""),
                   f"fix {cfg_name}: every ignore[] entry needs id, reason and until (YYYY-MM-DD)")
     profile = args.profile or (cfg or {}).get("profile") or "site"
-    if profile == "pedantic":
-        # Advisory notes become warn findings, so they fail the run like any finding.
-        for n in a.notes:
-            a.add("warn", n["id"], n["file"], n["message"], "see the note's rule in --rules / --explain")
-        a.notes = []
     for f in a.findings:
         f["path"] = real_path(root, f.get("file") or "")
     suppressed, silenced = apply_policy(a, cfg, cfg_name, profile, as_of)
+    if profile == "pedantic":
+        # AFTER apply_policy, so its own notes (suppression.unused, inline-*) count too.
+        # Advisory notes become warn findings and fail the run like any finding; each id has
+        # a catalogue entry, so --explain, docs_url and SARIF's ruleIndex work for them.
+        for n in a.notes:
+            rule = RULES.get(n["id"])
+            a.add("warn", n["id"], n["file"], n["message"], rule["fix"] if rule else "see --rules")
+            a.findings[-1]["path"] = real_path(root, n["file"])
+        a.notes = []
     decorate(a.findings, root)
     known = []
     if baseline is not None:
         current, legacy = baseline
 
         def in_baseline(f):
-            return f["fingerprint"] in current or fingerprint(f) in legacy
+            return f["fingerprint"] in current or legacy_key(f) in legacy
 
         known = [f for f in a.findings if in_baseline(f)]
         a.findings = [f for f in a.findings if not in_baseline(f)]

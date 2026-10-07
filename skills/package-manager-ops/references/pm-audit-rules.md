@@ -171,6 +171,9 @@ Which manager owns the install, and whether its lockfile can be trusted.
 | <a id="js.manager.mixed"></a>`js.manager.mixed` | warn | high | manual | nested package roots use a different manager than the root |
 | <a id="js.packagemanager.mismatch"></a>`js.packagemanager.mismatch` | error | high | edit | `packageManager` names a manager the lockfile is not from |
 | <a id="js.pnpm.field-ignored"></a>`js.pnpm.field-ignored` | warn | high | edit | a package.json `pnpm` field pnpm 11+ no longer reads |
+| <a id="js.packagemanager.unset"></a>`js.packagemanager.unset` | note | high | edit (safe) | package.json has no packageManager field |
+| <a id="js.lockfile.binary"></a>`js.lockfile.binary` | note | high | command | a binary bun.lockb that cannot be checked |
+| <a id="js.nested.roots"></a>`js.nested.roots` | note | high | manual | nested package roots with their own lockfile |
 
 ## Dependency rules
 
@@ -194,6 +197,8 @@ Node, PHP, Composer and Craft pins against the facts catalogue's dated tables.
 | <a id="js.node.eol"></a>`js.node.eol` | warn | medium | edit | a pinned Node is end of life |
 | <a id="js.node.eol-soon"></a>`js.node.eol-soon` | warn | medium | edit | a pinned Node reaches end of life within the eol_soon_days window |
 | <a id="js.node.unpinned"></a>`js.node.unpinned` | warn | high | edit | nothing pins Node |
+| <a id="js.node.floating"></a>`js.node.floating` | note | high | edit | a Node pin that floats (an alias such as lts/* or node) |
+| <a id="js.engines.unenforced"></a>`js.engines.unenforced` | note | high | edit (safe) | engines.node without engine-strict in .npmrc |
 | <a id="node.pin.disagree"></a>`node.pin.disagree` | warn | high | edit | Node pins in different files name different majors |
 | <a id="php.composer.eol"></a>`php.composer.eol` | warn | medium | edit | the Composer minor line in use is past support |
 | <a id="php.composer.v1"></a>`php.composer.v1` | warn | high | edit | CI or a Dockerfile uses Composer 1 |
@@ -224,6 +229,7 @@ Running registry packages outside the lockfile.
 |---|---|---|---|---|
 | <a id="npx.native-cli"></a>`npx.native-cli` | error | high | edit | a native CLI (rg, fd, jq...) is run through npx or installed globally from npm |
 | <a id="npx.unpinned"></a>`npx.unpinned` | warn | medium | edit | npx/dlx/bunx runs an unpinned or undeclared package |
+| <a id="npx.redundant"></a>`npx.redundant` | note | high | edit (safe) | a script runs a local dependency through npx |
 
 ## Legacy rules
 
@@ -234,6 +240,7 @@ Tools and packages the ecosystem has moved on from.
 | <a id="legacy.bower"></a>`legacy.bower` | warn | high | manual | bower.json or .bowerrc |
 | <a id="legacy.node-sass"></a>`legacy.node-sass` | warn | high | manual | node-sass is a dependency |
 | <a id="legacy.package"></a>`legacy.package` | warn | high | manual | a dependency matches the facts catalogue's legacy-package table |
+| <a id="js.yarn.classic"></a>`js.yarn.classic` | note | high | manual | a Yarn 1 (classic) lockfile |
 
 ## Registry and credential rules
 
@@ -245,6 +252,7 @@ Tokens and auth files that must not ship.
 | <a id="registry.credentials.image"></a>`registry.credentials.image` | error | medium | edit | CI writes credentials into a Docker build context that the image copies |
 | <a id="registry.pnpm.placeholder-ignored"></a>`registry.pnpm.placeholder-ignored` | warn | high | edit | a ${...} placeholder in a project .npmrc setting that pnpm ignores |
 | <a id="registry.token.committed"></a>`registry.token.committed` | error | high | manual | a literal token in .npmrc or .yarnrc.yml |
+| <a id="registry.authjson.ignored"></a>`registry.authjson.ignored` | note | high | manual | auth.json is present and gitignored (the good state) |
 
 ## CI and deploy rules
 
@@ -271,4 +279,6 @@ Raised by pm-audit about its own configuration.
 | <a id="config.invalid"></a>`config.invalid` | error | high | edit | the --config file is malformed, so none of it applies |
 | <a id="suppression.expired"></a>`suppression.expired` | warn | high | manual | an ignore passed its `until` date |
 | <a id="suppression.unused"></a>`suppression.unused` | note | high | edit | an ignore matched no finding |
+| <a id="suppression.inline-error"></a>`suppression.inline-error` | note | high | edit | an inline ignore names an error-severity finding |
+| <a id="suppression.inline-no-reason"></a>`suppression.inline-no-reason` | note | high | edit | an inline ignore gives no reason |
 

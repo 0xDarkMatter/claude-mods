@@ -587,8 +587,14 @@ sev = {i: r["severity"] for i, r in catalogue.items()}
 drift = sorted(set(doc_rows) ^ set(sev)) + sorted(i for i in set(doc_rows) & set(sev) if doc_rows[i] != sev[i])
 row(doc_rows and not drift, f"pm-audit-rules.md and the catalogue agree on every id and severity ({len(doc_rows)} rows)" + (f" - drift: {drift}" if drift else ""))
 row(not (covered - set(catalogue)), f"every id a fixture raises is in the catalogue" + (f" - missing: {sorted(covered - set(catalogue))}" if covered - set(catalogue) else ""))
-unfixtured = sorted(set(catalogue) - covered - {"suppression.unused"})
-row(not unfixtured, "every catalogue id has a fixture (suppression.unused is a note, tested below)" + (f" - none for: {unfixtured}" if unfixtured else ""))
+# Note-severity rules are advisory notes (meta.notes), not findings a fixture's _expect lists;
+# each must still be raised somewhere, so the catalogue never documents a note nothing emits.
+note_ids = {i for i, r in catalogue.items() if r["severity"] == "note"}
+unfixtured = sorted(set(catalogue) - covered - note_ids)
+row(not unfixtured, "every non-note catalogue id has a fixture" + (f" - none for: {unfixtured}" if unfixtured else ""))
+audit_src = Path(audit).read_text(encoding="utf-8")
+unraised = sorted(i for i in note_ids if f'note("{i}"' not in audit_src)
+row(not unraised, f"every note-severity catalogue id is raised by a note() call ({len(note_ids)} notes)" + (f" - never raised: {unraised}" if unraised else ""))
 row(all(r["docs_url"] == f"{RULES_URL}#{i}" for i, r in catalogue.items()), "--rules docs_url is the rules file plus an anchor equal to the id")
 
 # every finding is enriched; a fix is a structured object that never invents a command
@@ -776,7 +782,10 @@ for f in stripped["data"]:
     f.pop("fingerprint", None)
 base2 = tmp / "c4" / "baseline-old.json"
 base2.write_text(json.dumps(stripped), encoding="utf-8")
-row(pa(d, "--baseline", str(base2)).returncode == 0, "a baseline from before fingerprints existed still matches (computed from id, file, message)")
+row(pa(tmp / "m" / "deploy-bundle-credentials", "--baseline", str(base2)).returncode == 0,
+    "a baseline from before fingerprints existed still matches findings at the same line (id, file, line, message)")
+row(pa(d, "--baseline", str(base2)).returncode == 10,
+    "a legacy baseline resurfaces a finding whose line moved (no line text to prove it is the same one)")
 d = clone("legacy-bower")
 pb = pj(d)[0].stdout
 base3 = tmp / "c4" / "baseline-bower.json"
@@ -853,6 +862,56 @@ row("js.engine.floor" in (ids_in(doc) or set()), "--profile library still report
 row("silenced by profile library" in pa(tmp / "m" / "js-lockfile-missing", "--profile", "library").stderr,
     "what a profile silences is counted on stderr in every format")
 
+# refute-ux-fix findings (Codex re-refute)
+d = clone("deploy-composer-update")
+(d / "Dockerfile").write_text("FROM php:8.4-fpm\nRUN composer require acme/tool:5\n", encoding="utf-8")
+legacy = json.loads(pj(d)[0].stdout)
+for f in legacy["data"]:
+    f.pop("fingerprint", None)
+base5 = tmp / "c4" / "baseline-legacy-require.json"
+base5.write_text(json.dumps(legacy), encoding="utf-8")
+(d / "Dockerfile").write_text("FROM php:8.4-fpm\nRUN composer require acme/tool:5\nRUN composer require evil/backdoor\n", encoding="utf-8")
+lines5 = [f["line"] for f in (pj(d, "--baseline", str(base5))[1] or {"data": []})["data"] if f["id"] == "deploy.composer.adhoc"]
+row(lines5 == [3], f"a fingerprint-less (legacy) baseline cannot hide a new twin either (lines {lines5})")
+d = clone("clean")
+(d / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
+(d / ".github" / "workflows" / "my job.yml").write_text("name: j\non: push\njobs:\n  j:\n    runs-on: ubuntu-latest\n    steps:\n"
+                                                      "      - uses: actions/setup-node@v4\n        with:\n          node-version: '16'\n")
+paths = {f.get("path") for f in (pj(d)[1] or {"data": []})["data"] if f["file"].startswith(".github/workflows/my job.yml")}
+row(paths == {".github/workflows/my job.yml"}, f"a file name with a space keeps its whole path ({paths})")
+sar = json.loads(pa(noted, "--profile", "pedantic", "--format", "sarif").stdout or "{}")
+results = sar.get("runs", [{}])[0].get("results", [])
+row(results and all("ruleIndex" in r for r in results)
+    and subprocess.run([sys.executable, audit, "--explain", "js.yarn.classic"], capture_output=True).returncode == 0,
+    "a note promoted by pedantic is a catalogued rule (SARIF ruleIndex, --explain)")
+d = clone("clean")
+(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "reason": "kept until the npm move", "until": "2026-12-31"}]}))
+p, doc = pj(d, "--profile", "pedantic")
+row(p.returncode == 10 and "suppression.unused" in (ids_in(doc) or set()), "pedantic also promotes the notes the suppression pass raises")
+d = clone("clean")
+(d / "README.md").write_text((d / "README.md").read_text() + "\n* pm-audit: ignore[npx.unpinned] ordinary prose list item\n`npx cowsay hi`\n")
+row("npx.unpinned" in (ids_in(pj(d)[1]) or set()), "Markdown prose or a list item cannot carry an ignore (only an HTML comment)")
+d_mdh = clone("clean")
+(d_mdh / "README.md").write_text((d_mdh / "README.md").read_text() + "\n# pm-audit: ignore[npx.unpinned] a heading, not a comment\n`npx cowsay hi`\n")
+row("npx.unpinned" in (ids_in(pj(d_mdh)[1]) or set()), "a Markdown heading is not a comment line for an ignore")
+d_mdc = clone("clean")
+(d_mdc / "README.md").write_text((d_mdc / "README.md").read_text()
+                                 + "\n<!-- pm-audit: ignore[npx.unpinned] the docs example is illustrative only -->\n`npx cowsay hi`\n")
+row("npx.unpinned" not in (ids_in(pj(d_mdc)[1]) or set()), "an HTML comment above a Markdown line does carry an ignore")
+d = clone("clean-suppression-inline")
+(d / "scripts" / "bootstrap.sh").write_text("#!/bin/sh\n# pm-audit: ignore[npx.unpinned] .\nnpx eslint .\n")
+p, doc = pj(d)
+row(p.returncode == 10 and "suppression.inline-no-reason" in {n["id"] for n in doc["meta"]["notes"]},
+    "an inline reason must say something too ('.' is no reason)")
+d = clone("clean")
+(d / "scripts").mkdir(exist_ok=True)
+(d / "scripts" / "large.sh").write_text("#" * (513 * 1024) + "\nnpx eslint .\n")
+npx_row = next((c for c in (pj(d)[1] or {"meta": {"checks": []}})["meta"]["checks"] if c["check"] == "npx"), {})
+row(npx_row.get("status") == "skipped" and "large.sh" in npx_row.get("reason", ""), f"an oversized script makes the npx check skipped, not pass ({npx_row})")
+d = clone("legacy-bower")
+(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "reason": "等待迁移完成以后删除", "until": "2026-12-31"}]}, ensure_ascii=False), encoding="utf-8")
+row(pa(d).returncode == 0, "a reason written in a non-Latin script is a reason")
+
 # the new formats print no secret either
 for case in leaky:
     for fmt in ("sarif", "github"):
@@ -896,7 +955,7 @@ catches("an unused ignore raises a note", 'elif not any(f["id"] == e["id"] and i
 d_in = tmp / "m" / "clean-suppression-inline"
 catches("an inline ignore reads the line above", "for idx in (line - 1, line - 2):", "for idx in (line - 1,):", lambda s: runs(pa(d_in, script=s)).returncode == 0)
 d_nr = tmp / "m" / "suppression-inline-no-reason"
-catches("an inline ignore needs a reason", 'return ("ok", reason) if reason else ("noreason", None)', 'return ("ok", reason)', lambda s: runs(pa(d_nr, script=s)).returncode == 10)
+catches("an inline ignore needs a reason", 'return ("ok", reason) if reason_ok(reason) else ("noreason", None)', 'return ("ok", reason)', lambda s: runs(pa(d_nr, script=s)).returncode == 10)
 d_bad = clone("legacy-bower")
 (d_bad / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "path": "bower.json", "reason": "kept until the npm move", "until": "2026-12-31"}, {"id": "legacy.bower"}]}))
 catches("an invalid config applies none of itself", 'if not problems else (None, problems)', 'if True else (None, problems)',
@@ -908,13 +967,14 @@ base_b = tmp / "c4" / "baseline-bundle.json"
 base_b.write_text(pj(tmp / "m" / "deploy-bundle-credentials")[0].stdout, encoding="utf-8")
 catches("a fingerprint masks line numbers in the message", 'subject = re.sub(r"(?i)\\bline \\d+\\b", "line N", f.get("message", ""))',
         'subject = f.get("message", "")', lambda s: runs(pa(d_b, "--baseline", str(base_b), script=s)).returncode == 0)
-catches("a baseline row without a fingerprint is fingerprinted", '{fingerprint(r) for r in rows if not r.get("fingerprint")})', 'set())',
+catches("a baseline row without a fingerprint is matched", '{legacy_key(r) for r in rows if not r.get("fingerprint")})', 'set())',
         lambda s: runs(pa(tmp / "m" / "deploy-bundle-credentials", "--baseline", str(base2), script=s)).returncode == 0)
 catches("--fail-on error lets warnings through", 'if fail_on == "error":', 'if False:', lambda s: runs(pa(bower, "--fail-on", "error", script=s)).returncode == 0)
 catches("the library profile drops deploy-shaped rules", 'kept = [f for f in raw if f["id"] not in LIBRARY_SILENCED]', "kept = list(raw)",
         lambda s: runs(pa(lib, "--profile", "library", script=s)).returncode == 0)
 catches("the pedantic profile promotes notes to findings",
-        'a.add("warn", n["id"], n["file"], n["message"], "see the note\'s rule in --rules / --explain")', 'pass',
+        'a.add("warn", n["id"], n["file"], n["message"], rule["fix"] if rule else "see --rules")\n'
+        '            a.findings[-1]["path"] = real_path(root, n["file"])', 'pass',
         lambda s: runs(pa(noted, "--profile", "pedantic", script=s)).returncode == 10)
 catches("a % in an annotation is escaped", 'return s.replace("%", "%25")', "return s",
         lambda s: "fixture%2525x" in runs(pa(d_pct, "--format", "github", script=s)).stdout)
@@ -931,7 +991,8 @@ def fresh(case, edit):
 d_trail = fresh("clean-suppression-inline", lambda d: (d / "scripts" / "bootstrap.sh").write_text(
     "#!/bin/sh\nnpx eslint . # pm-audit: ignore[npx.unpinned] pinned by the image\nnpx prettier .\n"))
 catches("a trailing inline ignore covers its own line only",
-        'if idx == line - 2 and not (0 <= idx < len(rows) and COMMENT_ONLY.match(rows[idx])):', 'if False:',
+        'if idx == line - 2 and not COMMENT_ONLY.match(rows[idx]):',
+        'if False:',
         lambda s: runs(pa(d_trail, script=s)).returncode == 10)
 d_err = fresh("registry-token-committed", lambda d: (d / ".npmrc").write_text((d / ".npmrc").read_text().replace(
     "\n//npm.example.com/:_authToken", "\n# pm-audit: ignore[registry.token.committed] it is fine\n//npm.example.com/:_authToken", 1)))
@@ -976,6 +1037,29 @@ catches("a config reason must say something", "IGNORE_REASON_MIN = 8", "IGNORE_R
         lambda s: "config.invalid" in {f["id"] for f in json.loads(runs(pa(d_dot, "--json", script=s)).stdout)["data"]})
 d_far = fresh("legacy-bower", lambda d: (d / ".pm-audit.json").write_text(json.dumps(
     {"ignore": [{"id": "legacy.bower", "reason": "kept until the npm move", "until": "9999-12-31"}]})))
+catches("a Markdown ignore needs an HTML comment", 'if markdown and "<!--" not in rows[idx][:m.start()]:', "if False:",
+        lambda s: runs(pa(d_mdh, script=s)).returncode == 10)
+d_big = fresh("clean", lambda d: ((d / "scripts").mkdir(exist_ok=True), (d / "scripts" / "large.sh").write_text("#" * (513 * 1024) + "\nnpx eslint .\n")))
+catches("an oversized script marks the npx check skipped",
+        'self.blind("npx", f"skipped a file over {MAX_DOC_BYTES // 1024} KiB: {rel(self.root, p)}")', "pass",
+        lambda s: next(c for c in json.loads(runs(pa(d_big, "--json", script=s)).stdout)["meta"]["checks"] if c["check"] == "npx")["status"] == "skipped")
+def legacy_twin(s):
+    b = tmp / "c4" / f"legacy-base-{abs(hash(str(s)))}.json"
+    rows = json.loads(runs(pa(d_req0, "--json", script=s)).stdout)
+    for f in rows["data"]:
+        f.pop("fingerprint", None)
+    b.write_text(json.dumps(rows), encoding="utf-8")
+    data = json.loads(runs(pa(d_req1, "--json", "--baseline", str(b), script=s)).stdout)["data"]
+    return [f["line"] for f in data if f["id"] == "deploy.composer.adhoc"] == [3]
+catches("a legacy baseline row matches on its line too", 'return (f.get("id"), f.get("file"), f.get("line"), f.get("message"))',
+        'return (f.get("id"), f.get("file"), f.get("message"))', legacy_twin)
+d_sp = fresh("clean", lambda d: ((d / ".github" / "workflows").mkdir(parents=True, exist_ok=True),
+                                 (d / ".github" / "workflows" / "my job.yml").write_text(
+                                     "name: j\non: push\njobs:\n  j:\n    runs-on: ubuntu-latest\n    steps:\n"
+                                     "      - uses: actions/setup-node@v4\n        with:\n          node-version: '16'\n")))
+catches("real_path keeps a file name with a space", "for k in range(len(words), 0, -1):", "for k in range(1, 0, -1):",
+        lambda s: {f.get("path") for f in json.loads(runs(pa(d_sp, "--json", script=s)).stdout)["data"]
+                   if f["file"].startswith(".github/workflows/my job.yml")} == {".github/workflows/my job.yml"})
 catches("a config ignore expires within a year", "elif day > as_of + dt.timedelta(days=IGNORE_MAX_DAYS):", "elif False:",
         lambda s: "config.invalid" in {f["id"] for f in json.loads(runs(pa(d_far, "--json", script=s)).stdout)["data"]})
 PY
