@@ -33,11 +33,13 @@ The flow, in short:
    Pass `--recent-days N` through from `$ARGUMENTS` if the user gave one (their
    lanes may span longer than the 7-day default); pass `--active-window N` to tune
    the live-writer threshold. Each branch is classified
-   **LANDABLE / STALE / WIP / ACTIVE / MERGED**.
+   **LANDABLE / STALE / WIP / ACTIVE / MERGED / ERROR**. `ERROR` means a git
+   probe failed for that branch; exit 3 means nothing is landable but the survey
+   is incomplete, never an all-clear.
 
 2. **Confirm the plan (`AskUserQuestion`, required).** Present three groups —
-   *land these LANDABLE / park these WIP+ACTIVE+STALE / prune these MERGED* — and
-   get an explicit go. Surface any `far behind (N)` notes so the user knows which
+   *land these LANDABLE / park these WIP+ACTIVE+STALE / prune these MERGED* — plus
+   any `ERROR` rows on their own (never landed or pruned), and get an explicit go. Surface any `far behind (N)` notes so the user knows which
    lands may conflict. Never land without this confirm: it writes to the trunk.
 
 3. **Execute via fleet-ops** (only the confirmed landable set):
@@ -57,7 +59,7 @@ The flow, in short:
 
 **Safety invariants:** `ACTIVE` (a live peer writer) is never landed. `WIP` needs an
 explicit in-lane commit first. `STALE` needs explicit opt-in (`--recent-days` or naming
-the branch). Only `LANDABLE` lands by default.
+the branch). Only `LANDABLE` lands by default. `ERROR` is never landed or pruned.
 
 ## No args — status survey
 

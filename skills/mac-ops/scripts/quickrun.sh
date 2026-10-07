@@ -64,8 +64,11 @@ run_subscript() {
 
     # Capture sub-script output (suppress its own SUMMARY since we'll do our own).
     # Force NO_PANEL so children emit parseable plain text — we render our own panel.
-    local out
-    out=$(NO_PANEL=1 bash "$SCRIPTS_DIR/$script" --quiet "$@" 2>&1 || true)
+    # procsub guard: the sub-script's status is kept (checked after the counts).
+    # `|| true` threw it away, and an audit that crashed before its SUMMARY added
+    # nothing to the counts, so the verdict read green over a crashed audit.
+    local out rc=0
+    out=$(NO_PANEL=1 bash "$SCRIPTS_DIR/$script" --quiet "$@" 2>&1) || rc=$?
 
     # Echo the sub-script's findings (everything before its SUMMARY)
     echo "$out" | sed -n '/^=== /,/^=== SUMMARY ===/p' | sed '/^=== SUMMARY ===/q' | sed '$d'
@@ -83,6 +86,18 @@ run_subscript() {
         TOTAL_FAIL=$((TOTAL_FAIL + ${fail:-0}))
         TOTAL_WARN=$((TOTAL_WARN + ${warn:-0}))
         TOTAL_INFO=$((TOTAL_INFO + ${info:-0}))
+    fi
+
+    # None of the five audits documents a findings exit code (each exits 0 once
+    # its audit has run, FAILs or not), so a non-zero exit or a missing SUMMARY
+    # means its findings are incomplete: one FAIL naming the script, put first
+    # so the top-10 list can't truncate it away.
+    if [[ "$rc" -ne 0 || -z "$summary_line" ]]; then
+        local why="exit $rc"
+        [[ -z "$summary_line" ]] && why="$why, no SUMMARY"
+        TOTAL_FAIL=$((TOTAL_FAIL + 1))
+        ALL_FAILS=("[$label] $script failed ($why) - its findings are incomplete; run it alone to see why" \
+            ${ALL_FAILS[@]+"${ALL_FAILS[@]}"})
     fi
 
     # Collect FAIL and WARN lines for the consolidated summary

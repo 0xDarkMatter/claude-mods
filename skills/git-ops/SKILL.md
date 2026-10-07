@@ -47,7 +47,7 @@ No subagent needed. Execute directly via Bash for instant results.
 |-----------|---------|
 | **Status (rich)** | `bash $HOME/.claude/skills/git-ops/scripts/status.sh` — one-shot HEAD + sync + tree + worktrees + branches + PR |
 | **Worktree survey** | `bash $HOME/.claude/skills/git-ops/scripts/worktree-survey.sh` — per-worktree state, drift detection, prunable/WIP/ghost/orphan triage |
-| **Land-all plan** | `bash $HOME/.claude/skills/git-ops/scripts/land-all.sh [--porcelain]` — classifies every branch as LANDABLE/STALE/WIP/ACTIVE/MERGED for a batch land (see "Land all" below) |
+| **Land-all plan** | `bash $HOME/.claude/skills/git-ops/scripts/land-all.sh [--porcelain]` — classifies every branch as LANDABLE/STALE/WIP/ACTIVE/MERGED/ERROR for a batch land (see "Land all" below) |
 | Status (bare) | `git status --short` |
 | Log | `git log --oneline -20` |
 | Diff (unstaged) | `git diff --stat` |
@@ -290,6 +290,7 @@ Survey with `scripts/land-all.sh --porcelain`, **confirm the land / park / prune
 **Safety invariants:** `ACTIVE` lanes (live peer writer) are never landed — this is the
 worktree-boundaries live-writer guard applied to landing. `WIP` needs an explicit commit first.
 `STALE` needs explicit opt-in (`--recent-days` or naming the branch). Only `LANDABLE` lands by default.
+`ERROR` (a git probe failed) is never landed or pruned, and exit 3 means the survey is incomplete.
 
 ### Boundaries (HARD RULE)
 

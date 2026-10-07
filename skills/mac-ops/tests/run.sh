@@ -3,8 +3,12 @@
 # Lightweight self-tests. Run from repo root:
 #   bash skills/mac-ops/tests/run.sh
 #
-# Validates structural and output invariants WITHOUT trying to simulate
-# broken macOS state. Catches regressions in:
+# The fail-closed block runs on EVERY OS: PATH shims stand in for diskutil,
+# mount, df, log and tmutil, and fake sub-scripts stand in for quickrun's
+# audits, to prove a broken producer or a crashed audit never reads as a pass.
+#
+# The rest runs on macOS only and validates structural and output invariants
+# WITHOUT trying to simulate broken macOS state. Catches regressions in:
 #  - bash syntax / unbound vars / set -u trips
 #  - section headers + ordering
 #  - --json producing parseable NDJSON
@@ -33,17 +37,113 @@ assert() {
 contains() { local hay="$1" needle="$2"; [[ "$hay" == *"$needle"* ]]; }
 not_contains() { local hay="$1" needle="$2"; [[ "$hay" != *"$needle"* ]]; }
 
-# Skip on non-macOS
-if [[ "$(uname -s)" != "Darwin" ]]; then
-    echo "Skipping: mac-ops tests only run on macOS (this is $(uname -s))"
-    exit 0
-fi
-
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/.." && pwd)"
 
 echo "=== mac-ops self-tests ==="
 echo "Root: $root"
+
+# ----------------------------------------------------------------------------
+echo
+echo "--- fail-closed: shimmed tools + fake audits (every OS) ---"
+# ----------------------------------------------------------------------------
+# A producer that fails (diskutil, mount, df) or an audit that crashes must
+# surface as FAIL/WARN, never as the silent pass it used to be. Shims first on
+# PATH make the failure deterministic on any OS, macOS included.
+
+FC="$(mktemp -d)"; trap 'rm -rf "$FC"' EXIT
+mkdir -p "$FC/bin"
+cat > "$FC/bin/diskutil" <<'EOF'
+#!/bin/sh
+case "$1" in
+    list)
+        [ -n "${FAKE_LIST_FAIL:-}" ] && { echo "diskutil: simulated failure" >&2; exit 1; }
+        [ -n "${FAKE_LIST_EMPTY:-}" ] && exit 0
+        printf '/dev/disk0 (internal, physical):\n   0:  GUID_partition_scheme  *500.3 GB  disk0\n' ;;
+    info)
+        [ -n "${FAKE_INFO_FAIL:-}" ] && exit 1
+        printf '   Device / Media Name:  FAKE SSD\n   SMART Status:         %s\n' "${FAKE_SMART:-Verified}" ;;
+esac
+exit 0
+EOF
+cat > "$FC/bin/mount" <<'EOF'
+#!/bin/sh
+[ -n "${FAKE_MOUNT_FAIL:-}" ] && { echo "mount: simulated failure" >&2; exit 1; }
+echo '/dev/disk3s1s1 on / (apfs, sealed, local, read-only, journaled)'
+EOF
+cat > "$FC/bin/df" <<'EOF'
+#!/bin/sh
+[ -n "${FAKE_DF_FAIL:-}" ] && { echo "df: simulated failure" >&2; exit 1; }
+echo 'Filesystem      Size   Used  Avail Capacity  Mounted on'
+echo '/dev/disk3s1s1  460Gi  400Gi 60Gi  87%       /'
+EOF
+cat > "$FC/bin/tmutil" <<'EOF'
+#!/bin/sh
+i=0; while [ "$i" -lt "${FAKE_SNAPS:-0}" ]; do echo "com.apple.TimeMachine.snap-$i.local"; i=$((i+1)); done
+EOF
+printf '#!/bin/sh\nexit 0\n' > "$FC/bin/log"
+chmod +x "$FC/bin/"*
+
+# dh [VAR=value...]: disk-health.sh under the shims; its output lands in $dh_out.
+dh() { dh_out=$(env "$@" PATH="$FC/bin:$PATH" bash "$root/scripts/disk-health.sh" --quiet 2>&1); }
+
+dh FAKE_SMART=Failing
+assert "disk-health: harness reaches SMART (a Failing disk is reported)" contains "$dh_out" "[FAIL] /dev/disk0 SMART status"
+dh FAKE_LIST_FAIL=1
+assert "disk-health: a failed diskutil list is a FAIL, not a silent pass" contains "$dh_out" "[FAIL] Disk listing"
+dh FAKE_LIST_EMPTY=1
+assert "disk-health: a disk list naming no disk is a FAIL" contains "$dh_out" "[FAIL] Disk listing"
+dh FAKE_INFO_FAIL=1
+assert "disk-health: unreadable disk info is a SMART FAIL, not a WARN" contains "$dh_out" "[FAIL] /dev/disk0 SMART status"
+dh FAKE_MOUNT_FAIL=1
+assert "disk-health: a failed mount listing warns snapshots unchecked" contains "$dh_out" "[WARN] Snapshots :: NOT checked"
+assert "disk-health: a failed mount listing warns free space unchecked" contains "$dh_out" "[WARN] Free space :: NOT checked"
+dh FAKE_DF_FAIL=1
+assert "disk-health: a failed df is not '100% free'" not_contains "$dh_out" "[PASS] Free space"
+assert "disk-health: a failed df warns free space unchecked" contains "$dh_out" "[WARN] Free space on / :: NOT checked"
+dh FAKE_SNAPS=25
+assert "disk-health: a snapshot WARN reaches the SUMMARY count" contains "$dh_out" "WARN: 1    INFO:"
+
+# quickrun runs its audits from its own directory, so a copy beside fake audits
+# exercises the real run_subscript. Each fake prints one PASS and a SUMMARY;
+# FAKE_CRASH dies before the SUMMARY, FAKE_LATE_EXIT exits 2 after it.
+mkdir -p "$FC/qr"
+cp "$root/scripts/quickrun.sh" "$FC/qr/"
+cp -R "$root/scripts/_lib" "$FC/qr/"
+for s in health-audit startup-audit storage-pressure wake-reasons tcc-audit; do
+    cat > "$FC/qr/$s.sh" <<'EOF'
+#!/usr/bin/env bash
+me="$(basename "$0")"
+echo "[PASS] $me fake check"
+[[ "${FAKE_CRASH:-}" == "$me" ]] && { echo "$me: line 9: simulated crash" >&2; exit 1; }
+echo
+echo "=== SUMMARY ==="
+echo "  PASS: 1    FAIL: 0    WARN: 0    INFO: 0"
+echo "  No failures."
+[[ "${FAKE_LATE_EXIT:-}" == "$me" ]] && exit 2
+exit 0
+EOF
+done
+qr() { qr_out=$(env "$@" NO_PANEL=1 bash "$FC/qr/quickrun.sh" 2>&1); }
+
+qr
+assert "quickrun: five clean audits read clean" contains "$qr_out" "Aggregate: PASS 5    FAIL 0"
+qr FAKE_CRASH=storage-pressure.sh
+assert "quickrun: an audit that crashed before its SUMMARY is a FAIL" contains "$qr_out" "FAIL 1"
+assert "quickrun: the crash FAIL names the script" contains "$qr_out" "storage-pressure.sh failed (exit 1, no SUMMARY)"
+qr FAKE_LATE_EXIT=wake-reasons.sh
+assert "quickrun: an audit exiting non-zero after its SUMMARY is a FAIL" contains "$qr_out" "wake-reasons.sh failed (exit 2)"
+
+# Everything below drives the real macOS tools.
+if [[ "$(uname -s)" != "Darwin" ]]; then
+    echo
+    echo "Skipping the rest: it needs macOS (this is $(uname -s))"
+    echo "=== TOTAL: $PASS pass, $FAIL fail ==="
+    [[ "$FAIL" -eq 0 ]] && exit 0
+    echo "Failed tests:"
+    for t in "${FAILED_TESTS[@]}"; do echo "  - $t"; done
+    exit 1
+fi
 
 # ----------------------------------------------------------------------------
 echo

@@ -66,17 +66,40 @@ disk_id=$(resolve_target)
 # ----------------------------------------------------------------------------
 section "1. DEVICE SUMMARY"
 # ----------------------------------------------------------------------------
+# A check that could not run reports at the worst result it could have given,
+# so a broken tool can never read better than an honest run: SMART can FAIL, so
+# an unread disk is a FAIL; snapshots and free space only WARN (sections 4-5).
 if [[ -n "$disk_id" ]]; then
     targets=("$disk_id")
 else
-    # All physical disks (not partitions / synthesized)
-    mapfile -t targets < <(diskutil list 2>/dev/null | awk '/^\/dev\/disk[0-9]+ /{gsub("/dev/",""); print $1}' | sort -u | head -20)
+    # All physical disks (not partitions / synthesized).
+    # procsub guard: diskutil's status is checked before any disk is walked. Fed
+    # through `mapfile < <(diskutil list | awk ...)`, a failed listing left no
+    # targets: no SMART check ran, the run reported no FAIL, and a Failing disk
+    # went unreported. A failed or empty listing is now a FAIL of its own.
+    targets=()
+    rc=0
+    listing=$(diskutil list 2>/dev/null) || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        rows=$(printf '%s\n' "$listing" | awk '/^\/dev\/disk[0-9]+ /{gsub("/dev/",""); print $1}' | sort -u | head -20)
+        while IFS= read -r d; do
+            [[ -n "$d" ]] && targets+=("$d")
+        done <<< "$rows"
+    fi
+    if [[ "${#targets[@]}" -eq 0 ]]; then
+        why="named no disk"; [[ "$rc" -ne 0 ]] && why="failed (exit $rc)"
+        log_fail "Disk listing" "diskutil list $why - SMART status NOT checked"
+    fi
 fi
 
-for d in "${targets[@]}"; do
+for d in ${targets[@]+"${targets[@]}"}; do
     [[ -z "$d" ]] && continue
-    info=$(diskutil info "$d" 2>/dev/null)
-    [[ -z "$info" ]] && { log_warn "diskutil info $d" "no data"; continue; }
+    irc=0
+    info=$(diskutil info "$d" 2>/dev/null) || irc=$?
+    if [[ "$irc" -ne 0 || -z "$info" ]]; then
+        log_fail "/dev/$d SMART status" "NOT checked - diskutil info failed (exit $irc) or returned no data"
+        continue
+    fi
 
     model=$(echo "$info" | awk -F': *' '/Device \/ Media Name/{print $2; exit}')
     bus=$(echo "$info" | awk -F': *' '/Protocol/{print $2; exit}')
@@ -147,36 +170,71 @@ else
     log_pass "APFS error/fault events" "$apfs_errors"
 fi
 
+# procsub guard: mount's status is checked once, here, for sections 4 and 5.
+# Fed into loops (`mount | awk | while`, `mapfile < <(mount | awk)`), a failed
+# listing walked no volume, so the snapshot and free-space checks vanished and
+# the run read clean. The piped `while` also ran in a subshell, which dropped
+# every snapshot PASS/WARN it logged from the SUMMARY counts.
+mount_rc=0
+mount_out=$(mount 2>/dev/null) || mount_rc=$?
+apfs_mounts=""
+[[ "$mount_rc" -eq 0 ]] && apfs_mounts=$(printf '%s\n' "$mount_out" | awk '/apfs/{print $3}')
+mounts_why=""   # empty = the APFS mount list is usable
+if [[ "$mount_rc" -ne 0 ]]; then
+    mounts_why="mount failed (exit $mount_rc)"
+elif [[ -z "$apfs_mounts" ]]; then
+    mounts_why="mount listed no APFS volume"
+fi
+
 # ----------------------------------------------------------------------------
 section "4. APFS SNAPSHOT BLOAT"
 # ----------------------------------------------------------------------------
 # Per-volume snapshot count
-mount | awk '/apfs/{print $3}' | while read -r mnt; do
-    [[ -z "$mnt" ]] && continue
-    snap_count=$(tmutil listlocalsnapshots "$mnt" 2>/dev/null | grep -c "com.apple" | tr -d ' \n')
-    snap_count="${snap_count:-0}"
-    if (( snap_count > 20 )); then
-        log_warn "Snapshots on $mnt" "$snap_count — purgeable space tied up"
-    elif (( snap_count > 0 )); then
-        log_info "Snapshots on $mnt" "$snap_count"
-    else
-        log_pass "Snapshots on $mnt" "0"
-    fi
-done
+if [[ -n "$mounts_why" ]]; then
+    log_warn "Snapshots" "NOT checked - $mounts_why"
+else
+    while IFS= read -r mnt; do
+        [[ -z "$mnt" ]] && continue
+        snap_count=$(tmutil listlocalsnapshots "$mnt" 2>/dev/null | grep -c "com.apple" | tr -d ' \n')
+        snap_count="${snap_count:-0}"
+        if (( snap_count > 20 )); then
+            log_warn "Snapshots on $mnt" "$snap_count — purgeable space tied up"
+        elif (( snap_count > 0 )); then
+            log_info "Snapshots on $mnt" "$snap_count"
+        else
+            log_pass "Snapshots on $mnt" "0"
+        fi
+    done <<< "$apfs_mounts"
+fi
 
 # ----------------------------------------------------------------------------
 section "5. FREE SPACE / PURGEABLE BREAKDOWN"
 # ----------------------------------------------------------------------------
+volumes=()
 if [[ -n "$TARGET_VOL" ]]; then
     volumes=("$TARGET_VOL")
+elif [[ -n "$mounts_why" ]]; then
+    log_warn "Free space" "NOT checked - $mounts_why"
 else
-    mapfile -t volumes < <(mount | awk '/apfs/{print $3}' | head -6)
+    while IFS= read -r v; do
+        [[ -n "$v" ]] && volumes+=("$v")
+    done <<< "$(printf '%s\n' "$apfs_mounts" | head -6)"
 fi
 
-for v in "${volumes[@]}"; do
+for v in ${volumes[@]+"${volumes[@]}"}; do
     [[ -d "$v" ]] || continue
-    df_line=$(df -h "$v" 2>/dev/null | tail -1)
-    free_pct=$(echo "$df_line" | awk '{gsub("%","",$5); print 100-$5}')
+    # df's status is checked: its empty output once parsed as 0% used, so a
+    # failed df read "100% free", a PASS.
+    drc=0
+    df_out=$(df -h "$v" 2>/dev/null) || drc=$?
+    df_line=$(printf '%s\n' "$df_out" | tail -1)
+    used_pct=$(printf '%s\n' "$df_line" | awk '{gsub("%","",$5); print $5}')
+    if [[ "$drc" -ne 0 || ! "$used_pct" =~ ^[0-9]+$ ]]; then
+        why="df failed (exit $drc)"; [[ "$drc" -eq 0 ]] && why="df printed no capacity"
+        log_warn "Free space on $v" "NOT checked - $why"
+        continue
+    fi
+    free_pct=$((100 - used_pct))
     free_gb=$(echo "$df_line" | awk '{print $4}')
     note "  $v: ${free_gb} free (${free_pct}%)"
     if [[ "$free_pct" -lt 10 ]]; then
