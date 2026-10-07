@@ -27,6 +27,7 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   js.manager.mixed  deploy.install.unfrozen  deploy.composer.dev  php.composer.v1
   deploy.composer.safety-off
   deploy.composer.adhoc
+  deploy.composer.installer-unverified
   deploy.install.unlocked  deploy.npm.yarn-flag  deploy.global.unpinned
 
 It never prints a secret: a committed or CI-written credential is reported as file:line only,
@@ -2029,6 +2030,11 @@ class Audit:
                     writes.append((rel, n, m.group(2), join_dir(cwd, m.group(1), env)))
                 elif ci and CRED_CONFIG.search(line):
                     writes.append((rel, n, "auth.json", join_dir(cwd, "auth.json", env)))
+                if re.search(r"https?://getcomposer\.org/installer\b", line, re.I) and re.search(
+                        r"\|\s*(?:sudo\s+)?php\b", line, re.I):
+                    flag("deploy.composer.installer-unverified", rel, n,
+                         "Composer installer is fetched and piped directly to PHP, so its installer.sig is never checked",
+                         "download composer-setup.php and installer.sig, verify the SHA-384 hash, then execute the saved installer")
                 # A `cd` moves the rest of its shell block (undone at the end of a subshell);
                 # installs and builds run where it left off.
                 for words in simple_commands(line):
