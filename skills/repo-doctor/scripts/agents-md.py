@@ -1228,6 +1228,44 @@ def audit_nested(repo: Path, nested: list[str], f: dict, root_rel: str | None,
     return finds, docs, unlinked
 
 
+def owner_dir(paths: list[str], nested_dirs: list[str]) -> str | None:
+    """The deepest nested-doc folder holding every path, or None (the root owns it)."""
+    if not paths:
+        return None
+    inside = [d for d in nested_dirs if all(p.startswith(d + "/") for p in paths)]
+    return max(inside, key=len) if inside else None
+
+
+def landmine_items(lines: list[str]) -> list[tuple[int, str]]:
+    """(0-based line, text with continuation lines) for each top-level item of a
+    Landmines section."""
+    out = []
+    for s in h2_sections(lines):
+        if s["key"] != "landmines":
+            continue
+        cur = None
+        for i in range(s["start"] + 1, s["end"]):
+            line = lines[i]
+            if re.match(r"^(\d+\.|[-*])\s+", line):
+                if cur:
+                    out.append(cur)
+                cur = (i, line)
+            elif cur and line.strip() and line[:1] in (" ", "\t"):
+                cur = (cur[0], cur[1] + " " + line.strip())
+            elif cur and not line.strip():
+                out.append(cur)
+                cur = None
+        if cur:
+            out.append(cur)
+    return out
+
+
+def named_paths(text: str) -> list[str]:
+    """Repo paths a line names in code spans or links (a span with a space is a command)."""
+    found = [a or b for a, b in re.findall(r"`([^`\s]+)`|\]\(([^)\s#]+)\)", text)]
+    return [x.rstrip("/") for x in found if "/" in x and not re.match(r"^(\w+:|\.\./|/)", x)]
+
+
 def add_root_pointers(lines: list[str], unlinked: list[str], root_rel: str) -> list[str]:
     """Point the root at each unlinked nested doc: a row in an existing ## Ownership table,
     else one trigger-bearing line at the end of the Structure section (created if absent)."""
@@ -1660,15 +1698,35 @@ def cmd_audit(args) -> int:
             finds += [{"id": "ruled-out-unparsed", "severity": "info", "path": f"{RULED_OUT}:{n}",
                        "msg": "this line looks like a ruled-out entry but does not parse: "
                               "- [kind] `path` @count: reason"} for n in unparsed]
-        uncovered = uncovered_candidates(text, cands)
+        # Each candidate is asked of the deepest AGENTS.md whose folder holds all of its
+        # paths (spec N4); only that doc's text can answer it.
+        nested_dirs = [os.path.dirname(n) for n in nested]
+        texts = {n: read_raw(repo / n) for n in nested}
+        uncovered, by_doc = [], {}
+        for c in cands:
+            if not c.get("paths"):
+                continue
+            od = owner_dir(c["paths"], nested_dirs)
+            doc = f"{od}/AGENTS.md" if od else rel
+            if uncovered_candidates(texts.get(doc, text), [c]):
+                uncovered.append({**c, "doc": doc})
+                by_doc.setdefault(doc, []).append(c)
         data["uncovered_candidates"] = uncovered
-        if uncovered:
-            shown = ", ".join(f"`{c['paths'][0]}`" for c in uncovered[:5])
-            more = f" and {len(uncovered) - 5} more" if len(uncovered) > 5 else ""
-            finds.append({"id": "uncovered-candidates", "severity": "info", "path": rel,
-                          "msg": f"{len(uncovered)} landmine candidate(s) from the repo scan name files "
-                                 f"{rel} never mentions: {shown}{more}. Answer each as a landmine or "
+        for doc, cs in sorted(by_doc.items()):
+            shown = ", ".join(f"`{c['paths'][0]}`" for c in cs[:5])
+            more = f" and {len(cs) - 5} more" if len(cs) > 5 else ""
+            finds.append({"id": "uncovered-candidates", "severity": "info", "path": doc,
+                          "msg": f"{len(cs)} landmine candidate(s) from the repo scan name files "
+                                 f"{doc} never mentions: {shown}{more}. Answer each as a landmine or "
                                  "rule it out (--json lists the questions)"})
+        for d in docs:
+            d["uncovered"] = len(by_doc.get(d["path"], []))
+        for i, item in landmine_items(lines):
+            od = owner_dir(named_paths(item), nested_dirs)
+            if od:
+                finds.append({"id": "landmine-belongs-nested", "severity": "info", "path": f"{rel}:{i + 1}",
+                              "msg": f"this landmine names only paths in `{od}/`, so it belongs in "
+                                     f"{od}/AGENTS.md. Move it by hand; the patch never moves a landmine"})
     sev_rank = {"crit": 0, "warn": 1, "info": 2}
     finds.sort(key=lambda x: (sev_rank[x["severity"]], x["id"], x["path"]))
     for doc in docs:

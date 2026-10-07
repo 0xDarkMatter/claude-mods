@@ -456,6 +456,18 @@ grep -qxF '+- Before editing `packages/ui/**`, read [packages/ui/AGENTS.md](pack
 commit "$NA" "docs: link the ui doc"
 OUT="$("$PY" "$AM" audit --repo "$NA" --no-parents --json 2>/dev/null)"
 check "  ...and the re-audit finds it linked" "not $(nf nested-unlinked packages/ui/AGENTS.md)"
+# Routing: a candidate is answered by the deepest AGENTS.md whose folder holds all of its
+# paths. The engine doc covers parse.ts, so the root is not asked about it; the a01/a02
+# pair is the engine doc's open question, not the root's.
+echo '- `packages/engine/src/parse.ts` keeps breaking: run the suite after every edit.' >> "$NA/packages/engine/AGENTS.md"
+commit "$NA" "docs: engine landmine"
+OUT="$("$PY" "$AM" audit --repo "$NA" --no-parents --json 2>/dev/null)"
+check "candidate_inside_nested_dir_is_owned_by_nested_doc" \
+      "[(c['doc'],c['paths']) for c in D['uncovered_candidates'] if c['paths'][0].startswith('packages/engine/')]==[('packages/engine/AGENTS.md',['packages/engine/src/a01.ts','packages/engine/src/a02.ts'])] and not any(f['id']=='uncovered-candidates' and f['path']=='AGENTS.md' and 'packages/engine/' in f['msg'] for f in D['findings'])"
+# A root landmine about one package is reported against the nested doc that owns the
+# folder; the patch leaves it where it is (moving landmines is the owner's call).
+check "root_landmine_about_one_package_is_flagged_not_moved" \
+      "any(f['id']=='landmine-belongs-nested' and f['path']=='AGENTS.md:13' and 'packages/engine/AGENTS.md' in f['msg'] for f in D['findings']) and not any(l.startswith('-') and 'The parser shim' in l for l in (D['diff'] or '').splitlines())"
 # A root with an Ownership table gets a row there, in the table's own columns.
 OW="$TMP/owner"; init_repo "$OW"; good_agents "$OW"; mkdir -p "$OW/eng" "$OW/lib"
 printf '\n## Ownership\n\n| Area | Path | Entry doc | Gate |\n|---|---|---|---|\n| eng | `eng/` | [eng/AGENTS.md](eng/AGENTS.md) | `npm test` |\n' >> "$OW/AGENTS.md"
