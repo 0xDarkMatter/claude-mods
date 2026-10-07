@@ -20,6 +20,7 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   js.packagemanager.mismatch  js.node.unpinned  js.node.eol  node.pin.disagree
   ddev.node.unpinned  php.require.missing  php.platform.unset
   php.pin.disagree  php.eol  php.lockfile.missing  php.lockfile.stale
+  php.composer.safety-off
   npx.unpinned  npx.native-cli  legacy.bower  legacy.node-sass
   registry.token.committed  registry.authjson.committed  registry.credentials.image
   registry.pnpm.placeholder-ignored
@@ -1619,6 +1620,29 @@ class Audit:
                 self.add("error", "php.manifest.invalid", "composer.json", "composer.json is not valid JSON, or not a JSON object",
                          "fix the JSON; `composer validate` shows where")
             return
+        config = obj(c.get("config"))
+        disabled = []
+        if config.get("allow-plugins") is True:
+            disabled.append("config.allow-plugins=true (blanket plugin execution)")
+        if config.get("secure-http") is False:
+            disabled.append("config.secure-http=false")
+        if config.get("disable-tls") is True:
+            disabled.append("config.disable-tls=true")
+        audit = config.get("audit")
+        if audit is False or str(audit).lower() in ("off", "disabled", "ignore"):
+            disabled.append("config.audit is disabled")
+        elif isinstance(audit, dict):
+            for key, value in audit.items():
+                low = str(key).lower()
+                off = value is False or str(value).lower() in ("off", "disabled", "ignore", "false")
+                if off and any(token in low for token in ("advis", "malware", "abandon", "block")):
+                    disabled.append(f"config.audit.{key}={value!r}")
+        # A single finding names every switch so remediation is atomic and repeated keys do
+        # not drown out the rest of the PHP-family result.
+        if disabled:
+            self.add("warn", "php.composer.safety-off", "composer.json",
+                     "Composer safety controls are disabled: " + ", ".join(disabled),
+                     "restore secure-http/TLS, allow plugins by package name, and keep audit blocking enabled")
         is_lib = str(c.get("type", "project")) not in ("project", "")
         req = obj(c.get("require"))
         req_dev = obj(c.get("require-dev"))
