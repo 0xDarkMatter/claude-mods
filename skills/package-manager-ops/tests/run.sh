@@ -218,8 +218,17 @@ for case in cases:
 
 # Mutation proof: each new checks-a fixture must reject a scanner whose corresponding
 # rule is broken. Mutants live only under the suite temp directory and never touch source.
+# Guard: a mutant that does not RUN (no JSON, exit outside 0/10) proves nothing and fails
+# the row. Mutants sit in $TMP/mutants/, where pm-audit's default ../assets facts path does
+# not exist, so --facts is passed explicitly: without it every mutant exited 3 and every
+# mutation row "caught" its broken rule vacuously.
 source = Path(audit).read_text(encoding="utf-8")
+facts_file = str(Path(audit).resolve().parent.parent / "assets" / "package-manager-facts.json")
 mutants = tmp / "mutants"; mutants.mkdir(parents=True, exist_ok=True)
+
+def run_mutant(mutant, as_of, target):
+    return subprocess.run([sys.executable, str(mutant), "--json", "--facts", facts_file, "--as-of", as_of, str(target)],
+                          capture_output=True, text=True)
 
 def mutation(label, case_name, old, new):
     if old not in source:
@@ -230,21 +239,30 @@ def mutation(label, case_name, old, new):
     case = fixtures / case_name
     want = sorted(set((case / "_expect").read_text().split()))
     as_of = (case / "_as_of").read_text().strip() if (case / "_as_of").is_file() else "2026-10-05"
-    proc = subprocess.run([sys.executable, str(mutant), "--json", "--as-of", as_of, str(tmp / "m" / case_name)],
-                          capture_output=True, text=True)
+    proc = run_mutant(mutant, as_of, tmp / "m" / case_name)
     try:
-        data = json.loads(proc.stdout)["data"]
+        envelope = json.loads(proc.stdout)
+        data = envelope["data"]
         got = sorted({f["id"] for f in data})
     except Exception:
-        data, got = [], None
+        envelope, data, got = {}, [], None
+    if got is None or proc.returncode not in (0, 10):
+        row(False, f"mutation {label}: mutant did not run (exit {proc.returncode}): {' '.join(proc.stderr.split())[-160:]}")
+        return
+    checks_changed = False
+    if (case / "_checks").is_file():
+        statuses = {c.get("check"): c.get("status") for c in envelope.get("meta", {}).get("checks", [])}
+        checks_changed = any(statuses.get(k) != v.get("status") for k, v in json.loads((case / "_checks").read_text()).items())
     lines_changed = False
     if (case / "_lines").is_file():
         want_rows = sorted(line.strip() for line in (case / "_lines").read_text().splitlines() if line.strip())
         pinned = {line.split()[0] for line in want_rows}
         got_rows = sorted(f"{f['id']} {f['file']}:{f['line']}" for f in data if f["id"] in pinned)
         lines_changed = got_rows != want_rows
-    row(got != want or lines_changed or proc.returncode != (10 if want else 0),
-        f"mutation {label}: fixture catches broken rule")
+    row(got != want or lines_changed or checks_changed or proc.returncode != (10 if want else 0),
+        f"mutation {label}: fixture catches broken rule" + ("" if got != want or lines_changed or checks_changed
+                                                            or proc.returncode != (10 if want else 0)
+                                                            else f" - MISSED: mutant still gives {got}"))
 
 for fid, case_name in (
     ("js.engine.floor", "js-engine-floor"),
@@ -260,7 +278,6 @@ for fid, case_name in (
     ("deploy.composer.adhoc", "deploy-composer-update"),
     ("deploy.composer.installer-unverified", "deploy-composer-installer-unverified"),
     ("php.package.abandoned", "php-package-abandoned"),
-    ("legacy.package", "legacy-package"),
     ("js.dep.non-registry", "js-dep-non-registry"),
     ("php.dep.non-registry", "php-dep-non-registry"),
     ("js.root.not-private", "js-root-not-private"),
@@ -272,6 +289,10 @@ mutation("composer update-no-dev", "clean-deploy-composer-update-no-dev", '"--up
 mutation("composer no-dev env", "clean-deploy-composer-env",
          'obj(active_env).get("COMPOSER_NO_DEV")', 'False')
 mutation("legacy facts lookup", "legacy-node-sass",
+         'table = self.facts.get("legacy_packages")', 'table = self.facts.get("mutant_legacy_packages")')
+# legacy.package takes its id from the facts entry, so renaming the literal (the loop above)
+# cannot break it; breaking the table lookup does.
+mutation("legacy.package facts lookup", "legacy-package",
          'table = self.facts.get("legacy_packages")', 'table = self.facts.get("mutant_legacy_packages")')
 mutation("local composite action", "deploy-local-uses",
          'if not raw.startswith("./"):', 'if True:')
@@ -303,6 +324,22 @@ mutation("each caller of a reusable workflow is evaluated", "deploy-reusable-cal
          'visit(body, effective, seen | {key})', 'visit(body, effective, seen | {key}); seen |= {key}')
 mutation("additional install sites", "install-sites",
          '("package.json", "composer.json", "justfile", "Makefile")', '("never",)')
+
+# A check that raises must not lose the report: _check contains it, so the run still exits
+# 0/10 with valid JSON and names the family skipped with the error. Injected into legacy().
+crashing = mutants / "check-raises.py"
+crashing.write_text(source.replace("    def legacy(self):\n",
+                                   "    def legacy(self):\n        raise RuntimeError('injected')\n", 1), encoding="utf-8")
+proc = run_mutant(crashing, "2026-10-05", tmp / "m" / "clean")
+try:
+    legacy_row = next(c for c in json.loads(proc.stdout)["meta"]["checks"] if c["check"] == "legacy")
+except Exception:  # noqa: BLE001 - unparseable output is the failure this guards
+    legacy_row = None
+contained = (proc.returncode == 0 and legacy_row is not None and legacy_row["status"] == "skipped"
+             and "internal error in legacy: RuntimeError" in legacy_row["reason"] and "injected" in proc.stderr)
+# One row = one line: the bash reader scores any extra line as a failed row.
+row(contained, "a check that raises is contained (legacy skipped with the error, report kept)" + (
+    "" if contained else f" - exit {proc.returncode}, legacy {legacy_row}, stderr {' '.join(proc.stderr.split())[-160:]}"))
 
 # Every id the audit documents must have a fixture that produces it.
 doc_ids = set()
