@@ -4,9 +4,9 @@
 # skill/command docs (security-ops, techdebt, testgen, review, security-patterns)
 # that teach secure-coding / secret-detection patterns — not live credentials.
 # Plus historical .claude/settings.local.json entries (local config, not part of
-# any feature change). None are in current feature work. The push-safety gate
-# scans full branch history on a first push to a new remote branch, which re-flags
-# these long-standing entries; allowlisting them here keeps the gate meaningful.
+# any feature change). None are in current feature work. A full-history scan
+# re-flags these long-standing entries (a security-ops audit, or push-preflight's
+# first push to an empty remote); allowlisting them here keeps those scans meaningful.
 #
 # Format: <commit>:<file>:<rule>:<startline>
 cb575e7888f19eef36ec279169d2267f9aa50dad:skills/security-ops/SKILL.md:generic-api-key:181
