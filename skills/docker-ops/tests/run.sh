@@ -241,4 +241,69 @@ n_checks="$(wc -l < "$tmp/catalog.txt" | tr -d ' ')"
 grep -q $'^base-latest\tD1\tmedium\thadolint:DL3007' "$tmp/checks.txt" && ok "--list-checks carries cross-tool IDs" \
   || bad "--list-checks lost the cross-tool IDs"
 
+# === 12. Doctor: scenarios against a stub docker CLI and a fake host ===
+# run_doctor.py gives every scenario its own HOME, DOCKER_CONFIG and Windows folders, the
+# stub CLI (fixtures/doctor/docker_stub.py) and a fake process/port/WSL picture, so these
+# run the same on any OS with no Docker installed.
+doctor="$here/scripts/docker-doctor.py"
+runner="$fixtures/doctor/run_doctor.py"
+export STUB_LOG="$tmp/stub.log"
+: > "$STUB_LOG"
+doc() { "$PY" "$runner" "$1" "$doctor" "${@:2}" 2>&1; }
+out="$(doc healthy)"; rc=$?
+expect_exit "doctor: healthy colima" 0 "$rc"
+has "provider comes from the endpoint path" "$out" $'fact\tprovider\tcolima'
+has "the context source is named" "$out" $'fact\tendpoint_source\tdocker context use'
+has "engine version is reported" "$out" $'fact\tengine\tup (29.8.2)'
+out="$(doc bloat)"; rc=$?
+expect_exit "doctor: VM disk far above engine data" 10 "$rc"
+has "disk-bloat names both sizes" "$out" "30.0 GiB on disk but the engine holds only 4.7 GiB"
+out="$(doc down)"; rc=$?
+expect_exit "doctor: engine down" 10 "$rc"
+has "engine-down gives the provider's own start command" "$out" "run \`colima start\` yourself"
+has "engine-down promises not to start it" "$out" "the doctor never starts engines"
+out="$(doc multi)"
+has "two providers running is a finding" "$out" $'medium\tmultiple-providers'
+out="$(doc creds)"
+has "a credsStore helper missing from PATH is a finding" "$out" "docker-credential-nosuchhelper-fixture is not on PATH"
+hasnt "auths are never read out (base64)" "$out" "c2VjcmV0"
+hasnt "auths are never read out (decoded)" "$out" "secret-fixture"
+out="$(doc missing-socket)"
+has "a DOCKER_HOST socket that is gone is high" "$out" $'high\tendpoint-missing'
+has "DOCKER_HOST beating a stored context is named" "$out" $'low\tdocker-host-overrides-context'
+out="$(doc windows-ports --ports 50010,5432,8080,3000,9999)"; rc=$?
+expect_exit "doctor: Windows port checks" 10 "$rc"
+has "a port inside a Windows-reserved range is high" "$out" "port 50010 is inside a range Windows has reserved (50000-50059"
+has "a port held by another process" "$out" "port 5432 is held by postgres.exe"
+has "a port held by Docker's own backend is a published container" "$out" $'info\tport-published\tport 8080'
+has "a port held inside running WSL is reported" "$out" $'medium\tport-in-use-wsl\tport 3000'
+has "a free port is a fact" "$out" $'fact\tport:9999\tfree'
+has "the legacy docker_engine pipe is ambiguous" "$out" $'info\tendpoint-ambiguous'
+out="$(doc admin)"; rc=$?
+expect_exit "doctor: info-only findings do not set exit 10" 0 "$rc"
+has "admin-locked names the key" "$out" "exposeDockerAPIOnTCP2375"
+hasnt "admin-locked skips unlocked keys" "$out" "proxy"
+out="$(doc winctr)"
+has "Windows-containers mode is reported" "$out" $'low\twindows-containers'
+out="$(doc hang --timeout 1)"; rc=$?
+expect_exit "doctor: docker hangs on every probe" 7 "$rc"
+doc none >/dev/null; expect_exit "doctor: no runtime at all" 3 $?
+doc badcfg >/dev/null; expect_exit "doctor: unreadable config.json" 4 $?
+doc healthy --ports 80,nope >/dev/null; expect_exit "doctor: bad --ports" 2 $?
+doc healthy --timeout 0 >/dev/null; expect_exit "doctor: bad --timeout" 2 $?
+"$PY" "$runner" bloat "$doctor" --json > "$tmp/doctor.json" 2>/dev/null
+"$PY" - "$tmp/doctor.json" <<'EOF' && ok "doctor --json envelope" || bad "doctor --json envelope malformed"
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d["meta"]["schema"] == "claude-mods.docker-ops.doctor/v1"
+assert d["meta"]["facts"]["provider"] == "colima" and d["meta"]["count"] == len(d["data"]) == 1
+assert set(d["data"][0]) == {"severity", "check", "detail"}
+EOF
+# The read-only promise, checked: across every scenario above, the doctor asked docker
+# for nothing but these four probes.
+other="$(grep -vE '^(context inspect|version --format|info --format|system df --format) ' "$STUB_LOG" || true)"
+[ -s "$STUB_LOG" ] && ok "the stub saw $(wc -l < "$STUB_LOG" | tr -d ' ') docker calls" || bad "the stub saw no docker calls"
+[ -z "$other" ] && ok "doctor only ever runs read-only docker probes" || bad "doctor ran: $other"
+unset STUB_LOG
+
 finish
