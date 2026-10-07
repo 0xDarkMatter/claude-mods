@@ -59,6 +59,7 @@ On "INIT:" message at session start:
 | `tests/agnostic.sh` | Public-repo gate: fails on user-profile paths with real names, plus anything in the author's PRIVATE deny list; legit look-alikes go in `tests/agnostic-allow.txt` |
 | `tests/skill-size.sh` | Warns when a SKILL.md body passes ~5,000 tokens (chars / 3.6): after compaction only the first 5,000 tokens of a skill survive, so hard rules go first. `--report`, `--strict` |
 | `tests/reference-contents.sh` | Warns when a `references/*.md` over 100 lines lacks a complete `## Contents` list. Its parser is `skills/security-ops/tests/reference-contents.awk`, shared with that skill: don't move it |
+| `tests/skill-hygiene.sh` | Ratchet: fails on a NEW orphan side file, related skill the body never names, `scripts/...` call relative to the cwd, or duplicate `metadata.owns`. Old debt is in `tests/skill-hygiene-baseline.txt`, which may only shrink: fix a line, then delete it |
 | `tests/hooks.sh` | Hook contract tests: feeds the opt-in hooks the stdin JSON Claude Code sends, asserts exit 2 + stderr to block and no false positives; `HOOKS_DIR=<dir>` runs it against another copy (e.g. to prove it fails on a regression) |
 
 ## Repo Tools
