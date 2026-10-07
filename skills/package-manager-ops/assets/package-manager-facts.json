@@ -92,8 +92,44 @@
   },
   "composer": {
     "_comment": "From https://getcomposer.org/versions: the '1' channel is marked eol with maintenance-until. pm-audit's php.composer.v1 message quotes it; --live re-reads it.",
-    "v1_maintenance_until": "2026-05-30"
+    "v1_maintenance_until": "2026-05-30",
+    "lines_comment": "lines = every Composer 2.x minor line. 2.2 (the LTS, maintenance-until 2026-12-31) and 2.10 (current stable) come from https://getcomposer.org/versions, which lists no other minors; 2.0-2.9 end dates are the day the next minor shipped, from https://endoflife.date/api/v1/products/composer/. end null = still current. --live re-checks the two getcomposer lines. Verified 2026-10-07.",
+    "lines": {
+      "2.0":  {"end": "2021-06-03", "lts": false},
+      "2.1":  {"end": "2021-12-22", "lts": false},
+      "2.2":  {"end": "2026-12-31", "lts": true},
+      "2.3":  {"end": "2022-08-16", "lts": false},
+      "2.4":  {"end": "2022-12-20", "lts": false},
+      "2.5":  {"end": "2023-09-01", "lts": false},
+      "2.6":  {"end": "2024-02-08", "lts": false},
+      "2.7":  {"end": "2024-10-02", "lts": false},
+      "2.8":  {"end": "2025-11-13", "lts": false},
+      "2.9":  {"end": "2026-05-28", "lts": false},
+      "2.10": {"end": null, "lts": false}
+    },
+    "feature_floors_comment": "First Composer minor that ships each safety feature, from https://github.com/composer/composer/blob/main/CHANGELOG.md: 2.9.0 added automatic blocking of package versions with security advisories (audit.block-insecure, default true; --no-security-blocking arrived in 2.9.2); 2.10.0 enabled blocking of known-malware packages at install time by default.",
+    "feature_floors": {"security_blocking": "2.9", "malware_blocking": "2.10"}
   },
+  "craft": {
+    "_comment": "Craft CMS support policy: each major gets active support, then one more year of critical security fixes (security_end). Source: https://craftcms.com/knowledge-base/supported-versions (Craft CMS 3: 30 Apr 2024, 4: 30 Apr 2026, 5: 31 Dec 2031), cross-checked against https://endoflife.date/api/v1/products/craft-cms/. Verified 2026-10-07.",
+    "majors": {
+      "3": {"security_end": "2024-04-30"},
+      "4": {"security_end": "2026-04-30"},
+      "5": {"security_end": "2031-12-31"}
+    }
+  },
+  "eol_soon_days": 90,
+  "legacy_packages_comment": "Packages pm-audit flags as end-of-life or abandoned (legacy.* findings). id keeps the original finding id for bower and node-sass, else legacy.package. versions = an npm range the entry applies to, or '*'. Each reason was checked 2026-10-07: bower - bower.io says 'While Bower is maintained, we recommend using Yarn and Vite' and the last release is 1.8.14; node-sass - npm deprecation notice 'no longer supported', repo archived; laravel-mix - last release 6.0.49 on 2022-06-09, last commit 2024-01-24; vue <3 - v2.vuejs.org/eol 'End of Life on December 31st, 2023'; vue-template-compiler - compiles Vue 2 templates only, npm latest is 2.7.16; webpack <5 - 'webpack-4' dist-tag stops at 4.47.0 while latest is 5.x; request - npm deprecation notice 'request has been deprecated'; phantomjs-prebuilt - npm deprecation notice 'this package is now deprecated' and upstream README 'development is suspended'. Edit deliberately: this list is read by pm-audit.",
+  "legacy_packages": [
+    {"id": "legacy.bower", "ecosystem": "npm", "name": "bower", "versions": "*", "reason": "Bower's own site recommends Yarn and Vite instead; the last release is 1.8.14 (2022-03-14).", "replacement": "npm (or pnpm/Yarn) with a bundler such as Vite", "see": "references/legacy-exits.md#bower-to-npm"},
+    {"id": "legacy.node-sass", "ecosystem": "npm", "name": "node-sass", "versions": "*", "reason": "End of life: no more releases (last 9.0.0) and the repository is archived.", "replacement": "sass (Dart Sass)", "see": "references/legacy-exits.md#node-sass-to-dart-sass"},
+    {"id": "legacy.package", "ecosystem": "npm", "name": "laravel-mix", "versions": "*", "reason": "Webpack wrapper with no release since 2022-06-09 and no commit since 2024-01.", "replacement": "Vite with laravel-vite-plugin", "see": "frontend-upgrade-ops"},
+    {"id": "legacy.package", "ecosystem": "npm", "name": "vue", "versions": "<3", "reason": "Vue 2 reached end of life on 2023-12-31 and no longer receives fixes.", "replacement": "Vue 3", "see": "frontend-upgrade-ops"},
+    {"id": "legacy.package", "ecosystem": "npm", "name": "vue-template-compiler", "versions": "*", "reason": "Compiles Vue 2 templates only; Vue 2 is end of life.", "replacement": "@vue/compiler-sfc with Vue 3", "see": "frontend-upgrade-ops"},
+    {"id": "legacy.package", "ecosystem": "npm", "name": "webpack", "versions": "<5", "reason": "webpack 4 stopped at 4.47.0 (2023-09); the current line is 5.", "replacement": "webpack 5 or Vite", "see": "frontend-upgrade-ops"},
+    {"id": "legacy.package", "ecosystem": "npm", "name": "request", "versions": "*", "reason": "Deprecated on npm: the maintainers stopped development.", "replacement": "fetch (built into Node 18+) or undici", "see": "frontend-upgrade-ops"},
+    {"id": "legacy.package", "ecosystem": "npm", "name": "phantomjs-prebuilt", "versions": "*", "reason": "Deprecated on npm; PhantomJS development is suspended.", "replacement": "Playwright or Puppeteer", "see": "frontend-upgrade-ops"}
+  ],
   "native_cli_names": {
     "_comment": "Tools whose official channel is NOT the npm package of that bare name (winget/brew/apt/cargo/GitHub releases). `npx <name>` runs whatever owns that npm name - possibly a squatter. pm-audit flags npx.native-cli on these.",
     "names": ["rg", "ripgrep", "fd", "fd-find", "sd", "bat", "eza", "exa", "jq", "yq", "fzf", "delta", "git-delta", "dust", "procs", "hyperfine", "tokei", "difft", "difftastic", "zoxide", "just", "uv", "ruff", "gh", "lazygit", "markitdown"]
