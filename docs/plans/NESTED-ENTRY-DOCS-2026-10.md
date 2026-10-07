@@ -479,21 +479,22 @@ Primary URLs for the facts that get encoded:
 
 ## Done when
 
-- [ ] `repo-scan.py --json` carries `nesting`, `gates` and `architecture.warranted`, every
+- [x] `repo-scan.py --json` carries `nesting`, `gates` and `architecture.warranted`, every
       signal sourced, matching the monorepo fixture
-- [ ] `scaffold --dir` and `scaffold --architecture` draft from facts, honour the budgets
+- [x] `scaffold --dir` and `scaffold --architecture` draft from facts, honour the budgets
       and refuse to overwrite
-- [ ] `explain <folder>` prints the ordered files, reasons and sizes for each profile in
+- [x] `explain <folder>` prints the ordered files, reasons and sizes for each profile in
       `tool-profiles.json`, and every profile fact carries a source and date
-- [ ] `audit` reports `data.docs[]`, `data.load[]` and every finding above; `--diff` adds
+- [x] `audit` reports `data.docs[]`, `data.load[]` and every finding above; `--diff` adds
       the pointers and never moves Landmines
-- [ ] The scorer and survey changes are in, with rubric rows
-- [ ] check-memory-docs carries the new Claude Code facts, and the tool-profiles check has
+- [x] The scorer and survey changes are in, with rubric rows
+- [x] check-memory-docs carries the new Claude Code facts, and the tool-profiles check has
       `--offline` and `--live`; offline is green and live was verified once by hand
-- [ ] All protocol, reference, SKILL.md, rule, PLAN.md and CHANGELOG updates land in the
+- [x] All protocol, reference, SKILL.md, rule, PLAN.md and CHANGELOG updates land in the
       same lane
-- [ ] Every new test was seen failing first, and `just check` is green
-- [ ] The dogfood result on this repo is written into Status below
+- [ ] Every new test was seen failing first, and `just check` is green (the first half
+      holds; `just check` is MAIN's to confirm at landing)
+- [x] The dogfood result on this repo is written into Status below
 
 ## Status
 
@@ -504,3 +505,28 @@ orchestrating session as one writer, because it all lives in `agents-md.py`. The
 frozen contracts, with the additive fields as built, are in
 `docs/plans/REPO-DOCTOR-ABC-2026-10.md`. Still open: running the interview on a real
 repo, and the "Later" items.
+
+**Adversarial review (2026-10-07).** An Opus refute of the integrated lane found 25
+problems the green suites missed. Among them:
+- a crash on a sparse checkout
+- `--diff` moving a `### Gotchas` block that sits under a movable section
+- a generated CLAUDE.md still patched
+- dotted paths mangled by `lstrip("./")`
+- workspace globs crossing folders
+- one check script silencing every `invariant-ungated`
+- a user-scope Windsurf cap applied to repo files
+- four tests that could not fail against their named bug
+
+All the high and medium findings, and most low ones, are fixed with tests seen failing
+first. The rest:
+- Gemini's import depth and code skipping stay as researched, though unverified on its
+  page.
+- `check-tool-profiles.py`'s partial-unreachable exit and `tool-cap` for always-assumed
+  tools are documented departures (REPO-DOCTOR-ABC section 1.3).
+
+**Dogfood on this repo.** The nesting advisor considers 1 folder and recommends none. It
+reports one farm, `skills/` (101 members, one doc at the parent; `skills/fleet-ops/` has
+its own landmine cluster). There are 19 gates, all check scripts, all wired. ARCHITECTURE.md
+is not warranted. The audit lists 11 uncovered landmine candidates and no shadowing, and
+`explain . --tool all` loads only the root AGENTS.md for every tool. That is the expected
+verdict for a plugin repo of 100+ same-shaped skills.

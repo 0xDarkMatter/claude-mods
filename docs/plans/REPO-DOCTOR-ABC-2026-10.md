@@ -134,6 +134,15 @@ Additive fields, as built (2026-10-07):
 - A file-scope `caps_hit` entry adds `path` and `behaviour`.
 - `reason` gains `always-nested`, for a tool that loads every nested AGENTS.md (Kiro).
 
+Departures from contract 1.2, as built (2026-10-07, after the refute):
+- `targets_when: []` means the tool is assumed in use, but `tool-cap` is reported only
+  for tools a repo visibly targets. The caps of the always-assumed tools (Claude Code,
+  Codex) are checked by `over-ceiling` and `root-starves-nested`, which say more.
+- `check-tool-profiles.py --live` exits 7 only when every source is unreachable; with
+  some unreachable it reports those rows and exits 0 (documented in its docstring).
+- A cap whose fact failed live verification is not encoded (Copilot's 1,000 lines), and
+  a user-scope cap never is (Windsurf's 6,000-character global rules file).
+
 ### 1.4 Ruled-out record (producer: `entrydocs`; consumer: `docs`)
 
 `docs/agents/ruled-out.md` in the audited repo. One line per decision:

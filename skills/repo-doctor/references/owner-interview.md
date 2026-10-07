@@ -1,10 +1,9 @@
 # Owner interview: resolving a draft's questions
 
-A scaffolded AGENTS.md (or nested doc, or ARCHITECTURE.md) is full of `TODO(owner)`
-questions. This is the agent procedure that resolves them with the owner: ask only what
-the evidence can't answer, one question at a time, and put each answer where it will
-last. It drives the harness's question tool (`AskUserQuestion` in Claude Code). Protocol:
-`agents-md-protocol.md` sections 1 and 8.
+A scaffolded AGENTS.md is full of `TODO(owner)` questions. This is the agent procedure
+that resolves them with the owner: ask only what the evidence can't answer, one question
+at a time, and put each answer where it will last. It drives the harness's question tool
+(`AskUserQuestion` in Claude Code). Protocol: `agents-md-protocol.md` sections 1 and 8.
 
 ## 1. Split the questions
 
@@ -25,7 +24,11 @@ last. It drives the harness's question tool (`AskUserQuestion` in Claude Code). 
   files change together, but only the owner knows whether that is a rule.
 
 `data.guided` and `data.assisted` count them. When the assisted count is high, start
-with the landmine candidates that have the most evidence.
+with the landmine candidates that have the most evidence. Candidates the owner already
+ruled out (`docs/agents/ruled-out.md`) are left out, so nothing is asked twice.
+
+The split covers the root draft. A nested draft (`scaffold --dir`) and an ARCHITECTURE.md
+draft carry `TODO(owner)` lines without it; answer those the same way, one at a time.
 
 ## 2. Ask one at a time
 

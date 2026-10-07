@@ -364,8 +364,9 @@ assisted ones that need the owner. The procedure is `references/owner-interview.
 `--diff` prints a `git apply`-able patch: stubs for missing required sections, an
 `@AGENTS.md` import for a shadowing CLAUDE.md, an annotation on each dead command, and
 the split moves. Review it, then `git apply`. The patch only adds, annotates or moves.
-**It never deletes or moves the Landmines section**, and moved sections leave a link
-behind. The audit also lists the scan's landmine candidates whose files the owning doc
+**It never deletes or moves a Landmines section, or a section holding a landmine
+subsection** (a `### Gotchas` under Background stays put), and moved sections leave a
+link behind. The audit also lists the scan's landmine candidates whose files the owning doc
 never names (`uncovered_candidates` in `--json`): answer each as a landmine, or rule it
 out (section 1).
 
@@ -444,7 +445,7 @@ The audit runs the same engine over the root and every nested folder (`data.load
 | `load-over-budget` | warn | Claude Code loads over 20,800 characters for one folder (a root at its ceiling plus one nested doc) |
 | `root-starves-nested` | warn | the Codex chain to a folder passes its 32 KiB cap (Codex drops the deepest files first), or the root alone takes over half of it |
 | `import-cycle` | info | two files import each other |
-| `tool-cap` | info | a file over the cap of a tool the repo visibly targets (`.cursor/`, `.windsurf/`, `GEMINI.md`, `.kiro/`, Copilot instructions) |
+| `tool-cap` | info | a repo file over the cap of a tool the repo visibly targets (`.cursor/`, `.windsurf/`, `GEMINI.md`, `.kiro/`, Copilot instructions). A user-scope cap (Windsurf's 6,000-character global file) is never applied to repo files. Tools every repo is assumed to use (Claude Code, Codex) have their caps checked by `over-ceiling` and `root-starves-nested` instead |
 
 ## 12. Sources
 
