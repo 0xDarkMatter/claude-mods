@@ -338,6 +338,34 @@ expect_exit "preflight: forbidden path in the new commit still refuses" 2 "$rc"
 expect_has "preflight: refusal names the new forbidden path" "deploy/server.pem" "$(cat "$SB/preflight-forbidden.out")"
 expect_lacks "preflight: refusal leaves the path already on origin alone" "certs/ca.pem" "$(cat "$SB/preflight-forbidden.out")"
 
+echo "-- preflight.sh: regex-layer false positives already on origin/main --"
+# The 2026-10-07 refusal, end to end: a 2-commit branch cut from origin/main was
+# reported as "42 commits will be pushed" and refused on regex-layer hits that
+# main had published long before. These are those line shapes. Split with
+# printf so this file never carries them whole for a scanner to trip on.
+fp_code_line="$(printf '%s%s' '    token = str(fact["prose' '_token"])')"
+fp_docs_line="$(printf '%s%s' 'SOCKET_API' '_KEY="your-api-key-here"')"
+repo="$SB/preflight-published-fp"
+published_main "$repo" scripts/render.py "$fp_code_line"
+commit_path "$repo" docs/setup.md "$fp_docs_line"
+git -C "$repo" push -q origin main 2>/dev/null
+git -C "$repo" switch -q -c feature
+commit_path "$repo" candidate.txt 'message = "ordinary configuration"'
+preflight_stubbed "$repo" "$SB/preflight-published-fp.out" feature; rc=$?
+expect_exit "preflight: hits already published on origin/main do not refuse a new branch" 0 "$rc"
+expect_has "preflight: Step 4 counts only the branch's own commit" "STEP 4  OK    1 commits pending (new remote branch" "$(cat "$SB/preflight-published-fp.out")"
+expect_lacks "preflight: main's history is not re-scanned" "SECRET-PATTERN MATCH" "$(cat "$SB/preflight-published-fp.out")"
+
+# The same shapes in the branch's OWN commit are part of the push: the regex
+# layer is unchanged inside the range, so they still refuse.
+repo="$SB/preflight-own-fp"
+published_main "$repo" README2.md 'second baseline'
+git -C "$repo" switch -q -c feature
+commit_path "$repo" scripts/render.py "$fp_code_line"
+preflight_stubbed "$repo" "$SB/preflight-own-fp.out" feature; rc=$?
+expect_exit "preflight: a hit in the new branch's own commit still refuses" 1 "$rc"
+expect_has "preflight: refusal names the new commit's file" "scripts/render.py: " "$(cat "$SB/preflight-own-fp.out")"
+
 echo "-- gitleaks integration --"
 if command -v gitleaks >/dev/null 2>&1; then
   ghp_token="$(printf '%s%s' 'ghp_' '9xQ7zRtY2wodFb3KpL8mN0aBcDeFgHiJkLmN')"

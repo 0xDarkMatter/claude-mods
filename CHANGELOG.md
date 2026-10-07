@@ -372,11 +372,12 @@ feature releases live in the README "Recent Updates" section.
 - **push-preflight scans what a new branch's first push sends, not the whole branch** -
   when `<remote>/<branch>` did not exist yet, gitleaks scanned every commit on the branch
   and the regex layer read its whole tree, so the first push of any feature branch
-  re-scanned the main it was cut from. On 2026-10-07 a 4-commit branch was refused over
-  three lines that an earlier PR had merged into `origin/main` (two `token = str(...)`
-  lines and a documentation placeholder). gitleaks over the commits actually being sent
-  found nothing, and the suggested fix, a committed `.push-preflight-allow`, was a file
-  that repo forbids at its root. A new `scripts/push-scope.sh`, sourced by both scripts,
+  re-scanned the main it was cut from. On 2026-10-07 a 2-commit branch was reported as
+  "42 commits will be pushed" and refused over three lines that an earlier PR had merged
+  into `origin/main` (two `token = str(...)` lines and a documentation placeholder).
+  gitleaks over the commits actually being sent found nothing, and the suggested fix, a
+  committed `.push-preflight-allow`, was a file that repo forbids at its root. A new
+  `scripts/push-scope.sh`, sourced by both scripts,
   defines the scope once. An update still scans `<remote>/<branch>..<branch>`. A new
   branch scans `<branch> --not --remotes=<remote>`: gitleaks per commit, the regex layer
   from the newest already-published fork point, so main merged in mid-branch adds
@@ -385,9 +386,9 @@ feature releases live in the README "Recent Updates" section.
   every file on the branch, so any path already on the remote (a committed `.env.example`
   or public `.pem`) refused every new branch. It now reads the same diff, and Step 4's
   count matches. Detection inside the range is unchanged: no allowlist or pattern edits.
-  23 new assertions in `push-preflight/tests/run.sh` run against a local bare remote. The
-  scope cases were seen failing on the old scripts, and the "still refuses" guards were
-  seen failing against six mutants.
+  28 new assertions in `push-preflight/tests/run.sh` run against a local bare remote,
+  including both of those line shapes already on `origin/main`. On the old scripts 17 of
+  them fail; the "still refuses" guards fail against mutants that under-scan a new branch.
 
 - **`sessions.sh main` names the coordinator from inside a lane** - run from a lane at
   `.claude/worktrees/<x>`, it answered with the session sitting in that lane, usually the
