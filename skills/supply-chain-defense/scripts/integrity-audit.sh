@@ -10,9 +10,10 @@
 # Input:   optional PROJECT_DIR positional (default: cwd) + $HOME config locations
 # Output:  stdout = findings (tab-separated records, or JSON with --json)
 # Stderr:  section framing, progress, verdict guidance, errors
-# Exit:    0 clean, 2 usage, 5 missing-dep (jq, with --json) or a section could not
-#          be scanned (its producer failed: see stderr and meta.unscanned) - NOT
-#          clean, 10 review-items-found (wins over 5; it is never a false clean)
+# Exit:    0 clean, 2 usage, 5 missing-dep (jq, with --json) or a surface could not
+#          be scanned (a producer failed, or a file's text encoding is unreadable:
+#          see stderr and meta.unscanned) - NOT clean, 10 review-items-found
+#          (wins over 5; it is never a false clean)
 #
 # Note: intentionally NOT `set -e` — a scanner must survive missing files and keep
 # going. Errors are handled explicitly: a producer (find, grep, jq) that fails is
@@ -34,7 +35,7 @@ while [[ $# -gt 0 ]]; do
     -q|--quiet)    QUIET=1 ;;
     -v|--verbose)  VERBOSE=1 ;;
     -h|--help)
-      sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit "$EXIT_OK" ;;
+      sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit "$EXIT_OK" ;;
     -*) echo "ERROR: unknown flag: $1 (try --help)" >&2; exit "$EXIT_USAGE" ;;
     *)  PROJECT_DIR="$1" ;;
   esac
@@ -146,6 +147,51 @@ json_key_entries() {  # file key -> newline-separated entry list (jq)
     else (.[$k]|tostring) end' "$file" 2>/dev/null
 }
 
+# Scratch for grep_text: the matched lines, and a decoded copy of a UTF-16 file.
+HITS_F="$(mktemp)"; TEXT_F="$(mktemp)"; trap 'rm -f "$HITS_F" "$TEXT_F"' EXIT
+
+has_nul() { (( $(tr -d '\000' < "$1" | wc -c) != $(wc -c < "$1") )); }
+
+# grep_text <file> <ERE> — grep -n one config file as TEXT, whatever its encoding;
+# matching lines go to stdout. Returns 0 match, 1 none, 2 not (reliably) read,
+# with GREP_WHY saying why; any lines it did match are still real. Call it with
+# stdout redirected, never in $(...), so GREP_WHY reaches the caller.
+# Encoding guard: Windows PowerShell 5.1's `>` and Out-File write UTF-16LE (BOM
+# FF FE). An ASCII regex never matches UTF-16 (a NUL between every letter) and
+# GNU grep calls NUL bytes binary, so a profile carrying `Invoke-Expression ...
+# DownloadString` read clean. A BOM'd UTF-16 file is decoded with iconv first;
+# NUL bytes still there after that (UTF-16 with no BOM, UTF-32) mean unscanned.
+# -a: grep 3.5+ reports a match in a "binary" file on stderr only, so one stray
+# NUL hid every hit in the file. grep exit 2 is a read error, never "no match".
+grep_text() {
+  local f=$1 re=$2 src=$1 bom rc=0
+  GREP_WHY=""
+  bom="$(od -An -tx1 -N2 "$f" 2>/dev/null | tr -d ' \n')"
+  if [[ "$bom" == fffe || "$bom" == feff ]]; then
+    if ! iconv -f UTF-16 -t UTF-8 "$f" >"$TEXT_F" 2>/dev/null; then
+      GREP_WHY="UTF-16 text (BOM $bom) that iconv could not decode"; return 2
+    fi
+    src=$TEXT_F
+  fi
+  grep -anEi -- "$re" "$src" 2>/dev/null || rc=$?
+  if (( rc > 1 )); then GREP_WHY="grep exit $rc - could not read it"; return 2; fi
+  if has_nul "$src"; then
+    GREP_WHY="NUL bytes in its text - an encoding this scan cannot read (UTF-16 without a BOM? UTF-32?)"
+    return 2
+  fi
+  return "$rc"
+}
+
+# scan_text <category> <kind> <file> <ERE> — record a file's matching lines, and
+# report it unscanned when grep_text could not read it all.
+scan_text() {
+  local category=$1 kind=$2 f=$3 re=$4 rc=0 hits
+  grep_text "$f" "$re" >"$HITS_F" || rc=$?
+  hits="$(tr -d '\000' < "$HITS_F")"
+  [[ -n "$hits" ]] && record "$category" "$f" "$kind" "$hits"
+  (( rc <= 1 )) || unscanned "$f" "$GREP_WHY"
+}
+
 # ─── 1. AI-tool config: hooks / mcpServers across hosts ────────────────────
 # Broadened with the MCP host-config map from Perplexity's Bumblebee
 # (docs/inventory-sources.md) — the worm targets these persistence surfaces.
@@ -205,8 +251,7 @@ SUSPECT='task.allowAutomaticTasks|automationProfile|shellArgs|runOnStartup|autoR
 for f in "${EDITOR_SETTINGS[@]}"; do
   [[ -f "$f" ]] || continue
   vinfo "scanning $f"
-  hits=$(grep -nEi "$SUSPECT" "$f" 2>/dev/null)
-  [[ -n "$hits" ]] && record "vscode_settings" "$f" "autorun_keys" "$hits"
+  scan_text "vscode_settings" "autorun_keys" "$f" "$SUSPECT"
 done
 info "audit extensions too: code --list-extensions --show-versions (pause <7-day, non-verified)"
 
@@ -248,14 +293,14 @@ SHELL_RC=(
   "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile"
   "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.zshenv"
   "$HOME/.config/fish/config.fish"
+  # PowerShell 5.1 writes these as UTF-16LE: grep_text decodes them.
   "$HOME/Documents/PowerShell/Microsoft.PowerShell_profile.ps1"
   "$HOME/Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1")
 SHELL_SUSPECT='curl[^|]*\|[[:space:]]*(ba)?sh|wget[^|]*\|[[:space:]]*(ba)?sh|base64[[:space:]]+--?d|eval[[:space:]]+"?\$\(|\.claude[/\\]\.?settings|\.aws[/\\]credentials|/dev/tcp/|[Ii]nvoke-Expression[^;]*[Dd]ownload'
 for f in "${SHELL_RC[@]}"; do
   [[ -f "$f" ]] || continue
   vinfo "scanning $f"
-  hits=$(grep -nEi "$SHELL_SUSPECT" "$f" 2>/dev/null)
-  [[ -n "$hits" ]] && record "shell_rc" "$f" "suspicious_line" "$hits"
+  scan_text "shell_rc" "suspicious_line" "$f" "$SHELL_SUSPECT"
 done
 
 # ─── 5. Package-manager config (rogue registry / leaked token) ─────────────
@@ -263,8 +308,8 @@ section "Package-manager config" ".npmrc / .pypirc registry overrides + tokens"
 for f in "$HOME/.npmrc" "$PROJECT_DIR/.npmrc" "$HOME/.pypirc" "$PROJECT_DIR/.pypirc"; do
   [[ -f "$f" ]] || continue
   vinfo "scanning $f"
-  hits=$(grep -nEi '^[[:space:]]*registry[[:space:]]*=|_authToken|^[[:space:]]*index-url|password[[:space:]]*=' "$f" 2>/dev/null)
-  [[ -n "$hits" ]] && record "pkgmgr_config" "$f" "registry_or_token" "$hits"
+  scan_text "pkgmgr_config" "registry_or_token" "$f" \
+    '^[[:space:]]*registry[[:space:]]*=|_authToken|^[[:space:]]*index-url|password[[:space:]]*='
 done
 
 # ─── Output + verdict ──────────────────────────────────────────────────────
