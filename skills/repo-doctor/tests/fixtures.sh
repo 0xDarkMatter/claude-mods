@@ -195,7 +195,8 @@ EOF
     done
     for i in $(seq -w 1 300); do printf 'asset %s\n' "$i" > "$S/assets/a$i.txt"; done
     local tool
-    for tool in $(seq -w 1 9); do
+    for i in $(seq 1 9); do
+        printf -v tool '%02d' "$i"
         mkdir -p "$S/tools/t$tool/src"
         printf '{ "name": "@fixture/tool-%s" }\n' "$tool" > "$S/tools/t$tool/package.json"
         printf 'export const tool = true\n' > "$S/tools/t$tool/src/index.ts"

@@ -166,7 +166,7 @@ check "tool_farm_gets_one_protocol_doc" \
 check "apps_need_deploy_or_cluster_to_nest" \
       "any(r['dir']=='apps/web/' and {'own-manifest','own-deploy'} <= {s['kind'] for s in r['signals']} for r in D['nesting']['recommend'])"
 check "gate_detection_credits_dependency_cruiser" \
-      "any(g['tool']=='dependency-cruiser' and g['scope']=='packages/engine/' and g['config']=='packages/engine/.dependency-cruiser.cjs' for g in D['gates'])"
+      "any(g['tool']=='dependency-cruiser' and g['scope']=='packages/engine/' and g['config']=='.dependency-cruiser.cjs' for g in D['gates'])"
 check "go_internal_dir_counts_as_gate" \
       "any(g['tool']=='Go internal' and g['scope']=='packages/engine/' for g in D['gates'])"
 check "partial_gate_reports_baseline_size" \
