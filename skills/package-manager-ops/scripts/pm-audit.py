@@ -25,6 +25,7 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   php.pin.disagree  php.eol  php.eol-soon  php.lockfile.missing  php.lockfile.stale
   php.composer.safety-off
   php.composer.eol
+  php.craft.eol
   php.package.abandoned
   php.dep.non-registry
   php.lock.floor
@@ -1782,6 +1783,24 @@ class Audit:
                          f"{name} is marked abandoned; replacement: {replacement}",
                          (f"replace it with {replacement}" if replacement != "none named"
                           else "remove it or choose a maintained replacement after reviewing its dependants"))
+            craft = next((p for p in lock.get("packages", []) if isinstance(p, dict)
+                          and str(p.get("name", "")).lower() == "craftcms/cms"), None)
+            if craft:
+                m = re.match(r"^v?(\d+)", str(craft.get("version") or ""))
+                majors = obj(obj(self.facts.get("craft")).get("majors"))
+                row = majors.get(m.group(1)) if m else None
+                if not isinstance(row, dict):
+                    self.blind("php", "Craft major absent from facts craft.majors")
+                elif row.get("security_end"):
+                    try:
+                        end = dt.date.fromisoformat(str(row["security_end"]))
+                    except ValueError:
+                        self.blind("php", "Craft security_end is not an ISO date")
+                    else:
+                        if end < self.as_of:
+                            self.add("warn", "php.craft.eol", "composer.lock",
+                                     f"craftcms/cms {craft.get('version')} is past security support ({end})",
+                                     "upgrade Craft CMS to a major still receiving security fixes")
         php_req = req.get("php")
         # A composer.json that requires no packages (`{"name": ...}`, used to make a JS
         # asset repo installable through Composer) resolves nothing: PHP pins are noise.

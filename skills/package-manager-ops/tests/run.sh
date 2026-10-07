@@ -238,6 +238,7 @@ for fid, case_name in (
     ("php.lock.floor", "php-lock-floor"),
     ("deploy.bundle.credentials", "deploy-bundle-credentials"),
     ("php.composer.eol", "php-composer-eol"),
+    ("php.craft.eol", "php-craft-eol"),
     ("php.composer.safety-off", "php-composer-safety-off"),
     ("deploy.composer.safety-off", "deploy-composer-safety-off"),
     ("deploy.composer.adhoc", "deploy-composer-update"),
