@@ -145,7 +145,7 @@ ec 3 "pm-audit missing facts -> 3" "$PY" "$AUDIT" --facts "$TMP/nope.json" "$HER
 while IFS='|' read -r verdict msg; do
   [[ "$verdict" == PASS ]] && ok "$msg" || no "$msg"
 done < <("$PY" - "$HERE/fixtures" "$AUDIT" "$TMP" "$SKILL/references/diagnostics.md" <<'PY'
-import json, os, shutil, subprocess, sys, traceback
+import json, os, re, shutil, subprocess, sys, traceback
 from pathlib import Path
 fixtures, audit, tmp, diagnostics = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3]), Path(sys.argv[4])
 def row(ok, msg): print(f"{'PASS' if ok else 'FAIL'}|{msg}")
@@ -210,6 +210,48 @@ for case in cases:
         expected = json.loads((case / "_manager_majors").read_text())
         got_majors = json.loads(proc.stdout).get("meta", {}).get("manager_majors")
         row(got_majors == expected, f"{case.name}: manager majors {got_majors}" + ("" if got_majors == expected else f" (want {expected})"))
+
+# Mutation proof: each new checks-a fixture must reject a scanner whose corresponding
+# rule is broken. Mutants live only under the suite temp directory and never touch source.
+source = Path(audit).read_text(encoding="utf-8")
+mutants = tmp / "mutants"; mutants.mkdir(parents=True, exist_ok=True)
+
+def mutation(label, case_name, old, new):
+    if old not in source:
+        row(False, f"mutation {label}: source token missing")
+        return
+    mutant = mutants / (re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") + ".py")
+    mutant.write_text(source.replace(old, new), encoding="utf-8")
+    case = fixtures / case_name
+    want = sorted(set((case / "_expect").read_text().split()))
+    as_of = (case / "_as_of").read_text().strip() if (case / "_as_of").is_file() else "2026-10-05"
+    proc = subprocess.run([sys.executable, str(mutant), "--json", "--as-of", as_of, str(tmp / "m" / case_name)],
+                          capture_output=True, text=True)
+    try:
+        got = sorted({f["id"] for f in json.loads(proc.stdout)["data"]})
+    except Exception:
+        got = None
+    row(got != want or proc.returncode != (10 if want else 0), f"mutation {label}: fixture catches broken rule")
+
+for fid, case_name in (
+    ("php.composer.safety-off", "php-composer-safety-off"),
+    ("deploy.composer.safety-off", "deploy-composer-safety-off"),
+    ("deploy.composer.adhoc", "deploy-composer-update"),
+    ("deploy.composer.installer-unverified", "deploy-composer-installer-unverified"),
+    ("php.package.abandoned", "php-package-abandoned"),
+    ("legacy.package", "legacy-package"),
+    ("js.dep.non-registry", "js-dep-non-registry"),
+    ("php.dep.non-registry", "php-dep-non-registry"),
+    ("js.root.not-private", "js-root-not-private"),
+    ("php.eol-soon", "php-eol-soon"),
+    ("js.node.eol-soon", "js-node-eol-soon"),
+):
+    mutation(fid, case_name, f'"{fid}"', f'"mutant.{fid}"')
+mutation("composer update-no-dev", "clean-deploy-composer-update-no-dev", '"--update-no-dev"', '"--mutant-update-no-dev"')
+mutation("composer no-dev env", "clean-deploy-composer-env",
+         'obj(active_env).get("COMPOSER_NO_DEV")', 'False')
+mutation("legacy facts lookup", "legacy-node-sass",
+         'table = self.facts.get("legacy_packages")', 'table = self.facts.get("mutant_legacy_packages")')
 
 # Every id the audit documents must have a fixture that produces it.
 doc_ids = set()
