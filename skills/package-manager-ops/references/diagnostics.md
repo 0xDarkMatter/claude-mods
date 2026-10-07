@@ -46,7 +46,8 @@ shivammathur/setup-php count as pins for the agreement and end-of-life checks.
 Frozen installs are required in every CI job, whether it ships or not: the managers
 document the frozen install for CI as a whole, and a front-end job whose build a deploy job
 downloads ships its install without any deploy marker of its own. `--no-dev` is required
-only where `vendor/` ships:
+only where `vendor/` ships; `--update-no-dev` and a literal `COMPOSER_NO_DEV=1` at the
+workflow, job or step scope (or an earlier Dockerfile `ENV`) satisfy the same rule:
 
 - a Dockerfile or an appspec hook script, always;
 - a GitHub Actions **job** that ships something (`docker push`, `aws deploy`, an `aws s3 cp`
@@ -68,10 +69,13 @@ only where `vendor/` ships:
 | `js.lockfile.v1` | warn | npm 6-era lockfile | [legacy-exits.md](legacy-exits.md#npm-lockfileversion-1) |
 | `js.lockfile.shrinkwrap` | warn | only `npm-shrinkwrap.json`, which npm 12 ignores | [detect-and-choose.md](detect-and-choose.md#lockfile-to-manager) |
 | `js.pnpm.field-ignored` | warn | a `pnpm` field pnpm 11+ no longer reads | [scripts-and-workspaces.md](scripts-and-workspaces.md#pnpm-settings-moved-to-pnpm-workspaceyaml) |
+| `js.dep.non-registry` | warn | package.json points a dependency at git/GitHub, a local file/link, or a direct HTTP(S) tarball rather than the configured registry | [registries-and-auth.md](registries-and-auth.md) |
+| `js.root.not-private` | warn | a root package with dependencies is not private and has no conservative publication signal (`files`, `publishConfig`, exports/main, scoped name, or a non-default version) | [detect-and-choose.md](detect-and-choose.md) |
 | `js.packagemanager.mismatch` | error | `packageManager` names a manager (or Yarn flavour) the lockfile is not from | [detect-and-choose.md](detect-and-choose.md#declaring-the-manager-packagemanager-corepack-devengines) |
 | `js.manifest.invalid` | error | package.json is not valid JSON, or not a JSON object | - |
 | `js.node.unpinned` | warn | nothing pins Node | [version-pinning.md](version-pinning.md#the-recommended-node-pin-set) |
 | `js.node.eol` | warn | a Node the repo pins (or the only one it admits) is end of life; the server's own Node is not in the repo, so confirm it. DDEV's `nodejs_version` alone never raises it: that is `ddev-ops`' finding | [legacy-exits.md](legacy-exits.md#end-of-life-node) |
+| `js.node.eol-soon` | warn | a pinned Node major reaches end of life within the facts catalogue's `eol_soon_days` window | [version-pinning.md](version-pinning.md) |
 | `node.pin.disagree` | warn | `.nvmrc`, `engines`, `devEngines`, DDEV, CI's setup-node and friends name different majors | [version-pinning.md](version-pinning.md#what-reads-which-node-pin) |
 | `ddev.node.unpinned` | warn | DDEV has no `nodejs_version`, so it follows DDEV's default | [version-pinning.md](version-pinning.md#the-recommended-node-pin-set); values in `ddev-ops` |
 | `php.manifest.invalid` | error | composer.json is not valid JSON, or not a JSON object | `composer validate` |
@@ -79,12 +83,17 @@ only where `vendor/` ships:
 | `php.platform.unset` | warn | no `config.platform.php` in a project | [version-pinning.md](version-pinning.md#the-three-php-pins-and-what-each-means) |
 | `php.pin.disagree` | warn | DDEV `php_version`, `config.platform.php`, the lock's platform override, CI's setup-php and `require.php` disagree (`require.php` read as Composer reads it: `>8.2` admits 8.2.1, `!=` excludes one version) | [version-pinning.md](version-pinning.md#the-three-php-pins-and-what-each-means) |
 | `php.eol` | warn | a PHP the repo pins (or the only one it admits) is past security support; confirm the server's own PHP. DDEV's `php_version` alone never raises it: that is `ddev-ops`' finding | [legacy-exits.md](legacy-exits.md#end-of-life-php) |
+| `php.eol-soon` | warn | a pinned PHP major.minor reaches the end of security support within the facts catalogue's `eol_soon_days` window | [version-pinning.md](version-pinning.md) |
 | `php.lockfile.missing` | warn | a project with packages but no `composer.lock` | [install-semantics.md](install-semantics.md#composer-install-versus-composer-update) |
 | `php.lockfile.stale` | warn | `composer.json` requires packages the lock lacks, judged as Composer does: a locked package's `replace` or `provide` meets a requirement, and `require` is met only from `packages` | [install-semantics.md](install-semantics.md#composer-install-versus-composer-update) |
+| `php.composer.safety-off` | warn | composer.json disables transport, plugin or advisory/malware/abandoned-package safeguards (`allow-plugins: true`, insecure HTTP/TLS, or an audit block switched off) | [scripts-and-workspaces.md](scripts-and-workspaces.md#composer-scripts-and-plugins) |
+| `php.package.abandoned` | warn | composer.lock marks a package abandoned; when its metadata names a replacement, the finding names it too | [upgrades.md](upgrades.md) |
+| `php.dep.non-registry` | warn | composer.json uses a VCS/path/artifact repository, a `dev-*` or `*` constraint, or `minimum-stability: dev` without `prefer-stable: true` | [registries-and-auth.md](registries-and-auth.md) |
 | `npx.unpinned` | warn | `npx`/`dlx`/`bunx` of an unpinned, undeclared package (every `-p` counts; a bin a declared package provides, like `tsc`, is local), or of a declared one at a dist-tag or a range its installed version misses. `--no`/`--no-install` never fetch, so never fire | [npx-exec-safety.md](npx-exec-safety.md#the-rules) |
 | `npx.native-cli` | error | a native CLI (rg, fd, sd, jq...) through npx, or a global npm install of one in CI | [npx-exec-safety.md](npx-exec-safety.md#never-route-a-native-cli-through-npx) |
 | `legacy.bower` | warn | `bower.json` or `.bowerrc` | [legacy-exits.md](legacy-exits.md#bower-to-npm) |
 | `legacy.node-sass` | warn | node-sass in package.json | [legacy-exits.md](legacy-exits.md#node-sass-to-dart-sass) |
+| `legacy.package` | warn | a dependency matches the facts catalogue's versioned legacy-package table (initially Laravel Mix, Vue 2/compiler, webpack 4, request and PhantomJS) | [legacy-exits.md](legacy-exits.md) |
 | `registry.token.committed` | error | a literal, non-empty token in `.npmrc` or `.yarnrc.yml` | [registries-and-auth.md](registries-and-auth.md#when-a-token-was-committed) |
 | `registry.authjson.committed` | error | a root `auth.json` that git tracks, or that is not ignored (git decides; without git, the root `.gitignore` by git's rules: `**/`, `!`, last match wins) | [registries-and-auth.md](registries-and-auth.md#when-a-token-was-committed) |
 | `registry.credentials.image` | error | CI writes `auth.json` or `.npmrc` inside the context of a later `docker build` in the same job, its Dockerfile copies the whole context (not `COPY --from`), and `.dockerignore` (root-anchored, last match wins) lets it through | [registries-and-auth.md](registries-and-auth.md#ci-wiring) |
@@ -94,7 +103,10 @@ only where `vendor/` ships:
 | `deploy.install.unlocked` | warn | CI installs in a nested folder that has a `package.json` or `composer.json` but no lockfile, and no workspace root's lockfile covers it, so every run resolves fresh | [install-semantics.md](install-semantics.md#the-one-table) |
 | `deploy.npm.yarn-flag` | error | a Yarn flag (`--frozen-lockfile`, `--immutable`) on `npm ci` or `npm install`: npm 12 refuses the command | [install-semantics.md](install-semantics.md#npm-ci-versus-npm-install) |
 | `deploy.global.unpinned` | warn | `npm install -g <pkg>` in CI or a deploy without an exact version | [npx-exec-safety.md](npx-exec-safety.md#the-rules) |
-| `deploy.composer.dev` | warn | `composer install` without `--no-dev` where `vendor/` ships: a Dockerfile, an appspec hook, a shipping GitHub Actions job, or another CI file that ships | [install-semantics.md](install-semantics.md#deploy-patterns) |
+| `deploy.composer.dev` | warn | `composer install` without `--no-dev`, `--update-no-dev` or an applicable `COMPOSER_NO_DEV=1` where `vendor/` ships: a Dockerfile, an appspec hook, a shipping GitHub Actions job, or another CI file that ships | [install-semantics.md](install-semantics.md#deploy-patterns) |
+| `deploy.composer.safety-off` | warn | a shipping Composer command disables advisory/malware blocking, audit, or all platform requirements through a flag or environment setting | [install-semantics.md](install-semantics.md#deploy-patterns) |
+| `deploy.composer.adhoc` | warn | CI or deploy runs `composer require`, `composer global require` or `composer update` instead of installing the committed lock | [install-semantics.md](install-semantics.md#composer-install-versus-composer-update) |
+| `deploy.composer.installer-unverified` | warn | the Composer installer is fetched and piped to PHP without downloading `installer.sig` and checking its SHA-384 hash first | [registries-and-auth.md](registries-and-auth.md) |
 | `php.composer.v1` | warn | CI or a Dockerfile uses Composer 1, end of life since 2026-05-30 | [legacy-exits.md](legacy-exits.md#composer-1-to-composer-2) |
 
 The end-of-life checks read dated tables from `assets/package-manager-facts.json`; pass

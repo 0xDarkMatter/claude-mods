@@ -1,0 +1,3 @@
+{
+  "deploy": {"status": "skipped", "reason_contains": "CI parse failed: .github/workflows/broken.yml"}
+}

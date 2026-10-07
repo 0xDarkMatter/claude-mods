@@ -17,13 +17,21 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   js.manifest.invalid  php.manifest.invalid
   js.lockfile.conflict  js.lockfile.missing  js.lockfile.stale  js.lockfile.v1
   js.lockfile.shrinkwrap  js.pnpm.field-ignored
-  js.packagemanager.mismatch  js.node.unpinned  js.node.eol  node.pin.disagree
+  js.dep.non-registry
+  js.root.not-private
+  js.packagemanager.mismatch  js.node.unpinned  js.node.eol  js.node.eol-soon  node.pin.disagree
   ddev.node.unpinned  php.require.missing  php.platform.unset
-  php.pin.disagree  php.eol  php.lockfile.missing  php.lockfile.stale
-  npx.unpinned  npx.native-cli  legacy.bower  legacy.node-sass
+  php.pin.disagree  php.eol  php.eol-soon  php.lockfile.missing  php.lockfile.stale
+  php.composer.safety-off
+  php.package.abandoned
+  php.dep.non-registry
+  npx.unpinned  npx.native-cli  legacy.bower  legacy.node-sass  legacy.package
   registry.token.committed  registry.authjson.committed  registry.credentials.image
   registry.pnpm.placeholder-ignored
   js.manager.mixed  deploy.install.unfrozen  deploy.composer.dev  php.composer.v1
+  deploy.composer.safety-off
+  deploy.composer.adhoc
+  deploy.composer.installer-unverified
   deploy.install.unlocked  deploy.npm.yarn-flag  deploy.global.unpinned
 
 It never prints a secret: a committed or CI-written credential is reported as file:line only,
@@ -84,6 +92,7 @@ JS_LOCKFILES = {
 DEP_TYPES = ("dependencies", "devDependencies", "optionalDependencies")
 # Specs that never appear verbatim as yarn/pnpm lock keys; skip rather than guess.
 LOCAL_SPEC = re.compile(r"^(workspace:|file:|link:|portal:|patch:|exec:|git[+:]|github:|https?:)")
+NON_REGISTRY_SPEC = re.compile(r"^(?:git:|git\+|github:|file:|link:)|^https?://[^\s]+\.tgz(?:[?#].*)?$", re.I)
 COMPOSER_PLATFORM = re.compile(r"^(php(-64bit|-ipv6|-zts|-debug)?|hhvm|ext-.+|lib-.+|composer(-plugin-api|-runtime-api)?)$", re.I)
 EXACT_SEMVER = re.compile(r"^v?\d+\.\d+\.\d+([-+][0-9A-Za-z.+-]+)?$")
 # A dist-tag spec (`@latest`, `@next`, `@beta`). npm-package-arg calls a spec a tag when it
@@ -808,6 +817,17 @@ def workflow_jobs(text: str):
     return [tuple(j) for j in jobs] or None
 
 
+def yaml_parse_problem(text: str):
+    """A reason this scanner must not claim it parsed a CI YAML file. This deliberately
+    catches only byte/indentation failures YAML itself rejects; unsupported valid YAML is
+    handled conservatively by the line readers instead of being mislabeled invalid."""
+    if "\ufffd" in text:
+        return "invalid text encoding"
+    if any(re.match(r"^[ ]*\t", line) for line in text.splitlines()):
+        return "tab indentation is invalid YAML"
+    return None
+
+
 def indent_of(line: str) -> int:
     return len(line) - len(line.lstrip(" "))
 
@@ -1051,7 +1071,9 @@ class Audit:
         self.root, self.facts, self.as_of, self.docs, self.limit = root, facts, as_of, docs, limit
         self.findings: list[dict] = []
         self.notes: list[dict] = []
-        self.meta: dict = {"managers": [], "lockfiles": [], "node_pins": {}, "php_pins": {}}
+        self.meta: dict = {"managers": [], "lockfiles": [], "node_pins": {}, "php_pins": {},
+                           "checks": [], "manager_majors": {k: None for k in ("npm", "pnpm", "yarn", "bun", "composer")}}
+        self._blind: dict[str, list[str]] = {}
         # A manifest that is not a JSON object is unreadable to every check: None here, and
         # js()/php() report *.manifest.invalid for the file that exists.
         self.pkg = self._manifest("package.json")
@@ -1078,6 +1100,118 @@ class Audit:
     def note(self, nid, file, msg):
         self.notes.append({"id": nid, "file": redact(file), "message": redact(msg)})
 
+    def blind(self, family, reason):
+        """Record incomplete coverage at the check-family boundary. A partial scan that
+        found nothing is skipped, never pass: otherwise a clean result could be blind."""
+        self._blind.setdefault(family, []).append(reason)
+
+    def _check(self, family, funcs, skip_reason=""):
+        before = len(self.findings)
+        if not skip_reason:
+            for func in funcs:
+                func()
+        reasons = ([skip_reason] if skip_reason else []) + self._blind.pop(family, [])
+        status = "fail" if len(self.findings) > before else "skipped" if reasons else "pass"
+        self.meta["checks"].append({"check": family, "status": status,
+                                    "reason": "; ".join(dict.fromkeys(reasons))})
+
+    def _has_deploy_inputs(self):
+        if any(p.is_file() for g in CI_GLOBS for p in self.root.glob(g)):
+            return True
+        if any(p.is_file() and not re.search(r"dev|test", p.name, re.I) for p in self.root.glob("Dockerfile*")):
+            return True
+        appspec = self.root / "appspec.yml"
+        if not appspec.is_file():
+            return False
+        return any((self.root / loc).is_file() for loc in re.findall(
+            r"^\s*-?\s*location:\s*[\"']?([^\s\"'#]+)", read_text(appspec) or "", re.M))
+
+    def _manager_majors(self):
+        """Manager major evidence, strongest first: packageManager, manager-native lock
+        format, then literal CI setup pins. Null means the repository supplies no evidence."""
+        out = {k: None for k in ("npm", "pnpm", "yarn", "bun", "composer")}
+
+        def take(name, value):
+            m = re.search(r"\d+", str(value or ""))
+            if name in out and out[name] is None and m:
+                out[name] = int(m.group(0))
+
+        pm = str((self.pkg or {}).get("packageManager") or "")
+        if "@" in pm:
+            name, version = pm.split("@", 1)
+            take(name, version)
+        npm_lock = next((self.root / n for n in ("package-lock.json", "npm-shrinkwrap.json")
+                         if (self.root / n).is_file()), None)
+        if npm_lock and out["npm"] is None:
+            lock_version = obj(read_json(npm_lock)).get("lockfileVersion")
+            out["npm"] = {1: 6, 2: 7, 3: 7}.get(lock_version)
+        yarn = self.root / "yarn.lock"
+        if yarn.is_file() and out["yarn"] is None:
+            out["yarn"] = 2 if "__metadata:" in (read_text(yarn) or "")[:2000] else 1
+        pnpm = self.root / "pnpm-lock.yaml"
+        if pnpm.is_file() and out["pnpm"] is None:
+            m = re.search(r"^lockfileVersion\s*:\s*[\"']?([0-9]+)", read_text(pnpm) or "", re.M)
+            if m:
+                out["pnpm"] = int(m.group(1))
+        if any((self.root / n).is_file() for n in ("bun.lock", "bun.lockb")) and out["bun"] is None:
+            out["bun"] = 1
+        lock = read_json(self.root / "composer.lock") if (self.root / "composer.lock").is_file() else None
+        take("composer", obj(lock).get("plugin-api-version"))
+        for g in (".github/workflows/*.yml", ".github/workflows/*.yaml"):
+            for path in sorted(self.root.glob(g)):
+                lines = (read_text(path) or "").splitlines()
+                for i, line in enumerate(lines):
+                    m = re.search(r"uses:\s*[\"']?(pnpm/action-setup|oven-sh/setup-bun)@", line, re.I)
+                    if m:
+                        item = enclosing_item(lines, i)
+                        key = "version" if m.group(1).lower().startswith("pnpm/") else "bun-version"
+                        take("pnpm" if key == "version" else "bun", item_value(lines, item, key) if item else None)
+                    m = re.search(r"tools\s*:\s*[\"']?[^\n#]*composer:v?(\d+)", line, re.I)
+                    if m:
+                        take("composer", m.group(1))
+                    for manager, version in re.findall(r"\b(?:corepack\s+(?:prepare|use)\s+)?(npm|pnpm|yarn|bun)@(\d+)", line, re.I):
+                        take(manager.lower(), version)
+        return out
+
+    def _env_enabled(self, rel, kind, text, line_no, name):
+        """Whether a literal truthy environment setting applies at a command line.
+        GitHub's workflow/job/step scopes and Dockerfile ENV persist exactly where the
+        runner does; an inline shell assignment applies to that command only."""
+        truthy = lambda value: str(value or "").strip().strip("'\"").lower() in ("1", "true", "yes", "on")  # noqa: E731
+        lines = text.splitlines()
+        line = lines[line_no - 1] if 0 < line_no <= len(lines) else ""
+        m = re.search(r"(?:^|\s)" + re.escape(name) + r"\s*=\s*([^\s;&|]+)", line)
+        if m and truthy(m.group(1)):
+            return True
+        if kind == "deploy" and rel.lower().startswith("dockerfile"):
+            pat = re.compile(r"^\s*ENV\s+(?:[^\n]*\s)?" + re.escape(name) + r"(?:=|\s+)([^\s]+)", re.I)
+            return any((m := pat.match(raw)) and truthy(m.group(1)) for raw in lines[:line_no])
+        if not rel.startswith(".github/workflows/"):
+            return False
+        doc = mini_yaml(text)
+        if truthy(obj(doc.get("env")).get(name)):
+            return True
+        jobs = workflow_jobs(text) or []
+        job_name = next((lines[a - 1].strip().rstrip(":").strip("'\"") for a, b in jobs if a <= line_no <= b), None)
+        if job_name and truthy(obj(obj(obj(doc.get("jobs")).get(job_name)).get("env")).get(name)):
+            return True
+        item = enclosing_item(lines, line_no - 1) if lines else None
+        if item:
+            first, last, _ = item
+            env_indent = None
+            for raw in lines[first:last + 1]:
+                if re.match(r"^\s*env\s*:\s*(?:#.*)?$", raw):
+                    env_indent = indent_of(raw)
+                    continue
+                if env_indent is not None:
+                    if raw.strip() and indent_of(raw) <= env_indent:
+                        env_indent = None
+                    else:
+                        m = re.match(r"^\s*" + re.escape(name) + r"\s*:\s*(.*)$", raw)
+                        if m and truthy(scalar(m.group(1))):
+                            return True
+        return False
+
     # ---- DDEV: config.yaml, then config.*.yaml in name order (later files win) ----
     def _read_ddev(self):
         d = self.root / ".ddev"
@@ -1090,15 +1224,17 @@ class Audit:
         return merged
 
     def run(self):
-        self.deploy()  # first: js() asks where CI installs (self.installs); output is sorted later
-        self.js()
-        self.nested()
-        self.node_pins()
-        self.php()
-        self.npx()
-        self.legacy()
-        self.secrets()
-        self.pnpm_placeholders()
+        # Deploy stays first because js.lockfile asks which manager CI actually installs.
+        self._check("deploy", (self.deploy,), "" if self._has_deploy_inputs() else "no CI or deploy files")
+        has_js = (self.root / "package.json").is_file() or any((self.root / n).is_file() for n in JS_LOCKFILES)
+        self._check("js.lockfile", (self.js, self.nested), "" if has_js else "no package.json or JS lockfile")
+        self._check("node.pins", (self.node_pins,), "" if (self.root / "package.json").is_file() else "no package.json")
+        self._check("php", (self.php,), "" if (self.root / "composer.json").is_file() else "no composer.json")
+        npx_skip = "package.json absent and docs scan disabled" if not self.docs and not (self.root / "package.json").is_file() else ""
+        self._check("npx", (self.npx,), npx_skip)
+        self._check("legacy", (self.legacy,))
+        self._check("registry", (self.secrets, self.pnpm_placeholders))
+        self.meta["manager_majors"] = self._manager_majors()
         return self
 
     # ---- JS managers and lockfiles ----
@@ -1136,6 +1272,23 @@ class Audit:
                      + ") - pnpm 11+ no longer reads it, so those settings are silently dropped",
                      "move the settings into pnpm-workspace.yaml (references/scripts-and-workspaces.md)")
         has_deps = any(obj(self.pkg.get(t)) for t in DEP_TYPES)
+        # Guard: keep this biased toward silence. Treat every conventional package-export
+        # signal as publication intent; narrowing it would accuse real libraries of being
+        # deployable sites merely because they intentionally omit private=true.
+        version = str(self.pkg.get("version") or "")
+        published = any(key in self.pkg for key in ("files", "publishConfig", "exports", "main")) \
+            or str(self.pkg.get("name") or "").startswith("@") \
+            or version not in ("", "0.0.0", "1.0.0")
+        if has_deps and self.pkg.get("private") is not True and not published:
+            self.add("warn", "js.root.not-private", "package.json",
+                     "root package has dependencies but is neither private nor recognisably configured for publication",
+                     'set "private": true; if this is a published library, add explicit files/exports/publishConfig metadata')
+        for dep_type in DEP_TYPES:
+            for name, spec in obj(self.pkg.get(dep_type)).items():
+                if NON_REGISTRY_SPEC.match(str(spec).strip()):
+                    self.add("warn", "js.dep.non-registry", "package.json",
+                             f"{dep_type}.{name} uses non-registry source {spec!r}",
+                             "publish or mirror the package in the configured registry and pin a normal registry range")
         if not present and has_deps:
             built = self._nested_builds()
             if built:
@@ -1354,6 +1507,10 @@ class Audit:
         if self.pkg is None:
             return
         node = obj(self.facts.get("node"))
+        window = self.facts.get("eol_soon_days")
+        if isinstance(window, bool) or not isinstance(window, int) or window < 1:
+            self.blind("node.pins", "facts eol_soon_days missing or invalid")
+            window = None
         codenames = {str(k).lower(): v for k, v in obj(node.get("lts_codenames")).items()}
         exact: dict[str, int] = {}
         ranges: dict[str, str] = {}
@@ -1483,6 +1640,14 @@ class Audit:
                     self.add("warn", "js.node.eol", src,
                              f"{src} '{spec}' targets no supported Node release - confirm the server's Node version too"
                              + aside, "widen or move the range to a supported LTS major")
+        if window is not None:
+            soon = [(s, m) for s, m in exact.items() if not s.startswith(".ddev/") and m in ends
+                    and self.as_of <= ends[m] <= self.as_of + dt.timedelta(days=window)]
+            if soon:
+                self.add("warn", "js.node.eol-soon", soon[0][0],
+                         "the repo pins Node nearing end of life: "
+                         + ", ".join(f"{s}={m} (EOL {ends[m]})" for s, m in soon),
+                         f"schedule the move to the next supported LTS before the {window}-day window closes")
 
     # ---- Composer / PHP ----
     def php(self):
@@ -1492,6 +1657,47 @@ class Audit:
                 self.add("error", "php.manifest.invalid", "composer.json", "composer.json is not valid JSON, or not a JSON object",
                          "fix the JSON; `composer validate` shows where")
             return
+        window = self.facts.get("eol_soon_days")
+        if isinstance(window, bool) or not isinstance(window, int) or window < 1:
+            self.blind("php", "facts eol_soon_days missing or invalid")
+            window = None
+        config = obj(c.get("config"))
+        disabled = []
+        if config.get("allow-plugins") is True:
+            disabled.append("config.allow-plugins=true (blanket plugin execution)")
+        if config.get("secure-http") is False:
+            disabled.append("config.secure-http=false")
+        if config.get("disable-tls") is True:
+            disabled.append("config.disable-tls=true")
+        audit = config.get("audit")
+        if audit is False or str(audit).lower() in ("off", "disabled", "ignore"):
+            disabled.append("config.audit is disabled")
+        elif isinstance(audit, dict):
+            for key, value in audit.items():
+                low = str(key).lower()
+                off = value is False or str(value).lower() in ("off", "disabled", "ignore", "false")
+                if off and any(token in low for token in ("advis", "malware", "abandon", "block")):
+                    disabled.append(f"config.audit.{key}={value!r}")
+        # A single finding names every switch so remediation is atomic and repeated keys do
+        # not drown out the rest of the PHP-family result.
+        if disabled:
+            self.add("warn", "php.composer.safety-off", "composer.json",
+                     "Composer safety controls are disabled: " + ", ".join(disabled),
+                     "restore secure-http/TLS, allow plugins by package name, and keep audit blocking enabled")
+        repo_cfg = c.get("repositories")
+        repositories = repo_cfg if isinstance(repo_cfg, list) else list(repo_cfg.values()) if isinstance(repo_cfg, dict) else []
+        non_registry = [str(r.get("type")) for r in repositories
+                        if isinstance(r, dict) and str(r.get("type", "")).lower() in ("vcs", "path", "artifact")]
+        unstable = [f"{name}={constraint}" for section in ("require", "require-dev")
+                    for name, constraint in obj(c.get(section)).items()
+                    if str(constraint).strip() == "*" or str(constraint).strip().lower().startswith("dev-")]
+        if str(c.get("minimum-stability", "")).lower() == "dev" and c.get("prefer-stable") is not True:
+            unstable.append("minimum-stability=dev without prefer-stable=true")
+        if non_registry or unstable:
+            details = (["repository types: " + ", ".join(non_registry)] if non_registry else []) \
+                + (["unbounded/dev resolution: " + ", ".join(unstable)] if unstable else [])
+            self.add("warn", "php.dep.non-registry", "composer.json", "; ".join(details),
+                     "use Composer registry packages with bounded stable constraints; set prefer-stable=true if dev stability is required")
         is_lib = str(c.get("type", "project")) not in ("project", "")
         req = obj(c.get("require"))
         req_dev = obj(c.get("require-dev"))
@@ -1539,6 +1745,19 @@ class Audit:
                 self.add("warn", "php.lockfile.stale", "composer.lock",
                          "composer.json requires packages missing from composer.lock: " + ", ".join(shown[:8]),
                          "run `composer update <package>` for the new requirement and commit composer.lock")
+        if isinstance(lock, dict):
+            for package in list(lock.get("packages") or []) + list(lock.get("packages-dev") or []):
+                if not isinstance(package, dict):
+                    continue
+                abandoned = package.get("abandoned")
+                if abandoned is not True and not (isinstance(abandoned, str) and abandoned.strip()):
+                    continue
+                name = str(package.get("name") or "unknown package")
+                replacement = abandoned.strip() if isinstance(abandoned, str) else "none named"
+                self.add("warn", "php.package.abandoned", "composer.lock",
+                         f"{name} is marked abandoned; replacement: {replacement}",
+                         (f"replace it with {replacement}" if replacement != "none named"
+                          else "remove it or choose a maintained replacement after reviewing its dependants"))
         php_req = req.get("php")
         # A composer.json that requires no packages (`{"name": ...}`, used to make a JS
         # asset repo installable through Composer) resolves nothing: PHP pins are noise.
@@ -1625,6 +1844,14 @@ class Audit:
                 self.add("warn", "php.eol", "composer.json",
                          f"require.php '{php_req}' targets no supported PHP release - confirm the server's PHP version too"
                          + aside, "raise the constraint to a supported PHP (references/legacy-exits.md)")
+        if window is not None:
+            soon = [(s, v) for s, v in exact.items() if not s.startswith(".ddev/") and v in ends
+                    and self.as_of <= ends[v] <= self.as_of + dt.timedelta(days=window)]
+            if soon:
+                self.add("warn", "php.eol-soon", soon[0][0],
+                         "the repo pins PHP nearing end of security support: "
+                         + ", ".join(f"{s}={v[0]}.{v[1]} (security support ends {ends[v]})" for s, v in soon),
+                         f"schedule the PHP upgrade before the {window}-day window closes")
 
     # ---- npx / dlx / exec ----
     def npx(self):
@@ -1836,6 +2063,10 @@ class Audit:
             text = read_text(path) or ""
             rel = path.relative_to(self.root).as_posix()
             ci = kind == "ci"
+            problem = yaml_parse_problem(text) if ci and path.suffix in (".yml", ".yaml") else None
+            if problem:
+                self.blind("deploy", f"CI parse failed: {rel} ({problem})")
+                continue
             ships = self._ship_scope(rel, kind, text)
             start_dir = self._start_dirs(rel, kind, text)
             every = list(code_lines(text, False))
@@ -1872,6 +2103,11 @@ class Audit:
                     writes.append((rel, n, m.group(2), join_dir(cwd, m.group(1), env)))
                 elif ci and CRED_CONFIG.search(line):
                     writes.append((rel, n, "auth.json", join_dir(cwd, "auth.json", env)))
+                if re.search(r"https?://getcomposer\.org/installer\b", line, re.I) and re.search(
+                        r"\|\s*(?:sudo\s+)?php\b", line, re.I):
+                    flag("deploy.composer.installer-unverified", rel, n,
+                         "Composer installer is fetched and piped directly to PHP, so its installer.sig is never checked",
+                         "download composer-setup.php and installer.sig, verify the SHA-384 hash, then execute the saved installer")
                 # A `cd` moves the rest of its shell block (undone at the end of a subshell);
                 # installs and builds run where it left off.
                 for words in simple_commands(line):
@@ -1891,9 +2127,11 @@ class Audit:
                                  else posixpath.join(ctx, "Dockerfile") if ctx is not None else None)
                         builds.append((rel, n, ctx, dfile))
                     for tool, args in command_tools(words):
-                        self._install_line(tool, args, rel, n, kind, ships(n), cwd, flag, env)
+                        active_env = {name: self._env_enabled(rel, kind, text, n, name) for name in (
+                            "COMPOSER_NO_DEV", "COMPOSER_NO_SECURITY_BLOCKING", "COMPOSER_NO_AUDIT")}
+                        self._install_line(tool, args, rel, n, kind, ships(n), cwd, flag, env, active_env)
             if ci:
-                self._ramsey(text, rel, ships, flag)
+                self._ramsey(text, rel, ships, flag, kind)
                 builds += self._action_builds(rel, text, start_dir)
         self._image_leaks(writes, builds, scopes, flag)
 
@@ -2110,7 +2348,7 @@ class Audit:
                 return scalar(m.group(1)).lower() == "false"
         return False
 
-    def _install_line(self, tool, toks, rel, n, kind, ships, cwd, flag, env=None):
+    def _install_line(self, tool, toks, rel, n, kind, ships, cwd, flag, env=None, active_env=None):
         """One package-manager invocation from a CI/deploy line -> findings. `ships`: this
         line's install ends up in what is deployed (see _ship_scope). `cwd`: the package
         root it runs in, repo-relative ("" = the root, None = unknown; see _start_dirs),
@@ -2139,6 +2377,20 @@ class Audit:
             self._global_install(sub, toks[:idx] + toks[idx + 1:], rel, n, flag)
             return
         family = "php" if tool == "composer" else "js"
+        global_require = sub == "global" and any(t == "require" for t in toks[(idx + 1 if idx is not None else 0):])
+        if tool == "composer" and (sub in ("update", "u", "upgrade", "require") or global_require):
+            action = "global require" if global_require else sub
+            flag("deploy.composer.adhoc", rel, n,
+                 f"`composer {action}` in {rel}{where} resolves dependencies during CI/deploy",
+                 "change composer.json on a development machine, commit composer.lock, then run composer install")
+        if tool == "composer" and ships:
+            unsafe = [t for t in toks if t in ("--no-security-blocking", "--no-blocking", "--ignore-platform-reqs")]
+            unsafe += [name for name in ("COMPOSER_NO_SECURITY_BLOCKING", "COMPOSER_NO_AUDIT")
+                       if obj(active_env).get(name)]
+            if unsafe:
+                flag("deploy.composer.safety-off", rel, n,
+                     "shipping Composer command disables safety checks: " + ", ".join(dict.fromkeys(unsafe)),
+                     "remove the override; satisfy platform requirements and keep advisory/malware blocking enabled")
         installs = {"npm": sub in NPM_INSTALL + NPM_CI, "yarn": sub in ("", "install"),
                     "pnpm": sub in ("install", "i", "ci"), "bun": sub in ("install", "i", "ci")
                     }.get(tool, sub in ("install", "i"))
@@ -2194,7 +2446,8 @@ class Audit:
         elif tool == "composer":
             if sub in ("update", "u", "upgrade", "require", "remove"):
                 flag(unfrozen, rel, n, f"`composer {sub}` in {rel}{where} resolves new versions instead of installing the lock", fix)
-            elif sub in ("install", "i") and ships and "--no-dev" not in toks:
+            elif sub in ("install", "i") and ships and not ({"--no-dev", "--update-no-dev"} & set(toks)) \
+                    and not obj(active_env).get("COMPOSER_NO_DEV"):
                 flag("deploy.composer.dev", rel, n, f"`composer {sub}` without --no-dev in a deploy ({rel}) ships dev packages",
                      "add --no-dev --optimize-autoloader (references/install-semantics.md#deploy-patterns)")
 
@@ -2227,7 +2480,7 @@ class Audit:
                  f"a global npm install of {', '.join(unpinned)} in {rel} fetches the newest matching version on every run",
                  f"pin it: npm {sub} -g {split_spec(unpinned[0])[0]}@<exact version> (references/npx-exec-safety.md#the-rules)")
 
-    def _ramsey(self, text, rel, ships, flag):
+    def _ramsey(self, text, rel, ships, flag, kind):
         """ramsey/composer-install is `composer install` (or update) behind action inputs."""
         lines = text.splitlines()
         for i, line in enumerate(lines):
@@ -2246,22 +2499,66 @@ class Audit:
                 flag("deploy.install.unfrozen", rel, i + 1,
                      f"ramsey/composer-install with dependency-versions: {versions} runs `composer update` in {rel}",
                      "drop dependency-versions (default: locked) so CI installs the lock")
-            elif ships(i + 1) and "--no-dev" not in opts.split():
+            elif ships(i + 1) and not ({"--no-dev", "--update-no-dev"} & set(opts.split())) \
+                    and not self._env_enabled(rel, kind, text, i + 1, "COMPOSER_NO_DEV"):
                 flag("deploy.composer.dev", rel, i + 1,
                      f"ramsey/composer-install without --no-dev in a deploy ({rel}) ships dev packages",
                      'set composer-options: "--no-dev --optimize-autoloader" (references/install-semantics.md#deploy-patterns)')
 
     # ---- legacy tools ----
     def legacy(self):
+        table = self.facts.get("legacy_packages")
+        if not isinstance(table, list):
+            self.blind("legacy", "facts legacy_packages missing or invalid")
+            table = []
+        raised = set()
+
+        def emit(entry, file):
+            key = (entry.get("id"), entry.get("name"), file)
+            if key in raised:
+                return
+            raised.add(key)
+            self.add("warn", entry.get("id") or "legacy.package", file,
+                     f"{entry.get('name')} is legacy: {entry.get('reason')}",
+                     f"replace with {entry.get('replacement')} ({entry.get('see')})")
+
+        def applies(name, spec, versions):
+            if versions == "*":
+                return True
+            installed = self._installed(name)
+            if installed:
+                return admits(versions, installed, (installed[0], installed[1], installed[2] + 1)) is True
+            parsed = parse_range(spec)
+            if parsed is None:
+                return False
+            for branch in parsed:
+                lo = max([VZERO] + [iv[0] for iv in branch])
+                hi = min([VINF] + [iv[1] for iv in branch])
+                if lo < hi and admits(versions, lo, hi) is True:
+                    return True
+            return False
+
         for f in ("bower.json", ".bowerrc"):
             if (self.root / f).is_file():
-                self.add("warn", "legacy.bower", f, "Bower manifest - Bower is a legacy front-end manager",
-                         "move each Bower package to npm (references/legacy-exits.md)")
+                entry = next((e for e in table if isinstance(e, dict) and e.get("name") == "bower"), None)
+                if entry:
+                    emit(entry, f)
+                else:
+                    self.add("warn", "legacy.bower", f, "Bower manifest - Bower is a legacy front-end manager",
+                             "move each Bower package to npm (references/legacy-exits.md)")
                 break
-        if self.pkg and "node-sass" in self._declared():
-            self.add("warn", "legacy.node-sass", "package.json",
-                     "node-sass is deprecated and does not build on current Node",
-                     "replace with sass (Dart Sass); sass-loader picks it up (references/legacy-exits.md)")
+        declared = self._declared()
+        composer_declared = {**{str(k): str(v) for k, v in obj((self.composer or {}).get("require")).items()},
+                             **{str(k): str(v) for k, v in obj((self.composer or {}).get("require-dev")).items()}}
+        for entry in table:
+            if not isinstance(entry, dict):
+                continue
+            ecosystem, name, versions = entry.get("ecosystem"), str(entry.get("name") or ""), str(entry.get("versions") or "")
+            if ecosystem == "npm" and name in declared and applies(name, declared[name][1], versions):
+                emit(entry, "package.json")
+            elif ecosystem == "composer" and name in composer_declared and (versions == "*" or
+                    admits(versions, (0, 0, 0), VINF) is True):
+                emit(entry, "composer.json")
 
     # ---- committed registry credentials (values never printed) ----
     def secrets(self):

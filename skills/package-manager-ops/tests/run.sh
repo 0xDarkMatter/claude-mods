@@ -145,10 +145,17 @@ ec 3 "pm-audit missing facts -> 3" "$PY" "$AUDIT" --facts "$TMP/nope.json" "$HER
 while IFS='|' read -r verdict msg; do
   [[ "$verdict" == PASS ]] && ok "$msg" || no "$msg"
 done < <("$PY" - "$HERE/fixtures" "$AUDIT" "$TMP" "$SKILL/references/diagnostics.md" <<'PY'
-import json, os, shutil, subprocess, sys
+import json, os, re, shutil, subprocess, sys, traceback
 from pathlib import Path
 fixtures, audit, tmp, diagnostics = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3]), Path(sys.argv[4])
 def row(ok, msg): print(f"{'PASS' if ok else 'FAIL'}|{msg}")
+
+def _crash(kind, exc, tb):
+    # A process-substitution producer's exit code is not the while loop's exit code, so
+    # uncaught exceptions must become rows or the outer tally can report a false green.
+    row(False, f"fixture harness crashed: {''.join(traceback.format_exception_only(kind, exc)).strip()}")
+
+sys.excepthook = _crash
 
 def materialise(src: Path, dest: Path):
     for f in src.rglob("*.fx"):
@@ -156,7 +163,10 @@ def materialise(src: Path, dest: Path):
         out.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(f, out)
 
-cases = sorted(p for p in fixtures.iterdir() if p.is_dir())
+# facts/ and tools/ hold sub-suite fixture trees, not pm-audit cases. Requiring the
+# case contract file prevents one of those directories from crashing the child process
+# and silently truncating every alphabetically later scanner case.
+cases = sorted(p for p in fixtures.iterdir() if p.is_dir() and (p / "_expect").is_file())
 row(len(cases) >= 30, f"{len(cases)} fixture case(s)")
 covered = set()
 for case in cases:
@@ -167,7 +177,8 @@ for case in cases:
     for d in (case / "_delete").read_text().split() if (case / "_delete").is_file() else []:
         (dest / d).unlink()
     want = sorted(set((case / "_expect").read_text().split()))
-    proc = subprocess.run([sys.executable, audit, "--json", "--as-of", "2026-10-05", str(dest)],
+    as_of = (case / "_as_of").read_text().strip() if (case / "_as_of").is_file() else "2026-10-05"
+    proc = subprocess.run([sys.executable, audit, "--json", "--as-of", as_of, str(dest)],
                           capture_output=True, text=True)
     try:
         data = json.loads(proc.stdout)["data"]
@@ -184,6 +195,63 @@ for case in cases:
         pinned = {r.split()[0] for r in want_rows}
         got_rows = sorted(f"{f['id']} {f['file']}:{f['line']}" for f in data if f["id"] in pinned)
         row(got_rows == want_rows, f"{case.name}: lines {got_rows}" + ("" if got_rows == want_rows else f" (want {want_rows})"))
+    if (case / "_checks").is_file():
+        expected = json.loads((case / "_checks").read_text())
+        checks = {c.get("check"): c for c in json.loads(proc.stdout).get("meta", {}).get("checks", [])}
+        wrong = []
+        for family, want_check in expected.items():
+            got_check = checks.get(family, {})
+            if got_check.get("status") != want_check["status"]:
+                wrong.append(f"{family} status={got_check.get('status')!r}")
+            if want_check.get("reason_contains") not in got_check.get("reason", ""):
+                wrong.append(f"{family} reason={got_check.get('reason')!r}")
+        row(not wrong, f"{case.name}: per-family check status is explicit" + (f" ({'; '.join(wrong)})" if wrong else ""))
+    if (case / "_manager_majors").is_file():
+        expected = json.loads((case / "_manager_majors").read_text())
+        got_majors = json.loads(proc.stdout).get("meta", {}).get("manager_majors")
+        row(got_majors == expected, f"{case.name}: manager majors {got_majors}" + ("" if got_majors == expected else f" (want {expected})"))
+
+# Mutation proof: each new checks-a fixture must reject a scanner whose corresponding
+# rule is broken. Mutants live only under the suite temp directory and never touch source.
+source = Path(audit).read_text(encoding="utf-8")
+mutants = tmp / "mutants"; mutants.mkdir(parents=True, exist_ok=True)
+
+def mutation(label, case_name, old, new):
+    if old not in source:
+        row(False, f"mutation {label}: source token missing")
+        return
+    mutant = mutants / (re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") + ".py")
+    mutant.write_text(source.replace(old, new), encoding="utf-8")
+    case = fixtures / case_name
+    want = sorted(set((case / "_expect").read_text().split()))
+    as_of = (case / "_as_of").read_text().strip() if (case / "_as_of").is_file() else "2026-10-05"
+    proc = subprocess.run([sys.executable, str(mutant), "--json", "--as-of", as_of, str(tmp / "m" / case_name)],
+                          capture_output=True, text=True)
+    try:
+        got = sorted({f["id"] for f in json.loads(proc.stdout)["data"]})
+    except Exception:
+        got = None
+    row(got != want or proc.returncode != (10 if want else 0), f"mutation {label}: fixture catches broken rule")
+
+for fid, case_name in (
+    ("php.composer.safety-off", "php-composer-safety-off"),
+    ("deploy.composer.safety-off", "deploy-composer-safety-off"),
+    ("deploy.composer.adhoc", "deploy-composer-update"),
+    ("deploy.composer.installer-unverified", "deploy-composer-installer-unverified"),
+    ("php.package.abandoned", "php-package-abandoned"),
+    ("legacy.package", "legacy-package"),
+    ("js.dep.non-registry", "js-dep-non-registry"),
+    ("php.dep.non-registry", "php-dep-non-registry"),
+    ("js.root.not-private", "js-root-not-private"),
+    ("php.eol-soon", "php-eol-soon"),
+    ("js.node.eol-soon", "js-node-eol-soon"),
+):
+    mutation(fid, case_name, f'"{fid}"', f'"mutant.{fid}"')
+mutation("composer update-no-dev", "clean-deploy-composer-update-no-dev", '"--update-no-dev"', '"--mutant-update-no-dev"')
+mutation("composer no-dev env", "clean-deploy-composer-env",
+         'obj(active_env).get("COMPOSER_NO_DEV")', 'False')
+mutation("legacy facts lookup", "legacy-node-sass",
+         'table = self.facts.get("legacy_packages")', 'table = self.facts.get("mutant_legacy_packages")')
 
 # Every id the audit documents must have a fixture that produces it.
 doc_ids = set()
@@ -244,6 +312,9 @@ def audit_json(case):
     return json.loads(p.stdout) if p.stdout.strip().startswith("{") else {"data": [], "meta": {}}
 def found(case, fid):
     return [f for f in audit_json(case)["data"] if f["id"] == fid]
+abandoned = found("php-package-abandoned", "php.package.abandoned")
+row(abandoned and any("fixture/replacement-package" in f["message"] for f in abandoned),
+    "an abandoned Composer package names the replacement from composer.lock")
 # A Yarn freeze flag on npm is an error: npm 12 refuses the command (EUNKNOWNCONFIG).
 yf = found("deploy-npm-frozen-flag", "deploy.npm.yarn-flag")
 row(yf and all(f["severity"] == "error" and "npm 12 refuses" in f["message"] and "installs unfrozen" in f["message"]
@@ -315,6 +386,23 @@ def ids_of(p):
         return {f["id"] for f in json.loads(p.stdout.decode("utf-8"))["data"]}
     except Exception:  # noqa: BLE001 - any parse failure reads as "no ids"
         return None
+# Missing research tables are an explicit blind spot, not a crash or a clean legacy pass.
+d = fresh("missing-legacy-facts")
+facts_path = Path(audit).resolve().parent.parent / "assets" / "package-manager-facts.json"
+facts = json.loads(facts_path.read_text(encoding="utf-8")); facts.pop("legacy_packages")
+missing_facts = tmp / "facts-without-legacy.json"; missing_facts.write_text(json.dumps(facts))
+p = run(d, "--json", "--facts", str(missing_facts))
+meta = json.loads(p.stdout.decode("utf-8"))["meta"] if p.stdout.strip().startswith(b"{") else {}
+legacy_check = next((c for c in meta.get("checks", []) if c.get("check") == "legacy"), {})
+row(legacy_check.get("status") == "skipped" and "legacy_packages" in legacy_check.get("reason", ""),
+    f"missing legacy_packages marks the legacy family skipped ({legacy_check})")
+facts = json.loads(facts_path.read_text(encoding="utf-8")); facts.pop("eol_soon_days")
+missing_eol = tmp / "facts-without-eol-window.json"; missing_eol.write_text(json.dumps(facts))
+p = run(fresh("missing-eol-window"), "--json", "--facts", str(missing_eol))
+meta = json.loads(p.stdout.decode("utf-8"))["meta"] if p.stdout.strip().startswith(b"{") else {}
+window_checks = {c.get("check"): c for c in meta.get("checks", [])}
+row(all(window_checks.get(f, {}).get("status") == "skipped" and "eol_soon_days" in window_checks[f].get("reason", "")
+        for f in ("node.pins", "php")), f"missing eol_soon_days skips runtime families ({window_checks})")
 # Encodings: a UTF-8 BOM manifest parses (npm accepts it), a UTF-16 PowerShell script is
 # read, and a non-ASCII file name prints on a cp1252 stdout instead of a traceback.
 d = fresh("bom")
@@ -476,7 +564,13 @@ else
   no "verifier missing: scripts/check-pm-facts.py"
 fi
 
-# -- 6. copy-alone portability: the folder runs with nothing beside it ---------------
+# -- 6. focused behavioural sub-suites -----------------------------------------------
+# These suites stay separately runnable for mutation work, but the skill gate must not
+# silently omit their C1 catalogue and estate-tool coverage.
+ec 0 "facts behavioural sub-suite" bash "$HERE/facts.sh"
+ec 0 "estate tools sub-suite"       bash "$HERE/tools.sh"
+
+# -- 7. copy-alone portability: the folder runs with nothing beside it ---------------
 ALONE="$TMP/alone/package-manager-ops"
 mkdir -p "$TMP/alone" && cp -R "$SKILL" "$ALONE"
 grep -rq '\.\./\.\./' "$ALONE/scripts" && no "scripts reach outside the skill folder (../../)" || ok "no ../../ dependency in scripts"
