@@ -46,7 +46,8 @@ shivammathur/setup-php count as pins for the agreement and end-of-life checks.
 Frozen installs are required in every CI job, whether it ships or not: the managers
 document the frozen install for CI as a whole, and a front-end job whose build a deploy job
 downloads ships its install without any deploy marker of its own. `--no-dev` is required
-only where `vendor/` ships:
+only where `vendor/` ships; `--update-no-dev` and a literal `COMPOSER_NO_DEV=1` at the
+workflow, job or step scope (or an earlier Dockerfile `ENV`) satisfy the same rule:
 
 - a Dockerfile or an appspec hook script, always;
 - a GitHub Actions **job** that ships something (`docker push`, `aws deploy`, an `aws s3 cp`
@@ -94,7 +95,7 @@ only where `vendor/` ships:
 | `deploy.install.unlocked` | warn | CI installs in a nested folder that has a `package.json` or `composer.json` but no lockfile, and no workspace root's lockfile covers it, so every run resolves fresh | [install-semantics.md](install-semantics.md#the-one-table) |
 | `deploy.npm.yarn-flag` | error | a Yarn flag (`--frozen-lockfile`, `--immutable`) on `npm ci` or `npm install`: npm 12 refuses the command | [install-semantics.md](install-semantics.md#npm-ci-versus-npm-install) |
 | `deploy.global.unpinned` | warn | `npm install -g <pkg>` in CI or a deploy without an exact version | [npx-exec-safety.md](npx-exec-safety.md#the-rules) |
-| `deploy.composer.dev` | warn | `composer install` without `--no-dev` where `vendor/` ships: a Dockerfile, an appspec hook, a shipping GitHub Actions job, or another CI file that ships | [install-semantics.md](install-semantics.md#deploy-patterns) |
+| `deploy.composer.dev` | warn | `composer install` without `--no-dev`, `--update-no-dev` or an applicable `COMPOSER_NO_DEV=1` where `vendor/` ships: a Dockerfile, an appspec hook, a shipping GitHub Actions job, or another CI file that ships | [install-semantics.md](install-semantics.md#deploy-patterns) |
 | `php.composer.v1` | warn | CI or a Dockerfile uses Composer 1, end of life since 2026-05-30 | [legacy-exits.md](legacy-exits.md#composer-1-to-composer-2) |
 
 The end-of-life checks read dated tables from `assets/package-manager-facts.json`; pass

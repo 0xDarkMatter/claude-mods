@@ -1164,6 +1164,45 @@ class Audit:
                         take(manager.lower(), version)
         return out
 
+    def _env_enabled(self, rel, kind, text, line_no, name):
+        """Whether a literal truthy environment setting applies at a command line.
+        GitHub's workflow/job/step scopes and Dockerfile ENV persist exactly where the
+        runner does; an inline shell assignment applies to that command only."""
+        truthy = lambda value: str(value or "").strip().strip("'\"").lower() in ("1", "true", "yes", "on")  # noqa: E731
+        lines = text.splitlines()
+        line = lines[line_no - 1] if 0 < line_no <= len(lines) else ""
+        m = re.search(r"(?:^|\s)" + re.escape(name) + r"\s*=\s*([^\s;&|]+)", line)
+        if m and truthy(m.group(1)):
+            return True
+        if kind == "deploy" and rel.lower().startswith("dockerfile"):
+            pat = re.compile(r"^\s*ENV\s+(?:[^\n]*\s)?" + re.escape(name) + r"(?:=|\s+)([^\s]+)", re.I)
+            return any((m := pat.match(raw)) and truthy(m.group(1)) for raw in lines[:line_no])
+        if not rel.startswith(".github/workflows/"):
+            return False
+        doc = mini_yaml(text)
+        if truthy(obj(doc.get("env")).get(name)):
+            return True
+        jobs = workflow_jobs(text) or []
+        job_name = next((lines[a - 1].strip().rstrip(":").strip("'\"") for a, b in jobs if a <= line_no <= b), None)
+        if job_name and truthy(obj(obj(obj(doc.get("jobs")).get(job_name)).get("env")).get(name)):
+            return True
+        item = enclosing_item(lines, line_no - 1) if lines else None
+        if item:
+            first, last, _ = item
+            env_indent = None
+            for raw in lines[first:last + 1]:
+                if re.match(r"^\s*env\s*:\s*(?:#.*)?$", raw):
+                    env_indent = indent_of(raw)
+                    continue
+                if env_indent is not None:
+                    if raw.strip() and indent_of(raw) <= env_indent:
+                        env_indent = None
+                    else:
+                        m = re.match(r"^\s*" + re.escape(name) + r"\s*:\s*(.*)$", raw)
+                        if m and truthy(scalar(m.group(1))):
+                            return True
+        return False
+
     # ---- DDEV: config.yaml, then config.*.yaml in name order (later files win) ----
     def _read_ddev(self):
         d = self.root / ".ddev"
@@ -1983,9 +2022,11 @@ class Audit:
                                  else posixpath.join(ctx, "Dockerfile") if ctx is not None else None)
                         builds.append((rel, n, ctx, dfile))
                     for tool, args in command_tools(words):
-                        self._install_line(tool, args, rel, n, kind, ships(n), cwd, flag, env)
+                        active_env = {name: self._env_enabled(rel, kind, text, n, name) for name in (
+                            "COMPOSER_NO_DEV", "COMPOSER_NO_SECURITY_BLOCKING", "COMPOSER_NO_AUDIT")}
+                        self._install_line(tool, args, rel, n, kind, ships(n), cwd, flag, env, active_env)
             if ci:
-                self._ramsey(text, rel, ships, flag)
+                self._ramsey(text, rel, ships, flag, kind)
                 builds += self._action_builds(rel, text, start_dir)
         self._image_leaks(writes, builds, scopes, flag)
 
@@ -2202,7 +2243,7 @@ class Audit:
                 return scalar(m.group(1)).lower() == "false"
         return False
 
-    def _install_line(self, tool, toks, rel, n, kind, ships, cwd, flag, env=None):
+    def _install_line(self, tool, toks, rel, n, kind, ships, cwd, flag, env=None, active_env=None):
         """One package-manager invocation from a CI/deploy line -> findings. `ships`: this
         line's install ends up in what is deployed (see _ship_scope). `cwd`: the package
         root it runs in, repo-relative ("" = the root, None = unknown; see _start_dirs),
@@ -2286,7 +2327,8 @@ class Audit:
         elif tool == "composer":
             if sub in ("update", "u", "upgrade", "require", "remove"):
                 flag(unfrozen, rel, n, f"`composer {sub}` in {rel}{where} resolves new versions instead of installing the lock", fix)
-            elif sub in ("install", "i") and ships and "--no-dev" not in toks:
+            elif sub in ("install", "i") and ships and not ({"--no-dev", "--update-no-dev"} & set(toks)) \
+                    and not obj(active_env).get("COMPOSER_NO_DEV"):
                 flag("deploy.composer.dev", rel, n, f"`composer {sub}` without --no-dev in a deploy ({rel}) ships dev packages",
                      "add --no-dev --optimize-autoloader (references/install-semantics.md#deploy-patterns)")
 
@@ -2319,7 +2361,7 @@ class Audit:
                  f"a global npm install of {', '.join(unpinned)} in {rel} fetches the newest matching version on every run",
                  f"pin it: npm {sub} -g {split_spec(unpinned[0])[0]}@<exact version> (references/npx-exec-safety.md#the-rules)")
 
-    def _ramsey(self, text, rel, ships, flag):
+    def _ramsey(self, text, rel, ships, flag, kind):
         """ramsey/composer-install is `composer install` (or update) behind action inputs."""
         lines = text.splitlines()
         for i, line in enumerate(lines):
@@ -2338,7 +2380,8 @@ class Audit:
                 flag("deploy.install.unfrozen", rel, i + 1,
                      f"ramsey/composer-install with dependency-versions: {versions} runs `composer update` in {rel}",
                      "drop dependency-versions (default: locked) so CI installs the lock")
-            elif ships(i + 1) and "--no-dev" not in opts.split():
+            elif ships(i + 1) and not ({"--no-dev", "--update-no-dev"} & set(opts.split())) \
+                    and not self._env_enabled(rel, kind, text, i + 1, "COMPOSER_NO_DEV"):
                 flag("deploy.composer.dev", rel, i + 1,
                      f"ramsey/composer-install without --no-dev in a deploy ({rel}) ships dev packages",
                      'set composer-options: "--no-dev --optimize-autoloader" (references/install-semantics.md#deploy-patterns)')
