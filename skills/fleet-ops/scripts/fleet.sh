@@ -841,6 +841,8 @@ cmd_config() {
     # Which stores answered. The 2026-09-28 prune misclassification came from
     # reading one Desktop instance's store out of four, and nothing said so.
     local kind dir
+    # procsub ok: a diagnostic listing only; whether the gate is armed was decided
+    # above from main_session_row, and an empty list reads as no stores.
     while IFS=$'\t' read -r kind dir; do
       [[ -n "$kind" ]] && echo "#   $kind: $dir" >&2
     done < <(bash "$SESSIONS_SH" stores 2>/dev/null || true)
@@ -1275,6 +1277,8 @@ prune_freshen_sessions() {
   local raw=$1 ids=() id state="" rc=0
   SESSION_LASTCWD=""
   [[ $SESSION_STORE_OK -eq 1 ]] || return 0
+  # procsub ok: awk over in-memory caches; if it yields nothing, the cached values
+  # stand (staler, never less safe: see above) and --remove re-reads in full.
   while IFS= read -r id; do [[ -n "$id" ]] && ids+=("$id"); done < <(LC_ALL=C awk -F'\t' '
       function np(p) { gsub(/\\/, "/", p); sub(/\/+$/, "", p); return tolower(p) }
       function enc(p) { p = np(p); gsub(/[^a-z0-9]/, "-", p); return p }
@@ -1325,22 +1329,29 @@ prune_archived_proof() {
   return 1
 }
 
-# The git operation parked in worktree $1 (rebase, bisect, ...), or nothing. A
-# paused rebase or a bisect leaves HEAD detached in a CLEAN tree, so the dirty
-# check passes it — and removing the tree discards the operation's state. One
-# rev-parse resolves every state path, per-worktree, in a single process.
+# The git operation parked in worktree $1 (rebase, bisect, ...), nothing, or "?"
+# when its git state could not be read. A paused rebase or a bisect leaves HEAD
+# detached in a CLEAN tree, so the dirty check passes it — and removing the tree
+# discards the operation's state. One rev-parse resolves every state path,
+# per-worktree, in a single process.
 prune_op_in_progress() {
-  local wt=$1 p i=0 f args=()
+  local wt=$1 p i=0 f args=() paths rc=0
   local files=(rebase-merge rebase-apply BISECT_LOG MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD sequencer)
   local words=(rebase rebase bisect merge cherry-pick revert sequencer)
   for f in "${files[@]}"; do args+=(--git-path "$f"); done
+  # procsub guard: rev-parse's status is checked before its paths are tested. Fed
+  # straight into the loop via `< <(git rev-parse ...)`, a rev-parse that failed
+  # printed no paths, which read as "no operation in progress", and a tree with a
+  # parked rebase could come back SAFE for --remove. "?" makes the caller REVIEW.
+  paths=$(git -C "$wt" rev-parse "${args[@]}" 2>/dev/null) || rc=$?
+  if [[ $rc -ne 0 ]]; then printf '?'; return 0; fi
   while IFS= read -r p; do
     if [[ -n "$p" ]]; then
       [[ "$p" == /* || "$p" == [A-Za-z]:* ]] || p="$wt/$p"
       if [[ -e "$p" ]]; then printf '%s' "${words[$i]}"; return 0; fi
     fi
     i=$((i + 1))
-  done < <(git -C "$wt" rev-parse "${args[@]}" 2>/dev/null)
+  done <<< "$paths"
   return 0
 }
 
@@ -1423,6 +1434,9 @@ prune_emit() {
       prune_row "$wt" "<detached>" REVIEW "detached HEAD, DIRTY - $ddirty uncommitted/untracked ($who)"; return 0
     fi
     op=$(prune_op_in_progress "$wt")
+    if [[ "$op" == "?" ]]; then
+      prune_row "$wt" "<detached>" REVIEW "detached HEAD - could not read its git state (rev-parse failed)"; return 0
+    fi
     if [[ -n "$op" ]]; then
       prune_row "$wt" "<detached>" REVIEW "detached HEAD - git $op in progress"; return 0
     fi

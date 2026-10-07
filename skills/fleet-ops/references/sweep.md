@@ -59,7 +59,7 @@ whose classifier the sweep reads (`--porcelain`) and never reimplements.
 | worktree | `GHOST` | git lists it, the directory is gone | `--apply` (`git worktree prune`) |
 | worktree | `PARK` | its branch is on the never-push list | keep local; never land or push |
 | worktree | `COMPETING` | shares non-ledger files with another lane | settle in phase 2 |
-| worktree | `INSPECT` | uncommitted work, or a detached HEAD with new commits | commit in its lane, or discard |
+| worktree | `INSPECT` | uncommitted work, a detached HEAD with new commits, or a lane whose diff against base could not be read (competing work unknown) | commit in its lane, or discard; re-run once git answers |
 | worktree | `ASK-ARCHIVE` | landed + clean, owner open and idle, owner done everywhere | phase 5 |
 | worktree | `OWNER-BUSY` | landed + clean, but its owner has unlanded work elsewhere (or is this session / MAIN) | land the blocker first |
 | worktree | `CONTENT-LANDED` | not an ancestor, but its content is in base | remove tree + branch after an OK |

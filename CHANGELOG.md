@@ -349,6 +349,24 @@ feature releases live in the README "Recent Updates" section.
   guarding a fix was seen failing against the unfixed script, and four pin baselines
   (clean input still 0, a finding still 10).
 
+- **fleet-ops no longer reads a dead producer as "safe to proceed"** - the same
+  `< <(producer)` blind spot, in the land machinery. `live_many`, the liveness read the
+  land gate and prune's pre-delete check re-do every time, walked the session stores and
+  transcript roots through `find` and read a failed walk as "session idle", the one
+  direction that lets the gate through. A walk that fails now reads every asked-for
+  session live, the cautious answer for every caller, and prints `liveness walk
+  incomplete (find exit N: <error>)`, so a run of all-live readings is diagnosable with
+  `sessions.sh live <id>`. A file that vanished mid-walk (a wrapper rewrite) is a race,
+  not a gap, and changes nothing. `fleet prune` read a failed `rev-parse --git-path` as
+  "no rebase or bisect in progress"; the detached tree now reads REVIEW, "could not read
+  its git state". `fleet sweep` read a lane it could not diff as non-competing, so it
+  could say LAND beside a lane holding edits to the same files; it now reads INSPECT.
+  The claim lookups the gate ignores failures of (`branch_worktrees`, the transcript
+  probes) carry a `# procsub gap:` line; making the gate refuse on them is its own lane.
+  Every other site is tagged `# procsub ok:` with its reason. Seven new assertions in
+  `fleet-ops/tests/` (PATH shims that fail one `find` or `git` call): the five guarding
+  a fix were seen failing first, and two pin that a race and a healthy git change nothing.
+
 - **A lane's pigeon report reaches the coordinator** - a repo's worktrees share its
   pigeon identity (the git root commit), so a lane that sent `READY` to the coordinator
   in the main checkout was shown its own message by its `check-mail` hook, which then
