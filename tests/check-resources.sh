@@ -187,8 +187,13 @@ run "pm-facts --offline consistent" 0 "$PY" skills/package-manager-ops/scripts/c
 run "pm-facts --help"               0 "$PY" skills/package-manager-ops/scripts/check-pm-facts.py --help
 run "pm-audit --help"               0 "$PY" skills/package-manager-ops/scripts/pm-audit.py --help
 run "pm-audit bad args"             2 "$PY" skills/package-manager-ops/scripts/pm-audit.py
+run "pm-rollup --help"              0 "$PY" skills/package-manager-ops/scripts/pm-rollup.py --help
+run "pm-rollup bad args"            2 "$PY" skills/package-manager-ops/scripts/pm-rollup.py
+run "lock-replay --help"            0 "$PY" skills/package-manager-ops/scripts/lock-replay.py --help
+run "lock-replay bad args"          2 "$PY" skills/package-manager-ops/scripts/lock-replay.py
 # The fixture matrix lives in the skill's own tests/run.sh: its fixtures carry a .fx
 # suffix (so scanners never read them as real manifests) and must be materialised first.
+# pm-rollup / lock-replay behaviour (grouped report, conflict replay) lives in tests/tools.sh.
 
 echo "== protocol: every new verifier is executable + compiles"
 for s in skills/claude-api-ops/scripts/check-model-table.py \
@@ -215,7 +220,7 @@ for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/repo-doctor/scripts/repo-scan.py \
          skills/repo-doctor/scripts/agents-md.py \
          skills/package-manager-ops/scripts/check-pm-facts.py \
-         skills/package-manager-ops/scripts/pm-audit.py; do
+         skills/package-manager-ops/scripts/pm-audit.py          skills/package-manager-ops/scripts/pm-rollup.py          skills/package-manager-ops/scripts/lock-replay.py; do
     "$PY" -m py_compile "$s" 2>/dev/null && pass "py_compile $(basename "$s")" || bad "py_compile $(basename "$s")"
 done
 bash -n skills/terraform-ops/scripts/check-action-refs.sh 2>/dev/null \
@@ -254,6 +259,12 @@ purity "frontend-upgrade-facts" "$PY" skills/frontend-upgrade-ops/scripts/check-
 purity "ddev-facts"    "$PY" skills/ddev-ops/scripts/check-ddev-facts.py --offline
 purity "ddev-audit"    "$PY" skills/ddev-ops/scripts/audit-ddev-config.py skills/ddev-ops/tests/fixtures/minefield
 purity "pm-facts"      "$PY" skills/package-manager-ops/scripts/check-pm-facts.py --offline
+__pr="$(mktemp -d)"
+printf '{"packages":[{"name":"a/a","version":"1"}]}' > "$__pr/ours.lock"
+printf '{"packages":[{"name":"a/a","version":"2"}]}' > "$__pr/theirs.lock"
+purity "pm-rollup"     "$PY" skills/package-manager-ops/scripts/pm-rollup.py "$__pr"
+purity "lock-replay"   "$PY" skills/package-manager-ops/scripts/lock-replay.py --ours "$__pr/ours.lock" --theirs "$__pr/theirs.lock"
+rm -rf "$__pr"
 grep -q '_lib/term.sh' skills/terraform-ops/scripts/check-action-refs.sh \
     && pass "check-action-refs sources term.sh" || bad "check-action-refs missing term.sh"
 grep -q '_lib/term.sh' skills/fleet-worker/scripts/fleet-doctor.sh \
