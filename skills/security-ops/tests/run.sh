@@ -202,13 +202,22 @@ done
 
 REPO="$(cd "$SKILL/../.." && pwd)"
 if [[ -f "$REPO/.claude-plugin/plugin.json" ]]; then
-    ghosts=''
-    while IFS= read -r cited; do
-        [[ -f "$SKILL/references/$cited" ]] || ghosts+=" $cited"
-    done < <(cd "$REPO" && rg -o --no-filename 'security-ops/references/[A-Za-z0-9._-]+\.md' \
-                 skills agents commands rules docs README.md AGENTS.md 2>/dev/null \
-             | sed 's#.*/##' | sort -u)
-    [[ -z "$ghosts" ]] && ok 'every repo citation of a security-ops reference resolves' || no "cited but missing:$ghosts"
+    # procsub guard: a loop fed by `< <(rg ... 2>/dev/null)` hid rg's exit status AND its error,
+    # so a scan that failed outright reported "every citation resolves". Capture, check, loop.
+    # Under pipefail the pipeline's status is rg's: 1 = no citations (fine), 2+ = scan failed.
+    ghosts=''; rc=0
+    cites="$(cd "$REPO" && rg -o --no-filename 'security-ops/references/[A-Za-z0-9._-]+\.md' \
+                 skills agents commands rules docs README.md AGENTS.md \
+             | sed 's#.*/##' | sort -u)" || rc=$?
+    if (( rc > 1 )); then
+        no "repo-wide citation scan failed (rg exit $rc) - no citation was checked"
+    else
+        while IFS= read -r cited; do
+            [[ -n "$cited" ]] || continue
+            [[ -f "$SKILL/references/$cited" ]] || ghosts+=" $cited"
+        done <<< "$cites"
+        [[ -z "$ghosts" ]] && ok 'every repo citation of a security-ops reference resolves' || no "cited but missing:$ghosts"
+    fi
 else
     printf '  SKIP  repo-wide citation check (not running inside the claude-mods repo)\n'
 fi

@@ -291,6 +291,26 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **Test gates no longer pass when a process-substitution producer dies** - a
+  `while read ...; done < <(producer)` loop never sees the producer's exit status, so a
+  producer that crashed part-way just ended the loop early and the suite passed on
+  whatever rows had arrived: one suite reported "164 passed, 0 failed" with 52 of its 100
+  cases never run. Every such loop in the repo gates and skill suites outside
+  package-manager-ops was classified. Three hid a real failure and now capture the
+  producer, check its exit status, then loop: frontend-upgrade-ops' Python shape check (a
+  crash dropped every later row), security-ops' repo-wide citation scan (`rg ...
+  2>/dev/null` also hid the error, so a failed scan read as "every citation resolves")
+  and `tests/check-exec-bits.sh`'s `git ls-files` (its zero-candidate check caught only a
+  git that printed nothing). The clean tallies are unchanged. A new gate,
+  `tests/procsub-guard.sh` (in `just check` and CI), keeps them honest. For each guarded
+  site it shims the real tool on PATH to keep half its output and exit 70, and the
+  owning suite must then fail with that guard's own message. Against the unguarded
+  suites it failed 3/3, with the suites still green: 28 of 40 rows, a dead citation
+  scan read as "every citation resolves", and 137 of 184 scripts checked. The 18 loops
+  that stay carry a one-line `# procsub ok:` reason, such as a `find` over a directory
+  checked to exist or a `grep` with no failure exit to lose; the fixed sites are tagged
+  `# procsub guard:`.
+
 - **`sessions.sh main` names the coordinator from inside a lane** - run from a lane at
   `.claude/worktrees/<x>`, it answered with the session sitting in that lane, usually the
   caller itself, instead of the one in the main checkout (2026-10-06). It took "the repo

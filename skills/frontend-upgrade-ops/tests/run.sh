@@ -42,9 +42,10 @@ echo "=== frontend-upgrade-ops self-test ($SKILL) ===" >&2
 
 # -- shape contract: frontmatter, budgets, reference sizes, citations, anchors --------
 # One python pass emits "PASS|msg" / "FAIL|msg" rows so bash keeps the tally.
-while IFS='|' read -r verdict msg; do
-  [[ "$verdict" == PASS ]] && ok "$msg" || no "$msg"
-done < <("$PY" - "$SKILL" <<'PY'
+# procsub guard: a loop fed by `< <(python)` never sees python's exit status, so a crash
+# part-way ended the loop early and the suite still passed on fewer rows. Capture, check, loop.
+rc=0
+rows="$("$PY" - "$SKILL" <<'PY'
 import re, sys
 from pathlib import Path
 
@@ -102,7 +103,12 @@ for f in [skill / "SKILL.md", *refs]:
             bad.append(f"{f.name} -> {target} (missing anchor)")
 row(not bad, "all relative links + anchors resolve" + (f": {bad}" if bad else ""))
 PY
-)
+)" || rc=$?
+[[ "$rc" -eq 0 ]] || no "shape-contract python exited $rc - rows after the crash were never checked"
+while IFS='|' read -r verdict msg; do
+  [[ -n "$verdict" ]] || continue
+  [[ "$verdict" == PASS ]] && ok "$msg" || no "$msg"
+done <<< "$rows"
 
 # -- resources present + cited -------------------------------------------------------
 for res in assets/frontend-upgrade-facts.json scripts/check-frontend-upgrade-facts.py; do

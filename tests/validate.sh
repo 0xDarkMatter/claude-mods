@@ -157,6 +157,7 @@ validate_agents() {
     fi
 
     # Use find for better Windows compatibility
+    # procsub ok: find walks a dir checked to exist above; nothing in it can stop find early
     while IFS= read -r -d '' file; do
         if ! $NAMES_ONLY; then
             if check_yaml_frontmatter "$file"; then
@@ -184,6 +185,7 @@ validate_commands() {
     fi
 
     # Check .md files directly in commands/
+    # procsub ok: find walks a dir checked to exist above; nothing in it can stop find early
     while IFS= read -r -d '' file; do
         if ! $NAMES_ONLY; then
             if check_yaml_frontmatter "$file"; then
@@ -199,6 +201,7 @@ validate_commands() {
     done < <(find "$cmd_dir" -maxdepth 1 -name "*.md" -type f -print0)
 
     # Check subdirectories (like g-slave/, session-manager/)
+    # procsub ok (both loops): find walks dirs that exist; nothing in them can stop find early
     while IFS= read -r -d '' subdir; do
         # Look for main command file (exclude README.md, LICENSE.md)
         while IFS= read -r -d '' file; do
@@ -234,6 +237,7 @@ validate_skills() {
         return
     fi
 
+    # procsub ok: find walks a dir checked to exist above; nothing in it can stop find early
     while IFS= read -r -d '' skill_subdir; do
         # Skip shared helper dirs (e.g. _lib) - not skills, no SKILL.md expected.
         [[ "$(basename "$skill_subdir")" == _* ]] && continue
@@ -366,6 +370,7 @@ PY
         local description
         local when_to_use
         budget_rows=""
+        # procsub ok: find walks a dir checked to exist above, and zero rows fails below
         while IFS= read -r -d '' skill_subdir; do
             [[ "$(basename "$skill_subdir")" == _* ]] && continue
             skill_file="$skill_subdir/SKILL.md"
@@ -419,6 +424,7 @@ validate_rules() {
         return
     fi
 
+    # procsub ok: find walks a dir checked to exist above; nothing in it can stop find early
     while IFS= read -r -d '' file; do
         local basename
         basename=$(basename "$file")
@@ -484,6 +490,7 @@ validate_output_styles() {
         return
     fi
 
+    # procsub ok: find walks a dir checked to exist above; nothing in it can stop find early
     while IFS= read -r -d '' file; do
         local stem
         stem=$(basename "$file" .md)

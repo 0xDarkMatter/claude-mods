@@ -113,6 +113,7 @@ done
 for src in "$skill" "$here"/references/*.md "$here"/assets/*.md; do
   [ -e "$src" ] || continue
   dir="$(dirname "$src")"
+  # procsub ok: grep reads a file the -e test above confirmed, so it has no failure exit to lose
   while IFS= read -r target; do
     target="${target%%#*}"
     [ -z "$target" ] && continue
