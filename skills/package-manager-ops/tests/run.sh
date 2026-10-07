@@ -269,6 +269,9 @@ def audit_json(case):
     return json.loads(p.stdout) if p.stdout.strip().startswith("{") else {"data": [], "meta": {}}
 def found(case, fid):
     return [f for f in audit_json(case)["data"] if f["id"] == fid]
+abandoned = found("php-package-abandoned", "php.package.abandoned")
+row(abandoned and any("fixture/replacement-package" in f["message"] for f in abandoned),
+    "an abandoned Composer package names the replacement from composer.lock")
 # A Yarn freeze flag on npm is an error: npm 12 refuses the command (EUNKNOWNCONFIG).
 yf = found("deploy-npm-frozen-flag", "deploy.npm.yarn-flag")
 row(yf and all(f["severity"] == "error" and "npm 12 refuses" in f["message"] and "installs unfrozen" in f["message"]

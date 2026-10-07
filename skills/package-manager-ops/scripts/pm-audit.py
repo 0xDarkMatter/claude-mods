@@ -21,6 +21,7 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   ddev.node.unpinned  php.require.missing  php.platform.unset
   php.pin.disagree  php.eol  php.lockfile.missing  php.lockfile.stale
   php.composer.safety-off
+  php.package.abandoned
   npx.unpinned  npx.native-cli  legacy.bower  legacy.node-sass
   registry.token.committed  registry.authjson.committed  registry.credentials.image
   registry.pnpm.placeholder-ignored
@@ -1693,6 +1694,19 @@ class Audit:
                 self.add("warn", "php.lockfile.stale", "composer.lock",
                          "composer.json requires packages missing from composer.lock: " + ", ".join(shown[:8]),
                          "run `composer update <package>` for the new requirement and commit composer.lock")
+        if isinstance(lock, dict):
+            for package in list(lock.get("packages") or []) + list(lock.get("packages-dev") or []):
+                if not isinstance(package, dict):
+                    continue
+                abandoned = package.get("abandoned")
+                if abandoned is not True and not (isinstance(abandoned, str) and abandoned.strip()):
+                    continue
+                name = str(package.get("name") or "unknown package")
+                replacement = abandoned.strip() if isinstance(abandoned, str) else "none named"
+                self.add("warn", "php.package.abandoned", "composer.lock",
+                         f"{name} is marked abandoned; replacement: {replacement}",
+                         (f"replace it with {replacement}" if replacement != "none named"
+                          else "remove it or choose a maintained replacement after reviewing its dependants"))
         php_req = req.get("php")
         # A composer.json that requires no packages (`{"name": ...}`, used to make a JS
         # asset repo installable through Composer) resolves nothing: PHP pins are noise.
