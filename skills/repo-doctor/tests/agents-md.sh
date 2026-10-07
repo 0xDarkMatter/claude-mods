@@ -610,6 +610,41 @@ OUT="$("$PY" "$AM" audit --repo "$IG" --no-parents --json 2>/dev/null)"
 check "prose_invariant_without_gate_is_flagged" \
       "sorted(f['path'] for f in D['findings'] if f['id']=='invariant-ungated')==['AGENTS.md:13','ARCHITECTURE.md:5'] and all(f['severity']=='info' for f in D['findings'] if f['id']=='invariant-ungated')"
 
+# ============================== HYGIENE =======================================
+# A generated AGENTS.md (ruler, rulesync, a Source header) is reported against its source,
+# and the patch edits the source, never the output the next sync overwrites.
+GR="$TMP/ruler"; make_monorepo "$GR" >/dev/null 2>&1
+OUT="$("$PY" "$AM" audit --repo "$GR" --no-parents --json 2>/dev/null)"
+check "generated_entry_doc_patches_the_source" \
+      "any(f['id']=='generated-entry-doc' and '.ruler/' in f['msg'] for f in D['findings']) and 'diff --git a/AGENTS.md' not in (D['diff'] or '')"
+GS="$TMP/srchdr"; init_repo "$GS"; good_agents "$GS"; mkdir -p "$GS/docs"
+"$PY" - "$GS" <<'EOF'
+import sys
+r = sys.argv[1]
+body = open(f"{r}/AGENTS.md").read().replace("npm test\n", "npm test\nnpm run gone\n")
+open(f"{r}/docs/agents-src.md", "w", newline="\n").write(body)
+open(f"{r}/AGENTS.md", "w", newline="\n").write("<!-- Source: docs/agents-src.md -->\n" + body)
+EOF
+commit "$GS" "docs: generated agents"
+OUT="$("$PY" "$AM" audit --repo "$GS" --no-parents --json 2>/dev/null)"
+check "  ...and a Source header's file gets the patch instead" \
+      "'diff --git a/docs/agents-src.md' in (D['diff'] or '') and 'diff --git a/AGENTS.md' not in (D['diff'] or '') and 'agents-md: no ' in (D['diff'] or '')"
+# A backticked path git once tracked and no longer has is dead; the annotation names the
+# path history renamed it to.
+DP="$TMP/deadpath"; init_repo "$DP"; good_agents "$DP"; mkdir -p "$DP/src"; echo "x" > "$DP/src/old.js"
+echo "- The parser lives in \`src/old.js\`; \`dist/out.js\` is built." >> "$DP/AGENTS.md"; commit "$DP" "docs: parser"
+gitq "$DP" mv src/old.js src/new.js; commit "$DP" "refactor: rename the parser"
+OUT="$("$PY" "$AM" audit --repo "$DP" --no-parents --json 2>/dev/null)"
+check "dead_path_suggests_rename" \
+      "[f['msg'] for f in D['findings'] if f['id']=='dead-path']==['\`src/old.js\` is gone: git history renamed it to \`src/new.js\`'] and 'renamed to \`src/new.js\`' in (D['diff'] or '')"
+# audit --explain <finding-id> prints the rule, where it comes from, and this repo's evidence.
+EXPL="$("$PY" "$AM" audit --repo "$DP" --no-parents --explain dead-path 2>/dev/null)"; rc=$?
+printf '%s' "$EXPL" | grep -q '^rule: ' && printf '%s' "$EXPL" | grep -q '^source: ' \
+    && printf '%s' "$EXPL" | grep -q 'src/new.js' && [ "$rc" -eq 0 ] \
+    && ok "explain_finding_prints_rule_and_source" || no "explain_finding_prints_rule_and_source" "$EXPL (exit $rc)"
+"$PY" "$AM" audit --repo "$DP" --no-parents --explain no-such-finding >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 2 ] && ok "  ...and an unknown finding id exits 2" || no "explain unknown id" "exit $rc"
+
 # ============================== SURVEY ========================================
 FX="$TMP/gh-fixture.json"; LOG="$TMP/gh-calls.jsonl"
 "$PY" - "$FX" <<'EOF'

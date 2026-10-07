@@ -3,7 +3,8 @@
 
 Usage:   agents-md.py scaffold [--repo PATH] [--facts FILE]
                                [--archetype A | --dir FOLDER | --architecture] [--write] [--json]
-         agents-md.py audit    [--repo PATH] [--facts FILE] [--diff] [--no-parents] [--json]
+         agents-md.py audit    [--repo PATH] [--facts FILE] [--diff | --explain ID] [--no-parents]
+                               [--json]
          agents-md.py explain  [--repo PATH] FOLDER [--tool ID|all] [--json]
          agents-md.py survey   (--org OWNER | --remote OWNER/NAME) [--limit N]
                                [--include-archived] [--json]
@@ -17,6 +18,7 @@ Output:  scaffold: the AGENTS.md draft (markdown) on stdout, or the --json envel
            ARCHITECTURE.md (entry points and codemap named from facts, never linked).
          audit: a findings report, or --json (claude-mods.repo-doctor.agents-md-audit/v1),
            whose data.docs[] has one record per tracked AGENTS.md (root and nested).
+           --explain ID prints one finding's rule, its source and this repo's evidence.
            --diff prints ONLY a git-apply-able patch (empty when there is nothing to add).
          survey: one aligned row per repo, or --json
            (claude-mods.repo-doctor.agents-md-survey/v1).
@@ -62,6 +64,7 @@ scripts/repo-scan.py (schema claude-mods.repo-doctor.repo-scan/v1).
 #   SCAFFOLD      archetype choice, template fill, nested --dir and --architecture drafts,
 #                 --write
 #   EXPLAIN       per-tool load engine (tool-profiles.json): files, reasons, sizes, caps
+#   FINDINGS      the id registry behind audit --explain
 #   AUDIT         findings, dead commands, staleness, nested docs and root pointers,
 #                 trigger pointers, split plan, the ruled-out record, the --diff patch
 #   SURVEY        gh plumbing (GET only), per-repo remote analysis, table
@@ -1361,6 +1364,108 @@ def load_findings(repo: Path, rel: str | None, nested: list[str]) -> tuple[list[
     return finds, load
 
 
+# === FINDINGS ===
+# Every finding id the audit can emit: (severity, the rule, where it comes from). audit
+# --explain <id> prints the entry plus this repo's evidence. An id added to the audit
+# without an entry here explains as "no entry"; keep them in step.
+PROTO = "references/agents-md-protocol.md"
+SPEC = "docs/plans/NESTED-ENTRY-DOCS-2026-10.md"
+FINDING_DOCS = {
+    "missing-agents-md": ("crit", "The repo has no AGENTS.md, so every agent session starts blind.", f"{PROTO} section 1"),
+    "missing-section-": ("warn", "A protocol section is missing. Commands and Landmines are required; Deploy is "
+                         "required when the repo has deploy config; the rest are info.", f"{PROTO} section 1"),
+    "empty-landmines": ("warn", "The Landmines section lists no item.", f"{PROTO} section 1"),
+    "uncovered-candidates": ("info", "Landmine candidates from the repo scan name files the owning doc never "
+                             "mentions. Answer each as a landmine or rule it out in docs/agents/ruled-out.md.",
+                             f"{PROTO} section 1"),
+    "landmine-belongs-nested": ("info", "A root landmine names only paths inside one nested doc's folder. Move it "
+                                "by hand; the patch never moves a landmine.", f"{PROTO} section 6"),
+    "human-setup-prose": ("info", "Human setup steps belong in README.md, not in the agent entry doc.", f"{PROTO} section 2"),
+    "over-ceiling": ("warn", "Over 200 lines or 16,000 characters: Claude Code's documented target, because longer "
+                     "files cost context and adherence.", f"{PROTO} section 3"),
+    "over-target": ("info", "Under the ceiling, over the 150-line / 12,000-character house target.", f"{PROTO} section 3"),
+    "long-lines": ("info", "Lines over 500 characters each cost what several wrapped lines do.", f"{PROTO} section 3"),
+    "split-insufficient": ("info", "Moving every movable section still leaves the doc over target; the bulk sits in "
+                           "sections the patch never moves.", f"{PROTO} section 3"),
+    "bare-pointer": ("info", "A pointer that never says when to read its target. Name a path trigger or a task "
+                     "trigger.", f"{PROTO} section 3"),
+    "shadowed-": ("crit", "A CLAUDE.md that doesn't import AGENTS.md hides it from Claude Code: standalone, a prose "
+                  "pointer, a symlink checked out as text, or a copy.", f"{PROTO} section 4"),
+    "shadowed-by-parent": ("warn", "A CLAUDE.md above the repo makes Claude Code read CLAUDE.md files instead of "
+                           "AGENTS.md.", f"{PROTO} section 4"),
+    "shadowed-by-claude-local": ("warn", "A personal CLAUDE.local.md stops AGENTS.md loading for its owner.",
+                                 f"{PROTO} section 4"),
+    "claude-local-committed": ("crit", "A committed CLAUDE.local.md shadows AGENTS.md for everyone.", f"{PROTO} section 4"),
+    "claude-imports": ("info", "CLAUDE.md imports AGENTS.md: fine, provided it holds only Claude-only deltas.",
+                       f"{PROTO} section 4"),
+    "claude-imports-duplicate": ("warn", "CLAUDE.md imports AGENTS.md and also repeats it, so the text loads twice.",
+                                 f"{PROTO} section 4"),
+    "claude-symlink": ("info", "A CLAUDE.md symlink works on macOS and Linux, but a Windows clone without "
+                       "core.symlinks gets a one-line text file.", f"{PROTO} section 4"),
+    "dead-command": ("warn", "A command the doc presents as runnable that the repo's manifests can't run.",
+                     f"{PROTO} section 5"),
+    "dead-path": ("warn", "A backticked path git once tracked and the tree no longer has. The annotation names the "
+                  "rename history found.", f"{PROTO} section 5"),
+    "stale": ("warn", "Over 15 commits since the doc was last touched. Staleness is counted in commits, not days.",
+              f"{PROTO} section 5"),
+    "owner-todos": ("warn", "TODO(owner) questions from the scaffold are unanswered.", f"{PROTO} section 8"),
+    "draft-header": ("warn", "The scaffold's DRAFT comment is still at the top.", f"{PROTO} section 8"),
+    "untested-commands": ("info", "Commands still carry the scaffold's [untested] tag: run each once, then drop it.",
+                          f"{PROTO} section 8"),
+    "generated-entry-doc": ("info", "The entry doc is generated (ruler, rulesync or a Source header). Fixes go to "
+                            "its source; the next sync overwrites hand edits.", f"{SPEC} N8"),
+    "nested-over-budget": ("warn", "A nested AGENTS.md over 60 lines or 4,800 characters (info past 40 lines). Some "
+                           "tools load every nested doc on every task.", f"{PROTO} section 6"),
+    "nested-unlinked": ("warn", "The root never names this nested doc; for tools that read only the root it is "
+                        "unreachable.", f"{PROTO} section 6"),
+    "nested-no-scope": ("info", "The nested doc never names its own folder, so loaded alone it can't say where it "
+                        "applies.", f"{PROTO} section 6"),
+    "nested-restates-root": ("info", "Three or more long lines repeat the root; concatenating tools pay twice.",
+                             f"{PROTO} section 6"),
+    "nested-dead-command": ("warn", "A command neither the folder's manifest nor the root's can run.", f"{PROTO} section 6"),
+    "nested-stale": ("warn", "Over 15 commits to the folder itself since its doc was last touched.", f"{PROTO} section 6"),
+    "nested-shadowed": ("warn", "A subfolder's own CLAUDE.md makes Claude Code skip that folder's AGENTS.md.",
+                        f"{PROTO} section 6"),
+    "ruled-out-stale": ("info", "A docs/agents/ruled-out.md line matches no current candidate; delete it.", f"{PROTO} section 1"),
+    "ruled-out-lapsed": ("info", "The evidence grew past the line's @count, so the question is open again.",
+                         f"{PROTO} section 1"),
+    "ruled-out-expired": ("info", "The line's until date has passed, so the question is open again.", f"{PROTO} section 1"),
+    "ruled-out-proposed": ("info", "An agent's proposed line; an owner removes (proposed) to accept it.", f"{PROTO} section 1"),
+    "ruled-out-unparsed": ("info", "A line that looks like a ruled-out entry but doesn't parse.", f"{PROTO} section 1"),
+    "architecture-warranted": ("info", "ARCHITECTURE.md is warranted (nesting, contracted areas or workspace members) "
+                               "and missing.", f"{PROTO} section 10"),
+    "architecture-unlinked": ("info", "The root never points to ARCHITECTURE.md; --diff adds the line.", f"{PROTO} section 10"),
+    "architecture-location": ("info", "docs/ARCHITECTURE.md works, but the root is where readers look.", f"{PROTO} section 10"),
+    "architecture-over-budget": ("warn", "ARCHITECTURE.md past the root entry doc's 200-line / 16,000-character "
+                                 "budget.", f"{PROTO} section 10"),
+    "architecture-stale-name": ("warn", "A codemap or entry-point path that no longer exists, with the rename git "
+                                "history shows.", f"{PROTO} section 10"),
+    "architecture-stale-layout": ("warn", "The layout fingerprint no longer matches the folders; the codemap misses "
+                                  "what was added or removed.", f"{PROTO} section 10"),
+    "architecture-stale-marker": ("info", "An explicit staleness marker (outdated, TODO: document, FIXME).",
+                                  f"{PROTO} section 10"),
+    "architecture-links-code": ("info", "Links to source files or line anchors rot; name the symbol instead.",
+                                f"{PROTO} section 10"),
+    "invariant-ungated": ("info", "A prose invariant (\"X never imports Y\", \"only X touches Y\") no detected gate "
+                          "covers. Every invariant has a gate.", "references/monorepo-structure.md"),
+    "load-over-budget": ("warn", "Claude Code loads over 20,800 characters for work in one folder.", f"{PROTO} section 11"),
+    "root-starves-nested": ("warn", "The Codex chain to a folder passes its 32 KiB cap (it drops the deepest files "
+                            "first), or the root alone takes over half of it.", f"{PROTO} section 11"),
+    "import-cycle": ("info", "Two files import each other; the loader stops, but one import is redundant.",
+                     f"{PROTO} section 11"),
+    "tool-cap": ("info", "A file over the cap of a tool the repo visibly targets.", f"{PROTO} section 11"),
+    "tool-profiles-missing": ("info", "assets/agents-md/tool-profiles.json is missing, so load checks are skipped.",
+                              f"{PROTO} section 11"),
+}
+
+
+def finding_doc(fid: str) -> tuple[str, str, str] | None:
+    """The registry entry for an id; prefixed families (missing-section-*, shadowed-*) share one."""
+    if fid in FINDING_DOCS:
+        return FINDING_DOCS[fid]
+    return next((v for k, v in FINDING_DOCS.items() if k.endswith("-") and fid.startswith(k)), None)
+
+
 # === AUDIT ===
 
 
@@ -1825,6 +1930,63 @@ def audit_architecture(repo: Path, f: dict, root_rel: str | None,
     return finds, doc, pointer
 
 
+def dead_paths(repo: Path, lines: list[str]) -> list[tuple[int, str, str | None]]:
+    """(0-based line, path, renamed-to) for backticked paths outside code fences that git
+    once tracked and the tree no longer has. A path git never knew (an example, a build
+    output) is not dead, so it is never flagged."""
+    out, seen, fence, pairs = [], set(), False, None
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith(("```", "~~~")):
+            fence = not fence
+            continue
+        if fence:
+            continue
+        for tok in re.findall(r"`([^`\s]+)`", line):
+            tok = re.sub(r":\d+$", "", tok).rstrip(".,;")
+            if "/" not in tok or re.search(r"[*?<>{}$@]|://", tok) or tok.startswith(("-", "/", "~", "..")) \
+                    or tok in seen or len(seen) >= 30 or (repo / tok).exists():
+                continue
+            seen.add(tok)
+            if not git(repo, "log", "-1", "--format=%H", "--", tok):
+                continue
+            pairs = rename_pairs(repo) if pairs is None else pairs
+            out.append((i, tok, renamed_to(tok, pairs)))
+    return out
+
+
+def retarget(old: str, new: str, src: str) -> str:
+    """Apply the old -> new line edits to src, a generator's source that carries old's lines
+    (minus its header). A hunk whose lines can't be found in src is dropped, never guessed."""
+    o, n, s = old.splitlines(), new.splitlines(), src.splitlines()
+    omap = {}
+    for tag, i1, i2, j1, _ in difflib.SequenceMatcher(None, o, s, autojunk=False).get_opcodes():
+        if tag == "equal":
+            omap.update({i1 + k: j1 + k for k in range(i2 - i1)})
+    edits = []
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, o, n, autojunk=False).get_opcodes():
+        if tag == "equal":
+            continue
+        if i1 < i2:
+            idx = [omap.get(k) for k in range(i1, i2)]
+            if None in idx or idx != list(range(idx[0], idx[0] + len(idx))):
+                continue
+            a, b = idx[0], idx[-1] + 1
+        elif i1 in omap:
+            a = b = omap[i1]
+        elif i1 - 1 in omap:
+            a = b = omap[i1 - 1] + 1
+        elif i1 == len(o):
+            a = b = len(s)
+        else:
+            continue
+        edits.append((a, b, n[j1:j2]))
+    out = list(s)
+    for a, b, rep in sorted(edits, key=lambda e: (e[0], e[1]), reverse=True):
+        out[a:b] = rep
+    eol = "\r\n" if "\r\n" in src else "\n"
+    return eol.join(out) + (eol if src.endswith("\n") else "")
+
+
 def structure_insert(lines: list[str], add: list[str]) -> list[str]:
     """Append lines at the end of the Structure section, creating it when absent."""
     st = next((s for s in h2_sections(lines) if s["key"] == "structure"), None)
@@ -2104,6 +2266,10 @@ def uncovered_candidates(text: str, cands: list[dict]) -> list[dict]:
 
 
 def cmd_audit(args) -> int:
+    if args.explain and not finding_doc(args.explain):
+        eecho(f"agents-md: no finding {args.explain!r}. Known: " + ", ".join(
+            k + ("*" if k.endswith("-") else "") for k in FINDING_DOCS))
+        return EX_USAGE
     repo = Path(args.repo).resolve()
     if not repo.is_dir():
         eecho(f"agents-md: not a directory: {repo}")
@@ -2112,7 +2278,7 @@ def cmd_audit(args) -> int:
         ".claude/AGENTS.md" if (repo / ".claude/AGENTS.md").is_file() else None)
     nested = nested_doc_paths(repo)
     f = load_facts(repo, args.facts, None if args.facts else
-                   "repo,manifests,ddev,deploy,ci,tests,generated,history,outliers,env,architecture,gates",
+                   "repo,manifests,ddev,deploy,ci,tests,generated,history,outliers,env,architecture,gates,docs",
                    [os.path.dirname(n) + "/" for n in nested])
     if f is None:
         return EX_ERR
@@ -2196,6 +2362,13 @@ def cmd_audit(args) -> int:
             tag = f"agents-md: {why}"
             if tag not in new[i]:
                 new[i] = new[i] + (f"  # {tag}" if fenced else f" <!-- {tag} -->")
+        for i, tok, renamed in dead_paths(repo, lines):
+            finds.append({"id": "dead-path", "severity": "warn", "path": f"{rel}:{i + 1}",
+                          "msg": f"`{tok}` is gone: " + (f"git history renamed it to `{renamed}`" if renamed
+                                                          else "git history has it, the tree doesn't")})
+            tag = f"agents-md: `{tok}` is gone" + (f"; renamed to `{renamed}`" if renamed else "")
+            if tag not in new[i]:
+                new[i] = new[i] + f" <!-- {tag} -->"
         since, man = staleness(repo, rel)
         data.update({"commits_since": since, "manifest_commits_since": man})
         if since is not None and since > FRESH_COMMITS:
@@ -2266,6 +2439,28 @@ def cmd_audit(args) -> int:
                 s.replace("\n", eol) for s in stubs if s)
         if new_text.rstrip("\r\n") != text.rstrip("\r\n"):
             files[rel] = (text, new_text.rstrip("\r\n") + eol)
+        # A generated root is fixed at its source: a Source header's file gets the same
+        # edits; a generator folder (.ruler/, .rulesync/) gets none, and neither do the
+        # split's destinations, which would duplicate what the next sync puts back.
+        for g in f.get("generated_entry_docs") or []:
+            src = g.get("source_of_truth")
+            single = bool(src) and (repo / src).is_file()
+            finds.append({"id": "generated-entry-doc", "severity": "info", "path": g["path"],
+                          "msg": f"{g['path']} is generated by {g['generator']} from {src or 'an unnamed source'}: "
+                                 "fix the source, because the next sync overwrites this file. "
+                                 + ("The patch edits the source." if single else
+                                    "The patch leaves it alone.")})
+            if g["path"] != rel or rel not in files:
+                continue
+            old_root, new_root = files.pop(rel)
+            if single:
+                src_text = read_raw(repo / src)
+                fixed = retarget(old_root, new_root, src_text)
+                if fixed != src_text:
+                    files[src] = (src_text, fixed)
+            else:
+                for p_ in plan:
+                    files.pop(p_["destination"], None)
         c_finds, c_edits = shadow_findings(repo, rel, args.no_parents)
         finds += c_finds
         for name, (old, newc) in c_edits.items():
@@ -2315,6 +2510,11 @@ def cmd_audit(args) -> int:
     finds.sort(key=lambda x: (sev_rank[x["severity"]], x["id"], x["path"]))
     l_finds, data["load"] = load_findings(repo, rel, nested)
     finds += l_finds
+    for doc in nested:   # dead paths in nested docs: reported, not patched
+        for i, tok, renamed in dead_paths(repo, read_raw(repo / doc).splitlines()):
+            finds.append({"id": "dead-path", "severity": "warn", "path": f"{doc}:{i + 1}",
+                          "msg": f"`{tok}` is gone: " + (f"git history renamed it to `{renamed}`" if renamed
+                                                          else "git history has it, the tree doesn't")})
     finds.sort(key=lambda x: (sev_rank[x["severity"]], x["id"], x["path"]))
     for doc in docs:
         doc["findings"] = [x["id"] for x in finds if x["path"].split(":")[0] == doc["path"]]
@@ -2323,6 +2523,19 @@ def cmd_audit(args) -> int:
     patch = build_patch(files)
     data["diff"] = patch or None
     bad = any(x["severity"] in ("crit", "warn") for x in finds)
+    if args.explain:
+        sev, rule, source = finding_doc(args.explain) or ("", "", "")
+        ev = [x for x in finds if x["id"] == args.explain]
+        if args.json:
+            emit_json({"data": {"id": args.explain, "severity": sev, "rule": rule, "source": source,
+                                "evidence": ev}, "meta": {"schema": SCHEMA_AUDIT}})
+        else:
+            print(f"{args.explain} ({sev})\nrule: {rule}\nsource: {source}\nevidence:")
+            for x in ev:
+                print(f"  {x['path']}: {x['msg']}")
+            if not ev:
+                print("  none in this repo")
+        return EX_OK
     if args.diff:
         sys.stdout.buffer.write(patch.encode("utf-8"))
         sys.stdout.flush()
@@ -2609,6 +2822,7 @@ def main() -> int:
     ap_a.add_argument("--repo", default=".")
     ap_a.add_argument("--facts", help="saved `repo-scan.py --json` output")
     ap_a.add_argument("--diff", action="store_true", help="print only a git-apply-able patch")
+    ap_a.add_argument("--explain", metavar="FINDING_ID", help="print one finding's rule, source and evidence")
     ap_a.add_argument("--no-parents", action="store_true",
                       help="skip the check for CLAUDE.md files above the repo")
     ap_a.add_argument("--json", action="store_true")
@@ -2626,6 +2840,9 @@ def main() -> int:
     args = ap.parse_args()
     if args.cmd is None:
         ap.print_help()
+        return EX_USAGE
+    if args.cmd == "audit" and args.diff and args.explain:
+        eecho("agents-md: --explain prints one finding; it does not combine with --diff")
         return EX_USAGE
     if args.cmd == "audit" and args.diff and args.json:
         eecho("agents-md: --diff and --json are mutually exclusive (--json already carries data.diff)")
