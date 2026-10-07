@@ -8,5 +8,5 @@
   ],
   "platform": {"php": "^8.4"},
   "platform-overrides": {"php": "8.4.0"},
-  "plugin-api-version": "2.2.0"
+  "plugin-api-version": "2.6.0"
 }

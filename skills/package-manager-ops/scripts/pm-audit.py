@@ -1987,28 +1987,31 @@ class Audit:
                      "raise every production PHP pin to the lock floor and run `composer check-platform-reqs --lock`")
 
     def composer_line(self):
-        """Composer minor-line evidence against the facts catalogue's support and safety
-        floors. The `major.minor` string is the catalogue key; patch digits are discarded
-        only here so Docker tags, setup-php tools and plugin-api-version compare alike."""
+        """The Composer minor line a build RUNS (setup-php `tools: composer:v2.x`, a
+        `composer:2.x` image) against the facts catalogue's support and safety floors.
+
+        Guard: composer.lock `plugin-api-version` is deliberately NOT evidence. It is the
+        Plugin API version, which moves only when that API changes - composer/composer
+        src/Composer/Plugin/PluginInterface.php has PLUGIN_API_VERSION '2.6.0' at tags
+        2.6.0, 2.7.0 and 2.8.0, and '2.9.0' at 2.9.0 and 2.10.x - so it cannot name a line,
+        and it records only the lock's last writer, never the Composer CI installs with.
+        Reading it reported every fresh lock as an unsupported 2.9."""
         evidence = []
 
-        def take(file, raw):
-            m = re.match(r"^(2)\.(\d+)", str(raw or ""))
-            if m:
-                evidence.append((file, f"{m.group(1)}.{m.group(2)}"))
+        def take(file, text, m):
+            evidence.append((file, f"2.{m.group(1)}", text.count("\n", 0, m.start()) + 1))
 
-        lock = read_json(self.root / "composer.lock") if (self.root / "composer.lock").is_file() else None
-        if isinstance(lock, dict):
-            take("composer.lock plugin-api-version", lock.get("plugin-api-version"))
         for g in (".github/workflows/*.yml", ".github/workflows/*.yaml"):
             for path in sorted(self.root.glob(g)):
-                for m in re.finditer(r"tools\s*:\s*[\"']?[^\n#]*composer:v?(2\.\d+)", read_text(path) or "", re.I):
-                    take(path.relative_to(self.root).as_posix(), m.group(1))
+                text = read_text(path) or ""
+                for m in re.finditer(r"tools\s*:\s*[\"']?[^\n#]*composer:v?2\.(\d+)", text, re.I):
+                    take(path.relative_to(self.root).as_posix(), text, m)
         for path in sorted(self.root.glob("Dockerfile*")):
-            for m in re.finditer(r"(?:FROM|--from=)\s*composer:(2\.\d+)", read_text(path) or "", re.I):
-                take(path.name, m.group(1))
+            text = read_text(path) or ""
+            for m in re.finditer(r"(?:FROM|--from=)\s*composer:2\.(\d+)", text, re.I):
+                take(path.name, text, m)
         if not evidence:
-            self.blind("composer.line", "no Composer minor-line evidence")
+            self.blind("composer.line", "no Composer runtime pin (setup-php tools: composer:v2.x, composer:2.x image)")
             return
         composer = obj(self.facts.get("composer"))
         lines, floors = composer.get("lines"), composer.get("feature_floors")
@@ -2016,7 +2019,7 @@ class Audit:
             self.blind("composer.line", "facts composer.lines or feature_floors missing or invalid")
             return
         raised = set()
-        for file, line in evidence:
+        for file, line, at in evidence:
             if (file, line) in raised:
                 continue
             raised.add((file, line))
@@ -2024,11 +2027,9 @@ class Audit:
             if not isinstance(row, dict):
                 self.blind("composer.line", f"Composer {line} absent from facts")
                 continue
-            reasons = []
             end = row.get("end")
             try:
-                if end and dt.date.fromisoformat(str(end)) < self.as_of:
-                    reasons.append(f"support ended {end}")
+                ended = bool(end) and dt.date.fromisoformat(str(end)) < self.as_of
             except ValueError:
                 self.blind("composer.line", f"Composer {line} has an invalid end date in facts")
                 continue
@@ -2036,12 +2037,15 @@ class Audit:
             below = [name.replace("_", " ") for name, floor in floors.items()
                      if re.match(r"^\d+\.\d+$", str(floor))
                      and cur < tuple(int(x) for x in str(floor).split("."))]
-            if below:
-                reasons.append("below the " + " and ".join(below) + " feature floor(s)")
-            if reasons:
+            floor_text = "below the " + " and ".join(below) + " feature floor(s)" if below else ""
+            if ended:
                 self.add("warn", "php.composer.eol", file,
-                         f"Composer {line} is outside the supported safety baseline: " + "; ".join(reasons),
-                         "use a supported Composer line at or above every safety feature floor")
+                         f"Composer {line} reached end of support on {end}" + (f"; {floor_text}" if floor_text else ""),
+                         "use a supported Composer line at or above every safety feature floor", at)
+            elif below:
+                # A supported line (the 2.2 LTS) that predates a safety feature: contract C3
+                # makes this a note, not a finding - the line is still maintained.
+                self.note("php.composer.eol", f"{file}:{at}", f"Composer {line} is supported but {floor_text}")
 
     def install_policy(self):
         """Record explicit install-execution controls without judging their policy.
