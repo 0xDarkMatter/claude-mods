@@ -418,10 +418,10 @@ row(abandoned and any("fixture/replacement-package" in f["message"] for f in aba
 # A Yarn freeze flag on npm is an error: npm 12 refuses the command (EUNKNOWNCONFIG).
 yf = found("deploy-npm-frozen-flag", "deploy.npm.yarn-flag")
 row(yf and all(f["severity"] == "error" and "npm 12 refuses" in f["message"] and "installs unfrozen" in f["message"]
-               and "use npm ci" in f["fix"] for f in yf),
+               and "use npm ci" in f["fix"]["text"] for f in yf),
     "npm install --frozen-lockfile: an error - npm 12 refuses it, npm up to 11 installs unfrozen, fix npm ci")
 ci = [f for f in found("deploy-npm-ci-yarn-flag", "deploy.npm.yarn-flag") if "npm ci" in f["message"]]
-row(ci and all("already frozen" in f["fix"] for f in ci), "npm ci --frozen-lockfile: drop the flag, npm ci is already frozen")
+row(ci and all("already frozen" in f["fix"]["text"] for f in ci), "npm ci --frozen-lockfile: drop the flag, npm ci is already frozen")
 # A bare name and an `@latest`/`@next` spec run what that dist-tag names, which need not be
 # the newest published version (a release published under another tag never moves latest).
 bare = [f["message"] for f in found("npx-unpinned-docs", "npx.unpinned") if f["message"].startswith("`npx create-vite` ")]
@@ -441,7 +441,7 @@ row(ul and "runs in app/client/" in ul[0]["message"], "an install in a nested fo
 # Two root lockfiles: when CI installs with one manager, say which file is live.
 conf = found("js-lockfile-conflict-ci-yarn", "js.lockfile.conflict")
 row(conf and "`yarn install --frozen-lockfile`" in conf[0]["message"] and "package-lock.json is unused" in conf[0]["message"]
-    and conf[0]["fix"].startswith("delete package-lock.json"), "lockfile conflict names the one CI installs with and the unused one")
+    and conf[0]["fix"]["text"].startswith("delete package-lock.json"), "lockfile conflict names the one CI installs with and the unused one")
 nocif = found("js-lockfile-conflict", "js.lockfile.conflict")
 row(nocif and "CI installs" not in nocif[0]["message"], "without CI the lockfile conflict names no live lockfile")
 stale = found("php-lockfile-stale-dev-only", "php.lockfile.stale")
@@ -450,7 +450,7 @@ row(stale and "fixture/tool (locked only in packages-dev)" in stale[0]["message"
 # `composer update --lock` must read the old lock and rethrows its parse error; only a full
 # update regenerates an unparseable one (Installer::doUpdate, Composer 2.10.3).
 broken = found("php-lockfile-invalid", "php.lockfile.stale")
-row(broken and all("--lock" not in f["fix"] and "`composer update`" in f["fix"] for f in broken),
+row(broken and all("--lock" not in f["fix"]["text"] and "`composer update`" in f["fix"]["text"] for f in broken),
     f"an unparseable composer.lock is fixed from git or a full update, never update --lock ({[f['fix'] for f in broken]})")
 # EOL findings say what the repo pins, not what production runs.
 for case, fid in (("php-eol", "php.eol"), ("js-node-eol", "js.node.eol"), ("php-eol-ci", "php.eol"), ("js-node-eol-ci", "js.node.eol")):
@@ -466,7 +466,7 @@ ids = {f["id"] for f in json.loads(proc.stdout)["data"]} if proc.stdout.strip().
 row("js.node.eol" in ids, "--as-of moves the EOL line (Node 22 dead on 2027-05-01)")
 # npx of a bin that is not a package name: the advice names the package that provides it.
 adv = found("npx-unpinned-bin-advice", "npx.unpinned")
-row(adv and "typescript" in adv[0]["fix"] and "add tsc " not in adv[0]["fix"],
+row(adv and "typescript" in adv[0]["fix"]["text"] and "add tsc " not in adv[0]["fix"]["text"],
     "npx tsc advice names typescript, the package that provides tsc" + (f" (fix: {adv[0]['fix']!r})" if adv else ""))
 # DDEV's own end-of-life pin is ddev-ops' fact: pm-audit names it only as a pointer.
 for case, fid in (("php-eol", "php.eol"), ("js-node-eol", "js.node.eol")):
@@ -543,7 +543,7 @@ if shutil.which("git"):
     p = run(d, "--json")
     hit = [f for f in (json.loads(p.stdout.decode("utf-8"))["data"] if ids_of(p) is not None else [])
            if f["id"] == "registry.authjson.committed"]
-    row(hit and "tracked by git" in hit[0]["message"] and "git rm --cached" in hit[0]["fix"],
+    row(hit and "tracked by git" in hit[0]["message"] and "git rm --cached" in hit[0]["fix"]["text"],
         f"a git-tracked auth.json is reported as tracked although .gitignore lists it (ids {ids_of(p)})")
 else:
     row(True, "git-tracked auth.json case skipped: no git on PATH")
