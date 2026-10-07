@@ -145,10 +145,17 @@ ec 3 "pm-audit missing facts -> 3" "$PY" "$AUDIT" --facts "$TMP/nope.json" "$HER
 while IFS='|' read -r verdict msg; do
   [[ "$verdict" == PASS ]] && ok "$msg" || no "$msg"
 done < <("$PY" - "$HERE/fixtures" "$AUDIT" "$TMP" "$SKILL/references/diagnostics.md" <<'PY'
-import json, os, shutil, subprocess, sys
+import json, os, shutil, subprocess, sys, traceback
 from pathlib import Path
 fixtures, audit, tmp, diagnostics = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3]), Path(sys.argv[4])
 def row(ok, msg): print(f"{'PASS' if ok else 'FAIL'}|{msg}")
+
+def _crash(kind, exc, tb):
+    # A process-substitution producer's exit code is not the while loop's exit code, so
+    # uncaught exceptions must become rows or the outer tally can report a false green.
+    row(False, f"fixture harness crashed: {''.join(traceback.format_exception_only(kind, exc)).strip()}")
+
+sys.excepthook = _crash
 
 def materialise(src: Path, dest: Path):
     for f in src.rglob("*.fx"):
@@ -156,7 +163,10 @@ def materialise(src: Path, dest: Path):
         out.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(f, out)
 
-cases = sorted(p for p in fixtures.iterdir() if p.is_dir())
+# facts/ and tools/ hold sub-suite fixture trees, not pm-audit cases. Requiring the
+# case contract file prevents one of those directories from crashing the child process
+# and silently truncating every alphabetically later scanner case.
+cases = sorted(p for p in fixtures.iterdir() if p.is_dir() and (p / "_expect").is_file())
 row(len(cases) >= 30, f"{len(cases)} fixture case(s)")
 covered = set()
 for case in cases:
