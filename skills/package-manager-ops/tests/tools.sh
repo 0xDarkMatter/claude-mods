@@ -32,31 +32,6 @@ echo "=== package-manager-ops tools self-test ($SKILL) ===" >&2
 PY="$(bash "$SKILL/scripts/run-python.sh" --which 2>/dev/null)" || { no "no Python 3.8+ (run-python.sh --which)"; finish; }
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
-# A process-substitution producer's exit status is not the while loop's exit status. Keep
-# this guard even though a one-row preflight looks refactorable: the same boundary is used
-# by larger row producers, and losing it turns an uncaught exception into a false green.
-while IFS='|' read -r verdict msg; do
-  case "$verdict" in
-    PASS) ok "$msg" ;;
-    FAIL) no "$msg" ;;
-    *) no "producer emitted an invalid row: $verdict|$msg" ;;
-  esac
-done < <("$PY" - <<'PY'
-import os, sys, traceback
-
-def row(ok, msg):
-    print(f"{'PASS' if ok else 'FAIL'}|{msg}")
-
-def _crash(kind, exc, tb):
-    row(False, f"tools harness crashed: {''.join(traceback.format_exception_only(kind, exc)).strip()}")
-
-sys.excepthook = _crash
-if os.environ.get("TOOLS_HARNESS_CRASH") == "1":
-    raise RuntimeError("intentional tools harness crash")
-row(True, "producer harness reached its end")
-PY
-)
-
 # materialise <fixture-dir> <dest>: copy, stripping the .fx suffix
 materialise() {
   mkdir -p "$2"
@@ -65,8 +40,11 @@ materialise() {
     rel="${f#"$1"/}"; mkdir -p "$2/$(dirname "$rel")"; cp "$f" "$2/${rel%.fx}"
   done < <(find "$1" -type f -name '*.fx')
 }
+# Guard: `done < <(find ...)` hides find's exit status, so a missing or emptied fixture dir
+# copies nothing and every later test runs against an empty repo. Count what arrived.
 for d in repo-clean repo-bower lock-conflict lock-conflict-ragged lock-sides; do
   materialise "$FX/$d" "$TMP/$d"
+  [[ -n "$(find "$TMP/$d" -type f -print -quit 2>/dev/null)" ]] || no "fixture $d materialised no files ($FX/$d)"
 done
 
 ec() { local want="$1" lbl="$2"; shift 2; "$@" >/dev/null 2>&1; local got=$?

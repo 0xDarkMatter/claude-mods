@@ -684,6 +684,11 @@ fi
 # silently omit their C1 catalogue and estate-tool coverage.
 ec 0 "facts behavioural sub-suite" bash "$HERE/facts.sh"
 ec 0 "estate tools sub-suite"       bash "$HERE/tools.sh"
+# facts.sh feeds its tally from a process substitution; its excepthook must turn a producer
+# crash into a FAIL row. FACTS_HARNESS_CRASH=1 raises inside that producer: the sub-suite
+# has to fail, or its green means nothing.
+FACTS_HARNESS_CRASH=1 bash "$HERE/facts.sh" >/dev/null 2>&1 \
+  && no "facts.sh stays green when its row producer crashes" || ok "facts.sh fails when its row producer crashes"
 
 # -- 7. copy-alone portability: the folder runs with nothing beside it ---------------
 ALONE="$TMP/alone/package-manager-ops"
