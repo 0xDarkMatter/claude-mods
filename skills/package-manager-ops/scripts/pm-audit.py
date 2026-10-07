@@ -25,6 +25,7 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   registry.token.committed  registry.authjson.committed  registry.credentials.image
   registry.pnpm.placeholder-ignored
   js.manager.mixed  deploy.install.unfrozen  deploy.composer.dev  php.composer.v1
+  deploy.composer.safety-off
   deploy.install.unlocked  deploy.npm.yarn-flag  deploy.global.unpinned
 
 It never prints a secret: a committed or CI-written credential is reported as file:line only,
@@ -2296,6 +2297,14 @@ class Audit:
             self._global_install(sub, toks[:idx] + toks[idx + 1:], rel, n, flag)
             return
         family = "php" if tool == "composer" else "js"
+        if tool == "composer" and ships:
+            unsafe = [t for t in toks if t in ("--no-security-blocking", "--no-blocking", "--ignore-platform-reqs")]
+            unsafe += [name for name in ("COMPOSER_NO_SECURITY_BLOCKING", "COMPOSER_NO_AUDIT")
+                       if obj(active_env).get(name)]
+            if unsafe:
+                flag("deploy.composer.safety-off", rel, n,
+                     "shipping Composer command disables safety checks: " + ", ".join(dict.fromkeys(unsafe)),
+                     "remove the override; satisfy platform requirements and keep advisory/malware blocking enabled")
         installs = {"npm": sub in NPM_INSTALL + NPM_CI, "yarn": sub in ("", "install"),
                     "pnpm": sub in ("install", "i", "ci"), "bun": sub in ("install", "i", "ci")
                     }.get(tool, sub in ("install", "i"))
