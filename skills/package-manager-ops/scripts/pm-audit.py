@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
 """Read-only package-manager audit of one repo root: lockfiles, Node/PHP pins, npx use, legacy tools.
 
-Usage:   pm-audit.py [--json] [--no-docs] [--as-of YYYY-MM-DD] [--facts FILE] [--limit N] PATH
+Usage:   pm-audit.py [--format tsv|json|sarif|github | --json] [--no-docs] [--as-of YYYY-MM-DD]
+                     [--facts FILE] [--limit N] [--config FILE] [--profile site|library|pedantic]
+                     [--baseline FILE] [--fail-on error|warn] PATH
+         pm-audit.py --rules | --explain ID
 Input:   argv only. PATH is a repo root. Root manifests are audited; nested package
          roots are only listed (and flagged when they use another manager, or when CI
          installs in one that has no lockfile). Docs, scripts, CI configs, Dockerfiles
          and appspec hook scripts are read too.
 Output:  stdout = one TSV row per finding: severity, id, file[:line], message, fix.
-         --json: {"data": [finding...], "meta": {...}} with schema
-         claude-mods.package-manager-ops.pm-audit/v1. Data only.
+         --format json (--json): {"data": [finding...], "meta": {...}} with schema
+         claude-mods.package-manager-ops.pm-audit/v1. Data only. sarif is SARIF 2.1.0,
+         github is ::warning/::error workflow annotations.
+         --rules / --explain print the rule catalogue (no PATH needed).
 Stderr:  header, notes (informational - never findings), verdict line, errors.
-Exit:    0 clean, 2 usage, 3 PATH or facts missing, 4 facts unparseable,
-         10 findings (data[] non-empty)
+Exit:    0 clean, 2 usage, 3 PATH, facts, --config or --baseline missing, 4 facts or
+         baseline unparseable, 10 findings (data[] non-empty; with --fail-on error only an
+         error-severity finding)
 
 What it checks (finding ids - SKILL.md and references/diagnostics.md explain each):
   js.manifest.invalid  php.manifest.invalid
@@ -41,6 +47,8 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   deploy.composer.installer-unverified
   deploy.bundle.credentials
   deploy.install.unlocked  deploy.npm.yarn-flag  deploy.global.unpinned
+Raised about its own configuration (references/pm-audit-rules.md): config.invalid,
+suppression.expired; suppression.unused is a note.
 
 It never prints a secret: a committed or CI-written credential is reported as file:line only,
 and every finding and note passes through redact() in Audit.add()/Audit.note() - the one
@@ -67,7 +75,14 @@ Sections:
                            deploy (+ local CI via _local_uses_commands, local tooling,
                            credential bundle/image checks with npmrc_write_has_secret),
                            legacy, secrets, pnpm_placeholders
-  main()                   argv, output envelope, exit codes
+  === rule catalogue ===   RULES: one entry per finding id (severity, category, confidence, fix
+                           kind, summary, rationale), profiles; references/pm-audit-rules.md is
+                           tested against it
+  === rules, suppression, baselines and output formats ===
+                           decorate (confidence, docs_url, structured fix, fingerprint),
+                           load_config, inline_ignore, apply_policy, load_baseline, exit_code,
+                           github_lines, sarif_doc; all run AFTER the audit
+  main()                   argv, --rules/--explain, policy order, output envelope, exit codes
 
 Examples:
   bash scripts/run-python.sh scripts/pm-audit.py .
@@ -3841,9 +3856,10 @@ def explain_text(r: dict) -> str:
             f"{r['fix']}\nDocs: {docs_url(r['id'])}")
 
 
-# WHY these two escapers differ: GitHub's workflow-command grammar escapes % CR LF in the
-# message, and additionally `:` and `,` in property values (file=...), where they would end the
-# property. Escaping a message with the property rules would print `%3A` literally.
+# WHY these two escapers differ: GitHub's workflow-command grammar (@actions/core command.ts:
+# escapeData, escapeProperty) escapes % CR LF in the message, and additionally `:` and `,` in
+# property values (file=...), where they would end the property. Escaping a message with the
+# property rules would print `%3A` literally.
 def gh_data(s: str) -> str:
     return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 

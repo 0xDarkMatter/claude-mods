@@ -144,7 +144,7 @@ ec 3 "pm-audit missing facts -> 3" "$PY" "$AUDIT" --facts "$TMP/nope.json" "$HER
 # -- 3. fixture matrix: clean controls exit 0, every finding id is produced ----------
 while IFS='|' read -r verdict msg; do
   [[ "$verdict" == PASS ]] && ok "$msg" || no "$msg"
-done < <("$PY" - "$HERE/fixtures" "$AUDIT" "$TMP" "$SKILL/references/diagnostics.md" <<'PY'
+done < <("$PY" - "$HERE/fixtures" "$AUDIT" "$TMP" "$SKILL/references/diagnostics.md" "$SKILL/references/pm-audit-rules.md" <<'PY'
 import json, os, re, shutil, subprocess, sys, traceback
 from pathlib import Path
 fixtures, audit, tmp, diagnostics = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3]), Path(sys.argv[4])
@@ -169,6 +169,7 @@ def materialise(src: Path, dest: Path):
 cases = sorted(p for p in fixtures.iterdir() if p.is_dir() and (p / "_expect").is_file())
 row(len(cases) >= 30, f"{len(cases)} fixture case(s)")
 covered = set()
+seen = []
 for case in cases:
     dest = tmp / "m" / case.name
     materialise(fixtures / "clean", dest)
@@ -186,6 +187,7 @@ for case in cases:
     except Exception as exc:  # noqa: BLE001 - any parse failure is a test failure
         row(False, f"{case.name}: unparseable --json output ({exc}); stderr={proc.stderr.strip()[-200:]}")
         continue
+    seen.extend(data)
     code_ok = proc.returncode == (10 if want else 0)
     row(got == want and code_ok,
         f"{case.name}: ids {got or '[]'} exit {proc.returncode}" + ("" if got == want and code_ok else f" (want {want or '[]'} exit {10 if want else 0})"))
@@ -547,6 +549,307 @@ if shutil.which("git"):
         f"a git-tracked auth.json is reported as tracked although .gitignore lists it (ids {ids_of(p)})")
 else:
     row(True, "git-tracked auth.json case skipped: no git on PATH")
+
+# -- C4: catalogue, output formats, suppression, baseline, profile ---------------------------
+# Every row below was watched failing against the pre-C4 pm-audit (no --rules, no --format,
+# no config), then against a mutant that breaks only its own rule (catches()). A row that
+# reads another row's output is a bug magnet: each builds its own repo copy via clone().
+rules_doc = Path(sys.argv[5]).read_text(encoding="utf-8") if Path(sys.argv[5]).is_file() else ""
+RULES_URL = "references/pm-audit-rules.md"
+SCRIPT_FACTS = ["--facts", facts_file]
+
+def pa(d, *args, as_of="2026-10-05", script=None):
+    return subprocess.run([sys.executable, script or audit, *SCRIPT_FACTS, *args, "--as-of", as_of, str(d)],
+                          capture_output=True, text=True, encoding="utf-8")
+def pj(d, *args, **kw):
+    p = pa(d, "--json", *args, **kw)
+    try:
+        return p, json.loads(p.stdout)
+    except ValueError:
+        return p, None
+_n = [0]
+def clone(case):
+    _n[0] += 1
+    d = tmp / "c4" / f"{case}-{_n[0]}"
+    shutil.copytree(tmp / "m" / case, d)
+    return d
+def doc_sev(doc):
+    return {f["severity"] for f in doc["data"]}
+def ids_in(doc):
+    return {f["id"] for f in doc["data"]} if doc else None
+
+# catalogue <-> docs <-> fixtures: the three places an id lives must agree.
+rp = subprocess.run([sys.executable, audit, "--rules", "--format", "json"], capture_output=True, text=True, encoding="utf-8")
+catalogue = {r["id"]: r for r in json.loads(rp.stdout)["data"]} if rp.returncode == 0 else {}
+row(len(catalogue) >= 50 and rp.returncode == 0, f"--rules lists the catalogue without a PATH ({len(catalogue)} rules, exit {rp.returncode})")
+doc_rows = {m.group(1): m.group(2) for m in re.finditer(r'^\| <a id="([^"]+)"></a>`[^`]+` \| (error|warn|note) \|', rules_doc, re.M)}
+sev = {i: r["severity"] for i, r in catalogue.items()}
+drift = sorted(set(doc_rows) ^ set(sev)) + sorted(i for i in set(doc_rows) & set(sev) if doc_rows[i] != sev[i])
+row(doc_rows and not drift, f"pm-audit-rules.md and the catalogue agree on every id and severity ({len(doc_rows)} rows)" + (f" - drift: {drift}" if drift else ""))
+row(not (covered - set(catalogue)), f"every id a fixture raises is in the catalogue" + (f" - missing: {sorted(covered - set(catalogue))}" if covered - set(catalogue) else ""))
+unfixtured = sorted(set(catalogue) - covered - {"suppression.unused"})
+row(not unfixtured, "every catalogue id has a fixture (suppression.unused is a note, tested below)" + (f" - none for: {unfixtured}" if unfixtured else ""))
+row(all(r["docs_url"] == f"{RULES_URL}#{i}" for i, r in catalogue.items()), "--rules docs_url is the rules file plus an anchor equal to the id")
+
+# every finding is enriched; a fix is a structured object that never invents a command
+def sound(f):
+    fx = f["fix"]
+    return (isinstance(fx, dict) and set(fx) == {"kind", "text", "command", "safe"} and fx["kind"] in ("command", "edit", "manual")
+            and fx["text"] == f["fix_text"] and isinstance(fx["safe"], bool)
+            and (fx["command"] is None or (fx["kind"] == "command" and f"`{fx['command']}`" in fx["text"]))
+            and f["confidence"] in ("high", "medium", "low") and f["docs_url"] == f"{RULES_URL}#{f['id']}"
+            and re.fullmatch(r"[0-9a-f]{16}", f["fingerprint"]) is not None)
+unsound = sorted({f["id"] for f in seen if not sound(f)})
+row(seen and not unsound, f"every finding has docs_url, confidence, a structured fix and a fingerprint ({len(seen)} checked)" + (f" - bad: {unsound}" if unsound else ""))
+row(any(f["fix"]["command"] for f in seen), "a command-kind fix carries the command its text quotes")
+rn = found("js-root-not-private", "js.root.not-private")
+dc = found("deploy-composer-dev", "deploy.composer.dev")
+row(rn and dc and rn[0]["fix"]["safe"] is True and dc[0]["fix"]["safe"] is False, "fix.safe is true only for a mechanical edit (private flag yes, shipping install no)")
+p = pa(tmp / "m" / "registry-token-committed")
+row(all(len(r.split("\t")) == 5 for r in p.stdout.splitlines() if r) and all(r.split("\t")[4] and not r.split("\t")[4].startswith("{") for r in p.stdout.splitlines() if r),
+    "TSV still ends with the plain fix text, not the JSON fix object")
+
+# --explain
+ep = subprocess.run([sys.executable, audit, "--explain", "js.lockfile.conflict"], capture_output=True, text=True, encoding="utf-8")
+row(ep.returncode == 0 and "Why:" in ep.stdout and "Fix (" in ep.stdout and f"{RULES_URL}#js.lockfile.conflict" in ep.stdout,
+    "--explain prints rationale, fix and the docs anchor")
+bp = subprocess.run([sys.executable, audit, "--explain", "no.such-rule"], capture_output=True, text=True, encoding="utf-8")
+row(bp.returncode == 2 and "unknown rule" in bp.stderr, f"--explain of an unknown id is a usage error (exit {bp.returncode})")
+
+# formats
+p, doc = pj(tmp / "m" / "deploy-composer-dev")
+p2 = pa(tmp / "m" / "deploy-composer-dev", "--format", "json")
+row(p.returncode == 10 and p2.stdout == p.stdout, "--format json is byte-identical to --json")
+row(pa(tmp / "m" / "clean", "--json", "--format", "sarif").returncode == 2, "--json with --format sarif is a usage error")
+row(pa(tmp / "m" / "clean", "--format", "xml").returncode == 2, "an unknown --format is a usage error")
+sp = pa(tmp / "m" / "deploy-composer-dev", "--format", "sarif")
+try:
+    sarif = json.loads(sp.stdout)
+except ValueError:
+    sarif = {}
+def sarif_problems(log):
+    bad = []
+    if log.get("version") != "2.1.0" or not isinstance(log.get("runs"), list) or len(log["runs"]) != 1:
+        return ["log needs version 2.1.0 and one run"]
+    run_ = log["runs"][0]
+    driver = run_.get("tool", {}).get("driver", {})
+    rules = driver.get("rules", [])
+    if not driver.get("name"):
+        bad.append("driver.name")
+    ids = [r.get("id") for r in rules]
+    if len(ids) != len(set(ids)) or set(ids) != set(catalogue):
+        bad.append("one rule per catalogue id")
+    if any(not r.get("shortDescription", {}).get("text") for r in rules):
+        bad.append("rule shortDescription.text")
+    for res in run_.get("results", []):
+        if not res.get("message", {}).get("text"):
+            bad.append("result message.text")
+        if res.get("level") not in ("error", "warning", "note"):
+            bad.append("result level")
+        i = res.get("ruleIndex")
+        if not (isinstance(i, int) and 0 <= i < len(rules) and rules[i]["id"] == res.get("ruleId")):
+            bad.append(f"ruleIndex of {res.get('ruleId')}")
+        for loc in res.get("locations", []):
+            ph = loc.get("physicalLocation", {})
+            if not ph.get("artifactLocation", {}).get("uri") or ("region" in ph and not (isinstance(ph["region"].get("startLine"), int) and ph["region"]["startLine"] >= 1)):
+                bad.append("physicalLocation")
+        if not res.get("partialFingerprints"):
+            bad.append("partialFingerprints")
+    return bad
+row(sp.returncode == 10 and sarif.get("runs", [{}])[0].get("results") and not sarif_problems(sarif), f"--format sarif is SARIF 2.1.0: required fields, one rule per id, ruleIndex points at its rule {sarif_problems(sarif)}")
+cp = pa(tmp / "m" / "clean", "--format", "sarif")
+row(cp.returncode == 0 and json.loads(cp.stdout)["runs"][0]["results"] == [], "a clean repo gives SARIF with an empty results array")
+gp = pa(tmp / "m" / "deploy-composer-dev", "--format", "github")
+gl = [l for l in gp.stdout.splitlines() if l]
+row(gp.returncode == 10 and gl and all(re.match(r"^::(warning|error) file=[^,]+,line=\d+::[a-z.-]+ ", l) for l in gl), f"--format github prints ::warning file=,line=:: annotations ({gl[:1]})")
+gp = pa(tmp / "m" / "registry-token-committed", "--format", "github")
+row(any(l.startswith("::error ") for l in gp.stdout.splitlines()), "an error-severity finding is an ::error annotation")
+d = clone("clean")
+pk = json.loads((d / "package.json").read_text()); pk["dependencies"] = {"fixture-git": "github:example/fixture%25x"}
+(d / "package.json").write_text(json.dumps(pk))
+d_pct = d
+gp = pa(d, "--format", "github")
+row("fixture%2525x" in gp.stdout, "a % in an annotation message is escaped as %25 (GitHub's workflow-command grammar)")
+ns = {}
+exec(compile(re.search(r"(def gh_data.*?)\ndef github_lines", source, re.S).group(1), "gh", "exec"), ns)
+row(ns["gh_data"]("a\r\nb") == "a%0D%0Ab" and ns["gh_prop"]("a:b,c") == "a%3Ab%2Cc" and ns["gh_data"]("a:b,c") == "a:b,c",
+    "CR and LF are escaped in messages; : and , only in property values")
+
+# --fail-on and --profile
+bower = tmp / "m" / "legacy-bower"
+p, doc = pj(bower, "--fail-on", "error")
+row(p.returncode == 0 and ids_in(doc) == {"legacy.bower"}, f"--fail-on error exits 0 for warnings but still reports them (exit {p.returncode})")
+row(pa(bower, "--fail-on", "warn").returncode == 10 and pa(bower).returncode == 10, "--fail-on warn and the default both fail on a warning")
+row(pa(tmp / "m" / "registry-token-committed", "--fail-on", "error").returncode == 10, "--fail-on error still fails on an error")
+row(pa(bower, "--fail-on", "info").returncode == 2, "an unknown --fail-on value is a usage error")
+lib = tmp / "m" / "js-lockfile-missing"
+p, doc = pj(lib, "--profile", "library")
+row(p.returncode == 0 and doc and doc["meta"]["profile_silenced"] >= 1 and doc["meta"]["profile"] == "library", f"--profile library drops the deploy-shaped lockfile rule (exit {p.returncode})")
+row(pa(lib).returncode == 10 and ids_in(pj(lib, "--profile", "site")[1]) == ids_in(pj(lib)[1]), "the default profile is site and silences nothing")
+p, doc = pj(bower, "--profile", "pedantic")
+row(doc and {f["severity"] for f in doc["data"]} == {"error"}, "--profile pedantic reports every warn as an error")
+row(pa(bower, "--profile", "strict").returncode == 2, "an unknown --profile is a usage error")
+d = clone("legacy-bower")
+(d / ".pm-audit.json").write_text(json.dumps({"profile": "pedantic"}))
+row(doc_sev(pj(d)[1]) == {"error"} and doc_sev(pj(d, "--profile", "site")[1]) == {"warn"}, "the config's profile applies and --profile overrides it")
+
+# config: invalid, expired, unused, glob, boundary
+d = clone("legacy-bower")
+(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "path": "bower.json", "reason": "ok", "until": "2026-12-31"}, {"id": "legacy.bower"}]}))
+p, doc = pj(d)
+row(ids_in(doc) == {"config.invalid", "legacy.bower"}, f"one bad ignore voids the whole config, so the good one waives nothing ({ids_in(doc)})")
+for bad_cfg, label in (({"ignore": [{"id": "no.such-rule", "reason": "x", "until": "2026-12-31"}]}, "an unknown id"),
+                       ({"ignore": [{"id": "config.invalid", "reason": "x", "until": "2026-12-31"}]}, "an ignore of config.invalid itself"),
+                       ({"ignore": [{"id": "legacy.bower", "reason": "x", "until": "31/12/2026"}]}, "a non-ISO until"),
+                       ({"ignore": [{"id": "legacy.bower", "reason": "  ", "until": "2026-12-31"}]}, "a blank reason"),
+                       ({"profile": "everything"}, "an unknown profile"),
+                       ({"ignores": []}, "an unknown key (a typo that would waive nothing)")):
+    d = clone("legacy-bower")
+    (d / ".pm-audit.json").write_text(json.dumps(bad_cfg))
+    row("config.invalid" in (ids_in(pj(d)[1]) or set()), f"config.invalid for {label}")
+d = clone("legacy-bower")
+(d / ".pm-audit.json").write_text("{not json")
+row("config.invalid" in (ids_in(pj(d)[1]) or set()), "config.invalid for a config that is not JSON")
+row(pa(bower, "--config", str(tmp / "nope.json")).returncode == 3, "an explicit --config that does not exist exits 3")
+d = clone("legacy-bower")
+(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "path": "bower.json", "reason": "ok", "until": "2026-10-05"}]}))
+row(pa(d).returncode == 0, "an ignore is still live on its until day")
+row(pa(d, as_of="2026-10-06").returncode == 10, "an ignore is expired the day after its until")
+p, doc = pj(d, as_of="2026-10-06")
+exp = [f for f in doc["data"] if f["id"] == "suppression.expired"] if doc else []
+row(exp and "legacy.bower" in exp[0]["message"] and "2026-10-05" in exp[0]["message"] and exp[0]["file"] == ".pm-audit.json", "suppression.expired names the id, the date and the config file")
+p, doc = pj(d)
+sup = (doc or {"meta": {}})["meta"].get("suppressed", [])
+row(sup == [{"id": "legacy.bower", "file": "bower.json", "line": None, "by": "config", "reason": "ok"}], f"a suppressed finding is listed in meta.suppressed with its reason ({sup})")
+d = clone("legacy-bower")
+(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "path": "other/*", "reason": "ok", "until": "2026-12-31"}]}))
+p, doc = pj(d)
+row(ids_in(doc) == {"legacy.bower"} and "suppression.unused" in {n["id"] for n in doc["meta"]["notes"]},
+    "an ignore whose path matches nothing leaves the finding and raises suppression.unused (a note)")
+d = clone("clean")
+(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "reason": "ok", "until": "2026-12-31"}]}))
+p, doc = pj(d)
+row(p.returncode == 0 and "suppression.unused" in {n["id"] for n in doc["meta"]["notes"]}, "suppression.unused is a note: it never changes the exit code")
+d = clone("deploy-composer-dev")
+(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "deploy.composer.dev", "path": ".github/workflows/*.yml", "reason": "ok", "until": "2026-12-31"}]}))
+row(pa(d).returncode == 0, "a path glob with a leading dot directory matches (.github/workflows/*.yml)")
+d = clone("legacy-bower")
+alt = tmp / "c4" / "alt-config.json"
+alt.write_text(json.dumps({"ignore": [{"id": "legacy.bower", "reason": "ok", "until": "2026-12-31"}]}))
+row(pa(d, "--config", str(alt)).returncode == 0, "--config reads a file outside the repo; a path-less ignore matches every file")
+
+# inline ignores
+d = clone("clean-suppression-inline")
+p, doc = pj(d)
+row(p.returncode == 0 and doc["meta"]["suppressed"][0]["by"] == "inline", "an inline ignore on the line above waives the finding and is recorded")
+d = clone("clean-suppression-inline")
+(d / "scripts" / "bootstrap.sh").write_text("#!/bin/sh\nnpx eslint . # pm-audit: ignore[npx.unpinned] pinned by the image\n")
+row(pa(d).returncode == 0, "an inline ignore on the flagged line itself waives it")
+d = clone("clean-suppression-inline")
+(d / "scripts" / "bootstrap.sh").write_text("#!/bin/sh\n# pm-audit: ignore[legacy.bower] wrong rule\nnpx eslint .\n")
+row(pa(d).returncode == 10, "an inline ignore for a different id waives nothing")
+d = clone("suppression-inline-no-reason")
+p, doc = pj(d)
+row(ids_in(doc) == {"npx.unpinned"} and "suppression.inline-no-reason" in {n["id"] for n in doc["meta"]["notes"]}, "an inline ignore with no reason waives nothing and says why")
+
+# baseline
+d = clone("deploy-bundle-credentials")
+p, doc = pj(d)
+base = tmp / "c4" / "baseline.json"
+base.write_text(p.stdout, encoding="utf-8")
+row(doc and doc["data"] and pa(d, "--baseline", str(base)).returncode == 0, "--baseline hides every finding already in the baseline (exit 0)")
+bp_, bdoc = pj(d, "--baseline", str(base))
+row(bdoc and bdoc["data"] == [] and bdoc["meta"]["baseline"]["known"] == len(doc["data"]), "meta.baseline counts the findings the baseline absorbed")
+for wf in (d / ".github" / "workflows").glob("*.yml"):
+    wf.write_text("# a comment that shifts every line below it\n" + wf.read_text(encoding="utf-8"), encoding="utf-8")
+shifted_line = {(f["file"], f["line"]) for f in pj(d)[1]["data"]} != {(f["file"], f["line"]) for f in doc["data"]}
+row(shifted_line and pa(d, "--baseline", str(base)).returncode == 0, "a baselined finding stays hidden when its line moves (fingerprint is id+file+subject, not line)")
+stripped = json.loads(p.stdout)
+for f in stripped["data"]:
+    f.pop("fingerprint", None)
+base2 = tmp / "c4" / "baseline-old.json"
+base2.write_text(json.dumps(stripped), encoding="utf-8")
+row(pa(d, "--baseline", str(base2)).returncode == 0, "a baseline from before fingerprints existed still matches (computed from id, file, message)")
+d = clone("legacy-bower")
+pb = pj(d)[0].stdout
+base3 = tmp / "c4" / "baseline-bower.json"
+base3.write_text(pb, encoding="utf-8")
+pk = json.loads((d / "package.json").read_text()); pk.setdefault("devDependencies", {})["node-sass"] = "^9.0.0"
+(d / "package.json").write_text(json.dumps(pk))
+nb = ids_in(pj(d, "--baseline", str(base3))[1]) or set()
+row("legacy.node-sass" in nb and "legacy.bower" not in nb, f"--baseline reports only the finding that is new ({sorted(nb)})")
+row(pa(d, "--baseline", str(tmp / "nope.json")).returncode == 3, "a missing --baseline file exits 3")
+(tmp / "c4" / "garbage.json").write_text("{not json")
+row(pa(d, "--baseline", str(tmp / "c4" / "garbage.json")).returncode == 4, "an unparseable --baseline file exits 4")
+
+# the new formats print no secret either
+for case in leaky:
+    for fmt in ("sarif", "github"):
+        proc = subprocess.run([sys.executable, audit, "--format", fmt, "--as-of", "2026-10-05", str(tmp / "m" / case.name)],
+                              capture_output=True, encoding="utf-8", errors="replace")
+        shown = [s for s in SECRETS if s in proc.stdout + proc.stderr]
+        row(proc.returncode in (0, 10) and not shown, f"{case.name}: no secret printed ({fmt}, exit {proc.returncode})" + (f" - printed {shown}" if shown else ""))
+
+# Mutation proof for the rules the fixtures cannot name by id. catches(): the real audit must
+# behave (probe True) and a mutant that breaks only this rule must not (probe False). A mutant
+# that fails to run proves nothing, so it fails the row.
+def catches(label, old, new, probe):
+    if source.count(old) != 1:
+        row(False, f"mutation {label}: source token matches {source.count(old)} times, want 1")
+        return
+    mutant = mutants / (re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") + ".py")
+    mutant.write_text(source.replace(old, new), encoding="utf-8")
+    try:
+        real, broken = probe(Path(audit)), probe(mutant)
+    except Exception as exc:  # noqa: BLE001 - a mutant that cannot run must fail loudly
+        row(False, f"mutation {label}: did not run ({' '.join(str(exc).split())[-140:]})")
+        return
+    row(real and not broken, f"mutation {label}: " + ("caught" if real and not broken else f"MISSED (real={real}, mutant={broken})"))
+
+def runs(proc):
+    if proc.returncode not in (0, 10):
+        raise RuntimeError(f"exit {proc.returncode}: {proc.stderr.strip()[-120:]}")
+    return proc
+def sc(case_dir, *args, **kw):
+    return lambda script: runs(pa(case_dir, *args, script=script, **kw))
+d_exp = tmp / "m" / "suppression-expired"
+catches("an expired ignore must not waive", 'live = [e for e in entries if e["until"] >= as_of]', "live = list(entries)",
+        lambda s: "legacy.bower" in {f["id"] for f in json.loads(runs(pa(d_exp, "--json", script=s)).stdout)["data"]})
+d_day = clone("clean-suppression-config")
+(d_day / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "reason": "ok", "until": "2026-10-05"}]}))
+catches("an ignore is live on its until day", 'e["until"] >= as_of]', 'e["until"] > as_of]', lambda s: runs(pa(d_day, script=s)).returncode == 0)
+d_unused = clone("clean")
+(d_unused / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "reason": "ok", "until": "2026-12-31"}]}))
+catches("an unused ignore raises a note", 'elif not any(f["id"] == e["id"] and path_matches(e["path"], f["file"]) for f in raw):', "elif False:",
+        lambda s: "suppression.unused" in {n["id"] for n in json.loads(runs(pa(d_unused, "--json", script=s)).stdout)["meta"]["notes"]})
+d_in = tmp / "m" / "clean-suppression-inline"
+catches("an inline ignore reads the line above", "for idx in (line - 1, line - 2):", "for idx in (line - 1,):", lambda s: runs(pa(d_in, script=s)).returncode == 0)
+d_nr = tmp / "m" / "suppression-inline-no-reason"
+catches("an inline ignore needs a reason", 'return ("ok", reason) if reason else ("noreason", None)', 'return ("ok", reason)', lambda s: runs(pa(d_nr, script=s)).returncode == 10)
+d_bad = clone("legacy-bower")
+(d_bad / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "path": "bower.json", "reason": "ok", "until": "2026-12-31"}, {"id": "legacy.bower"}]}))
+catches("an invalid config applies none of itself", 'if not problems else (None, problems)', 'if True else (None, problems)',
+        lambda s: "legacy.bower" in {f["id"] for f in json.loads(runs(pa(d_bad, "--json", script=s)).stdout)["data"]})
+d_b = clone("deploy-bundle-credentials")
+for wf in (d_b / ".github" / "workflows").glob("*.yml"):
+    wf.write_text("# shifts every line\n" + wf.read_text(encoding="utf-8"), encoding="utf-8")
+base_b = tmp / "c4" / "baseline-bundle.json"
+base_b.write_text(pj(tmp / "m" / "deploy-bundle-credentials")[0].stdout, encoding="utf-8")
+catches("a fingerprint masks line numbers in the message", 'subject = re.sub(r"(?i)\\bline \\d+\\b", "line N", f.get("message", ""))',
+        'subject = f.get("message", "")', lambda s: runs(pa(d_b, "--baseline", str(base_b), script=s)).returncode == 0)
+catches("a baseline row without a fingerprint is fingerprinted", 'r.get("fingerprint") or fingerprint(r)', 'r.get("fingerprint")',
+        lambda s: runs(pa(tmp / "m" / "deploy-bundle-credentials", "--baseline", str(base2), script=s)).returncode == 0)
+catches("--fail-on error lets warnings through", 'if fail_on == "error":', 'if False:', lambda s: runs(pa(bower, "--fail-on", "error", script=s)).returncode == 0)
+catches("the library profile drops deploy-shaped rules", 'kept = [f for f in raw if f["id"] not in LIBRARY_SILENCED]', "kept = list(raw)",
+        lambda s: runs(pa(lib, "--profile", "library", script=s)).returncode == 0)
+catches("the pedantic profile promotes warn to error", 'f["severity"] = "error"', 'pass',
+        lambda s: {f["severity"] for f in json.loads(runs(pa(bower, "--json", "--profile", "pedantic", script=s)).stdout)["data"]} == {"error"})
+catches("a % in an annotation is escaped", 'return s.replace("%", "%25")', "return s",
+        lambda s: "fixture%2525x" in runs(pa(d_pct, "--format", "github", script=s)).stdout)
+catches("a SARIF result points at its own rule", 'res["ruleIndex"] = index[f["id"]]', 'res["ruleIndex"] = 0',
+        lambda s: not sarif_problems(json.loads(runs(pa(tmp / "m" / "deploy-composer-dev", "--format", "sarif", script=s)).stdout)))
+catches("a command-kind fix quotes the command", 'if command is None:\n            kind = "manual"', 'if command is None:\n            kind = "command"',
+        lambda s: all(f["fix"]["command"] or f["fix"]["kind"] != "command" for f in json.loads(runs(pa(tmp / "m" / "js-lockfile-stale", "--json", script=s)).stdout)["data"]))
 PY
 )
 

@@ -27,6 +27,10 @@ these, 0 when clean. Notes on stderr (for example `js.packagemanager.unset`,
 change the exit code. pm-audit audits the root manifests; `js.nested.roots` lists nested
 package roots that carry their own lockfile, so run it again on each of those.
 
+Output formats (`--format sarif|github`), per-finding `confidence`, `docs_url` and a structured
+`fix`, `--rules`/`--explain`, waivers that expire, baselines, `--fail-on` and profiles are in
+[pm-audit-rules.md](pm-audit-rules.md), which also holds the machine-readable catalogue.
+
 It also reads CI configs (`.github/workflows/`, `.gitlab-ci.yml`, `bitbucket-pipelines.yml`,
 `buildspec*.yml` and similar), Dockerfiles and AWS CodeDeploy `appspec.yml` hook scripts. In
 YAML only command keys (`run:`, `script:`, `commands:`) count, so a command quoted in a
