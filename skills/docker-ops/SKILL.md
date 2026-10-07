@@ -69,7 +69,7 @@ a volume someone needed. The rules below stop those first.
 | A container that won't start, exits, or can't be debugged | [debugging.md](references/debugging.md) |
 | Kubernetes, Helm, Gateway API, ECS | kubernetes-ops |
 | A project with a `.ddev/` folder | ddev-ops (its extra services use Compose syntax from here) |
-| `.wslconfig`, WSL networking modes, WSL disks in general | windows-ops |
+| `.wslconfig`, WSL networking modes, WSL disks in general | windows-ops ([wsl.md](../windows-ops/references/wsl.md)) |
 | `npm ci` vs `npm install`, lockfiles inside a RUN | package-manager-ops |
 | CI pipelines that build and push | ci-cd-ops |
 
