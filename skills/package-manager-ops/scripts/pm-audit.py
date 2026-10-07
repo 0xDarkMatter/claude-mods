@@ -3205,21 +3205,25 @@ class Audit:
                      f"{entry.get('name')} is legacy: {entry.get('reason')}",
                      f"replace with {entry.get('replacement')} ({entry.get('see')})")
 
+        def overlaps(spec, dialect, versions):
+            """Can the declared spec select a version the legacy entry's (npm) range covers?"""
+            parsed = parse_range(spec, dialect)
+            if parsed is None:
+                return False
+            for branch in parsed:
+                lo = max([(0, 0, 0)] + [iv[0] for iv in branch])
+                hi = min([INF] + [iv[1] for iv in branch])
+                if lo < hi and admits(versions, lo, hi) is True:
+                    return True
+            return False
+
         def applies(name, spec, versions):
             if versions == "*":
                 return True
             installed = self._installed(name)
             if installed:
                 return admits(versions, installed, (installed[0], installed[1], installed[2] + 1)) is True
-            parsed = parse_range(spec)
-            if parsed is None:
-                return False
-            for branch in parsed:
-                lo = max([VZERO] + [iv[0] for iv in branch])
-                hi = min([VINF] + [iv[1] for iv in branch])
-                if lo < hi and admits(versions, lo, hi) is True:
-                    return True
-            return False
+            return overlaps(spec, "npm", versions)
 
         for f in ("bower.json", ".bowerrc"):
             if (self.root / f).is_file():
@@ -3239,8 +3243,8 @@ class Audit:
             ecosystem, name, versions = entry.get("ecosystem"), str(entry.get("name") or ""), str(entry.get("versions") or "")
             if ecosystem == "npm" and name in declared and applies(name, declared[name][1], versions):
                 emit(entry, "package.json")
-            elif ecosystem == "composer" and name in composer_declared and (versions == "*" or
-                    admits(versions, (0, 0, 0), VINF) is True):
+            elif ecosystem == "composer" and name in composer_declared and (
+                    versions == "*" or overlaps(composer_declared[name], "composer", versions)):
                 emit(entry, "composer.json")
 
     # ---- committed registry credentials (values never printed) ----

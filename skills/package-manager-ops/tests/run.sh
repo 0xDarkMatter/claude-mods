@@ -292,6 +292,8 @@ mutation("legacy facts lookup", "legacy-node-sass",
          'table = self.facts.get("legacy_packages")', 'table = self.facts.get("mutant_legacy_packages")')
 # legacy.package takes its id from the facts entry, so renaming the literal (the loop above)
 # cannot break it; breaking the table lookup does.
+mutation("an unlocked legacy package is judged by its declared range", "legacy-package-unlocked",
+         'return overlaps(spec, "npm", versions)', 'return False')
 mutation("legacy.package facts lookup", "legacy-package",
          'table = self.facts.get("legacy_packages")', 'table = self.facts.get("mutant_legacy_packages")')
 mutation("local composite action", "deploy-local-uses",
