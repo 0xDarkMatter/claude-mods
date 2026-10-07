@@ -49,6 +49,7 @@ done
 # not markdown links — extract those spans and confirm each file exists.
 echo "-- cited references resolve --"
 linked=0; broken=0
+# procsub ok: grep reads the SKILL.md checked at the top, and linked=0 fails below
 while IFS= read -r rel; do
   [[ -z "$rel" ]] && continue
   linked=$((linked+1))

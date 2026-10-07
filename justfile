@@ -6,7 +6,7 @@
 default:
     @just --list
 
-# THE gate: frontmatter/naming + Agent Skills spec + doc-drift + agnostic + hook contracts + resource contracts + skill size (warn) + reference contents (warn) + skill suites + e2e suites
+# THE gate: frontmatter/naming + Agent Skills spec + doc-drift + agnostic + hook contracts + resource contracts + skill size (warn) + reference contents (warn) + skill suites + e2e suites + procsub-guard mutations
 check:
     @bash tests/validate.sh
     @bash tests/spec.sh
@@ -17,6 +17,7 @@ check:
     @bash tests/skill-size.sh
     @bash tests/reference-contents.sh
     @bash tests/run-skill-tests.sh
+    @bash tests/procsub-guard.sh
 
 # Fast gate: everything except the behavioural suites (per-skill and e2e)
 check-fast:

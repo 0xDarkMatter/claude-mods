@@ -15,7 +15,7 @@ EXAMPLES
   bash tests/check-exec-bits.sh
   bash tests/check-exec-bits.sh --help
 
-Exit codes: 0 clean, 1 findings, 2 usage error.
+Exit codes: 0 clean, 1 findings, 2 usage error or broken scan.
 EOF
 }
 
@@ -31,6 +31,14 @@ cd "$ROOT" || exit 2
 
 findings=0
 candidates=0
+# procsub guard: a loop fed by `< <(git ls-files)` never sees git's exit status, so a git
+# that died part-way ended the loop early and still reported clean (the zero-candidate
+# check below only catches a git that printed nothing). Capture, check, loop.
+rc=0; index="$(git ls-files -s -- skills hooks)" || rc=$?
+if [ "$rc" -ne 0 ]; then
+    echo "check-exec-bits: git ls-files failed (exit $rc) - scan incomplete" >&2
+    exit 2
+fi
 while read -r mode object stage path; do
     case "$path" in
         hooks/*.sh)
@@ -59,7 +67,7 @@ while read -r mode object stage path; do
             fi
             ;;
     esac
-done < <(git ls-files -s -- skills hooks)
+done <<< "$index"
 
 # Empty candidate list means the scan itself is broken (not in a repo, path
 # typo, git missing) — a gate that checked nothing must not report clean.

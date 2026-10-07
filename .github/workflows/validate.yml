@@ -66,6 +66,9 @@ jobs:
       - name: Run skill behavioural test suites
         run: bash tests/run-skill-tests.sh
 
+      - name: Process-substitution guards (break each producer, the suite must fail)
+        run: bash tests/procsub-guard.sh
+
       - name: Offline resource checks (verifier scripts)
         run: bash tests/check-resources.sh
 

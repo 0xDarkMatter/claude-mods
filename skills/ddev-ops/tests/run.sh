@@ -100,6 +100,7 @@ for f in "$here"/references/*.md; do
 done
 for src in "$skill" "$here"/references/*.md; do
   dir="$(dirname "$src")"
+  # procsub ok: grep fails only on a missing file (SKILL.md checked above; no refs = no links)
   while IFS= read -r target; do
     target="${target%%#*}"
     [ -z "$target" ] && continue

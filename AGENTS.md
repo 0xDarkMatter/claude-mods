@@ -143,6 +143,12 @@ On "INIT:" message at session start:
   nothing). Set `MSYS_NO_PATHCONV=1` for such calls, and never let a gate swallow a
   tool's exit-2 error — that combination once made the agnostic gate pass while
   scanning nothing.
+- **`done < <(producer)` never sees the producer's exit status**: a producer that dies
+  part-way just ends the loop, and the suite passes on fewer checks (52 of 100 cases once
+  vanished behind "164 passed, 0 failed"). Capture, check, loop: `rc=0;
+  rows="$(producer)" || rc=$?`, then `done <<< "$rows"` skipping empty rows. Tag each
+  site `# procsub guard:` (fixed) or `# procsub ok: <why it cannot stop early>`, and give
+  each new guard in tests/ or a skill suite a row in `tests/procsub-guard.sh`.
 - **`pwsh` on PATH does not mean Windows.** GitHub's Ubuntu runners ship `pwsh`, so
   a suite that runs Windows-only scripts whenever `command -v pwsh` succeeds goes
   red on Linux CI (windows-ops, supply-chain-defense). Gate runtime checks on the
@@ -162,7 +168,7 @@ On "INIT:" message at session start:
 ## Testing
 
 ```bash
-just check        # THE gate: validate + spec + doc-drift + agnostic + hook contracts + resource contracts + skill size + reference contents (both warn-only) + skill suites + e2e suites
+just check        # THE gate: validate + spec + doc-drift + agnostic + hook contracts + resource contracts + skill size + reference contents (both warn-only) + skill suites + e2e suites + procsub-guard mutations
 just check-fast   # same minus the behavioural suites (per-skill and e2e)
 ```
 
