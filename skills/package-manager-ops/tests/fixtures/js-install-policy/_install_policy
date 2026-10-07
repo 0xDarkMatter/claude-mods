@@ -1,1 +1,1 @@
-{"minimumReleaseAge": true, "allowBuilds": true, "trustPolicy": true, "npmrcIgnoreScripts": true, "yarnEnableScripts": true}
+{"minimumReleaseAge": true, "allowBuilds": true, "trustPolicy": true, "npmrcIgnoreScripts": true, "yarnEnableScripts": true, "pnpm10BuildLists": false, "strictDepBuildsOff": false}

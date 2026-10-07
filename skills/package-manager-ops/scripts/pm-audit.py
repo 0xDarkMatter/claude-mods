@@ -2098,19 +2098,37 @@ class Audit:
         def yaml_set(name, text):
             return bool(re.search(r"^\s*" + re.escape(name) + r"\s*:", text or "", re.M))
 
+        def anywhere(camel, kebab):
+            """Set in pnpm-workspace.yaml, package.json `pnpm`, or .npmrc (kebab-case)."""
+            return yaml_set(camel, workspace) or camel in pnpm or bool(
+                re.search(r"^\s*" + re.escape(kebab) + r"\s*=", npmrc or "", re.M | re.I))
+
+        # pnpm.io/settings/build: allowBuilds arrived in 10.26.0 and replaced, in pnpm 11,
+        # the pnpm 10 lists below (removed there); strictDepBuilds (10.3.0) defaults true.
+        pnpm10_lists = (("onlyBuiltDependencies", "only-built-dependencies"),
+                        ("onlyBuiltDependenciesFile", "only-built-dependencies-file"),
+                        ("neverBuiltDependencies", "never-built-dependencies"),
+                        ("ignoredBuiltDependencies", "ignored-built-dependencies"))
+        strict_off = bool(re.search(r"^\s*strictDepBuilds\s*:\s*[\"']?false\b", workspace or "", re.M | re.I)) \
+            or pnpm.get("strictDepBuilds") is False \
+            or bool(re.search(r"^\s*strict-dep-builds\s*=\s*false\b", npmrc or "", re.M | re.I))
         self.meta["install_policy"] = {
-            "minimumReleaseAge": yaml_set("minimumReleaseAge", workspace) or "minimumReleaseAge" in pnpm,
-            "allowBuilds": yaml_set("allowBuilds", workspace) or "allowBuilds" in pnpm,
-            "trustPolicy": yaml_set("trustPolicy", workspace) or "trustPolicy" in pnpm,
+            "minimumReleaseAge": anywhere("minimumReleaseAge", "minimum-release-age"),
+            "allowBuilds": anywhere("allowBuilds", "allow-builds"),
+            "pnpm10BuildLists": any(anywhere(c, k) for c, k in pnpm10_lists),
+            "strictDepBuildsOff": strict_off,
+            "trustPolicy": anywhere("trustPolicy", "trust-policy"),
             "npmrcIgnoreScripts": bool(re.search(r"^\s*ignore-scripts\s*=", npmrc or "", re.M | re.I)),
             "yarnEnableScripts": yaml_set("enableScripts", yarnrc),
         }
-        dangerous = bool(re.search(r"^\s*dangerouslyAllowAllBuilds\s*:\s*[\"']?true\b", workspace or "", re.M | re.I)) \
-            or pnpm.get("dangerouslyAllowAllBuilds") is True
-        if dangerous:
-            source = "pnpm-workspace.yaml" if workspace else "package.json"
-            self.add("warn", "js.install-policy", source,
-                     "pnpm dangerouslyAllowAllBuilds=true permits every dependency build script",
+        sources = [name for name, hit in (
+            ("pnpm-workspace.yaml", re.search(r"^\s*dangerouslyAllowAllBuilds\s*:\s*[\"']?true\b", workspace or "", re.M | re.I)),
+            ("package.json", pnpm.get("dangerouslyAllowAllBuilds") is True),
+            (".npmrc", re.search(r"^\s*dangerously-allow-all-builds\s*=\s*true\b", npmrc or "", re.M | re.I))) if hit]
+        if sources:
+            self.add("warn", "js.install-policy", sources[0],
+                     "pnpm dangerouslyAllowAllBuilds=true permits every dependency build script"
+                     + (f" (also set in {', '.join(sources[1:])})" if sources[1:] else ""),
                      "remove the blanket switch and list reviewed packages under allowBuilds")
 
     # ---- npx / dlx / exec ----
