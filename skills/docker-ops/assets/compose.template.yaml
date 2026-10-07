@@ -1,0 +1,57 @@
+# Starter compose.yaml (docker-ops). Passes scripts/docker-audit.py with no findings, and
+# --production with only the base-digest notes. ADAPT marks the lines to change.
+name: app                                   # ADAPT: the project name (stops two checkouts colliding)
+
+services:
+  web:
+    build: .
+    image: ghcr.io/acme/app:dev             # ADAPT: registry-qualified, so `compose pull` can't fetch a stranger's image
+    pull_policy: build
+    ports:
+      - "127.0.0.1:8000:8000"               # loopback only; reachable from your machine, not your LAN
+    environment:
+      DATABASE_URL: postgresql://app@db:5432/app
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env (not committed)}
+    secrets: [db_password]
+    depends_on:
+      db: {condition: service_healthy, restart: true}
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    deploy: {resources: {limits: {memory: 512m}}}
+    restart: unless-stopped
+    develop:
+      watch:
+        - {action: sync+restart, path: ./app, target: /app/app}
+        - {action: rebuild, path: uv.lock}
+
+  db:
+    image: postgres:18.6-trixie             # ADAPT: pin the major you run; 18 keeps data under /var/lib/postgresql
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_DB: app
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
+    volumes:
+      - dbdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+    read_only: true
+    tmpfs: [/tmp, /var/run/postgresql]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    security_opt: ["no-new-privileges:true"]
+    deploy: {resources: {limits: {memory: 1g}}}
+    restart: unless-stopped
+
+volumes:
+  dbdata: {}
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt         # gitignored

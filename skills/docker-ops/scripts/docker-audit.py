@@ -1389,10 +1389,16 @@ class Audit:
                                  f"{ins.cmd} {s}: {ignore_file.name} excludes it, so the build cannot find it")
         for st in df["stages"]:
             copied_all = None
+            installed_first = False
             for ins in st["instrs"]:
-                if ins in whole and copied_all is None:
+                if ins.cmd == "RUN" and copied_all is None and INSTALL_RE.search(ins.text):
+                    # deps installed from the manifests before the full copy: the later
+                    # install only adds the project itself (uv sync --no-install-project,
+                    # then uv sync) and the cached dependency layer survives source edits.
+                    installed_first = True
+                elif ins in whole and copied_all is None:
                     copied_all = ins
-                elif ins.cmd == "RUN" and copied_all is not None and INSTALL_RE.search(ins.text):
+                elif ins.cmd == "RUN" and copied_all is not None and not installed_first and INSTALL_RE.search(ins.text):
                     self.add("copy-all-before-install", rel, copied_all.line,
                              f"{copied_all.cmd} {copied_all.rest.strip()} comes before the install on line {ins.line}; "
                              "copy the manifests and lockfile first, install, then copy the rest")

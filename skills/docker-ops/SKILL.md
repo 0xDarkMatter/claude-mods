@@ -1,295 +1,210 @@
 ---
 name: docker-ops
-description: "Docker containerization patterns, Dockerfile best practices, multi-stage builds, and Docker Compose. Use for: docker, Dockerfile, docker-compose, container, image, multi-stage build, docker build, docker run, .dockerignore, health check, distroless, scratch image, BuildKit, layer caching, container security."
-when_to_use: "Use when building, running, or composing Docker containers — e.g. 'write an efficient multi-stage Dockerfile', 'set up docker-compose for local dev', 'optimize layer caching and .dockerignore', 'harden a distroless image'. For Kubernetes/ECS orchestration on top of containers, use container-orchestration."
+description: "Docker on your machine and in your repo: Dockerfile, .dockerignore, compose.yaml, BuildKit, image hardening and supply chain, plus the engine underneath (Docker Desktop, OrbStack, Colima, Podman, Rancher Desktop): contexts and sockets, ports, disk space, file sharing, emulation. Ships a repo auditor, a read-only machine doctor, an image-tag checker. Not for Kubernetes or Helm (kubernetes-ops), DDEV projects (ddev-ops), or WSL itself (windows-ops)."
+when_to_use: "Use when writing or reviewing a Dockerfile or Compose file, shrinking or hardening an image, picking a base image, or when Docker misbehaves locally: 'cannot connect to the Docker daemon', 'port is already allocated', 'forbidden by its access permissions', a VM disk that only grows, slow bind mounts, an arm64/amd64 mismatch, two engines fighting. Also before any docker rm, prune or volume delete."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: container-orchestration, ddev-ops, go-ops, rust-ops, ci-cd-ops, package-manager-ops
+  owns: "dockerfile, dockerignore, compose, buildkit, image-hardening, docker-engine, docker-desktop, colima, orbstack, podman, rancher-desktop, docker-contexts, docker-disk"
+  related-skills: "kubernetes-ops, ddev-ops, windows-ops, supply-chain-defense, package-manager-ops, ci-cd-ops, go-ops, rust-ops"
 ---
 
 # Docker Operations
 
-Comprehensive Docker patterns for building, running, and composing containerized applications.
+Docker on your machine and in your repo: the files you write (Dockerfile, .dockerignore,
+compose.yaml) and the engine that runs them. Versions verified 2026-10-07 (Compose v5,
+Docker Desktop 4.94, WSL 3.0, Podman 6); `scripts/check-docker-facts.py --live` re-checks
+them weekly.
 
-## Dockerfile Best Practices
+**Why:** the costly Docker mistakes are silent. A secret is copied into a layer, a datastore
+listens on every interface, `compose config` pastes credentials into a log, a prune deletes
+a volume someone needed. The rules below stop those first.
 
-| Practice | Do | Don't |
-|----------|------|-------|
-| Base image | `FROM node:20-slim` | `FROM node:latest` |
-| Layer caching | Copy dependency files first, then source | `COPY . .` before `RUN install` |
-| Package install | `apt-get update && apt-get install -y ... && rm -rf /var/lib/apt/lists/*` | Separate `RUN` for update and install |
-| User | `USER nonroot` (create if needed) | Run as root in production |
-| Multi-stage | Separate build and runtime stages | Ship compiler toolchains |
-| Secrets | `--mount=type=secret` (BuildKit) | `COPY .env .` or `ARG PASSWORD` |
-| ENTRYPOINT vs CMD | `ENTRYPOINT` for fixed binary, `CMD` for defaults | Relying on shell form for signal handling |
-| WORKDIR | `WORKDIR /app` | `RUN cd /app && ...` |
-| .dockerignore | Include `.git`, `node_modules`, `__pycache__` | No .dockerignore at all |
-| Labels | `LABEL org.opencontainers.image.*` | No metadata |
+## Hard rules
 
-## Multi-Stage Build Decision Tree
+1. **Say what is lost before anything destructive, and confirm a sweep.** Removing one
+   stopped container the user named is fine on an explicit ask. `docker kill`, any `prune`,
+   `compose down -v`, `volume rm`, and anything unscoped (`docker rm -f $(docker ps -aq)`)
+   needs a confirmation that names what goes. A sweep counts as a sweep even when
+   everything in it is stopped: scope beats state. Tiers: [destructive-commands.md](references/destructive-commands.md).
+2. **Never run `docker compose config` bare.** It prints interpolated values and inlines
+   `env_file` contents. Use `docker compose config --quiet` to validate, and add
+   `--no-interpolate` when you need to read the file.
+3. **No secrets in layers.** No `ARG`/`ENV` credentials, no `COPY .env` / `.npmrc` / keys.
+   Use `RUN --mount=type=secret,id=x,required=true` (fails loudly when the secret is
+   missing) and `--mount=type=ssh`. A later `RUN rm` does not remove a file from the
+   earlier layer.
+4. **Datastores and debug ports bind to loopback.** Write `127.0.0.1:5432:5432`, never `5432:5432`.
+   On Docker Desktop, an unbound port is reachable from your LAN.
+5. **Pin scanners and actions by commit SHA.** In March 2026, 76 of trivy-action's 77 tags
+   were force-pushed to an infostealer (advisory GHSA-69fq-xp46-6x23). Use
+   `aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0`.
+   Vetting dependencies is supply-chain-defense's job.
+6. **Current bases only.** Node.js 22 is the oldest supported line (20 ended 2026-04-30),
+   Python 3.11 (3.10 ended 2026-10-01). Distroless images are `-debian13`. Pin a tag, and
+   in production a digest. `assets/docker-facts.json` holds the floors the auditor checks.
+7. **Verify a non-root image with `docker inspect --format '{{.Config.User}}'`** (it must be
+   set and not `0` or `root`). `docker run img whoami` lies when the image has an ENTRYPOINT.
+8. **Never start, stop or reconfigure the engine on the user's behalf.** Report that it is
+   down and give the start command. Propose a settings change; don't apply it. A setting
+   their admin locked is the admin's call (`docker-doctor.py` reports locks).
+9. **`compose.yaml`, no `version:` line.** Compose ignores `version:` and prints a warning.
+   Since Compose v5 (2025-12; v3 and v4 were skipped), builds go through Bake.
+10. **Run this skill's scripts by path from the project root.** Use
+    `python "<skill-dir>/scripts/x.py"`; never `cd` into the skill or call `scripts/x.py`
+    relative to the project.
 
-Choose your runtime base image by language:
+## Routing
 
+| The task | Where |
+|---|---|
+| Dockerfile, multi-stage, BuildKit, base images, multi-platform | here + [dockerfile.md](references/dockerfile.md) |
+| compose.yaml, healthchecks, profiles, watch, secrets | here + [compose.md](references/compose.md) |
+| Scanning, SBOM, provenance, signing, digest pins | [supply-chain-and-scanning.md](references/supply-chain-and-scanning.md); vetting packages: supply-chain-defense |
+| Which engine am I talking to, contexts, sockets, credential helpers | [providers-and-contexts.md](references/providers-and-contexts.md) |
+| Port clashes, host.docker.internal, VPN subnets, reserved ports | [ports-and-networking.md](references/ports-and-networking.md) |
+| The VM disk keeps growing | [disk-reclaim.md](references/disk-reclaim.md) |
+| Slow bind mounts, VirtioFS, Rosetta, arm64 vs amd64 | [vmm-sharing-emulation.md](references/vmm-sharing-emulation.md) |
+| A container that won't start, exits, or can't be debugged | [debugging.md](references/debugging.md) |
+| Kubernetes, Helm, Gateway API, ECS | kubernetes-ops |
+| A project with a `.ddev/` folder | ddev-ops (its extra services use Compose syntax from here) |
+| `.wslconfig`, WSL networking modes, WSL disks in general | windows-ops |
+| `npm ci` vs `npm install`, lockfiles inside a RUN | package-manager-ops |
+| CI pipelines that build and push | ci-cd-ops |
+
+## Tools
+
+```bash
+docker build --check .                                       # BuildKit's own checks first (needs the daemon)
+python "<skill-dir>/scripts/docker-audit.py" .               # repo: Dockerfiles + Compose (exit 10 = findings)
+python "<skill-dir>/scripts/docker-doctor.py" --ports 80,5432   # machine: engine, provider, disk, ports (read-only)
+python "<skill-dir>/scripts/check-image-tags.py" --live .     # do the pinned tags exist for amd64+arm64?
+python "<skill-dir>/scripts/check-docker-facts.py" --offline  # are this skill's version facts still stated?
 ```
-Go ──────────── CGO disabled? ──── Yes ──► scratch or distroless/static
-                                   No ───► distroless/base or alpine
 
-Rust ─────────── Static musl? ──── Yes ──► scratch or distroless/static
-                                   No ───► distroless/cc or debian-slim
+- `scripts/docker-audit.py` checks Dockerfile families D1-D11 (base pinning and EOL, user,
+  secrets, TLS bypasses, package hygiene, instruction semantics, pipes, build context,
+  directives, healthcheck tooling, labels) and Compose families C1-C9 (obsolete `version:`,
+  build+image squatting, floating tags, literal secrets, published ports, host escapes,
+  hardening, readiness, undeclared resources). `--list-checks` shows each check with its
+  hadolint / BuildKit / Trivy / Checkov IDs. Suppress a finding inline with
+  `# docker-audit ignore=CHECK reason="..." until=YYYY-MM-DD`; a missing reason suppresses
+  nothing. `--production` adds digest pins and Compose hardening.
+- `scripts/docker-doctor.py` resolves the endpoint (DOCKER_HOST > DOCKER_CONTEXT > the stored
+  context), names the provider from the socket or pipe path, and reports: the engine down
+  or hung, two providers running, a missing credential helper, a VM disk far bigger than
+  what the engine holds, Windows-reserved ports, ports held inside running WSL, admin locks.
+  It never starts, prunes or compacts anything.
+- `scripts/check-image-tags.py` inventories every FROM / `COPY --from=` / `image:` reference
+  (Markdown code fences included). `--live` asks the registries: missing exits 10, uncertain
+  (Docker Hub's 429s) exits 7.
+- `scripts/check-docker-facts.py` keeps `assets/docker-facts.json` true: `--offline` in PR
+  CI, `--live` weekly.
 
-Node.js ──────── Need native? ──── Yes ──► node:20-slim
-                                   No ───► node:20-alpine (smaller)
-
-Python ────────── Need C libs? ─── Yes ──► python:3.12-slim
-                                   No ───► python:3.12-slim (still slim)
-
-Java ──────────── JRE only ──────────────► eclipse-temurin:21-jre-alpine
-```
-
-> **See:** `references/multi-stage-builds.md` for complete annotated examples per language.
-
-## Layer Caching Rules
-
-Docker caches each layer. A cache miss at layer N invalidates all subsequent layers.
-
-### What Invalidates Cache
-
-| Trigger | Effect |
-|---------|--------|
-| Changed file in `COPY`/`ADD` | Invalidates this layer + all below |
-| Changed `RUN` command text | Invalidates this layer + all below |
-| Changed `ARG` value | Invalidates from the `ARG` declaration down |
-| `--no-cache` flag | Invalidates everything |
-| Base image update | Invalidates everything |
-
-### Optimal Layer Order
+## Dockerfile in one screen
 
 ```dockerfile
-# 1. Base image (changes rarely)
-FROM python:3.12-slim
+# syntax=docker/dockerfile:1
+FROM node:24-slim AS deps
+WORKDIR /app
+RUN --mount=type=bind,source=package.json,target=package.json \
+    --mount=type=bind,source=package-lock.json,target=package-lock.json \
+    --mount=type=cache,target=/root/.npm,sharing=locked \
+    npm ci --omit=dev
 
-# 2. System dependencies (changes rarely)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# 3. Dependency files (changes occasionally)
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# 4. Application code (changes frequently)
-COPY src/ ./src/
-
-# 5. Runtime config (changes frequently)
-CMD ["python", "-m", "app"]
+FROM node:24-slim
+WORKDIR /app
+RUN rm -f /etc/apt/apt.conf.d/docker-clean \
+ && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends tini
+COPY --link --from=deps /app/node_modules ./node_modules
+COPY --chown=node:node . .
+USER node
+HEALTHCHECK CMD ["node", "healthcheck.js"]
+ENTRYPOINT ["tini", "--"]
+CMD ["node", "server.js"]
 ```
 
-**Rule of thumb:** Order layers from least-frequently-changed to most-frequently-changed.
+What makes it right: `# syntax=` on line 1 (anywhere else it is a comment). Bind-mounted
+manifests for an install that only reads them (keep `COPY` when the lockfile gets written
+back). Cache mounts with `sharing=locked`, and the `docker-clean` hook removed so the apt
+cache survives (Debian and Ubuntu images delete it after every install otherwise). Exec-form
+`CMD`, so the process gets SIGTERM. A non-root `USER`. A healthcheck the image can actually
+run: slim and distroless images ship no curl.
+Per-language stages, multi-platform builds and base-image choice: [dockerfile.md](references/dockerfile.md).
 
-## .dockerignore Essentials
+`.dockerignore` at the context root, at least: `.git`, `.env*` (then `!.env.example`),
+`node_modules`, `*.pem`, `*.key`, build output. Without it, `COPY . .` ships the history and
+your secrets, and every commit busts the cache.
 
-```dockerignore
-# Version control
-.git
-.gitignore
-
-# Dependencies (rebuilt in container)
-node_modules
-__pycache__
-*.pyc
-.venv
-vendor/
-
-# Build artifacts
-dist/
-build/
-target/
-*.egg-info
-
-# IDE and editor
-.vscode
-.idea
-*.swp
-*.swo
-
-# Docker files (prevent recursive context)
-Dockerfile*
-docker-compose*
-.dockerignore
-
-# Environment and secrets
-.env
-.env.*
-*.pem
-*.key
-
-# Documentation and tests (unless needed)
-docs/
-tests/
-*.md
-LICENSE
-```
-
-**Why it matters:** Without `.dockerignore`, `docker build` sends the entire context directory to the daemon. A `.git` folder alone can add hundreds of megabytes.
-
-## Docker Compose Quick Reference
-
-### Service Definition
+## Compose in one screen
 
 ```yaml
 services:
   web:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: production        # Multi-stage target
-    image: myapp:latest
-    ports:
-      - "8080:8000"
+    build: .
+    image: ghcr.io/acme/web:dev        # registry-qualified, so `compose pull` can't fetch a stranger's image
+    ports: ["127.0.0.1:3000:3000"]
     environment:
-      DATABASE_URL: postgres://db:5432/app
-    env_file:
-      - .env
-    volumes:
-      - ./src:/app/src          # Bind mount (dev)
-      - app-data:/app/data      # Named volume (persistent)
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET}
     depends_on:
-      db:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    restart: unless-stopped
-    networks:
-      - backend
+      db: {condition: service_healthy}
+  db:
+    image: postgres:18.6-trixie
+    environment: {POSTGRES_PASSWORD_FILE: /run/secrets/db_password}
+    secrets: [db_password]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U postgres"], interval: 5s}
+    volumes: [dbdata:/var/lib/postgresql]
+volumes: {dbdata: {}}
+secrets: {db_password: {file: ./db_password.txt}}
 ```
 
-### Volumes and Networks
+`service_healthy` needs a healthcheck on the dependency, or Compose fails at start.
+`develop.watch` (`docker compose watch`) replaces most bind-mount dev loops. Profiles,
+`include:`, overrides and env precedence are in [compose.md](references/compose.md).
 
-```yaml
-volumes:
-  app-data:           # Named volume (Docker-managed)
-  db-data:
-    driver: local
+## Destructive commands (summary)
 
-networks:
-  backend:
-    driver: bridge
-  frontend:
-    driver: bridge
-```
+| Tier | Commands | Rule |
+|---|---|---|
+| 1 | `docker rm <one stopped container the user named>`; `rm -f` of a container you started this session for a test | act on an explicit ask, then report |
+| 2 | `docker kill`; `container/image/volume/network/builder/system prune`; `compose down -v`; `volume rm`; anything over `$(docker ps -aq)`; containers you didn't start | name what is lost, wait for a yes |
+| - | `docker stop` | restartable, but in-memory state goes; warn unless it's your own test container |
 
-> **See:** `references/compose-patterns.md` for full patterns including profiles, watch mode, and override files.
+`system prune --volumes` removes only anonymous volumes. `system prune -a` removes every
+image no container uses: the next build re-downloads everything.
 
-> **PHP/CMS project with a `.ddev/` folder?** DDEV generates its own compose files; don't
-> hand-write a parallel stack. Use `ddev-ops` (extra services go in
-> `.ddev/docker-compose.<name>.yaml`, and the Compose syntax inside them is this skill's).
+## Engines in one table
 
-## Security Quick Reference
+| Provider | Endpoint | Starts with |
+|---|---|---|
+| Docker Desktop | context `desktop-linux`: `npipe:////./pipe/dockerDesktopLinuxEngine` (Windows), `~/.docker/run/docker.sock` (macOS) | the app, or `docker desktop start` |
+| OrbStack | context `orbstack`, `~/.orbstack/run/docker.sock` | the app |
+| Colima | `~/.colima/<profile>/docker.sock` | `colima start` |
+| Rancher Desktop | context `rancher-desktop`, `~/.rd/docker.sock` | the app |
+| Podman | `podman machine inspect` (ConnectionInfo) | `podman machine start` |
 
-| Area | Recommendation |
-|------|----------------|
-| User | Run as non-root: `RUN adduser -D appuser && USER appuser` |
-| Base image | Pin digest: `FROM python:3.12-slim@sha256:abc123...` |
-| Filesystem | Read-only root: `docker run --read-only --tmpfs /tmp` |
-| Capabilities | Drop all, add needed: `--cap-drop=ALL --cap-add=NET_BIND_SERVICE` |
-| Secrets | BuildKit secrets: `RUN --mount=type=secret,id=key cat /run/secrets/key` |
-| Scanning | Scan images: `trivy image myapp:latest` or `grype myapp:latest` |
-| No latest | Always use specific tags and pin versions |
-| Minimal image | Use distroless or scratch when possible |
-| No SUID | `RUN find / -perm /6000 -type f -exec chmod a-s {} +` |
-| Network | Use internal networks for backend services |
+`DOCKER_HOST` beats `DOCKER_CONTEXT`, and both beat `docker context use`. A forgotten
+`DOCKER_HOST` in a shell profile is the usual reason "my context is ignored". Two engines
+running at once fight over ports and `/var/run/docker.sock`. Docker Desktop 4.59 stopped
+compacting its WSL data disk, so on Windows the disk only grows: [disk-reclaim.md](references/disk-reclaim.md).
 
-### Non-Root User Pattern
+## References
 
-```dockerfile
-# Debian/Ubuntu-based
-RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser
-COPY --chown=appuser:appuser . /app
-USER appuser
+| File | Read when |
+|---|---|
+| [dockerfile.md](references/dockerfile.md) | Writing a Dockerfile: per-language stages, caching, multi-platform, base images, hardening |
+| [compose.md](references/compose.md) | Writing compose.yaml: healthchecks, profiles, watch, include, env precedence |
+| [supply-chain-and-scanning.md](references/supply-chain-and-scanning.md) | Scanning, SBOM and provenance, signing, digest pinning, base-image updates |
+| [destructive-commands.md](references/destructive-commands.md) | Before removing anything: the tiers, plus kubectl, Helm and DDEV equivalents |
+| [providers-and-contexts.md](references/providers-and-contexts.md) | Which engine, contexts and sockets, credential helpers, switching providers |
+| [ports-and-networking.md](references/ports-and-networking.md) | Ports in use or reserved, host aliases, subnets and VPNs, rootless ports |
+| [disk-reclaim.md](references/disk-reclaim.md) | VM disk images on Windows and macOS, and what is safe to reclaim |
+| [vmm-sharing-emulation.md](references/vmm-sharing-emulation.md) | VM backends, file-sharing speed, Rosetta and QEMU emulation |
+| [debugging.md](references/debugging.md) | Containers that exit, hang or can't be entered; build debugging |
 
-# Alpine-based
-RUN addgroup -S appuser && adduser -S -G appuser appuser
-COPY --chown=appuser:appuser . /app
-USER appuser
-
-# Distroless (built-in nonroot user)
-FROM gcr.io/distroless/static:nonroot
-USER nonroot:nonroot
-```
-
-## Common Gotchas
-
-| Gotcha | Problem | Fix |
-|--------|---------|-----|
-| Large images | Shipping build tools, node_modules in final image | Multi-stage builds |
-| Cache busting | `COPY . .` before `RUN npm install` | Copy lockfile first, install, then copy source |
-| Secrets in layers | `COPY .env .` or `ARG SECRET=...` bakes secrets into image history | Use `--mount=type=secret` or runtime env vars |
-| PID 1 problem | App doesn't receive SIGTERM, zombie processes | Use `tini` as init or `exec` form for CMD |
-| Timezone | Container uses UTC | Set `TZ` env var or install `tzdata` |
-| DNS caching | Alpine musl DNS issues | Use `RUN apk add --no-cache libc6-compat` or switch to slim |
-| apt cache | `apt-get update` cached from old layer | Always combine `update && install` in one RUN |
-| Missing signals | Shell form (`CMD npm start`) wraps in `/bin/sh` | Exec form: `CMD ["node", "server.js"]` |
-| Build context size | Sending GB of data to daemon | Add `.dockerignore`, check with `docker build --progress=plain` |
-| Layer explosion | Each RUN creates a layer | Chain related commands with `&&` |
-
-### PID 1 / Signal Handling Fix
-
-```dockerfile
-# Option 1: Use tini as init process
-RUN apt-get update && apt-get install -y --no-install-recommends tini \
-    && rm -rf /var/lib/apt/lists/*
-ENTRYPOINT ["tini", "--"]
-CMD ["node", "server.js"]
-
-# Option 2: Docker init flag (Docker 23.0+)
-# docker run --init myapp
-
-# Option 3: Node.js - handle signals in code
-# process.on('SIGTERM', () => { server.close(); process.exit(0); });
-```
-
-## Essential Docker Commands
-
-```bash
-# Build
-docker build -t myapp:1.0 .
-docker build -t myapp:1.0 --target production .    # Multi-stage target
-docker build --no-cache -t myapp:1.0 .              # Force rebuild
-
-# Run
-docker run -d --name myapp -p 8080:8000 myapp:1.0
-docker run --rm -it myapp:1.0 /bin/sh               # Interactive debug
-docker run --read-only --tmpfs /tmp myapp:1.0        # Read-only root
-
-# Inspect
-docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"
-docker history myapp:1.0                             # Layer breakdown
-docker inspect myapp:1.0 | jq '.[0].Config'         # Image config
-
-# Debug running container
-docker exec -it myapp /bin/sh
-docker logs -f myapp
-docker stats myapp
-
-# Cleanup
-docker system prune -a --volumes                     # Remove everything unused
-docker image prune -a                                # Remove unused images
-```
-
-## Reference Files
-
-| File | Contents |
-|------|----------|
-| `references/multi-stage-builds.md` | Per-language multi-stage patterns (Go, Rust, Node, Python) |
-| `references/compose-patterns.md` | Compose services, networking, profiles, watch, overrides |
-| `references/optimization.md` | Image size, BuildKit, security scanning, debugging |
-
-Inside a `RUN` step, install from the lockfile only: `npm ci` (or the manager's frozen
-install) and `composer install --no-dev --optimize-autoloader`. Which command each manager
-needs, and why `npm install` in an image is a bug, is in `package-manager-ops`.
+Assets: `assets/Dockerfile.template` and `assets/compose.template.yaml` are starters that
+pass the auditor clean. `assets/docker-facts.json` is the version catalog.

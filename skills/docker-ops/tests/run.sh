@@ -305,6 +305,22 @@ other="$(grep -vE '^(context inspect|version --format|info --format|system df --
 [ -s "$STUB_LOG" ] && ok "the stub saw $(wc -l < "$STUB_LOG" | tr -d ' ') docker calls" || bad "the stub saw no docker calls"
 [ -z "$other" ] && ok "doctor only ever runs read-only docker probes" || bad "doctor ran: $other"
 unset STUB_LOG
+# ...and the guard behind that promise refuses anything else, even if a later edit asks.
+"$PY" - "$doctor" "$fixtures/doctor/docker_stub.py" <<'EOF' && ok "doctor's guard refuses destructive docker calls" || bad "doctor's guard let a destructive call through"
+import importlib.util, os, sys
+os.environ["DOCKER_DOCTOR_DOCKER"] = sys.argv[2]
+os.environ.pop("DOCKER_DOCTOR_FAKE_HOST", None)
+spec = importlib.util.spec_from_file_location("doctor", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+probe = mod.Probe(5)
+for call in (("system", "prune", "-f"), ("rm", "-f", "x"), ("desktop", "start"), ("run", "alpine"), ("volume", "rm", "v")):
+    try:
+        probe.docker_cmd(*call)
+    except RuntimeError:
+        continue
+    raise SystemExit(f"allowed: docker {' '.join(call)}")
+EOF
 
 # === 13. Image-tag verifier: offline inventory, live classification on canned answers ===
 tags="$here/scripts/check-image-tags.py"
@@ -383,5 +399,19 @@ has "the unreachable source is named" "$out" $'eol:php\tunavailable'
 printf '{"schema": "claude-mods.docker-ops.facts/v1", "as_of": "2026-10-07"}' > "$tmp/thin.json"
 "$PY" "$facts" --catalog "$tmp/thin.json" >/dev/null 2>&1; expect_exit "facts: a catalog without its tables" 4 $?
 "$PY" "$facts" --catalog "$tmp/none.json" >/dev/null 2>&1; expect_exit "facts: a missing catalog" 3 $?
+
+# === 15. The shipped starters pass the auditor (they promise to in their headers) ===
+mkdir -p "$tmp/tpl"
+cp "$here/assets/Dockerfile.template" "$tmp/tpl/Dockerfile"
+cp "$here/assets/compose.template.yaml" "$tmp/tpl/compose.yaml"
+printf '.git\n.env*\nsecrets\n' > "$tmp/tpl/.dockerignore"
+out="$("$PY" "$audit" "$tmp/tpl" 2>/dev/null)"; rc=$?
+expect_exit "templates: no findings" 0 "$rc"
+[ -z "$out" ] || note "    " "$out"
+out="$("$PY" "$audit" "$tmp/tpl" --production 2>/dev/null)"
+other="$(printf '%s\n' "$out" | grep -v $'\tbase-not-digest\t' | grep . || true)"
+[ -z "$other" ] && ok "templates: --production adds only base-digest notes" || bad "templates under --production: $other"
+# And the facts the skill states are still stated (the PR-CI half of the staleness pattern).
+"$PY" "$facts" --offline >/dev/null 2>&1; expect_exit "this skill's prose matches assets/docker-facts.json" 0 $?
 
 finish
