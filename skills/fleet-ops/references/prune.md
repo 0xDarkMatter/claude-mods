@@ -16,7 +16,7 @@ The full bucket table and the order that makes it safe, how a session claims a w
 | 1b | git reports the directory gone | **REVIEW** (that's `git worktree prune`'s job) |
 | 2 | any session claiming it is LIVE | **KEEP** |
 | 3 | session store unreadable, or `session_check=off` | **REVIEW** |
-| 4 | detached HEAD — **SAFE** only if clean, no git operation in progress (rebase, bisect, ...), HEAD already in `base_branch`, no open claim, and an archived session positively claims it | **REVIEW** |
+| 4 | detached HEAD — **SAFE** only if clean, no git operation in progress (rebase, bisect, ...; a git state it cannot read counts as one), HEAD already in `base_branch`, no open claim, and an archived session positively claims it | **REVIEW** |
 | 5 | uncommitted or untracked changes | **REVIEW** |
 | 6 | commits not yet in `base_branch` | **REVIEW** |
 | 7 | merged + clean, no open session claims it — and for `.claude/worktrees/`, an archived session positively does | **SAFE** |

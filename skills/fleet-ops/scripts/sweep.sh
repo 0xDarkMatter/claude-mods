@@ -264,6 +264,8 @@ list_lines() {
 # The never-push list names branches whose history leaks identifiers that must
 # never reach a remote. One glob per line, the whole line.
 NP=()
+# procsub ok: list_lines is an in-shell function that always returns 0; it reads
+# only files it has just checked exist.
 while IFS= read -r line; do [[ -n "$line" ]] && NP+=("$line"); done \
   < <(list_lines FLEET_NEVER_PUSH "${HOME:-/nonexistent}/.claude/never-push.txt" "$GCD/info/never-push")
 never_push() {
@@ -284,6 +286,7 @@ never_push() {
 #               the review itself - as a never-push entry it would read LEAKED.
 # '<glob> <reason...>' per line; the reason is printed in the ON-HOLD row.
 HOLD_PAT=() HOLD_WHY=()
+# procsub ok: list_lines is an in-shell function that always returns 0 (see NP above).
 while IFS= read -r line; do
   [[ -n "$line" ]] || continue
   pat=${line%%[[:space:]]*}; why=${line#"$pat"}; why="${why#"${why%%[![:space:]]*}"}"
@@ -379,12 +382,13 @@ merge_sha() { printf '%s\n' "$MERGES" | awk -F'\t' -v s="merge: $1" '$2 == s && 
 
 say "checking $NW lane worktree(s)..."
 W_LANDED=(); W_CONF=(); W_AHEAD=(); W_DIRTY=(); W_DSAMPLE=(); W_AGE=(); W_LABEL=()
+W_DIFF=()  # "" or why the lane's diff against base could not be read
 FILES=""   # lane \t file \t c|u — only work NOT yet in base
 for ((i = 0; i < NW; i++)); do
   p=${W_PATH[$i]} br=${W_BR[$i]}
   label=${br:-${p##*/}}; W_LABEL+=("$label")
   if [[ ${W_GONE[$i]} -eq 1 || ! -d "$p" ]]; then
-    W_LANDED+=("-"); W_CONF+=(""); W_AHEAD+=(0); W_DIRTY+=(0); W_DSAMPLE+=(""); W_AGE+=(0); continue
+    W_LANDED+=("-"); W_CONF+=(""); W_AHEAD+=(0); W_DIRTY+=(0); W_DSAMPLE+=(""); W_AGE+=(0); W_DIFF+=(""); continue
   fi
   ref=${br:-${W_HEAD[$i]}}
   ls=$(landed_state "$ref"); st=${ls%%$'\t'*}; conf=""; [[ "$ls" == *$'\t'* ]] && conf=${ls#*$'\t'}
@@ -395,12 +399,23 @@ for ((i = 0; i < NW; i++)); do
   dpaths=$(printf '%s\n' "$dl" | sed '/^$/d' | status_paths)
   W_DIRTY+=("$(printf '%s\n' "$dpaths" | grep -c . || true)")
   W_DSAMPLE+=("$(printf '%s\n' "$dpaths" | sed '/^$/d' | head -n3 | paste -sd, -)")
+  W_DIFF+=("")
   # A never-push lane is never landed, so it cannot collide with anything.
   [[ -n "$br" ]] && never_push "$br" && continue
   if [[ "$st" != MERGED && "$st" != CONTENT ]]; then
-    while IFS= read -r f; do [[ -n "$f" ]] && FILES="${FILES}${label}"$'\t'"$f"$'\tc\n'; done \
-      < <(git -c core.quotepath=false -C "$REPO_ROOT" diff --name-only "$BASE...$ref" 2>/dev/null | ledger_out)
+    # procsub guard: git's status is checked (pipefail; ledger_out always exits 0)
+    # before the lane's files are used. Fed straight into the loop via `< <(git
+    # diff ...)`, a diff that failed listed no files, so the lane could never
+    # compete and read LAND beside a lane holding edits to the same files.
+    rc=0
+    committed=$(git -c core.quotepath=false -C "$REPO_ROOT" diff --name-only "$BASE...$ref" 2>/dev/null | ledger_out) || rc=$?
+    if [[ $rc -ne 0 ]]; then
+      W_DIFF[$i]="git diff exit $rc"
+    else
+      while IFS= read -r f; do [[ -n "$f" ]] && FILES="${FILES}${label}"$'\t'"$f"$'\tc\n'; done <<< "$committed"
+    fi
   fi
+  # procsub ok: printf/sed/ledger_out over in-memory paths; nothing here can stop early.
   while IFS= read -r f; do [[ -n "$f" ]] && FILES="${FILES}${label}"$'\t'"$f"$'\tu\n'; done \
     < <(printf '%s\n' "$dpaths" | sed '/^$/d' | ledger_out)
 done
@@ -647,6 +662,8 @@ for ((i = 0; i < NW; i++)); do
     row worktree "$p" REMOVE "$reason" "fleet prune --remove"
   elif [[ -n "$br" ]] && never_push "$br"; then
     row worktree "$p" PARK "branch is on the private never-push list" "never land or push it; remove the tree by hand when done"
+  elif [[ -n "${W_DIFF[$i]}" ]]; then
+    row worktree "$p" INSPECT "could not read its diff against $BASE (${W_DIFF[$i]}) - competing work unknown" "re-run once git answers; never land it on this verdict"
   elif printf '%s\n' "$COMPETING" | grep -qxF -- "$label"; then
     row worktree "$p" COMPETING "shares files with $(competes_with "$label") (phase 2)${hold:+; ON HOLD: $hold}" "settle the pair before landing either"
   elif [[ "$dirty" -gt 0 ]]; then

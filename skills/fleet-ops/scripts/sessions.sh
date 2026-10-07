@@ -683,14 +683,53 @@ wrapper_live_meta() {
 # 2026-09-28). The walk finds exactly what those globs did:
 # <root>/<dir>/<cli>.jsonl and <root>/<dir>/<cli>/subagents/*.jsonl.
 LM_CWD=0
+
+# walk_rows <find args...> — one of live_many's walks. Rows land in _WALK (a
+# global, so the walk costs find's fork and no other; see "FORK-FREE ON PURPOSE"
+# above). Returns 0 when the walk was complete; otherwise names the cause on
+# stderr and returns 1, and live_many then reads every asked-for session live.
+# Rows and errors share one capture, told apart by find's own "find: " prefix
+# (a row always starts with a walk root). "No such file or directory" is a race,
+# not a gap: an entry removed between listing its directory and reading it (a
+# wrapper rewritten, a transcript deleted) no longer exists, so nothing was
+# missed. LC_ALL=C keeps that message in English.
+_WALK=""
+walk_rows() {
+    local out rc=0 line errs="" races=0 nl=$'\n'
+    _WALK=""
+    out=$(LC_ALL=C find "$@" 2>&1) || rc=$?
+    while IFS= read -r line; do
+        case "$line" in
+            "find: "*"No such file or directory") races=1 ;;
+            "find: "*) errs="${errs:+$errs; }${line#find: }" ;;
+            "") ;;
+            *) _WALK="$_WALK$line$nl" ;;
+        esac
+    done <<< "$out"
+    (( rc == 0 )) && return 0
+    [[ -z "$errs" ]] && (( races )) && return 0
+    # No "find: " line at all: not GNU/BSD find talking (Windows find.exe ahead
+    # on PATH says "FIND: ..."), so none of its output is a row.
+    [[ -z "$errs" ]] && _WALK=""
+    printf 'sessions.sh: liveness walk incomplete (find exit %s: %s) - reporting every asked-for session live\n' \
+        "$rc" "${errs:-${out%%$nl*}}" >&2
+    return 1
+}
+
 live_many() {
     (( $# )) || return 0
     load_dirs
     local id la c ar f files=() names=() stats=() clis=() wmeta="" wmt="" tmeta=""
+    # procsub guard: each walk's status is checked (walk_rows) before its rows are
+    # used. Fed straight into a loop via `< <(find ...)`, a walk that failed found
+    # no wrapper and no transcript, and the session read IDLE: the one direction
+    # that lets the land gate through. A failed walk now reads every asked-for
+    # session live (walk_failed), the cautious answer for every caller.
+    local walk_failed=0
     for id in "$@"; do [[ -z "$id" || "$id" == cli:* ]] || names+=(-o -name "$id.json"); done
     if (( ${#names[@]} && ${#STORES[@]} )) && command -v jq >/dev/null 2>&1; then
-        while IFS= read -r f; do [[ -n "$f" ]] && files+=("$f"); done \
-            < <(find "${STORES[@]}" -type f \( "${names[@]:1}" \) 2>/dev/null)
+        walk_rows "${STORES[@]}" -type f \( "${names[@]:1}" \) || walk_failed=1
+        while IFS= read -r f; do [[ -n "$f" ]] && files+=("$f"); done <<< "$_WALK"
         if (( ${#files[@]} )); then
             wmeta=$(wrapper_live_meta "${files[@]}")
             stat_flavour
@@ -703,6 +742,7 @@ live_many() {
     names=()
     for c in ${clis[@]+"${clis[@]}"}; do names+=(-o -name "$c.jsonl" -o -name "$c"); done
     if (( ${#names[@]} && ${#TROOTS[@]} )); then
+        walk_rows "${TROOTS[@]}" -mindepth 2 -maxdepth 2 \( "${names[@]:1}" \) || walk_failed=1
         while IFS= read -r f; do
             [[ -n "$f" ]] || continue
             if [[ -d "$f" ]]; then
@@ -710,7 +750,7 @@ live_many() {
             elif [[ "$f" == *.jsonl ]]; then
                 stats+=("$f")
             fi
-        done < <(find "${TROOTS[@]}" -mindepth 2 -maxdepth 2 \( "${names[@]:1}" \) 2>/dev/null)
+        done <<< "$_WALK"
     fi
     if (( ${#stats[@]} )); then
         stat_flavour
@@ -729,7 +769,7 @@ live_many() {
 
     local now_s rows; now_s=$(date +%s)
     rows=$(awk -F'\t' -v now="$(( now_s * 1000 ))" -v win="$(( LIVE_SECS * 1000 ))" \
-               -v grace="$(( ARCHIVE_GRACE_SECS * 1000 ))" '
+               -v grace="$(( ARCHIVE_GRACE_SECS * 1000 ))" -v failed="$walk_failed" '
         FILENAME == ARGV[1] { if ($1 != "") { t[$1] = $2 + 0; tp[$1] = $3 }; next }
         FILENAME == ARGV[2] { if ($1 != "" && (!($1 in wm) || $2 + 0 < wm[$1])) wm[$1] = $2 + 0; next }
         FILENAME == ARGV[3] {
@@ -746,7 +786,7 @@ live_many() {
             tx = (c != "" && (c in t)) ? t[c] : 0
             if (a == "1" && ($0 in wm)) last = (tx > wm[$0] + grace) ? tx : 0
             else if (tx > last) last = tx
-            live = (last > 0 && now - last <= win) ? 1 : 0
+            live = (failed || (last > 0 && now - last <= win)) ? 1 : 0
             printf "%s\t%d\t%s\t%s\n", $0, live, a, (c != "" && (c in tp)) ? tp[c] : ""
         }' <(printf '%s\n' "$tmeta") <(printf '%s\n' "$wmt") <(printf '%s\n' "$wmeta") <(printf '%s\n' "$@"))
     [[ -n "$rows" ]] || return 0
@@ -947,6 +987,9 @@ live_transcripts_under() {
     [[ -n "$key" ]] || return 0
     load_dirs
     (( ${#TROOTS[@]} )) || return 0
+    # procsub gap: a find that fails here (or in the walk below) loses the probe, so
+    # a session the 15-minute cache does not know yet is missed; the gate ignores
+    # sessions.sh's status, so no return code can help. Closed by lane/procsub-gate.
     while IFS= read -r d; do [[ -n "$d" ]] && dirs+=("$d"); done \
         < <(find "${TROOTS[@]}" -mindepth 1 -maxdepth 1 -type d -iname "$key" 2>/dev/null)
     (( ${#dirs[@]} )) || return 0
@@ -986,6 +1029,8 @@ live_cwd_in() {
     (( ${#TROOTS[@]} )) || return 0
     now_s=$(date +%s)
     stat_flavour
+    # procsub gap: a find that fails reads as "no live cwd here", losing the probe's
+    # cwd route; the gate ignores sessions.sh's status. Closed by lane/procsub-gate.
     listing=$(find "${TROOTS[@]}" -mindepth 2 -maxdepth 2 -type f -name '*.jsonl' \
                 -mmin "-$(( LIVE_SECS / 60 + 2 ))" -exec stat "${_STATFMT[@]}" {} + 2>/dev/null)
     [[ -n "$listing" ]] || return 0
@@ -1020,6 +1065,8 @@ wrappers_for_clis() {
     (( ${#STORES[@]} )) || return 0
     local c f pats=() files=()
     for c in "$@"; do pats+=(-e "$c"); done
+    # procsub ok: a grep that fails leaves the live transcripts unattributed, so they
+    # are reported as cli:<id>, still live and never self: the gate errs toward refusing.
     while IFS= read -r f; do [[ -n "$f" ]] && files+=("$f"); done \
         < <(grep -rlF --include='local_*.json' "${pats[@]}" "${STORES[@]}" 2>/dev/null)
     (( ${#files[@]} )) || return 0
@@ -1062,6 +1109,7 @@ freshen_claims() {
     # is exactly what the probe sees for LIVE_SECS afterwards, so an archived
     # session's verdict is live_many's: live only on a write after the archive.
     local ids=()
+    # procsub ok: printf and awk over in-memory rows; nothing here can stop early.
     while IFS= read -r id; do [[ -n "$id" ]] && ids+=("$id"); done \
         < <(printf '%s\n%s\n' "$rows" "$probe" | awk -F'\t' 'NF && !s[$3]++ { print $3 }')
     fresh_map=$(live_many ${ids[@]+"${ids[@]}"}
@@ -1153,6 +1201,10 @@ claimants_of() {
     names=$(project_index <<< "$WIDE" | awk -F'\t' -v OFS='\t' -v b="$branch" \
         '$1 == b { print "", "", $2, $3, $4, $6, $7, "branch" }')
     paths=$(project_paths <<< "$WIDE")
+    # procsub gap: branch_worktrees swallows git's status, so a failed `git worktree
+    # list` loses the DIRECTORY join and a session working in the lane's tree by path
+    # is not a claimant; the gate ignores sessions.sh's status. Closed by
+    # lane/procsub-gate.
     while IFS= read -r wt; do [[ -n "$wt" ]] && wts+=("$wt"); done < <(branch_worktrees "$branch")
     (( ${#wts[@]} )) || wts=("")
     for (( i = 0; i < ${#wts[@]}; i++ )); do
@@ -1278,6 +1330,8 @@ cmd_where() {
     for id in "$@"; do [[ -z "$id" || "$id" == cli:* ]] || names+=(-o -name "$id.json"); done
     (( ${#names[@]} )) || return 0
     for st in "${STORES[@]}"; do
+        # procsub ok: "which store holds this wrapper"; a failed walk under-reports,
+        # and sweep (the one caller) then reads the session's reach as unknown, not here.
         while IFS= read -r f; do
             [[ -n "$f" ]] || continue
             f=${f##*/}

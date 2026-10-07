@@ -1892,6 +1892,31 @@ mk_tx cli-archnow "$(bs_path "$(awt_path arch-now)")" 3       # the archive's ow
 [ "$(bash "$SESSIONS" live local_archnow 2>/dev/null)" = "0" ] \
   && ok "live <id>: an archived session's shutdown write is not activity (land gate)" || no "live <id> reads a just-archived session live"
 
+# live_many's two walks fed loops via `< <(find ...)`, which hid find's status: a
+# walk that failed read the session IDLE, the one direction that lets the land
+# gate through. A failed walk now reads every asked-for session live and names
+# the failure; a file that vanished mid-walk (a wrapper rewrite) is a race, not a
+# gap, and changes nothing. Each shim runs the real find, then fails ONE walk.
+mkdir -p "$SB/fs-store" "$SB/fs-tx" "$SB/fs-race"
+REAL_FIND="$(command -v find)"
+printf '#!/bin/sh\ncase "$*" in *"-type f ( -name"*) "%s" "$@"; echo "find: %s: Permission denied" >&2; exit 1 ;; esac\nexec "%s" "$@"\n' \
+  "$REAL_FIND" "'$SB/astore'" "$REAL_FIND" > "$SB/fs-store/find"
+printf '#!/bin/sh\ncase "$*" in *"-maxdepth 2 ( -name"*) echo "find: %s: Permission denied" >&2; exit 1 ;; esac\nexec "%s" "$@"\n' \
+  "'$ATX'" "$REAL_FIND" > "$SB/fs-tx/find"
+printf '#!/bin/sh\ncase "$*" in *"-type f ( -name"*) "%s" "$@"; echo "find: %s: No such file or directory" >&2; exit 1 ;; esac\nexec "%s" "$@"\n' \
+  "$REAL_FIND" "'$ASTORE/.local_gone.json.tmp'" "$REAL_FIND" > "$SB/fs-race/find"
+chmod +x "$SB/fs-store/find" "$SB/fs-tx/find" "$SB/fs-race/find"
+lv_out="$(PATH="$SB/fs-store:$PATH" bash "$SESSIONS" live local_archnow 2>&1 >/dev/null)"
+[ "$(PATH="$SB/fs-store:$PATH" bash "$SESSIONS" live local_archnow 2>/dev/null)" = "1" ] \
+  && ok "live <id>: a failed store walk reads LIVE (cautious), not idle" || no "a failed store walk read local_archnow idle"
+case "$lv_out" in *"liveness walk incomplete"*"Permission denied"*) ok "...and the warning names the failure";;
+  *) no "failed store walk: warning missing or unnamed: $lv_out";; esac
+mk_tx cli-midturn "$(bs_path "$(awt_path midturn)")" 5   # fresh again: live by transcript only
+[ "$(PATH="$SB/fs-tx:$PATH" bash "$SESSIONS" live local_midturn 2>/dev/null)" = "1" ] \
+  && ok "live <id>: a failed transcript walk still reads a mid-turn session live" || no "a failed transcript walk read local_midturn idle"
+[ "$(PATH="$SB/fs-race:$PATH" bash "$SESSIONS" live local_archnow 2>/dev/null)" = "0" ] \
+  && ok "live <id>: a file vanished mid-walk is a race, not a failure (stays idle)" || no "a vanished-file race forced local_archnow live"
+
 mk_awt arch-dirty claude/arch-dirty
 echo scratch > "$(awt_path arch-dirty)/UNSAVED.txt"
 mk_wrap local_archdirty "Archived, left files" "$(bs_path "$(awt_path arch-dirty)")" 7200 claude/arch-dirty true cli-archdirty
@@ -1945,6 +1970,17 @@ git -C "$(awt_path left-behind)" bisect start >/dev/null 2>&1
 [ "$(pa left-behind)" = REVIEW ] && ok "...but a bisect in progress there => REVIEW" \
   || no "detached tree mid-bisect classified '$(pa left-behind)'"
 git -C "$(awt_path left-behind)" bisect reset >/dev/null 2>&1
+# The state paths came from a loop fed by `< <(git rev-parse --git-path ...)`, which
+# hid git's status: a rev-parse that failed read as "no operation in progress" and
+# the tree came back SAFE. The shim fails only that call.
+mkdir -p "$SB/opshim"
+printf '#!/bin/sh\ncase "$*" in *--git-path*) echo "fatal: simulated rev-parse failure" >&2; exit 128 ;; esac\nexec "%s" "$@"\n' \
+  "$(command -v git)" > "$SB/opshim/git"
+chmod +x "$SB/opshim/git"
+[ "$(PATH="$SB/opshim:$PATH" pa left-behind)" = REVIEW ] && ok "...and with its git state unreadable => REVIEW, not SAFE" \
+  || no "detached tree with unreadable git state classified '$(PATH="$SB/opshim:$PATH" pa left-behind)'"
+[ "$(pa left-behind)" = SAFE ] && ok "...and SAFE again once git answers (the shim was the only cause)" \
+  || no "left-behind no longer SAFE without the shim: '$(pa left-behind)'"
 mk_awt left-ahead claude/left-ahead
 LAWT=$(awt_path left-ahead)
 echo more > "$LAWT/more.txt"; git -C "$LAWT" add -A; git -C "$LAWT" -c user.email=w@t -c user.name=w commit -qm more

@@ -132,6 +132,19 @@ ee "a repo with leftovers exits 10 (findings)" 10 "$swx"
 case "$(printf '%s\n' "$SWOUT" | awk -F'\t' '$1 == "compete" && $2 == "lane/comp-a <> lane/comp-b" { print $4 }')" in
   *"uncommitted in lane/comp-b"*) ok "the competing pair names the side whose overlap is uncommitted" ;;
   *) no "no competing pair, or it misses which side is uncommitted" ;; esac
+# A lane whose diff against base could not be read was silently non-competing: its
+# committed files came from a loop fed by `< <(git diff ...)`, which hid git's
+# status, so it read LAND beside a lane holding edits to the same file. The shim
+# fails only comp-a's diff (merge-tree's --name-only runs for real).
+mkdir -p "$SB/sw-gshim"
+printf '#!/bin/sh\ncase "$*" in *"diff --name-only"*"lane/comp-a"*) echo "fatal: simulated diff failure" >&2; exit 128 ;; esac\nexec "%s" "$@"\n' \
+  "$(command -v git)" > "$SB/sw-gshim/git"
+chmod +x "$SB/sw-gshim/git"
+SWOUT_D=$(PATH="$SB/sw-gshim:$PATH" sw_as_self bash "$FLEET" sweep --porcelain 2>/dev/null)
+sw_d=$(printf '%s\n' "$SWOUT_D" | awk -F'\t' '$1 == "worktree" && $2 ~ /comp-a$/ { print $3 "|" $4; exit }')
+case "$sw_d" in
+  "INSPECT|could not read its diff"*) ok "a lane whose diff cannot be read reads INSPECT, not LAND" ;;
+  *) no "a lane whose diff failed read [$sw_d], want INSPECT" ;; esac
 printf '%s\n' "$SWOUT" | awk -F'\t' '$1 == "compete" && $2 ~ /led-/' | grep -q . \
   && no "lanes touching only CHANGELOG.md flagged as competing" || ok "a ledger-only overlap is not competing"
 

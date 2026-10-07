@@ -95,6 +95,18 @@ still blocks. An `isArchived` that is missing or not a boolean reads `?` (every
 wrapper seen carries a boolean, so anything else is a format change). That is
 never presumed archived: the session keeps timestamp liveness and counts as open.
 
+**A liveness read that could not finish reads live** (2026-10-07). The re-read walks
+the stores and the transcript roots with `find`, and until then a walk that failed
+found no wrapper and no transcript, so the session read idle: the direction that lets
+the gate through and lets prune call a tree SAFE. Now a failed walk reports every
+session asked about as live, and prints `sessions.sh: liveness walk incomplete (find
+exit N: <error>)` on stderr. Callers discard that stderr, so if every claimant suddenly
+reads live, run `sessions.sh live <id>` to see why. An entry that vanished mid-walk
+("No such file or directory": a wrapper rewritten, a transcript removed) is a race,
+not a gap, and changes nothing. The claim lookups around the re-read (`git worktree
+list`, the two transcript probes) still fail silently, because the gate ignores
+`sessions.sh`'s exit status; making the gate refuse on them is a separate change.
+
 **Self-ownership is exempt.** The hazard is a *concurrent* writer, and the session
 running `fleet land` is not one — it is blocked inside that call, so it is provably not
 mid-commit, and the worktree being rebased "out from under a live session" is the one it
