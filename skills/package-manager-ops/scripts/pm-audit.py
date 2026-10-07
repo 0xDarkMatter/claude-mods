@@ -58,9 +58,11 @@ module (Python 3.8+). Jump by section marker instead of splitting it:
                            GitHub Actions job and step boundaries (workflow_jobs,
                            enclosing_item), CI working directories (join_dir), gitignore /
                            dockerignore matching, read-only git queries (git_says), redact()
-  === the audit ===        Audit: js, nested, node_pins, php, runtime_floors, npx, deploy
-                           (+ credential bundle/image checks), legacy, secrets,
-                           pnpm_placeholders, install_policy
+  === the audit ===        Audit: js (+ paired drift and lock sources), nested, node_pins,
+                           php (+ Craft support), runtime_floors, composer_line,
+                           install_policy, npx, deploy (+ local CI, extra install sites,
+                           credential bundle/image checks), legacy, secrets,
+                           pnpm_placeholders
   main()                   argv, output envelope, exit codes
 
 Examples:
