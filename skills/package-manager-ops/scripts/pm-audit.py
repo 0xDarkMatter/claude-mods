@@ -49,7 +49,9 @@ masked whatever check quoted them. tests/run.sh greps all output of every fake-s
 
 Why one file: the skill folder must run when copied alone into another plugin, launched
 through scripts/run-python.sh with nothing on sys.path, so this stays a single stdlib
-module (Python 3.8+). Jump by section marker instead of splitting it:
+module (Python 3.8+). Jump by section marker instead of splitting it.
+
+Sections:
   === version ranges ===   npm semver + Composer constraint intervals (admits()), and the
                            span a literal pin can select (pin_span())
   === small readers ===    BOM-aware text, JSON/JSONC, a block-mapping YAML subset, markdown
@@ -182,12 +184,14 @@ def npmrc_write_has_secret(line: str) -> bool:
     """Does a CI line that writes .npmrc put a usable credential in it?
 
     An .npmrc is not a credential file by itself: `@scope:registry=<url>` carries none.
-    When the line shows its content (echo/printf), only an auth key counts, and a value
-    kept as a literal `${VAR}` inside single quotes stays a placeholder that npm expands at
-    run time - the file holds no secret. Double quotes or no quotes let the SHELL expand it,
-    so the token is written. Content the line does not show (a heredoc, envsubst, curl)
-    is assumed to carry one."""
-    if not re.search(r"\b(?:echo|printf)\b", line):
+    When the line shows its content (echo/printf straight into the file, or through
+    `tee`), only an auth key counts, and a value the shell leaves as a literal `${VAR}` -
+    inside single quotes, or escaped as `\\${VAR}` - stays a placeholder that npm expands
+    at run time: the file holds no secret. Double quotes or no quotes let the SHELL expand
+    it, so the token is written. Content the line does not show (a heredoc, curl) or
+    pipes through another command first (`| envsubst`, `| sed`) is assumed to carry one."""
+    # A single `|` into anything but tee transforms the text; `||` is control flow, not a pipe.
+    if not re.search(r"\b(?:echo|printf)\b", line) or re.search(r"(?<!\|)\|(?!\|)\s*(?!tee\b)[\w./-]", line):
         return True
     keys = list(NPMRC_AUTH.finditer(line))
     if not keys:
@@ -195,7 +199,8 @@ def npmrc_write_has_secret(line: str) -> bool:
     singles = [(m.start(), m.end()) for m in re.finditer(r"'[^']*'", line)]
     for key in keys:
         quoted = any(a < key.start() < b for a, b in singles)
-        if not (quoted and re.match(r"^\$\{?\w+\}?", key.group(1))):
+        literal = (quoted and re.match(r"^\$\{?\w+\}?", key.group(1))) or re.match(r"^\\\$\{?\w+\}?", key.group(1))
+        if not literal:
             return True
     return False
 # A COPY/ADD of the whole build context. Group 1 = its flags: `COPY --from=<stage> . /app`
@@ -409,22 +414,26 @@ def admits(spec: str, lo, hi, dialect: str = "npm"):
 
 
 def pin_span(raw: str, exact: bool = False):
-    """A literal version pin -> (lo, hi, label): the half-open span of versions it can
-    select. A partial pin installs its newest release ("20" -> [20.0.0, 21.0.0), "8.2" ->
-    [8.2.0, 8.3.0)); a full one, or any pin with exact=True (Composer's config.platform,
-    which resolves against exactly that version), selects only itself. None when raw is
-    not a literal pin (`lts/*`, `node`, an expression)."""
-    m = re.match(r"^\s*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?\s*$", raw or "")
+    """A literal version pin -> (lo, hi, label): the half-open span of versions that stand
+    for what it installs. A partial pin installs its NEWEST release, so its span is the top
+    of its line ("20" -> [20.999999.0, 21.0.0), "8.2" -> [8.2.999999, 8.3.0)): a range that
+    stops early in the line (`<20.1.0`) rejects it. A full pin, or any pin with exact=True
+    (Composer's config.platform, which resolves against exactly that version), is only
+    itself. A prerelease (`20.19.0-rc.1`) counts as its release - this parser has no
+    prerelease ordering (the same boundary as admits()). None when raw is not a literal pin
+    (`lts/*`, `node`, an expression)."""
+    m = re.match(r"^\s*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-[0-9A-Za-z.-]+)?\s*$", raw or "")
     if not m:
         return None
     parts = [int(x) for x in m.groups() if x is not None]
-    lo = tuple(parts + [0] * (3 - len(parts)))
+    label = raw.strip().lstrip("v")
     if exact or len(parts) == 3:
-        hi = (lo[0], lo[1], lo[2] + 1)
-    else:
-        bumped = parts[:-1] + [parts[-1] + 1]
-        hi = tuple(bumped + [0] * (3 - len(bumped)))
-    return lo, hi, ".".join(map(str, parts))
+        lo = tuple(parts + [0] * (3 - len(parts)))
+        return lo, (lo[0], lo[1], lo[2] + 1), label
+    top = 10 ** 6  # above any real minor or patch number
+    lo = (parts[0], top, 0) if len(parts) == 1 else (parts[0], parts[1], top)
+    hi = (parts[0] + 1, 0, 0) if len(parts) == 1 else (parts[0], parts[1] + 1, 0)
+    return lo, hi, label
 
 
 # =============================================================================
@@ -2025,6 +2034,10 @@ class Audit:
             return
         version = str(craft.get("version") or "")
         m = re.match(r"^(?:v|dev-)?(\d+)", version)
+        if not m and version.startswith("dev-"):
+            # A named branch (dev-develop) declares its line in extra.branch-alias ("4.x-dev").
+            alias = obj(obj(craft.get("extra")).get("branch-alias")).get(version)
+            m = re.match(r"^v?(\d+)", str(alias or ""))
         majors = {int(k): v for k, v in obj(obj(self.facts.get("craft")).get("majors")).items() if str(k).isdigit()}
         if not m or not majors:
             self.blind("craft", f"cannot read the Craft major ({version or 'no version'}) or facts craft.majors")
@@ -2607,22 +2620,40 @@ class Audit:
                 values = []
                 for value in obj(scripts).values():
                     values += value if isinstance(value, list) else [value]
-                # Report the script's own FILE line: find its JSON-encoded text in order
-                # (None if the file spells it differently, e.g. with \u escapes).
+                # Report the script's own FILE line: find its JSON-encoded text in order. A
+                # script the file spells differently (\u escapes) falls back to the `scripts`
+                # key's line - never None: later steps order and compare these lines.
                 text_lines, cursor, commands = text.splitlines(), 0, []
+                scripts_at = next((i + 1 for i, t in enumerate(text_lines) if re.search(r'"scripts"\s*:', t)), 1)
                 for command in (c for c in values if isinstance(c, str)):
                     needle = json.dumps(command, ensure_ascii=False)
                     at = next((i for i in range(cursor, len(text_lines)) if needle in text_lines[i]), None)
                     cursor = at if at is not None else cursor
-                    line_no = at + 1 if at is not None else None
+                    line_no = at + 1 if at is not None else scripts_at
                     commands.append((line_no, command, line_no))
             elif kind == "automation" and path == ddev_config:
-                commands = [(i, scalar(m.group(1)), i) for i, line in enumerate(text.splitlines(), 1)
-                            if (m := re.match(r"^\s*(?:-\s*)?(?:exec(?:-host|-container)?|command)\s*:\s*(.*)$", line))]
+                commands, text_lines = [], text.splitlines()
+                for i, line in enumerate(text_lines, 1):
+                    m = re.match(r"^(\s*)(-\s*)?(?:exec(?:-host|-container)?|command)\s*:\s*(.*)$", line)
+                    if not m:
+                        continue
+                    value = m.group(3).strip()
+                    if not re.match(r"^[|>][-+]?\d*\s*(?:#.*)?$", value):
+                        commands.append((i, scalar(value), i))
+                        continue
+                    # A block scalar (`exec: |`): the lines indented deeper than the KEY are
+                    # the command text; a sibling key (`service: web`) at the key's column ends it.
+                    key_col = len(m.group(1)) + len(m.group(2) or "")
+                    for j in range(i, len(text_lines)):
+                        body = text_lines[j]
+                        if body.strip() and len(body) - len(body.lstrip()) <= key_col:
+                            break
+                        if body.strip():
+                            commands.append((j + 1, body.strip(), i))
             elif path.suffix in (".yml", ".yaml"):
                 commands = list(yaml_command_lines(text))
                 local_commands, missing = self._local_uses_commands(rel, text)
-                commands += local_commands
+                commands += local_commands  # ordered by their (line, seq) key below, not by list position
                 for reason in missing:
                     self.blind("deploy", reason)
             elif path.name.lower().startswith("dockerfile"):
@@ -2643,17 +2674,22 @@ class Audit:
                     end = obj(self.facts.get("composer")).get("v1_maintenance_until") or "2026-05-30"
                     flag("php.composer.v1", rel, n, f"Composer 1 in {rel} - it reached end of life ({end})",
                          "use Composer 2 (`tools: composer:v2`, the composer:2 image); see references/legacy-exits.md")
+            # Execution order for writes, removals, builds and bundles: (line, seq). A line
+            # number alone cannot order two commands on one line (`rm -f .npmrc && zip ...`) or
+            # the commands of a local action, which all report its `uses:` line.
+            seq = 0
             for n, line, key_n in commands:
                 if key_n != block:
                     block, stack = key_n, []
                     cwd, env = start_dir(key_n)
+                seq += 1
                 # A credential write is placed where its block's shell stands; ~/.npmrc,
                 # $HOME/..., absolute and ../ paths come back None (outside any context).
                 m = CRED_WRITE.search(line) if ci else None
                 if m and not (m.group(2) == ".npmrc" and not npmrc_write_has_secret(line)):
-                    writes.append((rel, n, m.group(2), join_dir(cwd, m.group(1), env)))
+                    writes.append((rel, n, m.group(2), join_dir(cwd, m.group(1), env), (n, seq)))
                 elif ci and CRED_CONFIG.search(line):
-                    writes.append((rel, n, "auth.json", join_dir(cwd, "auth.json", env)))
+                    writes.append((rel, n, "auth.json", join_dir(cwd, "auth.json", env), (n, seq)))
                 if re.search(r"https?://getcomposer\.org/installer\b", line, re.I) and re.search(
                         r"\|\s*(?:sudo\s+)?php\b", line, re.I):
                     flag("deploy.composer.installer-unverified", rel, n,
@@ -2662,6 +2698,7 @@ class Audit:
                 # A `cd` moves the rest of its shell block (undone at the end of a subshell);
                 # installs and builds run where it left off.
                 for words in simple_commands(line):
+                    seq += 1
                     if words == ["("]:
                         stack.append(cwd)
                         continue
@@ -2672,23 +2709,23 @@ class Audit:
                         cwd = join_dir(cwd, words[1], env)
                         continue
                     if ci and words[0] == "rm":
-                        removals += [(rel, n, join_dir(cwd, a, env)) for a in words[1:] if not a.startswith("-")]
+                        removals += [(rel, n, join_dir(cwd, a, env), (n, seq)) for a in words[1:] if not a.startswith("-")]
                     built = docker_build(words) if ci else None
                     if built:
                         ctx = join_dir(cwd, built[0], env)
                         dfile = (join_dir(cwd, built[1], env) if built[1]
                                  else posixpath.join(ctx, "Dockerfile") if ctx is not None else None)
-                        builds.append((rel, n, ctx, dfile))
+                        builds.append((rel, n, ctx, dfile, (n, seq)))
                     bundled = self._bundle_source(words, cwd, env) if ci else None
                     if bundled:
-                        bundles.append((rel, n, *bundled))
+                        bundles.append((rel, n, *bundled, (n, seq)))
                     for tool, args in command_tools(words):
                         active_env = {name: self._env_enabled(rel, kind, text, n, name) for name in (
                             "COMPOSER_NO_DEV", "COMPOSER_NO_SECURITY_BLOCKING", "COMPOSER_NO_AUDIT")}
                         self._install_line(tool, args, rel, n, kind, ships(n), cwd, flag, env, active_env)
             if ci:
                 self._ramsey(text, rel, ships, flag, kind)
-                builds += self._action_builds(rel, text, start_dir)
+                builds += [(*b, (b[1], 0)) for b in self._action_builds(rel, text, start_dir)]
         self._image_leaks(writes, builds, scopes, flag)
         self._bundle_leaks(writes, bundles, scopes, flag, removals)
 
@@ -2727,15 +2764,15 @@ class Audit:
     def _bundle_leaks(self, writes, bundles, scopes, flag, removals=()):
         """Credential files created by CI must not enter a later deploy archive/source,
         unless an `rm` of that path in the same job runs between the write and the bundle."""
-        for rel, n, cred, path in writes:
+        for rel, n, cred, path, at in writes:
             if path is None:
                 continue
             scope = scopes.get(rel, lambda _n: 0)
-            for brel, bn, ctx, excludes, label in bundles:
-                if brel != rel or bn <= n or ctx is None or scope(bn) != scope(n):
+            for brel, bn, ctx, excludes, label, bat in bundles:
+                if brel != rel or bat <= at or ctx is None or scope(bn) != scope(n):
                     continue
-                if any(rrel == rel and n < rn < bn and rpath == path and scope(rn) == scope(n)
-                       for rrel, rn, rpath in removals):
+                if any(rrel == rel and at < rat < bat and rpath == path and scope(rn) == scope(n)
+                       for rrel, rn, rpath, rat in removals):
                     continue
                 inside = path if ctx == "" else (path[len(ctx) + 1:] if path.startswith(ctx + "/") else None)
                 if inside is None:
@@ -2849,12 +2886,12 @@ class Audit:
         the daemon; `COPY --from=<stage> .` reads another stage; .dockerignore is matched
         on the path inside the context, root-anchored, last match winning (dockerignored()),
         and Docker prefers <Dockerfile>.dockerignore next to the Dockerfile (BuildKit)."""
-        for rel, n, cred, path in writes:
+        for rel, n, cred, path, at in writes:
             if path is None:
                 continue
             scope = scopes.get(rel, lambda _n: 0)
-            for brel, bn, ctx, dfile in builds:
-                if brel != rel or bn <= n or ctx is None or dfile is None or scope(bn) != scope(n):
+            for brel, bn, ctx, dfile, bat in builds:
+                if brel != rel or bat <= at or ctx is None or dfile is None or scope(bn) != scope(n):
                     continue
                 inside = path if ctx == "" else (path[len(ctx) + 1:] if path.startswith(ctx + "/") else None)
                 df = self.root / dfile

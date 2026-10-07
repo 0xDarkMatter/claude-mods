@@ -52,8 +52,8 @@ a pass.
 Package scripts, Composer scripts, DDEV hooks/commands, Just recipes and Make recipes are
 local tooling: a developer is meant to run `npm install` or `composer update` there, so
 only the rules that hold everywhere apply - an unpinned global install
-(`deploy.global.unpinned`, at the script's own file line), the Composer installer check and
-the npx findings. The frozen-install, `--no-dev` and ad-hoc Composer rules stay CI and
+(`deploy.global.unpinned`, at the script's own file line; DDEV hooks written as a block
+scalar, `exec: |`, are read line by line), the Composer installer check and the npx findings. The frozen-install, `--no-dev` and ad-hoc Composer rules stay CI and
 deploy rules. A repo with local tooling but no CI or deploy file still reports the deploy
 check skipped, so a clean result there is never read as "CI is fine".
 
@@ -87,7 +87,7 @@ workflow, job or step scope (or an earlier Dockerfile `ENV`) satisfy the same ru
 | `js.install-policy` | warn | pnpm enables `dangerouslyAllowAllBuilds` (pnpm-workspace.yaml, package.json `pnpm`, or .npmrc `dangerously-allow-all-builds`; the finding names the file), bypassing every per-package build-script decision. `meta.install_policy` separately records which controls are set, including pnpm 10's build lists (removed in pnpm 11 for `allowBuilds`) and `strictDepBuilds: false` | [scripts-and-workspaces.md](scripts-and-workspaces.md#dependency-install-scripts-are-blocked-by-default) |
 | `js.dep.non-registry` | warn | package.json points a dependency at git/GitHub, a local file/link, or a direct HTTP(S) tarball rather than the configured registry | [registries-and-auth.md](registries-and-auth.md) |
 | `js.dep.paired-drift` | warn | Vue 2 and vue-template-compiler differ at all (Vue 3 and @vue/compiler-sfc by major.minor); a locked @vitejs/* or @tailwindcss/* package's own `peerDependencies` range rejects the locked vite or tailwindcss (majors alone prove nothing: those plugins version on their own); or one direct dependency's MAJOR differs between nested package roots | [upgrades.md](upgrades.md#duplicate-versions) |
-| `js.engine.floor` | warn | a literal Node pin (.nvmrc, .node-version, setup-node) can select no version that a package's `engines.node` in package-lock v2/v3 accepts. A partial pin (`20`) means its newest release, a full one (`20.11.1`) only itself. No literal pin: `runtime.floors` is skipped | [version-pinning.md](version-pinning.md#the-recommended-node-pin-set) |
+| `js.engine.floor` | warn | a literal Node pin (.nvmrc, .node-version, setup-node) can select no version that a package's `engines.node` in package-lock v2/v3 accepts. A partial pin (`20`) means its newest release, so a range that stops early in the line (`<20.1.0`) rejects it; a full one (`20.11.1`, or a prerelease such as `20.19.0-rc.1`, read as its release) means only itself. No literal pin: `runtime.floors` is skipped | [version-pinning.md](version-pinning.md#the-recommended-node-pin-set) |
 | `js.root.not-private` | warn | a root package with dependencies is not private and has no conservative publication signal (`files`, `publishConfig`, exports/main, scoped name, or a non-default version) | [detect-and-choose.md](detect-and-choose.md) |
 | `js.packagemanager.mismatch` | error | `packageManager` names a manager (or Yarn flavour) the lockfile is not from | [detect-and-choose.md](detect-and-choose.md#declaring-the-manager-packagemanager-corepack-devengines) |
 | `js.manifest.invalid` | error | package.json is not valid JSON, or not a JSON object | - |
@@ -128,7 +128,7 @@ workflow, job or step scope (or an earlier Dockerfile `ENV`) satisfy the same ru
 | `deploy.composer.safety-off` | warn | a shipping Composer command disables advisory/malware blocking, audit, or all platform requirements through a flag or environment setting | [install-semantics.md](install-semantics.md#deploy-patterns) |
 | `deploy.composer.adhoc` | warn | CI or deploy runs `composer require`, `composer global require` or `composer update` instead of installing the committed lock | [install-semantics.md](install-semantics.md#composer-install-versus-composer-update) |
 | `deploy.composer.installer-unverified` | warn | the Composer installer is fetched and piped to PHP without downloading `installer.sig` and checking its SHA-384 hash first | [registries-and-auth.md](registries-and-auth.md) |
-| `deploy.bundle.credentials` | error | CI writes auth.json or a token-bearing .npmrc inside a later zip/CodeDeploy source, no `rm` of it runs first, and the bundle excludes (`-x`, `-x@list`, `--exclude=`, `--ignore-hidden-files`) do not remove it. An .npmrc line with no auth key, or a `${VAR}` kept literal in single quotes, carries no secret (the same test applies to credentials in Docker images) | [registries-and-auth.md](registries-and-auth.md#ci-wiring) |
+| `deploy.bundle.credentials` | error | CI writes auth.json or a token-bearing .npmrc inside a later zip/CodeDeploy source, no `rm` of it runs first, and the bundle excludes (`-x`, `-x@list`, `--exclude=`, `--ignore-hidden-files`) do not remove it. An .npmrc line with no auth key, or a `${VAR}` the shell keeps literal (single quotes, or `\${VAR}`), carries no secret; one piped through another command first (`\| envsubst`) is assumed to. Order is execution order, so `rm -f .npmrc && zip ...` and a write and zip inside one local action are judged correctly (the same tests apply to credentials in Docker images) | [registries-and-auth.md](registries-and-auth.md#ci-wiring) |
 | `php.composer.v1` | warn | CI or a Dockerfile uses Composer 1, end of life since 2026-05-30 | [legacy-exits.md](legacy-exits.md#composer-1-to-composer-2) |
 
 The end-of-life checks read dated tables from `assets/package-manager-facts.json`; pass

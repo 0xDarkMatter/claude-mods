@@ -298,8 +298,18 @@ mutation("legacy.package facts lookup", "legacy-package",
          'table = self.facts.get("legacy_packages")', 'table = self.facts.get("mutant_legacy_packages")')
 mutation("local composite action", "deploy-local-uses",
          'if not raw.startswith("./"):', 'if True:')
-mutation("pin span judges every selectable version", "clean-engine-floor-partial-pin",
-         'admits(spec, lo, hi, dialect) is False', 'admits(spec, lo, (lo[0], lo[1], lo[2] + 1), dialect) is False')
+mutation("a pin is not judged by its line's lowest version", "clean-engine-floor-partial-pin",
+         'admits(spec, lo, hi, dialect) is False', 'admits(spec, (lo[0], 0, 0), (lo[0], 0, 1), dialect) is False')
+mutation("a partial pin stands for its newest release", "js-engine-floor-partial-upper",
+         'lo = (parts[0], top, 0) if len(parts) == 1 else (parts[0], parts[1], top)',
+         'lo = (parts[0], 0, 0) if len(parts) == 1 else (parts[0], parts[1], 0)')
+mutation("bundles are ordered by execution, not line", "deploy-local-action-bundle",
+         'if brel != rel or bat <= at or ctx is None or scope(bn) != scope(n):',
+         'if brel != rel or bn <= n or ctx is None or scope(bn) != scope(n):')
+mutation("rm then zip on one line is ordered", "clean-bundle-rm-same-line",
+         'for words in simple_commands(line):\n                    seq += 1', 'for words in simple_commands(line):\n                    pass')
+mutation("a piped .npmrc write is assumed to carry a secret", "deploy-bundle-envsubst",
+         'or re.search(r"(?<!\\|)\\|(?!\\|)\\s*(?!tee\\b)[\\w./-]", line)', 'or False')
 mutation("dev Dockerfile is not a production PHP pin", "clean-php-floor-dev-dockerfile",
          'if re.search(r"dev|test", path.name, re.I):', 'if False:')
 mutation("vite partners judged by peers, not majors", "clean-paired-peers-valid",
@@ -595,7 +605,7 @@ cases = [
 bad = [f"{s!r}/{d}" for s, iv, d, want in cases if a.admits(s, iv[0], iv[1], d) is not want]
 bad += ["unparseable returns None"] if a.admits("banana", (1,0,0), (2,0,0)) is not None else []
 bad += ["npm has no != (None)"] if a.admits("!=1.0.0", (1,0,0), (2,0,0), "npm") is not None else []
-bad += ["partial pin spans its newest release"] if a.pin_span("20") != ((20,0,0), (21,0,0), "20") else []
+bad += ["partial pin spans its newest release"] if a.pin_span("20") != ((20,10**6,0), (21,0,0), "20") else []
 bad += ["exact pin spans itself"] if a.pin_span("8.2", exact=True) != ((8,2,0), (8,2,1), "8.2") else []
 print("ok" if not bad else "bad:" + "; ".join(bad))' "$AUDIT" 2>&1)"
 [[ "$rng" == ok ]] && ok "range parser: npm + Composer dialects (34 cases)" || no "range parser: $rng"
