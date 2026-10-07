@@ -235,7 +235,7 @@ class Audit:
             return
         score += 2
         text = entry.read_text(encoding="utf-8", errors="replace")
-        lines = text.count("\n") + 1
+        lines = len(text.splitlines())   # as agents-md.py counts; newlines + 1 overcounted by one
         self.facts["entry_doc_lines"] = lines
         if LANDMINE_PAT.search(text):
             score += 1
@@ -305,7 +305,8 @@ class Audit:
                 continue
             ntext = (self.repo / rel).read_text(encoding="utf-8", errors="replace") \
                 if (self.repo / rel).is_file() else ""
-            nlines, nchars = ntext.count("\n") + 1, len(ntext.replace("\r\n", "\n"))
+            # splitlines, like agents-md.py: a trailing newline ends a line, it doesn't add one
+            nlines, nchars = len(ntext.splitlines()), len(ntext.replace("\r\n", "\n"))
             if nlines > NESTED_CEILING_LINES or nchars > NESTED_CEILING_CHARS:
                 over = True
                 self.add("entry_docs", "warn",

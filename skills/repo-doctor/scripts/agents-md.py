@@ -122,7 +122,7 @@ SCHEMA_EXPLAIN = "claude-mods.repo-doctor.agents-md-explain/v1"
 # ARCHITECTURE.md (spec N6): the root is recommended; docs/ is accepted when it holds a
 # codemap. It has the root entry doc's budget, and its staleness is layout drift, never age.
 ARCH_FILES = ("ARCHITECTURE.md", "docs/ARCHITECTURE.md")
-ARCH_POINTER = "Read [ARCHITECTURE.md]({up}ARCHITECTURE.md) before adding a module or moving code between packages."
+ARCH_POINTER = "Read [{path}]({up}{path}) before adding a module or moving code between packages."
 # The layout fingerprint closes the draft: sha1 of the sorted layout (repo-scan
 # data.architecture.layout_fingerprint) and the folders it covered, so the audit can name
 # what was added or removed. Grammar: <!-- layout: <40 hex> (...) <folder/> ... -->
@@ -900,9 +900,20 @@ def create_file(dest: Path, text: str) -> int:
     return EX_OK
 
 
+def inside_repo(repo: Path, rel: str) -> bool:
+    """rel names a folder inside repo: not absolute, no drive, no .., and it resolves there."""
+    if not rel or rel.startswith("/") or re.match(r"^[A-Za-z]:", rel) or ".." in rel.split("/"):
+        return False
+    try:
+        (repo / rel).resolve().relative_to(repo.resolve())
+    except ValueError:
+        return False
+    return (repo / rel).is_dir()
+
+
 def scaffold_nested(args, repo: Path) -> int:
     d = args.dir.replace("\\", "/").strip("/")
-    if not d or ".." in d.split("/") or not (repo / d).is_dir():
+    if not inside_repo(repo, d):
         eecho(f"agents-md: --dir {args.dir!r} is not a folder inside {repo}")
         return EX_NOTFOUND
     d += "/"
@@ -913,6 +924,7 @@ def scaffold_nested(args, repo: Path) -> int:
     f = load_facts(repo, args.facts, None, [d])
     if f is None:
         return EX_ERR
+    f["candidates"] = open_candidates(repo, f.get("candidates") or [])
     root_rel = next((r for r in ("AGENTS.md", ".claude/AGENTS.md") if (repo / r).is_file()), None)
     root_text = read_raw(repo / root_rel) if root_rel else ""
     if not root_rel:
@@ -1018,6 +1030,7 @@ def scaffold_architecture(args, repo: Path) -> int:
     f = load_facts(repo, args.facts)
     if f is None:
         return EX_ERR
+    f["candidates"] = open_candidates(repo, f.get("candidates") or [])
     a = f.get("architecture") or {}
     if not a.get("warranted"):
         eecho("agents-md: the scan does not find ARCHITECTURE.md warranted (fewer than 2 nesting "
@@ -1041,6 +1054,15 @@ def scaffold_architecture(args, repo: Path) -> int:
     else:
         sys.stdout.write(draft)
     return EX_OK
+
+
+def open_candidates(repo: Path, cands: list[dict]) -> list[dict]:
+    """Candidates the ruled-out record doesn't answer: a draft and its interview never
+    re-ask what the owner already ruled out."""
+    if not (repo / RULED_OUT).is_file():
+        return cands
+    entries, _ = parse_ruled_out(read_raw(repo / RULED_OUT))
+    return apply_ruled_out(cands, entries, date.today().isoformat())[0]
 
 
 def scaffold_questions(f: dict) -> list[dict]:
@@ -1118,13 +1140,14 @@ def cmd_scaffold(args) -> int:
         return scaffold_nested(args, repo)
     if args.architecture:
         return scaffold_architecture(args, repo)
-    if args.write and (repo / "AGENTS.md").exists():
+    if args.write and ((repo / "AGENTS.md").exists() or (repo / ".claude/AGENTS.md").exists()):
         eecho(f"agents-md: {repo / 'AGENTS.md'} already exists; scaffold never overwrites "
               "(an owner's landmines live there). Upgrade it instead: agents-md.py audit --diff")
         return EX_PRECOND
     f = load_facts(repo, args.facts)
     if f is None:
         return EX_ERR
+    f["candidates"] = open_candidates(repo, f.get("candidates") or [])
     arch = args.archetype if args.archetype != "auto" else choose_archetype(f)
     draft = render_draft(f, arch)
     n = draft.count("\n")
@@ -1245,8 +1268,9 @@ def entry_files_in(repo: Path, d: str, prof: dict) -> list[tuple[str, bool]]:
         first = next((n for n in prof.get("first_match_order") or names if (repo / (d + n)).is_file()), None)
         return [(d + first, first not in ("AGENTS.md", "AGENTS.override.md"))] if first else []
     if prof.get("per_dir") == "claude-md-shadows-agents-md":
-        claude = [n for n in has if n != "AGENTS.md"]
-        return [(d + n, False) for n in (claude or [n for n in has if n == "AGENTS.md"])]
+        agents = ("AGENTS.md", ".claude/AGENTS.md")
+        claude = [n for n in has if n not in agents]
+        return [(d + n, False) for n in (claude or [n for n in has if n in agents])]
     return [(d + n, False) for n in has]
 
 
@@ -1264,7 +1288,8 @@ def explain_tool(repo: Path, folder: str, prof: dict, nested: list[str]) -> dict
             return
         seen.add(rel)
         text = read_raw(repo / rel)
-        files.append({"path": rel, "reason": reason, "bytes": len(text.encode("utf-8")), "chars": len(text),
+        files.append({"path": rel, "reason": reason, "bytes": len(text.encode("utf-8")),
+                      "chars": len(text.replace("\r\n", "\n")),
                       "lines": len(text.splitlines()), "always_loaded": always})
         if not imp or depth >= int(imp.get("max_depth") or 0):
             return
@@ -1336,7 +1361,7 @@ def cmd_explain(args) -> int:
     repo = Path(args.repo).resolve()
     folder = args.folder.replace("\\", "/").strip("/")
     folder = "" if folder in ("", ".") else folder + "/"
-    if not repo.is_dir() or ".." in folder.split("/") or not (repo / folder).is_dir():
+    if not repo.is_dir() or (folder and not inside_repo(repo, folder.rstrip("/"))):
         eecho(f"agents-md: not a folder inside the repo: {args.folder}")
         return EX_NOTFOUND
     profiles = load_profiles()
@@ -1745,7 +1770,8 @@ def nested_doc_paths(repo: Path) -> list[str]:
     out = []
     for rel in sorted((git(repo, "ls-files", "*AGENTS.md") or "").splitlines()):
         d = os.path.dirname(rel)
-        if d and rel == f"{d}/AGENTS.md" and not re.search(r"(^|/)(node_modules|vendor|\.claude)(/|$)", d):
+        if d and rel == f"{d}/AGENTS.md" and not re.search(r"(^|/)(node_modules|vendor|\.claude)(/|$)", d) \
+                and (repo / rel).is_file():   # a sparse checkout leaves tracked files off disk
             out.append(rel)
     return out
 
@@ -1772,7 +1798,7 @@ def audit_nested(repo: Path, nested: list[str], f: dict, root_rel: str | None,
         d = os.path.dirname(rel)
         text = read_raw(repo / rel)
         lines = text.splitlines()
-        n, chars = len(lines), len(text)
+        n, chars = len(lines), len(text.replace("\r\n", "\n"))
 
         def add(fid: str, sev: str, msg: str, line: int | None = None) -> None:
             finds.append({"id": fid, "severity": sev, "path": f"{rel}:{line}" if line else rel, "msg": msg})
@@ -1788,7 +1814,7 @@ def audit_nested(repo: Path, nested: list[str], f: dict, root_rel: str | None,
             add("nested-unlinked", "warn",
                 f"{root_rel} never names {rel}. Tools that read only the root (Codex below the launch "
                 "folder, Jules) never reach it; --diff adds a pointer")
-        if not re.search(r"(?<![\w./-])" + re.escape(d) + r"(?![\w-])", text):
+        if not re.search(r"(?<![\w.-])(?:\./)?" + re.escape(d) + r"/|`(?:\./)?" + re.escape(d) + "`", text):
             add("nested-no-scope", "info",
                 f"{rel} never names `{d}/`, so loaded alone it can't say where it applies. Open with "
                 f"\"Applies to `{d}/` and below\"")
@@ -1821,23 +1847,30 @@ INVARIANT_RE = re.compile(r"(?i)\b(?:never|must not|may not|cannot|can't|does no
                           r"|\bonly\s.{1,60}?\b(?:touch(?:es)?|imports?|writes?|reads?|calls?|access(?:es)?|owns?)\b")
 
 
-def gate_covers(paths: list[str], gates: list[dict]) -> bool:
-    """A gate covers an invariant when it is repo-wide, or its scope holds every folder
-    the invariant names: a db/ gate checks db's imports, not ui's."""
+def gate_covers(paths: list[str], gates: list[dict], repo: Path | None = None) -> bool:
+    """A boundary checker covers an invariant when it is repo-wide, or its scope holds
+    every folder the invariant names: a db/ gate checks db's imports, not ui's. An
+    invariant test (a check script) checks only what it names, so it covers an invariant
+    only when its text names every folder; one link checker gates nothing else."""
     for g in gates:
         scope = g.get("scope") or ""
+        if g.get("tool") == "invariant test":
+            body = read_raw(repo / (scope + g["config"])) if repo and (repo / (scope + g["config"])).is_file() else ""
+            if paths and all(x.rstrip("/") + "/" in body for x in paths):
+                return True
+            continue
         if not scope or (paths and all((x.rstrip("/") + "/").startswith(scope) for x in paths)):
             return True
     return False
 
 
-def ungated(doc: str, lines: list[tuple[int, str]], gates: list[dict]) -> list[dict]:
+def ungated(doc: str, lines: list[tuple[int, str]], gates: list[dict], repo: Path | None = None) -> list[dict]:
     out = []
     for i, line in lines:
         if not INVARIANT_RE.search(line):
             continue
         paths = named_paths(line)
-        if (paths and not gate_covers(paths, gates)) or (not paths and not gates):
+        if (paths and not gate_covers(paths, gates, repo)) or (not paths and not gates):
             shown = re.sub(r"\s+", " ", line.strip())[:90]
             out.append({"id": "invariant-ungated", "severity": "info", "path": f"{doc}:{i + 1}",
                         "msg": f"an invariant with no gate: \"{shown}\". Prose rules rot; add a check "
@@ -1949,13 +1982,14 @@ def audit_architecture(repo: Path, f: dict, root_rel: str | None,
     finds: list[dict] = []
     text = read_raw(repo / ap)
     lines = text.splitlines()
+    size = len(text.replace("\r\n", "\n"))
 
     def add(fid: str, sev: str, msg: str, line: int | None = None) -> None:
         finds.append({"id": fid, "severity": sev, "path": f"{ap}:{line}" if line else ap, "msg": msg})
     if ap != ARCH_FILES[0]:
         add("architecture-location", "info", f"{ap} works, but the root ARCHITECTURE.md is where readers look")
-    if len(lines) > CEILING_LINES or len(text) > CEILING_CHARS:
-        add("architecture-over-budget", "warn", f"{len(lines)} lines and {len(text):,} characters, over the "
+    if len(lines) > CEILING_LINES or size > CEILING_CHARS:
+        add("architecture-over-budget", "warn", f"{len(lines)} lines and {size:,} characters, over the "
             f"{CEILING_LINES}-line / {CEILING_CHARS:,}-character budget: keep only what rarely changes")
     marks = [i for i, l in enumerate(lines) if re.search(r"(?i)\boutdated\b|\bTODO:?\s*document|\bFIXME\b", l)]
     if marks:
@@ -1971,7 +2005,8 @@ def audit_architecture(repo: Path, f: dict, root_rel: str | None,
     pairs = None
     stale = 0
     for i, tok in arch_tokens(lines):
-        if not tracked or tok.rstrip("/") in tracked or tok.rstrip("/") + "/" in dirs or stale >= 8:
+        if not tracked or tok.rstrip("/") in tracked or tok.rstrip("/") + "/" in dirs or stale >= 8 \
+                or not git(repo, "log", "-1", "--format=%H", "--", tok.rstrip("/")):
             continue
         stale += 1
         pairs = rename_pairs(repo) if pairs is None else pairs
@@ -1989,12 +2024,12 @@ def audit_architecture(repo: Path, f: dict, root_rel: str | None,
             + (detail or "fingerprint differs") + "). Update the codemap, then the fingerprint "
             "(agents-md.py scaffold --architecture prints a fresh one)", text[:m.start()].count("\n") + 1)
     finds += ungated(ap, [(i, l) for i, l in enumerate(lines) if re.search(r"(?i)architecture invariant", l)],
-                     f.get("gates") or [])
+                     f.get("gates") or [], repo)
     pointer = bool(root_rel) and "ARCHITECTURE.md" not in root_text
     if pointer:
         finds.append({"id": "architecture-unlinked", "severity": "info", "path": root_rel,
                       "msg": f"{root_rel} never points to {ap}; --diff adds the line"})
-    doc = {"path": ap, "kind": "architecture", "lines": len(lines), "chars": len(text),
+    doc = {"path": ap, "kind": "architecture", "lines": len(lines), "chars": size,
            "commits_since": staleness(repo, ap)[0]}
     return finds, doc, pointer
 
@@ -2174,9 +2209,15 @@ def split_plan(lines: list[str], repo: Path, arch_dest: str | None = None) -> li
             return 0
         return 2 if s["key"] in ("structure", "conventions") else 1
 
+    def holds_landmines(s: dict) -> bool:
+        # A "### Gotchas" under Background is a landmine block too (analyze_doc counts it
+        # as Landmines coverage), so its section stays where it is.
+        return any(lvl > 2 and section_key(title) == "landmines" for i, lvl, title in headings(lines)
+                   if s["start"] < i < s["end"])
+
     plan = []
     secs = [s for s in h2_sections(lines)
-            if s["key"] not in ("commands", "landmines", "deploy", "overview")]
+            if s["key"] not in ("commands", "landmines", "deploy", "overview") and not holds_landmines(s)]
     for s in sorted(secs, key=lambda s: (tier(s), -weight(s), s["start"])):
         if total <= TARGET_LINES and chars <= TARGET_CHARS:
             break
@@ -2497,7 +2538,7 @@ def cmd_audit(args) -> int:
         a_finds, a_doc, a_pointer = audit_architecture(repo, f, rel, text)
         finds += a_finds
         if a_pointer and not any(p["kind"] == "architecture" for p in plan):
-            new = structure_insert(new, ["- " + ARCH_POINTER.format(up="../" * rel.count("/"))])
+            new = structure_insert(new, ["- " + ARCH_POINTER.format(up="../" * rel.count("/"), path=a_doc["path"])])
         docs = [{"path": rel, "kind": "root", "lines": an["lines"], "chars": an["chars"],
                  "commits_since": since}] + n_docs + ([a_doc] if a_doc else [])
         stubs = [stub_for(k, f) for k in ("commands", "landmines", "deploy")
@@ -2532,8 +2573,10 @@ def cmd_audit(args) -> int:
                     files.pop(p_["destination"], None)
         c_finds, c_edits = shadow_findings(repo, rel, args.no_parents)
         finds += c_finds
+        generated = {g["path"] for g in f.get("generated_entry_docs") or []}
         for name, (old, newc) in c_edits.items():
-            files[name] = (old, newc)
+            if name not in generated:   # the next sync would overwrite a fix to generated output
+                files[name] = (old, newc)
         cands = f.get("candidates") or []
         data["ruled_out"] = 0
         if (repo / RULED_OUT).is_file():
@@ -2568,7 +2611,7 @@ def cmd_audit(args) -> int:
             d["uncovered"] = len(by_doc.get(d["path"], []))
         prose = [(i, lines[i]) for s in h2_sections(lines) if s["key"] in ("landmines", "conventions")
                  for i in range(s["start"] + 1, s["end"])]
-        finds += ungated(rel, prose, f.get("gates") or [])
+        finds += ungated(rel, prose, f.get("gates") or [], repo)
         for i, item in landmine_items(lines):
             od = owner_dir(named_paths(item), nested_dirs)
             if od:

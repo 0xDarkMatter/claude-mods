@@ -6,7 +6,7 @@
       "name": "Claude Code",
       "verified": "2026-10-07",
       "sources": ["https://code.claude.com/docs/en/memory"],
-      "entry_files": ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md", "AGENTS.md"],
+      "entry_files": ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", ".claude/AGENTS.md"],
       "per_dir": "claude-md-shadows-agents-md",
       "ancestors": "launch",
       "subdirs": "on-read",
@@ -117,15 +117,13 @@
       "rule_sets": [
         {"glob": ".github/instructions/**/*.instructions.md", "mode": "scoped", "scope_key": "applyTo", "always_when_scope_missing": false}
       ],
-      "caps": [
-        {"scope": "file", "bytes": null, "chars": null, "lines": 1000, "behaviour": "advice", "source": "https://code.visualstudio.com/docs/copilot/customization/custom-instructions"}
-      ],
+      "caps": [],
       "targets_when": [".github/copilot-instructions.md", ".github/instructions/"],
       "facts": [
         {"id": "applyto-attach", "claim": "VS Code attaches an .instructions.md file when its applyTo pattern matches a file the agent works on", "live_phrase": "automatically attaches an .instructions.md file when its applyTo pattern matches", "source": "https://code.visualstudio.com/docs/copilot/customization/custom-instructions"},
         {"id": "nested-experimental", "claim": "nested AGENTS.md support is experimental, off by default (chat.useNestedAgentsMdFiles), and lists nested files with their folders rather than preloading them", "live_phrase": "Nested AGENTS.md files is experimental and might change or be removed", "source": "https://code.visualstudio.com/docs/copilot/customization/custom-instructions"},
         {"id": "additive-no-precedence", "claim": "sources are additive and the page says not to rely on order or precedence, which differs from the research's 'nearest AGENTS.md takes precedence' (hence concatenate)", "live_phrase": "Do not depend on a file order or precedence rule", "source": "https://code.visualstudio.com/docs/copilot/customization/custom-instructions"},
-        {"id": "review-line-limit", "claim": "code review reads about 1,000 lines per file (taken from the 2026-10-07 research, not found on this page)", "live_phrase": null, "source": "https://code.visualstudio.com/docs/copilot/customization/custom-instructions"}
+        {"id": "review-line-limit", "claim": "code review reads about 1,000 lines per file (taken from the 2026-10-07 research, not found on this page, so it is not a caps entry)", "live_phrase": null, "source": "https://code.visualstudio.com/docs/copilot/customization/custom-instructions"}
       ]
     },
     {
@@ -189,14 +187,13 @@
         {"glob": ".windsurf/rules/*.md", "mode": "frontmatter", "scope_key": null, "always_when_scope_missing": false}
       ],
       "caps": [
-        {"scope": "file", "bytes": null, "chars": 6000, "lines": null, "behaviour": "per-file", "source": "https://docs.devin.ai/desktop/cascade/memories"},
         {"scope": "file", "bytes": null, "chars": 12000, "lines": null, "behaviour": "per-file", "source": "https://docs.devin.ai/desktop/cascade/memories"}
       ],
       "targets_when": [".windsurf/", ".windsurfrules"],
       "facts": [
         {"id": "agents-md-scoping", "claim": "a root AGENTS.md is always on; a subdirectory's is auto-scoped to that directory by glob", "live_phrase": "root-level = always-on, subdirectory = auto-glob for that directory", "source": "https://docs.devin.ai/desktop/cascade/memories"},
-        {"id": "global-cap", "claim": "the global rules file is limited to 6,000 characters (the first caps entry)", "live_phrase": "The global rules file is limited to 6,000 characters", "source": "https://docs.devin.ai/desktop/cascade/memories"},
-        {"id": "workspace-cap", "claim": "workspace rule files are limited to 12,000 characters each (the second caps entry)", "live_phrase": "Workspace rule files are limited to 12,000 characters each", "source": "https://docs.devin.ai/desktop/cascade/memories"},
+        {"id": "global-cap", "claim": "the global rules file is limited to 6,000 characters; it is user-scope, so it is not a caps entry (explain leaves user-scope files out)", "live_phrase": "The global rules file is limited to 6,000 characters", "source": "https://docs.devin.ai/desktop/cascade/memories"},
+        {"id": "workspace-cap", "claim": "workspace rule files are limited to 12,000 characters each (the caps entry)", "live_phrase": "Workspace rule files are limited to 12,000 characters each", "source": "https://docs.devin.ai/desktop/cascade/memories"},
         {"id": "rule-activation", "claim": "each workspace rule sets its activation mode in frontmatter via a trigger field, so scope_key is null here", "live_phrase": "declares an activation mode in its frontmatter via the trigger field", "source": "https://docs.devin.ai/desktop/cascade/memories"}
       ]
     },

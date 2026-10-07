@@ -225,6 +225,13 @@ commit "$MR" "docs: nested agents"
 OUT="$(score_of "$MR")"
 [ "$(get 'sum(1 for f in d["data"]["findings"] if f["dim"]=="entry_docs" and f["path"]=="packages/engine/AGENTS.md" and f["severity"]=="warn")')" = "1" ] \
     && ok "nested_doc_over_60_lines_warns" || no "nested budget" "not flagged"
+# Exactly 60 lines ending in a newline is AT the ceiling, not over it: count lines the way
+# agents-md.py does (splitlines), not newlines + 1.
+"$PY" -c "print('\n'.join(['# Engine rules','## Landmines','1. x'] + ['- line %d' % i for i in range(57)]))" > "$MR/packages/engine/AGENTS.md"
+commit "$MR" "docs: nested agents at the ceiling"
+OUT="$(score_of "$MR")"
+[ "$(get 'sum(1 for f in d["data"]["findings"] if f["dim"]=="entry_docs" and f["path"]=="packages/engine/AGENTS.md" and f["severity"]=="warn")')" = "0" ] \
+    && ok "nested_doc_of_exactly_60_lines_is_within_budget" || no "nested at ceiling" "warned at 60 lines"
 mkdir -p "$TMP/alone"; cp "$DOCTOR" "$TMP/alone/repo-doctor.py"
 OUT="$("$PY" "$TMP/alone/repo-doctor.py" --repo "$MR" --json 2>/dev/null)"
 [ "$(get 'any("repo-scan" in f["msg"] for f in d["data"]["findings"])')" = "True" ] \

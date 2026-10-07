@@ -489,7 +489,7 @@ EX="$TMP/explain"; make_monorepo "$EX" >/dev/null 2>&1
 printf '# Engine\n\nApplies to `packages/engine/`.\n' > "$EX/packages/engine/AGENTS.md"
 printf '# Extra\n\n@cyc.md\n' > "$EX/docs/agents/extra.md"; printf '@extra.md\n' > "$EX/docs/agents/cyc.md"
 printf 'x\n' > "$EX/docs/agents/code.md"; printf 'x\n' > "$EX/docs/agents/fenced.md"
-printf '\nNot an import: `@docs/agents/code.md`.\n\n```\n@docs/agents/fenced.md\n```\n' >> "$EX/AGENTS.md"
+printf '\nNot an import: `see @docs/agents/code.md`.\n\n```\n@docs/agents/fenced.md\n```\n' >> "$EX/AGENTS.md"
 commit "$EX" "docs: explain fixture"
 OUT="$("$PY" "$AM" explain --repo "$EX" packages/engine --json 2>/dev/null)"
 tool() { printf "next(x for x in D['tools'] if x['tool']=='%s')" "$1"; }
@@ -533,14 +533,14 @@ check "load_chain_over_budget_warns" \
       "any(f['id']=='load-over-budget' and f['severity']=='warn' for f in D['findings']) and any(x['dir']=='sub/' and x['claude_code_chars']>20800 for x in D['load'])"
 # A tool's caps apply only when the repo visibly targets it (.windsurf/ for Windsurf).
 TC="$TMP/toolcap"; init_repo "$TC"; good_agents "$TC"
-"$PY" -c "import sys;open(sys.argv[1],'a',newline='\n').write(''.join(f'- Note {i}: '+'context words '*8+'\n' for i in range(60)))" "$TC/AGENTS.md"
-commit "$TC" "docs: 7k agents"
+"$PY" -c "import sys;open(sys.argv[1],'a',newline='\n').write(''.join(f'- Note {i}: '+'context words '*8+'\n' for i in range(115)))" "$TC/AGENTS.md"
+commit "$TC" "docs: 15k agents"
 OUT="$("$PY" "$AM" audit --repo "$TC" --no-parents --json 2>/dev/null)"
 check "tool_cap_only_for_targeted_tools" "'tool-cap' not in {f['id'] for f in D['findings']}"
 mkdir -p "$TC/.windsurf"
 OUT="$("$PY" "$AM" audit --repo "$TC" --no-parents --json 2>/dev/null)"
 check "  ...and reported once the repo targets that tool" \
-      "any(f['id']=='tool-cap' and 'Windsurf' in f['msg'] and '6000' in f['msg'] for f in D['findings'])"
+      "any(f['id']=='tool-cap' and 'Windsurf' in f['msg'] and '12000' in f['msg'] for f in D['findings']) and not any('6000' in f['msg'] for f in D['findings'])"
 
 # ============================== ARCHITECTURE ==================================
 # scaffold --architecture drafts ARCHITECTURE.md in matklad's shape: entry points and a
@@ -657,6 +657,99 @@ OUT="$("$PY" "$AM" scaffold --repo "$QJ" --json 2>/dev/null)"
 q() { printf "next(x for x in D['questions'] if x['id']=='%s')" "$1"; }
 check "scaffold_json_splits_guided_from_assisted" \
       "$(q overview)['answerable']=='guided' and $(q overview)['recommended']=={'answer':'A queue worker for billing events.','source':'package.json'} and $(q check-command)['answerable']=='guided' and 'npm test' in $(q check-command)['recommended']['answer'] and any(x['id'].startswith('landmine:') and x['answerable']=='assisted' and x['evidence'] and 'recommended' not in x for x in D['questions']) and all(x['answerable'] in ('guided','assisted') for x in D['questions']) and (D['guided'],D['assisted'])==(sum(x['answerable']=='guided' for x in D['questions']),sum(x['answerable']=='assisted' for x in D['questions']))"
+
+# ============================== REFUTE REGRESSIONS ============================
+# From the 2026-10-07 adversarial review: each case below was a crash, a broken guarantee
+# or a false finding the suites above passed.
+# A tracked nested doc missing from disk (a sparse checkout) is skipped, not a traceback.
+MN="$TMP/sparse"; init_repo "$MN"; good_agents "$MN"; mkdir -p "$MN/sub"; printf '# Sub\n\nApplies to `sub/`.\n' > "$MN/sub/AGENTS.md"
+commit "$MN" "docs: nested"; rm "$MN/sub/AGENTS.md"
+OUT="$("$PY" "$AM" audit --repo "$MN" --no-parents --json 2>/dev/null)"
+check "missing_nested_doc_on_disk_does_not_crash" "d['meta']['schema']=='claude-mods.repo-doctor.agents-md-audit/v1'"
+# A landmine block under a movable section never leaves AGENTS.md: the split skips a
+# section holding a Gotchas/Landmines subsection.
+LS="$TMP/subland"; init_repo "$LS"; echo '{"name":"ls","scripts":{"build":"node b.js"}}' > "$LS/package.json"
+"$PY" - "$LS/AGENTS.md" <<'EOF'
+import sys
+L = ["# Agent Instructions - ls", "", "Fixture for landmines under a movable section.", "",
+     "## Commands", "", "```bash", "npm run build", "```", "", "## Landmines", "", "1. **Rule** - keep it.", "",
+     "## Background", ""] + [f"Paragraph {i} of history." for i in range(120)]
+L += ["", "### Gotchas", "", "- **BG-LANDMINE-SENTINEL** - the cache key must include the locale.", ""]
+L += ["## Notes", ""] + [f"- Note {i}: a tip." for i in range(80)]
+open(sys.argv[1], "w", newline="\n").write("\n".join(L) + "\n")
+EOF
+commit "$LS" "docs: subsection landmine"
+OUT="$("$PY" "$AM" audit --repo "$LS" --no-parents --json 2>/dev/null)"
+check "landmine_subsection_never_moves" \
+      "D['split_plan'] and 'Background' not in [x['section'] for x in D['split_plan']] and not any(l.startswith('-') and 'BG-LANDMINE-SENTINEL' in l for l in (D['diff'] or '').splitlines())"
+# A generated CLAUDE.md is fixed at its source like a generated AGENTS.md.
+GC="$TMP/rulerclaude"; init_repo "$GC"; good_agents "$GC"; mkdir -p "$GC/.ruler"; echo "# rules" > "$GC/.ruler/rules.md"
+printf '<!-- Generated by Ruler -->\n# Claude\n' > "$GC/CLAUDE.md"; commit "$GC" "docs: ruler claude"
+OUT="$("$PY" "$AM" audit --repo "$GC" --no-parents --json 2>/dev/null)"
+check "generated_claude_md_is_not_patched" \
+      "any(f['id']=='generated-entry-doc' and f['path']=='CLAUDE.md' for f in D['findings']) and 'diff --git a/CLAUDE.md' not in (D['diff'] or '')"
+# A folder outside the repo is refused, absolute or not.
+mkdir -p "$TMP/outside"
+"$PY" "$AM" scaffold --repo "$MN" --dir "$(winpath "$TMP/outside")" --write >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 3 ] && [ ! -f "$TMP/outside/AGENTS.md" ] && ok "absolute_dir_outside_the_repo_is_refused" \
+    || no "absolute_dir_outside_the_repo_is_refused" "exit $rc"
+"$PY" "$AM" explain --repo "$MN" "$(winpath "$TMP/outside")" >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 3 ] && ok "  ...and explain refuses it too" || no "explain outside" "exit $rc"
+# A .claude/AGENTS.md root is what Claude Code loads, and scaffold --write won't add a second root.
+DC="$TMP/dotclaude"; init_repo "$DC"; good_agents "$DC"; mkdir -p "$DC/.claude"; mv "$DC/AGENTS.md" "$DC/.claude/AGENTS.md"
+commit "$DC" "docs: dot-claude root"
+OUT="$("$PY" "$AM" explain --repo "$DC" . --json 2>/dev/null)"
+check "dot_claude_agents_md_is_loaded" "'.claude/AGENTS.md' in [x['path'] for x in D['tools'][0]['files']]"
+"$PY" "$AM" scaffold --repo "$DC" --write >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 5 ] && [ ! -f "$DC/AGENTS.md" ] && ok "  ...and scaffold --write refuses a second root" || no "dot-claude write" "exit $rc"
+# Size is counted as LF text: a CRLF nested doc under the budget is not over it.
+CN="$TMP/crlfnest"; init_repo "$CN"; good_agents "$CN"; mkdir -p "$CN/sub"
+echo "- Before editing \`sub/**\`, read [sub/AGENTS.md](sub/AGENTS.md)." >> "$CN/AGENTS.md"
+"$PY" -c "import sys;open(sys.argv[1],'w',newline='\r\n').write('# Sub\nApplies to \`sub/\`.\n'+''.join('- '+'n'*79+'\n' for _ in range(58)))" "$CN/sub/AGENTS.md"
+commit "$CN" "docs: crlf nested"
+OUT="$("$PY" "$AM" audit --repo "$CN" --no-parents --json 2>/dev/null)"
+check "crlf_nested_doc_is_measured_like_lf" \
+      "not any(f['id']=='nested-over-budget' and f['severity']=='warn' for f in D['findings']) and [x['chars'] for x in D['docs'] if x['path']=='sub/AGENTS.md'][0] <= 4800"
+# A docs/ARCHITECTURE.md gets a root pointer to where it actually is.
+DA="$TMP/docsarch"; init_repo "$DA"; good_agents "$DA"; mkdir -p "$DA/docs"
+printf '# Architecture\n\n## Codemap\n\n- `src/`: code.\n' > "$DA/docs/ARCHITECTURE.md"; commit "$DA" "docs: arch in docs"
+OUT="$("$PY" "$AM" audit --repo "$DA" --no-parents --json 2>/dev/null)"
+check "docs_architecture_pointer_links_its_path" \
+      "'+- Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) before adding a module or moving code between packages.' in (D['diff'] or '').splitlines()"
+# A scope line may start with ./; a prose word that happens to be the folder name is not one.
+NS="$TMP/scope"; init_repo "$NS"; good_agents "$NS"; mkdir -p "$NS/pkg/a" "$NS/tools"
+printf '\n- [pkg/a/AGENTS.md](pkg/a/AGENTS.md) and [tools/AGENTS.md](tools/AGENTS.md) load when editing there.\n' >> "$NS/AGENTS.md"
+printf '# A\n\nApplies to `./pkg/a/` and below.\n' > "$NS/pkg/a/AGENTS.md"; printf '# Tools\n\nThese tools are helpers.\n' > "$NS/tools/AGENTS.md"
+commit "$NS" "docs: scopes"
+OUT="$("$PY" "$AM" audit --repo "$NS" --no-parents --json 2>/dev/null)"
+check "nested_scope_line_forms" \
+      "sorted(f['path'] for f in D['findings'] if f['id']=='nested-no-scope')==['tools/AGENTS.md']"
+# A codemap name git never tracked (a bare file name, a symbol) is not stale; a path git
+# tracked and lost is.
+AN="$TMP/archnames"; init_repo "$AN"; good_agents "$AN"; mkdir -p "$AN/src"; echo x > "$AN/src/gone.rs"; echo x > "$AN/src/lib.rs"
+printf '# Architecture\n\n## Codemap\n\n- `lib.rs` holds `Config.load`; `src/gone.rs` parses.\n' > "$AN/ARCHITECTURE.md"
+commit "$AN" "docs: names"; gitq "$AN" rm -q src/gone.rs; commit "$AN" "refactor: drop gone.rs"
+OUT="$("$PY" "$AM" audit --repo "$AN" --no-parents --json 2>/dev/null)"
+check "architecture_stale_name_needs_history" \
+      "[f['msg'].split(chr(96))[1] for f in D['findings'] if f['id']=='architecture-stale-name']==['src/gone.rs']"
+# One unrelated check script does not gate every invariant; a script that names the
+# invariant's folders does.
+GI="$TMP/gateinv"; init_repo "$GI"; mkdir -p "$GI/core" "$GI/ui" "$GI/scripts"
+echo '{"name":"gi","scripts":{"test":"node t.js"}}' > "$GI/package.json"
+for d in core ui; do echo "export const $d = 1" > "$GI/$d/index.js"; done
+echo 'echo links ok' > "$GI/scripts/check-links.sh"
+printf '# Agent Instructions - gi\n\nA fixture.\n\n## Commands\n\n```bash\nnpm test\n```\n\n## Landmines\n\n1. **Layering** - `core/` never imports `ui/`.\n' > "$GI/AGENTS.md"
+commit "$GI" "docs: invariant"
+OUT="$("$PY" "$AM" audit --repo "$GI" --no-parents --json 2>/dev/null)"
+check "one_check_script_does_not_gate_every_invariant" "any(f['id']=='invariant-ungated' for f in D['findings'])"
+echo 'rg -q "from .*ui/" core/ && exit 1' > "$GI/scripts/check-layers.sh"; commit "$GI" "test: layer gate"
+OUT="$("$PY" "$AM" audit --repo "$GI" --no-parents --json 2>/dev/null)"
+check "  ...but a script naming both folders does" "not any(f['id']=='invariant-ungated' for f in D['findings'])"
+# The interview never re-asks a question the owner ruled out.
+mkdir -p "$QJ/docs/agents"; echo '- [fragile] `src/x.js` @3: an old parser, retired soon' > "$QJ/docs/agents/ruled-out.md"
+commit "$QJ" "docs: rule out x.js"
+OUT="$("$PY" "$AM" scaffold --repo "$QJ" --json 2>/dev/null)"
+check "scaffold_questions_skip_ruled_out" "not any(x['id']=='landmine:fragile:src/x.js' for x in D['questions'])"
 
 # ============================== SURVEY ========================================
 FX="$TMP/gh-fixture.json"; LOG="$TMP/gh-calls.jsonl"
