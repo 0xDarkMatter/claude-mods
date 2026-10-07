@@ -284,6 +284,28 @@ feature releases live in the README "Recent Updates" section.
   on the old code: a real nested `git worktree add`, the pin read from it, a submodule's
   worktree, and a bare repo's.
 
+- **Skill scanners and verifiers no longer read a dead producer as clean** - a loop fed
+  by `< <(producer)` never sees the producer's exit status, so a find, grep or jq that
+  died part-way just ended the loop, and the script reported what arrived. Every such
+  site under `skills/*/scripts/` (fleet-ops aside, in its own lane) now captures the
+  producer, checks its status, then loops, or carries a `# procsub ok:` line saying why
+  a failure cannot change its result. Fail-closed fixes: `integrity-audit.sh` read
+  project MCP configs through `find` (Windows `find.exe` ahead of GNU find answered
+  "Clean"), workflows through `grep -rl`, and settings through a `jq` whose parse errors
+  were discarded, so an unparseable `settings.json`, or no jq at all, hid its hooks.
+  `scan-extensions.sh` closed "inventory done" over a plugin list jq could not read and,
+  without jq, skipped every extension as nameless. Both now report the surface as `NOT
+  scanned`/`NOT read`, list it in `meta.unscanned`, and exit 5 where they would have
+  exited 0; a finding's exit 10 still wins. `scan-extensions --json` also stopped
+  printing recently-changed skill rows ahead of its JSON. `check-action-refs.sh` exits 5
+  on a workflow grep cannot read and greps with `-a`: one NUL byte made GNU grep 3.5+
+  print nothing, so a malformed `uses:` passed. `verify-commands.sh` (ffmpeg-ops) and
+  `check-ytdlp-version.sh` exit 1 when their SKILL.md link scan cannot run, and git-ops
+  `land-all.sh` exits 2, not "nothing landable", when it cannot list branches. 25 new
+  assertions across five suites, mostly PATH shims that break one producer; each one
+  guarding a fix was seen failing against the unfixed script, and four pin baselines
+  (clean input still 0, a finding still 10).
+
 - **A lane's pigeon report reaches the coordinator** - a repo's worktrees share its
   pigeon identity (the git root commit), so a lane that sent `READY` to the coordinator
   in the main checkout was shown its own message by its `check-mail` hook, which then

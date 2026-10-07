@@ -31,7 +31,7 @@
 # Exit codes:
 #   0  nothing landable (no LANDABLE candidates)
 #   1  at least one LANDABLE candidate (a batch land is available)
-#   2  not a git repo
+#   2  not a git repo, or its branches could not be listed
 
 set -u
 
@@ -128,6 +128,16 @@ emit() {
 }
 
 # Walk every local branch except trunk.
+# procsub guard: git's status is checked before the branches are walked. Fed
+# straight into the loop via `< <(git for-each-ref ...)`, a listing that failed
+# walked zero branches and exited 0, "nothing landable", the all-clear.
+rc=0
+BRANCHES=$(git for-each-ref --format='%(refname:short)' refs/heads/) || rc=$?
+if [ "$rc" -ne 0 ]; then
+  echo "error: could not list local branches (git exit $rc) - nothing was surveyed" >&2
+  rm -f "$TMP_WT"
+  exit 2
+fi
 while IFS= read -r branch; do
   [ -z "$branch" ] && continue
   [ "$branch" = "$TRUNK" ] && continue
@@ -178,7 +188,7 @@ while IFS= read -r branch; do
   fi
 
   emit "$status" "$branch" "$wt" "$ahead" "$behind" "$age" "$note"
-done < <(git for-each-ref --format='%(refname:short)' refs/heads/ 2>/dev/null)
+done <<< "$BRANCHES"
 
 rm -f "$TMP_WT"
 

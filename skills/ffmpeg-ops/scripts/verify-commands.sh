@@ -14,7 +14,8 @@
 # Input:   none (inspects the skill's own files; --live also the ffmpeg on PATH)
 # Output:  stdout = findings (one per line, "DRIFT:" / "STRUCT:" prefixed)
 # Stderr:  progress, warnings
-# Exit:    0 clean, 2 usage, 7 ffmpeg unavailable (--live only; advisory),
+# Exit:    0 clean, 1 crashed (a check could not read its input - nothing
+#          verified), 2 usage, 7 ffmpeg unavailable (--live only; advisory),
 #          10 drift/structural finding
 #
 # Examples:
@@ -24,7 +25,7 @@
 
 set -uo pipefail
 
-EXIT_OK=0; EXIT_USAGE=2; EXIT_UNAVAILABLE=7; EXIT_DRIFT=10
+EXIT_OK=0; EXIT_ERROR=1; EXIT_USAGE=2; EXIT_UNAVAILABLE=7; EXIT_DRIFT=10
 
 MODE="offline"; QUIET=0
 while [[ $# -gt 0 ]]; do
@@ -78,11 +79,22 @@ offline_checks() {
   done
 
   # 3. every relative resource link in SKILL.md resolves
+  # procsub guard: the pipeline's status (pipefail) is checked before its rows
+  # are used. Fed straight into the loop via `< <(grep ...)`, a grep that could
+  # not read SKILL.md checked no links and the verifier said clean. grep exit 1
+  # is "no links", a legitimate empty result.
+  local links rc=0
+  links="$(grep -oE '\]\((references|assets|scripts|tests)/[^)#]+\)' "$SKILL_MD" \
+           | sed -E 's/^\]\(//; s/\)$//' | sort -u)" || rc=$?
+  if (( rc > 1 )); then
+    echo "ERROR: could not read SKILL.md links (grep pipeline exit $rc) - nothing was verified" >&2
+    exit "$EXIT_ERROR"
+  fi
   while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
     [[ -e "$SKILL_DIR/$path" ]] \
       || finding "STRUCT: SKILL.md links to missing file: $path"
-  done < <(grep -oE '\]\((references|assets|scripts|tests)/[^)#]+\)' "$SKILL_MD" \
-           | sed -E 's/^\]\(//; s/\)$//' | sort -u)
+  done <<< "$links"
 }
 
 # ── live: docs vs the installed build ────────────────────────────────────────

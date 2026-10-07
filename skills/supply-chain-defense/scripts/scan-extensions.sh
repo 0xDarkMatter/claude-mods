@@ -24,7 +24,9 @@
 # Output:  stdout = inventory / findings (tab-separated, or JSON with --json)
 # Stderr:  framing, plugin SHA inventory, verdict
 # Exit:    0 ok (incl. --deep with engine absent — behavioural skipped, not failed),
-#          2 usage, 10 behavioural finding(s)
+#          2 usage, 5 part of the inventory could not be read (jq missing or a
+#          manifest it cannot parse - see stderr) - NOT ok, 10 behavioural
+#          finding(s) (wins over 5; it is never a false clean)
 #
 # Examples:
 #   scan-extensions.sh                       # full inventory + recency
@@ -42,7 +44,7 @@ while [[ $# -gt 0 ]]; do
     --deep) DEEP=1 ;;
     --all) ALL=1 ;;
     --days) DAYS="${2:?--days needs a value}"; shift ;;
-    -h|--help) sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; exit "$EXIT_OK" ;;
+    -h|--help) sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'; exit "$EXIT_OK" ;;
     -*) echo "ERROR: unknown flag: $1 (try --help)" >&2; exit "$EXIT_USAGE" ;;
     *) echo "ERROR: unexpected argument: $1" >&2; exit "$EXIT_USAGE" ;;
   esac
@@ -102,6 +104,15 @@ EXT_DIRS=("$HOME/.vscode/extensions" "$HOME/.vscode-server/extensions" "$HOME/.v
 [[ -n "${SC_EXT_DIRS:-}" ]] && IFS="$(printf ':')" read -ra EXT_DIRS <<< "$SC_EXT_DIRS"
 
 INV_JSON=(); FIND_JSON=(); FINDINGS=0; RECENT=0
+UNSCANNED=()   # "<what>: <why>" per inventory part we could not read
+
+# unscanned <what> <why> — printed even with -q (an error, not framing); turns a
+# would-be exit 0 into 5. "inventory done" must mean the inventory was read.
+unscanned() {
+  UNSCANNED+=("$1: $2")
+  if [[ "$PANEL" -eq 1 ]]; then popen; term_status_row bad "NOT read  $1" "$2" >&2
+  else printf '   %s[NOT read]%s %s: %s\n' "$C_Y" "$C_O" "$1" "$2" >&2; fi
+}
 
 dir_recent() {  # echoes yes/no — any code file in $1 modified within window
   local newest
@@ -113,6 +124,14 @@ dir_recent() {  # echoes yes/no — any code file in $1 modified within window
 section "Editor extensions" "inventory + recency <${DAYS}d$( [[ $DEEP_OK -eq 1 ]] && echo ' + GuardDog behavioural' )"
 for base in "${EXT_DIRS[@]}"; do
   [[ -d "$base" ]] || continue
+  # Without jq every manifest reads as nameless and is skipped below, so an
+  # extension dir full of code inventoried as empty. Say so instead.
+  if [[ "$HAS_JQ" -eq 0 ]]; then
+    for ext in "$base"/*/; do
+      [[ -f "$ext/package.json" ]] && { unscanned "$base" "jq not installed - extension manifests not read"; break; }
+    done
+    continue
+  fi
   for ext in "$base"/*/; do
     [[ -f "$ext/package.json" ]] || continue
     pub=$(jq -r '.publisher // empty' "$ext/package.json" 2>/dev/null)
@@ -140,10 +159,22 @@ done
 # ── 2. Claude Code plugins: inventory + pinned-commit ──────────────────────
 section "Claude Code plugins" "pinned-commit inventory - verify each against its marketplace"
 PMETA="$HOME/.claude/plugins/installed_plugins.json"
-if [[ -f "$PMETA" && "$HAS_JQ" -eq 1 ]]; then
-  while IFS= read -r line; do info "$line"; done < <(jq -r '.plugins | to_entries[] | .key as $n | .value[] | "\($n)  sha=\(.gitCommitSha[0:12])  scope=\(.scope)  updated=\(.lastUpdated)"' "$PMETA" 2>/dev/null)
+if [[ ! -f "$PMETA" ]]; then
+  info "no installed_plugins.json (no marketplace plugins)"
+elif [[ "$HAS_JQ" -eq 0 ]]; then
+  unscanned "$PMETA" "jq not installed - plugin inventory not read"
 else
-  info "no installed_plugins.json (no marketplace plugins) or jq missing"
+  # procsub guard: jq's status is checked before its rows are printed. Fed
+  # straight into a loop via `< <(jq ...)`, a manifest jq choked on (truncated
+  # write, schema change) listed no plugins and the run still closed "inventory
+  # done", exit 0.
+  rc=0
+  plugin_rows="$(jq -r '.plugins | to_entries[] | .key as $n | .value[] | "\($n)  sha=\(.gitCommitSha[0:12])  scope=\(.scope)  updated=\(.lastUpdated)"' "$PMETA" 2>/dev/null)" || rc=$?
+  if (( rc != 0 )); then
+    unscanned "$PMETA" "jq exit $rc - not JSON or not the expected shape; plugin inventory not read"
+  else
+    while IFS= read -r line; do [[ -n "$line" ]] && info "$line"; done <<< "$plugin_rows"
+  fi
 fi
 
 # ── 3. Installed skills: inventory + recency ───────────────────────────────
@@ -153,7 +184,8 @@ for sk in "$HOME/.claude/skills"/*/; do
   recent=$(dir_recent "$sk")
   if [[ "$recent" == yes ]]; then
     RECENT=$((RECENT+1))
-    [[ "$QUIET" -eq 0 ]] && printf '%s\t(recently changed)\n' "$(basename "$sk")"
+    # Not under --json: stdout is then the JSON document alone.
+    [[ "$QUIET" -eq 0 && "$JSON" -eq 0 ]] && printf '%s\t(recently changed)\n' "$(basename "$sk")"
   fi
 done
 
@@ -162,7 +194,8 @@ if [[ "$JSON" -eq 1 ]]; then
   printf '%s\n' "${INV_JSON[@]:-}" | jq -s \
     --argjson f "$(printf '%s\n' "${FIND_JSON[@]:-}" | jq -s 'map(select(length>0))' 2>/dev/null || echo '[]')" \
     --argjson deep "$DEEP" --argjson days "$DAYS" \
-    '{data:{inventory: map(select(length>0)), findings:$f}, meta:{deep:($deep==1), recency_days:$days, finding_count:($f|length), schema:"axiom.tool.scan-extensions.report/v1"}}'
+    --argjson u "$(printf '%s\n' "${UNSCANNED[@]:-}" | jq -R . | jq -sc 'map(select(length>0))')" \
+    '{data:{inventory: map(select(length>0)), findings:$f}, meta:{deep:($deep==1), recency_days:$days, finding_count:($f|length), unscanned:$u, schema:"axiom.tool.scan-extensions.report/v1"}}'
 fi
 
 # vclose <state> <hotkeys> <text>  — panel footer, or a colored legacy verdict line.
@@ -171,10 +204,19 @@ vclose() {  # state hotkeys legacy-color legacy-text
     popen; { term_panel_vert; term_panel_close "$2" "$(term_health "$1" "$4")"; } >&2
   else printf '%s%s%s\n' "$3" "$4" "$C_O" >&2; fi
 }
+# exit_ok — the would-be exit 0, unless part of the inventory went unread. A 10
+# (behavioural finding) already says "not clean, look", so it never comes here.
+exit_ok() {
+  if [[ ${#UNSCANNED[@]} -gt 0 ]]; then
+    [[ "$QUIET" -eq 1 ]] || vclose critical "fix the cause, re-run" "$C_Y" "NOT ok: ${#UNSCANNED[@]} inventory part(s) could not be read"
+    exit "$EXIT_MISSING_DEP"
+  fi
+  exit "$EXIT_OK"
+}
 if [[ "$DEEP_OK" -eq 1 ]]; then
   if [[ "$FINDINGS" -eq 0 ]]; then
     [[ "$QUIET" -eq 1 ]] || vclose healthy "exposure-check for known IOCs" "$C_G" "behavioural: GuardDog found no indicators"
-    exit "$EXIT_OK"
+    exit_ok
   fi
   [[ "$QUIET" -eq 1 ]] || vclose critical "inspect ${TERM_DOT} treat as incident" "$C_R" "$FINDINGS extension(s) with behavioural findings"
   exit "$EXIT_FINDING"
@@ -184,5 +226,7 @@ if [[ "$DEEP_SKIPPED" -eq 1 && "$QUIET" -eq 0 ]]; then
   info "  ran inventory + recency only - this is NOT a clean behavioural verdict."
   info "  enable on-demand:  uv tool install guarddog semgrep   (then re-run --deep)"
 fi
-[[ "$QUIET" -eq 1 ]] || vclose healthy "exposure-check.py for known-IOC matching" "$C_D" "inventory done - $RECENT item(s) changed within ${DAYS}d, review those"
-exit "$EXIT_OK"
+if [[ ${#UNSCANNED[@]} -eq 0 ]]; then
+  [[ "$QUIET" -eq 1 ]] || vclose healthy "exposure-check.py for known-IOC matching" "$C_D" "inventory done - $RECENT item(s) changed within ${DAYS}d, review those"
+fi
+exit_ok

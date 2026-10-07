@@ -146,5 +146,16 @@ OUT2="$(bash "$LA" "$R" --porcelain --active-window 3600 --recent-days 7)"
 a2=$(printf '%s\n' "$OUT2" | awk -F'\t' '$2=="feat/wip"{print $1}')
 [ "$a2" = ACTIVE ] && ok "fresh worktree → ACTIVE (live-writer guard)" || no "expected ACTIVE got [$a2]"
 
+echo "-- land-all: a branch list it could not read is not 'nothing landable' --"
+# The branches came from a loop fed by `< <(git for-each-ref ...)`, which hid
+# git's status: a failed listing walked zero branches and exited 0. The shim
+# fails only that call.
+mkdir -p "$SB/gshim"
+printf '#!/bin/sh\ncase "$*" in *for-each-ref*) echo "fatal: simulated ref read error" >&2; exit 128 ;; esac\nexec "%s" "$@"\n' \
+  "$(command -v git)" > "$SB/gshim/git"
+chmod +x "$SB/gshim/git"
+PATH="$SB/gshim:$PATH" bash "$LA" "$R" --active-window 0 >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 2 ] && ok "for-each-ref fails → exit 2, not 0" || no "for-each-ref fails: expected exit 2 got $rc"
+
 echo "=== $P passed, $F failed ==="
 [ $F -eq 0 ]

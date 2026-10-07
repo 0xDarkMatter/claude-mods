@@ -51,6 +51,8 @@ WT_COUNT=$(wc -l < "$TMP_REG" | tr -d ' ')
 # Enumerate filesystem entries in .claude/worktrees/ (canonical absolute paths)
 TMP_FS=$(mktemp)
 if [ -d .claude/worktrees ]; then
+  # procsub ok: read-only survey; a find that fails only under-reports orphans,
+  # which nothing here acts on.
   while IFS= read -r d; do
     [ -z "$d" ] && continue
     (cd "$d" 2>/dev/null && pwd -P)

@@ -379,6 +379,7 @@ print_card() { # repo_json
     if [ "$nf" -gt 0 ]; then
       term_panel_vert
       term_section "" "top fixes (highest-severity first)" "$nf"
+      # procsub ok: display only; nf above counted these fixes from the same JSON
       while IFS= read -r ln; do term_panel_line "$ln"; done < <(jq -r --arg b "$(term_mark warn)" '.top_fixes[] | "\($b) " + .' <<<"$o")
     fi
     term_panel_vert
@@ -405,6 +406,7 @@ if [ -n "$ORG" ]; then
   list="$(runner gh repo list "$ORG" --no-archived --limit 200 --json nameWithOwner,visibility 2>/dev/null)" \
     || skip "gh repo list failed for $ORG (not authed / offline / rate-limited?)"
   [ -n "$list" ] || skip "no repos returned for $ORG"
+  # procsub ok: a jq failure leaves repos empty, and the guard below exits 7 (unavailable), never clean
   mapfile -t repos < <(printf '%s' "$list" | jq -r '.[].nameWithOwner' | tr -d '\r')
   [ "${#repos[@]}" -gt 0 ] || skip "no non-archived repos for $ORG"
 
@@ -471,6 +473,7 @@ if [ -n "$ORG" ]; then
     {
       term_panel_vert
       term_section "" "roll-up: $ORG" "$swept"
+      # procsub ok: display only; any_findings and below_min, which decide the exit, were set in the sweep above
       while IFS= read -r ln; do term_panel_line "$ln"; done < <(printf '%s' "$rollup" | jq -r '
         "scored: \(.repos_scored)   unreadable: \(.repos_unreadable)",
         "avg score: \(.avg_score)   median: \(.median_score)",
