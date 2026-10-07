@@ -19,6 +19,7 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   js.lockfile.shrinkwrap  js.pnpm.field-ignored
   js.dep.non-registry
   js.dep.paired-drift
+  js.lockfile.source
   js.engine.floor
   js.root.not-private
   js.packagemanager.mismatch  js.node.unpinned  js.node.eol  js.node.eol-soon  node.pin.disagree
@@ -78,6 +79,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import urllib.parse
 from pathlib import Path
 
 EX_OK, EX_USAGE, EX_NOTFOUND, EX_UNPARSEABLE, EX_FINDINGS = 0, 2, 3, 4, 10
@@ -1250,7 +1252,7 @@ class Audit:
         # Deploy stays first because js.lockfile asks which manager CI actually installs.
         self._check("deploy", (self.deploy,), "" if self._has_deploy_inputs() else "no CI or deploy files")
         has_js = (self.root / "package.json").is_file() or any((self.root / n).is_file() for n in JS_LOCKFILES)
-        self._check("js.lockfile", (self.js, self.nested, self.paired_drift), "" if has_js else "no package.json or JS lockfile")
+        self._check("js.lockfile", (self.js, self.nested, self.paired_drift, self.lock_sources), "" if has_js else "no package.json or JS lockfile")
         self._check("node.pins", (self.node_pins,), "" if (self.root / "package.json").is_file() else "no package.json")
         self._check("php", (self.php,), "" if (self.root / "composer.json").is_file() else "no composer.json")
         has_floors = any((self.root / n).is_file() for n in ("package-lock.json", "npm-shrinkwrap.json", "composer.lock"))
@@ -2267,6 +2269,62 @@ class Audit:
             self.add("warn", "js.dep.paired-drift", "package-lock.json",
                      "; ".join(problems[:8]),
                      "upgrade coupled packages together and align shared dependencies across package roots")
+
+    def lock_sources(self):
+        """Lockfile source/integrity shape checks only. supply-chain-defense owns whether
+        a syntactically plausible registry artifact is trustworthy or malicious."""
+        problems = []
+
+        def inspect(name, resolved, integrity, file):
+            resolved, integrity = str(resolved or ""), str(integrity or "")
+            if not resolved:
+                return
+            path = urllib.parse.unquote(urllib.parse.urlparse(resolved).path).lower()
+            leaf = name.rsplit("/", 1)[-1].lower()
+            archive = path.rsplit("/", 1)[-1]
+            if resolved.lower().startswith("http:"):
+                problems.append(f"{file}: {name} resolves over HTTP")
+            if resolved.lower().startswith(("http://", "https://")) \
+                    and f"/{name.lower()}/" not in path and not archive.startswith(leaf + "-"):
+                problems.append(f"{file}: resolved path for {name} names another package")
+            if resolved.lower().startswith(("http://", "https://")) and not integrity:
+                problems.append(f"{file}: {name} has no integrity hash")
+            elif integrity.lower().startswith("sha1-"):
+                problems.append(f"{file}: {name} uses SHA-1 integrity")
+
+        for filename in ("package-lock.json", "npm-shrinkwrap.json"):
+            lock = read_json(self.root / filename) if (self.root / filename).is_file() else None
+            for key, row in obj(obj(lock).get("packages")).items():
+                if not key or not key.startswith("node_modules/") or obj(row).get("link") is True:
+                    continue
+                name = str(obj(row).get("name") or key.rsplit("node_modules/", 1)[-1])
+                inspect(name, obj(row).get("resolved"), obj(row).get("integrity"), filename)
+
+        yarn = read_text(self.root / "yarn.lock") if (self.root / "yarn.lock").is_file() else None
+        if yarn:
+            name, resolved, integrity = None, "", ""
+
+            def flush():
+                if name:
+                    inspect(name, resolved, integrity, "yarn.lock")
+
+            for line in yarn.splitlines() + [""]:
+                if line and not line[0].isspace() and line.rstrip().endswith(":"):
+                    flush()
+                    key = line.rstrip()[:-1].split(",", 1)[0].strip().strip('"')
+                    at = key.find("@", 1)
+                    name, resolved, integrity = (key[:at] if at > 0 else key), "", ""
+                elif re.match(r"^\s+resolved\s", line):
+                    resolved = line.split(None, 1)[1].strip().strip('"')
+                elif re.match(r"^\s+integrity\s", line):
+                    integrity = line.split(None, 1)[1].strip().strip('"')
+                elif not line.strip():
+                    flush()
+                    name, resolved, integrity = None, "", ""
+        if problems:
+            file = "package-lock.json" if (self.root / "package-lock.json").is_file() else "yarn.lock"
+            self.add("warn", "js.lockfile.source", file, "; ".join(problems[:8]),
+                     "regenerate the lockfile with the pinned manager over HTTPS and require SHA-512 integrity")
 
     # ---- CI and deploy: frozen installs, --no-dev, Composer 1, credentials in images ----
     def deploy(self):

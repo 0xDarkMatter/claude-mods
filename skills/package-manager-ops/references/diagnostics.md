@@ -72,6 +72,7 @@ workflow, job or step scope (or an earlier Dockerfile `ENV`) satisfy the same ru
 | `js.lockfile.stale` | warn | lockfile disagrees with package.json; a frozen install fails | [install-semantics.md](install-semantics.md#why-a-lockfile-changes-under-you) |
 | `js.lockfile.v1` | warn | npm 6-era lockfile | [legacy-exits.md](legacy-exits.md#npm-lockfileversion-1) |
 | `js.lockfile.shrinkwrap` | warn | only `npm-shrinkwrap.json`, which npm 12 ignores | [detect-and-choose.md](detect-and-choose.md#lockfile-to-manager) |
+| `js.lockfile.source` | warn | an npm/Yarn resolved URL uses HTTP or names another package, or a fetched artifact has SHA-1/missing integrity metadata (shape only; behavioural trust belongs to supply-chain-defense) | [registries-and-auth.md](registries-and-auth.md) |
 | `js.pnpm.field-ignored` | warn | a `pnpm` field pnpm 11+ no longer reads | [scripts-and-workspaces.md](scripts-and-workspaces.md#pnpm-settings-moved-to-pnpm-workspaceyaml) |
 | `js.dep.non-registry` | warn | package.json points a dependency at git/GitHub, a local file/link, or a direct HTTP(S) tarball rather than the configured registry | [registries-and-auth.md](registries-and-auth.md) |
 | `js.dep.paired-drift` | warn | Vue/compiler, Vite/@vitejs or Tailwind/@tailwindcss installed versions disagree, or the same direct dependency resolves differently across nested package roots | [upgrades.md](upgrades.md#duplicate-versions) |

@@ -240,6 +240,7 @@ for fid, case_name in (
     ("php.composer.eol", "php-composer-eol"),
     ("php.craft.eol", "php-craft-eol"),
     ("js.dep.paired-drift", "js-dep-paired-drift"),
+    ("js.lockfile.source", "js-lockfile-source"),
     ("php.composer.safety-off", "php-composer-safety-off"),
     ("deploy.composer.safety-off", "deploy-composer-safety-off"),
     ("deploy.composer.adhoc", "deploy-composer-update"),
