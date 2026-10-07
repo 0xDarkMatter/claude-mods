@@ -476,7 +476,13 @@ else
   no "verifier missing: scripts/check-pm-facts.py"
 fi
 
-# -- 6. copy-alone portability: the folder runs with nothing beside it ---------------
+# -- 6. focused behavioural sub-suites -----------------------------------------------
+# These suites stay separately runnable for mutation work, but the skill gate must not
+# silently omit their C1 catalogue and estate-tool coverage.
+ec 0 "facts behavioural sub-suite" bash "$HERE/facts.sh"
+ec 0 "estate tools sub-suite"       bash "$HERE/tools.sh"
+
+# -- 7. copy-alone portability: the folder runs with nothing beside it ---------------
 ALONE="$TMP/alone/package-manager-ops"
 mkdir -p "$TMP/alone" && cp -R "$SKILL" "$ALONE"
 grep -rq '\.\./\.\./' "$ALONE/scripts" && no "scripts reach outside the skill folder (../../)" || ok "no ../../ dependency in scripts"
