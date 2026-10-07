@@ -165,6 +165,22 @@ jobs:
             --unavailable "ddev-ops live check unreachable (GitHub API / raw docs / endoflife.date) - skipped" \
             -- python skills/ddev-ops/scripts/check-ddev-facts.py --live
 
+      - name: docker-ops facts vs Compose/WSL/Podman/Lima/Colima/K8s/Helm/Gateway API releases, EOL floors, Desktop compaction
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bash .github/scripts/freshness-step.sh --name docker-ops \
+            --drift "docker-ops drift - a tracked tool shipped a new major/minor, trivy-action has a new release past the pinned SHA, a Node/Python/PHP/Go line reached end of life (docker-audit.py's base-eol floors), or Docker Desktop's notes mention WSL disk compaction again; re-verify assets/docker-facts.json, the prose in docker-ops and kubernetes-ops, and references/disk-reclaim.md" \
+            --unavailable "docker-ops live check unreachable (GitHub API / endoflife.date / docker/docs) - skipped" \
+            -- python skills/docker-ops/scripts/check-docker-facts.py --live
+
+      - name: docker-ops + kubernetes-ops recommended image tags still exist (amd64 + arm64)
+        run: |
+          bash .github/scripts/freshness-step.sh --name docker-ops-image-tags \
+            --drift "an image tag the container skills recommend is gone, or no longer serves both linux/amd64 and linux/arm64; update the example (and docker-facts.json if it is a floor)" \
+            --unavailable "image-tag check could not verify every tag (registry rate limits or network) - skipped" \
+            -- python skills/docker-ops/scripts/check-image-tags.py --live skills/docker-ops/SKILL.md skills/docker-ops/references skills/docker-ops/assets skills/kubernetes-ops
+
       - name: repo-doctor AGENTS.md protocol vs Claude Code memory docs
         run: |
           bash .github/scripts/freshness-step.sh --name repo-doctor \

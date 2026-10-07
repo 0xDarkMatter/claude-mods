@@ -296,5 +296,5 @@ The canonical target-version list lives in [`assets/migrate-facts.json`](assets/
 | `git-ops` | Branch strategy for migration, git bisect to find breaking change |
 | `refactor-ops` | Code transformations that often accompany version upgrades |
 | `ci-cd-ops` | Updating CI pipelines to test against new versions, matrix builds |
-| `container-orchestration` | Updating base images, Dockerfile changes for new runtime versions |
+| `docker-ops` | Updating base images, Dockerfile changes for new runtime versions |
 | `security-ops` | Vulnerability remediation that triggers dependency upgrades |

@@ -8,6 +8,29 @@ feature releases live in the README "Recent Updates" section.
 
 ### Added
 
+- **docker-ops: Docker on your machine and in your repo** - the engine layer is folded in
+  rather than split into a separate runtime skill, because a broken-engine prompt says
+  "docker" and would collide with docker-ops anyway. The new SKILL.md opens with ten hard
+  rules: destructive commands are tiered (a sweep stays a sweep even when everything is
+  stopped); no bare `docker compose config`, which prints interpolated secrets and
+  `env_file` contents; no secrets in layers; datastore ports bound to loopback; scanners
+  pinned by SHA after March 2026's trivy-action compromise (GHSA-69fq-xp46-6x23); current
+  base lines only; non-root verified with `docker inspect`; never start or reconfigure the
+  engine for the user. Nine re-cut references: dockerfile, compose, supply chain and
+  scanning, a destructive-command index covering Docker, Compose, kubectl, Helm and DDEV,
+  providers and contexts, ports and networking, disk reclaim (Docker Desktop 4.59 stopped
+  compacting its WSL disk), VM backends and emulation, and debugging. Stale advice is gone:
+  `trivy-action@master`, an everyday `system prune -a --volumes`, `node:20`,
+  `rm -rf /var/lib/apt/lists` (now cache mounts with `docker-clean` removed), and `version:`
+  lines. Four tools, each with an offline suite (243 checks, 8/8 mutants killed):
+  `docker-audit.py` (Dockerfile families D1-D11, Compose C1-C9, cross-tool IDs, inline
+  pragmas that need a reason and may expire), `docker-doctor.py` (endpoint-first provider
+  detection, engine down or hung, two providers running, missing credential helpers, VM disk
+  far above engine data, Windows-reserved and WSL-side ports; it starts, prunes and
+  compacts nothing), `check-image-tags.py` (do the pinned tags still exist for
+  amd64+arm64?) and `check-docker-facts.py` (the weekly freshness job; its first live run
+  caught Python 3.10's end of life on 2026-10-01).
+
 - **`fleet sweep`: post-wave housekeeping in one ordered pass** - after a wave of chips,
   background agents or fleet lanes, `fleet prune` refused correctly but could not drain:
   a real 36-tree backlog read 0 SAFE, 31 REVIEW, with no next step for any of them. The
@@ -899,6 +922,17 @@ feature releases live in the README "Recent Updates" section.
 
 ### Changed
 
+- **`container-orchestration` renamed `kubernetes-ops`, Kubernetes and Helm only.** Its
+  Dockerfile and Compose material moved to docker-ops. Its examples move to Gateway API:
+  ingress-nginx was retired (no releases or security fixes since 2026-03, repository
+  archived), and InGate went with it. Also: Helm 4 (server-side apply by default,
+  `--rollback-on-failure` and `--force-replace`, plugin post-renderers), pods that meet the
+  restricted Pod Security Standard, what changed in Kubernetes 1.33-1.37, and a pod
+  debugging table. The ECS reference is thinned to the choice and the basics, and points to
+  AWS's own `aws-containers` skill; Flux points to fluxcd/agent-skills. The old
+  `build-push.sh` is retired: it wrapped plain `docker build`/`push` and defaulted to
+  `:latest`, which the new auditor reports. docker-ops documents `docker buildx build --push`
+  instead. Both installers remove an installed `container-orchestration`.
 - **`push-gate` renamed `push-preflight`.** It runs six checks before a push (secret
   scan, clean tree, forbidden files, fast-forward, size and open-issue advisories), so
   the name now matches `scripts/preflight.sh`. `secret-scan` was rejected: it would

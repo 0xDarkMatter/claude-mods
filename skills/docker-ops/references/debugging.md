@@ -41,7 +41,7 @@ rather than adding them to the image:
 
 ```bash
 # a toolbox sharing the container's process and network namespaces
-docker run --rm -it --pid=container:app --network=container:app nicolaka/netshoot
+docker run --rm -it --pid=container:app --network=container:app nicolaka/netshoot:v0.16
 # the filesystem, read-only, from a throwaway container
 docker run --rm -it --volumes-from app --entrypoint sh busybox:1.37
 ```

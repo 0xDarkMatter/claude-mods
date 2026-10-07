@@ -313,4 +313,4 @@ Load reference files when deeper tool-specific guidance is needed beyond what th
 | `code-stats` | Identify complex code that may be performance-sensitive |
 | `postgres-ops` | PostgreSQL-specific query optimization, indexing, EXPLAIN |
 | `sqlite-ops` | SQLite/D1/libSQL query plans, covering indexes, rows-read economics, `eqp-triage.py` |
-| `container-orchestration` | Resource limits, pod scaling, container performance |
+| `kubernetes-ops` | Resource limits, pod scaling, container performance |

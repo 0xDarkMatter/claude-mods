@@ -90,7 +90,7 @@ deprecated_items=(
     "$CLAUDE_DIR/agents/wrangler-expert.md"      # -> skills/cloudflare-ops
     "$CLAUDE_DIR/agents/bash-expert.md"          # -> skills/bash-ops
     "$CLAUDE_DIR/agents/claude-architect.md"     # -> skills/claude-code-ops
-    "$CLAUDE_DIR/agents/aws-fargate-ecs-expert.md" # -> skills/container-orchestration
+    "$CLAUDE_DIR/agents/aws-fargate-ecs-expert.md" # -> skills/kubernetes-ops (was container-orchestration)
     "$CLAUDE_DIR/agents/craftcms-expert.md"      # -> skills/craftcms-ops
     "$CLAUDE_DIR/agents/payloadcms-expert.md"    # -> skills/payloadcms-ops
     "$CLAUDE_DIR/agents/asus-router-expert.md"   # -> skills/asus-router-ops
@@ -119,6 +119,20 @@ for old_skill in "${renamed_skills[@]}"; do
     if [ -d "$old_path" ]; then
         rm -rf "$old_path"
         echo -e "  ${RED}Removed renamed: $old_skill (now ${old_skill%-patterns}-ops)${NC}"
+    fi
+done
+
+# Renames the -patterns rule above can't express, as "old new" pairs. A stale copy left
+# installed would keep triggering on the old name beside the new skill.
+other_renamed_skills=(
+    "container-orchestration kubernetes-ops"   # 2026-10: its Docker content folded into docker-ops
+)
+for pair in "${other_renamed_skills[@]}"; do
+    old_skill="${pair%% *}"
+    old_path="$CLAUDE_DIR/skills/$old_skill"
+    if [ -d "$old_path" ]; then
+        rm -rf "$old_path"
+        echo -e "  ${RED}Removed renamed: $old_skill (now ${pair##* })${NC}"
     fi
 done
 
