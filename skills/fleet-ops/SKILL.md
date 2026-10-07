@@ -108,8 +108,8 @@ lanes can hand off to.
 
 ### MAIN — one coordinator per repo
 
-**MAIN is the session whose cwd is the repo root**: the integration tree, which hosts no
-writing session ([`worktree-boundaries`](../../rules/worktree-boundaries.md)). `fleet main`
+**MAIN is the session whose cwd is the main checkout's root**, resolved the same from any
+lane: the integration tree, which hosts no writing session ([`worktree-boundaries`](../../rules/worktree-boundaries.md)). `fleet main`
 makes that role *addressable*, so a lane can say "come land me" instead of writing a file
 and hoping someone polls it.
 

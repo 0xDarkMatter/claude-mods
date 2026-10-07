@@ -1364,6 +1364,63 @@ mrow="$(bash "$FLEET" main show 2>&1)"
 case "$mrow" in
   *local_boss*) ok "release restores heuristic resolution";; *) no "release did not restore heuristic (show: $mrow)";; esac
 
+# -- main-from-linked-worktree-returns-root-session ----------------------------
+# `sessions.sh main` asked from INSIDE a lane must still name the session in the
+# MAIN checkout. It used to take "the repo root" from --show-toplevel, which in a
+# linked worktree is that worktree, so a lane asking "who is MAIN?" got the
+# session sitting in the lane: usually itself (2026-10-06). The pin was read from
+# the lane too, where it never is. fleet.sh hid this by cd'ing to the main
+# checkout first; a lane calling sessions.sh directly did not.
+MWT="$SREPO/.claude/worktrees/main-probe"     # the real lane layout: nested
+git -C "$SREPO" worktree add -q -b main-probe "$MWT" main
+mk_session local_inlane "Session sitting in the lane" \
+  "$(cygpath -m "$MWT" 2>/dev/null || printf '%s' "$MWT")" 5 main-probe main-probe
+mrow="$(cd "$MWT" && bash "$SESSIONS" main 2>/dev/null)"
+case "$mrow" in
+  *local_boss*) ok "main from a linked worktree returns the root session";;
+  *) no "main from a linked worktree resolved the wrong session ($mrow)";; esac
+bash "$FLEET" main claim local_hot >/dev/null 2>&1
+mrow="$(cd "$MWT" && bash "$SESSIONS" main 2>/dev/null)"
+case "$mrow" in
+  *local_hot*) ok "main from a linked worktree reads the main checkout's pin";;
+  *) no "the pin was not seen from a linked worktree ($mrow)";; esac
+bash "$FLEET" main release >/dev/null 2>&1
+
+# -- main-in-submodule-and-bare-layouts ----------------------------------------
+# The two layouts where the obvious one-liners name the wrong directory (checked
+# on git 2.49): in a submodule both `git worktree list`'s first entry and the
+# common dir's parent point into the superproject's .git/modules, and a bare
+# repo's parent is just the folder it sits in, where an unrelated session may
+# well be. A bare repo has no main checkout, so nobody is MAIN.
+git init -q -b main "$SB/msub-src"
+git -C "$SB/msub-src" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+git init -q -b main "$SB/msuper"
+git -C "$SB/msuper" -c protocol.file.allow=always submodule add -q "$SB/msub-src" sub >/dev/null 2>&1
+git -C "$SB/msuper/sub" worktree add -q -b msub-lane "$SB/msub-wt" 2>/dev/null
+mk_session local_subroot "Submodule checkout" \
+  "$(cygpath -m "$SB/msuper/sub" 2>/dev/null || printf '%s' "$SB/msuper/sub")" 30 main main
+mk_session local_subwt "Submodule lane" \
+  "$(cygpath -m "$SB/msub-wt" 2>/dev/null || printf '%s' "$SB/msub-wt")" 5 msub-lane msub-lane
+mrow="$(cd "$SB/msub-wt" && bash "$SESSIONS" main 2>/dev/null)"
+case "$mrow" in
+  *local_subroot*) ok "main from a submodule's worktree returns the submodule checkout's session";;
+  *) no "main from a submodule's worktree resolved ($mrow)";; esac
+
+mkdir -p "$SB/mbare"
+git clone -q --bare "$SREPO" "$SB/mbare/repo.git"
+git -C "$SB/mbare/repo.git" worktree add -q -b mbare-lane "$SB/mbare/wt" 2>/dev/null
+mk_session local_bareparent "Session in the bare repo's folder" \
+  "$(cygpath -m "$SB/mbare" 2>/dev/null || printf '%s' "$SB/mbare")" 5 elsewhere elsewhere
+mk_session local_barewt "Bare repo lane" \
+  "$(cygpath -m "$SB/mbare/wt" 2>/dev/null || printf '%s' "$SB/mbare/wt")" 5 mbare-lane mbare-lane
+mrow="$(cd "$SB/mbare/wt" && bash "$SESSIONS" main 2>/dev/null)"
+[ -z "$mrow" ] && ok "main from a bare repo's worktree resolves nobody" \
+  || no "main from a bare repo's worktree resolved ($mrow)"
+
+rm -f "$STORE"/local_inlane.json "$STORE"/local_subroot.json "$STORE"/local_subwt.json \
+      "$STORE"/local_bareparent.json "$STORE"/local_barewt.json
+git -C "$SREPO" worktree remove --force "$MWT"; git -C "$SREPO" branch -q -D main-probe
+
 # -- held-pin-release: a delete that fails must never read as a release -------
 # The 2026-10-05 flake (237/238, green on rerun). On Windows, a process holding
 # a file open WITHOUT delete-sharing (the Win32/.NET default; antivirus and

@@ -121,7 +121,9 @@ USAGE
                                   --fresh), then open over archived, then the
                                   newest. Use --fresh for any gate that must
                                   not act on stale data.
-  $SELF main                      The MAIN/coordinator session for this repo
+  $SELF main                      The MAIN/coordinator session for this repo:
+                                  the one in its main checkout, from any of
+                                  its worktrees. Exit 3 for a bare repo.
   $SELF paths                     All path->session claims (TSV, see below)
   $SELF views                     index + paths from one scan, tagged I / P
   $SELF at [--fresh] <path>       The claims on one directory (a worktree); a
@@ -831,14 +833,57 @@ self_session_id() {
 # MAIN = the coordinator session for this repo. Resolution order:
 #   1. explicit pin in .claude/fleet/main (a sessionId) — survives restarts and
 #      lets a human override the heuristic
-#   2. the session whose cwd IS the repo root (not a worktree under it), newest
-#      first, non-archived. This is the natural definition: worktree-boundaries
-#      doctrine already says the base checkout is the landing tree, so whoever
-#      sits in it is the integrator.
+#   2. the session whose cwd IS the main checkout's root (not a worktree under
+#      it), newest first, non-archived. This is the natural definition:
+#      worktree-boundaries doctrine already says the base checkout is the
+#      landing tree, so whoever sits in it is the integrator.
+# Both read the MAIN checkout, whichever tree of the repo the caller is in: a
+# lane asks "who is MAIN?" precisely because it is not MAIN.
+
+# The main checkout's top level, from any tree of the repo. Exit 2 outside a
+# repo, 1 when the repo has no main checkout. NOT --show-toplevel: in a linked
+# worktree that names the worktree, so `main` run from a lane answered with the
+# session sitting in the lane, usually the caller itself (2026-10-06). Nor the
+# obvious one-liners, each wrong in a layout (measured on git 2.49): in a
+# submodule, `git worktree list`'s first entry and the common dir's parent both
+# name the superproject's .git/modules/<name>; a bare repo's parent is just the
+# folder it sits in, where an unrelated session may be working. So: in the main
+# checkout, its toplevel; in a linked worktree, the checkout the shared
+# config's core.worktree names (a submodule's git dir lives elsewhere), else
+# the parent of a common dir called .git. Anything else (a bare repo, a
+# --separate-git-dir) has no checkout reachable from here. --path-format needs
+# git 2.31; an older one passes the unknown flag through as an extra line, and
+# then only the toplevel can be given.
+main_checkout_root() {
+    local out gd gcd wt cand
+    out=$(git rev-parse --path-format=absolute --git-dir --git-common-dir 2>/dev/null) || return 2
+    gd=${out%%$'\n'*}; gcd=${out#*$'\n'}
+    if [[ "$gcd" == *$'\n'* ]]; then git rev-parse --show-toplevel 2>/dev/null; return; fi
+    if [[ "$gd" == "$gcd" ]]; then
+        git rev-parse --show-toplevel 2>/dev/null || return 1
+        return
+    fi
+    wt=$(git config --file "$gcd/config" core.worktree 2>/dev/null)
+    if [[ -n "$wt" ]]; then
+        case "$wt" in /*|[A-Za-z]:[/\\]*) cand=$wt ;; *) cand=$gcd/$wt ;; esac
+    elif [[ "${gcd##*/}" == .git ]]; then
+        cand=${gcd%/*}
+    else
+        return 1
+    fi
+    # git's own path form, and proof it is a work tree: a bare repo kept in a
+    # dir called .git fails here rather than naming its parent.
+    git -C "$cand" rev-parse --show-toplevel 2>/dev/null || return 1
+}
+
 cmd_main() {
-    local root
-    root=$(git rev-parse --show-toplevel 2>/dev/null) || {
-        echo "$SELF: not in a git repo" >&2; return 2; }
+    local root rc=0
+    root=$(main_checkout_root) || rc=$?
+    case $rc in
+        0) ;;
+        2) echo "$SELF: not in a git repo" >&2; return 2 ;;
+        *) echo "$SELF: this repo has no main checkout (bare?), so no MAIN" >&2; return 3 ;;
+    esac
     if command -v cygpath >/dev/null 2>&1; then
         root=$(cygpath -m "$root" 2>/dev/null || printf '%s' "$root")
     fi
@@ -856,7 +901,7 @@ cmd_main() {
         echo "$SELF: pinned MAIN $pinned not found in session store (stale pin?)" >&2
     fi
 
-    # 2. heuristic — cwd is exactly the repo root
+    # 2. heuristic — cwd is exactly the main checkout's root
     printf '%s\n' "$idx" \
       | awk -F'\t' -v want="$want" '
           { c=tolower($5); sub(/\/$/,"",c); if (c == want) print }
