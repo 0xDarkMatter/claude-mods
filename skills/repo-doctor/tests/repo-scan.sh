@@ -205,6 +205,12 @@ commit "$GT" "feat: gates"
 OUT="$("$PY" "$SCAN" --repo "$GT" --only gates --json --no-tokei 2>/dev/null)"
 check "shipped_check_script_is_not_a_repo_gate" \
       "sorted(g['scope']+g['config'] for g in D['gates'] if g['tool']=='invariant test')==['lib/scripts/check-wired.sh','scripts/check-root.sh']"
+# A boundary checker in a plain subfolder governs that folder, not the repo; a root
+# check script stays repo-wide.
+mkdir -p "$GT/db"; printf 'module.exports = { forbidden: [] }\n' > "$GT/db/.dependency-cruiser.cjs"; commit "$GT" "db gate"
+OUT="$("$PY" "$SCAN" --repo "$GT" --only gates --json --no-tokei 2>/dev/null)"
+check "boundary_config_in_a_subfolder_is_scoped_to_it" \
+      "any(g['tool']=='dependency-cruiser' and g['scope']=='db/' and g['config']=='.dependency-cruiser.cjs' for g in D['gates']) and any(g['config']=='scripts/check-root.sh' and g['scope']=='' for g in D['gates'])"
 
 # ---- clean control -----------------------------------------------------------
 C="$TMP/clean"; init_repo "$C"; mkdir -p "$C/src"

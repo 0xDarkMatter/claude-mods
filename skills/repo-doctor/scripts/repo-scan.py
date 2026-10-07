@@ -1560,6 +1560,11 @@ class Scan:
             if wired is None:
                 wired = any(token in check_text for token in tokens) if tokens else None
             scope = self._scope_dir(config, workspaces)
+            # A boundary checker's config governs the folder it sits in (a db/ dependency-
+            # cruiser config checks db/'s imports), workspace member or not. Invariant
+            # tests and ArchUnit suites check the whole tree wherever they live.
+            if not scope and "/" in config and tool not in ("invariant test", "ArchUnit"):
+                scope = config.rsplit("/", 1)[0] + "/"
             display_config = config[len(scope):] if scope and config.startswith(scope) else config
             out.append({"tool": tool, "config": display_config, "scope": scope,
                         "partial": self._partial_gate(config), "wired": wired,
