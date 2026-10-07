@@ -13,7 +13,8 @@ Output:  scaffold: the AGENTS.md draft (markdown) on stdout, or the --json envel
            claude-mods.repo-doctor.agents-md-scaffold/v1. --write creates <repo>/AGENTS.md
            and prints nothing. --dir drafts <repo>/<FOLDER>/AGENTS.md instead: a nested
            doc holding only what the root AGENTS.md doesn't say.
-         audit: a findings report, or --json (claude-mods.repo-doctor.agents-md-audit/v1).
+         audit: a findings report, or --json (claude-mods.repo-doctor.agents-md-audit/v1),
+           whose data.docs[] has one record per tracked AGENTS.md (root and nested).
            --diff prints ONLY a git-apply-able patch (empty when there is nothing to add).
          survey: one aligned row per repo, or --json
            (claude-mods.repo-doctor.agents-md-survey/v1).
@@ -51,8 +52,9 @@ scripts/repo-scan.py (schema claude-mods.repo-doctor.repo-scan/v1).
 #   MARKDOWN      fence-aware heading parser, section coverage, doc analysis
 #   SHADOWING     CLAUDE.md classification (import / symlink / prose pointer / standalone)
 #   FACTS         running repo-scan.py, rendering facts into draft sections
-#   SCAFFOLD      archetype choice, template fill, --write
-#   AUDIT         findings, dead commands, staleness, split plan, the --diff patch
+#   SCAFFOLD      archetype choice, template fill, nested --dir drafts, --write
+#   AUDIT         findings, dead commands, staleness, nested docs and root pointers,
+#                 trigger pointers, split plan, the ruled-out record, the --diff patch
 #   SURVEY        gh plumbing (GET only), per-repo remote analysis, table
 #   CLI           argument parsing and dispatch
 
@@ -1146,6 +1148,120 @@ def shadow_findings(repo: Path, agents_rel: str, no_parents: bool) -> tuple[list
     return finds, edits
 
 
+# --- nested entry docs ------------------------------------------------------------
+# Every tracked <folder>/AGENTS.md is audited against its own folder (spec N3 in
+# docs/plans/NESTED-ENTRY-DOCS-2026-10.md). A nested doc carries deltas only, so it is
+# judged on its budget, on a root pointer that reaches it, on a scope line that holds
+# when it loads alone, and on commits to its own folder, never the repo's.
+
+
+def nested_doc_paths(repo: Path) -> list[str]:
+    """Tracked <folder>/AGENTS.md files below the root, skipping dependency trees and .claude/."""
+    out = []
+    for rel in sorted((git(repo, "ls-files", "*AGENTS.md") or "").splitlines()):
+        d = os.path.dirname(rel)
+        if d and rel == f"{d}/AGENTS.md" and not re.search(r"(^|/)(node_modules|vendor|\.claude)(/|$)", d):
+            out.append(rel)
+    return out
+
+
+def norm_line(line: str) -> str:
+    return re.sub(r"\s+", " ", line.strip().lower())
+
+
+def subtree_staleness(repo: Path, rel: str, d: str) -> int | None:
+    """Commits touching d/ since rel was last touched (repo-wide commits say nothing about a package)."""
+    last = git(repo, "rev-list", "-1", "HEAD", "--", rel)
+    if not last:
+        return None
+    n = git(repo, "rev-list", "--count", f"{last}..HEAD", "--", d + "/")
+    return int(n) if n and n.isdigit() else None
+
+
+def audit_nested(repo: Path, nested: list[str], f: dict, root_rel: str | None,
+                 root_text: str) -> tuple[list[dict], list[dict], list[str]]:
+    """(findings, one data.docs record per nested doc, folders the root never points to)."""
+    finds, docs, unlinked = [], [], []
+    root_long = {norm_line(l) for l in root_text.splitlines() if len(l.strip()) >= 40}
+    for rel in nested:
+        d = os.path.dirname(rel)
+        text = read_raw(repo / rel)
+        lines = text.splitlines()
+        n, chars = len(lines), len(text)
+
+        def add(fid: str, sev: str, msg: str, line: int | None = None) -> None:
+            finds.append({"id": fid, "severity": sev, "path": f"{rel}:{line}" if line else rel, "msg": msg})
+        if n > NESTED_CEILING_LINES or chars > NESTED_CEILING_CHARS:
+            add("nested-over-budget", "warn",
+                f"{n} lines and {chars:,} characters, over the nested ceiling ({NESTED_CEILING_LINES} lines / "
+                f"{NESTED_CEILING_CHARS:,} characters): some tools load every nested AGENTS.md on every "
+                "task. Keep the deltas; move detail to a linked doc")
+        elif n > NESTED_TARGET_LINES:
+            add("nested-over-budget", "info", f"{n} lines, over the {NESTED_TARGET_LINES}-line nested target")
+        if root_rel and not re.search(r"(?<![\w.-])" + re.escape(rel) + r"(?![\w-])", root_text):
+            unlinked.append(d)
+            add("nested-unlinked", "warn",
+                f"{root_rel} never names {rel}. Tools that read only the root (Codex below the launch "
+                "folder, Jules) never reach it; --diff adds a pointer")
+        if not re.search(r"(?<![\w./-])" + re.escape(d) + r"(?![\w-])", text):
+            add("nested-no-scope", "info",
+                f"{rel} never names `{d}/`, so loaded alone it can't say where it applies. Open with "
+                f"\"Applies to `{d}/` and below\"")
+        repeats = [i for i, l in enumerate(lines) if len(l.strip()) >= 40 and norm_line(l) in root_long]
+        if len(repeats) >= 3:
+            add("nested-restates-root", "info",
+                f"{len(repeats)} lines repeat the root AGENTS.md (first: line {repeats[0] + 1}); a tool "
+                "that concatenates both pays for them twice", repeats[0] + 1)
+        own = {"manifests": (f.get("manifests_by_dir") or {}).get(d + "/") or {}}
+        for i, cmd, _ in command_refs(lines):
+            # Dead only when neither the folder nor the root can run it: a nested doc may
+            # name either, and a package script must never be judged against the root.
+            why = check_command(cmd, own, repo / d)
+            if why and check_command(cmd, f, repo):
+                add("nested-dead-command", "warn", f"`{cmd}`: {why} (checked against `{d}/` and the root)", i + 1)
+        since = subtree_staleness(repo, rel, d)
+        if since is not None and since > FRESH_COMMITS:
+            add("nested-stale", "warn",
+                f"{since} commits have touched `{d}/` since {rel} was last touched: verify its claims, "
+                "then touch it in the fixing commit")
+        docs.append({"path": rel, "kind": "nested", "lines": n, "chars": chars, "commits_since": since})
+    return finds, docs, unlinked
+
+
+def add_root_pointers(lines: list[str], unlinked: list[str], root_rel: str) -> list[str]:
+    """Point the root at each unlinked nested doc: a row in an existing ## Ownership table,
+    else one trigger-bearing line at the end of the Structure section (created if absent)."""
+    up = "../" * root_rel.count("/")
+    secs = h2_sections(lines)
+    own = next((s for s in secs if re.match(r"(?i)ownership\b", s["title"])), None)
+    rows = [i for i in range(own["start"] + 1, own["end"]) if lines[i].lstrip().startswith("|")] if own else []
+    if len(rows) >= 2:
+        header = [c.strip().lower() for c in lines[rows[0]].strip().strip("|").split("|")]
+        add = []
+        for d in unlinked:
+            cells = []
+            for j, h in enumerate(header):
+                if re.search(r"path|folder|dir", h):
+                    cells.append(f"`{d}/`")
+                elif re.search(r"agents|doc|entry", h):
+                    cells.append(f"[{d}/AGENTS.md]({up}{d}/AGENTS.md)")
+                else:
+                    cells.append(d.rsplit("/", 1)[-1] if j == 0 else "")
+            if not any("AGENTS.md" in c for c in cells):
+                cells[-1] = f"[{d}/AGENTS.md]({up}{d}/AGENTS.md)"
+            add.append("| " + " | ".join(cells) + " |")
+        return lines[:rows[-1] + 1] + add + lines[rows[-1] + 1:]
+    add = [f"- Before editing `{d}/**`, read [{d}/AGENTS.md]({up}{d}/AGENTS.md)." for d in unlinked]
+    st = next((s for s in secs if s["key"] == "structure"), None)
+    if not st:
+        return lines + ["", "## Structure", ""] + add
+    end = st["end"]
+    while end > st["start"] + 1 and not lines[end - 1].strip():
+        end -= 1
+    gap = [""] if lines[end - 1].lstrip().startswith(("|", "<!--")) else []
+    return lines[:end] + gap + add + lines[end:]
+
+
 def slugify(title: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-") or "section"
 
@@ -1386,19 +1502,24 @@ def cmd_audit(args) -> int:
         return EX_NOTFOUND
     rel = "AGENTS.md" if (repo / "AGENTS.md").is_file() else (
         ".claude/AGENTS.md" if (repo / ".claude/AGENTS.md").is_file() else None)
+    nested = nested_doc_paths(repo)
     f = load_facts(repo, args.facts, None if args.facts else
-                   "repo,manifests,ddev,deploy,ci,tests,generated,history,outliers,env")
+                   "repo,manifests,ddev,deploy,ci,tests,generated,history,outliers,env",
+                   [os.path.dirname(n) + "/" for n in nested])
     if f is None:
         return EX_ERR
     finds: list[dict] = []
     files: dict = {}
     data: dict = {"repo": str(repo), "agents_md": rel}
+    docs: list[dict] = []
     if rel is None:
         finds.append({"id": "missing-agents-md", "severity": "crit", "path": "AGENTS.md",
                       "msg": "no AGENTS.md: agents enter blind. Draft one with "
                              "`agents-md.py scaffold --repo <path>` (verified facts only)"})
         c_finds, _ = shadow_findings(repo, "AGENTS.md", args.no_parents)
-        finds += [x for x in c_finds if x["id"] == "shadowed-by-parent"]
+        finds += [x for x in c_finds if x["id"] in ("shadowed-by-parent", "nested-shadowed")]
+        n_finds, docs, _ = audit_nested(repo, nested, f, None, "")
+        finds += n_finds
     else:
         text = read_raw(repo / rel)
         eol = "\r\n" if "\r\n" in text else "\n"
@@ -1512,6 +1633,12 @@ def cmd_audit(args) -> int:
             old_d, new_d = files[dest]
             if old_d and "\r\n" in old_d:   # keep a CRLF destination CRLF throughout
                 files[dest] = (old_d, new_d.replace("\r\n", "\n").replace("\n", "\r\n"))
+        n_finds, n_docs, unlinked = audit_nested(repo, nested, f, rel, text)
+        finds += n_finds
+        if unlinked:
+            new = add_root_pointers(new, unlinked, rel)
+        docs = [{"path": rel, "kind": "root", "lines": an["lines"], "chars": an["chars"],
+                 "commits_since": since}] + n_docs
         stubs = [stub_for(k, f) for k in ("commands", "landmines", "deploy")
                  if any(x["id"] == f"missing-section-{k}" and x["severity"] == "warn" for x in finds)]
         new_text = eol.join(new)
@@ -1544,6 +1671,9 @@ def cmd_audit(args) -> int:
                                  "rule it out (--json lists the questions)"})
     sev_rank = {"crit": 0, "warn": 1, "info": 2}
     finds.sort(key=lambda x: (sev_rank[x["severity"]], x["id"], x["path"]))
+    for doc in docs:
+        doc["findings"] = [x["id"] for x in finds if x["path"].split(":")[0] == doc["path"]]
+    data["docs"] = docs
     data["findings"] = finds
     patch = build_patch(files)
     data["diff"] = patch or None

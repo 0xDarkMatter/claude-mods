@@ -410,6 +410,60 @@ ruled '- [fragile] `z.js` @3: was fine until 2000-01-01'
 check "expired_line_is_not_honoured" \
       "D['ruled_out']==0 and 'ruled-out-expired' in {f['id'] for f in D['findings']}"
 rm -rf "$U/docs/agents"
+# Every tracked AGENTS.md is audited, nested ones against their own folder: budget,
+# a root pointer, a scope line, no copy of the root, commands checked against the
+# folder's manifest and the root, staleness counted on the folder's own commits.
+NA="$TMP/nestaud"; make_monorepo "$NA" >/dev/null 2>&1; rm -rf "$NA/.ruler"
+"$PY" - "$NA" <<'EOF'
+import sys
+r = sys.argv[1]
+shared = ["- Every package exports through its own src/index.ts entry point only.",
+          "- Shared types live in the engine and are re-exported, never redefined.",
+          "- Each package keeps its own tests beside its source files today."]
+root = ["# Agent Instructions - monorepo", "", "A fixture monorepo: an engine, a UI package and a web app.", "",
+        "## Commands", "", "```bash", "npm run check", "```", "", "## Landmines", "",
+        "1. **The parser shim** - `packages/engine/src/fragile.ts` keeps its compatibility shim.", "",
+        "## Structure", "", "- Before editing `packages/engine/**`, read [packages/engine/AGENTS.md](packages/engine/AGENTS.md).",
+        "", "## Conventions", ""] + shared
+engine = ["# Engine", "", "Applies to `packages/engine/` and below; extends the root [AGENTS.md](../../AGENTS.md).", "",
+          "## Commands", "", "```bash", "npm -w packages/engine run check:deps", "npm run check:deps", "npm run nope", "```"]
+ui = ["# UI", "", "Notes for the user interface package.", ""] + shared + [f"- Note {i}: keep components small." for i in range(64)]
+for path, lines in (("AGENTS.md", root), ("packages/engine/AGENTS.md", engine), ("packages/ui/AGENTS.md", ui)):
+    open(f"{r}/{path}", "w", newline="\n").write("\n".join(lines) + "\n")
+EOF
+commit "$NA" "docs: nested agents"
+for i in $(seq 1 16); do echo "$i" >> "$NA/README.md"; commit "$NA" "docs: readme $i"; done
+for i in $(seq 1 16); do echo "// $i" >> "$NA/packages/ui/src/u01.ts"; commit "$NA" "feat: ui $i"; done
+OUT="$("$PY" "$AM" audit --repo "$NA" --no-parents --json 2>/dev/null)"
+nf() { printf "any(f['id']=='%s' and f['path'].split(':')[0]=='%s' for f in D['findings'])" "$1" "$2"; }
+check "data_docs_lists_every_entry_doc" \
+      "{x['path']:x['kind'] for x in D['docs']}=={'AGENTS.md':'root','packages/engine/AGENTS.md':'nested','packages/ui/AGENTS.md':'nested'}"
+check "nested_doc_over_budget_warns" \
+      "any(f['id']=='nested-over-budget' and f['severity']=='warn' and f['path']=='packages/ui/AGENTS.md' for f in D['findings']) and not $(nf nested-over-budget packages/engine/AGENTS.md)"
+check "unlinked_nested_doc_warns" \
+      "$(nf nested-unlinked packages/ui/AGENTS.md) and not $(nf nested-unlinked packages/engine/AGENTS.md)"
+check "nested_staleness_counts_only_its_subtree" \
+      "$(nf nested-stale packages/ui/AGENTS.md) and not $(nf nested-stale packages/engine/AGENTS.md)"
+check "nested_dead_command_checked_against_own_manifest" \
+      "[f['msg'].split(chr(96))[1] for f in D['findings'] if f['id']=='nested-dead-command']==['npm run nope']"
+check "nested_doc_that_never_names_its_folder_is_flagged" \
+      "$(nf nested-no-scope packages/ui/AGENTS.md) and not $(nf nested-no-scope packages/engine/AGENTS.md)"
+check "nested_doc_restating_the_root_is_flagged" "$(nf nested-restates-root packages/ui/AGENTS.md)"
+"$PY" "$AM" audit --repo "$NA" --no-parents --diff > "$TMP/na.patch" 2>/dev/null
+grep -qxF '+- Before editing `packages/ui/**`, read [packages/ui/AGENTS.md](packages/ui/AGENTS.md).' "$TMP/na.patch" \
+    && gitq "$NA" apply "$(winpath "$TMP/na.patch")" 2>/dev/null \
+    && ok "unlinked_nested_doc_gets_a_trigger_pointer" || no "unlinked_nested_doc_gets_a_trigger_pointer" "$(grep '^+' "$TMP/na.patch" | head -5)"
+commit "$NA" "docs: link the ui doc"
+OUT="$("$PY" "$AM" audit --repo "$NA" --no-parents --json 2>/dev/null)"
+check "  ...and the re-audit finds it linked" "not $(nf nested-unlinked packages/ui/AGENTS.md)"
+# A root with an Ownership table gets a row there, in the table's own columns.
+OW="$TMP/owner"; init_repo "$OW"; good_agents "$OW"; mkdir -p "$OW/eng" "$OW/lib"
+printf '\n## Ownership\n\n| Area | Path | Entry doc | Gate |\n|---|---|---|---|\n| eng | `eng/` | [eng/AGENTS.md](eng/AGENTS.md) | `npm test` |\n' >> "$OW/AGENTS.md"
+printf '# Eng\n\nApplies to `eng/`.\n' > "$OW/eng/AGENTS.md"; printf '# Lib\n\nApplies to `lib/`.\n' > "$OW/lib/AGENTS.md"
+commit "$OW" "docs: ownership"
+"$PY" "$AM" audit --repo "$OW" --no-parents --diff 2>/dev/null \
+    | grep -qxF '+| lib | `lib/` | [lib/AGENTS.md](lib/AGENTS.md) |  |' \
+    && ok "pointer_lands_in_the_ownership_table" || no "pointer_lands_in_the_ownership_table" "no table row in the patch"
 M="$TMP/missing"; init_repo "$M"; echo x > "$M/f"; commit "$M" "x"
 OUT="$("$PY" "$AM" audit --repo "$M" --no-parents --json 2>/dev/null)"; rc=$?
 check "no AGENTS.md is crit" "D['findings'][0]['id']=='missing-agents-md'"
