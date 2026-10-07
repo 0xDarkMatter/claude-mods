@@ -2362,33 +2362,61 @@ class Audit:
         if sum((self.root / name).is_file() for name in JS_LOCKFILES) > 1:
             return
 
+        def real_name(name, spec):
+            """An npm alias (`string-width-cjs` -> `npm:string-width@^4.2.0`, arriving through
+            glob 10+ in most modern trees) installs the TARGET package: compare its name."""
+            spec = str(spec or "")
+            if not spec.startswith("npm:"):
+                return name
+            target = spec[4:]
+            at = target.find("@", 1)
+            return target[:at] if at > 0 else target
+
         def inspect(name, resolved, integrity, file):
             resolved, integrity = str(resolved or ""), str(integrity or "")
             if not resolved:
                 return
+            web = resolved.lower().startswith(("http://", "https://"))
             path = urllib.parse.unquote(urllib.parse.urlparse(resolved).path).lower()
-            leaf = name.rsplit("/", 1)[-1].lower()
-            archive = path.rsplit("/", 1)[-1]
             if resolved.lower().startswith("http:"):
-                problems.append(f"{file}: {name} resolves over HTTP")
-            if resolved.lower().startswith(("http://", "https://")) \
-                    and f"/{name.lower()}/" not in path and not archive.startswith(leaf + "-"):
-                problems.append(f"{file}: resolved path for {name} names another package")
-            if resolved.lower().startswith(("http://", "https://")) and not integrity:
-                problems.append(f"{file}: {name} has no integrity hash")
+                problems.append((file, f"{name} resolves over HTTP"))
+            # Name check on registry-layout tarballs only (`/<name>/-/<leaf>-<version>.tgz`,
+            # npm and Yarn registries and their mirrors). A git host or codeload tarball is a
+            # non-registry source: js.dep.non-registry owns it, so it is not reported twice.
+            if web and "/-/" in path and f"/{name.lower()}/-/" not in path:
+                problems.append((file, f"resolved path for {name} names another package"))
+            if web and not integrity:
+                problems.append((file, f"{name} has no integrity hash"))
             elif integrity.lower().startswith("sha1-"):
-                problems.append(f"{file}: {name} uses SHA-1 integrity")
+                problems.append((file, f"{name} uses SHA-1 integrity"))
+
+        def v1_tree(deps, filename):
+            # lockfileVersion 1 has no `packages` map: the tree nests under `dependencies`.
+            for key, row in obj(deps).items():
+                row = obj(row)
+                inspect(real_name(str(key), row.get("version")), row.get("resolved"), row.get("integrity"), filename)
+                v1_tree(row.get("dependencies"), filename)
 
         for filename in ("package-lock.json", "npm-shrinkwrap.json"):
             lock = read_json(self.root / filename) if (self.root / filename).is_file() else None
-            for key, row in obj(obj(lock).get("packages")).items():
+            packages = obj(lock).get("packages")
+            if not isinstance(packages, dict):
+                v1_tree(obj(lock).get("dependencies"), filename)
+            for key, row in obj(packages).items():
                 if not key or not key.startswith("node_modules/") or obj(row).get("link") is True:
                     continue
                 name = str(obj(row).get("name") or key.rsplit("node_modules/", 1)[-1])
                 inspect(name, obj(row).get("resolved"), obj(row).get("integrity"), filename)
 
         yarn = read_text(self.root / "yarn.lock") if (self.root / "yarn.lock").is_file() else None
-        if yarn:
+        if yarn and "__metadata:" in yarn[:2000]:
+            # Yarn 2+ records `resolution:` and `checksum:`, not URLs and SRI hashes; only an
+            # HTTP source is checked there.
+            for line in yarn.splitlines():
+                m = re.match(r"^\s+resolution\s*:\s*[\"']?(.+?)@(http://\S+?)[\"']?\s*$", line)
+                if m:
+                    problems.append(("yarn.lock", f"{m.group(1)} resolves over HTTP"))
+        elif yarn:
             name, resolved, integrity = None, "", ""
 
             def flush():
@@ -2400,17 +2428,31 @@ class Audit:
                     flush()
                     key = line.rstrip()[:-1].split(",", 1)[0].strip().strip('"')
                     at = key.find("@", 1)
-                    name, resolved, integrity = (key[:at] if at > 0 else key), "", ""
-                elif re.match(r"^\s+resolved\s", line):
-                    resolved = line.split(None, 1)[1].strip().strip('"')
-                elif re.match(r"^\s+integrity\s", line):
-                    integrity = line.split(None, 1)[1].strip().strip('"')
+                    name = real_name(key[:at], key[at + 1:]) if at > 0 else key
+                    resolved, integrity = "", ""
+                elif re.match(r"^\s+resolved(\s|$)", line):
+                    resolved = line.strip()[len("resolved"):].strip().strip('"')
+                elif re.match(r"^\s+integrity(\s|$)", line):
+                    integrity = line.strip()[len("integrity"):].strip().strip('"')
                 elif not line.strip():
                     flush()
                     name, resolved, integrity = None, "", ""
+
+        pnpm = read_text(self.root / "pnpm-lock.yaml") if (self.root / "pnpm-lock.yaml").is_file() else None
+        if pnpm:
+            # pnpm keeps registry integrity in `resolution: {integrity: ...}`; a tarball
+            # source is `resolution: {tarball: <url>}`. Only an HTTP tarball is checked.
+            lines = pnpm.splitlines()
+            for i, line in enumerate(lines):
+                if re.search(r"\btarball\s*:\s*[\"']?http://", line):
+                    indent = len(line) - len(line.lstrip())
+                    owner = next((lines[j].strip().rstrip(":").strip("'\"") for j in range(i - 1, -1, -1)
+                                  if lines[j].strip() and len(lines[j]) - len(lines[j].lstrip()) < indent
+                                  and not lines[j].strip().startswith("resolution")), "a package")
+                    problems.append(("pnpm-lock.yaml", f"{owner} resolves over HTTP"))
         if problems:
-            file = "package-lock.json" if (self.root / "package-lock.json").is_file() else "yarn.lock"
-            self.add("warn", "js.lockfile.source", file, "; ".join(problems[:8]),
+            self.add("warn", "js.lockfile.source", problems[0][0],
+                     "; ".join(f"{file}: {text}" for file, text in problems[:8]),
                      "regenerate the lockfile with the pinned manager over HTTPS and require SHA-512 integrity")
 
     # ---- CI and deploy: frozen installs, --no-dev, Composer 1, credentials in images ----

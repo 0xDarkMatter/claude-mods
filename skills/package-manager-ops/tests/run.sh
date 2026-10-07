@@ -285,6 +285,10 @@ mutation("vue-template-compiler must equal vue exactly", "js-dep-vue2-compiler-p
          'compare("vue", {"vue-template-compiler"}, 3)', 'compare("vue", {"vue-template-compiler"}, 2)')
 mutation("cross-root drift is major-only", "clean-nested-minor-drift",
          'if len({version[0] for _path, version in rows}) > 1:', 'if len({version for _path, version in rows}) > 1:')
+mutation("yarn npm-alias names its target", "clean-yarn-alias-source",
+         'name = real_name(key[:at], key[at + 1:]) if at > 0 else key', 'name = key[:at] if at > 0 else key')
+mutation("lockfileVersion 1 tree is read", "js-lockfile-source-v1",
+         'v1_tree(obj(lock).get("dependencies"), filename)\n', 'pass\n')
 mutation("additional install sites", "install-sites",
          '("package.json", "composer.json", "justfile", "Makefile")', '("never",)')
 
