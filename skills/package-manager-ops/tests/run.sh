@@ -686,22 +686,29 @@ lib = tmp / "m" / "js-lockfile-missing"
 p, doc = pj(lib, "--profile", "library")
 row(p.returncode == 0 and doc and doc["meta"]["profile_silenced"] >= 1 and doc["meta"]["profile"] == "library", f"--profile library drops the deploy-shaped lockfile rule (exit {p.returncode})")
 row(pa(lib).returncode == 10 and ids_in(pj(lib, "--profile", "site")[1]) == ids_in(pj(lib)[1]), "the default profile is site and silences nothing")
-p, doc = pj(bower, "--profile", "pedantic")
-row(doc and {f["severity"] for f in doc["data"]} == {"error"}, "--profile pedantic reports every warn as an error")
+noted = tmp / "m" / "clean-yarn-alias-source"  # clean, but carries the js.yarn.classic note
+p, doc = pj(noted, "--profile", "pedantic")
+row(p.returncode == 10 and "js.yarn.classic" in (ids_in(doc) or set()) and pa(noted).returncode == 0,
+    f"--profile pedantic turns advisory notes into findings (exit {p.returncode}; site exits {pa(noted).returncode})")
 row(pa(bower, "--profile", "strict").returncode == 2, "an unknown --profile is a usage error")
-d = clone("legacy-bower")
+d = clone("clean-yarn-alias-source")
 (d / ".pm-audit.json").write_text(json.dumps({"profile": "pedantic"}))
-row(doc_sev(pj(d)[1]) == {"error"} and doc_sev(pj(d, "--profile", "site")[1]) == {"warn"}, "the config's profile applies and --profile overrides it")
+row(pa(d).returncode == 10 and pa(d, "--profile", "site").returncode == 0, "the config's profile applies and --profile overrides it")
 
 # config: invalid, expired, unused, glob, boundary
 d = clone("legacy-bower")
-(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "path": "bower.json", "reason": "ok", "until": "2026-12-31"}, {"id": "legacy.bower"}]}))
+(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "path": "bower.json", "reason": "kept until the npm move", "until": "2026-12-31"}, {"id": "legacy.bower"}]}))
 p, doc = pj(d)
 row(ids_in(doc) == {"config.invalid", "legacy.bower"}, f"one bad ignore voids the whole config, so the good one waives nothing ({ids_in(doc)})")
-for bad_cfg, label in (({"ignore": [{"id": "no.such-rule", "reason": "x", "until": "2026-12-31"}]}, "an unknown id"),
-                       ({"ignore": [{"id": "config.invalid", "reason": "x", "until": "2026-12-31"}]}, "an ignore of config.invalid itself"),
-                       ({"ignore": [{"id": "legacy.bower", "reason": "x", "until": "31/12/2026"}]}, "a non-ISO until"),
+for bad_cfg, label in (({"ignore": [{"id": "no.such-rule", "reason": "kept until the npm move", "until": "2026-12-31"}]}, "an unknown id"),
+                       ({"ignore": [{"id": "config.invalid", "reason": "kept until the npm move", "until": "2026-12-31"}]}, "an ignore of config.invalid itself"),
+                       ({"ignore": [{"id": "legacy.bower", "reason": "kept until the npm move", "until": "31/12/2026"}]}, "a non-ISO until"),
                        ({"ignore": [{"id": "legacy.bower", "reason": "  ", "until": "2026-12-31"}]}, "a blank reason"),
+                       ({"ignore": [{"id": "legacy.bower", "reason": ".", "until": "2026-12-31"}]}, "a punctuation-only reason"),
+                       ({"ignore": [{"id": "legacy.bower", "reason": "kept until the npm move", "until": "9999-12-31"}]},
+                        "an until more than a year ahead (a permanent mute)"),
+                       ({"ignore": [{"id": "legacy.bower", "path": "", "reason": "kept until the npm move", "until": "2026-12-31"}]},
+                        "an empty path (it used to widen to every file)"),
                        ({"profile": "everything"}, "an unknown profile"),
                        ({"ignores": []}, "an unknown key (a typo that would waive nothing)")):
     d = clone("legacy-bower")
@@ -712,7 +719,7 @@ d = clone("legacy-bower")
 row("config.invalid" in (ids_in(pj(d)[1]) or set()), "config.invalid for a config that is not JSON")
 row(pa(bower, "--config", str(tmp / "nope.json")).returncode == 3, "an explicit --config that does not exist exits 3")
 d = clone("legacy-bower")
-(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "path": "bower.json", "reason": "ok", "until": "2026-10-05"}]}))
+(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "path": "bower.json", "reason": "kept until the npm move", "until": "2026-10-05"}]}))
 row(pa(d).returncode == 0, "an ignore is still live on its until day")
 row(pa(d, as_of="2026-10-06").returncode == 10, "an ignore is expired the day after its until")
 p, doc = pj(d, as_of="2026-10-06")
@@ -720,22 +727,22 @@ exp = [f for f in doc["data"] if f["id"] == "suppression.expired"] if doc else [
 row(exp and "legacy.bower" in exp[0]["message"] and "2026-10-05" in exp[0]["message"] and exp[0]["file"] == ".pm-audit.json", "suppression.expired names the id, the date and the config file")
 p, doc = pj(d)
 sup = (doc or {"meta": {}})["meta"].get("suppressed", [])
-row(sup == [{"id": "legacy.bower", "file": "bower.json", "line": None, "by": "config", "reason": "ok"}], f"a suppressed finding is listed in meta.suppressed with its reason ({sup})")
+row(sup == [{"id": "legacy.bower", "file": "bower.json", "line": None, "by": "config", "reason": "kept until the npm move"}], f"a suppressed finding is listed in meta.suppressed with its reason ({sup})")
 d = clone("legacy-bower")
-(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "path": "other/*", "reason": "ok", "until": "2026-12-31"}]}))
+(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "path": "other/*", "reason": "kept until the npm move", "until": "2026-12-31"}]}))
 p, doc = pj(d)
 row(ids_in(doc) == {"legacy.bower"} and "suppression.unused" in {n["id"] for n in doc["meta"]["notes"]},
     "an ignore whose path matches nothing leaves the finding and raises suppression.unused (a note)")
 d = clone("clean")
-(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "reason": "ok", "until": "2026-12-31"}]}))
+(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "reason": "kept until the npm move", "until": "2026-12-31"}]}))
 p, doc = pj(d)
 row(p.returncode == 0 and "suppression.unused" in {n["id"] for n in doc["meta"]["notes"]}, "suppression.unused is a note: it never changes the exit code")
 d = clone("deploy-composer-dev")
-(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "deploy.composer.dev", "path": ".github/workflows/*.yml", "reason": "ok", "until": "2026-12-31"}]}))
+(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "deploy.composer.dev", "path": ".github/workflows/*.yml", "reason": "kept until the npm move", "until": "2026-12-31"}]}))
 row(pa(d).returncode == 0, "a path glob with a leading dot directory matches (.github/workflows/*.yml)")
 d = clone("legacy-bower")
 alt = tmp / "c4" / "alt-config.json"
-alt.write_text(json.dumps({"ignore": [{"id": "legacy.bower", "reason": "ok", "until": "2026-12-31"}]}))
+alt.write_text(json.dumps({"ignore": [{"id": "legacy.bower", "reason": "kept until the npm move", "until": "2026-12-31"}]}))
 row(pa(d, "--config", str(alt)).returncode == 0, "--config reads a file outside the repo; a path-less ignore matches every file")
 
 # inline ignores
@@ -782,6 +789,70 @@ row(pa(d, "--baseline", str(tmp / "nope.json")).returncode == 3, "a missing --ba
 (tmp / "c4" / "garbage.json").write_text("{not json")
 row(pa(d, "--baseline", str(tmp / "c4" / "garbage.json")).returncode == 4, "an unparseable --baseline file exits 4")
 
+# refute-ux findings: suppression and baselines must not hide debt
+d = clone("clean-suppression-inline")
+(d / "scripts" / "bootstrap.sh").write_text("#!/bin/sh\nnpx eslint . # pm-audit: ignore[npx.unpinned] pinned by the image\nnpx prettier .\n")
+p, doc = pj(d)
+row(any(f["id"] == "npx.unpinned" and f["line"] == 3 for f in (doc or {"data": []})["data"]),
+    "a trailing inline ignore covers its own line, not the next one")
+d = clone("registry-token-committed")
+(d / ".npmrc").write_text((d / ".npmrc").read_text().replace(
+    "\n//npm.example.com/:_authToken", "\n# pm-audit: ignore[registry.token.committed] it is fine\n//npm.example.com/:_authToken", 1))
+p, doc = pj(d)
+row(p.returncode == 10 and "registry.token.committed" in (ids_in(doc) or set())
+    and "suppression.inline-error" in {n["id"] for n in doc["meta"]["notes"]},
+    "an inline ignore cannot mute an error (no expiry, no reviewer): the finding stays and a note says why")
+d = clone("deploy-composer-update")
+(d / "Dockerfile").write_text("FROM php:8.4-fpm\nWORKDIR /app\nRUN composer require acme/tool:5\n", encoding="utf-8")
+base4 = tmp / "c4" / "baseline-require.json"
+base4.write_text(pj(d)[0].stdout, encoding="utf-8")
+(d / "Dockerfile").write_text("FROM php:8.4-fpm\nWORKDIR /app\nRUN composer require acme/tool:5\n"
+                              "RUN composer require evil/backdoor\n", encoding="utf-8")
+new_rows = [f for f in (pj(d, "--baseline", str(base4))[1] or {"data": []})["data"] if f["id"] == "deploy.composer.adhoc"]
+row([f["line"] for f in new_rows] == [4],
+    f"--baseline reports a new `composer require` whose message matches a baselined one (lines {[f['line'] for f in new_rows]})")
+d = clone("clean")
+(d / ".github" / "actions" / "setup").mkdir(parents=True)
+(d / ".github" / "actions" / "setup" / "action.yml").write_text(
+    "runs:\n  using: composite\n  steps:\n    - run: npm install -g serve\n      shell: bash\n")
+(d / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
+(d / ".github" / "workflows" / "ci.yml").write_text("name: ci\non: push\njobs:\n  ci:\n    runs-on: ubuntu-latest\n    steps:\n"
+                                                 "      - uses: ./.github/actions/setup # pm-audit: ignore[deploy.global.unpinned] serve only\n")
+row("deploy.global.unpinned" in (ids_in(pj(d)[1]) or set()),
+    "an inline ignore on a local `uses:` line is not honoured (its findings come from the called file)")
+d = clone("clean")
+pk = json.loads((d / "package.json").read_text()); pk["engines"] = {"node": "16"}
+(d / "package.json").write_text(json.dumps(pk, indent=2))
+(d / ".nvmrc").unlink()  # leave engines.node as the pin, so the finding's file is "package.json engines.node"
+p, doc = pj(d)
+eol = [f for f in (doc or {"data": []})["data"] if f["id"] == "js.node.eol"]
+(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "js.node.eol", "path": "package.json", "reason": "the server runs Node 22", "until": "2026-12-31"}]}))
+p2, doc2 = pj(d)
+row(eol and "js.node.eol" not in (ids_in(doc2) or set()) and "package.json" in {f.get("path") for f in eol},
+    f"a config glob matches a finding whose file is a location like 'package.json engines.node' ({[f['file'] for f in eol]})")
+d = clone("clean")
+(d / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
+(d / ".github" / "workflows" / "de,ploy.yml").write_text("name: d\non: push\njobs:\n  d:\n    runs-on: ubuntu-latest\n    steps:\n"
+                                                      "      - run: npm install -g serve\n")
+gh = pa(d, "--format", "github").stdout
+sar = json.loads(pa(d, "--format", "sarif").stdout or "{}")
+uris = [loc["physicalLocation"]["artifactLocation"]["uri"] for r in sar.get("runs", [{}])[0].get("results", []) for loc in r.get("locations", [])]
+row("file=.github/workflows/de%2Cploy.yml" in gh and ".github/workflows/de%2Cploy.yml" in uris,
+    f"a comma in a file name survives into annotations and SARIF ({uris})")
+d = clone("clean")
+pk = json.loads((d / "package.json").read_text()); pk.setdefault("dependencies", {})["x\n::error file=README.md::pwned 100%"] = "github:a/b"
+(d / "package.json").write_text(json.dumps(pk, indent=2))
+out = pa(d).stdout
+row(out and not any(line.startswith("::") for line in out.splitlines()) and all(line.count("\t") == 4 for line in out.splitlines() if line),
+    "a newline in repo text cannot forge a workflow command through TSV (one escaped row per finding)")
+ex = subprocess.run([sys.executable, audit, "--explain", "js.lockfile.missing", "--format", "json"], capture_output=True, text=True, encoding="utf-8")
+exr = json.loads(ex.stdout)["data"][0] if ex.returncode == 0 else {}
+row(isinstance(exr.get("fix"), dict) and exr["fix"].get("text") == exr.get("fix_text"), "--explain JSON uses the same fix object as a finding")
+p, doc = pj(tmp / "m" / "js-engine-floor", "--profile", "library")
+row("js.engine.floor" in (ids_in(doc) or set()), "--profile library still reports js.engine.floor (it fires only on a literal pin)")
+row("silenced by profile library" in pa(tmp / "m" / "js-lockfile-missing", "--profile", "library").stderr,
+    "what a profile silences is counted on stderr in every format")
+
 # the new formats print no secret either
 for case in leaky:
     for fmt in ("sarif", "github"):
@@ -816,18 +887,18 @@ d_exp = tmp / "m" / "suppression-expired"
 catches("an expired ignore must not waive", 'live = [e for e in entries if e["until"] >= as_of]', "live = list(entries)",
         lambda s: "legacy.bower" in {f["id"] for f in json.loads(runs(pa(d_exp, "--json", script=s)).stdout)["data"]})
 d_day = clone("clean-suppression-config")
-(d_day / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "reason": "ok", "until": "2026-10-05"}]}))
+(d_day / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "reason": "kept until the npm move", "until": "2026-10-05"}]}))
 catches("an ignore is live on its until day", 'e["until"] >= as_of]', 'e["until"] > as_of]', lambda s: runs(pa(d_day, script=s)).returncode == 0)
 d_unused = clone("clean")
-(d_unused / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "reason": "ok", "until": "2026-12-31"}]}))
-catches("an unused ignore raises a note", 'elif not any(f["id"] == e["id"] and path_matches(e["path"], f["file"]) for f in raw):', "elif False:",
+(d_unused / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "reason": "kept until the npm move", "until": "2026-12-31"}]}))
+catches("an unused ignore raises a note", 'elif not any(f["id"] == e["id"] and ignore_matches(e, f) for f in raw):', "elif False:",
         lambda s: "suppression.unused" in {n["id"] for n in json.loads(runs(pa(d_unused, "--json", script=s)).stdout)["meta"]["notes"]})
 d_in = tmp / "m" / "clean-suppression-inline"
 catches("an inline ignore reads the line above", "for idx in (line - 1, line - 2):", "for idx in (line - 1,):", lambda s: runs(pa(d_in, script=s)).returncode == 0)
 d_nr = tmp / "m" / "suppression-inline-no-reason"
 catches("an inline ignore needs a reason", 'return ("ok", reason) if reason else ("noreason", None)', 'return ("ok", reason)', lambda s: runs(pa(d_nr, script=s)).returncode == 10)
 d_bad = clone("legacy-bower")
-(d_bad / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "path": "bower.json", "reason": "ok", "until": "2026-12-31"}, {"id": "legacy.bower"}]}))
+(d_bad / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "path": "bower.json", "reason": "kept until the npm move", "until": "2026-12-31"}, {"id": "legacy.bower"}]}))
 catches("an invalid config applies none of itself", 'if not problems else (None, problems)', 'if True else (None, problems)',
         lambda s: "legacy.bower" in {f["id"] for f in json.loads(runs(pa(d_bad, "--json", script=s)).stdout)["data"]})
 d_b = clone("deploy-bundle-credentials")
@@ -837,19 +908,76 @@ base_b = tmp / "c4" / "baseline-bundle.json"
 base_b.write_text(pj(tmp / "m" / "deploy-bundle-credentials")[0].stdout, encoding="utf-8")
 catches("a fingerprint masks line numbers in the message", 'subject = re.sub(r"(?i)\\bline \\d+\\b", "line N", f.get("message", ""))',
         'subject = f.get("message", "")', lambda s: runs(pa(d_b, "--baseline", str(base_b), script=s)).returncode == 0)
-catches("a baseline row without a fingerprint is fingerprinted", 'r.get("fingerprint") or fingerprint(r)', 'r.get("fingerprint")',
+catches("a baseline row without a fingerprint is fingerprinted", '{fingerprint(r) for r in rows if not r.get("fingerprint")})', 'set())',
         lambda s: runs(pa(tmp / "m" / "deploy-bundle-credentials", "--baseline", str(base2), script=s)).returncode == 0)
 catches("--fail-on error lets warnings through", 'if fail_on == "error":', 'if False:', lambda s: runs(pa(bower, "--fail-on", "error", script=s)).returncode == 0)
 catches("the library profile drops deploy-shaped rules", 'kept = [f for f in raw if f["id"] not in LIBRARY_SILENCED]', "kept = list(raw)",
         lambda s: runs(pa(lib, "--profile", "library", script=s)).returncode == 0)
-catches("the pedantic profile promotes warn to error", 'f["severity"] = "error"', 'pass',
-        lambda s: {f["severity"] for f in json.loads(runs(pa(bower, "--json", "--profile", "pedantic", script=s)).stdout)["data"]} == {"error"})
+catches("the pedantic profile promotes notes to findings",
+        'a.add("warn", n["id"], n["file"], n["message"], "see the note\'s rule in --rules / --explain")', 'pass',
+        lambda s: runs(pa(noted, "--profile", "pedantic", script=s)).returncode == 10)
 catches("a % in an annotation is escaped", 'return s.replace("%", "%25")', "return s",
         lambda s: "fixture%2525x" in runs(pa(d_pct, "--format", "github", script=s)).stdout)
 catches("a SARIF result points at its own rule", 'res["ruleIndex"] = index[f["id"]]', 'res["ruleIndex"] = 0',
         lambda s: not sarif_problems(json.loads(runs(pa(tmp / "m" / "deploy-composer-dev", "--format", "sarif", script=s)).stdout)))
 catches("a command-kind fix quotes the command", 'if command is None:\n            kind = "manual"', 'if command is None:\n            kind = "command"',
         lambda s: all(f["fix"]["command"] or f["fix"]["kind"] != "command" for f in json.loads(runs(pa(tmp / "m" / "js-lockfile-stale", "--json", script=s)).stdout)["data"]))
+
+# refute-ux guards: each mutant restores one way debt could hide.
+def fresh(case, edit):
+    d = clone(case)
+    edit(d)
+    return d
+d_trail = fresh("clean-suppression-inline", lambda d: (d / "scripts" / "bootstrap.sh").write_text(
+    "#!/bin/sh\nnpx eslint . # pm-audit: ignore[npx.unpinned] pinned by the image\nnpx prettier .\n"))
+catches("a trailing inline ignore covers its own line only",
+        'if idx == line - 2 and not (0 <= idx < len(rows) and COMMENT_ONLY.match(rows[idx])):', 'if False:',
+        lambda s: runs(pa(d_trail, script=s)).returncode == 10)
+d_err = fresh("registry-token-committed", lambda d: (d / ".npmrc").write_text((d / ".npmrc").read_text().replace(
+    "\n//npm.example.com/:_authToken", "\n# pm-audit: ignore[registry.token.committed] it is fine\n//npm.example.com/:_authToken", 1)))
+catches("an inline ignore cannot mute an error", 'if hit and hit[0] == "ok" and f["severity"] == "error":', 'if False:',
+        lambda s: runs(pa(d_err, script=s)).returncode == 10)
+def uses_repo(d):
+    (d / ".github" / "actions" / "setup").mkdir(parents=True)
+    (d / ".github" / "actions" / "setup" / "action.yml").write_text(
+        "runs:\n  using: composite\n  steps:\n    - run: npm install -g serve\n      shell: bash\n")
+    (d / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
+    (d / ".github" / "workflows" / "ci.yml").write_text("name: ci\non: push\njobs:\n  ci:\n    runs-on: ubuntu-latest\n    steps:\n"
+                                                     "      - uses: ./.github/actions/setup # pm-audit: ignore[deploy.global.unpinned] serve only\n")
+d_uses = fresh("clean", uses_repo)
+catches("an inline ignore on a local uses: line is not honoured",
+        'if 0 < line <= len(rows) and LOCAL_USES_LINE.search(rows[line - 1]):', 'if False:',
+        lambda s: runs(pa(d_uses, script=s)).returncode == 10)
+d_req0 = fresh("deploy-composer-update", lambda d: (d / "Dockerfile").write_text("FROM php:8.4-fpm\nRUN composer require acme/tool:5\n"))
+d_req1 = fresh("deploy-composer-update", lambda d: (d / "Dockerfile").write_text(
+    "FROM php:8.4-fpm\nRUN composer require acme/tool:5\nRUN composer require evil/backdoor\n"))
+def new_require_lines(s):
+    b = tmp / "c4" / f"req-base-{abs(hash(str(s)))}.json"
+    b.write_text(runs(pa(d_req0, "--json", script=s)).stdout, encoding="utf-8")
+    data = json.loads(runs(pa(d_req1, "--json", "--baseline", str(b), script=s)).stdout)["data"]
+    return [f["line"] for f in data if f["id"] == "deploy.composer.adhoc"] == [3]
+catches("a fingerprint includes the flagged line's text", '" ".join(line_text.split())', '""', new_require_lines)
+d_inj = fresh("clean", lambda d: (d / "package.json").write_text(json.dumps({**json.loads((d / "package.json").read_text()),
+    "dependencies": {"x\n::error file=README.md::pwned": "github:a/b"}}, indent=2)))
+catches("TSV fields escape newlines", 'return str(s).replace("\\\\", "\\\\\\\\").replace("\\t", "\\\\t").replace("\\r", "\\\\r").replace("\\n", "\\\\n")',
+        "return str(s)", lambda s: not any(l.startswith("::") for l in runs(pa(d_inj, script=s)).stdout.splitlines()))
+d_loc = fresh("clean", lambda d: (
+    (d / "package.json").write_text(json.dumps({**json.loads((d / "package.json").read_text()), "engines": {"node": "16"}}, indent=2)),
+    (d / ".nvmrc").unlink(),
+    (d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "js.node.eol", "path": "package.json",
+                                                              "reason": "the server runs Node 22", "until": "2026-12-31"}]}))))
+catches("a config glob matches the real file of a location", 'f["path"] = real_path(root, f.get("file") or "")', 'f["path"] = f.get("file")',
+        lambda s: "js.node.eol" not in {f["id"] for f in json.loads(runs(pa(d_loc, "--json", script=s)).stdout)["data"]})
+catches("the library profile keeps js.engine.floor", 'LIBRARY_SILENCED = {"js.lockfile.missing"', 'LIBRARY_SILENCED = {"js.engine.floor", "js.lockfile.missing"',
+        lambda s: "js.engine.floor" in {f["id"] for f in json.loads(runs(pa(tmp / "m" / "js-engine-floor", "--json", "--profile", "library", script=s)).stdout)["data"]})
+d_dot = fresh("legacy-bower", lambda d: (d / ".pm-audit.json").write_text(json.dumps(
+    {"ignore": [{"id": "legacy.bower", "reason": ".", "until": "2026-12-31"}]})))
+catches("a config reason must say something", "IGNORE_REASON_MIN = 8", "IGNORE_REASON_MIN = 0",
+        lambda s: "config.invalid" in {f["id"] for f in json.loads(runs(pa(d_dot, "--json", script=s)).stdout)["data"]})
+d_far = fresh("legacy-bower", lambda d: (d / ".pm-audit.json").write_text(json.dumps(
+    {"ignore": [{"id": "legacy.bower", "reason": "kept until the npm move", "until": "9999-12-31"}]})))
+catches("a config ignore expires within a year", "elif day > as_of + dt.timedelta(days=IGNORE_MAX_DAYS):", "elif False:",
+        lambda s: "config.invalid" in {f["id"] for f in json.loads(runs(pa(d_far, "--json", script=s)).stdout)["data"]})
 PY
 )
 

@@ -48,10 +48,10 @@ and combining it with another format is exit 2).
 
 | Format | Shape |
 |---|---|
-| `tsv` | One row per finding: severity, id, `file[:line]`, message, fix text. Data only on stdout |
+| `tsv` | One row per finding: severity, id, `file[:line]`, message, fix text. Data only on stdout. Backslash, TAB, CR and LF in a field are escaped (`\\`, `\t`, `\r`, `\n`), so repo text can never start a forged `::error` line |
 | `json` | `{"data": [finding...], "meta": {...}}`, schema `claude-mods.package-manager-ops.pm-audit/v2` |
-| `sarif` | SARIF 2.1.0, one run, one rule per catalogue id, `ruleIndex` on every result, the baseline fingerprint in `partialFingerprints["pmAudit/v1"]`, the fix object and confidence under `properties` |
-| `github` | `::warning file=F,line=N::<id> <message>` (`::error` for error severity). `%`, CR and LF are escaped in the message; `:` and `,` also in `file=`. Notes are not printed. Run it from the repo root so `file=` resolves in the checkout |
+| `sarif` | SARIF 2.1.0, one run, one rule per catalogue id, `ruleIndex` on every result, the location from `path`, the baseline fingerprint in `partialFingerprints["pmAudit/v2"]`, the fix object and confidence under `properties` |
+| `github` | `::warning file=F,line=N::<id> <message>` (`::error` for error severity), `F` from `path`. `%`, CR and LF are escaped in the message; `:` and `,` also in `file=`. Notes are not printed. Run it from the repo root so `file=` resolves in the checkout |
 
 JSON finding fields: `id`, `severity`, `file`, `line`, `message`, plus these, added by the
 output contract:
@@ -60,13 +60,15 @@ output contract:
 |---|---|
 | `fix` | `{"kind": "command"\|"edit"\|"manual", "text", "command", "safe"}`. `command` is only a command the text itself quotes in backticks, else `null`. `safe` means mechanical, local and reversible with git; it never means skip the review |
 | `fix_text` | The fix as a plain string (what `fix` was in schema v1; v2 made `fix` an object) |
+| `path` | The repo file the finding is in. `file` can be a location (`package.json engines.node`) or a list (`package-lock.json, yarn.lock`); `path` is the file itself, and what globs, SARIF and annotations use |
 | `confidence` | `high` a fact read from a manifest or lockfile, `medium` a judgement over shell, CI or version arithmetic, `low` a signal that can be legitimate |
 | `docs_url` | The anchor in this file |
 | `fingerprint` | Stable identity, see [Baselines](#baselines) |
 
 `meta` adds `profile`, `fail_on`, `config` (`file`, `valid`, `ignores`), `suppressed`
 (every waived finding with `by` = `config` or `inline`, and its reason), `profile_silenced`
-and `baseline` (`file`, `known`). Nothing is suppressed silently.
+and `baseline` (`file`, `known`). Nothing is suppressed silently: in every format the stderr
+summary counts what was suppressed, what a profile silenced and what the baseline absorbed.
 
 ## Suppressing findings
 
@@ -83,10 +85,12 @@ forgotten. Two forms:
 ```
 
 That is `.pm-audit.json` at the repo root (`--config FILE` reads another; an explicit file
-that is missing is exit 3). `reason` and `until` (`YYYY-MM-DD`) are required; `path` is an
-optional glob over the finding's file (`*` crosses `/`; a finding that names several files
-matches when any one does) and defaults to every file. An ignore is live through its `until`
-day. The other form is a comment on the flagged line or the line above it:
+that is missing is exit 3). `reason` (at least 8 letters or digits: say why) and `until`
+(`YYYY-MM-DD`, at most 366 days ahead, so a waiver is re-decided every year) are required;
+`path` is an optional glob over the finding's `path` (`*` crosses `/`; a finding that names
+several files matches when any one does). Omit `path` for every file; an empty one is an
+error. An ignore is live through its `until` day. The other form is a comment, either at the
+end of the flagged line (that line only) or alone on the line just above it:
 
 ```text
 # pm-audit: ignore[npx.unpinned] one-off bootstrap, the CI image pins it
@@ -95,7 +99,10 @@ npx eslint .
 
 An inline ignore needs a reason too (without one the finding stays and a
 `suppression.inline-no-reason` note says so) and only works on findings that carry a line,
-in files that have comments. `package.json` and `composer.json` use the config file.
+in files that have comments. It has no end date, so it cannot mute an **error** (a committed
+token, credentials in an image): those stay and `suppression.inline-error` says to use the
+config. It is not honoured on a local `uses: ./...` line either, because those findings come
+from the called action. `package.json` and `composer.json` use the config file.
 
 | Situation | Result |
 |---|---|
@@ -109,12 +116,13 @@ in files that have comments. `package.json` and `composer.json` use the config f
 
 `--baseline FILE` takes a previous `--json` output and reports only findings absent from it,
 so an old estate can adopt pm-audit and fail only on new problems. A finding's fingerprint is
-the first 16 hex digits of sha1 over id, file and a subject (the message with line numbers
-masked), **not** the line: an unrelated edit above a finding must not resurrect it. A rule
-whose wording changes resurfaces its baselined findings once. A baseline written before
-fingerprints existed still matches (they are computed from id, file and message). Two findings
-with the same id, file and subject share one fingerprint, so a new twin of a baselined
-finding is hidden. A missing baseline is exit 3, an unparseable one exit 4.
+the first 16 hex digits of sha1 over id, file, a subject (the message with line numbers
+masked) and the flagged line's own text - **not** the line number: an unrelated edit above a
+finding must not resurrect it, and the line text tells apart two findings whose message does
+not name the package (a new `composer require evil/backdoor` beside a baselined
+`composer require`). A changed rule wording or an edited line resurfaces once. A baseline
+written before fingerprints existed still matches on id, file and message. Two identical lines
+in one file share a fingerprint. A missing baseline is exit 3, an unparseable one exit 4.
 
 ## Gating CI
 
@@ -129,8 +137,8 @@ blocking a merge. Notes never count. Exit codes stay 0, 10, 2, 3, 4.
 | Profile | Effect | Why |
 |---|---|---|
 | `site` (default) | Silences nothing | The repo type every rule was written for: something deployed |
-| `library` | Drops `js.lockfile.missing`, `php.lockfile.missing`, `php.platform.unset`, `js.node.unpinned`, `ddev.node.unpinned`, `js.root.not-private`, `deploy.install.unlocked`, `js.engine.floor`, `php.lock.floor` | A published library legitimately ships no lockfile, sets no `config.platform.php`, pins no runtime and is published on purpose. The count is in `meta.profile_silenced` |
-| `pedantic` | Reports every warn as error | Pair with `--fail-on error` to make warnings block |
+| `library` | Drops `js.lockfile.missing`, `php.lockfile.missing`, `php.platform.unset`, `js.node.unpinned`, `ddev.node.unpinned`, `js.root.not-private`, `deploy.install.unlocked` | A published library legitimately ships no lockfile, sets no `config.platform.php`, pins no runtime and is published on purpose. `js.engine.floor` and `php.lock.floor` stay: they fire only on a literal pin, which a library still has to run. The count is in `meta.profile_silenced` and on stderr |
+| `pedantic` | Also reports every advisory note (`js.yarn.classic`, `suppression.unused`, ...) as a warn finding | Notes never fail a run; pedantic makes them count. Any finding already exits 10 by default |
 
 ## Reading a rule row
 

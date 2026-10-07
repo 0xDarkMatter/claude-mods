@@ -69,18 +69,19 @@ Sections:
                            GitHub Actions job and step boundaries (workflow_jobs,
                            enclosing_item), CI working directories (join_dir), gitignore /
                            dockerignore matching, read-only git queries (git_says), redact()
+  === rule catalogue ===   RULES: one entry per finding id (severity, category, confidence, fix
+                           kind, summary, rationale), profiles; references/pm-audit-rules.md is
+                           tested against it
   === the audit ===        Audit: _check (family status; contains a crashing check), js
                            (+ paired drift and lock sources), nested, node_pins, php,
                            runtime_floors, craft_eol, composer_line, install_policy, npx,
                            deploy (+ local CI via _local_uses_commands, local tooling,
                            credential bundle/image checks with npmrc_write_has_secret),
                            legacy, secrets, pnpm_placeholders
-  === rule catalogue ===   RULES: one entry per finding id (severity, category, confidence, fix
-                           kind, summary, rationale), profiles; references/pm-audit-rules.md is
-                           tested against it
   === rules, suppression, baselines and output formats ===
-                           decorate (confidence, docs_url, structured fix, fingerprint),
-                           load_config, inline_ignore, apply_policy, load_baseline, exit_code,
+                           real_path (a finding's file), decorate (confidence, docs_url,
+                           structured fix, fingerprint with line text), load_config,
+                           inline_ignore, apply_policy, load_baseline, exit_code, tsv_field,
                            github_lines, sarif_doc; all run AFTER the audit
   main()                   argv, --rules/--explain, policy order, output envelope, exit codes
 
@@ -1399,11 +1400,13 @@ CATEGORIES = ("manifest", "lockfile", "deps", "runtime", "php", "npx", "legacy",
 # Profiles: which rules a kind of repo should not be told about. `site` (the default) is the
 # repo type every rule was written for and silences nothing; `library` drops the rules that
 # only make sense for something deployed (a published library legitimately ships no lockfile,
-# pins no runtime and has nothing to freeze); `pedantic` silences nothing and reports every
-# warn as an error.
+# pins no runtime and has nothing to freeze); `pedantic` silences nothing and also reports
+# every advisory note as a warn finding, so notes fail the run too.
+# Guard: js.engine.floor and php.lock.floor are NOT library-silenced - they fire only when a
+# literal pin exists, and a library whose own pin cannot run its locked dependencies needs
+# to hear it. What a profile silences is counted on stderr in every format.
 LIBRARY_SILENCED = {"js.lockfile.missing", "php.lockfile.missing", "php.platform.unset", "js.node.unpinned",
-                    "ddev.node.unpinned", "js.root.not-private", "deploy.install.unlocked", "js.engine.floor",
-                    "php.lock.floor"}
+                    "ddev.node.unpinned", "js.root.not-private", "deploy.install.unlocked"}
 PROFILES = ("site", "library", "pedantic")
 SEVERITY_RANK = {"error": 0, "warn": 1, "note": 2}
 
@@ -3651,6 +3654,12 @@ UNSUPPRESSIBLE = {"config.invalid", "suppression.expired", "suppression.unused"}
 CONFIG_NAME = ".pm-audit.json"
 FIX_COMMAND_WORDS = {"npm", "pnpm", "yarn", "bun", "composer", "git", "corepack", "ddev", "rm", "mv"}
 INLINE_IGNORE = re.compile(r"pm-audit:\s*ignore\[([^\]]*)\]([^\n]*)")
+# A line that is ONLY a comment (it may carry an ignore for the line below it).
+COMMENT_ONLY = re.compile(r"^\s*(?:#|//|;|<!--|/\*|\*|--\s)")
+# A local action or reusable workflow call: its findings come from the called file.
+LOCAL_USES_LINE = re.compile(r"\buses\s*:\s*[\"']?\./")
+IGNORE_REASON_MIN = 8   # letters/digits a config reason needs
+IGNORE_MAX_DAYS = 366   # how far ahead a config ignore's `until` may be
 ISO_DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -3668,36 +3677,88 @@ def structured_fix(fid: str, text: str) -> dict:
     return {"kind": kind, "text": text, "command": command, "safe": bool(rule and rule["safe"]) and kind != "manual"}
 
 
-def fingerprint(f: dict) -> str:
-    """Stable identity of a finding across runs: id + file + subject, NOT the line.
-    Format: first 16 hex of sha1(id NUL file NUL subject), where the subject is the message
-    with line numbers masked (`line 12`, `:12`). Guard: a baseline is made of these, and an
-    unrelated edit above a finding shifts its line - hashing the line would resurrect every
-    baselined finding below it. The message is the subject because it names the package,
-    command or setting at fault; if a rule's wording changes, its baselined findings
-    reappear once, which is the safe failure."""
+def fingerprint(f: dict, line_text: str = "") -> str:
+    """Stable identity of a finding across runs: id + file + subject, NOT the line number.
+    Format (scheme pmAudit/v2): first 16 hex of sha1(id NUL file NUL subject NUL line_text),
+    where the subject is the message with line numbers masked (`line 12`, `:12`) and
+    line_text is the flagged line's own text, whitespace-collapsed.
+
+    Guard: a baseline is made of these, and an unrelated edit above a finding shifts its
+    line - hashing the line NUMBER would resurrect every baselined finding below it. The
+    line's TEXT moves with it, and it is what tells two findings of one rule apart when the
+    message does not name the subject (`composer require` in <file> says nothing of WHICH
+    package: hashing the message alone let a new `composer require evil/backdoor` hide behind
+    a baselined one). A changed rule wording or an edited line reappears once: the safe
+    failure. v1 fingerprints (message only) never match v2 ones, so a v1 baseline reappears."""
     subject = re.sub(r"(?i)\bline \d+\b", "line N", f.get("message", ""))
     subject = re.sub(r":\d+\b", ":N", subject)
-    raw = "\0".join((str(f.get("id", "")), str(f.get("file", "")), subject))
+    raw = "\0".join((str(f.get("id", "")), str(f.get("file", "")), subject, " ".join(line_text.split())))
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 
-def decorate(findings: list) -> None:
-    """Add confidence, docs_url, fingerprint and the structured fix. `fix_text` keeps the
-    plain string the JSON `fix` field used to be, for consumers that read it as text."""
+def file_lines(root: Path, file: str, cache: dict) -> list:
+    """The lines of a repo file a finding names, [] when it is not a readable file inside root."""
+    if file not in cache:
+        target = root / file
+        try:
+            inside = target.is_file() and root in target.resolve().parents
+        except OSError:
+            inside = False
+        cache[file] = (read_text(target) or "").splitlines() if inside else []
+    return cache[file]
+
+
+def real_path(root: Path, file: str):
+    """The repo file a finding's `file` text points at. `file` is sometimes a location, not a
+    path: "package.json engines.node", "composer.json config.platform.php", or a list
+    "package-lock.json, yarn.lock". Globs, SARIF and annotations need the FILE: an existing
+    path wins as written, then the first ", "-separated entry, then its text before a space.
+    Only ", " separates entries, so a file name containing a bare comma survives."""
+    if not file:
+        return None
+    if (root / file).exists():
+        return file
+    first = file.split(", ")[0].strip()
+    head = first.split(" ")[0]
+    for cand in (first, head):
+        if cand and (root / cand).exists():
+            return cand
+    return head or first
+
+
+def tsv_field(s) -> str:
+    """One TSV field: backslash, TAB, CR and LF escaped. Guard: a field carries repo text
+    (package names, commands); an unescaped newline breaks the one-row-per-finding contract
+    and lets a crafted name start a line `::error ...` that a GitHub runner turns into a forged
+    annotation."""
+    return str(s).replace("\\", "\\\\").replace("\t", "\\t").replace("\r", "\\r").replace("\n", "\\n")
+
+
+def decorate(findings: list, root: Path) -> None:
+    """Add path, confidence, docs_url, fingerprint and the structured fix. `fix_text` keeps
+    the plain string the JSON `fix` field was in schema v1, for consumers that read it as text."""
+    cache: dict = {}
     for f in findings:
         rule = RULES.get(f["id"])
         text = f["fix"] if isinstance(f["fix"], str) else f["fix"]["text"]
+        f.setdefault("path", real_path(root, f.get("file") or ""))
         f["confidence"] = rule["confidence"] if rule else "medium"
         f["docs_url"] = docs_url(f["id"]) if rule else RULES_DOC
         f["fix_text"] = text
         f["fix"] = structured_fix(f["id"], text)
-        f["fingerprint"] = fingerprint(f)
+        rows = file_lines(root, f["path"], cache) if f.get("path") and f.get("line") else []
+        line_text = rows[f["line"] - 1] if rows and 0 < f["line"] <= len(rows) else ""
+        f["fingerprint"] = fingerprint(f, line_text)
 
 
-def load_config(path: Path):
+def load_config(path: Path, as_of: dt.date):
     """-> (config or None, problems). Any problem means NO part of the file applies: a typo'd
-    ignore silently half-working would hide findings nobody chose to hide."""
+    ignore silently half-working would hide findings nobody chose to hide.
+
+    Guard: an ignore is a dated, explained exception, so the checks are strict on purpose -
+    a reason needs at least IGNORE_REASON_MIN letters or digits (".", "ok" and "n/a" say
+    nothing), `until` may be at most IGNORE_MAX_DAYS ahead (9999-12-31 is a permanent mute),
+    and an empty `path` is an error rather than "every file" (omit the key for that)."""
     text = read_text(path)
     if text is None:
         return None, ["cannot be read"]
@@ -3726,8 +3787,10 @@ def load_config(path: Path):
             bad.append(f"{where}.id {rid!r} is not a pm-audit rule (see --rules)")
         elif rid in UNSUPPRESSIBLE:
             bad.append(f"{where}.id {rid!r} cannot be ignored")
-        if not (isinstance(e.get("reason"), str) and e["reason"].strip()):
-            bad.append(f"{where}.reason is required (say why the finding is tolerated)")
+        reason = e.get("reason")
+        if not (isinstance(reason, str) and len(re.findall(r"[0-9A-Za-z]", reason)) >= IGNORE_REASON_MIN):
+            bad.append(f"{where}.reason is required and must say why the finding is tolerated "
+                       f"(at least {IGNORE_REASON_MIN} letters or digits)")
         until = e.get("until")
         day = None
         if isinstance(until, str) and ISO_DAY.match(until):
@@ -3737,13 +3800,15 @@ def load_config(path: Path):
                 pass
         if day is None:
             bad.append(f"{where}.until is required and must be YYYY-MM-DD")
-        if "path" in e and not isinstance(e["path"], str):
-            bad.append(f"{where}.path must be a glob string")
+        elif day > as_of + dt.timedelta(days=IGNORE_MAX_DAYS):
+            bad.append(f"{where}.until {until} is more than {IGNORE_MAX_DAYS} days ahead; renew it when it expires")
+        if "path" in e and not (isinstance(e["path"], str) and e["path"].strip()):
+            bad.append(f"{where}.path must be a non-empty glob (omit it to match every file)")
         if bad:
             problems += bad
         else:
-            entries.append({"id": rid, "path": re.sub(r"^\./", "", e.get("path") or "*") or "*", "reason": e["reason"].strip(),
-                            "until": day, "index": i})
+            entries.append({"id": rid, "path": re.sub(r"^\./", "", e["path"].strip()) if "path" in e else "*",
+                            "reason": e["reason"].strip(), "until": day, "index": i})
     return ({"profile": profile, "ignore": entries}, []) if not problems else (None, problems)
 
 
@@ -3751,25 +3816,34 @@ def path_matches(glob: str, file: str) -> bool:
     """A finding's `file` can name several files ("package-lock.json, yarn.lock"); a glob
     matches the whole string or any one of them. fnmatch's `*` crosses `/`, so
     `.github/workflows/*.yml` and `**` both do what a reader expects."""
-    return any(fnmatch.fnmatchcase(c, glob) for c in [file] + [p.strip() for p in file.split(",")])
+    return any(fnmatch.fnmatchcase(c, glob) for c in [file] + [p.strip() for p in file.split(", ")])
+
+
+def ignore_matches(entry: dict, f: dict) -> bool:
+    """Does a config ignore cover this finding? Its glob is tried against the real file
+    (`path`, e.g. package.json for "package.json engines.node") and the `file` text."""
+    return entry["id"] == f["id"] and (path_matches(entry["path"], f.get("path") or "")
+                                       or path_matches(entry["path"], f["file"]))
 
 
 def inline_ignore(root: Path, f: dict, cache: dict):
-    """`pm-audit: ignore[<id>] <reason>` on the flagged line or the one above it.
-    -> ("ok", reason) | ("noreason", None) | None. Only findings that carry a line can be
-    ignored inline; JSON manifests have no comments, so they use the config file."""
-    line, file = f.get("line"), f.get("file")
+    """`pm-audit: ignore[<id>] <reason>` on the flagged line, or on a COMMENT-ONLY line just
+    above it. -> ("ok", reason) | ("noreason", None) | None. Only findings that carry a line
+    can be ignored inline; JSON manifests have no comments, so they use the config file.
+
+    Guards: a trailing ignore covers its own line only (reading "the line above" for every
+    line made `npx a # pm-audit: ignore[...]` also mute the next line). A local `uses: ./`
+    line is never honoured: its findings come from commands in the called file, so one ignore
+    there would mute every command later added to that action - use the config file."""
+    line, file = f.get("line"), f.get("path") or f.get("file")
     if not line or not file:
         return None
-    if file not in cache:
-        target = (root / file)
-        try:
-            inside = target.is_file() and root in target.resolve().parents
-        except OSError:
-            inside = False
-        cache[file] = (read_text(target) or "").splitlines() if inside else []
-    rows = cache[file]
+    rows = file_lines(root, file, cache)
+    if 0 < line <= len(rows) and LOCAL_USES_LINE.search(rows[line - 1]):
+        return None
     for idx in (line - 1, line - 2):
+        if idx == line - 2 and not (0 <= idx < len(rows) and COMMENT_ONLY.match(rows[idx])):
+            continue
         if 0 <= idx < len(rows):
             for m in INLINE_IGNORE.finditer(rows[idx]):
                 if f["id"] in [x.strip() for x in m.group(1).split(",")]:
@@ -3796,13 +3870,18 @@ def apply_policy(a: Audit, cfg, cfg_name: str, profile: str, as_of: dt.date):
     for f in kept:
         by = None
         hit = inline_ignore(a.root, f, cache) if f["id"] not in UNSUPPRESSIBLE else None
-        if hit and hit[0] == "ok":
+        # Guard: an inline ignore has no expiry and no reviewer, so it may not mute an
+        # error (a committed token, credentials in an image): those need a dated config entry.
+        if hit and hit[0] == "ok" and f["severity"] == "error":
+            a.note("suppression.inline-error", f"{f['file']}:{f['line']}",
+                   f"`pm-audit: ignore[{f['id']}]` cannot mute an error; use {CONFIG_NAME} with a reason and an until date")
+        elif hit and hit[0] == "ok":
             by = ("inline", hit[1])
         elif hit:
             a.note("suppression.inline-no-reason", f"{f['file']}:{f['line']}",
                    f"`pm-audit: ignore[{f['id']}]` has no reason, so the finding is still reported")
         if by is None and f["id"] not in UNSUPPRESSIBLE:
-            e = next((e for e in live if e["id"] == f["id"] and path_matches(e["path"], f["file"])), None)
+            e = next((e for e in live if e["id"] == f["id"] and ignore_matches(e, f)), None)
             if e:
                 by = ("config", e["reason"])
         if by:
@@ -3816,15 +3895,17 @@ def apply_policy(a: Audit, cfg, cfg_name: str, profile: str, as_of: dt.date):
             a.add("warn", "suppression.expired", cfg_name,
                   f"{label} expired on {e['until'].isoformat()}: {e['reason']}",
                   "fix the finding, or renew `until` with a fresh reason")
-        elif not any(f["id"] == e["id"] and path_matches(e["path"], f["file"]) for f in raw):
+        elif not any(f["id"] == e["id"] and ignore_matches(e, f) for f in raw):
             a.note("suppression.unused", cfg_name, f"{label} matched no finding; delete it")
     a.findings = final + a.findings[n0:]
     return suppressed, meta_silenced
 
 
 def load_baseline(path: Path):
-    """-> set of fingerprints. A baseline is a previous `--json` output; a finding without a
-    fingerprint field (an older pm-audit) is fingerprinted from its id, file and message."""
+    """-> (fingerprints, legacy fingerprints). A baseline is a previous `--json` output. A row
+    without a fingerprint field (a pm-audit that predates them) is fingerprinted from its id,
+    file and message alone - it carries no line text - and is matched against each current
+    finding's message-only fingerprint, so an old baseline keeps working."""
     text = read_text(path)
     if text is None:
         raise OSError("cannot read file")
@@ -3832,7 +3913,9 @@ def load_baseline(path: Path):
     rows = doc["data"] if isinstance(doc, dict) else None
     if not isinstance(rows, list):
         raise ValueError("no top-level data[] list")
-    return {r.get("fingerprint") or fingerprint(r) for r in rows if isinstance(r, dict) and "id" in r}
+    rows = [r for r in rows if isinstance(r, dict) and "id" in r]
+    return ({r["fingerprint"] for r in rows if r.get("fingerprint")},
+            {fingerprint(r) for r in rows if not r.get("fingerprint")})
 
 
 def exit_code(findings: list, fail_on) -> int:
@@ -3874,8 +3957,8 @@ def github_lines(findings: list) -> list:
     out = []
     for f in findings:
         props = []
-        if f.get("file"):
-            props.append("file=" + gh_prop(f["file"].split(",")[0].strip()))
+        if f.get("path"):
+            props.append("file=" + gh_prop(f["path"]))
             if f.get("line"):
                 props.append(f"line={f['line']}")
         head = "::" + ("error" if f["severity"] == "error" else "warning") + (" " + ",".join(props) if props else "")
@@ -3894,12 +3977,12 @@ def sarif_doc(findings: list) -> dict:
     for f in findings:
         res = {"ruleId": f["id"], "level": level.get(f["severity"], "warning"),
                "message": {"text": f["message"]},
-               "partialFingerprints": {"pmAudit/v1": f["fingerprint"]},
+               "partialFingerprints": {"pmAudit/v2": f["fingerprint"]},
                "properties": {"confidence": f["confidence"], "docs_url": f["docs_url"], "fix": f["fix"]}}
         if f["id"] in index:
             res["ruleIndex"] = index[f["id"]]
-        if f.get("file"):
-            loc = {"artifactLocation": {"uri": urllib.parse.quote(f["file"].split(",")[0].strip()), "uriBaseId": "%SRCROOT%"}}
+        if f.get("path"):
+            loc = {"artifactLocation": {"uri": urllib.parse.quote(f["path"]), "uriBaseId": "%SRCROOT%"}}
             if f.get("line"):
                 loc["region"] = {"startLine": f["line"]}
             res["locations"] = [{"physicalLocation": loc}]
@@ -3994,7 +4077,7 @@ def main(argv: list[str]) -> int:
     p.add_argument("--config", metavar="FILE", default=None,
                    help=f"profile and ignores (default: {CONFIG_NAME} at the repo root, if present)")
     p.add_argument("--profile", choices=PROFILES, default=None,
-                   help="site (default: every rule), library (drops deploy-shaped rules), pedantic (warn = error); overrides the config")
+                   help="site (default: every rule), library (drops deploy-shaped rules), pedantic (advisory notes become findings); overrides the config")
     p.add_argument("--baseline", metavar="FILE", default=None,
                    help="a previous --json output: report only findings absent from it (matched by fingerprint, not line)")
     p.add_argument("--fail-on", choices=("error", "warn"), default=None,
@@ -4014,8 +4097,10 @@ def main(argv: list[str]) -> int:
                 print(f"error: unknown rule {args.explain!r} (pm-audit.py --rules lists them)", file=sys.stderr)
                 return EX_USAGE
             if fmt == "json":
+                # Same `fix` shape as a finding's (schema v2), so one jq filter reads both.
+                fix = {"kind": rule["kind"], "text": rule["fix"], "command": None, "safe": rule["safe"]}
                 print(json.dumps({"data": [{**rule_row(rule), "kind": rule["kind"], "safe": rule["safe"],
-                                            "why": rule["why"], "fix": rule["fix"]}],
+                                            "why": rule["why"], "fix": fix, "fix_text": rule["fix"]}],
                                   "meta": {"schema": SCHEMA, "count": 1}}, indent=2))
             else:
                 print(explain_text(rule))
@@ -4068,21 +4153,30 @@ def main(argv: list[str]) -> int:
             cfg_name = cfg_path.resolve().relative_to(root).as_posix()
         except ValueError:
             cfg_name = cfg_path.name
-        cfg, problems = load_config(cfg_path)
+        cfg, problems = load_config(cfg_path, as_of)
         if problems:
             a.add("error", "config.invalid", cfg_name, f"{cfg_name} is ignored: " + "; ".join(problems[:5])
                   + (f"; and {len(problems) - 5} more" if len(problems) > 5 else ""),
                   f"fix {cfg_name}: every ignore[] entry needs id, reason and until (YYYY-MM-DD)")
     profile = args.profile or (cfg or {}).get("profile") or "site"
-    suppressed, silenced = apply_policy(a, cfg, cfg_name, profile, as_of)
-    decorate(a.findings)
     if profile == "pedantic":
-        for f in a.findings:
-            f["severity"] = "error"
+        # Advisory notes become warn findings, so they fail the run like any finding.
+        for n in a.notes:
+            a.add("warn", n["id"], n["file"], n["message"], "see the note's rule in --rules / --explain")
+        a.notes = []
+    for f in a.findings:
+        f["path"] = real_path(root, f.get("file") or "")
+    suppressed, silenced = apply_policy(a, cfg, cfg_name, profile, as_of)
+    decorate(a.findings, root)
     known = []
     if baseline is not None:
-        known = [f for f in a.findings if f["fingerprint"] in baseline]
-        a.findings = [f for f in a.findings if f["fingerprint"] not in baseline]
+        current, legacy = baseline
+
+        def in_baseline(f):
+            return f["fingerprint"] in current or fingerprint(f) in legacy
+
+        known = [f for f in a.findings if in_baseline(f)]
+        a.findings = [f for f in a.findings if not in_baseline(f)]
     a.findings.sort(key=lambda f: (SEVERITY_RANK.get(f["severity"], 3), f["id"], f["file"]))
     print(f"pm-audit: {root.name} (as of {as_of.isoformat()})", file=sys.stderr)
     if fmt == "json":
@@ -4101,11 +4195,14 @@ def main(argv: list[str]) -> int:
     else:
         for f in a.findings:
             loc = f["file"] + (f":{f['line']}" if f.get("line") else "")
-            print("\t".join([f["severity"], f["id"], loc, f["message"], f["fix_text"]]))
+            print("\t".join(tsv_field(x) for x in (f["severity"], f["id"], loc, f["message"], f["fix_text"])))
     for n in a.notes:
-        print(f"  note  {n['id']}  {n['file']}: {n['message']}", file=sys.stderr)
+        # Same escaping as TSV: a runner reads workflow commands from stderr too.
+        print(f"  note  {n['id']}  {tsv_field(n['file'])}: {tsv_field(n['message'])}", file=sys.stderr)
     managers = ", ".join(a.meta["managers"]) or "none"
-    quiet = (f"; {len(suppressed)} suppressed" if suppressed else "") + (f"; {len(known)} in baseline" if known else "")
+    quiet = (f"; {len(suppressed)} suppressed" if suppressed else "") \
+        + (f"; {silenced} silenced by profile {profile}" if silenced else "") \
+        + (f"; {len(known)} in baseline" if known else "")
     code = exit_code(a.findings, args.fail_on)
     if a.findings:
         gate = "" if code == EX_FINDINGS else f" (none at --fail-on {args.fail_on})"
