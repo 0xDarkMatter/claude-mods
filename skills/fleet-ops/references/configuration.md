@@ -42,6 +42,15 @@ passes; a bare triple-X followed by a non-letter (a space, a colon) still
 refuses. A template false-refused a landing on 2026-09-01, hence the run-aware
 form.
 
+**Base64 data-URI payloads are stripped before matching**, for the default and a
+custom `forbidden_pattern` alike: each `data:<type>;base64,<payload>` run on an
+added line is cut to its prefix (`SCRUB_DATA_URI` in `scripts/fleet.sh`). Random
+base64 contains a triple-X followed by a digit, `+` or `/` often enough to refuse
+any file with an embedded font, which is what refused a Praxis gradecard HTML on
+2026-10-08. Only the payload is removed, so a marker elsewhere on the same line,
+even in one-line minified HTML, still refuses. Base64 that is not in a data URI
+gets no such pass.
+
 Mind the self-reference: the scrub greps every **added** diff line, so writing a
 contiguous marker token — or a triple-X run — into docs, comments, or a config
 example refuses the very branch that adds it. Build such tokens by concatenation

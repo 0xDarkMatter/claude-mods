@@ -75,7 +75,15 @@ TEST_CMD=""
 # mktemp template (push-gate-paths. plus six X's — false-refused a landing,
 # 2026-09-01), not a marker; a lone triple-X followed by a non-letter
 # (space, colon) still refuses.
+# Base64 data-URI payloads are stripped from each added line BEFORE this
+# pattern is applied (SCRUB_DATA_URI, scrub_diff): random base64 holds a
+# triple-X followed by a digit or +/ often enough to refuse any embedded font
+# (a Praxis gradecard HTML, 6 hits, 2026-10-08). A custom forbidden_pattern
+# gets the same strip.
 FORBIDDEN_PATTERN='TODO_''SCRUB|(^|[^X])X{3}[^a-zX]|FIXME_''BEFORE_LAND'
+# data:<mediatype>[;param=v...];base64,<payload>. Not configurable: it removes
+# only payload bytes, which can never be a deliberate marker.
+SCRUB_DATA_URI='data:[^,[:space:]]*;base64,[A-Za-z0-9+/=]+'
 BASE_BRANCH="main"
 POLL_INTERVAL=5
 ICONS="${icons:-}"   # env seed; config `icons=ascii` overrides below
@@ -388,8 +396,14 @@ scrub_diff() {
   # lines, and @@ hunk-header function-context must not trip the gate — removing
   # a forbidden marker is a fix, and a marker merely NEAR an edit is not one
   # (both false-positived here, 2026-07).
+  # Each data:<type>;base64,<payload> run is cut to its prefix before the match,
+  # so an embedded font or image never trips the gate but a marker elsewhere on
+  # the same line still does. Do NOT skip whole lines carrying a data URI
+  # instead: a minified HTML/CSS file is one line, and skipping it would wave
+  # through any marker in it (tests/run.sh pins both directions).
   local branch=$1
-  git diff "$BASE_BRANCH"..."$branch" 2>/dev/null | grep -E '^\+' | grep -vE '^\+\+\+ ' | grep -nE "$FORBIDDEN_PATTERN" || true
+  git diff "$BASE_BRANCH"..."$branch" 2>/dev/null | grep -E '^\+' | grep -vE '^\+\+\+ ' \
+    | sed -E "s#$SCRUB_DATA_URI#data:;base64,#g" | grep -nE "$FORBIDDEN_PATTERN" || true
 }
 
 refuse_if_shared_tree() {

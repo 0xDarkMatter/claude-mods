@@ -400,6 +400,14 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **fleet-ops: the pre-land scrub no longer refuses embedded base64 fonts.** Random base64
+  holds a triple-X followed by a digit, `+` or `/` often enough to match the scrub's
+  X-marker term. On 2026-10-08 a Praxis gradecard HTML with an embedded woff2 font was
+  refused six times over, and the only workaround was to untrack the file. `scrub_diff`
+  now cuts each `data:<type>;base64,<payload>` run on an added line down to its prefix
+  before matching. A marker in prose, or beside a data URI on the same line, still
+  refuses. `tests/run.sh` pins all three cases.
+
 - **repo-scan keeps the leading dot on appspec hooks and build outputs** - `repo-scan.py`
   normalised two paths with `str.lstrip("./")`, which strips every leading `.` and `/`
   rather than a `./` prefix. A CodeDeploy hook at `.deploy/hook.sh` was looked up as
