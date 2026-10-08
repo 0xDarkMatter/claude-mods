@@ -19,6 +19,13 @@ for c in "$SKILL/../../hooks/worktree-guard.sh" "$HOME/.claude/hooks/worktree-gu
 done
 
 command -v git >/dev/null 2>&1 || { echo "SKIP: git not available"; exit 0; }
+# The machine-wide lane root moves every lane out of the repo. Pin it OFF so the
+# legacy placement cases below mean what they say; the WORKTREE_ROOT block sets
+# it per call, always to a throwaway dir, never the real one.
+unset WORKTREE_ROOT
+# NL=<path> lets the suite run against another copy (e.g. the pre-change one,
+# to watch the WORKTREE_ROOT cases fail).
+NL="${NL_OVERRIDE:-$NL}"
 
 SB="$(mktemp -d)"; trap 'rm -rf "$SB"' EXIT
 P=0; F=0
@@ -53,6 +60,23 @@ mkrepo "$SB/S"; cd "$SB/S"
 OS="$(bash "$NL" --sibling big 2>/dev/null)"
 [ "$OS" = "$SB/S-big" ] && ok "sibling path = $OS" || no "sibling=[$OS]"
 [ -d "$SB/S-big" ] && ok "sibling dir outside repo" || no "sibling dir missing"
+
+echo "-- new-lane: WORKTREE_ROOT puts lanes at \$WORKTREE_ROOT/<repo>/<slug> --"
+WR="$SB/wroot"
+mkrepo "$SB/W"; cd "$SB/W"
+OW="$(WORKTREE_ROOT="$WR" bash "$NL" outside 2>/dev/null)"
+[ "$OW" = "$WR/W/outside" ] && ok "WORKTREE_ROOT path = <root>/<repo>/<slug>" || no "WORKTREE_ROOT path=[$OW]"
+[ -d "$WR/W/outside" ] && ok "lane dir created under WORKTREE_ROOT" || no "lane dir missing under WORKTREE_ROOT"
+[ ! -e "$SB/W/.claude/worktrees" ] && ok "nothing created in the project dir" || no "in-repo lane dir created anyway"
+[ ! -f "$SB/W/.gitignore" ] && ok "no .gitignore written for an outside lane" || no ".gitignore appended for an outside lane"
+OS2="$(WORKTREE_ROOT="$WR" bash "$NL" --sibling sib 2>/dev/null)"
+[ "$OS2" = "$WR/W/sib" ] && [ ! -e "$SB/W-sib" ] && ok "WORKTREE_ROOT wins over --sibling" || no "--sibling beat WORKTREE_ROOT [$OS2]"
+( cd "$OW" && WORKTREE_ROOT="$WR" bash "$NL" from-lane >/dev/null 2>&1 )
+[ -d "$WR/W/from-lane" ] && ok "from inside a WORKTREE_ROOT lane: <repo> = MAIN's name" || no "lane-from-lane misplaced: $(ls "$WR" 2>&1 | tr '\n' ' ')"
+OB="$(WORKTREE_ROOT="${WR//\//\\}" bash "$NL" backslash 2>/dev/null)"
+[ "$OB" = "$WR/W/backslash" ] && ok "backslashed WORKTREE_ROOT normalised" || no "backslash root -> [$OB]"
+WORKTREE_ROOT="$WR" bash "$NL" outside >/dev/null 2>&1; ee=$?
+[ $ee -eq 1 ] && ok "existing lane under WORKTREE_ROOT -> exit 1" || no "dup under WORKTREE_ROOT exit $ee"
 
 echo "-- new-lane: anchors at MAIN when invoked from inside a lane (no nesting) --"
 mkrepo "$SB/N"; cd "$SB/N"; L1="$(bash "$NL" first 2>/dev/null)"
