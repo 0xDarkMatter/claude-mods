@@ -78,6 +78,21 @@ OB="$(WORKTREE_ROOT="${WR//\//\\}" bash "$NL" backslash 2>/dev/null)"
 WORKTREE_ROOT="$WR" bash "$NL" outside >/dev/null 2>&1; ee=$?
 [ $ee -eq 1 ] && ok "existing lane under WORKTREE_ROOT -> exit 1" || no "dup under WORKTREE_ROOT exit $ee"
 
+echo "-- worktree-survey / status: lanes under WORKTREE_ROOT are seen --"
+SV="$SKILL/scripts/worktree-survey.sh"; ST="$SKILL/scripts/status.sh"
+mkdir -p "$WR/W/stray"; echo x > "$WR/W/stray/f"          # unregistered dir: an orphan
+mkrepo "$SB/other/W"                                      # a DIFFERENT repo also named W
+git -C "$SB/other/W" worktree add -q "$WR/W/theirs" -b theirs >/dev/null 2>&1
+SO="$(WORKTREE_ROOT="$WR" bash "$SV" "$SB/W" 2>&1)"
+case "$SO" in *stray*UNREGISTERED*) ok "survey flags an unregistered dir under WORKTREE_ROOT";; *) no "survey missed WORKTREE_ROOT orphan";; esac
+case "$SO" in *theirs*) no "survey called a same-named repo's lane our orphan";; *) ok "survey skips a same-named repo's lane";; esac
+case "$SO" in *"/ 1 orphan"*) ok "survey counts exactly 1 orphan";; *) no "orphan count: $(printf '%s\n' "$SO" | grep Summary)";; esac
+SO2="$(bash "$SV" "$SB/W" 2>&1)"
+case "$SO2" in *stray*) no "survey scanned WORKTREE_ROOT while unset";; *) ok "unset WORKTREE_ROOT: survey output unchanged";; esac
+STO="$(cd "$SB/W" && WORKTREE_ROOT="$WR" bash "$ST" 2>/dev/null)"
+case "$STO" in *"in $WR/W"*) ok "status counts lanes under WORKTREE_ROOT";; *) no "status trees line: $(printf '%s\n' "$STO" | grep trees)";; esac
+bash -n "$SV" && bash -n "$ST" && ok "survey/status syntax OK" || no "survey/status syntax error"
+
 echo "-- new-lane: anchors at MAIN when invoked from inside a lane (no nesting) --"
 mkrepo "$SB/N"; cd "$SB/N"; L1="$(bash "$NL" first 2>/dev/null)"
 ( cd "$L1" && bash "$NL" second >/dev/null 2>&1 )
