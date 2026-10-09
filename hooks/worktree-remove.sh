@@ -20,6 +20,10 @@
 #
 # BEHAVIOUR
 #   directory gone            -> exit 0 (nothing to remove)
+#   not in git, and EMPTY     -> rmdir, exit 0: the empty workspace
+#                                worktree-create.sh makes for a Claude Desktop
+#                                session in a plain folder. rmdir refuses a dir
+#                                with anything in it, so no data can go.
 #   not a LINKED git worktree -> exit 1, left in place (never rm -rf a dir we
 #                                cannot prove is a disposable checkout; the main
 #                                checkout is never a candidate)
@@ -39,8 +43,10 @@ WT="$(jq -r '.worktree_path // empty' 2>/dev/null | tr -d '\r')"
 [[ -n "$WT" ]] || { say "no worktree_path in the hook input"; exit 1; }
 [[ -e "$WT" ]] || { say "$WT is already gone"; exit 0; }
 
-GITDIR="$(git -C "$WT" rev-parse --path-format=absolute --git-dir 2>/dev/null)" \
-  || { say "$WT is not a git worktree - left in place"; exit 1; }
+if ! GITDIR="$(git -C "$WT" rev-parse --path-format=absolute --git-dir 2>/dev/null)"; then
+  rmdir "$WT" 2>/dev/null && { say "removed empty workspace $WT"; exit 0; }
+  say "$WT is not a git worktree - left in place"; exit 1
+fi
 COMMON="$(git -C "$WT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
   || { say "cannot resolve the repository of $WT - left in place"; exit 1; }
 TOP="$(git -C "$WT" rev-parse --show-toplevel 2>/dev/null)"
