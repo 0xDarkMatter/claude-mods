@@ -53,7 +53,7 @@ Or via the daemon + `signal.sh READY` gates (see Path B steps 3–4) if sessions
 fleet init auth-mw rate-limiter cache-layer
 ```
 
-Creates: a branch per name (off `main`), a worktree at `.fleet-worktrees/<name>/` (top-level so headless lane sessions can write — see "Headless agent compatibility" in `SKILL.md`), a status file at `.claude/fleet/lanes/<name>` (state: `RUNNING`), and deploys `signal.sh` to `.claude/fleet/signal.sh`.
+Creates: a branch per name (off `main`), a worktree at `.fleet-worktrees/<name>/` (top-level so headless lane sessions can write — see "Headless agent compatibility" in `SKILL.md`; `$WORKTREE_ROOT/<repo>/<name>/` when the machine sets that root), a status file at `.claude/fleet/lanes/<name>` (state: `RUNNING`), and deploys `signal.sh` to `.claude/fleet/signal.sh`.
 
 `fleet init` also appends `.claude/fleet/` and `.fleet-worktrees/` to `.gitignore` and auto-commits that change (`chore: gitignore fleet-ops runtime state`) when the tree is otherwise clean and you're on `main`. If it can't auto-commit safely, you'll see an `ACTION REQUIRED` notice — commit `.gitignore` yourself before `fleet start` or the daemon will refuse to land with `uncommitted tracked changes`.
 
@@ -104,10 +104,11 @@ When all lanes are terminal (`LANDED` or `FAILED`), the daemon exits. To tear do
 ```bash
 fleet stop                                              # if daemon still running
 git worktree remove .fleet-worktrees/<name>             # for each fleet-created worktree lane
+                                                        # (the path `fleet config` prints as worktree_root)
 rm -rf .claude/fleet                                    # nuke fleet state
 ```
 
-Only remove worktrees that `fleet init` created. Native sessions' worktrees under `.claude/worktrees/` are cleaned up through agent view (`Ctrl+X`) or `claude rm` — not by hand.
+Only remove worktrees that `fleet init` created. Native sessions' worktrees under `.claude/worktrees/` are cleaned up through agent view (`Ctrl+X`) or `claude rm` — not by hand. Session worktrees `hooks/worktree-create.sh` placed under `$WORKTREE_ROOT/<repo>/` (branch `worktree-<name>`) are removed by its `WorktreeRemove` pair when the session exits or is deleted; Claude Code's periodic sweep never removes them, so `fleet sweep` reports the rest ("hook-made").
 
 `fleet init` is idempotent — keep `.claude/fleet/` for the next round if you want.
 

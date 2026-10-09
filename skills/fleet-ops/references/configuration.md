@@ -6,6 +6,14 @@ The `.claude/fleet/config` keys, the parser's grammar, the shipped `forbidden_pa
 
 That's why the default `worktree_root` is `.fleet-worktrees/` at the repo top. (Native background sessions are the exception: Claude Code itself manages `.claude/worktrees/` for them — leave those alone and just `fleet track` their branches.) Runtime state (`lanes/`, `daemon.pid`, `activity.log`) is read/write from the orchestrator only and stays under `.claude/fleet/`.
 
+**Machine-wide lane root.** When the environment sets `WORKTREE_ROOT` (a Claude Code
+`settings.json` `env` entry) and the config does not name `worktree_root`, the default
+becomes `$WORKTREE_ROOT/<repo>`, `<repo>` being the main checkout's dir name: lanes leave
+the project entirely (`rules/worktree-boundaries.md` "Lane location"), and `fleet config`
+prints the resolved absolute path. An explicit `worktree_root=` still wins. fleet.sh's own
+variable is `FLEET_WT_ROOT`, never `WORKTREE_ROOT`: assigning the env name would overwrite
+the machine's value for fleet.sh and every child it runs (`test_cmd` included).
+
 ## Configuration
 
 Optional `.claude/fleet/config`, one `key=value` per line:
@@ -73,4 +81,4 @@ base_branch=main
 > gate. `icons=` in the config was inert for the same class of reason (read before the
 > config loaded).
 
-`fleet init`/`fleet track` append `.claude/fleet/` and `.fleet-worktrees/` to `.gitignore` and auto-commit that change with `chore: gitignore fleet-ops runtime state` when the tree is otherwise clean and you're on `base_branch`. If either condition fails, it prints an `ACTION REQUIRED` message — commit `.gitignore` yourself before landing.
+`fleet init`/`fleet track` append `.claude/fleet/` and `.fleet-worktrees/` (not when the lane root is `$WORKTREE_ROOT/<repo>`, outside the repo) to `.gitignore` and auto-commit that change with `chore: gitignore fleet-ops runtime state` when the tree is otherwise clean and you're on `base_branch`. If either condition fails, it prints an `ACTION REQUIRED` message — commit `.gitignore` yourself before landing.

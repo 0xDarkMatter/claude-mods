@@ -19,8 +19,8 @@ The full bucket table and the order that makes it safe, how a session claims a w
 | 4 | detached HEAD — **SAFE** only if clean, no git operation in progress (rebase, bisect, ...; a git state it cannot read counts as one), HEAD already in `base_branch`, no open claim, and an archived session positively claims it | **REVIEW** |
 | 5 | uncommitted or untracked changes | **REVIEW** |
 | 6 | commits not yet in `base_branch` | **REVIEW** |
-| 7 | merged + clean, no open session claims it — and for `.claude/worktrees/`, an archived session positively does | **SAFE** |
-| 8 | anything else (incl. an open owner, an owner whose archive flag cannot be read, or a `.claude/worktrees/` tree no session record mentions) | **REVIEW** |
+| 7 | merged + clean, no open session claims it — and for a session tree (`.claude/worktrees/`, or `worktree-*` under `$WORKTREE_ROOT`), an archived session positively does | **SAFE** |
+| 8 | anything else (incl. an open owner, an owner whose archive flag cannot be read, or a session tree no session record mentions) | **REVIEW** |
 
 Only **SAFE** is ever removable. **KEEP** means one thing — hands off, not yours
 to judge. Everything else lands in **REVIEW**, which is reported and never
@@ -102,6 +102,12 @@ the tree — by branch, by exact `cwd`/`worktreePath`, or by the exact cwd its
 transcript last recorded — so one can only be removed on positive evidence,
 never on the absence of a signal. (The docs promised this before the code kept
 it; since 2026-09-28 it does.)
+
+The same care covers a session worktree that `hooks/worktree-create.sh` placed
+outside the repo: a tree under `$WORKTREE_ROOT` on a `worktree-*` branch. It is
+the same kind of tree in a different place, and Claude Code's own sweep never
+removes it. A `lane/*` or fleet lane under that root is not a session tree and
+classifies as it would anywhere else.
 
 Three further guards, all on the irreversible direction:
 

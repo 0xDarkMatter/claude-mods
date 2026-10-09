@@ -66,7 +66,7 @@ N > 1 on one shared working tree           → REFUSE. Worktrees or separate clo
 
 **Native-spawn path (preferred):** let agent teams or background agents do the work in their own worktrees/branches. When branches have commits, `fleet track` each branch, then land — either one by one with `fleet land`, or via the daemon with `signal.sh READY` gates. Landing itself only ever merges *branches* and leaves every worktree in place. Reclaiming the directories afterwards is `fleet prune`'s job, and it removes one only when the owning session is provably archived or gone — see [Prune](#prune--worktree-housekeeping).
 
-**Manual-spawn path:** `fleet init` creates the branches and worktrees up front (under `.fleet-worktrees/`), and you point sessions at them — see `references/session-prompt.md` for the lane brief to hand each session.
+**Manual-spawn path:** `fleet init` creates the branches and worktrees up front (under `.fleet-worktrees/`, or `$WORKTREE_ROOT/<repo>/` when the machine sets that lane root), and you point sessions at them — see `references/session-prompt.md` for the lane brief to hand each session.
 
 ## Landing pipeline
 
@@ -152,7 +152,7 @@ whole job, and every ambiguous case resolves away from deletion.
 
 ### Buckets — first match wins, and the order is the safety argument
 
-Only **SAFE** is ever removable: merged, clean, no open session claiming it, and for a `.claude/worktrees/` tree an archived session positively claiming it. A live claimant (archiving is not activity) or the invoking tree is **KEEP**; an unreadable store or archive flag, unproven detached HEAD, dirty, unmerged or unattributable tree is **REVIEW**, never touched under any flag. Removal uses `git worktree remove` (never `rm -rf`), re-verifies against a fresh scan right before each delete, and `--all-repos` never removes. Prune cannot see writes by absolute path, so it must never be the only guard. Table, claim rules and the near-miss behind them: [references/prune.md](references/prune.md).
+Only **SAFE** is ever removable: merged, clean, no open session claiming it, and for a Claude Code session tree (under `.claude/worktrees/`, or a hook-made `worktree-*` tree under `$WORKTREE_ROOT`) an archived session positively claiming it. A live claimant (archiving is not activity) or the invoking tree is **KEEP**; an unreadable store or archive flag, unproven detached HEAD, dirty, unmerged or unattributable tree is **REVIEW**, never touched under any flag. Removal uses `git worktree remove` (never `rm -rf`), re-verifies against a fresh scan right before each delete, and `--all-repos` never removes. Prune cannot see writes by absolute path, so it must never be the only guard. Table, claim rules and the near-miss behind them: [references/prune.md](references/prune.md).
 
 ### Landmine: removing a worktree out from under a live session
 
