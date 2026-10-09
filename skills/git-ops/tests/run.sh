@@ -142,6 +142,31 @@ if [ -n "$GUARD" ]; then
     o=$(printf '{"tool_input":{"command":"%s"},"cwd":"%s"}' "$c" "$WG" | bash "$GUARD" 2>&1)
     [ -n "$o" ] && ok "guard still warns: $c" || no "guard regressed: $c"
   done
+
+  if command -v jq >/dev/null 2>&1; then
+    echo "-- worktree-guard: lanes under WORKTREE_ROOT are guarded too --"
+    GR="$SB/groot"; mkrepo "$SB/GX"; mkdir -p "$GR/GX/lane-a"
+    WIN="$(printf '%s' "$GR" | tr '/' '\\')"
+    # $1 expect warn|silent, $2 command, $3 cwd (default the repo), $4 WORKTREE_ROOT (default $GR, '-' = unset)
+    gx(){ local o root="${4:-$GR}"
+      local j; j=$(jq -cn --arg c "$2" --arg d "${3:-$SB/GX}" '{tool_input:{command:$c},cwd:$d}')
+      if [ "$root" = - ]; then o=$(printf '%s' "$j" | bash "$GUARD" 2>&1)
+      else o=$(printf '%s' "$j" | WORKTREE_ROOT="$root" bash "$GUARD" 2>&1); fi
+      if [ "$1" = warn ]; then [ -n "$o" ] && ok "guard WARN: $2" || no "guard expected WARN: $2"
+      else [ -z "$o" ] && ok "guard silent: $2${3:+ (cwd $3)}" || no "guard expected silent: $2 [$o]"; fi; }
+    gx warn   "rm -rf $GR/GX/lane-a"
+    gx warn   "rm -rf $WIN\\GX\\lane-a"
+    gx warn   'rm -rf "$WORKTREE_ROOT/GX/lane-a"'
+    gx warn   "git worktree remove $GR/GX/lane-a"
+    gx warn   "git rm -r --cached $GR/GX/lane-a"
+    gx warn   "git worktree prune"
+    gx silent "git add -A"                          # an outside lane cannot be staged
+    gx silent "rm -rf $SB/GX/build"
+    gx silent "rm -rf $GR/GX/lane-a" "$GR/GX/lane-a" # own lane: exempt
+    gx silent "rm -rf $GR/GX/lane-a" "$SB/GX" -       # unset: not a lane root
+  else
+    echo "  SKIP  WORKTREE_ROOT guard cases (jq not installed)"
+  fi
 else
   echo "  SKIP  worktree-guard.sh not found (hooks/ unavailable in this layout)"
 fi
