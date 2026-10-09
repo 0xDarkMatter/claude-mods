@@ -14,7 +14,9 @@ Claude Code hooks allow you to run custom scripts at key workflow points.
 | `manifest-dep-scan.sh` | PostToolUse (Write\|Edit) | Advisory when the agent edits a dependency manifest (package.json/requirements/composer.json/Cargo.toml/go.mod/Gemfile/pyproject.toml) — depscore + cooldown the added package. High-signal (silent on version bumps). |
 | `check-mail.sh` | PreToolUse | Deliver unread pigeon pmail, one stat when nothing is new. Delivery is per session (stdin `session_id`): each session is told about each message once and never about mail it sent itself, so a worktree lane's report reaches the coordinator in the main checkout instead of the lane. The shared signal file is a timestamp it never deletes. Inside a worktree the footer warns that a bare `pigeon read` marks the coordinator's mail read too. |
 | `config-change-guard.sh` | ConfigChange | Worm-persistence tripwire: when a Claude settings file changes mid-session, scan just that file for the vetted IOC set (curl\|sh, base64-decode eval, Invoke-Expression+Download, /dev/tcp, reads of `.claude/settings` / `.aws/credentials`). Silent on clean; on a finding, a desktop notification (`terminalSequence`, interactive sessions only - ConfigChange discards `systemMessage`, so no text reaches you or the model). `SUPPLY_CHAIN_BLOCK=1` blocks the change (exit 2). Fast single-file sibling of `supply-chain-defense`'s `integrity-audit.sh`. |
-| `worktree-guard.sh` | PreToolUse (Bash) | Enforce `rules/worktree-boundaries.md`: flags `rm` on `.claude/worktrees`, `git worktree remove/prune` against worktrees, `git rm` on worktree gitlinks, and `git add -A`/`.` in a repo that has a `.claude/worktrees` dir. Sessions whose cwd is inside their own worktree are exempt. Advisory by default; `WORKTREE_GUARD_BLOCK=1` hard-denies (exit 2). |
+| `worktree-guard.sh` | PreToolUse (Bash) | Enforce `rules/worktree-boundaries.md`: flags `rm` on `.claude/worktrees`, `git worktree remove/prune` against worktrees, `git rm` on worktree gitlinks, and `git add -A`/`.` in a repo that has a `.claude/worktrees` dir. With `WORKTREE_ROOT` set, lanes under `$WORKTREE_ROOT` get the same `rm`/`git rm`/`worktree remove`/`prune` guard. Sessions whose cwd is inside their own worktree are exempt. Advisory by default; `WORKTREE_GUARD_BLOCK=1` hard-denies (exit 2). |
+| `worktree-create.sh` | WorktreeCreate | Put Claude Code's own worktrees (`--worktree`, `isolation: worktree`, background sessions) at `$WORKTREE_ROOT/<repo>/<name>` instead of `<repo>/.claude/worktrees/`. Replaces Claude Code's git logic: branch `worktree-<name>`, `worktree.baseRef`, reopen by name, `.worktreeinclude`. Opt-in, machine-specific: see [Worktree placement](#worktree-placement-worktreecreate--worktreeremove). |
+| `worktree-remove.sh` | WorktreeRemove | Pair of `worktree-create.sh`: `git worktree remove` without `--force` (a dirty tree is kept, exit 1), then `git branch -d` on its `worktree-*` branch (never `-D`). |
 | `session-start-unicode-scan.sh` | SessionStart | One-shot hidden-Unicode scan of the project's instruction files (CLAUDE.md/AGENTS.md/SKILL.md/.cursorrules) at session boot. Silent on clean; advisory on a finding, and a separate "NOT scanned" advisory naming any file the scanner could not read. Pairs with `prompt-injection-defense`. |
 | `pre-write-peer-guard.sh` | PreToolUse (Edit\|Write) | Mid-session peer-writer guard (`rules/worktree-boundaries.md`): before writing a file, warn if it was freshly modified by something that isn't this session — the signature of a live peer session sharing the checkout. Uses the touched-ledger to tell own edits apart. Advisory by default; `GUARD_BLOCK=1` denies the write. Auto-wired with its ledger companion. |
 | `session-touched-ledger.sh` | PostToolUse (Edit\|Write) | Companion to `pre-write-peer-guard.sh`: records every file this session writes to `~/.claude/.session-touched/<session_id>.list` so the guard can distinguish this session's edits from a peer's. Silent, never blocks. Auto-wired with the peer guard. |
@@ -29,7 +31,7 @@ paths resolved via `${CLAUDE_PLUGIN_ROOT}`:
 | Set | Hooks | Why |
 |-----|-------|-----|
 | **Auto-wired (security advisory)** | `pre-install-scan.sh` (PreToolUse Bash), `worktree-guard.sh` (PreToolUse Bash), `manifest-dep-scan.sh` (PostToolUse Write\|Edit), `session-start-unicode-scan.sh` (SessionStart), `config-change-guard.sh` (ConfigChange), `pre-write-peer-guard.sh` (PreToolUse Write\|Edit), `session-touched-ledger.sh` (PostToolUse Write\|Edit) | Silent-on-clean guardrails: zero noise until something is actually wrong, so they're safe to ship on by default. |
-| **Opt-in (opinionated / formatting)** | `pre-commit-lint.sh`, `post-edit-format.sh`, `dangerous-cmd-warn.sh`, `enforce-uv.sh`, `check-mail.sh`, `pre-commit-unicode-scan.sh` (a *git* hook) | Workflow opinions — wire them yourself per the examples below. |
+| **Opt-in (opinionated / formatting)** | `pre-commit-lint.sh`, `post-edit-format.sh`, `dangerous-cmd-warn.sh`, `enforce-uv.sh`, `check-mail.sh`, `pre-commit-unicode-scan.sh` (a *git* hook), `worktree-create.sh` + `worktree-remove.sh` (machine-specific; never auto-wired) | Workflow opinions — wire them yourself per the examples below. |
 
 Plugin installs resolve auto-wired commands through `${CLAUDE_PLUGIN_ROOT}`. Script
 installs copy the hook scripts into `${CLAUDE_DIR:-~/.claude}/hooks/` and merge the
@@ -126,6 +128,48 @@ its real path, not beside `.git/hooks/`. If the pre-commit gate still finds no s
 it says so on every commit and lets the commit through: a broken install is never
 silent. The SessionStart hook stays silent then, because it is auto-wired and a setup
 without the skill is legitimate.
+
+### Worktree placement (WorktreeCreate + WorktreeRemove)
+
+Claude Code has no setting for where `claude --worktree`, `isolation: worktree`
+subagents and background sessions put their worktrees (`<repo>/.claude/worktrees/<name>`).
+A `WorktreeCreate` hook is the only lever, and it **replaces** git's worktree logic
+entirely. On a machine whose `settings.json` `env` sets `WORKTREE_ROOT`, this pair moves
+those worktrees to `$WORKTREE_ROOT/<repo>/<name>`, the same root `new-lane.sh` and
+`fleet init` use (`rules/worktree-boundaries.md` "Lane location"). Wire it in the
+**user** settings of that machine only:
+
+```json
+{
+  "env": { "WORKTREE_ROOT": "<absolute path outside every repo>" },
+  "hooks": {
+    "WorktreeCreate": [
+      { "hooks": [{ "type": "command", "command": "bash ~/.claude/hooks/worktree-create.sh" }] }
+    ],
+    "WorktreeRemove": [
+      { "hooks": [{ "type": "command", "command": "bash ~/.claude/hooks/worktree-remove.sh" }] }
+    ]
+  }
+}
+```
+
+Trade-offs, stated plainly:
+
+- **No automatic sweep.** Claude Code's periodic cleanup keeps any worktree without its
+  own git marker, so hook-made worktrees stay until removed. `WorktreeRemove` covers a
+  session you exit or delete; everything else is `fleet sweep` / `fleet prune`, which
+  see these trees (`git worktree list`) and say "hook-made" on them.
+- **A broken hook blocks every worktree creation on the machine.** Claude Code has no
+  fallback: any non-zero exit, or no path on stdout, fails creation. Needs `jq` and
+  `git`. With `WORKTREE_ROOT` unset the hook falls back to Claude Code's own location
+  rather than fail, but still loses the sweep, so install it only where the root is set.
+- **The hook owns what Claude Code did.** It copies `.worktreeinclude` matches, reads
+  `worktree.baseRef` (or `WORKTREE_BASE_REF`), names branches `worktree-<name>` and
+  reopens a worktree by name, at its old tip (Claude Code's reset of an untouched
+  worktree to the default branch is not emulated). `WorktreeRemove` never forces:
+  a tree with changed or untracked files is kept and the removal reports failure.
+
+`tests/hooks.sh` pins both contracts against throwaway repos.
 
 ## Hook Types
 
