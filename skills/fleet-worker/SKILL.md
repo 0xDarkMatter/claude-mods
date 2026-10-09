@@ -172,12 +172,18 @@ N workers never clobber each other. Spawn from the orchestrator's Bash tool with
 `run_in_background: true`, then collect by output file.
 
 ```bash
+# Where the worker trees go: the machine-wide lane root when set
+# ($WORKTREE_ROOT/<repo>/fleet-<id>, <repo> = the main checkout's dir name),
+# else in-repo scratch (.fleet-work/<id>). rules/worktree-boundaries.md "Lane location".
+main=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
+if [ -n "${WORKTREE_ROOT:-}" ]; then FW="${WORKTREE_ROOT%/}/$(basename "$main")"; pre=fleet-
+else FW=.fleet-work; pre=; fi
 delegate() {                     # $1 = task-id, $2 = prompt
-  local id="$1" prompt="$2" wt=".fleet-work/$1"
+  local id="$1" prompt="$2" wt="$FW/$pre$1"
   git worktree add -q -b "fleet/$id" "$wt" HEAD
   ( cd "$wt"
     FLEET_WORKER_CONFIG_DIR="$HOME/.fleet-worker/cfg-$id" \
-      fleet-worker --output-format json "$prompt" > "../$id.result.json" 2> "../$id.err"
+      fleet-worker --output-format json "$prompt" > "../$pre$id.result.json" 2> "../$pre$id.err"
   )
 }
 delegate task-a "Add tests for the auth module"      &
@@ -186,12 +192,13 @@ delegate task-c "Refactor utils.py duplications"     &
 wait                                                  # barrier
 
 for id in task-a task-b task-c; do
-  if fleet-collect.sh ".fleet-work/$id.result.json" >/dev/null; then echo "fleet/$id OK"; fi
+  if fleet-collect.sh "$FW/$pre$id.result.json" >/dev/null; then echo "fleet/$id OK"; fi
 done
 ```
 
 Keep concurrency modest (≤ 4–6) — the binding constraint is endpoint quota, not
-local CPU. `.gitignore` the scratch dirs (`.fleet-work/`, `.fleet-worker/`).
+local CPU. `.gitignore` the scratch dirs (`.fleet-work/`, `.fleet-worker/`); with
+`WORKTREE_ROOT` set, `.fleet-work/` is never created.
 
 ## Hand off to fleet-ops (test-gated landing)
 

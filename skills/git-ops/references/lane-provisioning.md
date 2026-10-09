@@ -8,14 +8,18 @@ Detail for the Worktree Operations row in SKILL.md: what `scripts/new-lane.sh` c
 work — the remedy the peer-writer guards (`session-start-unicode-scan.sh` at boot,
 `pre-write-peer-guard.sh` mid-session) point you to. It:
 
-- creates branch `lane/<slug>` **in-repo** at `<main>/.claude/worktrees/<slug>` — the native
-  Claude Code worktree location: tidy (no sibling dirs scattered across the parent) and gitignored
-  so `git add -A` can't stage its gitlinks — off `[base-branch]` (default: current branch);
-- **ensures the gitignore precondition**: if `.claude/worktrees/` isn't gitignored it adds the entry
-  first (the in-repo location is only safe when ignored), so the default is safe in *any* repo;
-- **`--sibling`** places it outside the repo at `<repo>/../<repo>-<slug>` instead — use when you need
-  structural isolation from repo-scoped destructive ops (`git clean -ff`, `rm -rf <repo>`) or in a
-  repo that can't gitignore the dir;
+- creates branch `lane/<slug>` off `[base-branch]` (default: current branch), placed by the first
+  rule that applies:
+  1. **`WORKTREE_ROOT` set** → `$WORKTREE_ROOT/<repo>/<slug>` (`<repo>` = the main checkout's dir
+     name). The machine-wide root keeps project dirs free of lanes; it wins over `--sibling` and
+     needs no gitignore entry;
+  2. **`--sibling`** → `<repo>/../<repo>-<slug>`, outside the repo — structural isolation from
+     repo-scoped destructive ops (`git clean -ff`, `rm -rf <repo>`), or a repo that can't gitignore
+     the dir;
+  3. default → **in-repo** at `<main>/.claude/worktrees/<slug>`, the native Claude Code location;
+- **ensures the gitignore precondition** for the in-repo case only: if `.claude/worktrees/` isn't
+  gitignored it adds the entry first (that location is only safe when ignored), so the default is
+  safe in *any* repo;
 - anchors at the **main** worktree root, so invoking it from inside a lane won't nest worktrees;
 - **carries over gitignored env files** (`.dev.vars`, `.env*`, `.secrets`) the fresh worktree
   would otherwise lack, so the lane runs immediately;

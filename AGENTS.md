@@ -10,9 +10,10 @@ and usage live in [README.md](README.md); this file is for agents working on the
   first when a family is ambiguous: `parallel-ops` (fleet-ops, fleet-worker, fleetflow,
   loop-ops, iterate, spawn) and `figma-ops` (the Figma MCP skills). README.md lists them all
 - **13 output styles** for response personality (Vesper, Spartan, Mentor, Executive, Pair, Atlas, Coach, Harbour, Meridian, Noir, Roast, Sage, Scout)
-- **13 hooks**: linting, formatting, dangerous-command warnings, uv enforcement,
+- **15 hooks**: linting, formatting, dangerous-command warnings, uv enforcement,
   supply-chain advisories, hidden-Unicode scans, config and worktree guards, a peer-writer
-  guard and touched-files ledger, pmail notifications. Plugin hooks.json wires the security set
+  guard and touched-files ledger, pmail notifications, an opt-in WorktreeCreate/Remove pair
+  that honours `WORKTREE_ROOT`. Plugin hooks.json wires the security set
 - **Pigeon** inter-session messaging (`pigeon send/read/reply`) - SQLite-backed pmail at `~/.claude/pmail.db`
 
 ## Key Directories
@@ -131,8 +132,14 @@ On "INIT:" message at session start:
   ours + theirs - base: in a merge, `git diff HEAD -- <file>` must add and remove the
   same lines as `git diff $(git merge-base HEAD MERGE_HEAD) MERGE_HEAD -- <file>`, and
   likewise with `HEAD` and `MERGE_HEAD` swapped.
-- Never touch `.claude/worktrees/` or any repo's git worktree state (see
-  `rules/worktree-boundaries.md`) — it looks orphaned and isn't.
+- Never touch `.claude/worktrees/`, `$WORKTREE_ROOT/`, or any repo's git worktree state
+  (see `rules/worktree-boundaries.md`) — it looks orphaned and isn't.
+- **`WORKTREE_ROOT` is a live env var on maintainer machines** and moves every lane to
+  `$WORKTREE_ROOT/<repo>/<slug>`. A suite that creates or classifies lanes must `unset`
+  it up top and set a throwaway one per case (git-ops, fleet-ops, `tests/hooks.sh`, e2e
+  do), and no script may assign it: fleet.sh once did, clobbering it for every child.
+  Two repos with the same dir name share `$WORKTREE_ROOT/<repo>/`; scanners skip a dir
+  whose `.git` points into another repo.
 - **This repo is public — keep it agnostic.** `tests/agnostic.sh` (in `just check` and
   CI) catches user-profile paths with real names; author-specific identifiers are
   caught by a PRIVATE deny list (`~/.claude/agnostic-deny.txt` or the gitignored
