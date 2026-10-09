@@ -60,7 +60,12 @@ MODE="auto"
 # enforces the global .claude/ sensitive-file guard, so worktrees nested
 # under .claude/ can't be written to by lane sessions. See SKILL.md
 # "Headless agent compatibility".
-WORKTREE_ROOT=".fleet-worktrees"
+# NOT named WORKTREE_ROOT: that is the machine-wide lane root from the env
+# (rules/worktree-boundaries.md "Lane location"). Assigning to it here once
+# overwrote the env value and, since an imported var stays exported, handed
+# ".fleet-worktrees" to every child (test_cmd, new-lane.sh) as THEIR root.
+FLEET_WT_ROOT=".fleet-worktrees"
+FLEET_WT_SET=0   # 1 once the config names worktree_root explicitly
 TEST_CMD=""
 # Scrub default. BUILT by string concatenation so this line never contains a
 # contiguous marker token — the scrub gate greps every ADDED diff line, so a
@@ -170,7 +175,7 @@ load_config() {
 
     case "$key" in
       mode)              MODE="$val" ;;
-      worktree_root)     WORKTREE_ROOT="$val" ;;
+      worktree_root)     FLEET_WT_ROOT="$val"; FLEET_WT_SET=1 ;;
       test_cmd)          TEST_CMD="$val" ;;
       forbidden_pattern) FORBIDDEN_PATTERN="$val" ;;
       base_branch)       BASE_BRANCH="$val" ;;
@@ -207,6 +212,17 @@ load_config() {
   return 0
 }
 load_config "$CONFIG"
+# Machine-wide lane root: with WORKTREE_ROOT set and no explicit worktree_root
+# in the config, lanes go to $WORKTREE_ROOT/<repo> (<repo> = the main checkout's
+# dir name), outside the project. An explicit config key still wins: it is a
+# deliberate per-repo choice. FLEET_WT_EXTERNAL marks the outside case, where
+# no .fleet-worktrees/ gitignore entry is needed.
+FLEET_WT_EXTERNAL=0
+if [[ $FLEET_WT_SET -eq 0 && -n "${WORKTREE_ROOT:-}" && -n "${REPO_ROOT:-}" ]]; then
+  FLEET_WT_ROOT="${WORKTREE_ROOT//\\//}"
+  FLEET_WT_ROOT="${FLEET_WT_ROOT%/}/$(basename "$REPO_ROOT")"
+  FLEET_WT_EXTERNAL=1
+fi
 # === END CONFIG ===============================================================
 
 # Shared terminal-output helpers (see docs/TERMINAL-DESIGN.md).
@@ -304,7 +320,7 @@ ensure_fleet_dir() {
       echo '.claude/fleet/' >> .gitignore
       appended=1
     fi
-    if ! grep -qxE '\.fleet-worktrees/\*?' .gitignore 2>/dev/null; then
+    if [[ $FLEET_WT_EXTERNAL -eq 0 ]] && ! grep -qxE '\.fleet-worktrees/\*?' .gitignore 2>/dev/null; then
       echo '.fleet-worktrees/' >> .gitignore
       appended=1
     fi
@@ -427,11 +443,11 @@ cmd_init() {
       log "created branch: $name"
     fi
     if [[ "$mode" == "worktree" ]]; then
-      local wt="$WORKTREE_ROOT/$name"
+      local wt="$FLEET_WT_ROOT/$name"
       if [[ -d "$wt" ]]; then
         log "skip worktree (exists): $wt"
       else
-        mkdir -p "$WORKTREE_ROOT"
+        mkdir -p "$FLEET_WT_ROOT"
         git worktree add "$wt" "$name"
         log "created worktree: $wt"
       fi
@@ -810,7 +826,7 @@ cmd_config() {
     echo "# source: none ($CONFIG absent) — all defaults" >&2
   fi
   echo "mode=$MODE"
-  echo "worktree_root=$WORKTREE_ROOT"
+  echo "worktree_root=$FLEET_WT_ROOT"
   echo "test_cmd=$TEST_CMD"
   echo "forbidden_pattern=$FORBIDDEN_PATTERN"
   echo "base_branch=$BASE_BRANCH"
@@ -1255,8 +1271,20 @@ prune_log() {
 # was readable AND it says the owner is archived or gone, which rules 3 and 7
 # already require. The flag exists to mark them loudly in the table and to
 # trigger the re-verify before removal.
+#
+# With WORKTREE_ROOT set, hooks/worktree-create.sh puts those session worktrees
+# at $WORKTREE_ROOT/<repo>/<name> on branch worktree-<name>, and Claude Code's
+# own sweep never removes them. Same hazard, different place: a tree under the
+# root on a worktree-* branch is native too. A new-lane.sh or fleet lane there
+# (lane/*, fleet names) is not, exactly as under .claude/worktrees/ it would be.
+# $2 = branch (optional; without it only the path rule applies).
 prune_is_native() {
-  case "$(prune_norm "$1")" in */.claude/worktrees/*) return 0 ;; *) return 1 ;; esac
+  case "$(prune_norm "$1")" in */.claude/worktrees/*) return 0 ;; esac
+  [[ -n "${WORKTREE_ROOT:-}" && "${2:-}" == worktree-* ]] || return 1
+  local r
+  r=$(prune_norm "$(prune_native "${WORKTREE_ROOT}")")
+  case "$(prune_norm "$(prune_native "$1")")/" in "$r"/?*) return 0 ;; esac
+  return 1
 }
 
 # Re-read, fresh, every session that claims one of this repo's worktrees
@@ -1506,7 +1534,7 @@ prune_emit() {
   # `.fleet-worktrees/` lane or a hand-made tree is not created per session;
   # any session working in one is found by the cwd and transcript joins, so
   # there "nobody claims it" means what it says.
-  if prune_is_native "$wt"; then
+  if prune_is_native "$wt" "$br"; then
     if [[ -n "$claims" ]]; then
       prune_row "$wt" "$br" REVIEW "merged + clean, but no archived session provably worked here - cannot prove abandoned"; return 0
     fi
@@ -1588,7 +1616,7 @@ prune_render() {
   term_summary_line "$total worktree(s), $safe safe, $review review, $keep keep"
   term_panel_vert
 
-  local b n rows p br bucket reason label short mark
+  local b n rows p br bucket reason label short mark any_native=0
   for b in SAFE REVIEW KEEP; do
     n=$(prune_count "$b")
     [[ $n -eq 0 ]] && continue
@@ -1604,7 +1632,7 @@ prune_render() {
       # ASCII-only marker: these rows must survive TERM_ASCII=1 on a non-UTF-8
       # Windows console (SKILL.md "Compatibility").
       mark="  "
-      prune_is_native "$p" && mark="! "
+      prune_is_native "$p" "$br" && { mark="! "; any_native=1; }
       label="$mark$short"
       printf '%s   %s %-30s %-26s %s\n' \
         "$(term_color dim "$TERM_TREE_VERT")" \
@@ -1621,8 +1649,10 @@ prune_render() {
   else health="$(term_health healthy "nothing removable")"; fi
   term_panel_close "$(term_hotkey '?' help)" "$health"
   echo ""
-  # '!' marks a native .claude/worktrees/ lane — see rules/worktree-boundaries.md
-  if printf '%s' "$PRUNE_ROWS" | cut -f1 | grep -qi '/\.claude/worktrees/'; then
+  # '!' marks a native session worktree — see rules/worktree-boundaries.md
+  if [[ $any_native -eq 1 && -n "${WORKTREE_ROOT:-}" ]]; then
+    echo "  ! = Claude Code session worktree (.claude/worktrees/, or worktree-* under \$WORKTREE_ROOT) - owned by a session, not by you" >&2
+  elif [[ $any_native -eq 1 ]]; then
     echo "  ! = Claude Code session worktree (.claude/worktrees/) - owned by a session, not by you" >&2
   fi
   return 0

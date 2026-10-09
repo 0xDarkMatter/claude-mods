@@ -27,7 +27,8 @@ unset FLEET_SKIP_SESSION_CHECK FLEET_SESSION_STORE FLEET_SESSION_NOCACHE \
       FLEET_SELF_SESSION_ID FLEET_NO_PRUNE_HINT FLEET_PRUNE_ROOTS \
       FLEET_PRUNE_MAX_REPOS FLEET_ASCII FLEET_RM_RETRY_SECS \
       FLEET_NEVER_PUSH FLEET_HELD_LANES FLEET_SWEEP_LEDGER FLEET_SWEEP_KEEP FLEET_SWEEP_STALE_DAYS \
-      FLEET_SWEEP_MIN_DIR_AGE
+      FLEET_SWEEP_MIN_DIR_AGE \
+      WORKTREE_ROOT   # the machine's lane root; worktree-root.sh sets a throwaway one
 
 command -v git >/dev/null 2>&1 || { echo "SKIP: git not available"; exit 0; }
 
@@ -2212,6 +2213,7 @@ cd "$REPO"
 fi
 
 . "$HERE/sweep.sh"   # `fleet sweep` cases, in their own file (see its header)
+. "$HERE/worktree-root.sh"   # lanes under a machine-wide WORKTREE_ROOT (see its header)
 
 echo "=== $PASS passed, $FAIL failed ==="
 [ "$FAIL" -eq 0 ] || exit 1

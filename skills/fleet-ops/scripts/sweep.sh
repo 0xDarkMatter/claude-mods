@@ -173,6 +173,24 @@ CFG=$(cd "$INVOKED_FROM" && bash "$FLEET_SH" config 2>/dev/null) || CFG=""
 cfg() { printf '%s\n' "$CFG" | sed -n "s/^$1=//p" | head -n1; }
 BASE=$(cfg base_branch); BASE=${BASE:-main}
 WT_ROOT=$(cfg worktree_root); WT_ROOT=${WT_ROOT:-.fleet-worktrees}
+# Every directory this repo's lanes can live under, deduplicated (comparison
+# form via norm): the native in-repo root, fleet's root (relative to the repo,
+# or absolute when WORKTREE_ROOT supplied it), and the machine-wide
+# $WORKTREE_ROOT/<repo> (rules/worktree-boundaries.md "Lane location"). EXT_ROOT
+# is WORKTREE_ROOT itself, which marks hook-made session trees in phase 1.
+EXT_ROOT=""
+LANE_ROOTS=()
+add_root() { local r; for r in ${LANE_ROOTS[@]+"${LANE_ROOTS[@]}"}; do [[ "$(norm "$r")" == "$(norm "$1")" ]] && return 0; done; LANE_ROOTS+=("$1"); }
+add_root "$REPO_ROOT/.claude/worktrees"
+case "$WT_ROOT" in
+  /*|[A-Za-z]:[\\/]*) add_root "$(native "${WT_ROOT//\\//}")" ;;
+  *)                  add_root "$REPO_ROOT/$WT_ROOT" ;;
+esac
+if [[ -n "${WORKTREE_ROOT:-}" ]]; then
+  EXT_ROOT=$(native "${WORKTREE_ROOT//\\//}"); EXT_ROOT=${EXT_ROOT%/}
+  add_root "$EXT_ROOT/${REPO_ROOT##*/}"
+fi
+LANE_ROOTS_NORM=$(for r in "${LANE_ROOTS[@]}"; do printf '%s/\n' "$(norm "$r")"; done)
 LIVE_SECS=$(cfg session_live_secs); LIVE_SECS=${LIVE_SECS:-600}
 SESSION_CHECK=$(cfg session_check | tr '[:upper:]' '[:lower:]')
 g() { git -C "$REPO_ROOT" "$@"; }
@@ -422,13 +440,24 @@ done
 
 # Unregistered directories under the worktree roots. `.fleetflow/` is not
 # scanned: fleetflow owns it, and ff-sweep reclaims it (with history archived).
+# Two repos with the same dir name share $WORKTREE_ROOT/<repo>: a dir whose .git
+# file points into ANOTHER git dir is that repo's lane, never our orphan (and
+# never an EMPTY-DIR for --apply to rmdir).
+foreign_lane() {
+  local gd
+  [[ -f "$1/.git" ]] || return 1
+  gd=$(sed -n 's/^gitdir: //p' "$1/.git" | tr -d '\r')
+  [[ "$(norm "$gd")/" == "$(norm "$GCD")"/* ]] && return 1
+  return 0
+}
 ORPHANS=()
-for root in "$REPO_ROOT/.claude/worktrees" "$REPO_ROOT/$WT_ROOT"; do
+for root in "${LANE_ROOTS[@]}"; do
   [[ -d "$root" ]] || continue
   for d in "$root"/*/; do
     [[ -d "$d" ]] || continue
     d=$(native "${d%/}")
-    printf '%s\n' "$REG_NORM" | grep -qxF -- "$(norm "$d")" || ORPHANS+=("$d")
+    printf '%s\n' "$REG_NORM" | grep -qxF -- "$(norm "$d")" && continue
+    foreign_lane "$d" || ORPHANS+=("$d")
   done
 done
 
@@ -471,10 +500,13 @@ claims_join() { # state-tsv -> path \t id \t title \t archived \t live \t via
 }
 # Open sessions whose wrapper cwd is a lane dir of THIS repo (index col 5).
 cwd_sessions() {
-  LC_ALL=C awk -F'\t' -v r1="$(norm "$REPO_ROOT/.claude/worktrees")/" -v r2="$(norm "$REPO_ROOT/$WT_ROOT")/" '
+  LC_ALL=C awk -F'\t' '
     function np(p) { gsub(/\\/, "/", p); sub(/\/+$/, "", p); return tolower(p) }
-    NF >= 7 { c = np($5); if ((index(c, r1) == 1 || index(c, r2) == 1) && !s[$2]++) print $2 "\t" $5 "\t" $3 "\t" $6 "\t" $7 }' \
-    <(printf '%s\n' "$SIDX")
+    FILENAME == ARGV[1] { if ($0 != "") R[++nr] = $0; next }
+    NF >= 7 { c = np($5); hit = 0
+              for (i = 1; i <= nr; i++) if (index(c, R[i]) == 1) hit = 1
+              if (hit && !s[$2]++) print $2 "\t" $5 "\t" $3 "\t" $6 "\t" $7 }' \
+    <(printf '%s\n' "$LANE_ROOTS_NORM") <(printf '%s\n' "$SIDX")
 }
 MERGED_SET=$(g for-each-ref --merged="$BASE" --format='%(refname:short)' refs/heads 2>/dev/null)
 CLAIMS="" CWDS="" FRESH=""
@@ -593,9 +625,10 @@ while IFS=$US read -r id cwd title arch live; do
   [[ -z "$id" || "$arch" == 1 ]] && continue
   # Its lane dir is the first path component under a worktree root.
   nc=$(norm "$cwd") top=""
-  for r in "$(norm "$REPO_ROOT/.claude/worktrees")/" "$(norm "$REPO_ROOT/$WT_ROOT")/"; do
+  while IFS= read -r r; do
+    [[ -z "$r" ]] && continue
     if [[ "$nc" == "$r"* ]]; then rest=${nc#"$r"}; top="$r${rest%%/*}"; break; fi
-  done
+  done <<< "$LANE_ROOTS_NORM"
   [[ -z "$top" ]] && continue
   printf '%s\n' "$REG_NORM" | grep -qxF -- "$top" && continue
   DIRECT="${DIRECT}${id}"$'\t'"${cwd//\\//}"$'\t'"$title"$'\t'"$live"$'\n'
@@ -640,9 +673,18 @@ sref() { local l; l=$(inst_label "$1"); printf '%s%s' "$1" "${l:+ [$l]}"; }
 N_AWAY=0
 
 # --- phase 1: worktrees -------------------------------------------------------
+# A worktree-* tree under $WORKTREE_ROOT was made by hooks/worktree-create.sh for
+# a Claude Code session. Claude Code's own sweep keeps such trees forever (they
+# carry no marker of its own), so the row says so: this report is where they
+# surface. wrow = `row worktree` for the current tree, with that note appended.
 N_ARCH_ASK=0
+wrow() { row worktree "$p" "$1" "$2$hk" "$3"; }
 for ((i = 0; i < NW; i++)); do
   p=${W_PATH[$i]} br=${W_BR[$i]} label=${W_LABEL[$i]} slug=${W_PATH[$i]##*/}
+  hk=""
+  if [[ -n "$EXT_ROOT" && "$br" == worktree-* && "$(norm "$p")/" == "$(norm "$EXT_ROOT")"/?* ]]; then
+    hk="; hook-made: Claude Code will not clean it up"
+  fi
   pb=$(prune_of "$p"); bucket=${pb%%$'\t'*}; reason=${pb#*$'\t'}
   [[ -z "$pb" ]] && { bucket=REVIEW; reason="not classified by prune"; }
   st=${W_LANDED[$i]} dirty=${W_DIRTY[$i]}
@@ -653,21 +695,21 @@ for ((i = 0; i < NW; i++)); do
   hold=""; [[ -n "$br" ]] && hold=$(held_reason "$br")
 
   if [[ ${W_GONE[$i]} -eq 1 || ! -d "$p" ]]; then
-    row worktree "$p" GHOST "directory gone; git still lists it" "git worktree prune  (fleet sweep --apply)"
+    wrow GHOST "directory gone; git still lists it" "git worktree prune  (fleet sweep --apply)"
   elif [[ "$bucket" == KEEP ]]; then
-    row worktree "$p" KEEP "$reason" "-"
+    wrow KEEP "$reason" "-"
   elif [[ -n "$live" ]]; then
-    row worktree "$p" KEEP "live session: $live (fresh read)" "-"
+    wrow KEEP "live session: $live (fresh read)" "-"
   elif [[ "$bucket" == SAFE ]]; then
-    row worktree "$p" REMOVE "$reason" "fleet prune --remove"
+    wrow REMOVE "$reason" "fleet prune --remove"
   elif [[ -n "$br" ]] && never_push "$br"; then
-    row worktree "$p" PARK "branch is on the private never-push list" "never land or push it; remove the tree by hand when done"
+    wrow PARK "branch is on the private never-push list" "never land or push it; remove the tree by hand when done"
   elif [[ -n "${W_DIFF[$i]}" ]]; then
-    row worktree "$p" INSPECT "could not read its diff against $BASE (${W_DIFF[$i]}) - competing work unknown" "re-run once git answers; never land it on this verdict"
+    wrow INSPECT "could not read its diff against $BASE (${W_DIFF[$i]}) - competing work unknown" "re-run once git answers; never land it on this verdict"
   elif printf '%s\n' "$COMPETING" | grep -qxF -- "$label"; then
-    row worktree "$p" COMPETING "shares files with $(competes_with "$label") (phase 2)${hold:+; ON HOLD: $hold}" "settle the pair before landing either"
+    wrow COMPETING "shares files with $(competes_with "$label") (phase 2)${hold:+; ON HOLD: $hold}" "settle the pair before landing either"
   elif [[ "$dirty" -gt 0 ]]; then
-    row worktree "$p" INSPECT "$dirty uncommitted: ${W_DSAMPLE[$i]}" "commit it in its lane, or discard after review"
+    wrow INSPECT "$dirty uncommitted: ${W_DSAMPLE[$i]}" "commit it in its lane, or discard after review"
   elif [[ "$st" == MERGED || "$st" == CONTENT ]]; then
     how="merged"; [[ "$st" == CONTENT ]] && how="landed by content (squash/cherry-pick) - prune cannot see it"
     if [[ -n "$open_ids" ]]; then
@@ -682,33 +724,33 @@ for ((i = 0; i < NW; i++)); do
         if is_direct "$id"; then direct="$direct${direct:+, }$(sref "$id")"; else ask="$ask${ask:+, }$(sref "$id")"; fi
       done <<< "$open_ids"
       if [[ -n "$blocker" ]]; then
-        row worktree "$p" OWNER-BUSY "$how; $blocker" "land the blocker first, then re-run"
+        wrow OWNER-BUSY "$how; $blocker" "land the blocker first, then re-run"
       elif [[ -n "$direct" ]]; then
-        row worktree "$p" ASK-ARCHIVE "$how + clean; owner open, its own lane dir gone" "archive $direct directly (phase 5) - never message it"
+        wrow ASK-ARCHIVE "$how + clean; owner open, its own lane dir gone" "archive $direct directly (phase 5) - never message it"
         N_ARCH_ASK=$((N_ARCH_ASK + 1))
       else
-        row worktree "$p" ASK-ARCHIVE "$how + clean; owner open but idle" "ask $ask to archive itself (phase 5)"
+        wrow ASK-ARCHIVE "$how + clean; owner open but idle" "ask $ask to archive itself (phase 5)"
         N_ARCH_ASK=$((N_ARCH_ASK + 1))
       fi
     elif [[ -n "$run" ]]; then
-      row worktree "$p" FLEETFLOW "$how + clean; a fleetflow lane" "ff-clean.sh --run $run (fleetflow archives the run first)"
+      wrow FLEETFLOW "$how + clean; a fleetflow lane" "ff-clean.sh --run $run (fleetflow archives the run first)"
     elif [[ "$st" == CONTENT ]]; then
-      row worktree "$p" CONTENT-LANDED "$how" "after an OK: git worktree remove '$p' && git branch -D '$br'"
+      wrow CONTENT-LANDED "$how" "after an OK: git worktree remove '$p' && git branch -D '$br'"
     else
-      row worktree "$p" VERIFY-OWNER "merged + clean; prune: $reason" "find its session (search_session_transcripts '$slug'); archived => prune can remove it"
+      wrow VERIFY-OWNER "merged + clean; prune: $reason" "find its session (search_session_transcripts '$slug'); archived => prune can remove it"
     fi
   elif [[ -n "$hold" ]]; then
     # Unlanded and on the hold list: never LAND, and never REBASE either - a
     # rebase rewrites the SHAs an outside review is reading.
     how="merges cleanly"; [[ "$st" == CONFLICT ]] && how="conflicts with $BASE"
-    row worktree "$p" ON-HOLD "held: $hold; ${W_AHEAD[$i]} commit(s), $how" "do not land or rebase it until the hold is lifted (references/sweep.md)"
+    wrow ON-HOLD "held: $hold; ${W_AHEAD[$i]} commit(s), $how" "do not land or rebase it until the hold is lifted (references/sweep.md)"
   elif [[ "$st" == CONFLICT ]]; then
-    row worktree "$p" REBASE "${W_AHEAD[$i]} commit(s) conflict with $BASE in ${W_CONF[$i]}" "rebase in the lane, or hand it back to its session"
+    wrow REBASE "${W_AHEAD[$i]} commit(s) conflict with $BASE in ${W_CONF[$i]}" "rebase in the lane, or hand it back to its session"
   elif [[ -z "$br" ]]; then
-    row worktree "$p" INSPECT "detached HEAD with commits not in $BASE" "branch it (git branch <name> <sha>) or discard after review"
+    wrow INSPECT "detached HEAD with commits not in $BASE" "branch it (git branch <name> <sha>) or discard after review"
   else
     stale=""; [[ "${W_AGE[$i]}" -ge "$STALE_DAYS" ]] && stale="; last commit ${W_AGE[$i]}d ago"
-    row worktree "$p" LAND "${W_AHEAD[$i]} commit(s), merges cleanly$stale" "fleet land $br"
+    wrow LAND "${W_AHEAD[$i]} commit(s), merges cleanly$stale" "fleet land $br"
   fi
 done
 

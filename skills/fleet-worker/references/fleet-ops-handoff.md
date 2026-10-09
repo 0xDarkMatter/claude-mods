@@ -29,12 +29,17 @@ produce ordinary branches, and fleet-ops lands branches.
 Each task gets its own worktree/branch and its own isolated config dir:
 
 ```bash
+# Worker trees: $WORKTREE_ROOT/<repo>/fleet-<id> when the machine sets the lane
+# root, else .fleet-work/<id> (same as SKILL.md's fan-out recipe).
+main=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
+if [ -n "${WORKTREE_ROOT:-}" ]; then FW="${WORKTREE_ROOT%/}/$(basename "$main")"; pre=fleet-
+else FW=.fleet-work; pre=; fi
 delegate() {                     # $1 = task-id, $2 = prompt
-  local id="$1" prompt="$2" wt=".fleet-work/$1"
+  local id="$1" prompt="$2" wt="$FW/$pre$1"
   git worktree add -q -b "fleet/$id" "$wt" HEAD
   ( cd "$wt"
     FLEET_WORKER_CONFIG_DIR="$HOME/.fleet-worker/cfg-$id" \
-      fleet-worker --output-format json "$prompt" > "../$id.result.json" 2> "../$id.err"
+      fleet-worker --output-format json "$prompt" > "../$pre$id.result.json" 2> "../$pre$id.err"
     # the worker edits files; commit so the branch carries the work
     git add -A && git commit -q -m "fleet/$id: $prompt" || true
   )
@@ -60,7 +65,7 @@ a true success (`is_error:false`), `10` on a failed/overloaded worker:
 ```bash
 winners=()
 for id in fix-lint add-tests doc-sync; do
-  if fleet-collect.sh ".fleet-work/$id.result.json" >/dev/null; then
+  if fleet-collect.sh "$FW/$pre$id.result.json" >/dev/null; then
     winners+=("fleet/$id"); echo "fleet/$id  OK"
   else
     echo "fleet/$id  FAILED — discard or re-dispatch"
@@ -106,7 +111,7 @@ The worker is cheap and *unreviewed* by design. The value of the pairing is that
 | Worker succeeded but diff is wrong on review | Don't `fleet track` it; delete the branch + worktree |
 | Lane fails the test gate after merge | `fleet revert fleet/<id>`, then re-dispatch with a tighter prompt |
 | Two workers touched the same files | fleet-ops lands sequentially and rebases; a rebase conflict marks the lane `CONFLICT` — resolve in its worktree |
-| Scratch dirs cluttering the tree | `git worktree remove .fleet-work/<id>`; `.gitignore` `.fleet-work/` and `.fleet-worker/` |
+| Scratch dirs cluttering the tree | `git worktree remove "$FW/$pre<id>"`; `.gitignore` `.fleet-work/` and `.fleet-worker/`, or set `WORKTREE_ROOT` so no worker tree lands in the repo |
 
 ## Boundaries (what each side owns)
 

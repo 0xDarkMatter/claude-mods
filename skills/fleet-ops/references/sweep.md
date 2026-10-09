@@ -191,8 +191,10 @@ After a typed `apply` (or `--yes`), and each re-verified immediately before it a
    release/* hotfix/*`). Deleted with `git update-ref -d <ref> <sha>`, a
    compare-and-swap on the sha verified a moment earlier, after re-checking it is
    still in base and checked out nowhere. Its commits stay reachable from base.
-3. **Empty dirs**: unregistered, under `.claude/worktrees/` or the fleet
-   worktree root, older than `FLEET_SWEEP_MIN_DIR_AGE` (default 3600s, since a
+3. **Empty dirs**: unregistered, under `.claude/worktrees/`, the fleet
+   worktree root or `$WORKTREE_ROOT/<repo>/` (a dir whose `.git` file points
+   into another repo — a same-named repo shares that folder — is never ours),
+   older than `FLEET_SWEEP_MIN_DIR_AGE` (default 3600s, since a
    dir may be mid-creation), and with no open claimant on a fresh
    `sessions.sh at --fresh` read. `rmdir`, which refuses a non-empty dir. With
    the session store unreadable, none qualify: no claim can be ruled out.

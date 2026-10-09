@@ -8,6 +8,21 @@ feature releases live in the README "Recent Updates" section.
 
 ### Added
 
+- **A machine-wide lane root: `WORKTREE_ROOT`.** Set it in Claude Code's `settings.json`
+  `env` and lanes live at `$WORKTREE_ROOT/<repo>/<slug>`, outside every project dir, so
+  `rg`, `fd`, `tokei` and `git add -A` in a project never see one. Unset, nothing changes.
+  - `new-lane.sh` and `fleet init` place lanes there by default (an explicit fleet
+    `worktree_root` still wins); the fleet-worker fan-out recipe uses `fleet-<id>` there.
+  - The tools that find lanes see them there: `worktree-survey.sh`, `status.sh`,
+    `fleet prune` and `fleet sweep` scan the root, and skip a same-named repo's lanes.
+    `worktree-guard.sh` guards `rm`, `git rm` and `git worktree remove/prune` on it.
+  - New opt-in hooks `worktree-create.sh` + `worktree-remove.sh` move Claude Code's own
+    worktrees there too. The remove hook never forces and deletes only a merged
+    `worktree-*` branch. Claude Code's sweep keeps hook-made trees, so `fleet sweep` marks
+    them "hook-made" and `fleet prune` gives them the same care as `.claude/worktrees/`.
+  - Fixed on the way: fleet.sh kept its default in a variable named `WORKTREE_ROOT`,
+    which overwrote the machine's value for itself and every child it ran.
+
 - **`tests/skill-hygiene.sh`: a ratchet against four quiet skill failures.**
   - **A side file SKILL.md never names.** The router can't find it. A named folder covers
     its files, and `_lib/` helpers are exempt.

@@ -44,6 +44,9 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+# A machine-wide lane root changes what worktree-guard and the worktree hooks do.
+# Pin it off; the cases that want one point it at a throwaway dir, never the real one.
+unset WORKTREE_ROOT WORKTREE_BASE_REF
 cmd_json()  { jq -cn --arg c "$1" '{tool_input:{command:$c}}'; }
 file_json() { jq -cn --arg p "$1" '{tool_input:{file_path:$p}}'; }
 
@@ -173,6 +176,92 @@ printf '{"source":"user_settings"}' | HOME="$tmp/cg" SUPPLY_CHAIN_BLOCK=1 bash "
 [ "$rc" -eq 2 ] && grep -qF 'CONFIG GUARD' "$tmp/err" && [ "$(notice_ok)" = true ] \
   && ok "IOC block exits 2 and still notifies" \
   || bad "IOC block exits 2 and still notifies - exit $rc"
+
+# --- worktree-create / worktree-remove ------------------------------------------
+# WorktreeCreate prints ONLY the worktree path (last stdout line); any non-zero
+# exit fails creation. WorktreeRemove: non-zero keeps the directory. The hooks
+# replace Claude Code's git logic, so these pin what they must re-implement.
+# https://code.claude.com/docs/en/hooks#worktreecreate
+echo "-- worktree-create / worktree-remove --"
+if command -v git >/dev/null 2>&1; then
+  native() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
+  wr="$tmp/wtroot"; R="$tmp/proj"; O="$tmp/origin.git"; cfg="$tmp/cfg"; mkdir -p "$cfg"
+  git init -q -b main "$R"; git -C "$R" config user.email t@t; git -C "$R" config user.name t
+  git -C "$R" config core.autocrlf false
+  printf '.env\nsecret/\n' > "$R/.gitignore"; echo t > "$R/tracked.txt"
+  git -C "$R" add -A; git -C "$R" commit -qm c1
+  git clone -q --bare "$R" "$O"; git -C "$R" remote add origin "$O"
+  git -C "$R" fetch -q origin; git -C "$R" remote set-head origin main >/dev/null
+  C1="$(git -C "$R" rev-parse HEAD)"
+  echo c2 > "$R/c2"; git -C "$R" add c2; git -C "$R" commit -qm c2    # local only
+  C2="$(git -C "$R" rev-parse HEAD)"
+  wc_run() {   # $1 name, $2 cwd, rest: env assignments -> out/err/rc
+    local n="$1" d="$2"; shift 2
+    jq -cn --arg n "$n" --arg c "$d" '{hook_event_name:"WorktreeCreate",name:$n,cwd:$c}' \
+      | env CLAUDE_CONFIG_DIR="$cfg" "$@" bash "$H/worktree-create.sh" >"$tmp/out" 2>"$tmp/err"
+  }
+  wrm_run() { jq -cn --arg p "$1" '{hook_event_name:"WorktreeRemove",worktree_path:$p}' \
+      | bash "$H/worktree-remove.sh" >"$tmp/out" 2>"$tmp/err"; }
+  check() { if eval "$2"; then ok "$1"; else bad "$1 - $(tail -n2 "$tmp/err" | tr '\n' ' ')"; fi; }
+
+  wc_run feat-a "$R" WORKTREE_ROOT="$wr"; rc=$?
+  want="$(native "$wr")/proj/feat-a"
+  check "create: exit 0" '[ $rc -eq 0 ]'
+  check "create: stdout is exactly the path" '[ "$(cat "$tmp/out")" = "$want" ]'
+  check "create: lane at \$WORKTREE_ROOT/<repo>/<name>" '[ -d "$wr/proj/feat-a" ] && [ ! -e "$R/.claude/worktrees" ]'
+  check "create: branch worktree-<name>" 'git -C "$R" show-ref -q --verify refs/heads/worktree-feat-a'
+  check "create: fresh base = origin/HEAD, not local HEAD" '[ "$(git -C "$wr/proj/feat-a" rev-parse HEAD)" = "$C1" ]'
+
+  wc_run feat-a "$R" WORKTREE_ROOT="$wr"; rc=$?
+  check "create: existing worktree of that name is reopened" '[ $rc -eq 0 ] && [ "$(cat "$tmp/out")" = "$want" ]'
+  mkdir -p "$wr/proj/squat"; echo keep > "$wr/proj/squat/f"
+  wc_run squat "$R" WORKTREE_ROOT="$wr"; rc=$?
+  check "create: a non-worktree dir in the way -> exit 1, untouched" '[ $rc -eq 1 ] && [ -f "$wr/proj/squat/f" ] && [ ! -s "$tmp/out" ]'
+
+  wc_run feat-h "$R" WORKTREE_ROOT="$wr" WORKTREE_BASE_REF=head
+  check "create: WORKTREE_BASE_REF=head -> current HEAD" '[ "$(git -C "$wr/proj/feat-h" rev-parse HEAD)" = "$C2" ]'
+  mkdir -p "$R/.claude"; printf '{"worktree":{"baseRef":"head"}}' > "$R/.claude/settings.json"
+  wc_run feat-s "$R" WORKTREE_ROOT="$wr"
+  check "create: worktree.baseRef=head in project settings -> current HEAD" '[ "$(git -C "$wr/proj/feat-s" rev-parse HEAD)" = "$C2" ]'
+  rm -f "$R/.claude/settings.json"
+
+  wc_run nested "$wr/proj/feat-a" WORKTREE_ROOT="$wr"
+  check "create: from inside a lane, <repo> is the MAIN checkout's name" '[ -d "$wr/proj/nested" ] && [ ! -e "$wr/feat-a" ]'
+  wc_run "team/feat" "$R" WORKTREE_ROOT="$wr"
+  check "create: a name is one path segment (team/feat -> team-feat)" '[ -d "$wr/proj/team-feat" ] && [ ! -e "$wr/proj/team" ]'
+
+  echo SECRET > "$R/.env"; mkdir -p "$R/secret"; echo k > "$R/secret/k"; echo n > "$R/notes.txt"
+  printf '.env\nsecret/k\nnotes.txt\n' > "$R/.worktreeinclude"
+  wc_run inc "$R" WORKTREE_ROOT="$wr" WORKTREE_BASE_REF=head
+  check ".worktreeinclude: gitignored matches copied" '[ -f "$wr/proj/inc/.env" ] && [ -f "$wr/proj/inc/secret/k" ]'
+  check ".worktreeinclude: untracked-but-not-ignored not copied" '[ ! -e "$wr/proj/inc/notes.txt" ]'
+
+  wc_run plain "$R"; rc=$?
+  check "create: WORKTREE_ROOT unset -> Claude Code's default <repo>/.claude/worktrees/<name>" \
+    '[ $rc -eq 0 ] && [ "$(cat "$tmp/out")" = "$(native "$R")/.claude/worktrees/plain" ] && [ -d "$R/.claude/worktrees/plain" ]'
+  printf '{"cwd":"%s"}' "$(native "$R")" | env CLAUDE_CONFIG_DIR="$cfg" bash "$H/worktree-create.sh" >"$tmp/out" 2>"$tmp/err"; rc=$?
+  check "create: no name -> exit 1, nothing on stdout" '[ $rc -eq 1 ] && [ ! -s "$tmp/out" ]'
+
+  wrm_run "$wr/proj/feat-h"; rc=$?
+  check "remove: clean worktree -> exit 0, dir gone" '[ $rc -eq 0 ] && [ ! -e "$wr/proj/feat-h" ]'
+  check "remove: merged worktree-* branch deleted with -d" '! git -C "$R" show-ref -q --verify refs/heads/worktree-feat-h'
+  echo wip > "$wr/proj/feat-s/untracked.txt"
+  wrm_run "$wr/proj/feat-s"; rc=$?
+  check "remove: untracked work -> exit 1, dir and file kept" '[ $rc -eq 1 ] && [ -f "$wr/proj/feat-s/untracked.txt" ]'
+  echo u > "$wr/proj/feat-a/u"; git -C "$wr/proj/feat-a" add u; git -C "$wr/proj/feat-a" -c user.email=t@t -c user.name=t commit -qm unmerged
+  wrm_run "$wr/proj/feat-a"; rc=$?
+  check "remove: unmerged branch kept (no -D), dir removed" '[ $rc -eq 0 ] && [ ! -e "$wr/proj/feat-a" ] && git -C "$R" show-ref -q --verify refs/heads/worktree-feat-a'
+  wrm_run "$wr/proj/squat"; rc=$?
+  check "remove: a non-git dir -> exit 1, untouched" '[ $rc -eq 1 ] && [ -f "$wr/proj/squat/f" ]'
+  wrm_run "$wr/proj/inc/secret"; rc=$?
+  check "remove: a subdir of a worktree -> exit 1, untouched" '[ $rc -eq 1 ] && [ -f "$wr/proj/inc/secret/k" ]'
+  wrm_run "$R"; rc=$?   # last: a broken hook deletes the fixture repo here
+  check "remove: the main checkout -> exit 1, untouched" '[ $rc -eq 1 ] && [ -d "$R/.git" ]'
+  wrm_run "$wr/proj/never-was"; rc=$?
+  check "remove: already gone -> exit 0" '[ $rc -eq 0 ]'
+else
+  skip "worktree-create / worktree-remove (git not installed)"
+fi
 
 echo
 echo "=== $PASS passed, $FAIL failed, $SKIP skipped ==="

@@ -90,6 +90,7 @@ When running any status check, scan for these anti-patterns and surface them **b
 ```bash
 git checkout main                                              # return main to trunk
 git worktree add .claude/worktrees/<name> <feature-branch>   # move work to worktree
+# machine sets WORKTREE_ROOT? put it there instead: "$WORKTREE_ROOT/<repo>/<name>"
 ```
 
 **Detecting main checkout vs worktree:**
@@ -246,7 +247,7 @@ Worktrees are first-class in this skill. The classification is:
 | Op | Tier | How |
 |----|------|-----|
 | **Survey** | T1 | `bash scripts/worktree-survey.sh` — read-only, reports per-worktree state + drift |
-| **New lane** | T2 (inline) | `bash scripts/new-lane.sh [--sibling] <slug> [base]` — fast scripted provisioning: branch `lane/<slug>` **in-repo** at `.claude/worktrees/<slug>` (gitignored; `--sibling` for an outside `<repo>-<slug>` instead) + carries over gitignored env files. The one-command collision remedy — see "Lane provisioning" below |
+| **New lane** | T2 (inline) | `bash scripts/new-lane.sh [--sibling] <slug> [base]` — fast scripted provisioning: branch `lane/<slug>` at `$WORKTREE_ROOT/<repo>/<slug>` when the machine sets `WORKTREE_ROOT`, else **in-repo** at `.claude/worktrees/<slug>` (gitignored; `--sibling` for an outside `<repo>-<slug>` instead) + carries over gitignored env files. The one-command collision remedy — see "Lane provisioning" below |
 | **Create (bespoke)** | T2 | `git worktree add <path> -b <branch>` via agent — for non-standard layouts the script doesn't cover |
 | **Land** | T2 | Rebase worktree branch onto trunk + test + fast-forward. Multi-step procedure — see "Worktree Land Procedure" below |
 | **Prune (clean)** | T2 | `git worktree prune` for ghost entries (registered but FS-missing). Always safe, no data loss possible |
@@ -254,7 +255,7 @@ Worktrees are first-class in this skill. The classification is:
 
 ### Lane provisioning (the collision remedy)
 
-`bash scripts/new-lane.sh [--sibling] <slug> [base]`: branch `lane/<slug>` at `.claude/worktrees/<slug>`, gitignore ensured, env files carried, never clobbers. Committed lane work survives worktree deletion; land early. Details: [references/lane-provisioning.md](references/lane-provisioning.md).
+`bash scripts/new-lane.sh [--sibling] <slug> [base]`: branch `lane/<slug>` at `$WORKTREE_ROOT/<repo>/<slug>` (machine-wide root, when set) or `.claude/worktrees/<slug>` (gitignore ensured), env files carried, never clobbers. Committed lane work survives worktree deletion; land early. Details: [references/lane-provisioning.md](references/lane-provisioning.md).
 
 ### Survey-first discipline
 
@@ -295,7 +296,7 @@ worktree-boundaries live-writer guard applied to landing. `WIP` needs an explici
 
 See `rules/worktree-boundaries.md`. Summary:
 
-- **Never** `rm -rf .claude/worktrees/` — the orphan count in survey is informational, never a cleanup cue
+- **Never** `rm -rf .claude/worktrees/` or `$WORKTREE_ROOT/<repo>/` — the orphan count in survey is informational, never a cleanup cue
 - **Never** `git add -A` when `.claude/worktrees/` has untracked entries (sweeps gitlinks into commits)
 - **Never** decide another session's worktree is "orphaned" — ask first
 - Cross-project work stays cross-project; a worktree in repo X is never our concern when we're operating on repo Y

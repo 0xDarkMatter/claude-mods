@@ -80,6 +80,15 @@ WT_FS=0
 if [ -d .claude/worktrees ]; then
   WT_FS=$(find .claude/worktrees -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
 fi
+# Machine-wide lane root (rules/worktree-boundaries.md "Lane location"): lanes at
+# $WORKTREE_ROOT/<repo>/, <repo> = the MAIN checkout's dir name.
+WT_EXT=0; WT_EXT_DIR=""
+if [ -n "${WORKTREE_ROOT:-}" ]; then
+  _common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) \
+    || _common=$(cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd)
+  WT_EXT_DIR="${WORKTREE_ROOT//\\//}"; WT_EXT_DIR="${WT_EXT_DIR%/}/$(basename "$(dirname "$_common")")"
+  [ -d "$WT_EXT_DIR" ] && WT_EXT=$(find "$WT_EXT_DIR" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
+fi
 
 # Branches
 BR_LOCAL=$(git branch 2>/dev/null | wc -l | tr -d ' ')
@@ -146,8 +155,12 @@ if [ -n "$SHORTSTAT" ]; then
 fi
 echo "tree:    $TREE_LINE"
 
-# Only show worktrees line if there are multiple registered OR .claude/worktrees exists
-if [ "$WT_REGISTERED" -gt 1 ] || [ "$WT_FS" -gt 0 ]; then
+# Only show worktrees line if there are multiple registered OR a lane root has entries
+if [ -n "$WT_EXT_DIR" ]; then
+  if [ "$WT_REGISTERED" -gt 1 ] || [ "$WT_FS" -gt 0 ] || [ "$WT_EXT" -gt 0 ]; then
+    echo "trees:   $WT_REGISTERED registered / $WT_FS in .claude/worktrees / $WT_EXT in $WT_EXT_DIR"
+  fi
+elif [ "$WT_REGISTERED" -gt 1 ] || [ "$WT_FS" -gt 0 ]; then
   echo "trees:   $WT_REGISTERED registered / $WT_FS in .claude/worktrees"
 fi
 

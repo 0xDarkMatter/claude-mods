@@ -16,7 +16,7 @@
 
 Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms) and Anthropic's [patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), it installs as a standard plugin and toggles off as easily as it toggles on.
 
-**3 agents. 112 skills. 13 styles. 13 hooks. 15 rules. One install.**
+**3 agents. 112 skills. 13 styles. 15 hooks. 15 rules. One install.**
 
 ## Recent Updates
 
