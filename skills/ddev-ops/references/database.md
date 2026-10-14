@@ -3,7 +3,9 @@
 Facts from DDEV's database-management, hosting-provider, customisation and command docs
 at DDEV v1.25.4, and its source (`provider.go`, `ddevapp.go`), checked 2026-10-06.
 "Observed" marks behaviour seen in throwaway projects on DDEV v1.25.4 (Docker Desktop,
-WSL2) that day.
+WSL2) that day. The uploads section reads DDEV's v1.25.4 nginx site templates
+(`pkg/ddevapp/webserver_config_assets/`) and nginx's documented `location` matching,
+checked 2026-10-14.
 
 ## Contents
 
@@ -12,6 +14,8 @@ WSL2) that day.
 - [Changing the database engine](#changing-the-database-engine)
 - [Pulling from hosting](#pulling-from-hosting)
 - [Production data on laptops](#production-data-on-laptops)
+- [Uploads: show production's instead of pulling](#uploads-show-productions-instead-of-pulling)
+- [Keep dumps out of an agent's context](#keep-dumps-out-of-an-agents-context)
 - [Import troubleshooting](#import-troubleshooting)
 
 ## Import, export, connect
@@ -187,6 +191,55 @@ result.**
 
 Why it matters, and what else crosses environments (mail transports, keys, API tokens):
 security-ops' `ddev-config-drift.md`.
+
+## Uploads: show production's instead of pulling
+
+Pulling uploads costs disk and time, and copies files real people uploaded. For most work
+it is enough that pages *show* them: let the local site send a request for a file it
+lacks to production.
+
+- **Drupal:** the Stage File Proxy module does this.
+- **Any CMS on `nginx-fpm`:** a snippet that redirects missing uploads, here WordPress's
+  path:
+
+  ```nginx
+  # .ddev/nginx/uploads-from-production.conf
+  location ^~ /wp-content/uploads/ {
+      try_files $uri @production_uploads;
+  }
+  location @production_uploads {
+      return 302 https://<production-host>$request_uri;
+  }
+  ```
+
+  - `^~` matters. DDEV includes `.ddev/nginx/*.conf` *after* its own regex `location`
+    for images, and nginx uses the first regex that matches; a `^~` prefix match stops
+    that regex search.
+  - Files you upload locally still exist locally and are served as usual.
+  - Check it: `ddev exec nginx -t`, `ddev restart`, then request a file that exists only
+    in production and expect a 302. This is the documented nginx behaviour; it was not
+    run against a live project for this skill.
+- **Then pull the database only:** `ddev pull <provider> --skip-files`, or a recipe with
+  no files stanza, like the sanitised-pull asset.
+
+## Keep dumps out of an agent's context
+
+A dump or snapshot is production data and often gigabytes. Read into an agent's context,
+it fills the window and copies personal data into a transcript stored somewhere else.
+
+- **Ask the database, not the file:** `ddev mysql -e 'SHOW TABLES'`,
+  `ddev mysql -e 'SELECT COUNT(*) FROM users'` (`ddev psql -c` on Postgres). To check a
+  dump's shape without reading its rows: `ls -lh dump.sql.gz` and
+  `zgrep -c 'CREATE TABLE' dump.sql.gz`.
+- **Deny reads in the agent's settings.** For Claude Code, in the project's
+  `.claude/settings.json`:
+
+  ```json
+  {"permissions": {"deny": ["Read(**/*.sql)", "Read(**/*.sql.gz)", "Read(./.ddev/db_snapshots/**)"]}}
+  ```
+
+  Read rules cover the file tools only, not a shell's `cat` or `zcat`, so say so in the
+  project's instructions too.
 
 ## Import troubleshooting
 

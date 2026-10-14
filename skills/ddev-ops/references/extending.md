@@ -2,7 +2,8 @@
 
 Facts from DDEV's add-on, custom-command, hooks, customisation, custom-compose and
 managing-projects docs at DDEV v1.25.4, and its source (`cmd/ddev/cmd/commands.go`,
-`ddevapp.go` `ProcessHooks`), checked 2026-10-06.
+`ddevapp.go` `ProcessHooks`), checked 2026-10-06; `#ddev-silent-no-warn` from its
+commands docs (`utility check-custom-config`), checked 2026-10-14.
 
 ## Contents
 
@@ -104,6 +105,9 @@ npm run build "$@"
   unless the override is deliberate. Built-ins ship from DDEV's global commands folder
   (`ddev -h` lists them).
 - `scripts/audit-ddev-config.py` reports both (`crlf-command`, `shadowed-command`).
+- **A host command is the repository's code running on your machine.** Read one before
+  running it; the auditor lists project host commands (`host-command`), skipping add-on
+  copies marked `#ddev-generated`.
 
 ## Hooks
 
@@ -126,6 +130,9 @@ hooks:
   whether that's `start`, `pull`, `import-db` or another. Hooks must not prompt.
 - **Keep `post-start` fast:** an `npm install` there runs on every start for every
   teammate.
+- **`exec-host` runs on your machine** with your rights, on every teammate's machine,
+  whenever its hook fires. Prefer `exec` in a container; the auditor reports committed
+  `exec-host` tasks (`host-hook`).
 
 ## Background processes
 
@@ -154,6 +161,9 @@ Front-end dev servers use the same mechanism: [frontend-node.md](frontend-node.m
   - Keep the `/phpstatus` alias: DDEV's health check needs it. DDEV's troubleshooting
     docs name a user-defined site config as the most common cause of
     "web service unhealthy".
+  - DDEV then warns about the file on every start (`ddev utility check-custom-config`
+    lists what it will warn about). A `#ddev-silent-no-warn` line in a file you took over
+    on purpose silences that, and tells the next reader it was deliberate.
 - **Test before restarting:** `ddev exec nginx -t` or `ddev exec apachectl -t`.
 - **The config is copied into the container on restart,** so edit the host file and
   `ddev restart`; editing the copy inside the container is lost.
@@ -171,6 +181,9 @@ Front-end dev servers use the same mechanism: [frontend-node.md](frontend-node.m
     custom commands.
   - Never edit `.ddev/.ddev-docker-compose-base.yaml` or `-full.yaml`: DDEV rewrites
     them on every start.
+  - Never mount the Docker socket (full control of the host) or your home directory,
+    or a credential folder in it, into a service; the auditor reports both
+    (`docker-socket-mounted`, `home-mounted`).
   - `ddev utility compose-config` shows the merged result.
 - **Extra Debian packages:** `webimage_extra_packages`. For example, the `webp`,
   `jpegoptim`, `optipng` and `gifsicle` binaries that image-optimising plugins call, or
@@ -184,7 +197,8 @@ Front-end dev servers use the same mechanism: [frontend-node.md](frontend-node.m
   directives that differ by default).
 - **Rebuild after image changes:** `ddev start --no-cache` or `ddev utility rebuild`.
 - **Shell niceties:** files in `.ddev/homeadditions/` (or `~/.ddev/homeadditions/`) are
-  copied into the container user's home - never commit an `auth.json` or key there.
+  copied into the container user's home - never put an `auth.json` or key there; the
+  auditor reports one (`credential-file`).
 
 ## Networking between projects and to the host
 

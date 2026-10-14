@@ -1,7 +1,7 @@
 {
   "schema": "claude-mods.ddev-ops.facts/v1",
   "as_of": "2026-10-05",
-  "_comment": "Single source of truth for the fast-moving DDEV facts this skill states. scripts/audit-ddev-config.py READS it (defaults, EOL floors, obsolete keys, built-in command names); scripts/check-ddev-facts.py VERIFIES it (--offline: prose still states each token and each token still contains its value; --live: GitHub releases, the docs config page at the release tag, the built-in command listing, endoflife.date). Sources on as_of: https://api.github.com/repos/ddev/ddev/releases, https://raw.githubusercontent.com/ddev/ddev/<tag>/docs/content/users/configuration/config.md, pkg/ddevapp/global_dotddev_assets/commands/<service> at the tag, https://endoflife.date/api/{php,nodejs}.json. Bump a value, its prose, and the 'Versions verified' note in SKILL.md in one commit.",
+  "_comment": "Single source of truth for the fast-moving DDEV facts this skill states. scripts/audit-ddev-config.py READS it (defaults, EOL floors, obsolete keys, the config schema's keys, built-in command names); scripts/check-ddev-facts.py VERIFIES it (--offline: prose still states each token and each token still contains its value; --live: GitHub releases, the docs config page and the config schema at the release tag, the built-in command listing, endoflife.date). Sources on as_of: https://api.github.com/repos/ddev/ddev/releases, https://raw.githubusercontent.com/ddev/ddev/<tag>/docs/content/users/configuration/config.md, https://raw.githubusercontent.com/ddev/ddev/<tag>/pkg/ddevapp/schema.json (config_keys, read 2026-10-14), pkg/ddevapp/global_dotddev_assets/commands/<service> at the tag, https://endoflife.date/api/{php,nodejs}.json. Bump a value, its prose, and the 'Versions verified' note in SKILL.md in one commit.",
   "release": {
     "tag": "v1.25.4",
     "minor": "1.25"
@@ -39,6 +39,19 @@
     "mutagen_enabled": "Replaced by performance_mode; the key is ignored, so Mutagen follows the global default.",
     "upload_dir": "Deprecated single-value form; DDEV migrates it, but write upload_dirs (a list)."
   },
+  "_config_keys_comment": "config_keys = the top-level properties of DDEV's own config schema, pkg/ddevapp/schema.json at release.tag (additionalProperties false). The auditor's unknown-key check reports any other top-level key; --live re-reads the schema and fails when the set moves. An obsolete_keys entry must NOT appear here.",
+  "config_keys": [
+    "additional_fqdns", "additional_hostnames", "bind_all_interfaces", "composer_root", "composer_version",
+    "corepack_enable", "database", "dbimage", "dbimage_extra_packages", "ddev_version_constraint",
+    "default_container_timeout", "disable_settings_management", "disable_upload_dirs_warning", "docroot",
+    "fail_on_hook_fail", "hooks", "host_db_port", "host_https_port", "host_mailpit_port", "host_webserver_port",
+    "host_xhgui_port", "mailpit_http_port", "mailpit_https_port", "name", "ngrok_args", "no_project_mount",
+    "nodejs_root", "nodejs_version", "omit_containers", "override_config", "performance_mode", "php_version",
+    "project_tld", "router_http_port", "router_https_port", "share_default_provider", "share_provider_args",
+    "timezone", "type", "upload_dirs", "use_dns_when_possible", "web_environment", "web_extra_daemons",
+    "web_extra_exposed_ports", "webimage", "webimage_extra_packages", "webserver_type", "working_dir",
+    "xdebug_enabled", "xhgui_http_port", "xhgui_https_port", "xhprof_mode"
+  ],
   "builtin_commands": {
     "_comment": "Files DDEV ships in pkg/ddevapp/global_dotddev_assets/commands/<service> at release.tag (README and *.example excluded). A project .ddev/commands/<service>/<name> with the same name wins, because project commands are registered first.",
     "web": ["admin-watch", "artisan", "asterios", "blackfire", "cake", "console", "craft", "dr", "drush", "magento", "maho", "npm", "npx", "php", "pint", "sake", "shopware-cli", "spark", "storefront-watch", "typo3", "wp", "xdebug", "xhprof", "yarn"],

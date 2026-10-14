@@ -13,3 +13,7 @@ xdebug_enabled: true        # xdebug-committed
 mutagen_enabled: false      # obsolete-key: ignored by DDEV, so Mutagen stays on
 upload_dirs:
   - storage                 # upload-dir-misplaced: resolves to web/storage
+php_verison: "8.3"          # unknown-key: a typo DDEV ignores, so PHP stays unpinned
+hooks:
+  pre-start:
+    - exec-host: ./bin/write-hosts-entries   # host-hook: runs on the host at every start

@@ -125,6 +125,7 @@ ec() { local want="$1" lbl="$2"; shift 2; "$@" >/dev/null 2>&1; local got=$?
 # pipefail: its exit 10 ("findings") becomes the pipeline's status even when grep
 # matched, which flips positive checks to FAIL and makes negative ones pass vacuously.
 checks_of() { "${run_py[@]}" "$audit" "$@" 2>/dev/null | cut -f2 || true; }
+checks_and_where() { "${run_py[@]}" "$audit" "$@" 2>/dev/null | cut -f2,3 | tr '\t' ' ' || true; }
 has() { printf '%s\n' "$1" | grep -qx "$2"; }
 for s in "$audit" "$verify"; do
   "${run_py[@]}" -m py_compile "$s" && ok "py_compile $(basename "$s")" || bad "py_compile $(basename "$s")"
@@ -139,7 +140,8 @@ out="$("${run_py[@]}" "$audit" "$fixtures/minefield" 2>/dev/null)"; rc=$?
 [ "$rc" = "10" ] && ok "minefield -> exit 10" || bad "minefield exit $rc (want 10)"
 for id in php-unpinned db-unpinned node-eol composer-v1 obsolete-key perf-mode-committed \
           router-ports-committed xdebug-committed upload-dir-misplaced shadowed-command \
-          ssh-agent-forwarded provider-push provider-files-noop; do
+          ssh-agent-forwarded provider-push provider-files-noop \
+          unknown-key host-hook host-command docker-socket-mounted home-mounted; do
   printf '%s\n' "$out" | cut -f2 | grep -qx "$id" && ok "minefield reports $id" || bad "minefield misses $id"
 done
 # Audit a COPY: in place, the fixture sits in this repository with its config.local.yaml
@@ -155,11 +157,12 @@ printf 'PAYMENT_API_TOKEN=%s\nCRAFT_DB_PASSWORD=db\n' "$fake" > "$tmp/mf/.ddev/.
 printf 'OTHER_API_TOKEN=%s\n' "$fake" > "$tmp/mf/.ddev/.env.web.local"
 out="$("${run_py[@]}" "$audit" "$tmp/mf" 2>/dev/null)"
 printf '%s\n' "$out" | grep -q $'^high\tcrlf-command\t.ddev/commands/web/assets' && ok "CRLF command reported" || bad "CRLF command missed"
-printf '%s\n' "$out" | grep -q $'^high\tcommitted-secret\t.ddev/.env.web\t.*PAYMENT_API_TOKEN' && ok "committed secret named, high" || bad "committed secret missed (or not high)"
+printf '%s\n' "$out" | grep -q $'^high\tcommitted-secret\t.ddev/.env.web:1\t.*PAYMENT_API_TOKEN' && ok "committed secret named, high, at its line" || bad "committed secret missed (or not high, or wrong line)"
 # DDEV's generated .ddev/.gitignore ignores *.example: the advice must say git add -f.
 printf '%s\n' "$out" | grep $'committed-secret' | grep -qF 'git add -f' && ok "committed-secret says git add -f for the .example" || bad "committed-secret omits git add -f"
 printf '%s\n' "$out" | grep -q 'CRAFT_DB_PASSWORD' && bad "DDEV's local db/db password flagged" || ok "local db/db password not flagged"
-printf '%s\n' "$out" | cut -f3 | grep -qx '.ddev/.env.web.local' && bad ".local env file flagged (it is gitignored)" || ok ".local env file not flagged"
+# strip ":line" first, or a finding that carries a line would slip past this negative check
+printf '%s\n' "$out" | cut -f3 | sed 's/:[0-9]*$//' | grep -qx '.ddev/.env.web.local' && bad ".local env file flagged (it is gitignored)" || ok ".local env file not flagged"
 json="$("${run_py[@]}" "$audit" "$tmp/mf" --json 2>/dev/null)"
 printf '%s\n%s' "$out" "$json" | grep -qF "$fake" && bad "secret VALUE printed" || ok "secret value never printed"
 printf '%s' "$json" | "${run_py[@]}" -c 'import json,sys; d=json.load(sys.stdin); assert d["meta"]["schema"]=="claude-mods.ddev-ops.audit/v1" and d["meta"]["count"]==len(d["data"])>0' \
@@ -168,6 +171,80 @@ ids="$(checks_of "$tmp/mf" --ignore shadowed-command)"
 has "$ids" ssh-agent-forwarded && ! has "$ids" shadowed-command \
   && ok "--ignore suppresses only the named check" || bad "--ignore did not suppress (or suppressed everything)"
 ec 2 "--ignore unknown-check -> 2" "${run_py[@]}" "$audit" "$tmp/mf" --ignore no-such-check
+
+# Line numbers: a finding on one line says file:line in text and `line` in --json, and the
+# number is the line the key really sits on (not off by one, not the file's first line).
+mf_ok="$(grep -n '^mutagen_enabled:' "$fixtures/minefield/.ddev/config.yaml" | cut -d: -f1)"
+printf '%s\n' "$(checks_and_where "$fixtures/minefield")" | grep -qx "obsolete-key .ddev/config.yaml:$mf_ok" \
+  && ok "obsolete-key points at its line ($mf_ok)" || bad "obsolete-key line wrong (want $mf_ok)"
+mf_json="$("${run_py[@]}" "$audit" "$fixtures/minefield" --json 2>/dev/null)"   # capture: exit 10 under pipefail
+printf '%s' "$mf_json" | "${run_py[@]}" -c 'import json,sys
+d = {f["check"]: f for f in json.load(sys.stdin)["data"]}
+assert d["obsolete-key"]["line"] == int(sys.argv[1]), d["obsolete-key"]
+assert d["shadowed-command"]["line"] is None, d["shadowed-command"]' "$mf_ok" \
+  && ok "--json line: a number for a key, null for a whole file" || bad "--json line field wrong"
+
+# unknown-key reads DDEV's schema list; a retired key gets obsolete-key's advice instead,
+# never both, and the minefield's typo is the only unknown key there.
+uk="$("${run_py[@]}" "$audit" "$fixtures/minefield" 2>/dev/null | grep $'\tunknown-key\t' || true)"
+printf '%s\n' "$uk" | grep -q 'php_verison' && ok "typo key -> unknown-key" || bad "typo key not reported"
+printf '%s\n' "$uk" | grep -q 'mutagen_enabled' && bad "obsolete key also reported as unknown-key" || ok "obsolete key not doubled as unknown-key"
+
+# Host execution: the minefield's exec-host hook and host command are reported; the clean
+# fixture's container `exec:` hook and its #ddev-generated add-on host command are not
+# (the clean run above already exits 0). DDEV names a command from `## Usage:`.
+mf_r3="$("${run_py[@]}" "$audit" "$fixtures/minefield" 2>/dev/null)"   # capture: exit 10 under pipefail
+printf '%s\n' "$mf_r3" | grep $'\thost-hook\t' | grep -q 'pre-start' \
+  && ok "host-hook names the hook" || bad "host-hook missing the hook name"
+printf '%s\n' "$mf_r3" | grep $'\thost-command\t' | grep -qF '`ddev admin`' \
+  && ok "host-command names the command from ## Usage" || bad "host-command does not name the command from ## Usage"
+
+# Mounts: the home mount names the credential store, never the cache mount beside it;
+# the socket finding names the service it went to.
+mounts="$("${run_py[@]}" "$audit" "$fixtures/minefield" 2>/dev/null | grep -E $'\t(home-mounted|docker-socket-mounted)\t' || true)"
+printf '%s\n' "$mounts" | grep $'\thome-mounted\t' | grep -qF '~/.aws into web' \
+  && ok "home-mounted names ~/.aws and the service" || bad "home-mounted detail wrong"
+printf '%s\n' "$mounts" | grep -qF '.composer' && bad "a cache mount was reported" || ok "cache mount not reported"
+printf '%s\n' "$mounts" | grep $'\tdocker-socket-mounted\t' | grep -qF 'into logs' \
+  && ok "docker-socket-mounted names the service" || bad "docker-socket-mounted detail wrong"
+cp -R "$fixtures/clean" "$tmp/home"
+printf 'services:\n  web:\n    volumes:\n      - ${HOME}:/home/host\n' > "$tmp/home/.ddev/docker-compose.home.yaml"
+home_out="$("${run_py[@]}" "$audit" "$tmp/home" 2>/dev/null)"
+printf '%s\n' "$home_out" | grep $'\thome-mounted\t' | grep -qF 'your whole home directory' \
+  && ok '${HOME} bind -> home-mounted (whole home)' || bad '${HOME} bind not reported'
+
+# committed-secret beyond .ddev/.env*: committed web_environment, a compose environment:
+# block (map form, YAML-quoted) and a web-server snippet all carry the value into git. An
+# add-on's #ddev-generated compose keeps its local defaults unflagged.
+cp -R "$fixtures/clean" "$tmp/sec"
+printf 'web_environment:\n  - STRIPE_SECRET_KEY=%s\n' "$fake" > "$tmp/sec/.ddev/config.payments.yaml"
+printf 'services:\n  web:\n    environment:\n      MAILER_PASSWORD: "%s"\n' "$fake" > "$tmp/sec/.ddev/docker-compose.mail.yaml"
+printf 'location /api/ {\n    fastcgi_param PAYMENT_API_TOKEN "%s";\n}\n' "$fake" > "$tmp/sec/.ddev/nginx/api-token.conf"
+printf '#ddev-generated\nservices:\n  search:\n    environment:\n      SEARCH_ADMIN_PASSWORD: localonly\n' > "$tmp/sec/.ddev/docker-compose.search.yaml"
+sec_all="$("${run_py[@]}" "$audit" "$tmp/sec" 2>&1; "${run_py[@]}" "$audit" "$tmp/sec" --json 2>&1)"
+for want in $'.ddev/config.payments.yaml:2\t.*STRIPE_SECRET_KEY' $'.ddev/docker-compose.mail.yaml:4\t.*MAILER_PASSWORD' \
+            $'.ddev/nginx/api-token.conf:2\t.*PAYMENT_API_TOKEN'; do
+  printf '%s\n' "$sec_all" | grep -q $'^high\tcommitted-secret\t'"$want" \
+    && ok "committed-secret: ${want%%$'\t'*}" || bad "committed-secret missed: ${want%%$'\t'*}"
+done
+printf '%s\n' "$sec_all" | grep -q 'docker-compose.search.yaml' && bad "add-on compose default flagged" || ok "add-on (#ddev-generated) compose not flagged"
+printf '%s\n' "$sec_all" | grep -qF "$fake" && bad "round-3 secret VALUE printed" || ok "round-3 secret values never printed (stdout, stderr, --json)"
+
+# credential-file: an agent add-on's login and a key dropped in homeadditions/ sit inside
+# the mounted project; a public key beside it is fine. Medium while git doesn't track them.
+cp -R "$fixtures/clean" "$tmp/cred"
+mkdir -p "$tmp/cred/.ddev/claude-code/.claude" "$tmp/cred/.ddev/homeadditions/.ssh" "$tmp/cred/.ddev/db_snapshots/s1"
+printf '{"token":"%s"}\n' "$fake" > "$tmp/cred/.ddev/claude-code/.claude/.credentials.json"
+printf 'fixture-not-a-key\n' > "$tmp/cred/.ddev/homeadditions/.ssh/id_ed25519"
+printf 'ssh-ed25519 fixture-public\n' > "$tmp/cred/.ddev/homeadditions/.ssh/id_ed25519.pub"
+printf 'fixture\n' > "$tmp/cred/.ddev/db_snapshots/s1/.credentials.json"   # snapshots are not walked
+cred_out="$("${run_py[@]}" "$audit" "$tmp/cred" 2>/dev/null | grep $'\tcredential-file\t' || true)"
+printf '%s\n' "$cred_out" | grep -q $'^medium\tcredential-file\t.ddev/claude-code/.claude/.credentials.json\t' \
+  && ok "agent login under .ddev/ -> credential-file" || bad "agent login under .ddev/ missed"
+printf '%s\n' "$cred_out" | grep -q $'^medium\tcredential-file\t.ddev/homeadditions/.ssh/id_ed25519\t' \
+  && ok "private key in homeadditions/ -> credential-file" || bad "homeadditions key missed"
+printf '%s\n' "$cred_out" | grep -qE 'id_ed25519\.pub|db_snapshots' && bad "public key or snapshot folder flagged" || ok "public key and db_snapshots/ left alone"
+"${run_py[@]}" "$audit" "$tmp/cred" --json 2>&1 | grep -qF "$fake" && bad "credential file content printed" || ok "credential file content never printed"
 
 # Agent forwarding has three spellings; the minefield uses the Docker Desktop/OrbStack
 # socket path. Prove the generic ${SSH_AUTH_SOCK} bind is caught too, and that DDEV's
@@ -304,6 +381,14 @@ assert high == [".ddev/.env.web.local", ".ddev/config.local.yaml"], high' \
   lfc "$tmp/lcy" | grep -qF 'check it for credentials by hand' \
     && ok "unreadable web_environment form -> says to check by hand" || bad "unreadable web_environment form passed as checked"
 
+  # A credential file git tracks has already left the machine: high, and the remedy is rotation.
+  repo "$tmp/lct"; mkdir -p "$tmp/lct/.ddev/homeadditions/.aws"
+  printf '[default]\naws_secret_access_key=%s\n' "$fake" > "$tmp/lct/.ddev/homeadditions/.aws/credentials"
+  G -C "$tmp/lct" add -f .ddev/homeadditions/.aws/credentials
+  lct_out="$("${run_py[@]}" "$audit" "$tmp/lct" 2>/dev/null)"
+  printf '%s\n' "$lct_out" | grep -q $'^high\tcredential-file\t.ddev/homeadditions/.aws/credentials\t.*rotate' \
+    && ok "tracked credential file -> high, says rotate" || bad "tracked credential file not high"
+
   # Where the project sits: a real git worktree (.git is a file), and a project in a
   # subdirectory of its repository (no .git of its own).
   repo "$tmp/lcw"; G -C "$tmp/lcw" add -f .ddev/config.local.yaml; G -C "$tmp/lcw" commit -qm init
@@ -413,6 +498,10 @@ mutate doc config.md 's/| `8.4` | Can be/| `8.5` | Can be/'
 ec 10 "docs default PHP moved -> 10" "${live[@]}" --fixtures "$tmp/live-doc"
 mutate cmd commands-web.json 's/{"name": "yarn", "type": "file"}/{"name": "yarn", "type": "file"}, {"name": "newcmd", "type": "file"}/'
 ec 10 "new built-in command -> 10" "${live[@]}" --fixtures "$tmp/live-cmd"
+mutate sch schema.json 's/"xhprof_mode": {}/"xhprof_mode": {}, "brand_new_key": {}/'
+ec 10 "new config schema key -> 10" "${live[@]}" --fixtures "$tmp/live-sch"
+sed 's/"upload_dirs", /"upload_dirs", "upload_dir", /' "$catalog" > "$tmp/c4.json"
+ec 10 "obsolete key also listed as a schema key -> 10" "${run_py[@]}" "$verify" --offline --catalog "$tmp/c4.json" --skill "$here"
 ec 10 "PHP 8.2 past EOL (today 2027-01-15) -> 10" "${run_py[@]}" "$verify" --live --catalog "$catalog" --today 2027-01-15 --fixtures "$fixtures/live"
 rm -rf "$tmp/live-gone"; cp -R "$fixtures/live" "$tmp/live-gone"; rm -f "$tmp/live-gone/eol-nodejs.json"
 ec 7 "unreachable source -> 7 (advisory)" "${live[@]}" --fixtures "$tmp/live-gone"

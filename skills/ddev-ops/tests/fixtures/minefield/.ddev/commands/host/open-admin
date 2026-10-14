@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+## Description: Fixture - a project host command (host-command). DDEV names it from Usage, so this file is `ddev admin`
+## Usage: admin
+## Example: "ddev admin"
+open "${DDEV_PRIMARY_URL}/admin"

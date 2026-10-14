@@ -23,16 +23,17 @@ setting committed for the whole team.
 
 1. **Read the project before changing it:** `.ddev/config.yaml`, any `config.*.yaml`,
    `ls -a .ddev/`, then `ddev describe` (URLs, ports, services) and `ddev version`.
-2. **Audit it.** From the skill folder (the launcher finds a working Python 3.8+, which
-   matters on Windows where `python3` is often a Store stub):
+2. **Audit it** from any directory, `<skill-dir>` being this skill's folder (the launcher
+   finds a working Python 3.8+, which matters on Windows where `python3` is often a
+   Store stub):
 
    ```bash
-   bash scripts/run-python.sh scripts/audit-ddev-config.py /path/to/project
-   bash scripts/run-python.sh scripts/audit-ddev-config.py /path/to/project --json | jq '.data[]'
+   bash "<skill-dir>/scripts/run-python.sh" "<skill-dir>/scripts/audit-ddev-config.py" /path/to/project
+   bash "<skill-dir>/scripts/run-python.sh" "<skill-dir>/scripts/audit-ddev-config.py" /path/to/project --json | jq '.data[]'
    ```
 
-   Exit 10 means findings, sorted high to low (severity, check, file, detail); 0 means
-   clean. `--ignore <check>` documents a deliberate exception.
+   Exit 10 means findings, sorted high to low (severity, check, `file:line`, detail); 0
+   means clean. `--ignore <check>` documents a deliberate exception.
 3. **Run everything through DDEV** - `ddev composer`, `ddev php`, `ddev npm`,
    `ddev exec` - so commands use the container's PHP and Node, not the host's.
 4. **Snapshot before anything risky**, with a unique name:
@@ -64,9 +65,13 @@ repositories; the rest are quiet failures DDEV's own docs and source describe.
 5. **No secrets in committed `.ddev/.env*` files.** Use the `.local` twin
    (`.ddev/.env.web.local`, v1.25.4+), kept out of git as rule 2 says. Commit a
    `.example` with `git add -f`, since DDEV's `.gitignore` hides `*.example`.
-6. **Never forward the host SSH agent into containers.** Every process in them -
-   Composer and npm scripts included - could sign with every key the agent holds. Load
-   one scoped key with `ddev auth ssh -f <key>`.
+6. **Never hand containers your machine's credentials.** Every process in them -
+   Composer and npm scripts included - can use what they reach.
+   - No host SSH-agent forwarding: load one scoped key with `ddev auth ssh -f <key>`.
+   - No compose mount of the Docker socket (full control of the host) or of your home
+     directory.
+   - No agent logins or keys under `.ddev/`: the project, `.ddev/` included, is mounted
+     into `web`.
 7. **Pull sanitised data; never push to production.**
    - Anonymise where the data lives and pull the result. No raw production personal data
      on laptops.
@@ -92,8 +97,17 @@ repositories; the rest are quiet failures DDEV's own docs and source describe.
 
 ## Driving DDEV from a script or agent
 
+- **`ddev` is not a sandbox.** Project host commands and `exec-host` hook tasks run on
+  your machine with your rights; a `pre-start` one runs on the first `ddev start`. In a
+  repository you didn't write, audit first and show the user any `host-hook` or
+  `host-command` finding before starting the project.
 - **Never run bare `ddev`** (it opens a dashboard) **or flagless `ddev config`** (it asks
   questions). Pass `--file`/`--source` to imports and `-y` to anything that prompts.
+- **Name the container directory.** `ddev exec` ignores the host folder you run it from;
+  pass `--dir /var/www/html/<path>`, or a plugin's suite runs against the project's
+  config and development database.
+- **Keep dumps out of your context:** ask the database (`ddev mysql -e '...'`), never
+  read a dump or snapshot ([database.md](references/database.md#keep-dumps-out-of-an-agents-context)).
 - **Read state as JSON:** `ddev describe -j | jq -r '.raw.primary_url'` (also
   `.raw.status`, `.raw.dbinfo.published_port`); `ddev list -j`;
   `ddev launch --print-url`.
@@ -110,8 +124,8 @@ Details, the destroys-data table and worktree setup:
 | Task | Read |
 |---|---|
 | Existing repo on a new machine, new project, version pinning, CI parity, Composer, what to commit, env files, upgrading DDEV | [config-and-env.md](references/config-and-env.md) |
-| Scripting DDEV, JSON output, commands that destroy data, several git worktrees, renaming or moving a project | [automation-and-worktrees.md](references/automation-and-worktrees.md) |
-| Import/export, snapshots, seed and reset, changing engine, `ddev pull` recipes, sanitised data | [database.md](references/database.md) |
+| Scripting DDEV, JSON output, commands that destroy data, several git worktrees (OAuth callbacks, webhooks), renaming or moving a project, AI agents inside DDEV | [automation-and-worktrees.md](references/automation-and-worktrees.md) |
+| Import/export, snapshots, seed and reset, changing engine, `ddev pull` recipes, sanitised data, uploads from production, dumps and agents | [database.md](references/database.md) |
 | Slow project, Mutagen, `upload_dirs`, WSL2, choosing a Docker provider | [performance.md](references/performance.md) |
 | Add-ons (Redis, search, cron), commands, hooks, daemons, nginx/Apache config, extra services, networking between projects, PHP ini, SSH keys | [extending.md](references/extending.md) |
 | Node.js version, npm/pnpm/yarn, dev-server ports and daemons | [frontend-node.md](references/frontend-node.md) |
@@ -152,13 +166,16 @@ Details, the destroys-data table and worktree setup:
 - **Checks:**
   - versions: `php-unpinned`, `php-out-of-range`, `php-eol`, `db-unpinned`, `node-eol`,
     `composer-v1`;
-  - config: `obsolete-key`, `perf-mode-committed`, `router-ports-committed`,
-    `xdebug-committed`, `name-in-worktree`;
+  - config: `obsolete-key`, `unknown-key` (against DDEV's own config schema),
+    `perf-mode-committed`, `router-ports-committed`, `xdebug-committed`,
+    `name-in-worktree`;
   - folders and commands: `upload-dir-misplaced`, `upload-dir-outside`,
     `shadowed-command`, `crlf-command`;
-  - safety: `ssh-agent-forwarded`, `provider-push`, `provider-files-noop`,
-    `committed-secret`, `local-file-committed` (reads git's index; never runs a git or
-    fsmonitor command the audited repository supplies).
+  - the host: `host-command`, `host-hook`, `ssh-agent-forwarded`,
+    `docker-socket-mounted`, `home-mounted`;
+  - safety: `provider-push`, `provider-files-noop`, `committed-secret` (env, config,
+    compose and web-server files), `credential-file`, `local-file-committed` (reads git's
+    index; never runs a git or fsmonitor command the audited repository supplies).
 - **Exit codes:** 0 clean, 10 findings, 3 no `.ddev/config.yaml`, 4 unreadable config,
   2 usage.
 - **It reads config the way DDEV does:** overrides merge, lists append. It skips DDEV's

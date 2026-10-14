@@ -8,6 +8,26 @@ feature releases live in the README "Recent Updates" section.
 
 ### Added
 
+- **ddev-ops round 3: what an agent should know before it runs `ddev`.**
+  - **Routes back to the host.** The auditor reports `exec-host` hook tasks (`host-hook`:
+    a pre-start one runs on the first `ddev start` of a fresh clone), project host commands
+    (`host-command`), compose mounts of the Docker socket (`docker-socket-mounted`) or of
+    the home directory or a credential store in it (`home-mounted`), and credential files
+    under `.ddev/`, such as an agent add-on's login or a key in `homeadditions/`
+    (`credential-file`; high once git tracks one).
+  - **More places for a committed secret.** `committed-secret` also reads committed
+    `web_environment`, compose `environment:` blocks and nginx/Apache snippets.
+  - **`unknown-key`** checks top-level keys against DDEV's own config schema (52 keys at
+    v1.25.4), which DDEV doesn't enforce: it ignores a key it doesn't know. The weekly
+    `--live` run re-reads the schema.
+  - **Findings carry `file:line`** (`line` in `--json`), as docker-ops' auditor prints them.
+  - **New guidance:** `ddev exec --dir` (DDEV doesn't follow the folder you run it from),
+    OAuth callback URLs and webhooks per checkout, showing uploads from production instead
+    of pulling them, keeping dumps out of an agent's context, AI agents inside DDEV, and
+    `#ddev-silent-no-warn`.
+  - SKILL.md runs its scripts as `"<skill-dir>/scripts/..."`, so its skill-hygiene
+    baseline line is gone.
+
 - **A machine-wide lane root: `WORKTREE_ROOT`.** Set it in Claude Code's `settings.json`
   `env` and lanes live at `$WORKTREE_ROOT/<repo>/<slug>`, outside every project dir, so
   `rg`, `fd`, `tokei` and `git add -A` in a project never see one. Unset, nothing changes.

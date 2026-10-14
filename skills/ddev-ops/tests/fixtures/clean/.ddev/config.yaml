@@ -19,6 +19,8 @@ web_extra_exposed_ports:
     container_port: 5173
     http_port: 5172
     https_port: 5173
+web_environment:
+  - SEARCH_API_KEY=${SEARCH_API_KEY}   # a reference, set outside git: not committed-secret
 hooks:
   post-import-db:
-    - exec: php craft up --interactive=0
+    - exec: php craft up --interactive=0   # runs in the container: not host-hook
