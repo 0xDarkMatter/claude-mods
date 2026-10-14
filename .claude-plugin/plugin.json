@@ -1,8 +1,8 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "claude-mods",
-  "version": "3.8.0",
-  "description": "Custom commands, skills, agents, rules, hooks, and output styles for Claude Code - session continuity and modern CLI tooling for real-world development workflows",
+  "version": "3.9.0",
+  "description": "Skills, rules, hooks, agents and output styles for Claude Code that ship their own gates: test-gated landing for parallel agent work, framework knowledge with staleness verifiers, and security checks aimed at the agent itself",
   "author": {
     "name": "0xDarkMatter"
   },
@@ -23,6 +23,11 @@
     "supply-chain-security",
     "prompt-injection-defense",
     "devops",
-    "testing"
+    "testing",
+    "agent-skills",
+    "parallel-agents",
+    "git-worktrees",
+    "docker",
+    "ddev"
   ]
 }

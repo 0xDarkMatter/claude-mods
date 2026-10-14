@@ -3,7 +3,7 @@
 **Goal**: A centralized repository of custom Claude Code commands, agents, and skills that enhance Claude Code's native capabilities with persistent session state, specialized expert agents, and streamlined workflows.
 
 **Created**: 2025-11-27
-**Last Updated**: 2026-10-06
+**Last Updated**: 2026-10-14
 **Status**: Active Development
 
 > Historical record of what shipped lives in [CHANGELOG.md](../CHANGELOG.md) and the
@@ -88,10 +88,10 @@ Theme: subtraction and enforcement, not addition.
       description trim, portability sanitization (process-compose-ops,
       portless-ops, shell-preference.md), dsp-launch retirement,
       description-budget gate flipped WARN→FAIL
-- [ ] Phase 3 — robustness floor: push-preflight test suite, verifier-wrap suites,
-      security-sensitive suites (security-ops, pigeon, leveldb-ops),
-      remaining test backlog, protocol backfill on 2025-12-21 scaffold batch
-      (R6 within Phase 3 is done — see below)
+- [x] Phase 3, suites: push-preflight, security-ops, pigeon and leveldb-ops each ship
+      `tests/run.sh` (R6 within Phase 3 is done too — see below)
+- [ ] Phase 3, the rest of the robustness floor: verifier-wrap suites, the remaining test
+      backlog, protocol backfill on the 2025-12-21 scaffold batch
 - [x] R6 — docs truth pass: AGENTS.md refresh, this inventory update,
       test-floor policy in SKILL-CREATION-PROTOCOL.md, full-suite-gate note
       in fleet-ops, baseline-before-closeout note in fleetflow
@@ -127,6 +127,20 @@ Build spec, dogfood findings and the survey behind it:
       `references/owner-interview.md` is the procedure
 - [ ] Lane C, in practice: run the interview on a real repo before the team rollout
 - [ ] Spec "Later": SARIF output, docs-as-tests coverage for commands, a ranked codemap
+
+### Phase 6 — Docker family and skill hygiene (2026-10)
+
+- [x] docker-ops covers the engine as well as the files (repo auditor, read-only machine
+      doctor, image-tag and facts verifiers); container-orchestration became
+      kubernetes-ops; windows-ops gained the WSL reference; ddev-ops round 3 reports the
+      routes from a project back to the host
+- [x] `tests/skill-hygiene.sh` ratchet over four quiet skill failures, with the existing
+      debt in `tests/skill-hygiene-baseline.txt`
+- [ ] Decide `build-push.sh` (retired in the docker-ops fold; it defaulted to `:latest`)
+      and whether ddev-ops carries `metadata.owns` (it is ported into the team plugin)
+- [ ] Burn the hygiene baseline down: 20 orphan side files, 82 related skills the body
+      never names, 56 `scripts/...` calls relative to the cwd. Fix a line, delete it in
+      the same commit
 
 ---
 
