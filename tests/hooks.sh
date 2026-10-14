@@ -223,6 +223,19 @@ if command -v git >/dev/null 2>&1; then
   wc_run squat "$R" WORKTREE_ROOT="$wr"; rc=$?
   check "create: a non-worktree dir in the way -> exit 1, untouched" '[ $rc -eq 1 ] && [ -f "$wr/proj/squat/f" ] && [ ! -s "$tmp/out" ]'
 
+  # Concurrent same-name calls (Desktop retries a failed-trust start within the
+  # same second): without the per-name lock the losers of the `git worktree add`
+  # race exit 1, and a non-zero exit fails that start.
+  for k in 1 2 3; do
+    ( jq -cn --arg c "$R" '{hook_event_name:"WorktreeCreate",name:"race",cwd:$c,transcript_path:""}' \
+        | env CLAUDE_CONFIG_DIR="$cfg" WORKTREE_ROOT="$wr" bash "$H/worktree-create.sh" >"$tmp/race$k.out" 2>"$tmp/race$k.err"
+      echo $? > "$tmp/race$k.rc" ) &
+  done
+  wait
+  cat "$tmp"/race[123].err > "$tmp/err"   # so a failure quotes the race, not the previous test
+  check "create: concurrent same-name calls -> all exit 0, one path, one worktree" \
+    '[ "$(cat "$tmp"/race[123].rc | sort -u)" = 0 ] && [ "$(cat "$tmp"/race[123].out | sort -u | wc -l)" -eq 1 ] && [ "$(git -C "$R" worktree list | grep -c /race)" -eq 1 ]'
+
   wc_run feat-h "$R" WORKTREE_ROOT="$wr" WORKTREE_BASE_REF=head
   check "create: WORKTREE_BASE_REF=head -> current HEAD" '[ "$(git -C "$wr/proj/feat-h" rev-parse HEAD)" = "$C2" ]'
   mkdir -p "$R/.claude"; printf '{"worktree":{"baseRef":"head"}}' > "$R/.claude/settings.json"

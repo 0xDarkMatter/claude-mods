@@ -58,6 +58,8 @@
 #     its old tip (Claude Code's reset-to-default-branch case is NOT emulated);
 #     a branch worktree-<name> without a dir is re-attached; any other existing
 #     path is refused, never clobbered.
+#   Concurrent calls for one name are serialised by a per-name lock in the git
+#     common dir, so every caller gets the same path (see "serialise").
 #   New branches start at a commit id, so they never track origin/<default>.
 #   .worktreeinclude (main checkout root, .gitignore syntax): copies files that
 #     match a pattern AND are gitignored, never tracked ones; existing files win.
@@ -139,6 +141,25 @@ else
   echo "worktree-create: WORKTREE_ROOT is unset - using Claude Code's default $WT" >&2
 fi
 WT="${WT//\/\///}"
+
+# --- serialise same-name calls ---------------------------------------------------
+# Two calls for the same name can arrive at once: Claude Desktop retries a start
+# within the same second when the source folder fails its trust check, and two CLI
+# sessions can ask for the same --worktree name. Unserialised, both race to
+# `git worktree add` one branch; the loser exits 1, and any non-zero exit fails
+# that whole start. A per-name lock makes the second call wait, then take the
+# reopen path below and print the SAME path. mkdir is atomic; a lock older than
+# 2 minutes is a crashed run and is broken. If the lock never frees (30 s), carry
+# on unlocked: reopen still covers most cases, and blocking every start on a
+# stale lock would be worse. tests/hooks.sh "concurrent same-name calls" pins it.
+LOCK="$COMMON/ccwt-$SLUG.lock"; HAVE_LOCK=""
+for ((i = 0; i < 300; i++)); do
+  if mkdir "$LOCK" 2>/dev/null; then HAVE_LOCK=1; break; fi
+  if [[ -n "$(find "$LOCK" -maxdepth 0 -mmin +2 2>/dev/null)" ]]; then rmdir "$LOCK" 2>/dev/null; continue; fi
+  sleep 0.1
+done
+[[ -n "$HAVE_LOCK" ]] && trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+[[ -n "$HAVE_LOCK" ]] || echo "worktree-create: lock $LOCK still held after 30 s - continuing unlocked" >&2
 
 # --- reopen -------------------------------------------------------------------
 lc() { local p=${1//\\//}; p=${p%/}; printf '%s' "$p" | tr '[:upper:]' '[:lower:]'; }

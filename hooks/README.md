@@ -197,6 +197,15 @@ instead, and Claude Code then runs a background session in the folder itself, it
 documented fallback. An empty dir would strand that session, and any
 `isolation: worktree` subagent, away from the files.
 
+**Two calls for one name can arrive at once.** When the source folder fails Claude
+Code's trust check (it was never opened and trusted as a project), Desktop retries the
+start within the same second, so its log shows two `Creating worktree for session ...`
+lines. Two CLI sessions asking for the same `--worktree` name race the same way.
+Unserialised, both runs `git worktree add` one branch and the loser exits 1, which fails
+that start. The hook takes a per-name lock in the git common dir, so the second call
+waits and reopens the first call's worktree. The lock doesn't fix an untrusted folder:
+open the folder once in Claude Code and accept the trust prompt.
+
 Trade-offs, stated plainly:
 
 - **No automatic sweep.** Claude Code's periodic cleanup keeps any worktree without its

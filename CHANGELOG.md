@@ -398,6 +398,15 @@ feature releases live in the README "Recent Updates" section.
     hooks reference gains the Desktop note and names WorktreeCreate's input field
     `name`, not `worktree_id`.
 
+- **`worktree-create.sh` survives two calls for the same name at once.** Desktop retries
+  a start within the same second when the source folder fails its trust check, and two
+  CLI sessions can ask for one `--worktree` name. Both runs raced to `git worktree add`
+  the same branch, and the loser's exit 1 failed that start. A per-name lock in the git
+  common dir now makes the second call wait and reopen the first call's worktree; a lock
+  older than 2 minutes is broken, and after 30 s the hook continues unlocked. The hooks
+  README says the untrusted folder itself still needs trusting. `tests/hooks.sh` runs
+  three concurrent calls, which failed on the unpatched hook every time.
+
 - **repo-scan keeps the leading dot on appspec hooks and build outputs** - `repo-scan.py`
   normalised two paths with `str.lstrip("./")`, which strips every leading `.` and `/`
   rather than a `./` prefix. A CodeDeploy hook at `.deploy/hook.sh` was looked up as
