@@ -27,7 +27,9 @@ def build(name: str, base: Path) -> dict:
                APPDATA=str(base / "roaming"), PROGRAMDATA=str(base / "programdata"), DOCKER_CONFIG=str(cfgdir),
                DOCKER_DOCTOR_DOCKER=str(HERE / "docker_stub.py"), STUB_MODE="up")
     fake = {"os": "linux", "processes": [], "wsl_running": [], "lxss": {}, "listeners": {},
-            "excluded_ports": [], "disk_sizes": {}, "wsl_ss": ""}
+            "excluded_ports": [], "disk_sizes": {}, "wsl_ss": "",
+            # pinned absent: GitHub's Ubuntu runners ship Docker, so the real path exists there
+            "paths": {"/var/run/docker.sock": False}}
     cfg: dict = {}
 
     def colima_context():
@@ -75,8 +77,10 @@ def build(name: str, base: Path) -> dict:
              "proxy": {"locked": False}}))
     if name == "winctr":
         env["STUB_OSTYPE"] = "windows"
-    if name == "none":
+    if name in ("none", "socket-present"):
         env["DOCKER_DOCTOR_DOCKER"] = str(base / "no-docker-here")
+    if name == "socket-present":
+        fake["paths"]["/var/run/docker.sock"] = True
     if name == "badcfg":
         (cfgdir / "config.json").write_text("{not json")
     elif cfg:
