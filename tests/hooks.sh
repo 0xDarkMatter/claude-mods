@@ -195,11 +195,16 @@ if command -v git >/dev/null 2>&1; then
   C1="$(git -C "$R" rev-parse HEAD)"
   echo c2 > "$R/c2"; git -C "$R" add c2; git -C "$R" commit -qm c2    # local only
   C2="$(git -C "$R" rev-parse HEAD)"
-  wc_run() {   # $1 name, $2 cwd, rest: env assignments -> out/err/rc
-    local n="$1" d="$2"; shift 2
-    jq -cn --arg n "$n" --arg c "$d" '{hook_event_name:"WorktreeCreate",name:$n,cwd:$c}' \
+  # $1 name, $2 cwd, $3 transcript_path, rest: env assignments -> out/err/rc.
+  # The CLI sends its transcript's path; Claude Desktop's own hook runner sends ""
+  # (its app bundle, builds 2.26454 and 2.31226), which is how the hook tells them apart.
+  wc_call() {
+    local n="$1" d="$2" t="$3"; shift 3
+    jq -cn --arg n "$n" --arg c "$d" --arg t "$t" '{hook_event_name:"WorktreeCreate",name:$n,cwd:$c,transcript_path:$t}' \
       | env CLAUDE_CONFIG_DIR="$cfg" "$@" bash "$H/worktree-create.sh" >"$tmp/out" 2>"$tmp/err"
   }
+  wc_run()  { local n="$1" d="$2"; shift 2; wc_call "$n" "$d" "$tmp/session.jsonl" "$@"; }
+  wc_desk() { local n="$1" d="$2"; shift 2; wc_call "$n" "$d" "" "$@"; }
   wrm_run() { jq -cn --arg p "$1" '{hook_event_name:"WorktreeRemove",worktree_path:$p}' \
       | bash "$H/worktree-remove.sh" >"$tmp/out" 2>"$tmp/err"; }
   check() { if eval "$2"; then ok "$1"; else bad "$1 - $(tail -n2 "$tmp/err" | tr '\n' ' ')"; fi; }
@@ -217,6 +222,19 @@ if command -v git >/dev/null 2>&1; then
   mkdir -p "$wr/proj/squat"; echo keep > "$wr/proj/squat/f"
   wc_run squat "$R" WORKTREE_ROOT="$wr"; rc=$?
   check "create: a non-worktree dir in the way -> exit 1, untouched" '[ $rc -eq 1 ] && [ -f "$wr/proj/squat/f" ] && [ ! -s "$tmp/out" ]'
+
+  # Concurrent same-name calls (Desktop retries a failed-trust start within the
+  # same second): without the per-name lock the losers of the `git worktree add`
+  # race exit 1, and a non-zero exit fails that start.
+  for k in 1 2 3; do
+    ( jq -cn --arg c "$R" '{hook_event_name:"WorktreeCreate",name:"race",cwd:$c,transcript_path:""}' \
+        | env CLAUDE_CONFIG_DIR="$cfg" WORKTREE_ROOT="$wr" bash "$H/worktree-create.sh" >"$tmp/race$k.out" 2>"$tmp/race$k.err"
+      echo $? > "$tmp/race$k.rc" ) &
+  done
+  wait
+  cat "$tmp"/race[123].err > "$tmp/err"   # so a failure quotes the race, not the previous test
+  check "create: concurrent same-name calls -> all exit 0, one path, one worktree" \
+    '[ "$(cat "$tmp"/race[123].rc | sort -u)" = 0 ] && [ "$(cat "$tmp"/race[123].out | sort -u | wc -l)" -eq 1 ] && [ "$(git -C "$R" worktree list | grep -c /race)" -eq 1 ]'
 
   wc_run feat-h "$R" WORKTREE_ROOT="$wr" WORKTREE_BASE_REF=head
   check "create: WORKTREE_BASE_REF=head -> current HEAD" '[ "$(git -C "$wr/proj/feat-h" rev-parse HEAD)" = "$C2" ]'
@@ -242,6 +260,41 @@ if command -v git >/dev/null 2>&1; then
   printf '{"cwd":"%s"}' "$(native "$R")" | env CLAUDE_CONFIG_DIR="$cfg" bash "$H/worktree-create.sh" >"$tmp/out" 2>"$tmp/err"; rc=$?
   check "create: no name -> exit 1, nothing on stdout" '[ $rc -eq 1 ] && [ ! -s "$tmp/out" ]'
 
+  # Claude Desktop runs this hook from its own process, without the settings.json
+  # `env` block: WORKTREE_ROOT never arrived and Desktop worktrees landed in-project.
+  printf '{"env":{"WORKTREE_ROOT":"%s"}}' "$(native "$wr")" > "$cfg/settings.json"
+  wc_desk desk "$R"; rc=$?
+  check "create: WORKTREE_ROOT only in user settings.json env (Desktop) -> still honoured" \
+    '[ $rc -eq 0 ] && [ "$(cat "$tmp/out")" = "$(native "$wr")/proj/desk" ] && [ -d "$wr/proj/desk" ]'
+  rm -f "$cfg/settings.json"
+
+  # A plain folder. Desktop calls the hook anyway ("no repository anchor"), aborts
+  # the session when it fails, and refuses the folder itself as the result ("it
+  # must create a separate workspace"): it gets an EMPTY workspace, never the cwd.
+  # The CLI gets a failure instead, because a failed hook outside a repo makes
+  # Claude Code run a background session in place, which an empty dir would break.
+  P="$tmp/plain-folder"; mkdir -p "$P"; echo keep > "$P/f"
+  if git -C "$P" rev-parse --git-dir >/dev/null 2>&1; then
+    skip "create: non-repo cwd (the temp dir sits inside a git repo)"
+  else
+    # Under _no-repo/: lane scanners walk $WORKTREE_ROOT/<repo>/, and a folder
+    # named like a repo would otherwise put a live session in that repo's sweep.
+    ws="$(native "$wr")/_no-repo/plain-folder/solo"
+    wc_desk solo "$P" WORKTREE_ROOT="$wr"; rc=$?
+    check "create: non-repo cwd from Desktop -> an empty workspace under \$WORKTREE_ROOT/_no-repo, never the cwd" \
+      '[ $rc -eq 0 ] && [ "$(cat "$tmp/out")" = "$ws" ] && [ -d "$ws" ] && [ -z "$(ls -A "$ws")" ] && [ ! -e "$P/.claude" ]'
+    wc_desk solo2 "$P"; rc=$?
+    check "create: non-repo cwd from Desktop, no root -> <cwd>/.claude/worktrees/<name>" \
+      '[ $rc -eq 0 ] && [ "$(cat "$tmp/out")" = "$(native "$P")/.claude/worktrees/solo2" ] && [ -d "$P/.claude/worktrees/solo2" ]'
+    rm -rf "$P/.claude"
+    wc_run solo3 "$P" WORKTREE_ROOT="$wr"; rc=$?
+    check "create: non-repo cwd from the CLI -> fails, prints and creates nothing" \
+      '[ $rc -ne 0 ] && [ ! -s "$tmp/out" ] && [ ! -e "$wr/_no-repo/plain-folder/solo3" ] && [ ! -e "$P/.claude" ] && grep -q "nothing to isolate" "$tmp/err"'
+    wc_desk solo4 "$tmp/no-such-folder" WORKTREE_ROOT="$wr"; rc=$?
+    check "create: missing cwd from Desktop -> fails, creates nothing" \
+      '[ $rc -ne 0 ] && [ ! -s "$tmp/out" ] && [ ! -e "$wr/_no-repo/no-such-folder" ]'
+  fi
+
   wrm_run "$wr/proj/feat-h"; rc=$?
   check "remove: clean worktree -> exit 0, dir gone" '[ $rc -eq 0 ] && [ ! -e "$wr/proj/feat-h" ]'
   check "remove: merged worktree-* branch deleted with -d" '! git -C "$R" show-ref -q --verify refs/heads/worktree-feat-h'
@@ -253,6 +306,9 @@ if command -v git >/dev/null 2>&1; then
   check "remove: unmerged branch kept (no -D), dir removed" '[ $rc -eq 0 ] && [ ! -e "$wr/proj/feat-a" ] && git -C "$R" show-ref -q --verify refs/heads/worktree-feat-a'
   wrm_run "$wr/proj/squat"; rc=$?
   check "remove: a non-git dir -> exit 1, untouched" '[ $rc -eq 1 ] && [ -f "$wr/proj/squat/f" ]'
+  mkdir -p "$wr/_no-repo/plain-folder/empty-ws"   # what create makes for a Desktop plain-folder session
+  wrm_run "$wr/_no-repo/plain-folder/empty-ws"; rc=$?
+  check "remove: an empty non-git workspace -> exit 0, removed" '[ $rc -eq 0 ] && [ ! -e "$wr/_no-repo/plain-folder/empty-ws" ]'
   wrm_run "$wr/proj/inc/secret"; rc=$?
   check "remove: a subdir of a worktree -> exit 1, untouched" '[ $rc -eq 1 ] && [ -f "$wr/proj/inc/secret/k" ]'
   wrm_run "$R"; rc=$?   # last: a broken hook deletes the fixture repo here

@@ -15,8 +15,8 @@ Claude Code hooks allow you to run custom scripts at key workflow points.
 | `check-mail.sh` | PreToolUse | Deliver unread pigeon pmail, one stat when nothing is new. Delivery is per session (stdin `session_id`): each session is told about each message once and never about mail it sent itself, so a worktree lane's report reaches the coordinator in the main checkout instead of the lane. The shared signal file is a timestamp it never deletes. Inside a worktree the footer warns that a bare `pigeon read` marks the coordinator's mail read too. |
 | `config-change-guard.sh` | ConfigChange | Worm-persistence tripwire: when a Claude settings file changes mid-session, scan just that file for the vetted IOC set (curl\|sh, base64-decode eval, Invoke-Expression+Download, /dev/tcp, reads of `.claude/settings` / `.aws/credentials`). Silent on clean; on a finding, a desktop notification (`terminalSequence`, interactive sessions only - ConfigChange discards `systemMessage`, so no text reaches you or the model). `SUPPLY_CHAIN_BLOCK=1` blocks the change (exit 2). Fast single-file sibling of `supply-chain-defense`'s `integrity-audit.sh`. |
 | `worktree-guard.sh` | PreToolUse (Bash) | Enforce `rules/worktree-boundaries.md`: flags `rm` on `.claude/worktrees`, `git worktree remove/prune` against worktrees, `git rm` on worktree gitlinks, and `git add -A`/`.` in a repo that has a `.claude/worktrees` dir. With `WORKTREE_ROOT` set, lanes under `$WORKTREE_ROOT` get the same `rm`/`git rm`/`worktree remove`/`prune` guard. Sessions whose cwd is inside their own worktree are exempt. Advisory by default; `WORKTREE_GUARD_BLOCK=1` hard-denies (exit 2). |
-| `worktree-create.sh` | WorktreeCreate | Put Claude Code's own worktrees (`--worktree`, `isolation: worktree`, background sessions) at `$WORKTREE_ROOT/<repo>/<name>` instead of `<repo>/.claude/worktrees/`. Replaces Claude Code's git logic: branch `worktree-<name>`, `worktree.baseRef`, reopen by name, `.worktreeinclude`. Opt-in, machine-specific: see [Worktree placement](#worktree-placement-worktreecreate--worktreeremove). |
-| `worktree-remove.sh` | WorktreeRemove | Pair of `worktree-create.sh`: `git worktree remove` without `--force` (a dirty tree is kept, exit 1), then `git branch -d` on its `worktree-*` branch (never `-D`). |
+| `worktree-create.sh` | WorktreeCreate | Put Claude Code's own worktrees (`--worktree`, `isolation: worktree`, background sessions) at `$WORKTREE_ROOT/<repo>/<name>` instead of `<repo>/.claude/worktrees/`. Replaces Claude Code's git logic: branch `worktree-<name>`, `worktree.baseRef`, reopen by name, `.worktreeinclude`. A cwd outside any git repo gets an empty workspace from Claude Desktop and a failure from the CLI. Opt-in, machine-specific, wired **by absolute path** (Claude Desktop runs it through `cmd.exe`, where `~` and `$HOME` don't expand): see [Worktree placement](#worktree-placement-worktreecreate--worktreeremove). |
+| `worktree-remove.sh` | WorktreeRemove | Pair of `worktree-create.sh`: `git worktree remove` without `--force` (a dirty tree is kept, exit 1), then `git branch -d` on its `worktree-*` branch (never `-D`). An empty non-git workspace (Desktop, plain folder) is rmdir'd; any other non-git dir is left in place. |
 | `session-start-unicode-scan.sh` | SessionStart | One-shot hidden-Unicode scan of the project's instruction files (CLAUDE.md/AGENTS.md/SKILL.md/.cursorrules) at session boot. Silent on clean; advisory on a finding, and a separate "NOT scanned" advisory naming any file the scanner could not read. Pairs with `prompt-injection-defense`. |
 | `pre-write-peer-guard.sh` | PreToolUse (Edit\|Write) | Mid-session peer-writer guard (`rules/worktree-boundaries.md`): before writing a file, warn if it was freshly modified by something that isn't this session — the signature of a live peer session sharing the checkout. Uses the touched-ledger to tell own edits apart. Advisory by default; `GUARD_BLOCK=1` denies the write. Auto-wired with its ledger companion. |
 | `session-touched-ledger.sh` | PostToolUse (Edit\|Write) | Companion to `pre-write-peer-guard.sh`: records every file this session writes to `~/.claude/.session-touched/<session_id>.list` so the guard can distinguish this session's edits from a peer's. Silent, never blocks. Auto-wired with the peer guard. |
@@ -137,21 +137,74 @@ A `WorktreeCreate` hook is the only lever, and it **replaces** git's worktree lo
 entirely. On a machine whose `settings.json` `env` sets `WORKTREE_ROOT`, this pair moves
 those worktrees to `$WORKTREE_ROOT/<repo>/<name>`, the same root `new-lane.sh` and
 `fleet init` use (`rules/worktree-boundaries.md` "Lane location"). Wire it in the
-**user** settings of that machine only:
+**user** settings of that machine only, **by absolute path**:
 
 ```json
 {
   "env": { "WORKTREE_ROOT": "<absolute path outside every repo>" },
   "hooks": {
     "WorktreeCreate": [
-      { "hooks": [{ "type": "command", "command": "bash ~/.claude/hooks/worktree-create.sh" }] }
+      { "hooks": [{ "type": "command", "command": "bash <your-home>/.claude/hooks/worktree-create.sh" }] }
     ],
     "WorktreeRemove": [
-      { "hooks": [{ "type": "command", "command": "bash ~/.claude/hooks/worktree-remove.sh" }] }
+      { "hooks": [{ "type": "command", "command": "bash <your-home>/.claude/hooks/worktree-remove.sh" }] }
     ]
   }
 }
 ```
+
+`<your-home>` is your home directory written out in full, with forward slashes:
+
+| OS | `WorktreeCreate` command |
+|----|--------------------------|
+| Windows | `bash C:/Users/<you>/.claude/hooks/worktree-create.sh` |
+| macOS | `bash /Users/<you>/.claude/hooks/worktree-create.sh` |
+| Linux | `bash /home/<you>/.claude/hooks/worktree-create.sh` |
+
+`WorktreeRemove` is the same with `worktree-remove.sh`.
+
+**Never `~` or `$HOME` in these two commands.** Claude Desktop runs WorktreeCreate and
+WorktreeRemove itself, not through Claude Code, and on Windows it hands the command to
+`cmd.exe /d /s /c` (read from its app bundle, builds 2.26454 and 2.31226). cmd.exe
+expands neither `~` nor `$HOME`, so with `bash ~/.claude/...` or
+`bash "$HOME/.claude/..."` bash looks for a file literally named that, the hook exits
+127, and Desktop aborts every worktree session and chip on the machine (its `main.log`
+says `worktree_hook_failed, aborting session`). The CLI runs hook commands through Git
+Bash or `sh`, so the `~` form works there and hides the break until Desktop starts a
+session. An absolute path works in both. To reproduce, run
+`cmd /d /s /c 'bash "$HOME/.claude/hooks/worktree-create.sh"'` from PowerShell: exit 127.
+
+**Desktop doesn't pass the settings `env` block either.** It starts the hook with its own
+environment (`PATH`, `CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PROJECT_DIR`), so
+`WORKTREE_ROOT` set in `settings.json` never reaches the hook as a variable. When the
+variable is missing, the hook reads `env.WORKTREE_ROOT` from
+`${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json` itself, so keep the root in the user
+settings file above. A real environment variable wins, including one set in the command
+(`bash -c "WORKTREE_ROOT=<root> exec bash <your-home>/.claude/hooks/worktree-create.sh"`),
+but neither is needed. Before this fallback, Desktop's worktrees silently landed in
+`<repo>/.claude/worktrees/`.
+
+**A folder that is not a git repository has nothing to isolate**, and Desktop still
+calls the hook for it (`no repository anchor` in its log). Desktop aborts the session if
+the hook fails, and refuses the folder itself as the result (`hook printed the base
+repository path ...; it must create a separate workspace`). So for Desktop the hook
+makes an **empty** workspace at `$WORKTREE_ROOT/_no-repo/<folder>/<name>` and the
+session works on the folder by absolute path, unisolated. `_no-repo/` keeps it out of
+the lane scans (`fleet sweep`, `worktree-survey.sh`) that walk `$WORKTREE_ROOT/<repo>/`.
+`worktree-remove.sh` rmdirs it while it is still empty and leaves it otherwise. The hook
+tells Desktop's calls apart by their `"transcript_path": ""`. For the CLI the hook fails
+instead, and Claude Code then runs a background session in the folder itself, its
+documented fallback. An empty dir would strand that session, and any
+`isolation: worktree` subagent, away from the files.
+
+**Two calls for one name can arrive at once.** When the source folder fails Claude
+Code's trust check (it was never opened and trusted as a project), Desktop retries the
+start within the same second, so its log shows two `Creating worktree for session ...`
+lines. Two CLI sessions asking for the same `--worktree` name race the same way.
+Unserialised, both runs `git worktree add` one branch and the loser exits 1, which fails
+that start. The hook takes a per-name lock in the git common dir, so the second call
+waits and reopens the first call's worktree. The lock doesn't fix an untrusted folder:
+open the folder once in Claude Code and accept the trust prompt.
 
 Trade-offs, stated plainly:
 
@@ -160,9 +213,14 @@ Trade-offs, stated plainly:
   session you exit or delete; everything else is `fleet sweep` / `fleet prune`, which
   see these trees (`git worktree list`) and say "hook-made" on them.
 - **A broken hook blocks every worktree creation on the machine.** Claude Code has no
-  fallback: any non-zero exit, or no path on stdout, fails creation. Needs `jq` and
-  `git`. With `WORKTREE_ROOT` unset the hook falls back to Claude Code's own location
-  rather than fail, but still loses the sweep, so install it only where the root is set.
+  fallback: any non-zero exit, or no path on stdout, fails creation, and Claude Desktop
+  then aborts the session. Needs `jq` and `git`. With `WORKTREE_ROOT` unset the hook
+  falls back to Claude Code's own location rather than fail, but still loses the sweep,
+  so install it only where the root is set.
+- **A fresh base can cost up to 5 s.** Like Claude Code, the hook fetches the default
+  branch when `FETCH_HEAD` is missing or over 24 h old, capped at 5 s and never
+  prompting. On a private HTTPS remote that can't authenticate silently, the session
+  start waits out the cap, then uses the cached `origin/HEAD`.
 - **The hook owns what Claude Code did.** It copies `.worktreeinclude` matches, reads
   `worktree.baseRef` (or `WORKTREE_BASE_REF`), names branches `worktree-<name>` and
   reopens a worktree by name, at its old tip (Claude Code's reset of an untouched

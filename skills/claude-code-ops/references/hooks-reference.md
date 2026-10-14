@@ -72,7 +72,7 @@ Event-specific fields:
 | `TaskCreated`/`TaskCompleted` | `task_id`, `task_title` |
 | `InstructionsLoaded` | `file_path`, `memory_type`, `load_reason`, `globs?`, `trigger_file_path?`, `parent_file_path?` |
 | `Elicitation` | `server_name`, `form_fields[]` (`name`, `type`, `label`, `required`) |
-| `WorktreeCreate`/`WorktreeRemove` | `worktree_id`, `worktree_path` (remove) |
+| `WorktreeCreate`/`WorktreeRemove` | `name` (create), `worktree_path` (remove) |
 
 Read it with jq:
 
@@ -146,6 +146,7 @@ Five types. All accept `timeout` (seconds), `if` (permission-rule filter), `stat
 
 - **Shell form** (no `args`): command string runs via shell (`sh -c`, Git Bash, or PowerShell with `shell: "powershell"`); pipes, `&&`, globs work.
 - **Exec form** (with `args`): resolved as executable on PATH, spawned directly, no shell.
+- **Claude Desktop runs `WorktreeCreate`/`WorktreeRemove` itself**, not through Claude Code. On Windows the command goes to `cmd.exe /d /s /c`, which expands neither `~` nor `$HOME`: the hook exits 127 and every Desktop worktree session aborts, so give the script an absolute path. Its env is its own (`PATH`, `CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PROJECT_DIR`), never the settings `env` block, and its stdin has `"transcript_path": ""`. It calls the hook for a non-git folder too, aborts the session if the hook fails, and refuses a result equal to that folder ("it must create a separate workspace"). Read from Desktop 2.26454/2.31226 on 2026-10-09; claude-mods' `hooks/README.md` has the wiring.
 - `async: true`: background, never blocks, output discarded.
 - `asyncRewake: true`: background, but **wakes Claude on exit 2** with stderr as a system reminder. Implies async.
 
