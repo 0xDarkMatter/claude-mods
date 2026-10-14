@@ -11,18 +11,22 @@ default from 8.3 to 8.4 without touching any project. Two modes:
 
   --offline (default, safe for PR CI): no network.
     * the catalog parses and is internally consistent (release.minor matches the tag;
-      every prose token contains the catalog value it states)
+      every prose token contains the catalog value it states; no obsolete key is also
+      listed as a schema key)
     * every prose token is still stated in SKILL.md or references/*.md
     * SKILL.md carries a "Versions verified YYYY-MM-DD" note equal to as_of
   --live (scheduled freshness job, never a PR gate):
     * newest stable DDEV release vs release.minor (a new minor or major is drift)
     * docs config page at that release: default php_version / database / nodejs_version
       and the php_version range
+    * config schema at that release (pkg/ddevapp/schema.json): its top-level keys vs
+      config_keys, which the auditor's unknown-key check uses
     * built-in command names at that release (global_dotddev_assets/commands/<service>)
     * endoflife.date: oldest PHP and Node.js lines still supported today
 
 Sources: https://api.github.com/repos/ddev/ddev/releases,
 https://raw.githubusercontent.com/ddev/ddev/<tag>/docs/content/users/configuration/config.md,
+https://raw.githubusercontent.com/ddev/ddev/<tag>/pkg/ddevapp/schema.json,
 https://api.github.com/repos/ddev/ddev/contents/pkg/ddevapp/global_dotddev_assets/commands/<service>,
 https://endoflife.date/api/php.json and nodejs.json. GITHUB_TOKEN, when set, is sent to
 api.github.com only (never printed) to lift the anonymous rate limit.
@@ -30,8 +34,9 @@ api.github.com only (never printed) to lift the anonymous rate limit.
 Usage:   check-ddev-facts.py [--offline | --live] [--catalog FILE] [--skill DIR]
                              [--fixtures DIR] [--today YYYY-MM-DD] [--json] [--timeout S] [-q]
 Input:   argv flags only (no stdin). --fixtures (live only) reads releases.json,
-         config.md, commands-{web,host,db}.json, eol-php.json and eol-nodejs.json from
-         DIR instead of the network - how tests exercise the live comparisons offline.
+         config.md, schema.json, commands-{web,host,db}.json, eol-php.json and
+         eol-nodejs.json from DIR instead of the network - how tests exercise the live
+         comparisons offline.
 Output:  stdout = findings (check<TAB>status<TAB>detail rows, or the --json envelope,
          schema claude-mods.ddev-ops.facts/v1). Data only.
 Stderr:  the verdict line, notices, errors.
@@ -70,6 +75,7 @@ DEFAULT_SKILL = HERE.parent
 
 RELEASES_URL = "https://api.github.com/repos/ddev/ddev/releases?per_page=30"
 CONFIG_DOC_URL = "https://raw.githubusercontent.com/ddev/ddev/{tag}/docs/content/users/configuration/config.md"
+SCHEMA_URL = "https://raw.githubusercontent.com/ddev/ddev/{tag}/pkg/ddevapp/schema.json"
 COMMANDS_URL = ("https://api.github.com/repos/ddev/ddev/contents/pkg/ddevapp/"
                 "global_dotddev_assets/commands/{svc}?ref={tag}")
 EOL_URL = "https://endoflife.date/api/{product}.json"
@@ -118,6 +124,11 @@ def load_catalog(path: Path) -> dict:
             names = lookup(cat, f"builtin_commands.{svc}")
             if not isinstance(names, list) or not names or not all(isinstance(n, str) and n for n in names):
                 raise ValueError(f"builtin_commands.{svc} must be a non-empty list of names")
+        keys = cat.get("config_keys")
+        if not isinstance(keys, list) or not keys or not all(isinstance(k, str) and k for k in keys):
+            raise ValueError("config_keys must be a non-empty list of key names")
+        if not isinstance(cat.get("obsolete_keys"), dict):
+            raise ValueError("obsolete_keys must be an object")
         tokens = cat.get("prose_tokens")
         if not isinstance(tokens, list) or not tokens:
             raise ValueError("prose_tokens must be a non-empty list")
@@ -166,6 +177,12 @@ def check_offline(cat: dict, skill_dir: Path) -> list[dict]:
     want_minor = f"{tm.group(1)}.{tm.group(2)}" if tm else ""  # load_catalog already rejected a bad tag
     out.append(row("release-minor", "ok" if cat["release"]["minor"] == want_minor else "drift",
                    f"release.minor {cat['release']['minor']!r} vs tag {cat['release']['tag']}"))
+
+    # An obsolete key that is also a schema key would make the auditor call a live key dead.
+    both = sorted(k for k in cat["obsolete_keys"] if not k.startswith("_") and k in set(cat["config_keys"]))
+    out.append(row("obsolete-vs-schema", "drift" if both else "ok",
+                   f"obsolete_keys also listed in config_keys: {', '.join(both)}" if both
+                   else f"{len(cat['config_keys'])} schema keys, none marked obsolete"))
 
     for t in cat["prose_tokens"]:
         value = str(lookup(cat, t["value_of"]))
@@ -294,6 +311,22 @@ def check_live(cat: dict, src: Sources, today: dt.date) -> list[dict]:
                 out.append(row(f"doc:{fkey}", "ok", f"{facts[fkey]}"))
     except Unavailable as exc:
         out.append(row("doc", "unavailable", str(exc)))
+
+    try:
+        schema = src.json("schema.json", SCHEMA_URL.format(tag=tag))
+        props = schema.get("properties") if isinstance(schema, dict) else None
+        if not isinstance(props, dict) or not props:
+            raise Unavailable("schema.json: no top-level properties")
+        live_keys, want = set(props), set(cat["config_keys"])
+        if live_keys != want:
+            added, gone = sorted(live_keys - want), sorted(want - live_keys)
+            out.append(row("schema:keys", "drift", f"config schema keys changed at {tag}: added {added or '-'}, "
+                                                   f"removed {gone or '-'} (update config_keys; a removed key may "
+                                                   "belong in obsolete_keys)"))
+        else:
+            out.append(row("schema:keys", "ok", f"{len(live_keys)} keys"))
+    except Unavailable as exc:
+        out.append(row("schema:keys", "unavailable", str(exc)))
 
     for svc in SERVICES:
         try:

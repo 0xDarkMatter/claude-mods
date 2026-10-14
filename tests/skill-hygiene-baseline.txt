@@ -33,7 +33,6 @@ color-ops	relative-script-call	scripts/harmony-gen.js
 color-ops	relative-script-call	scripts/palette-gen.js
 cypress-ops	related-not-named	ci-cd-ops
 cypress-ops	related-not-named	testing-ops
-ddev-ops	relative-script-call	scripts/run-python.sh
 doc-scanner	related-not-named	adr-ops
 doc-scanner	relative-script-call	scripts/agents-md.py
 evals-ops	related-not-named	claude-api-ops

@@ -156,12 +156,12 @@ jobs:
             --unavailable "frontend-upgrade-ops live check unreachable (npm/Packagist) - skipped" \
             -- python skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py --live
 
-      - name: ddev-ops facts vs DDEV releases, docs, built-in commands + PHP/Node EOL
+      - name: ddev-ops facts vs DDEV releases, docs, config schema, built-in commands + PHP/Node EOL
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           bash .github/scripts/freshness-step.sh --name ddev-ops \
-            --drift "ddev-ops drift - DDEV shipped a new minor, changed a default (PHP/database/Node.js) or a built-in command, or a PHP/Node.js line reached end of life; re-verify assets/ddev-facts.json and the prose" \
+            --drift "ddev-ops drift - DDEV shipped a new minor, changed a default (PHP/database/Node.js), a config schema key or a built-in command, or a PHP/Node.js line reached end of life; re-verify assets/ddev-facts.json and the prose" \
             --unavailable "ddev-ops live check unreachable (GitHub API / raw docs / endoflife.date) - skipped" \
             -- python skills/ddev-ops/scripts/check-ddev-facts.py --live
 

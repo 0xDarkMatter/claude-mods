@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#ddev-generated
+## Description: Fixture (clean) - an add-on's host command, reviewed at install: not host-command
+## Usage: addon-dashboard
+open "${DDEV_PRIMARY_URL}:9999"
