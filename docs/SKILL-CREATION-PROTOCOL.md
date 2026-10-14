@@ -138,6 +138,10 @@ commit:
 - [ ] [`tests/spec.sh`](../tests/spec.sh) passes: the spec's **official** validator,
       `skills-ref`, plus Claude Code's fields. Gate on official validators, never a
       hand-rolled reimplementation.
+- [ ] [`tests/skill-hygiene.sh`](../tests/skill-hygiene.sh) passes. A new skill may add
+      none of its four quiet failures: a side file SKILL.md never names, a
+      `related-skills` entry the body never mentions, a `scripts/...` call relative to the
+      cwd (write `"<skill-dir>/scripts/x"`), or a `metadata.owns` another skill claims.
 - [ ] `claude plugin validate` passes. It checks the plugin and marketplace manifests
       only; it does not read SKILL.md frontmatter.
 - [ ] `skill-creator` Step 5 if a distributable `.skill` is needed (a zip of the folder;
@@ -157,7 +161,7 @@ commit:
 4 resources   → SKILL-RESOURCE-PROTOCOL (§10 gate; staleness verifier if external facts)
 5 tests       → tests/run.sh → run-skill-tests.sh; verifier → check-resources.sh
 6 integrate   → doc-drift.sh: README row + count bumps + no ghost links
-7 ship        → validate.sh + spec.sh + claude plugin validate + package + commit
+7 ship        → validate.sh + spec.sh + skill-hygiene.sh + claude plugin validate + package + commit
 ```
 
 This doc owns the **sequence and the test/CI/counts bookend**. Everything else is owned by

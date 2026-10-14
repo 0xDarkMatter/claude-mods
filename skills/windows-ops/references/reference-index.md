@@ -2,6 +2,12 @@
 
 What each windows-ops reference covers and when to load it.
 
+- `references/symptom-guide.md` — every complaint this skill handles (slow boot, a silently failing drive, crashes with no dump, an HKLM entry you can't disable, an unexplained UAC prompt, a hot machine), where its real signal lives, and the trap that usually misleads the diagnosis. Load first when the user describes a symptom, to pick the rung of the Diagnostic Ladder to start on.
+
+- `references/manual-queries.md` — the queries, event catalogues and decoding tables behind SKILL.md's storage, boot, crash and event-log sections: disk and `storahci` event IDs, SMART fallbacks, the `StartupApproved` byte layout, Event 41's property indexes, and the `Get-WinEvent -FilterHashtable` keys that work. Load when running a query by hand or reading a script's raw output.
+
+- `references/worked-example.md` — one slow-booting, crashing PC taken from the first `health-audit.ps1` panel through `disk-health.ps1` and `drive-dependencies.ps1` to a verified fix, with the panels each script renders. Load to see the scripts used in sequence, or to show a user what the output will look like.
+
 - `references/storage-events.md` — full event ID catalog for `disk`, `storahci`, `Ntfs`, `partmgr`, `volmgr` providers. Load when investigating disk errors, mapping `\Device\Harddisk N` references, or interpreting LBA-level I/O failures. Includes severity triage thresholds (per-month counts that indicate failure for HDD vs SSD) and the query recipes the audit script uses.
 
 - `references/bugcheck-codes.md` — Windows BSOD stop-code catalog covering the codes that actually appear on workstations. Load when decoding a non-trivial Event 41, analyzing a minidump's stop code, or matching a symptom ("crashes during sleep", "random reboot no dump", "crashes during file copy") to a likely cause. Covers `0xEF`, `0xD1`, `0x124`, `0x50`, `0x7A`, `0x9F` and the special `0x0` case.

@@ -12,7 +12,7 @@
 
 > *Doctrine you can execute. Knowledge that knows when it's stale. Agents that land their own work.*
 
-**claude-mods** is a Claude Code plugin built on one premise: a skill that only *tells* the model something is a suggestion, and a skill that ships a gate is a guarantee. Its 112 skills carry the expert depth you'd expect - React, Rust, PostgreSQL, Cloudflare Workers, Next.js - but the ones that earn the install are the ones that run *agents*: a headless-worker spawner, a test-gated landing queue for parallel branches, a graduated-autonomy ladder for scheduled loops, and a security layer pointed at the agent itself. 63 skills ship executable tooling, 57 ship their own test suites, and 28 carry staleness verifiers that trip when the world moves under them.
+**claude-mods** is a Claude Code plugin built on one premise: a skill that only *tells* the model something is a suggestion, and a skill that ships a gate is a guarantee. Its 112 skills carry the expert depth you'd expect - React, Rust, PostgreSQL, Cloudflare Workers, Next.js - but the ones that earn the install are the ones that run *agents*: a headless-worker spawner, a test-gated landing queue for parallel branches, a graduated-autonomy ladder for scheduled loops, and a security layer pointed at the agent itself. 63 skills ship executable tooling, 58 ship their own test suites, and 29 carry staleness verifiers that trip when the world moves under them.
 
 Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms) and Anthropic's [patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), it installs as a standard plugin and toggles off as easily as it toggles on.
 
@@ -98,9 +98,9 @@ An agent that installs packages, reads web pages and edits its own settings has 
 
 ### 3. Its knowledge knows when it's stale
 
-A skill that says "modern R" or "Hono v4" is making a claim that will be false within a year. claude-mods makes those claims **machine-checked**: 22 skills ship a `check-*-facts` verifier with an `--offline` mode (does the prose still match the catalogue?) and a `--live` mode (does the catalogue still match the world?). CI runs the first on every push; a scheduled workflow runs the second every Monday. When TypeScript ships a native compiler or ADA deadlines move, a tripwire fires instead of a reference quietly rotting.
+A skill that says "modern R" or "Hono v4" is making a claim that will be false within a year. claude-mods makes those claims **machine-checked**: 29 skills ship a staleness verifier with an `--offline` mode (does the prose still match the catalogue?) and a `--live` mode (does the catalogue still match the world?). CI runs the first on every push; a scheduled workflow runs the second every Monday. When TypeScript ships a native compiler or ADA deadlines move, a tripwire fires instead of a reference quietly rotting.
 
-The same instinct runs through the tooling: 63 skills ship real scripts, 57 ship their own `tests/run.sh`, 44 gates use exit-10 as a machine-readable findings signal, and 5.6 MB of references load progressively - ~100 tokens per skill until one is relevant.
+The same instinct runs through the tooling: 63 skills ship real scripts, 58 ship their own `tests/run.sh`, more than 40 use exit-10 as a machine-readable findings signal, and 5.5 MB of references load progressively - ~100 tokens per skill until one is relevant.
 
 ### 4. The stacks are fuel, not filler
 
@@ -212,7 +212,7 @@ skill-name/
 2. SKILL.md body - Loaded when skill triggers (< 5,000 tokens; after auto-compaction Claude Code keeps only the first 5,000)
 3. Bundled resources - Loaded only when Claude needs them
 
-Skills carry the full layout by convention - a directory may sit empty until it's needed, so bundled resources always have an obvious home. In practice 95 skills ship references and 61 ship scripts.
+Skills carry the full layout by convention - a directory may sit empty until it's needed, so bundled resources always have an obvious home. In practice 97 skills ship references and 63 ship scripts.
 
 See [skill-creator](skills/skill-creator/) for the complete guide.
 
@@ -306,7 +306,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 #### Workstation & Network Diagnostics
 | Skill | Description |
 |-------|-------------|
-| [windows-ops](skills/windows-ops/) | Windows workstation diagnostics - health audit, crash triage, drive mapping, dying-drive recovery |
+| [windows-ops](skills/windows-ops/) | Windows workstation diagnostics - health audit, crash and process triage, drive mapping, dying-drive recovery, and WSL 2 from the Windows side (`.wslconfig`, networking modes, growing disks) |
 | [mac-ops](skills/mac-ops/) | macOS workstation diagnostics - TCC privacy permissions, wake reasons, Spotlight, APFS storage pressure |
 | [net-ops](skills/net-ops/) | Cross-platform network troubleshooting - layered ladder from link to app, IPv6 classifier, DoH detection, MTU/PMTU |
 | [asus-router-ops](skills/asus-router-ops/) | Asus / Asuswrt-Merlin routers - hardening, WireGuard/OpenVPN, segmentation, DNS privacy, JFFS scripting |
