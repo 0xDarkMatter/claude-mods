@@ -6,6 +6,16 @@ All notable changes to claude-mods are documented here. Format follows
 feature releases live in the README "Recent Updates" section.
 ## [Unreleased]
 
+### Fixed
+
+- **`docker-doctor.py` tests no longer depend on the host having Docker.** The doctor
+  checked whether the engine socket exists on the real filesystem even under its fake-host
+  test hook. GitHub's Ubuntu runners ship Docker, so `/var/run/docker.sock` exists there
+  and the "no runtime at all" case reported a `cli-missing` finding (exit 10) instead of
+  exit 3: red on Linux CI, green on Windows and Docker-less machines. The socket check now
+  goes through the fake host (`paths`), the fixture pins the socket absent, and a new
+  `socket-present` case pins the other side. The new tests failed on the old doctor.
+
 ## [3.9.0] - 2026-10-14
 
 The Docker family rebuilt around the engine as well as the files, DDEV and package-manager

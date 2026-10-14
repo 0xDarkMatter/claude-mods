@@ -38,7 +38,9 @@ Never:   starts, stops or restarts an engine, VM or WSL distro; runs, removes or
          prints a credential.
 Hooks:   for tests only. DOCKER_DOCTOR_DOCKER=<path> selects the docker CLI (a .py path runs
          under this Python). DOCKER_DOCTOR_FAKE_HOST=<json file> replaces the host probes:
-         os, processes, listeners, excluded_ports, wsl_running, lxss, disk_sizes, wsl_ss.
+         os, processes, listeners, excluded_ports, wsl_running, lxss, disk_sizes, wsl_ss,
+         paths ({path: bool}, whether an engine socket exists; unlisted paths are checked
+         for real, so a fixture never depends on the test host having Docker).
 
 Examples:
   docker-doctor.py                         # what am I talking to, and is anything off?
@@ -99,6 +101,14 @@ class Probe:
         if self.fake and self.fake.get("os"):
             return self.fake["os"]
         return "windows" if sys.platform.startswith("win") else "darwin" if sys.platform == "darwin" else "linux"
+
+    def path_exists(self, path: str) -> bool:
+        # Through the fake host so a fixture is the same on every runner: a Linux CI host
+        # with Docker installed has a real /var/run/docker.sock, which made the "no runtime
+        # at all" case report findings there and pass everywhere else.
+        if self.fake and path in self.fake.get("paths", {}):
+            return bool(self.fake["paths"][path])
+        return Path(path).exists()
 
     def run(self, argv, env_extra=None):
         """-> (rc, stdout, stderr); rc None when the binary is missing, 'timeout' on a hang."""
@@ -590,7 +600,7 @@ def main(argv=None) -> int:
             f"DOCKER_HOST={host} is set, so it silently wins over the context "
             f"{os.environ.get('DOCKER_CONTEXT') or cfg.get('currentContext')!r}; unset it if that context is the one you meant")
     path = unix_path(host)
-    socket_missing = bool(path) and probe.os != "windows" and not Path(path).exists()
+    socket_missing = bool(path) and probe.os != "windows" and not probe.path_exists(path)
 
     state, info, df_total = engine_probe(probe)
     facts["engine"] = state if state != "up" else f"up ({info.get('ServerVersion', '?')})"

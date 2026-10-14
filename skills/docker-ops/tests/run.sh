@@ -288,6 +288,11 @@ has "Windows-containers mode is reported" "$out" $'low\twindows-containers'
 out="$(doc hang --timeout 1)"; rc=$?
 expect_exit "doctor: docker hangs on every probe" 7 "$rc"
 doc none >/dev/null; expect_exit "doctor: no runtime at all" 3 $?
+# The socket check goes through the fake host: a runner with Docker installed (GitHub's
+# Ubuntu images) has a real /var/run/docker.sock, which turned "none" into exit 10 on CI only.
+out="$(doc socket-present)"; rc=$?
+expect_exit "doctor: no CLI but the default socket exists" 10 "$rc"
+has "a socket without a CLI is cli-missing, not no-runtime" "$out" $'medium\tcli-missing'
 doc badcfg >/dev/null; expect_exit "doctor: unreadable config.json" 4 $?
 doc healthy --ports 80,nope >/dev/null; expect_exit "doctor: bad --ports" 2 $?
 doc healthy --timeout 0 >/dev/null; expect_exit "doctor: bad --timeout" 2 $?
