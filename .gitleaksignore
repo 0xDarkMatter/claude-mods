@@ -28,3 +28,7 @@ f829a8e4454fcbfca767a3a46eb0ceec131444fb:skills/claude-api-ops/assets/recall-pro
 # sufficient length?"), moved verbatim from SKILL.md (allowlisted above at cb575e7) into
 # references/audit-agent-prompts.md: prose, not a credential. Fingerprints pin the file.
 d9bc420cb123a2f9b6205d8c0ae6f4f9fa20bea3:skills/security-ops/references/audit-agent-prompts.md:generic-api-key:142
+# docker-ops docker-doctor test fixture: the "creds" case writes a docker config.json with an
+# inline "auths" entry for registry.example.com so the probe can prove it flags inline registry
+# credentials. The value is a fake stub, base64 of a placeholder user:pass; not a credential.
+910a82398f81c71f291b9aba24d070ffeee3e820:skills/docker-ops/tests/fixtures/doctor/run_doctor.py:generic-api-key:59
