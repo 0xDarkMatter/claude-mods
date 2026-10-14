@@ -6,6 +6,14 @@ All notable changes to claude-mods are documented here. Format follows
 feature releases live in the README "Recent Updates" section.
 ## [Unreleased]
 
+## [3.9.0] - 2026-10-14
+
+The Docker family rebuilt around the engine as well as the files, DDEV and package-manager
+skills for agency PHP sites, AGENTS.md tooling end to end, lanes that live outside the
+project, and the gates that keep 112 skills honest. Two skills were renamed:
+`container-orchestration` is now `kubernetes-ops` and `push-gate` is now `push-preflight`;
+the installers remove the old installed copies.
+
 ### Added
 
 - **ddev-ops round 3: what an agent should know before it runs `ddev`.**
@@ -2212,7 +2220,16 @@ underneath them.
   agents, Python skill family, tech-debt scanner, modern CLI toolkit, validation
   suite
 
-[Unreleased]: https://github.com/0xDarkMatter/claude-mods/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/0xDarkMatter/claude-mods/compare/v3.9.0...HEAD
+[3.9.0]: https://github.com/0xDarkMatter/claude-mods/compare/v3.8.0...v3.9.0
+[3.8.0]: https://github.com/0xDarkMatter/claude-mods/compare/v3.7.0...v3.8.0
+[3.7.0]: https://github.com/0xDarkMatter/claude-mods/compare/v3.6.0...v3.7.0
+[3.6.0]: https://github.com/0xDarkMatter/claude-mods/compare/v3.5.0...v3.6.0
+[3.5.0]: https://github.com/0xDarkMatter/claude-mods/compare/v3.4.0...v3.5.0
+[3.4.0]: https://github.com/0xDarkMatter/claude-mods/compare/v3.3.0...v3.4.0
+[3.3.0]: https://github.com/0xDarkMatter/claude-mods/compare/v3.2.0...v3.3.0
+[3.2.0]: https://github.com/0xDarkMatter/claude-mods/compare/v3.1.0...v3.2.0
+[3.1.0]: https://github.com/0xDarkMatter/claude-mods/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/0xDarkMatter/claude-mods/compare/v2.10.1...v3.0.0
 [2.10.1]: https://github.com/0xDarkMatter/claude-mods/compare/v2.10.0...v2.10.1
 [2.10.0]: https://github.com/0xDarkMatter/claude-mods/compare/v2.9.0...v2.10.0
