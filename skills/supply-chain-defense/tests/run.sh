@@ -665,6 +665,27 @@ cp -R "$SB/pa-record/lib/site-packages/." "$SP/"
 expect_exit "findings outrank an unscanned package -> 10" 10 $?
 expect_has  "unscanned still named beside findings" "ghost@0.1" "$(cat "$SB/pa-ghost.err")"
 
+# A loopback or unspecified raw IP is no exfil endpoint, yet the raw-IP alternative
+# took any dotted quad: mcp 1.30.0 went HIGH cred-exfil + env-exfil only because a
+# dev-server origin allow-list ("http://127.0.0.1:*") sat beside its own installer
+# writing claude_desktop_config and a subprocess env copy. A public raw IP must fire.
+pa_ipkg() { # root ip -> pypi package that reads a credential path, copies env, names <ip>
+  local sp="$1/lib/site-packages"; pa_dist "$sp" ippkg 1.0
+  printf 'ippkg\n' > "$sp/ippkg-1.0.dist-info/top_level.txt"; mkdir -p "$sp/ippkg"
+  printf 'import os\nCFG = os.path.expanduser("~/claude_desktop_config.json")\nENV = dict(os.environ.items())\nORIGINS = ["http://%s:*", "http://localhost:*"]\n' \
+    "$2" > "$sp/ippkg/__init__.py"
+}
+pa_ipkg "$SB/pa-loop" 127.0.0.1
+printf 'BIND = "http://0.0.0.0:8000"\nALT = "https://127.45.6.7/"\n' > "$SB/pa-loop/lib/site-packages/ippkg/server.py"
+out="$("$PYTHON" "$PA" --root "$SB/pa-loop" --no-cache 2>/dev/null)"; rc=$?
+expect_exit "loopback-only raw IP with credential read is not high -> 0" 0 "$rc"
+expect_lacks "loopback raw IP is no cred-exfil endpoint" "cred-exfil" "$out"
+expect_lacks "loopback raw IP is no env-exfil endpoint" "env-exfil" "$out"
+pa_ipkg "$SB/pa-pubip" 203.0.113.7
+out="$("$PYTHON" "$PA" --root "$SB/pa-pubip" --no-cache 2>/dev/null)"; rc=$?
+expect_exit "public raw IP with credential read still flagged -> 10" 10 "$rc"
+expect_has  "public raw IP is a cred-exfil endpoint" "cred-exfil" "$out"
+
 # ── config-drift-check.py (repo-integrity / config-as-code, layer 6) ───────
 echo "-- config-drift-check.py --"
 CD="$SCRIPTS/config-drift-check.py"
