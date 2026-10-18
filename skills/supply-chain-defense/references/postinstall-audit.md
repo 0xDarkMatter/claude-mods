@@ -86,13 +86,23 @@ its findings — the cache speeds the scan, it does not hide results.
 | 0 | clean — no findings at/above `--min-severity` |
 | 2 | usage error (bad flag, no existing root) |
 | 3 | no root directory exists |
-| 5 | `--deep` requested but GuardDog/semgrep absent → **loud skip, heuristics still ran** (never a silent false-clean) |
-| 7 | `--live` only: the registry was unreachable (advisory, not a finding) |
-| 10 | one or more findings at/above `--min-severity` |
+| 5 | a PyPI package was **not scanned**: its code could not be located (below). Never a pass |
+| 10 | one or more findings at/above `--min-severity` (wins over 5) |
 
-`7` is deliberately distinct from `10`: a network blip during `--live` must never read as
-"package is bad". This is the same staleness-verifier discipline as §7 of
-`docs/SKILL-RESOURCE-PROTOCOL.md`.
+`--deep` without GuardDog/semgrep is a loud one-line skip that leaves the exit code alone
+(the heuristics still ran). A `--live` registry outage has no code of its own: see Exit
+precedence under --live. A network blip must never read as "package is bad", the same
+staleness-verifier discipline as §7 of `docs/SKILL-RESOURCE-PROTOCOL.md`.
+
+**Locating PyPI code.** Each `*.dist-info` leads to its code through `top_level.txt` (a
+package dir or a single-file module) or, failing that, `RECORD`, which most modern
+wheels carry without a `top_level.txt`. A PEP 420 namespace dir shared by several dists
+(protobuf's `google/`) is narrowed to the children this dist's RECORD lists. A dist-info
+neither file leads anywhere is **unscanned**: stderr names it (`ERROR: N package(s) NOT
+scanned`), the JSON carries it in `meta.unscanned` (`package`, `path`, `reason`), the
+summary counts it, and the run exits `5` with no `clean:` line. Until 2026-10 such
+packages were dropped without a word, so a venv of 93 dist-infos reported
+"45 packages (45 scanned)".
 
 ## --deep (GuardDog confirmation)
 
