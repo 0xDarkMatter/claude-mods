@@ -15,6 +15,16 @@ feature releases live in the README "Recent Updates" section.
   exit 3: red on Linux CI, green on Windows and Docker-less machines. The socket check now
   goes through the fake host (`paths`), the fixture pins the socket absent, and a new
   `socket-present` case pins the other side. The new tests failed on the old doctor.
+- **`postinstall-audit.py` no longer passes unread PyPI packages as clean.** It found a
+  package's code only through `top_level.txt` and skipped any dist-info without one, with
+  no message: a real venv printed "45 packages (45 scanned)" beside 93 dist-infos, so
+  most modern wheels (protobuf among them) were never read. It now falls back to
+  `RECORD` (narrowing a shared namespace dir such as `google/` to the dist's own
+  children), resolves `top_level.txt` names that are single-file modules, and names any
+  package it still cannot locate on stderr and in `meta.unscanned` with exit 5, never a
+  `clean:` line; findings still win with 10. The reference's exit-code table now matches
+  the script (no exit 7; `--deep` without GuardDog does not change the code). The new
+  tests failed on the old script.
 
 ## [3.9.0] - 2026-10-14
 
