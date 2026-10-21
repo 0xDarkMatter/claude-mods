@@ -302,6 +302,23 @@ expect_exit "empty remote: a hit in the first commit refuses" 1 "$rc"
 expect_has "empty remote: refusal names the first commit's file" "legacy.txt: " "$(cat "$SB/empty-remote.out")"
 expect_has "empty remote: label says full branch, empty remote" "full branch - 2 commits via gitleaks (origin has no refs: first push to an empty remote" "$(cat "$SB/empty-remote.out")"
 
+# The branch's base exists only on ANOTHER remote (upstream), not on origin, the
+# remote being pushed to. A scope taken from every remote's refs would treat the
+# base as already published and skip it; scoping to the pushed-to remote scans it.
+repo="$SB/other-remote"
+new_remote_repo "$repo"
+commit_path "$repo" README.md 'baseline'
+git -C "$repo" push -q origin main 2>/dev/null
+git init -q --bare -b main "$repo.upstream.git"
+git -C "$repo" remote add upstream "$repo.upstream.git"
+commit_path "$repo" legacy.txt "$secret_line"
+git -C "$repo" push -q upstream main 2>/dev/null
+git -C "$repo" switch -q -c feature
+commit_path "$repo" candidate.txt 'message = "ordinary configuration"'
+scan_stubbed "$repo" "$SB/other-remote.out" feature; rc=$?
+expect_exit "base only on another remote: its hit is still scanned" 1 "$rc"
+expect_has "other-remote refusal names the base commit's file" "legacy.txt: " "$(cat "$SB/other-remote.out")"
+
 # The remote has refs but shares no history with the branch (a host-created
 # README, then a local repo pushed to a new branch): everything is unsent.
 repo="$SB/unrelated"
