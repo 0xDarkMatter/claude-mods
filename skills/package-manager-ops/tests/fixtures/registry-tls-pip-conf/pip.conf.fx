@@ -1,0 +1,5 @@
+[global]
+index-url = http://pypi.example.com/simple
+trusted-host =
+    pypi.example.com
+    localhost

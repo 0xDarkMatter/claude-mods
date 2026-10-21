@@ -108,8 +108,9 @@ A read-only scan of one repo root. It finds conflicting lockfiles, lockfiles tha
 disagree with their manifests, Node and PHP pins that are missing, disagree with each
 other or with DDEV, or name end-of-life releases, unpinned `npx`/`dlx` use in scripts,
 docs and CI, native CLIs routed through npx, Bower and node-sass, committed registry
-credentials (reported by file and line, never by value), and `.npmrc` placeholders pnpm
-ignores. From CI configs, Dockerfiles and appspec hook scripts it reports unfrozen
+credentials (reported by file and line, never by value), `.npmrc` placeholders pnpm
+ignores, and committed configs (npm, Yarn, pnpm, pip, uv, Composer, `.env*`) that turn
+TLS verification off or point at an `http://` registry. From CI configs, Dockerfiles and appspec hook scripts it reports unfrozen
 installs, Yarn flags on npm, unpinned global installs, deploys without `--no-dev`,
 Composer 1, and credentials written into a Docker build context; it follows a CI build
 into the subfolder it runs in. It lists nested package roots and flags them when they use

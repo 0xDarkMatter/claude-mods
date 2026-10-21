@@ -10,6 +10,10 @@
 # strips the suffix when it materialises a case into a temp dir. Guard: do NOT rename
 # them to bare package.json / composer.lock / .npmrc - Dependabot, Socket and npm
 # itself would treat the fixture manifests (node-sass, bower, fake tokens) as real.
+# A `.env.*` fixture is stored as `dotenv.*.fx` (dotenv.example.fx -> .env.example). Guard:
+# do NOT store it as `.env.example.fx` - the repo .gitignore ignores `.env.*`, so `git add`
+# silently drops it (the suite then passes locally and fails on a clean clone), and
+# push-preflight refuses to push any path matching `.env.`. `.envrc.fx` matches neither.
 # A case = the `clean` control + the case's own files on top, minus each path in
 # `_delete`; `_expect` lists the exact finding ids pm-audit must report (empty = the
 # case is a clean control and must exit 0). An optional `_lines` pins the exact
@@ -160,6 +164,8 @@ sys.excepthook = _crash
 def materialise(src: Path, dest: Path):
     for f in src.rglob("*.fx"):
         out = dest / f.relative_to(src).with_suffix("")
+        if out.name.startswith("dotenv"):  # dotenv.example.fx -> .env.example (see FIXTURES above)
+            out = out.with_name(".env" + out.name[len("dotenv"):])
         out.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(f, out)
 
@@ -285,8 +291,28 @@ for fid, case_name in (
     ("js.root.not-private", "js-root-not-private"),
     ("php.eol-soon", "php-eol-soon"),
     ("js.node.eol-soon", "js-node-eol-soon"),
+    ("registry.tls.disabled", "registry-tls-npmrc"),
+    ("registry.url.http", "registry-tls-npmrc"),
 ):
     mutation(fid, case_name, f'"{fid}"', f'"mutant.{fid}"')
+# transport(): each near-miss control proves one exemption is load-bearing.
+mutation("loopback hosts are exempt", "clean-tls-js",
+         'return h in ("localhost", "::1")', 'return False and h in ("localhost", "::1")')
+mutation("an http:// proxy is not a registry", "clean-tls-js",
+         'elif (key == "registry" or (key.startswith("@") and key.endswith(":registry"))) and http_urls(value):\n'
+         '                http(".npmrc"', 'elif http_urls(value):\n                http(".npmrc"')
+mutation("a commented requirements option is not read", "clean-tls-python",
+         's = re.sub(r"(^|\\s)#.*$", "", line)\n', 's = line\n')
+mutation("another tool's pyproject table never counts", "clean-tls-python",
+         'leaf = key[len(pre):] if key.startswith(pre) else None', 'leaf = key.rsplit(".", 1)[-1]')
+mutation("only NODE_TLS_REJECT_UNAUTHORIZED=0 disables checks", "clean-tls-composer-env",
+         'name == "NODE_TLS_REJECT_UNAUTHORIZED" and value == "0"', 'name == "NODE_TLS_REJECT_UNAUTHORIZED"')
+mutation("a gitignored, untracked config is a local override", "clean-tls-composer-env",
+         'if shipped[rel]:', 'if True:')
+mutation("multi-line pip trusted-host is read", "registry-tls-pip-conf",
+         'cur[2] = (cur[2] + " " + line.strip()).strip()', 'pass')
+mutation("a [[tool.uv.index]] url is read", "registry-tls-uv-toml",
+         '"index", "index.url")', '"index")')
 mutation("composer update-no-dev", "clean-deploy-composer-update-no-dev", '"--update-no-dev"', '"--mutant-update-no-dev"')
 mutation("composer no-dev env", "clean-deploy-composer-env",
          'obj(active_env).get("COMPOSER_NO_DEV")', 'False')
@@ -408,6 +434,8 @@ row("js.engines.unenforced" in notes_of("clean"), "engines note fires for an npm
 row("js.engines.unenforced" not in notes_of("clean-pnpm"), "engines note stays silent for a pnpm repo (.npmrc advice is npm's)")
 # A project that pins config.platform.php gets a missing require.php as a note, not a finding.
 row("php.require.missing" in notes_of("clean-php-require-platform-pinned"), "missing require.php is a note when config.platform.php is set")
+# A gitignored, untracked .env.local that turns TLS off ships to nobody: a note, never silence.
+row("registry.tls.unshipped" in notes_of("clean-tls-composer-env"), "TLS off in a gitignored local file is a note, not a finding")
 def audit_json(case):
     d = tmp / "m" / case
     p = subprocess.run([sys.executable, audit, "--json", "--as-of", "2026-10-05", str(d)], capture_output=True, text=True)

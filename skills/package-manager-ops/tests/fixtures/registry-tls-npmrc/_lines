@@ -1,0 +1,2 @@
+registry.tls.disabled .npmrc:2
+registry.url.http .npmrc:3

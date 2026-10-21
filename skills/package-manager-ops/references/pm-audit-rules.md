@@ -244,15 +244,20 @@ Tools and packages the ecosystem has moved on from.
 
 ## Registry and credential rules
 
-Tokens and auth files that must not ship.
+Tokens and auth files that must not ship, and transport settings that let a package be
+swapped in transit ([registries-and-auth.md](registries-and-auth.md#tls-verification-and-plain-http-registries)
+lists the files and keys).
 
 | Id | Severity | Confidence | Fix | Means |
 |---|---|---|---|---|
 | <a id="registry.authjson.committed"></a>`registry.authjson.committed` | error | high | command | a root auth.json that git tracks or does not ignore |
 | <a id="registry.credentials.image"></a>`registry.credentials.image` | error | medium | edit | CI writes credentials into a Docker build context that the image copies |
 | <a id="registry.pnpm.placeholder-ignored"></a>`registry.pnpm.placeholder-ignored` | warn | high | edit | a ${...} placeholder in a project .npmrc setting that pnpm ignores |
+| <a id="registry.tls.disabled"></a>`registry.tls.disabled` | error | high | edit | a committed config turns TLS certificate checks off or allows plain HTTP to a host |
 | <a id="registry.token.committed"></a>`registry.token.committed` | error | high | manual | a literal token in .npmrc or .yarnrc.yml |
+| <a id="registry.url.http"></a>`registry.url.http` | error | high | edit | a committed registry or index URL uses plain http:// |
 | <a id="registry.authjson.ignored"></a>`registry.authjson.ignored` | note | high | manual | auth.json is present and gitignored (the good state) |
+| <a id="registry.tls.unshipped"></a>`registry.tls.unshipped` | note | high | manual | a gitignored, untracked root config turns TLS off or uses a plain-HTTP registry |
 
 ## CI and deploy rules
 

@@ -1,0 +1,2 @@
+registry.tls.disabled pyproject.toml:7
+registry.url.http pyproject.toml:10
