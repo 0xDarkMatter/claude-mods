@@ -129,10 +129,16 @@ PAT_CRED = re.compile(
     r"\.npmrc|\.pypirc|\.aws[/\\]credentials|\.config[/\\]gcloud|\.kube[/\\]config"
     r"|\.ssh[/\\]id_|\.claude[/\\]|\.claude\.json|claude_desktop_config"
     r"|Login Data|Local State|keychain|wallet\.dat|\.docker[/\\]config\.json", re.I)
+# Raw-IP URLs count as exfil endpoints EXCEPT loopback (127.0.0.0/8) and the
+# unspecified address (0.0.0.0): neither leaves the machine, and both are routine
+# in dev-server binds and origin allow-lists. Counting them paired mcp 1.30.0's
+# "http://127.0.0.1:*" allow-list with its own installer's claude_desktop_config
+# write into a HIGH cred-exfil (2026-10-18). Lookahead, not a post-filter: a file
+# naming loopback AND a public IP still matches on the public one.
 PAT_NET = re.compile(
     r"webhook\.site|discord(app)?\.com/api/webhooks|api\.telegram\.org"
     r"|pastebin\.com|hastebin|transfer\.sh|requestbin|burpcollaborator|oast\."
-    r"|interactsh|https?://\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", re.I)
+    r"|interactsh|https?://(?!127\.|0\.0\.0\.0(?!\d))\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", re.I)
 PAT_ENV = re.compile(r"JSON\.stringify\s*\(\s*process\.env\s*\)|Object\.(entries|keys)\s*\(\s*process\.env\s*\)"
                      r"|dict\s*\(\s*os\.environ\s*\)|os\.environ\.items\s*\(\)", re.I)
 PAT_PERSIST = re.compile(r"settings\.json|\.claude[/\\]settings|mcpServers|\.bashrc|\.zshrc"

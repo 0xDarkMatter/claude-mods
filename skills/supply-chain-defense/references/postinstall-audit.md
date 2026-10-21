@@ -51,7 +51,12 @@ trees are full of `eval` and base64 — see the false-positive note below):
 | `eval-base64` | low | `eval`/`Function` **and** base64 decode co-occurring in one small non-minified file |
 
 "Exfil endpoint" = `webhook.site`, Discord/Telegram webhooks, paste sites,
-`transfer.sh`, OAST/interactsh collaborators, or a raw-IP URL.
+`transfer.sh`, OAST/interactsh collaborators, or a raw-IP URL other than loopback
+(`127.0.0.0/8`) or the unspecified address (`0.0.0.0`). Those two never leave the
+machine and turn up in dev-server binds and origin allow-lists, so they don't count:
+`mcp` 1.30.0 was a HIGH cred-exfil only because its `http://127.0.0.1:*` allow-list
+sat beside its own `mcp install` writing `claude_desktop_config`. A file that names
+loopback and a public raw IP still counts.
 
 Default `--min-severity medium` reports the high/medium tiers and stays silent on the
 low informational ones. Drop to `--min-severity low` (or use `--json`) to see everything.
