@@ -1012,17 +1012,18 @@ catches("a command-kind fix quotes the command", 'if command is None:\n         
         lambda s: all(f["fix"]["command"] or f["fix"]["kind"] != "command" for f in json.loads(runs(pa(tmp / "m" / "js-lockfile-stale", "--json", script=s)).stdout)["data"]))
 
 # refute-ux guards: each mutant restores one way debt could hide.
-def fresh(case, edit):
+# Not "fresh": fresh(name) above is in this same program, and a second def would shadow it.
+def fresh_edited(case, edit):
     d = clone(case)
     edit(d)
     return d
-d_trail = fresh("clean-suppression-inline", lambda d: (d / "scripts" / "bootstrap.sh").write_text(
+d_trail = fresh_edited("clean-suppression-inline", lambda d: (d / "scripts" / "bootstrap.sh").write_text(
     "#!/bin/sh\nnpx eslint . # pm-audit: ignore[npx.unpinned] pinned by the image\nnpx prettier .\n"))
 catches("a trailing inline ignore covers its own line only",
         'if idx == line - 2 and not COMMENT_ONLY.match(rows[idx]):',
         'if False:',
         lambda s: runs(pa(d_trail, script=s)).returncode == 10)
-d_err = fresh("registry-token-committed", lambda d: (d / ".npmrc").write_text((d / ".npmrc").read_text().replace(
+d_err = fresh_edited("registry-token-committed", lambda d: (d / ".npmrc").write_text((d / ".npmrc").read_text().replace(
     "\n//npm.example.com/:_authToken", "\n# pm-audit: ignore[registry.token.committed] it is fine\n//npm.example.com/:_authToken", 1)))
 catches("an inline ignore cannot mute an error", 'if hit and hit[0] == "ok" and f["severity"] == "error":', 'if False:',
         lambda s: runs(pa(d_err, script=s)).returncode == 10)
@@ -1033,12 +1034,12 @@ def uses_repo(d):
     (d / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
     (d / ".github" / "workflows" / "ci.yml").write_text("name: ci\non: push\njobs:\n  ci:\n    runs-on: ubuntu-latest\n    steps:\n"
                                                      "      - uses: ./.github/actions/setup # pm-audit: ignore[deploy.global.unpinned] serve only\n")
-d_uses = fresh("clean", uses_repo)
+d_uses = fresh_edited("clean", uses_repo)
 catches("an inline ignore on a local uses: line is not honoured",
         'if 0 < line <= len(rows) and LOCAL_USES_LINE.search(rows[line - 1]):', 'if False:',
         lambda s: runs(pa(d_uses, script=s)).returncode == 10)
-d_req0 = fresh("deploy-composer-update", lambda d: (d / "Dockerfile").write_text("FROM php:8.4-fpm\nRUN composer require acme/tool:5\n"))
-d_req1 = fresh("deploy-composer-update", lambda d: (d / "Dockerfile").write_text(
+d_req0 = fresh_edited("deploy-composer-update", lambda d: (d / "Dockerfile").write_text("FROM php:8.4-fpm\nRUN composer require acme/tool:5\n"))
+d_req1 = fresh_edited("deploy-composer-update", lambda d: (d / "Dockerfile").write_text(
     "FROM php:8.4-fpm\nRUN composer require acme/tool:5\nRUN composer require evil/backdoor\n"))
 def new_require_lines(s):
     b = tmp / "c4" / f"req-base-{abs(hash(str(s)))}.json"
@@ -1046,11 +1047,11 @@ def new_require_lines(s):
     data = json.loads(runs(pa(d_req1, "--json", "--baseline", str(b), script=s)).stdout)["data"]
     return [f["line"] for f in data if f["id"] == "deploy.composer.adhoc"] == [3]
 catches("a fingerprint includes the flagged line's text", '" ".join(line_text.split())', '""', new_require_lines)
-d_inj = fresh("clean", lambda d: (d / "package.json").write_text(json.dumps({**json.loads((d / "package.json").read_text()),
+d_inj = fresh_edited("clean", lambda d: (d / "package.json").write_text(json.dumps({**json.loads((d / "package.json").read_text()),
     "dependencies": {"x\n::error file=README.md::pwned": "github:a/b"}}, indent=2)))
 catches("TSV fields escape newlines", 'return str(s).replace("\\\\", "\\\\\\\\").replace("\\t", "\\\\t").replace("\\r", "\\\\r").replace("\\n", "\\\\n")',
         "return str(s)", lambda s: not any(l.startswith("::") for l in runs(pa(d_inj, script=s)).stdout.splitlines()))
-d_loc = fresh("clean", lambda d: (
+d_loc = fresh_edited("clean", lambda d: (
     (d / "package.json").write_text(json.dumps({**json.loads((d / "package.json").read_text()), "engines": {"node": "16"}}, indent=2)),
     (d / ".nvmrc").unlink(),
     (d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "js.node.eol", "path": "package.json",
@@ -1059,15 +1060,15 @@ catches("a config glob matches the real file of a location", 'f["path"] = real_p
         lambda s: "js.node.eol" not in {f["id"] for f in json.loads(runs(pa(d_loc, "--json", script=s)).stdout)["data"]})
 catches("the library profile keeps js.engine.floor", 'LIBRARY_SILENCED = {"js.lockfile.missing"', 'LIBRARY_SILENCED = {"js.engine.floor", "js.lockfile.missing"',
         lambda s: "js.engine.floor" in {f["id"] for f in json.loads(runs(pa(tmp / "m" / "js-engine-floor", "--json", "--profile", "library", script=s)).stdout)["data"]})
-d_dot = fresh("legacy-bower", lambda d: (d / ".pm-audit.json").write_text(json.dumps(
+d_dot = fresh_edited("legacy-bower", lambda d: (d / ".pm-audit.json").write_text(json.dumps(
     {"ignore": [{"id": "legacy.bower", "reason": ".", "until": "2026-12-31"}]})))
 catches("a config reason must say something", "IGNORE_REASON_MIN = 8", "IGNORE_REASON_MIN = 0",
         lambda s: "config.invalid" in {f["id"] for f in json.loads(runs(pa(d_dot, "--json", script=s)).stdout)["data"]})
-d_far = fresh("legacy-bower", lambda d: (d / ".pm-audit.json").write_text(json.dumps(
+d_far = fresh_edited("legacy-bower", lambda d: (d / ".pm-audit.json").write_text(json.dumps(
     {"ignore": [{"id": "legacy.bower", "reason": "kept until the npm move", "until": "9999-12-31"}]})))
 catches("a Markdown ignore needs an HTML comment", 'if markdown and "<!--" not in rows[idx][:m.start()]:', "if False:",
         lambda s: runs(pa(d_mdh, script=s)).returncode == 10)
-d_big = fresh("clean", lambda d: ((d / "scripts").mkdir(exist_ok=True), (d / "scripts" / "large.sh").write_text("#" * (513 * 1024) + "\nnpx eslint .\n")))
+d_big = fresh_edited("clean", lambda d: ((d / "scripts").mkdir(exist_ok=True), (d / "scripts" / "large.sh").write_text("#" * (513 * 1024) + "\nnpx eslint .\n")))
 catches("an oversized script marks the npx check skipped",
         'self.blind("npx", f"skipped a file over {MAX_DOC_BYTES // 1024} KiB: {rel(self.root, p)}")', "pass",
         lambda s: next(c for c in json.loads(runs(pa(d_big, "--json", script=s)).stdout)["meta"]["checks"] if c["check"] == "npx")["status"] == "skipped")
@@ -1081,7 +1082,7 @@ def legacy_twin(s):
     return [f["line"] for f in data if f["id"] == "deploy.composer.adhoc"] == [3]
 catches("a legacy baseline row matches on its line too", 'return (f.get("id"), f.get("file"), f.get("line"), f.get("message"))',
         'return (f.get("id"), f.get("file"), f.get("message"))', legacy_twin)
-d_sp = fresh("clean", lambda d: ((d / ".github" / "workflows").mkdir(parents=True, exist_ok=True),
+d_sp = fresh_edited("clean", lambda d: ((d / ".github" / "workflows").mkdir(parents=True, exist_ok=True),
                                  (d / ".github" / "workflows" / "my job.yml").write_text(
                                      "name: j\non: push\njobs:\n  j:\n    runs-on: ubuntu-latest\n    steps:\n"
                                      "      - uses: actions/setup-node@v4\n        with:\n          node-version: '16'\n")))
