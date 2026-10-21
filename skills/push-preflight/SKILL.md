@@ -53,7 +53,7 @@ Step 11 →  Post-push verify (ls-remote matches pushed SHA)
 | New remote branch; the remote has other refs | `<branch> --not --remotes=<remote>`: commits no `<remote>/*` ref reaches | the fork point: the newest already-published parent of those commits |
 | The remote has no refs at all | the whole branch, labelled "first push to an empty remote" | the empty tree (every file added) |
 
-So a feature branch's first push scans its own commits, not the main it was cut from. A line already on the remote was published by an earlier push, and auditing it is history work (`security-ops`). The answer comes from local remote-tracking refs, so it is only as fresh as the last fetch: a ref that is behind the remote only widens the scan. When a branch merges two remote branches that forked separately, the base falls back to their common ancestor. That over-scans: it can refuse a push, but never misses a line. `bash scripts/push-scope.sh <remote> <branch>` prints the scope for a push.
+So a feature branch's first push scans its own commits, not the main it was cut from. A line already on the remote was published by an earlier push, and auditing it is history work (`security-ops`). The answer comes from local remote-tracking refs, so it is only as fresh as the last fetch: a ref that is behind the remote only widens the scan. When a branch merges two remote branches that forked separately, the base falls back to their common ancestor. That over-scans: it can refuse a push, but never misses a line. `bash "<skill-dir>/scripts/push-scope.sh" <remote> <branch>` prints the scope for a push.
 
 ## Invocation
 
