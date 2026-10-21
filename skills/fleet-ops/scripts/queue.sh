@@ -21,6 +21,7 @@
 #   fleet queue lane/foo 3b34773                       # land one reviewed lane
 #   fleet queue --dry-run lane/foo 3b34773 lane/bar 4ccf7bf   # audit only, land nothing
 #   fleet queue --deadline 45m --poll 30s lane/foo 3b34773
+#   fleet queue --deny-file ~/.private-names.txt lane/foo 3b34773
 #   fleet queue --json lane/foo 3b34773 | jq -r '.data[].result'
 #
 # CONTRACT (each line is a failure this exists to prevent; references/conduct.md has the why):
@@ -37,6 +38,10 @@
 #     reviewed tip gives. Anything else was not reviewed.
 #   * Every audit runs on the would-be merge (`git merge-tree`) against the base as it is
 #     at that attempt, and is re-run on every retry, because the base moves between them.
+#   * Released changelog sections are immutable: a clean auto-merge can file a lane's
+#     bullet under the newest `## [x.y.z]`, and no gate notices.
+#   * Deny-list findings name the file, line and pattern number, never the matched text:
+#     the list holds names that must not be published, and this output gets pasted.
 #   * No `< <(producer)` loops: every producer is captured and its status checked first,
 #     so a git that dies part-way fails the audit instead of passing it on empty input.
 set -uo pipefail
@@ -56,27 +61,38 @@ retrying while fleet refuses for a live owner or a held landing marker.
 
 Options:
   --dry-run            Check and audit every lane; land nothing, wait for nothing
-  --deadline <dur>     Stop waiting, and start no new land, after this (default 90m)
+  --deadline <dur>     Stop waiting, and start no new land, after this (default 75m:
+                       longer than one gate, and short enough that a land started at
+                       the deadline still finishes inside a ~2 h background limit)
   --poll <dur>         Wait between retries (default 60s)
   --mem-limit <pct>    Windows commit-charge ceiling for starting a gate (default 92; off)
   --changelog <path>   Changelog the audits read (default CHANGELOG.md; skipped if absent)
-  --skip-audit <name>  Skip one audit: dropped | glued | dups (repeatable; give a reason
-                       in the ledger, this is for a verified false positive)
+  --deny-file <path>   A private list of names that must not be published, one regex
+                       per line (ripgrep syntax, case-insensitive, '#' comments); the
+                       deny audit reads every line the merge adds (repeatable)
+  --skip-audit <name>  Skip one audit: dropped | glued | released | dups | deny
+                       (repeatable; for a verified false positive, such as a release
+                       cut for released; give the reason in the ledger)
   --json               Print one JSON envelope at the end instead of TSV rows
   -h, --help           This help
 
 Durations: 45s, 30m, 2h, or a bare number of minutes.
 
 Audits (on the would-be merge, against the base):
-  dropped  a changelog line the merge removes that none of the lane's own commits removed
+  dropped  a changelog line the merge loses (net of lines it only moves) that none of the
+           lane's own commits removed: a removal made in a merge resolution
   glued    an [Unreleased] "- **" entry with no blank line above it, new against the base
+  released a released "## [x.y.z]" section the merge changes or removes (a new section,
+           as a release cut adds, is fine; link-reference lines are a footer, not content)
   dups     a top-level shell function, Python def or CONSTANT defined twice in a touched
            .sh/.py file, new against the base's copy
+  deny     an added line, in any file, matching a --deny-file pattern
 
 EXAMPLES
   fleet queue lane/foo 3b34773
   fleet queue --dry-run lane/foo 3b34773 lane/bar 4ccf7bf
   fleet queue --deadline 45m --poll 30s lane/foo 3b34773
+  fleet queue --deny-file ~/.private-names.txt lane/foo 3b34773
   fleet queue --json lane/foo 3b34773 | jq -r '.data[].result'
 
 Exit codes: 0 all landed (or already in the base), 2 usage, 3 not found, 4 audit failed,
@@ -86,9 +102,10 @@ EOF
 }
 
 # === ARGUMENTS ================================================================
-DRY_RUN=0 JSON=0 DEADLINE_ARG="90m" POLL_ARG="60s" MEM_LIMIT="92" CHANGELOG="CHANGELOG.md"
+DRY_RUN=0 JSON=0 DEADLINE_ARG="75m" POLL_ARG="60s" MEM_LIMIT="92" CHANGELOG="CHANGELOG.md"
 SKIP_AUDITS=" "
 PAIRS=()
+DENY_FILES=() DENY_N=0   # DENY_N guards every expansion: bash 3.2 + set -u rejects "${a[@]}" on an empty array
 
 die_usage() { echo "fleet queue: $1" >&2; echo "run 'fleet queue --help' for usage" >&2; exit 2; }
 
@@ -108,16 +125,19 @@ while [[ $# -gt 0 ]]; do
     -h|--help) usage; exit 0 ;;
     --dry-run) DRY_RUN=1; shift ;;
     --json) JSON=1; shift ;;
-    --deadline|--poll|--mem-limit|--changelog|--skip-audit)
+    --deadline|--poll|--mem-limit|--changelog|--skip-audit|--deny-file)
       [[ $# -ge 2 && -n "$2" ]] || die_usage "$1 needs a value"
       case "$1" in
         --deadline) DEADLINE_ARG=$2 ;;
         --poll) POLL_ARG=$2 ;;
         --mem-limit) MEM_LIMIT=$2 ;;
         --changelog) CHANGELOG=$2 ;;
+        --deny-file)
+          [[ -f "$2" ]] || { echo "fleet queue: deny file not found: $2" >&2; exit 3; }
+          DENY_FILES+=("$2"); DENY_N=$((DENY_N + 1)) ;;
         --skip-audit)
-          case "$2" in dropped|glued|dups) SKIP_AUDITS+="$2 " ;;
-            *) die_usage "--skip-audit takes dropped, glued or dups, not '$2'" ;; esac ;;
+          case "$2" in dropped|glued|released|dups|deny) SKIP_AUDITS+="$2 " ;;
+            *) die_usage "--skip-audit takes dropped, glued, released, dups or deny, not '$2'" ;; esac ;;
       esac
       shift 2 ;;
     --) shift; PAIRS+=("$@"); break ;;
@@ -206,9 +226,10 @@ emit_json() {
 # findings on stdout (one per line) and returns 0 when there are none, 1 when there are,
 # 2 when a producer failed: an audit that could not read its input must not pass.
 
-# Removed lines of a unified diff on stdin, hunk bodies only (never the ---/+++ headers).
-# Every removed line counts, bullets ("- **x**" shows as "-- **x**") and blank lines too.
-removed_lines() { awk '/^diff --git/{h=0} /^@@/{h=1; next} h && /^-/{print substr($0, 2)}'; }
+# Removed ($1 = -) or added ($1 = +) lines of a unified diff on stdin, hunk bodies only,
+# never the ---/+++ headers. Every line counts: a removed bullet shows as "-- **x**", which
+# a '^-[^-]' filter never sees, and a blank line as a bare "-".
+hunk_lines() { awk -v s="$1" '/^diff --git/{h=0} /^@@/{h=1; next} h && substr($0, 1, 1) == s {print substr($0, 2)}'; }
 
 audit_dropped() { # B T lane
   local B=$1 T=$2 lane=$3 merged own
@@ -218,9 +239,13 @@ audit_dropped() { # B T lane
   # The lane's own removals: each non-merge commit's own patch. A removal made inside a
   # merge commit (a "keep both sides" resolution) is in none of them, so it is caught.
   own=$(git log --no-merges --no-color -p --format= "$B..$lane" -- "$CHANGELOG") || return 2
-  printf '%s\n' "$merged" | removed_lines | LC_ALL=C sort > "$WORK/merged"
-  printf '%s\n' "$own" | removed_lines | LC_ALL=C sort > "$WORK/own"
-  LC_ALL=C comm -23 "$WORK/merged" "$WORK/own" > "$WORK/dropped" || return 2
+  # Ours + theirs - base, as multisets: a line the merge removes AND adds was moved (git
+  # often aligns a reordered changelog as replacements), so only a NET loss counts.
+  printf '%s\n' "$merged" | hunk_lines - | LC_ALL=C sort > "$WORK/merged-rm"
+  printf '%s\n' "$merged" | hunk_lines + | LC_ALL=C sort > "$WORK/merged-add"
+  printf '%s\n' "$own" | hunk_lines - | LC_ALL=C sort > "$WORK/own"
+  LC_ALL=C comm -23 "$WORK/merged-rm" "$WORK/merged-add" > "$WORK/merged-net" || return 2
+  LC_ALL=C comm -23 "$WORK/merged-net" "$WORK/own" > "$WORK/dropped" || return 2
   [[ -s "$WORK/dropped" ]] || return 0
   sed 's/^/dropped: /' "$WORK/dropped"
   return 1
@@ -247,6 +272,47 @@ audit_glued() { # B T
   [[ -s "$WORK/glued" ]] || return 0
   cut -c1-72 "$WORK/glued" | sed 's/^/glued: /'
   return 1
+}
+
+# Released sections as "<version> TAB <line>", one row per line. A section runs from its
+# "## [x.y.z]" heading to the next "## " heading. Link-reference lines ("[3.9.0]: https://
+# ...") are a footer that every release cut rewrites, so they belong to no section.
+released_lines() {
+  awk '{ sub(/\r$/, "") }
+       /^## / { v = ""; if (match($0, /^## \[[0-9][^]]*\]/)) v = substr($0, 5, RLENGTH - 5) }
+       /^\[[^]]+\]: / { next }
+       v != "" { print v "\t" $0 }'
+}
+
+audit_released() { # B T
+  local B=$1 T=$2 was now versions v a b gains loses rc=0
+  git cat-file -e "$B:$CHANGELOG" 2>/dev/null || return 0
+  if ! git cat-file -e "$T:$CHANGELOG" 2>/dev/null; then echo "released: the merge deletes $CHANGELOG"; return 1; fi
+  was=$(git show "$B:$CHANGELOG") || return 2
+  now=$(git show "$T:$CHANGELOG") || return 2
+  printf '%s\n' "$was" | released_lines > "$WORK/rel-was"
+  printf '%s\n' "$now" | released_lines > "$WORK/rel-now"
+  versions=$(cut -f1 "$WORK/rel-was" | uniq) || return 2
+  # procsub guard: the version list is captured and its status checked above, then looped
+  # from a here-string, so a cut that died part-way fails the audit, never skips sections.
+  while IFS= read -r v; do
+    [[ -n "$v" ]] || continue
+    # Every section the base has must come through byte for byte. A section only the
+    # merge has (a release cut) is not in this loop, so it is allowed.
+    a=$(awk -F'\t' -v v="$v" '$1 == v' "$WORK/rel-was")
+    b=$(awk -F'\t' -v v="$v" '$1 == v' "$WORK/rel-now")
+    [[ "$a" == "$b" ]] && continue
+    rc=1
+    if [[ -z "$b" ]]; then echo "released: [$v] is gone from the merge"; continue; fi
+    printf '%s\n' "$a" | LC_ALL=C sort > "$WORK/rel-a"
+    printf '%s\n' "$b" | LC_ALL=C sort > "$WORK/rel-b"
+    gains=$(LC_ALL=C comm -13 "$WORK/rel-a" "$WORK/rel-b" | cut -f2- | sed '/^$/d' | head -n 3)
+    loses=$(LC_ALL=C comm -23 "$WORK/rel-a" "$WORK/rel-b" | cut -f2- | sed '/^$/d' | head -n 3)
+    [[ -z "$gains" ]] || awk -v p="released: [$v] gains: " '{ print p substr($0, 1, 100) }' <<< "$gains"
+    [[ -z "$loses" ]] || awk -v p="released: [$v] loses: " '{ print p substr($0, 1, 100) }' <<< "$loses"
+    [[ -n "$gains$loses" ]] || echo "released: [$v] changed (blank lines or order)"
+  done <<< "$versions"
+  return $rc
 }
 
 # Names defined twice at top level: shell "name()", Python "def name", "CONSTANT = ".
@@ -279,17 +345,65 @@ audit_dups() { # B T
   return $rc
 }
 
+# Lines the merge adds, as "path TAB line-in-merge TAB text", from a -U0 diff on stdin.
+added_lines() {
+  awk '/^\+\+\+ / { f = substr($0, 5); sub(/^b\//, "", f); next }
+       /^@@/        { split($3, h, ","); n = substr(h[1], 2) + 0; next }
+       /^\+/        { print f "\t" n "\t" substr($0, 2); n++ }'
+}
+
+# Line numbers (in the text on stdin) matching regex $1, case-insensitive. ripgrep when
+# present, since that is the syntax private deny lists are written in; else grep -E.
+# Status 0 hits, 1 none, 2 the pattern is not a valid regex.
+deny_grep() {
+  if command -v rg >/dev/null 2>&1; then rg -i -n --no-heading -e "$1" | cut -d: -f1
+  else grep -Ein -e "$1" | cut -d: -f1; fi
+}
+
+# Any added line matching a --deny-file pattern. Findings name file, line and the
+# pattern's number in its list, NEVER the matched text (see the contract above). Unlike a
+# repo's own leak gate, it reads every file, CHANGELOG and plans included: those are
+# skipped there because they are history, and this reads only what the merge ADDS.
+audit_deny() { # B T
+  [[ $DENY_N -gt 0 ]] || return 0
+  local B=$1 T=$2 diff f p i hits n loc rc=0 shown=0
+  diff=$(git diff --no-color --no-ext-diff -U0 "$B" "$T") || return 2
+  printf '%s\n' "$diff" | added_lines > "$WORK/added"
+  cut -f3- "$WORK/added" > "$WORK/added-text"
+  for f in "${DENY_FILES[@]}"; do
+    i=0
+    while IFS= read -r p || [[ -n "$p" ]]; do
+      p=${p%$'\r'}
+      case "$p" in ''|'#'*) continue ;; esac
+      i=$((i + 1))
+      hits=$(deny_grep "$p" < "$WORK/added-text"); n=$?
+      if [[ $n -ge 2 ]]; then echo "error: pattern #$i of $(basename "$f") is not a valid regex"; return 2; fi
+      [[ -n "$hits" ]] || continue
+      rc=1
+      for n in $hits; do
+        loc=$(sed -n "${n}p" "$WORK/added" | cut -f1,2 | tr '\t' ':')
+        (( shown < 20 )) && echo "deny: $loc matches pattern #$i of $(basename "$f")"
+        shown=$((shown + 1))
+      done
+    done < "$f"
+  done
+  (( shown <= 20 )) || echo "deny: ... $((shown - 20)) more"
+  return $rc
+}
+
 # Run every audit not skipped; findings go to $WORK/findings. Status 0 clean, 1 findings,
 # 2 a producer failed.
 run_audits() { # B T lane
   local name rc worst=0
   : > "$WORK/findings"
-  for name in dropped glued dups; do
+  for name in dropped glued released dups deny; do
     [[ "$SKIP_AUDITS" == *" $name "* ]] && continue
     case "$name" in
-      dropped) audit_dropped "$1" "$2" "$3" >> "$WORK/findings"; rc=$? ;;
-      glued)   audit_glued "$1" "$2" >> "$WORK/findings"; rc=$? ;;
-      dups)    audit_dups "$1" "$2" >> "$WORK/findings"; rc=$? ;;
+      dropped)  audit_dropped "$1" "$2" "$3" >> "$WORK/findings"; rc=$? ;;
+      glued)    audit_glued "$1" "$2" >> "$WORK/findings"; rc=$? ;;
+      released) audit_released "$1" "$2" >> "$WORK/findings"; rc=$? ;;
+      dups)     audit_dups "$1" "$2" >> "$WORK/findings"; rc=$? ;;
+      deny)     audit_deny "$1" "$2" >> "$WORK/findings"; rc=$? ;;
     esac
     if [[ $rc -eq 2 ]]; then echo "error: the $name audit could not read its input" >> "$WORK/findings"; worst=2
     elif [[ $rc -ne 0 && $worst -eq 0 ]]; then worst=1; fi

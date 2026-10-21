@@ -95,6 +95,10 @@ q_run "${QF[@]}" lane/qb "$(q_tip qb)"
 ee "dropped: a merge resolution that loses a changelog line stops the land" 4 $QX
 grep -qF 'dropped: - **Old entry** text.' "$SB/q.err" && ok "dropped: the lost bullet entry is named" \
   || no "dropped: the lost bullet was not reported: $(head -c 300 "$SB/q.err")"
+# git aligns this diff as replacements, so "Main M" shows as removed AND added: moved,
+# not dropped. Only a net loss is a dropped line.
+grep -qF 'dropped: - **Main M** text.' "$SB/q.err" && no "dropped: reported a line the merge only moved" \
+  || ok "dropped: a line the merge only moves is not reported"
 q_merged qb && no "dropped: the lane landed anyway" || ok "dropped: nothing landed"
 
 q_lane qg; q_entry "$QW/CHANGELOG.md" "Glued G" 1; q_commit "$QW" "lane g"
@@ -114,12 +118,71 @@ if command -v jq >/dev/null 2>&1; then
     "$SB/q.out" >/dev/null 2>&1 && ok "--json: one envelope with the row and its schema" || no "--json: $(head -c 300 "$SB/q.out")"
 fi
 
+# A private name in prose, in a plans file a repo's own leak gate skips by design. The
+# list has a comment and a blank line: neither may become a pattern (a blank one matches
+# every line). The finding must never print the name it protects.
+printf '# private names, one regex per line\n\n\\bzorblax\\b\n' > "$SB/deny.txt"
+q_run "${QF[@]}" --dry-run --deny-file "$SB/deny.txt" lane/qe "$(q_tip qe)"
+ee "deny: a deny list's comments and blank lines match nothing in a clean lane" 0 $QX
+q_lane qz; mkdir -p "$QW/docs/plans"; printf 'Plan.\nNotes for the Zorblax project.\n' > "$QW/docs/plans/p.md"; q_commit "$QW" "lane z"
+q_run "${QF[@]}" --dry-run --deny-file "$SB/deny.txt" lane/qz "$(q_tip qz)"
+ee "deny: an added line naming a denied word stops the land, in any file" 4 $QX
+grep -qF 'deny: docs/plans/p.md:2 matches pattern #1 of deny.txt' "$SB/q.err" && ok "deny: the finding names file, line and pattern number" \
+  || no "deny: finding not reported: $(head -c 300 "$SB/q.err")"
+cat "$SB/q.out" "$SB/q.err" | grep -qi zorblax && no "deny: the output printed the denied word" \
+  || ok "deny: the output never prints the denied word"
+bash "$FLEET" queue --dry-run --deny-file "$SB/no-such-list" lane/qz "$(q_tip qz)" >/dev/null 2>&1
+ee "deny: a deny file that does not exist is not silently skipped" 3 $?
+
 q_lane qd; printf 'helper() { echo two; }\n' >> "$QW/lib.sh"; q_commit "$QW" "lane d"
 q_run "${QF[@]}" --dry-run lane/qd "$(q_tip qd)"
 ee "dups: a merge that defines a shell function twice stops the land" 4 $QX
 grep -qF 'helper()' "$SB/q.err" && ok "dups: the duplicated function is named" || no "dups: helper() not reported: $(head -c 300 "$SB/q.err")"
 grep -qF 'twice()' "$SB/q.err" && no "dups: reported twice(), a duplicate the base already had" \
   || ok "dups: a duplicate already on the base is not reported"
+
+# Released sections never change. The failure: a lane appends its bullet at the end of
+# [Unreleased]; a release cut puts "## [1.1.0]" above those lines; git merges cleanly and
+# the bullet is filed under the released 1.1.0. Its own repo, with a link footer, so the
+# control (a release cut rewrites the footer) is meaningful.
+QV="$SB/qrel"
+git init -q -b main "$QV"; git -C "$QV" config user.email t@t; git -C "$QV" config user.name t
+git -C "$QV" config core.autocrlf false
+cat > "$QV/CHANGELOG.md" <<'EOF'
+# Changelog
+
+## [Unreleased]
+
+- **Old entry** text.
+
+## [1.0.0] - 2026-01-01
+
+- **Released** thing.
+
+[Unreleased]: https://example.com/compare/v1.0.0...HEAD
+[1.0.0]: https://example.com/releases/v1.0.0
+EOF
+printf '.claude/fleet/\n.fleet-worktrees/\n' > "$QV/.gitignore"
+git -C "$QV" add -A; git -C "$QV" commit -qm init
+arm_gate "$QV"
+cd "$QV"
+git -C "$QV" worktree add -q -b lane/cut "$SB/qvwt-cut" main
+awk '/^## \[Unreleased\]/ { print; getline; print; print "## [1.1.0] - 2026-02-01"; print ""; next }
+     /^\[Unreleased\]: / { print "[Unreleased]: https://example.com/compare/v1.1.0...HEAD"
+                           print "[1.1.0]: https://example.com/compare/v1.0.0...v1.1.0"; next }
+     { print }' "$QV/CHANGELOG.md" > "$SB/qvwt-cut/CHANGELOG.md"
+q_commit "$SB/qvwt-cut" "release 1.1.0"
+git -C "$QV" worktree add -q -b lane/late "$SB/qvwt-late" main
+awk '/^## \[1\.0\.0\]/ { print "- **Late bullet** text."; print "" } { print }' "$QV/CHANGELOG.md" > "$SB/qvwt-late/CHANGELOG.md"
+q_commit "$SB/qvwt-late" "late bullet"
+q_run "${QF[@]}" --dry-run lane/cut "$(git -C "$QV" rev-parse lane/cut)"
+ee "released: a release cut (new section, rewritten link footer) passes" 0 $QX
+git -C "$QV" merge -q --no-ff -m "merge: lane/cut" lane/cut >/dev/null 2>&1
+q_run "${QF[@]}" --dry-run lane/late "$(git -C "$QV" rev-parse lane/late)"
+ee "released: a bullet that merges into a released section stops the land" 4 $QX
+grep -qF 'released: [1.1.0] gains: - **Late bullet** text.' "$SB/q.err" && ok "released: the section and the bullet are named" \
+  || no "released: not reported: $(head -c 300 "$SB/q.err")"
+cd "$QR"
 
 # -- tips --------------------------------------------------------------------------
 # Fleet rebases every tracked lane after each land, so a reviewed tip moves. That is

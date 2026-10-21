@@ -78,6 +78,10 @@ Write the id into the ledger header and into every lane brief this session write
 ("report READY by SendMessage to `<id>`"). If `sessions.sh self` exits 3 (no session
 store on this host), `fleet main claim` with no id pins the session whose cwd is the root.
 
+Each brief also says how long to wait, and where. A lane builds and commits without
+waiting for `main`; only its branch point and a rebase need `fleet landing` to exit 0.
+Any wait it does make is capped above one full gate (rule 13).
+
 ## Phase 1: inventory
 
 ```bash
@@ -113,6 +117,12 @@ Then the gates the brief named, on that head, wherever the report's evidence is 
 against the diff, file by file. A clean `--dry-run` row and a diff that matches the brief
 make it `REVIEWED`.
 
+In a repo with a private deny list (names that must never be published, kept outside
+the repo), pass it to the dry run as `--deny-file <list>`, once per list that exists:
+the `deny` audit then reads every line the merge adds, in every file. Then read the diff
+for those names yourself, spelled as prose. A regex list matches the spelling it was
+written for, and a repo's own leak gate may skip files on purpose (rule 14).
+
 ## Phase 4: improve or send back
 
 - **Small and mechanical** (a count, a link, a typo, a missing doc line): fix it yourself,
@@ -128,14 +138,17 @@ bash "$FLEET/fleet.sh" queue lane/foo <reviewed head>    # run_in_background: tr
 ```
 
 One lane per call, and the next call starts from the previous one's completion
-notification. Several pairs in one call are allowed, but the deadline (default 90m) stops
-any new land from starting once it passes, so only chain what fits.
+notification. Several pairs in one call are allowed, but the deadline (default 75m) stops
+any new land from starting once it passes, so only chain what fits. The deadline plus one
+gate must fit inside the background time limit, and the deadline itself must exceed one
+gate, or a settle wait gives up while the previous land is still in its gate (rule 13).
+Pass the same `--deny-file` as the dry run.
 
 | Exit | Means | Do |
 |---|---|---|
 | 0 | landed, or its content was already in `main` | ledger `LANDED <sha>`; queue the next |
 | 3 | lane or head does not resolve | check the ledger row |
-| 4 | an audit failed (`dropped`, `glued`, `dups`) | read stderr; fix in the lane (phase 4). `--skip-audit <name>` only for a verified false positive, reason in the ledger |
+| 4 | an audit failed (`dropped`, `glued`, `released`, `dups`, `deny`) | read stderr; fix in the lane (phase 4). `--skip-audit <name>` only for a verified false positive (a release cut, for `released`), reason in the ledger |
 | 5 | precondition (git 2.38+, repo) | fix the host |
 | 6 | deadline passed while waiting (owner live, `main` unsettled, memory high) | queue it again later, from a notification |
 | 10 | conflicts with `main` | phase 4 |
@@ -226,3 +239,18 @@ Each rule is a failure that happened before the rule existed.
 10. **Pushing is the maintainer's call.** `/conduct` reports what would go and asks.
 11. **Pin the coordinator's id and put it in every brief.** Lanes find MAIN by session
     id; an id hard-coded into an old brief points at a coordinator that has handed off.
+12. **A released changelog section never changes.** A clean git auto-merge can put a
+    lane's bullet inside the newest released section instead of `[Unreleased]`: the lane
+    added it at the end of `[Unreleased]`, a release cut put a new `## [x.y.z]` heading
+    above those lines, and nothing conflicted. The gate never notices. The `released`
+    audit requires every `## [x.y.z]` section on the base to come through the merge
+    unchanged; a release cut adds a new section, which is allowed.
+13. **Waits are longer than they look.** On a repo whose gate runs every suite, one gate
+    takes 35-40 minutes, and a lane that waited 30 minutes for `main` to settle gave up
+    while the gate was still running. Every wait, in a brief or in `fleet queue`, is
+    capped above one full gate, and a lane waits only at its branch point.
+14. **Do not lean on the leak gate alone.** A lane named a private project four times in
+    prose and the repo's leak gate passed: its patterns did not match that spelling, and
+    it skips some files by design. The review greps the diff too, and the `deny` audit
+    reads every added line in every file. Its findings name the file, line and pattern
+    number, never the matched text, so the check cannot leak what it protects.
