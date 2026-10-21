@@ -133,6 +133,19 @@ written for, and a repo's own leak gate may skip files on purpose (rule 14).
 
 ## Phase 5: land, one at a time
 
+Once per wave, before the first land, check the gate runs what `just check` and CI run
+(rule 15). Run from the main checkout:
+
+```bash
+gate=$(bash "$FLEET/fleet.sh" config --quiet | sed -n 's/^test_cmd=//p' | grep -o 'tests/[A-Za-z0-9_.-]*\.sh' | sort -u)
+just=$(awk '/^check:/{f=1;next} f && /^[^ \t]/{f=0} f' justfile | grep -o 'tests/[A-Za-z0-9_.-]*\.sh' | sort -u)
+ci=$(cat .github/workflows/*.yml | grep -o 'tests/[A-Za-z0-9_.-]*\.sh' | sort -u)
+comm -13 <(echo "$gate") <(printf '%s\n' "$just" "$ci" | sort -u)   # run there, missing from the gate
+```
+
+Every name it prints is added to the gate's `test_cmd`, or written in the ledger header
+as a known exemption with its reason (warn-only, or CI-only on one OS). Then land:
+
 ```bash
 bash "$FLEET/fleet.sh" queue lane/foo <reviewed head>    # run_in_background: true
 ```
@@ -254,3 +267,7 @@ Each rule is a failure that happened before the rule existed.
     it skips some files by design. The review greps the diff too, and the `deny` audit
     reads every added line in every file. Its findings name the file, line and pattern
     number, never the matched text, so the check cannot leak what it protects.
+15. **The gate must run what `just check` and CI run.** A land gate whose `test_cmd`
+    lacked the skill-hygiene ratchet passed a lane that broke it, and `main` went red on
+    a check CI runs; the next push would have failed. The phase 5 diff of the three test
+    lists catches that drift before a land, not after a push.
