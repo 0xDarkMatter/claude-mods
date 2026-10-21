@@ -60,6 +60,12 @@ Not every task uses the whole chain — most use exactly one link. Read the
 table above first; only compose when the task genuinely spans spawn +
 land or inner + outer.
 
+**Whoever spawns owns the result**, whichever skill spawned it: review the
+worker's diff, not its summary; give each new round a fresh agent with the
+combined brief; never count a missing or inconclusive result as a pass; never
+let a change's author verify it. Rules and lane brief:
+[fleet-ops session-prompt](../fleet-ops/references/session-prompt.md#owning-what-comes-back).
+
 ## See also
 
 - [fleet-ops](../fleet-ops/) — landing discipline: test-gated queue, pre-land scrub, auto-rebase, revert, and the post-wave `fleet sweep`
