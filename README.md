@@ -514,6 +514,7 @@ Claude Code remembers conversation history (`--resume`), Claude-curated learning
 /sync                              # bootstrap + restore saved state
 [work]
 /save "Stopped at auth module"     # writes .claude/session-cache.json + MEMORY.md
+/save --pause                      # clean stop: local wip commit + resume note, nothing pushed
 ```
 
 Use all three together: `--resume` for conversation, auto-memory for learnings, `/sync` for tasks and handoff. The persistence matrix, the full workflow and the `session-cache.json` schema live in [docs/SESSION-CONTINUITY.md](docs/SESSION-CONTINUITY.md).
