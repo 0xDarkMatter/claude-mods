@@ -9,6 +9,9 @@
 set -u
 
 SHORT_DAYS=7
+# Saved because the loop below shifts $@ empty; restored after it so the
+# standard flags still reach parse_common_flags and maybe_filter_self.
+SAVED_ARGS=("$@")
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --days) SHORT_DAYS="$2"; shift 2 ;;
@@ -36,6 +39,10 @@ EOF
         *) shift ;;
     esac
 done
+# Without this restore every standard flag was silently ignored (--redact
+# output meant for sharing went out unredacted). ${a[@]+...} is the bash
+# 3.2-safe expansion of a possibly empty array under set -u.
+set -- ${SAVED_ARGS[@]+"${SAVED_ARGS[@]}"}
 
 source "$(dirname "$0")/_lib/common.sh"
 parse_common_flags "$@"
@@ -70,8 +77,10 @@ run_subscript() {
     local out rc=0
     out=$(NO_PANEL=1 bash "$SCRIPTS_DIR/$script" --quiet "$@" 2>&1) || rc=$?
 
-    # Echo the sub-script's findings (everything before its SUMMARY)
-    echo "$out" | sed -n '/^=== /,/^=== SUMMARY ===/p' | sed '/^=== SUMMARY ===/q' | sed '$d'
+    # Echo the sub-script's findings: everything before its SUMMARY. Don't key
+    # this on a section banner: a --quiet audit prints none, and a range that
+    # began at the first `=== ` line began at SUMMARY and echoed nothing.
+    printf '%s\n' "$out" | sed '/^=== SUMMARY ===/,$d'
 
     # Extract sub-script's pass/fail/warn counts from its SUMMARY line
     local summary_line

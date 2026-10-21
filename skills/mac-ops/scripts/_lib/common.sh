@@ -5,8 +5,15 @@
 #   - Semantic exit codes
 #   - log_pass / log_fail / log_warn / log_info — [TAG] message lines
 #   - JSON-mode emitters (mac_emit_check, mac_emit_section, mac_emit_summary)
-#   - Mode flags parsing: --json --redact --quiet
+#   - Mode flags parsing: --json --redact --quiet --verbose
 #   - Reuses net-ops _lib/redact.sh patterns via the shared term.sh
+#
+# Contract: parse_common_flags and maybe_filter_self take the script's WHOLE
+# argv. A script whose own option loop shifts $@ away must save it first and
+# `set --` it back before calling them (SAVED_ARGS in every script), or every
+# standard flag is silently dropped. tests/run.sh's "flags:" block checks each.
+# Whole argv means a script's own short option is seen here too: -v (--volume
+# in disk-health, drive-dependencies, storage-pressure) also sets VERBOSE.
 
 set -u
 

@@ -16,6 +16,9 @@ TARGET_DEV=""
 TARGET_VOL=""
 DAYS=30
 
+# Saved because the loop below shifts $@ empty; restored after it so the
+# standard flags still reach parse_common_flags and maybe_filter_self.
+SAVED_ARGS=("$@")
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -d|--disk) TARGET_DEV="$2"; shift 2 ;;
@@ -42,6 +45,10 @@ EOF
         *) shift ;;
     esac
 done
+# Without this restore every standard flag was silently ignored (--redact
+# output meant for sharing went out unredacted). ${a[@]+...} is the bash
+# 3.2-safe expansion of a possibly empty array under set -u.
+set -- ${SAVED_ARGS[@]+"${SAVED_ARGS[@]}"}
 
 source "$(dirname "$0")/_lib/common.sh"
 parse_common_flags "$@"
@@ -67,8 +74,9 @@ disk_id=$(resolve_target)
 section "1. DEVICE SUMMARY"
 # ----------------------------------------------------------------------------
 # A check that could not run reports at the worst result it could have given,
-# so a broken tool can never read better than an honest run: SMART can FAIL, so
-# an unread disk is a FAIL; snapshots and free space only WARN (sections 4-5).
+# so a broken tool can never read better than an honest run: SMART and IO errors
+# can FAIL, so an unread disk or log is a FAIL; APFS faults, snapshots and free
+# space only WARN (sections 3-5).
 if [[ -n "$disk_id" ]]; then
     targets=("$disk_id")
 else
@@ -141,12 +149,20 @@ df -h | awk 'NR==1 || /\/dev\/disk.* apfs|\/dev\/disk.*\/Volumes/{print "    " $
 # ----------------------------------------------------------------------------
 section "3. IO ERRORS (unified log, last ${DAYS}d)"
 # ----------------------------------------------------------------------------
+# log's status is checked for both queries: piped into a count, a failed or
+# unavailable `log show` read "0 events", a PASS. The IO check can FAIL, so an
+# unrun one is a FAIL; the APFS one only WARNs, so its unrun result is a WARN.
+io_rc=0
 io_lines=$(log show --last "${DAYS}d" --style compact \
     --predicate '(subsystem == "com.apple.iokit" OR subsystem == "com.apple.kernel") AND (eventMessage CONTAINS[c] "I/O error" OR eventMessage CONTAINS[c] "media error" OR eventMessage CONTAINS[c] "MEDIA_ERROR" OR eventMessage CONTAINS[c] "device timeout")' \
-    2>/dev/null)
-io_count=$(echo "$io_lines" | grep -c . || echo 0)
+    2>/dev/null) || io_rc=$?
+# grep -c prints its own 0 (and exits 1) on no match: an `|| echo 0` here made
+# "0\n0", a [[ ]] syntax error on every clean run.
+io_count=$(printf '%s\n' "$io_lines" | grep -c .)
 
-if [[ "$io_count" -gt 50 ]]; then
+if [[ "$io_rc" -ne 0 ]]; then
+    log_fail "IO errors in log" "NOT checked - log show failed (exit $io_rc)"
+elif [[ "$io_count" -gt 50 ]]; then
     log_fail "IO errors in log" "$io_count events — active failure"
     note "  Sample (first 5):"
     echo "$io_lines" | head -5 | sed 's/^/    /'
@@ -161,10 +177,14 @@ else
 fi
 
 # APFS-specific corruption signal
-apfs_errors=$(log show --last "${DAYS}d" --style compact \
+apfs_rc=0
+apfs_lines=$(log show --last "${DAYS}d" --style compact \
     --predicate 'eventMessage CONTAINS "apfs" AND (messageType == "Error" OR messageType == "Fault")' \
-    2>/dev/null | wc -l | tr -d ' ')
-if [[ "$apfs_errors" -gt 10 ]]; then
+    2>/dev/null) || apfs_rc=$?
+apfs_errors=$(printf '%s\n' "$apfs_lines" | grep -c .)
+if [[ "$apfs_rc" -ne 0 ]]; then
+    log_warn "APFS error/fault events" "NOT checked - log show failed (exit $apfs_rc)"
+elif [[ "$apfs_errors" -gt 10 ]]; then
     log_warn "APFS error/fault events" "$apfs_errors"
 else
     log_pass "APFS error/fault events" "$apfs_errors"
