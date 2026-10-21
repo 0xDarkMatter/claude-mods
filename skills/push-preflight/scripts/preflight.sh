@@ -137,7 +137,13 @@ FORBIDDEN_REGEX='(^|/)\.env(\.|$)|(^|/)\.env\.(local|development|production|test
 # Same scope as Steps 4 and 6: a path already on the remote is not sent again.
 ADDED_FILES="$(git diff --name-only --diff-filter=A "${SCOPE_BASE}..${BRANCH}")"
 
-FORBIDDEN_HITS="$(printf '%s\n' "$ADDED_FILES" | grep -iE "$FORBIDDEN_REGEX" || true)"
+# Env TEMPLATES (.env.example / .env.sample / .env.template) document the variables
+# a project needs and are meant to ship, but the `.env.` rule above would refuse every
+# one. They are exempt by NAME only: Step 6 has already secret-scanned their content,
+# so a template holding a real value still fails there. .env, .env.local and the
+# other real env files stay forbidden.
+TEMPLATE_ENV_REGEX='(^|/)\.env\.(example|sample|template)$'
+FORBIDDEN_HITS="$(printf '%s\n' "$ADDED_FILES" | grep -iE "$FORBIDDEN_REGEX" | grep -viE "$TEMPLATE_ENV_REGEX" || true)"
 if [ -n "$FORBIDDEN_HITS" ]; then
   echo "STEP 7  FAIL  forbidden files in push:"
   printf '%s\n' "$FORBIDDEN_HITS" | sed 's/^/            /'

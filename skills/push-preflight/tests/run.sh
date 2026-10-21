@@ -355,6 +355,37 @@ expect_exit "preflight: forbidden path in the new commit still refuses" 2 "$rc"
 expect_has "preflight: refusal names the new forbidden path" "deploy/server.pem" "$(cat "$SB/preflight-forbidden.out")"
 expect_lacks "preflight: refusal leaves the path already on origin alone" "certs/ca.pem" "$(cat "$SB/preflight-forbidden.out")"
 
+echo "-- preflight.sh: env templates ship, real env files do not --"
+# .env.example and friends document a project's variables and are meant to be
+# committed; Step 7's .env rule refused every one of them.
+repo="$SB/preflight-env-template"
+published_main "$repo" README2.md 'second baseline'
+git -C "$repo" switch -q -c feature
+commit_path "$repo" .env.example 'DATABASE_URL='
+commit_path "$repo" app/.env.sample 'API_TOKEN='
+preflight_stubbed "$repo" "$SB/preflight-env-template.out" feature; rc=$?
+expect_exit "preflight: committed env templates pass" 0 "$rc"
+expect_has "preflight: Step 7 passes env templates" "STEP 7  OK" "$(cat "$SB/preflight-env-template.out")"
+
+repo="$SB/preflight-env-real"
+published_main "$repo" README2.md 'second baseline'
+git -C "$repo" switch -q -c feature
+commit_path "$repo" .env.example 'DATABASE_URL='
+commit_path "$repo" config/.env.local 'DATABASE_URL=postgres://localhost/app'
+preflight_stubbed "$repo" "$SB/preflight-env-real.out" feature; rc=$?
+expect_exit "preflight: a real env file beside a template still refuses" 2 "$rc"
+expect_has "preflight: refusal names the real env file" "config/.env.local" "$(cat "$SB/preflight-env-real.out")"
+# Match the refusal list's 12-space indent: git's line-ending warnings also name the file.
+expect_lacks "preflight: refusal does not list the template" "            .env.example" "$(cat "$SB/preflight-env-real.out")"
+
+# Exempt by name only: a template holding a real secret is still refused (Step 6).
+repo="$SB/preflight-env-template-secret"
+published_main "$repo" README2.md 'second baseline'
+git -C "$repo" switch -q -c feature
+commit_path "$repo" .env.example "$secret_line"
+preflight_stubbed "$repo" "$SB/preflight-env-template-secret.out" feature; rc=$?
+expect_exit "preflight: a template holding a secret is still refused" 1 "$rc"
+
 echo "-- preflight.sh: regex-layer false positives already on origin/main --"
 # The 2026-10-07 refusal, end to end: a 2-commit branch cut from origin/main was
 # reported as "42 commits will be pushed" and refused on regex-layer hits that
