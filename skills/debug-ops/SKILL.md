@@ -13,6 +13,29 @@ metadata:
 
 Systematic debugging methodology with language-specific tooling and common scenario playbooks.
 
+## Hard Rules
+
+Check these before every fix, not just the first. Depth and examples are in
+`references/systematic-methods.md`, section "Premise, Guards and Signals".
+
+1. **Two failed fixes on one assumption: stop and test the assumption.** When two fixes
+   have failed and both took the same belief about the system for granted, that belief is
+   the prime suspect. Write it down as one sentence. Then run a check whose result would
+   change if the belief were wrong; where the failures cluster often says more than how
+   bad they are. No third fix until that check has run.
+2. **Guard a state only if it is allowed to exist.** Before adding a null check, default,
+   retry, clamp, catch-and-continue or fallback, ask whether the system may legitimately
+   reach the state that broke. If it may, handling it where it broke is the fix. If it
+   should be impossible, the guard buries the fault: find and fix whatever produced it.
+3. **Broken only after a restart? Look at what the restart kept.** A fresh process that
+   fails where the old one worked is reading something back: on-disk caches, lock and PID
+   files, config or sessions written at runtime, database or schema state, data saved by
+   an older build.
+4. **After a long dig, leave a cheap signal that stays on.** If the deciding clue was hard
+   to find, add the one log line, metric or assertion that would have surfaced it
+   immediately, so the next occurrence explains itself. It goes in alongside the
+   regression test, not instead of it.
+
 ## Bug Classification Decision Tree
 
 ```
@@ -55,8 +78,10 @@ Bug Report / Symptom
    │  └─ Check: shared mutable state, read-modify-write, check-then-act
    ├─ Timing-Dependent
    │  └─ Check: timeout values, clock skew, event ordering assumptions
-   └─ Environment-Specific
-      └─ Check: OS differences, locale, timezone, file system case sensitivity
+   ├─ Environment-Specific
+   │  └─ Check: OS differences, locale, timezone, file system case sensitivity
+   └─ Only After Restart / Redeploy
+      └─ Check: persisted state the new process reads back (Hard Rule 3)
 ```
 
 ## Systematic Debugging Workflow
@@ -77,7 +102,7 @@ Find the root cause, not just the proximate trigger. Use the 5 Whys technique, t
 
 ### Step 4: Fix
 
-Apply the minimal correct change that addresses the root cause. Avoid shotgun debugging (changing multiple things at once). Understand why the fix works, not just that it works.
+Apply the minimal correct change that addresses the root cause. Avoid shotgun debugging (changing multiple things at once). Understand why the fix works, not just that it works. If the change is a guard, Hard Rule 2 decides whether it is a fix at all; if it is the third attempt on one assumption, Hard Rule 1 comes first.
 
 ### Step 5: Verify
 
@@ -85,7 +110,7 @@ Confirm the fix resolves the original issue without introducing regressions. Re-
 
 ### Step 6: Prevent
 
-Add a regression test. Update documentation or runbooks if applicable. Consider whether the same class of bug could exist elsewhere. Share findings with the team.
+Add a regression test, plus the always-on signal from Hard Rule 4 if the cause was hard to find. Update documentation or runbooks if applicable. Consider whether the same class of bug could exist elsewhere. Share findings with the team.
 
 ## Reproduction Checklist
 
@@ -265,11 +290,11 @@ jq -r 'select(.level == "error") | .error_type' app.log | sort | uniq -c | sort 
 
 ## Reference Files
 
-| File | Contents | Lines |
-|------|----------|-------|
-| `references/systematic-methods.md` | Scientific method, binary search, delta debugging, differential debugging, time-travel debugging, team debugging | ~600 |
-| `references/tool-specific.md` | Browser DevTools, Node.js, Python, Go, Rust, database, network, Docker debugging tools | ~650 |
-| `references/common-scenarios.md` | Memory leaks, deadlocks, race conditions, performance regressions, API debugging, deployment issues | ~550 |
+| File | Contents |
+|------|----------|
+| `references/systematic-methods.md` | Scientific method, binary search, delta debugging, differential debugging, time-travel debugging, premise testing, guard legitimacy, restart-only failures, always-on signals, team debugging |
+| `references/tool-specific.md` | Browser DevTools, Node.js, Python, Go, Rust, database, network, Docker debugging tools |
+| `references/common-scenarios.md` | Memory leaks, deadlocks, race conditions, performance regressions, API debugging, deployment issues |
 
 ## See Also
 

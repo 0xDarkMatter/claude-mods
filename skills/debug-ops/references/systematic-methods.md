@@ -2,6 +2,22 @@
 
 Structured approaches to finding and fixing bugs, from scientific method to team-based protocols.
 
+## Contents
+
+- [Scientific Debugging Method](#scientific-debugging-method)
+- [Binary Search Debugging](#binary-search-debugging)
+- [Wolf Fence Algorithm](#wolf-fence-algorithm)
+- [Rubber Duck Debugging](#rubber-duck-debugging)
+- [Differential Debugging](#differential-debugging)
+- [Delta Debugging](#delta-debugging)
+- [Trace-Based Debugging](#trace-based-debugging)
+- [Time-Travel Debugging](#time-travel-debugging)
+- [Hypothesis-Driven Debugging](#hypothesis-driven-debugging)
+- [Premise, Guards and Signals](#premise-guards-and-signals): the four Hard Rules in SKILL.md, in depth
+- [Debugging Checklists](#debugging-checklists)
+- [When to Stop Debugging](#when-to-stop-debugging)
+- [Debugging in Teams](#debugging-in-teams)
+
 ## Scientific Debugging Method
 
 The most rigorous approach: treat debugging as an experiment.
@@ -486,7 +502,92 @@ Maintain a structured log of hypotheses to avoid going in circles.
 1. Write hypotheses down before testing them
 2. Define the prediction before running the test
 3. Record results even for rejected hypotheses (prevents retesting)
-4. If you have tested 5+ hypotheses without progress, step back and re-examine assumptions
+4. Two failed fixes resting on one assumption, or 5+ hypotheses without progress: stop and
+   test assumptions before the next attempt. The two thresholds mean different things; see
+   the table under [Attack the Premise](#attack-the-premise)
+
+## Premise, Guards and Signals
+
+Depth for the four Hard Rules at the top of `SKILL.md`. Each one targets a way a fix can
+look finished while the fault is still there.
+
+### Attack the Premise
+
+A fix that fails tells you something about the assumption underneath it. When two
+failures share an assumption, it becomes the likeliest culprit, and a third fix that
+leans on it bets against the evidence already collected.
+
+1. **Name the premise.** Write the single sentence both fixes took for granted: "the cache
+   is invalidated on write", "this handler receives the request", "the two clocks agree".
+2. **Design a check that could refute it.** Pick an observation whose outcome depends on
+   whether the premise holds, and run it. Study the shape of the failures as well as their
+   size: which inputs, hosts, times or code paths they cluster on. Script the check so it
+   can be rerun after every later change.
+3. **Act on the result.**
+   - Refuted: the cause is somewhere else. Find the trait every failing case shares and
+     the premise cannot account for, and build the next hypotheses on it.
+   - Confirmed: the premise holds, so ask the next "why" (see the 5 Whys in `SKILL.md`).
+     Both attempts most likely addressed a downstream effect.
+4. **Remove the cause rather than compensate for it.** If one component keeps ending up in
+   the bad state, change whatever drives it there. Clean-up code that runs after the fact
+   keeps the cause alive and adds cost to every run.
+
+Two stop signals, two meanings:
+
+| Signal | What it suggests | Do |
+|---|---|---|
+| Two failed fixes that share one assumption | That specific assumption is probably false | Stop fixing; test the assumption directly (steps 1-3) |
+| 5+ hypotheses with no progress, related or not | Your model of the system is wrong somewhere | Step back; list every assumption (rubber-duck step 5) and test the unwritten ones first |
+
+### Is the State Legitimate?
+
+A guard handles a state. Whether it is a fix depends on whether the system may
+legitimately end up there.
+
+| The triggering state is... | The fault lives in... | The fix is... |
+|---|---|---|
+| Allowed: an empty list, a network timeout, a user typo, a missing optional field | The code that failed to cope with it | Handle the state where it surfaced |
+| Impossible by design: an order with no customer, negative stock, an enum value your own code never emits | Whatever produced the state, upstream | Find and fix the producer; a check at the crash site only hides it |
+
+Common ways a symptom fix hides a fault: a null check or default value, a retry loop, a
+catch block that logs and carries on, clamping a value back into range, silently dropping
+the bad record. Each is correct for an allowed state and a cover-up for an impossible one.
+
+Once the producer is found, search for the same mistake elsewhere: code that wrote bad
+state in one place has often done it in its siblings too.
+
+### Restart-Only Failures
+
+When a bug shows up only after a restart, redeploy or reboot, the process's in-memory
+state is not the problem; something it reads back is. Check what survives the restart:
+
+- On-disk caches and build output (compiled assets, bytecode, bundler or proxy caches)
+- Lock, PID and socket files left behind by the previous run
+- Config or state written at runtime (settings files, feature-flag snapshots, sessions, tokens)
+- Database state: pending or half-applied migrations, a schema version marker, a queue
+  that kept its messages
+- Anything serialised by an older build and deserialised by the new one
+
+Quick discriminator: start the process against an empty state directory or a fresh
+container. If the bug disappears, bisect the persisted files until it comes back.
+
+### Leave a Signal Behind
+
+If the deciding clue took a long dig to uncover, the job is not done until the next
+person (or agent) could see that clue at a glance. Alongside the regression test, add one
+cheap signal that stays on in normal operation:
+
+| The clue that was hard to find | The signal to leave |
+|---|---|
+| Which config file or env var won | Log the resolved source once at startup |
+| A state that should be impossible | An assertion or error log where it is produced, naming the bad value |
+| A queue or pool filling quietly | A gauge metric, or a warning past a threshold |
+| Which branch a request took | A debug-level log line naming the branch and why |
+| Two components on mismatched versions | Log both versions at startup or handshake |
+
+Keep it cheap enough to leave on for good: one line, one metric, one assertion. The
+regression test proves this bug stays fixed; the signal explains the next bug of the same
+family.
 
 ## Debugging Checklists
 
@@ -526,6 +627,7 @@ Time    | Action Taken              | Result           | Next Step
 [ ] Could this bug class exist elsewhere? (search for similar patterns)
 [ ] Was the debugging process efficient? What would I do differently?
 [ ] Knowledge shared with team (if applicable)
+[ ] Cheap always-on signal left (log line, metric or assertion) if the clue was hard to find
 [ ] Monitoring/alerting added to catch recurrence
 ```
 
