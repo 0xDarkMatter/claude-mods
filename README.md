@@ -16,7 +16,7 @@
 
 Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms) and Anthropic's [patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), it installs as a standard plugin and toggles off as easily as it toggles on.
 
-**3 agents. 112 skills. 13 styles. 15 hooks. 15 rules. One install.**
+**3 agents. 112 skills. 13 styles. 17 hooks. 15 rules. One install.**
 
 ## Recent Updates
 
@@ -370,6 +370,8 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [enforce-uv.sh](hooks/enforce-uv.sh) | PreToolUse | Enforce uv over pip/bare tools in uv projects (`pip install` → `uv add`, bare `pytest`/`ruff` → `uv run`) |
 | [pre-install-scan.sh](hooks/pre-install-scan.sh) | PreToolUse | Advisory on dependency installs (npm/pnpm/yarn/bun/pip/uv/poetry/composer/gem/cargo, incl. `composer update`) - route through Socket, respect cooldown; `SUPPLY_CHAIN_BLOCK=1` for a hard gate |
 | [manifest-dep-scan.sh](hooks/manifest-dep-scan.sh) | PostToolUse | Advisory when the agent edits a dependency manifest (package.json/requirements/composer.json/Cargo.toml/go.mod/Gemfile) - depscore + cooldown the added package; silent on version bumps |
+| [pre-tls-verify-ask.sh](hooks/pre-tls-verify-ask.sh) | PreToolUse | Ask before a command turns TLS certificate verification off (`curl -k`, `NODE_TLS_REJECT_UNAUTHORIZED=0`, `git -c http.sslVerify=false`, `strict-ssl false`, `--trusted-host`, `-SkipCertificateCheck`); asks, never denies, since a self-signed certificate on a local dev host is the one legitimate case |
+| [post-tls-verify-scan.sh](hooks/post-tls-verify-scan.sh) | PostToolUse | Advisory when an edit turns verification off in code or config (`verify=False`, `rejectUnauthorized: false`, Guzzle `'verify' => false`, `InsecureSkipVerify`, trust-all Java/.NET, committed `.npmrc strict-ssl=false`); skips prose files |
 | [check-mail.sh](hooks/check-mail.sh) | PreToolUse | Deliver unread pmail (no cooldown, one stat when nothing is new); each session is told once and never about its own sent mail |
 | [session-start-unicode-scan.sh](hooks/session-start-unicode-scan.sh) | SessionStart | One-shot hidden-Unicode scan of project instruction files at boot (silent on clean; says so when a file could not be scanned) |
 | [pre-commit-unicode-scan.sh](hooks/pre-commit-unicode-scan.sh) | Git pre-commit | Block commits that add critical hidden Unicode (bidi, tag-block) to instruction files - scans the staged copy, and blocks one it cannot scan |
