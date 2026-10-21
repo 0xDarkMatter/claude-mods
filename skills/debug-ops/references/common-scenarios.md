@@ -2,6 +2,15 @@
 
 Playbooks for the most frequently encountered bug categories.
 
+## Contents
+
+- [Memory Leaks](#memory-leaks)
+- [Deadlocks](#deadlocks)
+- [Race Conditions](#race-conditions)
+- [Performance Regressions](#performance-regressions)
+- [API Debugging](#api-debugging)
+- [Deployment Issues ("Works on My Machine")](#deployment-issues-works-on-my-machine)
+
 ## Memory Leaks
 
 ### Symptoms
