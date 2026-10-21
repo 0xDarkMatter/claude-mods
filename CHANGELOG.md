@@ -435,29 +435,6 @@ feature releases live in the README "Recent Updates" section.
   `fleet-ops/tests/` (PATH shims that fail one `find` or `git` call): the five guarding
   a fix were seen failing first, and two pin that a race and a healthy git change nothing.
 
-- **mac-ops audits and the git-ops land plan no longer read a failed probe as a
-  result** - the same class as the scanner fix above, in three other constructs.
-  `disk-health.sh` walked its disks through `mapfile < <(diskutil list | awk ...)`, so a
-  failed listing ran no SMART check, reported no FAIL, and left a Failing disk
-  unreported. A failed or empty listing, or a disk whose `diskutil info` fails, is now a
-  SMART FAIL. A failed `mount` skipped every snapshot and free-space check, and a failed
-  `df` read "100% free", a PASS; each is now a `NOT checked` WARN, because a check that
-  cannot run reports the worst result it could have given. The snapshot loop also ran in
-  a pipeline subshell, so its PASS/WARN lines never reached the SUMMARY counts.
-  `quickrun.sh` ran each audit with `|| true`, so one that crashed before its SUMMARY
-  added nothing and the verdict read green; a non-zero exit or a missing SUMMARY is now a
-  FAIL naming the script, listed first. `land-all.sh` fell back to `|| echo 0` for its
-  per-branch probes: a failed `rev-list` made a branch MERGED, "in trunk - prune
-  candidate", and a failed commit-time read made a fresh branch STALE. A failed probe
-  now gives an `ERROR` row (`?` counts, never landed or pruned), with exit 3 instead of
-  0 when nothing is landable; a failed `git worktree list`, which stripped every branch
-  of its worktree so a WIP or live-writer lane read LANDABLE, exits 2. mac-ops' suite
-  gains a block that runs on every OS: PATH shims for diskutil, mount, df, log and
-  tmutil, and fake audits beside a copy of quickrun. 19 new assertions; the 16 guarding a
-  fix were each seen failing against the unfixed script, and 3 are controls. The old
-  for-each-ref test now also requires its error message, since exit 2 alone is what a
-  broken shim gives too.
-
 - **A lane's pigeon report reaches the coordinator** - a repo's worktrees share its
   pigeon identity (the git root commit), so a lane that sent `READY` to the coordinator
   in the main checkout was shown its own message by its `check-mail` hook, which then
