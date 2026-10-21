@@ -78,7 +78,7 @@ TEST_CMD=""
 # Base64 data-URI payloads are stripped from each added line BEFORE this
 # pattern is applied (SCRUB_DATA_URI, scrub_diff): random base64 holds a
 # triple-X followed by a digit or +/ often enough to refuse any embedded font
-# (a Praxis gradecard HTML, 6 hits, 2026-10-08). A custom forbidden_pattern
+# (an HTML report with an embedded font hit it 6 times). A custom forbidden_pattern
 # gets the same strip.
 FORBIDDEN_PATTERN='TODO_''SCRUB|(^|[^X])X{3}[^a-zX]|FIXME_''BEFORE_LAND'
 # data:<mediatype>[;param=v...];base64,<payload>. Not configurable: it removes

@@ -210,7 +210,7 @@ git -C "$SB/wt-chore_xmark" -c user.email=w@t -c user.name=w commit -qam "add a 
 bash "$FLEET" scrub-check chore/xmark >/dev/null 2>&1; ee "lone triple-X marker still refused" 1 $?
 
 echo "-- scrub gate: base64 data-URI payloads pass, markers beside them refuse --"
-# Regression (2026-10-08, Praxis): a gradecard HTML embeds woff2 fonts as
+# Regression: an HTML report that embeds woff2 fonts as
 # data:font/woff2;base64,... and random base64 holds a triple-X followed by a
 # digit or +/ often enough to trip the X-term (6 hits in one file). Payloads
 # are stripped before matching; prose markers, including one on the same line

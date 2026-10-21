@@ -46,8 +46,8 @@ form.
 custom `forbidden_pattern` alike: each `data:<type>;base64,<payload>` run on an
 added line is cut to its prefix (`SCRUB_DATA_URI` in `scripts/fleet.sh`). Random
 base64 contains a triple-X followed by a digit, `+` or `/` often enough to refuse
-any file with an embedded font, which is what refused a Praxis gradecard HTML on
-2026-10-08. Only the payload is removed, so a marker elsewhere on the same line,
+any file with an embedded font, which is how an HTML report with an embedded font came
+to be refused. Only the payload is removed, so a marker elsewhere on the same line,
 even in one-line minified HTML, still refuses. Base64 that is not in a data URI
 gets no such pass.
 
