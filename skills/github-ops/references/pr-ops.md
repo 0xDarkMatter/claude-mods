@@ -2,6 +2,21 @@
 
 Per-operation playbooks for `gh pr` workflows. Every write op with author voice (`--body` / `--title` / merge `--subject` / `--body`) is **preview-gated** per hard rule 8 — quote the draft verbatim in chat, name the send command, wait for explicit user approval, then send.
 
+## Contents
+
+- Reads (no preview)
+- Create (preview required — title AND body)
+- Comment (preview required)
+- Review (preview required for body)
+- Edit title / body (preview required)
+- Pre-merge gate, then red checks and bot findings: [review-bot-triage.md](review-bot-triage.md)
+- Merge strategy decision tree
+- Merge — the final call
+- Branch deletion (separate explicit step)
+- Close (without merging)
+- Common workflows
+- Anti-patterns
+
 ## Reads (no preview)
 
 ```bash
@@ -122,7 +137,7 @@ gh pr review <n> --repo <o>/<r> --request-changes --body "<approved body>"
 gh pr review <n> --repo <o>/<r> --comment --body "<approved body>"
 ```
 
-Inline-line comments (`gh api repos/<o>/<r>/pulls/<n>/comments`) are heavier — currently out of scope; use the GitHub UI or extend this reference when first needed.
+Posting new inline-line comments (`gh api repos/<o>/<r>/pulls/<n>/comments`) is heavier — currently out of scope; use the GitHub UI or extend this reference when first needed. Replying to an existing inline thread, such as a review bot's finding, is covered in [review-bot-triage.md](review-bot-triage.md#3-replying-safely).
 
 ## Edit title / body (preview required)
 
@@ -167,6 +182,8 @@ gh pr view <n> --repo <o>/<r> --json title,body --jq '.body' | head -50
 ```
 
 Surface the result in chat as a green/red checklist before proposing the merge command. If anything is red, **stop and report** — don't merge through a failing gate.
+
+Red is not yet a diagnosis. Before rerunning a failed check or answering an automated reviewer, triage it with [review-bot-triage.md](review-bot-triage.md): one fresh rebuild for a suspected flake, the stale-base check for a failure outside the diff, and fix / dismiss with evidence / ask a human for each bot finding.
 
 ## Merge strategy decision tree
 
@@ -256,8 +273,8 @@ gh pr close <n> --repo <o>/<r>
 1. Branch off origin/main
 2. Commit; push branch
 3. Draft PR body in chat, preview with user, gh pr create (preview-gated)
-4. CI runs; gh pr checks --watch
-5. Address review feedback if any (responses preview-gated)
+4. CI runs; gh pr checks --watch (red: classify per review-bot-triage.md before any rerun)
+5. Address review feedback if any (responses preview-gated; bot threads: review-bot-triage.md)
 6. Pre-merge gate
 7. Merge (squash by default; explicit user OK)
 8. Branch cleanup (separate step, explicit OK)
@@ -291,3 +308,4 @@ gh pr close <n> --repo <o>/<r>
 - ❌ Promising follow-up work in a PR description and not capturing it as an issue.
 - ❌ Skipping the "Closes #N" footer in PR body — leaves issues unclosed after merge.
 - ❌ Treating `mergeable: UNKNOWN` as green — wait for GitHub to compute (re-poll).
+- ❌ Rerunning a red check until it passes, or acting on a review bot's finding without verifying it (see `review-bot-triage.md`).

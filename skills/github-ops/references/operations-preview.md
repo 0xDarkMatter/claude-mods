@@ -29,6 +29,7 @@ Writes:
 |---|---|---|
 | Create | `gh pr create --title --body` | **Yes** (title + body) |
 | Comment | `gh pr comment <n> --body` | **Yes** |
+| Reply on an automated reviewer's thread | `gh api --method POST repos/<o>/<r>/pulls/<n>/comments/<id>/replies -F body=@reply.md` | No, when it answers the finding with evidence on a PR you are working on (automated-reviewer carve-out in public-posts); **Yes** for human-started threads. See [review-bot-triage.md](review-bot-triage.md) |
 | Review (approve / request changes / comment) | `gh pr review <n> --approve --body …` | **Yes** (body, if any) |
 | Edit title/body | `gh pr edit <n> --title --body` | **Yes** |
 | Edit labels / reviewers | `gh pr edit <n> --add-label … --add-reviewer …` | No (mechanical) |
