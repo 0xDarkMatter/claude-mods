@@ -18,7 +18,7 @@ Landing discipline for parallel work. Anything before "committed on a branch" is
 
 Claude Code now ships the parallel-execution half natively. **Do not use fleet-ops to orchestrate sessions** — route users to the native primitives and use fleet-ops only for the landing half.
 
-Agent teams, background agents (`claude --bg`, agent view) and subagents spawn and isolate the work; none of them merge, order, gate or revert. Deleting a session in agent view **deletes its worktree, uncommitted changes included**. Gives vs lacks: [references/native-spawn.md](references/native-spawn.md).
+Agent teams, background agents (`claude --bg`, agent view) and subagents spawn and isolate the work. Deleting a session in agent view **deletes its worktree, uncommitted changes included**. Gives vs lacks: [references/native-spawn.md](references/native-spawn.md).
 
 What **none** of them do — and what fleet-ops is for:
 
@@ -33,7 +33,7 @@ What **none** of them do — and what fleet-ops is for:
 
 A **lane** = one branch (or worktree), one unit of work. Lane status: `RUNNING | READY | CONFLICT | LANDED | FAILED`.
 
-Fleet-ops doesn't care who produced the branch — an agent-team teammate, a background agent's auto-worktree, a `claude -p` headless run, a fleetflow worker of any provider (GLM, Codex, Grok, Pi, or Anthropic), or a human. If it's a branch with commits, it can be a lane. Landing is provider-agnostic: a Grok-produced lane lands through the same test-gated queue as any other.
+Fleet-ops doesn't care who produced the branch: an agent-team teammate, a background agent, a `claude -p` headless run, a fleetflow worker of any provider, or a human. Any branch with commits can be a lane, and all lanes share one test-gated queue.
 
 ## CLI surface
 
@@ -64,9 +64,13 @@ Work to be spawned manually                → fleet init <names...> (creates br
 N > 1 on one shared working tree           → REFUSE. Worktrees or separate clones first.
 ```
 
-**Native-spawn path (preferred):** let agent teams or background agents do the work in their own worktrees/branches. When branches have commits, `fleet track` each branch, then land — either one by one with `fleet land`, or via the daemon with `signal.sh READY` gates. Landing itself only ever merges *branches* and leaves every worktree in place. Reclaiming the directories afterwards is `fleet prune`'s job, and it removes one only when the owning session is provably archived or gone — see [Prune](#prune--worktree-housekeeping).
+**Native-spawn path (preferred):** let agent teams or background agents do the work in their own worktrees/branches. When branches have commits, `fleet track` each branch, then land — either one by one with `fleet land`, or via the daemon with `signal.sh READY` gates. Landing merges *branches* only and leaves every worktree in place; `fleet prune` reclaims a directory once its owning session is provably archived or gone ([Prune](#prune--worktree-housekeeping)).
 
 **Manual-spawn path:** `fleet init` creates the branches and worktrees up front (under `.fleet-worktrees/`, or `$WORKTREE_ROOT/<repo>/` when the machine sets that lane root), and you point sessions at them — see `references/session-prompt.md` for the lane brief to hand each session.
+
+## Owning what lanes hand back
+
+The spawning session owns each lane's result: **review the diff (`git diff main...<lane>`), not the lane's report.** Each new round goes to a fresh agent briefed with the first task, every later instruction, and the last report and branch. A missing, crashed or inconclusive result is never a pass, and a change's author never verifies it. Brief fields and the reasoning: [references/session-prompt.md](references/session-prompt.md#owning-what-comes-back).
 
 ## Landing pipeline
 
@@ -152,17 +156,13 @@ whole job, and every ambiguous case resolves away from deletion.
 
 ### Buckets — first match wins, and the order is the safety argument
 
-Only **SAFE** is ever removable: merged, clean, no open session claiming it, and for a Claude Code session tree (under `.claude/worktrees/`, or a hook-made `worktree-*` tree under `$WORKTREE_ROOT`) an archived session positively claiming it. A live claimant (archiving is not activity) or the invoking tree is **KEEP**; an unreadable store or archive flag, unproven detached HEAD, dirty, unmerged or unattributable tree is **REVIEW**, never touched under any flag. Removal uses `git worktree remove` (never `rm -rf`), re-verifies against a fresh scan right before each delete, and `--all-repos` never removes. Prune cannot see writes by absolute path, so it must never be the only guard. Table, claim rules and the near-miss behind them: [references/prune.md](references/prune.md).
+Only **SAFE** is ever removable: merged, clean, no open session claiming it, and for a Claude Code session tree (under `.claude/worktrees/`, or a hook-made `worktree-*` tree under `$WORKTREE_ROOT`) an archived session positively claiming it. A live claimant (archiving is not activity) or the invoking tree is **KEEP**; an unreadable store or archive flag, unproven detached HEAD, dirty, unmerged or unattributable tree is **REVIEW**, never touched under any flag. Removal uses `git worktree remove` (never `rm -rf`), re-verifies against a fresh scan right before each delete, and `--all-repos` never removes. Prune cannot see writes by absolute path, so it must never be the only guard. Table and claim rules: [references/prune.md](references/prune.md).
 
 ### Landmine: removing a worktree out from under a live session
 
 **Terminate the session first, then remove its worktree, never the reverse.** A session whose worktree vanishes neither exits nor errors: it spins at ~85% of a core indefinitely under a live parent, so orphan scans miss it. Detect by sustained CPU rate, check its `--add-dir` against `git worktree list`, then kill it (safe: it touches no files). Evidence and the one-liner: [references/prune.md](references/prune.md).
 
-### Seeing the backlog
-
-`fleet status` adds `! 3 worktree(s) prunable, 6 to review - fleet prune` when
-there is a backlog, so it cannot grow unseen. Off: `prune_hint=off` in config or
-`FLEET_NO_PRUNE_HINT=1`.
+`fleet status` flags a backlog (`! 3 worktree(s) prunable, 6 to review - fleet prune`); off with `prune_hint=off` or `FLEET_NO_PRUNE_HINT=1`.
 
 ## Sweep — after a wave
 
@@ -189,13 +189,13 @@ For non-branching status updates ("here's what happened, here's what landed"), p
 
 ## What it handles vs what it does not
 
-Any branch with commits can be a lane; a dirty `main` is refused. Out of scope: spawning or monitoring sessions, several sessions on one working tree (refused), uncommitted work at signal time, cross-lane external state like migrations (order lands by hand). Full table: [references/scope.md](references/scope.md).
+A dirty `main` is refused. Out of scope: spawning or monitoring sessions, several sessions on one working tree (refused), uncommitted work at signal time, cross-lane external state like migrations (order lands by hand). Full table: [references/scope.md](references/scope.md).
 
 ## Compatibility
 
-Runs on Linux and macOS (bash 3.2+), Git Bash, and PowerShell 7 calling `bash`; needs `git 2.5+` and standard tools. Platform table: [references/scope.md](references/scope.md).
+Runs on Linux and macOS (bash 3.2+), Git Bash, and PowerShell 7 calling `bash`; needs `git 2.5+` and standard tools. Platform table and Windows notes (held files, long paths): [references/scope.md](references/scope.md).
 
-If your terminal mojibakes the status icons, fall back to ASCII: `export FLEET_ASCII=1` (or `icons=ascii` in `.claude/fleet/config`). Output panels follow `docs/TERMINAL-DESIGN.md` via `skills/_lib/term.sh`. Windows notes (held files, long paths): [references/scope.md](references/scope.md).
+Mojibake status icons: `export FLEET_ASCII=1` (or `icons=ascii` in `.claude/fleet/config`). Panels follow `docs/TERMINAL-DESIGN.md` via `skills/_lib/term.sh`.
 
 ## Headless agent compatibility
 
@@ -203,13 +203,13 @@ If your terminal mojibakes the status icons, fall back to ASCII: `export FLEET_A
 
 ## Configuration
 
-Optional `.claude/fleet/config`, one `key=value` per line, **parsed, never sourced**: keys are case-insensitive, values need no quotes, unknown keys are warned about on stderr. Keys: `mode`, `worktree_root`, `test_cmd`, `forbidden_pattern`, `base_branch`, `poll_interval`, `icons`, `session_check`, `session_live_secs`, `prune_hint`. **`test_cmd` is the test gate; unset, landing is refused.** Never add a contiguous scrub-marker token to a diff (build it by concatenation) or the scrub refuses the branch. Grammar, defaults, the shipped `forbidden_pattern` and the gitignore behaviour: [references/configuration.md](references/configuration.md).
+Optional `.claude/fleet/config`, one `key=value` per line, **parsed, never sourced**: keys are case-insensitive, values need no quotes, unknown keys are warned about on stderr. Keys: `mode`, `worktree_root`, `test_cmd`, `forbidden_pattern`, `base_branch`, `poll_interval`, `icons`, `session_check`, `session_live_secs`, `prune_hint`. **`test_cmd` is the test gate; unset, landing is refused.** Never add a contiguous scrub-marker token to a diff (build it by concatenation) or the scrub refuses the branch. Grammar, defaults, the shipped pattern: [references/configuration.md](references/configuration.md).
 
 ## References
 
-- `references/workflow.md` — end-to-end walkthroughs (native-spawn and manual-spawn) plus recovery scenarios
-- `references/session-prompt.md` — lane brief to embed in `claude --bg` prompts, teammate spawn prompts, or manual sessions
-- Detail moved out of this file, one topic each: `references/configuration.md`, `references/session-awareness.md`, `references/prune.md`, `references/sweep.md`, `references/landing.md`, `references/daemon.md`, `references/native-spawn.md`, `references/scope.md`
+- `references/workflow.md` — end-to-end walkthroughs (native and manual spawn) and recovery scenarios
+- `references/session-prompt.md` — the lane brief for any spawned session, and the rules for owning what it returns
+- One topic each, linked above: `configuration`, `session-awareness`, `prune`, `sweep`, `landing`, `daemon`, `native-spawn`, `scope` (all `.md` under `references/`)
 
 ## Scripts
 
