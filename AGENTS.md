@@ -10,8 +10,9 @@ and usage live in [README.md](README.md); this file is for agents working on the
   first when a family is ambiguous: `parallel-ops` (fleet-ops, fleet-worker, fleetflow,
   loop-ops, iterate, spawn) and `figma-ops` (the Figma MCP skills). README.md lists them all
 - **13 output styles** for response personality (Vesper, Spartan, Mentor, Executive, Pair, Atlas, Coach, Harbour, Meridian, Noir, Roast, Sage, Scout)
-- **15 hooks**: linting, formatting, dangerous-command warnings, uv enforcement,
-  supply-chain advisories, hidden-Unicode scans, config and worktree guards, a peer-writer
+- **17 hooks**: linting, formatting, dangerous-command warnings, uv enforcement,
+  supply-chain advisories, a TLS-verification guard pair (asks before a command turns
+  verification off, advises on code that does), hidden-Unicode scans, config and worktree guards, a peer-writer
   guard and touched-files ledger, pmail notifications, an opt-in WorktreeCreate/Remove pair
   that honours `WORKTREE_ROOT`. Plugin hooks.json wires the security set
 - **Pigeon** inter-session messaging (`pigeon send/read/reply`) - SQLite-backed pmail at `~/.claude/pmail.db`

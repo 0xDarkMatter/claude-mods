@@ -159,6 +159,7 @@ First, read these files for auth patterns and header requirements:
 - CORS policy restrictive (not wildcard)?
 - Cookie flags: HttpOnly, Secure, SameSite set?
 - Debug mode disabled in production config?
+- TLS certificate verification left on (CWE-295, tag `A07:2025`)? Flag `verify=False`, `ssl.CERT_NONE`, `_create_unverified_context`, `rejectUnauthorized: false`, `NODE_TLS_REJECT_UNAUTHORIZED=0`, Guzzle `'verify' => false`, `CURLOPT_SSL_VERIFYPEER`/`VERIFYHOST` 0, `verify_peer => false`, `InsecureSkipVerify: true`, `VERIFY_NONE`, `danger_accept_invalid_certs(true)`, a trust-all `X509TrustManager` or `HostnameVerifier`, a certificate callback returning true, and `strict-ssl=false` in `.npmrc`, unless scoped to a local dev host?
 
 **Session Management (OWASP A07:2025):**
 - Session timeout configured?

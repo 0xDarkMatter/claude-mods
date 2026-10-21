@@ -20,6 +20,8 @@ Claude Code hooks allow you to run custom scripts at key workflow points.
 | `session-start-unicode-scan.sh` | SessionStart | One-shot hidden-Unicode scan of the project's instruction files (CLAUDE.md/AGENTS.md/SKILL.md/.cursorrules) at session boot. Silent on clean; advisory on a finding, and a separate "NOT scanned" advisory naming any file the scanner could not read. Pairs with `prompt-injection-defense`. |
 | `pre-write-peer-guard.sh` | PreToolUse (Edit\|Write) | Mid-session peer-writer guard (`rules/worktree-boundaries.md`): before writing a file, warn if it was freshly modified by something that isn't this session — the signature of a live peer session sharing the checkout. Uses the touched-ledger to tell own edits apart. Advisory by default; `GUARD_BLOCK=1` denies the write. Auto-wired with its ledger companion. |
 | `session-touched-ledger.sh` | PostToolUse (Edit\|Write) | Companion to `pre-write-peer-guard.sh`: records every file this session writes to `~/.claude/.session-touched/<session_id>.list` so the guard can distinguish this session's edits from a peer's. Silent, never blocks. Auto-wired with the peer guard. |
+| `pre-tls-verify-ask.sh` | PreToolUse (Bash\|PowerShell) | Ask before a command turns TLS certificate verification off: `curl -k`/`--insecure`, `wget --no-check-certificate`, `NODE_TLS_REJECT_UNAUTHORIZED=0`, `PYTHONHTTPSVERIFY=0`, `GIT_SSL_NO_VERIFY`, `git -c http.sslVerify=false`, npm/pnpm/yarn `strict-ssl false`, pip/uv `--trusted-host`, Composer `disable-tls`/`secure-http`, PowerShell `-SkipCertificateCheck` and trust-all callbacks. Persistent switches (`git config`, `npm config set`, `pip config set`, `composer config`, `setx`) say they outlive the session. curl, wget and the package managers count only at command position, through a quote- and heredoc-aware lexer, so a commit message or `rg` pattern that quotes `curl -k` stays silent. See [Why the TLS guard asks](#why-the-tls-guard-asks-instead-of-denying). |
+| `post-tls-verify-scan.sh` | PostToolUse (Write\|Edit) | Advisory when an edit turns verification off in code or config: Python `verify=False`/`CERT_NONE`, Node `rejectUnauthorized: false`, Guzzle `'verify' => false`, `CURLOPT_SSL_VERIFYPEER` 0, Go `InsecureSkipVerify`, Ruby `VERIFY_NONE`, Rust `danger_accept_invalid_certs`, Java trust-all managers and verifiers, .NET callbacks returning true, and committed `.npmrc`/`.yarnrc.yml`/pip/`composer.json`/`.gitconfig` settings. Skips prose (`.md .mdx .markdown .rst .adoc .txt`). |
 | `pre-commit-unicode-scan.sh` | git pre-commit | Refuse commits that ADD hidden Unicode to instruction files. Scans the **staged (index) copy**, not the file on disk, including renamed and non-ASCII-named files. Silent on clean, warn on `high`, **block on `critical`** (tag-block / bidi override) **or on a staged instruction file it could not scan**. Override once with `PROMPT_INJECTION_ALLOW=1`. |
 
 ## Auto-wired vs opt-in
@@ -30,7 +32,7 @@ paths resolved via `${CLAUDE_PLUGIN_ROOT}`:
 
 | Set | Hooks | Why |
 |-----|-------|-----|
-| **Auto-wired (security advisory)** | `pre-install-scan.sh` (PreToolUse Bash), `worktree-guard.sh` (PreToolUse Bash), `manifest-dep-scan.sh` (PostToolUse Write\|Edit), `session-start-unicode-scan.sh` (SessionStart), `config-change-guard.sh` (ConfigChange), `pre-write-peer-guard.sh` (PreToolUse Write\|Edit), `session-touched-ledger.sh` (PostToolUse Write\|Edit) | Silent-on-clean guardrails: zero noise until something is actually wrong, so they're safe to ship on by default. |
+| **Auto-wired (security advisory)** | `pre-install-scan.sh` (PreToolUse Bash), `worktree-guard.sh` (PreToolUse Bash), `pre-tls-verify-ask.sh` (PreToolUse Bash\|PowerShell, asks), `manifest-dep-scan.sh` (PostToolUse Write\|Edit), `post-tls-verify-scan.sh` (PostToolUse Write\|Edit), `session-start-unicode-scan.sh` (SessionStart), `config-change-guard.sh` (ConfigChange), `pre-write-peer-guard.sh` (PreToolUse Write\|Edit), `session-touched-ledger.sh` (PostToolUse Write\|Edit) | Silent-on-clean guardrails: zero noise until something is actually wrong, so they're safe to ship on by default. |
 | **Opt-in (opinionated / formatting)** | `pre-commit-lint.sh`, `post-edit-format.sh`, `dangerous-cmd-warn.sh`, `enforce-uv.sh`, `check-mail.sh`, `pre-commit-unicode-scan.sh` (a *git* hook), `worktree-create.sh` + `worktree-remove.sh` (machine-specific; never auto-wired) | Workflow opinions — wire them yourself per the examples below. |
 
 Plugin installs resolve auto-wired commands through `${CLAUDE_PLUGIN_ROOT}`. Script
@@ -47,6 +49,20 @@ Escalate to a hard gate per concern:
 |----------|---------|-----------------|
 | `SUPPLY_CHAIN_BLOCK` | `pre-install-scan.sh`, `config-change-guard.sh` | Block the install / settings change (exit 2) until reviewed |
 | `WORKTREE_GUARD_BLOCK` | `worktree-guard.sh` | Deny the boundary-violating command (exit 2) |
+
+### Why the TLS guard asks instead of denying
+
+Turning certificate verification off to get past a certificate error lets anyone on
+the network path impersonate the server and read or change the traffic, credentials
+included, and a download or package fetched that way can be swapped in transit. An
+agent reaches for `curl -k` or `verify=False` mid-task without saying so, which is the
+behaviour `pre-tls-verify-ask.sh` interrupts. It asks rather than denies because a
+self-signed certificate on a local development host is the one legitimate case, and
+only the person at the keyboard knows whether this is it. The ask costs nothing unless
+one of the switches is present. In auto mode the hook's ask still forces the prompt;
+under `claude -p` nobody can answer, so Claude Code denies the call and Claude reads the
+reason. The code advisory never blocks: the edit has already happened, so it asks
+Claude to revert it or to scope it to the local host and say so.
 
 ### ConfigChange coverage note
 
@@ -400,7 +416,8 @@ context. The hooks here use:
 
 | Intent | Channel | Used by |
 |--------|---------|---------|
-| Advise, don't block (PreToolUse / PostToolUse) | exit 0 + **one** JSON value on stdout: `{"hookSpecificOutput":{"hookEventName":"<event>","additionalContext":"..."}}` (capped at 10,000 chars) | `pre-install-scan`, `worktree-guard`, `manifest-dep-scan`, `pre-write-peer-guard`, `check-mail` |
+| Advise, don't block (PreToolUse / PostToolUse) | exit 0 + **one** JSON value on stdout: `{"hookSpecificOutput":{"hookEventName":"<event>","additionalContext":"..."}}` (capped at 10,000 chars) | `pre-install-scan`, `worktree-guard`, `manifest-dep-scan`, `post-tls-verify-scan`, `pre-write-peer-guard`, `check-mail` |
+| Ask the user (PreToolUse) | exit 0 + one JSON value: `permissionDecision: "ask"`, `permissionDecisionReason` (shown to the user in the prompt) and `additionalContext` (for the model) | `pre-tls-verify-ask` |
 | Block | exit 2 + reason on **stderr** | `dangerous-cmd-warn`, `enforce-uv`, `pre-commit-lint`, and the `*_BLOCK=1` modes |
 | SessionStart advisory | plain stdout (delivered for this event) | `session-start-unicode-scan` |
 | ConfigChange | no text channel: `systemMessage` is discarded and even a block is silent. Only `terminalSequence` (a desktop notification, interactive sessions only) reaches a person | `config-change-guard` |
