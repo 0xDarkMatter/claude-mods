@@ -124,6 +124,17 @@ directives reward the signal instead.
   unfixed code, or a deliberately broken version of it. A test that cannot fail is
   noise. Characterisation tests written before a refactor are fine: they must fail when
   the behaviour changes.
+- **Two checks, not one.** Breaking the behaviour must turn the test red, and a refactor
+  that leaves what callers observe untouched must leave it green. A test that fails the
+  second check is tied to how the code works: each refactor forces an edit to it, yet it
+  guards nothing. Tests go hollow when:
+  - the expected value came from running the code itself, not from the requirement
+  - the unit under test is mocked
+  - exact error wording is asserted where callers only branch on the error type
+  - call counts or order are asserted instead of the outcome (unless the call *is* the
+    promised external effect)
+  - the fixture already holds the asserted value, so the assertion passes by
+    construction
 - **Named for the bug it prevents** (`returns_404_for_unknown_slug`, not
   `test_generate_2`). Adversarial tests are named for the adversary
   (`double-bill-nudge.test.ts`, not `billing2.test.ts`) — the name tells the next agent
@@ -182,7 +193,11 @@ The full playbook is `repo-doctor`'s [monorepo-structure reference](../skills/re
   Same-commit fix.
 - Did I create a file > 400 lines, or push one past 800? → Markers / split / guard.
 - Did I leave anything in repo root that isn't permanent? → Move or delete.
-- Did I add or change a test? → Have I seen it fail against the unfixed or broken code?
+- Did I add or change a test? → Have I seen it fail against the unfixed or broken code,
+  and would it survive a refactor that keeps the behaviour?
+- Am I reporting back? → Each claim says, in the same sentence, whether it was measured,
+  inferred or a guess (a forecast, or a cause nobody observed, counts as a guess). Any
+  check I could run myself, I ran: the human gets results, not homework.
 - Would `repo-doctor` flag what I just did? When in doubt, run it.
 
 ## When to bend the rule
