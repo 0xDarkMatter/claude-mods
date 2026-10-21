@@ -6,7 +6,7 @@ The contract each parallel worker needs so its branch can land through the fleet
 - **Agent team teammate**: include it in the teammate's spawn prompt
 - **Manual session** (Path B, `fleet init`): paste it as the opening message
 
-Fill in the seven fields. One you cannot fill means the lane is not scoped yet: finish scoping before you spawn it.
+Fill in the nine fields. One you cannot fill means the lane is not scoped yet: finish scoping before you spawn it.
 
 ## Contents
 
@@ -29,6 +29,8 @@ TESTS: <how to run tests for your scope, e.g. "pytest tests/test_auth.py">
 ACCEPTANCE: <the observable results that mean done, one per line>
 TIMEBOX: <rough cap on your working time, e.g. "90 minutes">
 FORBIDDEN: <actions and paths this lane must leave alone, beyond the rules below>
+COORDINATOR: <the coordinator's session id (`fleet main` prints it); the REPORT goes there>
+CHANGELOG: <skip | own>
 
 Setup:
   Work on branch <branch-name>. If you're in a worktree already on it, stay put;
@@ -53,11 +55,19 @@ Rules:
       bash .claude/fleet/signal.sh CONFLICT "timebox: <what remains>"
     and report PARTIAL. Unfinished work never signals READY.
   - Do not merge to main yourself. The fleet landing queue handles that.
-  - Before you branch from or rebase onto main (starting out, or fixing a
-    CONFLICT), run `fleet status`. A tip it marks PROVISIONAL is a merge still
-    under its land's test gate: NOT landed, and a red gate resets it. Wait
-    until `fleet landing` exits 0, then branch or rebase.
-  - End with this REPORT, every line filled ("none" where nothing applies):
+  - CHANGELOG skip: leave CHANGELOG.md alone and put your entry's text in the
+    REPORT; the coordinator writes one entry for the wave. CHANGELOG own:
+    write your entry under [Unreleased], never in a released section.
+  - Build and commit without waiting for main. Only branching from it and
+    rebasing onto it need a settled tip: before either (starting out, or
+    fixing a CONFLICT), run `fleet status`. A tip it marks PROVISIONAL is a
+    merge still under its land's test gate: NOT landed, and a red gate resets
+    it. Wait until `fleet landing` exits 0, then branch or rebase. One gate
+    can take 40 minutes, so never give up a wait shorter than that.
+  - End with this REPORT, every line filled ("none" where nothing applies),
+    sent to COORDINATOR (SendMessage to that id; pigeon where there is no
+    Desktop) and as your last message. Then go idle: a land waits until your
+    session has been quiet for 10 minutes.
       STATUS:     READY | PARTIAL | BLOCKED  (READY sent READY; the others CONFLICT)
       BRANCH:     <branch> @ <head sha>
       ACCEPTANCE: each line, met or not met, and the evidence
@@ -65,6 +75,7 @@ Rules:
       CHANGED:    every file you touched, one line each
       DEVIATIONS: where you departed from the brief, and why
       REMAINING:  what is still undone
+      CHANGELOG:  the entry's text (CHANGELOG skip), else none
     Label each claim measured, inferred or guess.
 
 Begin.
@@ -83,6 +94,8 @@ The PROVISIONAL rule exists because `fleet land` merges first and gates second: 
 | `ACCEPTANCE` | `An expired access token gets 401` / `POST /auth/refresh with a valid refresh token returns a new access token` |
 | `TIMEBOX` | `90 minutes` |
 | `FORBIDDEN` | `src/billing/, db/migrations/; no new dependencies` |
+| `COORDINATOR` | `local_<uuid>`, from `fleet main` in the main checkout |
+| `CHANGELOG` | `skip` for a wave of several lanes; `own` for a lane landing alone |
 
 The tee'd log plus the exit code (`${PIPESTATUS[0]}` — tee's own exit is always 0) is what `signal.sh READY` uses to verify tests passed. The exit code is the authoritative verdict; the log is evidence.
 
@@ -91,6 +104,10 @@ The tee'd log plus the exit code (`${PIPESTATUS[0]}` — tee's own exit is alway
 **TIMEBOX** is a rough cap that lets a stuck lane notice it is stuck. A lane that stops and hands back a committed branch gives the next round somewhere to start; one that runs on burns budget and holds up the wave. `fleet status` lists it as `CONFLICT` with its `timebox:` reason, so half-done work cannot land.
 
 **FORBIDDEN** complements SCOPE. SCOPE says where the lane may write; FORBIDDEN names what it must leave alone even there: a migration, a lockfile, a new dependency, a public API.
+
+**COORDINATOR** is the id the coordinator pinned with `fleet main claim`. Written into each brief when the lane is spawned, it is still right after the coordinator hands off, as long as the pin is renewed; a brief that names an old session reports to nobody.
+
+**CHANGELOG** `skip` is for waves: several lanes all adding to `[Unreleased]` conflict on every land after the first, so the coordinator writes one entry from the REPORTs once the wave lands ([conduct.md](conduct.md#phase-6-one-changelog-entry-per-wave)).
 
 **REPORT** has a fixed shape so the spawning session can line several lanes up and spot a gap at a glance. It is a map to the diff, not a stand-in for it ([below](#owning-what-comes-back)).
 

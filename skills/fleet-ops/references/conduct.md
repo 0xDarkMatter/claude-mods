@@ -74,13 +74,12 @@ id=$(bash "$FLEET/sessions.sh" self)           # this session's id, local_<uuid>
 bash "$FLEET/fleet.sh" main claim "$id"        # lanes resolve MAIN through this pin
 ```
 
-Write the id into the ledger header and into every lane brief this session writes
-("report READY by SendMessage to `<id>`"). If `sessions.sh self` exits 3 (no session
-store on this host), `fleet main claim` with no id pins the session whose cwd is the root.
-
-Each brief also says how long to wait, and where. A lane builds and commits without
-waiting for `main`; only its branch point and a rebase need `fleet landing` to exit 0.
-Any wait it does make is capped above one full gate (rule 13).
+Write the id into the ledger header and into each brief's `COORDINATOR` field (the
+template is [session-prompt.md](session-prompt.md#the-brief)). If `sessions.sh self`
+exits 3 (no session store on this host), `fleet main claim` with no id pins the session
+whose cwd is the root. For a wave, set each brief's `CHANGELOG: skip` (rule 6). The
+template already tells a lane to build and commit without waiting, and to wait out a
+full gate at its branch point (rule 13).
 
 ## Phase 1: inventory
 
@@ -98,10 +97,13 @@ ledger row, reported or not. A session waiting for the user is the user's to ans
 
 Record each READY as `REPORTED` with the head it names. Check it against the ledger
 (duplicates above). Do not land from the report: a READY is a claim, and phase 3 tests it.
+A lane that never reported, or sent a PARTIAL or cut-off REPORT, is not a pass either
+([Owning what comes back](session-prompt.md#owning-what-comes-back), rule 3).
 
 ## Phase 3: review
 
-Per lane, against its brief, with the head frozen first:
+Per lane, holding each ACCEPTANCE line of its brief up against the diff and the
+evidence, with the head frozen first:
 
 ```bash
 git rev-parse lane/foo                                   # the head the READY named?
@@ -127,8 +129,10 @@ written for, and a repo's own leak gate may skip files on purpose (rule 14).
 
 - **Small and mechanical** (a count, a link, a typo, a missing doc line): fix it yourself,
   as a commit in the lane's worktree, while its owner is idle. Re-freeze the new head.
-- **Anything else** (a behaviour, a test, the brief's own judgement calls): send it back
-  with the evidence (file:line, the failing output). The ledger row goes `SENT-BACK`.
+- **Anything else** (a behaviour, a test, the brief's own judgement calls): a new round,
+  for a fresh agent whose brief combines the first task, your findings (file:line, the
+  failing output) and the last REPORT ([Owning what comes back](session-prompt.md#owning-what-comes-back), rule 2).
+  The ledger row goes `SENT-BACK`.
 - **A conflict with `main`**: the owner rebases, or you do while it is idle; review again.
 
 ## Phase 5: land, one at a time
@@ -172,8 +176,8 @@ While a land waits on a live owner, send that owner nothing.
 
 ## Phase 6: one changelog entry per wave
 
-When the wave's briefs said "skip CHANGELOG.md, put the entry text in your READY report",
-write the combined entry once the wave has landed: in a short lane of its own
+When the wave's briefs said `CHANGELOG: skip`, collect the `CHANGELOG:` line of each
+REPORT and write the combined entry once the wave has landed: in a short lane of its own
 (`lane/<wave>-changelog`), reviewed and landed through phase 5 like any other, so `main`
 stays landing-only and the gate runs over it. Then update the plan's status if the wave
 had one.
@@ -244,7 +248,7 @@ Each rule is a failure that happened before the rule existed.
    adding to `[Unreleased]` conflict on every land after the first.
 7. **Review the diff, not the summary.** A READY is a claim: check the head,
    ahead/behind, a clean tree, the scope against the brief, and the gates, before
-   queueing.
+   queueing. The rest of the spawner's side is [Owning what comes back](session-prompt.md#owning-what-comes-back).
 8. **Key the ledger by lane + head.** A READY can arrive twice, and a rebased head looks
    new. The ledger recognises both, so nothing lands twice.
 9. **Archive only idle, landed and clean sessions.** Archiving removes the worktree:
