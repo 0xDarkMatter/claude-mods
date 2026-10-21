@@ -121,7 +121,7 @@ Some things outgrew a skill directory. An app with a dashboard and a roadmap is 
 claude-mods/
 ├── .claude-plugin/     # Plugin metadata
 ├── agents/             # Expert subagents (3)
-├── commands/           # Slash commands (3)
+├── commands/           # Slash commands (4)
 ├── skills/             # Custom skills (112)
 ├── output-styles/      # Response personalities
 ├── hooks/              # Hook examples & docs
@@ -212,6 +212,7 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 |---------|-------------|
 | [sync](commands/sync.md) | Session bootstrap - restore tasks, plan, git/PR context. Suggests `--resume` and `--from-pr`. |
 | [save](commands/save.md) | Persist tasks, plan, git/PR context, and session summary to native memory. |
+| [conduct](commands/conduct.md) | Coordinator pass over a wave of child sessions: review each READY lane's diff, land them one at a time through `fleet queue`, report what would be pushed, then sweep and archive. |
 
 ### Skills
 

@@ -9,6 +9,7 @@ The landing pipeline's fine print: the already-landed case of the merge, why the
 - [The landing marker](#the-landing-marker)
 - [Provisional main](#provisional-main)
 - [Interrupted lands](#interrupted-lands)
+- [A reviewed wave: `fleet queue`](#a-reviewed-wave-fleet-queue)
 - [`fleet revert` in full](#fleet-revert-in-full)
 
 ## Step 3, merge, in full
@@ -63,6 +64,12 @@ A marker whose process is gone means a land was cut short: kill -9, a crash, OOM
 Before this, the next land took the "already up to date" path and marked an untested merge `LANDED`. The `fleet land` call that prints the warning refuses that lane, so it cannot bless what it just flagged. To settle an `UNTESTED MERGE`, run `test_cmd` on the base branch yourself. If it passes, `fleet land <lane>` marks the lane `LANDED` and rebases the rest. If it fails, run `fleet revert <lane>`. Until one of those, `fleet status` keeps reporting the untested merge and `fleet landing` exits 10.
 
 "Process gone" means no running process whose command line mentions fleet, not merely a dead PID: Windows reuses PIDs fast, and a reused one must not make a dead land look live. Git Bash's `/proc` lists every MSYS process on the machine, other sessions' included, so a peer's `fleet status` sees MAIN's land as live.
+
+## A reviewed wave: `fleet queue`
+
+`fleet queue <lane> <tip>...` is how a coordinator lands lanes it has reviewed. Per lane, in order, it waits for `fleet landing` to exit 0, checks the branch is still the reviewed tip (a moved tip passes only when merging it gives the same tree as merging the reviewed one, which is what fleet's auto-rebase produces), trial-merges with `git merge-tree`, audits the would-be merge (a changelog line no lane commit removed, a glued `[Unreleased]` entry, a new duplicate top-level definition), waits for memory headroom on Windows, then runs `fleet land`. It retries only the refusals `fleet land` makes before merging: a live owner, another land holding the marker. It stops at the first lane that does not land.
+
+Its `--deadline` (default 90m) ends the waiting and stops a new land from starting, and never interrupts a land in progress: a background command that dies mid-gate is exactly the interrupted land above. Exit codes: `fleet queue --help`. The coordinator procedure around it: [conduct.md](conduct.md).
 
 ## `fleet revert` in full
 

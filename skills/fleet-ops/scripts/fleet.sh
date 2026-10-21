@@ -819,8 +819,18 @@ cmd_main() {
 cmd_config() {
   # Print the RESOLVED config — the observability that was missing while every
   # documented key was a silent no-op. stdout is data only (key=value, parseable);
-  # advice and warnings go to stderr.
-  if [[ -f "$CONFIG" ]]; then
+  # advice and warnings go to stderr. --quiet prints the keys alone: the session
+  # diagnostics below read every session store, which takes tens of seconds on a
+  # busy machine, and a script that wants one key (queue.sh: base_branch) must
+  # not pay that on every run.
+  local quiet=0
+  case "${1:-}" in
+    --quiet) quiet=1 ;;
+    "") : ;;
+    *) echo "usage: fleet config [--quiet]" >&2; return 2 ;;
+  esac
+  if [[ $quiet -eq 1 ]]; then :
+  elif [[ -f "$CONFIG" ]]; then
     echo "# source: $CONFIG" >&2
   else
     echo "# source: none ($CONFIG absent) — all defaults" >&2
@@ -835,6 +845,7 @@ cmd_config() {
   echo "session_check=$SESSION_CHECK"
   echo "session_live_secs=$SESSION_LIVE_SECS"
   echo "prune_hint=$PRUNE_HINT"
+  if [[ $quiet -eq 1 ]]; then return 0; fi
   if [[ -z "$TEST_CMD" ]]; then
     echo "WARNING: no test_cmd — 'fleet land' will not run a test gate" >&2
   fi
@@ -2545,7 +2556,7 @@ land_one() {
                FLEET_TRANSCRIPT_ROOTS FLEET_SESSION_LIVE_SECS FLEET_SESSION_CACHE_TTL \
                FLEET_SESSION_MAX_AGE_DAYS FLEET_SELF_SESSION_ID \
                FLEET_NO_PRUNE_HINT FLEET_PRUNE_ROOTS FLEET_PRUNE_MAX_REPOS \
-               FLEET_ASCII FLEET_RM_RETRY_SECS
+               FLEET_ASCII FLEET_RM_RETRY_SECS FLEET_QUEUE_COMMIT_PCT
          eval "$TEST_CMD" ) >>"$LOG" 2>&1; then
       log "PASS: $branch landed"
     else
@@ -3089,6 +3100,10 @@ case "${1:-}" in
   # guard protect the main checkout instead of the tree the caller is in.
   sweep)        shift; cd "$INVOKED_FROM" 2>/dev/null || true
                 exec bash "$SCRIPT_DIR/sweep.sh" "$@" ;;
+  # The audited, one-at-a-time landing chain (scripts/queue.sh). It drives `fleet
+  # land` per lane rather than land_one, so the marker, gate and rebase pass stay
+  # in this file alone.
+  queue)        shift; exec bash "$SCRIPT_DIR/queue.sh" "$@" ;;
   config)       shift; cmd_config "$@" ;;
   main)         shift; cmd_main "$@" ;;
   owner)        shift; [[ -z "${1:-}" ]] && { echo "usage: fleet owner <branch>" >&2; exit 1; }
@@ -3106,6 +3121,10 @@ Usage:
   fleet land <branch>         Manual land + rebase others
   fleet land --all [--running]  Batch-land all READY lanes (oldest-first);
                               --running also lands vetted RUNNING lanes
+  fleet queue <lane> <tip>... Land reviewed lanes one at a time: wait for
+                              $BASE_BRANCH to settle, audit each would-be merge,
+                              retry live-owner refusals. --dry-run audits only.
+                              (fleet queue --help)
   fleet revert <branch>       Revert merge commit on $BASE_BRANCH
   fleet landing [--porcelain] Is $BASE_BRANCH safe to branch from / rebase onto?
                               Exit 0 yes; 10 = a land holds it (PROVISIONAL
@@ -3118,7 +3137,8 @@ Usage:
   fleet sweep [--apply]       Post-wave housekeeping, in procedure order:
                               landed? competing? leftovers? who is done?
                               Report by default; --apply = zero-loss only.
-  fleet config                Print resolved config (is the test gate actually on?)
+  fleet config [--quiet]      Print resolved config (is the test gate actually on?);
+                              --quiet: the keys only, no session-store diagnostics
   fleet main [show|claim|release]
                               The coordinator session for this repo (lands,
                               deploys, triages). Lanes address it to hand off.
