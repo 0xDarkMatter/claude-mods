@@ -25,13 +25,6 @@ feature releases live in the README "Recent Updates" section.
   `clean:` line; findings still win with 10. The reference's exit-code table now matches
   the script (no exit 7; `--deep` without GuardDog does not change the code). The new
   tests failed on the old script.
-- **`postinstall-audit.py` no longer treats loopback addresses as exfil endpoints.** Any
-  raw-IP URL counted, so `http://127.0.0.1:*` or `http://0.0.0.0:8000` beside a
-  credential-path or env read raised HIGH `cred-exfil` / `env-exfil`. The first run that
-  read the `mcp` 1.30.0 package flagged it that way over a dev-server origin allow-list and
-  its own `mcp install` config write. Loopback (`127.0.0.0/8`) and `0.0.0.0` are now
-  excluded; a public raw IP still fires. The loopback test failed on the old pattern, and
-  the public-IP test failed on a version with the raw-IP check removed.
 
 ## [3.9.0] - 2026-10-14
 
