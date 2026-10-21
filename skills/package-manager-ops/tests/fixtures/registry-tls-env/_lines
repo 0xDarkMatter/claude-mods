@@ -1,0 +1,3 @@
+registry.tls.disabled .env.example:3
+registry.tls.disabled .envrc:1
+registry.url.http .envrc:2

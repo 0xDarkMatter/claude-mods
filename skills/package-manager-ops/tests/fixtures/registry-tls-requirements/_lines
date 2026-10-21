@@ -1,0 +1,3 @@
+registry.url.http requirements.txt:1
+registry.tls.disabled requirements.txt:2
+registry.url.http requirements/dev.txt:1

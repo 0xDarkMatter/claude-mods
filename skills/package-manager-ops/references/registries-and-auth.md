@@ -16,6 +16,7 @@ articles, checked against 2.10.3).
 - [Composer: auth.json, COMPOSER_AUTH and repositories](#composer-authjson-composer_auth-and-repositories)
 - [CI wiring](#ci-wiring)
 - [Mirrors and proxies](#mirrors-and-proxies)
+- [TLS verification and plain-HTTP registries](#tls-verification-and-plain-http-registries)
 - [When a token was committed](#when-a-token-was-committed)
 
 ## The rule
@@ -178,6 +179,36 @@ remove it from the old layers.
   (`EINTEGRITY`); that is the system working, see
   [diagnostics.md](diagnostics.md#integrity-failures).
 - Composer: add the mirror as a `composer` repository and disable `packagist.org`.
+
+## TLS verification and plain-HTTP registries
+
+A committed switch that turns certificate checks off, or an `http://` registry, applies
+to every checkout and CI job: anyone on the network path can then serve a tampered
+package. pm-audit reports the switch as `registry.tls.disabled` and the URL as
+`registry.url.http`, both errors, by file and line. Checked 2026-10-21 against
+pnpm.io/settings, yarnpkg.com (`.yarnrc.yml`), getcomposer.org (config), the pip
+requirements-file reference, docs.astral.sh/uv settings and the Node.js CLI docs.
+
+| Tool (root file) | Switch | URL keys |
+|---|---|---|
+| npm (`.npmrc`) | `strict-ssl=false` | `registry`, `@scope:registry` |
+| Yarn 1 (`.yarnrc`) | `strict-ssl false` | `registry` |
+| Yarn 2+ (`.yarnrc.yml`) | `enableStrictSsl: false`, `unsafeHttpWhitelist` hosts | `npmRegistryServer` |
+| pnpm (`pnpm-workspace.yaml`) | `strictSsl: false` | `registry`, `registries`, `namedRegistries` |
+| pip (`pip.conf`, `pip.ini`, `requirements*.txt`) | `trusted-host` / `--trusted-host` | `index-url`, `extra-index-url`, `find-links` (`-i`, `-f`) |
+| uv (`uv.toml`, `pyproject.toml [tool.uv]`) | `allow-insecure-host` | `index-url`, `extra-index-url`, `find-links`, `[[index]] url` |
+| Composer (`composer.json`) | `secure-http: false`, `disable-tls: true`, repository `options.ssl` | repository `url` |
+| `.env*` (`.env.example`, `.envrc`) | `NODE_TLS_REJECT_UNAUTHORIZED=0`, `npm_config_strict_ssl=false`, `YARN_ENABLE_STRICT_SSL`, `PIP_TRUSTED_HOST`, `UV_INSECURE_HOST` | `NPM_CONFIG_REGISTRY`, `PIP_INDEX_URL`, `UV_INDEX_URL` and kin |
+
+Never flagged: loopback hosts (`localhost`, `127.0.0.1`, `::1`: no network path), an
+`http://` proxy (HTTPS through it is still TLS), a README or docs page that quotes a
+switch, and a root file git ignores and does not track (a `registry.tls.unshipped` note:
+it affects that checkout only). pnpm 11+ reads only auth and registry keys from `.npmrc`,
+so `strict-ssl` there is npm's; pnpm's own is `strictSsl` in `pnpm-workspace.yaml`.
+
+The fix is an `https://` URL and, behind a proxy that re-signs TLS, a CA file instead of a
+switch: `cafile` (npm, pnpm, Yarn 1, Composer), `httpsCaFilePath` (Yarn 2+), `cert` (pip),
+`SSL_CERT_FILE` or `system-certs` (uv), `NODE_EXTRA_CA_CERTS` (Node).
 
 ## When a token was committed
 

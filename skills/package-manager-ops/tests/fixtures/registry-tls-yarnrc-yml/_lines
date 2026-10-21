@@ -1,0 +1,3 @@
+registry.tls.disabled .yarnrc.yml:1
+registry.url.http .yarnrc.yml:2
+registry.tls.disabled .yarnrc.yml:3

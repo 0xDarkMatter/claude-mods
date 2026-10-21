@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
 """Read-only package-manager audit of one repo root: lockfiles, Node/PHP pins, npx use, legacy tools.
 
-Usage:   pm-audit.py [--json] [--no-docs] [--as-of YYYY-MM-DD] [--facts FILE] [--limit N] PATH
+Usage:   pm-audit.py [--format tsv|json|sarif|github | --json] [--no-docs] [--as-of YYYY-MM-DD]
+                     [--facts FILE] [--limit N] [--config FILE] [--profile site|library|pedantic]
+                     [--baseline FILE] [--fail-on error|warn] PATH
+         pm-audit.py --rules | --explain ID
 Input:   argv only. PATH is a repo root. Root manifests are audited; nested package
          roots are only listed (and flagged when they use another manager, or when CI
          installs in one that has no lockfile). Docs, scripts, CI configs, Dockerfiles
          and appspec hook scripts are read too.
 Output:  stdout = one TSV row per finding: severity, id, file[:line], message, fix.
-         --json: {"data": [finding...], "meta": {...}} with schema
-         claude-mods.package-manager-ops.pm-audit/v1. Data only.
+         --format json (--json): {"data": [finding...], "meta": {...}} with schema
+         claude-mods.package-manager-ops.pm-audit/v2. Data only. sarif is SARIF 2.1.0,
+         github is ::warning/::error workflow annotations.
+         --rules / --explain print the rule catalogue (no PATH needed).
 Stderr:  header, notes (informational - never findings), verdict line, errors.
-Exit:    0 clean, 2 usage, 3 PATH or facts missing, 4 facts unparseable,
-         10 findings (data[] non-empty)
+Exit:    0 clean, 2 usage, 3 PATH, facts, --config or --baseline missing, 4 facts or
+         baseline unparseable, 10 findings (data[] non-empty; with --fail-on error only an
+         error-severity finding)
 
 What it checks (finding ids - SKILL.md and references/diagnostics.md explain each):
   js.manifest.invalid  php.manifest.invalid
@@ -35,12 +41,15 @@ What it checks (finding ids - SKILL.md and references/diagnostics.md explain eac
   npx.unpinned  npx.native-cli  legacy.bower  legacy.node-sass  legacy.package
   registry.token.committed  registry.authjson.committed  registry.credentials.image
   registry.pnpm.placeholder-ignored
+  registry.tls.disabled  registry.url.http
   js.manager.mixed  deploy.install.unfrozen  deploy.composer.dev  php.composer.v1
   deploy.composer.safety-off
   deploy.composer.adhoc
   deploy.composer.installer-unverified
   deploy.bundle.credentials
   deploy.install.unlocked  deploy.npm.yarn-flag  deploy.global.unpinned
+Raised about its own configuration (references/pm-audit-rules.md): config.invalid,
+suppression.expired; suppression.unused is a note.
 
 It never prints a secret: a committed or CI-written credential is reported as file:line only,
 and every finding and note passes through redact() in Audit.add()/Audit.note() - the one
@@ -61,13 +70,22 @@ Sections:
                            GitHub Actions job and step boundaries (workflow_jobs,
                            enclosing_item), CI working directories (join_dir), gitignore /
                            dockerignore matching, read-only git queries (git_says), redact()
+  === rule catalogue ===   RULES: one entry per finding id (severity, category, confidence, fix
+                           kind, summary, rationale), profiles; references/pm-audit-rules.md is
+                           tested against it
   === the audit ===        Audit: _check (family status; contains a crashing check), js
                            (+ paired drift and lock sources), nested, node_pins, php,
                            runtime_floors, craft_eol, composer_line, install_policy, npx,
                            deploy (+ local CI via _local_uses_commands, local tooling,
                            credential bundle/image checks with npmrc_write_has_secret),
+                           transport (TLS off or http:// registries in committed configs),
                            legacy, secrets, pnpm_placeholders
-  main()                   argv, output envelope, exit codes
+  === rules, suppression, baselines and output formats ===
+                           real_path (a finding's file), decorate (confidence, docs_url,
+                           structured fix, fingerprint with line text), load_config,
+                           inline_ignore, apply_policy, load_baseline, exit_code, tsv_field,
+                           github_lines, sarif_doc; all run AFTER the audit
+  main()                   argv, --rules/--explain, policy order, output envelope, exit codes
 
 Examples:
   bash scripts/run-python.sh scripts/pm-audit.py .
@@ -78,6 +96,8 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import fnmatch
+import hashlib
 import json
 import os
 import posixpath
@@ -90,7 +110,9 @@ import urllib.parse
 from pathlib import Path
 
 EX_OK, EX_USAGE, EX_NOTFOUND, EX_UNPARSEABLE, EX_FINDINGS = 0, 2, 3, 4, 10
-SCHEMA = "claude-mods.package-manager-ops.pm-audit/v1"
+# v2: a finding's `fix` is an object ({kind, text, command, safe}); v1 had it as a string,
+# which `fix_text` still carries. Bump this whenever an existing field changes type or meaning.
+SCHEMA = "claude-mods.package-manager-ops.pm-audit/v2"
 FACTS_SCHEMA = "claude-mods.package-manager-ops.facts/v1"
 DEFAULT_FACTS = Path(__file__).resolve().parent.parent / "assets" / "package-manager-facts.json"
 
@@ -1111,6 +1133,132 @@ def git_says(root: Path, *args):
     return p.returncode if p.returncode in (0, 1) else None
 
 
+# ---- transport() readers: hosts, URLs, a TOML subset and pip's INI ----
+def host_of(value) -> str:
+    """The host in a trusted-host / allow-insecure-host / whitelist entry, lower-cased: a URL
+    (uv accepts one), `host:port`, `[v6]:port` or a bare host. "" when unreadable."""
+    v = str(value or "").strip().strip("'\"")
+    if "://" in v:
+        try:
+            return (urllib.parse.urlsplit(v).hostname or "").lower()
+        except ValueError:
+            return ""
+    if v.startswith("["):
+        return v[1:v.find("]")].lower() if "]" in v else v.lower()
+    return (v.rsplit(":", 1)[0] if v.count(":") == 1 else v).lower()
+
+
+def loopback(host) -> bool:
+    """WHY loopback is exempt: plain HTTP or an unverified certificate on 127.0.0.0/8, ::1 or
+    *.localhost never leaves the machine, so nobody sits on that path (a local Verdaccio at
+    http://localhost:4873 is a normal dev setup). A LAN mirror or a CI service name is on a
+    network path and is never exempt."""
+    h = str(host or "").strip().strip("[]").lower()
+    return h in ("localhost", "::1") or h.endswith(".localhost") or re.match(r"^127(?:\.\d{1,3}){3}$", h) is not None
+
+
+def http_urls(text) -> list:
+    """Every non-loopback http:// URL in text, in order. https:// never matches."""
+    out = []
+    for url in re.findall(r"\bhttp://[^\s\"'<>,\]\)}]+", str(text or ""), re.I):
+        try:
+            host = urllib.parse.urlsplit(url).hostname or ""
+        except ValueError:
+            host = ""
+        if not loopback(host):
+            out.append(url)
+    return out
+
+
+def _mask_strings(s: str) -> str:
+    """s with the contents of TOML basic ("...") and literal ('...') strings replaced by x,
+    same length, so a #, =, [ or { inside a string is never read as syntax."""
+    out, q, i = [], "", 0
+    while i < len(s):
+        c = s[i]
+        if q:
+            if q == '"' and c == "\\" and i + 1 < len(s):
+                out.append("xx")
+                i += 2
+                continue
+            out.append(c if c == q else "x")
+            q = "" if c == q else q
+        else:
+            out.append(c)
+            q = c if c in "\"'" else ""
+        i += 1
+    return "".join(out)
+
+
+def _toml_uncomment(line: str) -> str:
+    at = _mask_strings(line).find("#")
+    return line[:at] if at >= 0 else line
+
+
+def _toml_key(raw: str) -> str:
+    parts = re.findall(r'"((?:[^"\\]|\\.)*)"|\'([^\']*)\'|([A-Za-z0-9_-]+)', raw)
+    return ".".join(a or b or c for a, b, c in parts)
+
+
+def toml_strings(value: str) -> list:
+    """The string literals in a TOML value (one string, or an array of them)."""
+    return [a or b for a, b in re.findall(r'"((?:[^"\\]|\\.)*)"|\'([^\']*)\'', value or "")]
+
+
+def toml_entries(text):
+    """(dotted path, raw value, line) for each `key = value` in a TOML file: the enclosing
+    [table] or [[array-of-tables]] header joined to the (possibly dotted) key with quotes
+    dropped, a multi-line array or inline table joined onto its key's line, comments (a #
+    outside a string) removed. A subset, enough for the uv settings transport() reads:
+    multi-line strings are not modelled and inline tables stay raw text."""
+    def depth(v):
+        m = _mask_strings(v)
+        return m.count("[") + m.count("{") - m.count("]") - m.count("}")
+    table, lines, i = "", (text or "").splitlines(), 0
+    while i < len(lines):
+        n, s = i + 1, _toml_uncomment(lines[i]).strip()
+        i += 1
+        if not s:
+            continue
+        if s.startswith("["):
+            table = _toml_key(s.strip("[] \t"))
+            continue
+        eq = _mask_strings(s).find("=")
+        if eq <= 0:
+            continue
+        key, value = _toml_key(s[:eq]), s[eq + 1:].strip()
+        while depth(value) > 0 and i < len(lines):
+            value += " " + _toml_uncomment(lines[i]).strip()
+            i += 1
+        yield (f"{table}.{key}" if table else key), value, n
+
+
+def ini_entries(text):
+    """(section, key, value, line) for a configparser file as pip reads pip.conf/pip.ini:
+    `key = value` or `key: value`, the key lower-cased with _ as - (pip's _normalize_name),
+    indented continuation lines appended to the value, # and ; comment lines skipped. No
+    inline comments: pip's RawConfigParser keeps `host # note` as the value."""
+    section, cur = "", None
+    for n, line in enumerate((text or "").splitlines(), 1):
+        if not line.strip() or line.lstrip().startswith(("#", ";")):
+            continue
+        if line[0] in " \t" and cur:
+            cur[2] = (cur[2] + " " + line.strip()).strip()
+            continue
+        if cur:
+            yield tuple(cur)
+            cur = None
+        s = line.strip()
+        if s.startswith("["):
+            section = s.strip("[]").strip().lower()
+            continue
+        m = re.match(r"^([^=:]+?)\s*[=:]\s*(.*)$", s)
+        if m:
+            cur = [section, m.group(1).strip().lower().replace("_", "-"), m.group(2).strip(), n]
+    if cur:
+        yield tuple(cur)
+
+
 def copies_context(text) -> bool:
     """Does a Dockerfile COPY or ADD its whole build context (`COPY . /app`)? A copy from
     another stage (`COPY --from=builder . /app`) reads that stage's filesystem instead."""
@@ -1126,6 +1274,332 @@ def rel(root: Path, p: Path) -> str:
         return p.relative_to(root).as_posix()
     except ValueError:
         return p.as_posix()
+
+
+# =============================================================================
+# === rule catalogue ===
+# =============================================================================
+# One entry per finding id: the single source of truth for severity, category, default
+# confidence, the fix's kind, and the text `--rules`, `--explain` and the SARIF rule table
+# print. references/pm-audit-rules.md is checked against this table by tests/run.sh (ids and
+# severities must agree), so add the id HERE and in that file in the same commit.
+# Guard: severity here is the MOST SEVERE one the rule emits (a stale lockfile is an error
+# when it cannot be parsed, a warn when merely behind), never a floor. confidence is how
+# sure the check is that the finding is real, not how bad it is: `high` is a fact read from
+# a manifest or lockfile, `medium` a judgement over shell, CI or version arithmetic, `low` a
+# signal that can be legitimate. kind: command (a shell command fixes it), edit (a file
+# change), manual (a decision or credentials rotation). safe = mechanical, local, reversible
+# with git; it never means "skip the diff review".
+RULES_DOC = "references/pm-audit-rules.md"
+RULES: dict = {}
+
+
+def _rule(rid, sev, cat, conf, kind, summary, why, fix, safe=False):
+    RULES[rid] = {"id": rid, "severity": sev, "category": cat, "confidence": conf, "kind": kind,
+                  "summary": summary, "why": why, "fix": fix, "safe": safe}
+
+
+_rule("js.manifest.invalid", "error", "manifest", "high", "manual",
+      "package.json is not valid JSON, or not a JSON object",
+      "Every install and every other JS check reads package.json first; none of them can run on a broken one.",
+      "Repair the JSON (a merge conflict marker is the usual cause) before any install.")
+_rule("php.manifest.invalid", "error", "manifest", "high", "manual",
+      "composer.json is not valid JSON, or not a JSON object",
+      "Composer refuses to resolve anything from an unparseable composer.json.",
+      "Repair the JSON, then run `composer validate`.")
+_rule("js.lockfile.conflict", "error", "lockfile", "high", "manual",
+      "two or more JS lockfiles at the root",
+      "Each manager reads only its own lockfile and ignores the others, so they drift apart silently and CI may install different versions than a developer.",
+      "Pick one manager, delete the other lockfile(s), reinstall with that manager and commit.")
+_rule("js.lockfile.missing", "warn", "lockfile", "high", "command",
+      "dependencies but no lockfile",
+      "Without a lockfile every install resolves fresh, so two runs of the same commit can ship different code.",
+      "Install once with the project's manager and commit the lockfile it writes (`npm install --package-lock-only`).")
+_rule("js.lockfile.stale", "error", "lockfile", "high", "command",
+      "lockfile disagrees with package.json (or cannot be parsed)",
+      "A frozen install (`npm ci`, `--frozen-lockfile`, `--immutable`) fails on a lockfile that does not match the manifest.",
+      "Regenerate the lockfile with the pinned manager and review the version changes before committing.")
+_rule("js.lockfile.v1", "warn", "lockfile", "high", "command",
+      "npm 6-era lockfileVersion 1",
+      "Current npm still reads it but rewrites it on install, and it lacks the integrity and engines data newer checks rely on.",
+      "Install with a current npm and commit the upgraded lockfile.")
+_rule("js.lockfile.shrinkwrap", "warn", "lockfile", "high", "edit",
+      "only npm-shrinkwrap.json, which npm 12 ignores",
+      "npm 12 no longer reads npm-shrinkwrap.json, so `npm ci` finds no lockfile.",
+      "Rename it to package-lock.json (applications) and commit.", True)
+_rule("js.lockfile.source", "warn", "lockfile", "medium", "manual",
+      "lockfile resolved URL is HTTP, names another package, or lacks a strong integrity hash",
+      "A lock entry fetched over http:, from a path that does not match its name, or with sha1-/missing integrity can be swapped in transit or by a poisoned mirror. Shape only: supply-chain-defense judges whether a package is malicious.",
+      "Regenerate the lockfile against the registry over HTTPS and review the changed entries.")
+_rule("js.pnpm.field-ignored", "warn", "lockfile", "high", "edit",
+      "a package.json `pnpm` field pnpm 11+ no longer reads",
+      "pnpm 11 moved these settings to pnpm-workspace.yaml; left behind they silently do nothing.",
+      "Move the setting to pnpm-workspace.yaml.")
+_rule("js.packagemanager.mismatch", "error", "lockfile", "high", "edit",
+      "`packageManager` names a manager the lockfile is not from",
+      "Corepack runs the manager `packageManager` names, which then ignores or rewrites a lockfile from another one.",
+      "Make `packageManager` and the lockfile name the same manager.")
+_rule("js.manager.mixed", "warn", "lockfile", "high", "manual",
+      "nested package roots use a different manager than the root",
+      "Contributors and CI must remember which manager each folder wants; the wrong one writes a second lockfile.",
+      "Standardise on one manager, or document each folder's manager in its own packageManager field.")
+_rule("js.install-policy", "warn", "lockfile", "high", "edit",
+      "pnpm enables dangerouslyAllowAllBuilds",
+      "It lets every dependency run install scripts, bypassing the per-package build allowlist. (Install-script policy itself belongs to supply-chain-defense.)",
+      "Remove it and list the packages that need builds under allowBuilds.")
+_rule("js.dep.non-registry", "warn", "deps", "high", "manual",
+      "package.json points a dependency at git, a local path or a direct tarball URL",
+      "A git or tarball spec bypasses the registry's integrity data, cooldowns and advisories, and a file:/link: spec breaks on any other machine.",
+      "Publish the package to the registry (a private one if needed) and depend on a version.")
+_rule("js.dep.paired-drift", "warn", "deps", "medium", "edit",
+      "packages that must move together are on different versions",
+      "Vue and its compiler, Vite and its plugins, Tailwind and its adapters share an internal contract; a mismatch fails at build time or worse, at runtime.",
+      "Bring the partner packages to the same major (Vue to the same major.minor) in one commit.")
+_rule("js.engine.floor", "warn", "deps", "medium", "edit",
+      "a locked package needs a newer Node than the repo pins",
+      "The lockfile records each package's engines.node; a Node pin below the strictest one installs with warnings and fails at run time.",
+      "Raise the Node pin, or pin the dependency to a release that supports the Node you run.")
+_rule("js.root.not-private", "warn", "deps", "low", "edit",
+      "a root package with dependencies is neither private nor evidently published",
+      "An application root without `\"private\": true` can be published to the registry by a stray `npm publish`.",
+      "Add `\"private\": true` to package.json.", True)
+_rule("js.node.unpinned", "warn", "runtime", "high", "edit",
+      "nothing pins Node",
+      "Developers, CI and production each pick their own Node, so a build that passes in one place fails in another.",
+      "Add an .nvmrc (or .node-version) and `engines.node`, and pin CI's setup-node to the same major.")
+_rule("js.node.eol", "warn", "runtime", "medium", "edit",
+      "a pinned Node is end of life",
+      "An end-of-life Node receives no security fixes. The repo's pin may differ from the server's Node, so confirm the server.",
+      "Move the pins to a supported Node line (see the facts catalogue's release table).")
+_rule("js.node.eol-soon", "warn", "runtime", "medium", "edit",
+      "a pinned Node reaches end of life within the eol_soon_days window",
+      "The upgrade takes longer than the notice period if started on the end-of-life date.",
+      "Plan the upgrade to the next supported Node line now.")
+_rule("node.pin.disagree", "warn", "runtime", "high", "edit",
+      "Node pins in different files name different majors",
+      "CI, DDEV and a developer's shell each read a different pin, so what passes in one fails in another.",
+      "Make .nvmrc, engines, devEngines, DDEV and setup-node name one major.")
+_rule("ddev.node.unpinned", "warn", "runtime", "high", "edit",
+      "DDEV has no nodejs_version",
+      "It then follows DDEV's own default, which changes when DDEV is upgraded.",
+      "Set `nodejs_version` in .ddev/config.yaml to the Node major the repo pins.")
+_rule("php.require.missing", "warn", "php", "high", "edit",
+      "no require.php in a library, or in a project without config.platform.php",
+      "Without a PHP constraint Composer resolves packages for whatever PHP runs it and cannot warn when the runtime is too old.",
+      "Add `require.php` (a library) or `config.platform.php` (a project).")
+_rule("php.platform.unset", "warn", "php", "high", "edit",
+      "no config.platform.php in a project",
+      "Composer resolves for the PHP on the machine that runs it, so a newer developer PHP can lock packages production cannot run.",
+      "Set `config.platform.php` to the production PHP version.")
+_rule("php.pin.disagree", "warn", "runtime", "high", "edit",
+      "PHP pins in different files name different versions",
+      "DDEV, config.platform.php, the lock's platform override, CI and require.php each gate a different step.",
+      "Make every PHP pin name the same minor line.")
+_rule("php.eol", "warn", "runtime", "medium", "edit",
+      "a pinned PHP is past security support",
+      "An unsupported PHP receives no security fixes. The repo's pin may differ from the server's PHP, so confirm the server.",
+      "Move the pins to a supported PHP minor (see the facts catalogue's release table).")
+_rule("php.eol-soon", "warn", "runtime", "medium", "edit",
+      "a pinned PHP leaves security support within the eol_soon_days window",
+      "The upgrade takes longer than the notice period if started on the end-of-life date.",
+      "Plan the upgrade to the next supported PHP minor now.")
+_rule("php.lockfile.missing", "warn", "php", "high", "command",
+      "a project with packages but no composer.lock",
+      "Without a lock every `composer install` resolves fresh, so two runs can ship different code.",
+      "Run `composer update` once (in DDEV: `ddev composer update`) and commit composer.lock.")
+_rule("php.lockfile.stale", "error", "php", "high", "command",
+      "composer.json requires packages the lock lacks (or the lock cannot be parsed)",
+      "`composer install` fails or installs something other than what composer.json says.",
+      "Run `composer update vendor/package` for the missing packages and commit the lock.")
+_rule("php.composer.safety-off", "warn", "php", "high", "edit",
+      "composer.json disables plugin or advisory safeguards",
+      "A blanket allow-plugins or a switched-off advisory, malware or abandoned check removes protections Composer enables "
+      "by default. secure-http and disable-tls are registry.tls.disabled.",
+      "Remove the setting; allow named plugins individually.")
+_rule("php.package.abandoned", "warn", "php", "high", "manual",
+      "composer.lock marks a package abandoned",
+      "An abandoned package gets no security fixes. Where the lock names a replacement, the finding says so.",
+      "Move to the named replacement, or to a maintained fork.")
+_rule("php.dep.non-registry", "warn", "deps", "high", "manual",
+      "composer.json uses a VCS/path/artifact repository, a dev-* or * constraint, or minimum-stability dev",
+      "Those sources bypass Packagist's advisories and malware blocking, and a floating dev-* or * constraint makes updates unreviewable.",
+      "Tag a release and require a version, or set `prefer-stable: true`.")
+_rule("php.lock.floor", "warn", "runtime", "medium", "edit",
+      "a locked package needs a newer PHP than production runs",
+      "composer.lock records each package's PHP lower bound; a production pin below it installs and then fails at run time (a static `composer check-platform-reqs --lock`).",
+      "Raise the production PHP, or lock the package to a release that supports the PHP you run.")
+_rule("php.composer.eol", "warn", "runtime", "medium", "edit",
+      "the Composer minor line in use is past support",
+      "An unsupported Composer misses security and malware-blocking features newer lines have.",
+      "Move to a supported Composer 2.x line (setup-php `tools: composer:v2`, a current image).")
+_rule("php.composer.v1", "warn", "runtime", "high", "edit",
+      "CI or a Dockerfile uses Composer 1",
+      "Composer 1 is end of life and cannot reach Packagist's current metadata.",
+      "Use Composer 2 (`tools: composer:v2`, `composer:2` image).")
+_rule("php.craft.eol", "warn", "runtime", "medium", "manual",
+      "composer.lock contains a Craft CMS major past critical-security support",
+      "A Craft major past its security end date receives no fixes for vulnerabilities in the CMS itself.",
+      "Upgrade Craft to a supported major.")
+_rule("npx.unpinned", "warn", "npx", "medium", "edit",
+      "npx/dlx/bunx runs an unpinned or undeclared package",
+      "It fetches whatever the dist-tag names on every run, so a hijacked publish runs on your machine and CI the moment it appears.",
+      "Add the package to devDependencies and run it through the lockfile, or pin an exact version.")
+_rule("npx.native-cli", "error", "npx", "high", "edit",
+      "a native CLI (rg, fd, jq...) is run through npx or installed globally from npm",
+      "The npm package of that name is a downloader of unknown provenance, not the tool; a native binary belongs to the system package manager.",
+      "Install the real tool with the OS package manager, or a pinned release asset.")
+_rule("legacy.bower", "warn", "legacy", "high", "manual",
+      "bower.json or .bowerrc",
+      "Bower is deprecated and its registry is not maintained.",
+      "Move to npm (references/legacy-exits.md).")
+_rule("legacy.node-sass", "warn", "legacy", "high", "manual",
+      "node-sass is a dependency",
+      "node-sass is deprecated, needs a native build per Node version and no longer receives updates.",
+      "Switch to Dart Sass (`sass`).")
+_rule("legacy.package", "warn", "legacy", "high", "manual",
+      "a dependency matches the facts catalogue's legacy-package table",
+      "The facts catalogue records why each package is legacy, what replaces it and which versions are affected.",
+      "Move to the replacement the finding names.")
+_rule("registry.token.committed", "error", "registry", "high", "manual",
+      "a literal token in .npmrc or .yarnrc.yml",
+      "A token in git history is readable by everyone with repository access, and revoking it is the only fix.",
+      "Revoke the token, move the credential to an environment variable or user config, and purge it from history.")
+_rule("registry.authjson.committed", "error", "registry", "high", "command",
+      "a root auth.json that git tracks or does not ignore",
+      "auth.json holds Composer credentials; committed, they leak to everyone with the repository.",
+      "Run `git rm --cached auth.json`, add it to .gitignore, and rotate the credentials.")
+_rule("registry.credentials.image", "error", "registry", "medium", "edit",
+      "CI writes credentials into a Docker build context that the image copies",
+      "The credentials end up in an image layer that anyone who can pull the image can read.",
+      "Pass the credential as a build secret or env, add the file to .dockerignore, and rotate it.")
+_rule("registry.pnpm.placeholder-ignored", "warn", "registry", "high", "edit",
+      "a ${...} placeholder in a project .npmrc setting that pnpm ignores",
+      "pnpm 11.5.3+ and 10.34.2+ ignore it with only a warning, so the registry or token silently drops out.",
+      "Move the secret to the user's ~/.npmrc or a pnpm_config_ environment variable; write non-secret values literally.")
+_rule("registry.tls.disabled", "error", "registry", "high", "edit",
+      "a committed config turns TLS certificate checks off or allows plain HTTP to a host",
+      "A committed config applies to every checkout and CI job, so anyone on the network path can serve all of them a "
+      "tampered package: strict-ssl, enableStrictSsl, strictSsl, trusted-host, allow-insecure-host, unsafeHttpWhitelist, "
+      "Composer secure-http/disable-tls/options.ssl, NODE_TLS_REJECT_UNAUTHORIZED=0.",
+      "Remove the switch; behind a proxy that re-signs TLS, trust its CA file instead (cafile, httpsCaFilePath, cert, "
+      "SSL_CERT_FILE, NODE_EXTRA_CA_CERTS).")
+_rule("registry.url.http", "error", "registry", "high", "edit",
+      "a committed registry or index URL uses plain http://",
+      "Packages and metadata cross the network unencrypted and unauthenticated, so anyone on the path can read and replace them.",
+      "Use the registry's https:// URL; a registry without TLS belongs behind a TLS proxy.")
+_rule("deploy.install.unfrozen", "warn", "deploy", "medium", "edit",
+      "CI or a deploy runs a non-frozen install",
+      "A non-frozen install can rewrite the lockfile and resolve versions nobody reviewed.",
+      "Use `npm ci`, `--frozen-lockfile` / `--immutable`, or `composer install`.")
+_rule("deploy.install.unlocked", "warn", "deploy", "medium", "manual",
+      "CI installs in a nested folder that has no lockfile",
+      "Every run of that job resolves fresh, so the build is not reproducible.",
+      "Commit a lockfile for that folder, or make it a workspace member of a root that has one.")
+_rule("deploy.npm.yarn-flag", "error", "deploy", "high", "edit",
+      "a Yarn flag on `npm ci` or `npm install`",
+      "npm 12 refuses the command; npm up to 11 ignores the flag and installs unfrozen.",
+      "Use `npm ci` alone.", True)
+_rule("deploy.global.unpinned", "warn", "deploy", "medium", "edit",
+      "`npm install -g` without an exact version",
+      "A global install fetches the newest release on every run, outside the lockfile.",
+      "Pin an exact version (`npm install -g tool@1.2.3`) or run it as a pinned devDependency.")
+_rule("deploy.composer.dev", "warn", "deploy", "medium", "edit",
+      "`composer install` without --no-dev where vendor/ ships",
+      "Dev packages (test and debug tooling) ship to production and widen its attack surface.",
+      "Add `--no-dev` (or set COMPOSER_NO_DEV=1) to the shipping install.")
+_rule("deploy.composer.safety-off", "warn", "deploy", "medium", "edit",
+      "a shipping Composer command disables security blocking, audit or platform checks",
+      "Turning off advisory or malware blocking, the audit or platform requirements removes the checks that stop a bad package reaching production.",
+      "Remove the flag or environment setting.")
+_rule("deploy.composer.adhoc", "warn", "deploy", "medium", "edit",
+      "CI or deploy runs `composer require`, `global require` or `update`",
+      "These resolve new versions at deploy time instead of installing the reviewed lock.",
+      "Run `composer install` against the committed lock; make dependency changes in a reviewed commit.")
+_rule("deploy.composer.installer-unverified", "warn", "deploy", "medium", "edit",
+      "the Composer installer is piped to php without checking installer.sig",
+      "A tampered installer runs with the build's privileges; the published signature exists to detect that.",
+      "Download installer.sig and compare its SHA-384 before running, or use a pinned image or setup-php.")
+_rule("deploy.bundle.credentials", "error", "deploy", "medium", "edit",
+      "CI writes a credential file and then zips it into a deploy bundle",
+      "The bundle is stored and downloaded by systems that never needed the credential.",
+      "Keep credentials outside the bundle source, or add the path to the archive exclude list.")
+_rule("config.invalid", "error", "config", "high", "edit",
+      "the --config file is malformed, so none of it applies",
+      "A typo in a suppression file must never be silent: a half-read config would hide findings nobody chose to hide.",
+      "Fix .pm-audit.json: every ignore[] entry needs id, reason and until (YYYY-MM-DD).")
+_rule("suppression.expired", "warn", "config", "high", "manual",
+      "an ignore passed its `until` date",
+      "A waiver is a loan: past its date the finding is reported again so tolerated risk is re-decided, not forgotten.",
+      "Fix the finding, or renew `until` with a fresh reason.")
+_rule("suppression.unused", "note", "config", "high", "edit",
+      "an ignore matched no finding",
+      "A waiver for something that no longer fires is dead weight and hides which ignores still matter.",
+      "Delete the entry from the config.")
+# Advisory notes. They never fail a run on their own; `--profile pedantic` reports them as
+# warn findings, so each needs a catalogue entry (rule row, docs anchor, SARIF ruleIndex).
+_rule("suppression.inline-error", "note", "config", "high", "edit",
+      "an inline ignore names an error-severity finding",
+      "An inline ignore has no end date and no reviewer, so it may not mute an error such as a committed token.",
+      "Fix the finding, or add a dated entry with a reason to .pm-audit.json.")
+_rule("suppression.inline-no-reason", "note", "config", "high", "edit",
+      "an inline ignore gives no reason",
+      "A waiver nobody explained is indistinguishable from one added to make CI pass.",
+      "Say why after the closing bracket: `pm-audit: ignore[<id>] <reason>`.")
+_rule("js.packagemanager.unset", "note", "lockfile", "high", "edit",
+      "package.json has no packageManager field",
+      "Nothing declares which manager and version the repo expects, so Corepack and CI cannot pin it.",
+      "Add `\"packageManager\": \"<manager>@<exact version>\"` for the manager that owns the lockfile.", safe=True)
+_rule("js.yarn.classic", "note", "legacy", "high", "manual",
+      "a Yarn 1 (classic) lockfile",
+      "Yarn 1 is in maintenance mode and ships only an occasional hotfix.",
+      "Plan a move to npm or Yarn 4 (references/legacy-exits.md).")
+_rule("js.lockfile.binary", "note", "lockfile", "high", "command",
+      "a binary bun.lockb that cannot be checked",
+      "The binary format hides its contents from review and from this scanner; current Bun writes a text bun.lock.",
+      "Run `bun install --save-text-lockfile --frozen-lockfile --lockfile-only`, delete bun.lockb "
+      "and commit bun.lock (bun.com/docs/pm/lockfile).")
+_rule("js.node.floating", "note", "runtime", "high", "edit",
+      "a Node pin that floats (an alias such as lts/* or node)",
+      "A floating pin selects whatever release is newest, so two machines can run different Node majors.",
+      "Pin a major or an exact version.")
+_rule("js.engines.unenforced", "note", "runtime", "high", "edit",
+      "engines.node without engine-strict in .npmrc",
+      "npm only warns about engines unless engine-strict=true, so a wrong Node still installs.",
+      "Add `engine-strict=true` to .npmrc if engines.node must block an install.", safe=True)
+_rule("npx.redundant", "note", "npx", "high", "edit",
+      "a script runs a local dependency through npx",
+      "npm run already puts node_modules/.bin on PATH; npx adds nothing but a chance to fetch.",
+      "Call the binary directly in the script.", safe=True)
+_rule("js.nested.roots", "note", "lockfile", "high", "manual",
+      "nested package roots with their own lockfile",
+      "pm-audit audits the root only; each nested root is its own install with its own pins.",
+      "Run pm-audit on each nested root it lists.")
+_rule("registry.authjson.ignored", "note", "registry", "high", "manual",
+      "auth.json is present and gitignored",
+      "The good state, reported so a clean result shows the credential file was seen and kept out of git.",
+      "Nothing to fix; keep it gitignored and prefer COMPOSER_AUTH in CI.")
+_rule("registry.tls.unshipped", "note", "registry", "high", "manual",
+      "a gitignored, untracked root config turns TLS off or uses a plain-HTTP registry",
+      "It ships to nobody, so it is not registry.tls.disabled, but this checkout's installs are still exposed.",
+      "Remove the switch locally, or trust the proxy's CA file instead.")
+
+CATEGORIES = ("manifest", "lockfile", "deps", "runtime", "php", "npx", "legacy", "registry", "deploy", "config")
+# Profiles: which rules a kind of repo should not be told about. `site` (the default) is the
+# repo type every rule was written for and silences nothing; `library` drops the rules that
+# only make sense for something deployed (a published library legitimately ships no lockfile,
+# pins no runtime and has nothing to freeze); `pedantic` silences nothing and also reports
+# every advisory note as a warn finding, so notes fail the run too.
+# Guard: js.engine.floor and php.lock.floor are NOT library-silenced - they fire only when a
+# literal pin exists, and a library whose own pin cannot run its locked dependencies needs
+# to hear it. What a profile silences is counted on stderr in every format.
+LIBRARY_SILENCED = {"js.lockfile.missing", "php.lockfile.missing", "php.platform.unset", "js.node.unpinned",
+                    "ddev.node.unpinned", "js.root.not-private", "deploy.install.unlocked"}
+PROFILES = ("site", "library", "pedantic")
+SEVERITY_RANK = {"error": 0, "warn": 1, "note": 2}
+
+
+def docs_url(rid: str) -> str:
+    return f"{RULES_DOC}#{rid}"
 
 
 # =============================================================================
@@ -1326,7 +1800,7 @@ class Audit:
         npx_skip = "package.json absent and docs scan disabled" if not self.docs and not (self.root / "package.json").is_file() else ""
         self._check("npx", (self.npx,), npx_skip)
         self._check("legacy", (self.legacy,))
-        self._check("registry", (self.secrets, self.pnpm_placeholders))
+        self._check("registry", (self.secrets, self.pnpm_placeholders, self.transport))
         self.meta["manager_majors"] = self._manager_majors()
         return self
 
@@ -1758,10 +2232,8 @@ class Audit:
         disabled = []
         if config.get("allow-plugins") is True:
             disabled.append("config.allow-plugins=true (blanket plugin execution)")
-        if config.get("secure-http") is False:
-            disabled.append("config.secure-http=false")
-        if config.get("disable-tls") is True:
-            disabled.append("config.disable-tls=true")
+        # secure-http=false and disable-tls=true are transport()'s registry.tls.disabled,
+        # an error with the line; listing them here too would report one switch twice.
         audit = config.get("audit")
         if audit is False or str(audit).lower() in ("off", "disabled", "ignore"):
             disabled.append("config.audit is disabled")
@@ -1776,7 +2248,7 @@ class Audit:
         if disabled:
             self.add("warn", "php.composer.safety-off", "composer.json",
                      "Composer safety controls are disabled: " + ", ".join(disabled),
-                     "restore secure-http/TLS, allow plugins by package name, and keep audit blocking enabled")
+                     "allow plugins by package name, and keep audit blocking enabled")
         repo_cfg = c.get("repositories")
         repositories = repo_cfg if isinstance(repo_cfg, list) else list(repo_cfg.values()) if isinstance(repo_cfg, dict) else []
         non_registry = [str(r.get("type")) for r in repositories
@@ -2322,13 +2794,18 @@ class Audit:
                 if p.suffix.lower() not in DOC_SUFFIXES and fn.lower() not in DOC_NAMES \
                         and not fn.lower().startswith(("dockerfile", "readme")) and not hook_script:
                     continue
+                # A file the walk could not read is coverage it did not have: say so, so a clean
+                # result cannot hide an oversized or unreadable script (meta.checks npx skipped).
                 try:
                     if p.stat().st_size > MAX_DOC_BYTES:
+                        self.blind("npx", f"skipped a file over {MAX_DOC_BYTES // 1024} KiB: {rel(self.root, p)}")
                         continue
                 except OSError:
+                    self.blind("npx", f"could not stat {rel(self.root, p)}")
                     continue
                 text = read_text(p)
                 if text is None:
+                    self.blind("npx", f"could not read {rel(self.root, p)}")
                     continue
                 scanned += 1
                 md = p.suffix.lower() in (".md", ".markdown") or fn.lower().startswith("readme")
@@ -3227,6 +3704,211 @@ class Audit:
                      f"ramsey/composer-install without --no-dev in a deploy ({rel}) ships dev packages",
                      'set composer-options: "--no-dev --optimize-autoloader" (references/install-semantics.md#deploy-patterns)')
 
+    # ---- TLS verification off, or a plain-HTTP registry, in a committed config ----
+    # WHY in the audit: a committed config applies to every developer and CI job that
+    # installs from the repo, so one `strict-ssl=false` lets anyone on the network path
+    # serve all of them a tampered package. Two ids, both error:
+    #   registry.tls.disabled  a switch that turns certificate checks off, or lets the
+    #                          manager use plain HTTP to a host (pip trusted-host, uv
+    #                          allow-insecure-host, Yarn unsafeHttpWhitelist, Composer
+    #                          secure-http=false), or NODE_TLS_REJECT_UNAUTHORIZED=0
+    #   registry.url.http      a registry or index URL that is http://. Proxies are not
+    #                          registries: HTTPS through an http:// proxy is still TLS.
+    # Root files only, as in secrets(), and only the keys each tool reads, so a README or a
+    # docs page that quotes `--trusted-host` is never read. A file git ignores and does not
+    # track is a local override: a note (registry.tls.unshipped), not a finding. Loopback
+    # hosts are exempt (loopback()). Composer's secure-http/disable-tls are reported here
+    # with their line, not in php.composer.safety-off, so one switch is one finding.
+    def transport(self):
+        tls_id, http_id = "registry.tls.disabled", "registry.url.http"
+        hits = []  # (id, file, line, message, fix)
+        npm_fix = "delete the line (strict-ssl defaults to true); for a private or proxy CA, point `cafile=` at its certificate"
+        pip_fix = "serve the index over HTTPS with a valid certificate and drop trusted-host; for a private CA set `cert` (PIP_CERT) to its certificate"
+        uv_fix = "drop allow-insecure-host; for a private CA set SSL_CERT_FILE, or `system-certs = true` to use the platform store"
+        yarn_fix = "delete it (it defaults to true); for a private CA set `httpsCaFilePath` to its certificate"
+        http_fix = "use the registry's https:// URL; a registry without TLS belongs behind a TLS proxy, not on plain HTTP"
+
+        def tls(rel, n, what, effect, fix):
+            at = f" on line {n}" if n else ""
+            hits.append((tls_id, rel, n, f"{what}{at} {effect}; a committed file applies to every checkout and CI "
+                                         "job, and anyone on the network path can then tamper with downloads", fix))
+
+        def http(rel, n, what, tool, urls):
+            at = f" on line {n}" if n else ""
+            hosts = ", ".join(dict.fromkeys(host_of(u) for u in urls))
+            hits.append((http_id, rel, n, f"{what}{at} points {tool} at a registry over plain HTTP ({hosts}); anyone "
+                                          "on the network path can read and replace the packages", http_fix))
+
+        def text_of(rel):
+            return read_text(self.root / rel) if (self.root / rel).is_file() else None
+
+        def yaml_line(line):
+            return re.sub(r"(^|\s)#.*$", "", line).rstrip()
+
+        # npm .npmrc. pnpm 11+ reads only auth and registry keys there, so strict-ssl is npm's.
+        for n, line in enumerate((text_of(".npmrc") or "").splitlines(), 1):
+            s = line.strip()
+            if not s or s.startswith(("#", ";")) or "=" not in s:
+                continue
+            key, value = (x.strip() for x in s.split("=", 1))
+            value = value.strip("'\"")
+            if key.lower() in ("strict-ssl", "strict_ssl") and value.lower() == "false":
+                tls(".npmrc", n, f"`{key}={value}`", "turns off TLS certificate checks for npm", npm_fix)
+            elif (key == "registry" or (key.startswith("@") and key.endswith(":registry"))) and http_urls(value):
+                http(".npmrc", n, f"`{key}`", "npm and pnpm", http_urls(value))
+        # Yarn 1 .yarnrc: `key value`, either side optionally quoted.
+        for n, line in enumerate((text_of(".yarnrc") or "").splitlines(), 1):
+            m = re.match(r'^\s*"?([^"\s#]+)"?\s+"?([^"]*?)"?\s*$', line)
+            if not m:
+                continue
+            key, value = m.group(1), m.group(2)
+            if key == "strict-ssl" and value.lower() == "false":
+                tls(".yarnrc", n, "`strict-ssl false`", "turns off TLS certificate checks for Yarn 1",
+                    "delete the line; for a private CA set `cafile` to its certificate")
+            elif (key == "registry" or (key.startswith("@") and key.endswith(":registry"))) and http_urls(value):
+                http(".yarnrc", n, f"`{key}`", "Yarn 1", http_urls(value))
+        # Yarn 2+ .yarnrc.yml (npmRegistryServer also sits under npmScopes, so any depth).
+        text = text_of(".yarnrc.yml") or ""
+        for n, line in enumerate(text.splitlines(), 1):
+            s = yaml_line(line)
+            m = re.match(r"^\s*enableStrictSsl\s*:\s*[\"']?(\w+)[\"']?\s*$", s)
+            if m and m.group(1).lower() == "false":
+                tls(".yarnrc.yml", n, "`enableStrictSsl: false`", "turns off TLS certificate checks for Yarn", yarn_fix)
+            m = re.match(r"^\s*npmRegistryServer\s*:\s*(.+)$", s)
+            if m and http_urls(m.group(1)):
+                http(".yarnrc.yml", n, "`npmRegistryServer`", "Yarn", http_urls(m.group(1)))
+        allowed = [h for h in yaml_list(text, "unsafeHttpWhitelist") if not loopback(host_of(h))]
+        if allowed:
+            n = next((i for i, l in enumerate(text.splitlines(), 1) if l.startswith("unsafeHttpWhitelist")), None)
+            tls(".yarnrc.yml", n, f"`unsafeHttpWhitelist` ({', '.join(allowed)})", "lets Yarn use plain HTTP to these hosts",
+                "serve the registry over HTTPS and remove its host from unsafeHttpWhitelist")
+        # pnpm-workspace.yaml settings (pnpm.io/settings): strictSsl, registry, registries
+        # and namedRegistries (a registries URL can be the key, so the whole block is read).
+        top = ""
+        for n, line in enumerate((text_of("pnpm-workspace.yaml") or "").splitlines(), 1):
+            s = yaml_line(line)
+            if not s.strip():
+                continue
+            if not line[0].isspace():
+                m = re.match(r"^[\"']?([^\"':\s]+)[\"']?\s*:\s*(.*)$", s)
+                top, value = (m.group(1), m.group(2)) if m else ("", "")
+                if top in ("strictSsl", "strict-ssl") and value.strip().strip("'\"").lower() == "false":
+                    tls("pnpm-workspace.yaml", n, f"`{top}: false`", "turns off TLS certificate checks for pnpm",
+                        "delete it (it defaults to true); for a private CA set `cafile` to its certificate")
+            if top in ("registry", "registries", "namedRegistries") and http_urls(s):
+                http("pnpm-workspace.yaml", n, f"`{top}`", "pnpm", http_urls(s))
+        # pip: pip.conf / pip.ini (any section: global, install, download...) and the
+        # options a requirements file may carry. pip strips `#` comments after whitespace.
+        for rel in ("pip.conf", "pip.ini"):
+            for _section, key, value, n in ini_entries(text_of(rel) or ""):
+                hosts = [h for h in value.split() if not loopback(host_of(h))] if key == "trusted-host" else []
+                if hosts:
+                    tls(rel, n, f"`trusted-host` ({', '.join(hosts)})",
+                        "turns off certificate checks for these hosts and lets pip use plain HTTP to them", pip_fix)
+                elif key in ("index-url", "extra-index-url", "find-links") and http_urls(value):
+                    http(rel, n, f"`{key}`", "pip", http_urls(value))
+        reqs = sorted({p for g in ("requirements*.txt", "requirements*.in", "requirements/*.txt", "requirements/*.in")
+                       for p in self.root.glob(g) if p.is_file()})
+        for path in reqs:
+            rel_req = path.relative_to(self.root).as_posix()
+            for n, line in enumerate((read_text(path) or "").splitlines(), 1):
+                s = re.sub(r"(^|\s)#.*$", "", line)
+                for m in re.finditer(r"(?:^|\s)--trusted-host(?:=|\s+)(\S+)", s):
+                    if not loopback(host_of(m.group(1))):
+                        tls(rel_req, n, f"`--trusted-host {m.group(1)}`",
+                            "turns off certificate checks for that host and lets pip use plain HTTP to it", pip_fix)
+                for m in re.finditer(r"(?:^|\s)(-i|--index-url|--extra-index-url|-f|--find-links)(?:=|\s+)(\S+)", s):
+                    if http_urls(m.group(2)):
+                        http(rel_req, n, f"`{m.group(1)}`", "pip", http_urls(m.group(2)))
+        # uv: uv.toml (top level and [pip]) and pyproject.toml [tool.uv] / [tool.uv.pip],
+        # [[index]] / [[tool.uv.index]] tables included. Another tool's table never counts.
+        for rel, prefixes in (("uv.toml", ("", "pip.")), ("pyproject.toml", ("tool.uv.", "tool.uv.pip."))):
+            for key, value, n in toml_entries(text_of(rel) or ""):
+                for pre in prefixes:
+                    leaf = key[len(pre):] if key.startswith(pre) else None
+                    hosts = [h for h in toml_strings(value) if not loopback(host_of(h))] if leaf == "allow-insecure-host" else []
+                    if hosts:
+                        tls(rel, n, f"`{key}` ({', '.join(hosts)})", "turns off certificate checks for these hosts in uv", uv_fix)
+                    elif leaf in ("index-url", "extra-index-url", "find-links", "index", "index.url") and http_urls(value):
+                        http(rel, n, f"`{key}`", "uv", http_urls(value))
+        # Composer, from the parsed manifest; the line is found by the key in the text.
+        if self.composer is not None:
+            lines = (text_of("composer.json") or "").splitlines()
+
+            def line_of(pattern):
+                return next((i for i, l in enumerate(lines, 1) if re.search(pattern, l)), None)
+            config = obj(self.composer.get("config"))
+            if config.get("secure-http") is False:
+                tls("composer.json", line_of(r'"secure-http"\s*:\s*false'), "`config.secure-http: false`",
+                    "lets Composer download over plain HTTP", "remove it (it defaults to true) and use https:// repository URLs")
+            if config.get("disable-tls") is True:
+                tls("composer.json", line_of(r'"disable-tls"\s*:\s*true'), "`config.disable-tls: true`",
+                    "turns TLS off for every Composer download", "remove it; for a private CA set `config.cafile` to its certificate")
+            repo_cfg = self.composer.get("repositories")
+            repos = repo_cfg if isinstance(repo_cfg, list) else list(repo_cfg.values()) if isinstance(repo_cfg, dict) else []
+            for r in (r for r in repos if isinstance(r, dict)):
+                url = r.get("url")
+                url = url if isinstance(url, str) else ""
+                if http_urls(url):
+                    http("composer.json", line_of(re.escape(url)), "repository `url`", "Composer", http_urls(url))
+                ssl = obj(obj(r.get("options")).get("ssl"))
+                off = [k for k in ("verify_peer", "verify_peer_name") if ssl.get(k) is False] \
+                    + (["allow_self_signed"] if ssl.get("allow_self_signed") is True else [])
+                if off:
+                    tls("composer.json", line_of(rf'"{off[0]}"\s*:'), f"repository `options.ssl` ({', '.join(off)})",
+                        "turns off certificate checks for that repository",
+                        "remove those ssl options; for a private CA set `options.ssl.cafile` to its certificate")
+        # Root .env* files (.env.example, .envrc...): the env spellings of the same settings.
+        # NODE_TLS_REJECT_UNAUTHORIZED disables checks only at exactly "0" (Node's docs).
+        env_urls = {"NPM_CONFIG_REGISTRY": "npm", "YARN_NPM_REGISTRY_SERVER": "Yarn", "PIP_INDEX_URL": "pip",
+                    "PIP_EXTRA_INDEX_URL": "pip", "UV_INDEX_URL": "uv", "UV_EXTRA_INDEX_URL": "uv",
+                    "UV_DEFAULT_INDEX": "uv", "UV_INDEX": "uv"}
+        for path in sorted(p for p in self.root.glob(".env*") if p.is_file()):
+            for n, line in enumerate((read_text(path) or "").splitlines(), 1):
+                m = re.match(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$", line)
+                if not m:
+                    continue
+                name, raw = m.group(1), m.group(2).strip()
+                quoted = len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'"
+                value = raw[1:-1] if quoted else re.sub(r"\s+#.*$", "", raw)
+                # npm reads npm_config_* in any case; the others are upper case by convention.
+                up = name.upper() if name.lower().startswith("npm_config_") else name
+                if name == "NODE_TLS_REJECT_UNAUTHORIZED" and value == "0":
+                    tls(path.name, n, "`NODE_TLS_REJECT_UNAUTHORIZED=0`",
+                        "turns off certificate checks for every Node process that loads the file (installs, builds, the app)",
+                        "delete it; trust a private CA with NODE_EXTRA_CA_CERTS=/path/to/ca.pem instead")
+                elif up == "NPM_CONFIG_STRICT_SSL" and value.lower() == "false":
+                    tls(path.name, n, f"`{name}=false`", "turns off TLS certificate checks for npm", npm_fix)
+                elif up == "YARN_ENABLE_STRICT_SSL" and value.lower() in ("false", "0"):
+                    tls(path.name, n, f"`{name}={value}`", "turns off TLS certificate checks for Yarn", yarn_fix)
+                elif up in ("PIP_TRUSTED_HOST", "UV_INSECURE_HOST"):
+                    hosts = [h for h in re.split(r"[\s,]+", value) if h and not loopback(host_of(h))]
+                    if hosts:
+                        tls(path.name, n, f"`{name}` ({', '.join(hosts)})", "turns off certificate checks for these hosts",
+                            pip_fix if up.startswith("PIP") else uv_fix)
+                elif up in env_urls and http_urls(value):
+                    http(path.name, n, f"`{name}`", env_urls[up], http_urls(value))
+        shipped = {}
+        for fid, rel, n, msg, fix in hits:
+            if rel not in shipped:
+                shipped[rel] = self._ships(rel)
+            if shipped[rel]:
+                self.add("error", fid, rel, msg, fix, n)
+        for rel in (r for r, ships in shipped.items() if not ships):
+            self.note("registry.tls.unshipped", rel, f"{rel} turns TLS checks off or uses a plain-HTTP registry, but git "
+                                                     "ignores it and does not track it, so it affects this checkout only")
+
+    def _ships(self, rel):
+        """Does the repo hand this root file to others? Tracked, or not ignored (the next
+        `git add` commits it). git decides when it can; otherwise the root .gitignore with
+        git's rules, as for auth.json in secrets()."""
+        if git_says(self.root, "ls-files", "--error-unmatch", "--", rel) == 0:
+            return True
+        ignored = git_says(self.root, "check-ignore", "-q", "--", rel)
+        if ignored is None:
+            return not gitignored((read_text(self.root / ".gitignore") or "").splitlines(), rel)
+        return ignored != 0
+
     # ---- legacy tools ----
     def legacy(self):
         table = self.facts.get("legacy_packages")
@@ -3355,6 +4037,392 @@ class Audit:
                          "literally (references/registries-and-auth.md)", n)
 
 
+# =============================================================================
+# === rules, suppression, baselines and output formats ===
+# =============================================================================
+# Everything here runs AFTER the audit: the checks above know nothing about profiles,
+# waivers or formats. Order matters and is fixed in apply_policy(): profile silencing, then
+# inline and config ignores, then decoration (confidence, docs_url, structured fix,
+# fingerprint), then the baseline. A suppression never deletes evidence silently: every
+# suppressed finding is listed in meta.suppressed with who suppressed it and why.
+UNSUPPRESSIBLE = {"config.invalid", "suppression.expired", "suppression.unused"}
+CONFIG_NAME = ".pm-audit.json"
+FIX_COMMAND_WORDS = {"npm", "pnpm", "yarn", "bun", "composer", "git", "corepack", "ddev", "rm", "mv"}
+INLINE_IGNORE = re.compile(r"pm-audit:\s*ignore\[([^\]]*)\]([^\n]*)")
+# A line that is ONLY a comment (it may carry an ignore for the line below it). No bare `*`:
+# that is a Markdown list item, not a block-comment continuation. In Markdown files
+# (MARKDOWN_SUFFIXES) inline_ignore() also requires the ignore to sit inside `<!-- -->`,
+# because there `#` starts a heading.
+COMMENT_ONLY = re.compile(r"^\s*(?:#|//|;|<!--|/\*|--\s)")
+MARKDOWN_SUFFIXES = (".md", ".markdown")
+# A local action or reusable workflow call: its findings come from the called file.
+LOCAL_USES_LINE = re.compile(r"\buses\s*:\s*[\"']?\./")
+IGNORE_REASON_MIN = 8   # letters/digits a config reason needs
+IGNORE_MAX_DAYS = 366   # how far ahead a config ignore's `until` may be
+ISO_DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def structured_fix(fid: str, text: str) -> dict:
+    """The JSON `fix` object. `command` is only ever a command the fix text itself quotes in
+    backticks; a rule whose kind is command but whose text quotes none degrades to manual
+    rather than inventing one."""
+    rule = RULES.get(fid)
+    kind = rule["kind"] if rule else "manual"
+    command = None
+    if kind == "command":
+        command = next((s for s in re.findall(r"`([^`]+)`", text) if s.split()[0] in FIX_COMMAND_WORDS), None)
+        if command is None:
+            kind = "manual"
+    return {"kind": kind, "text": text, "command": command, "safe": bool(rule and rule["safe"]) and kind != "manual"}
+
+
+def fingerprint(f: dict, line_text: str = "") -> str:
+    """Stable identity of a finding across runs: id + file + subject, NOT the line number.
+    Format (scheme pmAudit/v2): first 16 hex of sha1(id NUL file NUL subject NUL line_text),
+    where the subject is the message with line numbers masked (`line 12`, `:12`) and
+    line_text is the flagged line's own text, whitespace-collapsed.
+
+    Guard: a baseline is made of these, and an unrelated edit above a finding shifts its
+    line - hashing the line NUMBER would resurrect every baselined finding below it. The
+    line's TEXT moves with it, and it is what tells two findings of one rule apart when the
+    message does not name the subject (`composer require` in <file> says nothing of WHICH
+    package: hashing the message alone let a new `composer require evil/backdoor` hide behind
+    a baselined one). A changed rule wording or an edited line reappears once: the safe
+    failure. v1 fingerprints (message only) never match v2 ones, so a v1 baseline reappears."""
+    subject = re.sub(r"(?i)\bline \d+\b", "line N", f.get("message", ""))
+    subject = re.sub(r":\d+\b", ":N", subject)
+    raw = "\0".join((str(f.get("id", "")), str(f.get("file", "")), subject, " ".join(line_text.split())))
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def file_lines(root: Path, file: str, cache: dict) -> list:
+    """The lines of a repo file a finding names, [] when it is not a readable file inside root."""
+    if file not in cache:
+        target = root / file
+        try:
+            inside = target.is_file() and root in target.resolve().parents
+        except OSError:
+            inside = False
+        cache[file] = (read_text(target) or "").splitlines() if inside else []
+    return cache[file]
+
+
+def real_path(root: Path, file: str):
+    """The repo file a finding's `file` text points at. `file` is sometimes a location, not a
+    path: "package.json engines.node", ".github/workflows/ci.yml:9 node-version", or a list
+    "package-lock.json, yarn.lock". Globs, SARIF and annotations need the FILE. The longest
+    space-separated prefix (a trailing `:<line>` dropped) that EXISTS wins - tried on the whole
+    text first, so a name containing a space or ", " (`my job.yml`) survives - then on each
+    ", "-separated entry. Nothing on disk: the first entry's text before its first space."""
+    if not file:
+        return None
+
+    def longest_existing(text):
+        words = text.split(" ")
+        for k in range(len(words), 0, -1):
+            cand = re.sub(r":\d+$", "", " ".join(words[:k]).strip())
+            if cand and (root / cand).exists():
+                return cand
+        return None
+
+    for chunk in [file] + file.split(", "):
+        found = longest_existing(chunk.strip())
+        if found:
+            return found
+    first = file.split(", ")[0].strip()
+    return re.sub(r":\d+$", "", first.split(" ")[0]) or first
+
+
+def tsv_field(s) -> str:
+    """One TSV field: backslash, TAB, CR and LF escaped. Guard: a field carries repo text
+    (package names, commands); an unescaped newline breaks the one-row-per-finding contract
+    and lets a crafted name start a line `::error ...` that a GitHub runner turns into a forged
+    annotation."""
+    return str(s).replace("\\", "\\\\").replace("\t", "\\t").replace("\r", "\\r").replace("\n", "\\n")
+
+
+def decorate(findings: list, root: Path) -> None:
+    """Add path, confidence, docs_url, fingerprint and the structured fix. `fix_text` keeps
+    the plain string the JSON `fix` field was in schema v1, for consumers that read it as text."""
+    cache: dict = {}
+    for f in findings:
+        rule = RULES.get(f["id"])
+        text = f["fix"] if isinstance(f["fix"], str) else f["fix"]["text"]
+        f.setdefault("path", real_path(root, f.get("file") or ""))
+        f["confidence"] = rule["confidence"] if rule else "medium"
+        f["docs_url"] = docs_url(f["id"]) if rule else RULES_DOC
+        f["fix_text"] = text
+        f["fix"] = structured_fix(f["id"], text)
+        rows = file_lines(root, f["path"], cache) if f.get("path") and f.get("line") else []
+        line_text = rows[f["line"] - 1] if rows and 0 < f["line"] <= len(rows) else ""
+        f["fingerprint"] = fingerprint(f, line_text)
+
+
+def load_config(path: Path, as_of: dt.date):
+    """-> (config or None, problems). Any problem means NO part of the file applies: a typo'd
+    ignore silently half-working would hide findings nobody chose to hide.
+
+    Guard: an ignore is a dated, explained exception, so the checks are strict on purpose -
+    a reason needs at least IGNORE_REASON_MIN letters or digits (".", "ok" and "n/a" say
+    nothing), `until` may be at most IGNORE_MAX_DAYS ahead (9999-12-31 is a permanent mute),
+    and an empty `path` is an error rather than "every file" (omit the key for that)."""
+    text = read_text(path)
+    if text is None:
+        return None, ["cannot be read"]
+    try:
+        doc = json.loads(text)
+    except ValueError as exc:
+        return None, [f"not valid JSON ({exc})"]
+    if not isinstance(doc, dict):
+        return None, ["the top level must be a JSON object"]
+    problems = [f"unknown key {k!r} (allowed: profile, ignore)" for k in doc if k not in ("profile", "ignore")]
+    profile = doc.get("profile")
+    if profile is not None and profile not in PROFILES:
+        problems.append(f"profile {profile!r} is not one of {', '.join(PROFILES)}")
+    entries, raw = [], doc.get("ignore", [])
+    if not isinstance(raw, list):
+        problems.append("ignore must be a list")
+        raw = []
+    for i, e in enumerate(raw):
+        where = f"ignore[{i}]"
+        if not isinstance(e, dict):
+            problems.append(f"{where} must be an object")
+            continue
+        bad = [f"{where} has unknown key {k!r}" for k in e if k not in ("id", "path", "reason", "until")]
+        rid = e.get("id")
+        if rid not in RULES:
+            bad.append(f"{where}.id {rid!r} is not a pm-audit rule (see --rules)")
+        elif rid in UNSUPPRESSIBLE:
+            bad.append(f"{where}.id {rid!r} cannot be ignored")
+        if not reason_ok(e.get("reason")):
+            bad.append(f"{where}.reason is required and must say why the finding is tolerated "
+                       f"(at least {IGNORE_REASON_MIN} letters or digits)")
+        until = e.get("until")
+        day = None
+        if isinstance(until, str) and ISO_DAY.match(until):
+            try:
+                day = dt.date.fromisoformat(until)
+            except ValueError:
+                pass
+        if day is None:
+            bad.append(f"{where}.until is required and must be YYYY-MM-DD")
+        elif day > as_of + dt.timedelta(days=IGNORE_MAX_DAYS):
+            bad.append(f"{where}.until {until} is more than {IGNORE_MAX_DAYS} days ahead; renew it when it expires")
+        if "path" in e and not (isinstance(e["path"], str) and e["path"].strip()):
+            bad.append(f"{where}.path must be a non-empty glob (omit it to match every file)")
+        if bad:
+            problems += bad
+        else:
+            entries.append({"id": rid, "path": re.sub(r"^\./", "", e["path"].strip()) if "path" in e else "*",
+                            "reason": e["reason"].strip(), "until": day, "index": i})
+    return ({"profile": profile, "ignore": entries}, []) if not problems else (None, problems)
+
+
+def path_matches(glob: str, file: str) -> bool:
+    """A finding's `file` can name several files ("package-lock.json, yarn.lock"); a glob
+    matches the whole string or any one of them. fnmatch's `*` crosses `/`, so
+    `.github/workflows/*.yml` and `**` both do what a reader expects."""
+    return any(fnmatch.fnmatchcase(c, glob) for c in [file] + [p.strip() for p in file.split(", ")])
+
+
+def ignore_matches(entry: dict, f: dict) -> bool:
+    """Does a config ignore cover this finding? Its glob is tried against the real file
+    (`path`, e.g. package.json for "package.json engines.node") and the `file` text."""
+    return entry["id"] == f["id"] and (path_matches(entry["path"], f.get("path") or "")
+                                       or path_matches(entry["path"], f["file"]))
+
+
+def inline_ignore(root: Path, f: dict, cache: dict):
+    """`pm-audit: ignore[<id>] <reason>` on the flagged line, or on a COMMENT-ONLY line just
+    above it. -> ("ok", reason) | ("noreason", None) | None. Only findings that carry a line
+    can be ignored inline; JSON manifests have no comments, so they use the config file.
+
+    Guards: a trailing ignore covers its own line only (reading "the line above" for every
+    line made `npx a # pm-audit: ignore[...]` also mute the next line). A local `uses: ./`
+    line is never honoured: its findings come from commands in the called file, so one ignore
+    there would mute every command later added to that action - use the config file."""
+    line, file = f.get("line"), f.get("path") or f.get("file")
+    if not line or not file:
+        return None
+    rows = file_lines(root, file, cache)
+    if 0 < line <= len(rows) and LOCAL_USES_LINE.search(rows[line - 1]):
+        return None
+    markdown = file.lower().endswith(MARKDOWN_SUFFIXES)
+    for idx in (line - 1, line - 2):
+        if not 0 <= idx < len(rows):
+            continue
+        if idx == line - 2 and not COMMENT_ONLY.match(rows[idx]):
+            continue
+        for m in INLINE_IGNORE.finditer(rows[idx]):
+            # In Markdown an ignore counts only inside an HTML comment: the same words in
+            # prose, a list item or a `#` heading are text, not a directive.
+            if markdown and "<!--" not in rows[idx][:m.start()]:
+                continue
+            if f["id"] in [x.strip() for x in m.group(1).split(",")]:
+                reason = re.sub(r"\s*(?:-->|\*/)\s*$", "", m.group(2)).strip()
+                return ("ok", reason) if reason_ok(reason) else ("noreason", None)
+    return None
+
+
+def reason_ok(text) -> bool:
+    """Does a waiver's reason say something? At least IGNORE_REASON_MIN letters or digits in
+    any script (`[^\\W_]` is Unicode-aware), so ".", "ok" and "n/a" fail and a reason written
+    in Chinese or Greek passes."""
+    return isinstance(text, str) and len(re.findall(r"[^\W_]", text)) >= IGNORE_REASON_MIN
+
+
+def apply_policy(a: Audit, cfg, cfg_name: str, profile: str, as_of: dt.date):
+    """Profile, then ignores. Mutates a.findings / a.notes; returns the suppressed list.
+    An ignore counts as used when it matches ANY finding the audit raised, including ones the
+    profile or an inline ignore already removed: otherwise changing profile would turn every
+    waiver into `suppression.unused` noise."""
+    raw = list(a.findings)
+    meta_silenced = 0
+    if profile == "library":
+        kept = [f for f in raw if f["id"] not in LIBRARY_SILENCED]
+        meta_silenced = len(raw) - len(kept)
+    else:
+        kept = list(raw)
+    suppressed, cache, final = [], {}, []
+    entries = cfg["ignore"] if cfg else []
+    live = [e for e in entries if e["until"] >= as_of]
+    for f in kept:
+        by = None
+        hit = inline_ignore(a.root, f, cache) if f["id"] not in UNSUPPRESSIBLE else None
+        # Guard: an inline ignore has no expiry and no reviewer, so it may not mute an
+        # error (a committed token, credentials in an image): those need a dated config entry.
+        if hit and hit[0] == "ok" and f["severity"] == "error":
+            a.note("suppression.inline-error", f"{f['file']}:{f['line']}",
+                   f"`pm-audit: ignore[{f['id']}]` cannot mute an error; use {CONFIG_NAME} with a reason and an until date")
+        elif hit and hit[0] == "ok":
+            by = ("inline", hit[1])
+        elif hit:
+            a.note("suppression.inline-no-reason", f"{f['file']}:{f['line']}",
+                   f"`pm-audit: ignore[{f['id']}]` gives no reason (at least {IGNORE_REASON_MIN} letters or digits), "
+                   "so the finding is still reported")
+        if by is None and f["id"] not in UNSUPPRESSIBLE:
+            e = next((e for e in live if e["id"] == f["id"] and ignore_matches(e, f)), None)
+            if e:
+                by = ("config", e["reason"])
+        if by:
+            suppressed.append({"id": f["id"], "file": f["file"], "line": f.get("line"), "by": by[0], "reason": by[1]})
+        else:
+            final.append(f)
+    n0 = len(a.findings)
+    for e in entries:
+        label = f"ignore[{e['index']}] `{e['id']}` (path {e['path']})"
+        if e["until"] < as_of:
+            a.add("warn", "suppression.expired", cfg_name,
+                  f"{label} expired on {e['until'].isoformat()}: {e['reason']}",
+                  "fix the finding, or renew `until` with a fresh reason")
+        elif not any(f["id"] == e["id"] and ignore_matches(e, f) for f in raw):
+            a.note("suppression.unused", cfg_name, f"{label} matched no finding; delete it")
+    a.findings = final + a.findings[n0:]
+    return suppressed, meta_silenced
+
+
+def load_baseline(path: Path):
+    """-> (fingerprints, legacy keys). A baseline is a previous `--json` output. A row without
+    a fingerprint field (a pm-audit that predates them) has no line text to tell twins apart,
+    so it matches only the same id, file, message AND line number. Guard: matching such rows
+    on the message alone let a new `composer require evil/backdoor` hide behind a baselined
+    `composer require`. A legacy baseline therefore resurfaces findings whose line moved (the
+    safe failure); regenerate it with this pm-audit to get line-shift-proof fingerprints."""
+    text = read_text(path)
+    if text is None:
+        raise OSError("cannot read file")
+    doc = json.loads(text)
+    rows = doc["data"] if isinstance(doc, dict) else None
+    if not isinstance(rows, list):
+        raise ValueError("no top-level data[] list")
+    rows = [r for r in rows if isinstance(r, dict) and "id" in r]
+    return ({r["fingerprint"] for r in rows if r.get("fingerprint")},
+            {legacy_key(r) for r in rows if not r.get("fingerprint")})
+
+
+def legacy_key(f: dict) -> tuple:
+    """How a fingerprint-less baseline row is matched: id, file, line and message, exactly."""
+    return (f.get("id"), f.get("file"), f.get("line"), f.get("message"))
+
+
+def exit_code(findings: list, fail_on) -> int:
+    """Default: any finding fails (as before). `--fail-on error` lets warnings through;
+    `--fail-on warn` is the default spelled out. Notes are never findings."""
+    if fail_on == "error":
+        return EX_FINDINGS if any(f["severity"] == "error" for f in findings) else EX_OK
+    return EX_FINDINGS if findings else EX_OK
+
+
+def rule_row(r: dict) -> dict:
+    return {"id": r["id"], "severity": r["severity"], "category": r["category"], "confidence": r["confidence"],
+            "summary": r["summary"], "docs_url": docs_url(r["id"])}
+
+
+def sorted_rules() -> list:
+    return sorted(RULES.values(), key=lambda r: (CATEGORIES.index(r["category"]), r["id"]))
+
+
+def explain_text(r: dict) -> str:
+    return (f"{r['id']}  ({r['severity']}, {r['category']}, confidence {r['confidence']})\n"
+            f"{r['summary']}\n\nWhy: {r['why']}\nFix ({r['kind']}{', safe to apply mechanically' if r['safe'] else ''}): "
+            f"{r['fix']}\nDocs: {docs_url(r['id'])}")
+
+
+# WHY these two escapers differ: GitHub's workflow-command grammar (@actions/core command.ts:
+# escapeData, escapeProperty) escapes % CR LF in the message, and additionally `:` and `,` in
+# property values (file=...), where they would end the property. Escaping a message with the
+# property rules would print `%3A` literally.
+def gh_data(s: str) -> str:
+    return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def gh_prop(s: str) -> str:
+    return gh_data(s).replace(":", "%3A").replace(",", "%2C")
+
+
+def github_lines(findings: list) -> list:
+    out = []
+    for f in findings:
+        props = []
+        if f.get("path"):
+            props.append("file=" + gh_prop(f["path"]))
+            if f.get("line"):
+                props.append(f"line={f['line']}")
+        head = "::" + ("error" if f["severity"] == "error" else "warning") + (" " + ",".join(props) if props else "")
+        out.append(f"{head}::{gh_data(f['id'] + ' ' + f['message'])}")
+    return out
+
+
+def sarif_doc(findings: list) -> dict:
+    """SARIF 2.1.0: one reportingDescriptor per catalogue id (so a result's ruleIndex is stable
+    whatever fired), partialFingerprints carry the baseline fingerprint so code scanning tracks
+    a finding across line shifts the same way --baseline does."""
+    level = {"error": "error", "warn": "warning", "note": "note"}
+    rules = sorted(RULES.values(), key=lambda r: r["id"])
+    index = {r["id"]: i for i, r in enumerate(rules)}
+    results = []
+    for f in findings:
+        res = {"ruleId": f["id"], "level": level.get(f["severity"], "warning"),
+               "message": {"text": f["message"]},
+               "partialFingerprints": {"pmAudit/v2": f["fingerprint"]},
+               "properties": {"confidence": f["confidence"], "docs_url": f["docs_url"], "fix": f["fix"]}}
+        if f["id"] in index:
+            res["ruleIndex"] = index[f["id"]]
+        if f.get("path"):
+            loc = {"artifactLocation": {"uri": urllib.parse.quote(f["path"]), "uriBaseId": "%SRCROOT%"}}
+            if f.get("line"):
+                loc["region"] = {"startLine": f["line"]}
+            res["locations"] = [{"physicalLocation": loc}]
+        results.append(res)
+    return {"$schema": "https://json.schemastore.org/sarif-2.1.0.json", "version": "2.1.0",
+            "runs": [{"tool": {"driver": {"name": "pm-audit", "rules": [
+                {"id": r["id"], "name": r["id"], "shortDescription": {"text": r["summary"]},
+                 "fullDescription": {"text": r["why"]}, "help": {"text": f"{r['why']} Fix: {r['fix']}"},
+                 "defaultConfiguration": {"level": level[r["severity"]]},
+                 "properties": {"category": r["category"], "confidence": r["confidence"], "docs_url": docs_url(r["id"])}}
+                for r in rules]}}, "results": results}]}
+
+
 def load_facts(path: Path) -> dict:
     """The facts catalogue, shape-checked: a JSON object with the facts/v1 schema whose
     sections the audit reads (node, php, composer, native_cli_names, and the two release
@@ -3408,20 +4476,71 @@ def main(argv: list[str]) -> int:
         epilog="Examples:\n"
                "  bash scripts/run-python.sh scripts/pm-audit.py .\n"
                "  bash scripts/run-python.sh scripts/pm-audit.py --json path/to/repo | jq -r '.data[].id'\n"
-               "  bash scripts/run-python.sh scripts/pm-audit.py --no-docs --as-of 2026-10-05 path/to/repo\n\n"
-               "Exit: 0 clean, 2 usage, 3 path/facts missing, 4 facts unparseable, 10 findings",
+               "  bash scripts/run-python.sh scripts/pm-audit.py --no-docs --as-of 2026-10-05 path/to/repo\n"
+               "  bash scripts/run-python.sh scripts/pm-audit.py --format sarif . > pm-audit.sarif\n"
+               "  bash scripts/run-python.sh scripts/pm-audit.py --format github --fail-on error .\n"
+               "  bash scripts/run-python.sh scripts/pm-audit.py --rules\n"
+               "  bash scripts/run-python.sh scripts/pm-audit.py --explain deploy.composer.dev\n"
+               "  bash scripts/run-python.sh scripts/pm-audit.py --config ci/pm-audit.json --profile library .\n"
+               "  bash scripts/run-python.sh scripts/pm-audit.py --json . > baseline.json   # then, later:\n"
+               "  bash scripts/run-python.sh scripts/pm-audit.py --baseline baseline.json .   # only new findings\n\n"
+               "Waive a finding for a while in .pm-audit.json at the repo root (reason and until are required):\n"
+               "  {\"profile\": \"site\", \"ignore\": [{\"id\": \"npx.unpinned\", \"path\": \"docs/*\", \"reason\": \"docs only\", \"until\": \"2027-01-31\"}]}\n"
+               "or in a comment on or above the flagged line:  pm-audit: ignore[<id>] <reason>\n\n"
+               "Exit: 0 clean, 2 usage, 3 path/facts/config/baseline missing, 4 facts or baseline unparseable, 10 findings\n"
+               "(--fail-on error: 10 only for an error-severity finding)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("path", help="repo root to audit")
-    p.add_argument("--json", action="store_true", help="emit the JSON envelope")
+    p.add_argument("path", nargs="?", help="repo root to audit")
+    p.add_argument("--json", action="store_true", help="emit the JSON envelope (alias for --format json)")
+    p.add_argument("--format", choices=("tsv", "json", "sarif", "github"), default=None,
+                   help="output format (default tsv): json envelope, SARIF 2.1.0, or GitHub workflow annotations")
     p.add_argument("--no-docs", action="store_true", help="skip the npx scan of docs and scripts (package.json scripts still checked)")
-    p.add_argument("--as-of", default=None, help="date for end-of-life checks (default: today, UTC)")
+    p.add_argument("--as-of", default=None, help="date for end-of-life and ignore-expiry checks (default: today, UTC)")
     p.add_argument("--facts", default=str(DEFAULT_FACTS), help="facts catalogue JSON (EOL tables, native CLI names)")
     p.add_argument("--limit", type=int, default=50, help="max npx.unpinned findings to report (default 50)")
+    p.add_argument("--rules", action="store_true", help="list the rule catalogue (id, severity, category, summary) and exit")
+    p.add_argument("--explain", metavar="ID", default=None, help="print one rule's rationale, fix and docs anchor, and exit")
+    p.add_argument("--config", metavar="FILE", default=None,
+                   help=f"profile and ignores (default: {CONFIG_NAME} at the repo root, if present)")
+    p.add_argument("--profile", choices=PROFILES, default=None,
+                   help="site (default: every rule), library (drops deploy-shaped rules), pedantic (advisory notes become findings); overrides the config")
+    p.add_argument("--baseline", metavar="FILE", default=None,
+                   help="a previous --json output: report only findings absent from it (matched by fingerprint, not line)")
+    p.add_argument("--fail-on", choices=("error", "warn"), default=None,
+                   help="exit 10 only for findings at this severity or worse (default: any finding)")
     try:
         args = p.parse_args(argv)
     except SystemExit as exc:
         return EX_USAGE if exc.code not in (0, None) else EX_OK
+    fmt = args.format or ("json" if args.json else "tsv")
+    if args.json and args.format not in (None, "json"):
+        print(f"error: --json conflicts with --format {args.format}", file=sys.stderr)
+        return EX_USAGE
+    if args.rules or args.explain:
+        if args.explain:
+            rule = RULES.get(args.explain)
+            if rule is None:
+                print(f"error: unknown rule {args.explain!r} (pm-audit.py --rules lists them)", file=sys.stderr)
+                return EX_USAGE
+            if fmt == "json":
+                # Same `fix` shape as a finding's (schema v2), so one jq filter reads both.
+                fix = {"kind": rule["kind"], "text": rule["fix"], "command": None, "safe": rule["safe"]}
+                print(json.dumps({"data": [{**rule_row(rule), "kind": rule["kind"], "safe": rule["safe"],
+                                            "why": rule["why"], "fix": fix, "fix_text": rule["fix"]}],
+                                  "meta": {"schema": SCHEMA, "count": 1}}, indent=2))
+            else:
+                print(explain_text(rule))
+        elif fmt == "json":
+            print(json.dumps({"data": [rule_row(r) for r in sorted_rules()],
+                              "meta": {"schema": SCHEMA, "count": len(RULES)}}, indent=2))
+        else:
+            for r in sorted_rules():
+                print("\t".join((r["id"], r["severity"], r["category"], r["summary"])))
+        return EX_OK
+    if args.path is None:
+        print("error: PATH is required (a repo root)", file=sys.stderr)
+        return EX_USAGE
     try:
         as_of = dt.date.fromisoformat(args.as_of) if args.as_of else dt.datetime.now(dt.timezone.utc).date()
     except ValueError:
@@ -3433,32 +4552,95 @@ def main(argv: list[str]) -> int:
     root = Path(args.path).expanduser()
     if not root.is_dir():
         msg = f"not a directory: {args.path}"
-        if args.json:
+        if fmt == "json":
             print(json.dumps({"error": {"code": "NOT_FOUND", "message": msg, "details": {}}}))
         print(f"error: {msg}", file=sys.stderr)
         return EX_NOTFOUND
     root = root.resolve()
+    cfg_path = Path(args.config).expanduser() if args.config else root / CONFIG_NAME
+    if args.config and not cfg_path.is_file():
+        print(f"error: config file not found: {args.config}", file=sys.stderr)
+        return EX_NOTFOUND
+    baseline = None
+    if args.baseline:
+        base_path = Path(args.baseline).expanduser()
+        if not base_path.is_file():
+            print(f"error: baseline file not found: {args.baseline}", file=sys.stderr)
+            return EX_NOTFOUND
+        try:
+            baseline = load_baseline(base_path)
+        except (OSError, ValueError, KeyError) as exc:
+            print(f"error: could not read baseline {args.baseline}: {exc}", file=sys.stderr)
+            return EX_UNPARSEABLE
     facts = load_facts(Path(args.facts))
     a = Audit(root, facts, as_of, not args.no_docs, args.limit).run()
-    sev_rank = {"error": 0, "warn": 1}
-    a.findings.sort(key=lambda f: (sev_rank.get(f["severity"], 2), f["id"], f["file"]))
+    cfg, cfg_name = None, ""
+    if cfg_path.is_file():
+        try:
+            cfg_name = cfg_path.resolve().relative_to(root).as_posix()
+        except ValueError:
+            cfg_name = cfg_path.name
+        cfg, problems = load_config(cfg_path, as_of)
+        if problems:
+            a.add("error", "config.invalid", cfg_name, f"{cfg_name} is ignored: " + "; ".join(problems[:5])
+                  + (f"; and {len(problems) - 5} more" if len(problems) > 5 else ""),
+                  f"fix {cfg_name}: every ignore[] entry needs id, reason and until (YYYY-MM-DD)")
+    profile = args.profile or (cfg or {}).get("profile") or "site"
+    for f in a.findings:
+        f["path"] = real_path(root, f.get("file") or "")
+    suppressed, silenced = apply_policy(a, cfg, cfg_name, profile, as_of)
+    if profile == "pedantic":
+        # AFTER apply_policy, so its own notes (suppression.unused, inline-*) count too.
+        # Advisory notes become warn findings and fail the run like any finding; each id has
+        # a catalogue entry, so --explain, docs_url and SARIF's ruleIndex work for them.
+        for n in a.notes:
+            rule = RULES.get(n["id"])
+            a.add("warn", n["id"], n["file"], n["message"], rule["fix"] if rule else "see --rules")
+            a.findings[-1]["path"] = real_path(root, n["file"])
+        a.notes = []
+    decorate(a.findings, root)
+    known = []
+    if baseline is not None:
+        current, legacy = baseline
+
+        def in_baseline(f):
+            return f["fingerprint"] in current or legacy_key(f) in legacy
+
+        known = [f for f in a.findings if in_baseline(f)]
+        a.findings = [f for f in a.findings if not in_baseline(f)]
+    a.findings.sort(key=lambda f: (SEVERITY_RANK.get(f["severity"], 3), f["id"], f["file"]))
     print(f"pm-audit: {root.name} (as of {as_of.isoformat()})", file=sys.stderr)
-    if args.json:
-        print(json.dumps({"data": a.findings,
-                          "meta": {"schema": SCHEMA, "root": root.name, "as_of": as_of.isoformat(),
-                                   "count": len(a.findings), "notes": a.notes, **a.meta}}, indent=2))
+    if fmt == "json":
+        meta = {"schema": SCHEMA, "root": root.name, "as_of": as_of.isoformat(), "count": len(a.findings),
+                "notes": a.notes, "profile": profile, "fail_on": args.fail_on,
+                "config": {"file": cfg_name, "valid": cfg is not None, "ignores": len((cfg or {}).get("ignore", []))} if cfg_name else None,
+                "suppressed": suppressed, "profile_silenced": silenced,
+                "baseline": {"file": Path(args.baseline).name, "known": len(known)} if baseline is not None else None,
+                **a.meta}
+        print(json.dumps({"data": a.findings, "meta": meta}, indent=2))
+    elif fmt == "sarif":
+        print(json.dumps(sarif_doc(a.findings), indent=2))
+    elif fmt == "github":
+        for line in github_lines(a.findings):
+            print(line)
     else:
         for f in a.findings:
             loc = f["file"] + (f":{f['line']}" if f.get("line") else "")
-            print("\t".join([f["severity"], f["id"], loc, f["message"], f["fix"]]))
+            print("\t".join(tsv_field(x) for x in (f["severity"], f["id"], loc, f["message"], f["fix_text"])))
     for n in a.notes:
-        print(f"  note  {n['id']}  {n['file']}: {n['message']}", file=sys.stderr)
+        # Same escaping as TSV: a runner reads workflow commands from stderr too.
+        print(f"  note  {n['id']}  {tsv_field(n['file'])}: {tsv_field(n['message'])}", file=sys.stderr)
     managers = ", ".join(a.meta["managers"]) or "none"
+    quiet = (f"; {len(suppressed)} suppressed" if suppressed else "") \
+        + (f"; {silenced} silenced by profile {profile}" if silenced else "") \
+        + (f"; {len(known)} in baseline" if known else "")
+    code = exit_code(a.findings, args.fail_on)
     if a.findings:
-        print(f"pm-audit: {len(a.findings)} finding(s); managers: {managers}", file=sys.stderr)
-        return EX_FINDINGS
-    print(f"pm-audit: clean; managers: {managers}", file=sys.stderr)
-    return EX_OK
+        gate = "" if code == EX_FINDINGS else f" (none at --fail-on {args.fail_on})"
+        print(f"pm-audit: {len(a.findings)} finding(s){gate}; managers: {managers}{quiet}", file=sys.stderr)
+    else:
+        print(f"pm-audit: clean; managers: {managers}{quiet}", file=sys.stderr)
+    return code
 
 
 if __name__ == "__main__":

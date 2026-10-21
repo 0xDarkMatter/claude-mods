@@ -108,8 +108,9 @@ A read-only scan of one repo root. It finds conflicting lockfiles, lockfiles tha
 disagree with their manifests, Node and PHP pins that are missing, disagree with each
 other or with DDEV, or name end-of-life releases, unpinned `npx`/`dlx` use in scripts,
 docs and CI, native CLIs routed through npx, Bower and node-sass, committed registry
-credentials (reported by file and line, never by value), and `.npmrc` placeholders pnpm
-ignores. From CI configs, Dockerfiles and appspec hook scripts it reports unfrozen
+credentials (reported by file and line, never by value), `.npmrc` placeholders pnpm
+ignores, and committed configs (npm, Yarn, pnpm, pip, uv, Composer, `.env*`) that turn
+TLS verification off or point at an `http://` registry. From CI configs, Dockerfiles and appspec hook scripts it reports unfrozen
 installs, Yarn flags on npm, unpinned global installs, deploys without `--no-dev`,
 Composer 1, and credentials written into a Docker build context; it follows a CI build
 into the subfolder it runs in. It lists nested package roots and flags them when they use
@@ -131,6 +132,9 @@ bash scripts/run-python.sh scripts/pm-audit.py --no-docs --as-of 2027-01-01 path
 - It audits root manifests; run it again on each nested root it lists. Every finding id, its meaning and its fix are in
   [diagnostics.md](references/diagnostics.md#pm-audit-finding-ids). DDEV's own
   `.ddev/` config is `ddev-ops`' auditor; pm-audit only checks that DDEV agrees.
+- `--rules` / `--explain <id>` print the rule catalogue; `--format sarif|github` feed code
+  scanning and PR annotations; `.pm-audit.json` ignores need a reason and an `until` date.
+  Flags, formats, suppressions and baselines: [pm-audit-rules.md](references/pm-audit-rules.md).
 - Sweeping many repos: read-only sparse clones, the branch that deploys, and the
   findings to check by hand are in [diagnostics.md](references/diagnostics.md#auditing-many-repos).
 - `scripts/run-python.sh` picks the first real Python 3.8+ (`python3`, `python`, `py`),
@@ -168,3 +172,4 @@ dependency use, not deciding whether a package is safe.
 | [references/platform-gotchas.md](references/platform-gotchas.md) | Windows, DDEV host vs container, Apple Silicon, cross-platform lockfiles |
 | [references/legacy-exits.md](references/legacy-exits.md) | Bower, node-sass, Yarn 1, lockfile v1, end-of-life Node and PHP |
 | [references/diagnostics.md](references/diagnostics.md) | pm-audit ids, `npm ls`/`explain`, Composer diagnostics, ERESOLVE, EINTEGRITY, merge conflicts |
+| [references/pm-audit-rules.md](references/pm-audit-rules.md) | the pm-audit rule catalogue, output formats (SARIF, GitHub), suppressions, baselines, profiles |
