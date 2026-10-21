@@ -55,6 +55,12 @@ Session 2:
 
 **Use all three together:** `claude --resume` for conversation context, auto-memory for accumulated learnings, `/sync` for task state and handoff. Since v3.1, `/save` stores your session ID so `/sync` can suggest the exact `--resume` command.
 
+## Pause and Pickup
+
+`/save --pause` is a clean stop for going offline or before compaction. It stops at an atomic boundary (never mid-edit or mid-rebase), stops or records the agents it started, saves a dirty tree as one local `wip:` commit on the branch in use (never the default branch, never pushed), and writes a resume note whose first line is the exact first action.
+
+`/sync` then runs a pickup check on any restored state: it splits done from pending, never redoes finished work, and re-verifies each inherited claim on the real artifact (re-runs the tests, checks the commit landed, the file exists, the cited cause still reads as described) before anything builds on it, marking claims that no longer hold. Details: [commands/save.md](../commands/save.md) Pause Mode, [commands/sync.md](../commands/sync.md) Step 4b.
+
 ## Session Cache Schema (v3.1)
 
 The `.claude/session-cache.json` file stores full task objects:
@@ -79,4 +85,4 @@ The `.claude/session-cache.json` file stores full task objects:
 }
 ```
 
-**Compatibility:** `/sync` handles both v3.0 and v3.1 files gracefully. Missing v3.1 fields are treated as absent.
+**Compatibility:** `/sync` handles both v3.0 and v3.1 files gracefully. Missing v3.1 fields are treated as absent. `/save --pause` adds an optional `pause` block (`first_action`, `stopped_at`, `wip_commit`, `tree`, `agents`, `claims`); it is additive, so the version stays 3.1 and readers detect a pause by the block being present.
