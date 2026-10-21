@@ -70,7 +70,7 @@ Initialize-Term
 
 # BugCheck quick-lookup (most common codes; full catalog in references/bugcheck-codes.md)
 $bugCheckNames = @{
-    0x0   = '(no bugcheck recorded — hard power loss / total hang / hardware lockup)'
+    0x0   = '(no bugcheck recorded - hard power loss / total hang / hardware lockup)'
     0x1E  = 'KMODE_EXCEPTION_NOT_HANDLED'
     0x1A  = 'MEMORY_MANAGEMENT'
     0x3B  = 'SYSTEM_SERVICE_EXCEPTION'
@@ -86,14 +86,14 @@ $bugCheckNames = @{
     0xD1  = 'DRIVER_IRQL_NOT_LESS_OR_EQUAL  (driver accessed bad memory at high IRQL)'
     0xEF  = 'CRITICAL_PROCESS_DIED  (critical system process killed)'
     0xF4  = 'CRITICAL_OBJECT_TERMINATION  (often storage-induced)'
-    0x101 = 'CLOCK_WATCHDOG_TIMEOUT  (CPU stall — chipset or hardware)'
+    0x101 = 'CLOCK_WATCHDOG_TIMEOUT  (CPU stall - chipset or hardware)'
     0x124 = 'WHEA_UNCORRECTABLE_ERROR  (hardware-level fault)'
     0x139 = 'KERNEL_SECURITY_CHECK_FAILURE  (stack/pool corruption)'
 }
 
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 # Find the target crash
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 if (-not $CrashTime) {
     Write-Log -Level INFO -Message "No -CrashTime given; finding most recent Event 41 in last $DaysBack days"
     $crash = Get-WinEvent -FilterHashtable @{
@@ -107,7 +107,7 @@ if (-not $CrashTime) {
     }
     $CrashTime = $crash.TimeCreated
 } else {
-    # Find the Event 41 closest to the given time (within ±60 seconds)
+    # Find the Event 41 closest to the given time (within +/-60 seconds)
     $low  = $CrashTime.AddMinutes(-1)
     $high = $CrashTime.AddMinutes(1)
     $crash = Get-WinEvent -FilterHashtable @{
@@ -117,14 +117,14 @@ if (-not $CrashTime) {
         EndTime=$high
     } -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $crash) {
-        Write-Log -Level FAIL -Message "No Event 41 found within ±60s of $CrashTime"
+        Write-Log -Level FAIL -Message "No Event 41 found within +/-60s of $CrashTime"
         exit $script:EXIT_NOT_FOUND
     }
 }
 
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 # Decode the crash record
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 $bcCode  = [int64]$crash.Properties[0].Value
 $param1  = [int64]$crash.Properties[1].Value
 $param2  = [int64]$crash.Properties[2].Value
@@ -132,17 +132,17 @@ $param3  = [int64]$crash.Properties[3].Value
 $param4  = [int64]$crash.Properties[4].Value
 $pwrBtn  = if ($crash.Properties.Count -gt 6) { [int64]$crash.Properties[6].Value } else { 0 }
 $bcHex   = '0x{0:X}' -f $bcCode
-$bcName  = if ($bugCheckNames.ContainsKey([int]$bcCode)) { $bugCheckNames[[int]$bcCode] } else { '(unknown — consult references/bugcheck-codes.md)' }
+$bcName  = if ($bugCheckNames.ContainsKey([int]$bcCode)) { $bugCheckNames[[int]$bcCode] } else { '(unknown - consult references/bugcheck-codes.md)' }
 
 # Cause discrimination for BugCheck = 0
 $causeHint = if ($bcCode -eq 0) {
-    if ($pwrBtn -ne 0) { 'Power button was held → user force-shutdown of a hung machine' }
-    else                { 'No power button press recorded → hard power loss / hardware lockup / thermal trip' }
+    if ($pwrBtn -ne 0) { 'Power button was held -> user force-shutdown of a hung machine' }
+    else                { 'No power button press recorded -> hard power loss / hardware lockup / thermal trip' }
 } else { $null }
 
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 # Walk the pre-crash window
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 $windowStart = $CrashTime.AddMinutes(-$WindowMinutes)
 $preEvents = Get-WinEvent -FilterHashtable @{
     LogName='System'
@@ -155,19 +155,19 @@ $preEvents = Get-WinEvent -FilterHashtable @{
 $smokingGuns = @()
 foreach ($e in $preEvents) {
     if ($e.ProviderName -eq 'storahci' -and $e.Id -eq 129) {
-        $smokingGuns += "STORAGE: storahci controller reset at $($e.TimeCreated.ToString('HH:mm:ss')) — drive stopped responding"
+        $smokingGuns += "STORAGE: storahci controller reset at $($e.TimeCreated.ToString('HH:mm:ss')) - drive stopped responding"
     } elseif ($e.ProviderName -eq 'Microsoft-Windows-WHEA-Logger' -and $e.Level -le 2) {
-        $smokingGuns += "HARDWARE: WHEA error at $($e.TimeCreated.ToString('HH:mm:ss')) — CPU/RAM/PCIe-level fault"
+        $smokingGuns += "HARDWARE: WHEA error at $($e.TimeCreated.ToString('HH:mm:ss')) - CPU/RAM/PCIe-level fault"
     } elseif ($e.ProviderName -match 'nvlddmkm|igdkmd|amdkmdag' -and $e.Level -le 2) {
-        $smokingGuns += "GPU: $($e.ProviderName) error at $($e.TimeCreated.ToString('HH:mm:ss')) — GPU driver issue"
+        $smokingGuns += "GPU: $($e.ProviderName) error at $($e.TimeCreated.ToString('HH:mm:ss')) - GPU driver issue"
     } elseif ($e.ProviderName -eq 'disk' -and $e.Id -in @(7,51,153,154)) {
-        $smokingGuns += "STORAGE: disk Event $($e.Id) at $($e.TimeCreated.ToString('HH:mm:ss')) — bad block or hardware error"
+        $smokingGuns += "STORAGE: disk Event $($e.Id) at $($e.TimeCreated.ToString('HH:mm:ss')) - bad block or hardware error"
     }
 }
 
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 # Output
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 if ($Json) {
     @{
         crashTime         = $CrashTime.ToString('o')
@@ -196,7 +196,7 @@ if ($Json) {
     $indicator = $CrashTime.ToString('yyyy-MM-dd HH:mm:ss')
     Write-TermLine (New-TermPanelOpen -Brand 'windows-ops' -Name 'windows-ops' -Subtitle 'crash-triage' -Indicator $indicator)
     Write-TermLine (New-TermPanelVert)
-    Write-TermLine (New-TermSummary -Text "BugCheck $bcHex · $bcName")
+    Write-TermLine (New-TermSummary -Text "BugCheck $bcHex | $bcName")
     Write-TermLine (New-TermPanelVert)
 
     # PARAMETERS section
@@ -230,7 +230,7 @@ if ($Json) {
         Write-TermLine (New-TermPanelVert)
     } else {
         Write-TermLine (New-TermSection -State 'WARN' -Label "pre-crash timeline" -Count 0)
-        Write-TermLine (New-TermHint -Text 'no warning/error events in window — sudden hang or instant fault')
+        Write-TermLine (New-TermHint -Text 'no warning/error events in window - sudden hang or instant fault')
         Write-TermLine (New-TermPanelVert)
     }
 

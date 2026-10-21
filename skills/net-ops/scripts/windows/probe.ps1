@@ -99,7 +99,7 @@ foreach ($ip in $TestIPs) {
     Result ("TCP/443 -> $ip") $tcp443
 }
 
-# Raw UDP/53 — bypasses DNS Client API, proves whether DNS protocol itself works.
+# Raw UDP/53 - bypasses DNS Client API, proves whether DNS protocol itself works.
 foreach ($ip in $TestIPs) {
     try {
         $u = New-Object System.Net.Sockets.UdpClient
@@ -140,7 +140,7 @@ try {
     Result "Resolve-DnsName (system API)" $false $_.Exception.Message
 }
 
-# If layer 4 passed but layer 5 failed, dump the NRPT — that's the prime suspect.
+# If layer 4 passed but layer 5 failed, dump the NRPT - that's the prime suspect.
 $nrptRules = Get-DnsClientNrptRule -ErrorAction SilentlyContinue
 $catchAll = $nrptRules | Where-Object { $_.Namespace -eq "." }
 if ($catchAll) {

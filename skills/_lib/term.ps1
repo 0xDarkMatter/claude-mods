@@ -21,6 +21,14 @@
 
     Honors: $env:NO_COLOR, $env:FORCE_COLOR, $env:TERM_ASCII, $env:TERM=dumb.
     Spec: ../docs/TERMINAL-DESIGN.md.
+
+    Encoding: this file is 7-bit ASCII on purpose, and must stay that way.
+    Windows PowerShell 5.1 reads a script without a byte-order mark in the
+    ANSI code page, so a single raw glyph byte here broke the parse of this
+    file and of every script that dot-sources it. Each glyph is spelled as
+    its code point (ConvertFrom-TermCodePoint 0x2500), which keeps the
+    strings in memory identical. Never type a glyph literal into this file;
+    tests/check-ps51-parse.sh fails on one.
 #>
 
 # Guard against double-sourcing. Test-Path keeps this safe under
@@ -29,7 +37,19 @@
 if ((Test-Path Variable:Script:__TermPs1Loaded) -and $Script:__TermPs1Loaded) { return }
 $Script:__TermPs1Loaded = $true
 
-# ─── Globals (populated by Initialize-Term) ──────────────────────────────────
+# --- Code points (see "Encoding" above) --------------------------------------
+function ConvertFrom-TermCodePoint {
+    <#
+    .SYNOPSIS
+        Return the string for one or more Unicode code points, e.g.
+        ConvertFrom-TermCodePoint 0x251C 0x2500 is the tree branch connector.
+        Code points above U+FFFF (emoji) become surrogate pairs.
+    #>
+    param([Parameter(Mandatory, ValueFromRemainingArguments)][int[]]$CodePoint)
+    -join ($CodePoint | ForEach-Object { [char]::ConvertFromUtf32($_) })
+}
+
+# --- Globals (populated by Initialize-Term) ----------------------------------
 $Script:TermTty       = $false
 $Script:TermColor     = $false
 $Script:TermAsciiMode = $false
@@ -45,75 +65,75 @@ $Script:TC_Magenta = ''
 $Script:TC_Dim     = ''
 $Script:TC_Off     = ''
 
-# Tree connectors (set by Initialize-Term)
-$Script:T_Branch = ''   # ├─  / +-
-$Script:T_Last   = ''   # └─  / `-
-$Script:T_Vert   = ''   # │   / |
+# Tree connectors (set by Initialize-Term; Unicode code points / ASCII fallback)
+$Script:T_Branch = ''   # U+251C U+2500 tee + rule   / +-
+$Script:T_Last   = ''   # U+2514 U+2500 corner + rule / `-
+$Script:T_Vert   = ''   # U+2502 vertical            / |
 
 # Panel chrome
-$Script:P_TL     = ''   # ╭   / +
-$Script:P_BL     = ''   # ╰   / +
-$Script:P_HRule  = ''   # ─   / -
-$Script:P_Term   = ''   # ●   / *
+$Script:P_TL     = ''   # U+256D rounded top-left    / +
+$Script:P_BL     = ''   # U+2570 rounded bottom-left / +
+$Script:P_HRule  = ''   # U+2500 horizontal          / -
+$Script:P_Term   = ''   # U+25CF black circle        / *
 
 # Header / alert / tip glyphs
-$Script:G_Branch = ''   # ⎇ / (b)
-$Script:G_Alert  = ''   # ▲ / !
-$Script:G_Tip    = ''   # 💡 / (i)
+$Script:G_Branch = ''   # U+2387 branch symbol / (b)
+$Script:G_Alert  = ''   # U+25B2 up triangle   / !
+$Script:G_Tip    = ''   # U+1F4A1 light bulb   / (i)
 
 # Spinner frame banks
 $Script:Spin_Working   = @()
 $Script:Spin_Heartbeat = @()
 
-# ─── Registries (Unicode | ASCII fallback) ──────────────────────────────────
+# --- Registries (Unicode | ASCII fallback) ----------------------------------
 $Script:TermBrand = @{
-    fleet      = '⚡|[F]'
-    forge      = '🔨|[B]'
-    psql       = '🐘|[P]'
-    watch      = '📡|[M]'
-    deploy     = '🚀|[D]'
-    git        = '🌿|[G]'
-    'windows-ops' = '🩺|[H]'   # stethoscope — diagnostics is the verb
+    fleet         = (ConvertFrom-TermCodePoint 0x26A1)  + '|[F]'   # high voltage
+    forge         = (ConvertFrom-TermCodePoint 0x1F528) + '|[B]'   # hammer
+    psql          = (ConvertFrom-TermCodePoint 0x1F418) + '|[P]'   # elephant
+    watch         = (ConvertFrom-TermCodePoint 0x1F4E1) + '|[M]'   # satellite antenna
+    deploy        = (ConvertFrom-TermCodePoint 0x1F680) + '|[D]'   # rocket
+    git           = (ConvertFrom-TermCodePoint 0x1F33F) + '|[G]'   # herb
+    'windows-ops' = (ConvertFrom-TermCodePoint 0x1FA7A) + '|[H]'   # stethoscope - diagnostics is the verb
 }
 
 $Script:TermHealthGlyph = @{
-    healthy  = '•|(+)'
-    pending  = '•|(.)'
-    warning  = '•|(!)'
-    critical = '•|(!!)'
-    busted   = '⬤|(X)'
-    unknown  = '•|(?)'
+    healthy  = (ConvertFrom-TermCodePoint 0x2022) + '|(+)'   # bullet
+    pending  = (ConvertFrom-TermCodePoint 0x2022) + '|(.)'
+    warning  = (ConvertFrom-TermCodePoint 0x2022) + '|(!)'
+    critical = (ConvertFrom-TermCodePoint 0x2022) + '|(!!)'
+    busted   = (ConvertFrom-TermCodePoint 0x2B24) + '|(X)'    # black large circle
+    unknown  = (ConvertFrom-TermCodePoint 0x2022) + '|(?)'
 }
 
 $Script:TermDiagramIcon = @{
-    user     = '👤|(U)'
-    web      = '🌐|(W)'
-    mobile   = '📱|(M)'
-    auth     = '🔐|(A)'
-    database = '🗄|(D)'
-    cache    = '⚡|(C)'
-    queue    = '📨|(Q)'
-    storage  = '📦|(P)'
-    service  = '⚙|*'
-    api      = '🔌|(I)'
-    search   = '🔍|(S)'
-    timer    = '⏱|(T)'
-    build    = '🔨|(B)'
-    hook     = '🪝|(H)'
-    log      = '📄|(F)'
+    user     = (ConvertFrom-TermCodePoint 0x1F464) + '|(U)'   # bust in silhouette
+    web      = (ConvertFrom-TermCodePoint 0x1F310) + '|(W)'   # globe with meridians
+    mobile   = (ConvertFrom-TermCodePoint 0x1F4F1) + '|(M)'   # mobile phone
+    auth     = (ConvertFrom-TermCodePoint 0x1F510) + '|(A)'   # closed lock with key
+    database = (ConvertFrom-TermCodePoint 0x1F5C4) + '|(D)'   # file cabinet
+    cache    = (ConvertFrom-TermCodePoint 0x26A1)  + '|(C)'   # high voltage
+    queue    = (ConvertFrom-TermCodePoint 0x1F4E8) + '|(Q)'   # incoming envelope
+    storage  = (ConvertFrom-TermCodePoint 0x1F4E6) + '|(P)'   # package
+    service  = (ConvertFrom-TermCodePoint 0x2699)  + '|*'     # gear
+    api      = (ConvertFrom-TermCodePoint 0x1F50C) + '|(I)'   # electric plug
+    search   = (ConvertFrom-TermCodePoint 0x1F50D) + '|(S)'   # magnifying glass
+    timer    = (ConvertFrom-TermCodePoint 0x23F1)  + '|(T)'   # stopwatch
+    build    = (ConvertFrom-TermCodePoint 0x1F528) + '|(B)'   # hammer
+    hook     = (ConvertFrom-TermCodePoint 0x1FA9D) + '|(H)'   # hook
+    log      = (ConvertFrom-TermCodePoint 0x1F4C4) + '|(F)'   # page facing up
 }
 
-# ─── Initialize-Term ─────────────────────────────────────────────────────────
+# --- Initialize-Term ---------------------------------------------------------
 function Initialize-Term {
     <#
     .SYNOPSIS
         Detect terminal capabilities and populate global glyph/color state.
-        Idempotent — safe to call multiple times.
+        Idempotent - safe to call multiple times.
     #>
     [CmdletBinding()]
     param()
 
-    # TTY detection — stdout (not stderr; rendering targets stdout-ish)
+    # TTY detection - stdout (not stderr; rendering targets stdout-ish)
     try {
         $Script:TermTty = -not [Console]::IsOutputRedirected
     } catch {
@@ -135,7 +155,7 @@ function Initialize-Term {
         $Script:TermColor = $true
     }
 
-    # Terminal width — fall back to 100 (claude-mods default)
+    # Terminal width - fall back to 100 (claude-mods default)
     if ($Script:TermTty) {
         try {
             $cols = [Console]::WindowWidth
@@ -165,18 +185,23 @@ function Initialize-Term {
         $Script:Spin_Working   = @('|', '/', '-', '\')
         $Script:Spin_Heartbeat = @('.', ':', '*', ':')
     } else {
-        $Script:T_Branch = '├─'
-        $Script:T_Last   = '└─'
-        $Script:T_Vert   = '│'
-        $Script:P_TL     = '╭'
-        $Script:P_BL     = '╰'
-        $Script:P_HRule  = '─'
-        $Script:P_Term   = '●'
-        $Script:G_Branch = '⎇'
-        $Script:G_Alert  = '▲'
-        $Script:G_Tip    = '💡'
-        $Script:Spin_Working   = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
-        $Script:Spin_Heartbeat = @('·','∙','•','●','•','∙')
+        # Code points, never literals (see "Encoding" in the header)
+        $Script:T_Branch = ConvertFrom-TermCodePoint 0x251C 0x2500
+        $Script:T_Last   = ConvertFrom-TermCodePoint 0x2514 0x2500
+        $Script:T_Vert   = ConvertFrom-TermCodePoint 0x2502
+        $Script:P_TL     = ConvertFrom-TermCodePoint 0x256D
+        $Script:P_BL     = ConvertFrom-TermCodePoint 0x2570
+        $Script:P_HRule  = ConvertFrom-TermCodePoint 0x2500
+        $Script:P_Term   = ConvertFrom-TermCodePoint 0x25CF
+        $Script:G_Branch = ConvertFrom-TermCodePoint 0x2387
+        $Script:G_Alert  = ConvertFrom-TermCodePoint 0x25B2
+        $Script:G_Tip    = ConvertFrom-TermCodePoint 0x1F4A1
+        # braille dots, one frame per code point
+        $Script:Spin_Working   = @(0x280B, 0x2819, 0x2839, 0x2838, 0x283C, 0x2834, 0x2826, 0x2827, 0x2807, 0x280F |
+                                   ForEach-Object { ConvertFrom-TermCodePoint $_ })
+        # middle dot, bullet operator, bullet, black circle, bullet, bullet operator
+        $Script:Spin_Heartbeat = @(0x00B7, 0x2219, 0x2022, 0x25CF, 0x2022, 0x2219 |
+                                   ForEach-Object { ConvertFrom-TermCodePoint $_ })
     }
 
     # ANSI escapes
@@ -202,7 +227,7 @@ function Initialize-Term {
     }
 }
 
-# ─── Color helper ────────────────────────────────────────────────────────────
+# --- Color helper ------------------------------------------------------------
 function Get-TermColor {
     <#
     .SYNOPSIS
@@ -227,7 +252,7 @@ function Get-TermColor {
     return "${code}${Text}$($Script:TC_Off)"
 }
 
-# ─── Registry lookup ─────────────────────────────────────────────────────────
+# --- Registry lookup ---------------------------------------------------------
 function Get-TermGlyph {
     <#
     .SYNOPSIS
@@ -251,7 +276,7 @@ function Get-TermGlyph {
     if ($Script:TermAsciiMode) { return $parts[1] } else { return $parts[0] }
 }
 
-# ─── Display-width helpers ───────────────────────────────────────────────────
+# --- Display-width helpers ---------------------------------------------------
 function Get-TermDisplayWidth {
     <#
     .SYNOPSIS
@@ -272,12 +297,12 @@ function Get-TermDisplayWidth {
             # Simple wide-emoji heuristic: rune length >1 (surrogate pair) OR in known wide ranges
             $s = [string]$rune.Current
             if ($s.Length -gt 1) {
-                $width += 2   # surrogate pair — almost always wide
+                $width += 2   # surrogate pair - almost always wide
             } elseif (($cp -ge 0x2600 -and $cp -le 0x27BF) -or
                       ($cp -ge 0x2B00 -and $cp -le 0x2BFF) -or
-                      $cp -eq 0x26A1 -or         # ⚡
-                      $cp -eq 0x2728 -or         # ✨
-                      $cp -eq 0x2B24) {          # ⬤
+                      $cp -eq 0x26A1 -or         # high voltage
+                      $cp -eq 0x2728 -or         # sparkles
+                      $cp -eq 0x2B24) {          # black large circle
                 $width += 2
             } else {
                 $width += 1
@@ -299,20 +324,23 @@ function Get-TermTruncated {
     )
     $w = Get-TermDisplayWidth $Text
     if ($w -le $MaxCols) { return $Text }
-    $ell = if ($Script:TermAsciiMode) { '..' } else { '…' }
+    $ell = if ($Script:TermAsciiMode) { '..' } else { ConvertFrom-TermCodePoint 0x2026 }   # ellipsis
     $ellW = Get-TermDisplayWidth $ell
-    # Naive truncation by character count — close enough for our needs
+    # Naive truncation by character count - close enough for our needs
     $maxChars = $MaxCols - $ellW
     if ($maxChars -lt 0) { $maxChars = 0 }
     if ($Text.Length -le $maxChars) { return $Text + $ell }
     return $Text.Substring(0, $maxChars) + $ell
 }
 
-# ─── Panel chrome ────────────────────────────────────────────────────────────
+# --- Panel chrome ------------------------------------------------------------
 function New-TermPanelOpen {
     <#
     .SYNOPSIS
-        Render the panel header bar: ╭── 🩺 brand · subtitle ─── INDICATOR ───●
+        Render the panel header bar. In ASCII mode:
+            +-- [H] name . subtitle --- INDICATOR ---*
+        The dot before the subtitle is U+00B7 in both modes. The Unicode
+        rendering is drawn in docs/TERMINAL-DESIGN.md.
     .PARAMETER Brand
         Brand key from the registry (e.g. 'windows-ops').
     .PARAMETER Name
@@ -330,12 +358,13 @@ function New-TermPanelOpen {
         [string]$Indicator = ''
     )
     $emoji = Get-TermGlyph -Registry Brand -Key $Brand
+    $dot = ConvertFrom-TermCodePoint 0x00B7   # middle dot
     $title = if ($Subtitle) {
-        "$Name $(Get-TermColor dim "· $Subtitle")"
+        "$Name $(Get-TermColor dim "$dot $Subtitle")"
     } else {
         $Name
     }
-    $titleVis = if ($Subtitle) { "$Name · $Subtitle" } else { $Name }
+    $titleVis = if ($Subtitle) { "$Name $dot $Subtitle" } else { $Name }
 
     $leftRaw = "$($Script:P_TL)$($Script:P_HRule)$($Script:P_HRule) $emoji "
     $left = "$leftRaw$(Get-TermColor cyan $title) "
@@ -360,9 +389,9 @@ function New-TermPanelOpen {
 function New-TermPanelClose {
     <#
     .SYNOPSIS
-        Render the panel footer bar: ╰── hotkeys ─── health1  health2 ───●
+        Render the panel footer bar (ASCII mode): +-- hotkeys --- health1  health2 ---*
     .PARAMETER Hotkeys
-        Pre-rendered hotkey string (use New-TermHotkey + joining with ' · ').
+        Pre-rendered hotkey string (use New-TermHotkey + joining with ' | ').
     .PARAMETER Healths
         Pre-rendered health-indicator string (use New-TermHealth + joining with '  ').
     #>
@@ -395,17 +424,17 @@ function New-TermPanelClose {
 }
 
 function New-TermPanelVert {
-    <# Body-line spacer: a single │ on its own line. #>
+    <# Body-line spacer: a single | on its own line. #>
     [CmdletBinding()]
     param()
     return Get-TermColor dim $Script:T_Vert
 }
 
-# ─── Body components ─────────────────────────────────────────────────────────
+# --- Body components ---------------------------------------------------------
 function New-TermSection {
     <#
     .SYNOPSIS
-        Section header: ├── LABEL (n)  with label colored by state.
+        Section header: +-- LABEL (n)  with label colored by state.
     .PARAMETER State
         State token (FAILING/WARN/PASS/INFO or fleet-style RUNNING/READY/FAILED/CONFLICT).
     .PARAMETER Label
@@ -427,7 +456,7 @@ function New-TermSection {
         default { '' }
     }
     $renderedLabel = if ($color) { Get-TermColor $color $Label } else { $Label }
-    # Section is a panel-edge attachment — '├──' IS the left edge, no leading '│' prefix.
+    # Section is a panel-edge attachment - '+--' IS the left edge, no leading '|' prefix.
     $conn = Get-TermColor dim "$($Script:T_Branch)$($Script:P_HRule)"
     $countStr = if ($Count -ge 0) { ' ' + (Get-TermColor dim "($Count)") } else { '' }
     return "${conn} ${renderedLabel}${countStr}"
@@ -436,7 +465,7 @@ function New-TermSection {
 function New-TermSummary {
     <#
     .SYNOPSIS
-        Summary line: ├── text  (all dim, metadata-only branch).
+        Summary line: +-- text  (all dim, metadata-only branch).
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Text)
@@ -449,7 +478,7 @@ function New-TermSummary {
 function New-TermLeaf {
     <#
     .SYNOPSIS
-        Single leaf row: │   ├── name              ●─●─◉    meta    age
+        Single leaf row (ASCII mode): |   +-- name              *-*-@    meta    age
     .PARAMETER Name
         Leaf name (ellipsis-truncated to fit name column).
     .PARAMETER Rail
@@ -459,7 +488,7 @@ function New-TermLeaf {
     .PARAMETER Age
         Age column content (right-aligned, e.g. '12m', '2h').
     .PARAMETER IsLast
-        Use └── connector instead of ├── (for last sibling in a section).
+        Use `-- connector instead of +-- (for last sibling in a section).
     .PARAMETER NameColWidth
         Override name column width (default 32).
     .PARAMETER RailColWidth
@@ -501,7 +530,7 @@ function New-TermLeaf {
 function New-TermAlert {
     <#
     .SYNOPSIS
-        Inline alert sub-row: │   │   ▲ message  (orange/red).
+        Inline alert sub-row (ASCII mode): |   |   ! message  (orange/red).
     .PARAMETER Severity
         warning (orange) or critical (red).
     #>
@@ -514,7 +543,7 @@ function New-TermAlert {
     $vert  = Get-TermColor dim $Script:T_Vert
     $vert2 = Get-TermColor dim $Script:T_Vert
     $tri = Get-TermColor $color $Script:G_Alert
-    # Per design § 4.7: panel-vert, 3-space section indent, leaf-continuation vert,
+    # Per design section 4.7: panel-vert, 3-space section indent, leaf-continuation vert,
     # 3-space sub-indent (aligns the alert under the leaf's tree connector).
     return "${vert}   ${vert2}   ${tri} ${Text}"
 }
@@ -522,7 +551,7 @@ function New-TermAlert {
 function New-TermHint {
     <#
     .SYNOPSIS
-        Hint row with the tip glyph: │   💡 text  (dim, no tree connector).
+        Hint row with the tip glyph (ASCII mode): |   (i) text  (dim, no tree connector).
         Used for "to get started" / "did you know" rows in empty states.
     #>
     [CmdletBinding()]
@@ -535,7 +564,7 @@ function New-TermHint {
 function New-TermToast {
     <#
     .SYNOPSIS
-        Toast row: ├── 🩺 message  (dim cyan emoji + default fg text).
+        Toast row (ASCII mode): +-- [H] message  (dim cyan emoji + default fg text).
     #>
     [CmdletBinding()]
     param(
@@ -549,11 +578,11 @@ function New-TermToast {
     return "${vert}${conn} ${msg}"
 }
 
-# ─── Leaf-glyph builders ─────────────────────────────────────────────────────
+# --- Leaf-glyph builders -----------------------------------------------------
 function New-TermRail {
     <#
     .SYNOPSIS
-        Build a commit-graph rail: ●─●─●─◉ (HEAD) or ●─●─⊗ (CONFLICT).
+        Build a commit-graph rail (ASCII mode): *-*-*-@ (HEAD) or *-*-X (CONFLICT).
     .PARAMETER Commits
         Number of landed commits (including the HEAD position).
     .PARAMETER Head
@@ -564,10 +593,10 @@ function New-TermRail {
         [Parameter(Mandatory)][ValidateRange(0,99)][int]$Commits,
         [ValidateSet('HEAD','CONFLICT','EMPTY')][string]$Head = 'HEAD'
     )
-    $commit   = if ($Script:TermAsciiMode) { '*' } else { '●' }
-    $link     = if ($Script:TermAsciiMode) { '-' } else { '─' }
-    $headg    = if ($Script:TermAsciiMode) { '@' } else { '◉' }
-    $conflict = if ($Script:TermAsciiMode) { 'X' } else { '⊗' }
+    $commit   = if ($Script:TermAsciiMode) { '*' } else { ConvertFrom-TermCodePoint 0x25CF }   # black circle
+    $link     = if ($Script:TermAsciiMode) { '-' } else { ConvertFrom-TermCodePoint 0x2500 }   # box horizontal
+    $headg    = if ($Script:TermAsciiMode) { '@' } else { ConvertFrom-TermCodePoint 0x25C9 }   # fisheye
+    $conflict = if ($Script:TermAsciiMode) { 'X' } else { ConvertFrom-TermCodePoint 0x2297 }   # circled times
 
     if ($Commits -le 0 -and $Head -eq 'EMPTY') {
         return $link
@@ -596,9 +625,9 @@ function New-TermRail {
 function New-TermPipBar {
     <#
     .SYNOPSIS
-        Build a pip bar: ▰▰▰▰▱▱▱▱▱▱  with state-color based on metric type.
+        Build a pip bar (ASCII mode): ####------  with state-color based on metric type.
     .PARAMETER Type
-        progress | score | capacity (drives color selection per design § 4.10).
+        progress | score | capacity (drives color selection per design section 4.10).
     .PARAMETER Filled
         Filled count.
     .PARAMETER Total
@@ -613,8 +642,8 @@ function New-TermPipBar {
         [Parameter(Mandatory)][int]$Total,
         [int]$Width = 10
     )
-    $pipFull  = if ($Script:TermAsciiMode) { '#' } else { '▰' }
-    $pipEmpty = if ($Script:TermAsciiMode) { '-' } else { '▱' }
+    $pipFull  = if ($Script:TermAsciiMode) { '#' } else { ConvertFrom-TermCodePoint 0x25B0 }   # black parallelogram
+    $pipEmpty = if ($Script:TermAsciiMode) { '-' } else { ConvertFrom-TermCodePoint 0x25B1 }   # white parallelogram
 
     # Natural denominator override: if total <= 12 and not 100, use total as width
     if ($Total -ne 100 -and $Total -gt 0 -and $Total -le 12) {
@@ -648,11 +677,11 @@ function New-TermPipBar {
     return $out
 }
 
-# ─── Right-side furniture ────────────────────────────────────────────────────
+# --- Right-side furniture ----------------------------------------------------
 function New-TermHealth {
     <#
     .SYNOPSIS
-        Health indicator: • text  (with ⬤ for busted state).
+        Health indicator (ASCII mode): (+) text  (busted uses the large circle, (X)).
     .PARAMETER State
         healthy | pending | warning | critical | busted | unknown
     #>
@@ -692,11 +721,11 @@ function Join-TermHotkeys {
     param([Parameter(ValueFromPipeline, Position=0)][string]$InputObject)
     begin { $items = New-Object System.Collections.Generic.List[string] }
     process { if ($InputObject) { $items.Add($InputObject) } }
-    end { return ($items -join ' · ') }
+    end { return ($items -join " $(ConvertFrom-TermCodePoint 0x00B7) ") }   # middle dot
 }
 
 function Join-TermHealths {
-    <# Combine health indicators with two-space separator (per design § 4.3). #>
+    <# Combine health indicators with two-space separator (per design section 4.3). #>
     [CmdletBinding()]
     param([Parameter(ValueFromPipeline, Position=0)][string]$InputObject)
     begin { $items = New-Object System.Collections.Generic.List[string] }
@@ -704,7 +733,7 @@ function Join-TermHealths {
     end { return ($items -join '  ') }
 }
 
-# ─── Spinners ────────────────────────────────────────────────────────────────
+# --- Spinners ----------------------------------------------------------------
 function Get-TermSpinnerFrame {
     <#
     .SYNOPSIS
@@ -727,7 +756,7 @@ function Get-TermSpinnerFrame {
     return $frames[$Tick % $frames.Count]
 }
 
-# ─── Convenience: Write a panel-block to stderr ──────────────────────────────
+# --- Convenience: Write a panel-block to stderr ------------------------------
 function Write-TermLine {
     <#
     .SYNOPSIS

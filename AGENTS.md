@@ -166,6 +166,9 @@ On "INIT:" message at session start:
   a suite that runs Windows-only scripts whenever `command -v pwsh` succeeds goes
   red on Linux CI (windows-ops, supply-chain-defense). Gate runtime checks on the
   host: `[Environment]::OSVersion.Platform` = `Win32NT` (works in 5.1 and 7).
+- **PowerShell files stay ASCII.** Windows PowerShell 5.1 reads a BOM-less `.ps1` in the
+  ANSI code page, so one em dash or box glyph breaks the parse, and pwsh 7 hides it. Use an
+  ASCII stand-in, or `[char]0x2500` for an output glyph; `tests/check-ps51-parse.sh` gates it.
 - **The plugin name `claude-mods` is reserved** by Claude Code 2.1.287+ (Claude Mods).
   `claude plugin validate` rejects it, so call the validator only through
   `tests/plugin-validate.sh`, which waives that one error until 2026-10-31 and fails on

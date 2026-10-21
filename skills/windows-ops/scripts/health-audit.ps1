@@ -38,7 +38,7 @@
 
 .NOTES
     Exit codes (reflect whether the audit RAN, not what it found):
-      0 success — audit completed (findings reported via panel + JSON)
+      0 success - audit completed (findings reported via panel + JSON)
       1 general error during audit (e.g. WinRM unreachable)
       2 usage error (bad arguments)
       5 missing precondition (PowerShell version, required module)
@@ -89,9 +89,9 @@ function Add-Finding {
     }
 }
 
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 # Section: Hardware errors (WHEA)
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 Write-Verbose "Section 1: Hardware errors (WHEA)"
 
 try {
@@ -108,7 +108,7 @@ try {
             -Data @{ count = $wheaError.Count; first = $wheaError[0].TimeCreated.ToString('o') }
     } elseif ($wheaWarn) {
         Add-Finding -Level warn -Category 'hardware' -Subject 'WHEA warnings' `
-            -Detail "$($wheaWarn.Count) corrected hardware event(s) — usually benign but trending"
+            -Detail "$($wheaWarn.Count) corrected hardware event(s) - usually benign but trending"
     } else {
         Add-Finding -Level pass -Category 'hardware' -Subject 'WHEA' `
             -Detail "No hardware errors logged in last $Days days"
@@ -117,9 +117,9 @@ try {
     Add-Finding -Level warn -Category 'hardware' -Subject 'WHEA query' -Detail "Failed: $_"
 }
 
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 # Section: Storage health per disk
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 Write-Verbose "Section 2: Storage health per disk"
 $diskMap = Get-DiskMap
 foreach ($d in $diskMap) {
@@ -185,26 +185,26 @@ foreach ($d in $diskMap) {
         $failingDisks += $d
     } elseif ($event7 -gt 5 -or $event154 -gt 2) {
         Add-Finding -Level warn -Category 'storage' -Subject "Disk $n ($($d.Model))" `
-            -Detail "Watchlist: Event7=$event7, Event154=$event154 — back up important data" `
+            -Detail "Watchlist: Event7=$event7, Event154=$event154 - back up important data" `
             -Data @{ diskNumber=$d.Number; event7=$event7; event154=$event154 }
     } else {
         Add-Finding -Level pass -Category 'storage' -Subject "Disk $n ($($d.Model))" `
-            -Detail "Clean — 0 hardware errors over $Days days"
+            -Detail "Clean - 0 hardware errors over $Days days"
     }
 }
 
 if ($resetCount -gt 5) {
     Add-Finding -Level fail -Category 'storage' -Subject 'Controller resets' `
-        -Detail "$resetCount storahci controller resets in last $Days days — active storage failure"
+        -Detail "$resetCount storahci controller resets in last $Days days - active storage failure"
 } elseif ($resetCount -gt 0) {
     Add-Finding -Level warn -Category 'storage' -Subject 'Controller resets' `
-        -Detail "$resetCount storahci controller resets — drive intermittently unresponsive"
+        -Detail "$resetCount storahci controller resets - drive intermittently unresponsive"
 } else {
     Add-Finding -Level pass -Category 'storage' -Subject 'Controller resets' `
         -Detail "No storahci resets in last $Days days"
 }
 
-# Pagefile location — flag if pagefile is on a failing drive
+# Pagefile location - flag if pagefile is on a failing drive
 try {
     $pagefiles = Get-CimInstance Win32_PageFileSetting -ErrorAction SilentlyContinue
     foreach ($pf in $pagefiles) {
@@ -221,7 +221,7 @@ try {
     }
 } catch {}
 
-# Windows Search index location — boot-time amplifier if on failing drive
+# Windows Search index location - boot-time amplifier if on failing drive
 try {
     $idxDir = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows Search' -Name DataDirectory -ErrorAction SilentlyContinue).DataDirectory
     if ($idxDir) {
@@ -237,12 +237,12 @@ try {
     }
 } catch {}
 
-# Network mappings — SIGNPOST ONLY, deliberately not diagnosed here.
+# Network mappings - SIGNPOST ONLY, deliberately not diagnosed here.
 # A drive letter alone doesn't say whether a fault is local storage or SMB,
 # and every check above only sees physically-attached disks. Listing the
 # mappings stops the audit reading as "all drives healthy" when the user's
 # broken Z: is a NAS share this skill never looked at. Diagnosis belongs to
-# net-ops (scripts/windows/smb-audit.ps1) — keep this to ONE row, no verdict.
+# net-ops (scripts/windows/smb-audit.ps1) - keep this to ONE row, no verdict.
 try {
     $mappings = @(Get-SmbMapping -ErrorAction SilentlyContinue)
     if ($mappings.Count -gt 0) {
@@ -256,9 +256,9 @@ try {
     }
 } catch {}
 
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 # Section: Crash history
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 Write-Verbose "Section 3: Crash history"
 
 try {
@@ -279,7 +279,7 @@ try {
                 $hardShutdowns++
                 $why = if ($pwrBtn -ne 0) { 'power button held (hang)' } else { 'hard power loss or total hardware lockup' }
                 Add-Finding -Level fail -Category 'crash' -Subject $c.TimeCreated.ToString('yyyy-MM-dd HH:mm') `
-                    -Detail "BugCheck=0x0 (no bugcheck recorded) — $why" `
+                    -Detail "BugCheck=0x0 (no bugcheck recorded) - $why" `
                     -Data @{ time=$c.TimeCreated.ToString('o'); bugcheck=$bcHex; powerButtonHeld=($pwrBtn -ne 0) }
             } else {
                 Add-Finding -Level warn -Category 'crash' -Subject $c.TimeCreated.ToString('yyyy-MM-dd HH:mm') `
@@ -289,7 +289,7 @@ try {
         }
         if ($hardShutdowns -ge 2) {
             Add-Finding -Level fail -Category 'crash' -Subject 'Pattern' `
-                -Detail "$hardShutdowns unclean shutdowns with no bugcheck — investigate PSU, thermals, storage cabling"
+                -Detail "$hardShutdowns unclean shutdowns with no bugcheck - investigate PSU, thermals, storage cabling"
         }
     } else {
         Add-Finding -Level pass -Category 'crash' -Subject 'Crash log' -Detail "No Event 41 (Kernel-Power) crashes in last $Days days"
@@ -305,9 +305,9 @@ try {
     $hasMemoryDmp = (Test-Path 'C:\Windows\MEMORY.DMP')
 
     if ($dumpCfg.CrashDumpEnabled -eq 0) {
-        Add-Finding -Level warn -Category 'crash' -Subject 'Dump config' -Detail "CrashDumpEnabled=0 — no dumps will be written on crash"
+        Add-Finding -Level warn -Category 'crash' -Subject 'Dump config' -Detail "CrashDumpEnabled=0 - no dumps will be written on crash"
     } elseif (-not $hasMinidumps -and -not $hasMemoryDmp -and $crashes) {
-        Add-Finding -Level warn -Category 'crash' -Subject 'Dump config' -Detail "Crashes recorded but no dump files exist — pagefile may be too small or crashes were power-loss"
+        Add-Finding -Level warn -Category 'crash' -Subject 'Dump config' -Detail "Crashes recorded but no dump files exist - pagefile may be too small or crashes were power-loss"
     } else {
         $level = if ($dumpCfg.CrashDumpEnabled -eq 7) { 'pass' } else { 'info' }
         Add-Finding -Level $level -Category 'crash' -Subject 'Dump config' -Detail "CrashDumpEnabled=$($dumpCfg.CrashDumpEnabled)"
@@ -316,9 +316,9 @@ try {
     Add-Finding -Level warn -Category 'crash' -Subject 'Dump config' -Detail "Failed to read CrashControl key: $_"
 }
 
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 # Section: Startup inventory
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 Write-Verbose "Section 4: Startup inventory"
 
 $runPaths = @(
@@ -355,9 +355,9 @@ Add-Finding -Level $level -Category 'startup' -Subject 'Total auto-launch items'
     -Detail "$totalStartup ($runEntries Run + $autoSvcs services + $logonTasks tasks + $startupFolderCount shortcuts)" `
     -Data @{ runEntries=$runEntries; autoServices=$autoSvcs; logonTasks=$logonTasks; startupFolderShortcuts=$startupFolderCount }
 
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 # Section: Resource pressure (right now)
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 Write-Verbose "Section 5: Resource pressure (right now)"
 
 try {
@@ -367,7 +367,7 @@ try {
     Add-Finding -Level $level -Category 'resource' -Subject 'Memory' -Detail "$memUsedPct% used"
 } catch {}
 
-# Thermal — CPU/chipset temps via WMI's MSAcpi_ThermalZoneTemperature.
+# Thermal - CPU/chipset temps via WMI's MSAcpi_ThermalZoneTemperature.
 # Often returns nothing on desktops (vendor doesn't expose to ACPI thermal
 # zones) but always tries. Values are in tenths-of-Kelvin.
 try {
@@ -379,8 +379,8 @@ try {
                      elseif ($tempC -ge 85) { 'warn' }
                      elseif ($tempC -gt 0)  { 'pass' }
                      else { 'info' }
-            $detail = if ($tempC -ge 95) { "$tempC C — CRITICAL (CPU throttling / shutdown imminent)" }
-                      elseif ($tempC -ge 85) { "$tempC C — high (sustained loads risky)" }
+            $detail = if ($tempC -ge 95) { "$tempC C - CRITICAL (CPU throttling / shutdown imminent)" }
+                      elseif ($tempC -ge 85) { "$tempC C - high (sustained loads risky)" }
                       else { "$tempC C" }
             Add-Finding -Level $level -Category 'thermal' -Subject "Zone: $($z.InstanceName)" -Detail $detail
         }
@@ -393,7 +393,7 @@ try {
 }
 
 # Top processes by CURRENT CPU% over a 2-second sample (not accumulated CPU
-# time — that's misleading for long-running processes).
+# time - that's misleading for long-running processes).
 try {
     $sample1 = Get-Process | Select-Object Id, ProcessName, CPU, WorkingSet
     Start-Sleep -Milliseconds 2000
@@ -427,9 +427,9 @@ try {
     Add-Finding -Level info -Category 'resource' -Subject 'CPU sample' -Detail "Failed: $_"
 }
 
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 # Verdict
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 $failCount = ($Findings | Where-Object { $_.level -eq 'fail' }).Count
 $warnCount = ($Findings | Where-Object { $_.level -eq 'warn' }).Count
 $passCount = ($Findings | Where-Object { $_.level -eq 'pass' }).Count
@@ -442,10 +442,10 @@ if (-not $Json) {
     Write-TermLine (New-TermPanelOpen -Brand 'windows-ops' -Name 'windows-ops' -Subtitle 'health-audit' -Indicator $hostname)
     Write-TermLine (New-TermPanelVert)
 
-    # Summary line — single-glance digest
-    $summary = "$($diskMap.Count) disks · $($failingDisks.Count) failing"
+    # Summary line - single-glance digest
+    $summary = "$($diskMap.Count) disks | $($failingDisks.Count) failing"
     $crashCount = ($Findings | Where-Object { $_.category -eq 'crash' -and $_.level -eq 'fail' -and $_.subject -ne 'Pattern' -and $_.subject -ne 'Dump config' }).Count
-    if ($crashCount -gt 0) { $summary += " · $crashCount unclean shutdowns" }
+    if ($crashCount -gt 0) { $summary += " | $crashCount unclean shutdowns" }
     Write-TermLine (New-TermSummary -Text $summary)
     Write-TermLine (New-TermPanelVert)
 
@@ -477,7 +477,7 @@ if (-not $Json) {
         # Critical inline alert for FAILING section if a failing drive is identified
         if ($state -eq 'FAILING' -and $failingDisks) {
             $driveList = ($failingDisks | ForEach-Object { "Disk $($_.Number) ($($_.DriveLetters))" }) -join ', '
-            Write-TermLine (New-TermAlert -Severity critical -Text "back up + disconnect $driveList — see recover-clone.ps1 and drive-dependencies.ps1")
+            Write-TermLine (New-TermAlert -Severity critical -Text "back up + disconnect $driveList - see recover-clone.ps1 and drive-dependencies.ps1")
         }
         Write-TermLine (New-TermPanelVert)
     }
@@ -496,7 +496,7 @@ if (-not $Json) {
     if ($healthIndicators.Count -eq 0) {
         $healthIndicators.Add((New-TermHealth -State 'healthy' -Text 'clean'))
     }
-    # Cap at 2 per design § 4.3
+    # Cap at 2 per design section 4.3
     $healthIndicators = $healthIndicators | Select-Object -First 2
     $hl = $healthIndicators | Join-TermHealths
 

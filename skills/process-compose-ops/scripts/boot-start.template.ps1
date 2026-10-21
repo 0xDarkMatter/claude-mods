@@ -27,7 +27,7 @@ New-Item -ItemType Directory -Force -Path (Join-Path $root 'logs') | Out-Null
 
 "[$(Get-Date -Format 'yyyy-MM-ddTHH:mm:ssK')] boot-start invoked. User: $env:USERNAME" | Out-File -FilePath $bootLog -Append
 
-# ─── CUSTOMIZE PATH HERE ───────────────────────────────────────────────────
+# --- CUSTOMIZE PATH HERE ---------------------------------------------------
 # Add directories for binaries that your managed services need (python, uv,
 # git tools, cloudflared, language SDKs, etc.). Test by running this script
 # manually before relying on it at boot.
@@ -48,7 +48,7 @@ $env:PATH = ($pathParts -join ';')
 
 "[$(Get-Date -Format 'yyyy-MM-ddTHH:mm:ssK')] PATH set, $($pathParts.Count) entries" | Out-File -FilePath $bootLog -Append
 
-# ─── OPTIONAL: load secrets from gitignored .env ──────────────────────────
+# --- OPTIONAL: load secrets from gitignored .env --------------------------
 $envFile = Join-Path $root '.env'
 if (Test-Path $envFile) {
     "[$(Get-Date -Format 'yyyy-MM-ddTHH:mm:ssK')] Loading .env" | Out-File -FilePath $bootLog -Append
@@ -59,13 +59,13 @@ if (Test-Path $envFile) {
     }
 }
 
-# ─── OPTIONAL: explicitly UNSET env vars that conflict with services ──────
+# --- OPTIONAL: explicitly UNSET env vars that conflict with services ------
 # Example: if a daemon enforces OAuth-only and refuses to start with stale API keys
 # [Environment]::SetEnvironmentVariable('SOME_API_KEY', $null, 'Process')
 
 "[$(Get-Date -Format 'yyyy-MM-ddTHH:mm:ssK')] Starting process-compose..." | Out-File -FilePath $bootLog -Append
 
-# ─── LAUNCH ───────────────────────────────────────────────────────────────
+# --- LAUNCH ---------------------------------------------------------------
 # -p 8888    API port (avoid common collisions on 8080; pick what's free)
 # -t=false   no TUI (headless background daemon mode)
 # -L         PC's own log file

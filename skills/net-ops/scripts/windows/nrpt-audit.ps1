@@ -1,6 +1,6 @@
 # winnet-ops :: nrpt-audit.ps1
 # Dump every NRPT rule with full forensics. Use when probe.ps1 shows
-# layer 4 (nslookup) PASS but layer 5 (Resolve-DnsName) FAIL — that's the
+# layer 4 (nslookup) PASS but layer 5 (Resolve-DnsName) FAIL - that's the
 # textbook signature of a rogue NRPT entry.
 
 Write-Output "=== NRPT RULES (PowerShell view) ==="
@@ -20,7 +20,7 @@ $bad = $rules | Where-Object {
 if ($bad) {
     $bad | Format-List Name, Namespace, NameServers, Comment, DohTemplate
 } else {
-    Write-Output "None — only Tailscale MagicDNS rules present (normal)."
+    Write-Output "None - only Tailscale MagicDNS rules present (normal)."
 }
 
 Write-Output ""

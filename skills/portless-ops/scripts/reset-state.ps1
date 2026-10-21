@@ -19,7 +19,7 @@
     Keep the existing local CA. Default true (avoids re-trusting in browsers).
 
 .PARAMETER Aliases
-    Hashtable of name → port pairs to re-register after reset. Optional.
+    Hashtable of name -> port pairs to re-register after reset. Optional.
 
 .EXAMPLE
     # Change TLD and re-register aliases
@@ -73,7 +73,7 @@ if ($Aliases.Count -gt 0) {
     Write-Host "[4/4] Re-registering $($Aliases.Count) aliases..."
     foreach ($name in $Aliases.Keys) {
         $port = $Aliases[$name]
-        Write-Host "  alias: $name → $port"
+        Write-Host "  alias: $name -> $port"
         & portless alias $name $port --force 2>&1 | Out-Null
     }
 } else {

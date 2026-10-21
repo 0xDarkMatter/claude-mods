@@ -66,6 +66,12 @@ jobs:
       - name: Executable-bit gate (tracked scripts must be executable)
         run: bash tests/check-exec-bits.sh
 
+      # Static half only here: Linux has no Windows PowerShell 5.1, so the real parse
+      # runs in the windows-latest job below. pwsh on this runner would not reproduce
+      # the bug (it reads UTF-8), so the gate never uses it.
+      - name: PowerShell 5.1 encoding gate (tracked .ps1/.psm1/.psd1 are ASCII)
+        run: bash tests/check-ps51-parse.sh
+
       - name: Run skill behavioural test suites
         run: bash tests/run-skill-tests.sh
 
@@ -80,6 +86,8 @@ jobs:
   # doctor can only be exercised honestly on a Windows runner. Running it on
   # ubuntu would create files literally named "dir\skills\alpha" and the suite
   # would pass or fail for the wrong reasons.
+  # This is also the only CI job with Windows PowerShell 5.1, so the real 5.1 parse
+  # of tests/check-ps51-parse.sh runs here.
   install-guard:
     runs-on: windows-latest
     steps:
@@ -91,3 +99,9 @@ jobs:
       - name: Install guard + doctor behavioural tests
         shell: bash
         run: bash tests/install-guard.sh
+
+      # The real Windows PowerShell 5.1 parser over every tracked PowerShell file.
+      # --require-parse turns a missing 5.1 host into a failure, not a skip.
+      - name: PowerShell 5.1 parse gate (powershell.exe parses every .ps1)
+        shell: bash
+        run: bash tests/check-ps51-parse.sh --require-parse
