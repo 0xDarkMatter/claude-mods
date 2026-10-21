@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scan-secrets.sh — Secret-scan a pending push diff via gitleaks + regex layer.
-# push-preflight Step 6. Scans only <remote>/<branch>..<branch> (the commits
-# about to leave), never full history — history audits belong to security-ops.
+# push-preflight Step 6. Scans only the commits about to leave, as push-scope.sh
+# defines them, never full history — history audits belong to security-ops.
 #
 # Usage:   scan-secrets.sh <remote> <branch>
 # Exit:    0 clean, 1 secret hit, 5 missing dep
@@ -35,33 +35,41 @@ if ! command -v rg >/dev/null 2>&1; then
 fi
 
 # ── Range to scan ─────────────────────────────────────────────────────────────
-# Two cases:
-#   (a) origin/<branch> exists  → diff range scan (incremental push)
-#   (b) origin/<branch> missing → full branch scan (first push to new remote)
-# The well-known empty-tree SHA lets us express "everything as added" for the
-# regex layer's diff-based extraction without special-casing its plumbing.
-EMPTY_TREE="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+# push-scope.sh decides which commits the push sends (update / new-branch /
+# empty-remote; see its header). gitleaks walks those commits one by one; the
+# regex layer reads the net diff from SCOPE_BASE, which is the empty tree
+# ("everything added") only when the remote has no refs at all.
+# shellcheck source=push-scope.sh
+. "$SCRIPT_DIR/push-scope.sh"
+push_scope "$REMOTE" "$BRANCH"
 
-if git rev-parse --verify "${REMOTE}/${BRANCH}" >/dev/null 2>&1; then
-  RANGE="${REMOTE}/${BRANCH}..${BRANCH}"
-  GITLEAKS_LOG_OPTS="$RANGE"
-  DIFF_RANGE="$RANGE"
-  COMMIT_COUNT="$(git rev-list --count "$RANGE")"
-  if [ "$COMMIT_COUNT" -eq 0 ]; then
-    echo "push-preflight: nothing to push (${RANGE} is empty)."
-    exit 0
-  fi
-  SCAN_LABEL="${COMMIT_COUNT} commits via gitleaks (${RANGE})"
-else
-  COMMIT_COUNT="$(git rev-list --count "$BRANCH")"
-  if [ "$COMMIT_COUNT" -eq 0 ]; then
-    echo "push-preflight: branch ${BRANCH} has no commits."
-    exit 0
-  fi
-  GITLEAKS_LOG_OPTS="$BRANCH"
-  DIFF_RANGE="${EMPTY_TREE}..${BRANCH}"
-  SCAN_LABEL="full branch — ${COMMIT_COUNT} commits via gitleaks (first push to new remote)"
-fi
+COMMIT_COUNT="$SCOPE_COUNT"
+# gitleaks splits --log-opts on spaces; rev-list arguments never contain one.
+GITLEAKS_LOG_OPTS="${SCOPE_REVS[*]}"
+DIFF_RANGE="${SCOPE_BASE}..${BRANCH}"
+case "$SCOPE_KIND" in
+  update)
+    if [ "$COMMIT_COUNT" -eq 0 ]; then
+      echo "push-preflight: nothing to push (${SCOPE_REVS[0]} is empty)."
+      exit 0
+    fi
+    SCAN_LABEL="${COMMIT_COUNT} commits via gitleaks (${SCOPE_REVS[0]})"
+    ;;
+  new-branch)
+    if [ "$COMMIT_COUNT" -eq 0 ]; then
+      echo "push-preflight: nothing to scan (every commit on ${BRANCH} is already on ${REMOTE}; the push only creates the branch)."
+      exit 0
+    fi
+    SCAN_LABEL="${COMMIT_COUNT} commits via gitleaks (new remote branch: ${BRANCH} minus commits already on ${REMOTE})"
+    ;;
+  empty-remote)
+    if [ "$COMMIT_COUNT" -eq 0 ]; then
+      echo "push-preflight: branch ${BRANCH} has no commits."
+      exit 0
+    fi
+    SCAN_LABEL="full branch - ${COMMIT_COUNT} commits via gitleaks (${REMOTE} has no refs: first push to an empty remote, or never fetched)"
+    ;;
+esac
 
 # ── Layer 1: gitleaks on the commit range ─────────────────────────────────────
 echo "push-preflight: scanning ${SCAN_LABEL}"
