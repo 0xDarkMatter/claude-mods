@@ -209,6 +209,27 @@ printf '%sX fix this later\n' "$XR" >> "$SB/wt-chore_xmark/mark.txt"
 git -C "$SB/wt-chore_xmark" -c user.email=w@t -c user.name=w commit -qam "add a marker"
 bash "$FLEET" scrub-check chore/xmark >/dev/null 2>&1; ee "lone triple-X marker still refused" 1 $?
 
+echo "-- scrub gate: base64 data-URI payloads pass, markers beside them refuse --"
+# Regression: an HTML report that embeds woff2 fonts as
+# data:font/woff2;base64,... and random base64 holds a triple-X followed by a
+# digit or +/ often enough to trip the X-term (6 hits in one file). Payloads
+# are stripped before matching; prose markers, including one on the same line
+# as a data URI, must still refuse. Tokens built from $XR as above.
+mk_lane "chore/b64font" font.html
+printf '@font-face{src:url(data:font/woff2;base64,AAAA%sX9BBBB)}\n' "$XR" >> "$SB/wt-chore_b64font/font.html"
+git -C "$SB/wt-chore_b64font" -c user.email=w@t -c user.name=w commit -qam "embed a font"
+bash "$FLEET" scrub-check chore/b64font >/dev/null 2>&1; ee "base64 data-URI payload passes scrub" 0 $?
+
+mk_lane "chore/xcolon" colon.txt
+printf '%sX: fix this\n' "$XR" >> "$SB/wt-chore_xcolon/colon.txt"
+git -C "$SB/wt-chore_xcolon" -c user.email=w@t -c user.name=w commit -qam "add a colon marker"
+bash "$FLEET" scrub-check chore/xcolon >/dev/null 2>&1; ee "triple-X colon marker in prose refused" 1 $?
+
+mk_lane "chore/b64mark" both.html
+printf 'src:url(data:font/woff2;base64,AAAABBBB) /* %sX: fix */\n' "$XR" >> "$SB/wt-chore_b64mark/both.html"
+git -C "$SB/wt-chore_b64mark" -c user.email=w@t -c user.name=w commit -qam "marker beside a data URI"
+bash "$FLEET" scrub-check chore/b64mark >/dev/null 2>&1; ee "marker beside a data URI still refused" 1 $?
+
 echo "-- signal.sh log gate: exit codes and summaries, not prose --"
 # Regression (Ledger, 2026-07): a GREEN run whose stderr prints "failed"/"error"
 # prose, or whose test NAMES contain "error", must not be refused. Verdict order
