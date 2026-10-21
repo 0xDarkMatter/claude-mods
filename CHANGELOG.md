@@ -541,24 +541,6 @@ the installers remove the old installed copies.
   `fleet-ops/tests/` (PATH shims that fail one `find` or `git` call): the five guarding
   a fix were seen failing first, and two pin that a race and a healthy git change nothing.
 
-- **Two more supply-chain scanner blind spots no longer read as clean** -
-  `scan-extensions.sh` dated each item with `find -printf`, which only GNU find has. BSD
-  and macOS find rejected it, the error was discarded, and every extension and skill read
-  `recent=no`: the recency inventory always reported 0 changed, and `--deep` (gated to
-  recent items unless `--all`) scanned nothing, then exited 0. It now uses `-mmin`, which
-  GNU, BSD and busybox find all have. A probe that still fails reads `recent=unknown`
-  (`null` in `--json`), is listed in `meta.unscanned` (exit 5), and is scanned under
-  `--deep` rather than skipped. `integrity-audit.sh` grepped PowerShell profiles as ASCII,
-  but Windows PowerShell 5.1's `>` and `Out-File` write UTF-16LE, which an ASCII pattern
-  never matches, so a profile running `Invoke-Expression ... DownloadString` read clean.
-  A file with a UTF-16 BOM is now decoded with `iconv` first; one iconv cannot decode, or
-  NUL bytes left after decoding (UTF-16 without a BOM, UTF-32), report the file `NOT
-  scanned`. Its other per-file greps (editor settings, `.npmrc`, `.pypirc`) now treat
-  grep exit 2 as unread, not as no hits, and grep with `-a`: grep 3.5+ reports a match in
-  a file holding a NUL byte on stderr only. 17 new assertions, each seen failing against
-  the unfixed scripts or a plausible wrong fix (a probe still using a GNU-only primary,
-  every UTF-16 file marked unscanned).
-
 - **A lane's pigeon report reaches the coordinator** - a repo's worktrees share its
   pigeon identity (the git root commit), so a lane that sent `READY` to the coordinator
   in the main checkout was shown its own message by its `check-mail` hook, which then
