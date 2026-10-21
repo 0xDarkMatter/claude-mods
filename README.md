@@ -1,22 +1,172 @@
-```
- ██████╗██╗      █████╗ ██╗   ██╗██████╗ ███████╗    ███╗   ███╗ ██████╗ ██████╗ ███████╗
-██╔════╝██║     ██╔══██╗██║   ██║██╔══██╗██╔════╝    ████╗ ████║██╔═══██╗██╔══██╗██╔════╝
-██║     ██║     ███████║██║   ██║██║  ██║█████╗      ██╔████╔██║██║   ██║██║  ██║███████╗
-██║     ██║     ██╔══██║██║   ██║██║  ██║██╔══╝      ██║╚██╔╝██║██║   ██║██║  ██║╚════██║
-╚██████╗███████╗██║  ██║╚██████╔╝██████╔╝███████╗    ██║ ╚═╝ ██║╚██████╔╝██████╔╝███████║
- ╚═════╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝    ╚═╝     ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝
-```
+<div align="center">
 
-[![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-blueviolet?logo=anthropic)](https://docs.anthropic.com/en/docs/claude-code)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+# claude-mods
 
-> *Doctrine you can execute. Knowledge that knows when it's stale. Agents that land their own work.*
+**Doctrine you can execute. Knowledge that knows when it's stale. Agents that land their own work.**
+
+[![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-8957e5?labelColor=1b1f24)](https://docs.anthropic.com/en/docs/claude-code)
+[![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2F0xDarkMatter%2Fclaude-mods%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version&labelColor=1b1f24&color=3fb950)](CHANGELOG.md)
+[![CI](https://img.shields.io/github/actions/workflow/status/0xDarkMatter/claude-mods/validate.yml?branch=main&label=ci&labelColor=1b1f24)](https://github.com/0xDarkMatter/claude-mods/actions/workflows/validate.yml)
+[![Agent Skills spec](https://img.shields.io/badge/Agent%20Skills-spec%20validated-3fb950?labelColor=1b1f24)](https://agentskills.io/specification)
+[![License: MIT](https://img.shields.io/github/license/0xDarkMatter/claude-mods?labelColor=1b1f24&color=3fb950)](LICENSE)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/fleet-status-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/fleet-status-light.png">
+  <img alt="Terminal panel from 'fleet status': four agent branches grouped as RUNNING, READY and LANDED, each with a row of commit beads and the time since it last signalled" src="docs/screenshots/fleet-status-light.png" width="780">
+</picture>
+
+<sub><code>fleet status</code> in a throwaway repo: four agent branches, one landed through the test gate, one queued, two still running.</sub>
+
+</div>
 
 **claude-mods** is a Claude Code plugin built on one premise: a skill that only *tells* the model something is a suggestion, and a skill that ships a gate is a guarantee. Its 112 skills carry the expert depth you'd expect - React, Rust, PostgreSQL, Cloudflare Workers, Next.js - but the ones that earn the install are the ones that run *agents*: a headless-worker spawner, a test-gated landing queue for parallel branches, a graduated-autonomy ladder for scheduled loops, and a security layer pointed at the agent itself. 63 skills ship executable tooling, 58 ship their own test suites, and 29 carry staleness verifiers that trip when the world moves under them.
 
 Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms) and Anthropic's [patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), it installs as a standard plugin and toggles off as easily as it toggles on.
 
 **3 agents. 112 skills. 13 styles. 17 hooks. 15 rules. One install.**
+
+## What you get
+
+- **Parallel agent branches land one at a time, behind your tests.** [`fleet-ops`](skills/fleet-ops/) merges each finished branch through your test command and rebases the rest. It refuses to land when no test command is set, rather than passing vacuously, and won't merge a branch a live session is still writing to.
+- **Cheap workers you can hand a task to.** [`fleet-worker`](skills/fleet-worker/) runs a headless `claude -p` on GLM, Sonnet or Haiku in its own git worktree and config directory, so it can't reach your credentials, then passes its branch to the landing queue.
+- **Scheduled loops earn their autonomy.** [`loop-ops`](skills/loop-ops/) puts every loop on an L1 report → L3 unattended ladder, and `loop-check` won't pass a loop with an unbounded scope, no gate or no kill switch.
+- **A guard on the agent's own attack surface.** Behavioural dependency checks with a 7-day cooldown, a hidden-Unicode scan for instruction files, and a pre-push secret scan with no override flag.
+- **Stale knowledge trips an alarm instead of rotting.** 29 skills ship a verifier that checks their version claims against npm, crates.io and the rest. CI runs it offline on every push and live every Monday.
+- **Stack depth written for agents, not tutorials.** Production-mined gotchas, version-aware audits (`nextjs-ops` won't demand a v16 idiom of a v14 codebase), and about 100 tokens per skill until one is relevant.
+- **Sessions you can hand over.** `/save` and `/sync` keep task state in a file in your repo, so work resumes on another machine or with a teammate.
+
+What it isn't: a replacement for Claude Code's own machinery. Agent teams, background agents and `CronCreate` spawn and schedule; claude-mods lands, governs and checks what they produce.
+
+## See it work
+
+Real runs, not mockups: throwaway repos, the skills' own test fixtures and the live package registries, each command written as you would type it.
+
+### Clean up after a wave of agent branches
+
+`fleet sweep` reads every lane and says what to do with each one, in order: land what merges cleanly, prune what has already landed, and leave alone anything a live session still owns.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/fleet-sweep-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/fleet-sweep-light.png">
+  <img alt="Terminal panel from 'fleet sweep': three lanes marked LAND with 'merges cleanly' and the exact fleet land command, one marked REMOVE because it has merged, then a numbered list of next steps" src="docs/screenshots/fleet-sweep-light.png" width="828">
+</picture>
+
+### Catch knowledge going stale
+
+The staleness verifiers in live mode, run on 14 October 2026. TypeScript and Rust were current; npm had moved vitest, jotai, pinia and @vueuse/core up a major, so `react-ops` and `vue-ops` exit 10. The scheduled workflow turns that into a red run, so the skill gets updated instead of quietly teaching the old API.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/facts-live-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/facts-live-light.png">
+  <img alt="Four verifier runs: typescript-ops and rust-ops pass; react-ops and vue-ops report DRIFT lines naming each package whose live major is ahead of the documented one" src="docs/screenshots/facts-live-light.png" width="702">
+</picture>
+
+### Refuse the push that carries a key
+
+`push-preflight` scans only the commits a push would send. Here a commit adds an AWS-shaped access key (a fake one) to a source file. Steps 1-2, the remote check and fetch, are omitted.
+
+```text
+$ bash ~/.claude/skills/push-preflight/scripts/preflight.sh origin main
+push-preflight :: target = origin/main
+───────────────────────────────────────────────────────────────
+STEP 3  OK    working tree clean
+STEP 4  OK    1 commits pending
+            c25517d feat: Upload receipts to S3
+STEP 5  OK    clean fast-forward (local is strictly ahead)
+───────────────────────────────────────────────────────────────
+push-preflight: scanning 1 commits via gitleaks (origin/main..main)
+5:00PM INF Unknown SCM platform. Use --platform to include links in findings. host=
+5:00PM INF 1 commits scanned.
+5:00PM INF scanned ~85 bytes (85 bytes) in 164ms
+5:00PM WRN leaks found: 1
+
+═══════════════════════════════════════════════════════════════
+  SECRET DETECTED (gitleaks)
+═══════════════════════════════════════════════════════════════
+  aws-access-token in src/storage.ts:3 — Identified a pattern that may indicate AWS credentials, risking unauthorized cloud resource access and data breaches on AWS platforms.
+
+Refusing push. Remediate via one of:
+  1. If the secret is real: rotate it NOW, then rewrite history
+     (git filter-repo, BFG, or reset + re-commit).
+  2. If it is a false positive: add to .gitleaksignore at repo root
+     and commit, then re-run push-preflight.
+STEP 6  FAIL  secret scan (exit=1)
+```
+
+### Audit a Dockerfile before it ships
+
+`docker-audit.py` on the skill's own `bad` fixture: 54 findings, each with a check id, a `file:line` and the fix. 11 of the 54 rows are shown; exit code 10 means findings, so CI can gate on it.
+
+```text
+$ python ~/.claude/skills/docker-ops/scripts/docker-audit.py .
+docker-audit: 54 finding(s) (13 high, 23 medium, 18 low) in 1 Dockerfile(s), 1 Compose file(s)
+high	secret-in-arg-env	Dockerfile:8	ENV API_KEY has a literal value, which is stored in the image config; use RUN --mount=type=secret,id=api_key
+high	tls-verify-off	Dockerfile:13	curl -k/--insecure: the download is no longer authenticated
+high	host-escape	compose.yaml:19	service app: mounts /var/run/docker.sock, which is root on the host
+high	datastore-published	compose.yaml:25	service db: 5432:5432 publishes the postgres port on every interface (on Docker Desktop that includes your LAN); bind 127.0.0.1:... or drop the port and reach it over the Compose network
+medium	base-eol	Dockerfile:4	node:20-slim: node 20 is past end of life (the oldest supported line is 22); see assets/docker-facts.json
+medium	lockfile-not-enforced	Dockerfile:10	npm install can rewrite package-lock.json; use npm ci (see package-manager-ops)
+medium	final-user-unset	Dockerfile:29	the final stage (FROM python:3.9-slim) never sets USER, so the container runs as root
+medium	healthcheck-tool-missing	Dockerfile:31	HEALTHCHECK runs curl, which python:3.9-slim does not ship; install it in this stage, or probe with the app's own binary
+low	cmd-shell-form	Dockerfile:24	CMD node server.js: write it as CMD ["executable", "arg"] so the process gets SIGTERM
+low	multiple-cmd	Dockerfile:25	2 CMD instructions in this stage; only this last one takes effect
+```
+
+## Installation
+
+### Plugin Install (Recommended)
+
+```bash
+# Step 1: Add the marketplace
+/plugin marketplace add 0xDarkMatter/claude-mods
+
+# Step 2: Install the plugin
+/plugin install claude-mods@0xDarkMatter-claude-mods
+```
+
+This installs globally (available in all projects). Toggle on/off with `/plugin` menu.
+
+<details>
+<summary><b>Script install, and the optional CLI toolkit</b></summary>
+
+### Script Install
+
+```bash
+git clone https://github.com/0xDarkMatter/claude-mods.git
+cd claude-mods
+bash scripts/install.sh
+```
+
+Works on Linux, macOS, and Windows (Git Bash). A PowerShell alternative is also available at `scripts/install.ps1`.
+
+The install scripts:
+- Copy commands, skills, agents, rules, output styles to `~/.claude/`
+- Clean up deprecated items (e.g., old `/conclave` command)
+- Remove renamed skills (e.g., `-patterns` -> `-ops`)
+- Handle command→skill migrations (won't create duplicates)
+- Preserve any extra skills installed separately (e.g., project-specific skills)
+
+`scripts/install.ps1` additionally refuses to run from a tree that is behind
+`main` on paths it installs, since that would silently revert work another branch
+already landed (`-Force` overrides). `.\scripts\install.ps1 -Doctor` reports,
+read-only, what differs between the repo and `~/.claude` — stale, missing, and
+orphaned files — and exits non-zero when it finds any. Both comparisons ignore
+line endings.
+
+### CLI Tools (Optional)
+
+Install modern CLI tools (fd, rg, bat, etc.) for better performance:
+
+```bash
+# Windows (Admin PowerShell)
+.\tools\install-windows.ps1
+
+# Linux/macOS
+./tools/install-unix.sh
+```
+
+</details>
 
 ## Recent Updates
 
@@ -25,6 +175,9 @@ Built on the [Agent Skills specification](https://agentskills.io/specification) 
 - 🐘 **`ddev-ops` skill** - DDEV fails quietly: a default that moved under an unpinned project, a key it ignores, one developer's setting committed for the whole team. `audit-ddev-config.py` runs 26 checks at `file:line`, from the commonest in a read of 36 agency repos (a shadowed `craft` command, committed router ports, host SSH-agent forwarding) to what an agent should know before it runs `ddev`: host commands, `exec-host` hooks, Docker-socket and home mounts.
 - 📦 **`package-manager-ops` skill** - npm, Yarn, pnpm, Bun and Composer as a site actually uses them: one lockfile, `npm ci` and `composer install` in CI and deploy, Node and PHP pins that agree with DDEV. `pm-audit` reads the repo and its CI and deploy configs for conflicting lockfiles, end-of-life pins, unpinned npx and committed registry tokens.
 - 📝 **AGENTS.md, end to end, in `repo-doctor`** - entry docs drafted from facts that cite their source: `scaffold` writes root and nested AGENTS.md and an ARCHITECTURE.md, `audit --diff` proposes a reviewable patch, `explain` lists what nine coding agents load for a folder, and `survey --org` reads a whole GitHub org without cloning. The fact behind half of it: Claude Code reads AGENTS.md only when no CLAUDE.md exists.
+
+<details>
+<summary><b>Earlier releases (v3.3.0 - v3.8.0)</b></summary>
 
 **v3.8.0** (August 2026)
 - ♿ **`a11y-ops` skill** - accessibility as a dated legal requirement, not a quality preference. Carries the standards-and-law map (EAA supervision live since June, **ADA Title II deadlines extended to April 2027/2028** - most published advice still quotes the old dates), a four-pass audit workflow built around the fact that automated tooling finds only ~30-40% of WCAG failures, and `scan-a11y.py` as a static pre-flight with an exit-10 CI signal.
@@ -54,6 +207,8 @@ Built on the [Agent Skills specification](https://agentskills.io/specification) 
 
 **v3.3.0** (June 2026)
 - 🔁 **`loop-ops` skill** — the *outer-loop* design discipline: how to design and **safely** run scheduled, autonomous agent loops — the orchestration layer above [`iterate`](skills/iterate/) (which drives a single inner run). Its backbone is a **graduated-autonomy risk ladder** (L1 report → L2 assisted → L3 unattended) mapped onto Claude Code's *actual* permission model, so a loop only ever gets the authority it has earned — anchored by the rule that **a scheduler invokes `claude -p`, never a session spawning ungated children**. Ships a **13-pattern morphology** — `trigger` (cadence · event-driven Channels · `/goal` run-to-completion) × `posture` (L1–L3) × `locus` (connector→cloud routine · local→Desktop task) — plus a STATE/run-log/budget spine, multi-loop coordination, and a kill switch. Three tools do the work: **`loop-scaffold`** seeds a near-ready loop, **`loop-check`** refuses a green light on an unbounded scope / missing gate / undefined escalation, and **`loop-estimate`** gives caching-aware cost/month before you commit to a cadence. Composes `fleet-worker` (spawn) and `fleet-ops` (land).
+
+</details>
 
 [View full changelog →](CHANGELOG.md)
 
@@ -115,108 +270,15 @@ Some things outgrew a skill directory. An app with a dashboard and a roadmap is 
 | [**conclave**](https://github.com/0xDarkMatter/conclave) | A universal remote for LLMs - one syntax for any model, or all of them in parallel with a judge synthesising the verdict | The second-opinion engine. When one model's answer isn't enough, convene the council. |
 | [**flarecrawl**](https://github.com/0xDarkMatter/flarecrawl) | Cloudflare Browser Rendering as a Firecrawl alternative, cost-efficient at scale | A cheaper engine for the anti-bot tier of the web-fetch hierarchy - Browser Rendering pricing instead of a per-page SaaS bill. |
 
-## Structure
-
-```
-claude-mods/
-├── .claude-plugin/     # Plugin metadata
-├── agents/             # Expert subagents (3)
-├── commands/           # Slash commands (4)
-├── skills/             # Custom skills (112)
-├── output-styles/      # Response personalities
-├── hooks/              # Hook examples & docs
-├── rules/              # Claude Code rules
-├── tools/              # Modern CLI toolkit installers
-├── scripts/            # Plugin install scripts
-├── tests/              # Test suites + justfile
-├── docs/               # Project docs
-└── templates/          # Extension templates
-```
-
-## Installation
-
-### Plugin Install (Recommended)
-
-```bash
-# Step 1: Add the marketplace
-/plugin marketplace add 0xDarkMatter/claude-mods
-
-# Step 2: Install the plugin
-/plugin install claude-mods@0xDarkMatter-claude-mods
-```
-
-This installs globally (available in all projects). Toggle on/off with `/plugin` menu.
-
-### Script Install
-
-```bash
-git clone https://github.com/0xDarkMatter/claude-mods.git
-cd claude-mods
-bash scripts/install.sh
-```
-
-Works on Linux, macOS, and Windows (Git Bash). A PowerShell alternative is also available at `scripts/install.ps1`.
-
-The install scripts:
-- Copy commands, skills, agents, rules, output styles to `~/.claude/`
-- Clean up deprecated items (e.g., old `/conclave` command)
-- Remove renamed skills (e.g., `-patterns` -> `-ops`)
-- Handle command→skill migrations (won't create duplicates)
-- Preserve any extra skills installed separately (e.g., project-specific skills)
-
-`scripts/install.ps1` additionally refuses to run from a tree that is behind
-`main` on paths it installs, since that would silently revert work another branch
-already landed (`-Force` overrides). `.\scripts\install.ps1 -Doctor` reports,
-read-only, what differs between the repo and `~/.claude` — stale, missing, and
-orphaned files — and exits non-zero when it finds any. Both comparisons ignore
-line endings.
-
-### CLI Tools (Optional)
-
-Install modern CLI tools (fd, rg, bat, etc.) for better performance:
-
-```bash
-# Windows (Admin PowerShell)
-.\tools\install-windows.ps1
-
-# Linux/macOS
-./tools/install-unix.sh
-```
-
-## Skill Architecture
-
-All skills comply with the [Agent Skills specification](https://agentskills.io/specification) and follow a consistent structure:
-
-```
-skill-name/
-├── SKILL.md              # Core workflow (< 500 lines and ~5k tokens)
-├── scripts/              # Executable code (optional)
-├── references/           # Documentation loaded as needed (optional)
-└── assets/               # Output templates/files (optional)
-```
-
-**Progressive Loading:**
-1. Metadata (name + description) - Always in context (~100 tokens)
-2. SKILL.md body - Loaded when skill triggers (< 5,000 tokens; after auto-compaction Claude Code keeps only the first 5,000)
-3. Bundled resources - Loaded only when Claude needs them
-
-Skills carry the full layout by convention - a directory may sit empty until it's needed, so bundled resources always have an obvious home. In practice 97 skills ship references and 63 ship scripts.
-
-See [skill-creator](skills/skill-creator/) for the complete guide.
-
 ## What's Included
 
-### Commands
-
-| Command | Description |
-|---------|-------------|
-| [sync](commands/sync.md) | Session bootstrap - restore tasks, plan, git/PR context. Suggests `--resume` and `--from-pr`. |
-| [save](commands/save.md) | Persist tasks, plan, git/PR context, and session summary to native memory. |
-| [conduct](commands/conduct.md) | Coordinator pass over a wave of child sessions: review each READY lane's diff, land them one at a time through `fleet queue`, report what would be pushed, then sweep and archive. |
+Everything in the plugin, grouped. Each block expands.
 
 ### Skills
 
-#### Language & Framework Skills
+<details>
+<summary><b>Language & Framework Skills</b></summary>
+
 | Skill | Description |
 |-------|-------------|
 | [go-ops](skills/go-ops/) | Go concurrency, error handling, testing, interfaces, generics, project structure |
@@ -248,7 +310,11 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [svg-brand-tint-ops](skills/svg-brand-tint-ops/) | Zero-dep in-browser SVG studio - token-driven tri-tone brand recolour (feColorMatrix/feComponentTransfer + theme-aware CSS-filter bake) and a from-scratch raster vectoriser (PNG->SVG) with a Potrace-paper geometry stage (straightness/optimal-polygon/vertex-adjust/alphamax, no GPL code) over soft-field marching squares with alpha-aware palette handling; curated Google Fonts, filter stack, dependency-free server + headless trace CLI sharing one engine |
 | [unfold-admin](skills/unfold-admin/) | Django Unfold admin theme - ModelAdmin, dashboards, filters, widgets, theming |
 
-#### Python Skills
+</details>
+
+<details>
+<summary><b>Python Skills</b></summary>
+
 | Skill | Description |
 |-------|-------------|
 | [python-async-ops](skills/python-async-ops/) | asyncio concurrency, aiohttp, error handling, sync/async mixing, production patterns |
@@ -259,7 +325,11 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [python-pytest-ops](skills/python-pytest-ops/) | pytest fixtures, parametrization, property-based testing |
 | [python-typing-ops](skills/python-typing-ops/) | Advanced generics, type narrowing, runtime validation |
 
-#### Data & API Skills
+</details>
+
+<details>
+<summary><b>Data & API Skills</b></summary>
+
 | Skill | Description |
 |-------|-------------|
 | [api-design-ops](skills/api-design-ops/) | REST, gRPC, GraphQL design patterns, versioning, auth, rate limiting |
@@ -270,7 +340,11 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [claude-api-ops](skills/claude-api-ops/) | Build on Claude - Messages API, tool use, prompt caching, structured outputs, batches, Agent SDK |
 | [mcp-ops](skills/mcp-ops/) | MCP server development, FastMCP, transports, tool design, testing |
 
-#### Infrastructure Skills
+</details>
+
+<details>
+<summary><b>Infrastructure Skills</b></summary>
+
 | Skill | Description |
 |-------|-------------|
 | [docker-ops](skills/docker-ops/) | Docker on your machine and in your repo - Dockerfiles, Compose, BuildKit, image supply chain, and the engine underneath (Docker Desktop, OrbStack, Colima, Podman, Rancher): contexts, ports, disk reclaim. Ships a repo auditor, a read-only machine doctor and an image-tag checker |
@@ -292,7 +366,11 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [process-compose-ops](skills/process-compose-ops/) | Process Compose supervisor operations - YAML schema, readiness probes, dependency patterns, boot persistence |
 | [pypi-ops](skills/pypi-ops/) | PyPI publishing - OIDC Trusted Publishing + PEP 740 attestations, the pending-publisher first-publish fix (`invalid-publisher`), preflight/diagnose/pin-verifier scripts, hardened `publish.yml`, uv & twine local paths |
 
-#### Workstation & Network Diagnostics
+</details>
+
+<details>
+<summary><b>Workstation & Network Diagnostics</b></summary>
+
 | Skill | Description |
 |-------|-------------|
 | [windows-ops](skills/windows-ops/) | Windows workstation diagnostics - health audit, crash and process triage, drive mapping, dying-drive recovery, and WSL 2 from the Windows side (`.wslconfig`, networking modes, growing disks) |
@@ -300,7 +378,11 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [net-ops](skills/net-ops/) | Cross-platform network troubleshooting - layered ladder from link to app, IPv6 classifier, DoH detection, MTU/PMTU |
 | [asus-router-ops](skills/asus-router-ops/) | Asus / Asuswrt-Merlin routers - hardening, WireGuard/OpenVPN, segmentation, DNS privacy, JFFS scripting |
 
-#### CLI Tool Skills
+</details>
+
+<details>
+<summary><b>CLI Tool Skills</b></summary>
+
 | Skill | Description |
 |-------|-------------|
 | [file-search](skills/file-search/) | Find files with fd, search code with rg, select with fzf |
@@ -314,7 +396,11 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [log-ops](skills/log-ops/) | Log analysis, JSONL processing, cross-log correlation, timeline reconstruction |
 | [leveldb-ops](skills/leveldb-ops/) | Read Chromium/Electron LevelDB stores (Local Storage, IndexedDB) - app-state forensics |
 
-#### Workflow Skills
+</details>
+
+<details>
+<summary><b>Workflow Skills</b></summary>
+
 | Skill | Description |
 |-------|-------------|
 | [tool-discovery](skills/tool-discovery/) | Recommend agents and skills for any task |
@@ -335,7 +421,11 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [screenshot](skills/screenshot/) | Find and display recent screenshots from common screenshot directories |
 | [pigeon](skills/pigeon/) | Inter-session pmail - send/receive messages between Claude Code sessions across projects. SQLite-backed (`~/.claude/pmail.db`), git-rooted project identity, threading, attachments, broadcast, search. Hook-driven notifications. Per-project disable. |
 
-#### Development Skills
+</details>
+
+<details>
+<summary><b>Development Skills</b></summary>
+
 | Skill | Description |
 |-------|-------------|
 | [auto-skill](skills/auto-skill/) | Automatically detect skill-worthy workflows and create reusable skills. Stop hook suggests after complex sessions (8+ mutating ops across 4+ tool types). Agent Skills spec compliant with quality gates and duplicate detection. Toggle with `/auto-skill on/off`. |
@@ -360,7 +450,23 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [claude-code-ops](skills/claude-code-ops/) | Claude Code internals - full hook event catalog, skill frontmatter spec, headless/CLI reference, extension debugging |
 | [playwright-ops](skills/playwright-ops/) | Playwright e2e testing - selector hierarchy, fixtures, network mocking, CI sharding, flake hunting |
 
-### Hooks
+</details>
+
+### Commands, hooks, styles, agents and rules
+
+<details>
+<summary><b>Commands</b></summary>
+
+| Command | Description |
+|---------|-------------|
+| [sync](commands/sync.md) | Session bootstrap - restore tasks, plan, git/PR context. Suggests `--resume` and `--from-pr`. |
+| [save](commands/save.md) | Persist tasks, plan, git/PR context, and session summary to native memory. |
+| [conduct](commands/conduct.md) | Coordinator pass over a wave of child sessions: review each READY lane's diff, land them one at a time through `fleet queue`, report what would be pushed, then sweep and archive. |
+
+</details>
+
+<details>
+<summary><b>Hooks</b></summary>
 
 | Hook | Type | Description |
 |------|------|-------------|
@@ -380,7 +486,10 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [pre-write-peer-guard.sh](hooks/pre-write-peer-guard.sh) | PreToolUse | Mid-session peer-writer guard — warn before writing a file a live peer session in the same checkout just modified (collisions happen during a session, not only at boot); pairs with session-touched-ledger.sh |
 | [session-touched-ledger.sh](hooks/session-touched-ledger.sh) | PostToolUse | Record files this session has written so the peer-writer guard can tell own edits from a peer's (silent, never blocks) |
 
-### Output Styles
+</details>
+
+<details>
+<summary><b>Output styles</b></summary>
 
 | Style | Personality | Best For |
 |-------|-------------|----------|
@@ -398,7 +507,10 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [Sage](output-styles/sage.md) | Thoughtful, measured, precise | Post-mortems, analysis |
 | [Scout](output-styles/scout.md) | Curious, lateral, challenges assumptions | Design, problem reframing |
 
-### Agents
+</details>
+
+<details>
+<summary><b>Agents, and why there are only three</b></summary>
 
 > **Skills-first (v3.0):** language/framework expert agents (python-expert, react-expert, etc.) were
 > deprecated in favour of their `-ops` skill twins — unique agent content was folded into the skills.
@@ -431,7 +543,10 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [git-agent](agents/git-agent.md) | Background git operations - commits, PRs, releases (Sonnet) |
 | [project-organizer](agents/project-organizer.md) | Reorganize directory structures, cleanup |
 
-### Rules
+</details>
+
+<details>
+<summary><b>Rules</b></summary>
 
 | Rule | Description |
 |------|-------------|
@@ -451,7 +566,10 @@ See [skill-creator](skills/skill-creator/) for the complete guide.
 | [release-review.md](rules/release-review.md) | Never auto-publish GitHub releases - push commit+tag, stop, surface the diff for human review before gh release create |
 | [shell-preference.md](rules/shell-preference.md) | Speak the user's shell, never assume bash - shell-detection signals plus a worked PowerShell 5.1 example with the bash-to-PowerShell translation table |
 
-### Tools & Hooks
+</details>
+
+<details>
+<summary><b>CLI toolkit and web-fetch hierarchy</b></summary>
 
 | Resource | Description |
 |----------|-------------|
@@ -471,41 +589,7 @@ When fetching web content, tools are used in this order:
 
 See [tools/README.md](tools/README.md) for full documentation and install scripts.
 
-## Testing & Validation
-
-Validate all extensions before committing:
-
-```bash
-cd tests
-
-# Run full validation (requires just)
-just test
-
-# Or run directly
-bash validate.sh
-
-# Windows
-powershell validate.ps1
-```
-
-### What's Validated
-- YAML frontmatter syntax
-- Required fields (name, description)
-- Naming conventions (kebab-case)
-- File structure (agents/*.md, skills/*/SKILL.md)
-- Plugin manifests (`.claude-plugin/plugin.json` + `marketplace.json`) via the authoritative `claude plugin validate`, plus a guard against a stray root `marketplace.json`
-
-### Available Tasks
-
-```bash
-cd tests
-just              # List all tasks
-just test         # Run full validation
-just validate-yaml # YAML only
-just validate-names # Naming only
-just stats        # Count extensions
-just list-agents  # List all agents
-```
+</details>
 
 ## Session Continuity
 
@@ -521,6 +605,56 @@ Claude Code remembers conversation history (`--resume`), Claude-curated learning
 ```
 
 Use all three together: `--resume` for conversation, auto-memory for learnings, `/sync` for tasks and handoff. The persistence matrix, the full workflow and the `session-cache.json` schema live in [docs/SESSION-CONTINUITY.md](docs/SESSION-CONTINUITY.md).
+
+## Skill Architecture
+
+All skills comply with the [Agent Skills specification](https://agentskills.io/specification) and follow a consistent structure:
+
+```
+skill-name/
+├── SKILL.md              # Core workflow (< 500 lines and ~5k tokens)
+├── scripts/              # Executable code (optional)
+├── references/           # Documentation loaded as needed (optional)
+└── assets/               # Output templates/files (optional)
+```
+
+**Progressive Loading:**
+1. Metadata (name + description) - Always in context (~100 tokens)
+2. SKILL.md body - Loaded when skill triggers (< 5,000 tokens; after auto-compaction Claude Code keeps only the first 5,000)
+3. Bundled resources - Loaded only when Claude needs them
+
+Skills carry the full layout by convention - a directory may sit empty until it's needed, so bundled resources always have an obvious home. In practice 97 skills ship references and 63 ship scripts.
+
+See [skill-creator](skills/skill-creator/) for the complete guide.
+
+## Structure
+
+```
+claude-mods/
+├── .claude-plugin/     # Plugin metadata
+├── agents/             # Expert subagents (3)
+├── commands/           # Slash commands (4)
+├── skills/             # Custom skills (112)
+├── output-styles/      # Response personalities
+├── hooks/              # Hook examples & docs
+├── rules/              # Claude Code rules
+├── tools/              # Modern CLI toolkit installers
+├── scripts/            # Plugin install scripts
+├── tests/              # Test suites + justfile
+├── docs/               # Project docs
+└── templates/          # Extension templates
+```
+
+## Testing & Validation
+
+One gate covers everything, from the repo root:
+
+```bash
+just check        # frontmatter, Agent Skills spec, doc drift, public-repo check, hook contracts, every skill's own suite, e2e suites
+just check-fast   # the same without the behavioural suites
+```
+
+Each gate is also a plain script, so nothing needs `just`: `bash tests/validate.sh` (frontmatter and naming), `bash tests/spec.sh` (the Agent Skills spec's own validator), `bash tests/doc-drift.sh` (counts and links in the docs match the files on disk), `bash tests/agnostic.sh` (no personal paths in a public repo), `bash tests/hooks.sh` (hook contracts), `bash tests/run-skill-tests.sh` (every `skills/*/tests/run.sh`). On Windows, `powershell tests/validate.ps1` covers frontmatter. The plugin manifests are checked with Claude Code's own `claude plugin validate` via `tests/plugin-validate.sh`.
 
 ## Updating
 
