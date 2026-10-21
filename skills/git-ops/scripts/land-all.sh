@@ -14,6 +14,8 @@
 #   WIP       uncommitted tracked changes                        → commit first, park
 #   ACTIVE    a session is writing it right now (recent activity) → park, don't touch
 #   MERGED    already an ancestor of trunk (incl. nothing-ahead)  → prune candidate
+#   ERROR     a git probe for this branch failed, so it could not  → inspect by hand;
+#             be classified (AHEAD/BEHIND print ? when unknown)     never land or prune
 #
 # Usage:
 #   bash land-all.sh                     # human panel for current repo
@@ -29,9 +31,12 @@
 #                         work (LANDABLE); older clean branches are STALE. Default 7.
 #
 # Exit codes:
-#   0  nothing landable (no LANDABLE candidates)
-#   1  at least one LANDABLE candidate (a batch land is available)
-#   2  not a git repo, or its branches could not be listed
+#   0  nothing landable, and every branch was classified
+#   1  at least one LANDABLE candidate (a batch land is available; ERROR rows may
+#      still be listed beside it)
+#   2  not a git repo, or its branches or worktrees could not be listed
+#   3  nothing landable, but at least one ERROR row: the survey is incomplete,
+#      not an all-clear
 
 set -u
 
@@ -45,7 +50,7 @@ while [ $# -gt 0 ]; do
     --porcelain)     PORCELAIN=1; shift ;;
     --active-window) ACTIVE_WINDOW="${2:-120}"; shift 2 ;;
     --recent-days)   RECENT_DAYS="${2:-7}"; shift 2 ;;
-    -h|--help)       sed -n '2,42p' "$0"; exit 0 ;;
+    -h|--help)       sed -n '2,/^$/p' "$0"; exit 0 ;;   # the header, up to its blank line
     -*)              echo "unknown flag: $1" >&2; exit 2 ;;
     *)               REPO="$1"; shift ;;
   esac
@@ -74,8 +79,18 @@ MAIN_BRANCH=$(git -C "$REPO_ROOT" symbolic-ref --short HEAD 2>/dev/null || echo 
 
 # Map branch -> worktree path from `git worktree list --porcelain`.
 # (awk parses porcelain records; "branch refs/heads/" prefix is 18 chars.)
+# procsub guard: git's status is checked before the map is built. Piped straight
+# into awk, a failed listing left the map empty: every branch lost its worktree,
+# so WIP and ACTIVE (the live-writer guard, "never land") could not fire and a
+# dirty or live lane read LANDABLE.
+rc=0
+WT_LIST=$(git worktree list --porcelain 2>/dev/null) || rc=$?
+if [ "$rc" -ne 0 ]; then
+  echo "error: could not list worktrees (git exit $rc) - WIP and live-writer detection need them; nothing was classified" >&2
+  exit 2
+fi
 TMP_WT=$(mktemp)
-git worktree list --porcelain 2>/dev/null | awk '
+printf '%s\n' "$WT_LIST" | awk '
   /^worktree /{p=substr($0,10); next}
   /^branch /  {b=substr($0,19); if (b!="") print b"\t"p; next}
 ' > "$TMP_WT"
@@ -105,8 +120,18 @@ worktree_dirty() {
   ! git -C "$wt" diff --quiet 2>/dev/null || ! git -C "$wt" diff --cached --quiet 2>/dev/null
 }
 
+# Run a git probe that prints one integer; echo it, or return 1 when git failed
+# or printed something else. Callers turn a failure into an ERROR row - never
+# into a default number, which would classify (see the loop).
+probe_count() {
+  local n
+  n=$("$@" 2>/dev/null) || return 1
+  case "$n" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s' "$n"
+}
+
 # Counters
-N_LANDABLE=0; N_STALE=0; N_WIP=0; N_ACTIVE=0; N_MERGED=0
+N_LANDABLE=0; N_STALE=0; N_WIP=0; N_ACTIVE=0; N_MERGED=0; N_ERROR=0
 
 emit() {
   # STATUS BRANCH WORKTREE AHEAD BEHIND AGE NOTE
@@ -142,19 +167,30 @@ while IFS= read -r branch; do
   [ -z "$branch" ] && continue
   [ "$branch" = "$TRUNK" ] && continue
 
-  ahead=$(git rev-list --count "${TRUNK}..${branch}" 2>/dev/null || echo 0)
-  behind=$(git rev-list --count "${branch}..${TRUNK}" 2>/dev/null || echo 0)
+  # procsub guard: every probe's status is checked. The old `|| echo 0`
+  # fallbacks turned a failed probe into a value that classifies: ahead=0 read
+  # as MERGED, "in trunk - prune candidate" (a destructive suggestion produced
+  # by an error), and last_ct=0 as STALE. A failed probe now names itself in
+  # $failed and the row is ERROR, which is never landed or pruned.
+  failed=""
+  ahead=$(probe_count git rev-list --count "${TRUNK}..${branch}") || failed="ahead"
+  behind=$(probe_count git rev-list --count "${branch}..${TRUNK}") || failed="${failed:+$failed, }behind"
   age=$(git log -1 --format='%ar' "$branch" 2>/dev/null | sed 's/ ago//')
   [ -z "$age" ] && age="?"
-  last_ct=$(git log -1 --format='%ct' "$branch" 2>/dev/null || echo 0)
-  recent=false; [ "$last_ct" -ge "$RECENT_THRESHOLD" ] 2>/dev/null && recent=true
+  last_ct=$(probe_count git log -1 --format='%ct' "$branch") || failed="${failed:+$failed, }commit time"
+  recent=false; [ -n "$last_ct" ] && [ "$last_ct" -ge "$RECENT_THRESHOLD" ] && recent=true
 
   wt=$(worktree_for "$branch")
 
-  merged=false
-  if git merge-base --is-ancestor "$branch" "$TRUNK" 2>/dev/null; then
-    merged=true
-  fi
+  # --is-ancestor: 0 = ancestor, 1 = not; anything else is git failing, which
+  # `if` alone would read as "not merged".
+  merged=false; mrc=0
+  git merge-base --is-ancestor "$branch" "$TRUNK" 2>/dev/null || mrc=$?
+  case "$mrc" in
+    0) merged=true ;;
+    1) ;;
+    *) failed="${failed:+$failed, }ancestry" ;;
+  esac
 
   dirty=false; worktree_dirty "$wt" && dirty=true
   active=false; worktree_active "$wt" && active=true
@@ -170,12 +206,15 @@ while IFS= read -r branch; do
   # A branch far behind trunk will need a big rebase and likely conflicts —
   # surface it as a note whichever bucket it lands in.
   behind_note=""
-  [ "$behind" -gt 40 ] && behind_note="far behind (${behind}) — expect conflicts"
+  [ -n "$behind" ] && [ "$behind" -gt 40 ] && behind_note="far behind (${behind}) — expect conflicts"
 
-  # Classify (order matters: merged before active/dirty; recency splits
+  # Classify (order matters: a failed probe before everything, since the other
+  # buckets read its missing values; merged before active/dirty; recency splits
   # clean-and-ahead into current LANDABLE vs abandoned STALE). A branch with
   # nothing ahead of trunk is necessarily an ancestor → caught by MERGED.
-  if [ "$merged" = true ] || [ "$ahead" -eq 0 ]; then
+  if [ -n "$failed" ]; then
+    status="ERROR";   note="${note:+$note; }git probe failed (${failed}) — inspect by hand, never land or prune"; N_ERROR=$((N_ERROR+1))
+  elif [ "$merged" = true ] || [ "$ahead" -eq 0 ]; then
     status="MERGED";  note="${note:+$note; }in trunk — prune candidate"; N_MERGED=$((N_MERGED+1))
   elif [ "$active" = true ]; then
     status="ACTIVE";  note="${note:+$note; }live writer <${ACTIVE_WINDOW}s — park"; N_ACTIVE=$((N_ACTIVE+1))
@@ -187,7 +226,7 @@ while IFS= read -r branch; do
     status="STALE";   note="${note:+$note; }last commit >${RECENT_DAYS}d — abandoned?${behind_note:+; $behind_note}"; N_STALE=$((N_STALE+1))
   fi
 
-  emit "$status" "$branch" "$wt" "$ahead" "$behind" "$age" "$note"
+  emit "$status" "$branch" "$wt" "${ahead:-?}" "${behind:-?}" "$age" "$note"
 done <<< "$BRANCHES"
 
 rm -f "$TMP_WT"
@@ -195,7 +234,7 @@ rm -f "$TMP_WT"
 if [ "$PORCELAIN" -eq 0 ]; then
   echo ""
   echo "Trunk: $TRUNK   Main checkout on: ${MAIN_BRANCH:-<detached>}   (recent = ≤${RECENT_DAYS}d)"
-  echo "Summary: $N_LANDABLE landable · $N_STALE stale · $N_WIP WIP · $N_ACTIVE active · $N_MERGED merged"
+  echo "Summary: $N_LANDABLE landable · $N_STALE stale · $N_WIP WIP · $N_ACTIVE active · $N_MERGED merged · $N_ERROR error"
   echo ""
   if [ "$N_LANDABLE" -gt 0 ]; then
     echo "  → $N_LANDABLE branch(es) ready to land. Hand them to fleet-ops:"
@@ -206,11 +245,14 @@ if [ "$PORCELAIN" -eq 0 ]; then
   [ "$N_STALE"  -gt 0 ] && echo "  · $N_STALE stale (clean but >${RECENT_DAYS}d old) — prune/archive, or --recent-days to include."
   [ "$N_ACTIVE" -gt 0 ] && echo "  ⚠ $N_ACTIVE active (a session is writing) — parked, never auto-landed."
   [ "$N_WIP"    -gt 0 ] && echo "  ⚠ $N_WIP with uncommitted work — commit in-lane first, then re-run."
+  [ "$N_ERROR"  -gt 0 ] && echo "  ⚠ $N_ERROR could not be classified (a git probe failed) — inspect by hand; never land or prune them on this survey."
   if [ "$MAIN_BRANCH" != "$TRUNK" ] && [ -n "$MAIN_BRANCH" ]; then
     echo "  ⚠ main checkout is on '$MAIN_BRANCH', not '$TRUNK' — landing checks out $TRUNK there."
   fi
 fi
 
-# Exit 1 signals "a batch land is available" (LANDABLE > 0); 0 = nothing to do.
+# Exit 1 signals "a batch land is available" (LANDABLE > 0). With nothing to
+# land, ERROR rows make it 3, never 0: an unclassified branch is not an all-clear.
 [ "$N_LANDABLE" -gt 0 ] && exit 1
+[ "$N_ERROR" -gt 0 ] && exit 3
 exit 0

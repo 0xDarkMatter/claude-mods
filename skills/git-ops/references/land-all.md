@@ -23,9 +23,14 @@ test-gated landing. No duplicated landing logic — the two compose.
    | `WIP` | uncommitted tracked changes | park — commit in-lane first |
    | `ACTIVE` | a session is writing it **right now** (recent file activity) | **never land** — park |
    | `MERGED` | already an ancestor of trunk (incl. nothing ahead) | prune candidate |
+   | `ERROR` | a git probe for the branch failed, so it could not be classified (`?` counts) | **never land or prune** — show the note, inspect by hand |
+
+   Exit 3 (nothing landable, at least one `ERROR`) is an incomplete survey, not an all-clear.
+   Exit 2 means nothing was classified: the branches or worktrees could not be listed.
 
 2. **Confirm the plan (`AskUserQuestion`, HARD RULE).** Present the three groups — *land these
-   LANDABLE / park these WIP+ACTIVE+STALE / prune these MERGED* — and get explicit go.
+   LANDABLE / park these WIP+ACTIVE+STALE / prune these MERGED* — plus any `ERROR` rows on their
+   own, and get explicit go.
    Never skip this: landing is outward-facing on the trunk. Surface `far behind (N)` notes so the
    user knows which lands may conflict.
 
