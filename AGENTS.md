@@ -5,7 +5,7 @@
 This is **claude-mods** - a collection of custom extensions for Claude Code. Human install
 and usage live in [README.md](README.md); this file is for agents working on the repo.
 - **3 expert agents** for pure context-isolation/worker roles (git-agent, firecrawl-expert, project-organizer) - every domain-knowledge agent became an `-ops` skill (v3.0, skills-first)
-- **3 commands** for session management and git orchestration (/sync, /save, /git-ops)
+- **4 commands** for session management, git orchestration and wave coordination (/sync, /save, /git-ops, /conduct)
 - **112 skills** for CLI tools, patterns, workflows and development tasks. Two routers come
   first when a family is ambiguous: `parallel-ops` (fleet-ops, fleet-worker, fleetflow,
   loop-ops, iterate, spawn) and `figma-ops` (the Figma MCP skills). README.md lists them all

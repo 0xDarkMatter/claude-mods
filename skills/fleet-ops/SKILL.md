@@ -46,6 +46,7 @@ fleet status                One-shot fleet status panel
 fleet land <branch>         Manual land + rebase others
 fleet land --all [--running]  Batch-land all READY lanes oldest-first (--running
                             also lands vetted RUNNING lanes; used by git-ops "land all")
+fleet queue <lane> <tip>... Land reviewed lanes one at a time, each merge audited first
 fleet revert <branch>       Revert merge commit on main
 fleet landing [--porcelain] Is main safe to branch from? Exit 0 yes, 10 wait
 fleet scrub-check <branch>  Dry-run forbidden-pattern check
@@ -90,9 +91,7 @@ Every land (`fleet land`, each lane of `land --all`, the daemon) holds `.claude/
 
 ## Daemon lifecycle (experimental)
 
-The daemon is the queue-automation layer on top of `fleet land` — optional; manual `fleet land` per branch is fully supported and not experimental.
-
-`fleet start` (via `Bash(run_in_background: true)`) polls `.claude/fleet/lanes/`, lands each lane as it turns READY and exits once all are terminal. `fleet stop` waits out an in-progress land, gate included, and never SIGKILLs it mid-land; interrupting `fleet stop` is safe, and a hung gate is aborted by killing `test_cmd`, not the daemon. It dies with the session. Detail: [references/daemon.md](references/daemon.md).
+Optional automation over `fleet land`; manual lands are not experimental. `fleet start` (in the background) lands each lane as it turns READY and exits once all are terminal; `fleet stop` waits out a land in progress, gate included. It dies with the session. Detail: [references/daemon.md](references/daemon.md).
 
 `signal.sh` deploys to `.claude/fleet/signal.sh` on `init`/`track`. Working sessions call:
 
@@ -127,6 +126,7 @@ fleet owner <branch>        Who owns this lane, and are they still writing?
 MAIN's job is the whole integration half: land the queue, triage `CONFLICT` lanes,
 sweep after the wave, and prepare the deploy. Lanes build and signal; MAIN
 integrates. A deploy still needs an explicit human OK for that specific deploy.
+`/conduct` runs that half as one procedure: [references/conduct.md](references/conduct.md).
 
 ### The live-owner gate
 
@@ -136,9 +136,8 @@ Channels: lane files (`signal.sh`) work everywhere, `ccd_session_mgmt` is Deskto
 
 ## Prune — worktree housekeeping
 
-Landing a lane retires the *branch*. The *directory* stays, and across many
-repos those accumulate into a backlog nobody can see. `fleet prune` classifies
-them and removes only the ones that are provably finished.
+Landing retires the *branch*, not the *directory*. `fleet prune` classifies the
+leftover worktrees and removes only the provably finished ones.
 
 ```
 fleet prune                  Classify and print. Changes NOTHING. (the default)
@@ -217,3 +216,4 @@ Optional `.claude/fleet/config`, one `key=value` per line, **parsed, never sourc
 - `scripts/signal.sh` — branch-aware signaler (deployed to `.claude/fleet/signal.sh`); prints the MAIN handoff after READY/CONFLICT
 - `scripts/sessions.sh` — resolves a branch or directory to its owning session across every Desktop store and the CLI transcripts; exits 3 silently without the store or `jq`. Detail: [references/session-awareness.md](references/session-awareness.md)
 - `scripts/sweep.sh` — `fleet sweep`: the post-wave pass. `--porcelain`/`--json` rows (phase, subject, verdict, detail, action); exit 10 on findings. E.g. `fleet sweep --porcelain | awk -F'\t' '$3=="ARCHIVE-REQUEST"'`. Detail: [references/sweep.md](references/sweep.md)
+- `scripts/queue.sh` — `fleet queue`, the audited landing chain; exit codes in `--help`
