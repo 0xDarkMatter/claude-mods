@@ -120,6 +120,10 @@ On "INIT:" message at session start:
   file colocated in the same `tests/` dir — editing the skill's output format
   without regenerating the fixture is a silent, not loud, break (diff the fixture,
   don't just eyeball the code change).
+- **The root `.gitignore` drops `.env*` test fixtures**: its `.env.*` pattern makes
+  `git add` silently skip a fixture named like `.env.example`, so a suite passes where the
+  file is on disk and fails for everyone else (push-preflight refuses such paths too).
+  Store them as `dotenv*.fx` and materialise them at test time (package-manager-ops does).
 - **Skill frontmatter: two parsers disagree.** Claude Code reads its own fields
   (`when_to_use`, `argument-hint`, `effort`, ...) ONLY at the top level, so moving them
   under `metadata` to "satisfy the spec" silently disables them. The spec's validator
