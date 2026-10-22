@@ -214,6 +214,15 @@ feature releases live in the README "Recent Updates" section.
   and resets colour before the marker. A coloured render with its escapes stripped now equals
   the plain render, and UTF-8 rails pad to 14 columns, not 14 bytes.
 
+- **Terminal panels count wide glyphs as two cells.** `term.sh` measured characters, so the
+  ⚡ brand left `fleet status`'s header a cell past its footer, and MSYS bash (16-bit
+  `wchar_t`) counted 🔁 as two characters and could cut it in half. Widths are now terminal
+  cells from Unicode's East Asian Width table, counted on UTF-8 bytes so Linux, macOS and MSYS
+  agree, and `term_truncate` never splits a glyph. In `term.ps1`, `Get-TermDisplayWidth`'s
+  wide-glyph branch had never run, so `windows-ops` headers ran a cell long too; it now shares
+  `term.sh`'s table (a gate keeps the two equal), and `Get-TermTruncated` copies colour
+  escapes and emoji whole instead of cutting the raw string.
+
 - **react-ops' Vitest setup type-checks again.** `import '@testing-library/jest-dom'` types
   its matchers on `jest.Matchers`, which Vitest 5 no longer reads, so every jest-dom matcher was
   a TS2339. The setup now calls `expect.extend(matchers)` and ships a `Matchers<R, T>`
