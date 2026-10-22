@@ -204,6 +204,16 @@ feature releases live in the README "Recent Updates" section.
 - **pm-audit tests: a second `fresh()` no longer shadows the first** in the same embedded
   program (found by `fleet queue`'s duplicate-definition audit).
 
+- **Coloured panels no longer lose columns to their own colour codes.** `term.sh` measured
+  text that already carried ANSI escapes, so every escape byte counted as a column: with colour
+  on, `term_panel_close` drew the `fleet status` footer 62 cells wide under an 80-cell header,
+  `term_truncate` cut `loop-check`'s verdict row inside `ESC[33m` and mangled short coloured
+  labels, and printf `%-14s` / `%-10s` shifted the fleet leaf rows' columns. `term.sh` now
+  strips colour before it takes any width (`term_strip`, `term_vis_width`, `term_pad`,
+  fork-free inside); panel bars measure their rendered strings, and a cut copies escapes whole
+  and resets colour before the marker. A coloured render with its escapes stripped now equals
+  the plain render, and UTF-8 rails pad to 14 columns, not 14 bytes.
+
 - **react-ops' Vitest setup type-checks again.** `import '@testing-library/jest-dom'` types
   its matchers on `jest.Matchers`, which Vitest 5 no longer reads, so every jest-dom matcher was
   a TS2339. The setup now calls `expect.extend(matchers)` and ships a `Matchers<R, T>`
