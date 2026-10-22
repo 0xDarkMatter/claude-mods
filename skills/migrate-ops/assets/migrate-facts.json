@@ -1,7 +1,7 @@
 {
   "_comment": "Canonical fast-moving facts the migrate-ops skill encodes: the framework/language target versions it hardcodes in its description and body. scripts/check-migrate-facts.py asserts each claim still appears where recorded + a dated currency note (--offline), and resolves the current versions via endoflife.date + npm to flag lag (--live). Edit deliberately: a change here is a skill-content decision, not housekeeping.",
   "schema": "claude-mods.migrate-ops.facts/v1",
-  "as_of": "2026-07-05",
+  "as_of": "2026-10-22",
   "claims": [
     {
       "label": "React",
@@ -19,10 +19,11 @@
     },
     {
       "label": "Python",
-      "version": "3.14",
+      "version": "3.15",
       "where": ["description", "body"],
-      "pattern": "python[^\\n]*3\\.14\\b",
-      "live": {"source": "endoflife", "product": "python", "compare": "line", "documented": "3.14"}
+      "pattern": "python[^\\n]*3\\.15\\b",
+      "live": {"source": "endoflife", "product": "python", "compare": "line", "documented": "3.15"},
+      "_comment": "3.15 released 2026-10-09 (docs.python.org/3.15/whatsnew/3.15.html). Next line 3.16 expected Oct 2027."
     },
     {
       "label": "Node",
@@ -33,17 +34,19 @@
     },
     {
       "label": "TypeScript",
-      "version": "6",
+      "version": "7",
       "where": ["description", "body"],
-      "pattern": "typescript[^\\n]*\\b6\\b",
-      "live": {"source": "npm", "product": "typescript", "compare": "major", "documented": "6"}
+      "pattern": "typescript[^\\n]*\\b7\\b",
+      "live": {"source": "npm", "product": "typescript", "compare": "major", "documented": "7"},
+      "_comment": "7.0 (native Go port) released 2026-07-08, latest 7.0.2 (2026-08-20; github.com/microsoft/TypeScript releases). 7.1 beta 2026-10-20 is a minor, not drift."
     },
     {
       "label": "Go",
-      "version": "1.26",
+      "version": "1.27",
       "where": ["description", "body"],
-      "pattern": "go[^\\n]*1\\.26\\b",
-      "live": {"source": "endoflife", "product": "go", "compare": "line", "documented": "1.26"}
+      "pattern": "go[^\\n]*1\\.27\\b",
+      "live": {"source": "endoflife", "product": "go", "compare": "line", "documented": "1.27"},
+      "_comment": "1.27 released 2026-08-19 (go.dev/doc/go1.27). Next line 1.28 expected Feb 2027."
     },
     {
       "label": "Rust",
@@ -51,7 +54,7 @@
       "where": ["description", "body"],
       "pattern": "rust[^\\n]*2024\\b",
       "live": null,
-      "_comment": "Rust 2024 is an EDITION (reached stable with Rust 1.85), not a semver major tracked on endoflife.date's product list. Still the newest edition as of 2026-07 (next expected 2027). Live-checked nowhere; offline-only."
+      "_comment": "Rust 2024 is an EDITION (reached stable with Rust 1.85), not a semver major tracked on endoflife.date's product list. Still the newest edition as of 2026-10 (next expected 2027; not re-verified against a primary source in the 2026-10-22 refresh). Live-checked nowhere; offline-only."
     },
     {
       "label": "PHP",

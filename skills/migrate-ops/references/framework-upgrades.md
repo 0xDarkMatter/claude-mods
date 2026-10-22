@@ -501,7 +501,7 @@ php artisan test
 ### Common Pitfalls
 
 - **RxJS version**: Angular often requires specific RxJS versions. Check compatibility.
-- **TypeScript version**: Each Angular major requires a specific TS range.
+- **TypeScript version**: Each Angular major requires a specific TS range. TypeScript 7.0 ships no compiler API, so Angular's template type-checking stays on TypeScript 6.0. TypeScript's own guidance is to use 7.0's `tsc` for fast project-wide CLI checks and 6.0 for editor and template support (see language-upgrades.md).
 - **Zone.js**: Being phased out in favor of signals. Plan accordingly.
 - **Module vs Standalone**: Newer versions push toward standalone components.
 

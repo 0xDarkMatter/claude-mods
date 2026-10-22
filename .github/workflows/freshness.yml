@@ -219,7 +219,7 @@ jobs:
       - name: mcp-ops SDK packages vs npm + PyPI, spec URL still answers
         run: |
           bash .github/scripts/freshness-step.sh --name mcp-ops \
-            --drift "mcp-ops drift - an MCP SDK package is gone, a tracked SDK (@modelcontextprotocol/sdk, mcp, fastmcp) shipped a new major, or the spec URL stopped answering 200; re-verify assets/mcp-facts.json and the prose" \
+            --drift "mcp-ops drift - an MCP SDK package is gone, a tracked SDK (@modelcontextprotocol/server, /client, /sdk, mcp, fastmcp) shipped a new major, or the spec URL stopped answering 200; re-verify assets/mcp-facts.json and the prose" \
             --unavailable "mcp-ops live check unreachable (npm / PyPI / modelcontextprotocol.io) - skipped" \
             -- python skills/mcp-ops/scripts/check-mcp-facts.py --live
 

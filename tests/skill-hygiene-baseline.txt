@@ -96,7 +96,6 @@ mapbox-ops	related-not-named	color-ops
 mapbox-ops	related-not-named	genart-ops
 mapbox-ops	related-not-named	threejs-ops
 mapbox-ops	relative-script-call	scripts/check-mapbox-facts.py
-mcp-ops	related-not-named	claude-code-ops
 mcp-ops	related-not-named	python-fastapi-ops
 mcp-ops	related-not-named	typescript-ops
 mcp-ops	relative-script-call	scripts/check-mcp-facts.py

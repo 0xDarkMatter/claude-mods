@@ -3,12 +3,12 @@
 the skill hardcodes must stay stated where it claims, and must not silently lag
 reality.
 
-migrate-ops commits to specific target versions in its description and body —
-React 19, Laravel 11, Python 3.12, Node 22, TypeScript 5, Go 1.22, Rust 2024,
-PHP 8.4. Those are exactly the facts that drift silently
-(SKILL-RESOURCE-PROTOCOL.md §7): a line gets rewritten and drops a version, or
-the world moves (Python 3.12 → 3.13, Node 22 → 24) and the skill still names
-the old target. Two modes:
+migrate-ops commits to specific target versions in its description and body
+(the current list is assets/migrate-facts.json: React, Laravel, Python, Node,
+TypeScript, Go, Rust edition, PHP). Those are exactly the facts that drift
+silently (SKILL-RESOURCE-PROTOCOL.md §7): a line gets rewritten and drops a
+version, or the world moves (a new Python line, a new TypeScript major) and the
+skill still names the old target. Two modes:
 
   --offline (default, safe for PR CI): structural consistency, no network.
     * assets/migrate-facts.json parses and carries the schema + an as_of date
