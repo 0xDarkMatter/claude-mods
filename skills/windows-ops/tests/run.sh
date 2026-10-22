@@ -75,6 +75,50 @@ case "$cout" in *$'\033'*) ok "common.ps1 colorizes under FORCE_COLOR";; *) no "
 # The [TAG] text stays literal/greppable (color is amplification, not the signal).
 case "$cout" in *'[PASS]'*) ok "common.ps1 keeps the [PASS] tag literal";; *) no "common.ps1 lost the [PASS] tag";; esac
 
+# term.ps1 measures and cuts on display cells, like term.sh. Its old wide-glyph
+# branch never ran (it read .Current off a string), so every glyph counted 1
+# and a windows-ops header came out 81 cells to its 80-cell footer; and
+# Get-TermTruncated cut the raw string with Substring, through an ESC[...m
+# escape or an emoji's surrogate pair. Expected widths come from Unicode's
+# East Asian Width (W or F = 2 cells), never from term.ps1 itself. The script
+# prints ok|/FAIL| rows and END; it is single-quoted, so it holds no quote.
+WTERMPS1="$(winpath "$TERMPS1")"
+tout="$(TERMPS1_W="$WTERMPS1" TERM_WIDTH=80 TERM_ASCII= FLEET_ASCII= FORCE_COLOR=1 "$PWSH" -NoProfile -Command '
+. $env:TERMPS1_W
+Initialize-Term
+$esc = [char]27
+function Say([string]$what, [bool]$okay, [string]$why) { if ($okay) { "ok|$what" } else { "FAIL|${what}: $why" } }
+function Hex([string]$s) { ($s.ToCharArray() | ForEach-Object { "{0:X}" -f [int]$_ }) -join "," }
+$want = @{ 0x41 = 1; 0x2500 = 1; 0x2713 = 1; 0x2B24 = 1; 0x1F6E1 = 1;
+           0x26A1 = 2; 0x2705 = 2; 0x3042 = 2; 0x1F501 = 2; 0x1FA7A = 2 }
+$off = @($want.Keys | Where-Object { (Get-TermDisplayWidth (ConvertFrom-TermCodePoint $_)) -ne $want[$_] } |
+         ForEach-Object { "{0:X}" -f $_ })
+Say "Get-TermDisplayWidth gives East Asian Wide glyphs two cells" (-not $off) "wrong for U+$($off -join " U+")"
+# Oracle for the panel pair: one cell per code point, plus one for the
+# stethoscope brand, the only wide glyph either bar draws.
+function Cells([string]$s) {
+    $v = $s -replace "${esc}\[[0-9;]*m", ""
+    $n = @($v.ToCharArray() | Where-Object { -not [char]::IsLowSurrogate($_) }).Count
+    $n + ([regex]::Matches($v, (ConvertFrom-TermCodePoint 0x1FA7A))).Count
+}
+$h = Cells (New-TermPanelOpen -Brand windows-ops -Name windows-ops)
+$f = Cells (New-TermPanelClose -Hotkeys "R refresh")
+Say "windows-ops header and footer span the same cells" ($h -eq $f) "header $h, footer $f"
+$v = (Get-TermTruncated ("ab" + (Get-TermColor red "cdefgh")) 6) -replace "${esc}\[[0-9;]*m", ""
+Say "Get-TermTruncated copies colour escapes whole" ($v -eq ("abcde" + (ConvertFrom-TermCodePoint 0x2026))) "visible $(Hex $v)"
+$t = "AB" + (ConvertFrom-TermCodePoint 0x1F501) + "C" + (ConvertFrom-TermCodePoint 0x1F501 0x1F501) + "D"
+$split = @(1..9 | Where-Object {
+    (Get-TermTruncated $t $_) -match "[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]" })
+Say "Get-TermTruncated never splits a surrogate pair" (-not $split) "split at MaxCols $($split -join ",")"
+$c = Get-TermTruncated (ConvertFrom-TermCodePoint 0x1FA7A 0x1FA7A 0x1FA7A 0x1FA7A) 5
+Say "Get-TermTruncated keeps whole wide glyphs within MaxCols" ($c -eq (ConvertFrom-TermCodePoint 0x1FA7A 0x1FA7A 0x2026)) "got $(Hex $c)"
+"END"
+' 2>&1 | tr -d '\r')"
+case "$tout" in *$'\nEND') ;; *) no "term.ps1 cell probe ended early: $(printf '%s' "$tout" | tail -n3 | tr '\n' ' ')" ;; esac
+while IFS= read -r line; do
+  case "$line" in ok\|*) ok "${line#ok|}" ;; FAIL\|*) no "${line#FAIL|}" ;; esac
+done <<< "$tout"
+
 # ── copy-tree: non-destructive default + guard rails ──────────────────────────
 # The whole point of the Copy/Rescue/Mirror split is that the DEFAULT never
 # deletes. A regression here silently turns a copy into a mass deletion, so it

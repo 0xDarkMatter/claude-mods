@@ -277,35 +277,83 @@ function Get-TermGlyph {
 }
 
 # --- Display-width helpers ---------------------------------------------------
+# Width is terminal CELLS: one per code point, two for an East Asian Wide or
+# Fullwidth one, colour escapes zero - the same rule as term.sh's
+# __term_vis_width, so the two twins draw the same panel geometry. No grapheme
+# clustering: a combining mark, ZWJ or U+FE0F counts one like any code point.
+#
+# The pairs below are inclusive lo/hi code point ranges, ascending: Unicode
+# 15.0 EastAsianWidth.txt W and F, the table python's unicodedata reports.
+# They must equal __TERM_WIDE in term.sh, token for token; tests/check-
+# resources.sh compares the two. The heuristic this replaced (all of
+# U+2600-27BF, U+2B00-2BFF and every surrogate pair) never ran - it read
+# .Current off a string, so every glyph counted 1 and a windows-ops header
+# with its stethoscope brand came out 81 cells to its footer's 80 - and it
+# would have made check, cross, warning sign, gear and black large circle two
+# cells, which terminals draw in one.
+$Script:TermWide = @(
+    0x1100, 0x115F, 0x231A, 0x231B, 0x2329, 0x232A, 0x23E9, 0x23EC, 0x23F0, 0x23F0, 0x23F3, 0x23F3,
+    0x25FD, 0x25FE, 0x2614, 0x2615, 0x2648, 0x2653, 0x267F, 0x267F, 0x2693, 0x2693, 0x26A1, 0x26A1,
+    0x26AA, 0x26AB, 0x26BD, 0x26BE, 0x26C4, 0x26C5, 0x26CE, 0x26CE, 0x26D4, 0x26D4, 0x26EA, 0x26EA,
+    0x26F2, 0x26F3, 0x26F5, 0x26F5, 0x26FA, 0x26FA, 0x26FD, 0x26FD, 0x2705, 0x2705, 0x270A, 0x270B,
+    0x2728, 0x2728, 0x274C, 0x274C, 0x274E, 0x274E, 0x2753, 0x2755, 0x2757, 0x2757, 0x2795, 0x2797,
+    0x27B0, 0x27B0, 0x27BF, 0x27BF, 0x2B1B, 0x2B1C, 0x2B50, 0x2B50, 0x2B55, 0x2B55, 0x2E80, 0x2E99,
+    0x2E9B, 0x2EF3, 0x2F00, 0x2FD5, 0x2FF0, 0x2FFB, 0x3000, 0x303E, 0x3041, 0x3096, 0x3099, 0x30FF,
+    0x3105, 0x312F, 0x3131, 0x318E, 0x3190, 0x31E3, 0x31F0, 0x321E, 0x3220, 0x3247, 0x3250, 0x4DBF,
+    0x4E00, 0xA48C, 0xA490, 0xA4C6, 0xA960, 0xA97C, 0xAC00, 0xD7A3, 0xF900, 0xFAFF, 0xFE10, 0xFE19,
+    0xFE30, 0xFE52, 0xFE54, 0xFE66, 0xFE68, 0xFE6B, 0xFF01, 0xFF60, 0xFFE0, 0xFFE6,
+    0x16FE0, 0x16FE4, 0x16FF0, 0x16FF1, 0x17000, 0x187F7, 0x18800, 0x18CD5, 0x18D00, 0x18D08,
+    0x1AFF0, 0x1AFF3, 0x1AFF5, 0x1AFFB, 0x1AFFD, 0x1AFFE, 0x1B000, 0x1B122, 0x1B132, 0x1B132,
+    0x1B150, 0x1B152, 0x1B155, 0x1B155, 0x1B164, 0x1B167, 0x1B170, 0x1B2FB, 0x1F004, 0x1F004,
+    0x1F0CF, 0x1F0CF, 0x1F18E, 0x1F18E, 0x1F191, 0x1F19A, 0x1F200, 0x1F202, 0x1F210, 0x1F23B,
+    0x1F240, 0x1F248, 0x1F250, 0x1F251, 0x1F260, 0x1F265, 0x1F300, 0x1F320, 0x1F32D, 0x1F335,
+    0x1F337, 0x1F37C, 0x1F37E, 0x1F393, 0x1F3A0, 0x1F3CA, 0x1F3CF, 0x1F3D3, 0x1F3E0, 0x1F3F0,
+    0x1F3F4, 0x1F3F4, 0x1F3F8, 0x1F43E, 0x1F440, 0x1F440, 0x1F442, 0x1F4FC, 0x1F4FF, 0x1F53D,
+    0x1F54B, 0x1F54E, 0x1F550, 0x1F567, 0x1F57A, 0x1F57A, 0x1F595, 0x1F596, 0x1F5A4, 0x1F5A4,
+    0x1F5FB, 0x1F64F, 0x1F680, 0x1F6C5, 0x1F6CC, 0x1F6CC, 0x1F6D0, 0x1F6D2, 0x1F6D5, 0x1F6D7,
+    0x1F6DC, 0x1F6DF, 0x1F6EB, 0x1F6EC, 0x1F6F4, 0x1F6FC, 0x1F7E0, 0x1F7EB, 0x1F7F0, 0x1F7F0,
+    0x1F90C, 0x1F93A, 0x1F93C, 0x1F945, 0x1F947, 0x1F9FF, 0x1FA70, 0x1FA7C, 0x1FA80, 0x1FA88,
+    0x1FA90, 0x1FABD, 0x1FABF, 0x1FAC5, 0x1FACE, 0x1FADB, 0x1FAE0, 0x1FAE8, 0x1FAF0, 0x1FAF8,
+    0x20000, 0x2FFFD, 0x30000, 0x3FFFD
+)
+
+function Get-TermCodePointWidth {
+    <# Cells for one code point: 2 if it falls in $Script:TermWide, else 1. #>
+    param([Parameter(Mandatory)][int]$CodePoint)
+    if ($CodePoint -lt 0x1100) { return 1 }
+    $lo = 0
+    $hi = $Script:TermWide.Count / 2 - 1
+    while ($lo -le $hi) {
+        $mid = [Math]::Floor(($lo + $hi) / 2)
+        if ($CodePoint -lt $Script:TermWide[2 * $mid]) { $hi = $mid - 1 }
+        elseif ($CodePoint -gt $Script:TermWide[2 * $mid + 1]) { $lo = $mid + 1 }
+        else { return 2 }
+    }
+    return 1
+}
+
 function Get-TermDisplayWidth {
     <#
     .SYNOPSIS
-        Approximate display column count for a string, accounting for emoji
-        double-width and ignoring ANSI color escapes.
+        Display cells a string fills: colour escapes count 0, East Asian Wide
+        and Fullwidth code points 2, every other code point 1. A surrogate
+        pair is one code point; a lone surrogate counts 1.
     #>
     [CmdletBinding()]
     param([Parameter(ValueFromPipeline)][AllowEmptyString()][string]$Text = '')
     process {
         if (-not $Text) { return 0 }
-        # Strip ANSI escapes (CSI sequences)
         $esc = [char]27
         $clean = $Text -replace "${esc}\[[0-9;]*m", ''
         $width = 0
-        # EnumerateRunes handles surrogate pairs correctly
-        foreach ($rune in [System.Globalization.StringInfo]::GetTextElementEnumerator($clean)) {
-            $cp = if ([string]$rune.Current.Length -gt 0) { [int][char]([string]$rune.Current)[0] } else { 0 }
-            # Simple wide-emoji heuristic: rune length >1 (surrogate pair) OR in known wide ranges
-            $s = [string]$rune.Current
-            if ($s.Length -gt 1) {
-                $width += 2   # surrogate pair - almost always wide
-            } elseif (($cp -ge 0x2600 -and $cp -le 0x27BF) -or
-                      ($cp -ge 0x2B00 -and $cp -le 0x2BFF) -or
-                      $cp -eq 0x26A1 -or         # high voltage
-                      $cp -eq 0x2728 -or         # sparkles
-                      $cp -eq 0x2B24) {          # black large circle
-                $width += 2
+        $i = 0
+        while ($i -lt $clean.Length) {
+            if ([char]::IsSurrogatePair($clean, $i)) {
+                $width += Get-TermCodePointWidth ([char]::ConvertToUtf32($clean, $i))
+                $i += 2
             } else {
-                $width += 1
+                $width += Get-TermCodePointWidth ([int]$clean[$i])
+                $i += 1
             }
         }
         return $width
@@ -316,6 +364,15 @@ function Get-TermTruncated {
     <#
     .SYNOPSIS
         Ellipsis-truncate text to fit in MaxCols display columns.
+    .DESCRIPTION
+        Mirrors term_truncate in term.sh. Columns are display cells
+        (Get-TermDisplayWidth), never string length. Colour escapes are
+        zero-width and copied whole, and a reset precedes the marker when any
+        were copied: cutting the raw string with Substring once split
+        ESC[31m in half and left the rest of the line coloured, and could
+        cut an emoji's surrogate pair in two. Text is cut between code
+        points; a wide glyph that would straddle the limit is left out, so
+        the result can be one cell short of MaxCols.
     #>
     [CmdletBinding()]
     param(
@@ -325,12 +382,38 @@ function Get-TermTruncated {
     $w = Get-TermDisplayWidth $Text
     if ($w -le $MaxCols) { return $Text }
     $ell = if ($Script:TermAsciiMode) { '..' } else { ConvertFrom-TermCodePoint 0x2026 }   # ellipsis
-    $ellW = Get-TermDisplayWidth $ell
-    # Naive truncation by character count - close enough for our needs
-    $maxChars = $MaxCols - $ellW
-    if ($maxChars -lt 0) { $maxChars = 0 }
-    if ($Text.Length -le $maxChars) { return $Text + $ell }
-    return $Text.Substring(0, $maxChars) + $ell
+    $keep = $MaxCols - (Get-TermDisplayWidth $ell)
+    $esc = [char]27
+    $sb = New-Object System.Text.StringBuilder
+    $coloured = $false
+    $i = 0
+    while ($keep -gt 0 -and $i -lt $Text.Length) {
+        if ($Text[$i] -eq $esc) {
+            if ($i + 1 -lt $Text.Length -and $Text[$i + 1] -eq '[') {
+                # CSI: ESC [ <digits and ;> <final char>, zero cells, copied whole
+                $j = $i + 2
+                while ($j -lt $Text.Length -and '0123456789;'.IndexOf($Text[$j]) -ge 0) { $j++ }
+                if ($j -lt $Text.Length) { $j++ }
+                [void]$sb.Append($Text, $i, $j - $i)
+                $coloured = $true
+                $i = $j
+            } else {
+                $i++   # lone ESC: zero cells, dropped as in term.sh
+            }
+            continue
+        }
+        if ([char]::IsSurrogatePair($Text, $i)) { $n = 2; $cp = [char]::ConvertToUtf32($Text, $i) }
+        else { $n = 1; $cp = [int]$Text[$i] }   # a lone surrogate counts 1, never throws
+        $cw = Get-TermCodePointWidth $cp
+        if ($cw -gt $keep) { break }
+        [void]$sb.Append($Text, $i, $n)
+        $keep -= $cw
+        $i += $n
+    }
+    # TC_Off's colour-on value as a literal: the escapes came from the caller,
+    # so the reset is needed whatever TermColor says.
+    if ($coloured) { [void]$sb.Append("${esc}[0m") }
+    return $sb.ToString() + $ell
 }
 
 # --- Panel chrome ------------------------------------------------------------

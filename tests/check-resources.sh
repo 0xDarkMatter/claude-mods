@@ -412,6 +412,88 @@ case "$__wrc|$__wout" in
 esac
 rm -f "$__wprobe"
 
+echo "== terminal design: wide glyphs take two cells in term.sh's layout maths"
+# Width is terminal cells, not characters. term.sh once counted characters, so
+# the ⚡ brand (one character, two cells) made `fleet status`'s header 81 cells
+# to its footer's 80; and what a character is depends on the bash: MSYS (16-bit
+# wchar_t) counts the 🔁 brand as 2 and cut it between the halves of its
+# surrogate pair, Linux and macOS count it 1. The oracle is independent of
+# term.sh: python's unicodedata, East Asian Width W or F = 2 cells, SGR
+# stripped, and invalid UTF-8 means a cut split a character. Each probe line is
+# "<cells wanted, or = for the line above's>\t<what>\t<rendered>". The probe
+# runs once in a UTF-8 locale and once in C, where bash counts bytes.
+__uprobe="$(mktemp)"
+cat > "$__uprobe" <<'PROBE'
+. skills/_lib/term.sh
+unset TERM_ASCII FLEET_ASCII
+if [ "$1" = C ]; then LC_ALL=C
+else # C.UTF-8 on Linux CI; macOS and MSYS have en_US.UTF-8
+    for l in C.UTF-8 en_US.UTF-8; do LC_ALL=$l; s='⚡'; [ "${#s}" -eq 1 ] && break; done 2>/dev/null
+fi
+FORCE_COLOR=1 term_init; TERM_WIDTH=80
+row() { printf '%s\t%s\t%s\n' "$1" "$2" "$3"; }
+row 80 "fleet footer spans TERM_WIDTH" \
+    "$(term_panel_close "$(term_hotkey R refresh) $TERM_DOT $(term_hotkey '?' help)" \
+                        "$(term_health busted daemon)  $(term_health pending '4 active')")"
+row 80 "fleet header and footer span the same cells (bolt brand is 2)" "$(term_panel_open fleet fleet main)"
+row 80 "loop header spans the same cells (wide astral brand)" "$(term_panel_open loop loop main)"
+row 80 "supply-chain header spans the same cells (narrow astral brand)" \
+    "$(term_panel_open supply-chain supply-chain main)"
+row "" "" ""   # resets '=' so each pair below is compared on its own
+row - "leaf row with an ASCII name" "$(term_leaf_line "$TERM_TREE_BRANCH" lane-a "$(term_rail 2 HEAD)" "M1 ?2" 3m)"
+row = "leaf row with a wide-glyph name keeps its columns" \
+    "$(term_leaf_line "$TERM_TREE_BRANCH" "⚡bolt-lane" "$(term_rail 2 HEAD)" "M1 ?2" 3m)"
+row = "leaf row whose emoji name is cut keeps its columns" \
+    "$(term_leaf_line "$TERM_TREE_BRANCH" "🔁🔁🔁🔁🔁🔁🔁🔁🔁🔁🔁🔁🔁🔁🔁🔁🔁🔁" "$(term_rail 2 HEAD)" "M1 ?2" 3m)"
+row - "status row with an ASCII label" "$(term_status_row ok "plain label" value)"
+row = "status row with wide glyphs in its label keeps its value column" \
+    "$(term_status_row ok "⏳ waiting on ✅ checks" value)"
+row 5 "a cut beside astral emoji keeps whole glyphs (max 6)" "$(term_truncate "🔁🔁🔁🔁🔁" 6)"
+row 6 "a cut through mixed text counts the bolt as 2 cells (max 6)" "$(term_truncate "ab⚡cd⚡ef" 6)"
+row 3 "a cut of coloured emoji keeps escapes and glyphs whole (max 4)" \
+    "$(term_truncate "$(term_color red "🔁🔁🔁")x🔁" 4)"
+echo END
+PROBE
+__uoracle='import re, sys, unicodedata
+sgr = re.compile(rb"\x1b\[[0-9;]*[^0-9;]?")
+prev = None
+for raw in sys.stdin.buffer.read().split(b"\n"):
+    if raw == b"END":
+        print("END"); break
+    want, what, body = raw.split(b"\t", 2)
+    what = what.decode("ascii")
+    if not what:
+        prev = None; continue
+    try:
+        text = sgr.sub(b"", body).decode("utf-8")
+    except UnicodeDecodeError:
+        print("FAIL|%s: split a character (invalid UTF-8)" % what); prev = None; continue
+    got = sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in text)
+    want = got if want == b"-" else prev if want == b"=" else int(want)
+    print("ok|%s" % what if got == want else "FAIL|%s: want %s cells, got %s" % (what, want, got))
+    prev = got'
+for __loc in UTF-8 C; do
+    __wout="$(bash "$__uprobe" "$__loc" 2>/dev/null | "$PY" -c "$__uoracle" 2>&1)"; __wrc=$?
+    __wn="$(printf '%s\n' "$__wout" | grep -c '^ok|')"
+    # Fail closed: a probe or oracle that dies part-way never prints END.
+    case "$__wrc|$__wout" in
+        0\|*"FAIL|"*|[!0]*) bad "term.sh mis-measures wide glyphs ($__loc): $(printf '%s\n' "$__wout" | grep -v '^ok|' | tr '\n' ' ')" ;;
+        *$'\nEND') pass "term.sh: wide glyphs take two cells, cuts keep glyphs whole ($__loc, $__wn checks)" ;;
+        *) bad "term.sh wide-glyph probe ended early ($__loc): $(printf '%s' "$__wout" | tail -n3 | tr '\n' ' ')" ;;
+    esac
+done
+rm -f "$__uprobe"
+
+# The bash and PowerShell twins must draw the same panel geometry, so their
+# wide-glyph tables are one list: __TERM_WIDE in term.sh, $Script:TermWide in
+# term.ps1. Compare them bound for bound.
+__tw_sh="$(sed -n '/^__TERM_WIDE=(/,/^)/p' skills/_lib/term.sh | grep -oE '0x[0-9A-F]+' | tr '\n' ' ')"
+__tw_ps="$(sed -n '/^\$Script:TermWide = @(/,/^)/p' skills/_lib/term.ps1 | grep -oE '0x[0-9A-F]+' | tr '\n' ' ')"
+__tw_n="$(printf '%s' "$__tw_sh" | wc -w | tr -d ' ')"
+if [ "$__tw_n" -gt 0 ] && [ "$__tw_sh" = "$__tw_ps" ]; then
+    pass "term.sh and term.ps1 share one wide-glyph table ($__tw_n bounds)"
+else bad "term.sh and term.ps1 wide-glyph tables differ (sh: $__tw_n bounds, ps1: $(printf '%s' "$__tw_ps" | wc -w | tr -d ' '))"; fi
+
 # Source-level guard for the consumers. A hardcoded DECORATION glyph in an
 # authored string never reaches the registry, so TERM_ASCII=1 can't swap it —
 # the exact defect that leaked U+00B7 out of `fleet status`. Scoped to the
