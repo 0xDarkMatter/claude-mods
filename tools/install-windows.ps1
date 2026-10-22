@@ -13,10 +13,10 @@
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "╔══════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
-Write-Host "║       Modern CLI Toolkit Installer (Windows)                 ║" -ForegroundColor Cyan
-Write-Host "║       Token-efficient tools for AI coding assistants         ║" -ForegroundColor Cyan
-Write-Host "╚══════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+Write-Host "+==============================================================+" -ForegroundColor Cyan
+Write-Host "|       Modern CLI Toolkit Installer (Windows)                 |" -ForegroundColor Cyan
+Write-Host "|       Token-efficient tools for AI coding assistants         |" -ForegroundColor Cyan
+Write-Host "+==============================================================+" -ForegroundColor Cyan
 Write-Host ""
 
 # Check winget is available
@@ -103,9 +103,9 @@ foreach ($tool in $tools) {
 }
 
 Write-Host ""
-Write-Host "════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host "================================================================" -ForegroundColor Cyan
 Write-Host "  Results: $installed installed, $skipped skipped, $failed failed" -ForegroundColor Cyan
-Write-Host "════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host "================================================================" -ForegroundColor Cyan
 
 # Post-install: Update tldr cache
 if (Get-Command tldr -ErrorAction SilentlyContinue) {
@@ -137,7 +137,7 @@ Write-Host ""
 # Install custom CLI wrappers
 Write-Host ""
 Write-Host "Installing custom CLI wrappers..." -ForegroundColor Cyan
-Write-Host "────────────────────────────────"
+Write-Host "--------------------------------"
 
 $localBin = "$env:USERPROFILE\.local\bin"
 if (-not (Test-Path $localBin)) {

@@ -5,14 +5,14 @@
 .DESCRIPTION
     Companion to rescue-image.ps1: once a failing device has been imaged, the
     data must come back OUT of the image. On Windows that is harder than it
-    looks — the native Mount-DiskImage handles VHD/VHDX/ISO only, and a raw
+    looks - the native Mount-DiskImage handles VHD/VHDX/ISO only, and a raw
     PARTITION image has no partition table, so the usual "append a VHD footer"
     trick presents an uninitialised disk rather than a volume. Third-party
     volume mounters exist but are another install.
 
     7-Zip parses NTFS as an archive format: read-only, no driver, no mount, no
     write to the image, and it is already present on most systems. Measured at
-    30-107 MB/s against a 7 TB image, which is adequate — the alternative was
+    30-107 MB/s against a 7 TB image, which is adequate - the alternative was
     assumed to be faster without evidence.
 
     MODES
@@ -23,7 +23,7 @@
     RESUMABILITY: extraction passes 7z -aos (skip existing), so re-running the
     same command continues rather than restarting. The caveat that matters:
     -aos skips on EXISTENCE, not content, so a file interrupted mid-write is
-    treated as done. -Verify detects those by size mismatch — run it before
+    treated as done. -Verify detects those by size mismatch - run it before
     trusting a resumed extraction.
 
     PRIVACY: 7-Zip prints file names as it works. Every invocation is redirected
@@ -43,7 +43,7 @@
     -Extract; refuses to run bare so a whole image is never pulled by accident.
 
 .PARAMETER ExcludeDirs
-    Directory names excluded at ANY depth. See the LANDMINE note in the code —
+    Directory names excluded at ANY depth. See the LANDMINE note in the code -
     these are emitted as -xr! with bare names for a reason.
 
 .PARAMETER ExcludeFiles
@@ -71,7 +71,7 @@
 #>
 [CmdletBinding()]
 param(
-    # Not [Parameter(Mandatory)] — that makes a non-interactive run prompt, then
+    # Not [Parameter(Mandatory)] - that makes a non-interactive run prompt, then
     # die with a generic exit 1. Validated below so a missing argument returns
     # the documented usage code instead.
     [string]$Image,
@@ -80,7 +80,7 @@ param(
     [string[]]$Include = @(),
     # LANDMINE: emitted as -xr! with BARE names, never as '*\name\*'. The
     # wildcard form requires a leading path component, so it silently matches
-    # nothing for directories at the image ROOT — which is exactly where this
+    # nothing for directories at the image ROOT - which is exactly where this
     # kind of junk lives. That bug let 835,360 files through a run whose pattern
     # list looked perfectly correct. Verify any change against a root-level
     # entry, not just a nested one.
@@ -106,7 +106,7 @@ param(
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\_lib\common.ps1"
 
-# ── locate 7-Zip (probe, never assume an install path) ───────────────────────
+# -- locate 7-Zip (probe, never assume an install path) -----------------------
 $sevenZip = $null
 $cmd = Get-Command 7z.exe -ErrorAction SilentlyContinue
 if ($cmd) { $sevenZip = $cmd.Source }
@@ -131,7 +131,7 @@ $listing  = Join-Path $WorkDir 'listing.txt'
 
 function Get-Listing {
     # 7z `l` is cheap relative to extraction and only reads metadata, but it is
-    # still a full MFT parse — cache it rather than re-running per mode.
+    # still a full MFT parse - cache it rather than re-running per mode.
     if (-not (Test-Path $listing) -or (Get-Item $listing).Length -eq 0) {
         Write-Log -Level INFO -Message 'building image listing (names go to the work dir, not stdout)'
         & $sevenZip l $Image > $listing 2>&1
@@ -156,7 +156,7 @@ function Read-Rows {
     } finally { $r.Close() }
 }
 
-# ── PLAN ─────────────────────────────────────────────────────────────────────
+# -- PLAN ---------------------------------------------------------------------
 if ($Plan) {
     $src = Get-Listing
     $agg = @{}
@@ -176,7 +176,7 @@ if ($Plan) {
     exit $script:EXIT_OK
 }
 
-# ── VERIFY ───────────────────────────────────────────────────────────────────
+# -- VERIFY -------------------------------------------------------------------
 if ($Verify) {
     if (-not $Dest -or -not (Test-Path $Dest)) { Write-Log -Level FAIL -Message '-Dest required and must exist'; exit $script:EXIT_NOT_FOUND }
     $src = Get-Listing
@@ -210,14 +210,14 @@ if ($Verify) {
     exit $script:EXIT_OK
 }
 
-# ── EXTRACT ──────────────────────────────────────────────────────────────────
+# -- EXTRACT ------------------------------------------------------------------
 if (-not $Extract) { Write-Log -Level FAIL -Message 'specify one of -Plan, -Extract, -Verify'; exit $script:EXIT_USAGE }
 if (-not $Dest)    { Write-Log -Level FAIL -Message '-Dest is required for -Extract'; exit $script:EXIT_USAGE }
 if (-not $Include) { Write-Log -Level FAIL -Message "-Include is required (e.g. -Include 'Users\*'); refusing to extract an entire image implicitly"; exit $script:EXIT_USAGE }
 New-Item -ItemType Directory $Dest -Force | Out-Null
 
 # Progress is measured by destination VOLUME used-bytes: O(1). Do NOT enumerate
-# the destination tree to measure progress — at ~840k files that took 30 minutes
+# the destination tree to measure progress - at ~840k files that took 30 minutes
 # per sample and contended for I/O with the extraction it was measuring.
 function Get-DestUsed {
     $i = New-Object System.IO.DriveInfo (Split-Path $Dest -Qualifier)
@@ -239,7 +239,7 @@ $start = Get-Date
 $done = $false; $stalls = 0
 
 for ($i = 1; $i -le $MaxAttempts -and -not $done; $i++) {
-    # A vanished destination must halt, not silently consume the retry budget —
+    # A vanished destination must halt, not silently consume the retry budget -
     # a dismounted volume reports zero, which is indistinguishable from "no
     # progress" unless checked explicitly.
     $why = Test-DestReady
@@ -256,7 +256,7 @@ for ($i = 1; $i -le $MaxAttempts -and -not $done; $i++) {
         $now = Get-DestUsed
         if ([math]::Abs($now - $lastUsed) -gt 16MB) { $lastUsed = $now; $lastMove = Get-Date }
         elseif (((Get-Date) - $lastMove).TotalMinutes -ge $StallMinutes) {
-            Write-Log -Level WARN -Message "watchdog: no write progress for $StallMinutes min — relaunching"
+            Write-Log -Level WARN -Message "watchdog: no write progress for $StallMinutes min - relaunching"
             try { Stop-Process -Id $p.Id -Force -ErrorAction Stop } catch {}
             break
         }

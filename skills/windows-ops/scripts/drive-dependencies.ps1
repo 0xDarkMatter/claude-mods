@@ -13,7 +13,7 @@
     Default output is a human-readable table. -Json emits structured.
 
     Exit codes (reflect whether the audit RAN, not what it found):
-      0 success — audit completed (verdict reported via panel + JSON)
+      0 success - audit completed (verdict reported via panel + JSON)
       2 usage
       3 not found (no such drive)
 
@@ -44,9 +44,9 @@
 
 .NOTES
     Output verdict at end:
-      SAFE TO DISCONNECT — no critical references found
-      WARNINGS — some references found but none boot-critical
-      DO NOT DISCONNECT — boot-critical reference (pagefile, system, etc.)
+      SAFE TO DISCONNECT - no critical references found
+      WARNINGS - some references found but none boot-critical
+      DO NOT DISCONNECT - boot-critical reference (pagefile, system, etc.)
 #>
 
 [CmdletBinding(DefaultParameterSetName='Letter')]
@@ -83,7 +83,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Number') {
     $targetLetters = @($DriveLetter.ToUpper())
     # Verify the drive exists
     if (-not (Get-PSDrive -PSProvider FileSystem -Name $DriveLetter.ToUpper() -ErrorAction SilentlyContinue)) {
-        Write-Log -Level WARN -Message "Drive ${DriveLetter}: not currently mounted — auditing references anyway"
+        Write-Log -Level WARN -Message "Drive ${DriveLetter}: not currently mounted - auditing references anyway"
     }
 }
 
@@ -114,11 +114,11 @@ function Add-Dependency {
     $findings.Add(@{ category=$Category; name=$Name; target=$Target; severity=$Severity })
 }
 
-# (panel header rendered after dependency collection — see end of script)
+# (panel header rendered after dependency collection - see end of script)
 
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 # 1. Pagefile location
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 try {
     $pagefiles = Get-CimInstance Win32_PageFileSetting -ErrorAction SilentlyContinue
     foreach ($pf in $pagefiles) {
@@ -128,9 +128,9 @@ try {
     }
 } catch {}
 
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 # 2. Windows Search index data directory
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 try {
     $idxDir = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows Search' -Name DataDirectory -ErrorAction SilentlyContinue).DataDirectory
     if (Test-DrivePath $idxDir) {
@@ -138,9 +138,9 @@ try {
     }
 } catch {}
 
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 # 3. Windows Search indexed scopes (paths in the crawl scope)
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 try {
     $scopeKey = 'HKLM:\SOFTWARE\Microsoft\Windows Search\CrawlScopeManager\Windows\SystemIndex\WorkingSetRules'
     if (Test-Path $scopeKey) {
@@ -153,9 +153,9 @@ try {
     }
 } catch {}
 
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 # 4. Scheduled tasks
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 try {
     Get-ScheduledTask -ErrorAction SilentlyContinue | ForEach-Object {
         $task = $_
@@ -169,9 +169,9 @@ try {
     }
 } catch {}
 
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 # 5. Services with binary path on target drive
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 try {
     Get-CimInstance Win32_Service -ErrorAction SilentlyContinue | ForEach-Object {
         if (Test-DrivePath $_.PathName) {
@@ -181,9 +181,9 @@ try {
     }
 } catch {}
 
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 # 6. User profile symlinks/junctions pointing at target
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 try {
     Get-ChildItem $env:USERPROFILE -Force -ErrorAction SilentlyContinue |
         Where-Object { $_.Attributes -band [System.IO.FileAttributes]::ReparsePoint } |
@@ -194,9 +194,9 @@ try {
         }
 } catch {}
 
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 # 7. Startup folder shortcuts targeting drive
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 try {
     $shell = New-Object -ComObject WScript.Shell
     foreach ($d in @("$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup",
@@ -213,9 +213,9 @@ try {
     }
 } catch {}
 
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 # 8. Registry Run-key entries pointing at drive
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 $runPaths = @(
     'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
     'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
@@ -231,9 +231,9 @@ foreach ($p in $runPaths) {
     }
 }
 
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 # 9. Volume mount points (a folder on C: that mounts the target volume)
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 try {
     $partitions = Get-Partition -ErrorAction SilentlyContinue | Where-Object {
         $_.DriveLetter -and $targetLetters -contains "$($_.DriveLetter)"
@@ -250,19 +250,19 @@ try {
     }
 } catch {}
 
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 # Output
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 $criticalCount = ($findings | Where-Object { $_.severity -eq 'critical' }).Count
 $warnCount     = ($findings | Where-Object { $_.severity -eq 'warn' }).Count
 $infoCount     = ($findings | Where-Object { $_.severity -eq 'info' }).Count
 
 $verdict = if ($criticalCount -gt 0) {
-    'DO NOT DISCONNECT — boot-critical references found'
+    'DO NOT DISCONNECT - boot-critical references found'
 } elseif ($warnCount -gt 0) {
-    'WARNINGS — some references found; review before disconnecting'
+    'WARNINGS - some references found; review before disconnecting'
 } else {
-    'SAFE TO DISCONNECT — no system dependencies on this drive'
+    'SAFE TO DISCONNECT - no system dependencies on this drive'
 }
 
 if ($Json) {
@@ -280,16 +280,16 @@ if ($Json) {
 
     $totalRefs = $findings.Count
     $summary = if ($criticalCount -gt 0) {
-        "$totalRefs references · DO NOT DISCONNECT"
+        "$totalRefs references | DO NOT DISCONNECT"
     } elseif ($warnCount -gt 0) {
-        "$totalRefs references · review before disconnect"
+        "$totalRefs references | review before disconnect"
     } else {
-        "0 system references · safe to disconnect"
+        "0 system references | safe to disconnect"
     }
     Write-TermLine (New-TermSummary -Text $summary)
     Write-TermLine (New-TermPanelVert)
 
-    # CRITICAL section first — highest severity
+    # CRITICAL section first - highest severity
     $criticals = $findings | Where-Object { $_.severity -eq 'critical' }
     if ($criticals) {
         Write-TermLine (New-TermSection -State 'CRITICAL' -Label 'CRITICAL' -Count $criticals.Count)
@@ -299,11 +299,11 @@ if ($Json) {
             $target = Get-TermTruncated -Text $f.target -MaxCols 50
             Write-TermLine (New-TermLeaf -Name $name -Meta $f.name -Age '' -IsLast:($f -eq $last) -NameColWidth 20 -RailColWidth 0)
         }
-        Write-TermLine (New-TermAlert -Severity critical -Text 'system-critical references — disconnecting will break the OS')
+        Write-TermLine (New-TermAlert -Severity critical -Text 'system-critical references - disconnecting will break the OS')
         Write-TermLine (New-TermPanelVert)
     }
 
-    # WARN section — condense if very large
+    # WARN section - condense if very large
     $warns = $findings | Where-Object { $_.severity -eq 'warn' }
     if ($warns) {
         Write-TermLine (New-TermSection -State 'WARN' -Label 'WARN' -Count $warns.Count)

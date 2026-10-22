@@ -745,6 +745,18 @@ $LibDir = Join-Path $PSScriptRoot '..\..\_lib'
 Initialize-Term
 ```
 
+`term.ps1`, like every tracked PowerShell file, is 7-bit ASCII. Windows PowerShell 5.1
+reads a script without a BOM in the ANSI code page, so one typed glyph breaks the parse
+of the lib and of every script that dot-sources it. Add a registry glyph as its code
+point, never as a literal:
+
+```powershell
+forge = (ConvertFrom-TermCodePoint 0x1F528) + '|[B]'   # hammer
+```
+
+`tests/check-ps51-parse.sh` fails on any non-ASCII byte, and on Windows it also runs the
+5.1 parser over every file.
+
 ### Portable skills: the lib is optional
 
 A skill that is copied standalone into other plugins (`supply-chain-defense`,

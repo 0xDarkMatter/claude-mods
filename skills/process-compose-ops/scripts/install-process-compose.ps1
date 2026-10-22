@@ -12,7 +12,7 @@
     The result is a verified binary in <target>/bin/, ready to commit to your repo.
 
 .PARAMETER Version
-    Version tag (e.g. "v1.110.0"). Required — never auto-pick latest.
+    Version tag (e.g. "v1.110.0"). Required - never auto-pick latest.
 
 .PARAMETER TargetDir
     Where to put bin/. Defaults to current directory.

@@ -48,7 +48,7 @@ foreach ($svc in $services) {
         continue
     }
 
-    Write-Host "  $svc → $port"
+    Write-Host "  $svc -> $port"
     & portless alias $svc $port --force 2>&1 | Out-Null
     $count++
 }

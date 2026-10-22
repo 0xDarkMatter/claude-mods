@@ -112,7 +112,9 @@ if [ -n "$REAL_GIT" ]; then
     make_shim "$WORK/git" git "$REAL_GIT" '"ls-files "*'
     expect_guard "check-exec-bits index scan" "$WORK/git" \
         "git ls-files failed (exit 70)" tests/check-exec-bits.sh
-else missing "check-exec-bits index scan" git; fi
+    expect_guard "check-ps51-parse file scan" "$WORK/git" \
+        "git ls-files failed (exit 70)" tests/check-ps51-parse.sh
+else missing "check-exec-bits index scan" git; missing "check-ps51-parse file scan" git; fi
 
 echo "=== $PASS passed, $FAIL failed ==="
 [ "$MISSING" -eq 0 ] || exit 2

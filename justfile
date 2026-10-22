@@ -6,7 +6,7 @@
 default:
     @just --list
 
-# THE gate: frontmatter/naming + Agent Skills spec + doc-drift + agnostic + skill hygiene (ratchet) + hook contracts + resource contracts + skill size (warn) + reference contents (warn) + skill suites + e2e suites + procsub-guard mutations
+# THE gate: frontmatter/naming + Agent Skills spec + doc-drift + agnostic + skill hygiene (ratchet) + hook contracts + resource contracts + PowerShell 5.1 parse + skill size (warn) + reference contents (warn) + skill suites + e2e suites + procsub-guard mutations
 check:
     @bash tests/validate.sh
     @bash tests/spec.sh
@@ -15,6 +15,7 @@ check:
     @bash tests/skill-hygiene.sh
     @bash tests/hooks.sh
     @bash tests/check-resources.sh
+    @bash tests/check-ps51-parse.sh
     @bash tests/skill-size.sh
     @bash tests/reference-contents.sh
     @bash tests/run-skill-tests.sh
@@ -29,6 +30,7 @@ check-fast:
     @bash tests/skill-hygiene.sh
     @bash tests/hooks.sh
     @bash tests/check-resources.sh
+    @bash tests/check-ps51-parse.sh
     @bash tests/skill-size.sh
     @bash tests/reference-contents.sh
 

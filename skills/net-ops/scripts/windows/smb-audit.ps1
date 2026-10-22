@@ -8,7 +8,7 @@
 .DESCRIPTION
     Companion to probe.ps1 for the "LAN services" track of the ladder
     (rung 3.5). probe.ps1 asks "can this box reach the internet?"; this
-    script asks "can this box reach its own LAN by NAME?" — a different
+    script asks "can this box reach its own LAN by NAME?" - a different
     failure domain that internet-focused probing cannot express.
 
     For each mapped drive (or one selected with -DriveLetter) it reports:
@@ -19,7 +19,7 @@
       - if resolution fails: ICMP + TCP/445 against a last-known IP
         (from the DNS client cache, or supplied via -FallbackIp)
       - whether Credential Manager holds an entry whose TARGET matches the
-        host actually in the UNC path — and flags the hostname-vs-IP
+        host actually in the UNC path - and flags the hostname-vs-IP
         target mismatch that presents as "System error 5 / Access denied"
       - an active NRPT '.' catch-all (Get-DnsClientNrptPolicy -Effective)
         with attribution and the owning VPN interface, live or orphaned
@@ -62,9 +62,9 @@
     Machine-readable verdicts only.
 
 .NOTES
-    Exit codes (per docs/SKILL-RESOURCE-PROTOCOL.md — they reflect whether
+    Exit codes (per docs/SKILL-RESOURCE-PROTOCOL.md - they reflect whether
     the audit RAN and whether it FOUND anything, not share permissions):
-      0  audit ran, no findings — mappings healthy
+      0  audit ran, no findings - mappings healthy
       1  unexpected error
       2  usage error (bad -DriveLetter / -FallbackIp syntax)
       10 audit ran and found at least one problem (see verdicts)
@@ -73,7 +73,7 @@
       - Resolve-DnsName on a SINGLE-LABEL name ('NAS') that fails reports
         the misleading "The filename, directory name, or volume label
         syntax is incorrect". That is a resolution failure, not a syntax
-        problem. nslookup gives the honest "Non-existent domain" — prefer
+        problem. nslookup gives the honest "Non-existent domain" - prefer
         it when eyeballing single-label failures by hand.
       - An NRPT '.' catch-all captures single-label names too, and NRPT
         matching suppresses the LLMNR/NetBIOS broadcast fallback those
@@ -119,7 +119,7 @@ function Row($tag, $label, $detail = "") {
 $fallbackMap = @{}
 foreach ($pair in $FallbackIp) {
     if ($pair -notmatch '^([^=]+)=(\d{1,3}(\.\d{1,3}){3})$') {
-        [Console]::Error.WriteLine("Bad -FallbackIp entry '$pair' — expected HOST=IPv4, e.g. NAS=192.168.1.50")
+        [Console]::Error.WriteLine("Bad -FallbackIp entry '$pair' - expected HOST=IPv4, e.g. NAS=192.168.1.50")
         exit $EXIT_USAGE
     }
     $fallbackMap[$Matches[1].ToUpper()] = $Matches[2]
@@ -136,7 +136,7 @@ function Test-TcpPort($ip, $port) {
     } catch { return $false }
 }
 function Test-RawUdpDns($server) {
-    # Hand-rolled DNS query (google.com A) over raw UDP — bypasses the DNS
+    # Hand-rolled DNS query (google.com A) over raw UDP - bypasses the DNS
     # Client API entirely, so it tests the WIRE, not the resolver policy.
     try {
         $u = New-Object System.Net.Sockets.UdpClient
@@ -188,9 +188,9 @@ if ($nrptCatchAll) {
     $ifaceNote = if ($vpnAdapters) {
         'owning interface likely: ' + (($vpnAdapters | ForEach-Object { $_.Name }) -join ', ') + ' (VPN is LIVE)'
     } else {
-        'no VPN interface Up (ORPHANED rule — nrpt-clean.ps1 territory)'
+        'no VPN interface Up (ORPHANED rule - nrpt-clean.ps1 territory)'
     }
-    # WARN not FAIL: a live, wanted VPN catch-all is legitimate — it only
+    # WARN not FAIL: a live, wanted VPN catch-all is legitimate - it only
     # becomes the culprit when a LAN name below fails to resolve.
     Row 'WARN' "NRPT '.' catch-all active" ("-> " + $ns + " (" + $attribution + "); " + $ifaceNote)
 } else {
@@ -202,7 +202,7 @@ Section "ENVIRONMENT: LAN DNS EGRESS"
 # ---------------------------------------------------------------------------
 # The DNS-leak-protection signature: the VPN filters UDP/53 to anything but
 # its own tunnel resolver. Gateway answers ICMP and TCP, but raw UDP/53
-# times out — so there is NO fallback resolver even if you point at one.
+# times out - so there is NO fallback resolver even if you point at one.
 # Filter unspecified next-hops: a live WireGuard/Proton tunnel installs an
 # on-link default route with NextHop 0.0.0.0 that would otherwise win the
 # metric sort. We want the REAL LAN gateway, whatever the VPN thinks.
@@ -215,10 +215,10 @@ if ($gw) {
     $gwTcp = (Test-TcpPort $gw 53) -or (Test-TcpPort $gw 80) -or (Test-TcpPort $gw 443)
     $gwUdp53 = Test-RawUdpDns $gw
     if ($gwUdp53) {
-        Row 'PASS' "UDP/53 to gateway $gw" "router DNS answers — fallback resolution available"
+        Row 'PASS' "UDP/53 to gateway $gw" "router DNS answers - fallback resolution available"
     } elseif ($gwIcmp -or $gwTcp) {
         $leakBlock = $true
-        Row 'FAIL' "UDP/53 to gateway $gw BLOCKED (ICMP/TCP to it succeed)" "VPN DNS-leak-protection signature — LAN resolver unreachable"
+        Row 'FAIL' "UDP/53 to gateway $gw BLOCKED (ICMP/TCP to it succeed)" "VPN DNS-leak-protection signature - LAN resolver unreachable"
     } else {
         Row 'WARN' "Gateway $gw unreachable entirely" "check link/routing first (probe.ps1 rungs 1-2)"
     }
@@ -241,7 +241,7 @@ if (-not $mappings) {
     Row 'INFO' 'No SMB mappings present' 'nothing to audit'
 }
 
-# cmdkey /list once, up front — targets look like "Target: Domain:target=NAS"
+# cmdkey /list once, up front - targets look like "Target: Domain:target=NAS"
 $credTargets = @()
 try {
     $credTargets = @(cmdkey /list 2>$null | Select-String 'Target:' | ForEach-Object {
@@ -287,16 +287,16 @@ foreach ($m in $mappings) {
         $resolvedVia = 'literal-ip'; $resolvedIp = $remoteHost
         Row 'PASS' "Host is a literal IP" $remoteHost
     } else {
-        # 1. HOSTS — consulted before NRPT/DNS, so a pin here wins over any VPN
+        # 1. HOSTS - consulted before NRPT/DNS, so a pin here wins over any VPN
         $hostsHit = $hostsLines | Where-Object { $_ -match ('\s' + [regex]::Escape($remoteHost) + '(\s|$)') } | Select-Object -First 1
         if ($hostsHit) {
             $resolvedVia = 'HOSTS'
             $resolvedIp = ($hostsHit -split '\s+')[0]
-            Row 'PASS' "Resolved via HOSTS file" ($resolvedIp + "  (wins over NRPT/DNS — VPN-proof)")
+            Row 'PASS' "Resolved via HOSTS file" ($resolvedIp + "  (wins over NRPT/DNS - VPN-proof)")
         }
         # 2. DNS proper (no HOSTS, no LLMNR/NetBIOS). Note: on failure for a
         #    single-label name this cmdlet throws the misleading "filename,
-        #    directory name, or volume label syntax is incorrect" — that is a
+        #    directory name, or volume label syntax is incorrect" - that is a
         #    resolution failure, not bad syntax.
         if (-not $resolvedVia) {
             try {
@@ -307,10 +307,10 @@ foreach ($m in $mappings) {
                     Row 'PASS' "Resolved via DNS" $resolvedIp
                 }
             } catch {
-                Row 'INFO' "DNS resolution failed" $(if ($singleLabel) { "single-label name; error text is misleading — use nslookup for the honest NXDOMAIN" } else { $_.Exception.Message })
+                Row 'INFO' "DNS resolution failed" $(if ($singleLabel) { "single-label name; error text is misleading - use nslookup for the honest NXDOMAIN" } else { $_.Exception.Message })
             }
         }
-        # 3. LLMNR / NetBIOS broadcast — the fallback single-label LAN names
+        # 3. LLMNR / NetBIOS broadcast - the fallback single-label LAN names
         #    normally rely on, and exactly what an NRPT '.' match suppresses.
         if (-not $resolvedVia) {
             try {
@@ -325,7 +325,7 @@ foreach ($m in $mappings) {
         if (-not $resolvedVia) {
             $detail = "HOSTS, DNS, and LLMNR/NetBIOS all failed"
             if ($nrptCatchAll -and $singleLabel) {
-                $detail += " — NRPT '.' catch-all ($attribution) is swallowing this single-label name AND suppressing broadcast fallback"
+                $detail += " - NRPT '.' catch-all ($attribution) is swallowing this single-label name AND suppressing broadcast fallback"
             }
             Row 'FAIL' "Name '$remoteHost' does not resolve by ANY mechanism" $detail
         }
@@ -352,14 +352,14 @@ foreach ($m in $mappings) {
         $smb = Test-TcpPort $probeIp 445
         $lanAlive = $icmp -or $smb
         Row $(if ($icmp) { 'PASS' } else { 'WARN' }) "ICMP -> $probeIp ($probeSource)" ''
-        Row $(if ($smb) { 'PASS' } else { 'FAIL' }) "TCP/445 (SMB) -> $probeIp" $(if ($smb) { 'share host is serving SMB' } else { 'SMB unreachable — host down, firewall, or wrong IP' })
+        Row $(if ($smb) { 'PASS' } else { 'FAIL' }) "TCP/445 (SMB) -> $probeIp" $(if ($smb) { 'share host is serving SMB' } else { 'SMB unreachable - host down, firewall, or wrong IP' })
     } elseif (-not $hostIsIp) {
         Row 'WARN' "No IP to probe" "resolution failed and no -FallbackIp '$remoteHost=<ip>' given; check arp -a for candidates"
     }
 
     # -- credential targeting -------------------------------------------------
     # Credential Manager keys on the TARGET string. A credential stored for
-    # 'NAS' does NOT apply to '\\192.168.1.50\...' — remapping by IP then
+    # 'NAS' does NOT apply to '\\192.168.1.50\...' - remapping by IP then
     # fails with "System error 5 / Access is denied", which looks like a
     # permissions problem but is a credential-target-keying mismatch.
     $credForHost = $credTargets | Where-Object { $_ -ieq $remoteHost } | Select-Object -First 1
@@ -369,7 +369,7 @@ foreach ($m in $mappings) {
     } elseif ($credTargets.Count -gt 0) {
         $near = $credTargets | Where-Object { $_ -match [regex]::Escape($remoteHost) -or ($probeIp -and $_ -match [regex]::Escape($probeIp)) }
         if ($credForIp -and -not $hostIsIp) {
-            Row 'WARN' "Credential keyed to IP '$credForIp', path uses name '$remoteHost'" "target mismatch — access by name will prompt/deny"
+            Row 'WARN' "Credential keyed to IP '$credForIp', path uses name '$remoteHost'" "target mismatch - access by name will prompt/deny"
         } elseif ($near) {
             Row 'WARN' "No exact credential target for '$remoteHost'" ("near-misses: " + ($near -join ', '))
         } else {
@@ -381,7 +381,7 @@ foreach ($m in $mappings) {
     if ($hostIsIp -and $credTargets.Count -gt 0 -and -not $credForHost) {
         $byName = $credTargets | Where-Object { $_ -notmatch '^\d{1,3}(\.\d{1,3}){3}$' } | Select-Object -First 3
         if ($byName) {
-            Row 'WARN' "Path uses IP '$remoteHost' but credentials are keyed to hostnames" ("(" + ($byName -join ', ') + ") — the System-error-5 mismatch; fix: cmdkey /add:$remoteHost /user:<user> /pass")
+            Row 'WARN' "Path uses IP '$remoteHost' but credentials are keyed to hostnames" ("(" + ($byName -join ', ') + ") - the System-error-5 mismatch; fix: cmdkey /add:$remoteHost /user:<user> /pass")
         }
     }
 
@@ -390,7 +390,7 @@ foreach ($m in $mappings) {
         if ($m.Status -eq 'OK' -and ($resolvedVia -or $hostIsIp)) {
             "$($m.LocalPath) healthy."
         } elseif (-not $hostIsIp -and -not $resolvedVia -and $nrptCatchAll -and $singleLabel -and $vpnAdapters -and $lanAlive) {
-            "$($m.LocalPath): LIVE VPN ($attribution) NRPT catch-all is swallowing '$remoteHost'. LAN host is fine at $probeIp. Fix (coexistence, NOT nrpt-clean.ps1): pin in HOSTS as admin -> Add-Content `$env:windir\System32\drivers\etc\hosts '$probeIp  $remoteHost'  — or remap by IP AND add a matching credential: cmdkey /add:$probeIp"
+            "$($m.LocalPath): LIVE VPN ($attribution) NRPT catch-all is swallowing '$remoteHost'. LAN host is fine at $probeIp. Fix (coexistence, NOT nrpt-clean.ps1): pin in HOSTS as admin -> Add-Content `$env:windir\System32\drivers\etc\hosts '$probeIp  $remoteHost'  - or remap by IP AND add a matching credential: cmdkey /add:$probeIp"
         } elseif (-not $hostIsIp -and -not $resolvedVia -and $nrptCatchAll -and -not $vpnAdapters) {
             "$($m.LocalPath): ORPHANED NRPT catch-all (no VPN interface up) killing resolution of '$remoteHost'. Fix: scripts/windows/nrpt-clean.ps1 -Apply"
         } elseif (-not $hostIsIp -and -not $resolvedVia -and $lanAlive) {
@@ -398,9 +398,9 @@ foreach ($m in $mappings) {
         } elseif (-not $hostIsIp -and -not $resolvedVia) {
             "$($m.LocalPath): '$remoteHost' unresolvable and no live IP found. Confirm host is powered on; supply -FallbackIp '$remoteHost=<ip>' to retest."
         } elseif ($probeIp -and -not $lanAlive) {
-            "$($m.LocalPath): resolves but $probeIp does not answer ICMP or TCP/445 — host down or SMB blocked, not a name problem."
+            "$($m.LocalPath): resolves but $probeIp does not answer ICMP or TCP/445 - host down or SMB blocked, not a name problem."
         } else {
-            "$($m.LocalPath): mapping $($m.Status) with name+network healthy — investigate credentials/permissions on the share side."
+            "$($m.LocalPath): mapping $($m.Status) with name+network healthy - investigate credentials/permissions on the share side."
         }
     $verdicts.Add($verdict)
 

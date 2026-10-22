@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Focused per-drive health report — every diagnostic signal for one
+    Focused per-drive health report - every diagnostic signal for one
     specific physical disk in one report.
 
 .DESCRIPTION
@@ -12,8 +12,8 @@
       - All disk-provider events for the disk over the time window
       - All storahci controller resets (skill correlates port to drive)
       - Per-event-ID breakdown with severity classification
-      - Recovery clues — failing-LBA distribution, time-clustering
-      - System dependencies — quick summary (uses drive-dependencies.ps1
+      - Recovery clues - failing-LBA distribution, time-clustering
+      - System dependencies - quick summary (uses drive-dependencies.ps1
         if available, else inline check)
 
 .PARAMETER DiskNumber
@@ -21,7 +21,7 @@
     and -Model.
 
 .PARAMETER DriveLetter
-    Drive letter — resolves to the underlying physical disk.
+    Drive letter - resolves to the underlying physical disk.
 
 .PARAMETER Model
     Model substring match (e.g. 'HGST', '980 PRO'). Picks the first match.
@@ -46,8 +46,8 @@
 
 .NOTES
     Exit codes (reflect whether the diagnostic RAN, not what it found):
-      0 success — diagnostic completed (verdict reported via panel + JSON)
-      3 not found — no matching disk
+      0 success - diagnostic completed (verdict reported via panel + JSON)
+      3 not found - no matching disk
 
     The drive's health verdict (HEALTHY / WATCHLIST / FAILING) is in
     the panel output and JSON; check the verdict field, not $LASTEXITCODE.
@@ -201,7 +201,7 @@ $thresholds = if ($isSsd) {
 # storahci controller resets are not reliably attributable to a specific
 # physical disk number (RaidPort enumeration doesn't always map 1:1 to
 # Disk N). Only count them toward THIS disk's verdict when the disk also
-# shows its own error events — otherwise they're system-wide noise that
+# shows its own error events - otherwise they're system-wide noise that
 # would falsely blame healthy drives sharing the same controller.
 $thisDiskHasOwnErrors = ($ev7 + $ev154 + $ev51) -gt 0
 $attributedResets = if ($thisDiskHasOwnErrors) { $result.storahciResets } else { 0 }
@@ -242,7 +242,7 @@ if ($Json) {
     $indicator = "Disk $($target.Number) / $($target.DriveLetters)"
     Write-TermLine (New-TermPanelOpen -Brand 'windows-ops' -Name 'windows-ops' -Subtitle 'disk-health' -Indicator $indicator)
     Write-TermLine (New-TermPanelVert)
-    Write-TermLine (New-TermSummary -Text "$($target.Model) · $($target.FirmwareVersion) · $($target.SizeGB) GB · $($target.MediaType)/$($target.BusType)")
+    Write-TermLine (New-TermSummary -Text "$($target.Model) | $($target.FirmwareVersion) | $($target.SizeGB) GB | $($target.MediaType)/$($target.BusType)")
     Write-TermLine (New-TermPanelVert)
 
     # Verdict section header carries the state via section-color
@@ -299,7 +299,7 @@ if ($Json) {
     } else {
         Write-TermLine (New-TermLeaf -Name 'reliability counter' -Meta 'unavailable' -IsLast)
         if ($smartctl) {
-            Write-TermLine (New-TermHint -Text 'smartctl installed but call failed — try: smartctl -A /dev/sdX')
+            Write-TermLine (New-TermHint -Text 'smartctl installed but call failed - try: smartctl -A /dev/sdX')
         } else {
             Write-TermLine (New-TermHint -Text 'scoop install smartmontools for SMART access')
         }

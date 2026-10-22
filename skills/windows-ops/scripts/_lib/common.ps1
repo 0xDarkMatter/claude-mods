@@ -1,7 +1,7 @@
 # windows-ops common helpers
 # Dot-source from any script: . "$PSScriptRoot\_lib\common.ps1"
 
-# Semantic exit codes (matches ATP §7.8)
+# Semantic exit codes (matches ATP section 7.8)
 $script:EXIT_OK           = 0
 $script:EXIT_ERROR        = 1
 $script:EXIT_USAGE        = 2
@@ -11,7 +11,7 @@ $script:EXIT_PRECONDITION = 5
 $script:EXIT_TIMEOUT      = 6
 $script:EXIT_UNAVAILABLE  = 7
 
-# Shared terminal design system (skills/_lib/term.ps1) — colorized, ASCII-aware
+# Shared terminal design system (skills/_lib/term.ps1) - colorized, ASCII-aware
 # framing on stderr (data stays plain on stdout via Write-Data). term.ps1 honors
 # NO_COLOR / FORCE_COLOR / TERM_ASCII. Degrade to plain text if the lib is gone.
 $script:__WinTermLib = Join-Path $PSScriptRoot '..\..\..\_lib\term.ps1'
@@ -25,7 +25,7 @@ if (Test-Path $script:__WinTermLib) {
 }
 
 function Write-Log {
-    # All logs to stderr — never pollute stdout. Colorized via term.ps1 (the [TAG]
+    # All logs to stderr - never pollute stdout. Colorized via term.ps1 (the [TAG]
     # text stays literal/greppable; color is amplification, never the only signal).
     param(
         [Parameter(Mandatory)][ValidateSet('INFO','WARN','ERROR','PASS','FAIL','DEBUG')]$Level,
@@ -43,7 +43,7 @@ function Write-Log {
 }
 
 function Write-Section {
-    # Cyan section header (no long === rules — design principle #4: whitespace,
+    # Cyan section header (no long === rules - design principle #4: whitespace,
     # not rules, separates sections). ASCII-aware via term.ps1.
     param([Parameter(Mandatory)][string]$Title)
     [Console]::Error.WriteLine("")
@@ -51,7 +51,7 @@ function Write-Section {
 }
 
 function Write-Data {
-    # Plain data row to stdout — only thing that should go there
+    # Plain data row to stdout - only thing that should go there
     param([Parameter(Mandatory, ValueFromPipeline)][object]$Object)
     process { $Object | Out-String -Stream | Where-Object { $_ -ne '' } | ForEach-Object { [Console]::Out.WriteLine($_) } }
 }
