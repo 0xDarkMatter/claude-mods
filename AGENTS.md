@@ -187,7 +187,7 @@ On "INIT:" message at session start:
 ## Testing
 
 ```bash
-just check        # THE gate: validate + spec + doc-drift + agnostic + hook contracts + resource contracts + skill size + reference contents (both warn-only) + skill suites + e2e suites + procsub-guard mutations
+just check        # THE gate: validate + spec + doc-drift + agnostic + hook contracts + resource contracts + PowerShell 5.1 parse + skill size + reference contents (both warn-only) + skill suites + e2e suites + procsub-guard mutations
 just check-fast   # same minus the behavioural suites (per-skill and e2e)
 ```
 

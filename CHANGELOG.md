@@ -94,6 +94,25 @@ feature releases live in the README "Recent Updates" section.
   `.env.template` pass the forbidden-file check; their content is still secret-scanned in
   Step 6, and real env files stay forbidden.
 
+- **The weekly Freshness job now runs every skill's live fact check, and a PR can no longer
+  ship one it skips.** Eight skills (cloudflare-ops, mcp-ops, migrate-ops, pypi-ops, react-ops,
+  rust-ops, tailwind-ops, vue-ops) shipped an `--offline`/`--live` verifier that
+  `.github/workflows/freshness.yml` never called, so their drift could never fail a run. Each
+  now has a `freshness-step.sh` step; pypi-ops checks its `assets/publish.yml` pins against the
+  GitHub API. `tests/check-resources.sh` finds every `skills/*/scripts/` file naming both flags
+  and fails the PR when no step runs it, unless it is in an `__fv_exempt` list with a reason
+  (fleet-doctor and loop-doctor check the local machine, not shipped facts); it also fails a
+  stale exemption and a step naming a script no longer on disk. Expect the next scheduled run
+  to report drift in mcp-ops, migrate-ops, react-ops and vue-ops until their facts are
+  refreshed: that is the check doing its job.
+
+- **The README leads with what the plugin does, shown in real runs.** A "What you get" list,
+  then "See it work": `fleet status` and `fleet sweep` in a throwaway repo, the live staleness
+  verifiers catching drift, `push-preflight` refusing a commit that carries a key, and
+  `docker-audit` on its own bad fixture, with light and dark screenshots under
+  `docs/screenshots/`. Installation moves up, and the long inventories fold into expandable
+  blocks.
+
 ### Fixed
 
 - **`docker-doctor.py` tests no longer depend on the host having Docker.** The doctor
@@ -162,6 +181,30 @@ feature releases live in the README "Recent Updates" section.
 
 - **pm-audit tests: a second `fresh()` no longer shadows the first** in the same embedded
   program (found by `fleet queue`'s duplicate-definition audit).
+
+- **Every PowerShell script now parses under Windows PowerShell 5.1.** 5.1, still the
+  default shell on Windows, reads a script without a byte-order mark in the ANSI code page, so
+  the em dashes, box rules and emoji in 13 of the 31 tracked `.ps1` files broke their parse,
+  among them `skills/_lib/term.ps1`, which every PowerShell skill script loads; pwsh 7 reads
+  UTF-8 and hid it. Tracked PowerShell files are now plain ASCII: decorative characters use
+  the ASCII stand-ins `docs/TERMINAL-DESIGN.md` registers, `term.ps1` builds its glyphs from
+  code points (its output is unchanged), and `phone-home-monitor.ps1` drops its PowerShell
+  7-only `??`. A new gate, `tests/check-ps51-parse.sh`, fails on any non-ASCII byte and, on
+  Windows, runs the real 5.1 parser over every file; it runs in `just check` and in both CI
+  jobs.
+
+- **fleet-ops: sweep and prune no longer call at-risk work removable.** `fleet sweep` no
+  longer hides a tree's uncommitted files behind an earlier verdict: KEEP, REMOVE, PARK, a
+  diff INSPECT and COMPETING rows now end `N uncommitted: <files>`, and their action says to
+  commit or review that work first; an OVERLAP pair with an uncommitted side says so before
+  "drop the other". `fleet prune` treats a lane with no commit of its own as *unstarted*, not
+  merged: REVIEW until an archived owner is proven or it has sat unclaimed for
+  `FLEET_PRUNE_UNSTARTED_DAYS` (30), shown by the sweep as the new informational `UNSTARTED`
+  verdict. The new `sessions.sh named` makes a transcript whose `EnterWorktree` or
+  `git worktree add` tool call names a tree a keep-only claim on it, pending calls included
+  (window `FLEET_SESSION_NAMED_DAYS`, 7; the session running prune is exempt). Both came from
+  a zero-commit lane that read SAFE / REMOVE while its session waited on its EnterWorktree
+  prompt.
 
 ## [3.9.0] - 2026-10-14
 
