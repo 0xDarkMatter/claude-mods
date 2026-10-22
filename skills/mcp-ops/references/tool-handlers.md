@@ -1,5 +1,8 @@
 # Tool Handlers
 
+Samples target the v2 SDKs (Python `mcp` 2.x `MCPServer`, TypeScript
+`@modelcontextprotocol/server` 2.x); v1 differences are in [v2-migration.md](v2-migration.md).
+
 ## Tool Schema Design
 
 Every MCP tool has an `inputSchema` that follows JSON Schema. The schema tells the LLM what arguments the tool accepts.
@@ -7,11 +10,11 @@ Every MCP tool has an `inputSchema` that follows JSON Schema. The schema tells t
 ### Basic Schema
 
 ```python
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 
-mcp = FastMCP("tools-demo")
+mcp = MCPServer("tools-demo")
 
-# FastMCP generates the schema from type hints and docstring
+# MCPServer generates the schema from type hints and docstring
 @mcp.tool()
 def search(query: str, max_results: int = 10) -> str:
     """Search for documents matching a query.
@@ -84,19 +87,21 @@ def create_ticket(ticket: CreateTicket) -> str:
 ### TypeScript Schema with Zod
 
 ```typescript
-import { z } from "zod";
+import * as z from "zod/v4";   // v2 needs zod ^4.2 (Standard Schema); zod 3 is unsupported
 
 const PriorityEnum = z.enum(["low", "medium", "high", "critical"]);
 
-server.tool(
+server.registerTool(
   "create_ticket",
-  "Create a new support ticket",
   {
-    title: z.string().describe("Short summary of the issue"),
-    body: z.string().describe("Detailed description"),
-    priority: PriorityEnum.default("medium").describe("Ticket priority level"),
-    labels: z.array(z.string()).default([]).describe("Labels to apply"),
-    assignee: z.string().optional().describe("GitHub username to assign"),
+    description: "Create a new support ticket",
+    inputSchema: z.object({
+      title: z.string().describe("Short summary of the issue"),
+      body: z.string().describe("Detailed description"),
+      priority: PriorityEnum.default("medium").describe("Ticket priority level"),
+      labels: z.array(z.string()).default([]).describe("Labels to apply"),
+      assignee: z.string().optional().describe("GitHub username to assign"),
+    }),
   },
   async ({ title, body, priority, labels, assignee }) => {
     const result = await api.createTicket({ title, body, priority, labels, assignee });
@@ -120,12 +125,18 @@ server.tool(
 
 ## Input Validation
 
-### Python with Pydantic (FastMCP)
+### Python with Pydantic (MCPServer)
 
-FastMCP automatically validates inputs against type hints:
+MCPServer validates inputs against the type hints (Pydantic) before your function runs.
+Checks you write yourself should raise `ToolError`: in v2 it is the only exception
+whose message reaches the model. Any other exception reads
+`Error executing tool <name>`.
 
 ```python
-from pydantic import Field, field_validator
+import json
+
+from pydantic import Field
+from mcp.server.mcpserver.exceptions import ToolError
 
 @mcp.tool()
 def query_database(
@@ -139,7 +150,7 @@ def query_database(
         limit: Maximum rows to return (1-1000)
     """
     if not sql.strip().upper().startswith("SELECT"):
-        raise ValueError("Only SELECT queries are allowed")
+        raise ToolError("Only SELECT queries are allowed")
     results = db.execute(f"{sql} LIMIT {limit}")
     return json.dumps(results, default=str)
 ```
@@ -182,15 +193,16 @@ def read_file(args: FileReadArgs) -> str:
 ### TypeScript with Zod
 
 ```typescript
-server.tool(
+server.registerTool(
   "query_database",
-  "Execute a read-only SQL query",
   {
-    sql: z.string()
-      .refine((s) => s.trim().toUpperCase().startsWith("SELECT"), {
+    description: "Execute a read-only SQL query",
+    inputSchema: z.object({
+      sql: z.string().refine((s) => s.trim().toUpperCase().startsWith("SELECT"), {
         message: "Only SELECT queries are allowed",
       }),
-    limit: z.number().int().min(1).max(1000).default(100),
+      limit: z.number().int().min(1).max(1000).default(100),
+    }),
   },
   async ({ sql, limit }) => {
     const results = await db.query(`${sql} LIMIT ${limit}`);
@@ -220,16 +232,21 @@ def get_user(user_id: str) -> str:
 
 ### Image Content
 
+Return the `Image` helper (or ready-made content blocks). A plain `dict` is **not** an
+image: MCPServer wraps dict, list and scalar returns as JSON text plus
+`structured_content`.
+
 ```python
-import base64
+import io
+import json
+
+import matplotlib.pyplot as plt
+from mcp.server.mcpserver import Image
+from mcp.types import TextContent
 
 @mcp.tool()
 def generate_chart(data: str, chart_type: str = "bar") -> list:
     """Generate a chart image from data."""
-    # Generate chart with matplotlib
-    import matplotlib.pyplot as plt
-    import io
-
     fig, ax = plt.subplots()
     parsed = json.loads(data)
     ax.bar(parsed["labels"], parsed["values"])
@@ -237,21 +254,20 @@ def generate_chart(data: str, chart_type: str = "bar") -> list:
 
     buf = io.BytesIO()
     fig.savefig(buf, format="png")
-    buf.seek(0)
     plt.close(fig)
 
-    image_b64 = base64.b64encode(buf.read()).decode("utf-8")
-
-    # Return both image and text description
+    # Image converts to an ImageContent block (base64 + mime type) for you
     return [
-        {"type": "image", "data": image_b64, "mimeType": "image/png"},
-        {"type": "text", "text": f"Generated {chart_type} chart with {len(parsed['labels'])} data points."},
+        Image(data=buf.getvalue(), format="png"),
+        TextContent(type="text", text=f"Generated {chart_type} chart with {len(parsed['labels'])} data points."),
     ]
 ```
 
 ### Embedded Resources
 
 ```python
+from mcp.types import EmbeddedResource, TextContent, TextResourceContents
+
 @mcp.tool()
 def analyze_file(path: str) -> list:
     """Analyze a file and return results with the file content as an embedded resource."""
@@ -259,17 +275,16 @@ def analyze_file(path: str) -> list:
     analysis = perform_analysis(content)
 
     return [
-        {
-            "type": "resource",
-            "resource": {
-                "uri": f"file://{path}",
-                "mimeType": "text/plain",
-                "text": content,
-            },
-        },
-        {"type": "text", "text": f"Analysis:\n{analysis}"},
+        EmbeddedResource(
+            type="resource",
+            resource=TextResourceContents(uri=f"file://{path}", mime_type="text/plain", text=content),
+        ),
+        TextContent(type="text", text=f"Analysis:\n{analysis}"),
     ]
 ```
+
+v2 type fields are snake_case in Python (`mime_type`, `input_schema`, `is_error`); the
+JSON on the wire stays camelCase.
 
 ### Multiple Content Items
 
@@ -282,17 +297,23 @@ def compare_files(path_a: str, path_b: str) -> list:
     diff = compute_diff(content_a, content_b)
 
     return [
-        {"type": "text", "text": f"## File A: {path_a}\n```\n{content_a}\n```"},
-        {"type": "text", "text": f"## File B: {path_b}\n```\n{content_b}\n```"},
-        {"type": "text", "text": f"## Differences\n```diff\n{diff}\n```"},
+        TextContent(type="text", text=f"## File A: {path_a}\n```\n{content_a}\n```"),
+        TextContent(type="text", text=f"## File B: {path_b}\n```\n{content_b}\n```"),
+        TextContent(type="text", text=f"## Differences\n```diff\n{diff}\n```"),
     ]
 ```
 
 ## Progress Notifications
 
-For long-running operations, report progress so the client can display updates:
+For long-running operations, report progress so the client can display updates.
+`report_progress` takes the absolute current value (not a delta), and is a no-op when
+the caller did not ask for progress:
 
 ```python
+import json
+
+from mcp.server.mcpserver import Context
+
 @mcp.tool()
 async def batch_process(items: list[str], ctx: Context) -> str:
     """Process a batch of items with progress reporting."""
@@ -300,8 +321,7 @@ async def batch_process(items: list[str], ctx: Context) -> str:
     total = len(items)
 
     for i, item in enumerate(items):
-        await ctx.report_progress(i, total)
-        await ctx.info(f"Processing item {i+1}/{total}: {item}")
+        await ctx.report_progress(i, total, message=f"Processing item {i+1}/{total}: {item}")
 
         try:
             result = await process_single_item(item)
@@ -323,47 +343,53 @@ async def batch_process(items: list[str], ctx: Context) -> str:
 ### Returning Errors to the LLM
 
 ```python
+from mcp.server.mcpserver.exceptions import ToolError
+
 @mcp.tool()
 def delete_item(item_id: str) -> str:
     """Delete an item by ID."""
+    item = db.get(item_id)
+    if item is None:
+        # ToolError -> is_error=True, and the model reads this message
+        raise ToolError(f"Item {item_id} not found")
+    if item.protected:
+        raise ToolError(f"Item {item_id} is protected and cannot be deleted")
     try:
-        item = db.get(item_id)
-        if item is None:
-            # Raise to signal error - FastMCP sets isError=True
-            raise ValueError(f"Item {item_id} not found")
-        if item.protected:
-            raise PermissionError(f"Item {item_id} is protected and cannot be deleted")
         db.delete(item_id)
-        return f"Deleted item {item_id}"
-    except (ValueError, PermissionError):
-        raise  # Re-raise known errors for the LLM
-    except Exception as e:
-        raise RuntimeError(f"Failed to delete item: {e}")
+    except DatabaseUnavailable as e:
+        raise ToolError(f"Database unavailable, retry shortly: {e}")
+    # Any other exception: the model sees only "Error executing tool delete_item",
+    # and the traceback goes to the server log
+    return f"Deleted item {item_id}"
 ```
+
+Raise `MCPError` (`from mcp import MCPError`) only when the *request* should be rejected
+(for example a missing client capability). It becomes a JSON-RPC error that the host
+sees and the model never reads.
 
 ### TypeScript Error Responses
 
 ```typescript
-server.tool("delete_item", "Delete an item", { item_id: z.string() }, async ({ item_id }) => {
-  try {
-    const item = await db.get(item_id);
-    if (!item) {
+server.registerTool(
+  "delete_item",
+  { description: "Delete an item", inputSchema: z.object({ item_id: z.string() }) },
+  async ({ item_id }) => {
+    try {
+      const item = await db.get(item_id);
+      if (!item) {
+        return { content: [{ type: "text", text: `Item ${item_id} not found` }], isError: true };
+      }
+      await db.delete(item_id);
+      return { content: [{ type: "text", text: `Deleted item ${item_id}` }] };
+    } catch (error) {
+      // Throwing would produce the same isError result; ProtocolError is for rejecting the request
       return {
-        content: [{ type: "text", text: `Item ${item_id} not found` }],
+        content: [{ type: "text", text: `Failed to delete: ${(error as Error).message}` }],
         isError: true,
       };
     }
-    await db.delete(item_id);
-    return {
-      content: [{ type: "text", text: `Deleted item ${item_id}` }],
-    };
-  } catch (error) {
-    return {
-      content: [{ type: "text", text: `Failed to delete: ${error.message}` }],
-      isError: true,
-    };
   }
-});
+);
 ```
 
 ### Error Best Practices
@@ -373,8 +399,8 @@ server.tool("delete_item", "Delete an item", { item_id: z.string() }, async ({ i
 | Always include actionable message | LLM can report to user or retry differently |
 | Distinguish user errors from system errors | User errors: "Invalid SQL syntax"; system: "Database unavailable" |
 | Never expose stack traces | Security risk; use structured error messages |
-| Return `isError: true` for failures | Clients and LLMs can distinguish success from failure |
-| Log internal details server-side | Use `ctx.error()` or logging for debugging |
+| Signal failures as tool errors (`ToolError` / `isError: true`) | Clients and LLMs can distinguish success from failure; a returned error string looks like success |
+| Log internal details server-side | Use the `logging` module (to stderr for stdio servers); `ctx.error()` is deprecated (SEP-2577) |
 
 ## Tool Composition
 
@@ -406,8 +432,18 @@ async def analyze_and_fix(filepath: str, ctx: Context) -> str:
 
 ### Dependency Injection
 
+The lifespan's yielded object is the shared dependency container. Python v2 also has
+`Resolve(fn)` parameters, filled by your function and hidden from the model (see the
+[Dependencies](https://py.sdk.modelcontextprotocol.io/handlers/dependencies/) docs).
+
 ```python
+import json
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
+
+import httpx
+from mcp.server import MCPServer
+from mcp.server.mcpserver import Context
 
 @dataclass
 class AppDependencies:
@@ -416,25 +452,24 @@ class AppDependencies:
     cache: dict
 
 @asynccontextmanager
-async def lifespan(server: FastMCP):
+async def lifespan(server: MCPServer):
     deps = AppDependencies(
         db=await create_pool(),
         http=httpx.AsyncClient(),
         cache={},
     )
-    server.state["deps"] = deps
     try:
-        yield
+        yield deps                     # becomes ctx.request_context.lifespan_context
     finally:
         await deps.http.aclose()
         await deps.db.close()
 
-mcp = FastMCP("di-server", lifespan=lifespan)
+mcp = MCPServer("di-server", lifespan=lifespan)
 
 @mcp.tool()
 async def search_and_cache(query: str, ctx: Context) -> str:
     """Search with caching."""
-    deps: AppDependencies = ctx.server.state["deps"]
+    deps: AppDependencies = ctx.request_context.lifespan_context
 
     if query in deps.cache:
         return deps.cache[query]
@@ -452,7 +487,7 @@ async def search_and_cache(query: str, ctx: Context) -> str:
 async def bulk_update(
     updates: list[dict],
     continue_on_error: bool = True,
-    ctx: Context = None,
+    ctx: Context | None = None,   # injected; hidden from the tool schema
 ) -> str:
     """Apply multiple updates, optionally continuing past errors.
 
@@ -523,6 +558,21 @@ def create_item_idempotent(idempotency_key: str, title: str, body: str) -> str:
 ## Side Effects and Confirmation
 
 ### Read-Only vs Mutating Tools
+
+Declare the behaviour in tool annotations too, so hosts can decide when to ask the user.
+v2 Python fields are snake_case:
+
+```python
+from mcp.types import ToolAnnotations
+
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
+def get_status() -> str:
+    ...
+
+@mcp.tool(annotations=ToolAnnotations(destructive_hint=True, idempotent_hint=False))
+def purge_cache() -> str:
+    ...
+```
 
 ```python
 # Read-only: no confirmation needed
@@ -630,11 +680,16 @@ def search(
 
 ## Real-World Tool Examples
 
+Each example raises `ToolError` (`from mcp.server.mcpserver.exceptions import ToolError`)
+for failures the model should read and react to.
+
 ### File System Tools
 
 ```python
 import os
 import stat
+
+from mcp.server.mcpserver.exceptions import ToolError
 
 @mcp.tool()
 def read_file(path: str, encoding: str = "utf-8") -> str:
@@ -646,11 +701,11 @@ def read_file(path: str, encoding: str = "utf-8") -> str:
     """
     path = os.path.realpath(path)
     if not os.path.isfile(path):
-        raise FileNotFoundError(f"File not found: {path}")
+        raise ToolError(f"File not found: {path}")
 
     file_size = os.path.getsize(path)
     if file_size > 10 * 1024 * 1024:  # 10MB limit
-        raise ValueError(f"File too large ({file_size} bytes). Maximum is 10MB.")
+        raise ToolError(f"File too large ({file_size} bytes). Maximum is 10MB.")
 
     with open(path, encoding=encoding) as f:
         return f.read()
@@ -713,7 +768,7 @@ def query_sqlite(
     """
     sql_stripped = sql.strip().upper()
     if not sql_stripped.startswith("SELECT") and not sql_stripped.startswith("WITH"):
-        raise ValueError("Only SELECT and WITH (CTE) queries are allowed")
+        raise ToolError("Only SELECT and WITH (CTE) queries are allowed")
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -750,9 +805,9 @@ async def github_search(
         per_page: Results per page (1-100)
     """
     if search_type not in ("repositories", "code", "issues"):
-        raise ValueError(f"Invalid search type: {search_type}")
+        raise ToolError(f"Invalid search type: {search_type}")
     if not 1 <= per_page <= 100:
-        raise ValueError("per_page must be between 1 and 100")
+        raise ToolError("per_page must be between 1 and 100")
 
     token = os.environ.get("GITHUB_TOKEN")
     headers = {"Accept": "application/vnd.github.v3+json"}
@@ -824,7 +879,7 @@ async def fetch_webpage(url: str, extract_text: bool = True) -> str:
         extract_text: If true, extract text only; if false, return raw HTML
     """
     if not url.startswith(("http://", "https://")):
-        raise ValueError("URL must start with http:// or https://")
+        raise ToolError("URL must start with http:// or https://")
 
     async with httpx.AsyncClient(follow_redirects=True) as client:
         resp = await client.get(url, timeout=30.0, headers={
