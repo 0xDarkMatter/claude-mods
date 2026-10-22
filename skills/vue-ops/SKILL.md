@@ -14,7 +14,7 @@ Comprehensive Vue 3 reference covering Composition API, Pinia, Vue Router, Nuxt 
 
 Still on Vue 2, or mounting Vue islands in server-rendered Twig pages? That is **frontend-upgrade-ops** (migration build, Vuex to Pinia, islands, Alpine-or-Vue).
 
-> Vue 3 / Nuxt 4 ecosystem facts verified as of 2026-07-05.
+> Vue 3 / Nuxt 4 ecosystem facts verified as of 2026-10-22 (Pinia 4, VueUse 15, Vitest 5).
 
 ---
 
@@ -201,6 +201,13 @@ defineSlots<{
 
 ## Pinia Quick Start
 
+```bash
+npm install pinia @vue/devtools-api   # Pinia 4: devtools-api v8 is a required peer
+```
+
+Pinia 4 (2026-07-14) is ESM-only, peers `vue ^3.5.11`, and changes no store API; the
+upgrade notes are in [state-routing.md](./references/state-routing.md#pinia-4).
+
 ### Setup syntax (recommended — composable style)
 
 ```ts
@@ -272,7 +279,7 @@ pinia.use(piniaPluginPersistedstate)
 
 // In store:
 export const useAuthStore = defineStore('auth', () => { ... }, {
-  persist: true, // or { storage: sessionStorage, paths: ['token'] }
+  persist: true, // or { storage: sessionStorage, pick: ['token'] } (v4 renamed paths)
 })
 ```
 
@@ -429,7 +436,7 @@ What rendering strategy does my app need?
 </div>
 ```
 
-**Tip:** before writing a composable, check [VueUse](https://vueuse.org/) — 200+ battle-tested composables (`useLocalStorage`, `useIntersectionObserver`, `useDark`, ...) that handle SSR and cleanup edge cases.
+**Tip:** before writing a composable, check [VueUse](https://vueuse.org/) — 200+ battle-tested composables (`useLocalStorage`, `useIntersectionObserver`, `useDark`, ...) that handle SSR and cleanup edge cases. VueUse 15 (2026-09-16) needs Node 22+, drops `templateRef` (use Vue's `useTemplateRef`), replaces the `interval`/`immediate` timer options of `useNow`, `useTimestamp` and others with `scheduler`, and makes `useThrottleFn` trailing by default ([release notes](https://github.com/vueuse/vueuse/releases/tag/v15.0.0)).
 
 ## Common Gotchas
 
@@ -457,7 +464,7 @@ What rendering strategy does my app need?
 | [./references/composition-api.md](./references/composition-api.md) | Composables, provide/inject, template refs, custom directives, Teleport, Suspense, slots, transitions, v-model deep patterns |
 | [./references/state-routing.md](./references/state-routing.md) | Pinia advanced patterns (plugins, SSR, store composition), Vue Router (guards, meta typing, scroll behavior, transitions) |
 | [./references/nuxt.md](./references/nuxt.md) | Nuxt 4 directory structure, data fetching, server routes, middleware, plugins, modules, SEO, deployment, Nuxt Content |
-| [./references/testing.md](./references/testing.md) | Vitest setup, Vue Test Utils, Pinia/Router testing, composable testing, MSW, Playwright, Nuxt test utils |
+| [./references/testing.md](./references/testing.md) | Vitest 5 setup and breaking changes, Vue Test Utils, Pinia/Router testing, composable testing, MSW, Playwright, Nuxt test utils |
 
 ## Staleness Verifier
 

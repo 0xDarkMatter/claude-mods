@@ -1,7 +1,7 @@
 {
   "_comment": "Canonical fast-moving facts the vue-ops skill encodes. scripts/check-vue-facts.py asserts SKILL.md + references name these consistently (--offline) and probes the npm registry for major-version drift (--live). Edit deliberately: a change here is a skill-content decision, not housekeeping. documented_major is the major the skill's prose commits to (vue 3, nuxt 4) or the current tracked major for ecosystem libs the prose names without pinning a version.",
   "schema": "claude-mods.vue-ops.facts/v1",
-  "as_of": "2026-07-05",
+  "as_of": "2026-10-22",
   "vue_major": 3,
   "version_gates": {
     "_comment": "Vue 3 minor-version gates the skill centers on. --offline asserts each token is named in SKILL.md/references prose; a missing token means the prose stopped teaching a feature it claims.",
@@ -13,10 +13,10 @@
   "packages": {
     "vue":               { "documented_major": 3, "prose": ["Vue 3"],              "role": "core (Composition API, <script setup>)" },
     "nuxt":              { "documented_major": 4, "prose": ["Nuxt 4"],             "role": "meta-framework (SSR/SSG/ISR, app/ srcDir host)" },
-    "pinia":             { "documented_major": 3, "prose": ["pinia"],              "role": "store" },
+    "pinia":             { "documented_major": 4, "prose": ["pinia", "Pinia 4"],   "role": "store (v4 floors + install in references/state-routing.md)" },
     "vue-router":        { "documented_major": 5, "prose": ["vue-router"],         "role": "routing" },
-    "@vueuse/core":      { "documented_major": 14, "prose": ["VueUse"],            "role": "composable collection" },
+    "@vueuse/core":      { "documented_major": 15, "prose": ["VueUse", "VueUse 15"], "role": "composable collection (v15 breaking changes in the SKILL.md tip)" },
     "@vue/test-utils":   { "documented_major": 2, "prose": ["@vue/test-utils"],    "role": "component testing" },
-    "vitest":            { "documented_major": 4, "prose": ["vitest"],             "role": "test runner" }
+    "vitest":            { "documented_major": 5, "prose": ["vitest", "Vitest 5"], "role": "test runner (v5 changes in references/testing.md)" }
   }
 }
