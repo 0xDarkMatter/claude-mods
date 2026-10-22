@@ -20,7 +20,7 @@
 
 </div>
 
-**claude-mods** is a Claude Code plugin built on one premise: a skill that only *tells* the model something is a suggestion, and a skill that ships a gate is a guarantee. Its 112 skills carry the expert depth you'd expect - React, Rust, PostgreSQL, Cloudflare Workers, Next.js - but the ones that earn the install are the ones that run *agents*: a headless-worker spawner, a test-gated landing queue for parallel branches, a graduated-autonomy ladder for scheduled loops, and a security layer pointed at the agent itself. 63 skills ship executable tooling, 58 ship their own test suites, and 29 carry staleness verifiers that trip when the world moves under them.
+**claude-mods** is a Claude Code plugin built on one premise: a skill that only *tells* the model something is a suggestion, and a skill that ships a gate is a guarantee. Its 112 skills carry the expert depth you'd expect - React, Rust, PostgreSQL, Cloudflare Workers, Next.js - but the ones that earn the install are the ones that run *agents*: a headless-worker spawner, a test-gated landing queue for parallel branches, a graduated-autonomy ladder for scheduled loops, and a security layer pointed at the agent itself. 63 skills ship executable tooling, 58 ship their own test suites, and 28 carry staleness verifiers that trip when the world moves under them.
 
 Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms) and Anthropic's [patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), it installs as a standard plugin and toggles off as easily as it toggles on.
 
@@ -32,7 +32,7 @@ Built on the [Agent Skills specification](https://agentskills.io/specification) 
 - **Cheap workers you can hand a task to.** [`fleet-worker`](skills/fleet-worker/) runs a headless `claude -p` on GLM, Sonnet or Haiku in its own git worktree and config directory, so it can't reach your credentials, then passes its branch to the landing queue.
 - **Scheduled loops earn their autonomy.** [`loop-ops`](skills/loop-ops/) puts every loop on an L1 report → L3 unattended ladder, and `loop-check` won't pass a loop with an unbounded scope, no gate or no kill switch.
 - **A guard on the agent's own attack surface.** Behavioural dependency checks with a 7-day cooldown, a hidden-Unicode scan for instruction files, and a pre-push secret scan with no override flag.
-- **Stale knowledge trips an alarm instead of rotting.** 29 skills ship a verifier that checks their version claims against npm, crates.io and the rest. CI runs it offline on every push and live every Monday.
+- **Stale knowledge trips an alarm instead of rotting.** 28 skills ship a verifier that checks their version claims against npm, crates.io and the rest. CI runs it offline on every push and live every Monday.
 - **Stack depth written for agents, not tutorials.** Production-mined gotchas, version-aware audits (`nextjs-ops` won't demand a v16 idiom of a v14 codebase), and about 100 tokens per skill until one is relevant.
 - **Sessions you can hand over.** `/save` and `/sync` keep task state in a file in your repo, so work resumes on another machine or with a teammate.
 
@@ -241,7 +241,7 @@ An agent that installs packages, reads web pages and edits its own settings has 
 
 ### 3. Its knowledge knows when it's stale
 
-A skill that says "modern R" or "Hono v4" is making a claim that will be false within a year. claude-mods makes those claims **machine-checked**: 29 skills ship a staleness verifier with an `--offline` mode (does the prose still match the catalogue?) and a `--live` mode (does the catalogue still match the world?). CI runs the first on every push; a scheduled workflow runs the second every Monday. When TypeScript ships a native compiler or ADA deadlines move, a tripwire fires instead of a reference quietly rotting.
+A skill that says "modern R" or "Hono v4" is making a claim that will be false within a year. claude-mods makes those claims **machine-checked**: 28 skills ship a staleness verifier with an `--offline` mode (does the prose still match the catalogue?) and a `--live` mode (does the catalogue still match the world?). CI runs the first on every push; a scheduled workflow runs the second every Monday. When TypeScript ships a native compiler or ADA deadlines move, a tripwire fires instead of a reference quietly rotting.
 
 The same instinct runs through the tooling: 63 skills ship real scripts, 58 ship their own `tests/run.sh`, more than 40 use exit-10 as a machine-readable findings signal, and 5.5 MB of references load progressively - ~100 tokens per skill until one is relevant.
 
