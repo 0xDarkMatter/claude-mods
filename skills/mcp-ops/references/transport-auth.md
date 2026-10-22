@@ -4,6 +4,19 @@ Samples target the v2 SDKs (Python `mcp` 2.x `MCPServer`, TypeScript
 `@modelcontextprotocol/server` 2.x) and spec revision 2026-07-28; v1 differences are in
 [v2-migration.md](v2-migration.md).
 
+## Contents
+
+- [stdio Transport](#stdio-transport)
+- [SSE Transport (Legacy)](#sse-transport-legacy)
+- [Streamable HTTP Transport](#streamable-http-transport)
+- [Transport Selection Guide](#transport-selection-guide)
+- [Session Management](#session-management)
+- [Authentication](#authentication)
+- [Rate Limiting](#rate-limiting)
+- [CORS Configuration](#cors-configuration)
+- [TLS/HTTPS for Production](#tlshttps-for-production)
+- [Proxy Patterns](#proxy-patterns)
+
 ## stdio Transport
 
 ### How It Works

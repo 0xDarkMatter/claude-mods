@@ -4,6 +4,23 @@ Samples target the v2 SDKs (Python `mcp` 2.x `MCPServer`, TypeScript
 `@modelcontextprotocol/server` 2.x). For v1 → v2 renames and the 2026-07-28 protocol
 changes, see [v2-migration.md](v2-migration.md).
 
+## Contents
+
+- [Protocol Overview](#protocol-overview)
+- [Server Lifecycle: Two Protocol Eras](#server-lifecycle-two-protocol-eras)
+- [Capability Negotiation](#capability-negotiation)
+- [MCPServer Setup (Python)](#mcpserver-setup-python)
+- [TypeScript SDK Server Setup](#typescript-sdk-server-setup)
+- [Multi-Tool Server Organization](#multi-tool-server-organization)
+- [Middleware Patterns](#middleware-patterns)
+- [Error Handling](#error-handling)
+- [Logging](#logging)
+- [Graceful Shutdown](#graceful-shutdown)
+- [Connection and Session Management](#connection-and-session-management)
+- [Project Structure](#project-structure)
+- [Claude Desktop Configuration](#claude-desktop-configuration)
+- [Claude Code Configuration](#claude-code-configuration)
+
 ## Protocol Overview
 
 MCP uses **JSON-RPC 2.0** as its wire protocol. Every message is a JSON object with:

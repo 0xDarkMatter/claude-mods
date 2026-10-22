@@ -4,6 +4,20 @@ Samples target the v2 SDKs (Python `mcp` 2.x, TypeScript `@modelcontextprotocol/
 and `/client` 2.x) and MCP Inspector 2.x; v1 differences are in
 [v2-migration.md](v2-migration.md).
 
+## Contents
+
+- [MCP Inspector](#mcp-inspector)
+- [Unit Testing Tools (Python)](#unit-testing-tools-python)
+- [Unit Testing Tools (TypeScript)](#unit-testing-tools-typescript)
+- [Integration Testing](#integration-testing)
+- [Mock Clients](#mock-clients)
+- [Protocol Debugging](#protocol-debugging)
+- [Common Issues and Solutions](#common-issues-and-solutions)
+- [CI Testing](#ci-testing)
+- [Performance Testing](#performance-testing)
+- [Debugging Tools](#debugging-tools)
+- [Error Reproduction](#error-reproduction)
+
 ## MCP Inspector
 
 The MCP Inspector is an interactive debugging tool for testing MCP servers without a

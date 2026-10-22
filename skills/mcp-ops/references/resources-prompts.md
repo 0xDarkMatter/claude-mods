@@ -3,6 +3,19 @@
 Samples target the v2 SDKs (Python `mcp` 2.x `MCPServer`, TypeScript
 `@modelcontextprotocol/server` 2.x); v1 differences are in [v2-migration.md](v2-migration.md).
 
+## Contents
+
+- [Resource Overview](#resource-overview)
+- [Resource URIs](#resource-uris)
+- [Static Resources](#static-resources)
+- [Dynamic Resources](#dynamic-resources)
+- [MIME Types](#mime-types)
+- [Resource Subscriptions](#resource-subscriptions)
+- [Resource Listing](#resource-listing)
+- [Prompt Templates](#prompt-templates)
+- [Prompt Best Practices](#prompt-best-practices)
+- [Combining Resources and Tools](#combining-resources-and-tools)
+
 ## Resource Overview
 
 Resources provide **read-only data** to the LLM. They are identified by URIs and can be static or dynamic.

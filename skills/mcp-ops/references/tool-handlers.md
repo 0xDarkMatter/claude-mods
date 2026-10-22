@@ -3,6 +3,20 @@
 Samples target the v2 SDKs (Python `mcp` 2.x `MCPServer`, TypeScript
 `@modelcontextprotocol/server` 2.x); v1 differences are in [v2-migration.md](v2-migration.md).
 
+## Contents
+
+- [Tool Schema Design](#tool-schema-design)
+- [Input Validation](#input-validation)
+- [Return Types](#return-types)
+- [Progress Notifications](#progress-notifications)
+- [Error Responses](#error-responses)
+- [Tool Composition](#tool-composition)
+- [Batch Operations](#batch-operations)
+- [Idempotency](#idempotency)
+- [Side Effects and Confirmation](#side-effects-and-confirmation)
+- [Schema Evolution](#schema-evolution)
+- [Real-World Tool Examples](#real-world-tool-examples)
+
 ## Tool Schema Design
 
 Every MCP tool has an `inputSchema` that follows JSON Schema. The schema tells the LLM what arguments the tool accepts.
