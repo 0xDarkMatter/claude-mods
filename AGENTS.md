@@ -156,6 +156,9 @@ On "INIT:" message at session start:
   nothing). Set `MSYS_NO_PATHCONV=1` for such calls, and never let a gate swallow a
   tool's exit-2 error — that combination once made the agnostic gate pass while
   scanning nothing.
+- **Git for Windows' grep 3.0 aborts on `-iF` in the C locale** (SIGABRT, exit 134,
+  any pattern), so `LC_ALL=C grep -iF ... 2>/dev/null` reads as "no match". Use
+  `-iE` on ERE-quoted text, or `-F` alone (sessions.sh `named` does).
 - **`done < <(producer)` never sees the producer's exit status**: a producer that dies
   part-way just ends the loop, and the suite passes on fewer checks (52 of 100 cases once
   vanished behind "164 passed, 0 failed"). Capture, check, loop: `rc=0;
