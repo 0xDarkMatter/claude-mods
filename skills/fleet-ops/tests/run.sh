@@ -170,6 +170,29 @@ uni_out="$(cd "$REPO" && env -u TERM_ASCII -u FLEET_ASCII LC_ALL=en_US.UTF-8 bas
 case "$uni_out" in *"$(printf '\xc2\xb7')"*) ok "unicode mode still renders the U+00B7 separator";;
   *) no "unicode mode lost its separator (ASCII fallback leaked into UTF-8 output)";; esac
 
+echo "-- colour is zero-width: FORCE_COLOR=1 must not move a single column --"
+# Regression: term_panel_close sized its rule with ${#} over the pre-coloured
+# hotkeys/healths __fleet_footer hands it, so every ESC[..m byte counted as a
+# column and the footer came out 62 cells against an 80-cell header whenever
+# colour was on. printf %-14s/%-10s ate the leaf rows' rail + meta padding the
+# same way. Under TERM_ASCII=1 bytes == cells, so the widths compare exactly.
+sgr_esc="$(printf '\033')"
+sgr_strip() { sed "s/${sgr_esc}\[[0-9;]*m//g"; }
+geo="$(TERM_ASCII=1 FORCE_COLOR=1 bash "$FLEET" status 2>&1 | sgr_strip)"
+geo_hdr="$(printf '%s\n' "$geo" | grep '^+--' | head -n1)"
+geo_ftr="$(printf '%s\n' "$geo" | grep '^+--' | tail -n1)"
+if [ -n "$geo_hdr" ] && [ "$geo_hdr" != "$geo_ftr" ] && [ "${#geo_hdr}" -eq "${#geo_ftr}" ]; then
+  ok "footer width matches header with FORCE_COLOR=1 (${#geo_ftr} cols)"
+else no "footer width matches header with FORCE_COLOR=1 (header ${#geo_hdr}, footer ${#geo_ftr})"; fi
+# The same invariant over the whole panel in UTF-8, where multibyte rails made
+# byte padding wrong even uncoloured: stripped colour output == plain output.
+# Ages tick between the two runs (9s -> 10s), so the trailing age is normalised.
+geo_age() { sed -E 's/[0-9]+(s|m|h[0-9]+m)$/AGE/'; }
+env -u TERM_ASCII -u FORCE_COLOR LC_ALL=en_US.UTF-8 bash "$FLEET" status 2>&1 | geo_age > "$SB/geo-plain"
+env -u TERM_ASCII LC_ALL=en_US.UTF-8 FORCE_COLOR=1 bash "$FLEET" status 2>&1 | sgr_strip | geo_age > "$SB/geo-colour"
+if cmp -s "$SB/geo-plain" "$SB/geo-colour"; then ok "UTF-8 panel: colour moves no column"
+else no "UTF-8 panel: colour moves columns ($(diff "$SB/geo-plain" "$SB/geo-colour" | grep '^[<>]' | head -n2 | tr '\n' '|'))"; fi
+
 echo "-- scrub gate still works on a slashed branch --"
 wt="$SB/wt-feat_foo"
 # Marker built via printf so this source file never contains the contiguous

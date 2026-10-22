@@ -350,6 +350,8 @@ term_tree_connector 1 1; echo; term_tree_connector 1 2; echo
 term_tree_indent 1; echo; term_tree_indent 2; echo
 term_tree_node prefix conn label meta; term_tree_node prefix conn label
 term_table_row a b c d; term_empty nothing; term_color green text; echo
+term_strip "$(term_color green text)"; echo; term_vis_width "$(term_color red ab)"; echo
+term_pad "$(term_color cyan ab)" 6; echo
 PROBE
 __probe_out="$(FORCE_COLOR=1 bash "$__probe" 2>&1)"
 if printf '%s' "$__probe_out" | LC_ALL=C grep -q '[^[:print:][:cntrl:]]'; then
@@ -357,6 +359,58 @@ if printf '%s' "$__probe_out" | LC_ALL=C grep -q '[^[:print:][:cntrl:]]'; then
         | LC_ALL=C grep -o '[^[:print:][:cntrl:]]' | LC_ALL=C sort -u | tr -d '\n' | od -An -c | tr -s ' ')"
 else pass "term.sh: every helper + registry key ASCII-pure under TERM_ASCII=1"; fi
 rm -f "$__probe"
+
+echo "== terminal design: colour is zero-width in term.sh's layout maths"
+# Callers pre-colour fragments (term_hotkey, term_health, term_pip_bar) and hand
+# them to term.sh's layout helpers. Measuring them with ${#} or printf %-Ns
+# counted every ESC[...m byte as a column: panel footers came out ~18 cells short
+# whenever colour was on, and term_truncate cut an escape in half. Invariant:
+# rendering with colour, then stripping the SGR codes, gives exactly the plain
+# render. TERM_ASCII=1 keeps bytes == cells, so every comparison is exact.
+__wprobe="$(mktemp)"
+cat > "$__wprobe" <<'PROBE'
+. skills/_lib/term.sh
+export TERM_ASCII=1
+esc=$(printf '\033')
+strip() { printf '%s' "$1" | sed "s/${esc}\[[0-9;]*m//g"; }
+chk() { if [ "$2" = "$3" ]; then echo "ok|$1"; else echo "FAIL|$1: want $(printf '%q' "$2") got $(printf '%q' "$3")"; fi; }
+# Each fixture is a function, so its coloured arguments are built AFTER
+# term_init has picked the mode (arguments expand before the callee runs).
+footer() { term_panel_close "$(term_hotkey R refresh) $TERM_DOT $(term_hotkey '?' help)" \
+                            "$(term_health busted daemon)  $(term_health pending '4 active')"; }
+header() { term_panel_open fleet fleet main; }
+verdict() { term_status_row bad "NOT READY  $(term_pip_bar score 43 100)" "score 43/100"; }
+leaf() { term_leaf_line "$TERM_TREE_BRANCH" lane-a "$(term_rail 2 HEAD)" "M1 ?2" 3m; }
+cut() { term_truncate "NOT READY  $(term_pip_bar score 43 100)" 15; }
+same_geometry() { # desc fixture
+  local c p
+  FORCE_COLOR=1 term_init; c=$("$2")
+  FORCE_COLOR= NO_COLOR=1 term_init; p=$("$2")
+  chk "$1" "$p" "$(strip "$c")"
+}
+same_geometry "panel footer with coloured hotkeys + healths" footer
+same_geometry "status row with a coloured pip-bar label" verdict
+same_geometry "leaf row with a coloured rail + meta" leaf
+same_geometry "truncation of a coloured label" cut
+FORCE_COLOR=1 term_init
+chk "footer spans the header's width" "$(strip "$(header)" | wc -c)" "$(strip "$(footer)" | wc -c)"
+c=$(cut)
+chk "a cut never leaves half an escape" "" "$(strip "$c" | tr -cd '\033')"
+case "$c" in *"${esc}[0m.."*) echo "ok|a cut resets colour before the marker";;
+  *) echo "FAIL|a cut resets colour before the marker: got $(printf '%q' "$c")";; esac
+chk "plain text truncates as before" "abcd.." "$(term_truncate abcdefghijkl 6)"
+chk "short text passes through untouched" "$(term_color red ab)" "$(term_truncate "$(term_color red ab)" 6)"
+echo END
+PROBE
+__wout="$(bash "$__wprobe" 2>&1)"; __wrc=$?
+__wn="$(printf '%s\n' "$__wout" | grep -c '^ok|')"
+# Fail closed: a probe that dies part-way prints fewer rows, so END must be seen.
+case "$__wrc|$__wout" in
+    0\|*"FAIL|"*|[!0]*) bad "term.sh measures colour as width: $(printf '%s\n' "$__wout" | grep -v '^ok|' | tr '\n' ' ')" ;;
+    *$'\nEND') pass "term.sh: colour is zero-width in its layout maths ($__wn checks)" ;;
+    *) bad "term.sh width probe ended early: $(printf '%s' "$__wout" | tail -n3 | tr '\n' ' ')" ;;
+esac
+rm -f "$__wprobe"
 
 # Source-level guard for the consumers. A hardcoded DECORATION glyph in an
 # authored string never reaches the registry, so TERM_ASCII=1 can't swap it —
