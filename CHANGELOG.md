@@ -103,8 +103,21 @@ feature releases live in the README "Recent Updates" section.
   and fails the PR when no step runs it, unless it is in an `__fv_exempt` list with a reason
   (fleet-doctor and loop-doctor check the local machine, not shipped facts); it also fails a
   stale exemption and a step naming a script no longer on disk. Expect the next scheduled run
-  to report drift in mcp-ops, migrate-ops, react-ops and vue-ops until their facts are
-  refreshed: that is the check doing its job.
+  to report drift in react-ops and vue-ops until their facts are refreshed: that is the check
+  doing its job.
+
+- **mcp-ops teaches the v2 MCP ecosystem.** Spec revision 2026-07-28 (sessionless requests,
+  `server/discover`, no server-to-client requests), the Python SDK 2.x (`FastMCP` renamed
+  `MCPServer`, transport settings on `run()`, `ToolError` vs `MCPError`), FastMCP 4, and the
+  TypeScript SDK v2 split packages (`registerTool`, `serveStdio`, `createMcpHandler`, and a
+  codemod). A new `references/v2-migration.md` maps the version boundary with its sources and
+  lists what was not verified; the five references were ported, dropping several v1-era errors
+  on the way, and the verifier labels PyPI rows as PyPI.
+
+- **migrate-ops targets Python 3.15, TypeScript 7 and Go 1.27.** New guidance covers Python's
+  UTF-8 default encoding and lazy imports, TypeScript 7's native compiler (no compiler API
+  until 7.1, so tools that consume it stay on 6.0), and Go 1.26/1.27's generic methods,
+  json/v2 backing and removed GODEBUG settings.
 
 - **The README leads with what the plugin does, shown in real runs.** A "What you get" list,
   then "See it work": `fleet status` and `fleet sweep` in a throwaway repo, the live staleness
