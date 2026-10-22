@@ -81,6 +81,9 @@ VERDICTS that need you (anything else is informational)
   VERIFY-OWNER  FLEETFLOW  GHOST  OVERLAP  DELETE-MERGED  STALE  UNLANDED
   LEAKED  EMPTY-DIR  ORPHAN-DIR  HOLLOW  STALE-STASH  ARCHIVE-REQUEST
   ARCHIVE-DIRECT  SPINNING?  UNKNOWN
+  Informational ones include UNSTARTED: a lane with no commit of its own, which
+  is not landed. A dirty tree keeps its verdict; its detail then ends
+  "N uncommitted: <files>" and its action says to commit or review them first.
 
 ENVIRONMENT
   FLEET_SWEEP_LEDGER     ERE of files that never count as competing (default:
@@ -401,13 +404,19 @@ merge_sha() { printf '%s\n' "$MERGES" | awk -F'\t' -v s="merge: $1" '$2 == s && 
 say "checking $NW lane worktree(s)..."
 W_LANDED=(); W_CONF=(); W_AHEAD=(); W_DIRTY=(); W_DSAMPLE=(); W_AGE=(); W_LABEL=()
 W_DIFF=()  # "" or why the lane's diff against base could not be read
+# 1 when prune's reason opens "unstarted": a merged + clean lane with no commit
+# of its own (fleet.sh prune_unstarted), in base only because nothing was ever
+# added to it. Read off prune, never re-derived: one classifier. Such a lane is
+# neither landed nor done, whatever ancestry says.
+W_UNST=()
 FILES=""   # lane \t file \t c|u — only work NOT yet in base
 for ((i = 0; i < NW; i++)); do
   p=${W_PATH[$i]} br=${W_BR[$i]}
   label=${br:-${p##*/}}; W_LABEL+=("$label")
   if [[ ${W_GONE[$i]} -eq 1 || ! -d "$p" ]]; then
-    W_LANDED+=("-"); W_CONF+=(""); W_AHEAD+=(0); W_DIRTY+=(0); W_DSAMPLE+=(""); W_AGE+=(0); W_DIFF+=(""); continue
+    W_LANDED+=("-"); W_CONF+=(""); W_AHEAD+=(0); W_DIRTY+=(0); W_DSAMPLE+=(""); W_AGE+=(0); W_DIFF+=(""); W_UNST+=(0); continue
   fi
+  pr=$(prune_of "$p"); un=0; [[ -n "$pr" && "${pr#*$'\t'}" == unstarted* ]] && un=1; W_UNST+=("$un")
   ref=${br:-${W_HEAD[$i]}}
   ls=$(landed_state "$ref"); st=${ls%%$'\t'*}; conf=""; [[ "$ls" == *$'\t'* ]] && conf=${ls#*$'\t'}
   W_LANDED+=("$st"); W_CONF+=("$conf")
@@ -562,17 +571,20 @@ while IFS=$US read -r b sha wtp up track cdate; do
 done <<< "$BR_FACTS"
 for ((i = 0; i < NW; i++)); do
   [[ -z "${W_BR[$i]}" ]] && continue
-  ok=0; [[ ( "${W_LANDED[$i]}" == MERGED || "${W_LANDED[$i]}" == CONTENT ) && "${W_DIRTY[$i]}" == 0 ]] && ok=1
+  ok=0; [[ ( "${W_LANDED[$i]}" == MERGED || "${W_LANDED[$i]}" == CONTENT ) && "${W_DIRTY[$i]}" == 0 && "${W_UNST[$i]}" == 0 ]] && ok=1
   BR_OK="${BR_OK}${W_BR[$i]}"$'\t'"$ok"$'\n'
 done
 
 # --- session "done" test ------------------------------------------------------
 # A session is DONE when every tree it claims is landed + clean and every local
 # branch it wrote is in base. Only a done, open, idle session is asked to
-# archive; one with unlanded work anywhere is the blocker, named per tree.
+# archive; one with unlanded work anywhere is the blocker, named per tree. An
+# UNSTARTED tree is not landed: its owner may not have begun (column 4 is the
+# blocker's name, marked so).
 WT_OK=$(for ((i = 0; i < NW; i++)); do
-  ok=0; [[ ( "${W_LANDED[$i]}" == MERGED || "${W_LANDED[$i]}" == CONTENT ) && "${W_DIRTY[$i]}" == 0 ]] && ok=1
-  printf '%s\t%s\t%s\n' "${W_PATH[$i]}" "$ok" "${W_PATH[$i]##*/}"
+  ok=0; [[ ( "${W_LANDED[$i]}" == MERGED || "${W_LANDED[$i]}" == CONTENT ) && "${W_DIRTY[$i]}" == 0 && "${W_UNST[$i]}" == 0 ]] && ok=1
+  lbl=${W_PATH[$i]##*/}; [[ "${W_UNST[$i]}" == 1 ]] && lbl="$lbl (unstarted)"
+  printf '%s\t%s\t%s\t%s\n' "${W_PATH[$i]}" "$ok" "${W_PATH[$i]##*/}" "$lbl"
 done)
 # A tree prune KEEPs (live, locked) also blocks its claimants: prune and this
 # script read liveness moments apart, and an owner that went idle in between
@@ -581,7 +593,7 @@ done)
 KEEP_PATHS=$(printf '%s\n' "$PRUNE_TSV" | awk -F'\t' '$3 == "KEEP" { print $1 }')
 SESS=$(LC_ALL=C awk -F'\t' '
   FILENAME == ARGV[1] { if ($1 != "") KP[$1] = 1; next }
-  FILENAME == ARGV[2] { OK[$1] = $2; SLUG[$1] = $3; next }
+  FILENAME == ARGV[2] { OK[$1] = $2; SLUG[$1] = $3; LBL[$1] = $4; next }
   FILENAME == ARGV[3] { BOK[$1] = $2; next }
   FILENAME == ARGV[4] { if (!($1 in OK)) next; id = $2
                         if ($5 == "1") { LIVE[id] = 1; next }
@@ -589,7 +601,7 @@ SESS=$(LC_ALL=C awk -F'\t' '
                         ids[id] = 1; T[id] = $3
                         if (index("," TR[id] ",", "," SLUG[$1] ",") == 0) TR[id] = TR[id] (TR[id] == "" ? "" : ",") SLUG[$1]
                         if (($1 in KP) && !(id in BLK)) BLK[id] = SLUG[$1] " (prune keeps it)"
-                        if (OK[$1] != "1" && !(id in BLK)) BLK[id] = SLUG[$1]
+                        if (OK[$1] != "1" && !(id in BLK)) BLK[id] = LBL[$1]
                         next }
   NF >= 7 && ($2 in ids) && ($1 in BOK) && BOK[$1] == "0" && !($2 in BLK) { BLK[$2] = "branch " $1 }
   END { for (id in ids) if (!(id in LIVE)) print id "\t" T[id] "\t" ((id in BLK) ? 0 : 1) "\t" BLK[id] "\t" TR[id] }' \
@@ -677,10 +689,28 @@ N_AWAY=0
 # a Claude Code session. Claude Code's own sweep keeps such trees forever (they
 # carry no marker of its own), so the row says so: this report is where they
 # surface. wrow = `row worktree` for the current tree, with that note appended.
-N_ARCH_ASK=0
-wrow() { row worktree "$p" "$1" "$2$hk" "$3"; }
+#
+# UNCOMMITTED WORK IS NEVER HIDDEN. The chain below ranks KEEP, REMOVE, PARK, an
+# unreadable diff and COMPETING above the dirty check, and each of those once
+# said nothing about files git has never seen: a competing tree holding a
+# modified file and an untracked directory read only "settle the pair", and
+# settling it by dropping that side would have lost the draft (2026-10-22). So a
+# dirty tree keeps its verdict (a --porcelain filter on it still works), its
+# detail gains "N uncommitted: <sample>" (dnote), and an action it has opens with
+# "commit or review its uncommitted work first". The dirty INSPECT row clears
+# dnote: its detail already is that note.
+N_ARCH_ASK=0 N_COMP_DIRTY=0
+wrow() {
+  local det=$2 act=$3
+  if [[ -n "$dnote" ]]; then
+    det="$det; $dnote"
+    [[ "$act" != "-" ]] && act="commit or review its uncommitted work first; then $act"
+  fi
+  row worktree "$p" "$1" "$det$hk" "$act"
+}
 for ((i = 0; i < NW; i++)); do
   p=${W_PATH[$i]} br=${W_BR[$i]} label=${W_LABEL[$i]} slug=${W_PATH[$i]##*/}
+  dnote=""; [[ "${W_DIRTY[$i]}" -gt 0 ]] && dnote="${W_DIRTY[$i]} uncommitted: ${W_DSAMPLE[$i]}"
   hk=""
   if [[ -n "$EXT_ROOT" && "$br" == worktree-* && "$(norm "$p")/" == "$(norm "$EXT_ROOT")"/?* ]]; then
     hk="; hook-made: Claude Code will not clean it up"
@@ -707,9 +737,17 @@ for ((i = 0; i < NW; i++)); do
   elif [[ -n "${W_DIFF[$i]}" ]]; then
     wrow INSPECT "could not read its diff against $BASE (${W_DIFF[$i]}) - competing work unknown" "re-run once git answers; never land it on this verdict"
   elif printf '%s\n' "$COMPETING" | grep -qxF -- "$label"; then
+    [[ -n "$dnote" ]] && N_COMP_DIRTY=$((N_COMP_DIRTY + 1))
     wrow COMPETING "shares files with $(competes_with "$label") (phase 2)${hold:+; ON HOLD: $hold}" "settle the pair before landing either"
   elif [[ "$dirty" -gt 0 ]]; then
+    dnote=""
     wrow INSPECT "$dirty uncommitted: ${W_DSAMPLE[$i]}" "commit it in its lane, or discard after review"
+  elif [[ "${W_UNST[$i]}" == 1 ]]; then
+    # Prune's REVIEW for a lane with no commit of its own. "Merged" here would be
+    # ancestry's word for "nothing was ever added", and ASK-ARCHIVE would tell a
+    # session that has not begun that its lane is landed (references/sweep.md,
+    # "Unstarted lanes").
+    wrow UNSTARTED "no commit of its own yet, so not landed; prune: $reason" "leave it to its session; prune removes it once that session is archived, or after it sits unclaimed (references/prune.md)"
   elif [[ "$st" == MERGED || "$st" == CONTENT ]]; then
     how="merged"; [[ "$st" == CONTENT ]] && how="landed by content (squash/cherry-pick) - prune cannot see it"
     if [[ -n "$open_ids" ]]; then
@@ -760,10 +798,12 @@ while IFS=$US read -r a b n files ua ub; do
   who=""
   [[ "$ua" == 1 ]] && who="$a"; [[ "$ub" == 1 ]] && who="$who${who:+, }$b"
   note="$n file(s): $(printf '%s' "$files" | cut -d, -f1-4)"; [[ $n -gt 4 ]] && note="$note,..."
-  [[ -n "$who" ]] && note="$note; uncommitted in $who"
+  act="pick the winner: land it, then rebase or drop the other"
+  # "Drop the other" must never reach a side holding unsaved work (phase 1 note).
+  [[ -n "$who" ]] && { note="$note; uncommitted in $who"; act="commit or review the uncommitted work in $who first; then $act"; }
   # A held lane still competes (it will land), but it cannot be the winner now.
   for l in "$a" "$b"; do h=$(held_reason "$l") && note="$note; $l ON HOLD: $h"; done
-  row compete "$a <> $b" OVERLAP "$note" "pick the winner: land it, then rebase or drop the other"
+  row compete "$a <> $b" OVERLAP "$note" "$act"
 done <<< "${PAIRS//$'\t'/$US}"
 
 # --- phase 3 rows: branches with no worktree ----------------------------------
@@ -921,7 +961,7 @@ if [[ $SETTLED -eq 0 ]]; then
   ROWS=$(printf '%s' "$ROWS" | awk -F'\t' -v OFS='\t' -v w="wait: $BASE is not settled (see the landing row)" \
     'NF { if ($1 != "landing" && $5 != "-") $5 = w; print }')$'\n'
 fi
-INFO_RE='^(KEEP|PARK|TRACKED|HELD|ON-HOLD|STASH|OWNER-BUSY|FLEETFLOW-RUNS|DEAD-LAND)$'
+INFO_RE='^(KEEP|PARK|TRACKED|HELD|ON-HOLD|STASH|OWNER-BUSY|UNSTARTED|FLEETFLOW-RUNS|DEAD-LAND)$'
 FINDINGS=$(printf '%s' "$ROWS" | awk -F'\t' -v re="$INFO_RE" 'NF && $3 !~ re' | grep -c . || true)
 cnt() { printf '%s' "$ROWS" | awk -F'\t' -v v="$1" 'NF && $3 == v' | grep -c . || true; }
 
@@ -1014,7 +1054,8 @@ else
       echo "    'fleet landing' exits 0 once it is; then re-run 'fleet sweep' for the real next steps."
     else
       k=0; echo "  Next, in order - re-run 'fleet sweep' after each step:"
-      [[ $n_comp -gt 0 ]] && { k=$((k+1)); echo "    $k. settle $n_comp competing pair(s): pick a winner before landing either"; }
+      cdirty=""; [[ $N_COMP_DIRTY -gt 0 ]] && cdirty="; $N_COMP_DIRTY of those trees hold uncommitted work: commit or review it first"
+      [[ $n_comp -gt 0 ]] && { k=$((k+1)); echo "    $k. settle $n_comp competing pair(s): pick a winner before landing either$cdirty"; }
       [[ $((n_land + n_reb)) -gt 0 ]] && { k=$((k+1)); echo "    $k. land $n_land lane(s) (fleet land <branch>); $n_reb need a rebase in their lane first"; }
       [[ $n_insp -gt 0 ]] && { k=$((k+1)); echo "    $k. inspect $n_insp tree(s) with uncommitted work"; }
       [[ $((n_req + n_dir)) -gt 0 ]] && { k=$((k+1)); echo "    $k. sessions: $n_req archive request(s) (send_message), $n_dir to archive directly - agent step, one gated call each$away"; }

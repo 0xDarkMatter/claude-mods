@@ -155,7 +155,7 @@ whole job, and every ambiguous case resolves away from deletion.
 
 ### Buckets — first match wins, and the order is the safety argument
 
-Only **SAFE** is ever removable: merged, clean, no open session claiming it, and for a Claude Code session tree (under `.claude/worktrees/`, or a hook-made `worktree-*` tree under `$WORKTREE_ROOT`) an archived session positively claiming it. A live claimant (archiving is not activity) or the invoking tree is **KEEP**; an unreadable store or archive flag, unproven detached HEAD, dirty, unmerged or unattributable tree is **REVIEW**, never touched under any flag. Removal uses `git worktree remove` (never `rm -rf`), re-verifies against a fresh scan right before each delete, and `--all-repos` never removes. Prune cannot see writes by absolute path, so it must never be the only guard. Table and claim rules: [references/prune.md](references/prune.md).
+Only **SAFE** is ever removable: merged, clean, no open session claiming it, and for a Claude Code session tree (under `.claude/worktrees/`, or a hook-made `worktree-*` tree under `$WORKTREE_ROOT`) an archived session positively claiming it. A zero-commit lane is *unstarted*, not merged (REVIEW). A live claimant (archiving is not activity) or the invoking tree is **KEEP**; an unreadable store or archive flag, unproven detached HEAD, dirty, unmerged or unattributable tree is **REVIEW**, never touched under any flag. Removal uses `git worktree remove` (never `rm -rf`), re-verifies against a fresh scan right before each delete, and `--all-repos` never removes. Prune cannot see writes by absolute path, so it must never be the only guard. Table and claim rules: [references/prune.md](references/prune.md).
 
 ### Landmine: removing a worktree out from under a live session
 

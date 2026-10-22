@@ -27,7 +27,7 @@ unset FLEET_SKIP_SESSION_CHECK FLEET_SESSION_STORE FLEET_SESSION_NOCACHE \
       FLEET_SELF_SESSION_ID FLEET_NO_PRUNE_HINT FLEET_PRUNE_ROOTS \
       FLEET_PRUNE_MAX_REPOS FLEET_ASCII FLEET_RM_RETRY_SECS \
       FLEET_NEVER_PUSH FLEET_HELD_LANES FLEET_SWEEP_LEDGER FLEET_SWEEP_KEEP FLEET_SWEEP_STALE_DAYS \
-      FLEET_SWEEP_MIN_DIR_AGE FLEET_QUEUE_COMMIT_PCT \
+      FLEET_SWEEP_MIN_DIR_AGE FLEET_QUEUE_COMMIT_PCT FLEET_PRUNE_UNSTARTED_DAYS FLEET_SESSION_NAMED_DAYS \
       WORKTREE_ROOT   # the machine's lane root; worktree-root.sh sets a throwaway one
 
 command -v git >/dev/null 2>&1 || { echo "SKIP: git not available"; exit 0; }
@@ -2236,6 +2236,7 @@ fi
 . "$HERE/queue.sh"   # `fleet queue` cases: the audited landing chain (see its header)
 . "$HERE/sweep.sh"   # `fleet sweep` cases, in their own file (see its header)
 . "$HERE/worktree-root.sh"   # lanes under a machine-wide WORKTREE_ROOT (see its header)
+. "$HERE/unstarted.sh"   # zero-commit lanes and transcript-named trees (see its header)
 
 echo "=== $PASS passed, $FAIL failed ==="
 [ "$FAIL" -eq 0 ] || exit 1
