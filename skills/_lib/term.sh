@@ -10,6 +10,14 @@
 #
 # Honors: NO_COLOR, FORCE_COLOR, TERM_ASCII=1, FLEET_ASCII=1 (legacy).
 # See docs/TERMINAL-DESIGN.md for the design system this implements.
+#
+# Sections, in order (jump with: grep -n '^# ─── ' term.sh):
+#   Globals, escapes, connectors, chrome, registries  — state term_init fills
+#   term_init · Color helper · Registry lookup · state icons · Checklist mark
+#   Primitives
+#   Visible width  — every width, pad and cut: cells on UTF-8 bytes, wide table
+#   Panel · Body components · Leaf glyph builders · Right-side furniture
+#   Spinners · Legacy helpers
 
 # Guard against double-sourcing.
 [[ -n "${__TERM_SH_LOADED:-}" ]] && return 0
@@ -292,7 +300,7 @@ term_repeat() {
   printf '%s' "$out"
 }
 
-# ─── Visible width (colour is zero-width) ─────────────────────────────────
+# ─── Visible width (colour is zero-width, wide glyphs are two) ────────────
 # Callers hand the layout helpers PRE-COLOURED fragments (term_hotkey,
 # term_health, term_pip_bar, term_color output). Both `${#var}` and printf's
 # `%-Ns` count every byte of an SGR escape (ESC [ params m) as a column, so a
@@ -300,20 +308,140 @@ term_repeat() {
 # Hence: every width in this file is measured with __term_vis_width, every
 # column is padded with __term_pad, and every cut goes through term_truncate.
 # Never `${#x}` or `%-Ns` on text that may carry colour. tests/check-resources.sh
-# pins this ("colour is zero-width").
+# pins this ("colour is zero-width", "wide glyphs take two cells").
 #
-# Width means characters of the stripped text, not terminal cells: an
-# east-asian-wide glyph (the ⚡ brand, most emoji) still counts 1, and MSYS bash
-# (16-bit wchar_t) counts an astral emoji as 2. term.ps1's Get-TermDisplayWidth
-# carries a wide-glyph table; porting it means changing __term_vis_width alone.
+# Width means terminal CELLS: one per code point, two for an East Asian Wide or
+# Fullwidth one (the ⚡ and 🔁 brands, ✅ ❌ ⏳, CJK). Without that the `fleet
+# status` header came out 81 cells to its footer's 80. No grapheme clustering:
+# a combining mark, ZWJ or U+FE0F counts one like any code point, so ⚠️ (U+26A0
+# U+FE0F) is two cells, as emoji presentation renders in Windows Terminal,
+# iTerm2 and kitty.
+#
+# Counted on UTF-8 BYTES, never the shell's characters (__term_bytes_on): what
+# `${#s}` and `${s:i:1}` mean depends on the platform. Linux and macOS bash
+# count an astral emoji (🔁) as 1; MSYS bash, whose wchar_t is 16 bits, counts
+# it as 2 and `${s:0:1}` returns half its surrogate pair (bytes f0 9f 94), which
+# a cut then printed as broken UTF-8; the C locale counts bytes. In bytes, all
+# three agree, and term_truncate copies whole sequences.
 #
 # Fork-free on purpose: these run several times per panel row, and a $(...)
 # subshell is a whole process on Windows. The __ forms set a global instead of
 # printing; the public wrappers print, for callers that want a value.
 
+# Byte sets for the UTF-8 maths, built once. Bracket expressions take them
+# unquoted ([$__TERM_CONT]); they are explicit byte lists, not a-b ranges, so
+# no bash version's collation rules come into it. __TERM_HI doubles as the
+# lookup table for a byte's value: its offset in the string is value - 0x80.
+__TERM_HI=""; __TERM_CONT=""; __TERM_LEAD2=""; __TERM_LEAD3=""; __TERM_LEAD4=""
+__term_byte_sets() {
+  local i o b
+  for (( i=0x80; i<0x100; i++ )); do
+    printf -v o '%03o' "$i"; printf -v b "\\$o"
+    __TERM_HI="$__TERM_HI$b"
+    if   (( i < 0xC0 )); then __TERM_CONT="$__TERM_CONT$b"     # continuation
+    elif (( i < 0xE0 )); then __TERM_LEAD2="$__TERM_LEAD2$b"   # 2-byte lead
+    elif (( i < 0xF0 )); then __TERM_LEAD3="$__TERM_LEAD3$b"   # 3-byte lead
+    elif (( i < 0xF8 )); then __TERM_LEAD4="$__TERM_LEAD4$b"   # 4-byte lead
+    fi
+  done
+  __TERM_LEAD34="$__TERM_LEAD3$__TERM_LEAD4"
+  __TERM_STOP=$'\033'"$__TERM_HI"   # where a plain-ASCII run ends
+  printf -v __TERM_MB3 '\342\232\241'   # U+26A1 as its 3 bytes: the locale probe
+}
+__term_byte_sets
+
+# East Asian Width W and F code points as inclusive lo/hi pairs, ascending:
+# Unicode 15.0 EastAsianWidth.txt, the table python's unicodedata reports.
+# term.ps1's $Script:TermWide is the same list, token for token, and
+# tests/check-resources.sh compares the two. Not a block heuristic (all of
+# U+2600-27BF, every astral code point): that makes ✓ ✗ ⚠ ⚙ ✶ ⬤ and the 🛡 🏗 🗄
+# brands two cells, which terminals draw in one. To regenerate, list every code
+# point whose unicodedata.east_asian_width() is W or F, merged into runs.
+__TERM_WIDE=(
+  0x1100 0x115F  0x231A 0x231B  0x2329 0x232A  0x23E9 0x23EC  0x23F0 0x23F0  0x23F3 0x23F3
+  0x25FD 0x25FE  0x2614 0x2615  0x2648 0x2653  0x267F 0x267F  0x2693 0x2693  0x26A1 0x26A1
+  0x26AA 0x26AB  0x26BD 0x26BE  0x26C4 0x26C5  0x26CE 0x26CE  0x26D4 0x26D4  0x26EA 0x26EA
+  0x26F2 0x26F3  0x26F5 0x26F5  0x26FA 0x26FA  0x26FD 0x26FD  0x2705 0x2705  0x270A 0x270B
+  0x2728 0x2728  0x274C 0x274C  0x274E 0x274E  0x2753 0x2755  0x2757 0x2757  0x2795 0x2797
+  0x27B0 0x27B0  0x27BF 0x27BF  0x2B1B 0x2B1C  0x2B50 0x2B50  0x2B55 0x2B55  0x2E80 0x2E99
+  0x2E9B 0x2EF3  0x2F00 0x2FD5  0x2FF0 0x2FFB  0x3000 0x303E  0x3041 0x3096  0x3099 0x30FF
+  0x3105 0x312F  0x3131 0x318E  0x3190 0x31E3  0x31F0 0x321E  0x3220 0x3247  0x3250 0x4DBF
+  0x4E00 0xA48C  0xA490 0xA4C6  0xA960 0xA97C  0xAC00 0xD7A3  0xF900 0xFAFF  0xFE10 0xFE19
+  0xFE30 0xFE52  0xFE54 0xFE66  0xFE68 0xFE6B  0xFF01 0xFF60  0xFFE0 0xFFE6
+  0x16FE0 0x16FE4  0x16FF0 0x16FF1  0x17000 0x187F7  0x18800 0x18CD5  0x18D00 0x18D08
+  0x1AFF0 0x1AFF3  0x1AFF5 0x1AFFB  0x1AFFD 0x1AFFE  0x1B000 0x1B122  0x1B132 0x1B132
+  0x1B150 0x1B152  0x1B155 0x1B155  0x1B164 0x1B167  0x1B170 0x1B2FB  0x1F004 0x1F004
+  0x1F0CF 0x1F0CF  0x1F18E 0x1F18E  0x1F191 0x1F19A  0x1F200 0x1F202  0x1F210 0x1F23B
+  0x1F240 0x1F248  0x1F250 0x1F251  0x1F260 0x1F265  0x1F300 0x1F320  0x1F32D 0x1F335
+  0x1F337 0x1F37C  0x1F37E 0x1F393  0x1F3A0 0x1F3CA  0x1F3CF 0x1F3D3  0x1F3E0 0x1F3F0
+  0x1F3F4 0x1F3F4  0x1F3F8 0x1F43E  0x1F440 0x1F440  0x1F442 0x1F4FC  0x1F4FF 0x1F53D
+  0x1F54B 0x1F54E  0x1F550 0x1F567  0x1F57A 0x1F57A  0x1F595 0x1F596  0x1F5A4 0x1F5A4
+  0x1F5FB 0x1F64F  0x1F680 0x1F6C5  0x1F6CC 0x1F6CC  0x1F6D0 0x1F6D2  0x1F6D5 0x1F6D7
+  0x1F6DC 0x1F6DF  0x1F6EB 0x1F6EC  0x1F6F4 0x1F6FC  0x1F7E0 0x1F7EB  0x1F7F0 0x1F7F0
+  0x1F90C 0x1F93A  0x1F93C 0x1F945  0x1F947 0x1F9FF  0x1FA70 0x1FA7C  0x1FA80 0x1FA88
+  0x1FA90 0x1FABD  0x1FABF 0x1FAC5  0x1FACE 0x1FADB  0x1FAE0 0x1FAE8  0x1FAF0 0x1FAF8
+  0x20000 0x2FFFD  0x30000 0x3FFFD
+)
+
+# __term_bytes_on / __term_bytes_off <sw>  — run the width maths on bytes.
+# If the live locale is multibyte (the probe is not 3 long), set LC_ALL=C and
+# report __TERM_LC_SW=1; the caller keeps that in a local and hands it back to
+# __term_bytes_off, which restores LC_ALL as it was (or unsets it). A nested
+# call finds bytes already on and does nothing, so only the outermost restores.
+# Plain assignment and unset rather than `local LC_ALL`: both re-run setlocale
+# in every bash since 2.x. Each ends on a 0 status, safe under set -e.
+__TERM_LC_SW=0; __TERM_LC_SAVED=""; __TERM_LC_WASSET=""
+__term_bytes_on() {
+  __TERM_LC_SW=0
+  if [[ ${#__TERM_MB3} -ne 3 ]]; then
+    __TERM_LC_SAVED=${LC_ALL-}; __TERM_LC_WASSET=${LC_ALL+1}
+    LC_ALL=C; __TERM_LC_SW=1
+  fi
+}
+__term_bytes_off() {
+  if [[ ${1:-0} -eq 1 ]]; then
+    if [[ -n $__TERM_LC_WASSET ]]; then LC_ALL=$__TERM_LC_SAVED; else unset LC_ALL; fi
+  fi
+}
+
+# __term_char_cells <one UTF-8 sequence>  — sets __TERM_CELLS to 2 when it
+# encodes a code point in __TERM_WIDE, else 1. Bytes on. Only 3- and 4-byte
+# sequences can be wide; a malformed one costs 1 or 2, never a crash.
+# Answers are memoised in __TERM_SEEN1 / __TERM_SEEN2 (sequences concatenated):
+# a panel reuses a handful of glyphs, and one glob test beats the ~15 builtins
+# of a lookup on MSYS. A match is always aligned, because a lead byte (E0-F7)
+# never occurs inside another sequence.
+__TERM_SEEN1=""; __TERM_SEEN2=""
+__term_char_cells() {
+  local s=$1 v b0 b1 b2 b3=0 cp lo hi mid
+  __TERM_CELLS=1
+  [[ ${#s} -ge 3 ]] || return 0
+  [[ $__TERM_SEEN1 == *"$s"* ]] && return 0
+  if [[ $__TERM_SEEN2 == *"$s"* ]]; then __TERM_CELLS=2; return 0; fi
+  v=${__TERM_HI%%"${s:0:1}"*}; b0=${#v}      # byte value - 0x80
+  v=${__TERM_HI%%"${s:1:1}"*}; b1=${#v}
+  v=${__TERM_HI%%"${s:2:1}"*}; b2=${#v}
+  if [[ ${#s} -ge 4 ]]; then
+    v=${__TERM_HI%%"${s:3:1}"*}; b3=${#v}
+    cp=$(( (b0 & 7) << 18 | b1 << 12 | b2 << 6 | b3 ))
+  else
+    cp=$(( (b0 & 15) << 12 | b1 << 6 | b2 ))
+  fi
+  lo=0; hi=$(( ${#__TERM_WIDE[@]} / 2 - 1 ))  # binary search over the pairs
+  while (( lo <= hi )); do
+    mid=$(( (lo + hi) / 2 ))
+    if   (( cp < __TERM_WIDE[2 * mid] ));     then hi=$(( mid - 1 ))
+    elif (( cp > __TERM_WIDE[2 * mid + 1] )); then lo=$(( mid + 1 ))
+    else __TERM_CELLS=2; break; fi
+  done
+  if [[ $__TERM_CELLS -eq 2 ]]; then __TERM_SEEN2="$__TERM_SEEN2$s"
+  else __TERM_SEEN1="$__TERM_SEEN1$s"; fi
+}
+
 # __term_strip <text>  — sets __TERM_STRIPPED to <text> minus every CSI escape
 # (ESC [ <digits and ;> <final byte>). An escape cut off at the end of the text
 # goes whole, and so does a lone ESC with no '['. term.sh itself only emits SGR.
+# Callers turn bytes on first, so the final byte is one byte, never half a glyph.
 __term_strip() {
   local s=$1 out="" params esc=$'\033'
   while [[ "$s" == *"$esc"* ]]; do
@@ -329,8 +457,29 @@ __term_strip() {
   __TERM_STRIPPED="$out$s"
 }
 
-# __term_vis_width <text>  — sets __TERM_VIS_WIDTH to the columns <text> fills.
-__term_vis_width() { __term_strip "$1"; __TERM_VIS_WIDTH=${#__TERM_STRIPPED}; }
+# __term_vis_width <text>  — sets __TERM_VIS_WIDTH to the cells <text> fills:
+# one per code point (bytes that are not continuation bytes), plus one for each
+# wide one. Only 3- and 4-byte sequences are looked up. Text with no byte above
+# 0x7F is cells == bytes == characters in every locale, so it skips the locale
+# switch (setlocale is slow on MSYS) and stays as cheap as before.
+__term_vis_width() {
+  local sw r pre seq w
+  if [[ $1 != *[$__TERM_HI]* ]]; then
+    __term_strip "$1"; __TERM_VIS_WIDTH=${#__TERM_STRIPPED}; return 0
+  fi
+  __term_bytes_on; sw=$__TERM_LC_SW
+  __term_strip "$1"
+  r=$__TERM_STRIPPED
+  pre=${r//[$__TERM_CONT]/}; w=${#pre}
+  while [[ $r == *[$__TERM_LEAD34]* ]]; do
+    pre=${r%%[$__TERM_LEAD34]*}; r=${r:${#pre}}
+    case ${r:0:1} in [$__TERM_LEAD4]) seq=${r:0:4} ;; *) seq=${r:0:3} ;; esac
+    r=${r:${#seq}}
+    __term_char_cells "$seq"; w=$(( w + __TERM_CELLS - 1 ))
+  done
+  __TERM_VIS_WIDTH=$w
+  __term_bytes_off "$sw"
+}
 
 # __term_pad <text> <cols>  — sets __TERM_PADDED to <text> right-padded with
 # spaces to <cols> visible columns. Never truncates: wider text comes back as-is.
@@ -342,9 +491,14 @@ __term_pad() {
 }
 
 # term_strip <text>  — <text> with colour escapes removed.
-term_strip() { __term_strip "$1"; printf '%s' "$__TERM_STRIPPED"; }
+term_strip() {
+  local sw; __term_bytes_on; sw=$__TERM_LC_SW
+  __term_strip "$1"
+  __term_bytes_off "$sw"
+  printf '%s' "$__TERM_STRIPPED"
+}
 
-# term_vis_width <text>  — visible columns of <text> (colour counts 0).
+# term_vis_width <text>  — visible cells of <text> (colour 0, wide glyphs 2).
 term_vis_width() { __term_vis_width "$1"; printf '%s' "$__TERM_VIS_WIDTH"; }
 
 # term_pad <text> <cols>  — <text> padded to <cols> visible columns. Use it, not
@@ -352,36 +506,54 @@ term_vis_width() { __term_vis_width "$1"; printf '%s' "$__TERM_VIS_WIDTH"; }
 term_pad() { __term_pad "$1" "$2"; printf '%s' "$__TERM_PADDED"; }
 
 # term_truncate <text> <max_cols>  — ellipsis-truncate to <max_cols> VISIBLE
-# columns, appending "…" or "..". Escapes are zero-width and copied whole, so a
+# cells, appending "…" or "..". Escapes are zero-width and copied whole, so a
 # cut never lands inside one; if any were copied, a reset (ESC[0m) precedes the
-# marker so the cut cannot leave the terminal mid-colour.
+# marker so the cut cannot leave the terminal mid-colour. Characters are copied
+# whole too: a wide glyph that would straddle the limit is left out, so the
+# result can be one cell short of <max_cols> (callers pad with __term_pad).
 term_truncate() {
-  local text=$1 max=$2
+  local text=$1 max=$2 sw=0 ell="" keep s out run params n esc=$'\033' coloured=0
+  if [[ $text == *[$__TERM_HI]* ]]; then __term_bytes_on; sw=$__TERM_LC_SW; fi
   __term_vis_width "$text"
-  if [[ $__TERM_VIS_WIDTH -le $max ]]; then printf '%s' "$text"; return; fi
-  # Registered glyph, not a literal — TERM_ASCII=1 must swap it. The ASCII marker
-  # stays two dots (not $TERM_ELLIPSIS's three): it is the truncation cue, and a
-  # third dot would eat another column of the name it is already shortening.
-  local ell="$TERM_ELLIPSIS"
-  [[ "$TERM_ASCII_MODE" -eq 1 ]] && ell=".."
-  local keep=$(( max - ${#ell} ))   # ell is a bare glyph, so ${#} is exact here
-  [[ $keep -lt 0 ]] && keep=0
-  local s=$text out="" run params esc=$'\033' coloured=0
-  while [[ $keep -gt 0 && -n "$s" ]]; do
-    if [[ "$s" == "$esc["* ]]; then
-      s=${s:2}; params=${s%%[!0-9;]*}; s=${s#"$params"}
-      out="$out$esc[$params${s:0:1}"; s=${s:1}; coloured=1
-    elif [[ "$s" == "$esc"* ]]; then
-      s=${s:1}                        # lone ESC: zero columns, dropped as in __term_strip
-    else
-      run=${s%%"$esc"*}
-      [[ ${#run} -gt $keep ]] && run=${run:0:$keep}
-      out="$out$run"; s=${s:${#run}}; keep=$(( keep - ${#run} ))
-    fi
-  done
-  # $TERM_C_OFF's colour-on value as a literal: the escapes came from the
-  # caller, so the reset is needed whatever TERM_COLOR says.
-  [[ $coloured -eq 1 ]] && out="$out"$'\033[0m'
+  if [[ $__TERM_VIS_WIDTH -le $max ]]; then
+    out=$text
+  else
+    # Registered glyph, not a literal — TERM_ASCII=1 must swap it. The ASCII
+    # marker stays two dots (not $TERM_ELLIPSIS's three): it is the truncation
+    # cue, and a third dot would eat another column of the name it shortens.
+    ell="$TERM_ELLIPSIS"
+    [[ "$TERM_ASCII_MODE" -eq 1 ]] && ell=".."
+    __term_vis_width "$ell"; keep=$(( max - __TERM_VIS_WIDTH ))
+    [[ $keep -lt 0 ]] && keep=0
+    s=$text out=""
+    while [[ $keep -gt 0 && -n "$s" ]]; do
+      if [[ "$s" == "$esc["* ]]; then
+        s=${s:2}; params=${s%%[!0-9;]*}; s=${s#"$params"}
+        out="$out$esc[$params${s:0:1}"; s=${s:1}; coloured=1
+      elif [[ "$s" == "$esc"* ]]; then
+        s=${s:1}                      # lone ESC: zero columns, dropped as in __term_strip
+      else
+        run=${s%%[$__TERM_STOP]*}     # plain ASCII up to the next escape or glyph
+        if [[ -n "$run" ]]; then
+          [[ ${#run} -gt $keep ]] && run=${run:0:$keep}
+          out="$out$run"; s=${s:${#run}}; keep=$(( keep - ${#run} ))
+        else                          # one multibyte character: whole, or not at all
+          case ${s:0:1} in
+            [$__TERM_LEAD4]) n=4 ;; [$__TERM_LEAD3]) n=3 ;; [$__TERM_LEAD2]) n=2 ;; *) n=1 ;;
+          esac
+          run=${s:0:$n}
+          __term_char_cells "$run"
+          case $run in [$__TERM_CONT]) __TERM_CELLS=0 ;; esac   # stray continuation byte
+          [[ $__TERM_CELLS -gt $keep ]] && break
+          out="$out$run"; s=${s:$n}; keep=$(( keep - __TERM_CELLS ))
+        fi
+      fi
+    done
+    # $TERM_C_OFF's colour-on value as a literal: the escapes came from the
+    # caller, so the reset is needed whatever TERM_COLOR says.
+    [[ $coloured -eq 1 ]] && out="$out"$'\033[0m'
+  fi
+  __term_bytes_off "$sw"
   printf '%s%s' "$out" "$ell"
 }
 
