@@ -1,10 +1,24 @@
 # Language Version Upgrades
 
-Detailed upgrade paths for major programming language version transitions.
+Detailed upgrade paths for major programming language version transitions. Verified
+2026-10-22 against each language's release notes (cited in the newest sections).
+
+One file on purpose: SKILL.md links it as the single language reference, and each
+language section stands alone, so jump to the one you need instead of splitting the file.
+
+## Contents
+
+- [Python 3.9 to 3.15](#python-39-to-315)
+- [Node.js 18 to 26](#nodejs-18-to-26)
+- [TypeScript 4.x to 7.0](#typescript-4x-to-70)
+- [Go 1.20 to 1.27](#go-120-to-127)
+- [Rust Edition 2021 to 2024](#rust-edition-2021-to-2024)
+- [PHP 8.1 to 8.5](#php-81-to-85)
+- [Cross-Language Upgrade Checklist](#cross-language-upgrade-checklist)
 
 ---
 
-## Python 3.9 to 3.14
+## Python 3.9 to 3.15
 
 ### Python 3.10 (from 3.9)
 
@@ -168,6 +182,44 @@ rg "asyncio\.get_event_loop\(\)" .
 pyupgrade --py314-plus **/*.py
 ```
 
+### Python 3.15 (from 3.14)
+
+Released 2026-10-09. Source: [What's New in Python 3.15](https://docs.python.org/3.15/whatsnew/3.15.html).
+
+**Key Features Gained:**
+- Explicit lazy imports (PEP 810): `lazy import json` / `lazy from pathlib import Path` defer loading until first use (`lazy` is a soft keyword)
+- `frozendict` built-in (PEP 814): immutable, hashable when its contents are, not a `dict` subclass
+- `sentinel` built-in (PEP 661) for unique sentinel values that survive copy and pickle
+- Unpacking in comprehensions (PEP 798): `[*L for L in lists]`, `{**d for d in dicts}`
+- Dedicated `profiling` package with the Tachyon sampling profiler (PEP 799)
+- Stable ABI for free-threaded builds (PEP 803); macOS installers ship free-threading by default
+- Frame pointers on by default (PEP 831); upgraded experimental JIT; typing: `TypedDict` extra items (PEP 728), `TypeForm` (PEP 747)
+
+**Breaking Changes:**
+- **UTF-8 is the default encoding (PEP 686).** `open()` and friends without `encoding=` now use UTF-8, not the locale encoding, which bites Windows code that relied on cp1252. Opt out with `PYTHONUTF8=0` or `-X utf8=0`
+- `sqlite3.connect()` parameters other than `database` are keyword-only
+- AST node constructors raise `TypeError` on missing or unknown fields (deprecated since 3.13)
+- `datetime.strptime()` raises on `%d` without a year directive
+- Removed: `sre_compile` / `sre_constants` / `sre_parse`, `http.server` `CGIHTTPRequestHandler` and `--cgi`, `importlib` `Loader.load_module()`, `platform.java_ver()`, `glob.glob0/glob1`, `pathlib.PurePath.is_reserved()`, `types.CodeType.co_lnotab`, keyword-argument `NamedTuple(...)` and field-less `TypedDict("TD")`
+- `argparse`: in `add_argument('-f', '-foo')`, `dest` is now inferred from the single-dash long option (`foo`)
+- `base64.urlsafe_b64decode()` no longer requires padding (pass `padded=True` to require it)
+- `unittest` `assertWarns*()` no longer swallows non-matching warnings, so tests may leak previously hidden warnings
+
+**Migration Commands:**
+```bash
+# Find text I/O that silently depended on the locale encoding
+python -X warn_default_encoding -W error::EncodingWarning -m pytest
+rg "open\([^)]*\)" --glob "*.py" | rg -v "encoding="
+
+# Removed modules and APIs
+rg "import sre_(compile|constants|parse)|CGIHTTPRequestHandler|\.load_module\(|java_ver\(|co_lnotab" .
+
+# sqlite3 now keyword-only after the database argument
+rg "sqlite3\.connect\([^)]*,[^=)]*\)" --glob "*.py"
+
+pyupgrade --py315-plus **/*.py
+```
+
 ### Python Version Upgrade Summary
 
 | From → To | Key Action | Biggest Risk |
@@ -177,6 +229,7 @@ pyupgrade --py314-plus **/*.py
 | 3.11 → 3.12 | Remove `distutils`/`imp`, adopt type syntax | `distutils` full removal, sqlite3 adapter changes |
 | 3.12 → 3.13 | Remove deprecated stdlib modules | Large number of removed stdlib modules |
 | 3.13 → 3.14 | Adopt deferred annotations + t-strings | `asyncio.get_event_loop()` no longer creates a loop |
+| 3.14 → 3.15 | Pass `encoding=` explicitly, adopt lazy imports | UTF-8 default encoding changes untagged file I/O |
 
 ---
 
@@ -287,8 +340,9 @@ rg "require\(['\"]\./.*\.mjs" .  # spots that relied on require(esm) flags
 
 ### Node.js 26 (from 24)
 
-Node 26 is the Current line (April 2026); it enters Active LTS in October 2026. For
-production, upgrade LTS-to-LTS: 22 → 24 now, 24 → 26 once 26 is LTS. The mechanics are
+Node 26 was released 2026-05-05 as the Current line and is scheduled to enter Active LTS
+on 2026-10-28 (endoflife.date). For production, upgrade LTS-to-LTS: 24 → 26 once 26 is
+LTS. Node 25 reached end of life on 2026-06-01. The mechanics are
 the same as every even-major bump: rebuild native modules, re-run the test suite on the
 new V8, and update `FROM node:26` images plus CI matrices when you cut over.
 
@@ -299,11 +353,11 @@ new V8, and update `FROM node:26` images plus CI matrices when you cut over.
 | 18 → 20 | Rebuild native modules, test URL parsing | Stricter URL validation, loader hooks off-thread |
 | 20 → 22 | Rebuild native modules, check glibc version | Native module compatibility, header validation |
 | 22 → 24 | Adopt require(esm), permission model | Native-addon toolchain change on Windows |
-| 24 → 26 | LTS-to-LTS bump when 26 enters LTS (Oct 2026) | Riding the Current line before LTS |
+| 24 → 26 | LTS-to-LTS bump when 26 enters LTS (2026-10-28) | Riding the Current line before LTS |
 
 ---
 
-## TypeScript 4.x to 6.0
+## TypeScript 4.x to 7.0
 
 ### TypeScript 5.0 (from 4.9)
 
@@ -368,10 +422,14 @@ bridge to the native (Go) compiler in TypeScript 7.
 - Large-monorepo `tsc --watch` rebuilds significantly faster
 
 **Breaking Changes:**
-- `strict: true` is now the **default** — configs that never set it surface new errors
-- Defaults changed: `module: esnext`, `target: es2025`
-- Removed: `moduleResolution: classic`; `module: amd/umd/system/none`; minimum `target` is ES2015 (`es5` deprecated)
-- `esModuleInterop` / `allowSyntheticDefaultImports` can no longer be set to `false`
+- `strict: true` is now the **default**, so configs that never set it surface new errors
+- Defaults changed: `module: esnext`, `target` = the newest stable ES version (es2025),
+  `noUncheckedSideEffectImports: true`, `rootDir: ./`, `types: []`. The last two
+  surprise most projects: list your `@types` packages explicitly and set `rootDir`
+- Deprecated, an error unless silenced with `"ignoreDeprecations": "6.0"`, and a **hard
+  error in 7.0**: `target: es5`, `downlevelIteration`, `moduleResolution: node`/`node10`/`classic`,
+  `module: amd/umd/system/none`, `baseUrl`, `esModuleInterop` / `allowSyntheticDefaultImports: false`,
+  `alwaysStrict: false`, `import ... asserts {}` (use `with`)
 - Namespace-with-class merging requires explicit `export`
 
 **Migration Commands:**
@@ -386,6 +444,46 @@ rg '"target":\s*"es5"' -i tsconfig.json
 
 # Surface the strict-by-default delta before committing to it
 npx tsc --noEmit
+```
+
+### TypeScript 7.0 (from 6.0)
+
+Released 2026-07-08 (7.0.2 on 2026-08-20; 7.1 beta on 2026-10-20). Sources:
+[Announcing TypeScript 7.0](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/),
+[typescript-go CHANGES.md](https://github.com/microsoft/typescript-go/blob/main/CHANGES.md).
+
+7.0 is the **native port** of the compiler and language service, written in Go. It
+typically builds 8-12x faster, uses shared-memory multithreading, and speaks LSP. It is
+built to type-check exactly like 6.0: code that compiles cleanly on 6.0 with
+`stableTypeOrdering` on and no `ignoreDeprecations` should compile identically on 7.0.
+
+**Key Features Gained:**
+- 8-12x faster full builds, faster `--watch`, and parallel type-checking and project-reference builds (`--singleThreaded` to opt out)
+- New LSP-based language server (VS Code: the dedicated TypeScript 7 extension; Visual Studio enables it per workspace)
+- Template-literal inference treats Unicode code points as one unit (`"😀abc"` → `["😀", "abc"]`)
+
+**Breaking Changes:**
+- **No programmatic compiler API in 7.0** (a new, different API is expected in 7.1). Tools that import `typescript` (typescript-eslint, Volar-based Vue/MDX/Astro/Svelte tooling, Angular template checking) must keep running on 6.0
+- Every 6.0 deprecation is a hard error (`target: es5`, `downlevelIteration`, `moduleResolution: node10`/`classic`, `module: amd/umd/system/none`, `baseUrl`, `esModuleInterop: false`, `alwaysStrict: false`, `asserts` import attributes, `module` keyword for namespaces)
+- `stableTypeOrdering` is always on and cannot be turned off
+- `tsc file.ts` in a directory that has a `tsconfig.json` errors unless you pass `--ignoreConfig`
+- JS/JSDoc checking was reworked to match `.ts` analysis: no values as types (use `typeof`), no special `@enum` or `@class`, no Closure function-type syntax, no standalone `?` type
+- Type-level string utilities that modeled UTF-16 code units change results
+
+**Migration Commands:**
+```bash
+# Step 1: be clean on 6.0 first, with no ignoreDeprecations and stableTypeOrdering on
+rg '"ignoreDeprecations"' --glob "tsconfig*.json"
+npx tsc --noEmit --stableTypeOrdering
+
+# Step 2: install 7.0
+npm install -D typescript@7
+
+# Tools that need the compiler API: keep 6.0 under the `typescript` name (tsc6 binary),
+# alias 7.0 so `npx tsc` is the native compiler
+npm install -D typescript@npm:@typescript/typescript6@^6.0.2 @typescript/native@npm:typescript@^7.0.2
+
+# Nightlies now publish as typescript@next (was @typescript/native-preview)
 ```
 
 ### Migration Strategy
@@ -405,16 +503,23 @@ TypeScript version upgrade approach:
 │  ├─ 4. Decide on decorator strategy (legacy vs ECMAScript)
 │  └─ 5. Consider adopting moduleResolution: "bundler"
 │
-└─ Major version (5.x → 6.0)
-   ├─ 1. Set strict: true explicitly and fix errors BEFORE upgrading
-   ├─ 2. Replace removed module/moduleResolution options
-   ├─ 3. Install typescript@6, run tsc --noEmit
-   └─ 4. Pin the target you actually ship (defaults moved to es2025)
+├─ Major version (5.x → 6.0)
+│  ├─ 1. Set strict: true explicitly and fix errors BEFORE upgrading
+│  ├─ 2. Replace deprecated module/moduleResolution/baseUrl options
+│  ├─ 3. Set rootDir and types explicitly (new defaults: ./ and [])
+│  ├─ 4. Install typescript@6, run tsc --noEmit
+│  └─ 5. Pin the target you actually ship (defaults moved to es2025)
+│
+└─ Major version (6.0 → 7.0)
+   ├─ 1. Remove ignoreDeprecations; build clean with --stableTypeOrdering on 6.0
+   ├─ 2. Inventory tools that import the compiler API (eslint, Vue/Svelte/Astro, Angular)
+   ├─ 3. Install typescript@7; keep @typescript/typescript6 for those tools
+   └─ 4. Switch editors to the TypeScript 7 language server; keep 6.0 for embedded-language projects
 ```
 
 ---
 
-## Go 1.20 to 1.26
+## Go 1.20 to 1.27
 
 ### Go 1.21 (from 1.20)
 
@@ -502,24 +607,70 @@ rg "\.Stop\(\)" . --glob "*.go"  # Review timer stop behavior
 rg "\.Reset\(" . --glob "*.go"   # Review timer reset behavior
 ```
 
-### Go 1.24 – 1.26 (from 1.23)
+### Go 1.24 – 1.25 (from 1.23)
 
 **Key Features Gained:**
 - **1.24**: generic type aliases; `tool` directives in go.mod (tracked tool deps); `os.Root` (filesystem-scoped file access); Swiss-table map implementation (runtime perf); `weak` package; `runtime.AddCleanup` (successor to `SetFinalizer`)
 - **1.25**: container-aware `GOMAXPROCS` (respects cgroup CPU limits); `testing/synctest` for concurrent-code tests; experimental green-tea GC
-- **1.26**: current stable line — as with every Go release, review the release notes for `go vet`/runtime deltas; language changes remain rare and gated on the `go` directive
 
 **Breaking Changes:**
 - Effectively none at the language level (Go 1 compatibility promise); behavior deltas are gated on the `go` directive version in go.mod, so bumps activate deliberately
 
+### Go 1.26 (from 1.25)
+
+Released 2026-02-10. Source: [Go 1.26 Release Notes](https://go.dev/doc/go1.26).
+
+**Key Features Gained:**
+- `new(expr)`: the built-in `new` takes an initial value (`Age: new(yearsSince(born))`), handy for pointer-to-optional fields
+- Generic types may refer to themselves in their own type-parameter constraints (`type Adder[A Adder[A]] interface{...}`)
+- Green Tea garbage collector **on by default** (10-40% less GC overhead in GC-heavy programs)
+- `go fix` rebuilt as the home of **modernizers** on the `go vet` analysis framework, plus `//go:fix inline` for automated API migrations; the old obsolete fixers are gone
+- Faster cgo calls; heap base address randomization; `crypto/hpke`; experimental `simd/archsimd` and `runtime/secret`; goroutine-leak profile as an experiment
+
+**Breaking Changes:**
+- `go mod init` writes the previous Go version (`go 1.25.0` from a 1.26 toolchain)
+- `cmd/doc` and `go tool doc` were deleted (use `go doc`)
+- Last release supporting macOS 12
+
+### Go 1.27 (from 1.26)
+
+Released 2026-08-19. Source: [Go 1.27 Release Notes](https://go.dev/doc/go1.27).
+
+**Key Features Gained:**
+- **Generic methods**: a method may declare its own type parameters (`func (r *Rand) N[Int intType](n Int) Int`). Interface methods still cannot, and generic methods do not implement interface methods
+- Struct-literal keys may be any field selector, not just a top-level field name; function type inference works wherever a generic function is assigned to a matching function type
+- `encoding/json/v2` and `encoding/json/jsontext` are GA. `encoding/json` itself is now **backed by the v2 implementation** (same behaviour, faster unmarshal, different error text)
+- New `uuid` and `crypto/mldsa` (post-quantum ML-DSA, also in `crypto/x509` and TLS 1.3) packages; experimental `simd`
+- `goroutineleak` profile GA (`runtime/pprof`, `/debug/pprof/goroutineleak`); size-specialized small allocations (up to 30% cheaper, about 60 KB more binary)
+- `go doc pkg@version`, `go doc -ex`; new `go fix` modernizers; `go mod tidy` merges duplicate require blocks for `go 1.27` modules
+
+**Breaking Changes:**
+- **macOS 13 Ventura or later required**
+- `asynctimerchan` GODEBUG removed: `time` channels are always unbuffered. A `go.mod` or `//go:debug` line setting it to the old value now **fails the build**
+- `go test` runs the `stdversion` vet check by default (flags stdlib symbols newer than the file's Go version)
+- `gofmt` alignment fix: reformatting previously formatted code can produce small whitespace diffs, so expect churn in a repo-wide `gofmt -l` check
+- `encoding/json` error messages differ. Tests asserting on exact error text break; `GOEXPERIMENT=nojsonv2` restores v1 temporarily
+- `go fix`: `waitgroup` renamed `waitgroupgo`, `fmtappendf` removed; `bzr` VCS support dropped; `go tool trace -http=:port` binds localhost only
+- Closure (function literal) symbol names changed, which affects tests that match on symbol names
+
 **Migration Commands:**
 ```bash
-go mod edit -go=1.26
+go mod edit -go=1.27
 go mod tidy
 go vet ./...
+go test ./...            # now includes the stdversion vet check
 govulncheck ./...
 
-# Adopt tool directives (1.24+) — replaces tools.go pattern
+# GODEBUG settings that 1.27 removed: an old value fails the build
+rg "asynctimerchan" --glob "go.mod" --glob "*.go"
+
+# Tests that pin encoding/json error strings
+rg 'json: (cannot|invalid|unexpected)' --glob "*_test.go"
+
+# Modernize with the 1.26+ go fix
+go fix ./...
+
+# Adopt tool directives (1.24+) - replaces the tools.go pattern
 go get -tool golang.org/x/tools/cmd/stringer
 ```
 
@@ -530,7 +681,9 @@ go get -tool golang.org/x/tools/cmd/stringer
 | 1.20 → 1.21 | Update go.mod toolchain, adopt slog | Toolchain directive in go.mod |
 | 1.21 → 1.22 | Enjoy loop variable fix, adopt enhanced routing | Loop variable semantics (usually fixes bugs) |
 | 1.22 → 1.23 | Replace x/exp packages, adopt iterators | Timer/Ticker behavior change |
-| 1.23 → 1.26 | Bump go directive stepwise, adopt tool directives + os.Root | Runtime perf deltas (Swiss maps, GC) in hot paths |
+| 1.23 → 1.25 | Bump go directive stepwise, adopt tool directives + os.Root | Runtime perf deltas (Swiss maps, GC) in hot paths |
+| 1.25 → 1.26 | Run the new `go fix` modernizers, adopt `new(expr)` | Green Tea GC now default (measure GC-heavy services) |
+| 1.26 → 1.27 | Adopt generic methods, `encoding/json/v2` where useful | Removed `asynctimerchan`, json error text, macOS 13 floor |
 
 ---
 
