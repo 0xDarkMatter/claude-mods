@@ -292,21 +292,114 @@ term_repeat() {
   printf '%s' "$out"
 }
 
-# term_truncate <text> <max_cols>  — ellipsis-truncate, append "…" or "..".
+# ─── Visible width (colour is zero-width) ─────────────────────────────────
+# Callers hand the layout helpers PRE-COLOURED fragments (term_hotkey,
+# term_health, term_pip_bar, term_color output). Both `${#var}` and printf's
+# `%-Ns` count every byte of an SGR escape (ESC [ params m) as a column, so a
+# coloured panel footer came out short and term_truncate cut ESC[33m in half.
+# Hence: every width in this file is measured with __term_vis_width, every
+# column is padded with __term_pad, and every cut goes through term_truncate.
+# Never `${#x}` or `%-Ns` on text that may carry colour. tests/check-resources.sh
+# pins this ("colour is zero-width").
+#
+# Width means characters of the stripped text, not terminal cells: an
+# east-asian-wide glyph (the ⚡ brand, most emoji) still counts 1, and MSYS bash
+# (16-bit wchar_t) counts an astral emoji as 2. term.ps1's Get-TermDisplayWidth
+# carries a wide-glyph table; porting it means changing __term_vis_width alone.
+#
+# Fork-free on purpose: these run several times per panel row, and a $(...)
+# subshell is a whole process on Windows. The __ forms set a global instead of
+# printing; the public wrappers print, for callers that want a value.
+
+# __term_strip <text>  — sets __TERM_STRIPPED to <text> minus every CSI escape
+# (ESC [ <digits and ;> <final byte>). An escape cut off at the end of the text
+# goes whole, and so does a lone ESC with no '['. term.sh itself only emits SGR.
+__term_strip() {
+  local s=$1 out="" params esc=$'\033'
+  while [[ "$s" == *"$esc"* ]]; do
+    out="$out${s%%"$esc"*}"
+    s=${s#*"$esc"}
+    if [[ "$s" == "["* ]]; then
+      s=${s:1}
+      params=${s%%[!0-9;]*}
+      s=${s#"$params"}
+      s=${s:1}
+    fi
+  done
+  __TERM_STRIPPED="$out$s"
+}
+
+# __term_vis_width <text>  — sets __TERM_VIS_WIDTH to the columns <text> fills.
+__term_vis_width() { __term_strip "$1"; __TERM_VIS_WIDTH=${#__TERM_STRIPPED}; }
+
+# __term_pad <text> <cols>  — sets __TERM_PADDED to <text> right-padded with
+# spaces to <cols> visible columns. Never truncates: wider text comes back as-is.
+__term_pad() {
+  __term_vis_width "$1"
+  local gap=$(( $2 - __TERM_VIS_WIDTH ))
+  [[ $gap -lt 0 ]] && gap=0
+  printf -v __TERM_PADDED '%s%*s' "$1" "$gap" ''
+}
+
+# term_strip <text>  — <text> with colour escapes removed.
+term_strip() { __term_strip "$1"; printf '%s' "$__TERM_STRIPPED"; }
+
+# term_vis_width <text>  — visible columns of <text> (colour counts 0).
+term_vis_width() { __term_vis_width "$1"; printf '%s' "$__TERM_VIS_WIDTH"; }
+
+# term_pad <text> <cols>  — <text> padded to <cols> visible columns. Use it, not
+# printf %-Ns, for any column that may hold colour or multibyte glyphs.
+term_pad() { __term_pad "$1" "$2"; printf '%s' "$__TERM_PADDED"; }
+
+# term_truncate <text> <max_cols>  — ellipsis-truncate to <max_cols> VISIBLE
+# columns, appending "…" or "..". Escapes are zero-width and copied whole, so a
+# cut never lands inside one; if any were copied, a reset (ESC[0m) precedes the
+# marker so the cut cannot leave the terminal mid-colour.
 term_truncate() {
   local text=$1 max=$2
-  local len=${#text}
-  if [[ $len -le $max ]]; then printf '%s' "$text"; return; fi
+  __term_vis_width "$text"
+  if [[ $__TERM_VIS_WIDTH -le $max ]]; then printf '%s' "$text"; return; fi
   # Registered glyph, not a literal — TERM_ASCII=1 must swap it. The ASCII marker
   # stays two dots (not $TERM_ELLIPSIS's three): it is the truncation cue, and a
   # third dot would eat another column of the name it is already shortening.
   local ell="$TERM_ELLIPSIS"
   [[ "$TERM_ASCII_MODE" -eq 1 ]] && ell=".."
-  local elllen=${#ell}
-  printf '%s%s' "${text:0:$((max - elllen))}" "$ell"
+  local keep=$(( max - ${#ell} ))   # ell is a bare glyph, so ${#} is exact here
+  [[ $keep -lt 0 ]] && keep=0
+  local s=$text out="" run params esc=$'\033' coloured=0
+  while [[ $keep -gt 0 && -n "$s" ]]; do
+    if [[ "$s" == "$esc["* ]]; then
+      s=${s:2}; params=${s%%[!0-9;]*}; s=${s#"$params"}
+      out="$out$esc[$params${s:0:1}"; s=${s:1}; coloured=1
+    elif [[ "$s" == "$esc"* ]]; then
+      s=${s:1}                        # lone ESC: zero columns, dropped as in __term_strip
+    else
+      run=${s%%"$esc"*}
+      [[ ${#run} -gt $keep ]] && run=${run:0:$keep}
+      out="$out$run"; s=${s:${#run}}; keep=$(( keep - ${#run} ))
+    fi
+  done
+  # $TERM_C_OFF's colour-on value as a literal: the escapes came from the
+  # caller, so the reset is needed whatever TERM_COLOR says.
+  [[ $coloured -eq 1 ]] && out="$out"$'\033[0m'
+  printf '%s%s' "$out" "$ell"
 }
 
 # ─── Panel ────────────────────────────────────────────────────────────────
+
+# __term_panel_bar <left> <right>  — print <left>, a cyan rule filling the rest
+# of TERM_WIDTH, then <right>. Both widths come from the RENDERED strings with
+# colour stripped, never from a hand-kept uncoloured twin: the footer once kept
+# such a twin, filled it with its callers' pre-coloured hotkeys and healths, and
+# came out short whenever colour was on (62 of 80 cells in `fleet status`).
+__term_panel_bar() {
+  local lw
+  __term_vis_width "$1"; lw=$__TERM_VIS_WIDTH
+  __term_vis_width "$2"
+  local fill=$(( TERM_WIDTH - lw - __TERM_VIS_WIDTH ))
+  [[ $fill -lt 4 ]] && fill=4
+  printf '%s%s%s\n' "$1" "$(term_color cyan "$(term_repeat "$TERM_PANEL_HRULE" "$fill")")" "$2"
+}
 
 # term_panel_open <emoji_key> <name> [right_indicator]
 #   ╭── ⚡ name ─────────  <indicator> ───●
@@ -315,50 +408,22 @@ term_panel_open() {
   local emoji
   emoji=$(term_brand_glyph "$key")
   local left="${TERM_PANEL_TL}${TERM_PANEL_HRULE}${TERM_PANEL_HRULE} ${emoji} $(term_color cyan "$name") "
-  local right=""
-  if [[ -n "$indicator" ]]; then
-    right=" $(term_color dim "$indicator") ${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}$(term_color cyan "$TERM_PANEL_TERM")"
-  else
-    right="${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}$(term_color cyan "$TERM_PANEL_TERM")"
-  fi
-
-  # Visible (color-stripped) widths to size the rule fill correctly.
-  local left_vis="${TERM_PANEL_TL}${TERM_PANEL_HRULE}${TERM_PANEL_HRULE} ${emoji} ${name} "
-  local right_vis=""
-  [[ -n "$indicator" ]] && right_vis=" ${indicator} ${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}${TERM_PANEL_TERM}" \
-                       || right_vis="${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}${TERM_PANEL_TERM}"
-
-  local fill=$(( TERM_WIDTH - ${#left_vis} - ${#right_vis} ))
-  [[ $fill -lt 4 ]] && fill=4
-  local rule
-  rule=$(term_repeat "$TERM_PANEL_HRULE" "$fill")
-  printf '%s%s%s\n' "$left" "$(term_color cyan "$rule")" "$right"
+  local right="${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}$(term_color cyan "$TERM_PANEL_TERM")"
+  [[ -n "$indicator" ]] && right=" $(term_color dim "$indicator") ${right}"
+  __term_panel_bar "$left" "$right"
 }
 
 # term_panel_close [hotkeys] [health_indicators]
 #   ╰── R refresh · L land · ? help ───── • daemon  • 17m ───●
 # `hotkeys`: pre-formatted "R refresh · L land · ? help" string.
 # `healths`: pre-formatted "• daemon  • 17m" string.
+# Both may carry colour (term_hotkey, term_health): it is measured as zero-width.
 term_panel_close() {
   local hotkeys=${1:-} healths=${2:-}
   local left="${TERM_PANEL_BL}${TERM_PANEL_HRULE}${TERM_PANEL_HRULE} ${hotkeys} "
-  local right=""
-  if [[ -n "$healths" ]]; then
-    right=" ${healths} ${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}$(term_color cyan "$TERM_PANEL_TERM")"
-  else
-    right="${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}$(term_color cyan "$TERM_PANEL_TERM")"
-  fi
-
-  local left_vis="${TERM_PANEL_BL}${TERM_PANEL_HRULE}${TERM_PANEL_HRULE} ${hotkeys} "
-  local right_vis=""
-  [[ -n "$healths" ]] && right_vis=" ${healths} ${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}${TERM_PANEL_TERM}" \
-                     || right_vis="${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}${TERM_PANEL_TERM}"
-
-  local fill=$(( TERM_WIDTH - ${#left_vis} - ${#right_vis} ))
-  [[ $fill -lt 4 ]] && fill=4
-  local rule
-  rule=$(term_repeat "$TERM_PANEL_HRULE" "$fill")
-  printf '%s%s%s\n' "$left" "$(term_color cyan "$rule")" "$right"
+  local right="${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}$(term_color cyan "$TERM_PANEL_TERM")"
+  [[ -n "$healths" ]] && right=" ${healths} ${right}"
+  __term_panel_bar "$left" "$right"
 }
 
 # term_panel_vert  — emit a single body-line spacer "│"
@@ -408,16 +473,21 @@ term_summary_line() {
 # term_leaf_line <connector> <name> <leaf_glyph> <meta> <age>
 #   │   ├── name              ●─●─●─◉    M4 ?1   12m
 # `connector` = ├── or └──
+# Columns are padded on visible width: `leaf` is a coloured rail or pip bar, and
+# printf %-14s counted its escape and multibyte bytes, so the meta/age columns
+# wandered with the commit count (docs/TERMINAL-DESIGN.md §3.3 grid).
 term_leaf_line() {
   local conn=$1 name=$2 leaf=$3 meta=${4:-} age=${5:-}
-  local trunc_name
-  trunc_name=$(term_truncate "$name" 28)
-  printf '%s   %s %-28s  %-14s %-10s %s\n' \
+  local name_col leaf_col
+  __term_pad "$(term_truncate "$name" 28)" 28; name_col=$__TERM_PADDED
+  __term_pad "$leaf" 14; leaf_col=$__TERM_PADDED
+  __term_pad "$(term_color dim "$meta")" 10
+  printf '%s   %s %s  %s %s %s\n' \
     "$(term_color dim "$TERM_TREE_VERT")" \
     "$(term_color dim "$conn$TERM_PANEL_HRULE")" \
-    "$trunc_name" \
-    "$leaf" \
-    "$(term_color dim "$meta")" \
+    "$name_col" \
+    "$leaf_col" \
+    "$__TERM_PADDED" \
     "$(term_color dim "$age")"
 }
 
@@ -437,12 +507,15 @@ term_toast() {
 # The no-tree counterpart to term_leaf_line: a flat row riding the panel rail,
 # led by a term_mark glyph (ok/bad/warn/skip/na/unknown). `value` is dim, right of
 # the label column. Use inside a status panel (a PR's checks, a health summary).
+# `label` may carry colour (loop-check puts a coloured pip bar in it): it is cut
+# and padded on visible columns, so the value column stays put either way.
 term_status_row() {
   local mark label value
   mark="$(term_mark "$1")"; label=$2; value=${3:-}
   if [[ -n "$value" ]]; then
-    printf '%s   %s  %-30s %s\n' \
-      "$(term_color dim "$TERM_TREE_VERT")" "$mark" "$(term_truncate "$label" 30)" \
+    __term_pad "$(term_truncate "$label" 30)" 30
+    printf '%s   %s  %s %s\n' \
+      "$(term_color dim "$TERM_TREE_VERT")" "$mark" "$__TERM_PADDED" \
       "$(term_color dim "$value")"
   else
     printf '%s   %s  %s\n' \
@@ -587,12 +660,17 @@ term_spinner_frame() {
 }
 
 # ─── Legacy / kept-for-compat helpers (used by older scripts) ─────────────
+# term_tree_item, term_tree_node and term_table_row keep their printf %-Ns
+# columns, so they align PLAIN text only; pass colour in their last argument.
+# Left alone because nothing in this repo calls them and term_table_row's icon
+# column relies on byte padding happening to give a wide emoji its 2 cells.
 
 # term_header <title> [meta]  — "── title ──────  meta" (legacy)
 term_header() {
   local title=$1 meta=${2:-}
   local glyph="─"; [[ "$TERM_ASCII_MODE" -eq 1 ]] && glyph="-"
-  local pad=$(( TERM_WIDTH - ${#title} - 6 ))
+  __term_vis_width "$title"
+  local pad=$(( TERM_WIDTH - __TERM_VIS_WIDTH - 6 ))
   [[ $pad -lt 4 ]] && pad=4
   local line
   line="$(term_repeat "$glyph" 2) $(term_color cyan "$title") $(term_repeat "$glyph" "$pad")"

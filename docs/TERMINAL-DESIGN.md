@@ -178,6 +178,8 @@ Layout is built on whitespace alignment, not vertical bars. The grid for a leaf 
 
 These widths target an **80-col default**. They scale: a `--wide=120` mode bumps name to 48 and rail to 20. They never exceed terminal width — at <60 cols, drop the rail and meta columns rather than wrap.
 
+**Colour is zero-width.** Columns hold coloured fragments (`term_rail`, `term_pip_bar`, `term_health`) and multibyte glyphs, while `${#var}` and printf's `%-Ns` count bytes: escape codes and `●─◉` eat the padding, and a footer sized from them comes out short. Measure with `term_vis_width`, pad with `term_pad`, cut with `term_truncate`. Rendering with colour and stripping the escapes must give exactly the plain render; `tests/check-resources.sh` holds `term.sh` to that.
+
 Section rows ride the same indent: `│   ` (panel + 3 spaces) to land at the section-indent column.
 
 ---
@@ -803,7 +805,10 @@ term_hotkey      key verb                # R refresh
 term_spinner_frame family tick           # working / heartbeat → glyph
 
 # Edge cases
-term_truncate    "text" max_cols         # ellipsis-truncate
+term_truncate    "text" max_cols         # ellipsis-truncate on visible cols; never cuts an escape
+term_strip       "text"                  # text minus colour escapes
+term_vis_width   "text"                  # visible cols (colour counts 0)
+term_pad         "text" cols             # pad to visible cols: use instead of printf %-Ns
 term_term_width                          # current cols
 
 # Text-level glyphs — interpolate, never type the literal (TERM_ASCII=1 swaps these)
