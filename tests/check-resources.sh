@@ -511,6 +511,54 @@ if [ "$__fy_live" -gt 0 ] && [ "$__fy_live" -eq "$__fy_help" ]; then
     pass "$__fy: one helper call per live check ($__fy_live)"
 else bad "$__fy: $__fy_help helper calls for $__fy_live live checks - want one each"; fi
 
+echo "== freshness workflow: every live verifier is on the weekly schedule"
+# A --live mode only catches drift if freshness.yml runs it. Eight skills once
+# shipped a §7 verifier the workflow never called, so their drift could not turn
+# a run red. A verifier is any skills/*/scripts/ file naming BOTH --offline and
+# --live (the §7 split); one naming only --live in a comment is not. It counts as
+# scheduled when its path is a whole token on a `-- <cmd> ... --live` line.
+# Deliberate exclusions go in __fv_exempt: "<path> <reason>", one per line. An
+# entry with no reason, a path not on disk or a path freshness.yml does run fails.
+__fv_exempt='
+skills/fleet-worker/scripts/fleet-doctor.sh needs a paid worker-endpoint key and spends one real model turn through the claude CLI: a per-machine preflight, not shipped-fact drift
+skills/loop-ops/scripts/loop-doctor.sh --live is a runtime preflight of a local loop.config.yaml (claude/git/verify binary on PATH), not a shipped fact
+'
+# Every whole token on the `-- <cmd>` lines. A step's verifier path must sit on
+# that line itself, not on a `\` continuation line below it.
+__fy_tokens="$(printf '%s\n' "$__fy_code" | grep -E '^\s*-- ' | tr -s ' \t\\' '\n\n\n')"
+__fv_rc=0
+__fv_found="$(grep -rlI --exclude-dir=__pycache__ -e '--live' skills/*/scripts 2>/dev/null)" || __fv_rc=$?
+[ "$__fv_rc" -le 1 ] || bad "verifier discovery: grep over skills/*/scripts failed (exit $__fv_rc)"
+__fv_missing=""; __fv_n=0
+for __f in $__fv_found; do   # paths under skills/ carry no spaces (naming-conventions.md)
+    grep -q -e '--offline' "$__f" || continue
+    __fv_n=$((__fv_n + 1))
+    if printf '%s\n' "$__fv_exempt" | awk -v p="$__f" '$1 == p { m = 1 } END { exit !m }'; then continue; fi
+    printf '%s\n' "$__fy_tokens" | grep -qxF -- "$__f" || __fv_missing="$__fv_missing $__f"
+done
+if [ "$__fv_n" -eq 0 ]; then bad "verifier discovery found no --offline/--live verifier under skills/*/scripts"
+elif [ -n "$__fv_missing" ]; then
+    bad "$__fy never runs --live for:$(printf ' %s' $__fv_missing | sed 's#skills/\([^/ ]*\)/scripts/#\1/#g') - add a freshness-step.sh step, or an __fv_exempt line with the reason"
+else pass "$__fy schedules every --offline/--live verifier ($__fv_n found, exemptions included)"; fi
+__fv_stale=""
+for __f in $(printf '%s\n' "$__fv_exempt" | awk 'NF { print $1 }'); do
+    __why="$(printf '%s\n' "$__fv_exempt" | awk -v p="$__f" '$1 == p { $1 = ""; sub(/^ +/, ""); print; exit }')"
+    if [ -z "$__why" ]; then __fv_stale="$__fv_stale $__f(no-reason)"
+    elif [ ! -f "$__f" ]; then __fv_stale="$__fv_stale $__f(not-on-disk)"
+    elif printf '%s\n' "$__fy_tokens" | grep -qxF -- "$__f"; then __fv_stale="$__fv_stale $__f(scheduled-anyway)"
+    fi
+done
+if [ -n "$__fv_stale" ]; then bad "stale __fv_exempt entries:$__fv_stale"
+else pass "every __fv_exempt entry names an unscheduled verifier on disk and says why"; fi
+# The reverse: a renamed or deleted verifier still named by a step would only
+# surface on Monday, as a crash. Catch it in the PR instead.
+__fy_gone=""
+for __f in $(printf '%s\n' "$__fy_tokens" | grep -E '^skills/[^/]+/scripts/'); do
+    [ -f "$__f" ] || __fy_gone="$__fy_gone $__f"
+done
+if [ -n "$__fy_gone" ]; then bad "$__fy runs verifiers that are not on disk:$__fy_gone"
+else pass "$__fy names only verifiers that exist"; fi
+
 echo
 if [ "$fail" -eq 0 ]; then echo "resource checks: clean"; exit 0; fi
 echo "resource checks: failures above"; exit 1

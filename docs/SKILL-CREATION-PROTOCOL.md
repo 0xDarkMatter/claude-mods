@@ -118,8 +118,10 @@ in the trim commit that later re-discovers it.
 No registration needed: [`tests/run-skill-tests.sh`](../tests/run-skill-tests.sh) globs
 `skills/*/tests/run.sh` and runs them all in CI. If the skill ships a verifier script,
 also add an offline-mode assertion to [`tests/check-resources.sh`](../tests/check-resources.sh)
-(PR CI, may block); its `--live` mode runs in the scheduled
-[`freshness.yml`](../.github/workflows/freshness.yml), never blocking a PR.
+(PR CI, may block), and a step for its `--live` mode in the scheduled
+[`freshness.yml`](../.github/workflows/freshness.yml), which never blocks a PR. Nothing
+schedules a verifier for you; `check-resources.sh` fails the PR when a `--offline`/`--live`
+verifier has no step (the protocol's §7 says how to exempt one).
 
 ## Step 6 — Repo integration (the doc-drift gate)
 

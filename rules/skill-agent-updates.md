@@ -28,7 +28,8 @@ the first-comment-block contract, and `--json` envelopes. A skill that encodes
 fast-moving external facts (model IDs, API params, action versions) SHOULD ship a
 verifier with the `--offline`/`--live` split (§7) so staleness trips a tripwire
 instead of rotting silently. `tests/check-resources.sh` runs the offline mode in CI;
-the scheduled `freshness.yml` workflow runs the live mode.
+the scheduled `freshness.yml` workflow runs the live mode, once you add the
+verifier's step there (`tests/check-resources.sh` fails the PR until you do).
 
 ## Terminal output
 
