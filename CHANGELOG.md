@@ -102,9 +102,7 @@ feature releases live in the README "Recent Updates" section.
   GitHub API. `tests/check-resources.sh` finds every `skills/*/scripts/` file naming both flags
   and fails the PR when no step runs it, unless it is in an `__fv_exempt` list with a reason
   (fleet-doctor and loop-doctor check the local machine, not shipped facts); it also fails a
-  stale exemption and a step naming a script no longer on disk. Expect the next scheduled run
-  to report drift in react-ops and vue-ops until their facts are refreshed: that is the check
-  doing its job.
+  stale exemption and a step naming a script no longer on disk.
 
 - **mcp-ops teaches the v2 MCP ecosystem.** Spec revision 2026-07-28 (sessionless requests,
   `server/discover`, no server-to-client requests), the Python SDK 2.x (`FastMCP` renamed
@@ -118,6 +116,17 @@ feature releases live in the README "Recent Updates" section.
   UTF-8 default encoding and lazy imports, TypeScript 7's native compiler (no compiler API
   until 7.1, so tools that consume it stay on 6.0), and Go 1.26/1.27's generic methods,
   json/v2 backing and removed GODEBUG settings.
+
+- **react-ops and vue-ops teach Jotai 3, Vitest 5, Pinia 4 and VueUse 15.** Their `--live`
+  verifiers had tripped on all four new majors; the prose was checked against each project's
+  release notes or migration guide (cited inline) before the facts moved. Jotai gets a v2-to-v3
+  change table (`atomFamily` to `jotai-family`, `loadable` removed, ESM only, a mount-timing
+  change); both testing references get Vitest 5's floors (Node 22.12, Vite 6.4 as a required
+  peer) and the changes that break suites (`clearMocks` on by default, unawaited `.resolves`
+  failing, top-level `vi.mock`, the `>` test-name separator, the `.vitest/` artifact
+  directory); Pinia 4 gets its install line (`@vue/devtools-api` is now a required peer) and
+  VueUse 15 its breaking changes. The facts files now carry major-bearing prose tokens ("Vitest
+  5", "Pinia 4", ...), so `--offline` fails if the prose stops naming the documented major.
 
 - **The README leads with what the plugin does, shown in real runs.** A "What you get" list,
   then "See it work": `fleet status` and `fleet sweep` in a throwaway repo, the live staleness
@@ -194,6 +203,16 @@ feature releases live in the README "Recent Updates" section.
 
 - **pm-audit tests: a second `fresh()` no longer shadows the first** in the same embedded
   program (found by `fleet queue`'s duplicate-definition audit).
+
+- **react-ops' Vitest setup type-checks again.** `import '@testing-library/jest-dom'` types
+  its matchers on `jest.Matchers`, which Vitest 5 no longer reads, so every jest-dom matcher was
+  a TS2339. The setup now calls `expect.extend(matchers)` and ships a `Matchers<R, T>`
+  augmentation until jest-dom ships Vitest 5 types (testing-library/jest-dom#738). The same
+  file's `jest-axe` example called `toHaveNoViolations()` instead of passing the matcher, and
+  named Playwright's `--update-snapshots` flag where Vitest's is `-u`.
+
+- **vue-ops' persisted-state example uses `pick`.** pinia-plugin-persistedstate v4 renamed
+  `paths` to `pick`, so the old option no longer limited what was persisted.
 
 - **Every PowerShell script now parses under Windows PowerShell 5.1.** 5.1, still the
   default shell on Windows, reads a script without a byte-order mark in the ANSI code page, so
