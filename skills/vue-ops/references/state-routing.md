@@ -4,6 +4,36 @@ Advanced Pinia patterns and Vue Router configuration with TypeScript.
 
 ---
 
+## Pinia 4
+
+Pinia 4.0.0 shipped 2026-07-14 (4.1.0 on 2026-10-14). Its release notes call the
+breaking changes "only technically breaking": ESM only, and `@vue/devtools-api` v8
+"now must be installed alongside pinia"
+([v4.0.0 notes](https://github.com/vuejs/pinia/releases/tag/v4.0.0)). Store definitions,
+`storeToRefs`, plugins and `$reset` are unchanged, so every pattern below is current.
+
+```bash
+npm install pinia @vue/devtools-api        # getting-started, pinia.vuejs.org
+npx nuxi@latest module add pinia           # Nuxt: adds @pinia/nuxt + pinia
+```
+
+| Check | Pinia 4 floor |
+|-------|---------------|
+| Vue | `^3.5.11` (peer) |
+| TypeScript | `>=5.6.0` (optional peer) |
+| `@vue/devtools-api` | `^8`, required peer: Yarn won't add it for you |
+| Companion packages | `@pinia/testing` 2.x and `@pinia/nuxt` 1.x (their latest releases peer `pinia >=4.1.0` / `^4.1.0`) |
+| Bundling | ESM only, no CJS build: check old Jest or SSR tooling that still `require()`s it |
+
+New in 4.x: errors and dev warnings are rewritten as diagnostics with fix hints,
+`storeToRefs` skips nullish values, `piniaSymbol` is exported, and 4.1 adds
+`getStores()` ([v4.1.0 notes](https://github.com/vuejs/pinia/releases/tag/v4.1.0)).
+Pinia 3 (2025-02-11) already dropped Vue 2, `PiniaStorePlugin` and the
+`defineStore({ id })` form ([v3.0.0 notes](https://github.com/vuejs/pinia/releases/tag/v3.0.0));
+the string-id form used below is the only one.
+
+---
+
 ## Pinia — Setup Syntax (Recommended)
 
 The setup syntax mirrors `<script setup>` and is the preferred approach — full TypeScript inference, composables allowed inside, no `this` binding.
@@ -182,7 +212,9 @@ export const usePreferencesStore = defineStore('preferences', () => {
   return { theme, language, notifications }
 }, {
   persist: {
-    paths: ['theme', 'language'],     // only persist these
+    // v4 of the plugin renamed `paths` to `pick` (and added `omit`), and rehydrates
+    // only the picked keys (plugin's v4.0.0 release notes); it peers pinia >=3.
+    pick: ['theme', 'language'],      // only persist these
     storage: localStorage,
     serializer: {
       deserialize: JSON.parse,

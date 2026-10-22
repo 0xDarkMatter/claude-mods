@@ -492,6 +492,9 @@ const theme = useTheme()
 
 ### Pinia with Nuxt (recommended for complex state)
 
+Install with `npx nuxi@latest module add pinia`. `@pinia/nuxt` 1.x pairs with Pinia 4,
+which also needs `@vue/devtools-api` installed (see state-routing.md, Pinia 4).
+
 ```ts
 // nuxt.config.ts
 export default defineNuxtConfig({
