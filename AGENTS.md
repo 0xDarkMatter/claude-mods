@@ -6,7 +6,7 @@ This is **claude-mods** - a collection of custom extensions for Claude Code. Hum
 and usage live in [README.md](README.md); this file is for agents working on the repo.
 - **3 expert agents** for pure context-isolation/worker roles (git-agent, firecrawl-expert, project-organizer) - every domain-knowledge agent became an `-ops` skill (v3.0, skills-first)
 - **4 commands** for session management, git orchestration and wave coordination (/sync, /save, /git-ops, /conduct)
-- **112 skills** for CLI tools, patterns, workflows and development tasks. Two routers come
+- **113 skills** for CLI tools, patterns, workflows and development tasks. Two routers come
   first when a family is ambiguous: `parallel-ops` (fleet-ops, fleet-worker, fleetflow,
   loop-ops, iterate, spawn) and `figma-ops` (the Figma MCP skills). README.md lists them all
 - **13 output styles** for response personality (Vesper, Spartan, Mentor, Executive, Pair, Atlas, Coach, Harbour, Meridian, Noir, Roast, Sage, Scout)
@@ -52,6 +52,7 @@ On "INIT:" message at session start:
 | `skills/pigeon/` | Inter-session pmail - send, read, reply, broadcast, search across projects |
 | `skills/auto-skill/` | Auto-detect skill-worthy workflows; Stop hook suggests after complex sessions. `/auto-skill on/off/status` to toggle |
 | `skills/supply-chain-defense/` | Behavioural-first dependency security: Socket.dev depscore MCP, IOC exposure checks (npm and its kin, PyPI, Composer, Cargo, Go, RubyGems, editor extensions), persistence audit. Paired with `rules/supply-chain.md` |
+| `skills/ca-trust-ops/` | Read-only machine check against a CA distrust event: generic bash and PowerShell checkers, one incident pack per event in `assets/incidents/`. Its contract and landmines (no writes, no proxies, path-confirmed probes) are in [skills/ca-trust-ops/AGENTS.md](skills/ca-trust-ops/AGENTS.md) |
 | `skills/repo-doctor/` | Agentic-quality scorer (`--json`, `--strict` CI gate) and the entry-doc toolchain: `repo-scan.py` (nesting, gates, architecture), `agents-md.py` scaffold (root, `--dir`, `--architecture`) / `audit --diff` over every entry doc / `explain` (what each tool loads) / `survey --org`. Other tools' loading facts live only in `assets/agents-md/tool-profiles.json`. Paired with `rules/agentic-quality.md` |
 | `skills/parallel-ops/` | Router for the parallel/recurring-agent-work family (fleet-ops, fleet-worker, fleetflow — own repo — loop-ops, iterate, spawn) - read first when it's unclear which one owns a fan-out/schedule/delegation ask, or the cleanup after a wave (`fleet sweep`) |
 | [`fleetflow`](https://github.com/0xDarkMatter/fleetflow) (own repo) | Heterogeneous GLM/Codex/Grok/Pi/Anthropic worker fleets from one session; extracted 2026-08-01, mounted as `/fleetflow` via junction at `~/.claude/skills/fleetflow` |
