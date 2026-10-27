@@ -1,0 +1,16 @@
+Extend or set how long a sandbox stays on
+
+Usage: boat.exe extend [OPTIONS] [ID]
+
+Arguments:
+  [ID]  Sandbox ID, "current" or "self". Omit for this shell's current sandbox, or the sandbox you are inside.
+
+Options:
+      --api-url <API_URL>  [env: BOAT_API_URL=]
+      --hours <HOURS>      Set the remaining lifetime in hours.
+      --org <ID_OR_NAME>   Run this command in an organization's billing scope. See `boat org list`. [env: BOAT_ORG=]
+      --ttl <TTL>          Set the remaining lifetime in seconds.
+      --json               Force machine-readable JSON/JSONL output
+      --no-auto-stop       Disable automatic stop. The Sandbox runs until you stop it.
+      --no-update          Skip the automatic CLI update (also BOAT_NO_UPDATE=1) [env: BOAT_NO_UPDATE=]
+  -h, --help               Print help

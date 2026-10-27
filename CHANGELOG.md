@@ -6,6 +6,18 @@ All notable changes to claude-mods are documented here. Format follows
 feature releases live in the README "Recent Updates" section.
 ## [Unreleased]
 
+### Added
+
+- **`boat-ops`: boat.dev boxes as lanes, CI runners and heavy-job offload.** Distilled
+  from fleetflow's boat host driver and reports and a week of field use: the box lifecycle
+  (create, size, exec or ssh, copy in and out, delete and confirm the 404), naming and the
+  10-character lane-id limit, cost and start limits, fleetflow remote lanes and Codex on a
+  box, a one-time GitHub Actions runner with fallback to GitHub's runner, Docker and DDEV
+  on a box, web tools on lanes, the security model, and a landmine table. Ships
+  `check-boat-facts.py` (`--offline` in PR CI; `--live` weekly against docs.boat.dev and,
+  where installed, `boat help`) and `confirm-gone.sh`, a read-only deletion check. Skill
+  count 112 -> 113.
+
 ### Fixed
 
 - **`docker-doctor.py` tests no longer depend on the host having Docker.** The doctor

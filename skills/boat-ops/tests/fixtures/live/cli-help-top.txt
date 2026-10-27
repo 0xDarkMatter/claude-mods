@@ -1,0 +1,11 @@
+Boat CLI
+
+Usage: boat.exe [OPTIONS] [COMMAND]
+
+Options:
+      --api-url <API_URL>  [env: BOAT_API_URL=]
+      --org <ID_OR_NAME>   Run this command in an organization's billing scope. See `boat org list`. [env: BOAT_ORG=]
+      --json               Force machine-readable JSON/JSONL output
+      --no-update          Skip the automatic CLI update (also BOAT_NO_UPDATE=1) [env: BOAT_NO_UPDATE=]
+  -h, --help               Print help
+  -V, --version            Print version
