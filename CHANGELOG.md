@@ -23,6 +23,13 @@ feature releases live in the README "Recent Updates" section.
   and the third gotcha is now `setStyle` wiping custom sources, layers and images.
   `three-custom-layer.md` gains the `## Contents` list a reference past 100 lines needs.
 
+- **The mapbox-ops suite runs where only the `py` launcher exists, and leaves no
+  bytecode.** It tried `python3` and `python` only, so a Windows machine with just `py`
+  skipped every check and still passed; it now tries `py` too. Its `py_compile` checks
+  wrote `scripts/__pycache__/` into the skill folder, which git doesn't ignore and
+  `install.ps1` copies; it now compiles in memory with `PYTHONDONTWRITEBYTECODE=1`. Both
+  were seen failing on the old suite.
+
 ## [3.9.0] - 2026-10-14
 
 The Docker family rebuilt around the engine as well as the files, DDEV and package-manager
