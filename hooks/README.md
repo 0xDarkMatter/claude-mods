@@ -23,6 +23,7 @@ Claude Code hooks allow you to run custom scripts at key workflow points.
 | `pre-tls-verify-ask.sh` | PreToolUse (Bash\|PowerShell) | Ask before a command turns TLS certificate verification off: `curl -k`/`--insecure`, `wget --no-check-certificate`, `NODE_TLS_REJECT_UNAUTHORIZED=0`, `PYTHONHTTPSVERIFY=0`, `GIT_SSL_NO_VERIFY`, `git -c http.sslVerify=false`, npm/pnpm/yarn `strict-ssl false`, pip/uv `--trusted-host`, Composer `disable-tls`/`secure-http`, PowerShell `-SkipCertificateCheck` and trust-all callbacks. Persistent switches (`git config`, `npm config set`, `pip config set`, `composer config`, `setx`) say they outlive the session. curl, wget and the package managers count only at command position, through a quote- and heredoc-aware lexer, so a commit message or `rg` pattern that quotes `curl -k` stays silent. See [Why the TLS guard asks](#why-the-tls-guard-asks-instead-of-denying). |
 | `post-tls-verify-scan.sh` | PostToolUse (Write\|Edit) | Advisory when an edit turns verification off in code or config: Python `verify=False`/`CERT_NONE`, Node `rejectUnauthorized: false`, Guzzle `'verify' => false`, `CURLOPT_SSL_VERIFYPEER` 0, Go `InsecureSkipVerify`, Ruby `VERIFY_NONE`, Rust `danger_accept_invalid_certs`, Java trust-all managers and verifiers, .NET callbacks returning true, and committed `.npmrc`/`.yarnrc.yml`/pip/`composer.json`/`.gitconfig` settings. Skips prose (`.md .mdx .markdown .rst .adoc .txt`). |
 | `pre-commit-unicode-scan.sh` | git pre-commit | Refuse commits that ADD hidden Unicode to instruction files. Scans the **staged (index) copy**, not the file on disk, including renamed and non-ASCII-named files. Silent on clean, warn on `high`, **block on `critical`** (tag-block / bidi override) **or on a staged instruction file it could not scan**. Override once with `PROMPT_INJECTION_ALLOW=1`. |
+| `tool-loop-guard.sh` | PreToolUse + PostToolUse + PostToolUseFailure (all tools) | Repetition guard, Factory Droid 1.0's loop rule moved into the harness: the 3rd identical tool call in a row (same input **and** same result) gets an `additionalContext` nudge, and the 6th is denied. A poll whose output changes never counts. Per session (and per subagent) state in `~/.claude/.loop-guard/`. Fail-open. Opt-in: see [Tool loop guard](#tool-loop-guard). |
 
 ## Auto-wired vs opt-in
 
@@ -33,7 +34,7 @@ paths resolved via `${CLAUDE_PLUGIN_ROOT}`:
 | Set | Hooks | Why |
 |-----|-------|-----|
 | **Auto-wired (security advisory)** | `pre-install-scan.sh` (PreToolUse Bash), `worktree-guard.sh` (PreToolUse Bash), `pre-tls-verify-ask.sh` (PreToolUse Bash\|PowerShell, asks), `manifest-dep-scan.sh` (PostToolUse Write\|Edit), `post-tls-verify-scan.sh` (PostToolUse Write\|Edit), `session-start-unicode-scan.sh` (SessionStart), `config-change-guard.sh` (ConfigChange), `pre-write-peer-guard.sh` (PreToolUse Write\|Edit), `session-touched-ledger.sh` (PostToolUse Write\|Edit) | Silent-on-clean guardrails: zero noise until something is actually wrong, so they're safe to ship on by default. |
-| **Opt-in (opinionated / formatting)** | `pre-commit-lint.sh`, `post-edit-format.sh`, `dangerous-cmd-warn.sh`, `enforce-uv.sh`, `check-mail.sh`, `pre-commit-unicode-scan.sh` (a *git* hook), `worktree-create.sh` + `worktree-remove.sh` (machine-specific; never auto-wired) | Workflow opinions — wire them yourself per the examples below. |
+| **Opt-in (opinionated / formatting)** | `pre-commit-lint.sh`, `post-edit-format.sh`, `dangerous-cmd-warn.sh`, `enforce-uv.sh`, `check-mail.sh`, `pre-commit-unicode-scan.sh` (a *git* hook), `worktree-create.sh` + `worktree-remove.sh` (machine-specific; never auto-wired), `tool-loop-guard.sh` (it denies calls, so turning it on is the user's choice) | Workflow opinions — wire them yourself per the examples below. |
 
 Plugin installs resolve auto-wired commands through `${CLAUDE_PLUGIN_ROOT}`. Script
 installs copy the hook scripts into `${CLAUDE_DIR:-~/.claude}/hooks/` and merge the
@@ -49,6 +50,63 @@ Escalate to a hard gate per concern:
 |----------|---------|-----------------|
 | `SUPPLY_CHAIN_BLOCK` | `pre-install-scan.sh`, `config-change-guard.sh` | Block the install / settings change (exit 2) until reviewed |
 | `WORKTREE_GUARD_BLOCK` | `worktree-guard.sh` | Deny the boundary-violating command (exit 2) |
+
+### Tool loop guard
+
+A model that keeps re-running the same failing command, or re-reading the same file,
+spends turns until a person notices. Factory's Droid 1.0 puts the rule in the harness
+so every model gets it: three identical tool calls get a nudge, six stop the loop, and
+repeats that return new results may continue. Claude Code has no such rule, so
+`tool-loop-guard.sh` adds it. Wire all three events to the one script, with no matcher
+so it sees every tool:
+
+```json
+{
+  "hooks": {
+    "PreToolUse":         [{ "hooks": [{ "type": "command", "command": "bash ~/.claude/hooks/tool-loop-guard.sh", "timeout": 10 }] }],
+    "PostToolUse":        [{ "hooks": [{ "type": "command", "command": "bash ~/.claude/hooks/tool-loop-guard.sh", "timeout": 10 }] }],
+    "PostToolUseFailure": [{ "hooks": [{ "type": "command", "command": "bash ~/.claude/hooks/tool-loop-guard.sh", "timeout": 10 }] }]
+  }
+}
+```
+
+How it counts:
+
+- **Identical means input and result.** The fingerprint is the tool name plus
+  `tool_input` with its keys sorted (Bash's `description` is dropped as prose). The
+  result is `tool_response`, or `error` on PostToolUseFailure, which is where a Bash
+  command with a non-zero exit lands. Timing keys such as `durationMs` are dropped
+  first, or no Glob or WebFetch repeat would ever match.
+- **Why the result, not a list of polling tools.** A poll (`gh run view`, a log tail,
+  `TaskOutput`) repeats its input by design. While its output changes, it is making
+  progress, so a changed result restarts the count at 1. A list of exempt tools would
+  need upkeep and would miss `Bash` polls. A poll that returns the same output six
+  times running is stuck, and gets denied like anything else.
+- **Post counts, Pre denies.** PostToolUse and PostToolUseFailure update the count and
+  add the nudge from call 3 on, next to the tool result. The result of call 6 is
+  unknown before it runs, so PreToolUse denies it when the previous 5 calls had this
+  input and one unchanged result. A denied call has no Post, so retrying it stays
+  denied until the model does something else.
+- **State is per session, and per subagent within it**:
+  `~/.claude/.loop-guard/<session_id>[.<agent_id>].state`, one line. A subagent's calls
+  arrive under the parent's `session_id`, interleaved with the parent's, so a shared
+  file would break both runs. Files idle for 2 days are pruned when a new session
+  starts writing.
+- **Fail-open.** No `jq`, no `session_id`, unparsable input or a failed hash: exit 0,
+  silent.
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `LOOP_GUARD` | `1` | `0` turns the guard off |
+| `LOOP_GUARD_NUDGE` | `3` | Identical call that gets the first nudge (minimum 2) |
+| `LOOP_GUARD_DENY` | `6` | Identical call that is denied; `0` nudges only |
+| `LOOP_GUARD_EXEMPT` | (empty) | ERE on `tool_name` for tools the guard skips |
+| `LOOP_GUARD_DIR` | `~/.claude/.loop-guard` | State directory |
+
+Cost: the hook runs twice per tool call. Pre spawns `jq` and `sha1sum`. Post spawns
+those plus `split` and `rm`, so tool output is hashed from temp files and never read
+into a shell variable. On Windows that measured about 125 ms for Pre and 185 ms for
+Post.
 
 ### Why the TLS guard asks instead of denying
 
@@ -416,7 +474,8 @@ context. The hooks here use:
 
 | Intent | Channel | Used by |
 |--------|---------|---------|
-| Advise, don't block (PreToolUse / PostToolUse) | exit 0 + **one** JSON value on stdout: `{"hookSpecificOutput":{"hookEventName":"<event>","additionalContext":"..."}}` (capped at 10,000 chars) | `pre-install-scan`, `worktree-guard`, `manifest-dep-scan`, `post-tls-verify-scan`, `pre-write-peer-guard`, `check-mail` |
+| Advise, don't block (PreToolUse / PostToolUse) | exit 0 + **one** JSON value on stdout: `{"hookSpecificOutput":{"hookEventName":"<event>","additionalContext":"..."}}` (capped at 10,000 chars) | `pre-install-scan`, `worktree-guard`, `manifest-dep-scan`, `post-tls-verify-scan`, `pre-write-peer-guard`, `check-mail`, `tool-loop-guard` (PostToolUse and PostToolUseFailure) |
+| Deny with a reason (PreToolUse) | exit 0 + one JSON value: `permissionDecision: "deny"`, `permissionDecisionReason` (fed to the model) | `tool-loop-guard`, `pre-write-peer-guard` with `GUARD_BLOCK=1` |
 | Ask the user (PreToolUse) | exit 0 + one JSON value: `permissionDecision: "ask"`, `permissionDecisionReason` (shown to the user in the prompt) and `additionalContext` (for the model) | `pre-tls-verify-ask` |
 | Block | exit 2 + reason on **stderr** | `dangerous-cmd-warn`, `enforce-uv`, `pre-commit-lint`, and the `*_BLOCK=1` modes |
 | SessionStart advisory | plain stdout (delivered for this event) | `session-start-unicode-scan` |

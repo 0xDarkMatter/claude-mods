@@ -20,7 +20,7 @@
 | Commands | 4 | Session management + git orchestration + wave coordination (sync, save, git-ops, conduct) |
 | Rules | 15 | agentic-quality, cli-tools, commit-style, deploy-gating, dev-servers, loop-engineering, modern-tools, naming-conventions, prompt-injection, public-posts, release-review, shell-preference, skill-agent-updates, supply-chain, worktree-boundaries |
 | Output Styles | 13 | Vesper, Spartan, Mentor, Executive, Pair, Atlas, Coach, Harbour, Meridian, Noir, Roast, Sage, Scout |
-| Hooks | 17 | lint, format, safety, uv, install-scan, manifest-scan, TLS-verify ask + code scan, pmail, unicode-scan ×2, config-change guard, worktree guard, worktree create/remove (WORKTREE_ROOT placement), peer-writer guard, touched-files ledger |
+| Hooks | 18 | lint, format, safety, uv, install-scan, manifest-scan, TLS-verify ask + code scan, pmail, unicode-scan ×2, config-change guard, worktree guard, worktree create/remove (WORKTREE_ROOT placement), peer-writer guard, touched-files ledger, tool-loop guard |
 
 Counts are enforced by the CI doc-drift gate (see roadmap) — if this table rots, CI fails.
 

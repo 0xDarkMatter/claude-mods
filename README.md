@@ -24,7 +24,7 @@
 
 Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms) and Anthropic's [patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), it installs as a standard plugin and toggles off as easily as it toggles on.
 
-**3 agents. 112 skills. 13 styles. 17 hooks. 15 rules. One install.**
+**3 agents. 112 skills. 13 styles. 18 hooks. 15 rules. One install.**
 
 ## What you get
 
@@ -485,6 +485,7 @@ Everything in the plugin, grouped. Each block expands.
 | [worktree-guard.sh](hooks/worktree-guard.sh) | PreToolUse | Warn on commands that touch other sessions' `.claude/worktrees/` (rm, worktree remove/prune, sweeping `git add -A`, double-force `git clean -ff`); `WORKTREE_GUARD_BLOCK=1` to deny |
 | [pre-write-peer-guard.sh](hooks/pre-write-peer-guard.sh) | PreToolUse | Mid-session peer-writer guard — warn before writing a file a live peer session in the same checkout just modified (collisions happen during a session, not only at boot); pairs with session-touched-ledger.sh |
 | [session-touched-ledger.sh](hooks/session-touched-ledger.sh) | PostToolUse | Record files this session has written so the peer-writer guard can tell own edits from a peer's (silent, never blocks) |
+| [tool-loop-guard.sh](hooks/tool-loop-guard.sh) | PreToolUse + PostToolUse(+Failure) | Repetition guard (Factory Droid's loop rule): the 3rd identical tool call in a row with the same result gets a nudge, the 6th is denied; a poll whose output changes never counts. Opt-in |
 
 </details>
 
