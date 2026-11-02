@@ -84,7 +84,9 @@ federation** to npm. No phished human. Audit and revoke:
 Commit lockfiles. Pin exact versions for anything in CI/prod. Apply a **7-day
 cooldown**: don't auto-update production deps until a release has aged a week, so
 the ecosystem has time to detect and remediate a compromise. (Axios poisoned
-versions were live ~3 hours — a 7-day lag would have caught it.)
+versions were live ~3 hours — a 7-day lag would have caught it.) A security release
+that patches a published CVE may skip the wait only under the conditions in
+[hardening-checklist.md section 5](hardening-checklist.md#5-dependency-pinning--cooldown-policy).
 
 ## F. Rotate publish tokens → short-lived OIDC
 

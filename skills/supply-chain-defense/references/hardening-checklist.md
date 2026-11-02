@@ -149,6 +149,45 @@ Check publish age ad-hoc before any add:
 bash scripts/preinstall-check.sh axios react@19.0.0
 ```
 
+### Security-release exception
+
+A release that patches a published vulnerability may skip the wait, because a week on
+a known, exploitable hole is the bigger risk. "Security fix, upgrade now" is also the
+lure a hijacked publish uses, so the label alone waives nothing. **Every** check below
+must pass. If one fails or cannot be run, the release waits the 7 days.
+
+1. **Advisory names this version.** Find the CVE or vendor security advisory and confirm
+   it lists this exact version as the fix. A changelog line or commit message claiming a
+   security fix is not an advisory.
+2. **Vendor checksum or signature, from the vendor's own channel.** Fetch the published
+   checksum or signature from the vendor (its download site, checksum API, or signed
+   release page), not from the registry entry, and compare it with the artifact you
+   actually installed (the archive in the package cache, or the `dist` URL your lockfile
+   resolved). Registry metadata alone proves nothing: a stolen publish token can rewrite it.
+3. **Lock diff confined to the patched package(s).** `git diff -- <lockfile>` must move
+   only the advised package and any sibling the vendor ships with it (a core package and
+   its core-files package, say). Anything else moving sends the whole change back under
+   the cooldown.
+4. **A person merges, staging first.** No agent or bot merges or deploys a waived
+   release. It runs on staging (or the equivalent) before production.
+5. **Record the waiver** in the PR body or commit message:
+
+   ```text
+   Cooldown waived: security release.
+   Advisory: <CVE or vendor advisory ID + URL>, names <version> as the fix.
+   Checksum: <algorithm> <value>, from <vendor URL>, matches the installed artifact.
+   Lock: only <package(s)> changed.
+   ```
+
+The behavioural scan still runs; the exception waives only the wait.
+`preinstall-check.sh` keeps reporting exit 10 for the release, by design: it has no
+waiver flag, because a flag would be the first thing a lure asks for.
+
+**Example.** A CMS ships core `X.Y.4`, a security point release whose advisory fixes a
+CVE in `X.Y.3`. The lock moves the core package and its core-files package, and nothing
+else. The archive's SHA-1 matches the checksum on the vendor's own download API. The PR
+records all of that, a person merges it to staging, then promotes it the same day.
+
 ---
 
 ## 6. Wrap installs (layer 2)

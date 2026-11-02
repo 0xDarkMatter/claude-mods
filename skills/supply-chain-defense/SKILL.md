@@ -29,7 +29,12 @@ routine below is the point.
    the new package - depscore takes a list.
 2. **Age it**: `bash scripts/preinstall-check.sh <pkg>[@ver] ...` (`--pip`,
    `--composer`, `--cargo`, `--go`); exit 10 = published inside the 7-day cooldown.
-   Never suggest a day-zero (`@latest`) release for a production path.
+   Never suggest a day-zero (`@latest`) release for a production path. The one
+   exception is a security release that patches a published CVE, and only when its
+   advisory names that version, a vendor-published checksum matches, nothing else
+   moves in the lock, a person merges it via staging and the PR records the waiver
+   (`references/hardening-checklist.md` section 5). The script still exits 10: the
+   waiver is a recorded human decision, never a flag.
 3. **Install behind a gate**: `socket npm install <pkg>`, or no lifecycle scripts at
    all (`npm config set ignore-scripts true`).
 4. **Pin it**: commit the lockfile; exact versions for anything in CI/prod.
@@ -160,6 +165,7 @@ Layer 6 playbook: `references/repo-integrity.md`.
 | "We run `npm audit` in CI, we're covered." | Advisory-driven; blind to malware in the publish-to-CVE window — the exact gap the 2026 worms exploit. | Add a behavioural scan (Socket / GuardDog) gating the merge, not just a CVE check. |
 | Trusting valid provenance / SLSA attestation as proof of safety. | Mini Shai-Hulud minted **valid Build L3 attestations** from stolen OIDC tokens. Valid ≠ safe. | Treat provenance as one signal; require behavioural verdict too. |
 | Auto-updating production deps the day a release lands. | Poisoned versions live for hours; you become an early victim. | 7-day release-age cooldown (Renovate `minimumReleaseAge`). |
+| Waiving the cooldown because a release says "security fix". | Urgency is the lure for a hijacked publish; the label costs an attacker nothing. | Waive only with the advisory naming the version, a vendor-channel checksum, a lock diff confined to the patched package, a human merge via staging, and the waiver recorded. |
 | Treating a verified-publisher VS Code extension as trustworthy. | Nx Console: verified publisher, 2.2M installs, backdoored. | Check publication recency; pause <7-day non-verified; audit on a schedule. |
 | Leaving `id-token: write` on workflows that no longer publish. | The orphaned-OIDC entry point — a token minted from a stale workflow. | Revoke registry trust + drop the permission. Run `zizmor`. |
 | Deleting a found persistence hook and moving on. | The worm stole credentials *before* it persisted; the hook is the symptom. | Treat as an incident: isolate, rotate every reachable credential, then investigate. |
@@ -167,7 +173,7 @@ Layer 6 playbook: `references/repo-integrity.md`.
 ## Verification checklist
 
 - [ ] A behavioural verdict (not just `npm audit`) exists for every newly added/bumped dependency
-- [ ] Production deps respect a release-age cooldown (≥7 days)
+- [ ] Production deps respect a release-age cooldown (≥7 days); every security-release waiver is recorded in its PR with its evidence
 - [ ] Lockfiles committed; exact pins for anything in CI/prod
 - [ ] No workflow carries `id-token: write` it doesn't need (`zizmor` clean)
 - [ ] Long-lived publish tokens rotated or replaced with short-lived OIDC
