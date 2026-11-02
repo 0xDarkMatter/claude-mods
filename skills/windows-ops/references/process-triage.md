@@ -38,11 +38,20 @@ processes totalling 1.16 GB**, while **six spinners with live parents held five
 cores** and had burned **66.6 core-hours over 43.8 hours**. The orphan scan was
 not wrong; it was answering a different question.
 
-Sample twice, subtract, divide by the window:
+Sample twice, subtract, divide by the time that actually passed for that process:
 
 ```
-core_pct = (cpu_seconds_after - cpu_seconds_before) / window_seconds * 100
+core_pct = (cpu_seconds_after - cpu_seconds_before) / elapsed_seconds * 100
 ```
+
+`elapsed_seconds` is measured per process, not taken from the nominal window: reading
+1,200 processes one by one takes long enough that the window and the real gap
+diverge. Dividing by the window once showed 5,135% of one core on a 32-thread machine
+and 418% for a single-threaded burner (2026-10-26). Two more rules keep the number
+honest: take each snapshot in one enumeration (a per-PID `Get-Process -Id` scales with
+the whole process table), and drop any PID whose start time changed between snapshots,
+because Windows reuses PIDs fast under churn. `scripts/_lib/cpu-rate.ps1` implements
+all three, and its JSON rows carry `window_s` so you can see the gap.
 
 A sustained result near 100 is one saturated core. Anything above ~20 that
 persists across two samples and produces no output is a spinner until proven
