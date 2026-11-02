@@ -19,6 +19,11 @@
 #            time for the version asked for) - never read 7 as a pass,
 #          10 at-least-one-inside-cooldown (wins over 7)
 #
+# There is deliberately no flag to waive the cooldown. A security release that
+# patches a published CVE may skip it, but only as a human decision recorded in the
+# PR (rules/supply-chain.md, references/hardening-checklist.md section 5): a waiver
+# flag is exactly what a "critical fix, upgrade now" lure would ask an agent to pass.
+#
 # Examples:
 #   preinstall-check.sh axios react@19.0.0 @types/node@22.0.0
 #   preinstall-check.sh --pip requests fastapi@0.110.0
@@ -124,7 +129,7 @@ result() {  # name version published [why-unchecked]
     '{ecosystem:$e, name:$n, version:(if $v == "" then null else $v end), published:(if $p == "" then null else $p end), age_days:(if $d<0 then null else $d end), inside_cooldown:$ic, unchecked_reason:(if $d<0 then $w else null end)}')")
   # human framing → stderr
   if [[ "$ic" == "true" ]]; then
-    prow bad "[INSIDE COOLDOWN]" "${name}@${version} - ${days}d ago (< ${COOLDOWN_DAYS}d). Hold off."
+    prow bad "[INSIDE COOLDOWN]" "${name}@${version} - ${days}d ago (< ${COOLDOWN_DAYS}d). Hold off, unless it is a security release that passes every check of the exception (hardening-checklist.md section 5)."
   elif [[ "$days" -ge 0 ]]; then
     prow ok "[ok]" "${name}@${version} - ${days}d ago (>= ${COOLDOWN_DAYS}d)."
   else

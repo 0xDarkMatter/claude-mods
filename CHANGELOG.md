@@ -74,6 +74,15 @@ feature releases live in the README "Recent Updates" section.
 
 ### Changed
 
+- **A security-release exception to the 7-day cooldown.** A release that patches a
+  published CVE may skip the wait, but the CVE label alone waives nothing, because
+  "critical fix, upgrade now" is the lure a hijacked publish uses. The advisory must name
+  that version, the artifact must match a checksum or signature from the vendor's own
+  channel, nothing but the patched package may move in the lock, a person merges it via
+  staging, and the PR records the waiver. `rules/supply-chain.md` says why each condition
+  is there; `supply-chain-defense` carries the procedure. `preinstall-check.sh` still exits
+  10 for such a release and gains no waiver flag.
+
 - **review: state the intent first, then a lead judgment.** Every finding is sorted into
   act on, consider, noted or dismissed with a reason; a review with no findings is valid;
   `--second-opinion` adds an independent reviewer from another model family. The PRAISE
