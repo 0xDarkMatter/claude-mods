@@ -1,8 +1,8 @@
 ---
 name: figma-ops
-description: "Router and composition workflows for Figma via the official Figma MCP: which Figma skill/tool for which job, capture-to-canvas (screenshots or shotcraft crops into a Figma file), moodboard and reference-board composition (grid, plus, loose-plus arrangements with a deterministic layout planner), canvas craft rules the API skills don't cover, and multi-account routing. Triggers on: figma, moodboard, brand board, reference board, put these screenshots in figma, compose in figma, arrange images in figma, plus arrangement, which figma skill, figma account, upload to figma, delete figma page."
+description: "Router and composition workflows for Figma via the official Figma MCP: which Figma skill/tool for which job, capture-to-canvas (screenshots or shotcraft crops into a Figma file), moodboard and reference-board composition (grid, plus, loose-plus arrangements), canvas craft rules the API skills don't cover, multi-account routing. Triggers on: figma, moodboard, brand board, reference board, put these screenshots in figma, compose in figma, arrange images in figma, plus arrangement, which figma skill, figma account, upload to figma, delete figma page."
 license: MIT
-when_to_use: "Any Figma request that isn't obviously a single official skill's job: 'put these screenshots in Figma', 'make a moodboard from these references', 'arrange this more organically', 'which Figma skill do I use for X', 'it says I don't have edit access', 'this file is in my other Figma account', 'delete the old pages'."
+when_to_use: "Any Figma request that isn't obviously a single official skill's job: 'arrange this more organically', 'it says I don't have edit access', 'this file is in my other Figma account', 'delete the old pages'."
 argument-hint: "[route|compose|verify] [figma-url]"
 compatibility: "Official Figma MCP server (Claude Code figma plugin) for canvas work; Node 18+ for scripts/*.mjs; shotcraft optional for live-site capture"
 allowed-tools: "Read Write Bash Glob Grep AskUserQuestion"

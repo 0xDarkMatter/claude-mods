@@ -1,6 +1,6 @@
 ---
 name: pigeon
-description: "Inter-session pmail - send and receive messages between Claude Code sessions running in different project directories. Uses global SQLite database at ~/.claude/pmail.db. Triggers on: mail, pmail, send message, check mail, inbox, inter-session, message another session, pigeon."
+description: "Inter-session pmail - send and receive messages between Claude Code sessions running in different project directories. Triggers on: mail, pmail, send message, check mail, inbox, inter-session, message another session, pigeon."
 license: MIT
 allowed-tools: "Read Bash Grep"
 metadata:

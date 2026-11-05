@@ -1,6 +1,6 @@
 ---
 name: react-ops
-description: "React development patterns, hooks, state management, Server Components, and performance optimization. Use for: react, hooks, useState, useEffect, jsx, tsx, server components, RSC, zustand, react query, component patterns, react testing library, error boundary, suspense, react 19."
+description: "React development patterns, state management, and performance optimization. Use for: react, hooks, useState, useEffect, jsx, tsx, server components, RSC, zustand, react query, component patterns, react testing library, error boundary, suspense, react 19."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:

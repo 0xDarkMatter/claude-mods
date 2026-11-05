@@ -1,6 +1,6 @@
 ---
 name: genart-ops
-description: "Generative art programming - three.js scenes, p5.js sketches, SVG generation, GLSL shaders, procedural algorithms, and color for creative coding. Use for: generative art, creative coding, three.js, p5.js, SVG, GLSL, shader, noise, perlin, simplex, flow field, particle system, SDF, ray marching, procedural, L-system, voronoi, delaunay, cellular automata, wave function collapse, instanced mesh, post-processing, bloom, WebGL, canvas, fragment shader, vertex shader, FBM, domain warping."
+description: "Generative art programming and color for creative coding. Use for: generative art, creative coding, three.js, p5.js, SVG, GLSL, shader, noise, perlin, simplex, flow field, particle system, SDF, ray marching, procedural, L-system, voronoi, delaunay, cellular automata, wave function collapse, instanced mesh, post-processing, bloom, WebGL, canvas, fragment shader, vertex shader, FBM, domain warping."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:

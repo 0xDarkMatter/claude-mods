@@ -1,6 +1,6 @@
 ---
 name: terraform-ops
-description: "Terraform and OpenTofu infrastructure-as-code operations - project layout, state management, module design, plan/apply safety, CI/CD pipelines, and secrets. Use for: terraform, opentofu, infrastructure as code, IaC, tfstate, terraform state, terraform module, remote backend, terraform plan, terraform apply, for_each, moved block, terraform import, drift detection, tflint, checkov, HCL."
+description: "Terraform and OpenTofu operations: project layout, state, module design, plan/apply safety, CI/CD, secrets. Use for: terraform, opentofu, infrastructure as code, IaC, tfstate, terraform state, terraform module, remote backend, terraform plan, terraform apply, for_each, moved block, terraform import, drift detection, tflint, checkov, HCL."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:

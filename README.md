@@ -681,11 +681,12 @@ Requires a model that supports `tool_reference` blocks: Sonnet 4.5, Haiku 4.5, O
 
 ### Skill Description Budget
 
-With 90+ skills installed (this plugin alone ships 112), skill descriptions can overflow the listing budget. All skill names are always listed, but descriptions share a budget of **1% of the model context window** — on overflow, least-invoked skills lose their descriptions first and **silently stop auto-triggering** (explicit `/name` invocation still works). Each skill's combined `description` + `when_to_use` is also truncated at **1,536 chars**, so trigger phrases belong at the front.
+With 90+ skills installed (this plugin alone ships 112), skill descriptions can overflow the listing budget. All skill names are always listed, but descriptions share a budget of **1% of the model context window, counted in characters**. On overflow, the least-used skills lose their descriptions first: Claude can still invoke them and explicit `/name` always works, but Claude is **less likely to pick one on its own**. Each skill's combined `description` + `when_to_use` is also truncated at **1,536 chars**, so trigger phrases belong at the front.
 
-- **Check:** run `/doctor` — it shows whether the budget is overflowing and which skills are affected.
-- **Fix:** demote or disable skills you don't use via `skillOverrides` in settings (`"on"` / `"name-only"` / `"user-invocable-only"` / `"off"` per skill, or `/skills` + `Space`). Plugin skills are managed via `/plugin` instead.
-- **Or raise the budget:** `skillListingBudgetFraction` setting (e.g. `0.02`), `SLASH_COMMAND_TOOL_CHAR_BUDGET` env var for a fixed char count, or `maxSkillDescriptionChars` for the per-skill cap.
+- **Check:** run `/doctor` for the listing's context cost and biggest contributors, and `/skill-doctor` for what each skill costs against how often it is used. `claude --debug` logs a warning when the listing is over budget. `/context` shows the listing's size after the budget is applied.
+- **Fix:** demote or disable skills you don't use via `skillOverrides` in settings (`"on"` / `"name-only"` / `"user-invocable-only"` / `"off"` per skill, or `/skills` + `Space`). `skillOverrides` does not reach plugin skills, so this plugin's skills are managed via `/plugin` instead.
+- **Or raise the budget:** `skillListingBudgetFraction` setting (e.g. `0.02`), `SLASH_COMMAND_TOOL_CHAR_BUDGET` env var for a fixed char count, or `skillListingMaxDescChars` for the per-skill cap.
+- **Reading a listing:** a skill with no description is either over budget or set to `"name-only"`, and the listing looks the same for both. Check `skillOverrides` before blaming the budget.
 
 ### Skills Over Commands
 

@@ -1,7 +1,7 @@
 ---
 name: laravel-ops
 description: "Laravel framework patterns, Eloquent ORM, authentication, queues, and testing. Use for: laravel, eloquent, artisan, blade, php, sanctum, livewire, inertia, pest, phpunit, forge, vapor, queue, middleware, migration, factory, seeder."
-when_to_use: "Use when building Laravel 11+ apps — e.g. 'write an Eloquent query or migration', 'set up Sanctum auth', 'configure queues and jobs', 'test with Pest or PHPUnit'. Covers artisan, Blade, Livewire/Inertia, Forge/Vapor, factories, and seeders."
+when_to_use: "Use when building Laravel 11+ apps — e.g. 'write an Eloquent query or migration', 'set up Sanctum auth', 'configure queues and jobs', 'test with Pest or PHPUnit'."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:

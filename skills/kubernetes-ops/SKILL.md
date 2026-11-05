@@ -1,7 +1,7 @@
 ---
 name: kubernetes-ops
 description: "Kubernetes and Helm in practice: Deployments, Services, probes, resources, autoscaling, disruption budgets, NetworkPolicy, Pod Security Standards, Gateway API (ingress-nginx is retired), Helm 4 charts and releases, and kubectl without accidents. ECS and EKS specifics go to AWS's aws-containers skill, Flux to fluxcd/agent-skills. Not for Dockerfiles or Compose (docker-ops)."
-when_to_use: "Use when writing or reviewing Kubernetes manifests or Helm charts, migrating off ingress-nginx, upgrading to Helm 4, hardening pods to the restricted Pod Security Standard, or debugging CrashLoopBackOff, Pending, ImagePullBackOff or OOMKilled pods. Also for ECS-vs-Kubernetes choices, and before kubectl delete, helm uninstall or a namespace teardown."
+when_to_use: "Use when writing or reviewing manifests or charts, migrating off ingress-nginx, upgrading to Helm 4, hardening pods to the restricted standard, or debugging CrashLoopBackOff, Pending, ImagePullBackOff or OOMKilled pods. Also for ECS-vs-Kubernetes choices, and before kubectl delete, helm uninstall or a namespace teardown."
 license: MIT
 compatibility: "Kubernetes 1.35-1.37, Helm 4 (Helm 3 gets security fixes until 2027-02-10), Gateway API v1.6"
 allowed-tools: "Read Write Bash"

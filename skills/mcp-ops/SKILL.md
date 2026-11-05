@@ -1,6 +1,6 @@
 ---
 name: mcp-ops
-description: "Model Context Protocol server development, tool design, resource handling, and transport configuration. Use for: mcp, model context protocol, mcp server, mcp tool, mcp resource, fastmcp, mcp transport, stdio, sse, streamable http, mcp inspector, tool handler, mcp prompt."
+description: "MCP server development, tool design, resource handling, transport configuration. Use for: mcp, model context protocol, mcp server, mcp tool, mcp resource, fastmcp, mcp transport, stdio, sse, streamable http, mcp inspector, tool handler, mcp prompt."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:

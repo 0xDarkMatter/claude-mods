@@ -1,6 +1,6 @@
 ---
 name: doc-scanner
-description: "Scans for project documentation files (AGENTS.md, CLAUDE.md, GEMINI.md, COPILOT.md, CURSOR.md, WARP.md, and 15+ other formats) and synthesizes guidance. Auto-activates when user asks to review, understand, or explore a codebase, when starting work in a new project, when asking about conventions or agents, or when documentation context would help. Can consolidate multiple platform docs into unified AGENTS.md."
+description: "Scans for project documentation files (AGENTS.md, CLAUDE.md, GEMINI.md, COPILOT.md, CURSOR.md, WARP.md, and 15+ other formats) and synthesizes guidance. Use when reviewing, understanding or exploring a codebase, starting work in a new project, or asking about conventions or agents. Can consolidate multiple platform docs into unified AGENTS.md."
 license: MIT
 allowed-tools: "Glob Read Write Bash"
 metadata:
