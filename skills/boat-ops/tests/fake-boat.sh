@@ -10,6 +10,7 @@
 #       FAKE_LISTED     space-separated ids that list --all still shows
 #       FAKE_INFO_FAIL  1 = info prints nothing and exits 1 (API unreachable)
 #       FAKE_LIST_FAIL  1 = list prints nothing and exits 1
+#       FAKE_LIST_PAD   N = list --all also shows N filler boxes after FAKE_LISTED
 set -u
 [ -n "${FAKE_LOG:-}" ] && printf '%s\n' "$*" >> "$FAKE_LOG"
 args=()
@@ -29,6 +30,10 @@ case "${args[0]:-}" in
     [ "${FAKE_LIST_FAIL:-0}" = 1 ] && exit 1
     rows=""
     for id in ${FAKE_LISTED:-}; do rows="${rows:+$rows,}{\"id\":\"$id\",\"state\":\"running\"}"; done
+    if [ "${FAKE_LIST_PAD:-0}" -gt 0 ]; then
+      pad="$(printf '{"id":"bx_pad%d","state":"running"},' $(seq 1 "$FAKE_LIST_PAD"))"
+      rows="${rows:+$rows,}${pad%,}"
+    fi
     printf '{"sandboxes":[%s]}\n' "$rows" ;;
   *) echo "fake-boat: unsupported: $*" >&2; exit 3 ;;
 esac

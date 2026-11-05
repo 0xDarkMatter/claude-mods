@@ -34,6 +34,8 @@ boat's docs and `boat help`; `scripts/check-boat-facts.py` re-checks them.
 4. **Delete what you created, and confirm it.** `boat delete <id> --yes`, then confirm:
    `info` answers `not_found` AND `boat list --all` no longer shows it (plain `boat list`
    shows only running boxes). `"<skill-dir>/scripts/confirm-gone.sh" <id>` does both.
+   Confirm in the same scope as the create (same account, `BOAT_ORG` and
+   `BOAT_API_KEY`): from another scope a live box can look missing.
    Never delete, extend or exec on a box you did not create unless the user names it:
    other sessions' boxes share the account.
 5. **Check which account the CLI is on before any work.** `boat status` and `boat org`

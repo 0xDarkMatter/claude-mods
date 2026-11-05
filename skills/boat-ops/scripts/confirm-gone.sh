@@ -8,7 +8,8 @@
 #          envelope {data:[{id, gone, info, listed}], meta:{...}}. Data only.
 # Stderr:  progress, the verdict line, errors.
 # Exit:    0 every id gone, 2 usage, 5 no boat CLI or no jq,
-#          7 boat unreachable (list --all failed, or info never answered),
+#          7 boat unreachable (list --all failed, or info never answered for a box
+#          that list --all does not show),
 #          10 at least one box is still there (domain signal: delete it or look again)
 #
 # "Gone" means both of fleetflow's checks (scripts/hosts/boat.sh `down`): `boat info
@@ -17,6 +18,11 @@
 # Delete is asynchronous, so info is polled until --timeout (default 90 s, as the
 # driver does). This script only ever calls `info` and `list`, always with --no-update
 # (the CLI self-updates after a command otherwise).
+#
+# A box that list --all shows is present (exit 10) even if info never answered: an
+# outage must not hide a box known to exist. "Gone" holds only in the scope it ran in:
+# run it under the same account and BOAT_ORG / BOAT_API_KEY as the create, or a live
+# box in another scope can look missing. Bash 3.2 (macOS) safe: no associative arrays.
 #
 # Examples:
 #   confirm-gone.sh bx_ab12cd34
@@ -65,7 +71,7 @@ command -v jq >/dev/null 2>&1 \
 # MSYS_NO_PATHCONV: Git Bash would rewrite path-like args before boat.exe sees them.
 b() { MSYS_NO_PATHCONV=1 "$BOAT" --no-update "$@"; }
 
-declare -A INFO=()
+INFO=()   # indexed, in argv order: bash 3.2 has no associative arrays
 for id in "${IDS[@]}"; do
   state="no-answer"; waited=0
   while :; do
@@ -79,7 +85,7 @@ for id in "${IDS[@]}"; do
     [ "$waited" -ge "$TIMEOUT" ] && break
     sleep "$INTERVAL"; waited=$((waited + INTERVAL))
   done
-  INFO[$id]="$state"
+  INFO+=("$state")
   [ "$state" = "not_found" ] && say ok "$id: info answers not_found" || say bad "$id: still answers info (state $state) after ${TIMEOUT}s"
 done
 
@@ -90,17 +96,20 @@ if [ "$rc" -ne 0 ] || ! printf '%s' "$listed_json" | jq -e 'has("sandboxes")' >/
   exit "$EXIT_UNAVAILABLE"
 fi
 
-present=0; unanswered=0; rows=""
+present=0; unanswered=0; rows=""; i=0
 for id in "${IDS[@]}"; do
+  info="${INFO[$i]}"; i=$((i + 1))
   in_list=false
-  printf '%s\n' "$listed" | grep -qx "$id" && in_list=true
+  # Here-string, never `printf | grep -q`: under pipefail grep exits at the first match,
+  # printf takes SIGPIPE, the pipeline fails and a still-listed box reads as gone.
+  grep -qx "$id" <<<"$listed" && in_list=true
   gone=false
-  [ "${INFO[$id]}" = "not_found" ] && [ "$in_list" = false ] && gone=true
+  [ "$info" = "not_found" ] && [ "$in_list" = false ] && gone=true
   [ "$gone" = true ] || present=$((present + 1))
-  [ "${INFO[$id]}" = "no-answer" ] && unanswered=$((unanswered + 1))
+  [ "$info" = "no-answer" ] && [ "$in_list" = false ] && unanswered=$((unanswered + 1))
   [ "$in_list" = true ] && say bad "$id: boat list --all still shows it"
   if [ "$JSON" = 1 ]; then
-    rows="${rows:+$rows,}$(jq -nc --arg id "$id" --arg info "${INFO[$id]}" --argjson gone "$gone" --argjson listed "$in_list" \
+    rows="${rows:+$rows,}$(jq -nc --arg id "$id" --arg info "$info" --argjson gone "$gone" --argjson listed "$in_list" \
       '{id:$id, gone:$gone, info:$info, listed:$listed}')"
   else
     printf '%s\t%s\n' "$id" "$([ "$gone" = true ] && echo gone || echo present)"
@@ -112,7 +121,7 @@ if [ "$JSON" = 1 ]; then
 fi
 
 if [ "$present" -gt 0 ]; then
-  # Every box that never answered info at all is an outage, not a finding.
+  # Every unlisted box that never answered info is an outage, not a finding.
   [ "$unanswered" -eq "$present" ] && { say warn "boat info never answered: cannot confirm"; exit "$EXIT_UNAVAILABLE"; }
   say bad "$present of ${#IDS[@]} box(es) not confirmed gone"
   exit "$EXIT_PRESENT"

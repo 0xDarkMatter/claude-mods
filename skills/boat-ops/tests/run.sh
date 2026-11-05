@@ -150,6 +150,9 @@ out="$("$PY" "$verifier" --live --fixtures "$tmp/nocli" --skill "$here" --json 2
 
 # === 4. confirm-gone.sh: verdicts against a fake boat CLI ===
 [ -f "$gone" ] || { bad "confirm-gone.sh missing"; finish; }
+grep -Eq '(declare|local|typeset) +-[a-zA-Z]*A' "$gone" \
+  && bad "confirm-gone.sh uses an associative array, which macOS's bash 3.2 lacks" \
+  || ok "confirm-gone.sh has no associative array (macOS bash 3.2)"
 out="$(bash "$gone" --help 2>/dev/null)"; rc=$?
 [ "$rc" = 0 ] && printf '%s' "$out" | grep -q 'Examples:' \
   && ok "confirm-gone --help exits 0 with Examples" || bad "confirm-gone --help (rc $rc, or no Examples)"
@@ -174,6 +177,15 @@ if command -v jq >/dev/null 2>&1; then
     env BOAT_BIN="$fake" FAKE_GONE="" bash "$gone" --timeout 2 --interval 1 bx_aaaa
   expect "confirm-gone: info says not_found but list --all still shows it" 10 \
     env BOAT_BIN="$fake" FAKE_GONE="bx_aaaa" FAKE_LISTED="bx_aaaa" bash "$gone" --timeout 2 --interval 1 bx_aaaa
+  # 20,000 filler rows: under pipefail, `printf | grep -qx` lets grep exit at the first
+  # match, printf takes SIGPIPE and the pipeline fails, so a listed box read as gone.
+  expect "confirm-gone: a box listed first in a long list --all is not gone" 10 \
+    env BOAT_BIN="$fake" FAKE_GONE="bx_aaaa" FAKE_LISTED="bx_aaaa" FAKE_LIST_PAD=20000 \
+    bash "$gone" --timeout 2 --interval 1 bx_aaaa
+  expect "confirm-gone: info never answering is unavailable" 7 \
+    env BOAT_BIN="$fake" FAKE_INFO_FAIL=1 bash "$gone" --timeout 2 --interval 1 bx_aaaa
+  expect "confirm-gone: info never answering but list --all shows it is not gone" 10 \
+    env BOAT_BIN="$fake" FAKE_INFO_FAIL=1 FAKE_LISTED="bx_aaaa" bash "$gone" --timeout 2 --interval 1 bx_aaaa
   expect "confirm-gone: list --all failing is unavailable" 7 \
     env BOAT_BIN="$fake" FAKE_GONE="bx_aaaa" FAKE_LIST_FAIL=1 bash "$gone" --timeout 2 --interval 1 bx_aaaa
   out="$(env BOAT_BIN="$fake" FAKE_GONE="bx_aaaa" bash "$gone" --json --timeout 2 --interval 1 bx_aaaa 2>/dev/null)"
