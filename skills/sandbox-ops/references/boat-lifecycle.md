@@ -8,6 +8,7 @@
 - Copy files in and out
 - Lifetime: TTL, extend, stop
 - Delete and confirm
+- Driving boat from a Windows host
 - Measured timings
 
 Source tags as in SKILL.md: [docs] boat docs 2026-10-27, [cli] `boat help`, [driver]
@@ -142,6 +143,16 @@ bash "<skill-dir>/scripts/confirm-gone.sh" --timeout 90 "$id"
   `GET /sandboxes/{id}` for 404 or `GET /deletion-operations/{op}` for `completed` [field].
 - A saved snapshot taken from the box keeps its data after the delete; `boat snapshot rm
   <name>` removes it [docs: cli-reference].
+
+## Driving boat from a Windows host
+
+| Landmine | What happens | Do instead |
+|---|---|---|
+| `boat scp` with a Windows path | any path containing `X:` reads as a sandbox id [driver] | `cd` to the file's folder and pass a bare name |
+| Git Bash path rewriting | args that look like POSIX paths are rewritten before boat.exe sees them | `MSYS_NO_PATHCONV=1` on boat calls |
+| Windows `jq.exe` | prints CRLF, and cannot open a `<(...)` `/proc` path [driver] | strip `\r`; write temp files |
+| `git archive` on Windows | hook scripts arrive with CRLF | `git -c core.autocrlf=false archive ...` |
+| The login config path | `%AppData%\ascii\boat\config.json` is fixed; a redirected `APPDATA` does not move it, and there is no config-path variable [field] | `BOAT_API_KEY` per process, never a second `boat login` |
 
 ## Measured timings
 

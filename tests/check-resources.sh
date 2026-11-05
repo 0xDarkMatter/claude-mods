@@ -212,14 +212,14 @@ run "lock-replay bad args"          2 "$PY" skills/package-manager-ops/scripts/l
 # suffix (so scanners never read them as real manifests) and must be materialised first.
 # pm-rollup / lock-replay behaviour (grouped report, conflict replay) lives in tests/tools.sh.
 
-echo "== sandbox-ops: boat.dev facts staleness verifier + deletion confirmer contract"
-run "boat-facts --offline consistent" 0 "$PY" skills/sandbox-ops/scripts/check-boat-facts.py --offline
-run "boat-facts --help"               0 "$PY" skills/sandbox-ops/scripts/check-boat-facts.py --help
+echo "== sandbox-ops: provider facts staleness verifier + deletion confirmer contract"
+run "sandbox-facts --offline consistent" 0 "$PY" skills/sandbox-ops/scripts/check-sandbox-facts.py --offline
+run "sandbox-facts --help"               0 "$PY" skills/sandbox-ops/scripts/check-sandbox-facts.py --help
 # Live comparisons exercised offline against recorded docs pages and `boat help` (no network in PR CI).
-run "boat-facts --live vs fixtures"   0 "$PY" skills/sandbox-ops/scripts/check-boat-facts.py --live --fixtures skills/sandbox-ops/tests/fixtures/live/boat
-run "confirm-gone --help"             0 bash skills/sandbox-ops/scripts/confirm-gone.sh --help
-run "confirm-gone no id"              2 bash skills/sandbox-ops/scripts/confirm-gone.sh
-# Its verdicts (gone / still listed / boat unreachable) run against a fake CLI in the skill's tests/run.sh.
+run "sandbox-facts --live vs fixtures"   0 "$PY" skills/sandbox-ops/scripts/check-sandbox-facts.py --live --fixtures skills/sandbox-ops/tests/fixtures/live
+run "confirm-gone --help"                0 bash skills/sandbox-ops/scripts/confirm-gone.sh --help
+run "confirm-gone no id"                 2 bash skills/sandbox-ops/scripts/confirm-gone.sh
+# Its verdicts (gone / still listed / unreachable, per provider) run against fake CLIs in the skill's tests/run.sh.
 
 echo "== protocol: every new verifier is executable + compiles"
 for s in skills/claude-api-ops/scripts/check-model-table.py \
@@ -242,7 +242,7 @@ for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py \
          skills/ddev-ops/scripts/check-ddev-facts.py \
          skills/ddev-ops/scripts/audit-ddev-config.py \
-         skills/sandbox-ops/scripts/check-boat-facts.py \
+         skills/sandbox-ops/scripts/check-sandbox-facts.py \
          skills/repo-doctor/scripts/check-memory-docs.py \
          skills/repo-doctor/scripts/check-tool-profiles.py \
          skills/repo-doctor/scripts/repo-scan.py \
@@ -289,7 +289,7 @@ purity "frontend-upgrade-facts" "$PY" skills/frontend-upgrade-ops/scripts/check-
 purity "ddev-facts"    "$PY" skills/ddev-ops/scripts/check-ddev-facts.py --offline
 purity "ddev-audit"    "$PY" skills/ddev-ops/scripts/audit-ddev-config.py skills/ddev-ops/tests/fixtures/minefield
 purity "pm-facts"      "$PY" skills/package-manager-ops/scripts/check-pm-facts.py --offline
-purity "boat-facts"    "$PY" skills/sandbox-ops/scripts/check-boat-facts.py --offline
+purity "sandbox-facts" "$PY" skills/sandbox-ops/scripts/check-sandbox-facts.py --offline
 __pr="$(mktemp -d)"
 printf '{"packages":[{"name":"a/a","version":"1"}]}' > "$__pr/ours.lock"
 printf '{"packages":[{"name":"a/a","version":"2"}]}' > "$__pr/theirs.lock"

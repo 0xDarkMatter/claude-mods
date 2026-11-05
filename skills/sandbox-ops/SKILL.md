@@ -1,6 +1,6 @@
 ---
 name: sandbox-ops
-description: "Run work on boat.dev cloud sandboxes (ephemeral Linux VMs, bx_ ids) without leaking boxes, losing work or credentials: create and size a box, exec or ssh, copy files in and out, delete and confirm the 404. Covers boat as a fleetflow remote-lane host, as a one-time GitHub Actions runner with fallback to GitHub's runner, heavy-job offload, Docker and DDEV on a box, web tools on lanes, cost and start limits, and what a box can reach. Triggers: boat, boat.dev, boat new, boat exec, bx_, cloud sandbox, remote lane, offload to boat, boat CI runner, JIT runner."
+description: "Run work on hosted cloud sandboxes without leaking boxes, losing work or credentials: boat.dev (boat, boat new, boat exec, bx_), E2B, Modal Sandboxes, Vercel Sandbox, Daytona, Fly Machines. Create and size a box, exec or ssh, copy files in and out, set the lifetime, delete and confirm it is gone, one API key per process. Covers remote agent lanes (fleetflow), one-time CI runners, heavy-job offload, Docker or DDEV on a box, residency. (Formerly boat-ops.) Not for writing @cloudflare/sandbox code: use sandbox-stable or sandbox-next."
 license: MIT
 metadata:
   author: claude-mods
@@ -9,190 +9,157 @@ metadata:
 
 # sandbox-ops: hosted cloud sandboxes (boat.dev in depth)
 
-A boat box is a full Ubuntu VM you rent by the second, drive with the `boat` CLI or the
-REST API (`https://boat.dev/api/v1`), and throw away. It is the right tool when the
-local machine is short of CPU or memory, when a lane or CI job should run on clean
-Linux, or when the work must not touch the desk. Facts verified 2026-10-27 against
-boat's docs and `boat help`; `scripts/check-boat-facts.py` re-checks them.
+A hosted sandbox is a Linux box you rent by the second, drive from a CLI or SDK, and
+throw away. It is the right tool when the local machine is short of CPU or memory, when
+a lane or CI job should run on clean Linux, or when the work must not touch the desk.
+boat.dev is the provider in production use and gets the full profile (`references/boat-*.md`);
+E2B, Modal, Vercel Sandbox, Daytona and Fly Machines get one card each. boat Facts
+verified 2026-10-27 against its docs and `boat help`; each card states its own date, and
+`scripts/check-sandbox-facts.py` re-checks them.
 
-## Hard rules (each one cost something to learn)
+## Hard rules, any provider
 
-1. **`--no-update` on every `boat` call.** The CLI updates itself, at most every 6 hours,
-   after a command ends [docs: cli-reference]. That silently breaks a 7-day
-   supply-chain cooldown and changes a benchmark mid-run. Never run `boat self-update`.
-2. **Create with `--no-env --no-snapshots --no-monitoring`** unless you need otherwise.
-   `--no-env` keeps the account's stored secrets out of the box; `--no-snapshots` means
-   nothing survives the box (a stop erases it); `--no-monitoring` means boat keeps no
-   command output. Without it boat keeps command history for 90 days [docs:
-   data-retention]. The one exception, a golden base image with no client code, is in
-   [boat-snapshots](references/boat-snapshots.md).
-3. **The TTL is a data-loss trap.** Auto-stop defaults to 1 hour [docs: limits], and exec
-   and SSH do not extend it [docs: cli-reference]. On a `--no-snapshots` box auto-stop
-   erases everything. Set `--ttl` above the whole job plus fetch-back, or
-   `boat extend <id> --ttl <s>`, which SETS the time left from now; it does not add.
-   Read `boat info <id> --json` first (`archiveAfter` is the live expiry) so you never
-   shorten a shared box [driver].
-4. **Delete what you created, and confirm it.** `boat delete <id> --yes`, then confirm:
-   `info` answers `not_found` AND `boat list --all` no longer shows it (plain `boat list`
-   shows only running boxes). `"<skill-dir>/scripts/confirm-gone.sh" <id>` does both.
-   Confirm in the same scope as the create (same account, `BOAT_ORG` and
-   `BOAT_API_KEY`): from another scope a live box can look missing.
-   Never delete, extend or exec on a box you did not create unless the user names it:
-   other sessions' boxes share the account.
-5. **Check which account the CLI is on before any work.** `boat status` and `boat org`
-   show the account and the wallet that new boxes bill. A CLI signed in to another
-   company's account looks identical, and nothing on the box says whose it is [field].
-   To work for a second company, do not switch the login: put that company's key in
-   `BOAT_API_KEY` for the job's process, which overrides the stored login for that process
-   only. See [boat-security](references/boat-security.md#policy-and-accounts).
-6. **Credentials never travel in argv.** Other users on a host can read process
-   arguments. Pass a key on stdin (`boat login --key-stdin`, or `boat ssh` stdin into
-   env), or as an API header from a file; never as a flag value or in an exec string.
-7. **A box is readable by everything on it.** The box user has passwordless sudo, and
-   every `boat exec` child inherits `CAP_DAC_READ_SEARCH` from boat's agent, so even a
-   `chmod 000` directory is readable [field, measured]. Never leave a credential file on
-   a box; never put production data on one. See [boat-security](references/boat-security.md).
+1. **Set a lifetime above the job, and know what the end does.** Every provider has a
+   default that ends a 1-4 h headless job: 5 min on E2B, Modal and Vercel, 15 min idle
+   on Daytona, 1 h on boat, restart-forever on Fly. Know whether it kills, stops, pauses
+   or erases. Table: [ttl-traps](references/ttl-traps.md).
+2. **Delete only boxes you created, then confirm with two reads in the same scope** (same
+   account, org and key as the create; from another scope a live box can look missing).
+   `"<skill-dir>/scripts/confirm-gone.sh" --provider <p> <id>` does the reads.
+3. **Hunt what outlives the box:** paused sandboxes, snapshots, volumes, stopped disks.
+   Several never expire and keep billing ([ttl-traps](references/ttl-traps.md#what-outlives-the-box)).
+4. **One key per process; never switch the machine login; nothing in argv; no
+   credentials left on the box.** Put the key in the job's environment. Daytona needs
+   `DAYTONA_API_URL` set too. [credentials-and-auth](references/credentials-and-auth.md).
+5. **A box is readable by everything on it.** Assume root inside; no production data,
+   no long-lived secrets. [security-and-residency](references/security-and-residency.md).
+6. **Pin the CLI.** Self-updating CLIs (boat) break a 7-day supply-chain cooldown and
+   change behaviour mid-run.
+7. **Name boxes `<who>-<what>-<MMDD-HHMM>`** (`who` from `gh api user --jq .login`, UTC
+   time): the name is the only owner a shared dashboard shows
+   ([boat-lifecycle](references/boat-lifecycle.md#name-every-box)).
 
-## Lifecycle at a glance
+## On boat
+
+- **`--no-update` on every `boat` call.** The CLI updates itself, at most every 6 hours,
+  after a command ends [docs: cli-reference]. Never run `boat self-update`.
+- **Create with `--no-env --no-snapshots --no-monitoring`.** `--no-env` keeps the
+  account's stored secrets out; with `--no-snapshots` a stop erases it; without
+  `--no-monitoring` boat keeps command history for 90 days [docs: data-retention]. The
+  one exception, a golden base image with no client code:
+  [boat-snapshots](references/boat-snapshots.md).
+- **The TTL is a data-loss trap.** Auto-stop defaults to 1 hour [docs: limits], and exec
+  and SSH do not extend it [docs: cli-reference]. `boat extend <id> --ttl <s>` SETS the
+  time left from now; read `archiveAfter` in `boat info <id> --json` first so you never
+  shorten a shared box.
+- **`boat new --json` prints JSONL:** take the id from the `created` event, never
+  `jq -r .id` (three lines; the delete fails and the box leaks).
+- **`boat exec` does not forward stdin:** pipe data with `boat ssh <id> '<cmd>' < file`.
+- **`BOAT_API_KEY` in the job's environment, never `boat login` for a second company:**
+  the login is one machine-wide file under every shell. `boat status` shows whose wallet
+  a create will bill. See [boat-security](references/boat-security.md#policy-and-accounts).
+- **Exec children hold `CAP_DAC_READ_SEARCH`:** even a `chmod 000` directory is readable.
 
 ```bash
 B="boat --no-update"
 $B new --type default --ttl 3600 --no-env --no-snapshots --no-monitoring \
-       --name ci-myrepo-pr12-ab12cd3 --json > new.jsonl     # JSONL: created, state, ready
+       --name "$who-myrepo-$(date -u +%m%d-%H%M)" --json > new.jsonl
 id="$(jq -rs 'map(select(.event=="created"))[0].id' new.jsonl | tr -d '\r')"
 $B exec "$id" --json --timeout 120 -- bash -c 'uname -a'      # waits; 600 s max
 $B exec "$id" --detach -- bash -c 'make test > out.log 2>&1'  # long jobs: --status/--attach/--kill <pid>
 $B ssh "$id" 'cat > in.tar' < in.tar                          # ssh forwards stdin; exec does not
-$B usage "$id" --json                                         # dollars, seconds, billingMultiplier
 $B delete "$id" --yes --json
 bash "<skill-dir>/scripts/confirm-gone.sh" "$id"              # exit 0 = gone, 10 = still there
 ```
 
-- **One job end to end:** `boat --no-update run --type default --push . -- <cmd>` creates,
-  copies the tracked files in, runs, prints the cost, deletes, and exits with the
-  command's code [cli].
-- **Fail fast:** `--fail-fast` creates only if a machine is ready now; it answers in about
-  1.5 s and costs nothing when none is [cli].
-- **Seed a box at create:** `--file SANDBOX_PATH=LOCAL_FILE` (text, 256KB in total) and
-  `--setup-file` (a 64KB script, runs in the background; watch `setupStatus` in `info`).
-- **Copy in and out:** see [boat-lifecycle](references/boat-lifecycle.md). Short version:
-  small files go over `ssh`/`exec` with a sha256 check; `scp` costs 10-15 s fixed per
-  call; `boat push` sends only git-tracked or unignored files.
+- One job end to end: `boat --no-update run --type default --push . -- <cmd>` creates,
+  copies tracked files in, runs, deletes and exits with the command's code [cli].
+- `--fail-fast` creates only if a machine is ready now (about 1.5 s, free when none is);
+  `--setup-file` seeds a 64KB script at create.
+- Sizes `small` / `default` / `large` / `xlarge` (2 to 16 vCPU), `default` $0.036 an
+  hour; starts (12 a minute on the $20 plan) are the limit you hit first. Rates, limits,
+  error codes: [boat-cost-and-limits](references/boat-cost-and-limits.md). Copy recipes,
+  timings, Windows-host traps: [boat-lifecycle](references/boat-lifecycle.md).
 
-Full lifecycle, every CLI fact the docs do not spell out, and copy recipes:
-[references/boat-lifecycle.md](references/boat-lifecycle.md).
+## Providers
 
-## Naming
+| Provider | Pick it for | Key variable | Default end | Worst trap | Card |
+|---|---|---|---|---|---|
+| boat.dev | cheapest by far; fleetflow driver exists | `BOAT_API_KEY` | auto-stop 1 h | a stop with snapshots off erases the box | `boat-*` refs |
+| E2B | agent template, pause/resume with memory | `E2B_API_KEY` | kill at 5 min | paused sandboxes never expire | [e2b](references/e2b.md) |
+| Modal | `au` region, env overrides the profile | `MODAL_TOKEN_ID` + `_SECRET` | 5 min | no SSH; region multiplier | [modal](references/modal.md) |
+| Vercel Sandbox | `syd1`, credential injection | `VERCEL_TOKEN` (SDK) | 5 min, then snapshot | stop-snapshots pile up | [vercel](references/vercel.md) |
+| Daytona | native SSH, Claude Code preinstalled | `DAYTONA_API_KEY` + `_URL` | stop at 15 min idle | 10 GB disk; key ignored without URL | [daytona](references/daytona.md) |
+| Fly Machines | cheap Australian VM, plain SSH | `FLY_API_TOKEN` | restart `always` | rootfs and volumes bill when stopped | [fly](references/fly.md) |
 
-- Box ids match `bx_[a-z0-9]+`; validate before splicing one into a command.
-- `--name` takes up to 120 characters [cli]. Make it say what and whose: CI boxes as
-  `ci-<repo>-pr<N>-<sha7>-run<run_id>-<attempt>` (or `ci-<repo>-manual-...`), so a sweeper
-  can find leftovers by the `ci-` prefix and a human can read the dashboard.
-- **fleetflow lane ids: 10 characters or fewer.** A remote lane's TMPDIR is
-  `$HOME/ff/cache/<repo-slug>/<run>/<id>`. At about 76 characters every Claude Code Bash
-  call fails ("Failed to create bridge sockets"); 68-74 worked [field, measured; cause
-  inferred: the 108-byte AF_UNIX socket path limit]. Respawn under a shorter id; a retry
-  fails the same way.
-- A one-time CI runner's label must be unique per run and attempt
-  (`boat-<run_id>-<attempt>`): a generic label can be claimed by another repo's job in the
-  same runner group [field].
-
-## Size and cost in one table
-
-| Size | vCPU / RAM / disk | $/hour [docs: pricing] | Use for |
-|---|---|---|---|
-| `small` | 2 / 4 GB / 12 GB | $0.018 | probes, light scripts |
-| `default` | 4 / 8 GB / 50 GB | $0.036 | CI gates, Docker builds, agent lanes |
-| `large` | 8 / 16 GB / 125 GB | $0.072 | heavy builds, many containers |
-| `xlarge` | 16 / 32 GB / 251 GB | $0.200 | needs the $100 plan or higher |
-
-Billed per second while running; no GPU on any size. The $20 plan includes 555 h of
-`default`, 100 at once and 12 / 60 / 200 starts per minute / hour / day; seats multiply
-the limits [docs]. Starts are the limit you hit first: pace bulk creates under 12 a
-minute. Measured costs (a CI gate about $0.0033, a Docker build under $0.001) and the
-limits and error codes: [references/boat-cost-and-limits.md](references/boat-cost-and-limits.md).
+Writing code against Cloudflare's `@cloudflare/sandbox` SDK is a platform build, not a
+hosted box: use `sandbox-stable` or `sandbox-next`. The verbs every provider must offer,
+side by side: [lifecycle-contract](references/lifecycle-contract.md).
 
 ## What to use a box for
 
 | Use | Start here |
 |---|---|
-| A fleetflow lane on a remote box (`--host boat:new`), lanes per box, Codex on a box | [references/boat-fleetflow-lanes.md](references/boat-fleetflow-lanes.md) |
-| Offload a heavy gate, render or test fan-out from a strained machine | [references/boat-fleetflow-lanes.md](references/boat-fleetflow-lanes.md#heavy-job-offload) |
-| A one-time GitHub Actions runner, with fallback to GitHub's runner | [references/boat-ci-runner.md](references/boat-ci-runner.md) |
-| Docker builds or DDEV on a box | [references/boat-docker-ddev.md](references/boat-docker-ddev.md) |
-| WebSearch/WebFetch missing on a remote lane | [references/boat-fleetflow-lanes.md](references/boat-fleetflow-lanes.md#web-tools-on-lanes) |
-| Can this code or data go on a box? What can a box reach? | [references/boat-security.md](references/boat-security.md) |
-
-## Security model in five lines
-
-- Each box is its own VM; boxes reach each other only over the network. Inside one, the
-  user is root (passwordless sudo) and containers share its kernel [docs: security].
-- Network: outbound open to the internet; inbound refused except SSH and ports you
-  publish with `boat host` (a token URL is a password; `--public` is open to anyone).
-- Org boxes are visible to every member of the org that pays for them [docs].
-- Data sits on machines in Germany, Finland and France, and snapshot copies can be stored
-  outside the EU [docs]. Placement is not selectable. Check this against any residency
-  clause before code goes on a box.
-- Ephemeral is the whole argument for putting private or client code on a box: ship a
-  credential-free git bundle or archive, keep production databases and their dumps off,
-  destroy the box and confirm it. Policy that is still open is in the reference.
+| A fleetflow lane on a remote boat box, lanes per box, Codex on a box | [boat-fleetflow-lanes](references/boat-fleetflow-lanes.md) |
+| Offload a heavy gate, render or test fan-out | [boat-fleetflow-lanes](references/boat-fleetflow-lanes.md#heavy-job-offload) |
+| A one-time GitHub Actions runner, with fallback to GitHub's runner | [boat-ci-runner](references/boat-ci-runner.md) |
+| Docker builds or DDEV on a box | [boat-docker-ddev](references/boat-docker-ddev.md) |
+| WebSearch/WebFetch missing on a remote lane | [boat-fleetflow-lanes](references/boat-fleetflow-lanes.md#web-tools-on-lanes) |
+| Can this code or data go on a box? Where does it run? | [security-and-residency](references/security-and-residency.md), [boat-security](references/boat-security.md) |
+| A lane or runner on another provider | its card, then [lifecycle-contract](references/lifecycle-contract.md) |
 
 ## Landmines
 
 | Landmine | What happens | Do instead |
 |---|---|---|
-| `boat new --json` prints JSONL | `jq -r .id` yields three lines; a delete given that string fails and the box leaks [driver] | `jq -rs 'map(select(.event=="created"))[0].id'` |
-| `boat exec` does not forward stdin | data piped in never arrives | `boat ssh <id> '<cmd>' < file` |
-| `exec --timeout` above 600 s (or 0) | output switches to a live stream; JSON callers break [cli] | keep waits at 600 s or less; `--detach` for long jobs |
-| Waiting-command output cap | 8 MiB per stream [docs: limits]; fleetflow saw truncation between 3.5 and 13.4 MB | download big files in chunks, or over `ssh` |
-| Non-zero remote exit | the CLI exits 1 with a JSON error line, hiding the real code [driver] | read `exitCode` from `--json`, or echo a sentinel like `__rc=$?` to stderr |
-| `boat scp` with a Windows path | any path containing `X:` reads as a sandbox id [driver] | `cd` to the file's folder and pass a bare name |
-| Git Bash path rewriting | args that look like POSIX paths are rewritten before boat.exe sees them | `MSYS_NO_PATHCONV=1` on boat calls |
-| Windows `jq.exe` | prints CRLF, and cannot open a `<(...)` `/proc` path [driver] | strip `\r`; write temp files |
-| `git archive` on Windows | hook scripts arrive with CRLF | `git -c core.autocrlf=false archive ...` |
-| `CAP_DAC_READ_SEARCH` on exec children | `chmod 000` still readable: permission tests fail, Codex's bwrap refuses to start [field] | `setpriv --inh-caps=-all --ambient-caps=-all --` (see references) |
-| Repo denies WebFetch/WebSearch by bare name | the tool vanishes from a lane even when allowed [field] | fleetflow's refusal or `FLEETFLOW_REMOTE_WEB_LIFT=1` |
-| Long lane ids | Bash sandbox fails to start on the box | ids of 10 characters or fewer |
-| Switching company with `boat login` | rewrites the one machine-wide login under every shell and session; the config path is fixed (Windows `%AppData%\ascii\boat\config.json`), a redirected `APPDATA` does not move it, and there is no config-path variable [field] | `BOAT_API_KEY` in the job's environment |
-| A new API key made on the dashboard | scoped to a personal account despite the org banner; `org` in a create gave 403 `not_org_member` [field] | `GET /api/v1/orgs` once before wiring a key into CI |
-| Auto mode | refuses agent steps that put a credential on a third-party VM [driver] | a permission rule for the exact command, or leave auto mode |
-| Parallel workers on a fresh box | race on a first model or package download [field] | one-worker warm-up pass first |
+| A provider's default timeout | the job dies at 5-15 min, or a Fly job restarts forever | set the lifetime at create; read it back |
+| Confirming from another account or org | a live box looks gone | confirm in the create's scope |
+| A paused, stopped or snapshotted leftover | bills for weeks; E2B paused boxes never expire | list them after every run |
+| A key in a flag (`--token`, `--api-key`) | readable in the process list and shell history | the provider's env variable |
+| `DAYTONA_API_KEY` alone | the CLI runs under the saved profile's account | set `DAYTONA_API_URL` too |
+| `exec --timeout` above 600 s (or 0) on boat | output switches to a live stream; JSON callers break [cli] | 600 s or less; `--detach` for long jobs |
+| boat waiting-command output cap | 8 MiB per stream [docs: limits] | chunk big downloads, or use `ssh` |
+| boat non-zero remote exit | the CLI exits 1, hiding the real code [driver] | read `exitCode` from `--json`, or a `__rc=$?` sentinel |
+| boat `CAP_DAC_READ_SEARCH` | permission tests fail; Codex's bwrap refuses to start [field] | `setpriv --inh-caps=-all --ambient-caps=-all --` |
+| Repo denies WebFetch/WebSearch by bare name | the tool vanishes from a lane [field] | fleetflow's refusal or `FLEETFLOW_REMOTE_WEB_LIFT=1` |
+| fleetflow lane ids over 10 characters | the Bash sandbox fails to start on the box (socket path limit) | ids of 10 characters or fewer |
+| A boat key made on the dashboard | scoped to a personal account; an `org` create gave 403 `not_org_member` [field] | `GET /api/v1/orgs` once before wiring a key into CI |
+| boat REST delete without `X-Ascii-Confirm-Delete` | 409, and the box keeps billing [field] | send the header; retry 409, 429, 5xx |
+| An outage during cleanup | a delete lost to it is never re-sent [field] | retry with backoff; an outage ends in exit 7, never a pass |
+| Auto mode | refuses steps that put a credential on a third-party VM [driver] | a permission rule for the exact command |
+| Parallel workers on a fresh box | race on a first model or package download [field] | a one-worker warm-up pass first |
+
+Windows-host traps (`scp` paths, Git Bash rewriting, `jq.exe` CRLF) are in
+[boat-lifecycle](references/boat-lifecycle.md#driving-boat-from-a-windows-host).
 
 ## Scripts
 
-- **`check-boat-facts.py`** - the staleness verifier (SKILL-RESOURCE-PROTOCOL section 7)
-  for `assets/facts-boat.json`, the rates, limits, retention and security facts and the
-  CLI flags this skill relies on.
-  - `python "<skill-dir>/scripts/check-boat-facts.py" --offline` (PR CI): the prose still
-    states every catalogued fact and flag, and SKILL.md's "Facts verified" date matches.
-  - `python "<skill-dir>/scripts/check-boat-facts.py" --live` (weekly): each fact against
-    `https://docs.boat.dev/<page>.md`, and each flag against the docs CLI reference and,
-    if a boat CLI is installed (`BOAT_BIN` or `boat` on PATH), `boat --no-update help`.
-    Exit 10 = drift, 7 = a page unreachable or reshaped (advisory), 0 = current.
-- **`confirm-gone.sh`** - read-only deletion check: polls `info` until `not_found`, then
-  checks `list --all`. It never deletes. `bash "<skill-dir>/scripts/confirm-gone.sh"
-  --timeout 90 bx_aaaa bx_bbbb` prints `id<TAB>gone|present`; exit 0 all gone, 10 some
-  still there, 7 boat unreachable, 5 no boat CLI or jq.
+- **`check-sandbox-facts.py --provider boat|e2b|modal|vercel|daytona|fly|all`**: the
+  staleness verifier (SKILL-RESOURCE-PROTOCOL section 7) for `assets/facts-boat.json` and
+  `assets/facts-providers.json`. `--offline` (PR CI): the prose still states every fact
+  and flag, and each verified date matches. `--live` (weekly): each fact against its docs
+  page, and boat's flags against `boat --no-update help` where installed. Exit 10 drift,
+  7 a page unreachable or reshaped (advisory), 0 current.
+- **`confirm-gone.sh [--provider boat|e2b|vercel|daytona|fly] <id>...`**: read-only.
+  boat: polls `info` until `not_found`, then checks `list --all`; others: the id must be
+  absent from the provider's list. Prints `id<TAB>gone|present`; exit 0 all gone, 10 some
+  still there, 7 provider unreachable, 5 no CLI or jq. It never deletes.
 
 ## Related skills
 
 - `fleet-ops` lands the branches remote lanes bring home; fleetflow (its own repo) owns
-  the remote-lane runtime described in [boat-fleetflow-lanes](references/boat-fleetflow-lanes.md).
-- `ci-cd-ops` for GitHub Actions in general; this skill only covers the boat runner.
-- `docker-ops` and `ddev-ops` for the tools themselves; this skill covers running them on
-  a box.
-- `supply-chain-defense` for the 7-day cooldown that `--no-update` protects.
+  the remote-lane runtime in [boat-fleetflow-lanes](references/boat-fleetflow-lanes.md).
+- `ci-cd-ops` for GitHub Actions in general; `docker-ops` and `ddev-ops` for the tools.
+- `supply-chain-defense` for the 7-day cooldown that pinning the CLI protects.
+- `sandbox-stable` / `sandbox-next` (Cloudflare's) for `@cloudflare/sandbox` code.
 
 ## Sources
 
-Every fact above carries its source tag:
-- **[docs]** boat's docs, read 2026-10-27 (`pricing`, `limits`, `data-retention`,
-  `security`, `cli-reference`, `llms.txt`).
-- **[cli]** `boat help <command>`, 2026-10-27.
-- **[driver]** fleetflow's host driver `scripts/hosts/boat.sh` and its project boat-ops
-  skill (2026-10-22 to 10-25).
-- **[bench]** fleetflow's sandbox-bench runs, 2026-10-22.
-- **[field]** field reports from 2026-10-23 to 10-27, generalised: fleetflow's Codex
-  sandbox reports, a CI runner trial and benchmark on two private repos, build-only Docker
-  benchmarks of two client sites, a web-tools lane fix, DDEV on a box, and heavy-job
-  offload; and a per-process `BOAT_API_KEY` test on 2026-11-05.
+- **[docs]** each provider's docs: boat's read 2026-10-27, the others 2026-11-05 (URLs
+  in the cards). **[cli]** `boat help <command>`, 2026-10-27.
+- **[driver]** fleetflow's host driver `scripts/hosts/boat.sh`; **[bench]** its
+  sandbox-bench runs, 2026-10-22.
+- **[field]** field reports 2026-10-23 to 11-05: Codex sandbox reports, a CI runner
+  trial, Docker benchmarks, DDEV on a box, heavy-job offload, a REST teardown review and
+  a per-process `BOAT_API_KEY` test.
+- **[report]** the 2026-11-05 provider research behind the cards.
