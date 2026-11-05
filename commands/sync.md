@@ -1,5 +1,5 @@
 ---
-description: "Session bootstrap - read project context, restore saved state, show status. Quick orientation with optional deep dive."
+description: "Session bootstrap - read project context, restore saved state, re-verify inherited claims before building on them, show status. Quick orientation with optional deep dive."
 ---
 
 # Sync - Session Bootstrap & Restore
@@ -35,6 +35,7 @@ $ARGUMENTS
     |      +- Restore tasks via TaskCreate
     |      +- Resolve plan path (Step 0)
     |      +- Read plan (<plan-path>)
+    |      +- Pickup check: done vs pending, re-verify inherited claims
     |      +- Acknowledge memory context (already auto-loaded)
     |      +- Show unified status
     |      +- Suggest next action
@@ -150,6 +151,50 @@ git log -1 --format="%h %s" 2>/dev/null
 - `wc -l` in Git Bash = count lines (CORRECT)
 - Git Bash understands `2>/dev/null` but NOT `2>nul`
 
+### Step 4b: Pickup Check
+
+Runs whenever Step 2 restored saved state; skipped under `--status`. The saved state is
+the record of what was decided and done, so read it instead of working it out again. The
+claims inside it are different: each one is re-checked on the real artifact before
+anything builds on it.
+
+1. **Resume point.** The `pause` block's `first_action` when one exists (written by
+   `/save --pause`). Otherwise the first `in_progress` task, then the first pending task
+   or plan step.
+2. **Done vs pending.** Split the saved tasks and plan steps into done and pending. Hold
+   the pending items against what landed since the save
+   (`git log --oneline <git.last_commit>..HEAD`): one finished since then moves to done,
+   after the same check as any claim. **Never redo a done item.** Re-checking a claim
+   means running its probe, not repeating the work behind it.
+3. **Collect inherited claims** from `pause.claims`, completed tasks, plan steps marked
+   done, and statements in `notes` ("tests pass", "merged", "the cause is X"). A saved
+   line saying something passed is a lead to check, not evidence.
+4. **Re-verify each claim on the real artifact.** Prefer the claim's own `check` when the
+   pause block recorded one:
+
+   | Claim | Probe |
+   |-------|-------|
+   | Tests pass | Re-run the named command on the current HEAD |
+   | Branch or commit landed | `git merge-base --is-ancestor <sha> <base>` |
+   | `wip:` commit is on this branch | `git merge-base --is-ancestor <sha> HEAD` |
+   | File exists, or holds a change | The path exists and `rg` finds the change in it |
+   | Cause found | The cited `file:line` still reads as described; re-run the recorded repro if it is cheap |
+   | PR open or green | `gh pr view <n> --json state,statusCheckRollup` |
+
+5. **Mark each claim** HOLDS, STALE (no longer true: say what you saw) or UNVERIFIED
+   (couldn't check: say why). Never build on a STALE claim: set its task back to
+   `in_progress` or `pending` (TaskUpdate) and fix it ahead of the resume point. A probe
+   likely to run past ~2 minutes may go to the background, or wait until just before the
+   first step that relies on it; until it runs, the claim stays UNVERIFIED.
+6. **Paused-state checks** (only with a `pause` block):
+   - `tree` was `clean` but the working tree is dirty now: something wrote here after
+     the pause. Find out what before editing anything.
+   - `agents` lists one still running: read its output before starting that work again.
+   - Carry on from the branch that holds the `wip:` commit; reword or squash it before
+     the branch lands.
+
+A cache without a `pause` block (any v3.0 or v3.1 save) still gets steps 1-5.
+
 ### Step 5: Check Mail
 
 Check for unread pigeon messages using the globally installed script:
@@ -215,9 +260,11 @@ Project Synced: [project-name]
 | **Last saved** | 2 hours ago |
 | **Branch** | feature/auth |
 | **Previous session** | abc123... |
+| **Paused** | wip: e4f5a6b, tree clean |
 | **Notes** | "Stopped at callback URL issue" |
 
-Note: Previous session row only shown when session_id is present in saved state.
+Note: Previous session row only shown when session_id is present in saved state. Paused
+row only shown when the cache has a `pause` block.
 
 ## Plan Status
 
@@ -240,6 +287,18 @@ Progress: 40% (2/5)
 | Done | Set up OAuth credentials |
 | **In Progress** | Fix callback URL handling |
 | Pending | Add token refresh logic |
+
+## Pickup Check
+
+**Resume point**: Run `npm test -- oauth` and fix the redirect assertion (from the pause note)
+
+| Claim | Probe | Result |
+|-------|-------|--------|
+| OAuth config landed on main | `git merge-base --is-ancestor abc123f main` | HOLDS |
+| wip commit is on this branch | `git merge-base --is-ancestor e4f5a6b HEAD` | HOLDS |
+| Only the redirect test fails | `npm test -- oauth` | STALE: token.spec.ts fails too |
+
+Done, kept: 1 | Done since save: 0 | Pending: 2 | Reopened: 1
 
 ## Git
 
@@ -294,7 +353,7 @@ Run `/auto-skill` to capture a workflow, or `auto-skill clear` to dismiss.
 ## Next Steps
 
 1. **Read mail**: N unread messages - `pigeon read` (when unread mail exists)
-2. **Continue**: Fix callback URL handling
+2. **Continue**: the resume point from the Pickup Check, after fixing any STALE claim
 3. **Check diff**: /sync --diff to see changes since save
 4. **Resume conversation**: `claude --resume abc123...` (when session_id present)
 5. **PR context**: `claude --from-pr 42` (when PR is linked)
@@ -579,6 +638,7 @@ Session End
 ## Notes
 
 - **Read-focused** - Only `/save` writes files
+- **Re-checks, never redoes** - The pickup check probes inherited claims; finished work is not repeated
 - **Fast by default** - Parallel reads, minimal overhead
 - **Git-aware** - Tracks branch, commits, uncommitted changes
 - **Smart restore** - Detects stale state, branch changes

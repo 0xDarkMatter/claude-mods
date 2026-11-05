@@ -363,6 +363,8 @@ term_tree_connector 1 1; echo; term_tree_connector 1 2; echo
 term_tree_indent 1; echo; term_tree_indent 2; echo
 term_tree_node prefix conn label meta; term_tree_node prefix conn label
 term_table_row a b c d; term_empty nothing; term_color green text; echo
+term_strip "$(term_color green text)"; echo; term_vis_width "$(term_color red ab)"; echo
+term_pad "$(term_color cyan ab)" 6; echo
 PROBE
 __probe_out="$(FORCE_COLOR=1 bash "$__probe" 2>&1)"
 if printf '%s' "$__probe_out" | LC_ALL=C grep -q '[^[:print:][:cntrl:]]'; then
@@ -370,6 +372,140 @@ if printf '%s' "$__probe_out" | LC_ALL=C grep -q '[^[:print:][:cntrl:]]'; then
         | LC_ALL=C grep -o '[^[:print:][:cntrl:]]' | LC_ALL=C sort -u | tr -d '\n' | od -An -c | tr -s ' ')"
 else pass "term.sh: every helper + registry key ASCII-pure under TERM_ASCII=1"; fi
 rm -f "$__probe"
+
+echo "== terminal design: colour is zero-width in term.sh's layout maths"
+# Callers pre-colour fragments (term_hotkey, term_health, term_pip_bar) and hand
+# them to term.sh's layout helpers. Measuring them with ${#} or printf %-Ns
+# counted every ESC[...m byte as a column: panel footers came out ~18 cells short
+# whenever colour was on, and term_truncate cut an escape in half. Invariant:
+# rendering with colour, then stripping the SGR codes, gives exactly the plain
+# render. TERM_ASCII=1 keeps bytes == cells, so every comparison is exact.
+__wprobe="$(mktemp)"
+cat > "$__wprobe" <<'PROBE'
+. skills/_lib/term.sh
+export TERM_ASCII=1
+esc=$(printf '\033')
+strip() { printf '%s' "$1" | sed "s/${esc}\[[0-9;]*m//g"; }
+chk() { if [ "$2" = "$3" ]; then echo "ok|$1"; else echo "FAIL|$1: want $(printf '%q' "$2") got $(printf '%q' "$3")"; fi; }
+# Each fixture is a function, so its coloured arguments are built AFTER
+# term_init has picked the mode (arguments expand before the callee runs).
+footer() { term_panel_close "$(term_hotkey R refresh) $TERM_DOT $(term_hotkey '?' help)" \
+                            "$(term_health busted daemon)  $(term_health pending '4 active')"; }
+header() { term_panel_open fleet fleet main; }
+verdict() { term_status_row bad "NOT READY  $(term_pip_bar score 43 100)" "score 43/100"; }
+leaf() { term_leaf_line "$TERM_TREE_BRANCH" lane-a "$(term_rail 2 HEAD)" "M1 ?2" 3m; }
+cut() { term_truncate "NOT READY  $(term_pip_bar score 43 100)" 15; }
+same_geometry() { # desc fixture
+  local c p
+  FORCE_COLOR=1 term_init; c=$("$2")
+  FORCE_COLOR= NO_COLOR=1 term_init; p=$("$2")
+  chk "$1" "$p" "$(strip "$c")"
+}
+same_geometry "panel footer with coloured hotkeys + healths" footer
+same_geometry "status row with a coloured pip-bar label" verdict
+same_geometry "leaf row with a coloured rail + meta" leaf
+same_geometry "truncation of a coloured label" cut
+FORCE_COLOR=1 term_init
+chk "footer spans the header's width" "$(strip "$(header)" | wc -c)" "$(strip "$(footer)" | wc -c)"
+c=$(cut)
+chk "a cut never leaves half an escape" "" "$(strip "$c" | tr -cd '\033')"
+case "$c" in *"${esc}[0m.."*) echo "ok|a cut resets colour before the marker";;
+  *) echo "FAIL|a cut resets colour before the marker: got $(printf '%q' "$c")";; esac
+chk "plain text truncates as before" "abcd.." "$(term_truncate abcdefghijkl 6)"
+chk "short text passes through untouched" "$(term_color red ab)" "$(term_truncate "$(term_color red ab)" 6)"
+echo END
+PROBE
+__wout="$(bash "$__wprobe" 2>&1)"; __wrc=$?
+__wn="$(printf '%s\n' "$__wout" | grep -c '^ok|')"
+# Fail closed: a probe that dies part-way prints fewer rows, so END must be seen.
+case "$__wrc|$__wout" in
+    0\|*"FAIL|"*|[!0]*) bad "term.sh measures colour as width: $(printf '%s\n' "$__wout" | grep -v '^ok|' | tr '\n' ' ')" ;;
+    *$'\nEND') pass "term.sh: colour is zero-width in its layout maths ($__wn checks)" ;;
+    *) bad "term.sh width probe ended early: $(printf '%s' "$__wout" | tail -n3 | tr '\n' ' ')" ;;
+esac
+rm -f "$__wprobe"
+
+echo "== terminal design: wide glyphs take two cells in term.sh's layout maths"
+# Width is terminal cells, not characters. term.sh once counted characters, so
+# the ⚡ brand (one character, two cells) made `fleet status`'s header 81 cells
+# to its footer's 80; and what a character is depends on the bash: MSYS (16-bit
+# wchar_t) counts the 🔁 brand as 2 and cut it between the halves of its
+# surrogate pair, Linux and macOS count it 1. The oracle is independent of
+# term.sh: python's unicodedata, East Asian Width W or F = 2 cells, SGR
+# stripped, and invalid UTF-8 means a cut split a character. Each probe line is
+# "<cells wanted, or = for the line above's>\t<what>\t<rendered>". The probe
+# runs once in a UTF-8 locale and once in C, where bash counts bytes.
+__uprobe="$(mktemp)"
+cat > "$__uprobe" <<'PROBE'
+. skills/_lib/term.sh
+unset TERM_ASCII FLEET_ASCII
+if [ "$1" = C ]; then LC_ALL=C
+else # C.UTF-8 on Linux CI; macOS and MSYS have en_US.UTF-8
+    for l in C.UTF-8 en_US.UTF-8; do LC_ALL=$l; s='⚡'; [ "${#s}" -eq 1 ] && break; done 2>/dev/null
+fi
+FORCE_COLOR=1 term_init; TERM_WIDTH=80
+row() { printf '%s\t%s\t%s\n' "$1" "$2" "$3"; }
+row 80 "fleet footer spans TERM_WIDTH" \
+    "$(term_panel_close "$(term_hotkey R refresh) $TERM_DOT $(term_hotkey '?' help)" \
+                        "$(term_health busted daemon)  $(term_health pending '4 active')")"
+row 80 "fleet header and footer span the same cells (bolt brand is 2)" "$(term_panel_open fleet fleet main)"
+row 80 "loop header spans the same cells (wide astral brand)" "$(term_panel_open loop loop main)"
+row 80 "supply-chain header spans the same cells (narrow astral brand)" \
+    "$(term_panel_open supply-chain supply-chain main)"
+row "" "" ""   # resets '=' so each pair below is compared on its own
+row - "leaf row with an ASCII name" "$(term_leaf_line "$TERM_TREE_BRANCH" lane-a "$(term_rail 2 HEAD)" "M1 ?2" 3m)"
+row = "leaf row with a wide-glyph name keeps its columns" \
+    "$(term_leaf_line "$TERM_TREE_BRANCH" "⚡bolt-lane" "$(term_rail 2 HEAD)" "M1 ?2" 3m)"
+row = "leaf row whose emoji name is cut keeps its columns" \
+    "$(term_leaf_line "$TERM_TREE_BRANCH" "🔁🔁🔁🔁🔁🔁🔁🔁🔁🔁🔁🔁🔁🔁🔁🔁🔁🔁" "$(term_rail 2 HEAD)" "M1 ?2" 3m)"
+row - "status row with an ASCII label" "$(term_status_row ok "plain label" value)"
+row = "status row with wide glyphs in its label keeps its value column" \
+    "$(term_status_row ok "⏳ waiting on ✅ checks" value)"
+row 5 "a cut beside astral emoji keeps whole glyphs (max 6)" "$(term_truncate "🔁🔁🔁🔁🔁" 6)"
+row 6 "a cut through mixed text counts the bolt as 2 cells (max 6)" "$(term_truncate "ab⚡cd⚡ef" 6)"
+row 3 "a cut of coloured emoji keeps escapes and glyphs whole (max 4)" \
+    "$(term_truncate "$(term_color red "🔁🔁🔁")x🔁" 4)"
+echo END
+PROBE
+__uoracle='import re, sys, unicodedata
+sgr = re.compile(rb"\x1b\[[0-9;]*[^0-9;]?")
+prev = None
+for raw in sys.stdin.buffer.read().split(b"\n"):
+    if raw == b"END":
+        print("END"); break
+    want, what, body = raw.split(b"\t", 2)
+    what = what.decode("ascii")
+    if not what:
+        prev = None; continue
+    try:
+        text = sgr.sub(b"", body).decode("utf-8")
+    except UnicodeDecodeError:
+        print("FAIL|%s: split a character (invalid UTF-8)" % what); prev = None; continue
+    got = sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in text)
+    want = got if want == b"-" else prev if want == b"=" else int(want)
+    print("ok|%s" % what if got == want else "FAIL|%s: want %s cells, got %s" % (what, want, got))
+    prev = got'
+for __loc in UTF-8 C; do
+    __wout="$(bash "$__uprobe" "$__loc" 2>/dev/null | "$PY" -c "$__uoracle" 2>&1)"; __wrc=$?
+    __wn="$(printf '%s\n' "$__wout" | grep -c '^ok|')"
+    # Fail closed: a probe or oracle that dies part-way never prints END.
+    case "$__wrc|$__wout" in
+        0\|*"FAIL|"*|[!0]*) bad "term.sh mis-measures wide glyphs ($__loc): $(printf '%s\n' "$__wout" | grep -v '^ok|' | tr '\n' ' ')" ;;
+        *$'\nEND') pass "term.sh: wide glyphs take two cells, cuts keep glyphs whole ($__loc, $__wn checks)" ;;
+        *) bad "term.sh wide-glyph probe ended early ($__loc): $(printf '%s' "$__wout" | tail -n3 | tr '\n' ' ')" ;;
+    esac
+done
+rm -f "$__uprobe"
+
+# The bash and PowerShell twins must draw the same panel geometry, so their
+# wide-glyph tables are one list: __TERM_WIDE in term.sh, $Script:TermWide in
+# term.ps1. Compare them bound for bound.
+__tw_sh="$(sed -n '/^__TERM_WIDE=(/,/^)/p' skills/_lib/term.sh | grep -oE '0x[0-9A-F]+' | tr '\n' ' ')"
+__tw_ps="$(sed -n '/^\$Script:TermWide = @(/,/^)/p' skills/_lib/term.ps1 | grep -oE '0x[0-9A-F]+' | tr '\n' ' ')"
+__tw_n="$(printf '%s' "$__tw_sh" | wc -w | tr -d ' ')"
+if [ "$__tw_n" -gt 0 ] && [ "$__tw_sh" = "$__tw_ps" ]; then
+    pass "term.sh and term.ps1 share one wide-glyph table ($__tw_n bounds)"
+else bad "term.sh and term.ps1 wide-glyph tables differ (sh: $__tw_n bounds, ps1: $(printf '%s' "$__tw_ps" | wc -w | tr -d ' '))"; fi
 
 # Source-level guard for the consumers. A hardcoded DECORATION glyph in an
 # authored string never reaches the registry, so TERM_ASCII=1 can't swap it —
@@ -523,6 +659,54 @@ __fy_help="$(printf '%s\n' "$__fy_code" | grep -cE 'bash \.github/scripts/freshn
 if [ "$__fy_live" -gt 0 ] && [ "$__fy_live" -eq "$__fy_help" ]; then
     pass "$__fy: one helper call per live check ($__fy_live)"
 else bad "$__fy: $__fy_help helper calls for $__fy_live live checks - want one each"; fi
+
+echo "== freshness workflow: every live verifier is on the weekly schedule"
+# A --live mode only catches drift if freshness.yml runs it. Eight skills once
+# shipped a §7 verifier the workflow never called, so their drift could not turn
+# a run red. A verifier is any skills/*/scripts/ file naming BOTH --offline and
+# --live (the §7 split); one naming only --live in a comment is not. It counts as
+# scheduled when its path is a whole token on a `-- <cmd> ... --live` line.
+# Deliberate exclusions go in __fv_exempt: "<path> <reason>", one per line. An
+# entry with no reason, a path not on disk or a path freshness.yml does run fails.
+__fv_exempt='
+skills/fleet-worker/scripts/fleet-doctor.sh needs a paid worker-endpoint key and spends one real model turn through the claude CLI: a per-machine preflight, not shipped-fact drift
+skills/loop-ops/scripts/loop-doctor.sh --live is a runtime preflight of a local loop.config.yaml (claude/git/verify binary on PATH), not a shipped fact
+'
+# Every whole token on the `-- <cmd>` lines. A step's verifier path must sit on
+# that line itself, not on a `\` continuation line below it.
+__fy_tokens="$(printf '%s\n' "$__fy_code" | grep -E '^\s*-- ' | tr -s ' \t\\' '\n\n\n')"
+__fv_rc=0
+__fv_found="$(grep -rlI --exclude-dir=__pycache__ -e '--live' skills/*/scripts 2>/dev/null)" || __fv_rc=$?
+[ "$__fv_rc" -le 1 ] || bad "verifier discovery: grep over skills/*/scripts failed (exit $__fv_rc)"
+__fv_missing=""; __fv_n=0
+for __f in $__fv_found; do   # paths under skills/ carry no spaces (naming-conventions.md)
+    grep -q -e '--offline' "$__f" || continue
+    __fv_n=$((__fv_n + 1))
+    if printf '%s\n' "$__fv_exempt" | awk -v p="$__f" '$1 == p { m = 1 } END { exit !m }'; then continue; fi
+    printf '%s\n' "$__fy_tokens" | grep -qxF -- "$__f" || __fv_missing="$__fv_missing $__f"
+done
+if [ "$__fv_n" -eq 0 ]; then bad "verifier discovery found no --offline/--live verifier under skills/*/scripts"
+elif [ -n "$__fv_missing" ]; then
+    bad "$__fy never runs --live for:$(printf ' %s' $__fv_missing | sed 's#skills/\([^/ ]*\)/scripts/#\1/#g') - add a freshness-step.sh step, or an __fv_exempt line with the reason"
+else pass "$__fy schedules every --offline/--live verifier ($__fv_n found, exemptions included)"; fi
+__fv_stale=""
+for __f in $(printf '%s\n' "$__fv_exempt" | awk 'NF { print $1 }'); do
+    __why="$(printf '%s\n' "$__fv_exempt" | awk -v p="$__f" '$1 == p { $1 = ""; sub(/^ +/, ""); print; exit }')"
+    if [ -z "$__why" ]; then __fv_stale="$__fv_stale $__f(no-reason)"
+    elif [ ! -f "$__f" ]; then __fv_stale="$__fv_stale $__f(not-on-disk)"
+    elif printf '%s\n' "$__fy_tokens" | grep -qxF -- "$__f"; then __fv_stale="$__fv_stale $__f(scheduled-anyway)"
+    fi
+done
+if [ -n "$__fv_stale" ]; then bad "stale __fv_exempt entries:$__fv_stale"
+else pass "every __fv_exempt entry names an unscheduled verifier on disk and says why"; fi
+# The reverse: a renamed or deleted verifier still named by a step would only
+# surface on Monday, as a crash. Catch it in the PR instead.
+__fy_gone=""
+for __f in $(printf '%s\n' "$__fy_tokens" | grep -E '^skills/[^/]+/scripts/'); do
+    [ -f "$__f" ] || __fy_gone="$__fy_gone $__f"
+done
+if [ -n "$__fy_gone" ]; then bad "$__fy runs verifiers that are not on disk:$__fy_gone"
+else pass "$__fy names only verifiers that exist"; fi
 
 echo
 if [ "$fail" -eq 0 ]; then echo "resource checks: clean"; exit 0; fi

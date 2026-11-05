@@ -243,6 +243,8 @@ Reads need no preview. Create, comment, review and edit title/body are preview-g
 
 See `references/pr-ops.md` for full playbooks, review-flow templates, and the merge-strategy decision tree.
 
+**Red check or review-bot findings?** Classify before rerunning or replying: one fresh rebuild per suspected flake, a failure outside the diff means a stale base, and each bot finding is fixed, dismissed with evidence, or taken to a human (security, auth, billing and migrations always are). [references/review-bot-triage.md](references/review-bot-triage.md)
+
 ## Conventions enforced (load reference files for detail)
 
 Defaults: minor on `feat:`, patch on `fix:`-only, major only with approval; README intro of 2–3 concrete paragraphs; landing page register-first, never mixed; Recent Updates in per-version blocks; `--private` unless told public; preview-gated issue/PR bodies, squash by default, branch deletion a separate step. The reference behind each: [references/files.md](references/files.md).

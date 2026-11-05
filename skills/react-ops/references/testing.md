@@ -17,8 +17,14 @@ Test behavior, not implementation. Tests should resemble how users interact with
 ## Vitest + RTL Setup
 
 ```bash
-npm install -D vitest @testing-library/react @testing-library/user-event @testing-library/jest-dom jsdom
+npm install -D vitest vite @testing-library/react @testing-library/dom @testing-library/user-event @testing-library/jest-dom jsdom
 ```
+
+Vitest 5 (5.0.0, 2026-09-03) requires Node.js `>=22.12.0` and Vite `>=6.4.0`, and
+`vite` is now a required peer rather than a dependency: npm, pnpm and Bun install it,
+Yarn does not, so list it explicitly
+([migration guide](https://vitest.dev/guide/migration)). `@testing-library/dom` is a
+required peer of both RTL 16 and jest-dom 7.
 
 ```typescript
 // vitest.config.ts
@@ -42,10 +48,15 @@ export default defineConfig({
 
 ```typescript
 // src/test/setup.ts
-import '@testing-library/jest-dom'; // extends expect with DOM matchers
+import * as matchers from '@testing-library/jest-dom/matchers';
 import { cleanup } from '@testing-library/react';
-import { afterEach, beforeAll, afterAll } from 'vitest';
+import { afterEach, beforeAll, afterAll, expect } from 'vitest';
 import { server } from './mocks/server';
+
+// Register jest-dom's DOM matchers (toBeInTheDocument, toHaveTextContent, ...).
+// Not `import '@testing-library/jest-dom'`: that entry types the matchers on
+// jest.Matchers, which Vitest 5 no longer reads, so every matcher is a TS2339.
+expect.extend(matchers);
 
 // RTL cleanup after each test
 afterEach(() => cleanup());
@@ -55,6 +66,41 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 ```
+
+```typescript
+// src/test/vitest-matchers.d.ts (include it in tsconfig)
+// Workaround until jest-dom ships Vitest 5 types (testing-library/jest-dom#738,
+// fix PR #742 open as of 2026-10-22). jest-dom 7.0.1's own '/vitest' entry still
+// augments the old one-parameter Assertion<T>: it compiles only with
+// skipLibCheck: true (TS2428 otherwise). This shape compiled clean either way
+// against vitest 5.0.4 + jest-dom 7.0.1 + TypeScript 5.9.3; drop it once #742 lands.
+import 'vitest';
+import type { TestingLibraryMatchers } from '@testing-library/jest-dom/matchers';
+
+declare module 'vitest' {
+  interface Matchers<R, T> extends TestingLibraryMatchers<unknown, R> {
+    toHaveNoViolations(): R; // jest-axe, if used: its types augment jest.Matchers only
+  }
+}
+```
+
+### Vitest 5 changes that bite React suites
+
+From the [Vitest 5 migration guide](https://vitest.dev/guide/migration):
+
+| Change | What breaks | Do |
+|--------|-------------|----|
+| `clearMocks` defaults to `true` | Call history recorded in a setup file, at module top level or in `beforeAll` is gone when the test asserts on it | Record calls inside the test, or set `clearMocks: false` |
+| Unawaited async assertions fail | `expect(p).resolves.toBe(1)` without `await` now fails the test (v4 only warned) | `await expect(p).resolves...` |
+| Hoisted mocks must be top level | `vi.mock` / `vi.hoisted` inside a `describe` or function now throws | Move it to module scope; `vi.doMock` is not hoisted |
+| `-t` matches the `>`-joined name | `vitest -t 'LoginForm submits'` stops matching | `vitest -t 'LoginForm > submits'`, or one segment |
+| Artifacts under `.vitest/` | `json`/`junit` reporters write files instead of stdout; HTML report moves to `.vitest/index.html` | `.gitignore` `.vitest`; read the file, or `[['json', { stdout: true }]]` |
+| No config lookup in parent dirs | `cd packages/app && vitest` loses the root config | `--config ../../vitest.config.ts` |
+
+Browser mode's `expect.element(...).toHaveTextContent()` is now exact-match, with
+`toMatchTextContent` for partial or regex matches. jest-dom's `toHaveTextContent` on
+RTL queries, used throughout this file, is a different matcher and still accepts a
+substring or a RegExp.
 
 ---
 
@@ -448,7 +494,7 @@ test('validates required fields on submit', async () => {
 ```tsx
 import { axe, toHaveNoViolations } from 'jest-axe';
 
-expect.extend(toHaveNoViolations());
+expect.extend(toHaveNoViolations); // the matcher object, not a call (jest-axe README)
 
 test('has no accessibility violations', async () => {
   const { container } = render(<LoginForm onLogin={vi.fn()} />);
@@ -499,8 +545,9 @@ test('Badge renders correctly', () => {
   expect(container.firstChild).toMatchSnapshot();
 });
 
-// Update snapshots when intentional changes are made:
-// vitest --update-snapshots
+// Update snapshots when intentional changes are made
+// (Vitest's flag is -u / --update; --update-snapshots is Playwright's):
+// vitest -u
 ```
 
 ---

@@ -2,9 +2,11 @@
 """Staleness verifier for mcp-ops: the MCP SDK packages + spec URL the skill
 names must stay real, named, and current.
 
-mcp-ops tells the reader to install `@modelcontextprotocol/sdk` (npm),
-`@modelcontextprotocol/inspector` (npm), `mcp[cli]` / `fastmcp` (PyPI), and
-cites the spec at spec.modelcontextprotocol.io. Those are exactly the facts
+mcp-ops tells the reader to install the TypeScript SDK v2 packages
+(`@modelcontextprotocol/server` / `client`, npm), names the v1 monolith
+`@modelcontextprotocol/sdk` and its codemod, `@modelcontextprotocol/inspector`
+(npm), `mcp[cli]` / `fastmcp` (PyPI), and cites the spec at
+modelcontextprotocol.io/specification. Those are exactly the facts
 that drift silently (SKILL-RESOURCE-PROTOCOL.md §7): an SDK is renamed, a
 package is unpublished, the prose stops mentioning one the catalog still
 lists, or the spec URL goes dead — and nobody notices for months. Two modes:
@@ -19,6 +21,7 @@ lists, or the spec URL goes dead — and nobody notices for months. Two modes:
   --live (scheduled freshness job, never a PR gate): does each package still
     resolve on its registry (npm latest / PyPI JSON), and has any tracked
     SDK's major moved off the sampled major? Does the spec URL answer 200?
+    Rows are labelled by the registry queried: npm:<pkg> or pypi:<pkg>.
 
 Usage:   check-mcp-facts.py [--offline | --live] [--catalog FILE] [--skill DIR] [--json] [--timeout S]
 Input:   argv flags only (no stdin).
@@ -195,28 +198,32 @@ def check_live(catalog: dict, timeout: float) -> list[Finding]:
 
     for name, meta in catalog.get("packages", {}).items():
         registry = meta.get("registry", "npm")
+        # Row label names the registry actually queried ("npm:@scope/pkg", "pypi:mcp"),
+        # so a PyPI drift row is never mistaken for an npm one in the freshness log.
         if registry == "npm":
+            label = "npm"
             status, info = _npm_latest(name, timeout)
         else:
+            label = "pypi"
             status, info = _pypi_latest(name, timeout)
         if status == "notfound":
-            findings.append(Finding(f"npm:{name}", "drift",
+            findings.append(Finding(f"{label}:{name}", "drift",
                                     "package gone from registry — renamed/removed, review skill"))
             continue
         if status == "unavailable":
-            findings.append(Finding(f"npm:{name}", "unavailable", "registry unreachable"))
+            findings.append(Finding(f"{label}:{name}", "unavailable", "registry unreachable"))
             continue
         ver = str(info)
         if meta.get("track_major"):
             sampled = str(meta.get("sampled_major", ""))
             latest_major = _major(ver)
             if latest_major and latest_major != sampled:
-                findings.append(Finding(f"npm:{name}", "drift",
+                findings.append(Finding(f"{label}:{name}", "drift",
                                         f"{name}@{ver} major {latest_major} != sampled {sampled} — review skill"))
             else:
-                findings.append(Finding(f"npm:{name}", "ok", f"latest {ver} (major {latest_major})"))
+                findings.append(Finding(f"{label}:{name}", "ok", f"latest {ver} (major {latest_major})"))
         else:
-            findings.append(Finding(f"npm:{name}", "ok", f"latest {ver}"))
+            findings.append(Finding(f"{label}:{name}", "ok", f"latest {ver}"))
 
     # Spec URL must answer 200 (follows redirects).
     spec_url = str(catalog.get("spec", {}).get("url", ""))

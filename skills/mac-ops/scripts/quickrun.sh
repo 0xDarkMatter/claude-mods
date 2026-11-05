@@ -9,6 +9,9 @@
 set -u
 
 SHORT_DAYS=7
+# Saved because the loop below shifts $@ empty; restored after it so the
+# standard flags still reach parse_common_flags and maybe_filter_self.
+SAVED_ARGS=("$@")
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --days) SHORT_DAYS="$2"; shift 2 ;;
@@ -36,6 +39,10 @@ EOF
         *) shift ;;
     esac
 done
+# Without this restore every standard flag was silently ignored (--redact
+# output meant for sharing went out unredacted). ${a[@]+...} is the bash
+# 3.2-safe expansion of a possibly empty array under set -u.
+set -- ${SAVED_ARGS[@]+"${SAVED_ARGS[@]}"}
 
 source "$(dirname "$0")/_lib/common.sh"
 parse_common_flags "$@"
@@ -64,11 +71,16 @@ run_subscript() {
 
     # Capture sub-script output (suppress its own SUMMARY since we'll do our own).
     # Force NO_PANEL so children emit parseable plain text — we render our own panel.
-    local out
-    out=$(NO_PANEL=1 bash "$SCRIPTS_DIR/$script" --quiet "$@" 2>&1 || true)
+    # procsub guard: the sub-script's status is kept (checked after the counts).
+    # `|| true` threw it away, and an audit that crashed before its SUMMARY added
+    # nothing to the counts, so the verdict read green over a crashed audit.
+    local out rc=0
+    out=$(NO_PANEL=1 bash "$SCRIPTS_DIR/$script" --quiet "$@" 2>&1) || rc=$?
 
-    # Echo the sub-script's findings (everything before its SUMMARY)
-    echo "$out" | sed -n '/^=== /,/^=== SUMMARY ===/p' | sed '/^=== SUMMARY ===/q' | sed '$d'
+    # Echo the sub-script's findings: everything before its SUMMARY. Don't key
+    # this on a section banner: a --quiet audit prints none, and a range that
+    # began at the first `=== ` line began at SUMMARY and echoed nothing.
+    printf '%s\n' "$out" | sed '/^=== SUMMARY ===/,$d'
 
     # Extract sub-script's pass/fail/warn counts from its SUMMARY line
     local summary_line
@@ -83,6 +95,18 @@ run_subscript() {
         TOTAL_FAIL=$((TOTAL_FAIL + ${fail:-0}))
         TOTAL_WARN=$((TOTAL_WARN + ${warn:-0}))
         TOTAL_INFO=$((TOTAL_INFO + ${info:-0}))
+    fi
+
+    # None of the five audits documents a findings exit code (each exits 0 once
+    # its audit has run, FAILs or not), so a non-zero exit or a missing SUMMARY
+    # means its findings are incomplete: one FAIL naming the script, put first
+    # so the top-10 list can't truncate it away.
+    if [[ "$rc" -ne 0 || -z "$summary_line" ]]; then
+        local why="exit $rc"
+        [[ -z "$summary_line" ]] && why="$why, no SUMMARY"
+        TOTAL_FAIL=$((TOTAL_FAIL + 1))
+        ALL_FAILS=("[$label] $script failed ($why) - its findings are incomplete; run it alone to see why" \
+            ${ALL_FAILS[@]+"${ALL_FAILS[@]}"})
     fi
 
     # Collect FAIL and WARN lines for the consolidated summary

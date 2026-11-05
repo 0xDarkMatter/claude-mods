@@ -61,7 +61,7 @@ Force branch-only mode: `mode=branch` in `.claude/fleet/config`. Use this when e
 
 ### 2. Launch sessions
 
-For each lane, open a Claude session pointing at that worktree (or that clone). Use `references/session-prompt.md` as the template — fill in `LANE`, `SCOPE`, `TASK`, `TESTS`.
+For each lane, open a Claude session pointing at that worktree (or that clone). Use `references/session-prompt.md` as the template — fill in `LANE`, `SCOPE`, `TASK`, `TESTS`, plus `ACCEPTANCE`, `TIMEBOX` and `FORBIDDEN` (see that file for what each one is for).
 
 Each session works in isolation, commits atomically, runs tests, and signals when ready:
 

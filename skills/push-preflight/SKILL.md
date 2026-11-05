@@ -43,6 +43,18 @@ Step 10 →  git push <remote> <branch>
 Step 11 →  Post-push verify (ls-remote matches pushed SHA)
 ```
 
+## Scope: what the push sends
+
+`scripts/push-scope.sh` decides which commits a push sends. Steps 4, 6 and 7 all use that one answer, so the commit count, the secret scan and the forbidden-file check cover the same commits:
+
+| Case | Commits scanned | Diff base (regex layer, Step 7) |
+|---|---|---|
+| `<remote>/<branch>` exists | `<remote>/<branch>..<branch>` | `<remote>/<branch>` |
+| New remote branch; the remote has other refs | `<branch> --not --remotes=<remote>`: commits no `<remote>/*` ref reaches | the fork point: the newest already-published parent of those commits |
+| The remote has no refs at all | the whole branch, labelled "first push to an empty remote" | the empty tree (every file added) |
+
+So a feature branch's first push scans its own commits, not the main it was cut from. A line already on the remote was published by an earlier push, and auditing it is history work (`security-ops`). The answer comes from local remote-tracking refs, so it is only as fresh as the last fetch: a ref that is behind the remote only widens the scan. When a branch merges two remote branches that forked separately, the base falls back to their common ancestor. That over-scans: it can refuse a push, but never misses a line. `bash "<skill-dir>/scripts/push-scope.sh" <remote> <branch>` prints the scope for a push.
+
 ## Invocation
 
 ```bash
@@ -61,7 +73,7 @@ The script prints a structured report and exits with:
 |---|---|---|
 | 0 | All gates passed; ready for push | Ask user to confirm, then `git push <remote> <branch>` |
 | 1 | Secret-scanner hit | Report to user; refuse; suggest `git filter-repo` / BFG |
-| 2 | Forbidden file added (.env, key files, `.claude/settings.local.json`, worktree paths, etc.) | Report; refuse |
+| 2 | Forbidden file added (.env, key files, `.claude/settings.local.json`, worktree paths, etc.; env templates `.env.example` / `.env.sample` / `.env.template` are allowed, their content is still secret-scanned in Step 6) | Report; refuse |
 | 3 | Dirty working tree | Report; ask user to commit or stash first |
 | 4 | Non-ff divergence | Report; ask user to rebase or merge first |
 | 5 | Missing dependency (gitleaks) | Report install instructions; refuse |
@@ -130,9 +142,10 @@ packages/mcp/test/client.test.ts:^  apiKey: "wire-snapshot-key",$
 | `SKILL.md` | This file — workflow + rules |
 | `scripts/preflight.sh` | Main orchestration (Steps 1–8) |
 | `scripts/scan-secrets.sh` | Gitleaks + regex layer (Step 6) |
+| `scripts/push-scope.sh` | What the push sends (§Scope); sourced by both scripts above, or run directly to print it |
 | `references/secret-patterns.txt` | Regex corpus + false-positive filter words |
 | `references/gitleaks-config.toml` | Gitleaks config: default rules + public-token allowlist (used by `scan-secrets.sh` when present) |
-| `tests/run.sh` | Offline behavioural self-test for the secret scanner (planted secrets, FP filter, allowlist, stale entries, legacy allowlist name) |
+| `tests/run.sh` | Offline behavioural self-test (planted secrets, FP filter, allowlist, stale entries, legacy allowlist name, push scope against a bare remote) |
 | `assets/` | (empty; reserved for future report templates) |
 
 Per-repo (not shipped with the skill): `.gitleaksignore` and `.push-preflight-allow`, committed at the scanned repo's root — see §False-positive handling.

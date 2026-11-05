@@ -5,6 +5,7 @@ The full bucket table and the order that makes it safe, how a session claims a w
 ## Contents
 
 - [Buckets — first match wins, and the order is the safety argument](#buckets--first-match-wins-and-the-order-is-the-safety-argument)
+- [Unstarted lanes and named claims (2026-10-22)](#unstarted-lanes-and-named-claims-2026-10-22)
 - [Why `.claude/worktrees/` gets extra care](#why-claudeworktrees-gets-extra-care)
 - [Landmine: removing a worktree out from under a live session](#landmine-removing-a-worktree-out-from-under-a-live-session)
 
@@ -19,8 +20,8 @@ The full bucket table and the order that makes it safe, how a session claims a w
 | 4 | detached HEAD — **SAFE** only if clean, no git operation in progress (rebase, bisect, ...; a git state it cannot read counts as one), HEAD already in `base_branch`, no open claim, and an archived session positively claims it | **REVIEW** |
 | 5 | uncommitted or untracked changes | **REVIEW** |
 | 6 | commits not yet in `base_branch` | **REVIEW** |
-| 7 | merged + clean, no open session claims it — and for a session tree (`.claude/worktrees/`, or `worktree-*` under `$WORKTREE_ROOT`), an archived session positively does | **SAFE** |
-| 8 | anything else (incl. an open owner, an owner whose archive flag cannot be read, or a session tree no session record mentions) | **REVIEW** |
+| 7 | merged + clean, no open session claims it — and for a session tree (`.claude/worktrees/`, or `worktree-*` under `$WORKTREE_ROOT`), an archived session positively does; for an *unstarted* lane (no commit of its own), an archived session positively does, or it has sat unclaimed for `FLEET_PRUNE_UNSTARTED_DAYS` (30) days | **SAFE** |
+| 8 | anything else (incl. an open owner, an owner whose archive flag cannot be read, a session tree no session record mentions, or a younger unstarted lane) | **REVIEW** |
 
 Only **SAFE** is ever removable. **KEEP** means one thing — hands off, not yours
 to judge. Everything else lands in **REVIEW**, which is reported and never
@@ -33,7 +34,9 @@ normalised: slashes, case, `X:` vs `/x/`), by the worktree path a
 about 2026-09-24), by the directory its CLI transcript is filed under
 (`EnterWorktree` moves it there; the wrapper's `cwd` never changes, and a resume
 files it back under that `cwd`), and, while live, by the last `cwd` its
-transcript recorded. `fleet owner` and the land gate read these same claims
+transcript recorded. `fleet prune` alone adds one more, `named`: a transcript
+whose `EnterWorktree` or `git worktree add` tool call names the tree
+([below](#unstarted-lanes-and-named-claims-2026-10-22)). `fleet owner` and the land gate read the other claims
 ([session-awareness](session-awareness.md#fleet-owner-sees-a-session-that-moved-in-2026-10-06)). The store
 read is the **union** of every Desktop instance's store — the primary and each
 `--user-data-dir` instance under `~/.claude-desktop-profiles/` — and `fleet
@@ -79,6 +82,36 @@ wrapper's stale timestamp called the running sessions idle. `--remove` would
 have stranded both in the silent spin described below. The fixes are the
 claims above, and rule 7's positive-claim clause as the backstop for whatever
 the joins still miss.
+
+### Unstarted lanes and named claims (2026-10-22)
+
+A session ran `git worktree add "$WORKTREE_ROOT/<repo>/<slug>" -b lane/<slug>
+main`, called `EnterWorktree` on that path, and waited 30+ hours for the user to
+approve the prompt. The lane had no commits, so its tip (an older `main` commit)
+was an ancestor of `main` and read "merged"; no transcript had that path as a cwd
+yet, so nothing claimed it. Rule 7 called it SAFE and the sweep said `REMOVE`.
+Two fixes:
+
+- **No commits is not landed.** A lane is *unstarted* when no commit-creating
+  entry (`commit`, `cherry-pick`, `revert`, `am`, a merge commit) is in its
+  branch's reflog, and either that reflog holds entries (every one a pure move:
+  creation, rename, fast-forward, reset, a rebase's finish) or, with no reflog at all (a Desktop chip's
+  branch has none), its tip is older than the tree (the `commondir` git writes once
+  into the tree's admin dir). A fast-forward-landed lane has its own `commit:`
+  entries, and a tip newer than its tree, so it stays "merged". An unstarted lane
+  is REVIEW until an archived session positively claims it, or it has sat
+  unclaimed for `FLEET_PRUNE_UNSTARTED_DAYS` (default 30) days. Every reason for
+  one opens `unstarted`, which `fleet sweep` reads ([sweep.md](sweep.md#unstarted-lanes)).
+- **A transcript that names a tree claims it.** Under `fleet prune` (not the
+  status hint, not `--all-repos`), `sessions.sh named` reads the transcripts
+  written since the oldest tree was made, at most the last
+  `FLEET_SESSION_NAMED_DAYS` (7) days, for an `EnterWorktree` tool call whose
+  `path` is a tree, or a shell tool call running `git worktree add` on one
+  (`$WORKTREE_ROOT/<repo>/<slug>` unexpanded counts). A pending call counts: the
+  tool_use record is written before the prompt is shown. A path quoted in prose
+  does not. Like a transcript-key claim it only keeps a tree, never proves one
+  free, and the session running prune is not a claim on what it named itself,
+  so a coordinator can still prune the lanes it made for finished peers.
 
 **Known limitation — writes by absolute path.** A session whose cwd never
 entered a worktree, but which writes into it by absolute path, leaves no claim

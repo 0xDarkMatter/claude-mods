@@ -218,8 +218,43 @@ mkdir -p "$SB/gshim"
 printf '#!/bin/sh\ncase "$*" in *for-each-ref*) echo "fatal: simulated ref read error" >&2; exit 128 ;; esac\nexec "%s" "$@"\n' \
   "$(command -v git)" > "$SB/gshim/git"
 chmod +x "$SB/gshim/git"
-PATH="$SB/gshim:$PATH" bash "$LA" "$R" --active-window 0 >/dev/null 2>&1; rc=$?
-[ "$rc" -eq 2 ] && ok "for-each-ref fails → exit 2, not 0" || no "for-each-ref fails: expected exit 2 got $rc"
+# Exit 2 alone also means not-a-repo, which is all a broken shim produces, so the
+# message must name the branch listing.
+err="$(PATH="$SB/gshim:$PATH" bash "$LA" "$R" --active-window 0 2>&1 >/dev/null)"; rc=$?
+case "$rc:$err" in 2:*"could not list local branches"*) ok "for-each-ref fails → exit 2, not 0";;
+  *) no "for-each-ref fails: expected exit 2 naming the branch listing, got $rc [$err]";; esac
+
+echo "-- land-all: a failed git probe is an ERROR row, never MERGED or STALE --"
+# Each per-branch probe fell back to a value that classifies: rev-list's
+# `|| echo 0` made ahead=0, so the branch read MERGED, "in trunk - prune
+# candidate"; log's `|| echo 0` made a fresh branch read STALE.
+# brokegit <dir> <case pattern>: git that fails (exit 128) every call whose "$*"
+# matches the pattern and runs the real git for the rest. Quote any space in the
+# pattern (*'a b'*): a bare one is a shim syntax error that fails EVERY call.
+brokegit(){ mkdir -p "$1"
+  { printf '#!/bin/sh\ncase "$*" in %s) echo "fatal: simulated probe failure" >&2; exit 128 ;; esac\n' "$2"
+    printf 'exec "%s" "$@"\n' "$(command -v git)"; } > "$1/git"; chmod +x "$1/git"; }
+laprobe(){ # <probe> <branch> <case pattern>: break that probe for that branch only
+  brokegit "$SB/probe-$1" "$3"
+  PO="$(PATH="$SB/probe-$1:$PATH" bash "$LA" "$R" --porcelain --active-window 0 --recent-days 7 2>/dev/null)"
+  ps=$(printf '%s\n' "$PO" | awk -F'\t' -v b="$2" '$2==b{print $1}')
+  [ "$ps" = ERROR ] && ok "$1 probe fails → $2 is ERROR" || no "$1 probe fails: $2 got [$ps], want ERROR"; }
+laprobe ahead       feat/stale   '*rev-list*feat/stale*'
+pl=$(printf '%s\n' "$PO" | awk -F'\t' '$2=="feat/land-me"{print $1}')
+[ "$pl" = LANDABLE ] && ok "a probe failing on one branch leaves the others classified" || no "feat/land-me got [$pl] with only feat/stale broken"
+laprobe commit-time feat/land-me '*%ct*feat/land-me*'
+laprobe ancestry    feat/land-me '*merge-base*feat/land-me*'
+brokegit "$SB/probe-all" '*rev-list*'
+PATH="$SB/probe-all:$PATH" bash "$LA" "$R" --active-window 0 >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 3 ] && ok "every probe fails → exit 3, not 0 (the all-clear)" || no "every probe fails: expected exit 3 got $rc"
+
+echo "-- land-all: no worktree list means no WIP/ACTIVE guard, so no survey --"
+# `git worktree list | awk > map` hid git's status: an empty map stripped every
+# branch of its worktree, and a dirty or live-writer lane read LANDABLE.
+brokegit "$SB/wtl" "*'worktree list'*"
+err="$(PATH="$SB/wtl:$PATH" bash "$LA" "$R" --active-window 0 2>&1 >/dev/null)"; rc=$?
+case "$rc:$err" in 2:*"could not list worktrees"*) ok "worktree list fails → exit 2, not a LANDABLE WIP lane";;
+  *) no "worktree list fails: expected exit 2 naming the worktree listing, got $rc [$err]";; esac
 
 echo "=== $P passed, $F failed ==="
 [ $F -eq 0 ]

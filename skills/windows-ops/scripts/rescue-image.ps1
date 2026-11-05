@@ -7,7 +7,7 @@
     Tier 1 (copy-tree.ps1) copies FILES and is right for a mostly-healthy drive.
     It reads in directory order, so it meets every bad sector head-on and pays
     the full device timeout each time. On a drive with DENSE damage that is
-    fatal to throughput — a measured real-world case managed 118 MB in 3.6 hours
+    fatal to throughput - a measured real-world case managed 118 MB in 3.6 hours
     and permanently lost 23 files.
 
     ddrescue reads in LBA order and SKIPS ahead on error, capturing the healthy
@@ -17,7 +17,7 @@
 
     WHY A SUPERVISOR: under Cygwin, some hard read errors surface as EACCES
     ("Permission denied") rather than EIO, because Windows returns a misleading
-    error code for the raw device. ddrescue treats that as fatal and exits — in
+    error code for the raw device. ddrescue treats that as fatal and exits - in
     testing, roughly every 9 minutes while otherwise sustaining 70 MB/s. It is
     NOT a permissions fault and elevation does not prevent it. Because the
     mapfile makes ddrescue resumable, the correct response is simply to relaunch,
@@ -35,14 +35,14 @@
 .PARAMETER Device
     Source device as ddrescue sees it. Under Cygwin these are /dev/sdX (whole
     disk) or /dev/sdXN (partition). Run with -ListDevices to map them to Windows
-    disks before guessing — imaging the wrong device wastes hours.
+    disks before guessing - imaging the wrong device wastes hours.
 
 .PARAMETER Image
     Output image file. Needs free space >= the device size. Never place it on
     the failing device.
 
 .PARAMETER Mapfile
-    ddrescue mapfile. Defaults to "<Image>.map". THIS IS THE RESUME RECORD —
+    ddrescue mapfile. Defaults to "<Image>.map". THIS IS THE RESUME RECORD -
     keep it with the image; deleting it forces a full re-read.
 
 .PARAMETER Pass
@@ -84,7 +84,7 @@
 
     REQUIRES GNU ddrescue. On Windows the practical options are Cygwin
     (setup-x86_64.exe -q -P ddrescue) or a Linux live environment. Note that a
-    live USB costs a power cycle, which a marginal drive may not survive — a
+    live USB costs a power cycle, which a marginal drive may not survive - a
     drive that has already failed once may never spin up again. Prefer the
     in-session route while the device is readable.
 
@@ -115,7 +115,7 @@ param(
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\_lib\common.ps1"
 
-# ── locate ddrescue ──────────────────────────────────────────────────────────
+# -- locate ddrescue ----------------------------------------------------------
 function Find-Ddrescue {
     param([string]$Explicit)
     if ($Explicit) { if (Test-Path $Explicit) { return $Explicit }; return $null }
@@ -141,7 +141,7 @@ $ddDir  = Split-Path $dd -Parent
 $ddlog  = Join-Path $ddDir 'ddrescuelog.exe'
 $cygBash = Join-Path $ddDir 'bash.exe'
 
-# ── -ListDevices: map ddrescue names to Windows volumes ──────────────────────
+# -- -ListDevices: map ddrescue names to Windows volumes ----------------------
 # Cygwin exposes /proc/partitions with a win-mounts column; that mapping is the
 # only safe way to pick a device. Guessing sdX from disk numbers is how people
 # image the wrong drive.
@@ -164,7 +164,7 @@ if ($ListDevices) {
     exit $script:EXIT_OK
 }
 
-# ── validate ─────────────────────────────────────────────────────────────────
+# -- validate -----------------------------------------------------------------
 if (-not $Device -or -not $Image) {
     Write-Log -Level FAIL -Message "-Device and -Image are required (run -ListDevices first to map devices)"
     exit $script:EXIT_USAGE
@@ -206,7 +206,7 @@ function Invoke-DdrescuePass {
             $now = Get-ImageBytes
             if ($now -ne $lastBytes) { $lastBytes = $now; $lastMove = Get-Date }
             elseif (((Get-Date) - $lastMove).TotalMinutes -ge $StallMinutes) {
-                Write-Log -Level WARN -Message "watchdog: image static for $StallMinutes min — relaunching"
+                Write-Log -Level WARN -Message "watchdog: image static for $StallMinutes min - relaunching"
                 try { Stop-Process -Id $p.Id -Force -ErrorAction Stop } catch {}
                 break
             }
@@ -231,7 +231,7 @@ if ($Pass -in 'first','both') { $okFirst = Invoke-DdrescuePass -Flavour 'first' 
 if ($Pass -in 'retry','both') { $okRetry = Invoke-DdrescuePass -Flavour 'retry' }
 $elapsed = ((Get-Date) - $start).TotalMinutes
 
-# ── report ───────────────────────────────────────────────────────────────────
+# -- report -------------------------------------------------------------------
 $stats = if (Test-Path $ddlog) { (& $ddlog -t $Mapfile 2>&1 | Out-String).Trim() } else { '' }
 $imageGB = [math]::Round((Get-ImageBytes)/1GB,2)
 

@@ -27,6 +27,7 @@ you need, and stop reading here.
 | Drive ONE mechanical metric to a target in one continuous session (even a long overnight one) | [iterate](../iterate/) | [loop-ops](../loop-ops/) is the scheduler *around* sessions, not the session itself |
 | Land/merge branches that parallel work produced | [fleet-ops](../fleet-ops/) | the terminus for every branch-producing row above (in-process subagents and prompt authoring produce no branches) |
 | Clean up AFTER a wave: what landed, competing lanes, stale worktrees and branches, archive finished sessions | [fleet-ops](../fleet-ops/) `fleet sweep` | `fleet prune` alone removes only provably-finished trees; the sweep turns the rest into next actions. fleetflow's own `.fleetflow/` runs stay with its `ff-sweep` |
+| Coordinate a whole wave from MAIN: review READY lanes, land them one at a time, report the push, archive | `/conduct` (fleet-ops [conduct.md](../fleet-ops/references/conduct.md)) | the procedure that orders `fleet queue`, `fleet sweep` and archiving; each alone is one step of it |
 | Author a static expert-agent prompt FILE (not a runtime worker) | [spawn](../spawn/) | listed only to catch the name collision with "spawn workers" |
 
 Tie-breakers for the two classic overlaps: "many files, cheap models" is
@@ -59,6 +60,12 @@ iterate (inner loop)  →  loop-ops (outer loop / scheduler)
 Not every task uses the whole chain — most use exactly one link. Read the
 table above first; only compose when the task genuinely spans spawn +
 land or inner + outer.
+
+**Whoever spawns owns the result**, whichever skill spawned it: review the
+worker's diff, not its summary; give each new round a fresh agent with the
+combined brief; never count a missing or inconclusive result as a pass; never
+let a change's author verify it. Rules and lane brief:
+[fleet-ops session-prompt](../fleet-ops/references/session-prompt.md#owning-what-comes-back).
 
 ## See also
 

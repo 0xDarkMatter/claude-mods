@@ -27,6 +27,10 @@ these, 0 when clean. Notes on stderr (for example `js.packagemanager.unset`,
 change the exit code. pm-audit audits the root manifests; `js.nested.roots` lists nested
 package roots that carry their own lockfile, so run it again on each of those.
 
+Output formats (`--format sarif|github`), per-finding `confidence`, `docs_url` and a structured
+`fix`, `--rules`/`--explain`, waivers that expire, baselines, `--fail-on` and profiles are in
+[pm-audit-rules.md](pm-audit-rules.md), which also holds the machine-readable catalogue.
+
 It also reads CI configs (`.github/workflows/`, `.gitlab-ci.yml`, `bitbucket-pipelines.yml`,
 `buildspec*.yml` and similar), Dockerfiles and AWS CodeDeploy `appspec.yml` hook scripts. In
 YAML only command keys (`run:`, `script:`, `commands:`) count, so a command quoted in a
@@ -104,7 +108,7 @@ workflow, job or step scope (or an earlier Dockerfile `ENV`) satisfy the same ru
 | `php.eol-soon` | warn | a pinned PHP major.minor reaches the end of security support within the facts catalogue's `eol_soon_days` window | [version-pinning.md](version-pinning.md) |
 | `php.lockfile.missing` | warn | a project with packages but no `composer.lock` | [install-semantics.md](install-semantics.md#composer-install-versus-composer-update) |
 | `php.lockfile.stale` | warn | `composer.json` requires packages the lock lacks, judged as Composer does: a locked package's `replace` or `provide` meets a requirement, and `require` is met only from `packages` | [install-semantics.md](install-semantics.md#composer-install-versus-composer-update) |
-| `php.composer.safety-off` | warn | composer.json disables transport, plugin or advisory/malware/abandoned-package safeguards (`allow-plugins: true`, insecure HTTP/TLS, or an audit block switched off) | [scripts-and-workspaces.md](scripts-and-workspaces.md#composer-scripts-and-plugins) |
+| `php.composer.safety-off` | warn | composer.json disables plugin or advisory/malware/abandoned-package safeguards (`allow-plugins: true`, or an audit block switched off). `secure-http`/`disable-tls` are `registry.tls.disabled` | [scripts-and-workspaces.md](scripts-and-workspaces.md#composer-scripts-and-plugins) |
 | `php.composer.eol` | warn | setup-php `tools: composer:v2.x` or a `composer:2.x` image runs a minor line past support (a supported line below the security/malware blocking floors is a note). composer.lock's `plugin-api-version` is never read: it names the plugin API, not the Composer line, and only the lock's last writer | [legacy-exits.md](legacy-exits.md#composer-1-to-composer-2) |
 | `php.craft.eol` | warn | composer.lock contains a Craft CMS major past the catalogue's critical-security support date, or older than the oldest major it lists (Craft 2). Its own `craft` check: a major newer than the catalogue skips that check only, never the `php` one | [version-pinning.md](version-pinning.md) |
 | `php.package.abandoned` | warn | composer.lock marks a package abandoned; when its metadata names a replacement, the finding names it too | [upgrades.md](upgrades.md) |
@@ -118,6 +122,8 @@ workflow, job or step scope (or an earlier Dockerfile `ENV`) satisfy the same ru
 | `registry.token.committed` | error | a literal, non-empty token in `.npmrc` or `.yarnrc.yml` | [registries-and-auth.md](registries-and-auth.md#when-a-token-was-committed) |
 | `registry.authjson.committed` | error | a root `auth.json` that git tracks, or that is not ignored (git decides; without git, the root `.gitignore` by git's rules: `**/`, `!`, last match wins) | [registries-and-auth.md](registries-and-auth.md#when-a-token-was-committed) |
 | `registry.credentials.image` | error | CI writes `auth.json` or `.npmrc` inside the context of a later `docker build` in the same job, its Dockerfile copies the whole context (not `COPY --from`), and `.dockerignore` (root-anchored, last match wins) lets it through | [registries-and-auth.md](registries-and-auth.md#ci-wiring) |
+| `registry.tls.disabled` | error | a committed root config turns TLS certificate checks off or allows plain HTTP to a host: `.npmrc`/`.yarnrc` `strict-ssl`, `.yarnrc.yml` `enableStrictSsl`/`unsafeHttpWhitelist`, `pnpm-workspace.yaml` `strictSsl`, pip `trusted-host`, uv `allow-insecure-host`, Composer `secure-http`/`disable-tls`/repository `options.ssl`, or `NODE_TLS_REJECT_UNAUTHORIZED=0` and kin in a shipped `.env*`. Loopback hosts are exempt; a gitignored, untracked file is a note | [registries-and-auth.md](registries-and-auth.md#tls-verification-and-plain-http-registries) |
+| `registry.url.http` | error | a registry or index URL in those files is `http://` (not loopback; proxies are not registries) | [registries-and-auth.md](registries-and-auth.md#tls-verification-and-plain-http-registries) |
 | `registry.pnpm.placeholder-ignored` | warn | a pnpm repo's project `.npmrc` has a `${...}` in a registry, proxy or auth setting, which pnpm 11.5.3+ (and 10.34.2+) ignores with only a warning | [registries-and-auth.md](registries-and-auth.md#pnpm-no-placeholders-in-the-project-npmrc) |
 | `js.manager.mixed` | warn | nested package roots use a different manager than the root | [detect-and-choose.md](detect-and-choose.md#two-lockfiles-pick-one) |
 | `deploy.install.unfrozen` | warn | CI or a deploy runs `npm install`, a non-frozen Yarn/pnpm/Bun install (Yarn 2+ counts as frozen on CI unless `.yarnrc.yml` sets `enableImmutableInstalls: false`), or `composer update`/`require`; names the nested root it runs in | [install-semantics.md](install-semantics.md#the-one-table) |

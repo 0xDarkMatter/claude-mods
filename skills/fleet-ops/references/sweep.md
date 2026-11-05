@@ -10,6 +10,7 @@ archive. It reports by default; `--apply` does only the zero-loss part.
 
 - [The procedure](#the-procedure)
 - [Verdicts](#verdicts)
+- [Unstarted lanes](#unstarted-lanes)
 - [Landed by content](#landed-by-content)
 - [Competing work](#competing-work)
 - [Sessions: requests vs direct archives](#sessions-requests-vs-direct-archives)
@@ -37,6 +38,8 @@ is left. That is what makes it resumable after an interruption.
    `wait`.
    Re-run once `fleet landing` exits 0. See [landing.md](landing.md#provisional-main).
 1. **Settle competing pairs** (phase 2). Pick the winner before landing either.
+   When a side holds uncommitted work, the row says so: commit or review it
+   first, because dropping that side would lose it.
 2. **Land** `LAND` rows (`fleet land <branch>`); hand `REBASE` rows back to their lane. Leave `ON-HOLD` rows alone.
 3. **Inspect** `INSPECT` trees: commit the work in its lane, or discard it after review.
 4. **Sessions** (phase 5): send each `ARCHIVE-REQUEST`, archive each `ARCHIVE-DIRECT`. Agent step, one gated call each, and only for sessions in your own Desktop instance. A row whose session lives in another instance names that window instead ([below](#desktop-instances-act-from-the-right-window)).
@@ -58,16 +61,17 @@ whose classifier the sweep reads (`--porcelain`) and never reimplements.
 | worktree | `REMOVE` | prune's SAFE | `fleet prune --remove` |
 | worktree | `GHOST` | git lists it, the directory is gone | `--apply` (`git worktree prune`) |
 | worktree | `PARK` | its branch is on the never-push list | keep local; never land or push |
-| worktree | `COMPETING` | shares non-ledger files with another lane | settle in phase 2 |
+| worktree | `COMPETING` | shares non-ledger files with another lane; a tree that also holds uncommitted work says `N uncommitted: <files>` | commit or review that work first, then settle in phase 2 |
 | worktree | `INSPECT` | uncommitted work, a detached HEAD with new commits, or a lane whose diff against base could not be read (competing work unknown) | commit in its lane, or discard; re-run once git answers |
 | worktree | `ASK-ARCHIVE` | landed + clean, owner open and idle, owner done everywhere | phase 5 |
 | worktree | `OWNER-BUSY` | landed + clean, but its owner has unlanded work elsewhere (or is this session / MAIN) | land the blocker first |
 | worktree | `CONTENT-LANDED` | not an ancestor, but its content is in base | remove tree + branch after an OK |
 | worktree | `VERIFY-OWNER` | merged + clean, prune cannot prove the owner archived | find the session (below) |
+| worktree | `UNSTARTED` | in base only because it has no commit of its own (prune's reason opens `unstarted`): not landed, and its session may not have begun | none: leave it to its session ([below](#unstarted-lanes)) |
 | worktree | `FLEETFLOW` | a landed fleetflow lane | `ff-clean.sh --run <run>` |
 | worktree | `LAND` / `REBASE` | unlanded; merges cleanly / conflicts with base | `fleet land` / rebase in the lane |
 | worktree | `ON-HOLD` | unlanded, and on the [hold list](#the-hold-list); the detail opens with the hold's reason | none: no land, no rebase, until the hold is lifted |
-| compete | `OVERLAP` | the pair and the shared files; "uncommitted in X" names the side, "X ON HOLD" a side that cannot win yet | pick a winner |
+| compete | `OVERLAP` | the pair and the shared files; "uncommitted in X" names the side, "X ON HOLD" a side that cannot win yet | pick a winner; with "uncommitted in X", commit or review X's work first |
 | branch | `DELETE-MERGED` | worktree-less, every commit in base, nobody holds it | `--apply` |
 | branch | `HELD` | merged, but an open session's record names it (archive flag read fresh) | none (deleted once it archives) |
 | branch | `ON-HOLD` | worktree-less, unlanded, on the hold list | none, as above |
@@ -78,7 +82,7 @@ whose classifier the sweep reads (`--porcelain`) and never reimplements.
 | hygiene | `HOLLOW` | empty, but an open session's cwd (named `id [instance]`) | archive that session first |
 | hygiene | `ORPHAN-DIR` | unregistered with content | review by hand; never `rm -rf` |
 | hygiene | `STALE-STASH` | older than `--stale-days` | inspect; the stack is shared, drop by hand |
-| session | `ARCHIVE-REQUEST` | open, idle, every tree and written branch landed | `send_message` (below) |
+| session | `ARCHIVE-REQUEST` | open, idle, every tree and written branch landed (an `UNSTARTED` tree is not) | `send_message` (below) |
 | session | `ARCHIVE-DIRECT` | open, and its lane dir is gone or no longer a worktree | `archive_session` — never message it |
 | session | `SPINNING?` | LIVE, and its lane dir is gone | check its CPU now ([prune.md](prune.md), landmine) |
 
@@ -86,10 +90,30 @@ Every session row's detail opens with `[instance]`, the Desktop instance its
 session lives in (`[terminal]` for a CLI session). Its action is a tool call
 only when that instance is yours; otherwise it names the window to act from.
 
+**Uncommitted work is never hidden behind another verdict.** `KEEP`, `REMOVE`,
+`PARK`, a diff `INSPECT` and `COMPETING` all outrank the dirty check. A tree that
+is also dirty keeps that verdict, so a `--porcelain` filter on it still works,
+but its detail gains `; N uncommitted: <sample>` and its action, if it has one,
+opens with `commit or review its uncommitted work first`. Before 2026-10-22 a
+competing tree holding a modified file and an untracked directory read only
+"settle the pair", and settling by dropping that side would have lost the draft.
+
 Exit code: `0` nothing to act on (after `--apply`: every step it took
 succeeded), `10` findings, `1` an `--apply` step failed, `2` usage, `5`
 precondition. `KEEP`, `PARK`, `HELD`, `ON-HOLD`, `TRACKED`, `OWNER-BUSY`,
-`STASH` and `FLEETFLOW-RUNS` are informational and never make it 10.
+`UNSTARTED`, `STASH` and `FLEETFLOW-RUNS` are informational and never make it 10.
+
+## Unstarted lanes
+
+A lane with no commit of its own has its tip in base only because nothing was
+ever added to it, so ancestry calls it merged. That is not landed: its session
+may be about to start, or waiting for the user to approve its `EnterWorktree`
+(the 2026-10-22 case: 30+ hours, and the sweep said `REMOVE`). Prune decides it
+([prune.md](prune.md#unstarted-lanes-and-named-claims-2026-10-22)) and opens its
+reason with `unstarted`; the sweep reads that prefix and never re-derives it.
+Such a tree reads `UNSTARTED` (or `REMOVE`, once prune proves it SAFE). It also
+counts as not landed for its owner, so that owner gets no archive request and its
+other trees read `OWNER-BUSY`.
 
 ## Landed by content
 
@@ -149,7 +173,10 @@ for the session that worked there (`search_session_transcripts("<slug>")`,
 ungated), then `get_session`. If it is open, it is an archive request. If it is
 archived, MAIN may remove the tree by hand with an OK (`git worktree remove`
 still refuses a dirty tree). The live backlog is mostly lanes a session made
-with `git worktree add` and `EnterWorktree`, whose claim is not in any record.
+with `git worktree add` and `EnterWorktree`, whose claim is in no session record.
+Prune now reads those two calls from the last 7 days of transcripts (a `named`
+claim, [prune.md](prune.md#unstarted-lanes-and-named-claims-2026-10-22)), so an
+open session that made the lane keeps it REVIEW; older calls still land here.
 
 Never asked: live sessions, this session, MAIN, and archived sessions.
 

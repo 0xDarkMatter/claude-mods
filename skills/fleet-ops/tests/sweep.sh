@@ -55,6 +55,8 @@ git -C "$SW" cherry-pick lane/partial >/dev/null 2>&1; sw_ci "$WTS/partial" p2.t
 # Competing: comp-a COMMITS hook.sh; comp-b, merged, holds UNCOMMITTED edits to it.
 sw_wt comp-a lane/comp-a; sw_ci "$WTS/comp-a" hook.sh "from a"
 sw_wt comp-b lane/comp-b; printf 'from b\n' >> "$WTS/comp-b/hook.sh"
+# A never-push lane holding an unsaved draft: PARK must not hide it either.
+sw_wt secret-wt secret/wt; printf 'draft\n' > "$WTS/secret-wt/draft.md"
 # Two lanes touching only the shared ledger.
 sw_wt led-a lane/led-a; sw_ci "$WTS/led-a" CHANGELOG.md "- a"
 sw_wt led-b lane/led-b; sw_ci "$WTS/led-b" CHANGELOG.md "- b"
@@ -132,6 +134,20 @@ ee "a repo with leftovers exits 10 (findings)" 10 "$swx"
 case "$(printf '%s\n' "$SWOUT" | awk -F'\t' '$1 == "compete" && $2 == "lane/comp-a <> lane/comp-b" { print $4 }')" in
   *"uncommitted in lane/comp-b"*) ok "the competing pair names the side whose overlap is uncommitted" ;;
   *) no "no competing pair, or it misses which side is uncommitted" ;; esac
+# A tree that both competes and holds uncommitted work read only COMPETING ("settle
+# the pair"), with no word of the uncommitted files, because the verdict chain
+# checked COMPETING before dirty. Settling the pair by dropping one side could
+# lose the draft (2026-10-22). Every row that outranks the dirty check must say so.
+sw_row(){ printf '%s\n' "$SWOUT" | awk -F'\t' -v ph="$1" -v k="$2" '$1 == ph && ($2 == k || substr($2, length($2) - length(k)) == "/" k) && !f { print $4 "|" $5; f = 1 }'; }
+case "$(sw_row worktree comp-b)" in
+  *"1 uncommitted: hook.sh"*"|commit or review"*) ok "a COMPETING tree with uncommitted work says so, and to commit or review it first" ;;
+  *) no "COMPETING row hides the uncommitted work: [$(sw_row worktree comp-b)]" ;; esac
+case "$(printf '%s\n' "$SWOUT" | awk -F'\t' '$1 == "compete" && $2 == "lane/comp-a <> lane/comp-b" { print $5 }')" in
+  "commit or review the uncommitted work in lane/comp-b first;"*) ok "the competing pair's action protects the uncommitted side before 'drop the other'" ;;
+  *) no "competing pair action ignores the uncommitted side" ;; esac
+case "$(sw_row worktree secret-wt)" in
+  *"1 uncommitted: draft.md"*"|commit or review"*) ok "a PARK tree with uncommitted work says so before 'remove the tree by hand'" ;;
+  *) no "PARK row hides the uncommitted work: [$(sw_row worktree secret-wt)]" ;; esac
 # A lane whose diff against base could not be read was silently non-competing: its
 # committed files came from a loop fed by `< <(git diff ...)`, which hid git's
 # status, so it read LAND beside a lane holding edits to the same file. The shim

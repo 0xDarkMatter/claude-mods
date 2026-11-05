@@ -1,0 +1,4 @@
+registry.url.http composer.json:14
+registry.tls.disabled composer.json:17
+registry.tls.disabled composer.json:26
+registry.tls.disabled composer.json:27

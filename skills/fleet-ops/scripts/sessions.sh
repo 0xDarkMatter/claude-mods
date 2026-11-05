@@ -70,6 +70,8 @@
 #   self        which session is calling (the land gate's self-exemption)
 #   main        the repo's coordinator session
 #   at          directory -> claims; --fresh adds what the index cannot know
+#   named       trees -> sessions whose EnterWorktree / `git worktree add` tool
+#               calls name them (transcript content; `fleet prune` only)
 #   claimants   branch -> every claim: its name, or the worktree it is checked
 #               out in (the `at` read). --fresh is the land gate's read
 #   owner       branch -> the one claimant that wins (live, open, newest)
@@ -133,6 +135,12 @@ USAGE
                                   live transcript filed under <path>, or one
                                   whose last recorded cwd is <path> or inside
                                   it, wherever it is filed.
+  $SELF named [--since <epoch>] <path>...
+                                  Sessions whose transcript names <path> in a
+                                  tool call: EnterWorktree with that path, or a
+                                  shell command running \`git worktree add\` on
+                                  it. Reads transcripts written since <epoch>,
+                                  at most the last FLEET_SESSION_NAMED_DAYS days.
   $SELF live <sessionId>          1 if that session is live, else 0
   $SELF state <sessionId>...      The fresh read prune takes before it
                                   classifies: liveness and the archive flag
@@ -160,7 +168,8 @@ OUTPUT (TSV columns)
     key  path  sessionId  title  lastActivityMs  archived(0|1|?)  live(0|1)  via
     key   the path in Claude Code's project-dir encoding, lowercased
     path  the normalised path, or empty when only the encoded key is known
-    via   cwd | worktree | written | transcript | live-cwd
+    via   cwd | worktree | written | transcript | live-cwd  (and named, from
+          \`named\` only)
           written: a worktree its wrapper's writtenBranches says it wrote in
   state:
     sessionId  live(0|1)  archived(0|1|?|-)  lastCwd
@@ -187,6 +196,7 @@ ENVIRONMENT
                             they use \`owner --fresh\`, \`at --fresh\`, or a
                             fresh re-scan.
   FLEET_SESSION_NOCACHE     set to any value to force a fresh scan
+  FLEET_SESSION_NAMED_DAYS  how far back \`named\` reads transcripts (default 7)
 
 EXAMPLES
   # who owns this lane, and are they still writing?
@@ -203,6 +213,9 @@ EXAMPLES
 
   # which sessions claim this worktree, by any route?
   $SELF at 'X:\\repo\\.claude\\worktrees\\lane-a'
+
+  # who has an EnterWorktree / git worktree add call naming this tree (last 7 days)?
+  $SELF named 'X:/worktrees/repo/lane-a'
 
   # fresh liveness + archive flag for two sessions, bypassing the cache
   $SELF state local_0a1b2c3d local_4e5f6a7b
@@ -1164,6 +1177,138 @@ abs_path() {
     esac
 }
 
+# --- named -------------------------------------------------------------------
+# Every session whose transcript NAMES a tree in a tool call that makes it or
+# moves into it: an EnterWorktree tool_use whose input.path is the tree, or a
+# shell (Bash / PowerShell) tool_use whose command runs `git worktree add` on it.
+# A session that has made a tree and called EnterWorktree on it, and is waiting
+# for the user to approve that prompt, has no claim any other route can see: its
+# cwd never got there, so its transcript stays filed, and its last cwd recorded,
+# where it started. On 2026-10-22 one waited 30+ hours like that while `fleet
+# prune` called its tree SAFE. The pending call is already on disk: the tool_use
+# record is written before the prompt is shown.
+#
+# NARROW: those two record shapes only. A path in prose (a brief that SAYS
+# "git worktree add <path>") is a user message, not a call, and never counts.
+# KEEP-ONLY: fleet.sh takes via=named as a claim, never as proof that a tree is
+# abandoned (prune_archived_proof). A CLI or headless session with no Desktop
+# record counts only while live, as T rows do in the index.
+# BOUNDED: this is the one command that reads transcript CONTENT (the last 60
+# days of transcripts were ~9 GB here, 2026-10-22). Only files written since
+# --since and within the last NAMED_DAYS are read; a grep keeps the few that
+# mention a tree's last two path components, and jq parses only their matching
+# lines (`fromjson?`: a half-written last line is skipped, not fatal).
+# The grep is -iE on ERE-quoted components, never -iF: Git for Windows' grep
+# 3.0 ABORTS (SIGABRT, exit 134) on -iF in the C locale, any pattern (measured
+# 2026-10-22), and an aborted prefilter reads exactly like "no transcript names
+# it". -i and -iE are fine there.
+# A failed walk or grep finds fewer names. That can only lose this extra claim,
+# never invent removal evidence, so neither status is checked.
+# MATCHING, on paths folded like norm_path (slashes, case): an EnterWorktree
+# path equal to the tree or ending in /<parent>/<slug> (a $VAR/<repo>/<slug> or
+# Git Bash form); a command holding `worktree add` and the tree, or
+# /<parent>/<slug>, followed by a quote, space, ;, ), &, |, a backtick or its end.
+# Output: the `at` TSV, via=named, one row per (tree, session).
+NAMED_DAYS=${FLEET_SESSION_NAMED_DAYS:-7}
+# $1 with every ERE metacharacter backslash-escaped.
+ere_quote() { printf '%s' "$1" | LC_ALL=C sed 's/[][\.*^$+?(){}|]/\\&/g'; }
+cmd_named() {
+    local since=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --since) [[ "${2:-}" =~ ^-?[0-9]+$ ]] || { echo "$SELF: --since needs epoch seconds" >&2; return 2; }
+                     since=$2; shift 2 ;;
+            -*) echo "$SELF: unknown flag '$1'" >&2; return 2 ;;
+            *) break ;;
+        esac
+    done
+    (( $# )) || { echo "usage: $SELF named [--since <epoch>] <path>..." >&2; return 2; }
+    [[ "$NAMED_DAYS" =~ ^[0-9]+$ ]] || NAMED_DAYS=7
+    load_dirs
+    (( ${#TROOTS[@]} )) || return 0
+    command -v jq >/dev/null 2>&1 || return 3
+    local p n t pats=() targets="" now floor
+    for p in "$@"; do
+        n=$(norm_path "$p")
+        [[ "$n" == */*/* ]] || continue      # a parent and a slug to match on
+        t=${n%/*}; t="${t##*/}/${n##*/}"
+        # <parent> then / or, JSON-escaped, \\ (X:\a\b is on disk as X:\\a\\b), then <slug>.
+        pats+=(-e "$(ere_quote "${t%%/*}")"'(/|\\\\)'"$(ere_quote "${t#*/}")")
+        targets+="$n"$'\t'"$t"$'\n'
+    done
+    (( ${#pats[@]} )) || return 0
+    now=$(date +%s); floor=$(( now - NAMED_DAYS * 86400 ))
+    (( since > floor )) || since=$floor
+    local files f cli ms calls=""
+    files=$(find "${TROOTS[@]}" -mindepth 2 -maxdepth 4 -type f -name '*.jsonl' \
+                -mmin "-$(( (now - since) / 60 + 2 ))" -print0 2>/dev/null \
+            | LC_ALL=C xargs -0 grep -ilE "${pats[@]}" 2>/dev/null)
+    [[ -n "$files" ]] || return 0
+    # cli  ms  kind(E|C)  text: one row per tool call in a matching line. A
+    # subagent's file (<cli>/subagents/<agent>.jsonl) belongs to its session.
+    while IFS= read -r f; do
+        [[ -n "$f" ]] || continue
+        cli=${f##*/}; cli=${cli%.jsonl}
+        case "$f" in */subagents/*) cli=${f%/subagents/*}; cli=${cli##*/} ;; esac
+        ms=$(( $(file_mtime_s "$f") * 1000 ))
+        calls+=$(LC_ALL=C grep -iE "${pats[@]}" "$f" 2>/dev/null | jq -Rr --arg c "$cli" --arg m "$ms" '
+            fromjson? | .message.content? | arrays | .[]
+            | select(type == "object" and .type == "tool_use")
+            | if .name == "EnterWorktree" then [$c, $m, "E", (.input.path? // "" | tostring)]
+              elif .name == "Bash" or .name == "PowerShell" then [$c, $m, "C", (.input.command? // "" | tostring)]
+              else empty end
+            | @tsv' 2>/dev/null | tr -d '\r')$'\n'    # CRLF from a Windows-native jq
+    done <<< "$files"
+    # tree  cli  ms — @tsv wrote each backslash as two; fold() undoes both forms.
+    local hits
+    hits=$(LC_ALL=C awk -F'\t' -v OFS='\t' -v q="'" '
+        function fold(s) { gsub(/\\\\/, "/", s); gsub(/\\/, "/", s); return tolower(s) }
+        function ends(s, x) { return length(s) >= length(x) && substr(s, length(s) - length(x) + 1) == x }
+        function tok(s, x,   j, c) {
+            while ((j = index(s, x)) > 0) {
+                c = substr(s, j + length(x), 1)
+                if (c == "" || c == q || index("\" \t;)&|`", c)) return 1
+                s = substr(s, j + 1)
+            }
+            return 0
+        }
+        FILENAME == ARGV[1] { if ($1 != "") { N[++k] = $1; T[k] = $2 }; next }
+        $1 != "" {
+            s = fold($4); if ($3 == "E") sub(/\/+$/, "", s)
+            for (i = 1; i <= k; i++) {
+                if ($3 == "E") hit = (s == N[i] || s == T[i] || ends(s, "/" T[i]))
+                else hit = (s ~ /worktree[ \t]+add/ && (tok(s, N[i]) || tok(s, "/" T[i])))
+                if (hit && !seen[N[i] SUBSEP $1]++) print N[i], $1, $2
+            }
+        }' <(printf '%s' "$targets") <(printf '%s\n' "$calls"))
+    [[ -n "$hits" ]] || return 0
+    # tree  id  title  ms  wrapperArchived  cliOnly(1|0)
+    local clis rows ids fresh
+    clis=$(printf '%s\n' "$hits" | cut -f2 | sort -u)
+    # shellcheck disable=SC2086  # ids carry no whitespace; one argument each
+    rows=$(awk -F'\t' -v OFS='\t' '
+        FILENAME == ARGV[1] { if ($1 != "") { c[$1]++; w[$1, c[$1]] = $2 "\t" $3 "\t" $4 }; next }
+        $1 != "" {
+            if ($2 in c) for (i = 1; i <= c[$2]; i++) { split(w[$2, i], a, "\t"); print $1, a[1], a[2], $3, a[3], 0 }
+            else print $1, "cli:" $2, "(no Desktop record - CLI or headless session)", $3, 0, 1
+        }' <(wrappers_for_clis $clis) <(printf '%s\n' "$hits"))
+    [[ -n "$rows" ]] || return 0
+    # Liveness and the archive flag, fresh, for every session named.
+    ids=$(printf '%s\n' "$rows" | cut -f2 | sort -u)
+    # shellcheck disable=SC2086
+    fresh=$(live_many $ids)
+    awk -F'\t' -v OFS='\t' '
+        function enc(p) { gsub(/[^a-z0-9]/, "-", p); return p }
+        FILENAME == ARGV[1] { if ($1 != "") { L[$1] = $2; A[$1] = $3 }; next }
+        $1 != "" {
+            live = ($2 in L) ? L[$2] : 0
+            ar = (($2 in A) && A[$2] != "-" && A[$2] != "") ? A[$2] : $5
+            if ($6 == 1 && live != 1) next
+            if (!seen[$1 SUBSEP $2]++) print enc($1), $1, $2, $3, $4, ar, live, "named"
+        }' <(printf '%s\n' "$fresh") <(printf '%s\n' "$rows")
+    return 0
+}
+
 # --- claimants / owner --------------------------------------------------------
 # Who is working on branch $1. ONE claim logic for every reader that asks it —
 # `owner`, `fleet owner`, the land gate, prune's pre-delete re-check — and it is
@@ -1347,6 +1492,7 @@ case "${1:---help}" in
     paths)          build_paths; exit $? ;;
     views)          build_views; exit $? ;;
     at)             shift; cmd_at "$@"; exit $? ;;
+    named)          shift; cmd_named "$@"; exit $? ;;
     stores)         cmd_stores; exit $? ;;
     where)          shift; cmd_where "$@"; exit $? ;;
     owner)          shift; cmd_owner "$@"; exit $? ;;

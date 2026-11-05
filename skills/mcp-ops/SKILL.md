@@ -12,38 +12,20 @@ metadata:
 
 Comprehensive patterns for building, testing, and deploying Model Context Protocol servers in Python and TypeScript.
 
-> Ecosystem facts verified as of 2026-07-05 (standalone FastMCP at major 3).
+> Ecosystem facts verified as of 2026-10-22: spec revision **2026-07-28**, Python SDK `mcp` **2.x**, standalone FastMCP **4**, TypeScript SDK **v2** (split packages). Porting v1 / FastMCP 3 code? Read [`references/v2-migration.md`](references/v2-migration.md) first.
 
 ## MCP Architecture Quick Reference
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                     MCP Host                            │
-│  (Claude Desktop, Claude Code, Custom App)              │
-│                                                         │
-│  ┌───────────┐   ┌───────────┐   ┌───────────┐        │
-│  │  Client A  │   │  Client B  │   │  Client C  │       │
-│  └─────┬─────┘   └─────┬─────┘   └─────┬─────┘        │
-└────────┼───────────────┼───────────────┼────────────────┘
-         │               │               │
-    ┌────┴────┐     ┌────┴────┐     ┌────┴────┐
-    │Transport│     │Transport│     │Transport│
-    │ (stdio) │     │  (SSE)  │     │ (HTTP)  │
-    └────┬────┘     └────┬────┘     └────┬────┘
-         │               │               │
-┌────────┴──┐     ┌──────┴────┐   ┌──────┴────┐
-│  Server A  │     │  Server B  │   │  Server C  │
-│            │     │            │   │            │
-│ ┌────────┐ │     │ ┌────────┐ │   │ ┌────────┐ │
-│ │ Tools  │ │     │ │Resources│ │   │ │Prompts │ │
-│ └────────┘ │     │ └────────┘ │   │ └────────┘ │
-│ ┌────────┐ │     │ ┌────────┐ │   │ ┌────────┐ │
-│ │Resources│ │     │ │Prompts │ │   │ │ Tools  │ │
-│ └────────┘ │     │ └────────┘ │   │ └────────┘ │
-└────────────┘     └────────────┘   └────────────┘
+MCP Host (Claude Desktop, Claude Code, custom app)
+  ├─ Client A ── stdio ─────────── Server A  (tools, resources)
+  ├─ Client B ── Streamable HTTP ─ Server B  (resources, prompts)
+  └─ Client C ── SSE (legacy) ──── Server C  (prompts, tools)
 
-Protocol: JSON-RPC 2.0 over chosen transport
-Flow:     Client → request → Server → response → Client
+Protocol: JSON-RPC 2.0 over the chosen transport
+2026-07-28: no initialize handshake, no session; every request carries its
+            protocol version + client capabilities in _meta; discovery is
+            server/discover; the server can no longer call the client mid-request
 ```
 
 ## Server Type Decision Tree
@@ -53,22 +35,20 @@ What transport does your MCP server need?
 │
 ├─ Local CLI tool / single-user desktop integration?
 │  └─ stdio
-│     - Simplest setup, no networking
+│     - Simplest setup, no networking; host owns the process lifecycle
 │     - Claude Desktop, Claude Code native support
-│     - Process lifecycle managed by host
 │
-├─ Web dashboard / browser-based client?
-│  └─ SSE (Server-Sent Events)
-│     - HTTP-based, works through firewalls
-│     - Persistent connection for server→client events
-│     - Good for development and internal tools
+├─ Remote / multi-tenant / cloud deployment?
+│  └─ Streamable HTTP
+│     - 2026-07-28 requests are sessionless: any replica behind a plain
+│       load balancer can answer them
+│     - 2025-era clients still open Mcp-Session-Id sessions (keep stickiness)
+│     - Full OAuth support; the production default
 │
-└─ Production API / multi-tenant / cloud deployment?
-   └─ Streamable HTTP
-      - HTTP POST for requests, SSE for streaming responses
-      - Supports stateless and stateful modes
-      - Full auth support, load balancer friendly
-      - Recommended for production deployments
+└─ Old client that only speaks HTTP+SSE?
+   └─ SSE (legacy)
+      - Superseded by Streamable HTTP; TS v2 moved it to
+        @modelcontextprotocol/server-legacy, Python v2 keeps sse_app()
 ```
 
 ## Tool vs Resource vs Prompt Decision Tree
@@ -77,30 +57,23 @@ What transport does your MCP server need?
 What does the LLM need to do?
 │
 ├─ Perform an action or computation?
-│  └─ TOOL
-│     - Has side effects (API calls, file writes, DB mutations)
-│     - Accepts structured input, returns results
-│     - Examples: run_query, create_issue, send_email
+│  └─ TOOL - side effects, structured input, e.g. run_query, create_issue
 │
 ├─ Read data or context?
-│  └─ RESOURCE
-│     - Read-only data retrieval
-│     - Identified by URI (file://, db://, api://)
-│     - Examples: config://app, schema://users, file://readme.md
+│  └─ RESOURCE - read-only, identified by URI, e.g. config://app, schema://users
 │
 └─ Guide the LLM's behavior or workflow?
-   └─ PROMPT
-      - Templated instructions with arguments
-      - Suggests conversation starters or workflows
-      - Examples: code_review(language, file), summarize(topic)
+   └─ PROMPT - templated instructions with arguments, e.g. code_review(language, file)
 ```
 
 ## Python SDK Quick Start
 
 ```python
-from mcp.server.fastmcp import FastMCP
+import json
 
-mcp = FastMCP("my-server")
+from mcp.server import MCPServer  # v2. v1 was: from mcp.server.fastmcp import FastMCP
+
+mcp = MCPServer("my-server")
 
 @mcp.tool()
 def search_docs(query: str) -> str:
@@ -119,7 +92,7 @@ def get_config() -> str:
     """Return current application configuration."""
     return json.dumps(load_config(), indent=2)
 
-@mcp.resource("schema://db/{table}")
+@mcp.resource("schema://db/{table}")  # RFC 6570 template, matched exactly
 def get_table_schema(table: str) -> str:
     """Return the schema for a database table."""
     return json.dumps(get_schema(table), indent=2)
@@ -130,132 +103,143 @@ def code_review(language: str, filepath: str) -> str:
     return f"Review this {language} code in {filepath} for bugs, style issues, and performance."
 
 if __name__ == "__main__":
-    mcp.run()  # Defaults to stdio transport
+    mcp.run()  # stdio; HTTP: mcp.run(transport="streamable-http", port=3001)
 ```
 
 **Install and run:**
 
 ```bash
 uv init my-mcp-server && cd my-mcp-server
-uv add mcp[cli]
-# Run with: uv run python server.py
-# Or:       uv run mcp run server.py
+uv add "mcp[cli]"
+uv run mcp run server.py   # or: uv run python server.py
+uv run mcp dev server.py   # under the MCP Inspector
 ```
 
-**Two Python FastMCPs — know which you're on.** The official `mcp` SDK bundles a frozen
-1.x-era FastMCP (`from mcp.server.fastmcp import FastMCP`, used in the samples above —
-stable, minimal). The standalone `fastmcp` package (gofastmcp.com) is where active
-development happens and is at **major 3**: same decorator surface, plus auth, proxying,
-OpenAPI generation, and a test client. To use it:
+The decorators are unchanged from v1; what moved is around them. Transport settings
+(`host`, `port`, `stateless_http`, `json_response`) go to `run()`, not the constructor
+(`MCPServer("x", port=9000)` is a `TypeError`). Declare a `ctx: Context` parameter
+(`from mcp.server.mcpserver import Context`) instead of `get_context()`. Sync `def`
+handlers run on a worker thread. To stay on v1, pin `mcp>=1.28,<2` (1.x gets security
+fixes only).
+
+**Official `MCPServer` or standalone FastMCP 4?** The SDK's class was `FastMCP` in v1
+and is `MCPServer` in v2 (the `mcp.server.fastmcp` path raises `ModuleNotFoundError`).
+The standalone `fastmcp` package (gofastmcp.com) keeps the `FastMCP` name, is at
+**major 4**, and builds on SDK v2. It has the same decorators, plus composition
+(`mount`), proxies (`create_proxy`), OpenAPI providers, auth providers and a test `Client`:
 
 ```bash
 uv add fastmcp
 ```
 
 ```python
-from fastmcp import FastMCP   # standalone FastMCP 3 — not mcp.server.fastmcp
+from fastmcp import FastMCP   # standalone FastMCP 4, not the SDK's MCPServer
 
-mcp = FastMCP("my-server")    # v3: constructor is identity/behaviour only;
-                              # transport config moved to run()/serve time
+mcp = FastMCP("my-server")    # identity only; transport config goes to run()
+mcp.run(transport="http", host="127.0.0.1", port=8000)
 ```
 
-FastMCP 3 breaking changes (from 2.x): 16 deprecated constructor kwargs removed
-(transport settings now passed at serve time), `ui=` replaced by `app=`,
-`ctx.set_state()`/`ctx.get_state()` are now async with session-scoped persistence, and
-the metadata namespace changed from `_fastmcp` to `fastmcp`.
+FastMCP 4 breaking changes (from 3.x):
+- Server-pushed `ctx.sample()`, `ctx.sample_step()` and `ctx.list_roots()` are removed.
+- `ctx.elicit()` raises on 2026-07-28 connections (which the default `Client(mode="auto")`
+  negotiates) and now requires `response_type=`.
+- `task=True` tools need `fastmcp[tasks]` plus `mcp.add_extension(TasksExtension())`.
+- The 3.x deprecations are gone: `as_proxy` → `create_proxy`, `import_server` → `mount`
+  (a live composition, not a snapshot), `mount(prefix=)` → `namespace=`.
+- httpx → httpx2, and MCP model fields are snake_case (camelCase reads still work, with
+  a warning).
 
 ## TypeScript SDK Quick Start
 
 ```typescript
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { z } from "zod";
+import { McpServer } from "@modelcontextprotocol/server";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
+import * as z from "zod/v4";
 
-const server = new McpServer({
-  name: "my-server",
-  version: "1.0.0",
-});
+function createServer(): McpServer {
+  const server = new McpServer({ name: "my-server", version: "1.0.0" });
 
-// Register a tool
-server.tool(
-  "search_docs",
-  "Search documentation by keyword",
-  { query: z.string().describe("Search query") },
-  async ({ query }) => {
-    const results = await performSearch(query);
-    return {
-      content: [{ type: "text", text: results.join("\n") }],
-    };
-  }
-);
+  server.registerTool(
+    "search_docs",
+    {
+      description: "Search documentation by keyword",
+      inputSchema: z.object({ query: z.string().describe("Search query") }),
+    },
+    async ({ query }) => {
+      const results = await performSearch(query);
+      return { content: [{ type: "text", text: results.join("\n") }] };
+    }
+  );
 
-// Register a resource
-server.resource(
-  "config",
-  "config://app",
-  { description: "Current application configuration" },
-  async (uri) => ({
-    contents: [{
-      uri: uri.href,
-      mimeType: "application/json",
-      text: JSON.stringify(loadConfig(), null, 2),
-    }],
-  })
-);
+  server.registerResource(
+    "config",
+    "config://app",
+    { description: "Current application configuration", mimeType: "application/json" },
+    async (uri) => ({
+      contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(loadConfig(), null, 2) }],
+    })
+  );
 
-// Register a prompt
-server.prompt(
-  "code_review",
-  "Generate a code review prompt",
-  { language: z.string(), filepath: z.string() },
-  async ({ language, filepath }) => ({
-    messages: [{
-      role: "user",
-      content: {
-        type: "text",
-        text: `Review this ${language} code in ${filepath} for bugs and style issues.`,
-      },
-    }],
-  })
-);
+  server.registerPrompt(
+    "code_review",
+    {
+      description: "Generate a code review prompt",
+      argsSchema: z.object({ language: z.string(), filepath: z.string() }),
+    },
+    ({ language, filepath }) => ({
+      messages: [{
+        role: "user",
+        content: { type: "text", text: `Review this ${language} code in ${filepath} for bugs and style issues.` },
+      }],
+    })
+  );
 
-async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  return server;
 }
-main().catch(console.error);
+
+void serveStdio(createServer);          // HTTP: createMcpHandler(createServer)
+console.error("my-server on stdio");    // stdout is the protocol channel
 ```
 
 **Install and run:**
 
 ```bash
 npm init -y
-npm install @modelcontextprotocol/sdk zod
+npm pkg set type=module
+npm install @modelcontextprotocol/server zod
 npx tsx server.ts
 ```
 
+v2 splits the old `@modelcontextprotocol/sdk` monolith into `@modelcontextprotocol/server`,
+`@modelcontextprotocol/client`, optional HTTP adapters (`/node`, `/express`, `/hono`,
+`/fastify`) and `/core` (raw Zod wire schemas). It needs Node 20+ and zod ^4.2. The
+variadic `server.tool()` / `.resource()` / `.prompt()` are removed: use `registerTool` /
+`registerResource` / `registerPrompt` with a config object. Port v1 code with
+`npx @modelcontextprotocol/codemod@latest v1-to-v2 .` (run it at the package root). The
+1.x line is still published as `@modelcontextprotocol/sdk`.
+
 ## Transport Selection Matrix
 
-| Feature | stdio | SSE | Streamable HTTP |
-|---------|-------|-----|-----------------|
-| **Use case** | Local CLI tools, desktop | Web dashboards, dev | Production APIs |
-| **Protocol** | stdin/stdout pipes | HTTP + EventSource | HTTP POST + SSE |
-| **Auth support** | Env vars only | Bearer tokens | Full OAuth2/PKCE |
+| Feature | stdio | SSE (legacy) | Streamable HTTP |
+|---------|-------|--------------|-----------------|
+| **Use case** | Local CLI tools, desktop | Old HTTP+SSE clients only | Production APIs |
+| **Protocol** | stdin/stdout pipes | HTTP + EventSource | HTTP POST (+ SSE stream when needed) |
+| **Auth support** | Env vars only | Bearer tokens | Full OAuth 2.1 |
 | **Deployment** | Local process | Single server | Load balanced |
-| **Reconnection** | Process restart | Auto-reconnect | Stateless resilient |
+| **State** | Process lifetime | Connection lifetime | Sessionless (2026-07-28) or session (2025-era clients) |
 | **Multi-client** | 1:1 only | Multiple clients | Horizontally scalable |
-| **Firewall** | N/A (local) | HTTP-friendly | HTTP-friendly |
-| **State** | Process lifetime | Connection lifetime | Session or stateless |
-| **Best for** | Claude Desktop/Code | Internal tools | Cloud/enterprise |
+| **SDK status** | Both SDKs | TS: `server-legacy` only; Py: `sse_app()` | Both SDKs, the default |
 
 ## Authentication Patterns Quick Reference
 
 ```python
 # Pattern 1: API keys from environment
 import os
-from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("api-server")
+import httpx
+from mcp.server import MCPServer
+
+mcp = MCPServer("api-server")
 
 @mcp.tool()
 def call_api(endpoint: str) -> str:
@@ -266,27 +250,8 @@ def call_api(endpoint: str) -> str:
     return resp.text
 ```
 
-```python
-# Pattern 2: OAuth2 token refresh (in-memory cache)
-import time
-
-_token_cache: dict = {}
-
-async def get_valid_token() -> str:
-    if _token_cache.get("expires_at", 0) > time.time() + 60:
-        return _token_cache["access_token"]
-    resp = await httpx.AsyncClient().post("https://auth.example.com/token", data={
-        "grant_type": "refresh_token",
-        "refresh_token": os.environ["REFRESH_TOKEN"],
-        "client_id": os.environ["CLIENT_ID"],
-    })
-    data = resp.json()
-    _token_cache.update({
-        "access_token": data["access_token"],
-        "expires_at": time.time() + data["expires_in"],
-    })
-    return data["access_token"]
-```
+Pattern 2, OAuth token refresh with an in-memory cache, and the full OAuth 2.1 server
+setup are in [`references/transport-auth.md`](references/transport-auth.md).
 
 ```json
 // Claude Desktop config with env vars
@@ -308,28 +273,30 @@ async def get_valid_token() -> str:
 
 | Gotcha | Why | Fix |
 |--------|-----|-----|
-| Tool not appearing in client | `inputSchema` has invalid JSON Schema | Validate schema with jsonschema library; use Pydantic/Zod to generate |
-| Tool returns raw object | Results must be `content` list with typed items | Always return `{"content": [{"type": "text", "text": "..."}]}` |
-| Timeout on long operations | Default client timeout is often 30-60s | Add progress notifications; break into smaller operations |
-| Concurrent requests fail | Tool handler uses shared mutable state | Use asyncio locks, or make handlers stateless |
-| Large response crashes client | MCP messages have practical size limits | Paginate results; return summaries with detail-fetch tools |
-| Error swallowed silently | Exception in handler returns generic error | Set `isError: true` in response; include error message in content |
-| SSE connection drops | No keep-alive or reconnection logic | Implement heartbeat; client auto-reconnects on SSE |
-| Client ignores new tools | Capabilities not updated after tool change | Call `server.request_context.session.send_resource_list_changed()` |
-| Tool name collision | Two servers register same tool name | Namespace tools: `myserver_search` not just `search` |
-| Resource URI too generic | `data://info` is ambiguous | Use specific schemes: `db://myapp/users`, `config://myapp/settings` |
-| `async def` missing on handler | FastMCP tools can be sync or async, but I/O should be async | Use `async def` for any handler doing network/file I/O |
+| `No module named 'mcp.server.fastmcp'` | Python SDK v2 renamed `FastMCP` to `MCPServer` | `from mcp.server import MCPServer`, or pin `mcp<2` |
+| `TypeError: ... unexpected keyword argument 'port'` | v2 moved transport settings off the constructor | `mcp.run(transport="streamable-http", port=...)` |
+| `ctx.elicit()` fails in a test that passed on v1 | `Client(mcp)` negotiates 2026-07-28, which has no server-to-client back-channel (`NoBackChannelError`) | Use a `Resolve(...)` parameter (both eras), or `Client(mcp, mode="legacy")` |
+| Model never sees the error text | v2: only a `ToolError` message reaches the model. `MCPError` becomes a JSON-RPC error, and any other exception reads `Error executing tool <name>` | Raise `ToolError` (Py) or return `isError: true` (TS) for failures the model can fix |
+| Tool not appearing in client | Invalid input schema (`{}` lacks `"type": "object"`) | Let Pydantic/Zod generate it; v2 validates results before sending |
+| `TS2769: No overload matches this call` on `registerTool` | zod < 4.2 lacks `~standard.jsonSchema` | Upgrade to `zod ^4.2.0` |
+| Low-level handler returns a bare list | v2 low-level `Server` no longer wraps results | Return the full `ListToolsResult` / `CallToolResult` |
+| Timeout on long operations | Client timeout is often 30-60s | Report progress (`ctx.report_progress`); split the work |
+| Concurrent requests fail | Shared mutable state, and v2 runs sync `def` handlers on worker threads | Use locks, or keep handlers stateless and `async def` |
+| Large response crashes client | Practical message size limits (Py v2 HTTP rejects bodies over 4 MiB) | Paginate; return summaries plus detail-fetch tools |
+| Client ignores new tools | No list-changed notification | Py: `await ctx.notify_tools_changed()`. TS: `registerTool` handles notify for you |
+| Tool name collision | Two servers register the same name | Namespace tools: `myserver_search`, not `search` |
 | Server works locally, fails in Claude Desktop | Different working directory or PATH | Use absolute paths; log `os.getcwd()` on startup |
 
 ## Reference Files
 
-| File | Lines | Content |
-|------|-------|---------|
-| `references/server-architecture.md` | ~700 | Server lifecycle, FastMCP/TS SDK setup, capabilities, middleware, error handling |
-| `references/tool-handlers.md` | ~650 | Schema design, validation, return types, composition, side effects, examples |
-| `references/resources-prompts.md` | ~550 | Resource URIs, static/dynamic resources, templates, prompts, subscriptions |
-| `references/transport-auth.md` | ~550 | stdio/SSE/HTTP transports, session management, OAuth2, rate limiting, TLS |
-| `references/testing-debugging.md` | ~550 | MCP Inspector, unit/integration testing, protocol debugging, CI, performance |
+| File | Content |
+|------|---------|
+| `references/v2-migration.md` | The version boundary: spec 2026-07-28, Python SDK v1→v2, FastMCP 3→4, TS SDK v1→v2, and what was not verified |
+| `references/server-architecture.md` | Server lifecycle, MCPServer/TS SDK setup, low-level servers, capabilities, error handling |
+| `references/tool-handlers.md` | Schema design, validation, return types, composition, side effects, examples |
+| `references/resources-prompts.md` | Resource URIs, static/dynamic resources, templates, prompts, subscriptions |
+| `references/transport-auth.md` | stdio/SSE/HTTP transports, session management, OAuth2, rate limiting, TLS |
+| `references/testing-debugging.md` | MCP Inspector, unit/integration testing, protocol debugging, CI, performance |
 
 ## Staleness verifier
 
@@ -351,9 +318,9 @@ The canonical fact set lives in [`assets/mcp-facts.json`](assets/mcp-facts.json)
 ## See Also
 
 - **MCP Specification**: https://modelcontextprotocol.io/specification/latest (the old spec.modelcontextprotocol.io subdomain no longer resolves)
-- **Python SDK**: https://github.com/modelcontextprotocol/python-sdk
-- **TypeScript SDK**: https://github.com/modelcontextprotocol/typescript-sdk
+- **Python SDK**: https://github.com/modelcontextprotocol/python-sdk, docs https://py.sdk.modelcontextprotocol.io/ (v1 docs under `/v1/`)
+- **TypeScript SDK**: https://github.com/modelcontextprotocol/typescript-sdk, docs https://ts.sdk.modelcontextprotocol.io/
 - **Official MCP Servers**: https://github.com/modelcontextprotocol/servers
 - **MCP Inspector**: `npx @modelcontextprotocol/inspector`
 - **FastMCP Documentation**: https://gofastmcp.com
-- **Related skills**: `claude-code-hooks` (hook into Claude Code), `claude-code-debug` (debug Claude Code issues)
+- **Related skills**: `claude-code-ops` (Claude Code hooks, MCP server debugging)

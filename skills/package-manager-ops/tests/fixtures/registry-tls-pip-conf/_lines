@@ -1,0 +1,2 @@
+registry.url.http pip.conf:2
+registry.tls.disabled pip.conf:3

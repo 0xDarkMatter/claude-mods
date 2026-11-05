@@ -27,7 +27,7 @@ unset FLEET_SKIP_SESSION_CHECK FLEET_SESSION_STORE FLEET_SESSION_NOCACHE \
       FLEET_SELF_SESSION_ID FLEET_NO_PRUNE_HINT FLEET_PRUNE_ROOTS \
       FLEET_PRUNE_MAX_REPOS FLEET_ASCII FLEET_RM_RETRY_SECS \
       FLEET_NEVER_PUSH FLEET_HELD_LANES FLEET_SWEEP_LEDGER FLEET_SWEEP_KEEP FLEET_SWEEP_STALE_DAYS \
-      FLEET_SWEEP_MIN_DIR_AGE \
+      FLEET_SWEEP_MIN_DIR_AGE FLEET_QUEUE_COMMIT_PCT FLEET_PRUNE_UNSTARTED_DAYS FLEET_SESSION_NAMED_DAYS \
       WORKTREE_ROOT   # the machine's lane root; worktree-root.sh sets a throwaway one
 
 command -v git >/dev/null 2>&1 || { echo "SKIP: git not available"; exit 0; }
@@ -170,6 +170,29 @@ uni_out="$(cd "$REPO" && env -u TERM_ASCII -u FLEET_ASCII LC_ALL=en_US.UTF-8 bas
 case "$uni_out" in *"$(printf '\xc2\xb7')"*) ok "unicode mode still renders the U+00B7 separator";;
   *) no "unicode mode lost its separator (ASCII fallback leaked into UTF-8 output)";; esac
 
+echo "-- colour is zero-width: FORCE_COLOR=1 must not move a single column --"
+# Regression: term_panel_close sized its rule with ${#} over the pre-coloured
+# hotkeys/healths __fleet_footer hands it, so every ESC[..m byte counted as a
+# column and the footer came out 62 cells against an 80-cell header whenever
+# colour was on. printf %-14s/%-10s ate the leaf rows' rail + meta padding the
+# same way. Under TERM_ASCII=1 bytes == cells, so the widths compare exactly.
+sgr_esc="$(printf '\033')"
+sgr_strip() { sed "s/${sgr_esc}\[[0-9;]*m//g"; }
+geo="$(TERM_ASCII=1 FORCE_COLOR=1 bash "$FLEET" status 2>&1 | sgr_strip)"
+geo_hdr="$(printf '%s\n' "$geo" | grep '^+--' | head -n1)"
+geo_ftr="$(printf '%s\n' "$geo" | grep '^+--' | tail -n1)"
+if [ -n "$geo_hdr" ] && [ "$geo_hdr" != "$geo_ftr" ] && [ "${#geo_hdr}" -eq "${#geo_ftr}" ]; then
+  ok "footer width matches header with FORCE_COLOR=1 (${#geo_ftr} cols)"
+else no "footer width matches header with FORCE_COLOR=1 (header ${#geo_hdr}, footer ${#geo_ftr})"; fi
+# The same invariant over the whole panel in UTF-8, where multibyte rails made
+# byte padding wrong even uncoloured: stripped colour output == plain output.
+# Ages tick between the two runs (9s -> 10s), so the trailing age is normalised.
+geo_age() { sed -E 's/[0-9]+(s|m|h[0-9]+m)$/AGE/'; }
+env -u TERM_ASCII -u FORCE_COLOR LC_ALL=en_US.UTF-8 bash "$FLEET" status 2>&1 | geo_age > "$SB/geo-plain"
+env -u TERM_ASCII LC_ALL=en_US.UTF-8 FORCE_COLOR=1 bash "$FLEET" status 2>&1 | sgr_strip | geo_age > "$SB/geo-colour"
+if cmp -s "$SB/geo-plain" "$SB/geo-colour"; then ok "UTF-8 panel: colour moves no column"
+else no "UTF-8 panel: colour moves columns ($(diff "$SB/geo-plain" "$SB/geo-colour" | grep '^[<>]' | head -n2 | tr '\n' '|'))"; fi
+
 echo "-- scrub gate still works on a slashed branch --"
 wt="$SB/wt-feat_foo"
 # Marker built via printf so this source file never contains the contiguous
@@ -208,6 +231,27 @@ mk_lane "chore/xmark" mark.txt
 printf '%sX fix this later\n' "$XR" >> "$SB/wt-chore_xmark/mark.txt"
 git -C "$SB/wt-chore_xmark" -c user.email=w@t -c user.name=w commit -qam "add a marker"
 bash "$FLEET" scrub-check chore/xmark >/dev/null 2>&1; ee "lone triple-X marker still refused" 1 $?
+
+echo "-- scrub gate: base64 data-URI payloads pass, markers beside them refuse --"
+# Regression: an HTML report that embeds woff2 fonts as
+# data:font/woff2;base64,... and random base64 holds a triple-X followed by a
+# digit or +/ often enough to trip the X-term (6 hits in one file). Payloads
+# are stripped before matching; prose markers, including one on the same line
+# as a data URI, must still refuse. Tokens built from $XR as above.
+mk_lane "chore/b64font" font.html
+printf '@font-face{src:url(data:font/woff2;base64,AAAA%sX9BBBB)}\n' "$XR" >> "$SB/wt-chore_b64font/font.html"
+git -C "$SB/wt-chore_b64font" -c user.email=w@t -c user.name=w commit -qam "embed a font"
+bash "$FLEET" scrub-check chore/b64font >/dev/null 2>&1; ee "base64 data-URI payload passes scrub" 0 $?
+
+mk_lane "chore/xcolon" colon.txt
+printf '%sX: fix this\n' "$XR" >> "$SB/wt-chore_xcolon/colon.txt"
+git -C "$SB/wt-chore_xcolon" -c user.email=w@t -c user.name=w commit -qam "add a colon marker"
+bash "$FLEET" scrub-check chore/xcolon >/dev/null 2>&1; ee "triple-X colon marker in prose refused" 1 $?
+
+mk_lane "chore/b64mark" both.html
+printf 'src:url(data:font/woff2;base64,AAAABBBB) /* %sX: fix */\n' "$XR" >> "$SB/wt-chore_b64mark/both.html"
+git -C "$SB/wt-chore_b64mark" -c user.email=w@t -c user.name=w commit -qam "marker beside a data URI"
+bash "$FLEET" scrub-check chore/b64mark >/dev/null 2>&1; ee "marker beside a data URI still refused" 1 $?
 
 echo "-- signal.sh log gate: exit codes and summaries, not prose --"
 # Regression (Ledger, 2026-07): a GREEN run whose stderr prints "failed"/"error"
@@ -2212,8 +2256,10 @@ unset FLEET_SESSION_NOCACHE; hermetic_sessions
 cd "$REPO"
 fi
 
+. "$HERE/queue.sh"   # `fleet queue` cases: the audited landing chain (see its header)
 . "$HERE/sweep.sh"   # `fleet sweep` cases, in their own file (see its header)
 . "$HERE/worktree-root.sh"   # lanes under a machine-wide WORKTREE_ROOT (see its header)
+. "$HERE/unstarted.sh"   # zero-commit lanes and transcript-named trees (see its header)
 
 echo "=== $PASS passed, $FAIL failed ==="
 [ "$FAIL" -eq 0 ] || exit 1

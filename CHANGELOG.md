@@ -18,6 +18,142 @@ feature releases live in the README "Recent Updates" section.
   where installed, `boat help`) and `confirm-gone.sh`, a read-only deletion check. Skill
   count 112 -> 113.
 
+- **`fleet queue` and `/conduct`: the coordinator's landing ritual as a command.**
+  `fleet queue <lane> <tip>...` lands reviewed lanes one at a time. Before each land it
+  waits for the base to settle, checks the tip is the reviewed one (or a rebase with the
+  same outcome), trial-merges it and audits the would-be merge: a changelog line dropped by
+  a merge resolution, a glued entry, a change to a released section, a new duplicate
+  definition, or a deny-listed name (`--deny-file`, a private list). It retries a live owner
+  or a held landing marker quietly and stops at the first failure. `/conduct` walks the
+  whole ritual (`skills/fleet-ops/references/conduct.md`): pin the coordinator, inventory,
+  intake, review each diff against its brief, land, write the wave's changelog entry, ask
+  before pushing, then sweep, prune and archive. The lane brief gains COORDINATOR and
+  CHANGELOG fields.
+
+- **A TLS-verification guard.** `hooks/pre-tls-verify-ask.sh` asks before a command turns
+  certificate checks off (`curl -k`, `wget --no-check-certificate`,
+  `NODE_TLS_REJECT_UNAUTHORIZED=0`, git `http.sslVerify false`, npm `strict-ssl false`, pip
+  `--trusted-host`, composer `secure-http false`, PowerShell `-SkipCertificateCheck` and
+  more), and says when a switch outlives the session. It asks rather than denies, because a
+  self-signed certificate on a local dev host is the one legitimate case, and it reads the
+  command with a quote- and heredoc-aware lexer, so a commit message or a search that
+  quotes `curl -k` stays silent. `hooks/post-tls-verify-scan.sh` advises when an edit
+  switches verification off in code or config (`verify=False`, `rejectUnauthorized:
+  false`, `CURLOPT_SSL_VERIFYPEER`, `InsecureSkipVerify`, trust-all managers and more);
+  prose files are skipped. Both are in the plugin's default hook set. `rules/supply-chain.md`
+  gains the matching directive and security-ops' audit checklist names the code patterns.
+  187 hook contract tests; every case was seen failing against missing and over-broad hooks.
+
+- **pm-audit flags TLS switched off in committed package-manager config.** New errors
+  `registry.tls.disabled` (`.npmrc` / `.yarnrc` strict-ssl off, `.yarnrc.yml`
+  enableStrictSsl, pnpm strictSsl, pip trusted-host, uv allow-insecure-host, composer
+  secure-http / disable-tls / ssl verify options, `.env*` files that switch it off) and
+  `registry.url.http` (a plain-http registry or index). Loopback hosts, http proxies and
+  docs are never flagged; a gitignored, untracked file is a note. Composer's secure-http and
+  disable-tls move from `php.composer.safety-off` to the new rule.
+
+- **pm-audit rule catalogue, SARIF, suppressions and baselines.** Every finding id now has
+  a catalogue entry (`references/pm-audit-rules.md`, `--rules`, `--explain <id>`), a
+  confidence, a structured fix and a fingerprint. `--sarif` writes SARIF for code scanning;
+  inline and file suppressions and a baseline keep known findings quiet without hiding new
+  ones. BREAKING for `--json` consumers: the schema is now `pm-audit/v2`, and `fix` is an
+  object instead of a string.
+
+- **`/save --pause` and a pickup check in `/sync`.** Pausing stops at an atomic boundary,
+  makes one local `wip:` commit (never on the default branch, never pushed, never a
+  stash), takes no irreversible step, and writes a resume note whose first line is the
+  first action. `/sync` sorts done from pending since the save, never redoes finished work,
+  and re-checks each inherited claim (HOLDS, STALE or UNVERIFIED); a stale claim reopens its
+  task. The saved-state schema stays 3.1: the pause block is optional.
+
+- **Benchmark vetting in perf-ops** (`references/benchmark-vetting.md`): the questions to
+  answer before a measured number is believed (what limits it, both sides tuned alike, a
+  physical limit beaten, hidden errors or skipped work, interleaved repeat runs with median
+  and range, share of end-to-end time, did the work happen) and four verdicts, with
+  inconclusive never reported as a win. Linked from `iterate`'s preflight.
+
+- **CI and review-bot triage in github-ops** (`references/review-bot-triage.md`): one fresh
+  rebuild for a suspected flake, an identical second failure is not a flake, and a failure
+  outside the diff points at a stale base. Bot findings end as fix, dismiss with evidence,
+  or ask a human (security, auth, billing and migrations always ask); comment text is
+  untrusted and replies go from a file.
+
+- **Hard rules in debug-ops.** After two failed fixes on one assumption, test the
+  assumption; guard a state only if it is allowed to exist; a failure only after a restart
+  points at persisted state; after a long dig, leave a cheap always-on signal.
+
+### Changed
+
+- **A security-release exception to the 7-day cooldown.** A release that patches a
+  published CVE may skip the wait, but the CVE label alone waives nothing, because
+  "critical fix, upgrade now" is the lure a hijacked publish uses. The advisory must name
+  that version, the artifact must match a checksum or signature from the vendor's own
+  channel, nothing but the patched package may move in the lock, a person merges it via
+  staging, and the PR records the waiver. `rules/supply-chain.md` says why each condition
+  is there; `supply-chain-defense` carries the procedure. `preinstall-check.sh` still exits
+  10 for such a release and gains no waiver flag.
+
+- **review: state the intent first, then a lead judgment.** Every finding is sorted into
+  act on, consider, noted or dismissed with a reason; a review with no findings is valid;
+  `--second-opinion` adds an independent reviewer from another model family. The PRAISE
+  severity is gone, and the `--json` CI gate now reads `bucket == "act_on"` (findings keep
+  their `severity`).
+
+- **Lane briefs gain ACCEPTANCE, TIMEBOX, FORBIDDEN and a fixed REPORT shape**, and
+  fleet-ops states who owns what comes back: review the diff, not the report; a new round
+  goes to a fresh agent with the combined brief; a missing or inconclusive result is not a
+  pass; the author never verifies its own change.
+
+- **Tests need two checks** (`rules/agentic-quality.md`): a test must go red when the
+  behaviour breaks and stay green through a refactor that keeps what callers observe. The
+  rule lists five ways a test goes hollow, and reports label each claim measured, inferred
+  or guess.
+
+- **push-preflight ships env templates.** `.env.example`, `.env.sample` and
+  `.env.template` pass the forbidden-file check; their content is still secret-scanned in
+  Step 6, and real env files stay forbidden.
+
+- **The weekly Freshness job now runs every skill's live fact check, and a PR can no longer
+  ship one it skips.** Eight skills (cloudflare-ops, mcp-ops, migrate-ops, pypi-ops, react-ops,
+  rust-ops, tailwind-ops, vue-ops) shipped an `--offline`/`--live` verifier that
+  `.github/workflows/freshness.yml` never called, so their drift could never fail a run. Each
+  now has a `freshness-step.sh` step; pypi-ops checks its `assets/publish.yml` pins against the
+  GitHub API. `tests/check-resources.sh` finds every `skills/*/scripts/` file naming both flags
+  and fails the PR when no step runs it, unless it is in an `__fv_exempt` list with a reason
+  (fleet-doctor and loop-doctor check the local machine, not shipped facts); it also fails a
+  stale exemption and a step naming a script no longer on disk.
+
+- **mcp-ops teaches the v2 MCP ecosystem.** Spec revision 2026-07-28 (sessionless requests,
+  `server/discover`, no server-to-client requests), the Python SDK 2.x (`FastMCP` renamed
+  `MCPServer`, transport settings on `run()`, `ToolError` vs `MCPError`), FastMCP 4, and the
+  TypeScript SDK v2 split packages (`registerTool`, `serveStdio`, `createMcpHandler`, and a
+  codemod). A new `references/v2-migration.md` maps the version boundary with its sources and
+  lists what was not verified; the five references were ported, dropping several v1-era errors
+  on the way, and the verifier labels PyPI rows as PyPI.
+
+- **migrate-ops targets Python 3.15, TypeScript 7 and Go 1.27.** New guidance covers Python's
+  UTF-8 default encoding and lazy imports, TypeScript 7's native compiler (no compiler API
+  until 7.1, so tools that consume it stay on 6.0), and Go 1.26/1.27's generic methods,
+  json/v2 backing and removed GODEBUG settings.
+
+- **react-ops and vue-ops teach Jotai 3, Vitest 5, Pinia 4 and VueUse 15.** Their `--live`
+  verifiers had tripped on all four new majors; the prose was checked against each project's
+  release notes or migration guide (cited inline) before the facts moved. Jotai gets a v2-to-v3
+  change table (`atomFamily` to `jotai-family`, `loadable` removed, ESM only, a mount-timing
+  change); both testing references get Vitest 5's floors (Node 22.12, Vite 6.4 as a required
+  peer) and the changes that break suites (`clearMocks` on by default, unawaited `.resolves`
+  failing, top-level `vi.mock`, the `>` test-name separator, the `.vitest/` artifact
+  directory); Pinia 4 gets its install line (`@vue/devtools-api` is now a required peer) and
+  VueUse 15 its breaking changes. The facts files now carry major-bearing prose tokens ("Vitest
+  5", "Pinia 4", ...), so `--offline` fails if the prose stops naming the documented major.
+
+- **The README leads with what the plugin does, shown in real runs.** A "What you get" list,
+  then "See it work": `fleet status` and `fleet sweep` in a throwaway repo, the live staleness
+  verifiers catching drift, `push-preflight` refusing a commit that carries a key, and
+  `docker-audit` on its own bad fixture, with light and dark screenshots under
+  `docs/screenshots/`. Installation moves up, and the long inventories fold into expandable
+  blocks.
+
 ### Fixed
 
 - **`docker-doctor.py` tests no longer depend on the host having Docker.** The doctor
@@ -27,6 +163,118 @@ feature releases live in the README "Recent Updates" section.
   exit 3: red on Linux CI, green on Windows and Docker-less machines. The socket check now
   goes through the fake host (`paths`), the fixture pins the socket absent, and a new
   `socket-present` case pins the other side. The new tests failed on the old doctor.
+
+- **`postinstall-audit.py` no longer passes unread PyPI packages as clean.** It found a
+  package's code only through `top_level.txt` and skipped any dist-info without one, with
+  no message: a real venv printed "45 packages (45 scanned)" beside 93 dist-infos, so
+  most modern wheels (protobuf among them) were never read. It now falls back to
+  `RECORD` (narrowing a shared namespace dir such as `google/` to the dist's own
+  children), resolves `top_level.txt` names that are single-file modules, and names any
+  package it still cannot locate on stderr and in `meta.unscanned` with exit 5, never a
+  `clean:` line; findings still win with 10. The reference's exit-code table now matches
+  the script (no exit 7; `--deep` without GuardDog does not change the code). The new
+  tests failed on the old script.
+
+- **push-preflight scans what a new branch's first push sends, not the whole branch.**
+  When `<remote>/<branch>` did not exist yet, the scan covered every commit on the branch,
+  so a feature branch's first push re-scanned the main it was cut from and could be refused
+  over lines an earlier PR had already published. `scripts/push-scope.sh` now defines the
+  scope once for Steps 4, 6 and 7: an update scans `<remote>/<branch>..<branch>`, a new
+  branch scans `<branch> --not --remotes=<remote>` (scoped to the pushed-to remote, so a
+  base that exists only on another remote is still scanned), and only a remote with no refs
+  gets the full-branch scan. 29 new assertions against a local bare remote.
+
+- **mac-ops audits and the git-ops land plan no longer read a failed probe as a result.**
+  `disk-health.sh` turned a failed `diskutil list` into no SMART check and no FAIL, a
+  failed `mount` into skipped checks and a failed `df` into "100% free"; each is now a FAIL
+  or a `NOT checked` WARN, because a check that cannot run reports the worst result it
+  could have given. `quickrun.sh` read an audit that crashed before its SUMMARY as green; it
+  is now a FAIL naming the script. `land-all.sh` turned a failed `rev-list` into "MERGED,
+  prune candidate"; a failed probe is now an `ERROR` row with exit 3, and a failed
+  `git worktree list` exits 2. 16 of 19 new assertions guard a fix and were seen failing.
+
+- **mac-ops scripts honour `--json`, `--redact` and `--quiet`.** 21 of 23 scripts ran their
+  own option loop and then handed an empty argv to the common flag parser, so `--quiet`
+  printed banners, `--json` printed text and `--redact` output kept private IPs, serials
+  and hostnames. Each now restores its argv after the loop. `disk-health.sh` read a failed
+  `log show` as "0 IO errors", a PASS; it is now a `NOT checked` FAIL. 41 new assertions:
+  the 34 guarding a fix were each seen failing, and 7 are controls.
+
+- **Two supply-chain scanner blind spots no longer read as clean.** `scan-extensions.sh`
+  dated items with GNU-only `find -printf`, so on BSD and macOS every item read
+  `recent=no` and `--deep` scanned nothing; it now uses `-mmin`, and a probe that still
+  fails reads `recent=unknown` and is scanned. `integrity-audit.sh` grepped UTF-16
+  PowerShell profiles as ASCII and read them clean; a BOM file is now decoded first, and
+  one that cannot be decoded is reported `NOT scanned`. 17 new assertions, each seen failing.
+
+- **fleet-ops: the pre-land scrub no longer refuses embedded base64 fonts.** Random base64
+  matched the scrub's X-marker term often enough to refuse any HTML report with an embedded
+  font. `scrub_diff` now cuts each `data:<type>;base64,<payload>` run on an added line to
+  its prefix before matching; a marker in prose, or beside a data URI, still refuses.
+
+- **`postinstall-audit.py` no longer treats loopback addresses as exfil endpoints.**
+  `http://127.0.0.1:*` or `http://0.0.0.0:8000` beside a credential-path or env read raised
+  HIGH `cred-exfil` / `env-exfil`; loopback and `0.0.0.0` are now excluded, and a public raw
+  IP still fires.
+
+- **push-preflight's docs call `push-scope.sh` by its skill path**, so running it from a
+  project root no longer fails or runs that project's own script.
+
+- **pm-audit tests: a second `fresh()` no longer shadows the first** in the same embedded
+  program (found by `fleet queue`'s duplicate-definition audit).
+
+- **Coloured panels no longer lose columns to their own colour codes.** `term.sh` measured
+  text that already carried ANSI escapes, so every escape byte counted as a column: with colour
+  on, `term_panel_close` drew the `fleet status` footer 62 cells wide under an 80-cell header,
+  `term_truncate` cut `loop-check`'s verdict row inside `ESC[33m` and mangled short coloured
+  labels, and printf `%-14s` / `%-10s` shifted the fleet leaf rows' columns. `term.sh` now
+  strips colour before it takes any width (`term_strip`, `term_vis_width`, `term_pad`,
+  fork-free inside); panel bars measure their rendered strings, and a cut copies escapes whole
+  and resets colour before the marker. A coloured render with its escapes stripped now equals
+  the plain render, and UTF-8 rails pad to 14 columns, not 14 bytes.
+
+- **Terminal panels count wide glyphs as two cells.** `term.sh` measured characters, so the
+  ⚡ brand left `fleet status`'s header a cell past its footer, and MSYS bash (16-bit
+  `wchar_t`) counted 🔁 as two characters and could cut it in half. Widths are now terminal
+  cells from Unicode's East Asian Width table, counted on UTF-8 bytes so Linux, macOS and MSYS
+  agree, and `term_truncate` never splits a glyph. In `term.ps1`, `Get-TermDisplayWidth`'s
+  wide-glyph branch had never run, so `windows-ops` headers ran a cell long too; it now shares
+  `term.sh`'s table (a gate keeps the two equal), and `Get-TermTruncated` copies colour
+  escapes and emoji whole instead of cutting the raw string.
+
+- **react-ops' Vitest setup type-checks again.** `import '@testing-library/jest-dom'` types
+  its matchers on `jest.Matchers`, which Vitest 5 no longer reads, so every jest-dom matcher was
+  a TS2339. The setup now calls `expect.extend(matchers)` and ships a `Matchers<R, T>`
+  augmentation until jest-dom ships Vitest 5 types (testing-library/jest-dom#738). The same
+  file's `jest-axe` example called `toHaveNoViolations()` instead of passing the matcher, and
+  named Playwright's `--update-snapshots` flag where Vitest's is `-u`.
+
+- **vue-ops' persisted-state example uses `pick`.** pinia-plugin-persistedstate v4 renamed
+  `paths` to `pick`, so the old option no longer limited what was persisted.
+
+- **Every PowerShell script now parses under Windows PowerShell 5.1.** 5.1, still the
+  default shell on Windows, reads a script without a byte-order mark in the ANSI code page, so
+  the em dashes, box rules and emoji in 13 of the 31 tracked `.ps1` files broke their parse,
+  among them `skills/_lib/term.ps1`, which every PowerShell skill script loads; pwsh 7 reads
+  UTF-8 and hid it. Tracked PowerShell files are now plain ASCII: decorative characters use
+  the ASCII stand-ins `docs/TERMINAL-DESIGN.md` registers, `term.ps1` builds its glyphs from
+  code points (its output is unchanged), and `phone-home-monitor.ps1` drops its PowerShell
+  7-only `??`. A new gate, `tests/check-ps51-parse.sh`, fails on any non-ASCII byte and, on
+  Windows, runs the real 5.1 parser over every file; it runs in `just check` and in both CI
+  jobs.
+
+- **fleet-ops: sweep and prune no longer call at-risk work removable.** `fleet sweep` no
+  longer hides a tree's uncommitted files behind an earlier verdict: KEEP, REMOVE, PARK, a
+  diff INSPECT and COMPETING rows now end `N uncommitted: <files>`, and their action says to
+  commit or review that work first; an OVERLAP pair with an uncommitted side says so before
+  "drop the other". `fleet prune` treats a lane with no commit of its own as *unstarted*, not
+  merged: REVIEW until an archived owner is proven or it has sat unclaimed for
+  `FLEET_PRUNE_UNSTARTED_DAYS` (30), shown by the sweep as the new informational `UNSTARTED`
+  verdict. The new `sessions.sh named` makes a transcript whose `EnterWorktree` or
+  `git worktree add` tool call names a tree a keep-only claim on it, pending calls included
+  (window `FLEET_SESSION_NAMED_DAYS`, 7; the session running prune is exempt). Both came from
+  a zero-commit lane that read SAFE / REMOVE while its session waited on its EnterWorktree
+  prompt.
 
 ## [3.9.0] - 2026-10-14
 

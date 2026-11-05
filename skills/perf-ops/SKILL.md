@@ -165,6 +165,7 @@ User confirmed the optimization. Proceed with execution.
 {exact changes from preflight report}
 
 ## Before/After Protocol
+Vet both numbers per skills/perf-ops/references/benchmark-vetting.md (interleaved runs, errors and work counted) and lead with its verdict; inconclusive is never a win.
 1. Record the current benchmark baseline: {specific command from T2}
 2. Apply the approved changes
 3. Run the same benchmark again
@@ -299,6 +300,7 @@ When a performance-related request arrives:
 | `references/load-testing.md` | k6, Artillery, vegeta, wrk, Locust methodology and CI integration |
 | `references/optimization-patterns.md` | Caching, database, frontend, API, concurrency, memory optimization strategies |
 | `references/ci-integration.md` | Performance budgets, regression detection, CI pipeline patterns, benchmark baselines |
+| `references/benchmark-vetting.md` | Seven questions before trusting a measured number, interleaved repeat runs, the four verdicts |
 
 Load reference files when deeper tool-specific guidance is needed beyond what the dispatch prompt provides.
 

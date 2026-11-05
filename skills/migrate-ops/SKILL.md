@@ -1,6 +1,6 @@
 ---
 name: migrate-ops
-description: "Framework and language migration patterns - version upgrades, breaking changes, dependency audit, safe rollback. Use for: migrate, migration, upgrade, version bump, breaking changes, deprecation, dependency audit, npm audit, pip-audit, codemod, jscodeshift, rector, rollback, semver, changelog, framework upgrade, language upgrade, React 19, Vue 3, Next.js App Router, Laravel 13, Angular, Python 3.14, Node 26, TypeScript 6, Go 1.26, Rust 2024, PHP 8.5."
+description: "Framework and language migration patterns - version upgrades, breaking changes, dependency audit, safe rollback. Use for: migrate, migration, upgrade, version bump, breaking changes, deprecation, dependency audit, npm audit, pip-audit, codemod, jscodeshift, rector, rollback, semver, changelog, framework upgrade, language upgrade, React 19, Vue 3, Next.js App Router, Laravel 13, Angular, Python 3.15, Node 26, TypeScript 7, Go 1.27, Rust 2024, PHP 8.5."
 license: MIT
 allowed-tools: "Read Edit Write Bash Glob Grep Agent"
 metadata:
@@ -12,7 +12,7 @@ metadata:
 
 Comprehensive migration skill covering framework upgrades, language version bumps, dependency auditing, breaking change detection, codemods, and rollback strategies.
 
-> Ecosystem facts verified as of 2026-07-05.
+> Ecosystem facts verified as of 2026-10-22: Python 3.15 (released 2026-10-09), TypeScript 7.0 (native Go compiler, 2026-07-08), Go 1.27 (2026-08-19), Node 26 (Active LTS from 2026-10-28).
 
 ## Migration Strategy Decision Tree
 
@@ -49,10 +49,11 @@ What kind of migration are you performing?
 │        Pros: highest confidence, catch subtle differences
 │        Cons: double infrastructure cost, comparison logic
 │
-└─ Language version upgrade (Python 3.12→3.14, Node 22→26)
+└─ Language version upgrade (Python 3.13→3.15, Node 24→26, TypeScript 6→7)
    └─ In-place upgrade with CI matrix
       Test against both old and new versions in CI
       Drop old version support once all tests pass
+      TypeScript 5.x→7: go through 6.0 first (7.0 turns 6.0 deprecations into errors)
 ```
 
 ## Framework Upgrade Decision Tree
@@ -198,10 +199,10 @@ How do you detect breaking changes?
 | **Next.js** | next-codemod | `npx @next/codemod@latest` | Next.js version upgrades |
 | **Vue** | vue-codemod | `npx @vue/codemod src/` | Vue 2 to 3 transforms |
 | **PHP** | Rector | `vendor/bin/rector process src` | PHP version + framework upgrades |
-| **Python** | pyupgrade | `pyupgrade --py314-plus *.py` | Python version syntax upgrades |
+| **Python** | pyupgrade | `pyupgrade --py315-plus *.py` | Python version syntax upgrades |
 | **Python** | django-upgrade | `django-upgrade --target-version 5.0 *.py` | Django version upgrades |
 | **Go** | gofmt | `gofmt -w .` | Go formatting updates |
-| **Go** | gofix | `go fix ./...` | Go API changes |
+| **Go** | go fix | `go fix ./...` | Modernizers (Go 1.26+ rebuilt `go fix` on the vet analyzers) |
 | **Rust** | cargo fix | `cargo fix --edition` | Rust edition migration |
 | **Multi** | ast-grep | `sg scan --rule rules.yml` | Any language with custom rules |
 
@@ -262,18 +263,20 @@ Migration failed or caused issues — how to roll back?
 | Not updating CI to test both versions | CI passes on old version but new version has failures | Add matrix testing for both versions during transition |
 | Database migration without backup | Irreversible schema changes with no recovery path | Always backup before migration; test rollback procedure |
 | Forgetting to update Docker/CI base images | Code upgraded but runtime is still old version | Update Dockerfile FROM, CI config, and deployment manifests |
+| Upgrading to TypeScript 7 where tooling needs the compiler API | 7.0 ships no programmatic API (expected in 7.1); typescript-eslint, Vue/Svelte/Astro/MDX language tools and Angular templates still run on 6.0 | Keep 6.0 for API consumers via the `@typescript/typescript6` alias; use 7.0's `tsc` for CLI type-checking |
+| Python 3.15 code reading files with no `encoding=` | UTF-8 is now the default text encoding (PEP 686), not the locale's | Pass `encoding=` explicitly, or run with `PYTHONUTF8=0` while you audit |
 
 ## Reference Files
 
 | File | Contents | Lines |
 |------|----------|-------|
 | `references/framework-upgrades.md` | React 18→19, Next.js Pages→App Router, Vue 2→3, Laravel 10→13, Angular, Django upgrade paths | ~700 |
-| `references/language-upgrades.md` | Python 3.9→3.14, Node 18→26, TypeScript 4→6, Go 1.20→1.26, Rust 2021→2024, PHP 8.1→8.5 | ~650 |
+| `references/language-upgrades.md` | Python 3.9→3.15, Node 18→26, TypeScript 4→7, Go 1.20→1.27, Rust 2021→2024, PHP 8.1→8.5 | ~850 |
 | `references/dependency-management.md` | Audit tools, update strategies, lock files, monorepo deps, supply chain security | ~550 |
 
 ## Staleness verifier
 
-This skill hardcodes specific framework/language target versions (React 19, Laravel 13, Python 3.14, Node 26, TypeScript 6, Go 1.26, Rust 2024, PHP 8.5). [`scripts/check-migrate-facts.py`](scripts/check-migrate-facts.py) guards them against silent drift:
+This skill hardcodes specific framework/language target versions (React 19, Laravel 13, Python 3.15, Node 26, TypeScript 7, Go 1.27, Rust 2024, PHP 8.5). [`scripts/check-migrate-facts.py`](scripts/check-migrate-facts.py) guards them against silent drift:
 
 ```bash
 # Structural (PR CI, no network): every catalogued target version still appears

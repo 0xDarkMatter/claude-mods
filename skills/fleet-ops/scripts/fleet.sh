@@ -75,7 +75,15 @@ TEST_CMD=""
 # mktemp template (push-gate-paths. plus six X's — false-refused a landing,
 # 2026-09-01), not a marker; a lone triple-X followed by a non-letter
 # (space, colon) still refuses.
+# Base64 data-URI payloads are stripped from each added line BEFORE this
+# pattern is applied (SCRUB_DATA_URI, scrub_diff): random base64 holds a
+# triple-X followed by a digit or +/ often enough to refuse any embedded font
+# (an HTML report with an embedded font hit it 6 times). A custom forbidden_pattern
+# gets the same strip.
 FORBIDDEN_PATTERN='TODO_''SCRUB|(^|[^X])X{3}[^a-zX]|FIXME_''BEFORE_LAND'
+# data:<mediatype>[;param=v...];base64,<payload>. Not configurable: it removes
+# only payload bytes, which can never be a deliberate marker.
+SCRUB_DATA_URI='data:[^,[:space:]]*;base64,[A-Za-z0-9+/=]+'
 BASE_BRANCH="main"
 POLL_INTERVAL=5
 ICONS="${icons:-}"   # env seed; config `icons=ascii` overrides below
@@ -388,8 +396,14 @@ scrub_diff() {
   # lines, and @@ hunk-header function-context must not trip the gate — removing
   # a forbidden marker is a fix, and a marker merely NEAR an edit is not one
   # (both false-positived here, 2026-07).
+  # Each data:<type>;base64,<payload> run is cut to its prefix before the match,
+  # so an embedded font or image never trips the gate but a marker elsewhere on
+  # the same line still does. Do NOT skip whole lines carrying a data URI
+  # instead: a minified HTML/CSS file is one line, and skipping it would wave
+  # through any marker in it (tests/run.sh pins both directions).
   local branch=$1
-  git diff "$BASE_BRANCH"..."$branch" 2>/dev/null | grep -E '^\+' | grep -vE '^\+\+\+ ' | grep -nE "$FORBIDDEN_PATTERN" || true
+  git diff "$BASE_BRANCH"..."$branch" 2>/dev/null | grep -E '^\+' | grep -vE '^\+\+\+ ' \
+    | sed -E "s#$SCRUB_DATA_URI#data:;base64,#g" | grep -nE "$FORBIDDEN_PATTERN" || true
 }
 
 refuse_if_shared_tree() {
@@ -819,8 +833,18 @@ cmd_main() {
 cmd_config() {
   # Print the RESOLVED config — the observability that was missing while every
   # documented key was a silent no-op. stdout is data only (key=value, parseable);
-  # advice and warnings go to stderr.
-  if [[ -f "$CONFIG" ]]; then
+  # advice and warnings go to stderr. --quiet prints the keys alone: the session
+  # diagnostics below read every session store, which takes tens of seconds on a
+  # busy machine, and a script that wants one key (queue.sh: base_branch) must
+  # not pay that on every run.
+  local quiet=0
+  case "${1:-}" in
+    --quiet) quiet=1 ;;
+    "") : ;;
+    *) echo "usage: fleet config [--quiet]" >&2; return 2 ;;
+  esac
+  if [[ $quiet -eq 1 ]]; then :
+  elif [[ -f "$CONFIG" ]]; then
     echo "# source: $CONFIG" >&2
   else
     echo "# source: none ($CONFIG absent) — all defaults" >&2
@@ -835,6 +859,7 @@ cmd_config() {
   echo "session_check=$SESSION_CHECK"
   echo "session_live_secs=$SESSION_LIVE_SECS"
   echo "prune_hint=$PRUNE_HINT"
+  if [[ $quiet -eq 1 ]]; then return 0; fi
   if [[ -z "$TEST_CMD" ]]; then
     echo "WARNING: no test_cmd — 'fleet land' will not run a test gate" >&2
   fi
@@ -1165,8 +1190,15 @@ session_land_gate() {
 #   6  commits not yet in <base>                  REVIEW  unintegrated work
 #   7  merged + clean, and no OPEN session        SAFE    finished and recoverable
 #      claims it; for .claude/worktrees/ also a
-#      positive archived claim
+#      positive archived claim; for an UNSTARTED
+#      lane (no commit of its own) that claim,
+#      or PRUNE_UNSTARTED_DAYS unclaimed
 #   8  anything else                              REVIEW  default deny
+#
+# Under `fleet prune` a transcript whose EnterWorktree or `git worktree add`
+# tool call names a tree is one more claim (prune_named_probe), keep-only like
+# the transcript-key claim. Both 2026-10-22: a zero-commit lane read "merged"
+# and unclaimed under a session waiting on its EnterWorktree prompt.
 #
 # A session CLAIMS a worktree by any of: its branch (checked-out or written),
 # its wrapper cwd or worktreePath, its transcript's project directory, or —
@@ -1199,6 +1231,13 @@ session_land_gate() {
 PRUNE_ROWS=""   # accumulated TSV: path \t branch \t bucket \t reason
 PRUNE_FRESHEN=0     # 1 under `fleet prune` only — see prune_freshen_sessions
 SESSION_LASTCWD=""  # sessionId \t normalised last transcript cwd (archived only)
+PRUNE_NAMED=0       # 1 under single-repo `fleet prune` only — see prune_named_probe
+NAMED_CLAIMS=""     # `at`-shaped rows, via=named, from prune_named_probe
+# How long an unstarted lane (prune_unstarted) must sit unclaimed before rule 7
+# may call it SAFE. Long on purpose: a session can wait a day or more on one
+# permission prompt, and an empty tree costs nothing to keep.
+PRUNE_UNSTARTED_DAYS=${FLEET_PRUNE_UNSTARTED_DAYS:-30}
+[[ "$PRUNE_UNSTARTED_DAYS" =~ ^[0-9]+$ ]] || PRUNE_UNSTARTED_DAYS=30
 
 # Normalise a path for comparison: forward slashes, no trailing slash,
 # lowercased (Windows paths are case-insensitive and git's casing of the drive
@@ -1357,6 +1396,82 @@ prune_archived_proof() {
   return 1
 }
 
+# The tree's birth, epoch seconds: the mtime of the `commondir` file that
+# `git worktree add` writes into the tree's admin dir. move, repair, lock,
+# commits and status leave it alone (measured on git 2.49, 2026-10-22). 1 when
+# there is none to read.
+prune_tree_made() {
+  local gd
+  gd=$(git -C "$1" rev-parse --git-dir 2>/dev/null) || return 1
+  case "$gd" in /*|[A-Za-z]:[\\/]*) ;; *) gd="$1/$gd" ;; esac
+  [[ -f "$gd/commondir" ]] || return 1
+  stat -c %Y "$gd/commondir" 2>/dev/null || stat -f %m "$gd/commondir" 2>/dev/null || return 1
+}
+
+# prune_unstarted <worktree> <branch> — exit 0, printing the tree's age in
+# seconds, when the lane has no commit of its own; 1 when it has one, or when
+# the tree's birth cannot be read (it then classifies as before).
+# Ancestry cannot tell "landed" from "nothing to land": a lane forked from base
+# that never got a commit has its tip in base, exactly like a lane whose commits
+# merged, and rule 7 called such a tree SAFE under a session waiting 30+ hours
+# on its EnterWorktree prompt (2026-10-22). Two signals, both erring toward
+# "unstarted" (REVIEW), never toward "landed":
+#   reflog   a commit-creating entry (commit, commit (amend|merge|initial),
+#            cherry-pick, revert, am, "Merge made by") is work of its own. Every
+#            other entry (Created from, renamed, Fast-forward, reset, a rebase's
+#            finish) only moves the ref to commits made elsewhere, so a reflog of
+#            nothing but those is unstarted. A fast-forward-landed lane keeps its
+#            own commit: entries, so it stays landed.
+#   tip age  with NO reflog at all (a Desktop chip's branch is made without one,
+#            measured 2026-10-22): unstarted when the tip commit is older than the
+#            tree, i.e. nothing was committed after the tree was made. Strict <:
+#            a commit in the tree's first second counts as work.
+prune_unstarted() {
+  local wt=$1 br=$2 made log tip
+  made=$(prune_tree_made "$wt") || return 1
+  log=$(git -C "$wt" reflog show --format=%gs "refs/heads/$br" -- 2>/dev/null) || log=""
+  if LC_ALL=C grep -qiE '^(commit|cherry-pick|revert|am)( \([^)]*\))?:|: merge made by' <<< "$log"; then return 1; fi
+  if [[ -z "$log" ]]; then
+    tip=$(git -C "$wt" log -1 --format=%ct "refs/heads/$br" -- 2>/dev/null) || return 1
+    [[ "$tip" =~ ^[0-9]+$ ]] && (( tip < made )) || return 1
+  fi
+  printf '%s' "$(( $(date +%s) - made ))"
+}
+
+# Seconds -> "40m" / "30h" / "12d", for reasons.
+prune_age() {
+  if (( $1 < 3600 )); then printf '%dm' $(( $1 / 60 ))
+  elif (( $1 < 172800 )); then printf '%dh' $(( $1 / 3600 ))
+  else printf '%dd' $(( $1 / 86400 )); fi
+}
+
+# The `named` claims (sessions.sh header, "named") on this repo's worktrees,
+# read once per classification into NAMED_CLAIMS, before any tree is judged:
+# the read greps transcript content, so one call for every tree, never one per
+# tree. Its window opens at the OLDEST tree's birth (a call naming a tree cannot
+# predate it), less two minutes of mtime slack; sessions.sh caps it at its own
+# NAMED_DAYS. The calling session's rows are dropped: what it named itself is
+# not a peer's claim (a coordinator prunes the lanes it made for peers that
+# have finished), and a tree it stands in is KEEP by rule 1 anyway. A failed
+# read leaves NAMED_CLAIMS empty, which is the behaviour before this claim
+# existed: it only ever keeps a tree.
+prune_named_probe() {
+  local raw=$1 wt m since="" wts=() out
+  NAMED_CLAIMS=""
+  [[ $SESSION_STORE_OK -eq 1 ]] || return 0
+  while IFS= read -r wt; do
+    [[ -n "$wt" && -d "$wt" ]] || continue
+    wts+=("$wt")
+    if m=$(prune_tree_made "$wt"); then [[ -z "$since" || $m -lt $since ]] && since=$m; fi
+  done <<< "$(printf '%s\n' "$raw" | awk 'substr($0, 1, 9) == "worktree " { if (n++) print substr($0, 10) }')"
+  [[ ${#wts[@]} -gt 0 ]] || return 0
+  out=$(FLEET_SESSION_LIVE_SECS="$SESSION_LIVE_SECS" \
+    bash "$SESSIONS_SH" named --since "$(( ${since:-0} - 120 ))" "${wts[@]}" 2>/dev/null </dev/null) || return 0
+  session_is_self "" || true     # resolves SELF_SESSION_ID once
+  NAMED_CLAIMS=$(printf '%s\n' "$out" | awk -F'\t' -v s="$SELF_SESSION_ID" 'NF && (s == "" || $3 != s)')
+  return 0
+}
+
 # The git operation parked in worktree $1 (rebase, bisect, ...), nothing, or "?"
 # when its git state could not be read. A paused rebase or a bisect leaves HEAD
 # detached in a CLEAN tree, so the dirty check passes it — and removing the tree
@@ -1421,12 +1536,18 @@ prune_emit() {
     # First match without `exit`: an early-exiting reader can SIGPIPE the
     # printf, and under pipefail + set -e that kills the whole command.
     claims=$(path_claims "$wt")
+    # Plus the transcript-named claims on this tree (prune_named_probe): a claim
+    # like the others, except that prune_archived_proof never takes one as proof.
+    if [[ -n "$NAMED_CLAIMS" ]]; then
+      claims=$(printf '%s\n%s\n' "$claims" "$NAMED_CLAIMS" | awk -F'\t' -v n="$wtn" 'NF && ($8 != "named" || $2 == n)')
+    fi
     live_claim=$(printf '%s\n' "$claims" | awk -F'\t' -v u="$unread" '
       NF && $7 == "1" && !f { print $4 " (by " $8 ($6 == "?" ? "; " u : "") ")"; f = 1 }')
     # OPEN = anything not provably archived: 0, and ? — an unreadable flag is
     # never presumed archived. "title<TAB>flag", preferring a plainly open one.
     open_claim=$(printf '%s\n' "$claims" | awk -F'\t' '
-      NF && $6 != "1" { if ($6 == "0") { if (!z) { zt = $4; z = 1 } } else if (!q) { qt = $4; q = 1 } }
+      NF && $6 != "1" { t = $4 ($8 == "named" ? " (named this tree in a tool call)" : "")
+                        if ($6 == "0") { if (!z) { zt = t; z = 1 } } else if (!q) { qt = t; q = 1 } }
       END { if (z) print zt "\t0"; else if (q) print qt "\t?" }')
     if [[ -n "$open_claim" ]]; then open_flag=${open_claim##*$'\t'}; open_claim=${open_claim%$'\t'*}; fi
     # Who owns it, for the REVIEW reasons below.
@@ -1499,6 +1620,16 @@ prune_emit() {
     prune_row "$wt" "$br" REVIEW "unmerged - ${ahead:-?} ahead of $base ($who)"; return 0
   fi
 
+  # UNSTARTED (2026-10-22) — in base only because nothing was ever added to it
+  #     (prune_unstarted). Every reason below opens "unstarted" for such a lane:
+  #     `fleet sweep` reads that prefix (sweep.sh, W_UNST) rather than deriving
+  #     it again, so it must stay first in each of them.
+  local mclean="merged + clean" unstarted=0 uage=0
+  if uage=$(prune_unstarted "$wt" "$br"); then
+    unstarted=1
+    mclean="unstarted (no commit since its worktree was made, $(prune_age "$uage") ago) + clean"
+  fi
+
   # 8 (checked before 7) — an OPEN session claims it, by branch or by
   #     directory: idle now, and free to wake up. A session resumed into a
   #     deleted cwd does not error — it spins a core indefinitely (SKILL.md,
@@ -1507,11 +1638,11 @@ prune_emit() {
   local still="owner still open" unopen="owner's archive flag unreadable, treated as open"
   if [[ -n "$orow" && "$oarch" != "1" ]]; then
     [[ "$oarch" == "?" ]] && still=$unopen
-    prune_row "$wt" "$br" REVIEW "merged + clean, but $still: ${otitle:-?}"; return 0
+    prune_row "$wt" "$br" REVIEW "$mclean, but $still: ${otitle:-?}"; return 0
   fi
   if [[ -n "$open_claim" ]]; then
     [[ "$open_flag" == "?" ]] && still=$unopen
-    prune_row "$wt" "$br" REVIEW "merged + clean, but $still: $open_claim"; return 0
+    prune_row "$wt" "$br" REVIEW "$mclean, but $still: $open_claim"; return 0
   fi
 
   # 7 — merged, clean, and every claim is archived. POSITIVE evidence means an
@@ -1524,7 +1655,13 @@ prune_emit() {
   if [[ $proven -eq 0 ]] && how=$(prune_archived_proof "$wtn" "$claims"); then proven=1; fi
   if [[ $proven -eq 1 ]]; then
     local by=""; [[ "$how" == "transcript cwd" ]] && by=" (by its transcript cwd)"
-    prune_row "$wt" "$br" SAFE "merged + clean, owner archived$by"; return 0
+    prune_row "$wt" "$br" SAFE "$mclean, owner archived$by"; return 0
+  fi
+  # An unstarted lane nobody is proven done with: its session may be about to
+  # start, or be waiting on the user to approve its EnterWorktree. REVIEW until
+  # it has sat unclaimed for PRUNE_UNSTARTED_DAYS; then the rules below apply.
+  if [[ $unstarted -eq 1 ]] && (( uage < PRUNE_UNSTARTED_DAYS * 86400 )); then
+    prune_row "$wt" "$br" REVIEW "$mclean - not landed, and its session may not have started yet (removable once its owner is archived, or after ${PRUNE_UNSTARTED_DAYS}d unclaimed)"; return 0
   fi
   # No positive claim. For a .claude/worktrees/ tree that is the ABSENCE of a
   # signal, not evidence: Claude Code made it for a session, and the store we
@@ -1536,11 +1673,11 @@ prune_emit() {
   # there "nobody claims it" means what it says.
   if prune_is_native "$wt" "$br"; then
     if [[ -n "$claims" ]]; then
-      prune_row "$wt" "$br" REVIEW "merged + clean, but no archived session provably worked here - cannot prove abandoned"; return 0
+      prune_row "$wt" "$br" REVIEW "$mclean, but no archived session provably worked here - cannot prove abandoned"; return 0
     fi
-    prune_row "$wt" "$br" REVIEW "merged + clean, but no session record claims it - cannot prove abandoned"; return 0
+    prune_row "$wt" "$br" REVIEW "$mclean, but no session record claims it - cannot prove abandoned"; return 0
   fi
-  prune_row "$wt" "$br" SAFE "merged + clean, no session owns it"
+  prune_row "$wt" "$br" SAFE "$mclean, no session owns it"
 }
 
 # prune_classify <repo> <base>  — fills PRUNE_ROWS. The PRIMARY worktree is
@@ -1559,6 +1696,8 @@ prune_classify() {
   raw=$(git -C "$repo" worktree list --porcelain 2>/dev/null || true)
   [[ -z "$raw" ]] && return 0
   if [[ $PRUNE_FRESHEN -eq 1 ]]; then prune_freshen_sessions "$raw"; fi
+  NAMED_CLAIMS=""
+  if [[ $PRUNE_FRESHEN -eq 1 && $PRUNE_NAMED -eq 1 ]]; then prune_named_probe "$raw"; fi
 
   # Porcelain records are blank-line separated. Command substitution ate the
   # trailing newlines, so append one blank line to flush the final record.
@@ -1872,8 +2011,11 @@ Buckets:
           A detached tree qualifies only with HEAD in $BASE_BRANCH, no git
           operation in progress, and an archived owner placed there by path.
   REVIEW  reported, never removed: dirty, unmerged, detached without proof, an
-          owner whose archive flag cannot be read, or no session info at all.
-          Your call.
+          owner whose archive flag cannot be read, no session info at all, or
+          an unstarted lane (no commit of its own) younger than
+          FLEET_PRUNE_UNSTARTED_DAYS (default 30) with no archived owner.
+          A transcript whose EnterWorktree / git worktree add call names a
+          tree is a claim on it. Your call.
   KEEP    a live session owns it, git has it locked, or it is the tree you are
           standing in. Not touched under any flag.
 
@@ -1924,6 +2066,10 @@ cmd_prune() {
     return 0
   fi
 
+  # One repo: also read the transcript-named claims (prune_named_probe). Not for
+  # --all-repos above (a transcript grep per repo, for counts) nor the status
+  # hint, which may therefore count a named tree SAFE that this run keeps.
+  PRUNE_NAMED=1
   prune_classify "$REPO_ROOT" "$BASE_BRANCH"
 
   if [[ $porcelain -eq 1 ]]; then
@@ -2545,7 +2691,8 @@ land_one() {
                FLEET_TRANSCRIPT_ROOTS FLEET_SESSION_LIVE_SECS FLEET_SESSION_CACHE_TTL \
                FLEET_SESSION_MAX_AGE_DAYS FLEET_SELF_SESSION_ID \
                FLEET_NO_PRUNE_HINT FLEET_PRUNE_ROOTS FLEET_PRUNE_MAX_REPOS \
-               FLEET_ASCII FLEET_RM_RETRY_SECS
+               FLEET_ASCII FLEET_RM_RETRY_SECS FLEET_QUEUE_COMMIT_PCT \
+               FLEET_PRUNE_UNSTARTED_DAYS FLEET_SESSION_NAMED_DAYS
          eval "$TEST_CMD" ) >>"$LOG" 2>&1; then
       log "PASS: $branch landed"
     else
@@ -3089,6 +3236,10 @@ case "${1:-}" in
   # guard protect the main checkout instead of the tree the caller is in.
   sweep)        shift; cd "$INVOKED_FROM" 2>/dev/null || true
                 exec bash "$SCRIPT_DIR/sweep.sh" "$@" ;;
+  # The audited, one-at-a-time landing chain (scripts/queue.sh). It drives `fleet
+  # land` per lane rather than land_one, so the marker, gate and rebase pass stay
+  # in this file alone.
+  queue)        shift; exec bash "$SCRIPT_DIR/queue.sh" "$@" ;;
   config)       shift; cmd_config "$@" ;;
   main)         shift; cmd_main "$@" ;;
   owner)        shift; [[ -z "${1:-}" ]] && { echo "usage: fleet owner <branch>" >&2; exit 1; }
@@ -3106,6 +3257,10 @@ Usage:
   fleet land <branch>         Manual land + rebase others
   fleet land --all [--running]  Batch-land all READY lanes (oldest-first);
                               --running also lands vetted RUNNING lanes
+  fleet queue <lane> <tip>... Land reviewed lanes one at a time: wait for
+                              $BASE_BRANCH to settle, audit each would-be merge,
+                              retry live-owner refusals. --dry-run audits only.
+                              (fleet queue --help)
   fleet revert <branch>       Revert merge commit on $BASE_BRANCH
   fleet landing [--porcelain] Is $BASE_BRANCH safe to branch from / rebase onto?
                               Exit 0 yes; 10 = a land holds it (PROVISIONAL
@@ -3118,7 +3273,8 @@ Usage:
   fleet sweep [--apply]       Post-wave housekeeping, in procedure order:
                               landed? competing? leftovers? who is done?
                               Report by default; --apply = zero-loss only.
-  fleet config                Print resolved config (is the test gate actually on?)
+  fleet config [--quiet]      Print resolved config (is the test gate actually on?);
+                              --quiet: the keys only, no session-store diagnostics
   fleet main [show|claim|release]
                               The coordinator session for this repo (lands,
                               deploys, triages). Lanes address it to hand off.

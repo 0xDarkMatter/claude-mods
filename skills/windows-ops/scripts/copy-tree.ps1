@@ -5,35 +5,35 @@
 
 .DESCRIPTION
     A robocopy wrapper with sane, non-destructive defaults. Robocopy already
-    logs failures and carries on rather than aborting — this script's job is to
+    logs failures and carries on rather than aborting - this script's job is to
     pick the right flags for the situation, then turn robocopy's bitmask exit
     and wall-of-text log into a verdict plus a failed-files list you can act on.
 
     THE ROBOCOPY DEFAULT THAT BITES EVERYONE: bare `robocopy` uses
-    /R:1000000 /W:30 — a single locked file retries a million times with 30s
+    /R:1000000 /W:30 - a single locked file retries a million times with 30s
     waits (~347 days) and looks exactly like a hang. Every mode below sets /R
     and /W explicitly.
 
     Modes (-Mode):
 
       Copy    DEFAULT. Healthy source, everyday copy.
-              /E /R:1 /W:1 /MT:16 — additive, never deletes at destination.
+              /E /R:1 /W:1 /MT:16 - additive, never deletes at destination.
               One retry absorbs transiently-locked files without stalling.
 
-      Rescue  Failing/suspect drive. /E /R:0 /W:0 /MT:1 — additive.
+      Rescue  Failing/suspect drive. /E /R:0 /W:0 /MT:1 - additive.
               Zero retries because every re-read of a bad sector stresses a
               dying drive further and can finish it off. Single-threaded so
               the head isn't thrashed across the platter. Skips the recursive
               size preflight for the same reason (see -SkipSpaceCheck).
 
-      Mirror  DESTRUCTIVE. /MIR — makes destination identical to source,
+      Mirror  DESTRUCTIVE. /MIR - makes destination identical to source,
               which means DELETING anything at the destination that isn't in
               the source. Prompts for confirmation unless -Force. A mistyped
               destination in this mode is a mass deletion, which is why it is
               not, and must never become, the default.
 
-    All modes: /XJ (skip junctions — no recursive mount loops), /COPY:DAT
-    (data+attributes+timestamps; ACLs cost time — add -CopyAcl if you need
+    All modes: /XJ (skip junctions - no recursive mount loops), /COPY:DAT
+    (data+attributes+timestamps; ACLs cost time - add -CopyAcl if you need
     them), /DCOPY:T (directory timestamps).
 
     Resumable: re-run after a crash or Ctrl-C and robocopy skips what already
@@ -51,7 +51,7 @@
 
 .PARAMETER MaxRetries
     Retry budget per file, overriding the mode default (Copy 1, Rescue 0,
-    Mirror 1). Keep at 0 on a failing drive — retries accelerate its death.
+    Mirror 1). Keep at 0 on a failing drive - retries accelerate its death.
 
 .PARAMETER Threads
     Robocopy /MT thread count, overriding the mode default (Copy/Mirror 16,
@@ -59,7 +59,7 @@
 
 .PARAMETER CopyAcl
     Copy security descriptors too (/COPY:DATSOU). Slower, and Owner/Auditing
-    need an elevated shell. Default omits ACLs — the destination inherits from
+    need an elevated shell. Default omits ACLs - the destination inherits from
     its parent, which is usually what you want for a plain copy.
 
 .PARAMETER Backup
@@ -118,16 +118,16 @@
 
 .NOTES
     Exit codes:
-      0   complete — everything copied (or nothing needed copying)
-      10  partial  — copy ran, but some files failed; see the failed-files log
-      1   fatal    — robocopy could not run the job at all
-      2   usage    — bad arguments
-      3   not found — source missing, or source is a file not a directory
-      4   validation — destination has less free space than the source
-      5   precondition — robocopy.exe not on PATH
+      0   complete - everything copied (or nothing needed copying)
+      10  partial  - copy ran, but some files failed; see the failed-files log
+      1   fatal    - robocopy could not run the job at all
+      2   usage    - bad arguments
+      3   not found - source missing, or source is a file not a directory
+      4   validation - destination has less free space than the source
+      5   precondition - robocopy.exe not on PATH
 
     Exit 10 (not 1) for partial means a caller can distinguish "some files
-    were locked" from "the copy never happened" — the older version of this
+    were locked" from "the copy never happened" - the older version of this
     script collapsed both to 1.
 #>
 
@@ -163,7 +163,7 @@ if ($Help -or -not $Source -or -not $Destination) {
     exit $script:EXIT_USAGE
 }
 
-# ── Preflight ────────────────────────────────────────────────────────────────
+# -- Preflight ----------------------------------------------------------------
 if (-not (Get-Command robocopy.exe -ErrorAction SilentlyContinue)) {
     Write-Log -Level FAIL -Message "robocopy.exe not on PATH (ships with every Windows install)"
     exit $script:EXIT_PRECONDITION
@@ -184,7 +184,7 @@ if (-not (Test-Path $Source -PathType Container)) {
 function Format-RoboPath {
     param([string]$Path)
     $p = $Path.Trim()
-    if ($p -match '^[A-Za-z]:\\$') { return $p }          # drive root — keep
+    if ($p -match '^[A-Za-z]:\\$') { return $p }          # drive root - keep
     if ($p -match '^\\\\[^\\]+\\[^\\]+\\?$') { return $p.TrimEnd('\') + '\' }  # UNC share root
     return $p.TrimEnd('\')
 }
@@ -201,7 +201,7 @@ $retries = if ($MaxRetries -ge 0) { $MaxRetries } else { $preset.Retries }
 $wait    = if ($retries -eq 0) { 0 } else { $preset.Wait }
 $threads = if ($Threads -ge 1) { $Threads } else { $preset.Threads }
 
-# ── Capacity preflight ───────────────────────────────────────────────────────
+# -- Capacity preflight -------------------------------------------------------
 # Summing the source tree means walking every file. On a big tree that is
 # minutes of apparent hang; on a dying drive it is stress we exist to avoid.
 $skipSpace = $SkipSpaceCheck -or ($Mode -eq 'Rescue')
@@ -216,7 +216,7 @@ if (-not $skipSpace) {
 }
 
 # Free space: only meaningful for a local drive-letter destination. UNC paths
-# have no PSDrive to interrogate — report unknown rather than silently
+# have no PSDrive to interrogate - report unknown rather than silently
 # mis-parsing "\\server\share" as drive "\" (the old bug).
 $destFreeGB = -1
 if ($dstArg -match '^([A-Za-z]):') {
@@ -231,7 +231,7 @@ if ($srcUsedGB -gt 0 -and $destFreeGB -ge 0 -and $destFreeGB -lt $srcUsedGB) {
     exit $script:EXIT_VALIDATION
 }
 
-# ── Build the robocopy invocation ────────────────────────────────────────────
+# -- Build the robocopy invocation --------------------------------------------
 $stamp     = (Get-Date).ToString('yyyyMMdd-HHmmss')
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
 $transferLog = Join-Path $LogDir "copy-tree-$stamp.log"
@@ -253,28 +253,28 @@ foreach ($x in $Exclude) {
     $roboArgs += '/XF'; $roboArgs += $x
     $roboArgs += '/XD'; $roboArgs += $x
 }
-$roboArgs += '/V'               # verbose — name skipped files too
+$roboArgs += '/V'               # verbose - name skipped files too
 $roboArgs += '/BYTES'
 $roboArgs += '/NP'              # no per-file percentage (keeps the log parseable)
 $roboArgs += "/LOG:$transferLog"
 if (-not $Json) { $roboArgs += '/TEE' }
 if ($DryRun)    { $roboArgs += '/L' }
 
-# ── Preflight panel ──────────────────────────────────────────────────────────
-$indicator = if ($DryRun) { "$($Mode.ToLower()) · dry-run" } else { $Mode.ToLower() }
+# -- Preflight panel ----------------------------------------------------------
+$indicator = if ($DryRun) { "$($Mode.ToLower()) | dry-run" } else { $Mode.ToLower() }
 if (-not $Json) {
     Write-TermLine (New-TermPanelOpen -Brand 'windows-ops' -Name 'windows-ops' -Subtitle 'copy-tree' -Indicator $indicator)
     Write-TermLine (New-TermPanelVert)
     $srcDisplay = if ($srcUsedGB -gt 0) { "$srcUsedGB GB" } elseif ($skipSpace) { 'size not measured' } else { 'size unknown' }
     $dstDisplay = if ($destFreeGB -ge 0) { "$destFreeGB GB free" } else { 'free space unknown' }
-    Write-TermLine (New-TermSummary -Text "$srcArg → $dstArg · $srcDisplay · destination has $dstDisplay")
+    Write-TermLine (New-TermSummary -Text "$srcArg -> $dstArg | $srcDisplay | destination has $dstDisplay")
     Write-TermLine (New-TermPanelVert)
 
     Write-TermLine (New-TermSection -State 'INFO' -Label 'plan' -Count -1)
     $modeMeta = switch ($Mode) {
-        'Copy'   { '/E — additive, nothing at the destination is deleted' }
-        'Rescue' { '/E — additive, tuned to not stress a failing drive' }
-        'Mirror' { '/MIR — DELETES destination files missing from source' }
+        'Copy'   { '/E - additive, nothing at the destination is deleted' }
+        'Rescue' { '/E - additive, tuned to not stress a failing drive' }
+        'Mirror' { '/MIR - DELETES destination files missing from source' }
     }
     Write-TermLine (New-TermLeaf -Name 'mode' -Meta $modeMeta)
     Write-TermLine (New-TermLeaf -Name 'retries per file' -Meta "$retries (wait ${wait}s)")
@@ -283,10 +283,10 @@ if (-not $Json) {
     Write-TermLine (New-TermLeaf -Name 'transfer log' -Meta $transferLog -IsLast)
 
     if ($Mode -eq 'Mirror') {
-        Write-TermLine (New-TermAlert -Severity warning -Text "MIRROR — files under $dstArg that are absent from the source will be DELETED")
+        Write-TermLine (New-TermAlert -Severity warning -Text "MIRROR - files under $dstArg that are absent from the source will be DELETED")
     }
     if ($DryRun) {
-        Write-TermLine (New-TermAlert -Severity warning -Text 'DRY-RUN — robocopy /L enumerates without copying')
+        Write-TermLine (New-TermAlert -Severity warning -Text 'DRY-RUN - robocopy /L enumerates without copying')
     }
     Write-TermLine (New-TermPanelVert)
     Write-TermLine (New-TermPanelClose -Hotkeys (New-TermHotkey -Key '?' -Verb 'help') -Healths (New-TermHealth -State 'pending' -Text 'starting'))
@@ -298,7 +298,7 @@ if ($preset.Mirror -and -not $DryRun -and -not $Force) {
     [Console]::Error.WriteLine("Mirror mode will DELETE files under $dstArg that are not in $srcArg.")
     $answer = Read-Host "Type the word MIRROR to proceed"
     if ($answer -cne 'MIRROR') {
-        Write-Log -Level INFO -Message "Aborted — destination untouched."
+        Write-Log -Level INFO -Message "Aborted - destination untouched."
         exit $script:EXIT_OK
     }
 }
@@ -308,18 +308,18 @@ if (-not $PSCmdlet.ShouldProcess("$srcArg -> $dstArg", "robocopy $Mode")) {
     exit $script:EXIT_OK
 }
 
-# ── Run ──────────────────────────────────────────────────────────────────────
+# -- Run ----------------------------------------------------------------------
 $start = Get-Date
 & robocopy.exe @roboArgs | Out-Null
 $roboExit = $LASTEXITCODE
 $elapsedSec = ((Get-Date) - $start).TotalSeconds
 
-# Robocopy's exit is a bitmask: 1 copied · 2 extras · 4 mismatches ·
-# 8 FAILURES · 16 fatal. Anything >=8 carries real failures.
+# Robocopy's exit is a bitmask: 1 copied | 2 extras | 4 mismatches |
+# 8 FAILURES | 16 fatal. Anything >=8 carries real failures.
 $hasFailures = ($roboExit -band 8) -ne 0
 $isFatal     = ($roboExit -band 16) -ne 0
 
-# ── Failed-files extraction ──────────────────────────────────────────────────
+# -- Failed-files extraction --------------------------------------------------
 # Robocopy's error record is TWO lines and the reason is on the second:
 #   2026/08/16 18:16:44 ERROR 32 (0x00000020) Copying File X:\src\locked.txt
 #   The process cannot access the file because it is being used by another process.
@@ -341,13 +341,13 @@ if (Test-Path $transferLog) {
         }
     }
     # Each retry logs its own ERROR record, so /R:1 yields two entries for one
-    # unreadable file. Report files, not attempts — keep the last outcome per path.
+    # unreadable file. Report files, not attempts - keep the last outcome per path.
     if ($failures.Count -gt 0) {
         $failures = $failures | Group-Object path | ForEach-Object { $_.Group[-1] }
     }
     if ($failures.Count -gt 0) {
         $header = @(
-            "copy-tree failed files — $stamp",
+            "copy-tree failed files - $stamp",
             "$srcArg -> $dstArg (mode: $Mode, retries: $retries)",
             "$($failures.Count) file(s) could not be copied. Transfer log: $transferLog",
             ""
@@ -362,7 +362,7 @@ $elapsedText = if ($elapsedSec -lt 90) { "$([math]::Round($elapsedSec, 1)) s" }
                elseif ($elapsedSec -lt 5400) { "$([math]::Round($elapsedSec / 60, 1)) min" }
                else { "$([math]::Round($elapsedSec / 3600, 1)) h" }
 
-# ── Output ───────────────────────────────────────────────────────────────────
+# -- Output -------------------------------------------------------------------
 if ($Json) {
     $result = [PSCustomObject]@{
         schema       = 'claude-mods.windows-ops.copy-tree/v1'
@@ -378,22 +378,22 @@ if ($Json) {
         failedLog    = $(if ($failures.Count -gt 0) { $failedLog } else { $null })
         failures     = @($failures)
     }
-    # Write-Output, not [Console]::Out — the latter writes straight to the console
+    # Write-Output, not [Console]::Out - the latter writes straight to the console
     # handle, so `copy-tree.ps1 -Json | ConvertFrom-Json` would silently capture
     # nothing when dot-called inside a session. Still stdout-only either way.
     Write-Output ($result | ConvertTo-Json -Depth 5)
 } else {
     $verdictState = switch ($verdict) { 'fatal' { 'FAILING' } 'partial' { 'WARN' } 'complete' { 'PASS' } }
     $verdictText  = switch ($verdict) {
-        'fatal'    { 'fatal robocopy error — nothing reliable was transferred' }
+        'fatal'    { 'fatal robocopy error - nothing reliable was transferred' }
         'partial'  { 'copy finished, some files could not be read' }
         'complete' { if ($DryRun) { 'dry-run complete' } else { 'copy complete' } }
     }
 
     Write-TermLine ''
-    Write-TermLine (New-TermPanelOpen -Brand 'windows-ops' -Name 'windows-ops' -Subtitle 'copy-tree · results' -Indicator $elapsedText)
+    Write-TermLine (New-TermPanelOpen -Brand 'windows-ops' -Name 'windows-ops' -Subtitle 'copy-tree | results' -Indicator $elapsedText)
     Write-TermLine (New-TermPanelVert)
-    Write-TermLine (New-TermSummary -Text "$verdictText · robocopy exit $roboExit")
+    Write-TermLine (New-TermSummary -Text "$verdictText | robocopy exit $roboExit")
     Write-TermLine (New-TermPanelVert)
 
     Write-TermLine (New-TermSection -State $verdictState -Label $verdict -Count -1)
@@ -402,18 +402,18 @@ if ($Json) {
     Write-TermLine (New-TermLeaf -Name 'transfer log' -Meta $transferLog -IsLast:($failures.Count -eq 0))
     if ($failures.Count -gt 0) {
         Write-TermLine (New-TermLeaf -Name 'error log' -Meta $failedLog -IsLast)
-        # Name the first few inline — an operator should not have to open a file
+        # Name the first few inline - an operator should not have to open a file
         # to learn whether the failures matter.
         foreach ($f in ($failures | Select-Object -First 3)) {
-            Write-TermLine (New-TermAlert -Severity warning -Text "$($f.path) — $($f.reason)")
+            Write-TermLine (New-TermAlert -Severity warning -Text "$($f.path) - $($f.reason)")
         }
         if ($failures.Count -gt 3) {
-            Write-TermLine (New-TermAlert -Severity warning -Text "...and $($failures.Count - 3) more — full list in $failedLog")
+            Write-TermLine (New-TermAlert -Severity warning -Text "...and $($failures.Count - 3) more - full list in $failedLog")
         }
         if ($Mode -eq 'Rescue') {
-            Write-TermLine (New-TermAlert -Severity warning -Text 'Unreadable on a failing drive — consider ddrescue for bit-level recovery (see references/recovery-patterns.md)')
+            Write-TermLine (New-TermAlert -Severity warning -Text 'Unreadable on a failing drive - consider ddrescue for bit-level recovery (see references/recovery-patterns.md)')
         } elseif ($failures | Where-Object { $_.code -in 5, 32 }) {
-            Write-TermLine (New-TermAlert -Severity warning -Text 'Locked or access-denied files — retry with -Backup from an elevated shell, or close the holding process')
+            Write-TermLine (New-TermAlert -Severity warning -Text 'Locked or access-denied files - retry with -Backup from an elevated shell, or close the holding process')
         }
     }
     Write-TermLine (New-TermPanelVert)

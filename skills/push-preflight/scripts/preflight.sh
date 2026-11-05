@@ -76,22 +76,37 @@ fi
 echo "STEP 3  OK    working tree clean"
 
 # ── Step 4: pending commits ───────────────────────────────────────────────────
-if ! git rev-parse --verify "${REMOTE}/${BRANCH}" >/dev/null 2>&1; then
-  echo "STEP 4  INFO  ${REMOTE}/${BRANCH} does not exist yet (new remote branch)"
-  COMMIT_COUNT="$(git rev-list --count "$BRANCH")"
-  echo "          ${COMMIT_COUNT} commits will be pushed (creating the remote branch)"
+# push-scope.sh is the one definition of "what this push sends", shared with
+# scan-secrets.sh (Step 6) and Step 7 below, so all three cover the same commits.
+# shellcheck source=push-scope.sh
+. "$SCRIPT_DIR/push-scope.sh"
+push_scope "$REMOTE" "$BRANCH"
+COMMIT_COUNT="$SCOPE_COUNT"
+
+list_pending() {
+  git log --oneline -20 "${SCOPE_REVS[@]}" | sed 's/^/            /'
+  if [ "$COMMIT_COUNT" -gt 20 ]; then
+    echo "            … and $((COMMIT_COUNT - 20)) more"
+  fi
+}
+
+if [ "$SCOPE_KIND" = "empty-remote" ]; then
+  echo "STEP 4  INFO  ${REMOTE} has no refs (empty remote, or never fetched)"
+  echo "          all ${COMMIT_COUNT} commits on ${BRANCH} will be pushed (creating the remote branch)"
+elif [ "$SCOPE_KIND" = "new-branch" ]; then
+  echo "STEP 4  OK    ${COMMIT_COUNT} commits pending (new remote branch; commits already on ${REMOTE} excluded)"
+  if [ "$COMMIT_COUNT" -eq 0 ]; then
+    echo "          every commit is already on ${REMOTE}; the push only creates ${REMOTE}/${BRANCH}"
+  else
+    list_pending
+  fi
 else
-  RANGE="${REMOTE}/${BRANCH}..${BRANCH}"
-  COMMIT_COUNT="$(git rev-list --count "$RANGE")"
   echo "STEP 4  OK    ${COMMIT_COUNT} commits pending"
   if [ "$COMMIT_COUNT" -eq 0 ]; then
     echo "          nothing to push; exiting cleanly"
     exit 0
   fi
-  git log --oneline -20 "$RANGE" | sed 's/^/            /'
-  if [ "$COMMIT_COUNT" -gt 20 ]; then
-    echo "            … and $((COMMIT_COUNT - 20)) more"
-  fi
+  list_pending
 
   # ── Step 5: divergence ──────────────────────────────────────────────────────
   BEHIND="$(git rev-list --count "${BRANCH}..${REMOTE}/${BRANCH}")"
@@ -119,13 +134,16 @@ echo "STEP 6  OK    secret scan clean"
 # Gitignore-style patterns would be nicer; for now, a small explicit list.
 FORBIDDEN_REGEX='(^|/)\.env(\.|$)|(^|/)\.env\.(local|development|production|test)$|\.(pem|key|pfx|p12|asc|ppk|id_rsa|id_ed25519|id_ecdsa|id_dsa)$|(^|/)\.aws/credentials$|(^|/)\.ssh/(id_|config)|(^|/)\.claude/worktrees/|(^|/)\.claude/settings\.local\.json$|(^|/)secrets?\.(json|ya?ml|toml|ini)$'
 
-if git rev-parse --verify "${REMOTE}/${BRANCH}" >/dev/null 2>&1; then
-  ADDED_FILES="$(git diff --name-only --diff-filter=A "${REMOTE}/${BRANCH}..${BRANCH}")"
-else
-  ADDED_FILES="$(git ls-tree -r --name-only "$BRANCH")"
-fi
+# Same scope as Steps 4 and 6: a path already on the remote is not sent again.
+ADDED_FILES="$(git diff --name-only --diff-filter=A "${SCOPE_BASE}..${BRANCH}")"
 
-FORBIDDEN_HITS="$(printf '%s\n' "$ADDED_FILES" | grep -iE "$FORBIDDEN_REGEX" || true)"
+# Env TEMPLATES (.env.example / .env.sample / .env.template) document the variables
+# a project needs and are meant to ship, but the `.env.` rule above would refuse every
+# one. They are exempt by NAME only: Step 6 has already secret-scanned their content,
+# so a template holding a real value still fails there. .env, .env.local and the
+# other real env files stay forbidden.
+TEMPLATE_ENV_REGEX='(^|/)\.env\.(example|sample|template)$'
+FORBIDDEN_HITS="$(printf '%s\n' "$ADDED_FILES" | grep -iE "$FORBIDDEN_REGEX" | grep -viE "$TEMPLATE_ENV_REGEX" || true)"
 if [ -n "$FORBIDDEN_HITS" ]; then
   echo "STEP 7  FAIL  forbidden files in push:"
   printf '%s\n' "$FORBIDDEN_HITS" | sed 's/^/            /'

@@ -14,6 +14,7 @@ The convention each reference enforces with its default, and every file this ski
 | Metadata audit checklist | `references/metadata-checklist.md` | full source-of-truth for mode `audit` |
 | Issue operations | `references/issue-ops.md` | view → triage → comment (with preview) → close; closing comments preview-gated |
 | PR operations | `references/pr-ops.md` | create (preview body) → review → pre-merge gate → squash by default; branch deletion separate explicit step |
+| CI and review-bot triage | `references/review-bot-triage.md` | classify a red check before any rerun (one fresh rebuild per suspected flake; failure outside the diff = stale base); each bot finding is fix / dismiss with evidence / ask a human, security, auth, billing and migrations always ask; replies sent from a file |
 
 ## Files
 
@@ -30,6 +31,7 @@ The convention each reference enforces with its default, and every file this ski
 | `references/metadata-checklist.md` | Audit checklist source of truth |
 | `references/issue-ops.md` | Issue operation playbooks (view/triage/comment/create/close) + preview templates |
 | `references/pr-ops.md` | PR operation playbooks (create/review/merge) + pre-merge gate + merge-strategy decision tree |
+| `references/review-bot-triage.md` | CI failure classification (flake, stale base, diff-caused), automated-review triage (fix / dismiss / ask), safe replies to bot threads, dismissal-pattern log format |
 | `scripts/repo-scorecard.sh` | **Capstone audit tool.** Scored, read-only repo-health matrix — orchestrates `check-security-posture.sh` + `check-issues.sh` and adds metadata/release/actions signals into a 0–100 score + grade per repo; `--org` for a fleet matrix + roll-up; `--min-score N` to gate CI; `--json` envelope. Surfaces top-3 fixes per repo. Never mutates |
 | `scripts/check-issues.sh` | Surface open issues you may not have seen (externally-authored + stale) for a repo or remote. Read-only `gh issue list`; flags author≠owner and untouched-for-N-days |
 | `scripts/check-security-posture.sh` | Read-only repo security-posture auditor. Per-feature checklist (Dependabot alerts/updates, secret scanning + push protection, code scanning, private vuln reporting, SECURITY.md, branch protection), visibility-aware severity, open-alert exposure where a scanner is on, `--org` fleet sweep. Emits enable commands as text — never applies a change |

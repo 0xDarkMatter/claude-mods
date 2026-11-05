@@ -1,14 +1,23 @@
 # Lane Brief Template
 
-The contract each parallel worker needs so its branch can land through the fleet queue. Embed it wherever the worker is spawned:
+The contract each parallel worker needs so its branch can land through the fleet queue, and so the session that spawned it can judge what comes back. Embed it wherever the worker is spawned:
 
 - **Background agent**: append it to the `claude --bg "<prompt>"` text
 - **Agent team teammate**: include it in the teammate's spawn prompt
 - **Manual session** (Path B, `fleet init`): paste it as the opening message
 
-Fill in the four fields.
+Fill in the nine fields. One you cannot fill means the lane is not scoped yet: finish scoping before you spawn it.
 
----
+## Contents
+
+- [The brief](#the-brief)
+- [Filling in the fields](#filling-in-the-fields)
+- [Owning what comes back](#owning-what-comes-back)
+- [Native-spawn note](#native-spawn-note)
+- [Why the scope rule matters](#why-the-scope-rule-matters)
+- [Per-language test cmd snippets](#per-language-test-cmd-snippets)
+
+## The brief
 
 ```
 You are a fleet-ops lane.
@@ -17,6 +26,11 @@ LANE: <branch-name>
 SCOPE: <files/dirs you may touch — comma-separated>
 TASK: <what to build>
 TESTS: <how to run tests for your scope, e.g. "pytest tests/test_auth.py">
+ACCEPTANCE: <the observable results that mean done, one per line>
+TIMEBOX: <rough cap on your working time, e.g. "90 minutes">
+FORBIDDEN: <actions and paths this lane must leave alone, beyond the rules below>
+COORDINATOR: <the coordinator's session id (`fleet main` prints it); the REPORT goes there>
+CHANGELOG: <skip | own>
 
 Setup:
   Work on branch <branch-name>. If you're in a worktree already on it, stay put;
@@ -24,26 +38,50 @@ Setup:
 
 Rules:
   - Only modify files within SCOPE. If you need to go outside, STOP and ask.
+  - Never do what FORBIDDEN lists. Off limits whatever it says: pushing,
+    force-pushing, deploying, writing in another worktree, and weakening or
+    deleting a test so that it passes.
   - Make atomic commits with conventional commit messages as you go.
   - Run TESTS before finishing, capturing the log AND the exit code:
       <test-cmd> 2>&1 | tee <path-to-test-log>; rc=${PIPESTATUS[0]}
   - When tests pass and you're ready to land, run:
       bash .claude/fleet/signal.sh READY <path-to-test-log> $rc
+    Ready means you checked every ACCEPTANCE line and each one holds.
   - If you hit a conflict, scope creep, or any unresolvable issue, run:
       bash .claude/fleet/signal.sh CONFLICT "<one-line reason>"
     then stop and explain.
+  - When TIMEBOX runs out, start nothing new. Commit what you have (a wip:
+    commit is fine), then run:
+      bash .claude/fleet/signal.sh CONFLICT "timebox: <what remains>"
+    and report PARTIAL. Unfinished work never signals READY.
   - Do not merge to main yourself. The fleet landing queue handles that.
-  - Before you branch from or rebase onto main (starting out, or fixing a
-    CONFLICT), run `fleet status`. A tip it marks PROVISIONAL is a merge still
-    under its land's test gate: NOT landed, and a red gate resets it. Wait
-    until `fleet landing` exits 0, then branch or rebase.
+  - CHANGELOG skip: leave CHANGELOG.md alone and put your entry's text in the
+    REPORT; the coordinator writes one entry for the wave. CHANGELOG own:
+    write your entry under [Unreleased], never in a released section.
+  - Build and commit without waiting for main. Only branching from it and
+    rebasing onto it need a settled tip: before either (starting out, or
+    fixing a CONFLICT), run `fleet status`. A tip it marks PROVISIONAL is a
+    merge still under its land's test gate: NOT landed, and a red gate resets
+    it. Wait until `fleet landing` exits 0, then branch or rebase. One gate
+    can take 40 minutes, so never give up a wait shorter than that.
+  - End with this REPORT, every line filled ("none" where nothing applies),
+    sent to COORDINATOR (SendMessage to that id; pigeon where there is no
+    Desktop) and as your last message. Then go idle: a land waits until your
+    session has been quiet for 10 minutes.
+      STATUS:     READY | PARTIAL | BLOCKED  (READY sent READY; the others CONFLICT)
+      BRANCH:     <branch> @ <head sha>
+      ACCEPTANCE: each line, met or not met, and the evidence
+      RAN:        every check you ran, with its exit code
+      CHANGED:    every file you touched, one line each
+      DEVIATIONS: where you departed from the brief, and why
+      REMAINING:  what is still undone
+      CHANGELOG:  the entry's text (CHANGELOG skip), else none
+    Label each claim measured, inferred or guess.
 
 Begin.
 ```
 
-The last rule exists because `fleet land` merges first and gates second: for the whole gate, `main`'s tip is a `merge: <lane>` commit that a red gate hard-resets. Lanes that read it as landed have branched from it and rebased onto it. Details: [landing.md](landing.md#provisional-main).
-
----
+The PROVISIONAL rule exists because `fleet land` merges first and gates second: for the whole gate, `main`'s tip is a `merge: <lane>` commit that a red gate hard-resets. Lanes that read it as landed have branched from it and rebased onto it. Details: [landing.md](landing.md#provisional-main).
 
 ## Filling in the fields
 
@@ -53,8 +91,34 @@ The last rule exists because `fleet land` merges first and gates second: for the
 | `SCOPE` | `src/auth/, tests/test_auth.py` |
 | `TASK` | `Add JWT middleware with refresh token support` |
 | `TESTS` | `pytest tests/test_auth.py 2>&1 | tee tests/test_auth.log` |
+| `ACCEPTANCE` | `An expired access token gets 401` / `POST /auth/refresh with a valid refresh token returns a new access token` |
+| `TIMEBOX` | `90 minutes` |
+| `FORBIDDEN` | `src/billing/, db/migrations/; no new dependencies` |
+| `COORDINATOR` | `local_<uuid>`, from `fleet main` in the main checkout |
+| `CHANGELOG` | `skip` for a wave of several lanes; `own` for a lane landing alone |
 
 The tee'd log plus the exit code (`${PIPESTATUS[0]}` — tee's own exit is always 0) is what `signal.sh READY` uses to verify tests passed. The exit code is the authoritative verdict; the log is evidence.
+
+**ACCEPTANCE** is what the lane gets judged against. TESTS shows nothing broke; ACCEPTANCE shows the task got done. Write each line as something a reader can observe (a command's output, a response, a file that now exists), never "works well".
+
+**TIMEBOX** is a rough cap that lets a stuck lane notice it is stuck. A lane that stops and hands back a committed branch gives the next round somewhere to start; one that runs on burns budget and holds up the wave. `fleet status` lists it as `CONFLICT` with its `timebox:` reason, so half-done work cannot land.
+
+**FORBIDDEN** complements SCOPE. SCOPE says where the lane may write; FORBIDDEN names what it must leave alone even there: a migration, a lockfile, a new dependency, a public API.
+
+**COORDINATOR** is the id the coordinator pinned with `fleet main claim`. Written into each brief when the lane is spawned, it is still right after the coordinator hands off, as long as the pin is renewed; a brief that names an old session reports to nobody.
+
+**CHANGELOG** `skip` is for waves: several lanes all adding to `[Unreleased]` conflict on every land after the first, so the coordinator writes one entry from the REPORTs once the wave lands ([conduct.md](conduct.md#phase-6-one-changelog-entry-per-wave)).
+
+**REPORT** has a fixed shape so the spawning session can line several lanes up and spot a gap at a glance. It is a map to the diff, not a stand-in for it ([below](#owning-what-comes-back)).
+
+## Owning what comes back
+
+The brief governs the lane. These rules govern the session that spawned it, usually MAIN. Spawning a lane hands off the typing, never the responsibility: what it returns is yours once you land it.
+
+1. **Read the diff, not the report.** The REPORT says where to look; `git diff main...<lane>` (and `fleet scrub-check <lane>`) is what you would land. Hold the ACCEPTANCE lines up against the diff and the evidence, then write your own account of the lane instead of forwarding its summary, which records only what the worker believes it did.
+2. **Each new round gets a fresh agent.** A fix, a retry, a follow-up or the next item goes to a new agent whose brief combines the first task, each instruction added since, and the last round's REPORT and branch. Committed lane work lives on the branch, so starting fresh loses nothing. Resuming or messaging an old agent quietly drops instructions that arrived by interrupt or across resumes, and carries over its mistaken picture of the work. Reuse one only when the next step needs something that agent alone holds and cannot hand over cheaply: uncommitted edits, or a server or watcher it has running.
+3. **No result is not a pass.** A lane that never reported, a session that crashed, a land log with no `running test_cmd:` line, an empty or cut-off test log, a PARTIAL, a verifier that could not run: each means *not verified yet*. Leave the lane unlanded until a fresh run gives an answer. Account for every lane you spawned. Doing a vanished lane's work yourself conceals that it failed and leaves what it was meant to cover unexamined.
+4. **The author never verifies.** An agent checking its own change tests its intent, not its output. A lane's own test run and its `READY` are its self-report. The verdict comes from something other than the author: the land gate's `test_cmd`, or a verifier agent, preferably on a different model from the author's.
 
 ## Native-spawn note
 

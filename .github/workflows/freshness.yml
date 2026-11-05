@@ -10,6 +10,11 @@ name: Freshness (live drift checks)
 # Every verifier runs through .github/scripts/freshness-step.sh, which owns that
 # mapping. Don't read `$?` in a step: tests/check-resources.sh fails the PR if a
 # `--live` command is not the one handed to the helper after `--`.
+#
+# Every skills/*/scripts/ verifier with the --offline/--live split needs a step
+# here: tests/check-resources.sh fails the PR otherwise. Keep the verifier's path
+# on the `-- <cmd>` line itself. A deliberate exclusion goes in that script's
+# __fv_exempt list, with its reason.
 
 on:
   schedule:
@@ -211,6 +216,64 @@ jobs:
             --drift "boat-ops drift - boat changed a published rate, plan limit, retention period or security default, or dropped a CLI flag the skill relies on; re-read the page named in the finding, then fix assets/boat-facts.json, the prose and the Facts verified date together" \
             --unavailable "boat-ops live check unreachable (docs.boat.dev), or a page lost its title line - skipped" \
             -- python skills/boat-ops/scripts/check-boat-facts.py --live
+
+      - name: cloudflare-ops Wrangler major vs npm registry
+        run: |
+          bash .github/scripts/freshness-step.sh --name cloudflare-ops \
+            --drift "cloudflare-ops drift - wrangler is gone from npm or shipped a major past v4; re-verify assets/cloudflare-facts.json and the prose (config + deploy advice moves with the major)" \
+            --unavailable "cloudflare-ops live check unreachable (npm registry) - skipped" \
+            -- python skills/cloudflare-ops/scripts/check-cloudflare-facts.py --live
+
+      - name: mcp-ops SDK packages vs npm + PyPI, spec URL still answers
+        run: |
+          bash .github/scripts/freshness-step.sh --name mcp-ops \
+            --drift "mcp-ops drift - an MCP SDK package is gone, a tracked SDK (@modelcontextprotocol/server, /client, /sdk, mcp, fastmcp) shipped a new major, or the spec URL stopped answering 200; re-verify assets/mcp-facts.json and the prose" \
+            --unavailable "mcp-ops live check unreachable (npm / PyPI / modelcontextprotocol.io) - skipped" \
+            -- python skills/mcp-ops/scripts/check-mcp-facts.py --live
+
+      - name: migrate-ops migration targets vs latest stable lines (endoflife.date, npm)
+        run: |
+          bash .github/scripts/freshness-step.sh --name migrate-ops \
+            --drift "migrate-ops drift - a documented migration target (React, Laravel, Python, Node.js, TypeScript, Go, PHP) lags the latest stable line; update SKILL.md and assets/migrate-facts.json together" \
+            --unavailable "migrate-ops live check unreachable (endoflife.date / npm registry) - skipped" \
+            -- python skills/migrate-ops/scripts/check-migrate-facts.py --live
+
+      - name: react-ops packages vs npm registry (React + ecosystem majors)
+        run: |
+          bash .github/scripts/freshness-step.sh --name react-ops \
+            --drift "react-ops drift - a package's latest npm major moved past the documented major, or a package is gone; re-verify assets/react-facts.json and the prose" \
+            --unavailable "react-ops live check unreachable (npm registry) - skipped" \
+            -- python skills/react-ops/scripts/check-react-facts.py --live
+
+      - name: rust-ops crates vs crates.io (tokio/axum/serde majors)
+        run: |
+          bash .github/scripts/freshness-step.sh --name rust-ops \
+            --drift "rust-ops drift - a core crate's latest stable major on crates.io moved past the documented major; re-verify assets/rust-facts.json and the prose" \
+            --unavailable "rust-ops live check unreachable (crates.io) - skipped" \
+            -- python skills/rust-ops/scripts/check-rust-facts.py --live
+
+      - name: tailwind-ops packages vs npm registry (tailwindcss + @tailwindcss/* majors)
+        run: |
+          bash .github/scripts/freshness-step.sh --name tailwind-ops \
+            --drift "tailwind-ops drift - tailwindcss or an @tailwindcss package shipped a major past the documented one, or a package is gone; re-verify assets/tailwind-facts.json and the v4 prose" \
+            --unavailable "tailwind-ops live check unreachable (npm registry) - skipped" \
+            -- python skills/tailwind-ops/scripts/check-tailwind-facts.py --live
+
+      - name: vue-ops packages vs npm registry (Vue, Nuxt + ecosystem majors)
+        run: |
+          bash .github/scripts/freshness-step.sh --name vue-ops \
+            --drift "vue-ops drift - a package's latest npm major moved past the documented major, or a package is gone; re-verify assets/vue-facts.json and the prose" \
+            --unavailable "vue-ops live check unreachable (npm registry) - skipped" \
+            -- python skills/vue-ops/scripts/check-vue-facts.py --live
+
+      - name: pypi-ops publish workflow SHA pins vs their version tags
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bash .github/scripts/freshness-step.sh --name pypi-ops \
+            --drift "pypi-ops drift - an action pin in assets/publish.yml no longer matches the tag its # vX comment names (retagged or stale), or lost its SHA pin or comment; re-pin to the tag's current commit" \
+            --unavailable "pypi-ops action-pin live check unreachable or rate-limited (GitHub API) - skipped" \
+            -- python skills/pypi-ops/scripts/check-action-pins.py --live skills/pypi-ops/assets/publish.yml
 
       - name: GitHub Action refs still resolve
         env:

@@ -5,13 +5,14 @@
 This is **claude-mods** - a collection of custom extensions for Claude Code. Human install
 and usage live in [README.md](README.md); this file is for agents working on the repo.
 - **3 expert agents** for pure context-isolation/worker roles (git-agent, firecrawl-expert, project-organizer) - every domain-knowledge agent became an `-ops` skill (v3.0, skills-first)
-- **3 commands** for session management and git orchestration (/sync, /save, /git-ops)
+- **4 commands** for session management, git orchestration and wave coordination (/sync, /save, /git-ops, /conduct)
 - **113 skills** for CLI tools, patterns, workflows and development tasks. Two routers come
   first when a family is ambiguous: `parallel-ops` (fleet-ops, fleet-worker, fleetflow,
   loop-ops, iterate, spawn) and `figma-ops` (the Figma MCP skills). README.md lists them all
 - **13 output styles** for response personality (Vesper, Spartan, Mentor, Executive, Pair, Atlas, Coach, Harbour, Meridian, Noir, Roast, Sage, Scout)
-- **15 hooks**: linting, formatting, dangerous-command warnings, uv enforcement,
-  supply-chain advisories, hidden-Unicode scans, config and worktree guards, a peer-writer
+- **17 hooks**: linting, formatting, dangerous-command warnings, uv enforcement,
+  supply-chain advisories, a TLS-verification guard pair (asks before a command turns
+  verification off, advises on code that does), hidden-Unicode scans, config and worktree guards, a peer-writer
   guard and touched-files ledger, pmail notifications, an opt-in WorktreeCreate/Remove pair
   that honours `WORKTREE_ROOT`. Plugin hooks.json wires the security set
 - **Pigeon** inter-session messaging (`pigeon send/read/reply`) - SQLite-backed pmail at `~/.claude/pmail.db`
@@ -119,6 +120,10 @@ On "INIT:" message at session start:
   file colocated in the same `tests/` dir — editing the skill's output format
   without regenerating the fixture is a silent, not loud, break (diff the fixture,
   don't just eyeball the code change).
+- **The root `.gitignore` drops `.env*` test fixtures**: its `.env.*` pattern makes
+  `git add` silently skip a fixture named like `.env.example`, so a suite passes where the
+  file is on disk and fails for everyone else (push-preflight refuses such paths too).
+  Store them as `dotenv*.fx` and materialise them at test time (package-manager-ops does).
 - **Skill frontmatter: two parsers disagree.** Claude Code reads its own fields
   (`when_to_use`, `argument-hint`, `effort`, ...) ONLY at the top level, so moving them
   under `metadata` to "satisfy the spec" silently disables them. The spec's validator
@@ -151,6 +156,9 @@ On "INIT:" message at session start:
   nothing). Set `MSYS_NO_PATHCONV=1` for such calls, and never let a gate swallow a
   tool's exit-2 error — that combination once made the agnostic gate pass while
   scanning nothing.
+- **Git for Windows' grep 3.0 aborts on `-iF` in the C locale** (SIGABRT, exit 134,
+  any pattern), so `LC_ALL=C grep -iF ... 2>/dev/null` reads as "no match". Use
+  `-iE` on ERE-quoted text, or `-F` alone (sessions.sh `named` does).
 - **`done < <(producer)` never sees the producer's exit status**: a producer that dies
   part-way just ends the loop, and the suite passes on fewer checks (52 of 100 cases once
   vanished behind "164 passed, 0 failed"). Capture, check, loop: `rc=0;
@@ -161,6 +169,9 @@ On "INIT:" message at session start:
   a suite that runs Windows-only scripts whenever `command -v pwsh` succeeds goes
   red on Linux CI (windows-ops, supply-chain-defense). Gate runtime checks on the
   host: `[Environment]::OSVersion.Platform` = `Win32NT` (works in 5.1 and 7).
+- **PowerShell files stay ASCII.** Windows PowerShell 5.1 reads a BOM-less `.ps1` in the
+  ANSI code page, so one em dash or box glyph breaks the parse, and pwsh 7 hides it. Use an
+  ASCII stand-in, or `[char]0x2500` for an output glyph; `tests/check-ps51-parse.sh` gates it.
 - **The plugin name `claude-mods` is reserved** by Claude Code 2.1.287+ (Claude Mods).
   `claude plugin validate` rejects it, so call the validator only through
   `tests/plugin-validate.sh`, which waives that one error until 2026-10-31 and fails on
@@ -176,7 +187,7 @@ On "INIT:" message at session start:
 ## Testing
 
 ```bash
-just check        # THE gate: validate + spec + doc-drift + agnostic + hook contracts + resource contracts + skill size + reference contents (both warn-only) + skill suites + e2e suites + procsub-guard mutations
+just check        # THE gate: validate + spec + doc-drift + agnostic + hook contracts + resource contracts + PowerShell 5.1 parse + skill size + reference contents (both warn-only) + skill suites + e2e suites + procsub-guard mutations
 just check-fast   # same minus the behavioural suites (per-skill and e2e)
 ```
 

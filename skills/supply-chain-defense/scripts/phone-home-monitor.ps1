@@ -108,7 +108,7 @@ if (-not $LogPath) {
     $LogPath = Join-Path (Join-Path $logBase 'supply-chain-defense') 'phone-home.jsonl'
 }
 
-# ── IOC catalog ──────────────────────────────────────────────────────────────
+# -- IOC catalog --------------------------------------------------------------
 $iocPath = if ($Ioc) { $Ioc } else { Join-Path (Join-Path (Split-Path -Parent $ScriptDir) 'assets') 'network-ioc.json' }
 $iocDomains = @(); $iocIps = @()
 if (Test-Path $iocPath) {
@@ -128,7 +128,7 @@ if (Test-Path $iocPath) {
     exit $EXIT_NOT_FOUND
 }
 
-# ── classification constants ────────────────────────────────────────────────
+# -- classification constants ------------------------------------------------
 $Interpreters = @('node', 'node.exe', 'python', 'python.exe', 'pythonw.exe', 'python3', 'deno', 'deno.exe', 'bun', 'bun.exe')
 $PackageManagers = @('npm', 'npm.cmd', 'npx', 'npx.cmd', 'pnpm', 'pnpm.cmd', 'yarn', 'yarn.cmd', 'bun', 'bun.exe',
                      'pip', 'pip.exe', 'pip3.exe', 'uv', 'uv.exe', 'cargo', 'cargo.exe', 'composer', 'composer.bat',
@@ -170,16 +170,22 @@ function Get-DomainAgeDays([string]$hostname) {
     return $age
 }
 
-# ── rules engine ─────────────────────────────────────────────────────────────
+# -- rules engine -------------------------------------------------------------
+# Stands in for `$Value ?? $Default`. Windows PowerShell 5.1 has no `??` (it arrived in
+# 7.0) and fails to parse the whole file on one, and this script must run there - it is
+# the default shell on the machines it audits (tests/check-ps51-parse.sh parses it with
+# 5.1). Every caller passes a string or $null, so a function's array unrolling never bites.
+function Get-ValueOrDefault($Value, $Default) { if ($null -ne $Value) { $Value } else { $Default } }
+
 function Get-Findings($conn) {
     # $conn: processName, path, pid, parentChain (string[]), remoteAddress,
     #        remotePort, remoteHost, signed
     $f = [System.Collections.Generic.List[object]]::new()
-    $name = ($conn.processName ?? '').ToLower()
-    $path = $conn.path ?? ''
+    $name = (Get-ValueOrDefault $conn.processName '').ToLower()
+    $path = Get-ValueOrDefault $conn.path ''
     $remote = "$($conn.remoteAddress):$($conn.remotePort)"
     $isInterp = $Interpreters -contains $name
-    $parentHit = @($conn.parentChain | Where-Object { $PackageManagers -contains ($_ ?? '').ToLower() })
+    $parentHit = @($conn.parentChain | Where-Object { $PackageManagers -contains (Get-ValueOrDefault $_ '').ToLower() })
     $isPrivate = Test-PrivateIp $conn.remoteAddress
 
     $add = { param($sev, $rule, $detail)
@@ -194,7 +200,7 @@ function Get-Findings($conn) {
     }
 
     # IOC endpoints match even on private/odd destinations
-    $hostLower = ($conn.remoteHost ?? '').ToLower()
+    $hostLower = (Get-ValueOrDefault $conn.remoteHost '').ToLower()
     foreach ($d in $iocDomains) {
         if ($hostLower -and ($hostLower -eq $d.value -or $hostLower.EndsWith('.' + $d.value))) {
             & $add 'high' 'ioc-endpoint' "destination matches IOC catalog entry $($d.id) ($($d.value))"
@@ -228,7 +234,7 @@ function Get-Findings($conn) {
     return $f
 }
 
-# ── capture sources ──────────────────────────────────────────────────────────
+# -- capture sources ----------------------------------------------------------
 # A capture source that fails must never look like a quiet machine. Each reader
 # records its failure here and returns nothing; the mode then exits 5 (access
 # refused - elevation fixes it) or 7 (source broken) instead of reporting an empty
@@ -366,7 +372,7 @@ function Get-SysmonConnections {
         $procId = [int]$d['ProcessId']
         $hostName = $d['DestinationHostname']
         $out.Add([pscustomobject]@{
-            processName = Split-Path -Leaf ($d['Image'] ?? '')
+            processName = Split-Path -Leaf (Get-ValueOrDefault $d['Image'] '')
             path = $d['Image']; pid = $procId
             parentChain = @(Get-ParentChain $procId $procMap)
             remoteAddress = $d['DestinationIp']; remotePort = [int]$d['DestinationPort']
@@ -377,7 +383,7 @@ function Get-SysmonConnections {
     return $out
 }
 
-# ── output ───────────────────────────────────────────────────────────────────
+# -- output -------------------------------------------------------------------
 function Write-Report($findings, [string]$source, [int]$connCount) {
     $counted = @($findings | Where-Object { $_.severity -in @('high', 'medium') -or ($Strict -and $_.severity -eq 'low') })
     if ($Json) {
@@ -402,7 +408,7 @@ function Write-Report($findings, [string]$source, [int]$connCount) {
     if ($counted.Count -gt 0) { exit $EXIT_FINDING } else { exit $EXIT_OK }
 }
 
-# ── log ring buffer (2-file ring: .jsonl + .jsonl.1) ─────────────────────────
+# -- log ring buffer (2-file ring: .jsonl + .jsonl.1) -------------------------
 function Write-FindingLog($finding) {
     $dir = Split-Path -Parent $LogPath
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
@@ -412,7 +418,7 @@ function Write-FindingLog($finding) {
     Add-Content -Path $LogPath -Value ($finding | ConvertTo-Json -Compress -Depth 6)
 }
 
-# ── modes ────────────────────────────────────────────────────────────────────
+# -- modes --------------------------------------------------------------------
 if ($Status) {
     $sysmonState = Get-SysmonState
     $wfp = 'unknown (auditpol requires admin)'

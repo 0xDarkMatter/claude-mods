@@ -211,6 +211,17 @@ a bare `exit 0`, so such a crash passed green every week. For verifier authors, 
 exit `0` only after the comparison has run. [`tests/check-resources.sh`](../tests/check-resources.sh)
 pins the helper's mapping and fails a PR whose freshness step reads `$?` itself.
 
+**A new verifier is not scheduled until you add its step.** Nothing runs a `--live` mode
+by discovery: give it a step in `freshness.yml`, with its own `--drift` and `--unavailable`
+messages, and pass any token or tool it needs (as the steps for its neighbours do).
+`tests/check-resources.sh` finds every `skills/*/scripts/` file that names both
+`--offline` and `--live` and fails the PR when no step runs it, so a verifier can no
+longer ship without its weekly check, as eight once did. A verifier that should not run
+weekly (it needs a paid key, or checks the local machine rather than a shipped fact)
+goes in that script's `__fv_exempt` list with its reason. The gate also fails an
+exemption with no reason, for a file that is gone or for a verifier a step runs anyway,
+and a step naming a script that is not on disk.
+
 ---
 
 ## 8. The resource-scaffold checklist

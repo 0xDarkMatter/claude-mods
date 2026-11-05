@@ -10,16 +10,16 @@
     total) and flags individual components that exceeded the system's
     "fast boot" threshold:
 
-      Event 100 — "Windows successfully booted in X ms"
+      Event 100 - "Windows successfully booted in X ms"
                   Contains: BootTime, BootMainPathTime, BootPostBootTime,
                   IsDegradation, IncidentTime
-      Event 101 — "App took longer than usual to start"
-      Event 102 — "Driver took longer than usual to start"
-      Event 103 — "Service took longer than usual to start"
+      Event 101 - "App took longer than usual to start"
+      Event 102 - "Driver took longer than usual to start"
+      Event 103 - "Service took longer than usual to start"
 
     Reading this log requires Administrator. Without admin, the script
     falls back to a kernel-event-based inference using Event 12 (kernel
-    start) and Event 6005 (event log service started) — coarser but
+    start) and Event 6005 (event log service started) - coarser but
     still useful for trend detection.
 
 .PARAMETER LastN
@@ -58,9 +58,9 @@ $boots = New-Object System.Collections.Generic.List[hashtable]
 $slowComponents = New-Object System.Collections.Generic.List[hashtable]
 $source = 'diagnostics-perf'
 
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 # Primary: Diagnostics-Performance log (requires admin)
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 try {
     $perfEvents = Get-WinEvent -LogName 'Microsoft-Windows-Diagnostics-Performance/Operational' `
         -ErrorAction Stop |
@@ -89,7 +89,7 @@ try {
         })
     }
 
-    # Slow components — events 101/102/103
+    # Slow components - events 101/102/103
     foreach ($e in $perfEvents | Where-Object { $_.Id -in @(101, 102, 103) }) {
         $kind = switch ($e.Id) { 101 {'app'} 102 {'driver'} 103 {'service'} }
         # Property layout varies by event id; the friendly name + delay are
@@ -120,11 +120,11 @@ catch {
         Write-Log -Level WARN -Message "Diagnostics-Performance log unavailable: $_"
     }
 
-    # ─────────────────────────────────────────────────────────────────
+    # -----------------------------------------------------------------
     # Fallback: kernel event 12 (start) + 6005 (event log started)
-    # Gap = approximate "kernel → services running" time. Not full boot
+    # Gap = approximate "kernel -> services running" time. Not full boot
     # to usable desktop but a useful trend metric.
-    # ─────────────────────────────────────────────────────────────────
+    # -----------------------------------------------------------------
     try {
         $kernelStarts = Get-WinEvent -FilterHashtable @{
             LogName='System'; Id=12; ProviderName='Microsoft-Windows-Kernel-General'
@@ -157,9 +157,9 @@ catch {
 # Trim to LastN
 $boots = $boots | Sort-Object { [DateTime]$_.time } -Descending | Select-Object -First $LastN
 
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 # Output
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 if ($Json) {
     @{
         source         = $source
@@ -188,7 +188,7 @@ $avg = if ($mainSecs.Count -ge 1) {
 $sourceLabel = if ($source -eq 'diagnostics-perf') { 'full data' } else { 'fallback mode' }
 Write-TermLine (New-TermPanelOpen -Brand 'windows-ops' -Name 'windows-ops' -Subtitle 'boot-perf' -Indicator $sourceLabel)
 Write-TermLine (New-TermPanelVert)
-Write-TermLine (New-TermSummary -Text "$($boots.Count) boots · median ${median}s · avg ${avg}s")
+Write-TermLine (New-TermSummary -Text "$($boots.Count) boots | median ${median}s | avg ${avg}s")
 if (-not $elevated -and $source -ne 'diagnostics-perf') {
     Write-TermLine (New-TermHint -Text 'run as Administrator for full Diagnostics-Performance log (boot phases + slow-component flags)')
 }
@@ -202,13 +202,13 @@ for ($i = 0; $i -lt $boots.Count; $i++) {
     $b = $boots[$i]
     $t = ([DateTime]$b.time).ToString('yyyy-MM-dd HH:mm')
     $secVal = if ($b.bootMainSec -gt 0) { $b.bootMainSec } else { 0 }
-    # Capacity pip bar: relative to 20-second ceiling (anything ≥80% = red)
+    # Capacity pip bar: relative to 20-second ceiling (anything >=80% = red)
     $bar = New-TermPipBar -Type capacity -Filled ([int]($secVal * 5)) -Total 100
     $meta = "${secVal}s"
     if ($b.degraded) { $meta += ' [DEGRADED]' }
     Write-TermLine (New-TermLeaf -Name $t -Rail $bar -Meta $meta -IsLast:($i -eq $idxLast) -NameColWidth 20)
     if ($secVal -eq $slowestSec -and $boots.Count -gt 3 -and $secVal -gt 0) {
-        Write-TermLine (New-TermAlert -Severity warning -Text "slowest in window · ${secVal}s vs median ${median}s")
+        Write-TermLine (New-TermAlert -Severity warning -Text "slowest in window | ${secVal}s vs median ${median}s")
     }
 }
 Write-TermLine (New-TermPanelVert)
@@ -224,7 +224,7 @@ if ($recentSlow) {
         $when = ([DateTime]$s.time).ToString('MM-dd HH:mm')
         Write-TermLine (New-TermLeaf -Name "[$($s.kind)] $($s.name)" -Meta $delay -Age $when -IsLast:($i -eq $idxLast) -NameColWidth 36)
     }
-    Write-TermLine (New-TermAlert -Severity warning -Text 'repeat offenders → safe-disable-startup.ps1 (apps) or Set-Service -StartupType Manual (services)')
+    Write-TermLine (New-TermAlert -Severity warning -Text 'repeat offenders -> safe-disable-startup.ps1 (apps) or Set-Service -StartupType Manual (services)')
     Write-TermLine (New-TermPanelVert)
 }
 

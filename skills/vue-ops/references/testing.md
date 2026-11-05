@@ -9,10 +9,16 @@ Vue 3 testing with Vitest, Vue Test Utils, Pinia, Vue Router, MSW, Playwright, a
 ### Installation
 
 ```bash
-npm install -D vitest @vue/test-utils happy-dom @vitest/coverage-v8
+npm install -D vitest vite @vitejs/plugin-vue @vue/test-utils @pinia/testing happy-dom @vitest/coverage-v8
 # Or jsdom:
 npm install -D jsdom
 ```
+
+Vitest 5 (5.0.0, 2026-09-03) requires Node.js `>=22.12.0` and Vite `>=6.4.0`, and
+`vite` is now a required peer (Yarn won't install it for you).
+`@vitest/coverage-v8` peers the exact same Vitest version, so upgrade the two together
+([migration guide](https://vitest.dev/guide/migration)). `@pinia/testing` 2.x is the
+line for Pinia 4.
 
 ### vitest.config.ts
 
@@ -62,6 +68,21 @@ config.global.stubs = {
 // Suppress Vue warnings in tests (optional — often better to fix them)
 // config.global.config.warnHandler = () => null
 ```
+
+### Vitest 5 changes that bite Vue suites
+
+From the [Vitest 5 migration guide](https://vitest.dev/guide/migration):
+
+| Change | What breaks | Do |
+|--------|-------------|----|
+| `clearMocks` defaults to `true` | Call history recorded in a setup file, at module top level or in `beforeAll` is cleared before the asserting test runs; implementations survive | Record calls inside the test, or set `clearMocks: false` |
+| Unawaited async assertions fail | `expect(store.fetch()).resolves.toBe(...)` without `await` fails the test (v4 only warned) | `await expect(...).resolves...` |
+| Hoisted mocks must be top level | `vi.mock('@/api')` inside a `describe` or function now throws | Move it to module scope; `vi.doMock` is not hoisted |
+| `vitest-browser-vue` `render` is async | `const screen = render(Comp)` returns a promise | `const screen = await render(Comp)` |
+| Browser-mode `toHaveTextContent` is exact | Partial and RegExp matches fail | `toMatchTextContent` for partial or regex |
+| `-t` matches the `>`-joined name | `vitest -t 'UserCard renders'` stops matching | `vitest -t 'UserCard > renders'` |
+| Artifacts under `.vitest/` | `json`/`junit` reporters write files, HTML report is `.vitest/index.html` | `.gitignore` `.vitest`; read the file, or `[['json', { stdout: true }]]` |
+| Inline `test.projects` inherit the root config | A project that relied on *not* getting the root `plugins: [vue()]` or `setupFiles` now gets them (arrays are appended) | `extends: false` on that project |
 
 ### Auto-imports with unplugin-auto-import
 
@@ -843,5 +864,5 @@ describe('useMyNuxtComposable', () => {
 | Testing implementation details | Brittle tests that break on refactor | Test behavior and output, not internal refs or methods |
 | Missing `setActivePinia` in store tests | Pinia has no active instance | Call `setActivePinia(createPinia())` in `beforeEach` |
 | Forgetting `router.isReady()` | Navigation not complete | Await `router.isReady()` after `router.push()` in tests |
-| Not cleaning up global mocks | Tests pollute each other | Use `afterEach(() => vi.restoreAllMocks())` or `vi.resetAllMocks()` |
+| Not cleaning up global mocks | Tests pollute each other | Vitest 5 clears call history before each test, but `vi.spyOn(global, 'fetch')` and mocked implementations persist: `afterEach(() => vi.restoreAllMocks())` |
 | Querying by text that changes | Brittle to copy changes | Use `data-testid` attributes or ARIA roles for stable selectors |

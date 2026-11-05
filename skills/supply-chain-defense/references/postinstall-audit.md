@@ -51,7 +51,12 @@ trees are full of `eval` and base64 — see the false-positive note below):
 | `eval-base64` | low | `eval`/`Function` **and** base64 decode co-occurring in one small non-minified file |
 
 "Exfil endpoint" = `webhook.site`, Discord/Telegram webhooks, paste sites,
-`transfer.sh`, OAST/interactsh collaborators, or a raw-IP URL.
+`transfer.sh`, OAST/interactsh collaborators, or a raw-IP URL other than loopback
+(`127.0.0.0/8`) or the unspecified address (`0.0.0.0`). Those two never leave the
+machine and turn up in dev-server binds and origin allow-lists, so they don't count:
+`mcp` 1.30.0 was a HIGH cred-exfil only because its `http://127.0.0.1:*` allow-list
+sat beside its own `mcp install` writing `claude_desktop_config`. A file that names
+loopback and a public raw IP still counts.
 
 Default `--min-severity medium` reports the high/medium tiers and stays silent on the
 low informational ones. Drop to `--min-severity low` (or use `--json`) to see everything.
@@ -86,13 +91,23 @@ its findings — the cache speeds the scan, it does not hide results.
 | 0 | clean — no findings at/above `--min-severity` |
 | 2 | usage error (bad flag, no existing root) |
 | 3 | no root directory exists |
-| 5 | `--deep` requested but GuardDog/semgrep absent → **loud skip, heuristics still ran** (never a silent false-clean) |
-| 7 | `--live` only: the registry was unreachable (advisory, not a finding) |
-| 10 | one or more findings at/above `--min-severity` |
+| 5 | a PyPI package was **not scanned**: its code could not be located (below). Never a pass |
+| 10 | one or more findings at/above `--min-severity` (wins over 5) |
 
-`7` is deliberately distinct from `10`: a network blip during `--live` must never read as
-"package is bad". This is the same staleness-verifier discipline as §7 of
-`docs/SKILL-RESOURCE-PROTOCOL.md`.
+`--deep` without GuardDog/semgrep is a loud one-line skip that leaves the exit code alone
+(the heuristics still ran). A `--live` registry outage has no code of its own: see Exit
+precedence under --live. A network blip must never read as "package is bad", the same
+staleness-verifier discipline as §7 of `docs/SKILL-RESOURCE-PROTOCOL.md`.
+
+**Locating PyPI code.** Each `*.dist-info` leads to its code through `top_level.txt` (a
+package dir or a single-file module) or, failing that, `RECORD`, which most modern
+wheels carry without a `top_level.txt`. A PEP 420 namespace dir shared by several dists
+(protobuf's `google/`) is narrowed to the children this dist's RECORD lists. A dist-info
+neither file leads anywhere is **unscanned**: stderr names it (`ERROR: N package(s) NOT
+scanned`), the JSON carries it in `meta.unscanned` (`package`, `path`, `reason`), the
+summary counts it, and the run exits `5` with no `clean:` line. Until 2026-10 such
+packages were dropped without a word, so a venv of 93 dist-infos reported
+"45 packages (45 scanned)".
 
 ## --deep (GuardDog confirmation)
 

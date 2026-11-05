@@ -34,7 +34,7 @@ Write-Host "Installing portless@$Version with pre-install audit" -ForegroundColo
 Write-Host ("=" * 60)
 Write-Host ""
 
-# Step 1 — Inspect tarball without installing
+# Step 1 - Inspect tarball without installing
 $tmp = Join-Path $env:TEMP "portless-inspect-$(Get-Random)"
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 
@@ -77,14 +77,14 @@ try {
         Write-Warning "Package has install scripts: $($foundInstallScripts -join ', ')"
         Write-Warning "Review these before installing!"
     } else {
-        Write-Host "  ✓ No install scripts (preinstall/install/postinstall/prepare)"
+        Write-Host "  [ok] No install scripts (preinstall/install/postinstall/prepare)"
     }
 
     # Check runtime dependencies (should be empty for portless)
     if ($pkgJson.dependencies -and $pkgJson.dependencies.PSObject.Properties.Count -gt 0) {
         Write-Warning "Package has runtime deps: $($pkgJson.dependencies.PSObject.Properties.Name -join ', ')"
     } else {
-        Write-Host "  ✓ Zero runtime dependencies"
+        Write-Host "  [ok] Zero runtime dependencies"
     }
 
     # Scan for known IOC strings from recent attacks
@@ -112,13 +112,13 @@ try {
     if ($hits) {
         throw "IOC MATCH FOUND - aborting:`n$($hits -join "`n")"
     }
-    Write-Host "  ✓ Zero IOC matches"
+    Write-Host "  [ok] Zero IOC matches"
 
-    # Step 5 — Install via npm
+    # Step 5 - Install via npm
     Write-Host "[5/6] npm install -g portless@$Version..." -ForegroundColor Yellow
     npm install -g portless@$Version 2>&1 | Tee-Object -Variable npmOutput | Out-Host
 
-    # Step 6 — Verify installed version
+    # Step 6 - Verify installed version
     Write-Host "[6/6] Verifying installed version..." -ForegroundColor Yellow
     $installed = (portless --version).Trim()
     if ($installed -ne $Version) {

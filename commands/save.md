@@ -1,5 +1,5 @@
 ---
-description: "Save session state - persist tasks (via TaskList), plan content, and git context. Complementary to /sync."
+description: "Save session state - persist tasks (via TaskList), plan content, and git context. --pause stops cleanly: wip commit, resume note, nothing pushed. Complementary to /sync."
 ---
 
 # Save - Session State Persistence
@@ -15,6 +15,7 @@ $ARGUMENTS
 - No args: Save current state (tasks, plan, git context)
 - `"notes"`: Save with descriptive notes
 - `--archive`: Archive current plan to `PLAN-<date>.md`, then save fresh
+- `--pause`: Clean stop that a cold session can resume (see Pause Mode below). Takes notes too: `/save --pause "notes"`
 
 ## What It Saves
 
@@ -25,6 +26,7 @@ $ARGUMENTS
 | Git context | `git status/log` | `.claude/session-cache.json` |
 | User notes | Command argument | `.claude/session-cache.json` |
 | Human-readable summary | Generated | `.claude/claude-progress.md` |
+| Pause note (`--pause` only) | Pause Mode, P4 | `pause` block in `.claude/session-cache.json` + top of `.claude/claude-progress.md` |
 
 ## Execution
 
@@ -247,6 +249,7 @@ even without running `/sync`.
 - **Step**: [current plan step or "N/A"]
 - **Session**: [session_id] (resume with `claude --resume <id>`)
 - **PR**: [#number if linked, omit line if none]
+- **Paused**: [first action + wip commit SHA, only after `--pause`]
 - **Notes**: [user notes if provided, omit line if none]
 - **Restore**: Run `/sync` to restore full task state
 ```
@@ -308,6 +311,132 @@ Files written:
 
 ---
 
+## Pause Mode: `/save --pause`
+
+A clean stop that a fresh session, with none of this conversation, can pick up from.
+Use it when the user says pause, stop for now or that they're going offline, or when
+context compaction is about to drop the working state. **Explicit only:** being told to
+carry on, even overnight, is never a pause, and a plain `/save` never makes a commit.
+
+Run P1-P4, then the normal Steps 0-5 (Step 4 also writes the `pause` block).
+
+### P1: Reach an atomic boundary
+
+Finish the step in flight, or undo it if finishing would need a new decision. Start
+nothing new. Never stop part-way through an edit (no file left half-changed) or part-way
+through a git operation:
+
+```bash
+# Per-worktree git dir: in a linked worktree these markers live there, not in the shared one
+g=$(git rev-parse --git-dir)
+for f in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD BISECT_LOG; do
+  [ -e "$g/$f" ] && echo "in progress: $f"
+done
+```
+
+Complete an operation that is one conflict-free step from done. Otherwise abort it
+(`git rebase --abort`, `git merge --abort`, `git cherry-pick --abort`,
+`git revert --abort`, `git bisect reset`), which puts the branch back where it was before
+the operation, and record in the resume note what the abort discarded.
+
+### P2: Stop or record nested agents
+
+Stop every subagent, background agent and workflow this session started. If one has to
+keep running (a long test run the user wants), leave it and record its id, what it is
+doing and where its output lands. Sessions you didn't start are not yours to stop.
+
+### P3: Make the work durable with a `wip:` commit
+
+Only when `git status --porcelain` is non-empty:
+
+- **Branch check first.** Never commit on the default branch (`main`, `master`, or what
+  `git symbolic-ref --short refs/remotes/origin/HEAD` names) or on a detached HEAD. There,
+  leave the tree as it is and list the uncommitted files in the resume note as NOT durable.
+- **Stage by path** the files this session changed (`git add -- <paths>`), never
+  `git add -A` or `git add .`: those sweep in nested worktrees, scratch files and secrets.
+  List untracked files you didn't create rather than adding them.
+- **Commit** as `wip: <what was in flight>`. When the work doesn't build or pass yet
+  (tests fail, a refactor is half-done), add one body line saying so. Hooks run as
+  normal: never `--no-verify`. If a hook refuses the commit, leave the tree dirty and
+  record why.
+- **Not a stash.** Every worktree of a repo shares one stash stack, so another session
+  can pop your entry; a commit on your own branch can't be taken that way.
+
+`wip:` is deliberately outside the Conventional Commits types: it flags a commit to reword
+or squash before the branch lands, so don't "correct" it to `feat:` or `chore:`.
+
+**Nothing irreversible while pausing:** no push, PR, merge, tag, release or deploy, and no
+deleting branches, worktrees or files. Something already out before the pause (an open PR)
+stays as it is; mention it in the note.
+
+### P4: Write the resume note
+
+**Line 1 of `.claude/claude-progress.md` is the exact first action to take on resume**: a
+command or an edit with its path, concrete enough that a cold session can do it before
+reading anything else. "Run `npm test -- oauth` and fix the redirect assertion in
+src/auth/callback.ts" works; "Continue the auth work" doesn't.
+
+Below that line, ahead of the usual progress content:
+
+| Section | Contents |
+|---------|----------|
+| **Intent** | The goal, in one or two lines |
+| **Stopped at** | The boundary reached in P1, and anything aborted |
+| **Verified** | Each claim with the command that checked it this session; label the rest inferred |
+| **Only in context** | Decisions, hypotheses and dead ends not yet written anywhere - this is their last chance |
+| **Durable state** | The `wip:` commit SHA and a clean tree, or which files are NOT durable and why |
+| **Agents** | Stopped, or still running (id, output path) |
+| **Next** | The steps after the first action |
+| **Gotchas** | Traps hit this session that would cost the next one time |
+
+Link an existing trail (a plan doc, a lane log, a PR) instead of copying it. Paths, not
+diffs.
+
+The same facts go into `.claude/session-cache.json` as a `pause` block:
+
+```json
+"pause": {
+  "first_action": "Run `npm test -- oauth` and fix the redirect assertion in src/auth/callback.ts",
+  "stopped_at": "Callback handler done; rebase onto main not started",
+  "wip_commit": "e4f5a6b",
+  "tree": "clean",
+  "agents": [],
+  "claims": [
+    { "claim": "OAuth config landed on main", "check": "git merge-base --is-ancestor abc123f main", "basis": "measured" },
+    { "claim": "Only the redirect test fails", "check": "npm test -- oauth", "basis": "measured" }
+  ]
+}
+```
+
+- `first_action` is identical to line 1 of the progress file.
+- `tree` is `clean`, or `dirty: <why it wasn't committed>`.
+- `basis` is `measured` (checked this session) or `inferred`. Each `check` is a command
+  `/sync` can re-run on the real artifact.
+- **The block is optional and additive, so the file stays `"version": "3.1"`.** Readers
+  detect a pause by the block being present, never by the version. A plain `/save`
+  rewrites the cache without it.
+
+### Output
+
+Report a pause, not a wrap-up: where it stopped, what is on disk versus only in this
+conversation, the commit and tree state, and the first action.
+
+```
+Session paused
+
+| Category | Value |
+|----------|-------|
+| **Stopped at** | Callback handler done; rebase not started |
+| **Durable** | wip: e4f5a6b on feature/auth, tree clean |
+| **Agents** | 1 stopped |
+| **Claims** | 2 measured, 0 inferred |
+| **First action** | Run `npm test -- oauth` and fix the redirect assertion |
+
+Nothing pushed. Resume with: /sync
+```
+
+---
+
 ## Usage Examples
 
 ```bash
@@ -319,6 +448,9 @@ Files written:
 
 # Archive current plan and start fresh
 /save --archive
+
+# Clean stop before going offline or before compaction
+/save --pause "Half-way through the callback refactor"
 ```
 
 ---
@@ -365,6 +497,7 @@ Files written:
 ## Notes
 
 - **Non-destructive** - Never overwrites without archiving option
+- **Pause stays local** - `--pause` makes at most one local `wip:` commit; it never pushes
 - **Git-aware** - Captures branch, commit, uncommitted changes
 - **Human-readable** - Progress files work without Claude Code
 - Ensure `.claude/` directory exists (created if missing)

@@ -1,44 +1,69 @@
 {
-  "_comment": "Canonical fast-moving facts the mcp-ops skill encodes. scripts/check-mcp-facts.py asserts the skill prose still names these SDK packages + spec URL and still carries a dated currency note (--offline), and probes the npm/PyPI registries + the spec URL for drift (--live). Edit deliberately: a change here is a skill-content decision, not housekeeping.",
+  "_comment": "Canonical fast-moving facts the mcp-ops skill encodes. scripts/check-mcp-facts.py asserts the skill prose still names these SDK packages + spec URL and still carries a dated currency note (--offline), and probes the npm/PyPI registries + the spec URL for drift (--live). Edit deliberately: a change here is a skill-content decision, not housekeeping. 2026-10-22 refresh: spec 2026-07-28, Python SDK v2, FastMCP 4 and the TS SDK v2 package split - sources in references/v2-migration.md.",
   "schema": "claude-mods.mcp-ops.facts/v1",
-  "as_of": "2026-07-05",
+  "as_of": "2026-10-22",
   "spec": {
     "url": "https://modelcontextprotocol.io/specification/latest",
     "prose_token": "modelcontextprotocol.io/specification",
-    "_comment": "The MCP specification URL cited in See Also (moved off the spec. subdomain, which stopped resolving by 2026-07). --offline asserts the token is named in the skill prose; --live expects the URL to answer HTTP 200 (after redirects)."
+    "revision": "2026-07-28",
+    "_comment": "The MCP specification URL cited in See Also (moved off the spec. subdomain, which stopped resolving by 2026-07). --offline asserts the token is named in the skill prose; --live expects the URL to answer HTTP 200 (after redirects). 'revision' is informational: the newest spec revision the skill teaches (sessionless requests, server/discover, no server-to-client requests)."
   },
   "packages": {
+    "@modelcontextprotocol/server": {
+      "registry": "npm",
+      "role": "TypeScript SDK v2, server side (split out of the v1 @modelcontextprotocol/sdk monolith)",
+      "sampled_major": 2,
+      "track_major": true,
+      "prose_token": "@modelcontextprotocol/server",
+      "_comment": "What the TypeScript samples import (McpServer, registerTool, createMcpHandler, serveStdio from ./stdio). 2.3.1 on 2026-10-05; first 2.0.0 2026-07-27. A 3.x would be an API-break release warranting a skill review."
+    },
+    "@modelcontextprotocol/client": {
+      "registry": "npm",
+      "role": "TypeScript SDK v2, client side",
+      "sampled_major": 2,
+      "track_major": true,
+      "prose_token": "@modelcontextprotocol/client",
+      "_comment": "Used by the testing reference (Client, StreamableHTTPClientTransport). Versions in lock-step with @modelcontextprotocol/server."
+    },
     "@modelcontextprotocol/sdk": {
       "registry": "npm",
-      "role": "TypeScript SDK",
+      "role": "TypeScript SDK v1 monolith - still published on the 1.x line (1.32.1 on 2026-10-05); v2 lives in the split packages above",
       "sampled_major": 1,
       "track_major": true,
       "prose_token": "@modelcontextprotocol/sdk",
-      "_comment": "The official TS SDK. --live flags drift if the latest dist-tag leaves major 1 (a 2.x would be an API-break release warranting a skill review)."
+      "_comment": "Named in the skill as the v1 package to migrate from. Tracked at major 1: if it ever publishes a 2.x the split-package story in the skill needs a re-check."
+    },
+    "@modelcontextprotocol/codemod": {
+      "registry": "npm",
+      "role": "TypeScript SDK v1-to-v2 codemod (npx @modelcontextprotocol/codemod@latest v1-to-v2 .)",
+      "sampled_major": 2,
+      "track_major": false,
+      "prose_token": "@modelcontextprotocol/codemod",
+      "_comment": "Resolution-only check: a 404 means the migration command the skill teaches is gone."
     },
     "@modelcontextprotocol/inspector": {
       "registry": "npm",
-      "role": "MCP Inspector (dev/debug UI)",
-      "sampled_major": 0,
+      "role": "MCP Inspector (dev/debug UI + --cli / --tui)",
+      "sampled_major": 2,
       "track_major": false,
       "prose_token": "@modelcontextprotocol/inspector",
-      "_comment": "The interactive inspector invoked via `npx`. Only resolution is checked live (0.x versioning is chatty); a 404 means it was renamed/removed."
+      "_comment": "The interactive inspector invoked via `npx`; v2 line (2.12.0 on 2026-10-22, Node >=22.19). Only resolution is checked live; a 404 means it was renamed/removed."
     },
     "mcp": {
       "registry": "pypi",
-      "role": "Python SDK (FastMCP ships inside as mcp.server.fastmcp)",
-      "sampled_major": 1,
+      "role": "Python SDK (high-level MCPServer, formerly FastMCP; mcp.server.fastmcp removed in 2.0)",
+      "sampled_major": 2,
       "track_major": true,
       "prose_token": "mcp[cli]",
-      "_comment": "The official Python SDK on PyPI, installed via `uv add mcp[cli]`. --live flags drift if the latest release leaves major 1."
+      "_comment": "The official Python SDK on PyPI, installed via `uv add \"mcp[cli]\"`. 2.3.0 on 2026-10-02; 1.x is maintenance-only on the v1.x branch. --live flags drift if the latest release leaves major 2."
     },
     "fastmcp": {
       "registry": "pypi",
-      "role": "FastMCP high-level framework (gofastmcp.com)",
-      "sampled_major": 3,
+      "role": "Standalone FastMCP framework (gofastmcp.com, PrefectHQ/fastmcp)",
+      "sampled_major": 4,
       "track_major": true,
       "prose_token": "fastmcp",
-      "_comment": "The standalone FastMCP package, documented at major 3 (constructor identity-only, async ctx state, fastmcp meta namespace). Named in prose as FastMCP and via gofastmcp.com; matched case-insensitively."
+      "_comment": "The standalone FastMCP package, documented at major 4 (built on SDK v2; server-pushed sampling/roots removed, ctx.elicit legacy-only, tasks as an extension). 4.1.3 on 2026-10-20. Named in prose as FastMCP and via gofastmcp.com; matched case-insensitively."
     }
   }
 }
