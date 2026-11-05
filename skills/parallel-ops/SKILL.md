@@ -34,6 +34,10 @@ Tie-breakers for the two classic overlaps: "many files, cheap models" is
 **brain economics, not count** — cheaper brain → fleet-worker, own brain →
 native. "Run overnight until X" is **session shape, not duration** — one
 continuous run → iterate; scheduled re-entry across sessions → loop-ops.
+Status-line overhead is not a reason to pick `claude -p` workers either. As of
+v2.1.316 (2026-11-05), a native background subagent's 30 s status line is a short
+Haiku call. Before that it re-read the subagent's whole transcript on its own model,
+about 2-16% of spend. Choose on brain cost.
 
 ## Two axes that confuse cold agents
 

@@ -95,6 +95,11 @@ claude --bare -p "query" --allowedTools "Read,Grep" --output-format json | jq -r
 - `stream-json` (+ `--verbose --include-partial-messages`) for token streaming; `system/init` event lists loaded `plugins`/`plugin_errors` (assert in CI).
 - Multi-turn: `--continue`, `--resume <id|name>`, `--fork-session`; caps: `--max-turns`, `--max-budget-usd`.
 - Fire-and-forget: `claude --bg "task"`, then `claude agents --json` / `logs` / `attach` / `stop`.
+- Background subagent status lines (as of v2.1.316, 2026-11-05): each running background
+  subagent gets a summary call on a server-set timer (30-240 s). From 2.1.316 it is a short
+  Haiku call, where before it was a whole-transcript re-read on the subagent's model. No
+  setting controls it, and the calls never reach the session JSONL. Measure them with OTel
+  `api_request` where `query_source=agent_summary`.
 
 ## Debugging Decision Tree
 

@@ -85,6 +85,10 @@ session_id=$(claude -p "Start a review" --output-format json | jq -r '.session_i
 
 `total_cost_usd` includes a per-model cost breakdown — track spend per invocation.
 
+Headless runs don't start the background-subagent summary timer, so `-p` spend carries no
+status-line calls. That is observed on 2.1.309, not documented. The undocumented
+`CLAUDE_CODE_AGENT_PROGRESS_SUMMARIES=1` turns the timer on, for example to measure it.
+
 ### Structured output (`--json-schema`)
 
 ```bash
