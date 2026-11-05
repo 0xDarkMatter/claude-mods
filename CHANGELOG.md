@@ -44,6 +44,22 @@ feature releases live in the README "Recent Updates" section.
   test-engineering's audit, prune and triage modes.
 - **`security-ops`: optional discovery companion**: `cloudflare/security-audit-skill`,
   referenced at a pinned, reviewed commit rather than vendored.
+- **`sandbox-ops`: hosted cloud sandboxes, with boat.dev in depth.** One skill for running
+  work on rented boxes without leaking them, losing work or leaking keys. boat.dev, the
+  provider in production use, keeps its full profile from fleetflow's host driver and a
+  week of field use: the box lifecycle, box naming (`<who>-<what>-<MMDD-HHMM>`), the
+  golden-snapshot exception, cost and start limits, fleetflow remote lanes and Codex on a
+  box, a one-time GitHub Actions runner with fallback to GitHub's runner, Docker and DDEV
+  on a box, and the security model. E2B, Modal, Vercel Sandbox, Daytona and Fly Machines
+  get one card each, and four provider-neutral references cover lifetime traps, one key
+  per process, security and residency, and the lifecycle verbs side by side. Ships
+  `check-sandbox-facts.py --provider ...` (`--offline` in PR CI; `--live` weekly against
+  each provider's docs) and `confirm-gone.sh --provider ...`, a read-only deletion check,
+  plus the repo's first trigger evals (`evals/`).
+  - `confirm-gone.sh` no longer reports a still-listed boat box as gone: under
+    `pipefail`, `printf | grep -q` failed on a long list. It also runs on macOS's bash
+    3.2, and a box that `list --all` shows counts as present even when `info` never
+    answered.
 
 - **`fleet queue` and `/conduct`: the coordinator's landing ritual as a command.**
   `fleet queue <lane> <tip>...` lands reviewed lanes one at a time. Before each land it

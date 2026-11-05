@@ -1,0 +1,42 @@
+{
+  "_comment": "Fast-moving boat.dev facts that boat-ops states. scripts/check-boat-facts.py guards this file: --offline checks that the skill prose still states each fact's skill_text and names each flag; --live checks each fact's pattern (a regex) against the docs page https://docs.boat.dev/<page>.md and each flag against the docs CLI reference and, when a boat CLI is installed, `boat --no-update help <sub>`. When a fact changes, re-read the page, then change pattern, skill_text, the prose and `verified` together.",
+  "verified": "2026-10-27",
+  "docs_base": "https://docs.boat.dev/",
+  "pages": {
+    "pricing": "# Pricing",
+    "limits": "# Limits and errors",
+    "data-retention": "# Data retention and deletion",
+    "security": "# Security and isolation",
+    "cli-reference": "# CLI reference"
+  },
+  "facts": [
+    {"id": "rate-small", "page": "pricing", "pattern": "`small` \\| \\*\\*\\\\?\\$0\\.018\\*\\*", "skill_text": "$0.018"},
+    {"id": "rate-default", "page": "pricing", "pattern": "`default` \\| \\*\\*\\\\?\\$0\\.036\\*\\*", "skill_text": "$0.036"},
+    {"id": "rate-large", "page": "pricing", "pattern": "`large` \\| \\*\\*\\\\?\\$0\\.072\\*\\*", "skill_text": "$0.072"},
+    {"id": "rate-xlarge", "page": "pricing", "pattern": "`xlarge` \\\\?\\* \\| \\*\\*\\\\?\\$0\\.200\\*\\*", "skill_text": "$0.200"},
+    {"id": "plan20-starts", "page": "pricing", "pattern": "\\\\?\\$20/mo \\| 100 \\| 12 / 60 / 200 \\|", "skill_text": "12 / 60 / 200"},
+    {"id": "plan20-hours", "page": "pricing", "pattern": "555 h of `default`", "skill_text": "555 h"},
+    {"id": "autostop-default", "page": "limits", "pattern": "Auto-stop \\| Default 1 hour", "skill_text": "Auto-stop defaults to 1 hour"},
+    {"id": "exec-wait-max", "page": "limits", "pattern": "default timeout 30 s, maximum 600 s", "skill_text": "600 s"},
+    {"id": "exec-output-cap", "page": "limits", "pattern": "8 MiB per stream", "skill_text": "8 MiB per stream"},
+    {"id": "api-key-lifetime", "page": "limits", "pattern": "Lifetime 90 days by default, 365 days maximum", "skill_text": "90 days by default, 365 at most"},
+    {"id": "stopped-disk-kept", "page": "data-retention", "pattern": "14 days after the stop", "skill_text": "14 days after a stop"},
+    {"id": "command-history", "page": "data-retention", "pattern": "Command history[^|\\n]*\\| 90 days", "skill_text": "command history for 90 days"},
+    {"id": "snapshots-off-stop-erases", "page": "data-retention", "pattern": "With snapshots off \\| Nothing\\. A stop erases the sandbox", "skill_text": "a stop erases it"},
+    {"id": "passwordless-sudo", "page": "security", "pattern": "passwordless `sudo`", "skill_text": "passwordless sudo"},
+    {"id": "inbound", "page": "security", "pattern": "Inbound \\| Refused, except SSH", "skill_text": "inbound refused except SSH"},
+    {"id": "outbound", "page": "security", "pattern": "Outbound \\| Open to the internet", "skill_text": "outbound open to the internet"},
+    {"id": "data-location", "page": "security", "pattern": "Germany, Finland and France", "skill_text": "Germany, Finland and France"},
+    {"id": "snapshot-copies", "page": "security", "pattern": "Snapshot copies can be stored outside the EU", "skill_text": "snapshot copies can be stored outside the EU"},
+    {"id": "ttl-not-idle", "page": "cli-reference", "pattern": "not `boat exec` or SSH", "skill_text": "exec and SSH do not extend it"},
+    {"id": "self-update", "page": "cli-reference", "pattern": "updates itself, at most every 6 hours", "skill_text": "every 6 hours"}
+  ],
+  "flags": {
+    "top": ["--no-update"],
+    "new": ["--ttl", "--no-env", "--no-snapshots", "--no-monitoring", "--type", "--fail-fast", "--name", "--setup-file", "--json"],
+    "exec": ["--timeout", "--detach", "--status", "--kill", "--attach"],
+    "delete": ["--yes"],
+    "list": ["--all"],
+    "extend": ["--ttl"]
+  }
+}

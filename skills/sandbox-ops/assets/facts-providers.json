@@ -1,0 +1,95 @@
+{
+  "_comment": "Fast-moving facts the sandbox-ops provider cards state, one entry per provider (boat has its own facts-boat.json). scripts/check-sandbox-facts.py guards this file: --offline checks that each card (references/<card>) still states every fact's skill_text and that its 'Facts verified' date equals the provider's `verified`; --live checks each fact's pattern (a regex) against the page's url, after confirming the page still carries its title line. When a fact changes, re-read the page, then change pattern, skill_text, the card and `verified` together. Re-record the fixtures at the same time with tests/record-fixtures.py (never hand-edit one).",
+  "providers": {
+    "e2b": {
+      "verified": "2026-11-05",
+      "card": "e2b.md",
+      "pages": {
+        "sandbox-lifetime": {"url": "https://docs.e2b.dev/faq/sandbox-lifetime.md", "title": "# How long does a sandbox live?"},
+        "billing": {"url": "https://docs.e2b.dev/billing.md", "title": "# Billing & limits"},
+        "cli-auth": {"url": "https://docs.e2b.dev/cli/auth.md", "title": "# Authentication in CLI"}
+      },
+      "facts": [
+        {"id": "default-timeout", "page": "sandbox-lifetime", "pattern": "defaults to \\*\\*5 minutes\\*\\*", "skill_text": "defaults to **5 minutes**"},
+        {"id": "timeout-kills", "page": "sandbox-lifetime", "pattern": "`onTimeout: 'kill'` \\(the default\\)", "skill_text": "`onTimeout: 'kill'` (the default)"},
+        {"id": "paused-no-ttl", "page": "sandbox-lifetime", "pattern": "Paused sandboxes have \\*\\*no time-to-live\\*\\*", "skill_text": "**no time-to-live**"},
+        {"id": "runtime-caps", "page": "billing", "pattern": "\\*\\*Max continuous runtime[^|]*\\*\\* \\| 1 hour \\| 24 hours \\|", "skill_text": "| Max continuous runtime | 1 hour | 24 hours |"},
+        {"id": "pro-price", "page": "billing", "pattern": "\\*\\*Base price\\*\\* \\| \\\\?\\$0/month \\| \\\\?\\$150/month \\|", "skill_text": "$150/month"},
+        {"id": "env-key-cli", "page": "cli-auth", "pattern": "Use CLI version 2\\.12\\.1 or later", "skill_text": "from CLI 2.12.1"}
+      ]
+    },
+    "modal": {
+      "verified": "2026-11-05",
+      "card": "modal.md",
+      "pages": {
+        "sandboxes": {"url": "https://modal.com/docs/guide/sandboxes.md", "title": "# Sandboxes"},
+        "config": {"url": "https://modal.com/docs/reference/modal.config.md", "title": "# config"},
+        "region-selection": {"url": "https://modal.com/docs/guide/region-selection.md", "title": "# Region selection"}
+      },
+      "facts": [
+        {"id": "default-lifetime", "page": "sandboxes", "pattern": "default maximum lifetime of 5 minutes", "skill_text": "default maximum lifetime of **5 minutes**"},
+        {"id": "max-lifetime", "page": "sandboxes", "pattern": "of up to 24 hours", "skill_text": "up to 24 hours to `Sandbox.create(...)`"},
+        {"id": "env-overrides-profile", "page": "config", "pattern": "overridden by an environment variable named `MODAL_<SETTING>`", "skill_text": "overridden by an environment variable named `MODAL_<SETTING>`"},
+        {"id": "token-vars", "page": "config", "pattern": "`MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`", "skill_text": "`MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`"},
+        {"id": "region-au", "page": "region-selection", "pattern": "\"au\"\\s+Australia", "skill_text": "Regions include `au`"},
+        {"id": "multiplier-broad", "page": "region-selection", "pattern": "Broad \\(e\\.g\\. `us`\\)\\s*\\| 1\\.15x", "skill_text": "1.15x for a broad region"},
+        {"id": "multiplier-narrow", "page": "region-selection", "pattern": "Narrow \\(e\\.g\\. `us-west`\\)\\s*\\| 1\\.75x", "skill_text": "1.75x for a narrow one"}
+      ]
+    },
+    "vercel": {
+      "verified": "2026-11-05",
+      "card": "vercel.md",
+      "pages": {
+        "concepts": {"url": "https://vercel.com/docs/sandbox/concepts.md", "title": "title: Understanding Sandboxes"},
+        "pricing": {"url": "https://vercel.com/docs/sandbox/pricing.md", "title": "title: Vercel Sandbox pricing and quotas"},
+        "authentication": {"url": "https://vercel.com/docs/sandbox/concepts/authentication.md", "title": "title: Sandbox Authentication"},
+        "regions": {"url": "https://vercel.com/docs/sandbox/concepts/regions.md", "title": "title: Sandbox Regions"}
+      },
+      "facts": [
+        {"id": "firecracker", "page": "concepts", "pattern": "runs in its own \\[Firecracker\\]", "skill_text": "own Firecracker microVM"},
+        {"id": "ubuntu", "page": "concepts", "pattern": "boots an Ubuntu 26\\.04 image", "skill_text": "Ubuntu 26.04"},
+        {"id": "persistent-default", "page": "concepts", "pattern": "\\*\\*persistent by default\\*\\*", "skill_text": "persistent by default"},
+        {"id": "default-timeout", "page": "pricing", "pattern": "The default timeout is 5 minutes", "skill_text": "The default timeout is 5 minutes"},
+        {"id": "max-session", "page": "pricing", "pattern": "\\| Max Session Duration \\| 45 minutes \\| 24 hours \\| 24 hours \\|", "skill_text": "Hobby 45 minutes, Pro and Enterprise 24 hours"},
+        {"id": "snapshot-expiry", "page": "pricing", "pattern": "Snapshots expire \\*\\*30 days after their last use by default\\*\\*", "skill_text": "30 days after their last use"},
+        {"id": "delete-rate", "page": "pricing", "pattern": "limited to 20 requests per second per team", "skill_text": "20 requests per second per team"},
+        {"id": "oidc-12h", "page": "authentication", "pattern": "The token expires after 12 hours", "skill_text": "expires after 12 hours"},
+        {"id": "region-syd1", "page": "regions", "pattern": "\\| syd1 \\| ap-southeast-2 \\| Sydney, Australia \\|", "skill_text": "`syd1` (Sydney)"}
+      ]
+    },
+    "daytona": {
+      "verified": "2026-11-05",
+      "card": "daytona.md",
+      "pages": {
+        "sandboxes": {"url": "https://www.daytona.io/docs/en/sandboxes.md", "title": "# Sandboxes"},
+        "authentication": {"url": "https://www.daytona.io/docs/en/authentication.md", "title": "# Authentication"},
+        "limits": {"url": "https://www.daytona.io/docs/en/limits.md", "title": "# Limits"},
+        "regions": {"url": "https://www.daytona.io/docs/en/regions.md", "title": "# Regions"}
+      },
+      "facts": [
+        {"id": "idle-autostop", "page": "sandboxes", "pattern": "auto-stop after 15 minutes of inactivity", "skill_text": "auto-stop after 15 minutes of inactivity"},
+        {"id": "process-not-activity", "page": "sandboxes", "pattern": "the process itself doesn't count as \"activity\"", "skill_text": "a long-running process does not count as activity"},
+        {"id": "per-box-max", "page": "sandboxes", "pattern": "maximum sandbox resource limit of \\*\\*4 vCPUs\\*\\*, \\*\\*8GB RAM\\*\\*, and \\*\\*10GB disk\\*\\*", "skill_text": "4 vCPUs, 8 GB RAM and 10 GB disk"},
+        {"id": "cli-env-needs-url", "page": "authentication", "pattern": "When both `DAYTONA_API_KEY` and `DAYTONA_API_URL` are set in the environment, the CLI uses them instead of the active profile", "skill_text": "when both `DAYTONA_API_KEY` and `DAYTONA_API_URL` are set"},
+        {"id": "tier1-pool", "page": "limits", "pattern": "\\| Tier 1\\s+\\| 10 / ", "skill_text": "Tier 1 (email verified) pools 10 vCPU"},
+        {"id": "regions-us-eu", "page": "regions", "pattern": "\\| United States \\| \\*\\*`us`\\*\\*", "skill_text": "Shared regions `us` and `eu`"}
+      ]
+    },
+    "fly": {
+      "verified": "2026-11-05",
+      "card": "fly.md",
+      "pages": {
+        "integrating": {"url": "https://docs.fly.io/flyctl/integrating.md", "title": "# Integrating flyctl"},
+        "tokens": {"url": "https://docs.fly.io/security/tokens.md", "title": "# Access tokens"},
+        "pricing": {"url": "https://docs.fly.io/about/pricing.md", "title": "# Fly.io Resource Pricing"}
+      },
+      "facts": [
+        {"id": "env-token-wins", "page": "integrating", "pattern": "It takes precedence over the token saved by a prior `fly auth login`", "skill_text": "takes precedence over the token saved by a prior `fly auth login`"},
+        {"id": "access-token-wins", "page": "integrating", "pattern": "If both variables are set, `FLY_ACCESS_TOKEN` takes precedence", "skill_text": "If `FLY_ACCESS_TOKEN` is also set, it wins"},
+        {"id": "token-20-years", "page": "tokens", "pattern": "Tokens are valid for 20 years", "skill_text": "valid for **20 years** by default"},
+        {"id": "trial-credit", "page": "pricing", "pattern": "\\\\?\\$1 of credit for Machines", "skill_text": "a $1 trial credit lasts 7 days"},
+        {"id": "stopped-rootfs-billed", "page": "pricing", "pattern": "Only the Machine's root file system is billed while it's stopped", "skill_text": "A stopped Machine still bills its root filesystem"}
+      ]
+    }
+  }
+}

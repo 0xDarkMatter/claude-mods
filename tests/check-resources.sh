@@ -212,6 +212,15 @@ run "lock-replay bad args"          2 "$PY" skills/package-manager-ops/scripts/l
 # suffix (so scanners never read them as real manifests) and must be materialised first.
 # pm-rollup / lock-replay behaviour (grouped report, conflict replay) lives in tests/tools.sh.
 
+echo "== sandbox-ops: provider facts staleness verifier + deletion confirmer contract"
+run "sandbox-facts --offline consistent" 0 "$PY" skills/sandbox-ops/scripts/check-sandbox-facts.py --offline
+run "sandbox-facts --help"               0 "$PY" skills/sandbox-ops/scripts/check-sandbox-facts.py --help
+# Live comparisons exercised offline against recorded docs pages and `boat help` (no network in PR CI).
+run "sandbox-facts --live vs fixtures"   0 "$PY" skills/sandbox-ops/scripts/check-sandbox-facts.py --live --fixtures skills/sandbox-ops/tests/fixtures/live
+run "confirm-gone --help"                0 bash skills/sandbox-ops/scripts/confirm-gone.sh --help
+run "confirm-gone no id"                 2 bash skills/sandbox-ops/scripts/confirm-gone.sh
+# Its verdicts (gone / still listed / unreachable, per provider) run against fake CLIs in the skill's tests/run.sh.
+
 echo "== protocol: every new verifier is executable + compiles"
 for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/claude-api-ops/scripts/context-budget.py \
@@ -233,6 +242,7 @@ for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py \
          skills/ddev-ops/scripts/check-ddev-facts.py \
          skills/ddev-ops/scripts/audit-ddev-config.py \
+         skills/sandbox-ops/scripts/check-sandbox-facts.py \
          skills/repo-doctor/scripts/check-memory-docs.py \
          skills/repo-doctor/scripts/check-tool-profiles.py \
          skills/repo-doctor/scripts/repo-scan.py \
@@ -249,6 +259,8 @@ bash -n skills/ytdlp-ops/scripts/check-ytdlp-version.sh 2>/dev/null \
     && pass "bash -n check-ytdlp-version.sh" || bad "bash -n check-ytdlp-version.sh"
 bash -n skills/fleet-worker/scripts/fleet-doctor.sh 2>/dev/null \
     && pass "bash -n fleet-doctor.sh" || bad "bash -n fleet-doctor.sh"
+bash -n skills/sandbox-ops/scripts/confirm-gone.sh 2>/dev/null \
+    && pass "bash -n confirm-gone.sh" || bad "bash -n confirm-gone.sh"
 
 echo "== terminal design: verifier framing adopts term.sh and is ASCII-pure"
 # Each verifier renders its human framing on stderr; under TERM_ASCII=1 every
@@ -277,6 +289,7 @@ purity "frontend-upgrade-facts" "$PY" skills/frontend-upgrade-ops/scripts/check-
 purity "ddev-facts"    "$PY" skills/ddev-ops/scripts/check-ddev-facts.py --offline
 purity "ddev-audit"    "$PY" skills/ddev-ops/scripts/audit-ddev-config.py skills/ddev-ops/tests/fixtures/minefield
 purity "pm-facts"      "$PY" skills/package-manager-ops/scripts/check-pm-facts.py --offline
+purity "sandbox-facts" "$PY" skills/sandbox-ops/scripts/check-sandbox-facts.py --offline
 __pr="$(mktemp -d)"
 printf '{"packages":[{"name":"a/a","version":"1"}]}' > "$__pr/ours.lock"
 printf '{"packages":[{"name":"a/a","version":"2"}]}' > "$__pr/theirs.lock"

@@ -209,6 +209,14 @@ jobs:
             --unavailable "package-manager-ops live check unreachable (nodejs.org / php.net / npm / getcomposer.org / GitHub) - skipped" \
             -- python skills/package-manager-ops/scripts/check-pm-facts.py --live
 
+      - name: sandbox-ops provider facts (boat, E2B, Modal, Vercel, Daytona, Fly) vs their docs
+        run: |
+          # No boat CLI on the runner, so boat's CLI-help half is skipped and the docs decide.
+          bash .github/scripts/freshness-step.sh --name sandbox-ops \
+            --drift "sandbox-ops drift - a sandbox provider changed a published rate, lifetime default, plan limit, auth rule or security default, or boat dropped a CLI flag the skill relies on; re-read the page named in the finding, then fix assets/facts-boat.json or assets/facts-providers.json, the prose or card, the Facts verified date and the recorded fixture together" \
+            --unavailable "sandbox-ops live check unreachable (a provider's docs site), or a page lost its title line - skipped" \
+            -- python skills/sandbox-ops/scripts/check-sandbox-facts.py --live
+
       - name: cloudflare-ops Wrangler major vs npm registry
         run: |
           bash .github/scripts/freshness-step.sh --name cloudflare-ops \

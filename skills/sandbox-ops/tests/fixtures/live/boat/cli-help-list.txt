@@ -1,0 +1,12 @@
+List your sandboxes
+
+Usage: boat.exe list [OPTIONS]
+
+Options:
+      --api-url <API_URL>  [env: BOAT_API_URL=]
+      --filter <GROUPS>    State groups to include: r=up/running, s=stopped, p=pending, t=stopping, e=error. Combine letters, e.g. sr. Default: r.
+      --all                Include every state (same as --filter rspte).
+      --org <ID_OR_NAME>   Run this command in an organization's billing scope. See `boat org list`. [env: BOAT_ORG=]
+      --json               Force machine-readable JSON/JSONL output
+      --no-update          Skip the automatic CLI update (also BOAT_NO_UPDATE=1) [env: BOAT_NO_UPDATE=]
+  -h, --help               Print help

@@ -1,0 +1,5 @@
+<!-- Recorded excerpt of https://vercel.com/docs/sandbox/concepts.md, fetched 2026-11-05. Test input for check-sandbox-facts.py --live --fixtures; lines are verbatim, the rest of the page is cut. -->
+title: Understanding Sandboxes
+Unlike Docker containers, each sandbox runs in its own [Firecracker](https://firecracker-microvm.github.io/) microVM with a dedicated kernel. This provides stronger isolation than container-based solutions, which makes sandboxes ideal for running untrusted code.
+When you call `Sandbox.create()`, Vercel provisions a Firecracker microVM on its infrastructure. This microVM boots an Ubuntu 26.04 image, a custom image from VCR, or a saved snapshot.
+Vercel Sandboxes provide on-demand, isolated compute environments for running untrusted code, testing applications, executing AI-generated scripts, and more. Sandboxes are **persistent by default**: when a sandbox stops, the SDK automatically snapshots its filesystem, and the sandbox configuration is preserved across sessions, so both are restored the next time you resume.

@@ -6,7 +6,7 @@ This is **claude-mods** - a collection of custom extensions for Claude Code. Hum
 and usage live in [README.md](README.md); this file is for agents working on the repo.
 - **4 expert agents** for pure context-isolation/worker roles (git-agent, firecrawl-expert, project-organizer, test-review-agent) - every domain-knowledge agent became an `-ops` skill (v3.0, skills-first)
 - **5 commands** for session management, git orchestration and wave coordination (/sync, /save, /git-ops, /conduct), plus the one-release /testgen alias
-- **111 skills** for CLI tools, patterns, workflows and development tasks. Two routers come
+- **112 skills** for CLI tools, patterns, workflows and development tasks. Two routers come
   first when a family is ambiguous: `parallel-ops` (fleet-ops, fleet-worker, fleetflow,
   loop-ops, iterate, spawn) and `figma-ops` (the Figma MCP skills). README.md lists them all
 - **13 output styles** for response personality (Vesper, Spartan, Mentor, Executive, Pair, Atlas, Coach, Harbour, Meridian, Noir, Roast, Sage, Scout)
@@ -32,6 +32,7 @@ and usage live in [README.md](README.md); this file is for agents working on the
 | `tests/` | Validation scripts + justfile |
 | `scripts/` | Install scripts |
 | `docs/` | Design docs and protocols, indexed one line each in `docs/00_INDEX.md`; to build a skill start at SKILL-CREATION-PROTOCOL.md |
+| `evals/` | Trigger evals (`claude plugin eval`), one folder per case; spends plan usage, so not in CI (`evals/AGENTS.md`) |
 
 ## Session Init
 
