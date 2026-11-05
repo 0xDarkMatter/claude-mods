@@ -117,6 +117,18 @@ feature releases live in the README "Recent Updates" section.
   restores the old gate), and the mocking guidance no longer says to always mock databases
   and the file system.
 
+- **Faster gates, and `just check-changed` for development.** On Git Bash the gates spent
+  their time starting processes, not working. `validate.sh`, `doc-drift.sh` and
+  `skill-size.sh` now batch their scans into one awk or grep (or pure bash) instead of a
+  pipeline per file, and `hooks/dangerous-cmd-warn.sh` tests all its patterns with one grep
+  before naming the match: about 116 process starts per Bash call down to about 17. The
+  same verdicts, proved by old-vs-new runs on deliberately broken trees. `validate.sh` no
+  longer dies silently part-way when a skill lacks `name:` or `description:`, and its
+  skill-frontmatter section is gone (`spec.sh` failed on every mutation it caught).
+  `just check-changed [base]` runs only the gates and suites covering what changed
+  (`tests/changed-map.tsv`), four at a time, with shared or unmapped paths running
+  everything. `just check` is still the landing gate.
+
 - **A security-release exception to the 7-day cooldown.** A release that patches a
   published CVE may skip the wait, but the CVE label alone waives nothing, because
   "critical fix, upgrade now" is the lure a hijacked publish uses. The advisory must name

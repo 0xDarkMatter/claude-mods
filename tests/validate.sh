@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # claude-mods validation script
-# Validates YAML frontmatter, required fields, and naming conventions
+# Validates YAML frontmatter, required fields, and naming conventions for agents,
+# commands, rules and output styles, plus the skill description budget and the plugin
+# manifests. Skill frontmatter itself is tests/spec.sh's job (see the note above
+# frontmatter_field_len).
 
 set -Eeuo pipefail
 
@@ -56,22 +59,38 @@ log_warn() {
     WARN=$((WARN + 1))
 }
 
+# Frontmatter helpers are pure bash on purpose: the cat/sed/grep pipelines they
+# replaced forked ~16 processes per file, ~2,000 per run, and process start-up is
+# what makes this gate slow on Windows. Keep them subprocess-free.
+# fm_load caches one file's lines (CRs kept, as sed kept them).
+FM_FILE=""
+FM_LINES=()
+fm_load() {
+    [[ "$FM_FILE" == "$1" ]] && return 0
+    FM_FILE="$1"
+    FM_LINES=()
+    mapfile -t FM_LINES < "$1"
+}
+
 # Check if file has valid YAML frontmatter
 check_yaml_frontmatter() {
     local file="$1"
-    local content
-    content=$(cat "$file")
+    fm_load "$file"
 
     # Check for opening ---
-    if [[ "$content" != ---* ]]; then
+    if [[ "${FM_LINES[0]:-}" != ---* ]]; then
         log_fail "$file - Missing YAML frontmatter (no opening ---)"
         return 1
     fi
 
-    # Check for closing ---
-    local frontmatter
-    frontmatter=$(echo "$content" | sed -n '1,/^---$/p' | tail -n +2)
-    if [[ -z "$frontmatter" ]]; then
+    # "Closing ---" has always meant "anything after line 1": the old
+    # `sed -n '1,/^---$/p' | tail -n +2` was empty only for a one-line file.
+    # A trailing empty line does not count ($(cat) dropped it).
+    local i has_more=0
+    for ((i = 1; i < ${#FM_LINES[@]}; i++)); do
+        [[ -n "${FM_LINES[i]}" ]] && { has_more=1; break; }
+    done
+    if ((has_more == 0)); then
         log_fail "$file - Invalid YAML frontmatter (no closing ---)"
         return 1
     fi
@@ -79,13 +98,40 @@ check_yaml_frontmatter() {
     return 0
 }
 
-# Extract field from YAML frontmatter
+# Extract a top-level field from YAML frontmatter into the variable named $1:
+#   get_yaml_field VAR FILE FIELD
+# Reads lines 2..first `---` (to EOF when there is none), takes every line that
+# starts with `FIELD:` (joined by newlines), strips the key, leading blanks, and one
+# leading and one trailing quote - the semantics of the sed|grep|sed pipeline it
+# replaced. First physical line only: block scalars read as `>-` (see
+# frontmatter_field_len for the full length).
 get_yaml_field() {
-    local file="$1"
-    local field="$2"
+    local -n _gyf_out="$1"
+    local field="$3" line val i out="" first=1
+    fm_load "$2"
+    for ((i = 1; i < ${#FM_LINES[@]}; i++)); do
+        line="${FM_LINES[i]}"
+        if [[ "$line" == "$field:"* ]]; then
+            val="${line#"$field:"}"
+            val="${val#"${val%%[![:space:]]*}"}"
+            val="${val#[\"\']}"
+            val="${val%[\"\']}"
+            if ((first)); then out="$val"; first=0; else out+=$'\n'"$val"; fi
+        fi
+        # sed tests a range's end regex only from the line after its start
+        ((i > 1)) && [[ "$line" == "---" ]] && break
+    done
+    _gyf_out="$out"
+}
 
-    # Extract frontmatter and get field value
-    sed -n '2,/^---$/p' "$file" | grep "^${field}:" | sed "s/^${field}:[[:space:]]*//" | sed 's/^["'"'"']//' | sed 's/["'"'"']$//'
+# True when FILE has a line starting with `FIELD:` anywhere (grep -q "^FIELD:").
+has_line_prefix() {
+    local line
+    fm_load "$1"
+    for line in "${FM_LINES[@]}"; do
+        [[ "$line" == "$2:"* ]] && return 0
+    done
+    return 1
 }
 
 # Check required fields in agents/commands
@@ -96,8 +142,8 @@ check_required_fields() {
     local name
     local description
 
-    name=$(get_yaml_field "$file" "name")
-    description=$(get_yaml_field "$file" "description")
+    get_yaml_field name "$file" "name"
+    get_yaml_field description "$file" "description"
 
     # Agents require both name and description
     if [[ "$type" == "agent" ]]; then
@@ -126,7 +172,7 @@ check_required_fields() {
 check_naming() {
     local file="$1"
     local basename
-    basename=$(basename "$file" .md)
+    basename="${file##*/}"; basename="${basename%.md}"
 
     # Check if filename is kebab-case
     if [[ ! "$basename" =~ ^[a-z][a-z0-9]*(-[a-z0-9]+)*$ ]]; then
@@ -136,7 +182,7 @@ check_naming() {
 
     # Check if name field matches filename (for agents)
     local name
-    name=$(get_yaml_field "$file" "name")
+    get_yaml_field name "$file" "name"
     if [[ -n "$name" && "$name" != "$basename" ]]; then
         log_warn "$file - Name field '$name' doesn't match filename '$basename'"
         return 1
@@ -206,7 +252,7 @@ validate_commands() {
         # Look for main command file (exclude README.md, LICENSE.md)
         while IFS= read -r -d '' file; do
             local basename
-            basename=$(basename "$file")
+            basename="${file##*/}"
             # Skip README and LICENSE files
             [[ "$basename" == "README.md" || "$basename" == "LICENSE.md" ]] && continue
 
@@ -214,7 +260,7 @@ validate_commands() {
                 if check_yaml_frontmatter "$file"; then
                     # Commands in subdirs may have different required fields
                     local desc
-                    desc=$(get_yaml_field "$file" "description")
+                    get_yaml_field desc "$file" "description"
                     if [[ -n "$desc" ]]; then
                         log_pass "$file - Valid subcommand"
                     else
@@ -226,45 +272,11 @@ validate_commands() {
     done < <(find "$cmd_dir" -mindepth 1 -maxdepth 1 -type d -print0)
 }
 
-# Validate skills
-validate_skills() {
-    echo ""
-    echo "=== Validating Skills ==="
-
-    local skills_dir="$PROJECT_DIR/skills"
-    if [[ ! -d "$skills_dir" ]]; then
-        log_warn "skills/ directory not found"
-        return
-    fi
-
-    # procsub ok: find walks a dir checked to exist above; nothing in it can stop find early
-    while IFS= read -r -d '' skill_subdir; do
-        # Skip shared helper dirs (e.g. _lib) - not skills, no SKILL.md expected.
-        [[ "$(basename "$skill_subdir")" == _* ]] && continue
-
-        local skill_file="$skill_subdir/SKILL.md"
-        if [[ ! -f "$skill_file" ]]; then
-            log_fail "$skill_subdir - Missing SKILL.md"
-            continue
-        fi
-
-        if ! $NAMES_ONLY; then
-            if check_yaml_frontmatter "$skill_file"; then
-                local name
-                local desc
-                name=$(get_yaml_field "$skill_file" "name")
-                desc=$(get_yaml_field "$skill_file" "description")
-
-                if [[ -n "$name" && -n "$desc" ]]; then
-                    log_pass "$skill_file - Valid skill"
-                else
-                    [[ -z "$name" ]] && log_fail "$skill_file - Missing name"
-                    [[ -z "$desc" ]] && log_fail "$skill_file - Missing description"
-                fi
-            fi
-        fi
-    done < <(find "$skills_dir" -mindepth 1 -maxdepth 1 -type d -print0)
-}
+# Skill frontmatter (SKILL.md present, opening fence, name, description) is checked by
+# tests/spec.sh, the Agent Skills spec's own validator, which CI and `just check` both run.
+# This script's own skills section was removed 2026-11 after revert-and-run showed spec.sh
+# failing on every mutation it caught (missing SKILL.md, no fence, no or empty name or
+# description). Don't re-add it here: extend tests/spec-check.py instead.
 
 # Fallback frontmatter measurer: counts the FULL value of a top-level field,
 # including block scalars (|, >, |-, >-) and indented continuation lines.
@@ -372,7 +384,7 @@ PY
         budget_rows=""
         # procsub ok: find walks a dir checked to exist above, and zero rows fails below
         while IFS= read -r -d '' skill_subdir; do
-            [[ "$(basename "$skill_subdir")" == _* ]] && continue
+            [[ "${skill_subdir##*/}" == _* ]] && continue
             skill_file="$skill_subdir/SKILL.md"
             [[ -f "$skill_file" ]] || continue
             description=$(frontmatter_field_len "$skill_file" "description" || echo 0)
@@ -427,7 +439,7 @@ validate_rules() {
     # procsub ok: find walks a dir checked to exist above; nothing in it can stop find early
     while IFS= read -r -d '' file; do
         local basename
-        basename=$(basename "$file")
+        basename="${file##*/}"
 
         # Rules should be .md files
         if [[ "$file" != *.md ]]; then
@@ -442,12 +454,13 @@ validate_rules() {
         fi
 
         # Check for valid YAML frontmatter if present
-        local content
-        content=$(cat "$file")
-        if [[ "$content" == ---* ]]; then
-            # Has frontmatter - validate it
-            local closing
-            closing=$(echo "$content" | sed -n '2,${/^---$/=;}'| head -1)
+        fm_load "$file"
+        if [[ "${FM_LINES[0]:-}" == ---* ]]; then
+            # Has frontmatter - validate it: some line after the first is exactly ---
+            local closing="" i
+            for ((i = 1; i < ${#FM_LINES[@]}; i++)); do
+                [[ "${FM_LINES[i]}" == "---" ]] && { closing=$((i + 1)); break; }
+            done
             if [[ -z "$closing" ]]; then
                 log_fail "$file - Invalid YAML frontmatter (no closing ---)"
                 continue
@@ -455,15 +468,15 @@ validate_rules() {
 
             # If paths field exists, validate it's not empty
             local paths
-            paths=$(get_yaml_field "$file" "paths")
-            if grep -q "^paths:" "$file" && [[ -z "$paths" ]]; then
+            get_yaml_field paths "$file" "paths"
+            if has_line_prefix "$file" paths && [[ -z "$paths" ]]; then
                 log_warn "$file - paths field is empty"
             fi
         fi
 
         # Check naming convention (kebab-case)
         local name
-        name=$(basename "$file" .md)
+        name="${file##*/}"; name="${name%.md}"
         if [[ ! "$name" =~ ^[a-z][a-z0-9]*(-[a-z0-9]+)*$ ]]; then
             log_warn "$file - Filename not kebab-case: $name"
         fi
@@ -493,7 +506,7 @@ validate_output_styles() {
     # procsub ok: find walks a dir checked to exist above; nothing in it can stop find early
     while IFS= read -r -d '' file; do
         local stem
-        stem=$(basename "$file" .md)
+        stem="${file##*/}"; stem="${stem%.md}"
 
         if [[ ! "$stem" =~ ^[a-z][a-z0-9]*(-[a-z0-9]+)*$ ]]; then
             log_warn "$file - Filename not kebab-case: $stem"
@@ -506,8 +519,8 @@ validate_output_styles() {
         # `name:` is optional; when present it MUST equal the filename stem, or
         # the documented settings value silently selects nothing.
         local declared
-        declared=$(get_yaml_field "$file" "name")
-        if grep -q "^name:" "$file" && [[ "$declared" != "$stem" ]]; then
+        get_yaml_field declared "$file" "name"
+        if has_line_prefix "$file" name && [[ "$declared" != "$stem" ]]; then
             log_fail "$file - Frontmatter name '$declared' != filename '$stem' (outputStyle would silently fail)"
             continue
         fi
@@ -675,7 +688,6 @@ main() {
 
     validate_agents
     validate_commands
-    validate_skills
     validate_description_budget
     validate_rules
     validate_output_styles

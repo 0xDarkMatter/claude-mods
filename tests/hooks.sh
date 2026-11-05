@@ -53,6 +53,28 @@ tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 # Pin it off; the cases that want one point it at a throwaway dir, never the real one.
 unset WORKTREE_ROOT WORKTREE_BASE_REF
 cmd_json()  { jq -cn --arg c "$1" '{tool_input:{command:$c}}'; }
+
+# hook_fields VAR... -- KEY...: read hookSpecificOutput.KEY from $tmp/out into each VAR,
+# in ONE jq (+ one tr) instead of a jq|tr pair per field: this suite runs ~200 hook
+# calls, and process start-up is what makes it slow on Windows. The FIRST key keeps the
+# old envelope check: "none" when absent, "<n> JSON values" unless stdout is exactly one
+# JSON value. Later keys are "" when absent. A jq failure (not JSON) leaves every VAR
+# empty, as the separate calls did. \037 separates fields; values may hold newlines.
+# tr: Windows jq.exe writes -r output in text mode (every "\n" becomes "\r\n").
+hook_fields() {
+  local -a _hf_vars=() _hf_keys=(); local _hf_v _hf_out
+  while [ "$1" != -- ]; do _hf_vars+=("$1"); shift; done; shift; _hf_keys=("$@")
+  _hf_out="$(jq -rs --args '. as $all | $ARGS.positional as $k
+      | if ($all | length) == 1
+        then [($all[0].hookSpecificOutput[$k[0]] // "none")]
+             + [$k[1:][] as $x | ($all[0].hookSpecificOutput[$x] // "")]
+        else ["\($all | length) JSON values"] + [$k[1:][] | ""] end
+      | map(tostring) | join("\u001f")' "${_hf_keys[@]}" <"$tmp/out" 2>/dev/null | tr -d '\r')"
+  for _hf_v in "${_hf_vars[@]}"; do
+    if [[ "$_hf_out" == *$'\037'* ]]; then printf -v "$_hf_v" '%s' "${_hf_out%%$'\037'*}"; _hf_out="${_hf_out#*$'\037'}"
+    else printf -v "$_hf_v" '%s' "$_hf_out"; _hf_out=""; fi
+  done
+}
 file_json() { jq -cn --arg p "$1" '{tool_input:{file_path:$p}}'; }
 
 # --- dangerous-cmd-warn -------------------------------------------------------
@@ -124,9 +146,8 @@ echo "-- advisory channel (exit 0, additionalContext JSON on stdout) --"
 advisory() {   # $1 payload JSON, $2 hook, $3 event, $4 text the context must carry
   local payload="$1"; shift
   printf '%s' "$payload" | bash "$H/$1" >"$tmp/out" 2>/dev/null; local rc=$? ev ctx
-  # tr: Windows jq.exe writes -r output in text mode (every "\n" becomes "\r\n").
-  ev="$(jq -rs 'if length == 1 then (.[0].hookSpecificOutput.hookEventName // "no hookEventName") else "\(length) JSON values" end' <"$tmp/out" 2>/dev/null | tr -d '\r')"
-  ctx="$(jq -r '.hookSpecificOutput.additionalContext // empty' <"$tmp/out" 2>/dev/null | tr -d '\r')"
+  hook_fields ev ctx -- hookEventName additionalContext
+  [ "$ev" = none ] && ev="no hookEventName"
   if [ "$rc" -ne 0 ]; then bad "$1 advisory - exit $rc"
   elif [ "$ev" != "$2" ]; then bad "$1 advisory is one $2 envelope - got ${ev:-plain text}: $(head -c 60 "$tmp/out")"
   elif [[ "$ctx" != *"$3"* ]]; then bad "$1 advisory - additionalContext lacks '$3'"
@@ -177,9 +198,7 @@ tls_call() {   # $1 tool name, $2 command
 }
 tls_asks() {   # $1 tool, $2 command, $3 "persist" when the switch outlives the session
   tls_call "$1" "$2"; local rc=$? dec reason ctx; set -- "$1" "${2//$TLS_NL/<NL>}" "${3:-}"
-  dec="$(jq -rs 'if length == 1 then (.[0].hookSpecificOutput.permissionDecision // "none") else "\(length) JSON values" end' <"$tmp/out" 2>/dev/null | tr -d '\r')"
-  reason="$(jq -r '.hookSpecificOutput.permissionDecisionReason // empty' <"$tmp/out" 2>/dev/null | tr -d '\r')"
-  ctx="$(jq -r '.hookSpecificOutput.additionalContext // empty' <"$tmp/out" 2>/dev/null | tr -d '\r')"
+  hook_fields dec reason ctx -- permissionDecision permissionDecisionReason additionalContext
   if [ "$rc" -ne 0 ]; then bad "asks [$1]: $2 - exit $rc"
   elif [ "$dec" != ask ]; then bad "asks [$1]: $2 - got ${dec:-no output}"
   elif [[ "$reason" != *"TLS GUARD"* || "$ctx" != *"stop-and-report"* ]]; then bad "asks [$1]: $2 - reason or context missing"
@@ -248,8 +267,7 @@ scan_call() {   # $1 file path, $2 added text; Edit carries new_string, Write co
 }
 scan_fires() {   # $1 file path, $2 added text
   scan_call "$1" "$2"; local rc=$? ev ctx; set -- "$1" "${2//$TLS_NL/<NL>}"
-  ev="$(jq -rs 'if length == 1 then (.[0].hookSpecificOutput.hookEventName // "none") else "\(length) JSON values" end' <"$tmp/out" 2>/dev/null | tr -d '\r')"
-  ctx="$(jq -r '.hookSpecificOutput.additionalContext // empty' <"$tmp/out" 2>/dev/null | tr -d '\r')"
+  hook_fields ev ctx -- hookEventName additionalContext
   if [ "$rc" -ne 0 ]; then bad "advises: ${1##*[/\\]} $2 - exit $rc"
   elif [ "$ev" != PostToolUse ] || [[ "$ctx" != *"TLS ADVISORY"* ]]; then bad "advises: ${1##*[/\\]} $2 - got ${ev:-no output}"
   else ok "advises: ${1##*[/\\]} $2"; fi

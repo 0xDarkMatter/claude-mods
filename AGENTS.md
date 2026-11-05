@@ -183,15 +183,17 @@ On "INIT:" message at session start:
   duplicated in each **on purpose** - don't DRY it into `_lib`
   (`tests/check-resources.sh` fails if the copies drift). Each suite's "standalone"
   block copies the folder alone and proves it.
+- **On Git Bash, process starts ARE the runtime**: a fork per file or case (`$(basename)`, a
+  grep per pattern) cost a gate thousands of spawns. One awk/grep over all files, builtins.
 
 ## Testing
 
 ```bash
 just check        # THE gate: validate + spec + doc-drift + agnostic + hook contracts + resource contracts + PowerShell 5.1 parse + skill size + reference contents (both warn-only) + skill suites + e2e suites + procsub-guard mutations
 just check-fast   # same minus the behavioural suites (per-skill and e2e)
+just check-changed [base]  # DEV ONLY: checks covering what changed (map: tests/changed-map.tsv), 4 at once
 ```
 
-CI (`.github/workflows/validate.yml`) also runs three gates `just check` does not:
-`tests/plugin-validate.sh --self-test`, `tests/check-exec-bits.sh`, and
-`tests/install-guard.sh` (Windows runner only). Run them by hand before landing a change
-to the manifests, a script's mode, or `scripts/install.ps1`.
+CI (`.github/workflows/validate.yml`) also runs `tests/plugin-validate.sh --self-test`,
+`tests/check-exec-bits.sh` and `tests/install-guard.sh` (Windows only): run them by hand
+before landing a change to the manifests, a script's mode, or `scripts/install.ps1`.

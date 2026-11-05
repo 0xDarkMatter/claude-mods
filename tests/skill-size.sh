@@ -50,28 +50,25 @@ for arg in "$@"; do
     esac
 done
 
-# Body of a SKILL.md: drop the leading ----fenced frontmatter block only.
-skill_body() {
-    awk 'NR==1 && /^---[[:space:]]*$/ {fm=1; next}
-         fm==1 && /^---[[:space:]]*$/ {fm=2; next}
-         fm!=1 {print}' "$1"
-}
-
-# Estimated tokens, rounded: round(chars / 3.6) == (chars*10 + 18) / 36.
-estimate_tokens() {
-    local chars
-    chars=$(skill_body "$1" | LC_ALL=C.UTF-8 wc -m)
-    echo $(( (chars * 10 + 18) / 36 ))
-}
-
 # Prints "tokens<TAB>name" for every skill in $1, largest first.
+# One awk for every SKILL.md: a process per skill cost ~1,300 spawns and ~20 s on
+# Windows. Body = everything but the leading ----fenced frontmatter block; chars =
+# length()+1 per body line (the newline), which is what `awk print | wc -m` counted.
+# Estimated tokens, rounded: round(chars / 3.6) == (chars*10 + 18) / 36.
 scan() {
-    local dir="$1" f name
-    for f in "$dir"/*/SKILL.md; do
-        [ -f "$f" ] || continue
-        name=$(basename "$(dirname "$f")")
-        printf '%s\t%s\n' "$(estimate_tokens "$f")" "$name"
-    done | sort -rn
+    local dir="$1"
+    set -- "$dir"/*/SKILL.md
+    [ -f "$1" ] || return 0
+    LC_ALL=C.UTF-8 awk '
+        FNR == 1 { if (f != "") emit(); f = FILENAME; fm = 0; chars = 0 }
+        FNR == 1 && /^---[[:space:]]*$/ { fm = 1; next }
+        fm == 1 && /^---[[:space:]]*$/ { fm = 2; next }
+        fm != 1 { chars += length($0) + 1 }
+        function emit(  n) {
+            n = f; sub(/\/SKILL\.md$/, "", n); sub(/.*\//, "", n)
+            printf "%d\t%s\n", int((chars * 10 + 18) / 36), n
+        }
+        END { if (f != "") emit() }' "$@" | sort -rn
 }
 
 # --- self-test: the gate must see an oversized body, and ignore frontmatter --

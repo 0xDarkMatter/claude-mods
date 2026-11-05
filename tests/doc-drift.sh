@@ -25,12 +25,13 @@ err() { echo "DRIFT: $*"; errors=$((errors + 1)); }
 # component. `[ -e ]` is case-insensitive on Windows and macOS filesystems, so a
 # link to docs/auto-mode-classifier.md passed locally while the file was
 # docs/AUTO-MODE-CLASSIFIER.md - and failed on case-sensitive Linux CI.
-# Each directory is listed once and cached, and the comparison is pure bash:
-# spawning ls+grep per component per link took this gate from seconds to minutes
-# under Git Bash, where process start-up is expensive.
+# Each directory is listed once and cached, and both the listing (a glob, not ls)
+# and the comparison are pure bash: a process per component per link took this
+# gate from seconds to minutes under Git Bash, where process start-up is
+# expensive. readdir returns names as stored, so the glob keeps their real case.
 declare -A DIR_LS=()
 exists_exact() {
-    local p="$1" cur="" part dir
+    local p="$1" cur="" part dir entry listing had_dot had_null
     [ -e "$p" ] || return 1
     local IFS='/'
     for part in $p; do
@@ -40,7 +41,15 @@ exists_exact() {
         esac
         dir="${cur:-.}"
         if [ -z "${DIR_LS[$dir]+set}" ]; then
-            DIR_LS[$dir]=$'\n'"$(ls -a -- "$dir" 2>/dev/null)"$'\n'
+            had_dot=0; had_null=0
+            shopt -q dotglob && had_dot=1
+            shopt -q nullglob && had_null=1
+            shopt -s dotglob nullglob
+            listing=$'\n'
+            for entry in "$dir"/*; do listing+="${entry##*/}"$'\n'; done
+            ((had_dot)) || shopt -u dotglob
+            ((had_null)) || shopt -u nullglob
+            DIR_LS[$dir]="$listing"
         fi
         [[ "${DIR_LS[$dir]}" == *$'\n'"$part"$'\n'* ]] || return 1
         cur="${cur:+$cur/}$part"
@@ -134,10 +143,12 @@ check_plan "Output Styles" "$styles_disk"
 check_plan "Hooks" "$hooks_disk"
 
 # --- 2. Every skill has a README row ----------------------------------------
+# README read once: a grep per skill was ~110 process starts.
+readme_text="$(<README.md)"
 for d in skills/*/; do
-    n="$(basename "$d")"
+    n="${d%/}"; n="${n##*/}"
     [ -f "$d/SKILL.md" ] || continue
-    grep -q "skills/$n/" README.md || err "README.md: skill '$n' has no table row"
+    [[ "$readme_text" == *"skills/$n/"* ]] || err "README.md: skill '$n' has no table row"
 done
 
 # --- 3. Ghost-link check (README.md + AGENTS.md) ----------------------------
@@ -156,9 +167,20 @@ done
 # Keep this allowlist narrow: every other unknown reference is a failure.
 external_skills="frontend-design"
 
-for skill_file in skills/*/SKILL.md; do
-    # procsub ok: awk reads a file the glob just matched; nothing in it can stop awk early
-    while IFS= read -r refs; do
+# One awk over every SKILL.md (nextfile at the closing fence), not one per skill.
+# Rows are "<file><TAB><frontmatter line>".
+rc=0
+ref_rows="$(awk '
+    FNR == 1 { frontmatter = 0; metadata = 0 }
+    FNR == 1 && $0 == "---" { frontmatter=1; next }
+    frontmatter && $0 == "---" { nextfile }
+    frontmatter && /^metadata:/ { metadata=1; next }
+    metadata && /^[^ ]/ { metadata=0 }
+    metadata && /^  (related-skills|depends-on):/ { print FILENAME "\t" $0 }
+' skills/*/SKILL.md)" || rc=$?
+[ "$rc" -eq 0 ] || err "skill frontmatter scan failed (awk exit $rc)"
+while IFS=$'\t' read -r skill_file refs; do
+        [ -n "$skill_file" ] || continue
         refs="${refs#*:}"
         refs="${refs#"${refs%%[![:space:]]*}"}"
         refs="${refs%"${refs##*[![:space:]]}"}"
@@ -171,14 +193,7 @@ for skill_file in skills/*/SKILL.md; do
             case " $external_skills " in *" $name "*) continue ;; esac
             [ -d "skills/$name" ] || err "$skill_file: unknown skill reference '$name'"
         done
-    done < <(awk '
-        NR == 1 && $0 == "---" { frontmatter=1; next }
-        frontmatter && $0 == "---" { exit }
-        frontmatter && /^metadata:/ { metadata=1; next }
-        metadata && /^[^ ]/ { metadata=0 }
-        metadata && /^  (related-skills|depends-on):/ { print }
-    ' "$skill_file")
-done
+done <<< "$ref_rows"
 
 # --- 5. Skill-internal link check (skills/**/*.md) --------------------------
 # Links inside a skill are FILE-relative (`../../rules/x.md`, `../color-ops/SKILL.md`),
@@ -199,12 +214,27 @@ done
 #                          deliberately name the INSTALLED location, not a repo path.
 #   - #anchor-only         intra-document.
 #   - <, {, $, or a space  template placeholders and prose, not real paths.
-# procsub ok: find walks skills/ from the repo root (cd above); nothing can stop it early
-while IFS= read -r skill_doc; do
-    case "$skill_doc" in */assets/*) continue ;; esac
-    skill_dir="$(dirname "$skill_doc")"
-    # procsub ok: awk|grep|sed read a file find just listed; nothing in it stops them early
-    while IFS= read -r link; do
+#
+# One find + one xargs'd awk for all ~700 docs: awk|grep|sed + dirname per file was
+# ~3,500 process starts. The awk does the old `grep -oE '\]\([^)]+\)' | sed` itself
+# and emits "<file>\037<link>" rows in find|sort order. \037 (unit separator), not a
+# tab: read trims IFS whitespace, and the old IFS= read kept a link's blanks intact.
+rc=0
+link_rows="$(find skills -name '*.md' -not -path '*/assets/*' -print0 | sort -z | xargs -0 awk '
+    FNR == 1 { fence = 0 }
+    /^[[:space:]]*(```|~~~)/ { fence = !fence; next }
+    fence { next }
+    { gsub(/`[^`]*`/, "")
+      line = $0
+      while (match(line, /\]\([^)]+\)/)) {
+          print FILENAME "\037" substr(line, RSTART + 2, RLENGTH - 3)
+          line = substr(line, RSTART + RLENGTH)
+      } }
+')" || rc=$?
+[ "$rc" -eq 0 ] || err "skill link scan failed (find|xargs awk exit $rc)"
+while IFS=$'\037' read -r skill_doc link; do
+        [ -n "$skill_doc" ] || continue
+        skill_dir="${skill_doc%/*}"
         case "$link" in
             http://*|https://*|mailto:*|/*|'~/'*|'#'*|'') continue ;;
             *'<'*|*'{'*|*'$'*|*' '*) continue ;;
@@ -212,12 +242,7 @@ while IFS= read -r skill_doc; do
         link="${link%%#*}"   # strip anchors
         [ -z "$link" ] && continue
         exists_exact "$skill_dir/$link" || err "$skill_doc: link target does not exist (or wrong case): $link"
-    done < <(awk '
-        /^[[:space:]]*(```|~~~)/ { fence = !fence; next }
-        fence { next }
-        { gsub(/`[^`]*`/, ""); print }
-    ' "$skill_doc" | grep -oE '\]\([^)]+\)' | sed -E 's/^\]\(//; s/\)$//')
-done < <(find skills -name '*.md' | sort)
+done <<< "$link_rows"
 
 
 echo
