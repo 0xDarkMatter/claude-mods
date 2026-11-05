@@ -109,20 +109,28 @@ block() {   # $1 = what matched, $2 = risk
   exit 2
 }
 
-for pattern in "${!PATTERNS[@]}"; do
-  if printf '%s\n' "$INPUT" | grep -qEi "$pattern"; then
-    block "$pattern" "${PATTERNS[$pattern]}"
-  fi
-done
+# One grep tests every pattern at once; only when something matches does the loop
+# run, to name the pattern that did. This hook runs before EVERY Bash call: a grep
+# per pattern was ~116 process starts per call (~2 s on Windows), now 1-3 for a
+# safe command. Here-strings, not `printf | grep`, so no subshell is forked.
+any=()
+for pattern in "${!PATTERNS[@]}"; do any+=(-e "$pattern"); done
+if grep -qEi "${any[@]}" <<< "$INPUT"; then
+  for pattern in "${!PATTERNS[@]}"; do
+    if grep -qEi -e "$pattern" <<< "$INPUT"; then
+      block "$pattern" "${PATTERNS[$pattern]}"
+    fi
+  done
+fi
 
 # UPDATE ... SET without a WHERE anywhere in the statement.
-if printf '%s\n' "$INPUT" | grep -qEi 'UPDATE\s+\w+\s+SET\s' \
-   && ! printf '%s\n' "$INPUT" | grep -qEi '\bWHERE\b'; then
+if grep -qEi 'UPDATE\s+\w+\s+SET\s' <<< "$INPUT" \
+   && ! grep -qEi '\bWHERE\b' <<< "$INPUT"; then
   block "UPDATE ... SET without WHERE" "UPDATE without WHERE clause modifies all rows"
 fi
 
 # Reading a real .env file (not .env.example / .sample / .template / .dist).
-if printf '%s\n' "$INPUT" | grep -qEi '(^|[;&|(]\s*)(cat|bat|less|more|head|tail)\s'; then
+if grep -qEi '(^|[;&|(]\s*)(cat|bat|less|more|head|tail)\s' <<< "$INPUT"; then
   set -f
   for tok in $INPUT; do
     t="${tok##*/}"; t="${t%%[;&|)\"\']*}"
