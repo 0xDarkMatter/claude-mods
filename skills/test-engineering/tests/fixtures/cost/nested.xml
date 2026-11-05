@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="run" time="10.0">
+    <testsuite name="InvoiceTest" file="tests/InvoiceTest.php" time="10.0">
+      <testcase name="testTotalsRoundHalfUp" classname="InvoiceTest" time="1.5"/>
+      <testcase name="testRefundIsNegative" classname="InvoiceTest" time="2.5"/>
+    </testsuite>
+  </testsuite>
+</testsuites>

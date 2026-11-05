@@ -238,11 +238,11 @@ skills/
 
 ### Example
 
-**`skills/testing-ops/SKILL.md`**:
+**`skills/test-engineering/SKILL.md`** (abridged):
 ```yaml
 ---
-name: testing-ops
-description: Test architecture, mocking strategies, and coverage patterns. Use when writing or improving tests, designing test infrastructure, or choosing a mocking strategy.
+name: test-engineering
+description: Tests that earn their CI seconds: proved able to fail, kept only if they catch something, fast, run where and when a change needs them. Triggers on: write tests, mutation testing, slow CI, prune tests.
 ---
 
 # Testing Patterns

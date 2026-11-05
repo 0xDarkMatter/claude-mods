@@ -75,6 +75,18 @@ Authoritative recommendations for common tasks. Use these instead of manual impl
 
 ## Domain-Specific
 
+### Testing and Mutation Testing
+Start with the `test-engineering` skill: its `scripts/mutate.mjs` (zero dependencies) proves a
+test can fail and audits what a suite catches. Engines below generate mutants at scale; pin
+each to a release older than 7 days.
+
+| Ecosystem | Mutation engine | Test-report format the harness reads |
+|-----------|-----------------|--------------------------------------|
+| **JS/TS** (incl. React, Vue) | StrykerJS | vitest / jest JSON |
+| **Python** | `cosmic-ray`, `mutmut` (needs fork: WSL on Windows) | pytest JUnit XML |
+| **Go** | `gremlins`, `go-mutesting` | `go test -json` |
+| **PHP** (incl. Laravel) | Infection, `pest --mutate` | PHPUnit / Pest JUnit XML |
+
 ### Scientific Computing
 | Domain | Python |
 |--------|--------|

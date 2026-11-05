@@ -65,7 +65,7 @@ the scorer only checks the two mechanically-checkable proxies.
 
 | Check | Points | Why | Fix |
 |---|---|---|---|
-| Tests present | 1.5 | Without tests every agent edit is a hope | testing-ops / testgen; name adversarial tests for the adversary |
+| Tests present | 1.5 | Without tests every agent edit is a hope | test-engineering; name adversarial tests for the adversary |
 | CI workflows | 1.0 | Local-only gates skip on exactly the sessions that forget | Minimal workflow running `check` |
 | Single `check` entry | 1.5 | If verification isn't one command, agents won't run it | `npm run check` / `just check` fanning out typecheck+lint+tests+gates |
 | Invariant gates | 1.0 if `check` or CI runs one; 0.5 if gates exist but nothing runs them | Prose rules rot; 30-line scripts don't (the lint:db lesson). A gate no session runs enforces nothing. Detected gates: root `scripts/check-*`, `tests/*drift*`, import-linter, tach, dependency-cruiser, eslint-plugin-boundaries, Nx module boundaries, ArchUnit, deptrac, depguard, Go `internal/` | `scripts/check-<invariant>.mjs` per ownership-table rule, run from the check entry point |

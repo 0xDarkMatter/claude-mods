@@ -1,0 +1,4 @@
+[project]
+name = "x"
+[dependency-groups]
+dev = ["pytest", "pytest-testmon"]

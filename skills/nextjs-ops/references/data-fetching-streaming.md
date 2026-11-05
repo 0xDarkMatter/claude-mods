@@ -204,5 +204,5 @@ await instant(page, async () => {
 
 The DevTools Instant Insights panel surfaces the same regressions in
 development, and the Navigation Inspector pauses a navigation at its shell so
-you can see exactly what the user would see. `testing-ops` and `playwright-ops`
+you can see exactly what the user would see. `test-engineering` and `playwright-ops`
 own the wider test strategy.

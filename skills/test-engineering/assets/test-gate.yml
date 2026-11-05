@@ -1,0 +1,24 @@
+# test-engineering L0 gate (v1) - copy to .github/workflows/test-gate.yml
+#
+# Blocks on ONE thing: lost Python tests (two test functions with the same name in one
+# scope; the first never runs). pyflakes F811 detects that with no false positives, which is
+# why it may block when the other slop heuristics may not (references/gate.md).
+#
+# Pins: actions by commit SHA, ruff by exact version; every pin was more than 7 days old
+# when chosen (2026-10-01). Bump deliberately, never to a release younger than 7 days.
+# Not a Python repo? There is nothing to block on in v1; see references/gate.md.
+name: test-gate
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  lost-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      # Adjust the path if tests live elsewhere. --no-fix: a gate reports, it never edits.
+      - run: uvx ruff@0.16.8 check --select F811 --no-fix tests/

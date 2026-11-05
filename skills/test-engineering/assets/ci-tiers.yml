@@ -1,0 +1,90 @@
+# test-engineering tiered test pipeline - copy to .github/workflows/tests.yml and adapt.
+#
+# Shape (references/ci.md "Shape of a tiered pipeline"):
+#   fast     every PR push: lint + the exact gate checks; gates the rest
+#   affected every PR push: change-aware selection + smoke set + the budget gate
+#   full     merge to main, nightly, and PRs touching ALWAYS-FULL paths: the whole suite
+# The cheap defaults ci-audit.py lint checks (CI1-CI4) are all set below.
+#
+# ADAPT: every line marked ADAPT. The example is Python + uv; for other stacks take the
+# commands from `run-plan.py stack --repo .` (junit / parallel / changed / shard).
+# Pins: actions by commit SHA, each more than 7 days old when chosen (2026-10-01).
+# Bump deliberately, never to a release younger than 7 days (rules/supply-chain.md).
+name: tests
+on:
+  pull_request:
+    paths-ignore: ["**.md", "docs/**"]               # CI3 - ADAPT: what never affects tests
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 3 * * *"                             # nightly full run, off the hour
+concurrency:                                         # CI1: a new push cancels the old run
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+permissions:
+  contents: read
+jobs:
+  fast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5                               # CI2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with: { enable-cache: true }                 # CI4
+      - run: uvx ruff@0.16.8 check --no-fix .        # includes F811 (lost tests): gate.md
+
+  affected:
+    if: github.event_name == 'pull_request'
+    needs: fast                                      # fail-fast ordering: lint never pays for tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false, fetch-depth: 0 }   # selection diffs against the base
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with: { enable-cache: true }
+      - run: uv sync --frozen
+      # ALWAYS-FULL paths: a change here can break tests no selector traces (speed.md).
+      - id: scope
+        run: |
+          base="origin/${{ github.base_ref }}"
+          if git diff --name-only "$base"...HEAD | grep -qE '^(uv\.lock|pyproject\.toml|conftest\.py|tests/fixtures/|migrations/|\.github/)'; then
+            echo "full=true" >> "$GITHUB_OUTPUT"
+          fi
+      # ADAPT: the selector. testmon needs its .testmondata from a main-branch run (cache it).
+      - run: uv run pytest -n auto ${{ steps.scope.outputs.full != 'true' && '--testmon' || '' }} --junitxml=reports/affected.xml
+      - if: always()
+        run: echo "junit at reports/affected.xml (upload it as an artifact for flake history)"
+
+  full:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false                               # the full tier needs the whole picture
+      matrix: { group: [1, 2] }                      # shard by DURATION, until shard time >> setup
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with: { enable-cache: true }
+      - run: uv sync --frozen
+      # ADAPT: pytest-split shards by stored durations (.test_durations, refreshed from this job)
+      - run: uv run pytest -n auto --splits 2 --group ${{ matrix.group }} --junitxml=reports/full-${{ matrix.group }}.xml
+
+  budget:
+    # The budget reads the WHOLE suite, so it runs after the shards, on merge and nightly.
+    # Alert-only there; a repo whose PR tier runs the full suite can block in `affected`.
+    if: github.event_name != 'pull_request'
+    needs: full
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      # ADAPT: download the shards' JUnit artifacts into reports/ here, and point the
+      # script paths at wherever this repo vendors or installs the skill. Then:
+      - run: |
+          python .claude/skills/test-engineering/scripts/suite-profile.py profile reports/ --json > full.json
+          python .claude/skills/test-engineering/scripts/budget-gate.py check full.json --baseline .test-budget.json

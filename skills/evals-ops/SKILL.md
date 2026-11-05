@@ -4,7 +4,7 @@ description: "Build and run evals for LLM and agent systems: golden datasets, LL
 license: MIT
 metadata:
   author: claude-mods
-  related-skills: "testing-ops, claude-api-ops, iterate, loop-ops, fleet-ops"
+  related-skills: "test-engineering, claude-api-ops, iterate, loop-ops, fleet-ops"
 ---
 
 # Evals Ops
@@ -297,3 +297,5 @@ than on scaffolding:
 - `references/regression-gating.md` - blocking vs advisory, noise floor, McNemar, CI shape, cost/latency attribution
 - `references/hillclimbing.md` - optimising against an eval without destroying it: noise, overfitting, frontiers, optimizers
 - `references/tooling-landscape.md` - platform comparison with verification datestamps
+
+Deterministic code around the model is ordinary testing: `test-engineering`. This skill covers output quality.

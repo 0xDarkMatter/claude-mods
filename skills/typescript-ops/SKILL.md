@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: react-ops, testing-ops
+  related-skills: react-ops, test-engineering
 ---
 
 # TypeScript Operations
@@ -330,5 +330,5 @@ Load these for deep-dive topics. Each is self-contained.
 
 ## See Also
 
-- `testing-ops` - Cross-language testing strategies
+- `test-engineering` - Cross-language testing strategies
 - `ci-cd-ops` - TypeScript CI pipelines, type checking in CI

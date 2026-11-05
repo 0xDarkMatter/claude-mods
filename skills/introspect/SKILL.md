@@ -192,7 +192,7 @@ Scan the session data for these patterns and generate recommendations where rele
 
 **Skill and command awareness:**
 - Manual code review without `/review` - mention the skill
-- Test writing without `/testgen` - mention the skill
+- Test writing without `test-engineering` - mention the skill
 - Complex reasoning without `/atomise` - mention it for hard problems
 - Agent spawning for tasks a skill already handles - suggest the lighter-weight option
 

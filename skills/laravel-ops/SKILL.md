@@ -6,7 +6,7 @@ license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: sql-ops, postgres-ops, testing-ops, docker-ops
+  related-skills: sql-ops, postgres-ops, test-engineering, docker-ops
 ---
 
 # Laravel Operations
@@ -417,7 +417,7 @@ $this->assertSoftDeleted('posts', ['id' => $post->id]);
 
 - `sql-ops` - Query optimization, indexing strategy, raw SQL patterns
 - `postgres-ops` - PostgreSQL-specific features, JSON columns, full-text search
-- `testing-ops` - General testing philosophy, TDD, CI integration
+- `test-engineering` - General testing philosophy, TDD, CI integration
 - `docker-ops` - Containerizing Laravel apps, Docker Compose, production setup
 
 ### Key External Resources

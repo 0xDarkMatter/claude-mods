@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="CLI Arguments" tests="6" assertions="4" errors="1" failures="1" skipped="1" time="0.039576">
+    <testsuite name="MoneyTest" file="/repo/tests/MoneyTest.php" tests="5" assertions="2" errors="1" failures="1" skipped="1" time="0.004764">
+      <testcase name="testRoundsHalfCentUp" file="/repo/tests/MoneyTest.php" line="7" class="MoneyTest" classname="MoneyTest" assertions="1" time="0.000535"/>
+      <testcase name="testKeepsNegativeTotalsNegative" file="/repo/tests/MoneyTest.php" line="8" class="MoneyTest" classname="MoneyTest" assertions="1" time="0.003597">
+        <failure type="PHPUnit\Framework\ExpectationFailedException">MoneyTest::testKeepsNegativeTotalsNegative&#13;
+Failed asserting that -250 is identical to 250.
+&#13;
+/repo/tests/MoneyTest.php:8</failure>
+      </testcase>
+      <testcase name="testSkipped" file="/repo/tests/MoneyTest.php" line="9" class="MoneyTest" classname="MoneyTest" assertions="0" time="0.000142">
+        <skipped/>
+      </testcase>
+      <testcase name="testThrowsInsideTheTest" file="/repo/tests/MoneyTest.php" line="10" class="MoneyTest" classname="MoneyTest" assertions="0" time="0.000347">
+        <error type="RuntimeException">MoneyTest::testThrowsInsideTheTest&#13;
+RuntimeException: fixture error
+&#13;
+/repo/tests/MoneyTest.php:10</error>
+      </testcase>
+      <testcase name="testWithNoAssertions" file="/repo/tests/MoneyTest.php" line="11" class="MoneyTest" classname="MoneyTest" assertions="0" time="0.000143"/>
+    </testsuite>
+    <testsuite name="TemplateTest" file="/repo/tests/TemplateTest.php" tests="1" assertions="2" errors="0" failures="0" skipped="0" time="0.034812">
+      <testcase name="testEscapesAUserSuppliedName" file="/repo/tests/TemplateTest.php" line="8" class="TemplateTest" classname="TemplateTest" assertions="2" time="0.034812"/>
+    </testsuite>
+  </testsuite>
+</testsuites>

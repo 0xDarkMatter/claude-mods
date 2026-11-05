@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Edit Write Bash Glob Grep Agent"
 metadata:
   author: claude-mods
-  related-skills: testing-ops, structural-search, debug-ops, code-stats, migrate-ops
+  related-skills: test-engineering, structural-search, debug-ops, code-stats, migrate-ops
 ---
 
 # Refactor Operations
@@ -289,7 +289,7 @@ Refactoring Untested Code
 
 | Skill | When to Combine |
 |-------|----------------|
-| `testing-ops` | Write characterization tests before refactoring, test strategy for refactored code |
+| `test-engineering` | Write characterization tests before refactoring, test strategy for refactored code |
 | `structural-search` | Use ast-grep for structural find-and-replace across codebase |
 | `debug-ops` | When refactoring exposes hidden bugs or introduces regressions |
 | `code-stats` | Measure complexity before and after refactoring to quantify improvement |

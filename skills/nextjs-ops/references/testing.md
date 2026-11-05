@@ -2,7 +2,7 @@
 
 Verified against Next.js 16.3.3 docs, 2026-08-30.
 
-`testing-ops` owns test strategy in general; `playwright-ops` and `cypress-ops`
+`test-engineering` owns test strategy in general; `playwright-ops` and `cypress-ops`
 own their runners. This file owns what is *different* about testing the App
 Router — which is mostly a story about what you cannot unit-test and what to do
 instead.
@@ -144,7 +144,7 @@ Insights panel are the interactive equivalents while developing.
 
 ## Client Components
 
-Ordinary React testing — `react-ops` and `testing-ops` own the patterns. Two
+Ordinary React testing — `react-ops` and `test-engineering` own the patterns. Two
 Next-specific notes:
 
 - Mock `next/navigation` (`useRouter`, `usePathname`, `useSearchParams`), not

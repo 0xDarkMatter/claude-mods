@@ -1,0 +1,8 @@
+{
+  "full": "bash run-all.sh",
+  "always_full": ["run-all.sh", "pkgs/*/tests/fixtures/**", "*.lock"],
+  "ignore": ["**/*.md", "docs/**"],
+  "rules": [
+    {"paths": ["pkgs/*/**"], "run": "bash pkgs/{1}/tests/run.sh"}
+  ]
+}

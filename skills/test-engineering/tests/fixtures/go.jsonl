@@ -1,0 +1,19 @@
+{"ImportPath":"example.com/fixture/broken [example.com/fixture/broken.test]","Action":"build-output","Output":"# example.com/fixture/broken [example.com/fixture/broken.test]\n"}
+{"ImportPath":"example.com/fixture/broken [example.com/fixture/broken.test]","Action":"build-output","Output":"broken\\broken.go:3:25: undefined: undefinedName\n"}
+{"ImportPath":"example.com/fixture/broken [example.com/fixture/broken.test]","Action":"build-fail"}
+{"Time":"2026-01-01T00:03:38.1894997Z","Action":"start","Package":"example.com/fixture/broken"}
+{"Time":"2026-01-01T00:03:38.1894997Z","Action":"output","Package":"example.com/fixture/broken","Output":"FAIL\texample.com/fixture/broken [build failed]\n"}
+{"Time":"2026-01-01T00:03:38.1894997Z","Action":"fail","Package":"example.com/fixture/broken","Elapsed":0,"FailedBuild":"example.com/fixture/broken [example.com/fixture/broken.test]"}
+{"Time":"2026-01-01T00:03:38.4056654Z","Action":"start","Package":"example.com/fixture/money"}
+{"Time":"2026-01-01T00:03:38.8070596Z","Action":"run","Package":"example.com/fixture/money","Test":"TestCentsScales"}
+{"Time":"2026-01-01T00:03:38.8076005Z","Action":"output","Package":"example.com/fixture/money","Test":"TestCentsScales","Output":"=== RUN   TestCentsScales\n"}
+{"Time":"2026-01-01T00:03:38.8076005Z","Action":"output","Package":"example.com/fixture/money","Test":"TestCentsScales","Output":"--- PASS: TestCentsScales (0.00s)\n"}
+{"Time":"2026-01-01T00:03:38.8076005Z","Action":"pass","Package":"example.com/fixture/money","Test":"TestCentsScales","Elapsed":0}
+{"Time":"2026-01-01T00:03:38.8076005Z","Action":"run","Package":"example.com/fixture/money","Test":"TestCentsRejectsNegative"}
+{"Time":"2026-01-01T00:03:38.8076005Z","Action":"output","Package":"example.com/fixture/money","Test":"TestCentsRejectsNegative","Output":"=== RUN   TestCentsRejectsNegative\n"}
+{"Time":"2026-01-01T00:03:38.8076005Z","Action":"output","Package":"example.com/fixture/money","Test":"TestCentsRejectsNegative","Output":"    money_test.go:13: want 0 for negative input\n"}
+{"Time":"2026-01-01T00:03:38.8076005Z","Action":"output","Package":"example.com/fixture/money","Test":"TestCentsRejectsNegative","Output":"--- FAIL: TestCentsRejectsNegative (0.00s)\n"}
+{"Time":"2026-01-01T00:03:38.8076005Z","Action":"fail","Package":"example.com/fixture/money","Test":"TestCentsRejectsNegative","Elapsed":0}
+{"Time":"2026-01-01T00:03:38.8076005Z","Action":"output","Package":"example.com/fixture/money","Output":"FAIL\n"}
+{"Time":"2026-01-01T00:03:38.8103595Z","Action":"output","Package":"example.com/fixture/money","Output":"FAIL\texample.com/fixture/money\t0.405s\n"}
+{"Time":"2026-01-01T00:03:38.8103595Z","Action":"fail","Package":"example.com/fixture/money","Elapsed":0.405}

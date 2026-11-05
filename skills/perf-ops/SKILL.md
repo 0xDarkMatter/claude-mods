@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Edit Write Bash Glob Grep Agent TaskCreate TaskUpdate"
 metadata:
   author: claude-mods
-  related-skills: debug-ops, monitoring-ops, testing-ops, code-stats, postgres-ops, sqlite-ops
+  related-skills: debug-ops, monitoring-ops, test-engineering, code-stats, postgres-ops, sqlite-ops
 ---
 
 # Performance Operations
@@ -311,7 +311,7 @@ Load reference files when deeper tool-specific guidance is needed beyond what th
 | `web-perf-ops` | Frontend page speed - Core Web Vitals diagnosis, field vs lab data, image/font/JS/CSS fixes, Lighthouse CI |
 | `debug-ops` | Root cause analysis for performance regressions |
 | `monitoring-ops` | Production metrics, alerting on latency/throughput |
-| `testing-ops` | Performance regression tests in CI, benchmark suites |
+| `test-engineering` | Performance regression tests in CI, benchmark suites |
 | `code-stats` | Identify complex code that may be performance-sensitive |
 | `postgres-ops` | PostgreSQL-specific query optimization, indexing, EXPLAIN |
 | `sqlite-ops` | SQLite/D1/libSQL query plans, covering indexes, rows-read economics, `eqp-triage.py` |

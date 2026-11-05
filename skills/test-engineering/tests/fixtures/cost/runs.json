@@ -1,0 +1,11 @@
+{"repo": "acme/widget", "runs": [
+  {"id": 1, "name": "tests", "conclusion": "success", "head_branch": "feat-a", "pull_requests": [{"number": 7}],
+   "run_started_at": "2026-10-01T10:00:00Z", "updated_at": "2026-10-01T10:02:00Z",
+   "jobs": [
+     {"name": "lint", "labels": ["ubuntu-latest"], "started_at": "2026-10-01T10:00:00Z", "completed_at": "2026-10-01T10:00:20Z"},
+     {"name": "unit", "labels": ["ubuntu-latest"], "started_at": "2026-10-01T10:00:00Z", "completed_at": "2026-10-01T10:00:20Z"},
+     {"name": "win", "labels": ["windows-latest"], "started_at": "2026-10-01T10:00:00Z", "completed_at": "2026-10-01T10:01:30Z"}]},
+  {"id": 2, "name": "tests", "conclusion": "cancelled", "head_branch": "feat-a", "pull_requests": [{"number": 7}],
+   "run_started_at": "2026-10-01T09:00:00Z", "updated_at": "2026-10-01T09:03:00Z",
+   "jobs": [
+     {"name": "unit", "labels": ["ubuntu-latest"], "started_at": "2026-10-01T09:00:00Z", "completed_at": "2026-10-01T09:03:00Z"}]}]}

@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: docker-ops, ci-cd-ops, testing-ops
+  related-skills: docker-ops, ci-cd-ops, test-engineering
 ---
 
 # Rust Operations
@@ -347,4 +347,4 @@ Load these for deep-dive topics. Each is self-contained.
 
 - `docker-ops` - Multi-stage builds for Rust (scratch/distroless, cargo-chef for layer caching)
 - `ci-cd-ops` - Rust CI pipelines, cargo caching, cross-compilation
-- `testing-ops` - Cross-language testing strategies
+- `test-engineering` - Cross-language testing strategies

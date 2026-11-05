@@ -317,7 +317,7 @@ command -v tokei >/dev/null 2>&1 || echo "tokei not installed - skipping stats"
 | Skill/Command | Relationship |
 |---------------|--------------|
 | `/review` | Review after understanding |
-| `/testgen` | Generate tests for explained code |
+| `/test-engineering write` | Tests for explained code, each proved able to fail |
 | `/save` | Save progress if working on related task |
 
 ## Persistence

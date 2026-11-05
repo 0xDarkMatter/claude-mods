@@ -1,0 +1,18 @@
+[
+  {
+    "id": "AUTH-1",
+    "file": "src/auth/reset.ts",
+    "old": "if (!token || token.usedAt || token.expiresAt <= now) return reject(\"invalid_token\");",
+    "new": "if (!token || token.expiresAt <= now) return reject(\"invalid_token\");",
+    "bug": "a password-reset link can be used a second time",
+    "class": "G1"
+  },
+  {
+    "id": "FIX-142",
+    "file": "src/billing/round.ts",
+    "old": "return Math.round(cents) / 100;",
+    "new": "return Math.floor(cents) / 100;",
+    "bug": "reverse of the fix for #142: half cents were rounded down",
+    "class": "G7"
+  }
+]

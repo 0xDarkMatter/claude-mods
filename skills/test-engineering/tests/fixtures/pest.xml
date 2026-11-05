@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="CLI Arguments" tests="3" assertions="2" errors="0" failures="1" skipped="1" time="0.035652">
+    <testsuite name="Tests\MoneyTest" file="tests/MoneyTest.php" tests="3" assertions="2" errors="0" failures="1" skipped="1" time="0.035652">
+      <testcase name="rounds a half cent up" file="tests/MoneyTest.php::rounds a half cent up" class="Tests\MoneyTest" classname="Tests.MoneyTest" assertions="1" time="0.020197"/>
+      <testcase name="keeps negative totals negative" file="tests/MoneyTest.php::keeps negative totals negative" class="Tests\MoneyTest" classname="Tests.MoneyTest" assertions="1" time="0.013669">
+        <failure type="PHPUnit\Framework\ExpectationFailedException">keeps negative totals negativeFailed asserting that -250 is identical to 250.&#13;
+at tests/MoneyTest.php:9</failure>
+      </testcase>
+      <testcase name="it is skipped" file="tests/MoneyTest.php::it is skipped" class="Tests\MoneyTest" classname="Tests.MoneyTest" assertions="0" time="0.001786">
+        <skipped/>
+      </testcase>
+    </testsuite>
+  </testsuite>
+</testsuites>
