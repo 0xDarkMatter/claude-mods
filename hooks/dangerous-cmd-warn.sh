@@ -113,9 +113,13 @@ block() {   # $1 = what matched, $2 = risk
 # run, to name the pattern that did. This hook runs before EVERY Bash call: a grep
 # per pattern was ~116 process starts per call (~2 s on Windows), now 1-3 for a
 # safe command. Here-strings, not `printf | grep`, so no subshell is forked.
+# Skip the loop ONLY on a clean "no match" (1). One invalid pattern makes the combined
+# grep exit 2 with no verdict; treating that as "safe" would turn off every block, where
+# the per-pattern loop only ever lost the one bad pattern. So anything but 1 falls through.
 any=()
 for pattern in "${!PATTERNS[@]}"; do any+=(-e "$pattern"); done
-if grep -qEi "${any[@]}" <<< "$INPUT"; then
+grep -qEi "${any[@]}" <<< "$INPUT"; rc=$?
+if [ "$rc" -ne 1 ]; then
   for pattern in "${!PATTERNS[@]}"; do
     if grep -qEi -e "$pattern" <<< "$INPUT"; then
       block "$pattern" "${PATTERNS[$pattern]}"
