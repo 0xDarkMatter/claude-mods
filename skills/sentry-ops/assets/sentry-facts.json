@@ -1,0 +1,28 @@
+{
+  "schema": "claude-mods.sentry-ops.facts/v1",
+  "as_of": "2026-11-06",
+  "note": "Version-bound facts sentry-ops depends on. check-sentry-facts.py --offline checks each prose_token is still named in the skill; --live checks npm and the docs. When the SDK major moves, re-read the migration guide before bumping documented_major.",
+  "packages": {
+    "cloudflare": {"package": "@sentry/cloudflare", "prose_token": "@sentry/cloudflare", "documented_major": 11},
+    "astro": {"package": "@sentry/astro", "prose_token": "@sentry/astro", "documented_major": 11},
+    "browser": {"package": "@sentry/browser", "prose_token": "@sentry/browser", "documented_major": 11},
+    "node": {"package": "@sentry/node", "prose_token": "@sentry/node", "documented_major": 11},
+    "hono": {"package": "@sentry/hono", "prose_token": "@sentry/hono", "documented_major": 11},
+    "core": {"package": "@sentry/core", "prose_token": "@sentry/core", "documented_major": 11},
+    "wizard": {"package": "@sentry/wizard", "prose_token": "@sentry/wizard"},
+    "agent_plugin": {"package": "@sentry/agent-plugin", "prose_token": "@sentry/agent-plugin"}
+  },
+  "documented_sdk_major": 11,
+  "data_collection_keys": [
+    "userInfo", "cookies", "httpHeaders", "httpBodies", "urlQueryParams", "graphQL",
+    "genAI", "mcp", "databaseQueryData", "queues", "stackFrameVariables", "frameContextLines"
+  ],
+  "data_collection_source": "https://unpkg.com/@sentry/core@latest/build/esm/utils/data-collection/resolveDataCollectionOptions.js",
+  "doc_pages": [
+    {"url": "https://docs.sentry.io/platforms/javascript/guides/cloudflare/frameworks/astro.md", "marker": "withSentry"},
+    {"url": "https://docs.sentry.io/platforms/javascript/configuration/options.md", "marker": "dataCollection"},
+    {"url": "https://docs.sentry.io/platforms/javascript/migration/v10-to-v11.md", "marker": "sendDefaultPii"},
+    {"url": "https://docs.sentry.io/concepts/key-terms/dsn-explainer.md", "marker": "DSN"},
+    {"url": "https://docs.sentry.io/account/auth-tokens.md", "marker": "Organization"}
+  ]
+}

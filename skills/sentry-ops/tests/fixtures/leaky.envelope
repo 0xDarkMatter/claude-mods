@@ -1,0 +1,3 @@
+{"event_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "sdk": {"name": "sentry.javascript.cloudflare", "version": "0.0.0"}}
+{"type": "event"}
+{"event_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "level": "error", "platform": "javascript", "environment": "production", "exception": {"values": [{"type": "Error", "value": "boom"}]}, "user": {"ip_address": "203.0.113.9"}, "breadcrumbs": [{"category": "console", "message": "log for person@example.com"}], "request": {"method": "POST", "url": "http://app.test/contact?email=person%40example.com", "headers": {"x-custom": "HEADERVALUE"}, "cookies": {"theme": "dark"}, "query_string": "email=person%40example.com", "data": "{\"m\":\"person@example.com\"}"}}
