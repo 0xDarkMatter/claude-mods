@@ -74,6 +74,18 @@ feature releases live in the README "Recent Updates" section.
 
 ### Changed
 
+- **fleet-ops: far fewer processes on Git Bash.** The self-test took 37 minutes and started
+  126,000 processes, because every `$(...)`, pipe stage and `head`/`awk`/`tr` is a Windows
+  process. `fleet.sh`, `sweep.sh`, `sessions.sh` and the shared `_lib/term.sh` now do their
+  hot work (lane-file reads, colouring, panel rows, prune's session joins, the sweep's
+  per-lane lookups) with builtins and `printf -v` setters, and read the lane files with one
+  `stat`. Output is unchanged: old and new were diffed byte for byte over every status,
+  prune and read-only sweep view in ASCII, UTF-8 and forced-colour modes. The `fleet queue`
+  live-owner case no longer uses a fixed 4 s deadline that a loaded machine could outrun:
+  `FLEET_QUEUE_EXPIRE_AFTER_LANDS` (a test seam in `queue.sh`) now says the deadline has
+  passed once the first land attempt returns, so no wall-clock guess is left. Self-test:
+  37 min and 126,000 processes down to 18 min and 68,000; the e2e from 53 s to 26 s.
+
 - **A security-release exception to the 7-day cooldown.** A release that patches a
   published CVE may skip the wait, but the CVE label alone waives nothing, because
   "critical fix, upgrade now" is the lure a hijacked publish uses. The advisory must name

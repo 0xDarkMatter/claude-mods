@@ -19,7 +19,10 @@
 #   dispatch            the subcommand case at the bottom
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Builtins only: dirname + two subshells were 3 processes on every call.
+__src=${BASH_SOURCE[0]}
+case "$__src" in */*) __src=${__src%/*}; [[ -n "$__src" ]] || __src=/ ;; *) __src=. ;; esac
+SCRIPT_DIR=$(cd "$__src" && pwd)
 REPO_ROOT=""
 
 # Where the user actually invoked us from, captured BEFORE the cd below.
@@ -32,7 +35,9 @@ REPO_ROOT=""
 # `git worktree list` yields "D:/code/repo"; string-comparing those two never
 # matches, and the guard silently stops guarding. Converting to git's own
 # mixed form is what makes the comparison mean anything on Windows.
-INVOKED_FROM="$(pwd -P 2>/dev/null || pwd)"
+# `cd -P .` is `pwd -P` without the subshell; the logical cwd is restored after.
+__here=$PWD
+if cd -P . 2>/dev/null; then INVOKED_FROM=$PWD; cd "$__here"; else INVOKED_FROM=$PWD; fi
 if command -v cygpath >/dev/null 2>&1; then
   INVOKED_FROM="$(cygpath -m "$INVOKED_FROM" 2>/dev/null || printf '%s' "$INVOKED_FROM")"
 fi
@@ -40,8 +45,8 @@ fi
 # Resolve repo root via git, so fleet works from any worktree.
 # cd to it once so all relative paths below resolve correctly.
 if GIT_COMMON_DIR=$(git rev-parse --git-common-dir 2>/dev/null); then
-  REPO_ROOT="$(cd "$GIT_COMMON_DIR/.." && pwd)"
-  cd "$REPO_ROOT"
+  cd "$GIT_COMMON_DIR/.."
+  REPO_ROOT=$PWD
 fi
 
 FLEET_DIR=".claude/fleet"
@@ -110,6 +115,60 @@ PRUNE_HINT="on"
 SKIP_SESSION_CHECK="${FLEET_SKIP_SESSION_CHECK:-}"
 unset FLEET_SKIP_SESSION_CHECK
 
+# === FORK-FREE HELPERS ========================================================
+# On Git Bash every $(...), pipe stage and external command is a new Windows
+# process (~15-20 ms each, measured 2026-11-05): the fleet-ops suite spent 84% of
+# its 44 minutes creating them, and one `fleet status` cost ~180. These setters
+# return through a NAMED variable (printf -v) so hot paths need no subshell.
+# Each matches the pipeline it replaced byte for byte, including the trailing-
+# newline strip of $(...); keep it that way. Their own locals are __-prefixed
+# because printf -v resolves the target name dynamically: a helper local called
+# `s` would swallow a caller's `s`.
+
+# lower_v VAR STR — STR lowercased as `tr '[:upper:]' '[:lower:]'` does it.
+# ASCII input uses ${s,,}; anything else (and bash 3.2, which has no ${s,,})
+# still goes through tr, whose idea of a non-ASCII letter varies by platform.
+if (( BASH_VERSINFO[0] >= 4 )); then
+  lower_v() {
+    if [[ $2 == *[![:ascii:]]* ]]; then
+      printf -v "$1" '%s' "$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
+    else
+      printf -v "$1" '%s' "${2,,}"
+    fi
+  }
+else
+  lower_v() { printf -v "$1" '%s' "$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"; }
+fi
+
+# now_v VAR — epoch seconds, as `date +%s`. clock_v VAR — `date '+%H:%M:%S'`.
+# printf's %(...)T is bash 4.2+; older bash forks date as before.
+if printf '%(%s)T' -1 >/dev/null 2>&1; then
+  now_v()   { printf -v "$1" '%(%s)T' -1; }
+  clock_v() { printf -v "$1" '%(%H:%M:%S)T' -1; }
+else
+  now_v()   { printf -v "$1" '%s' "$(date +%s)"; }
+  clock_v() { printf -v "$1" '%s' "$(date '+%H:%M:%S')"; }
+fi
+
+# chomp_v VAR — strip VAR's trailing newlines, as command substitution does.
+chomp_v() {
+  local __c=${!1}
+  while [[ $__c == *$'\n' ]]; do __c=${__c%$'\n'}; done
+  printf -v "$1" '%s' "$__c"
+}
+
+# cut_field_v VAR LINE N — `printf '%s' LINE | cut -fN`: tab-separated, a line
+# with no tab at all comes back whole (cut prints undelimited lines as they are).
+cut_field_v() {
+  local __l=$2 __n=$3
+  if [[ $__l != *$'\t'* ]]; then printf -v "$1" '%s' "$__l"; return 0; fi
+  while (( __n > 1 )); do
+    if [[ $__l != *$'\t'* ]]; then __l=""; break; fi
+    __l=${__l#*$'\t'}; __n=$(( __n - 1 ))
+  done
+  printf -v "$1" '%s' "${__l%%$'\t'*}"
+}
+
 # === CONFIG ===================================================================
 # The config is PARSED, never `source`d. Two reasons, both learned the hard way
 # (2026-07: every documented key had been a silent no-op since the file shipped):
@@ -136,11 +195,13 @@ config_warn() {
 }
 
 # Strip leading and trailing whitespace. bash 3.2-safe (macOS ships 3.2).
-config_trim() {
-  local s=$1
-  s="${s#"${s%%[![:space:]]*}"}"
-  s="${s%"${s##*[![:space:]]}"}"
-  printf '%s' "$s"
+config_trim() { config_trim_v __ct "$1"; printf '%s' "$__ct"; }
+# config_trim_v VAR STR — the same trim into VAR (the parser runs it 3x a line).
+config_trim_v() {
+  local __s=$2
+  __s="${__s#"${__s%%[![:space:]]*}"}"
+  __s="${__s%"${__s##*[![:space:]]}"}"
+  printf -v "$1" '%s' "$__s"
 }
 
 # Parse key=value lines. Grammar (documented identically in SKILL.md):
@@ -161,16 +222,16 @@ load_config() {
   while IFS= read -r line || [[ -n "$line" ]]; do
     lineno=$((lineno + 1))
     line="${line%$'\r'}"                 # CRLF configs (Windows editors)
-    line="$(config_trim "$line")"
+    config_trim_v line "$line"
     [[ -z "$line" || "$line" == \#* ]] && continue
 
     if [[ "$line" != *=* ]]; then
       config_warn "$file:$lineno — not a key=value line, ignored: $line"
       continue
     fi
-    key="$(config_trim "${line%%=*}")"
-    key="$(printf '%s' "$key" | tr '[:upper:]' '[:lower:]')"
-    val="$(config_trim "${line#*=}")"
+    config_trim_v key "${line%%=*}"
+    lower_v key "$key"
+    config_trim_v val "${line#*=}"
 
     case "$val" in
       # Quoted: value is everything up to the closing quote; rest is discarded.
@@ -178,7 +239,7 @@ load_config() {
       \'*) val="${val#\'}"; val="${val%%\'*}" ;;
       # Unquoted: drop a trailing ` # comment` (matches shell intuition, and the
       # SKILL.md example block is annotated that way — a verbatim copy must work).
-      *)   val="${val%%[[:space:]]#*}"; val="$(config_trim "$val")" ;;
+      *)   val="${val%%[[:space:]]#*}"; config_trim_v val "$val" ;;
     esac
 
     case "$key" in
@@ -243,16 +304,40 @@ if [[ "${FLEET_ASCII:-}" == "1" || "$ICONS" == "ascii" ]]; then export TERM_ASCI
 term_init
 
 # Icons resolved through the shared term lib (term_state_icon).
-ICON_RUNNING="$(term_state_icon RUNNING)"
-ICON_READY="$(term_state_icon READY)"
-ICON_LANDED="$(term_state_icon LANDED)"
-ICON_FAILED="$(term_state_icon FAILED)"
-ICON_CONFLICT="$(term_state_icon CONFLICT)"
+# (term_state_icon's own mapping, read without five subshells.)
+ICON_RUNNING="$TERM_ICON_PENDING"
+ICON_READY="$TERM_ICON_READY"
+ICON_LANDED="$TERM_ICON_DONE"
+ICON_FAILED="$TERM_ICON_FAILED"
+ICON_CONFLICT="$TERM_ICON_WARN"
 ICON_UNKNOWN="?"
 
 # Cross-platform mtime: GNU stat (Linux/Git Bash) vs BSD stat (macOS)
 file_mtime() {
   stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || date +%s
+}
+
+# lane_files_v — LANE_FILES=(every regular file in $LANES_DIR, glob order) and
+# LANE_MTIMES=(their file_mtime), read with ONE stat for the lot instead of a
+# subshell + stat per lane. Any doubt (BSD stat, a file gone mid-read, a short
+# answer) falls back to file_mtime per file, which is what ran before.
+LANE_FILES=(); LANE_MTIMES=()
+lane_files_v() {
+  local __f __out="" __ok=0
+  LANE_FILES=(); LANE_MTIMES=()
+  for __f in "$LANES_DIR"/*; do [[ -f "$__f" ]] && LANE_FILES+=("$__f"); done
+  [[ ${#LANE_FILES[@]} -gt 0 ]] || return 0
+  if __out=$(stat -c %Y -- "${LANE_FILES[@]}" 2>/dev/null); then
+    while IFS= read -r __f; do
+      [[ $__f =~ ^[0-9]+$ ]] || { __ok=0; break; }
+      LANE_MTIMES+=("$__f"); __ok=1
+    done <<< "$__out"
+  fi
+  if [[ $__ok -ne 1 || ${#LANE_MTIMES[@]} -ne ${#LANE_FILES[@]} ]]; then
+    LANE_MTIMES=()
+    for __f in "${LANE_FILES[@]}"; do LANE_MTIMES+=("$(file_mtime "$__f")"); done
+  fi
+  return 0
 }
 
 # Lane files are named after branches, but branch names can contain '/'
@@ -262,8 +347,18 @@ file_mtime() {
 # signal.sh carries an identical encoder so the two interoperate.
 encode_lane() { local s=${1//\%/%25}; printf '%s' "${s//\//%2F}"; }
 decode_lane() { local s=${1//%2F/\/}; printf '%s' "${s//%25/\%}"; }
+# The same two, into a named variable (no subshell).
+encode_lane_v() { local __s=${2//\%/%25}; printf -v "$1" '%s' "${__s//\//%2F}"; }
+decode_lane_v() { local __s=${2//%2F/\/}; printf -v "$1" '%s' "${__s//%25/\%}"; }
 
-log() { echo "[$(date '+%H:%M:%S')] $*" | tee -a "$LOG" >&2; }
+# Was `echo ... | tee -a "$LOG" >&2`: three processes a line. Same bytes to both
+# places, and the same exit status (the append's) when the log can't be written.
+log() {
+  local __t; clock_v __t
+  local __m="[$__t] $*"
+  printf '%s\n' "$__m" >&2
+  printf '%s\n' "$__m" >> "$LOG"
+}
 
 maybe_commit_gitignore() {
   # Auto-commit the .gitignore append from ensure_fleet_dir, but only when
@@ -299,22 +394,24 @@ maybe_commit_gitignore() {
 }
 
 ensure_fleet_dir() {
-  mkdir -p "$LANES_DIR"
+  [[ -d "$LANES_DIR" ]] || mkdir -p "$LANES_DIR"
   [[ -f "$FLEET_DIR/signal.sh" ]] || cp "$SCRIPT_DIR/signal.sh" "$FLEET_DIR/signal.sh"
-  chmod +x "$FLEET_DIR/signal.sh" 2>/dev/null || true
   # sessions.sh ships alongside signal.sh so a lane session — which only ever
   # sees .claude/fleet/, never the installed skill dir — can resolve MAIN's
   # address when it signals READY. Refreshed every time so a skill update
   # propagates (signal.sh is deliberately NOT overwritten: a repo may have
   # customised it).
   cp -f "$SCRIPT_DIR/sessions.sh" "$FLEET_DIR/sessions.sh" 2>/dev/null || true
-  chmod +x "$FLEET_DIR/sessions.sh" 2>/dev/null || true
+  # One chmod for both (it was one each); each still fails on its own, silently.
+  chmod +x "$FLEET_DIR/signal.sh" "$FLEET_DIR/sessions.sh" 2>/dev/null || true
   # Auto-ignore fleet-ops runtime state in git so it doesn't show as "dirty"
   # or get committed. Two paths:
   #   .claude/fleet/      — lanes/, daemon.pid, landing, activity.log, signal.sh, config
   #   .fleet-worktrees/   — default worktree root (top-level so headless
   #                         Claude lane sessions can write there)
-  if git rev-parse --git-dir >/dev/null 2>&1; then
+  # Startup's rev-parse already proved REPO_ROOT a repo; ask git again only
+  # from anywhere else.
+  if [[ -n "$REPO_ROOT" && "$PWD" == "$REPO_ROOT" ]] || git rev-parse --git-dir >/dev/null 2>&1; then
     [[ -f .gitignore ]] || touch .gitignore
     # Accept the `dir/*` form as already-ignoring, not just `dir/`. A repo that
     # wants to track ONE file in here (e.g. a `config.example` so the landing
@@ -323,12 +420,19 @@ ensure_fleet_dir() {
     # excluded. An exact-match grep does not see that as ignored, so it appended
     # a bare `.claude/fleet/` and auto-committed it, re-excluding the directory
     # and quietly undoing the repo's intent.
-    local appended=0
-    if ! grep -qxE '\.claude/fleet/\*?' .gitignore 2>/dev/null; then
+    local appended=0 __gl __has_fleet=0 __has_wt=0
+    # One builtin read for both whole-line matches (were two grep -qxE runs).
+    while IFS= read -r __gl || [[ -n "$__gl" ]]; do
+      case "$__gl" in
+        .claude/fleet/|.claude/fleet/\*) __has_fleet=1 ;;
+        .fleet-worktrees/|.fleet-worktrees/\*) __has_wt=1 ;;
+      esac
+    done < .gitignore 2>/dev/null || true
+    if [[ $__has_fleet -eq 0 ]]; then
       echo '.claude/fleet/' >> .gitignore
       appended=1
     fi
-    if [[ $FLEET_WT_EXTERNAL -eq 0 ]] && ! grep -qxE '\.fleet-worktrees/\*?' .gitignore 2>/dev/null; then
+    if [[ $FLEET_WT_EXTERNAL -eq 0 && $__has_wt -eq 0 ]]; then
       echo '.fleet-worktrees/' >> .gitignore
       appended=1
     fi
@@ -346,6 +450,18 @@ is_dirty_tracked() {
 }
 
 lane_state() { local f="$LANES_DIR/$(encode_lane "$1")"; [[ -f "$f" ]] && head -n1 "$f" || echo "MISSING"; }
+# lane_state_v VAR BRANCH — "$(lane_state BRANCH)" read with builtins.
+lane_state_v() {
+  local __f __st=""
+  encode_lane_v __f "$2"; __f="$LANES_DIR/$__f"
+  if [[ -f "$__f" ]]; then
+    # An unreadable file was `head` failing into `|| echo MISSING`.
+    { IFS= read -r __st || true; } < "$__f" 2>/dev/null || __st=MISSING
+  else
+    __st=MISSING
+  fi
+  printf -v "$1" '%s' "$__st"
+}
 set_lane_state() {
   local l=$1 s=$2 f
   f="$LANES_DIR/$(encode_lane "$l")"
@@ -505,6 +621,14 @@ format_age() {
   else printf '%dh%dm' "$((secs/3600))" "$(( (secs%3600)/60 ))"
   fi
 }
+# format_age_v VAR SECS — the same, into VAR.
+format_age_v() {
+  local __s=$2
+  if   [[ $__s -lt 60   ]]; then printf -v "$1" '%ds' "$__s"
+  elif [[ $__s -lt 3600 ]]; then printf -v "$1" '%dm' "$((__s/60))"
+  else printf -v "$1" '%dh%dm' "$((__s/3600))" "$(( (__s%3600)/60 ))"
+  fi
+}
 
 icon_for_state() {
   case "$1" in
@@ -526,17 +650,20 @@ __fleet_bucket() {
   total=0; active=0
   state_buckets=("" "" "" "" "")
   state_counts=(0 0 0 0 0)
-  local now=$(date +%s)
-  for f in "$LANES_DIR"/*; do
-    [[ -f "$f" ]] || continue
+  local now; now_v now
+  local li
+  lane_files_v
+  for (( li=0; li<${#LANE_FILES[@]}; li++ )); do
+    f=${LANE_FILES[$li]}
     total=$((total+1))
     local branch state meta mtime secs age idx
-    branch=$(decode_lane "$(basename "$f")")
-    state=$(head -n1 "$f")
-    meta=$(sed -n '2p' "$f")
-    mtime=$(file_mtime "$f")
+    decode_lane_v branch "${f##*/}"
+    # Lines 1 and 2 with builtins (were head -n1 and sed -n 2p).
+    state="" meta=""
+    { IFS= read -r state || true; IFS= read -r meta || true; } < "$f"
+    mtime=${LANE_MTIMES[$li]}
     secs=$((now - mtime))
-    age=$(format_age "$secs")
+    format_age_v age "$secs"
     [[ "$state" != "LANDED" && "$state" != "FAILED" ]] && active=$((active+1))
     idx=-1
     case "$state" in
@@ -553,16 +680,20 @@ __fleet_bucket() {
 }
 
 # Daemon health → "healthy" or "busted"
-__fleet_daemon_state() {
+__fleet_daemon_state() { __fleet_daemon_state_v __ds; printf '%s' "$__ds"; }
+# __fleet_daemon_state_v VAR — the same verdict into VAR (no subshell, no cat).
+__fleet_daemon_state_v() {
+  printf -v "$1" '%s' busted
   if [[ -f "$PID_FILE" ]]; then
-    local pid
-    pid=$(cat "$PID_FILE" 2>/dev/null || echo "")
-    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-      printf 'healthy'
-      return
+    local __pid=""
+    # The whole file, trailing newlines stripped: what $(cat) gave.
+    IFS= read -r -d '' __pid < "$PID_FILE" 2>/dev/null || true
+    chomp_v __pid
+    if [[ -n "$__pid" ]] && kill -0 "$__pid" 2>/dev/null; then
+      printf -v "$1" '%s' healthy
     fi
   fi
-  printf 'busted'
+  return 0
 }
 
 # Footer composition shared by all panel views.
@@ -572,10 +703,13 @@ __fleet_footer() {
   # Separators come from term.sh ($TERM_DOT), never an authored U+00B7. A literal
   # middle dot bypasses the ASCII-fallback registry, so it survives TERM_ASCII=1
   # and mojibakes on non-UTF-8 consoles. tests/check-resources.sh gates this.
-  hotkeys="$(term_hotkey R refresh) ${TERM_DOT} $(term_hotkey L land) ${TERM_DOT} $(term_hotkey '?' help)"
+  # The hotkey/health fragments come from term.sh's setters (no subshells).
+  local __r __l __q
+  __term_c cyan R; __r=$__TERM_C; __term_c cyan L; __l=$__TERM_C; __term_c cyan '?'; __q=$__TERM_C
+  hotkeys="$__r refresh ${TERM_DOT} $__l land ${TERM_DOT} $__q help"
   local healths
-  healths="$(term_health "$daemon_state" "daemon")"
-  [[ "$active" -gt 0 ]] && healths="$healths  $(term_health pending "$active active")"
+  __term_health_v "$daemon_state" "daemon"; healths=$__TERM_HEALTH
+  if [[ "$active" -gt 0 ]]; then __term_health_v pending "$active active"; healths="$healths  $__TERM_HEALTH"; fi
   term_panel_close "$hotkeys" "$healths"
 }
 
@@ -589,7 +723,7 @@ fleet_view_panel() {
   __fleet_bucket
   load_session_index
   local daemon_state
-  daemon_state=$(__fleet_daemon_state)
+  __fleet_daemon_state_v daemon_state
 
   echo ""
   term_panel_open fleet fleet "$TERM_GLYPH_BRANCH $BASE_BRANCH"
@@ -615,7 +749,8 @@ fleet_view_panel() {
   fi
 
   term_panel_vert
-  term_summary_line "$total $([ "$total" -eq 1 ] && echo lane || echo lanes) ${TERM_DOT} $active active"
+  local noun=lanes; [[ "$total" -eq 1 ]] && noun=lane
+  term_summary_line "$total $noun ${TERM_DOT} $active active"
   term_panel_vert
 
   local i
@@ -639,9 +774,11 @@ fleet_view_panel() {
       ahead=$(git rev-list --count "${BASE_BRANCH}..${branch}" 2>/dev/null || echo 0)
       head_kind="HEAD"
       [[ "$state" == "CONFLICT" || "$state" == "FAILED" ]] && head_kind="CONFLICT"
-      rail=$(term_rail "$ahead" "$head_kind")
+      __term_rail_v "$ahead" "$head_kind"; rail=$__TERM_RAIL
 
-      local own; own=$(owner_annotation "$branch")
+      # owner_annotation prints nothing without an index: skip its subshell then.
+      local own=""
+      if [[ -n "$SESSION_INDEX_CACHE" ]]; then own=$(owner_annotation "$branch"); fi
       local shown_meta="${meta:-}"
       if [[ -n "$own" ]]; then
         # ASCII separator on purpose — this row must survive TERM_ASCII=1.
@@ -668,8 +805,8 @@ fleet_view_verbose() {
   __fleet_bucket
   load_session_index
   local daemon_state
-  daemon_state=$(__fleet_daemon_state)
-  local now=$(date +%s)
+  __fleet_daemon_state_v daemon_state
+  local now; now_v now
 
   echo ""
   term_panel_open fleet "fleet ${TERM_DOT} verbose" "$TERM_GLYPH_BRANCH $BASE_BRANCH"
@@ -685,18 +822,21 @@ fleet_view_verbose() {
   fi
 
   term_panel_vert
-  term_summary_line "$total $([ "$total" -eq 1 ] && echo lane || echo lanes) ${TERM_DOT} $active active"
+  local noun=lanes; [[ "$total" -eq 1 ]] && noun=lane
+  term_summary_line "$total $noun ${TERM_DOT} $active active"
   term_panel_vert
 
-  for f in "$LANES_DIR"/*; do
-    [[ -f "$f" ]] || continue
+  local li
+  lane_files_v
+  for (( li=0; li<${#LANE_FILES[@]}; li++ )); do
+    f=${LANE_FILES[$li]}
     local branch state meta mtime age secs wt commits color label_state
-    branch=$(decode_lane "$(basename "$f")")
-    state=$(head -n1 "$f")
-    meta=$(sed -n '2p' "$f")
-    mtime=$(file_mtime "$f")
+    decode_lane_v branch "${f##*/}"
+    state="" meta=""
+    { IFS= read -r state || true; IFS= read -r meta || true; } < "$f"
+    mtime=${LANE_MTIMES[$li]}
     secs=$((now - mtime))
-    age=$(format_age "$secs")
+    format_age_v age "$secs"
     wt=$(worktree_path_for "$branch" 2>/dev/null || echo "")
     commits=$(git rev-list --count "$BASE_BRANCH..$branch" 2>/dev/null || echo "?")
 
@@ -744,7 +884,8 @@ fleet_view_verbose() {
         "$(term_color dim "$TERM_TREE_VERT")" \
         "$(term_color dim "$meta")"
     fi
-    local own_v; own_v=$(owner_annotation "$branch")
+    local own_v=""
+    if [[ -n "$SESSION_INDEX_CACHE" ]]; then own_v=$(owner_annotation "$branch"); fi
     if [[ -n "$own_v" ]]; then
       printf '%s   %s owner:     %s\n' \
         "$(term_color dim "$TERM_TREE_VERT")" \
@@ -920,8 +1061,8 @@ cmd_scrub_check() {
 SESSIONS_SH="$SCRIPT_DIR/sessions.sh"
 
 session_enabled() {
-  [[ "$(printf '%s' "$SESSION_CHECK" | tr '[:upper:]' '[:lower:]')" != "off" ]] \
-    && [[ -f "$SESSIONS_SH" ]]
+  local __sc; lower_v __sc "$SESSION_CHECK"
+  [[ "$__sc" != "off" ]] && [[ -f "$SESSIONS_SH" ]]
 }
 
 # TSV row for the session owning $1 (by name, or by a claim on its worktree:
@@ -944,6 +1085,7 @@ main_session_row() {
 # Column accessors: 1=branch 2=sessionId 3=title 4=lastActivityMs 5=cwd
 #                   6=archived 7=live
 sfield() { printf '%s' "$1" | cut -f"$2"; }
+sfield_v() { cut_field_v "$@"; }   # sfield_v VAR ROW N
 
 # Status views resolve an owner per lane. Doing that with one sessions.sh call
 # each would re-pay process spawn N times, so the whole index is pulled once per
@@ -983,8 +1125,16 @@ load_session_index() {
   # Both views, or neither: prune reads "no claim" as evidence, which is only
   # true when the claims were actually read.
   if [[ $rc -eq 0 ]]; then
-    SESSION_INDEX_CACHE=$(printf '%s\n' "$views" | awk '/^I\t/ { print substr($0, 3) }')
-    SESSION_PATHS_CACHE=$(printf '%s\n' "$views" | awk '/^P\t/ { print substr($0, 3) }')
+    # Split the tagged rows with builtins (were two printf | awk pipelines).
+    local __v __i="" __p=""
+    while IFS= read -r __v; do
+      case "$__v" in
+        I$'\t'*) __i="$__i${__v:2}"$'\n' ;;
+        P$'\t'*) __p="$__p${__v:2}"$'\n' ;;
+      esac
+    done <<< "$views"
+    chomp_v __i; chomp_v __p
+    SESSION_INDEX_CACHE=$__i; SESSION_PATHS_CACHE=$__p
     SESSION_STORE_OK=1
   fi
   return 0
@@ -995,6 +1145,23 @@ load_session_index() {
 # the two silently loses transcript claims (tests/run.sh pins the pair).
 path_key() {
   printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C sed 's/[^a-z0-9]/-/g'
+}
+# path_key_v VAR PATH — the same key into VAR. ASCII only: the sed works on
+# bytes (one '-' per byte of a multibyte character), so anything else, and
+# bash 3.2, still runs the pipeline.
+path_key_v() {
+  if (( BASH_VERSINFO[0] < 4 )) || [[ $2 == *[![:ascii:]]* ]]; then
+    printf -v "$1" '%s' "$(path_key "$2")"; return 0
+  fi
+  local __pk=${2,,}
+  printf -v "$1" '%s' "${__pk//[!abcdefghijklmnopqrstuvwxyz0123456789]/-}"
+}
+
+# tsv12_v VAR1 VAR2 LINE — awk -F'\t' $1 and $2 of LINE ($2 empty when absent).
+tsv12_v() {
+  local __a=${3%%$'\t'*} __b=""
+  if [[ $3 == *$'\t'* ]]; then __b=${3#*$'\t'}; __b=${__b%%$'\t'*}; fi
+  printf -v "$1" '%s' "$__a"; printf -v "$2" '%s' "$__b"
 }
 
 # Every claim on worktree $1 (git's path form): an exact normalised-path match,
@@ -1007,6 +1174,21 @@ path_claims() {
     | awk -F'\t' -v n="$n" -v k="$k" 'NF && (($2 != "" && $2 == n) || $1 == k)'
   return 0
 }
+# path_claims_v VAR TREE — "$(path_claims TREE)" with builtins: the same rows,
+# in order, joined by newlines.
+path_claims_v() {
+  local __n __k __row __c1 __c2 __out=""
+  printf -v "$1" '%s' ""
+  [[ -z "$SESSION_PATHS_CACHE" ]] && return 0
+  prune_norm_v __n "$2"; path_key_v __k "$__n"
+  while IFS= read -r __row; do
+    [[ -n "$__row" ]] || continue
+    tsv12_v __c1 __c2 "$__row"
+    if [[ ( -n "$__c2" && "$__c2" == "$__n" ) || "$__c1" == "$__k" ]]; then __out="$__out$__row"$'\n'; fi
+  done <<< "$SESSION_PATHS_CACHE"
+  chomp_v __out
+  printf -v "$1" '%s' "$__out"
+}
 
 # Full TSV row of the newest session owning branch $1, from the in-memory index.
 # Same tie-break as sessions.sh's own `owner`: non-archived outranks archived
@@ -1018,6 +1200,23 @@ owner_row_cached() {
     | awk -F'\t' -v w="$1" '$1 == w' \
     | sort -t"$(printf '\t')" -k6,6n -k4,4nr \
     | head -n1
+}
+# owner_row_cached_v VAR BRANCH — "$(owner_row_cached BRANCH)". The filter runs
+# on builtins; only a branch with two or more rows still needs sort's
+# tie-break, so only then does the original pipeline run (on those rows).
+owner_row_cached_v() {
+  local __row __c1 __c2 __hits="" __n=0
+  printf -v "$1" '%s' ""
+  [[ -z "$SESSION_INDEX_CACHE" ]] && return 0
+  while IFS= read -r __row; do
+    tsv12_v __c1 __c2 "$__row"
+    if [[ "$__c1" == "$2" ]]; then __hits="$__hits$__row"$'\n'; __n=$((__n + 1)); fi
+  done <<< "$SESSION_INDEX_CACHE"
+  if [[ $__n -ge 2 ]]; then
+    __hits=$(printf '%s' "$__hits" | sort -t"$(printf '\t')" -k6,6n -k4,4nr | head -n1)
+  fi
+  chomp_v __hits
+  printf -v "$1" '%s' "$__hits"
 }
 
 # "title<TAB>live" for the newest session owning $1, or empty.
@@ -1033,8 +1232,8 @@ owner_annotation() {
   local b=$1 brief title live
   brief=$(owner_brief "$b")
   [[ -z "$brief" ]] && return 0
-  title=$(printf '%s' "$brief" | cut -f1)
-  live=$(printf '%s' "$brief" | cut -f2)
+  cut_field_v title "$brief" 1
+  cut_field_v live "$brief" 2
   [[ ${#title} -gt 28 ]] && title="${title:0:25}..."
   # Deliberately ASCII: this string lands inside panel rows that must survive
   # FLEET_ASCII=1 and non-UTF-8 Windows consoles (SKILL.md "Compatibility").
@@ -1242,10 +1441,12 @@ PRUNE_UNSTARTED_DAYS=${FLEET_PRUNE_UNSTARTED_DAYS:-30}
 # Normalise a path for comparison: forward slashes, no trailing slash,
 # lowercased (Windows paths are case-insensitive and git's casing of the drive
 # letter does not always match the shell's).
-prune_norm() {
-  local p=${1//\\//}
-  p=${p%/}
-  printf '%s' "$p" | tr '[:upper:]' '[:lower:]'
+prune_norm() { prune_norm_v __pn "$1"; printf '%s' "$__pn"; }
+# prune_norm_v VAR PATH — the same normal form, into VAR.
+prune_norm_v() {
+  local __p=${2//\\//}
+  __p=${__p%/}
+  lower_v "$1" "$__p"
 }
 
 # Changed + untracked entry count. UNTRACKED counts on purpose: those are
@@ -1253,6 +1454,13 @@ prune_norm() {
 # tree containing them anyway.
 prune_dirty_count() {
   git -C "$1" status --porcelain 2>/dev/null | grep -c '.' || true
+}
+# prune_dirty_count_v VAR TREE — the same count, the grep done with builtins.
+prune_dirty_count_v() {
+  local __o="" __l __n=0
+  __o=$(git -C "$2" status --porcelain 2>/dev/null) || true
+  while IFS= read -r __l; do [[ -n "$__l" ]] && __n=$((__n + 1)); done <<< "$__o"
+  printf -v "$1" '%s' "$__n"
 }
 
 # After a FAILED `git worktree remove`: did git finish everything but the
@@ -1502,8 +1710,8 @@ prune_op_in_progress() {
 prune_emit() {
   local repo=$1 base=$2 wt=$3 br=$4 det=$5 locked=$6 gone=$7 merged_list=$8
   local wtn here
-  wtn=$(prune_norm "$wt")
-  here=$(prune_norm "$INVOKED_FROM")
+  prune_norm_v wtn "$wt"
+  prune_norm_v here "$INVOKED_FROM"
 
   # 1 — structurally untouchable
   if [[ $locked -eq 1 ]]; then
@@ -1527,28 +1735,32 @@ prune_emit() {
   local claims="" live_claim="" open_claim="" open_flag="" who="no owner in store"
   local unread="archive flag unreadable - treated as live"
   if [[ $SESSION_STORE_OK -eq 1 ]]; then
-    if [[ -n "$br" ]]; then
-      orow=$(owner_row_cached "$br")
+    # Each helper below prints nothing from an empty cache: skip the subshell then.
+    if [[ -n "$br" && -n "$SESSION_INDEX_CACHE" ]]; then
+      owner_row_cached_v orow "$br"
       if [[ -n "$orow" ]]; then
-        olive=$(sfield "$orow" 7); oarch=$(sfield "$orow" 6); otitle=$(sfield "$orow" 3)
+        sfield_v olive "$orow" 7; sfield_v oarch "$orow" 6; sfield_v otitle "$orow" 3
       fi
     fi
     # First match without `exit`: an early-exiting reader can SIGPIPE the
     # printf, and under pipefail + set -e that kills the whole command.
-    claims=$(path_claims "$wt")
+    path_claims_v claims "$wt"
     # Plus the transcript-named claims on this tree (prune_named_probe): a claim
     # like the others, except that prune_archived_proof never takes one as proof.
     if [[ -n "$NAMED_CLAIMS" ]]; then
       claims=$(printf '%s\n%s\n' "$claims" "$NAMED_CLAIMS" | awk -F'\t' -v n="$wtn" 'NF && ($8 != "named" || $2 == n)')
     fi
-    live_claim=$(printf '%s\n' "$claims" | awk -F'\t' -v u="$unread" '
-      NF && $7 == "1" && !f { print $4 " (by " $8 ($6 == "?" ? "; " u : "") ")"; f = 1 }')
-    # OPEN = anything not provably archived: 0, and ? — an unreadable flag is
-    # never presumed archived. "title<TAB>flag", preferring a plainly open one.
-    open_claim=$(printf '%s\n' "$claims" | awk -F'\t' '
-      NF && $6 != "1" { t = $4 ($8 == "named" ? " (named this tree in a tool call)" : "")
-                        if ($6 == "0") { if (!z) { zt = t; z = 1 } } else if (!q) { qt = t; q = 1 } }
-      END { if (z) print zt "\t0"; else if (q) print qt "\t?" }')
+    # With no claims both awks below print nothing; don't start them.
+    if [[ -n "$claims" ]]; then
+      live_claim=$(printf '%s\n' "$claims" | awk -F'\t' -v u="$unread" '
+        NF && $7 == "1" && !f { print $4 " (by " $8 ($6 == "?" ? "; " u : "") ")"; f = 1 }')
+      # OPEN = anything not provably archived: 0, and ? — an unreadable flag is
+      # never presumed archived. "title<TAB>flag", preferring a plainly open one.
+      open_claim=$(printf '%s\n' "$claims" | awk -F'\t' '
+        NF && $6 != "1" { t = $4 ($8 == "named" ? " (named this tree in a tool call)" : "")
+                          if ($6 == "0") { if (!z) { zt = t; z = 1 } } else if (!q) { qt = t; q = 1 } }
+        END { if (z) print zt "\t0"; else if (q) print qt "\t?" }')
+    fi
     if [[ -n "$open_claim" ]]; then open_flag=${open_claim##*$'\t'}; open_claim=${open_claim%$'\t'*}; fi
     # Who owns it, for the REVIEW reasons below.
     if [[ ( -n "$orow" && "$oarch" == "0" ) || "$open_flag" == "0" ]]; then who="owner idle"
@@ -1578,7 +1790,7 @@ prune_emit() {
   #     is lost; no open claim; and an archived owner proven by exact path.
   if [[ $det -eq 1 || -z "$br" ]]; then
     local ddirty op
-    ddirty=$(prune_dirty_count "$wt")
+    prune_dirty_count_v ddirty "$wt"
     if [[ "${ddirty:-0}" -gt 0 ]]; then
       prune_row "$wt" "<detached>" REVIEW "detached HEAD, DIRTY - $ddirty uncommitted/untracked ($who)"; return 0
     fi
@@ -1602,11 +1814,12 @@ prune_emit() {
   fi
 
   local is_merged=0
-  if printf '%s\n' "$merged_list" | grep -qxF -- "$br"; then is_merged=1; fi
+  # Whole-line, fixed-string membership (was printf | grep -qxF).
+  if [[ $'\n'"$merged_list"$'\n' == *$'\n'"$br"$'\n'* ]]; then is_merged=1; fi
 
   # 5 — uncommitted or untracked work: the only bytes git cannot give back
   local dirty
-  dirty=$(prune_dirty_count "$wt")
+  prune_dirty_count_v dirty "$wt"
   if [[ "${dirty:-0}" -gt 0 ]]; then
     local mstate="unmerged"
     [[ $is_merged -eq 1 ]] && mstate="merged"
@@ -1688,9 +1901,16 @@ prune_classify() {
   PRUNE_ROWS=""
   load_session_index
 
-  local merged_list
-  merged_list=$(git -C "$repo" branch --merged "$base" 2>/dev/null \
-                | sed -e 's/^[*+ ]*//' -e 's/[[:space:]]*$//' || true)
+  # `git branch --merged`, each line stripped of its [*+ ] marker run and of
+  # trailing whitespace (the old sed), with builtins.
+  local merged_list="" __bm="" __bl
+  __bm=$(git -C "$repo" branch --merged "$base" 2>/dev/null) || true
+  while IFS= read -r __bl; do
+    __bl="${__bl#"${__bl%%[!*+ ]*}"}"
+    __bl="${__bl%"${__bl##*[![:space:]]}"}"
+    merged_list="$merged_list$__bl"$'\n'
+  done <<< "$__bm"
+  chomp_v merged_list
 
   local raw
   raw=$(git -C "$repo" worktree list --porcelain 2>/dev/null || true)
@@ -1726,6 +1946,20 @@ prune_count() {
   [[ -z "$PRUNE_ROWS" ]] && { printf '0'; return 0; }
   printf '%s' "$PRUNE_ROWS" | awk -F'\t' -v b="$1" 'NF && $3==b {n++} END{print n+0}'
 }
+# prune_count_v VAR BUCKET — the same count with builtins: rows whose third
+# tab field (awk's $3, empty when absent) is BUCKET.
+prune_count_v() {
+  local __r __f __n=0
+  if [[ -n "$PRUNE_ROWS" ]]; then
+    while IFS= read -r __r; do
+      [[ -n "$__r" ]] || continue
+      __f=""
+      if [[ $__r == *$'\t'*$'\t'* ]]; then __f=${__r#*$'\t'}; __f=${__f#*$'\t'}; __f=${__f%%$'\t'*}; fi
+      [[ "$__f" == "$2" ]] && __n=$((__n + 1))
+    done <<< "$PRUNE_ROWS"
+  fi
+  printf -v "$1" '%s' "$__n"
+}
 
 # The base branch to classify against in an arbitrary repo. This repo's
 # configured base is meaningless next door, so resolve per-repo.
@@ -1739,7 +1973,7 @@ prune_base_for() {
 
 prune_render() {
   local total safe review keep
-  safe=$(prune_count SAFE); review=$(prune_count REVIEW); keep=$(prune_count KEEP)
+  prune_count_v safe SAFE; prune_count_v review REVIEW; prune_count_v keep KEEP
   total=$((safe + review + keep))
 
   echo ""
@@ -1757,7 +1991,7 @@ prune_render() {
 
   local b n rows p br bucket reason label short mark any_native=0
   for b in SAFE REVIEW KEEP; do
-    n=$(prune_count "$b")
+    prune_count_v n "$b"
     [[ $n -eq 0 ]] && continue
     case "$b" in
       SAFE)   term_section READY    "SAFE"   "$n" ;;
@@ -2130,10 +2364,11 @@ cmd_prune() {
 # Off with prune_hint=off in config or FLEET_NO_PRUNE_HINT=1.
 prune_status_hint() {
   [[ -n "${FLEET_NO_PRUNE_HINT:-}" ]] && return 0
-  [[ "$(printf '%s' "$PRUNE_HINT" | tr '[:upper:]' '[:lower:]')" == "off" ]] && return 0
+  local __ph; lower_v __ph "$PRUNE_HINT"
+  [[ "$__ph" == "off" ]] && return 0
   prune_classify "$REPO_ROOT" "$BASE_BRANCH" || return 0
   local safe review
-  safe=$(prune_count SAFE); review=$(prune_count REVIEW)
+  prune_count_v safe SAFE; prune_count_v review REVIEW
   [[ "$safe" -eq 0 && "$review" -eq 0 ]] && return 0
   local msg="$safe worktree(s) prunable"
   [[ "$review" -gt 0 ]] && msg="$msg, $review to review"
@@ -2339,7 +2574,7 @@ landing_status() {
     done
     return 0
   fi
-  if [[ -n "$M_LANE" ]]; then state=$(lane_state "$M_LANE"); fi
+  if [[ -n "$M_LANE" ]]; then lane_state_v state "$M_LANE"; fi
   if [[ -z "$M_PID" || "$M_PID" == "$$" ]] || landing_pid_live "$M_PID"; then
     if [[ -z "$M_PID" || "$state" == "FAILED" ]]; then LS_STATE="LANDING"
     elif [[ "$state" == "LANDED" ]]; then LS_STATE="SETTLING"
@@ -2514,7 +2749,7 @@ recover_stranded_landing() {
   # NOTE, not WARNING: only the findings below that need a human say WARNING.
   log "NOTE: a land of $M_LANE (pid $M_PID$age) died before finishing; checking what it left"
   tip=$(git rev-parse -q --verify "refs/heads/$BASE_BRANCH" 2>/dev/null) || tip=""
-  state=$(lane_state "$M_LANE")
+  lane_state_v state "$M_LANE"
   shown=$state
   if [[ "$state" == "MISSING" ]]; then shown="untracked"; fi
 
@@ -2743,9 +2978,9 @@ rebase_others() {
   local landed=$1
   for f in "$LANES_DIR"/*; do
     local b state wt
-    b=$(decode_lane "$(basename "$f")")
+    decode_lane_v b "${f##*/}"
     [[ "$b" == "$landed" ]] && continue
-    state=$(lane_state "$b")
+    lane_state_v state "$b"
     [[ "$state" == "LANDED" || "$state" == "FAILED" ]] && continue
     git rev-parse --verify "$b" >/dev/null 2>&1 || continue
     log "rebase: $b onto $BASE_BRANCH"
@@ -2815,8 +3050,8 @@ cmd_land_all() {
   local candidates=() f b state ts
   for f in "$LANES_DIR"/*; do
     [[ -f "$f" ]] || continue
-    b=$(decode_lane "$(basename "$f")")
-    state=$(head -n1 "$f")
+    decode_lane_v b "${f##*/}"
+    state=""; { IFS= read -r state || true; } < "$f"
     case "$state" in
       READY)   : ;;
       RUNNING) [[ $include_running -eq 1 ]] || continue ;;
@@ -3162,8 +3397,12 @@ cmd_start() {
       if [[ "$waiting_on" != "$M_PID" ]]; then log_landing_busy "daemon: waiting"; waiting_on=$M_PID; fi
     else
       waiting_on=""
+      # Builtins, not head + decode subshells: this runs every poll.
+      local rs rb
       for f in "$LANES_DIR"/*; do
-        [[ -f "$f" && "$(head -n1 "$f")" == "READY" ]] && ready+=("$(decode_lane "$(basename "$f")")")
+        rs=""
+        if [[ -f "$f" ]]; then { IFS= read -r rs || true; } < "$f" 2>/dev/null || rs=""; fi
+        if [[ "$rs" == "READY" ]]; then decode_lane_v rb "${f##*/}"; ready+=("$rb"); fi
       done
     fi
 
@@ -3192,8 +3431,8 @@ cmd_start() {
     local active=0
     for f in "$LANES_DIR"/*; do
       [[ -f "$f" ]] || continue
-      local s
-      s=$(head -n1 "$f")
+      local s=""
+      { IFS= read -r s || true; } < "$f"
       [[ "$s" != "LANDED" && "$s" != "FAILED" ]] && active=$((active+1))
     done
     if [[ $active -eq 0 ]]; then

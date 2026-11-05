@@ -163,6 +163,28 @@ native() {
 # Comparison form: forward slashes, no trailing slash, lowercased. MIRRORS
 # prune_norm in fleet.sh and np() in sessions.sh; a drift loses claims.
 norm() { local p=${1//\\//}; p=${p%/}; printf '%s' "$p" | tr '[:upper:]' '[:lower:]'; }
+# Fork-free twins of the hot lookups below. On Git Bash every $(...) and pipe
+# stage is a Windows process (~15-20 ms); a sweep ran ~300 of them per lane.
+# Same contract as fleet.sh's FORK-FREE HELPERS: each matches the pipeline it
+# replaces byte for byte, returns through a named variable (printf -v), and
+# keeps its own locals __-prefixed so it cannot shadow the caller's.
+# norm_v VAR PATH — "$(norm PATH)". ASCII via ${s,,}; anything else, and bash
+# 3.2, still through tr.
+norm_v() {
+  local __np=${2//\\//}; __np=${__np%/}
+  if (( BASH_VERSINFO[0] >= 4 )) && [[ $__np != *[![:ascii:]]* ]]; then printf -v "$1" '%s' "${__np,,}"
+  else printf -v "$1" '%s' "$(printf '%s' "$__np" | tr '[:upper:]' '[:lower:]')"; fi
+}
+# __tsvf LINE — __F=( awk -F'\t' $1..$NF of LINE ); an empty line has no fields.
+__F=()
+__tsvf() {
+  local __l=$1; __F=()
+  [[ -n "$__l" ]] || return 0
+  while [[ $__l == *$'\t'* ]]; do __F+=("${__l%%$'\t'*}"); __l=${__l#*$'\t'}; done
+  __F+=("$__l")
+}
+# in_lines LIST WORD — WORD is a whole line of LIST (was printf | grep -qxF).
+in_lines() { [[ $'\n'"$1"$'\n' == *$'\n'"$2"$'\n'* ]]; }
 say() { [[ -t 2 ]] && echo "fleet sweep: $*" >&2; return 0; }
 
 INVOKED_FROM=$(native "$(pwd -P 2>/dev/null || pwd)")
@@ -377,6 +399,16 @@ say "reading prune's buckets (session store, fresh claimant read)..."
 # protects the caller's own tree here exactly as it does under `fleet prune`.
 PRUNE_TSV=$(cd "$INVOKED_FROM" && bash "$FLEET_SH" prune --porcelain 2>/dev/null) || PRUNE_TSV=""
 prune_of() { printf '%s\n' "$PRUNE_TSV" | awk -F'\t' -v p="$1" '$1 == p && !f { print $3 "\t" $4; f = 1 }'; }
+# prune_of_v VAR PATH — "$(prune_of PATH)" with builtins.
+prune_of_v() {
+  local __r
+  printf -v "$1" '%s' ""
+  while IFS= read -r __r; do
+    __tsvf "$__r"
+    if [[ ${#__F[@]} -gt 0 && "${__F[0]}" == "$2" ]]; then printf -v "$1" '%s\t%s' "${__F[2]:-}" "${__F[3]:-}"; return 0; fi
+  done <<< "$PRUNE_TSV"
+  return 0
+}
 
 # Registered worktrees (the primary is skipped: it is the integration tree).
 W_PATH=(); W_BR=(); W_HEAD=(); W_GONE=()
@@ -396,7 +428,9 @@ while IFS= read -r line; do
   esac
 done <<< "$(g worktree list --porcelain 2>/dev/null)"$'\n'
 NW=${#W_PATH[@]}
-REG_NORM=$(for p in ${W_PATH[@]+"${W_PATH[@]}"}; do norm "$p"; echo; done)
+REG_NORM=""
+for p in ${W_PATH[@]+"${W_PATH[@]}"}; do norm_v rn "$p"; REG_NORM="$REG_NORM$rn"$'\n'; done
+while [[ $REG_NORM == *$'\n' ]]; do REG_NORM=${REG_NORM%$'\n'}; done
 
 MERGES=$(g log --merges --format='%h%x09%s' "$BASE" 2>/dev/null)
 merge_sha() { printf '%s\n' "$MERGES" | awk -F'\t' -v s="merge: $1" '$2 == s && !f { print $1; f = 1 }'; }
@@ -416,16 +450,38 @@ for ((i = 0; i < NW; i++)); do
   if [[ ${W_GONE[$i]} -eq 1 || ! -d "$p" ]]; then
     W_LANDED+=("-"); W_CONF+=(""); W_AHEAD+=(0); W_DIRTY+=(0); W_DSAMPLE+=(""); W_AGE+=(0); W_DIFF+=(""); W_UNST+=(0); continue
   fi
-  pr=$(prune_of "$p"); un=0; [[ -n "$pr" && "${pr#*$'\t'}" == unstarted* ]] && un=1; W_UNST+=("$un")
+  prune_of_v pr "$p"; un=0; [[ -n "$pr" && "${pr#*$'\t'}" == unstarted* ]] && un=1; W_UNST+=("$un")
   ref=${br:-${W_HEAD[$i]}}
   ls=$(landed_state "$ref"); st=${ls%%$'\t'*}; conf=""; [[ "$ls" == *$'\t'* ]] && conf=${ls#*$'\t'}
   W_LANDED+=("$st"); W_CONF+=("$conf")
   W_AHEAD+=("$(g rev-list --count "$BASE..$ref" 2>/dev/null || echo 0)")
-  W_AGE+=("$(age_days "$(g log -1 --format=%ct "$ref" 2>/dev/null)")")
+  ct=$(g log -1 --format=%ct "$ref" 2>/dev/null) || true
+  W_AGE+=("$(( (NOW - ${ct:-$NOW}) / 86400 ))")   # age_days, without its subshell
   dl=$(git -c core.quotepath=false -C "$p" status --porcelain -uall 2>/dev/null)
-  dpaths=$(printf '%s\n' "$dl" | sed '/^$/d' | status_paths)
-  W_DIRTY+=("$(printf '%s\n' "$dpaths" | grep -c . || true)")
-  W_DSAMPLE+=("$(printf '%s\n' "$dpaths" | sed '/^$/d' | head -n3 | paste -sd, -)")
+  if [[ $dl == *[![:ascii:]]* ]]; then
+    # A non-ASCII path: sed's idea of a character is the locale's; keep it.
+    dpaths=$(printf '%s\n' "$dl" | sed '/^$/d' | status_paths)
+    W_DIRTY+=("$(printf '%s\n' "$dpaths" | grep -c . || true)")
+    W_DSAMPLE+=("$(printf '%s\n' "$dpaths" | sed '/^$/d' | head -n3 | paste -sd, -)")
+  else
+    # status_paths, the count and the sample with builtins: drop the XY status
+    # and space, keep a rename's new side, strip git's quotes.
+    dp_acc="" dp_n=0 dp_smp=""
+    while IFS= read -r dline; do
+      [[ -n "$dline" ]] || continue
+      [[ ${#dline} -ge 3 ]] && dline=${dline:3}
+      [[ "$dline" == *" -> "* ]] && dline=${dline##*" -> "}
+      if [[ ${#dline} -ge 2 && "$dline" == \"*\" ]]; then dline=${dline:1:${#dline}-2}; fi
+      dp_acc="$dp_acc$dline"$'\n'
+      if [[ -n "$dline" ]]; then
+        dp_n=$((dp_n + 1))
+        [[ $dp_n -le 3 ]] && dp_smp="$dp_smp${dp_smp:+,}$dline"
+      fi
+    done <<< "$dl"
+    while [[ $dp_acc == *$'\n' ]]; do dp_acc=${dp_acc%$'\n'}; done
+    dpaths=$dp_acc
+    W_DIRTY+=("$dp_n"); W_DSAMPLE+=("$dp_smp")
+  fi
   W_DIFF+=("")
   # A never-push lane is never landed, so it cannot collide with anything.
   [[ -n "$br" ]] && never_push "$br" && continue
@@ -443,8 +499,11 @@ for ((i = 0; i < NW; i++)); do
     fi
   fi
   # procsub ok: printf/sed/ledger_out over in-memory paths; nothing here can stop early.
-  while IFS= read -r f; do [[ -n "$f" ]] && FILES="${FILES}${label}"$'\t'"$f"$'\tu\n'; done \
-    < <(printf '%s\n' "$dpaths" | sed '/^$/d' | ledger_out)
+  # A lane with no uncommitted paths has nothing to list: skip the three processes.
+  if [[ -n "$dpaths" ]]; then
+    while IFS= read -r f; do [[ -n "$f" ]] && FILES="${FILES}${label}"$'\t'"$f"$'\tu\n'; done \
+      < <(printf '%s\n' "$dpaths" | sed '/^$/d' | ledger_out)
+  fi
 done
 
 # Unregistered directories under the worktree roots. `.fleetflow/` is not
@@ -456,7 +515,8 @@ foreign_lane() {
   local gd
   [[ -f "$1/.git" ]] || return 1
   gd=$(sed -n 's/^gitdir: //p' "$1/.git" | tr -d '\r')
-  [[ "$(norm "$gd")/" == "$(norm "$GCD")"/* ]] && return 1
+  local gn cn; norm_v gn "$gd"; norm_v cn "$GCD"
+  [[ "$gn/" == "$cn"/* ]] && return 1
   return 0
 }
 ORPHANS=()
@@ -465,7 +525,7 @@ for root in "${LANE_ROOTS[@]}"; do
   for d in "$root"/*/; do
     [[ -d "$d" ]] || continue
     d=$(native "${d%/}")
-    printf '%s\n' "$REG_NORM" | grep -qxF -- "$(norm "$d")" && continue
+    norm_v dn "$d"; in_lines "$REG_NORM" "$dn" && continue
     foreign_lane "$d" || ORPHANS+=("$d")
   done
 done
@@ -549,6 +609,15 @@ if [[ $STORE_OK -eq 1 ]]; then
   fi
 fi
 claims_of() { printf '%s\n' "$CLAIMS" | awk -F'\t' -v p="$1" '$1 == p'; }
+# claims_of_v VAR PATH — "$(claims_of PATH)" with builtins: the rows, in order.
+claims_of_v() {
+  local __r __o=""
+  while IFS= read -r __r; do
+    [[ "${__r%%$'\t'*}" == "$2" ]] && __o="$__o$__r"$'\n'
+  done <<< "$CLAIMS"
+  while [[ $__o == *$'\n' ]]; do __o=${__o%$'\n'}; done
+  printf -v "$1" '%s' "$__o"
+}
 
 # === VERDICTS =================================================================
 # --- phase 3 facts first: branch landed-ness feeds the session "done" test -----
@@ -562,7 +631,7 @@ BR_FACTS=$(g for-each-ref refs/heads --format='%(refname:short)%1f%(objectname)%
 B_ROWS=()   # name US sha US state US upstream US track US date  (worktree-less only)
 while IFS=$US read -r b sha wtp up track cdate; do
   [[ -z "$b" || "$b" == "$BASE" ]] && continue
-  if printf '%s\n' "$MERGED_SET" | grep -qxF -- "$b"; then s=MERGED
+  if in_lines "$MERGED_SET" "$b"; then s=MERGED
   elif [[ -n "$wtp" ]]; then s=WT   # judged with its worktree in phase 1
   else s=$(landed_state "$b"); s=${s%%$'\t'*}; fi
   ok=0; [[ "$s" == MERGED || "$s" == CONTENT ]] && ok=1
@@ -636,17 +705,22 @@ DIRECT=""   # id \t lane dir \t title \t live
 while IFS=$US read -r id cwd title arch live; do
   [[ -z "$id" || "$arch" == 1 ]] && continue
   # Its lane dir is the first path component under a worktree root.
-  nc=$(norm "$cwd") top=""
+  norm_v nc "$cwd"; top=""
   while IFS= read -r r; do
     [[ -z "$r" ]] && continue
     if [[ "$nc" == "$r"* ]]; then rest=${nc#"$r"}; top="$r${rest%%/*}"; break; fi
   done <<< "$LANE_ROOTS_NORM"
   [[ -z "$top" ]] && continue
-  printf '%s\n' "$REG_NORM" | grep -qxF -- "$top" && continue
+  in_lines "$REG_NORM" "$top" && continue
   DIRECT="${DIRECT}${id}"$'\t'"${cwd//\\//}"$'\t'"$title"$'\t'"$live"$'\n'
 done <<< "${CWDS//$'\t'/$US}"
 DIRECT=$(printf '%s%s' "$DIRECT" "$HOLLOW_LIST" | awk -F'\t' 'NF && !s[$1]++')
-is_direct() { printf '%s\n' "$DIRECT" | cut -f1 | grep -qxF -- "$1"; }
+# Is $1 the first tab field of a DIRECT row? (was printf | cut -f1 | grep -qxF)
+is_direct() {
+  local __r
+  while IFS= read -r __r; do [[ "${__r%%$'\t'*}" == "$1" ]] && return 0; done <<< "$DIRECT"
+  return 1
+}
 
 # --- which Desktop instance holds each named session ---------------------------
 # sessions.sh reads EVERY Desktop instance's store (the primary and each
@@ -715,12 +789,19 @@ for ((i = 0; i < NW; i++)); do
   if [[ -n "$EXT_ROOT" && "$br" == worktree-* && "$(norm "$p")/" == "$(norm "$EXT_ROOT")"/?* ]]; then
     hk="; hook-made: Claude Code will not clean it up"
   fi
-  pb=$(prune_of "$p"); bucket=${pb%%$'\t'*}; reason=${pb#*$'\t'}
+  prune_of_v pb "$p"; bucket=${pb%%$'\t'*}; reason=${pb#*$'\t'}
   [[ -z "$pb" ]] && { bucket=REVIEW; reason="not classified by prune"; }
   st=${W_LANDED[$i]} dirty=${W_DIRTY[$i]}
-  cl=$(claims_of "$p")
-  live=$(printf '%s\n' "$cl" | awk -F'\t' '$5 == "1" && !f { print $3; f = 1 }')
-  open_ids=$(printf '%s\n' "$cl" | awk -F'\t' 'NF && $4 != "1" && $5 != "1" { print $2 }' | sort -u)
+  claims_of_v cl "$p"
+  live="" open_ids=""
+  # No claims: both answers are empty, and the awks + sort need not start.
+  if [[ -n "$cl" ]]; then
+    while IFS= read -r cline; do
+      __tsvf "$cline"
+      if [[ "${__F[4]:-}" == 1 ]]; then live=${__F[2]:-}; break; fi
+    done <<< "$cl"
+    open_ids=$(printf '%s\n' "$cl" | awk -F'\t' 'NF && $4 != "1" && $5 != "1" { print $2 }' | sort -u)
+  fi
   run=""; [[ "$br" == fleetflow/*/* ]] && { run=${br#fleetflow/}; run=${run%%/*}; }
   hold=""; [[ -n "$br" ]] && hold=$(held_reason "$br")
 
@@ -736,7 +817,7 @@ for ((i = 0; i < NW; i++)); do
     wrow PARK "branch is on the private never-push list" "never land or push it; remove the tree by hand when done"
   elif [[ -n "${W_DIFF[$i]}" ]]; then
     wrow INSPECT "could not read its diff against $BASE (${W_DIFF[$i]}) - competing work unknown" "re-run once git answers; never land it on this verdict"
-  elif printf '%s\n' "$COMPETING" | grep -qxF -- "$label"; then
+  elif in_lines "$COMPETING" "$label"; then
     [[ -n "$dnote" ]] && N_COMP_DIRTY=$((N_COMP_DIRTY + 1))
     wrow COMPETING "shares files with $(competes_with "$label") (phase 2)${hold:+; ON HOLD: $hold}" "settle the pair before landing either"
   elif [[ "$dirty" -gt 0 ]]; then
@@ -963,7 +1044,15 @@ if [[ $SETTLED -eq 0 ]]; then
 fi
 INFO_RE='^(KEEP|PARK|TRACKED|HELD|ON-HOLD|STASH|OWNER-BUSY|UNSTARTED|FLEETFLOW-RUNS|DEAD-LAND)$'
 FINDINGS=$(printf '%s' "$ROWS" | awk -F'\t' -v re="$INFO_RE" 'NF && $3 !~ re' | grep -c . || true)
-cnt() { printf '%s' "$ROWS" | awk -F'\t' -v v="$1" 'NF && $3 == v' | grep -c . || true; }
+# Rows whose verdict ($3) is $1; builtins (was printf | awk | grep -c).
+cnt() {
+  local __r __n=0
+  while IFS= read -r __r; do
+    [[ -n "$__r" ]] || continue
+    __tsvf "$__r"; [[ "${__F[2]:-}" == "$1" ]] && __n=$((__n + 1))
+  done <<< "$ROWS"
+  printf '%s\n' "$__n"
+}
 
 if [[ $MODE == porcelain ]]; then
   printf '%s' "$ROWS"
@@ -1017,9 +1106,12 @@ else
         # Worktree subjects are paths (show the dir name); compete and session
         # subjects are branch pairs and ids, which contain '/' and stay whole.
         w=28; [[ $ph == worktree ]] && subj=${subj##*/}; [[ $ph == compete ]] && w=52
-        printf "%s   %s %-${w}s %-15s %s\n" "$(term_color dim "$TERM_TREE_VERT")" \
-          "$(term_color dim "$TERM_TREE_BRANCH$TERM_PANEL_HRULE")" \
-          "$(term_truncate "$subj" "$w")" "$v" "$(term_color dim "$(term_truncate "$det" 70)")"
+        # term.sh setters, not $(term_color ...) / $(term_truncate ...): no subshells per row.
+        __term_c dim "$TERM_TREE_VERT"; rv=$__TERM_C
+        __term_c dim "$TERM_TREE_BRANCH$TERM_PANEL_HRULE"; rb=$__TERM_C
+        __term_truncate "$subj" "$w"; __term_chomp_trunc; rs=$__TERM_TRUNC
+        __term_truncate "$det" 70; __term_chomp_trunc; __term_c dim "$__TERM_TRUNC"
+        printf "%s   %s %-${w}s %-15s %s\n" "$rv" "$rb" "$rs" "$v" "$__TERM_C"
         [[ "$act" != "-" ]] && printf '%s        %s\n' "$(term_color dim "$TERM_TREE_VERT")" \
           "$(term_color dim "-> $(term_truncate "$act" 96)")"
       done <<< "${rows//$'\t'/$US}"
