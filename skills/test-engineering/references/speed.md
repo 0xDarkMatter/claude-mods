@@ -142,6 +142,9 @@ Coverage-based selectors (testmon) see only what the last run executed. So:
   not a release.
 - **Some changes always trigger the full suite**: lockfiles, test config, CI config,
   fixtures, migrations, and the test harness itself. Put these in the PR job's path filter.
+- **Cross-readers**: a suite whose text names another package's path (a fixture copied from
+  it, a script it calls) must run when that package changes. Grep the suites for each
+  package's path and add the rule; it is the miss path maps make most often.
 - **A T2 failure the T1 run missed is a selector bug**: record which file escaped and add it
   to the always-full list.
 
@@ -174,6 +177,16 @@ left. Judge it on measurements, not fashion:
 | Python env setup dominates CI | uv (`uv sync --frozen`), with its cache |
 | Lint or format runs inside the test job | ruff, Biome or oxlint, in a separate fast job |
 | A bash or PowerShell suite spawns processes per check (each spawn costs tens of ms, more on Windows) | batch checks into one process per file; or rewrite the harness in Go or Rust when it is run often and the measured spawn cost dominates |
+
+**Count processes, not seconds, for shell suites.** On a loaded workstation wall time
+swings several-fold between identical runs, and on Git Bash process starts *are* the
+runtime: one measured bash suite spent 432 s of CPU in 2,638 s of wall time. Count the
+processes a run creates (a Windows job object, or `strace -f -c` / `perf trace` on Linux)
+before and after a change. The usual fixes keep every verdict: one `awk` or `grep` over
+all files instead of a pipeline per file; `mapfile` and parameter expansion instead of
+`$(cat | sed | grep)`; one `jq` call that returns every field joined by a separator instead
+of one call per field. Prove it the same way as any refactor: old and new suites against a
+deliberately broken copy must print the same PASS/FAIL lines.
 
 A harness rewrite is a project of its own, not a speed-mode step. Propose it with the
 numbers: share of time spent in process spawns, runs per day, and the minutes per run it
