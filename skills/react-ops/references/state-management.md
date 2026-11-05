@@ -190,6 +190,29 @@ export const useCartActions = () =>
 
 Atomic state model — compose fine-grained atoms instead of one store.
 
+**Jotai 3** (3.0.0, 2026-09-08) keeps the public API: `atom`, `useAtom`, `useAtomValue`
+and `useSetAtom` have the same signatures, and an app that runs on v2 without
+deprecation warnings "should run on v3 as is"
+([migration guide](https://github.com/pmndrs/jotai/blob/main/docs/guides/migrating-to-v3.mdx)).
+What does change:
+
+| Area | v3 | If you used it in v2 |
+|------|----|----------------------|
+| Floors | React 18, TypeScript 5.5, Node.js `>=22.12.0` | Stay on v2 for React 17 or Node 20 |
+| Packaging | ESM only, ES2020; `exports` expose only the public entry points (`jotai`, `jotai/utils`, `jotai/vanilla`, `jotai/react`, ...) | Deep imports of internal files break |
+| `atomFamily` | Moved out of `jotai/utils` | `npm install jotai-family`, `import { atomFamily } from 'jotai-family'` |
+| `loadable` | Removed | Use `unwrap` from `jotai/utils` (the guide has a userland `loadable`) |
+| `jotai/babel` | Moved | `jotai-babel/plugin-react-refresh` |
+| `setSelf` in `read` | Removed, no direct replacement | `onMount` or `jotai-effect` |
+| `delay` option on `useAtom`/`useAtomValue` | Removed | A custom hook over `useStore().sub()` |
+| No-bundler builds | Files read `process.env.NODE_ENV` directly | Define it yourself (import maps) |
+
+Mount timing: v2's `useAtomValue` re-rendered once after mount; v3 re-renders only on a
+real change, so a value a child writes in its `useEffect` can be missed until the next
+change. The new `useAtomValueRawSync` (built on `useSyncExternalStore`) catches it;
+`useAtomValueRaw` returns async atoms as promises without suspending
+([useAtom docs](https://github.com/pmndrs/jotai/blob/main/docs/core/use-atom.mdx)).
+
 ```typescript
 import { atom, useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { atomWithStorage, atomWithReset } from 'jotai/utils';

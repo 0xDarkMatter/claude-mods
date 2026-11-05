@@ -7,7 +7,7 @@ license: MIT
 allowed-tools: "Read Write Edit Glob Grep Bash Agent TaskCreate TaskUpdate TaskList"
 metadata:
   author: claude-mods
-  related-skills: "evals-ops, loop-ops"
+  related-skills: "evals-ops, loop-ops, perf-ops"
 ---
 
 # Iterate - Autonomous Improvement Loop
@@ -92,6 +92,7 @@ Before the first iteration, make sure verification actually works:
 
 - Run the verify command on the current state. If it fails or produces no parseable number, fix this first.
 - Run the guard command (if set). If it fails on the current state, the codebase has pre-existing issues - flag to the user.
+- If the metric is a timing or throughput, vet the harness first with [perf-ops -> references/benchmark-vetting.md](../perf-ops/references/benchmark-vetting.md): what limits it, whether errors and skipped work are counted, whether the work happened.
 - If tests don't exist yet for the scope, consider writing them as iteration 0. Good tests make the loop more effective.
 
 ### 7. Baseline

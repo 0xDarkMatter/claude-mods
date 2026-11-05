@@ -111,8 +111,8 @@ case "$out" in *SEKRET-AAA*) no "worker leaked key to its own output";; *) ok "w
 P="$(cat "$PROBE")"
 eh "isolated CLAUDE_CONFIG_DIR set" "CONFIG=$CFG" "$P"
 eh "z.ai base url set"              "BASE=https://api.z.ai/api/anthropic" "$P"
-eh "sonnet maps to GLM-5.3"         "SONNET=GLM-5.3" "$P"
-eh "haiku maps to GLM-4.5-Air"      "HAIKU=GLM-4.5-Air" "$P"
+eh "sonnet maps to glm-5.3"         "SONNET=glm-5.3" "$P"
+eh "haiku maps to glm-4.5-air"      "HAIKU=glm-4.5-air" "$P"
 eh "key reached claude via env"     "TOKEN=SEKRET-AAA" "$P"
 eh "bakes flags + forwards args"    "ARGS=-p --model sonnet --permission-mode bypassPermissions --output-format json do a thing" "$P"
 [ -f "$CFG/settings.json" ] && ok "seeds settings.json" || no "settings.json not seeded"
@@ -224,13 +224,78 @@ grep -q '_lib/term.sh' "$DOCTOR" && ok "doctor sources term.sh" || no "doctor mi
 
 # Drift tripwire: copy the skill into a temp dir with a SKILL.md that documents
 # no model name; the doctor run from there must report drift -> exit 10.
+# Copies every script (not a named list) so a newly-sourced helper comes along.
 DSB="$SB/skillcopy"; mkdir -p "$DSB/scripts" "$DSB/assets"
-cp "$WORKER" "$DSB/scripts/fleet-worker"
-cp "$DOCTOR" "$DSB/scripts/fleet-doctor.sh"
+cp "$SCRIPTS"/* "$DSB/scripts/"
 printf '# fleet-worker\nThis doc deliberately mentions no model name or endpoint.\n' > "$DSB/SKILL.md"
 printf '{ "hooks": {}, "effortLevel": "high" }\n' > "$DSB/assets/worker-settings.json"
 bash "$DSB/scripts/fleet-doctor.sh" --offline -q >/dev/null 2>&1
 ee "drift (undocumented model) -> 10" 10 $?
+
+# --- doctor --live, offline: curl + claude mocked --------------------------
+# A mock curl answers the endpoint ping and records the x-api-key it was sent;
+# mock claudes stand in for the real CLI the doctor now runs through the
+# launcher. The jq dir is appended (never prepended) so mocks always win.
+echo "-- fleet-doctor.sh --live (mocked) --"
+LB="$SB/livebin"; mkdir -p "$LB"
+CURLPROBE="$SB/curlprobe.txt"
+cat > "$LB/curl" <<EOF
+#!/usr/bin/env bash
+: > "$CURLPROBE"
+for a in "\$@"; do case "\$a" in x-api-key:*) echo "KEYHDR=\${a#x-api-key: }" >> "$CURLPROBE";; esac; done
+printf '%s' "\${MOCK_CURL_CODE:-200}"
+EOF
+# Empty keyring entry: the exact host shape behind bug 1 (vars set, entry blank).
+printf '#!/usr/bin/env bash\nexit 0\n' > "$LB/keyring"
+chmod +x "$LB/curl" "$LB/keyring"
+mk_claude() { # dir mode -> a claude mock: ok | warn-ok | refuse
+  mkdir -p "$1"
+  case "$2" in
+    ok)      printf '#!/usr/bin/env bash\necho %s\n' "'{\"is_error\":false,\"subtype\":\"success\",\"result\":\"ok\"}'" > "$1/claude" ;;
+    warn-ok) printf '#!/usr/bin/env bash\necho %s >&2\necho %s\n' \
+               "'[claude-code:unrecognized_model] {\"model\":\"glm-5.3\",\"query_source\":\"sdk\"}'" \
+               "'{\"is_error\":false,\"subtype\":\"success\",\"result\":\"ok\"}'" > "$1/claude" ;;
+    refuse)  printf '#!/usr/bin/env bash\necho %s >&2\nexit 1\n' \
+               "'[claude-code:unrecognized_model] {\"model\":\"GLM-5.3\",\"query_source\":\"sdk\"}'" > "$1/claude" ;;
+  esac
+  chmod +x "$1/claude"
+}
+mk_claude "$SB/cl-ok" ok; mk_claude "$SB/cl-warn" warn-ok; mk_claude "$SB/cl-refuse" refuse
+JQD="$(dirname "$(command -v jq)")"
+live() { # claude-mock-dir, then env assignments; runs doctor --live -q, echoes rc
+  local d="$1"; shift
+  env PATH="$LB:$d:/usr/bin:/bin:$JQD" FLEET_WORKER_CONFIG_DIR="$SB/cfg-live" "$@" \
+    bash "$DOCTOR" --live -q > "$SB/live.out" 2>/dev/null; echo $?
+}
+
+# Bug 1 (2026-10-02): keyring vars set + EMPTY entry + ZHIPU_API_KEY set. The
+# doctor's if/elif took the keyring branch, got "", and never fell through, so
+# --live said "no key" while the launcher (which does fall through) ran fine.
+rc="$(live "$SB/cl-ok" FLEET_WORKER_KEYRING_SERVICE=svc FLEET_WORKER_KEYRING_KEY=glm ZHIPU_API_KEY=ZK-FALLTHRU)"
+ee "doctor --live: empty keyring falls through to ZHIPU_API_KEY" 0 "$rc"
+eh "doctor --live: ping carried the fallen-through key" "KEYHDR=ZK-FALLTHRU" "$(cat "$CURLPROBE" 2>/dev/null)"
+# The launcher resolves keys identically (one shared function, not two copies).
+: > "$PROBE"
+PATH="$LB:$MB:/usr/bin:/bin" FLEET_WORKER_CONFIG_DIR="$SB/cfg-ft" \
+  FLEET_WORKER_KEYRING_SERVICE=svc FLEET_WORKER_KEYRING_KEY=glm ZHIPU_API_KEY=ZK-FALLTHRU \
+  "$WORKER" "hi" >/dev/null 2>&1
+eh "launcher: empty keyring falls through to ZHIPU_API_KEY" "TOKEN=ZK-FALLTHRU" "$(cat "$PROBE")"
+# Mechanical anti-divergence gate: exactly ONE `keyring get` across scripts/.
+n="$(grep -l 'keyring get "\$' "$SCRIPTS"/* 2>/dev/null | wc -l | tr -d ' ')"
+ee "key resolution lives in one file (no second copy to drift)" 1 "$n"
+
+# Bug 2 (2026-10-02): the endpoint ping can pass for a model the CLI then
+# refuses. --live must run the real claude through the launcher and judge it.
+rc="$(live "$SB/cl-refuse" ZHIPU_API_KEY=ZK)"
+ee "doctor --live: curl 200 but CLI refuses -> drift" 10 "$rc"
+eh "doctor --live: reports a live-cli row" "live-cli" "$(cat "$SB/live.out")"
+# ...but the unrecognized_model stderr notice alone is NOT a failure: Claude
+# Code 2.1.280 prints it for every non-catalog id (glm-5.3 included) and the
+# run succeeds. A doctor that grepped for it would fail every healthy host.
+rc="$(live "$SB/cl-warn" ZHIPU_API_KEY=ZK)"
+ee "doctor --live: catalog notice on a successful run -> ok" 0 "$rc"
+rc="$(live "$SB/cl-ok" ZHIPU_API_KEY=ZK MOCK_CURL_CODE=503)"
+ee "doctor --live: endpoint 503 -> unavailable" 7 "$rc"
 
 # --- assets/route.js: paste-in model-routing helper ---------------------------
 ROUTE="$SKILL/assets/route.js"

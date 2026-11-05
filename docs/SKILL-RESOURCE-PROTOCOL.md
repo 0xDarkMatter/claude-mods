@@ -33,7 +33,7 @@ skill scripts in this repo, the strong ones already follow this —
 | Resource | Ship one when… |
 |---|---|
 | `scripts/*` | The agent would re-derive the same logic every task, OR the invocation has >3 flags, OR it's a known-good decoder/validator/verifier |
-| `references/*.md` | A sub-topic is too long for the SKILL.md body (keep body < 500 lines); one concept per file, kebab-case, TOC if > 300 lines |
+| `references/*.md` | A sub-topic is too long for the SKILL.md body (body under 500 lines and ~5,000 tokens); one concept per file, kebab-case, linked directly from SKILL.md, and a `## Contents` list at the top once it passes 100 lines. The full rule and its sources: "The size rule" in [SKILL-SUBAGENT-REFERENCE.md](SKILL-SUBAGENT-REFERENCE.md#rules-for-claude-mods-skills) |
 | `assets/*` | A task needs a known-good scaffold — a config template, a starter schema, canonical lookup data |
 
 Every reference and asset MUST be cited from `SKILL.md` with enough context that the
@@ -54,10 +54,25 @@ A script under `scripts/` is an **agent-facing tool**. It MUST satisfy all of:
 6. **Bash:** `set -uo pipefail` (use `-e` only when every failure is fatal), all
    expansions quoted. **Python:** passes `python -m py_compile`, `argparse` for args.
 7. **Agent safety** (§6) — validate inputs; never `shell=True` with agent-supplied data.
-8. **Cited from `SKILL.md`** with a complete worked invocation, not a bare path.
+8. **Cited from `SKILL.md`** with a complete worked invocation, not a bare path. Write the
+   path from the skill's folder, `python "<skill-dir>/scripts/x.py"`, never
+   `python scripts/x.py`: the agent runs it from the user's project root, where a relative
+   path exits 127 or runs the project's own `scripts/x.py` (docker/skills #102).
+   `tests/skill-hygiene.sh` fails a new relative call.
 
 Default to **stdlib + common shell tools** (`jq`, `git`, `curl`). Check optional tools
 with `command -v` and exit `5` (missing-dep) with an install hint, never a stack trace.
+
+**Portable skills** - ones copied standalone into other plugins, today
+`supply-chain-defense`, `prompt-injection-defense`, `ddev-ops` and `package-manager-ops` - must run with nothing beside
+their folder: no `../../` dependency; `skills/_lib/term.sh` sourced only behind a guard
+with a 7-bit ASCII fallback ([TERMINAL-DESIGN.md](TERMINAL-DESIGN.md) §9); `.py`
+scripts launched through a bundled `scripts/run-python.sh`, which runs the first of
+`python3` / `python` / `py` that really is 3.8+ (on Windows `python3` is often the
+Microsoft Store alias, which exits 49 without running anything, and an `env python3`
+shebang lands on it too). Their `tests/run.sh` copies the folder alone and runs every
+script's `--help` and offline mode. The launcher is duplicated per skill on purpose;
+`tests/check-resources.sh` fails if the copies drift.
 
 ---
 
@@ -185,6 +200,27 @@ check-model-table.py --live         # exit 10 if live Models API disagrees with 
 
 The scheduled job runs `--live` weekly; on exit `10` it fails loudly (or opens an issue)
 naming the exact drift. The skill stays trustworthy without making honest PRs flaky.
+
+**The scheduled job treats every other exit code as a failure.** Each step hands its
+verifier to one helper, [`.github/scripts/freshness-step.sh`](../.github/scripts/freshness-step.sh):
+`0` passes, `7` warns and passes, `10` fails with the step's drift message, and any other
+code fails as "verifier crashed or was misused (exit N)". A verifier that dies before
+comparing anything (an uncaught exception exits `1`; facts it cannot find or parse exit
+`3`/`4`) has checked nothing, so it must not read as "no drift". The steps once ended in
+a bare `exit 0`, so such a crash passed green every week. For verifier authors, this means
+exit `0` only after the comparison has run. [`tests/check-resources.sh`](../tests/check-resources.sh)
+pins the helper's mapping and fails a PR whose freshness step reads `$?` itself.
+
+**A new verifier is not scheduled until you add its step.** Nothing runs a `--live` mode
+by discovery: give it a step in `freshness.yml`, with its own `--drift` and `--unavailable`
+messages, and pass any token or tool it needs (as the steps for its neighbours do).
+`tests/check-resources.sh` finds every `skills/*/scripts/` file that names both
+`--offline` and `--live` and fails the PR when no step runs it, so a verifier can no
+longer ship without its weekly check, as eight once did. A verifier that should not run
+weekly (it needs a paid key, or checks the local machine rather than a shipped fact)
+goes in that script's `__fv_exempt` list with its reason. The gate also fails an
+exemption with no reason, for a file that is gone or for a verifier a step runs anyway,
+and a step naming a script that is not on disk.
 
 ---
 

@@ -42,7 +42,7 @@ Each Desktop session has two halves:
 
 Summon copies (or with `--move`, relocates) the metadata wrapper into the destination account's dir. The transcript stays put — both wrappers point at the same conversation. After Logout/Login on the destination, the new entries appear in the **left-hand session picker** (Desktop's Code-tab sidebar).
 
-**The uuid-mismatch trap.** The wrapper filename uuid (`local_<uuid>.json` / `sessionId`) does **not** name the transcript — the transcript file is named by the wrapper's `cliSessionId`, a different uuid (e.g. wrapper `local_6577b24c-…` → transcript `e640a2a8-….jsonl`). And the transcript's parent dir is the *munged cwd* (`D:\code\myapp\.claude\worktrees\funny-hypatia-5e54f7` → `D--code-myapp--claude-worktrees-funny-hypatia-5e54f7`), which occasionally doesn't derive from the wrapper's recorded cwd at all. All toolbox modes resolve via `cliSessionId` at the expected munged path first, then fall back to scanning every project dir for `<cliSessionId>.jsonl`.
+**The uuid-mismatch trap:** the transcript is named by the wrapper's `cliSessionId`, not its `sessionId`, and may not sit under the wrapper's munged cwd. Every mode resolves by `cliSessionId` with a scan fallback: [references/session-store.md](references/session-store.md).
 
 ## Run
 
@@ -56,12 +56,7 @@ python ~/.claude/skills/summon/scripts/summon.py [flags]
 
 Default behaviour: list candidate sessions across **all non-destination accounts**, grouped Account → Project → Session, then prompt to copy them into the destination account. **Copy semantics by default** — sessions remain visible in the source account too. Last 3 days; remote-VM sessions auto-skipped.
 
-Two natural framings of the same operation:
-
-- **Push** (proactive): you're approaching usage limit on your current account. Run `summon --to <next-account>` while still on the current one. Pick which sessions to push. Then Logout/Login is the account switch you were going to do anyway.
-- **Pull** (rescue): you've already switched accounts and want to bring earlier sessions over. Run `summon` (no `--to`); destination defaults to your now-current account.
-
-Mechanically identical — the file moves are the same regardless of which framing you have in mind. Push is the recommended workflow because the Logout/Login becomes invisible.
+Push (`--to <next-account>` before switching) and pull (no `--to`, after switching) are mechanically identical; push is recommended. [references/transfer.md](references/transfer.md#push-vs-pull).
 
 ### Flags
 
@@ -92,40 +87,13 @@ Interactive picker over the **whole** session store (all accounts, default last 
 
 Selecting a session emits a **paste-ready handover on stdout** (context panel and progress on stderr, so `summon pick | clip` stays clean). Same output as `recover`, below.
 
-**`summon pick --json`** skips the picker entirely and emits the filtered inventory as a `claude-mods.summon.pick/v1` envelope on stdout — JSON only, no panel glyphs (an empty inventory is `"data": []` with exit 0, not an error). Each session row carries: `id` (short) + `sessionId` (full) + `cliSessionId`, `title`, `cwd`, `projectRoot` + `worktree` (the cwd with any `\.claude\worktrees\<name>` suffix split out), `branch`, `model` + `effort`, `turns`, `isArchived`, `isRunning` (active in the last 10m), `brokenCwd` (doctor's check — recorded cwd missing on disk), `lastActivityAt` (ISO-8601 Z), `account` + `accountEmail`, and `transcriptPath` (resolved via the same wrapper→transcript logic as recover, scan fallback included; `null` when missing). This feeds the [in-chat visual card picker](#in-chat-mode-visual-card-picker--the-default-for-picking-sessions) and any scripted caller:
-
-```bash
-summon pick --json | jq -r '.data[] | "\(.id)  \(.title)  \(.projectRoot)"'
-```
-
-**`summon pick --json --rich`** advances the schema to `claude-mods.summon.pick/v2` and adds transcript-derived **display metrics** to every row — one linear transcript read each, so it's opt-in (the plain `--json` inventory stays metadata-only and instant). Extra keys: `events` (transcript line count), `toolCalls`, `densityBuckets` (24-bucket activity histogram over the session's lifetime), `durationMin`, `sizeKB` (on-disk transcript size), `ctxTokens` (last-turn context occupancy — input + cache + output, matching Claude Code's live meter), `ctxPeak` (max before any auto-compaction), `ctxWindow` (200000, or 1000000 when peak exceeds 200k), `ctxPct` / `ctxPeakPct`, and `firstAsk` (the session's opening ask, boilerplate-stripped). This is the feed for the card picker.
+`summon pick --json` emits the inventory as a `claude-mods.summon.pick/v1` envelope (no picker); `--json --rich` adds display metrics as `pick/v2`, the card picker's feed. Keys: [references/toolbox-modes.md](references/toolbox-modes.md).
 
 ### `summon recover <id>` — distilled handover brief
 
 `summon recover 6577b24c` — id is a `sessionId` or `cliSessionId`, prefix ok. Four-stage flow:
 
-1. **Extract** (in-script, no LLM): parses the transcript JSONL and pulls conversational content only — user/assistant text turns, skipping `tool_result` blobs and `tool_use` inputs (they are most of the bytes). The final ~15 turns are included verbatim; earlier turns fill the remaining budget from the start (so the goal statement survives), middle elided when too long. Total capped at a char budget (`--budget`, default 120k).
-2. **Distill** (cheap, tool-less): pipes the extraction to a single `claude -p --model sonnet --permission-mode dontAsk` call — one-shot stdin summarisation, no tools, no agentic loop, never `bypassPermissions` (per `rules/loop-engineering.md`). Produces a brief with fixed sections: **Goal / What landed** (branch + commits if mentioned) **/ Unfinished / Open decisions / Key context**, ~1k-word cap. `--model` overrides sonnet.
-3. **Cache**: the brief is written to `<transcript-path>.handover.md` next to the JSONL and reused while it's newer than the transcript's mtime. `--refresh` forces re-distillation.
-4. **Emit** (stdout = the data product): the brief inline plus a pointer clause:
-
-```
-Continue a previous Claude session: 'Fix overlapping photo pins with gentle displacement'.
-Branch: claude/funny-hypatia-5e54f7
-
-## Goal
-…
-## What landed
-…
-## Unfinished
-…
-## Open decisions
-…
-## Key context
-…
-
-Full transcript at C:\Users\<you>\.claude\projects\D--code-myapp-…\e640a2a8-….jsonl (session 6577b24c-…, branch claude/funny-hypatia-5e54f7); consult it only if something specific is missing.
-```
+Extract turns (no LLM), distill with one tool-less `claude -p --model sonnet` call, cache at `<transcript>.handover.md`, emit the brief plus a transcript pointer on stdout. Detail and sample: [references/toolbox-modes.md](references/toolbox-modes.md).
 
 **Degrade, never hard-fail**: if the `claude` CLI is absent from PATH, or the call fails/times out (60s), recover falls back to the classic non-distilled pointer prompt (Title/Branch/Orig cwd/Transcript + tail-reading instruction) with a stderr warning and **exit 0** — worker unavailability is advisory, not an error. `--no-distill` forces the fallback (no LLM call at all).
 
@@ -144,12 +112,7 @@ When a project folder moves (e.g. `D:\code\myapp` → `D:\archive\myapp`), sessi
 summon rebind 6577b24c --cwd "D:\archive\myapp\.claude\worktrees\funny-hypatia-5e54f7"
 ```
 
-1. **Backs up** every matching wrapper to `~/.claude/summon-backups/<timestamp>/` (outside the live store) before touching anything
-2. **Atomically rewrites** `cwd`, and rebases `originCwd`/`worktreePath` (worktree sessions record the project *root* in `originCwd` — the suffix math is handled)
-3. **Bridges the transcript**: Desktop resolves the transcript via the munged *new* cwd, so the `<cliSessionId>.jsonl` is copied (never moved) into the new munged project dir. `--no-transcript` skips this
-4. **Verifies** by re-reading the wrapper; on mismatch it restores from the backup
-5. If the same session was transfer-copied into several accounts, **all copies are rebound**
-6. When the new cwd is inside a `.claude\worktrees\` path, prints a reminder that **git worktree links break on folder moves** — run `git worktree repair <new-worktree-path>` from the repo root (verified fix 2026-07-03)
+Backs up, rewrites and verifies the wrapper (every account's copy) and bridges the transcript. **For a worktree path, run `git worktree repair <new-worktree-path>` from the repo root**; worktree links break on folder moves. Steps: [references/toolbox-modes.md](references/toolbox-modes.md).
 
 `--dry-run` previews; `--force` allows a `--cwd` that doesn't exist yet. The new cwd must normally exist on disk. After a rebind, restart Desktop (or Logout/Login) so the sidebar re-reads the wrapper.
 
@@ -172,11 +135,11 @@ When summon is invoked from **inside a Claude chat session** (Desktop chat, clau
 1. Run **`summon widget --days 30`** (add `--cwd`/`--title` filters as asked). It prints the **finished, self-contained card-picker HTML on stdout** — the rich inventory already trimmed and injected into the template.
 2. **Pass that stdout straight to the `show_widget` tool** as `widget_code`. That's the whole job: no manual injection, no key-trimming, no reading a file back. The builder also writes the same HTML to `%TEMP%\claude\summon-widget.html` (override with `--out`), so you can `Read` it if you'd rather not re-run.
 
-> **Why one command, not hand-assembly (don't "simplify" this away).** `show_widget` accepts only **inline** `widget_code` — no file path — and its CSP blocks any fetch, so the session data *must* be inlined. The old manual flow (`pick --json --rich` → hand-merge data into the template → `Read` the assembled file to inline it) was expensive and broke: `--rich` for ~75 sessions is >100 KB (it spools to a tool-results file), and once injected as one long JSON line the assembled file **trips the 25k-token `Read` cap and can't be paginated** (Read is line-based; the megaline is indivisible). `summon widget` fixes all of it in-process: it drops 0-turn stubs, caps to the most-recently-active `--limit` (default 24), keeps only the keys the template consumes, downsamples the density strip, injects **one session object per line** (so `Read` *can* paginate the mirror file), and holds the assembled HTML under a hard **`--max-kb` byte budget** (default 28 KB ≈ <15k tokens) so it never spools and never trips the Read cap — capping the session count with a stderr note if it must. Flags: `--include-stubs`, `--full-density`, `--limit N`, `--max-kb N`, `--days N`/`--all`, `--out PATH`.
+> **Don't hand-assemble the widget.** `show_widget` takes only inline code, and a hand-merged file trips the 25k-token `Read` cap. Why, and the trimming flags: [references/in-chat-picker.md](references/in-chat-picker.md).
 
-The widget itself needs no further setup: archived sessions are hidden by default (a "show archived" toggle reveals them); cross-account copies dedupe by `sessionId`; it has a client-side age filter (24h/3d/7d/30d/all — `summon widget` pre-selects the one matching `--days`) so the user narrows in-widget without a CLI re-run. Each card shows a **colour-coded context-usage gauge chip** (token count + % of the session's window — 200k or 1M, auto-detected from peak; green/amber/red by fill) in the stats row, an **activity-density strip**, and chips for model/effort, age, turns, messages, tool calls, on-disk size, and duration, plus **grid/list** and **sort** controls. The header stays light — just project, tags, and the action icons (grouped right, wrap-safe) — so nothing overruns the card border. `firstAsk` is the mechanical opening ask; you MAY replace it with a distilled one-liner by setting a `summary` field on a row (edit the mirror file or post-process the JSON) before rendering.
+Widget features, and the optional per-row `summary` that replaces `firstAsk`: [references/in-chat-picker.md](references/in-chat-picker.md).
 
-**Manual fallback (only if `summon widget` is unavailable):** run **`summon pick --json --rich --days 30`**, parse the `claude-mods.summon.pick/v2` envelope, drop its `data` array into the `<script id="D">` block of [`assets/picker-widget.html`](assets/picker-widget.html) (the widget consumes pick/v2 objects verbatim — keys documented in the template header), and render via `show_widget`. Watch the Read-cap trap above: keep the injected array one-object-per-line and trim to a couple dozen sessions.
+**Manual fallback** (only if `summon widget` is unavailable): inject `pick --json --rich` output into [`assets/picker-widget.html`](assets/picker-widget.html); steps in [references/in-chat-picker.md](references/in-chat-picker.md).
 
 3. Act on the `sendPrompt` callbacks the widget fires. Per-card `↗ summon` and `⟳ recover` (and the footer's "Recover/Summon selected") are worded to be **spawned as background chips** — when one arrives, call `spawn_task` (one chip per session) rather than doing the work inline, so the user's current turn keeps flowing:
    - **"Recover … as a background chip"** → one `spawn_task` per session (the batch button sends a single prompt listing all selected — fan it into one chip **per session**, not one mega-chip, so each recovers independently in its own project folder). For each chip:
@@ -196,50 +159,15 @@ The template is deliberately self-contained: host CSS variables + the host's Tab
 
 ## Display
 
-Output follows the [Terminal Panel Design System](../../docs/TERMINAL-DESIGN.md) (panel header, body with `│` rail, footer, ASCII fallback when stdout isn't UTF-8). The candidate hierarchy is **Account → Project → Session**, with sessions globally numbered for picker selection (`3, 5, 7`).
-
-```
-╭── 🪄 summon ──────────────────────────────────────────────── → other-account ───●
-│
-├── 4 sessions · from 1 account · last 3d
-│
-├── dev@example.com (4)
-│   ├── D:\code\project-one (2)
-│   │   ├──  1. train-fasttext                    30t            16h
-│   │   └──  2. make-doom-for-mips                64t            16h
-│   └── D:\work\client-site (2)
-│       ├──  3. timekeeper                        35t            16h
-│       └──  4. agency-os                         17t            16h
-│
-│   💡  best run BEFORE switching accounts: copy sessions to the next
-│       account first, then Logout/Login (the switch you were doing anyway)
-│
-╰── # select · a all · blank cancel ───────────────────────────────────●
-```
-
-Header shows `→ destination`. Summary line shows count, source breadth, and active filter window. Body shows Account → Project → Session hierarchy with global numbering for picker selection (`3,5,7`). A rotating hint tile sits above the footer; the footer shows the active hotkeys.
+Account → Project → Session panel, globally numbered for picker selection (`3,5,7`), ASCII fallback off UTF-8: [references/display.md](references/display.md).
 
 ## Edge cases handled
 
-| Case | Behaviour |
-|------|-----------|
-| Session cwd is `/sessions/<vm>/mnt` (remote) | Skipped — no local transcript to bridge |
-| Transcript JSONL missing on disk | Skipped with warning (orphan metadata) |
-| Same `sessionId` already in destination | Skipped (idempotent) |
-| Destination has no workspace dirs | New workspace UUID created |
-| Stdout is not UTF-8 (Windows cp1252) | ASCII fallback for all panel glyphs |
-| Stdout is not a TTY or `NO_COLOR` set | Plain text, no ANSI escapes |
+Remote-VM sessions and missing transcripts are skipped, existing `sessionId`s are idempotent, non-UTF-8/non-TTY output degrades: [references/transfer.md](references/transfer.md#edge-cases-handled).
 
 ## Sidebar refresh
 
-Desktop loads sessions into its left-hand session picker on login and doesn't watch the filesystem afterwards (verified via bundle inspection — no `chokidar`, no relevant `fs.watch` on the session dir, only direct `fs.readdir` calls). Summon throws a best-effort nudge at fs.watch (sentinel pings, mtime touches, rename ping-pong) but **don't rely on it** — assume Logout/Login is required to populate the sidebar with new sessions.
-
-This is why summon is best run **before switching accounts**: the Logout/Login is what you'd do anyway. Running summon as a "rescue" after the fact still works mechanically, but the Logout/Login still has to happen.
-
-If sessions still don't appear:
-
-1. Try View → Reload (rarely helps; Ctrl+R only re-renders)
-2. **Logout → Login** triggers a full filesystem rescan and always works
+Desktop reads its session list at login and doesn't watch the filesystem: **Logout → Login is required** for new sessions to appear. Evidence: [references/transfer.md](references/transfer.md#sidebar-refresh).
 
 ## Wrapper install
 

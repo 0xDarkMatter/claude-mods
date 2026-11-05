@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Audit project dependencies with available ecosystem vulnerability scanners.
+# Audit project dependencies with available ecosystem vulnerability scanners:
+# pip-audit/safety, npm audit, govulncheck, cargo audit, trivy, composer audit.
 #
 # Usage:   dependency-audit.sh
 # Input:   Project manifests in the current directory; no stdin input.
@@ -18,7 +19,9 @@ usage() {
 Usage: dependency-audit.sh
 
 Run available ecosystem vulnerability scanners for manifests in the current
-directory. Findings are written to stdout; progress is written to stderr.
+directory (requirements.txt/pyproject.toml, package.json, go.mod, Cargo.toml,
+Dockerfile, composer.json). Findings are written to stdout; progress is written
+to stderr.
 
 Exit codes:
   0   audits completed with no findings
@@ -109,6 +112,26 @@ if [[ -f Dockerfile ]]; then
     else
         printf '%bInstall trivy for container vulnerability scanning%b\n' "$YELLOW" "$NC" >&2
         printf '%s\n' '  brew install trivy' >&2
+    fi
+fi
+
+if [[ -f composer.json ]]; then
+    printf '%s\n' '--- PHP Dependencies (Composer) ---' >&2
+    # `audit` exists from Composer 2.4; probe for it so an old Composer's "command not
+    # defined" error is never counted as a vulnerability. Any non-zero exit is a
+    # finding: 2.8.4-2.9 used a 1/2/3 bitmask, 2.10+ returns only 0/1, so never decode it.
+    # --locked reads composer.lock without needing vendor/ (2.10+ fails without it).
+    if ! command -v composer >/dev/null 2>&1; then
+        printf '%bInstall Composer 2.4+ for PHP vulnerability scanning (composer audit)%b\n' "$YELLOW" "$NC" >&2
+        printf '%s\n' '  https://getcomposer.org/download/  (inside DDEV: ddev composer audit)' >&2
+    elif ! composer audit --help >/dev/null 2>&1; then
+        printf '%bComposer predates 2.4 (no audit command): composer self-update, or require roave/security-advisories%b\n' "$YELLOW" "$NC" >&2
+    elif [[ -f composer.lock ]]; then
+        printf '%s\n' 'Running composer audit --locked...' >&2
+        run_audit composer audit --locked --format=plain --no-interaction
+    else
+        printf '%s\n' 'Running composer audit (no composer.lock: auditing vendor/)...' >&2
+        run_audit composer audit --format=plain --no-interaction
     fi
 fi
 

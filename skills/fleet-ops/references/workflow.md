@@ -2,6 +2,13 @@
 
 End-to-end walkthroughs plus recovery scenarios. The native-primitives routing table and CLI surface live in `SKILL.md` — this doc is the operational manual.
 
+## Contents
+
+- [Path A — native spawn, fleet landing](#path-a--native-spawn-fleet-landing)
+- [Path B — manual spawn (`fleet init`)](#path-b--manual-spawn-fleet-init)
+- [Recovery](#recovery)
+- [Common patterns](#common-patterns)
+
 There are two ways work enters the fleet: **native spawn** (preferred — agent teams or background agents do the parallel work) and **manual spawn** (`fleet init` creates lanes you point sessions at). Landing is identical for both.
 
 ## Path A — native spawn, fleet landing
@@ -46,7 +53,7 @@ Or via the daemon + `signal.sh READY` gates (see Path B steps 3–4) if sessions
 fleet init auth-mw rate-limiter cache-layer
 ```
 
-Creates: a branch per name (off `main`), a worktree at `.fleet-worktrees/<name>/` (top-level so headless lane sessions can write — see "Headless agent compatibility" in `SKILL.md`), a status file at `.claude/fleet/lanes/<name>` (state: `RUNNING`), and deploys `signal.sh` to `.claude/fleet/signal.sh`.
+Creates: a branch per name (off `main`), a worktree at `.fleet-worktrees/<name>/` (top-level so headless lane sessions can write — see "Headless agent compatibility" in `SKILL.md`; `$WORKTREE_ROOT/<repo>/<name>/` when the machine sets that root), a status file at `.claude/fleet/lanes/<name>` (state: `RUNNING`), and deploys `signal.sh` to `.claude/fleet/signal.sh`.
 
 `fleet init` also appends `.claude/fleet/` and `.fleet-worktrees/` to `.gitignore` and auto-commits that change (`chore: gitignore fleet-ops runtime state`) when the tree is otherwise clean and you're on `main`. If it can't auto-commit safely, you'll see an `ACTION REQUIRED` notice — commit `.gitignore` yourself before `fleet start` or the daemon will refuse to land with `uncommitted tracked changes`.
 
@@ -54,7 +61,7 @@ Force branch-only mode: `mode=branch` in `.claude/fleet/config`. Use this when e
 
 ### 2. Launch sessions
 
-For each lane, open a Claude session pointing at that worktree (or that clone). Use `references/session-prompt.md` as the template — fill in `LANE`, `SCOPE`, `TASK`, `TESTS`.
+For each lane, open a Claude session pointing at that worktree (or that clone). Use `references/session-prompt.md` as the template — fill in `LANE`, `SCOPE`, `TASK`, `TESTS`, plus `ACCEPTANCE`, `TIMEBOX` and `FORBIDDEN` (see that file for what each one is for).
 
 Each session works in isolation, commits atomically, runs tests, and signals when ready:
 
@@ -88,6 +95,8 @@ fleet status
 
 One panel: every lane grouped by state (`RUNNING / READY / CONFLICT / FAILED / LANDED`) with age and commits-ahead. `fleet status --verbose` adds worktree paths and notes.
 
+While a land's gate runs, the panel's first line reads `main <sha> is PROVISIONAL - gate for <lane> running since HH:MM (pid N); red resets to <base>`. That tip is not landed yet, so no session branches from it or rebases onto it until the line is gone (`fleet landing` exits 0). See [landing.md](landing.md#provisional-main).
+
 ### 5. Cleanup
 
 When all lanes are terminal (`LANDED` or `FAILED`), the daemon exits. To tear down:
@@ -95,16 +104,29 @@ When all lanes are terminal (`LANDED` or `FAILED`), the daemon exits. To tear do
 ```bash
 fleet stop                                              # if daemon still running
 git worktree remove .fleet-worktrees/<name>             # for each fleet-created worktree lane
+                                                        # (the path `fleet config` prints as worktree_root)
 rm -rf .claude/fleet                                    # nuke fleet state
 ```
 
-Only remove worktrees that `fleet init` created. Native sessions' worktrees under `.claude/worktrees/` are cleaned up through agent view (`Ctrl+X`) or `claude rm` — not by hand.
+Only remove worktrees that `fleet init` created. Native sessions' worktrees under `.claude/worktrees/` are cleaned up through agent view (`Ctrl+X`) or `claude rm` — not by hand. Session worktrees `hooks/worktree-create.sh` placed under `$WORKTREE_ROOT/<repo>/` (branch `worktree-<name>`) are removed by its `WorktreeRemove` pair when the session exits or is deleted; Claude Code's periodic sweep never removes them, so `fleet sweep` reports the rest ("hook-made").
 
 `fleet init` is idempotent — keep `.claude/fleet/` for the next round if you want.
 
-If a previous daemon was killed without cleanup, `fleet start` auto-detects the stale `daemon.pid` and clears it.
+If a previous daemon was killed without cleanup, `fleet start` auto-detects the stale `daemon.pid` and clears it. A land it was in the middle of is examined the same way, by `fleet start` and by `fleet land`. See the next section.
 
 ## Recovery
+
+### `CONFLICT` lane noted `UNTESTED MERGE` (a land died mid-gate)
+
+A land was cut short after its merge and before its gate's verdict (kill -9, crash, a tool timeout), so the merge is on `main` and no gate has judged it. `fleet status` says `main <sha> holds an UNTESTED merge of <lane>` until it is settled. Run the gate yourself:
+
+```bash
+git checkout main && <test_cmd>
+fleet land <lane-branch>     # green: records it LANDED, rebases the other lanes
+fleet revert <lane-branch>   # red: reverts the merge, lane back to RUNNING
+```
+
+A lane noted `rebase onto main cut short` is stuck mid-rebase in its own worktree. Its owner finishes it, or runs `git -C <worktree> rebase --abort`, then re-signals READY.
 
 ### `CONFLICT` lane (rebase or merge failed)
 

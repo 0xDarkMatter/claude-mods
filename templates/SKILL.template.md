@@ -38,8 +38,9 @@ compatibility: "Requires Node.js 18+, macOS/Linux only"
 metadata:
   author: "Your Name"
   version: "1.0.0"
-  tags: ["git", "workflow", "automation"]
-# - Key-value mapping for custom properties
+  tags: "git, workflow, automation"
+# - Key-value mapping for custom properties; every value is a string
+# - Lists are comma-separated strings: the spec's validator rejects [a, b]
 # - Not defined by spec - use for your own tracking
 
 allowed-tools: "Bash Read Write Glob Grep"
@@ -61,22 +62,27 @@ Skills load content in stages to minimize context consumption:
 
 ### When to Split Content
 
-| SKILL.md Size | Action |
+The limit is **body under 500 lines AND under ~5,000 tokens** (characters / 3.6). After
+auto-compaction Claude Code keeps only the first 5,000 tokens of an invoked skill, so a
+long tail silently drops. Full rule and sources: "The size rule" in
+`docs/SKILL-SUBAGENT-REFERENCE.md`.
+
+| SKILL.md body | Action |
 |---------------|--------|
-| < 150 lines | Keep as single file |
-| 150-300 lines | Consider extracting reference tables |
-| 300+ lines | **Must split** - extract to references/ |
+| Well inside both limits | Keep as single file |
+| Approaching 500 lines or ~5,000 tokens | Extract reference tables and examples to references/ |
+| Over either limit | **Must split** - procedure and hard rules stay first, detail moves out |
 
 ## Directory Structure
 
-### Simple Skill (<150 lines)
+### Simple Skill (one file)
 
 ```
 my-skill/
 └── SKILL.md
 ```
 
-### Medium Skill (150-300 lines)
+### Medium Skill (one reference)
 
 ```
 my-skill/
@@ -85,11 +91,11 @@ my-skill/
     └── REFERENCE.md         # Extended patterns
 ```
 
-### Complex Skill (300+ lines)
+### Complex Skill (several references)
 
 ```
 my-skill/
-├── SKILL.md                    # Core only (<300 lines)
+├── SKILL.md                    # Core only (<500 lines, ~5k tokens)
 ├── references/
 │   ├── REFERENCE.md            # Primary reference
 │   ├── {lang}-patterns.md      # Language-specific
@@ -225,10 +231,11 @@ For complete patterns, load:
 - [ ] `name` does not start or end with hyphen
 - [ ] `description` is non-empty and under 1024 chars
 - [ ] `description` explains what AND when
-- [ ] SKILL.md under 300 lines (target for progressive disclosure)
+- [ ] SKILL.md body under 500 lines and ~5,000 tokens (`bash tests/skill-size.sh`)
 - [ ] Top 10 essential patterns inline, rest in references/
 - [ ] All file references use relative paths (`./references/`)
-- [ ] No nested directories (one level deep only)
+- [ ] Every reference linked directly from SKILL.md (one level deep, no chains)
+- [ ] Any reference over 100 lines opens with a `## Contents` list naming every `##` heading (`bash tests/reference-contents.sh --report`)
 - [ ] Works without loading references (basic cases)
 - [ ] Optional fields only included if needed
 

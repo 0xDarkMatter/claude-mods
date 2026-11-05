@@ -64,6 +64,25 @@ bash "$V" --offline "$SB/bad.yml" >"$SB/neg.out" 2>&1
 expect_exit "--offline flags missing @ref -> 4" 4 $?
 expect_has "finding names the malformed ref" "malformed" "$(cat "$SB/neg.out")"
 
+# ── a producer that fails must not read as "refs well-formed" ─────────────────
+# The `uses:` lines came from a loop fed by `< <(grep ...)`, so grep's status was
+# never seen. A NUL byte makes GNU grep call the file binary: 3.0 printed
+# "Binary file ... matches" as if it were a ref, 3.5+ prints nothing to stdout,
+# so the real malformed ref below was never checked and the run could exit 0.
+echo "-- failing producer --"
+printf 'jobs:\n  b:\n    steps:\n      - uses: hashicorp/setup-terraform\n\000\n' > "$SB/nul.yml"
+bash "$V" --offline "$SB/nul.yml" >"$SB/nul.out" 2>&1
+expect_exit "NUL-byte workflow: malformed ref still found -> 4" 4 $?
+expect_has  "NUL-byte workflow: names the real ref" "hashicorp/setup-terraform" "$(cat "$SB/nul.out")"
+# grep that cannot read the file (exit 2) is not "no uses: lines" (exit 1).
+mkdir -p "$SB/shim"
+printf '#!/bin/sh\ncase "$*" in *uses:*) echo "grep: simulated read error" >&2; exit 2 ;; esac\nexec "%s" "$@"\n' \
+  "$(command -v grep)" > "$SB/shim/grep"
+chmod +x "$SB/shim/grep"
+PATH="$SB/shim:$PATH" bash "$V" --offline "$SB/bad.yml" >"$SB/shim.out" 2>&1
+expect_exit "grep read error -> 5, not 0" 5 $?
+expect_has  "grep read error: says the file was not read" "could not read" "$(cat "$SB/shim.out")"
+
 # ── SKILL.md sanity ───────────────────────────────────────────────────────────
 echo "-- SKILL.md --"
 grep -q '^name: terraform-ops$' "$SKILL/SKILL.md" && ok "frontmatter name" || no "frontmatter name"

@@ -1,0 +1,35 @@
+# syntax=docker/dockerfile:1
+# check=error=true
+# Starter Dockerfile (docker-ops). Passes scripts/docker-audit.py with no findings; keep it
+# that way when you adapt it. ADAPT marks the lines to change for your app.
+# Shown for Python + uv; dockerfile.md has Go, Rust, Node.js, Java and PHP stages.
+
+# ADAPT: the runtime line. Python 3.11 is the oldest supported (assets/docker-facts.json).
+FROM python:3.14-slim AS build
+COPY --from=ghcr.io/astral-sh/uv:0.12.23 /uv /uvx /bin/
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
+WORKDIR /app
+# Dependencies first, from the lockfile only: this layer survives source edits.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --locked --no-install-project --no-dev
+COPY . .
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev
+
+FROM python:3.14-slim
+# A numeric user, so Kubernetes' runAsNonRoot can verify it.
+RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin app
+WORKDIR /app
+COPY --from=build --chown=10001:10001 /app /app
+ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1
+# ADAPT: source URL and version labels.
+LABEL org.opencontainers.image.source="https://github.com/acme/app" \
+      org.opencontainers.image.description="Example service"
+USER 10001
+EXPOSE 8000
+# The slim image has no curl: probe with Python itself. ADAPT: the health URL.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
+  CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).status == 200 else 1)"]
+# ADAPT: the app's command. Exec form, so the process receives SIGTERM.
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

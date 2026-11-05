@@ -1,5 +1,21 @@
 # Resources and Prompts
 
+Samples target the v2 SDKs (Python `mcp` 2.x `MCPServer`, TypeScript
+`@modelcontextprotocol/server` 2.x); v1 differences are in [v2-migration.md](v2-migration.md).
+
+## Contents
+
+- [Resource Overview](#resource-overview)
+- [Resource URIs](#resource-uris)
+- [Static Resources](#static-resources)
+- [Dynamic Resources](#dynamic-resources)
+- [MIME Types](#mime-types)
+- [Resource Subscriptions](#resource-subscriptions)
+- [Resource Listing](#resource-listing)
+- [Prompt Templates](#prompt-templates)
+- [Prompt Best Practices](#prompt-best-practices)
+- [Combining Resources and Tools](#combining-resources-and-tools)
+
 ## Resource Overview
 
 Resources provide **read-only data** to the LLM. They are identified by URIs and can be static or dynamic.
@@ -29,12 +45,20 @@ Examples:
 
 ### URI Templates
 
-URI templates allow parameterized resources:
+URI templates allow parameterized resources. In v2 they are real RFC 6570 templates:
+`{name}` matches one path segment, `{+path}` matches across slashes, `{?query}` reads
+query parameters, and matching is exact. Extracted values are screened for path
+traversal (`..`, absolute paths) by default, and a malformed template fails at
+decoration time.
 
 ```python
-from mcp.server.fastmcp import FastMCP
+import json
 
-mcp = FastMCP("resource-server")
+import httpx
+from mcp.server import MCPServer
+from mcp.server.mcpserver.exceptions import ResourceError
+
+mcp = MCPServer("resource-server")
 
 # Static URI - single resource
 @mcp.resource("config://app/settings")
@@ -47,7 +71,7 @@ def get_settings() -> str:
 def get_table_data(table_name: str) -> str:
     """Return data from a database table."""
     if table_name not in ALLOWED_TABLES:
-        raise ValueError(f"Table {table_name} not accessible")
+        raise ResourceError(f"Table {table_name} not accessible")
     rows = db.query(f"SELECT * FROM {table_name} LIMIT 100")
     return json.dumps(rows, default=str, indent=2)
 
@@ -62,19 +86,27 @@ def get_repo_info(owner: str, repo: str) -> str:
 ### TypeScript Resources
 
 ```typescript
-// Static resource
-server.resource("settings", "config://app/settings", async (uri) => ({
-  contents: [{
-    uri: uri.href,
-    mimeType: "application/json",
-    text: JSON.stringify(loadSettings(), null, 2),
-  }],
-}));
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/server";
 
-// Resource template
-server.resource(
+// Static resource: registerResource(name, uri, metadata, callback); metadata is required ({} if none)
+server.registerResource(
+  "settings",
+  "config://app/settings",
+  { description: "Application settings", mimeType: "application/json" },
+  async (uri) => ({
+    contents: [{
+      uri: uri.href,
+      mimeType: "application/json",
+      text: JSON.stringify(loadSettings(), null, 2),
+    }],
+  })
+);
+
+// Resource template: matched variables arrive as the second callback argument
+server.registerResource(
   "table_data",
   new ResourceTemplate("db://app/tables/{table_name}", { list: undefined }),
+  { description: "Rows from one table", mimeType: "application/json" },
   async (uri, { table_name }) => ({
     contents: [{
       uri: uri.href,
@@ -177,7 +209,7 @@ def get_recent_errors() -> str:
 ### Setting MIME Types
 
 ```python
-# Python - FastMCP infers from return type, or specify explicitly
+# Python - MCPServer infers from return type, or specify explicitly
 @mcp.resource("docs://readme", mime_type="text/markdown")
 def get_readme() -> str:
     """Return the project README."""
@@ -189,39 +221,47 @@ def get_readme() -> str:
 def get_logo() -> bytes:
     """Return the application logo."""
     with open("logo.png", "rb") as f:
-        return f.read()  # FastMCP handles base64 encoding
+        return f.read()  # MCPServer handles base64 encoding
 ```
 
 ```typescript
-// TypeScript - specify mimeType in contents
-server.resource("readme", "docs://readme", async (uri) => ({
-  contents: [{
-    uri: uri.href,
-    mimeType: "text/markdown",
-    text: await fs.readFile("README.md", "utf-8"),
-  }],
-}));
+// TypeScript - metadata mimeType describes the resource in resources/list;
+// each contents item carries its own mimeType
+server.registerResource(
+  "readme",
+  "docs://readme",
+  { mimeType: "text/markdown" },
+  async (uri) => ({
+    contents: [{ uri: uri.href, mimeType: "text/markdown", text: await fs.readFile("README.md", "utf-8") }],
+  })
+);
 
 // Binary content
-server.resource("logo", "images://logo", async (uri) => ({
-  contents: [{
-    uri: uri.href,
-    mimeType: "image/png",
-    blob: (await fs.readFile("logo.png")).toString("base64"),
-  }],
-}));
+server.registerResource(
+  "logo",
+  "images://logo",
+  { mimeType: "image/png" },
+  async (uri) => ({
+    contents: [{ uri: uri.href, mimeType: "image/png", blob: (await fs.readFile("logo.png")).toString("base64") }],
+  })
+);
 ```
 
 ## Resource Subscriptions
 
-Clients can subscribe to resource changes and receive notifications:
+Clients can watch resources for changes. On 2025-era sessions they use
+`resources/subscribe` (deprecated by SEP-2575). On 2026-07-28 connections they open one
+`subscriptions/listen` stream naming the notification kinds they want. The server-side
+call is the same for both:
 
 ```python
-from mcp.server.fastmcp import FastMCP, Context
+import json
 
-mcp = FastMCP("subscription-demo")
+from mcp.server import MCPServer
+from mcp.server.mcpserver import Context
 
-# Track subscriptions
+mcp = MCPServer("subscription-demo")
+
 _config_version = 0
 
 @mcp.resource("config://app/settings")
@@ -235,27 +275,32 @@ async def update_setting(key: str, value: str, ctx: Context) -> str:
     save_setting(key, value)
     _config_version += 1
 
-    # Notify subscribed clients that the resource changed
-    await ctx.request_context.session.send_resource_updated("config://app/settings")
+    # Notify watching clients that the resource changed (both protocol eras)
+    await ctx.notify_resource_updated("config://app/settings")
     return f"Updated {key} = {value}"
 ```
+
+Across replicas, pass a shared `SubscriptionBus` (`MCPServer(subscriptions=...)`), so an
+update published on one replica reaches listeners connected to another. In TypeScript
+behind `createMcpHandler`, publish through the handler, because the `McpServer`
+instance is per request: `handler.notify.resourceUpdated("config://app/settings")`.
 
 ## Resource Listing
 
 Servers expose available resources via `resources/list`:
 
 ```python
-# FastMCP handles listing automatically for registered resources.
-# For dynamic resources, implement custom listing:
+# MCPServer lists registered static resources automatically, and templates
+# appear in resources/templates/list.
 
 @mcp.resource("db://app/tables/{table_name}")
 def get_table(table_name: str) -> str:
     """Read data from a database table."""
     return json.dumps(db.query(f"SELECT * FROM {table_name} LIMIT 50"), default=str)
 
-# Override resource listing to show available tables
-# (FastMCP's resource template handles this automatically when
-#  the template is registered with a list callback)
+# To enumerate concrete table URIs in resources/list, register each one as a
+# static resource at startup (mcp.add_resource), or subclass MCPServer and
+# override list_resources(): the protocol handler still calls it in v2.
 ```
 
 ### Pagination for Large Resource Lists
@@ -292,9 +337,9 @@ Prompts are pre-written templates that suggest how the LLM should approach a tas
 ### Basic Prompts
 
 ```python
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 
-mcp = FastMCP("prompt-server")
+mcp = MCPServer("prompt-server")
 
 @mcp.prompt()
 def code_review(language: str, filepath: str) -> str:
@@ -321,12 +366,14 @@ def explain_error(error_message: str, context: str = "") -> str:
 ### TypeScript Prompts
 
 ```typescript
-server.prompt(
+server.registerPrompt(
   "code_review",
-  "Generate a code review prompt",
   {
-    language: z.string().describe("Programming language"),
-    filepath: z.string().describe("Path to the file to review"),
+    description: "Generate a code review prompt",
+    argsSchema: z.object({
+      language: z.string().describe("Programming language"),
+      filepath: z.string().describe("Path to the file to review"),
+    }),
   },
   async ({ language, filepath }) => ({
     messages: [{
@@ -371,35 +418,34 @@ def sql_query_help(
 
 ### Multi-Turn Prompts
 
-Prompts can include multiple messages for conversation setup:
+Prompts can include multiple messages for conversation setup. MCP prompt messages have
+only two roles, `user` and `assistant`: there is no `system` role, so put the framing in
+the first user message.
 
 ```python
+from mcp.server.mcpserver.prompts.base import AssistantMessage, Message, UserMessage
+
 @mcp.prompt()
-def debug_session(error_type: str, language: str) -> list[dict]:
+def debug_session(error_type: str, language: str) -> list[Message]:
     """Start a debugging session for a specific error type."""
     return [
-        {
-            "role": "system",
-            "content": f"You are a {language} debugging expert. Help the user systematically debug their {error_type} error.",
-        },
-        {
-            "role": "user",
-            "content": (
-                f"I'm encountering a {error_type} in my {language} code. "
-                "Please help me debug it step by step. "
-                "Start by asking me for the error message and relevant code."
-            ),
-        },
+        UserMessage(
+            f"You are a {language} debugging expert. I'm encountering a {error_type} "
+            f"in my {language} code. Help me debug it step by step."
+        ),
+        AssistantMessage("Happy to help. First, share the full error message and the relevant code."),
     ]
 ```
 
 ```typescript
-server.prompt(
+server.registerPrompt(
   "debug_session",
-  "Start a debugging session",
   {
-    error_type: z.string().describe("Type of error (e.g., TypeError, ConnectionError)"),
-    language: z.string().describe("Programming language"),
+    description: "Start a debugging session",
+    argsSchema: z.object({
+      error_type: z.string().describe("Type of error (e.g., TypeError, ConnectionError)"),
+      language: z.string().describe("Programming language"),
+    }),
   },
   async ({ error_type, language }) => ({
     messages: [
@@ -417,9 +463,14 @@ server.prompt(
 
 ### Prompts that Reference Resources
 
-Combine prompts with resources for context-aware interactions:
+Combine prompts with resources for context-aware interactions. Each prompt message
+carries **one** content block, so an embedded resource and its instructions are two
+messages:
 
 ```python
+from mcp.server.mcpserver.prompts.base import Message, UserMessage
+from mcp.types import EmbeddedResource, TextResourceContents
+
 @mcp.resource("schema://db/{table}")
 def get_table_schema(table: str) -> str:
     """Return the schema for a database table."""
@@ -427,32 +478,28 @@ def get_table_schema(table: str) -> str:
     return json.dumps(schema, indent=2)
 
 @mcp.prompt()
-def optimize_query(table: str, slow_query: str) -> list[dict]:
+def optimize_query(table: str, slow_query: str) -> list[Message]:
     """Help optimize a slow SQL query with schema context."""
     return [
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "resource",
-                    "resource": {
-                        "uri": f"schema://db/{table}",
-                        "text": get_table_schema(table),
-                        "mimeType": "application/json",
-                    },
-                },
-                {
-                    "type": "text",
-                    "text": (
-                        f"This query against the `{table}` table is slow:\n\n"
-                        f"```sql\n{slow_query}\n```\n\n"
-                        "Please suggest optimizations, including index recommendations."
-                    ),
-                },
-            ],
-        },
+        UserMessage(EmbeddedResource(
+            type="resource",
+            resource=TextResourceContents(
+                uri=f"schema://db/{table}",
+                mime_type="application/json",
+                text=get_table_schema(table),
+            ),
+        )),
+        UserMessage(
+            f"This query against the `{table}` table is slow:\n\n"
+            f"```sql\n{slow_query}\n```\n\n"
+            "Please suggest optimizations, including index recommendations."
+        ),
     ]
 ```
+
+At 2026-07-28 an `@mcp.prompt()` or templated `@mcp.resource()` function may also return
+an `InputRequiredResult` to ask the client for input first (multi-round-trip). See
+[v2-migration.md](v2-migration.md#spec-revision-2026-07-28).
 
 ### Guided Workflows
 
@@ -460,22 +507,19 @@ Use prompts to define multi-step workflows:
 
 ```python
 @mcp.prompt()
-def migration_workflow(source_db: str, target_db: str) -> list[dict]:
+def migration_workflow(source_db: str, target_db: str) -> list[Message]:
     """Guide through a database migration workflow."""
     return [
-        {
-            "role": "user",
-            "content": (
-                f"I need to migrate data from {source_db} to {target_db}. "
-                "Please guide me through these steps:\n\n"
-                "1. Analyze the source schema\n"
-                "2. Create the target schema (with any needed transformations)\n"
-                "3. Write the migration script\n"
-                "4. Create validation queries to verify the migration\n"
-                "5. Suggest a rollback plan\n\n"
-                "Let's start with step 1."
-            ),
-        },
+        UserMessage(
+            f"I need to migrate data from {source_db} to {target_db}. "
+            "Please guide me through these steps:\n\n"
+            "1. Analyze the source schema\n"
+            "2. Create the target schema (with any needed transformations)\n"
+            "3. Write the migration script\n"
+            "4. Create validation queries to verify the migration\n"
+            "5. Suggest a rollback plan\n\n"
+            "Let's start with step 1."
+        ),
     ]
 
 @mcp.prompt()

@@ -2,7 +2,7 @@
 # Safely remove orphaned NRPT catch-all rules left behind by disconnected VPNs.
 # NEVER removes Tailscale MagicDNS rules.
 #
-# Defaults to DRY RUN — pass -Apply to actually delete.
+# Defaults to DRY RUN - pass -Apply to actually delete.
 # Requires elevated PowerShell (Administrator).
 
 param(
@@ -39,7 +39,7 @@ $targets | Format-List Name, Namespace, NameServers, Comment
 
 if (!$Apply) {
     Write-Output ""
-    Write-Output "DRY RUN — pass -Apply to actually remove the rules above."
+    Write-Output "DRY RUN - pass -Apply to actually remove the rules above."
     exit 0
 }
 

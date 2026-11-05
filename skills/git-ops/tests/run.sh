@@ -19,6 +19,13 @@ for c in "$SKILL/../../hooks/worktree-guard.sh" "$HOME/.claude/hooks/worktree-gu
 done
 
 command -v git >/dev/null 2>&1 || { echo "SKIP: git not available"; exit 0; }
+# The machine-wide lane root moves every lane out of the repo. Pin it OFF so the
+# legacy placement cases below mean what they say; the WORKTREE_ROOT block sets
+# it per call, always to a throwaway dir, never the real one.
+unset WORKTREE_ROOT
+# NL=<path> lets the suite run against another copy (e.g. the pre-change one,
+# to watch the WORKTREE_ROOT cases fail).
+NL="${NL_OVERRIDE:-$NL}"
 
 SB="$(mktemp -d)"; trap 'rm -rf "$SB"' EXIT
 P=0; F=0
@@ -53,6 +60,38 @@ mkrepo "$SB/S"; cd "$SB/S"
 OS="$(bash "$NL" --sibling big 2>/dev/null)"
 [ "$OS" = "$SB/S-big" ] && ok "sibling path = $OS" || no "sibling=[$OS]"
 [ -d "$SB/S-big" ] && ok "sibling dir outside repo" || no "sibling dir missing"
+
+echo "-- new-lane: WORKTREE_ROOT puts lanes at \$WORKTREE_ROOT/<repo>/<slug> --"
+WR="$SB/wroot"
+mkrepo "$SB/W"; cd "$SB/W"
+OW="$(WORKTREE_ROOT="$WR" bash "$NL" outside 2>/dev/null)"
+[ "$OW" = "$WR/W/outside" ] && ok "WORKTREE_ROOT path = <root>/<repo>/<slug>" || no "WORKTREE_ROOT path=[$OW]"
+[ -d "$WR/W/outside" ] && ok "lane dir created under WORKTREE_ROOT" || no "lane dir missing under WORKTREE_ROOT"
+[ ! -e "$SB/W/.claude/worktrees" ] && ok "nothing created in the project dir" || no "in-repo lane dir created anyway"
+[ ! -f "$SB/W/.gitignore" ] && ok "no .gitignore written for an outside lane" || no ".gitignore appended for an outside lane"
+OS2="$(WORKTREE_ROOT="$WR" bash "$NL" --sibling sib 2>/dev/null)"
+[ "$OS2" = "$WR/W/sib" ] && [ ! -e "$SB/W-sib" ] && ok "WORKTREE_ROOT wins over --sibling" || no "--sibling beat WORKTREE_ROOT [$OS2]"
+( cd "$OW" && WORKTREE_ROOT="$WR" bash "$NL" from-lane >/dev/null 2>&1 )
+[ -d "$WR/W/from-lane" ] && ok "from inside a WORKTREE_ROOT lane: <repo> = MAIN's name" || no "lane-from-lane misplaced: $(ls "$WR" 2>&1 | tr '\n' ' ')"
+OB="$(WORKTREE_ROOT="${WR//\//\\}" bash "$NL" backslash 2>/dev/null)"
+[ "$OB" = "$WR/W/backslash" ] && ok "backslashed WORKTREE_ROOT normalised" || no "backslash root -> [$OB]"
+WORKTREE_ROOT="$WR" bash "$NL" outside >/dev/null 2>&1; ee=$?
+[ $ee -eq 1 ] && ok "existing lane under WORKTREE_ROOT -> exit 1" || no "dup under WORKTREE_ROOT exit $ee"
+
+echo "-- worktree-survey / status: lanes under WORKTREE_ROOT are seen --"
+SV="$SKILL/scripts/worktree-survey.sh"; ST="$SKILL/scripts/status.sh"
+mkdir -p "$WR/W/stray"; echo x > "$WR/W/stray/f"          # unregistered dir: an orphan
+mkrepo "$SB/other/W"                                      # a DIFFERENT repo also named W
+git -C "$SB/other/W" worktree add -q "$WR/W/theirs" -b theirs >/dev/null 2>&1
+SO="$(WORKTREE_ROOT="$WR" bash "$SV" "$SB/W" 2>&1)"
+case "$SO" in *stray*UNREGISTERED*) ok "survey flags an unregistered dir under WORKTREE_ROOT";; *) no "survey missed WORKTREE_ROOT orphan";; esac
+case "$SO" in *theirs*) no "survey called a same-named repo's lane our orphan";; *) ok "survey skips a same-named repo's lane";; esac
+case "$SO" in *"/ 1 orphan"*) ok "survey counts exactly 1 orphan";; *) no "orphan count: $(printf '%s\n' "$SO" | grep Summary)";; esac
+SO2="$(bash "$SV" "$SB/W" 2>&1)"
+case "$SO2" in *stray*) no "survey scanned WORKTREE_ROOT while unset";; *) ok "unset WORKTREE_ROOT: survey output unchanged";; esac
+STO="$(cd "$SB/W" && WORKTREE_ROOT="$WR" bash "$ST" 2>/dev/null)"
+case "$STO" in *"in $WR/W"*) ok "status counts lanes under WORKTREE_ROOT";; *) no "status trees line: $(printf '%s\n' "$STO" | grep trees)";; esac
+bash -n "$SV" && bash -n "$ST" && ok "survey/status syntax OK" || no "survey/status syntax error"
 
 echo "-- new-lane: anchors at MAIN when invoked from inside a lane (no nesting) --"
 mkrepo "$SB/N"; cd "$SB/N"; L1="$(bash "$NL" first 2>/dev/null)"
@@ -103,6 +142,31 @@ if [ -n "$GUARD" ]; then
     o=$(printf '{"tool_input":{"command":"%s"},"cwd":"%s"}' "$c" "$WG" | bash "$GUARD" 2>&1)
     [ -n "$o" ] && ok "guard still warns: $c" || no "guard regressed: $c"
   done
+
+  if command -v jq >/dev/null 2>&1; then
+    echo "-- worktree-guard: lanes under WORKTREE_ROOT are guarded too --"
+    GR="$SB/groot"; mkrepo "$SB/GX"; mkdir -p "$GR/GX/lane-a"
+    WIN="$(printf '%s' "$GR" | tr '/' '\\')"
+    # $1 expect warn|silent, $2 command, $3 cwd (default the repo), $4 WORKTREE_ROOT (default $GR, '-' = unset)
+    gx(){ local o root="${4:-$GR}"
+      local j; j=$(jq -cn --arg c "$2" --arg d "${3:-$SB/GX}" '{tool_input:{command:$c},cwd:$d}')
+      if [ "$root" = - ]; then o=$(printf '%s' "$j" | bash "$GUARD" 2>&1)
+      else o=$(printf '%s' "$j" | WORKTREE_ROOT="$root" bash "$GUARD" 2>&1); fi
+      if [ "$1" = warn ]; then [ -n "$o" ] && ok "guard WARN: $2" || no "guard expected WARN: $2"
+      else [ -z "$o" ] && ok "guard silent: $2${3:+ (cwd $3)}" || no "guard expected silent: $2 [$o]"; fi; }
+    gx warn   "rm -rf $GR/GX/lane-a"
+    gx warn   "rm -rf $WIN\\GX\\lane-a"
+    gx warn   'rm -rf "$WORKTREE_ROOT/GX/lane-a"'
+    gx warn   "git worktree remove $GR/GX/lane-a"
+    gx warn   "git rm -r --cached $GR/GX/lane-a"
+    gx warn   "git worktree prune"
+    gx silent "git add -A"                          # an outside lane cannot be staged
+    gx silent "rm -rf $SB/GX/build"
+    gx silent "rm -rf $GR/GX/lane-a" "$GR/GX/lane-a" # own lane: exempt
+    gx silent "rm -rf $GR/GX/lane-a" "$SB/GX" -       # unset: not a lane root
+  else
+    echo "  SKIP  WORKTREE_ROOT guard cases (jq not installed)"
+  fi
 else
   echo "  SKIP  worktree-guard.sh not found (hooks/ unavailable in this layout)"
 fi
@@ -145,6 +209,52 @@ bash "$LA" "$R" --active-window 0 >/dev/null 2>&1; [ $? -eq 1 ] && ok "exit 1 (l
 OUT2="$(bash "$LA" "$R" --porcelain --active-window 3600 --recent-days 7)"
 a2=$(printf '%s\n' "$OUT2" | awk -F'\t' '$2=="feat/wip"{print $1}')
 [ "$a2" = ACTIVE ] && ok "fresh worktree → ACTIVE (live-writer guard)" || no "expected ACTIVE got [$a2]"
+
+echo "-- land-all: a branch list it could not read is not 'nothing landable' --"
+# The branches came from a loop fed by `< <(git for-each-ref ...)`, which hid
+# git's status: a failed listing walked zero branches and exited 0. The shim
+# fails only that call.
+mkdir -p "$SB/gshim"
+printf '#!/bin/sh\ncase "$*" in *for-each-ref*) echo "fatal: simulated ref read error" >&2; exit 128 ;; esac\nexec "%s" "$@"\n' \
+  "$(command -v git)" > "$SB/gshim/git"
+chmod +x "$SB/gshim/git"
+# Exit 2 alone also means not-a-repo, which is all a broken shim produces, so the
+# message must name the branch listing.
+err="$(PATH="$SB/gshim:$PATH" bash "$LA" "$R" --active-window 0 2>&1 >/dev/null)"; rc=$?
+case "$rc:$err" in 2:*"could not list local branches"*) ok "for-each-ref fails → exit 2, not 0";;
+  *) no "for-each-ref fails: expected exit 2 naming the branch listing, got $rc [$err]";; esac
+
+echo "-- land-all: a failed git probe is an ERROR row, never MERGED or STALE --"
+# Each per-branch probe fell back to a value that classifies: rev-list's
+# `|| echo 0` made ahead=0, so the branch read MERGED, "in trunk - prune
+# candidate"; log's `|| echo 0` made a fresh branch read STALE.
+# brokegit <dir> <case pattern>: git that fails (exit 128) every call whose "$*"
+# matches the pattern and runs the real git for the rest. Quote any space in the
+# pattern (*'a b'*): a bare one is a shim syntax error that fails EVERY call.
+brokegit(){ mkdir -p "$1"
+  { printf '#!/bin/sh\ncase "$*" in %s) echo "fatal: simulated probe failure" >&2; exit 128 ;; esac\n' "$2"
+    printf 'exec "%s" "$@"\n' "$(command -v git)"; } > "$1/git"; chmod +x "$1/git"; }
+laprobe(){ # <probe> <branch> <case pattern>: break that probe for that branch only
+  brokegit "$SB/probe-$1" "$3"
+  PO="$(PATH="$SB/probe-$1:$PATH" bash "$LA" "$R" --porcelain --active-window 0 --recent-days 7 2>/dev/null)"
+  ps=$(printf '%s\n' "$PO" | awk -F'\t' -v b="$2" '$2==b{print $1}')
+  [ "$ps" = ERROR ] && ok "$1 probe fails → $2 is ERROR" || no "$1 probe fails: $2 got [$ps], want ERROR"; }
+laprobe ahead       feat/stale   '*rev-list*feat/stale*'
+pl=$(printf '%s\n' "$PO" | awk -F'\t' '$2=="feat/land-me"{print $1}')
+[ "$pl" = LANDABLE ] && ok "a probe failing on one branch leaves the others classified" || no "feat/land-me got [$pl] with only feat/stale broken"
+laprobe commit-time feat/land-me '*%ct*feat/land-me*'
+laprobe ancestry    feat/land-me '*merge-base*feat/land-me*'
+brokegit "$SB/probe-all" '*rev-list*'
+PATH="$SB/probe-all:$PATH" bash "$LA" "$R" --active-window 0 >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 3 ] && ok "every probe fails → exit 3, not 0 (the all-clear)" || no "every probe fails: expected exit 3 got $rc"
+
+echo "-- land-all: no worktree list means no WIP/ACTIVE guard, so no survey --"
+# `git worktree list | awk > map` hid git's status: an empty map stripped every
+# branch of its worktree, and a dirty or live-writer lane read LANDABLE.
+brokegit "$SB/wtl" "*'worktree list'*"
+err="$(PATH="$SB/wtl:$PATH" bash "$LA" "$R" --active-window 0 2>&1 >/dev/null)"; rc=$?
+case "$rc:$err" in 2:*"could not list worktrees"*) ok "worktree list fails → exit 2, not a LANDABLE WIP lane";;
+  *) no "worktree list fails: expected exit 2 naming the worktree listing, got $rc [$err]";; esac
 
 echo "=== $P passed, $F failed ==="
 [ $F -eq 0 ]

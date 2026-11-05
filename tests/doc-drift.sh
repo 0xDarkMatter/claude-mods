@@ -82,6 +82,7 @@ fi
 # widen a pattern to a bare '[0-9]+ skills' — it would flag every one of them.
 check_readme_prose() { # $1=regex $2=disk-count $3=label
     local span claim matched=0
+    # procsub ok: grep has no exit to lose here (1 = no match), and matched=0 fails below
     while IFS= read -r span; do
         [ -n "$span" ] || continue
         matched=$((matched + 1))
@@ -141,6 +142,7 @@ done
 
 # --- 3. Ghost-link check (README.md + AGENTS.md) ----------------------------
 for doc in README.md AGENTS.md; do
+    # procsub ok: grep's only failure is a missing README/AGENTS.md, which checks above fail
     while IFS= read -r path; do
         path="${path%%#*}"   # strip anchors
         [ -z "$path" ] && continue
@@ -155,6 +157,7 @@ done
 external_skills="frontend-design"
 
 for skill_file in skills/*/SKILL.md; do
+    # procsub ok: awk reads a file the glob just matched; nothing in it can stop awk early
     while IFS= read -r refs; do
         refs="${refs#*:}"
         refs="${refs#"${refs%%[![:space:]]*}"}"
@@ -196,9 +199,11 @@ done
 #                          deliberately name the INSTALLED location, not a repo path.
 #   - #anchor-only         intra-document.
 #   - <, {, $, or a space  template placeholders and prose, not real paths.
+# procsub ok: find walks skills/ from the repo root (cd above); nothing can stop it early
 while IFS= read -r skill_doc; do
     case "$skill_doc" in */assets/*) continue ;; esac
     skill_dir="$(dirname "$skill_doc")"
+    # procsub ok: awk|grep|sed read a file find just listed; nothing in it stops them early
     while IFS= read -r link; do
         case "$link" in
             http://*|https://*|mailto:*|/*|'~/'*|'#'*|'') continue ;;

@@ -152,5 +152,5 @@ Do all of this regardless of which pattern above you use:
 ## Scanning and Gates
 
 - `trivy config .` / `checkov -d .` catch *misconfigurations* (public buckets, `0.0.0.0/0` ingress, unencrypted volumes) — wire into PR CI (see cicd-pipelines.md).
-- `gitleaks` / push-gates catch secrets *in the repo* — tfvars are a classic leak vector.
+- `gitleaks` / pre-push scans (`push-preflight`) catch secrets *in the repo* — tfvars are a classic leak vector.
 - `terraform providers` + lockfile review on provider bumps: providers execute arbitrary code on your CI runner with cloud credentials. A provider is a dependency — the repo's supply-chain rules (cooldown, behavioural scan before adopting unfamiliar providers from the registry) apply in full.

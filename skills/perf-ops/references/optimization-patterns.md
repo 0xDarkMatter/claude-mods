@@ -214,10 +214,12 @@ When to split:
 ├─ Library-based splitting
 │  └─ Large libraries in separate chunks
 │     Moment.js, chart libraries, syntax highlighters
-│     // vite.config.js
-│     build: { rollupOptions: { output: {
-│       manualChunks: { vendor: ['react', 'react-dom'] }
-│     }}}
+│     // vite.config.js - Vite 8 (Rolldown)
+│     build: { rolldownOptions: { output: { codeSplitting: { groups: [
+│       { name: 'vendor', test: /node_modules[\\/](react|react-dom)[\\/]/ }
+│     ]}}}}
+│     // Vite 7 and earlier: rollupOptions.output.manualChunks
+│     //   (Vite 8 dropped its object form - vite.dev/guide/migration)
 │
 └─ Conditional feature splitting
    └─ Features only some users need (admin panel, A/B tests)

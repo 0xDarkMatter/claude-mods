@@ -6,22 +6,33 @@
 default:
     @just --list
 
-# THE gate: frontmatter/naming + doc-drift + agnostic + resource contracts + skill suites
+# THE gate: frontmatter/naming + Agent Skills spec + doc-drift + agnostic + skill hygiene (ratchet) + hook contracts + resource contracts + PowerShell 5.1 parse + skill size (warn) + reference contents (warn) + skill suites + e2e suites + procsub-guard mutations
 check:
     @bash tests/validate.sh
+    @bash tests/spec.sh
     @bash tests/doc-drift.sh
     @bash tests/agnostic.sh
+    @bash tests/skill-hygiene.sh
     @bash tests/hooks.sh
     @bash tests/check-resources.sh
+    @bash tests/check-ps51-parse.sh
+    @bash tests/skill-size.sh
+    @bash tests/reference-contents.sh
     @bash tests/run-skill-tests.sh
+    @bash tests/procsub-guard.sh
 
-# Fast gate: everything except the per-skill behavioural suites
+# Fast gate: everything except the behavioural suites (per-skill and e2e)
 check-fast:
     @bash tests/validate.sh
+    @bash tests/spec.sh
     @bash tests/doc-drift.sh
     @bash tests/agnostic.sh
+    @bash tests/skill-hygiene.sh
     @bash tests/hooks.sh
     @bash tests/check-resources.sh
+    @bash tests/check-ps51-parse.sh
+    @bash tests/skill-size.sh
+    @bash tests/reference-contents.sh
 
 # Everything in tests/justfile is reachable from root too
 test:

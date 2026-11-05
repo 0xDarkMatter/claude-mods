@@ -1,0 +1,219 @@
+{
+  "schema": "claude-mods.repo-doctor.tool-profiles/v1",
+  "profiles": [
+    {
+      "id": "claude-code",
+      "name": "Claude Code",
+      "verified": "2026-10-07",
+      "sources": ["https://code.claude.com/docs/en/memory"],
+      "entry_files": ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", ".claude/AGENTS.md"],
+      "per_dir": "claude-md-shadows-agents-md",
+      "ancestors": "launch",
+      "subdirs": "on-read",
+      "precedence": "concatenate",
+      "imports": {"syntax": "@path", "max_depth": 4, "skip_code": true, "relative_to": "importing-file"},
+      "rule_sets": [
+        {"glob": ".claude/rules/**/*.md", "mode": "scoped", "scope_key": "paths", "always_when_scope_missing": true}
+      ],
+      "caps": [
+        {"scope": "file", "bytes": null, "chars": null, "lines": 200, "behaviour": "advice", "source": "https://code.claude.com/docs/en/memory"}
+      ],
+      "targets_when": [],
+      "facts": [
+        {"id": "ancestors-at-launch", "claim": "ancestor files load at launch, ordered from the filesystem root down to the working directory", "live_phrase": "ordered from the filesystem root down to your working directory", "source": "https://code.claude.com/docs/en/memory"},
+        {"id": "subdir-on-demand", "claim": "a subfolder's CLAUDE.md loads on demand (when Claude works with a file there), not at launch", "live_phrase": "it loads on demand rather than at launch", "source": "https://code.claude.com/docs/en/memory"},
+        {"id": "subdir-agents-md-on-read", "claim": "a subfolder's AGENTS.md loads on Read only if that folder has no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md", "live_phrase": "that subdirectory has none of the three CLAUDE.md files of its own", "source": "https://code.claude.com/docs/en/memory"},
+        {"id": "imports-relative", "claim": "@path imports resolve relative to the importing file, not the working directory", "live_phrase": "Relative paths resolve relative to the file containing the import", "source": "https://code.claude.com/docs/en/memory"},
+        {"id": "imports-depth", "claim": "imports nest at most four hops", "live_phrase": "with a maximum depth of four hops", "source": "https://code.claude.com/docs/en/memory"},
+        {"id": "imports-skip-code", "claim": "import parsing skips Markdown code spans and fenced code blocks", "live_phrase": "Import parsing skips Markdown code spans and fenced code blocks", "source": "https://code.claude.com/docs/en/memory"},
+        {"id": "imports-load-at-launch", "claim": "imports load at launch, so they organise a file without shrinking its context cost", "live_phrase": "imported files also load at launch", "source": "https://code.claude.com/docs/en/memory"},
+        {"id": "rules-without-paths", "claim": ".claude/rules files without a paths field load unconditionally at launch", "live_phrase": "Rules without a paths field are loaded unconditionally", "source": "https://code.claude.com/docs/en/memory"},
+        {"id": "no-precedence-rule", "claim": "contradictory instructions have no precedence rule; Claude may pick one arbitrarily", "live_phrase": "Claude may pick one arbitrarily", "source": "https://code.claude.com/docs/en/memory"}
+      ]
+    },
+    {
+      "id": "codex",
+      "name": "Codex",
+      "verified": "2026-10-07",
+      "sources": ["https://learn.chatgpt.com/docs/agent-configuration/agents-md"],
+      "entry_files": ["AGENTS.override.md", "AGENTS.md"],
+      "per_dir": "first-match",
+      "first_match_order": ["AGENTS.override.md", "AGENTS.md"],
+      "ancestors": "launch",
+      "subdirs": "launch-path-only",
+      "precedence": "nearest-wins",
+      "imports": null,
+      "rule_sets": [],
+      "caps": [
+        {"scope": "chain", "bytes": 32768, "chars": null, "lines": null, "behaviour": "drop-deepest", "source": "https://learn.chatgpt.com/docs/agent-configuration/agents-md"}
+      ],
+      "targets_when": [],
+      "facts": [
+        {"id": "walk-root-to-cwd", "claim": "from the project (git) root, Codex walks down to the launch folder", "live_phrase": "Codex walks down to your current working directory", "source": "https://learn.chatgpt.com/docs/agent-configuration/agents-md"},
+        {"id": "one-file-per-dir", "claim": "at most one file per folder: AGENTS.override.md, then AGENTS.md, then configured fallback names", "live_phrase": "Codex includes at most one file per directory", "source": "https://learn.chatgpt.com/docs/agent-configuration/agents-md"},
+        {"id": "joined-root-first", "claim": "files are joined root-first, so deeper text comes later and wins", "live_phrase": "Files closer to your current directory override earlier guidance", "source": "https://learn.chatgpt.com/docs/agent-configuration/agents-md"},
+        {"id": "combined-cap", "claim": "32 KiB combined cap (project_doc_max_bytes); files stop being added when full, so the deepest drops first", "live_phrase": "stops adding files once the combined size reaches the limit", "source": "https://learn.chatgpt.com/docs/agent-configuration/agents-md"},
+        {"id": "below-launch-self-serve", "claim": "below the launch folder the model is told to look for nested files itself; the page states no loader for them (taken from the 2026-10-07 research, not found on the page)", "live_phrase": null, "source": "https://learn.chatgpt.com/docs/agent-configuration/agents-md"}
+      ]
+    },
+    {
+      "id": "gemini",
+      "name": "Gemini CLI",
+      "verified": "2026-10-07",
+      "sources": ["https://geminicli.com/docs/cli/gemini-md"],
+      "entry_files": ["GEMINI.md"],
+      "per_dir": "all",
+      "ancestors": "launch",
+      "subdirs": "on-read",
+      "precedence": "concatenate",
+      "imports": {"syntax": "@path", "max_depth": 5, "skip_code": true, "relative_to": null},
+      "rule_sets": [],
+      "caps": [],
+      "targets_when": ["GEMINI.md"],
+      "facts": [
+        {"id": "concatenated-every-prompt", "claim": "all found context files are concatenated and sent with every prompt", "live_phrase": "concatenates the contents of all found files", "source": "https://geminicli.com/docs/cli/gemini-md"},
+        {"id": "jit-scan", "claim": "just-in-time: when a tool touches a file or folder, the CLI scans for GEMINI.md files there", "live_phrase": "Just-in-time (JIT) context files", "source": "https://geminicli.com/docs/cli/gemini-md"},
+        {"id": "file-names-configurable", "claim": "file names come from the context.fileName setting (a string or a list)", "live_phrase": "use the context.fileName property", "source": "https://geminicli.com/docs/cli/gemini-md"},
+        {"id": "imports-at-file", "claim": "@file.md imports support relative and absolute paths; the page does not say what relative paths are relative to, so relative_to is null", "live_phrase": "using the @file.md syntax", "source": "https://geminicli.com/docs/cli/gemini-md"},
+        {"id": "imports-depth-cycles", "claim": "imports go up to 5 deep with cycle detection and are skipped in code (taken from the 2026-10-07 research, not found on the page)", "live_phrase": null, "source": "https://geminicli.com/docs/cli/gemini-md"}
+      ]
+    },
+    {
+      "id": "cursor",
+      "name": "Cursor",
+      "verified": "2026-10-07",
+      "sources": ["https://cursor.com/docs/context/rules"],
+      "entry_files": ["AGENTS.md"],
+      "per_dir": "all",
+      "ancestors": "launch",
+      "subdirs": "on-read",
+      "precedence": "nearest-wins",
+      "imports": null,
+      "rule_sets": [
+        {"glob": ".cursor/rules/**/*.mdc", "mode": "frontmatter", "scope_key": "globs", "always_when_scope_missing": false}
+      ],
+      "caps": [
+        {"scope": "file", "bytes": null, "chars": null, "lines": 500, "behaviour": "advice", "source": "https://cursor.com/docs/context/rules"}
+      ],
+      "targets_when": [".cursor/"],
+      "facts": [
+        {"id": "nested-agents-md", "claim": "AGENTS.md files in subfolders apply when working with files in that folder or its children", "live_phrase": "they will be automatically applied when working with files in that directory", "source": "https://cursor.com/docs/context/rules"},
+        {"id": "more-specific-wins", "claim": "a more specific AGENTS.md wins over its parents (taken from the 2026-10-07 research, not found on the page)", "live_phrase": null, "source": "https://cursor.com/docs/context/rules"},
+        {"id": "mdc-modes", "claim": ".mdc rules are always-on, glob-attached, description-pulled or manual, set by the alwaysApply, globs and description frontmatter", "live_phrase": "the three frontmatter fields interact to determine when a rule is included", "source": "https://cursor.com/docs/context/rules"},
+        {"id": "size-advice", "claim": "advice: keep rules under 500 lines", "live_phrase": "Keep rules under 500 lines", "source": "https://cursor.com/docs/context/rules"}
+      ]
+    },
+    {
+      "id": "copilot",
+      "name": "GitHub Copilot",
+      "verified": "2026-10-07",
+      "sources": ["https://code.visualstudio.com/docs/copilot/customization/custom-instructions"],
+      "entry_files": [".github/copilot-instructions.md", "AGENTS.md"],
+      "per_dir": "all",
+      "ancestors": "launch",
+      "subdirs": "never",
+      "precedence": "concatenate",
+      "imports": null,
+      "rule_sets": [
+        {"glob": ".github/instructions/**/*.instructions.md", "mode": "scoped", "scope_key": "applyTo", "always_when_scope_missing": false}
+      ],
+      "caps": [],
+      "targets_when": [".github/copilot-instructions.md", ".github/instructions/"],
+      "facts": [
+        {"id": "applyto-attach", "claim": "VS Code attaches an .instructions.md file when its applyTo pattern matches a file the agent works on", "live_phrase": "automatically attaches an .instructions.md file when its applyTo pattern matches", "source": "https://code.visualstudio.com/docs/copilot/customization/custom-instructions"},
+        {"id": "nested-experimental", "claim": "nested AGENTS.md support is experimental, off by default (chat.useNestedAgentsMdFiles), and lists nested files with their folders rather than preloading them", "live_phrase": "Nested AGENTS.md files is experimental and might change or be removed", "source": "https://code.visualstudio.com/docs/copilot/customization/custom-instructions"},
+        {"id": "additive-no-precedence", "claim": "sources are additive and the page says not to rely on order or precedence, which differs from the research's 'nearest AGENTS.md takes precedence' (hence concatenate)", "live_phrase": "Do not depend on a file order or precedence rule", "source": "https://code.visualstudio.com/docs/copilot/customization/custom-instructions"},
+        {"id": "review-line-limit", "claim": "code review reads about 1,000 lines per file (taken from the 2026-10-07 research, not found on this page, so it is not a caps entry)", "live_phrase": null, "source": "https://code.visualstudio.com/docs/copilot/customization/custom-instructions"}
+      ]
+    },
+    {
+      "id": "amp",
+      "name": "Amp",
+      "verified": "2026-10-07",
+      "sources": ["https://ampcode.com/docs/customize/agents-md"],
+      "entry_files": ["AGENTS.md", "AGENT.md", "CLAUDE.md"],
+      "per_dir": "first-match",
+      "first_match_order": ["AGENTS.md", "AGENT.md", "CLAUDE.md"],
+      "ancestors": "launch",
+      "subdirs": "on-read",
+      "precedence": "concatenate",
+      "imports": null,
+      "rule_sets": [],
+      "caps": [],
+      "targets_when": [],
+      "facts": [
+        {"id": "launch-and-parents", "claim": "the launch folder and its parents up to $HOME are always included", "live_phrase": "parent directories (up to $HOME ) are always included", "source": "https://ampcode.com/docs/customize/agents-md"},
+        {"id": "subtree-on-read", "claim": "subtree AGENTS.md files are included when the agent reads a file in the subtree", "live_phrase": "included when the agent reads a file in the subtree", "source": "https://ampcode.com/docs/customize/agents-md"},
+        {"id": "per-dir-fallback", "claim": "a folder with no AGENTS.md falls back to AGENT.md, then CLAUDE.md", "live_phrase": "a file named AGENT.md (without an S ) or CLAUDE.md does exist", "source": "https://ampcode.com/docs/customize/agents-md"},
+        {"id": "no-documented-cap", "claim": "the page documents no size cap and no precedence rule; precedence is concatenate by absence", "live_phrase": null, "source": "https://ampcode.com/docs/customize/agents-md"}
+      ]
+    },
+    {
+      "id": "kiro",
+      "name": "Kiro",
+      "verified": "2026-10-07",
+      "sources": ["https://kiro.dev/docs/steering/"],
+      "entry_files": ["AGENTS.md"],
+      "per_dir": "all",
+      "ancestors": "launch",
+      "subdirs": "always",
+      "precedence": "concatenate",
+      "imports": null,
+      "rule_sets": [
+        {"glob": ".kiro/steering/**/*.md", "mode": "frontmatter", "scope_key": "fileMatchPattern", "always_when_scope_missing": true}
+      ],
+      "caps": [],
+      "targets_when": [".kiro/"],
+      "facts": [
+        {"id": "agents-md-always", "claim": "AGENTS.md files have no inclusion modes and are always included", "live_phrase": "do not support inclusion modes and are always included", "source": "https://kiro.dev/docs/steering/"},
+        {"id": "agents-md-subdirs", "claim": "AGENTS.md files are also discovered in subdirectories throughout the workspace", "live_phrase": "AGENTS.md files are also discovered in subdirectories throughout your workspace", "source": "https://kiro.dev/docs/steering/"},
+        {"id": "steering-modes", "claim": "steering files load at different times by inclusion mode (always, fileMatch via fileMatchPattern, manual, auto); the default-always reading is from the research", "live_phrase": "Steering files can be configured to load at different times", "source": "https://kiro.dev/docs/steering/"},
+        {"id": "no-documented-cap", "claim": "no size cap or precedence rule documented", "live_phrase": null, "source": "https://kiro.dev/docs/steering/"}
+      ]
+    },
+    {
+      "id": "windsurf",
+      "name": "Windsurf",
+      "verified": "2026-10-07",
+      "sources": ["https://docs.devin.ai/desktop/cascade/memories"],
+      "entry_files": ["AGENTS.md"],
+      "per_dir": "all",
+      "ancestors": "launch",
+      "subdirs": "on-read",
+      "precedence": "concatenate",
+      "imports": null,
+      "rule_sets": [
+        {"glob": ".devin/rules/*.md", "mode": "frontmatter", "scope_key": null, "always_when_scope_missing": false},
+        {"glob": ".windsurf/rules/*.md", "mode": "frontmatter", "scope_key": null, "always_when_scope_missing": false}
+      ],
+      "caps": [
+        {"scope": "file", "bytes": null, "chars": 12000, "lines": null, "behaviour": "per-file", "source": "https://docs.devin.ai/desktop/cascade/memories"}
+      ],
+      "targets_when": [".windsurf/", ".windsurfrules"],
+      "facts": [
+        {"id": "agents-md-scoping", "claim": "a root AGENTS.md is always on; a subdirectory's is auto-scoped to that directory by glob", "live_phrase": "root-level = always-on, subdirectory = auto-glob for that directory", "source": "https://docs.devin.ai/desktop/cascade/memories"},
+        {"id": "global-cap", "claim": "the global rules file is limited to 6,000 characters; it is user-scope, so it is not a caps entry (explain leaves user-scope files out)", "live_phrase": "The global rules file is limited to 6,000 characters", "source": "https://docs.devin.ai/desktop/cascade/memories"},
+        {"id": "workspace-cap", "claim": "workspace rule files are limited to 12,000 characters each (the caps entry)", "live_phrase": "Workspace rule files are limited to 12,000 characters each", "source": "https://docs.devin.ai/desktop/cascade/memories"},
+        {"id": "rule-activation", "claim": "each workspace rule sets its activation mode in frontmatter via a trigger field, so scope_key is null here", "live_phrase": "declares an activation mode in its frontmatter via the trigger field", "source": "https://docs.devin.ai/desktop/cascade/memories"}
+      ]
+    },
+    {
+      "id": "jules",
+      "name": "Jules",
+      "verified": "2026-10-07",
+      "sources": ["https://jules.google/docs"],
+      "entry_files": ["AGENTS.md"],
+      "per_dir": "all",
+      "ancestors": "none",
+      "subdirs": "never",
+      "precedence": "concatenate",
+      "imports": null,
+      "rule_sets": [],
+      "caps": [],
+      "targets_when": [],
+      "facts": [
+        {"id": "root-only", "claim": "Jules reads the AGENTS.md at the repository root only", "live_phrase": "automatically looks for a file named AGENTS.md in the root", "source": "https://jules.google/docs"}
+      ]
+    }
+  ]
+}

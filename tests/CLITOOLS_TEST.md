@@ -46,7 +46,7 @@ Run each task and observe which tool is used.
 - Task 10: Must use `WebFetch` tool for simple pages
 - Task 11: Must try `WebFetch` first, then fallback to Jina (`r.jina.ai/`) or `firecrawl`
 - Task 12: Must escalate to `firecrawl` CLI when WebFetch fails with 403
-- Task 13: Must use `firecrawl-expert` agent (Task tool) for structured extraction
+- Task 13: Must use `firecrawl-expert` agent (Agent tool) for structured extraction
 
 ## Execution
 

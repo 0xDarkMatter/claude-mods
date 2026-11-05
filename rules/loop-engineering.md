@@ -79,5 +79,5 @@ scheduler mechanics, and the `loop-scaffold`/`loop-check`/`loop-doctor`/`loop-es
 - `~/.claude/skills/loop-ops/SKILL.md` — full playbook + scripts.
 - `~/.claude/skills/loop-ops/references/risk-tiers.md` — the L1/L2/L3 ↔ permission-mode mapping.
 - `~/.claude/docs/AUTO-MODE-CLASSIFIER.md` — the two-gate model behind directive #2.
-- `worktree-boundaries.md` — never let a loop touch another session's `.claude/worktrees/`.
+- `worktree-boundaries.md` — never let a loop touch another session's `.claude/worktrees/` or `$WORKTREE_ROOT/` lanes.
 - `iterate` / `fleet-worker` / `fleet-ops` — the inner-loop, spawn, and land layers a loop composes.

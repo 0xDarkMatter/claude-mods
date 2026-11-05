@@ -62,6 +62,16 @@ bash "$SB/ghost/scripts/check-ytdlp-version.sh" --offline >"$SB/ghost.out" 2>/de
 expect_exit "--offline flags ghost link -> 10" 10 $?
 expect_has "finding names the missing file" "does-not-exist.md" "$(cat "$SB/ghost.out")"
 
+# a link scan whose grep dies checked no links: a crash (1), never clean (0).
+# The links came from a loop fed by `< <(grep ...)`, which hid grep's status.
+mkdir -p "$SB/shim"
+printf '#!/bin/sh\ncase "$*" in *"references|assets"*) echo "grep: simulated read error" >&2; exit 2 ;; esac\nexec "%s" "$@"\n' \
+  "$(command -v grep)" > "$SB/shim/grep"
+chmod +x "$SB/shim/grep"
+PATH="$SB/shim:$PATH" bash "$SB/ghost/scripts/check-ytdlp-version.sh" --offline >"$SB/crash.out" 2>&1
+expect_exit "--offline link grep dies -> 1, not clean" 1 $?
+expect_has "crash names the link scan" "could not read SKILL.md links" "$(cat "$SB/crash.out")"
+
 # ── assets ───────────────────────────────────────────────────────────────────
 echo "-- assets --"
 for a in "$SKILL"/assets/*.json; do

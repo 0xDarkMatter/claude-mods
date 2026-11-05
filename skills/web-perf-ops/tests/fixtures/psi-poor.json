@@ -1,0 +1,40 @@
+{
+  "_fixture": "Hand-built minimal PageSpeed Insights v5 response (field block shape per the PSI API reference; audit ids as shipped in Lighthouse 13.5). Field LCP is poor, CLS needs improvement (PSI encodes CLS x100: 12 means 0.12), a retired FID metric is present and must be ignored, lab TBT is poor. triage-vitals.py must exit 10 and must NOT list passing-audit.",
+  "id": "https://example.com/",
+  "loadingExperience": {
+    "id": "https://example.com/",
+    "overall_category": "SLOW",
+    "metrics": {
+      "LARGEST_CONTENTFUL_PAINT_MS": {"percentile": 4200, "category": "SLOW"},
+      "INTERACTION_TO_NEXT_PAINT": {"percentile": 180, "category": "FAST"},
+      "CUMULATIVE_LAYOUT_SHIFT_SCORE": {"percentile": 12, "category": "AVERAGE"},
+      "FIRST_CONTENTFUL_PAINT_MS": {"percentile": 2100, "category": "AVERAGE"},
+      "EXPERIMENTAL_TIME_TO_FIRST_BYTE": {"percentile": 950, "category": "AVERAGE"},
+      "FIRST_INPUT_DELAY_MS": {"percentile": 20, "category": "FAST"}
+    }
+  },
+  "originLoadingExperience": {
+    "id": "https://example.com",
+    "overall_category": "AVERAGE",
+    "metrics": {
+      "LARGEST_CONTENTFUL_PAINT_MS": {"percentile": 3100, "category": "AVERAGE"},
+      "INTERACTION_TO_NEXT_PAINT": {"percentile": 160, "category": "FAST"},
+      "CUMULATIVE_LAYOUT_SHIFT_SCORE": {"percentile": 6, "category": "FAST"}
+    }
+  },
+  "lighthouseResult": {
+    "lighthouseVersion": "13.5.0",
+    "audits": {
+      "largest-contentful-paint": {"score": 0.21, "numericValue": 5210.4},
+      "cumulative-layout-shift": {"score": 1, "numericValue": 0.021},
+      "total-blocking-time": {"score": 0.32, "numericValue": 750},
+      "first-contentful-paint": {"score": 0.55, "numericValue": 2600},
+      "lcp-discovery-insight": {"score": 0, "metricSavings": {"LCP": 1400}},
+      "image-delivery-insight": {"score": 0.5, "metricSavings": {"LCP": 900, "FCP": 0}},
+      "render-blocking-insight": {"score": 0, "metricSavings": {"FCP": 610, "LCP": 610}},
+      "third-parties-insight": {"score": 0.5, "metricSavings": {"TBT": 420}},
+      "cls-culprits-insight": {"score": 1, "metricSavings": {"CLS": 0}},
+      "passing-audit": {"score": 1, "metricSavings": {"LCP": 300}}
+    }
+  }
+}

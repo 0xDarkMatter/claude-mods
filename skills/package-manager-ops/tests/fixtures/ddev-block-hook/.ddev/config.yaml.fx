@@ -1,0 +1,16 @@
+name: fixture-site
+type: craftcms
+docroot: web
+php_version: "8.4"
+webserver_type: nginx-fpm
+database:
+  type: mysql
+  version: "8.0"
+nodejs_version: "24"
+additional_hostnames:
+  - assets
+hooks:
+  post-start:
+    - exec: |
+        npm install -g block-tool
+      service: web

@@ -178,6 +178,10 @@ Layout is built on whitespace alignment, not vertical bars. The grid for a leaf 
 
 These widths target an **80-col default**. They scale: a `--wide=120` mode bumps name to 48 and rail to 20. They never exceed terminal width — at <60 cols, drop the rail and meta columns rather than wrap.
 
+**Colour is zero-width.** Columns hold coloured fragments (`term_rail`, `term_pip_bar`, `term_health`) and multibyte glyphs, while `${#var}` and printf's `%-Ns` count bytes: escape codes and `●─◉` eat the padding, and a footer sized from them comes out short. Measure with `term_vis_width`, pad with `term_pad`, cut with `term_truncate`. Rendering with colour and stripping the escapes must give exactly the plain render; `tests/check-resources.sh` holds `term.sh` to that.
+
+**Wide glyphs are two cells.** Widths are terminal cells, not characters: a code point Unicode marks East Asian Wide or Fullwidth (the ⚡ and 🔁 brands, ✅ ❌ ⏳, CJK) takes two, everything else one, so `fleet status`'s header no longer runs a cell past its footer. Text-style pictographs (🛡 🏗 🗄 ⚙ ⏱) and marks like ✓ ✗ ⬤ are one cell, as terminals draw them; ⚠️ is two (U+FE0F asks for emoji presentation). `term.sh` measures on UTF-8 bytes, because what bash calls a character varies: MSYS bash counts 🔁 as two characters and `${s:0:1}` hands back half its surrogate pair, Linux and macOS count it as one. `term_truncate` never splits a glyph, so a cut can land one cell short; pad after cutting. The width table lives in both twins (`__TERM_WIDE` / `$Script:TermWide`) and must stay identical; `tests/check-resources.sh` compares them and checks `term.sh` against Python's `unicodedata`.
+
 Section rows ride the same indent: `│   ` (panel + 3 spaces) to land at the section-indent column.
 
 ---
@@ -510,7 +514,7 @@ Same atoms, no grouping. Sorted by age. State moves to a per-leaf indicator at t
 For genuinely flat data — a PR's checks, a service's health summary. No sections, no tree connectors, just leaves under the panel `│`.
 
 ```
-╭── ⚡ push-gate ───────────────────────────  refusing ───●
+╭── ⚡ push-preflight ──────────────────────  refusing ───●
 │
 │   ✓  secret scan
 │   ✓  forbidden files
@@ -727,7 +731,7 @@ This spec is the single source of truth. Three implementations conform to it, on
 | **PowerShell** | `skills/_lib/term.ps1` | `windows-ops`, any future PowerShell skill |
 | **Python** | inline `Term` class + module functions in each Python skill | `summon`, any future Python skill |
 
-When extending the registries (new brand emoji, new health state, new diagram icon) update all three. The bash + PowerShell ports share variable names directly (`TERM_BRAND` / `$Script:TermBrand`); the Python implementations carry their own lookup tables but the keys must match.
+When extending the registries (new brand emoji, new health state, new diagram icon) update all three. The bash + PowerShell ports share variable names directly (`TERM_BRAND` / `$Script:TermBrand`); the Python implementations carry their own lookup tables but the keys must match. The wide-glyph table is shared the same way: `__TERM_WIDE` in `term.sh` and `$Script:TermWide` in `term.ps1` are one list, compared by `tests/check-resources.sh`.
 
 ### Bash usage
 
@@ -744,6 +748,35 @@ $LibDir = Join-Path $PSScriptRoot '..\..\_lib'
 . (Join-Path $LibDir 'term.ps1')
 Initialize-Term
 ```
+
+`term.ps1`, like every tracked PowerShell file, is 7-bit ASCII. Windows PowerShell 5.1
+reads a script without a BOM in the ANSI code page, so one typed glyph breaks the parse
+of the lib and of every script that dot-sources it. Add a registry glyph as its code
+point, never as a literal:
+
+```powershell
+forge = (ConvertFrom-TermCodePoint 0x1F528) + '|[B]'   # hammer
+```
+
+`tests/check-ps51-parse.sh` fails on any non-ASCII byte, and on Windows it also runs the
+5.1 parser over every file.
+
+### Portable skills: the lib is optional
+
+A skill that is copied standalone into other plugins (`supply-chain-defense`,
+`prompt-injection-defense`, `ddev-ops`, `package-manager-ops`) has no `skills/_lib/` beside it, so it must not source
+the lib unconditionally. Guard the source, keep a plain fallback, and keep that
+fallback 7-bit ASCII - with no lib there is no glyph registry to fall back through:
+
+```bash
+__lib="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../_lib" 2>/dev/null && pwd || true)"
+if [ -n "${__lib:-}" ] && [ -f "$__lib/term.sh" ]; then . "$__lib/term.sh"; term_init 2; __HAVE_TERM=1
+else __HAVE_TERM=0; fi   # fallback: plain "== section ==" framing, no panel
+```
+
+Stdout data and exit codes must not depend on which branch ran. The skill's
+`tests/run.sh` copies the folder alone and asserts the fallback framing is ASCII -
+see the "standalone" block in `skills/supply-chain-defense/tests/run.sh`.
 
 ### Helpers
 
@@ -774,7 +807,10 @@ term_hotkey      key verb                # R refresh
 term_spinner_frame family tick           # working / heartbeat → glyph
 
 # Edge cases
-term_truncate    "text" max_cols         # ellipsis-truncate
+term_truncate    "text" max_cols         # ellipsis-truncate on cells; never cuts an escape or a glyph
+term_strip       "text"                  # text minus colour escapes
+term_vis_width   "text"                  # cells (colour 0, wide glyphs 2)
+term_pad         "text" cols             # pad to cells: use instead of printf %-Ns
 term_term_width                          # current cols
 
 # Text-level glyphs — interpolate, never type the literal (TERM_ASCII=1 swaps these)
@@ -877,7 +913,7 @@ Top-anchored, right-aligned, **1-char right padding**.
 
 Left padding = `width − label_cells − 1 − 2` (corners). The constant 1-char right pad is what makes labels visibly right-anchored across boxes with mixed icon/no-icon content.
 
-Cell-width counting: emoji = 2 cells; standard glyphs and ASCII chars = 1 cell.
+Cell-width counting: wide emoji (⚡ 🔁 👤 🌐, East Asian Width W) = 2 cells; text-style pictographs (🗄 ⚙ ⏱), other glyphs and ASCII = 1 cell. `term_vis_width` gives the count.
 
 #### Examples — same 16-wide box, varied content
 
@@ -1125,7 +1161,7 @@ A small registered set for diagrams. Use sparingly — at most one per box, only
 **Rules for icons in diagrams:**
 1. **At most one icon per box.** No stacking.
 2. **Icon goes inside the box, before the label.** Same row, single space between.
-3. **Boxes must size for emoji width.** Emoji = 2 cells; size the box accordingly.
+3. **Boxes must size for emoji width.** Wide emoji = 2 cells (`term_vis_width` knows which); size the box accordingly.
 4. **Be selective.** A diagram of 16 boxes shouldn't have 16 icons — pick 4–6 *categories* of node and icon those (one for each tier or role).
 
 ### 11.7 Reference exemplar — 16-element architecture

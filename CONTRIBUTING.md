@@ -8,7 +8,8 @@ Issues and PRs are welcome. A few ground rules keep them mergeable.
   changes). Small fixes and typo-level docs can go straight to a PR.
 - Commits follow [Conventional Commits](https://www.conventionalcommits.org/):
   `type(scope): summary` - see `rules/commit-style.md` for the house specifics.
-- Run the gate before pushing: `just check` (frontmatter validation, doc-drift,
+- Run the gate before pushing: `just check` (frontmatter validation, the Agent Skills
+  spec gate - needs [uv](https://docs.astral.sh/uv/) - doc-drift,
   the agnostic gate, hook contract tests, resource contracts, and every skill's
   behavioural suite).
 - Keep contributions machine-agnostic: no real usernames, home paths, hostnames or

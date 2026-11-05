@@ -10,10 +10,14 @@
 # Input:   optional PROJECT_DIR positional (default: cwd) + $HOME config locations
 # Output:  stdout = findings (tab-separated records, or JSON with --json)
 # Stderr:  section framing, progress, verdict guidance, errors
-# Exit:    0 clean, 2 usage, 5 missing-dep (jq, with --json), 10 review-items-found
+# Exit:    0 clean, 2 usage, 5 missing-dep (jq, with --json) or a surface could not
+#          be scanned (a producer failed, or a file's text encoding is unreadable:
+#          see stderr and meta.unscanned) - NOT clean, 10 review-items-found
+#          (wins over 5; it is never a false clean)
 #
 # Note: intentionally NOT `set -e` — a scanner must survive missing files and keep
-# going. Errors are handled explicitly.
+# going. Errors are handled explicitly: a producer (find, grep, jq) that fails is
+# recorded as unscanned, never read as "nothing found".
 #
 # Examples:
 #   integrity-audit.sh
@@ -31,7 +35,7 @@ while [[ $# -gt 0 ]]; do
     -q|--quiet)    QUIET=1 ;;
     -v|--verbose)  VERBOSE=1 ;;
     -h|--help)
-      sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit "$EXIT_OK" ;;
+      sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit "$EXIT_OK" ;;
     -*) echo "ERROR: unknown flag: $1 (try --help)" >&2; exit "$EXIT_USAGE" ;;
     *)  PROJECT_DIR="$1" ;;
   esac
@@ -42,6 +46,9 @@ done
 # the TSV/--json data product stays plain on stdout. The full enclosing panel
 # renders for a human at a TTY (or FORCE_COLOR); piped/quiet keeps the legacy
 # "== section ==" framing so any stderr consumer is unaffected.
+# The lib is OPTIONAL: this skill is copied standalone into other plugins with no
+# skills/_lib beside it, so the fallback must work and stay 7-bit ASCII (pinned by
+# the "standalone" block in tests/run.sh). Never source it unconditionally.
 __lib="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../_lib" 2>/dev/null && pwd || true)"
 if [ -n "${__lib:-}" ] && [ -f "$__lib/term.sh" ]; then . "$__lib/term.sh"; term_init 2; __HAVE_TERM=1
 else __HAVE_TERM=0; fi
@@ -91,6 +98,18 @@ fi
 
 REVIEW_JSON=()    # array of compact JSON objects
 REVIEW_COUNT=0
+UNSCANNED=()      # "<what>: <why>" per surface whose producer failed
+
+# unscanned <what> <why> — a surface we could not read. Printed even with -q: it
+# is an error, not framing, and it turns a clean verdict into exit 5.
+unscanned() {
+  UNSCANNED+=("$1: $2")
+  if [[ "$PANEL" -eq 1 ]]; then
+    popen; term_status_row bad "NOT scanned  $1" "$2" >&2
+  else
+    printf '   %s[NOT scanned]%s %s: %s\n' "$C_Y" "$C_O" "$1" "$2" >&2
+  fi
+}
 
 # record <category> <source> <kind> <entries-newline-separated>
 record() {
@@ -115,14 +134,62 @@ record() {
   fi
 }
 
+# Returns jq's status: nonzero means the file was NOT read (not JSON - a comment
+# or a truncated write - or the wrong shape), which the caller must report as
+# unscanned. Swallowing it once read every unparseable config as "no hooks".
 json_key_entries() {  # file key -> newline-separated entry list (jq)
   local file=$1 key=$2
-  [[ -f "$file" && "$HAS_JQ" -eq 1 ]] || return 0
+  [[ -f "$file" ]] || return 0
   jq -r --arg k "$key" '
     if (.[$k] // empty) == null then empty
     elif (.[$k]|type)=="object" then (.[$k]|keys[])
     elif (.[$k]|type)=="array"  then (.[$k][]|tostring)
     else (.[$k]|tostring) end' "$file" 2>/dev/null
+}
+
+# Scratch for grep_text: the matched lines, and a decoded copy of a UTF-16 file.
+HITS_F="$(mktemp)"; TEXT_F="$(mktemp)"; trap 'rm -f "$HITS_F" "$TEXT_F"' EXIT
+
+has_nul() { (( $(tr -d '\000' < "$1" | wc -c) != $(wc -c < "$1") )); }
+
+# grep_text <file> <ERE> — grep -n one config file as TEXT, whatever its encoding;
+# matching lines go to stdout. Returns 0 match, 1 none, 2 not (reliably) read,
+# with GREP_WHY saying why; any lines it did match are still real. Call it with
+# stdout redirected, never in $(...), so GREP_WHY reaches the caller.
+# Encoding guard: Windows PowerShell 5.1's `>` and Out-File write UTF-16LE (BOM
+# FF FE). An ASCII regex never matches UTF-16 (a NUL between every letter) and
+# GNU grep calls NUL bytes binary, so a profile carrying `Invoke-Expression ...
+# DownloadString` read clean. A BOM'd UTF-16 file is decoded with iconv first;
+# NUL bytes still there after that (UTF-16 with no BOM, UTF-32) mean unscanned.
+# -a: grep 3.5+ reports a match in a "binary" file on stderr only, so one stray
+# NUL hid every hit in the file. grep exit 2 is a read error, never "no match".
+grep_text() {
+  local f=$1 re=$2 src=$1 bom rc=0
+  GREP_WHY=""
+  bom="$(od -An -tx1 -N2 "$f" 2>/dev/null | tr -d ' \n')"
+  if [[ "$bom" == fffe || "$bom" == feff ]]; then
+    if ! iconv -f UTF-16 -t UTF-8 "$f" >"$TEXT_F" 2>/dev/null; then
+      GREP_WHY="UTF-16 text (BOM $bom) that iconv could not decode"; return 2
+    fi
+    src=$TEXT_F
+  fi
+  grep -anEi -- "$re" "$src" 2>/dev/null || rc=$?
+  if (( rc > 1 )); then GREP_WHY="grep exit $rc - could not read it"; return 2; fi
+  if has_nul "$src"; then
+    GREP_WHY="NUL bytes in its text - an encoding this scan cannot read (UTF-16 without a BOM? UTF-32?)"
+    return 2
+  fi
+  return "$rc"
+}
+
+# scan_text <category> <kind> <file> <ERE> — record a file's matching lines, and
+# report it unscanned when grep_text could not read it all.
+scan_text() {
+  local category=$1 kind=$2 f=$3 re=$4 rc=0 hits
+  grep_text "$f" "$re" >"$HITS_F" || rc=$?
+  hits="$(tr -d '\000' < "$HITS_F")"
+  [[ -n "$hits" ]] && record "$category" "$f" "$kind" "$hits"
+  (( rc <= 1 )) || unscanned "$f" "$GREP_WHY"
 }
 
 # ─── 1. AI-tool config: hooks / mcpServers across hosts ────────────────────
@@ -137,17 +204,36 @@ CLAUDE_FILES=(
   "$APPDATA_DIR/Claude/claude_desktop_config.json"                 # Claude Desktop (win)
   "$HOME/.config/Claude/claude_desktop_config.json")              # Claude Desktop (linux)
 # Project-local MCP / Claude configs (skip worktrees — owned by other sessions).
-while IFS= read -r f; do CLAUDE_FILES+=("$f"); done < <(
-  find "$PROJECT_DIR" -maxdepth 4 \
+# procsub guard: find's status is checked before its rows are used. Fed straight
+# into a loop via `< <(find ...)`, a find that died (Windows find.exe ahead of GNU
+# find on PATH, an unreadable PROJECT_DIR) scanned no project config and the run
+# still said Clean. Any find error means some directory went unread.
+rc=0; ferr="$(mktemp)"
+proj_cfgs="$(find "$PROJECT_DIR" -maxdepth 4 \
     \( -name 'settings*.json' -path '*/.claude/*' \
        -o -name '.mcp.json' -o -name 'mcp.json' \
        -o -name 'cline_mcp_settings.json' -o -name 'mcp_settings.json' \) \
-    -not -path '*/worktrees/*' -not -path '*/node_modules/*' 2>/dev/null)
+    -not -path '*/worktrees/*' -not -path '*/node_modules/*' 2>"$ferr")" || rc=$?
+if (( rc != 0 )); then
+  unscanned "project MCP/Claude configs under $PROJECT_DIR" \
+    "find exit $rc: $(head -1 "$ferr" | tr -d '\r')"
+fi
+rm -f "$ferr"
+while IFS= read -r f; do
+  [[ -n "$f" ]] && CLAUDE_FILES+=("$f")
+done <<< "$proj_cfgs"
 for f in "${CLAUDE_FILES[@]}"; do
   [[ -f "$f" ]] || continue
+  if [[ "$HAS_JQ" -eq 0 ]]; then
+    unscanned "$f" "jq not installed - hooks/mcpServers not read"; continue
+  fi
   vinfo "scanning $f"
   for key in hooks mcpServers; do
-    entries=$(json_key_entries "$f" "$key")
+    rc=0; entries=$(json_key_entries "$f" "$key") || rc=$?
+    if (( rc != 0 )); then
+      unscanned "$f" "jq exit $rc - not plain JSON (comments? truncated?) or not an object"
+      break
+    fi
     [[ -n "$entries" ]] && record "aitool_config" "$f" "$key" "$entries"
   done
 done
@@ -165,8 +251,7 @@ SUSPECT='task.allowAutomaticTasks|automationProfile|shellArgs|runOnStartup|autoR
 for f in "${EDITOR_SETTINGS[@]}"; do
   [[ -f "$f" ]] || continue
   vinfo "scanning $f"
-  hits=$(grep -nEi "$SUSPECT" "$f" 2>/dev/null)
-  [[ -n "$hits" ]] && record "vscode_settings" "$f" "autorun_keys" "$hits"
+  scan_text "vscode_settings" "autorun_keys" "$f" "$SUSPECT"
 done
 info "audit extensions too: code --list-extensions --show-versions (pause <7-day, non-verified)"
 
@@ -175,19 +260,26 @@ section "GitHub Actions" "live OIDC publish trust (Mini Shai-Hulud entry point)"
 WF_DIR="$PROJECT_DIR/.github/workflows"
 if [[ -d "$WF_DIR" ]]; then
   if [[ "$HAS_ZIZMOR" -eq 1 ]]; then
-    info "running zizmor (richer workflow analysis) — see stderr"
+    info "running zizmor (richer workflow analysis) - see stderr"
     [[ "$QUIET" -eq 0 ]] && zizmor "$WF_DIR" >&2 2>&1 || true
   else
     # Surface the degradation at info level (NOT verbose-only) — the caller must
     # know they're getting the weaker check, or they'll assume full coverage.
-    info "NOTE: zizmor not installed — using weaker rg-based OIDC check only."
+    info "NOTE: zizmor not installed - using weaker rg-based OIDC check only."
     info "      Misses pull_request_target / template-injection. Install: uv tool install zizmor"
   fi
+  # procsub guard: grep's status is checked before its rows are used. Exit 1 is
+  # "no workflow grants id-token: write" (clean); 2 is a read error, which fed
+  # straight into the loop looked identical to clean. Matches from the files it
+  # could read are still recorded.
+  rc=0
+  oidc_wfs="$(grep -rlE 'id-token:\s*write' "$WF_DIR" 2>/dev/null)" || rc=$?
+  (( rc <= 1 )) || unscanned "workflows in $WF_DIR" "grep exit $rc - unreadable workflow file(s)"
   while IFS= read -r wf; do
     [[ -z "$wf" ]] && continue
     pub=$(grep -nE 'npm publish|pypi|twine upload|trusted.?publish|registry-url' "$wf" 2>/dev/null)
     record "workflow_oidc" "$wf" "id-token-write" "${pub:-id-token: write present}"
-  done < <(grep -rlE 'id-token:\s*write' "$WF_DIR" 2>/dev/null)
+  done <<< "$oidc_wfs"
 else
   info "no .github/workflows in $PROJECT_DIR"
 fi
@@ -201,14 +293,14 @@ SHELL_RC=(
   "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile"
   "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.zshenv"
   "$HOME/.config/fish/config.fish"
+  # PowerShell 5.1 writes these as UTF-16LE: grep_text decodes them.
   "$HOME/Documents/PowerShell/Microsoft.PowerShell_profile.ps1"
   "$HOME/Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1")
 SHELL_SUSPECT='curl[^|]*\|[[:space:]]*(ba)?sh|wget[^|]*\|[[:space:]]*(ba)?sh|base64[[:space:]]+--?d|eval[[:space:]]+"?\$\(|\.claude[/\\]\.?settings|\.aws[/\\]credentials|/dev/tcp/|[Ii]nvoke-Expression[^;]*[Dd]ownload'
 for f in "${SHELL_RC[@]}"; do
   [[ -f "$f" ]] || continue
   vinfo "scanning $f"
-  hits=$(grep -nEi "$SHELL_SUSPECT" "$f" 2>/dev/null)
-  [[ -n "$hits" ]] && record "shell_rc" "$f" "suspicious_line" "$hits"
+  scan_text "shell_rc" "suspicious_line" "$f" "$SHELL_SUSPECT"
 done
 
 # ─── 5. Package-manager config (rogue registry / leaked token) ─────────────
@@ -216,15 +308,35 @@ section "Package-manager config" ".npmrc / .pypirc registry overrides + tokens"
 for f in "$HOME/.npmrc" "$PROJECT_DIR/.npmrc" "$HOME/.pypirc" "$PROJECT_DIR/.pypirc"; do
   [[ -f "$f" ]] || continue
   vinfo "scanning $f"
-  hits=$(grep -nEi '^[[:space:]]*registry[[:space:]]*=|_authToken|^[[:space:]]*index-url|password[[:space:]]*=' "$f" 2>/dev/null)
-  [[ -n "$hits" ]] && record "pkgmgr_config" "$f" "registry_or_token" "$hits"
+  scan_text "pkgmgr_config" "registry_or_token" "$f" \
+    '^[[:space:]]*registry[[:space:]]*=|_authToken|^[[:space:]]*index-url|password[[:space:]]*='
 done
 
 # ─── Output + verdict ──────────────────────────────────────────────────────
 if [[ "$JSON" -eq 1 ]]; then
   printf '%s\n' "${REVIEW_JSON[@]:-}" | jq -s \
     --argjson z "$HAS_ZIZMOR" \
-    '{data:{review: (map(select(length>0)))}, meta:{count:(map(select(length>0))|length), zizmor_used:($z==1), schema:"axiom.tool.integrity-audit.report/v1"}}'
+    --argjson u "$(printf '%s\n' "${UNSCANNED[@]:-}" | jq -R . | jq -sc 'map(select(length>0))')" \
+    '{data:{review: (map(select(length>0)))}, meta:{count:(map(select(length>0))|length), unscanned:$u, zizmor_used:($z==1), schema:"axiom.tool.integrity-audit.report/v1"}}'
+fi
+
+# A clean verdict needs every surface read. Exit 10 already says "not clean, look",
+# so it stands; only a would-be 0 becomes 5.
+if [[ "$REVIEW_COUNT" -eq 0 && ${#UNSCANNED[@]} -gt 0 ]]; then
+  if [[ "$QUIET" -eq 1 ]]; then :   # the [NOT scanned] lines already went out
+  elif [[ "$PANEL" -eq 1 ]]; then
+    popen
+    { term_panel_vert
+      term_panel_close "fix the cause, re-run" "$(term_health critical "${#UNSCANNED[@]} not scanned")"
+    } >&2
+  else
+    printf '%sNOT clean: %d surface(s) could not be scanned - fix the cause and re-run.%s\n' \
+      "$C_Y" "${#UNSCANNED[@]}" "$C_O" >&2
+  fi
+  exit "$EXIT_MISSING_DEP"
+fi
+if [[ "$REVIEW_COUNT" -gt 0 && ${#UNSCANNED[@]} -gt 0 && "$QUIET" -eq 0 ]]; then
+  info "also: ${#UNSCANNED[@]} surface(s) NOT scanned (above) - this review list may be incomplete"
 fi
 
 if [[ "$REVIEW_COUNT" -eq 0 ]]; then

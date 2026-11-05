@@ -35,7 +35,7 @@ if (-not (Test-Path $bootScript)) {
     throw "boot-start.ps1 not found at $bootScript - copy boot-start.template.ps1 and customise"
 }
 
-# ─── CUSTOMIZE TASK NAME ──────────────────────────────────────────────────
+# --- CUSTOMIZE TASK NAME --------------------------------------------------
 $taskName = "ProcessCompose-MyStack"   # rename per project
 
 Write-Host "Registering Task Scheduler entry: $taskName" -ForegroundColor Cyan

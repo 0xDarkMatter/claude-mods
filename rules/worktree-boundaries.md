@@ -1,14 +1,14 @@
 # Worktree Boundaries
 
-Never touch `.claude/worktrees/` in any repo. Never touch git worktrees, submodules, gitlinks, or agent-spawned ephemeral dirs in repos outside your current working scope.
+Never touch `.claude/worktrees/` in any repo, or `$WORKTREE_ROOT/` when the machine sets it. Never touch git worktrees, submodules, gitlinks, or agent-spawned ephemeral dirs in repos outside your current working scope.
 
 ## The rule
 
-**Worktrees belong to the project that owns them.** If cross-project housekeeping touches file X in repo Y, that does NOT extend to `.claude/worktrees/` in repo Y. Worktrees are the private state of whichever agent, session, or human spawned them. They may look orphaned and aren't.
+**Worktrees belong to the project that owns them.** If cross-project housekeeping touches file X in repo Y, that does NOT extend to `.claude/worktrees/` in repo Y, nor to `$WORKTREE_ROOT/Y/`. Worktrees are the private state of whichever agent, session, or human spawned them. They may look orphaned and aren't.
 
 ## What counts as "don't touch"
 
-- Do not `rm -rf .claude/worktrees/` in any repo
+- Do not `rm -rf .claude/worktrees/` in any repo, nor `$WORKTREE_ROOT/<repo>/` or anything under it
 - Do not `git rm` or `git rm --cached` worktree entries
 - Do not stage deletions of worktree dirs via `git add -A` (this is the subtle one — `-A` sweeps up changes you didn't intend)
 - Do not `git clean -ff` / `--force --force` in a repo with `.claude/worktrees/` — a *single* `-f` git clean safely skips nested worktrees ("Skipping repository …"), but a **double** force deletes them, taking any uncommitted lane work with it
@@ -74,13 +74,17 @@ Corollaries:
   **committed lane work lives in the shared object store and survives even deletion of the worktree
   directory** (recover with `git worktree add <path> lane/<slug>`); only *uncommitted* work is
   destructible. So commit-often is what makes a lane's work durable.
-- **Lane location:** default **in-repo** at `<main>/.claude/worktrees/<slug>` — tidy (no sibling dirs
-  scattered across the parent), native to Claude Code's own worktrees, and gitignored so `git add -A`
-  can't stage its gitlinks. This is only safe *because* `.claude/worktrees/` is gitignored, so a tool
-  placing a lane there must ensure that ignore first (`new-lane.sh` does). Use a **sibling**
-  (`<repo>-<slug>`, outside the repo — `new-lane.sh --sibling`) only when you need structural
-  isolation from repo-scoped destructive ops (`git clean -ff`, `rm -rf <repo>`) or in a repo that
-  can't gitignore the dir.
+- **Lane location:** when the machine sets **`WORKTREE_ROOT`** (Claude Code `settings.json` `env`),
+  every lane goes to **`$WORKTREE_ROOT/<repo>/<slug>`**, `<repo>` being the main checkout's dir name.
+  Project dirs then hold no lanes at all, so `rg`/`fd`/`tokei`/`git add -A`/`git clean` in the
+  project never see one, and no ignore entry is needed. `new-lane.sh` and `fleet init` use it by
+  default; Claude Code's own worktrees follow only with the `hooks/worktree-create.sh` pair wired.
+  Without the variable: **in-repo** at `<main>/.claude/worktrees/<slug>` — native to Claude Code's
+  own worktrees, and safe only *because* `.claude/worktrees/` is gitignored, so a tool placing a lane
+  there must ensure that ignore first (`new-lane.sh` does). A **sibling** (`<repo>-<slug>` —
+  `new-lane.sh --sibling`) is the fallback for structural isolation from repo-scoped destructive
+  ops (`git clean -ff`, `rm -rf <repo>`) or a repo that can't gitignore the dir. Tools that find
+  lanes ask `git worktree list`, not a path pattern: a lane can live in any of the three places.
 - **Lane naming:** `lane/<slug>` (and the native `claude/<slug>`) so the backlog is legible.
 - **A branch name does not reveal isolation** — `claude/eager-wozniak` looks identical whether it's a
   worktree-isolated background agent or a session in your main checkout. Isolation is a structural

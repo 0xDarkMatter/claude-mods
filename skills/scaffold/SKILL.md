@@ -438,8 +438,9 @@ Project setup complete? Add these:
 └─ Documentation
    ├─ [ ] README.md (project description, setup, usage)
    ├─ [ ] AGENTS.md — seed from the repo-doctor skill's
-   │      assets/AGENTS-template.md (Landmines section is mandatory;
-   │      doctrine: rules/agentic-quality.md)
+   │      assets/AGENTS-template.md, or once code exists run its
+   │      scripts/agents-md.py scaffold (Landmines section is mandatory;
+   │      no CLAUDE.md unless it starts with @AGENTS.md)
    ├─ [ ] CONTRIBUTING.md
    └─ [ ] API documentation (OpenAPI, godoc, rustdoc)
 ```

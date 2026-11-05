@@ -336,7 +336,7 @@ Print provider DLLs load into spoolsv at boot. A failing or slow provider can de
 
 ## Full audit query patterns
 
-The audit script (`scripts/startup-audit.ps1`) walks all five mechanisms in parallel and produces a unified report. The patterns it uses:
+No bundled script runs all of these: `scripts/health-audit.ps1` counts the five mechanisms in its startup section, and `scripts/safe-disable-startup.ps1 -List` lists the Run-key and Startup-folder entries. For the full picture, run the queries by hand:
 
 ```powershell
 # Mechanism 1: Run keys (all 6 paths)
@@ -405,4 +405,4 @@ Get-CimInstance Win32_Service | Where-Object { $_.PathName -like "*$vendor*" -or
 Get-ScheduledTask | Where-Object { $_.Actions.Execute -like "*$vendor*" }
 ```
 
-This pattern is what `scripts/startup-audit.ps1` runs by default for vendor patterns (Adobe, Docker, Slack, NVIDIA, Microsoft Office, Intel).
+Run it once per vendor you suspect; the usual offenders are Adobe, Docker, Slack, NVIDIA, Microsoft Office and Intel.

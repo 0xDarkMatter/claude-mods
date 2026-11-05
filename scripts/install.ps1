@@ -554,6 +554,7 @@ $deprecated = @(
     "$claudeDir\skills\claude-code-headless",   # Merged into claude-code-ops (v3.0)
     "$claudeDir\skills\claude-code-hooks",      # Merged into claude-code-ops (v3.0)
     "$claudeDir\skills\dsp-launch",             # Superseded by fleet-worker + native background agents (2026-07)
+    "$claudeDir\skills\push-gate",              # Renamed to push-preflight (2026-10)
 
     # Deprecated agents (v3.0): folded into their -ops skill twins
     "$claudeDir\agents\python-expert.md",
@@ -572,7 +573,7 @@ $deprecated = @(
     "$claudeDir\agents\wrangler-expert.md",       # -> skills/cloudflare-ops
     "$claudeDir\agents\bash-expert.md",           # -> skills/bash-ops
     "$claudeDir\agents\claude-architect.md",      # -> skills/claude-code-ops
-    "$claudeDir\agents\aws-fargate-ecs-expert.md", # -> skills/container-orchestration
+    "$claudeDir\agents\aws-fargate-ecs-expert.md", # -> skills/kubernetes-ops (was container-orchestration)
     "$claudeDir\agents\craftcms-expert.md",       # -> skills/craftcms-ops
     "$claudeDir\agents\payloadcms-expert.md",     # -> skills/payloadcms-ops
     "$claudeDir\agents\asus-router-expert.md"     # -> skills/asus-router-ops
@@ -603,6 +604,23 @@ foreach ($oldSkill in $renamedSkills) {
             Remove-Item -LiteralPath $oldPath -Recurse -Force -ErrorAction Stop
             $newName = $oldSkill -replace '-patterns$', '-ops'
             Write-Host "  Removed renamed: $oldSkill (now $newName)" -ForegroundColor Red
+        } catch {
+            Write-Host "  WARNING: could not remove $oldPath ($($_.Exception.Message)) - continuing" -ForegroundColor Yellow
+        }
+    }
+}
+
+# Renames the -patterns rule above can't express: old name -> new name. A stale copy left
+# installed would keep triggering on the old name beside the new skill.
+$otherRenamedSkills = [ordered]@{
+    "container-orchestration" = "kubernetes-ops"   # 2026-10: its Docker content folded into docker-ops
+}
+foreach ($oldSkill in $otherRenamedSkills.Keys) {
+    $oldPath = "$claudeDir\skills\$oldSkill"
+    if (Test-Path -LiteralPath $oldPath) {
+        try {
+            Remove-Item -LiteralPath $oldPath -Recurse -Force -ErrorAction Stop
+            Write-Host "  Removed renamed: $oldSkill (now $($otherRenamedSkills[$oldSkill]))" -ForegroundColor Red
         } catch {
             Write-Host "  WARNING: could not remove $oldPath ($($_.Exception.Message)) - continuing" -ForegroundColor Yellow
         }

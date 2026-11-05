@@ -1,0 +1,2 @@
+# Fixture: a per-developer override. Gitignored by DDEV, so performance_mode here is fine.
+performance_mode: mutagen

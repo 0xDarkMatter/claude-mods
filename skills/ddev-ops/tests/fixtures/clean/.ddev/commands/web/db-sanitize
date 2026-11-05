@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+## Description: Fixture - a project command whose name does not collide with a built-in
+## Usage: db-sanitize
+## Example: "ddev db-sanitize"
+## ExecRaw: true
+mysql db < /var/www/html/.ddev/sanitize.sql

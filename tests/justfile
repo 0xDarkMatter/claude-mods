@@ -18,6 +18,10 @@ validate-yaml:
 validate-names:
     @bash tests/validate.sh --names-only
 
+# Check every skill against the Agent Skills spec (official skills-ref + Claude Code fields)
+validate-spec:
+    @bash tests/spec.sh
+
 # Windows test runner
 test-win:
     powershell -ExecutionPolicy Bypass -File tests/validate.ps1

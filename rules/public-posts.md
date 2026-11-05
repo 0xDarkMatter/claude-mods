@@ -26,7 +26,7 @@ Does **not** apply to:
 - Local git operations (`git commit`, `git tag`) — commit messages are
   reviewable in the diff before push, and the user authorises the push
   separately.
-- `git push` itself — that's covered by the push-gate skill and per-task
+- `git push` itself — that's covered by the push-preflight skill and per-task
   authorisation.
 - Reading public surfaces (`gh issue view`, `gh pr checks`, etc.).
 - Replies on an **automated reviewer's** threads (an AI code-review bot's findings)
@@ -77,5 +77,5 @@ The rule is about *text Claude wrote* hitting a public surface.
 
 - `~/.claude/rules/release-review.md` — the release-creation specific
   half of this pattern
-- `~/.claude/skills/push-gate/SKILL.md` — pre-push gate (different
+- `~/.claude/skills/push-preflight/SKILL.md` — pre-push gate (different
   concern: secrets / forbidden files, not message review)

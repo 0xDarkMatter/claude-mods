@@ -1,0 +1,1258 @@
+#!/usr/bin/env bash
+# Offline self-test for package-manager-ops: skill shape, the pm-audit fixture matrix,
+# the version-range parser, the facts verifier contract, and copy-alone portability
+# (SKILL-RESOURCE-PROTOCOL.md §2, §7, §10).
+#
+# Offline-deterministic: no network, no npm/composer install. Resolves paths relative
+# to itself so it runs in the repo and once installed to ~/.claude/skills/.
+#
+# FIXTURES (tests/fixtures/<case>/): every fixture file ends in `.fx` and the suite
+# strips the suffix when it materialises a case into a temp dir. Guard: do NOT rename
+# them to bare package.json / composer.lock / .npmrc - Dependabot, Socket and npm
+# itself would treat the fixture manifests (node-sass, bower, fake tokens) as real.
+# A `.env.*` fixture is stored as `dotenv.*.fx` (dotenv.example.fx -> .env.example). Guard:
+# do NOT store it as `.env.example.fx` - the repo .gitignore ignores `.env.*`, so `git add`
+# silently drops it (the suite then passes locally and fails on a clean clone), and
+# push-preflight refuses to push any path matching `.env.`. `.envrc.fx` matches neither.
+# A case = the `clean` control + the case's own files on top, minus each path in
+# `_delete`; `_expect` lists the exact finding ids pm-audit must report (empty = the
+# case is a clean control and must exit 0). An optional `_lines` pins the exact
+# `id file:line` rows for every id it names, for cases whose point is WHICH line fires
+# (the per-job deploy scope). It is coupled to the fixture's line numbers: after
+# editing a fixture, re-read its `_lines` (rg -n), never re-count by hand.
+# A fake secret in a fixture is spelled FIXTURE-LITERAL-VALUE or FIXTURE-URL-SECRET: the
+# leak check runs every fixture holding one in both output modes and fails if the string
+# appears anywhere. A secret spelled any other way is never looked for.
+#
+# FRONTMATTER CONTRACT - this suite asserts on SKILL.md's own frontmatter shape:
+#   * top-level keys limited to the six Agent Skills spec fields (portable as one unit)
+#   * description starts "Use when " and is <= 500 chars
+# A trim or spec-alignment pass that edits the frontmatter must keep these, or change
+# this suite in the same commit (docs/SKILL-CREATION-PROTOCOL.md, Step 5).
+#
+# Usage:   bash tests/run.sh
+#          SKILL_DIR=/path/to/copy bash tests/run.sh        # prove a guard fails on a broken copy
+#          PM_AUDIT=/path/to/stub.py bash tests/run.sh      # run the matrix against another audit
+# Input:   none
+# Output:  PASS/FAIL rows on stderr; final tally line.
+# Exit:    0 all pass, 1 any failure
+set -uo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL="${SKILL_DIR:-$(dirname "$HERE")}"
+DOC="$SKILL/SKILL.md"
+AUDIT="${PM_AUDIT:-$SKILL/scripts/pm-audit.py}"
+V="$SKILL/scripts/check-pm-facts.py"
+FACTS="$SKILL/assets/package-manager-facts.json"
+
+PASS=0; FAIL=0
+ok() { PASS=$((PASS+1)); printf '  PASS  %s\n' "$1" >&2; }
+no() { FAIL=$((FAIL+1)); printf '  FAIL  %s\n' "$1" >&2; }
+finish() { echo "=== $PASS passed, $FAIL failed ===" >&2; [[ "$FAIL" -eq 0 ]] || exit 1; exit 0; }
+
+echo "=== package-manager-ops self-test ($SKILL) ===" >&2
+PY="$(bash "$SKILL/scripts/run-python.sh" --which 2>/dev/null)" || { no "no Python 3.8+ (run-python.sh --which)"; finish; }
+ok "python launcher picked: $PY"
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+
+# -- 1. skill shape: frontmatter, budgets, references, citations, links ---------------
+if [[ -f "$DOC" ]]; then
+  while IFS='|' read -r verdict msg; do
+    [[ "$verdict" == PASS ]] && ok "$msg" || no "$msg"
+  done < <("$PY" - "$SKILL" <<'PY'
+import re, sys
+from pathlib import Path
+skill = Path(sys.argv[1])
+text = (skill / "SKILL.md").read_text(encoding="utf-8")
+def row(ok, msg): print(f"{'PASS' if ok else 'FAIL'}|{msg}")
+parts = text.split("---", 2)
+fm, body = (parts[1], parts[2]) if len(parts) == 3 else ("", text)
+keys = re.findall(r"^([A-Za-z_-]+):", fm, re.M)
+spec = {"name", "description", "license", "compatibility", "allowed-tools", "metadata"}
+row(set(keys) <= spec, f"frontmatter keys are Agent Skills spec only ({', '.join(keys)})")
+row(re.search(r"^name: package-manager-ops\s*$", fm, re.M) is not None, "name: package-manager-ops")
+row(re.search(r"^license: MIT\s*$", fm, re.M) is not None, "license: MIT")
+m = re.search(r'^description: "(.*)"\s*$', fm, re.M)
+desc = m.group(1) if m else ""
+row(desc.startswith("Use when ") and len(desc) <= 500, f'description starts "Use when " and is <= 500 chars ({len(desc)})')
+# Portability: the target plugin's leak check rejects this host suffix.
+row(".ddev" + ".site" not in text, "no DDEV site-suffix placeholder in SKILL.md")
+lines = body.splitlines()
+est = round(len(body) / 3.6)
+row(len(lines) < 500 and est <= 5000, f"SKILL.md body < 500 lines and <= ~5000 est. tokens ({len(lines)} lines, ~{est})")
+row(re.search(r"as of 20\d\d", body) is not None, "dated 'as of <year>' currency note")
+refs = sorted((skill / "references").glob("*.md"))
+row(len(refs) > 0, f"{len(refs)} reference file(s)")
+for ref in refs:
+    rt = ref.read_text(encoding="utf-8")
+    rl = rt.splitlines()
+    row(len(rl) <= 300, f"{ref.name} <= 300 lines ({len(rl)})")
+    if len(rl) > 100:
+        # The repo size rule (tests/reference-contents.sh): the list sits in the first 15
+        # lines and links every `## ` heading below it. Checked here, hard, without
+        # borrowing another skill's parser, so the folder still runs copied alone.
+        row(any(l.strip() == "## Contents" for l in rl[:15]), f"{ref.name} has '## Contents' in its first 15 lines")
+        heads, fence, listed, in_toc = [], False, set(), False
+        for l in rl:
+            if l.lstrip().startswith("```"):
+                fence = not fence
+            if fence:
+                continue
+            if l.startswith("## "):
+                in_toc = l.strip() == "## Contents"
+                if not in_toc:
+                    heads.append(re.sub(r"[^\w\- ]", "", l[3:].strip().lower()).replace(" ", "-"))
+            elif in_toc:
+                listed.update(re.findall(r"\]\(#([^)]+)\)", l))
+        gone = [h for h in heads if h not in listed]
+        row(not gone, f"{ref.name} Contents links every ## heading" + (f" - missing: {gone}" if gone else ""))
+    row(f"references/{ref.name}" in text, f"{ref.name} cited from SKILL.md")
+    row(".ddev" + ".site" not in rt, f"{ref.name} has no DDEV site-suffix placeholder")
+def slugs(md):
+    return {re.sub(r"[^\w\- ]", "", h.strip().lower()).replace(" ", "-") for h in re.findall(r"^#{1,6} (.+)$", md, re.M)}
+bad = []
+for f in [skill / "SKILL.md", *refs]:
+    md = f.read_text(encoding="utf-8")
+    for target in re.findall(r"\]\(([^)\s]+)\)", md):
+        if re.match(r"[a-z]+:", target):
+            continue
+        path, _, anchor = target.partition("#")
+        dest = (f.parent / path).resolve() if path else f
+        if not dest.exists():
+            bad.append(f"{f.name} -> {target} (missing file)")
+        elif anchor and dest.suffix == ".md" and anchor not in slugs(dest.read_text(encoding="utf-8")):
+            bad.append(f"{f.name} -> {target} (missing anchor)")
+row(not bad, "all relative links + anchors resolve" + (f": {bad}" if bad else ""))
+PY
+)
+  for res in scripts/pm-audit.py scripts/check-pm-facts.py scripts/run-python.sh assets/package-manager-facts.json; do
+    [[ -f "$SKILL/$res" ]] && ok "resource present: $res" || no "missing resource: $res"
+    grep -q "$res" "$DOC" && ok "cited from SKILL.md: $res" || no "uncited: $res"
+  done
+else
+  no "SKILL.md missing"
+fi
+
+# -- 2. pm-audit CLI contract --------------------------------------------------------
+ec() { local want="$1" lbl="$2"; shift 2; "$@" >/dev/null 2>&1; local got=$?
+       [[ "$got" == "$want" ]] && ok "$lbl (exit $got)" || no "$lbl (want $want got $got)"; }
+ec 0 "pm-audit py_compile"     "$PY" -m py_compile "$AUDIT"
+ec 0 "pm-audit --help"         "$PY" "$AUDIT" --help
+ec 2 "pm-audit bad flag -> 2"  "$PY" "$AUDIT" --bogus "$HERE"
+ec 2 "pm-audit no path -> 2"   "$PY" "$AUDIT"
+ec 2 "pm-audit bad --as-of -> 2" "$PY" "$AUDIT" --as-of 05/10/2026 "$HERE"
+ec 3 "pm-audit missing path -> 3" "$PY" "$AUDIT" "$TMP/does-not-exist"
+ec 3 "pm-audit missing facts -> 3" "$PY" "$AUDIT" --facts "$TMP/nope.json" "$HERE"
+"$PY" "$AUDIT" --help 2>/dev/null | grep -q "Examples:" && ok "pm-audit --help lists Examples" || no "pm-audit --help lacks Examples"
+
+# -- 3. fixture matrix: clean controls exit 0, every finding id is produced ----------
+while IFS='|' read -r verdict msg; do
+  [[ "$verdict" == PASS ]] && ok "$msg" || no "$msg"
+done < <("$PY" - "$HERE/fixtures" "$AUDIT" "$TMP" "$SKILL/references/diagnostics.md" "$SKILL/references/pm-audit-rules.md" <<'PY'
+import json, os, re, shutil, subprocess, sys, traceback
+from pathlib import Path
+fixtures, audit, tmp, diagnostics = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3]), Path(sys.argv[4])
+def row(ok, msg): print(f"{'PASS' if ok else 'FAIL'}|{msg}")
+
+def _crash(kind, exc, tb):
+    # A process-substitution producer's exit code is not the while loop's exit code, so
+    # uncaught exceptions must become rows or the outer tally can report a false green.
+    row(False, f"fixture harness crashed: {''.join(traceback.format_exception_only(kind, exc)).strip()}")
+
+sys.excepthook = _crash
+
+def materialise(src: Path, dest: Path):
+    for f in src.rglob("*.fx"):
+        out = dest / f.relative_to(src).with_suffix("")
+        if out.name.startswith("dotenv"):  # dotenv.example.fx -> .env.example (see FIXTURES above)
+            out = out.with_name(".env" + out.name[len("dotenv"):])
+        out.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(f, out)
+
+# facts/ and tools/ hold sub-suite fixture trees, not pm-audit cases. Requiring the
+# case contract file prevents one of those directories from crashing the child process
+# and silently truncating every alphabetically later scanner case.
+cases = sorted(p for p in fixtures.iterdir() if p.is_dir() and (p / "_expect").is_file())
+row(len(cases) >= 30, f"{len(cases)} fixture case(s)")
+covered = set()
+seen = []
+for case in cases:
+    dest = tmp / "m" / case.name
+    materialise(fixtures / "clean", dest)
+    if case.name != "clean":
+        materialise(case, dest)
+    for d in (case / "_delete").read_text().split() if (case / "_delete").is_file() else []:
+        (dest / d).unlink()
+    want = sorted(set((case / "_expect").read_text().split()))
+    as_of = (case / "_as_of").read_text().strip() if (case / "_as_of").is_file() else "2026-10-05"
+    proc = subprocess.run([sys.executable, audit, "--json", "--as-of", as_of, str(dest)],
+                          capture_output=True, text=True)
+    try:
+        data = json.loads(proc.stdout)["data"]
+        got = sorted({f["id"] for f in data})
+    except Exception as exc:  # noqa: BLE001 - any parse failure is a test failure
+        row(False, f"{case.name}: unparseable --json output ({exc}); stderr={proc.stderr.strip()[-200:]}")
+        continue
+    seen.extend(data)
+    code_ok = proc.returncode == (10 if want else 0)
+    row(got == want and code_ok,
+        f"{case.name}: ids {got or '[]'} exit {proc.returncode}" + ("" if got == want and code_ok else f" (want {want or '[]'} exit {10 if want else 0})"))
+    covered.update(want)
+    if (case / "_lines").is_file():
+        want_rows = sorted(l.strip() for l in (case / "_lines").read_text().splitlines() if l.strip())
+        pinned = {r.split()[0] for r in want_rows}
+        got_rows = sorted(f"{f['id']} {f['file']}:{f['line']}" for f in data if f["id"] in pinned)
+        row(got_rows == want_rows, f"{case.name}: lines {got_rows}" + ("" if got_rows == want_rows else f" (want {want_rows})"))
+    if (case / "_checks").is_file():
+        expected = json.loads((case / "_checks").read_text())
+        checks = {c.get("check"): c for c in json.loads(proc.stdout).get("meta", {}).get("checks", [])}
+        wrong = []
+        for family, want_check in expected.items():
+            got_check = checks.get(family, {})
+            if got_check.get("status") != want_check["status"]:
+                wrong.append(f"{family} status={got_check.get('status')!r}")
+            if want_check.get("reason_contains") not in got_check.get("reason", ""):
+                wrong.append(f"{family} reason={got_check.get('reason')!r}")
+        row(not wrong, f"{case.name}: per-family check status is explicit" + (f" ({'; '.join(wrong)})" if wrong else ""))
+    if (case / "_manager_majors").is_file():
+        expected = json.loads((case / "_manager_majors").read_text())
+        got_majors = json.loads(proc.stdout).get("meta", {}).get("manager_majors")
+        row(got_majors == expected, f"{case.name}: manager majors {got_majors}" + ("" if got_majors == expected else f" (want {expected})"))
+    if (case / "_install_policy").is_file():
+        expected = json.loads((case / "_install_policy").read_text())
+        got_policy = json.loads(proc.stdout).get("meta", {}).get("install_policy")
+        row(got_policy == expected, f"{case.name}: install policy metadata {got_policy}"
+            + ("" if got_policy == expected else f" (want {expected})"))
+
+# Mutation proof: each new checks-a fixture must reject a scanner whose corresponding
+# rule is broken. Mutants live only under the suite temp directory and never touch source.
+# Guard: a mutant that does not RUN (no JSON, exit outside 0/10) proves nothing and fails
+# the row. Mutants sit in $TMP/mutants/, where pm-audit's default ../assets facts path does
+# not exist, so --facts is passed explicitly: without it every mutant exited 3 and every
+# mutation row "caught" its broken rule vacuously.
+source = Path(audit).read_text(encoding="utf-8")
+facts_file = str(Path(audit).resolve().parent.parent / "assets" / "package-manager-facts.json")
+mutants = tmp / "mutants"; mutants.mkdir(parents=True, exist_ok=True)
+
+def run_mutant(mutant, as_of, target):
+    return subprocess.run([sys.executable, str(mutant), "--json", "--facts", facts_file, "--as-of", as_of, str(target)],
+                          capture_output=True, text=True)
+
+def mutation(label, case_name, old, new):
+    if old not in source:
+        row(False, f"mutation {label}: source token missing")
+        return
+    mutant = mutants / (re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") + ".py")
+    mutant.write_text(source.replace(old, new), encoding="utf-8")
+    case = fixtures / case_name
+    want = sorted(set((case / "_expect").read_text().split()))
+    as_of = (case / "_as_of").read_text().strip() if (case / "_as_of").is_file() else "2026-10-05"
+    proc = run_mutant(mutant, as_of, tmp / "m" / case_name)
+    try:
+        envelope = json.loads(proc.stdout)
+        data = envelope["data"]
+        got = sorted({f["id"] for f in data})
+    except Exception:
+        envelope, data, got = {}, [], None
+    if got is None or proc.returncode not in (0, 10):
+        row(False, f"mutation {label}: mutant did not run (exit {proc.returncode}): {' '.join(proc.stderr.split())[-160:]}")
+        return
+    checks_changed = False
+    if (case / "_checks").is_file():
+        statuses = {c.get("check"): c.get("status") for c in envelope.get("meta", {}).get("checks", [])}
+        checks_changed = any(statuses.get(k) != v.get("status") for k, v in json.loads((case / "_checks").read_text()).items())
+    lines_changed = False
+    if (case / "_lines").is_file():
+        want_rows = sorted(line.strip() for line in (case / "_lines").read_text().splitlines() if line.strip())
+        pinned = {line.split()[0] for line in want_rows}
+        got_rows = sorted(f"{f['id']} {f['file']}:{f['line']}" for f in data if f["id"] in pinned)
+        lines_changed = got_rows != want_rows
+    row(got != want or lines_changed or checks_changed or proc.returncode != (10 if want else 0),
+        f"mutation {label}: fixture catches broken rule" + ("" if got != want or lines_changed or checks_changed
+                                                            or proc.returncode != (10 if want else 0)
+                                                            else f" - MISSED: mutant still gives {got}"))
+
+for fid, case_name in (
+    ("js.engine.floor", "js-engine-floor"),
+    ("php.lock.floor", "php-lock-floor"),
+    ("deploy.bundle.credentials", "deploy-bundle-credentials"),
+    ("php.composer.eol", "php-composer-eol"),
+    ("php.craft.eol", "php-craft-eol"),
+    ("js.dep.paired-drift", "js-dep-paired-drift"),
+    ("js.lockfile.source", "js-lockfile-source"),
+    ("js.install-policy", "js-install-policy"),
+    ("php.composer.safety-off", "php-composer-safety-off"),
+    ("deploy.composer.safety-off", "deploy-composer-safety-off"),
+    ("deploy.composer.adhoc", "deploy-composer-update"),
+    ("deploy.composer.installer-unverified", "deploy-composer-installer-unverified"),
+    ("php.package.abandoned", "php-package-abandoned"),
+    ("js.dep.non-registry", "js-dep-non-registry"),
+    ("php.dep.non-registry", "php-dep-non-registry"),
+    ("js.root.not-private", "js-root-not-private"),
+    ("php.eol-soon", "php-eol-soon"),
+    ("js.node.eol-soon", "js-node-eol-soon"),
+    ("registry.tls.disabled", "registry-tls-npmrc"),
+    ("registry.url.http", "registry-tls-npmrc"),
+):
+    mutation(fid, case_name, f'"{fid}"', f'"mutant.{fid}"')
+# transport(): each near-miss control proves one exemption is load-bearing.
+mutation("loopback hosts are exempt", "clean-tls-js",
+         'return h in ("localhost", "::1")', 'return False and h in ("localhost", "::1")')
+mutation("an http:// proxy is not a registry", "clean-tls-js",
+         'elif (key == "registry" or (key.startswith("@") and key.endswith(":registry"))) and http_urls(value):\n'
+         '                http(".npmrc"', 'elif http_urls(value):\n                http(".npmrc"')
+mutation("a commented requirements option is not read", "clean-tls-python",
+         's = re.sub(r"(^|\\s)#.*$", "", line)\n', 's = line\n')
+mutation("another tool's pyproject table never counts", "clean-tls-python",
+         'leaf = key[len(pre):] if key.startswith(pre) else None', 'leaf = key.rsplit(".", 1)[-1]')
+mutation("only NODE_TLS_REJECT_UNAUTHORIZED=0 disables checks", "clean-tls-composer-env",
+         'name == "NODE_TLS_REJECT_UNAUTHORIZED" and value == "0"', 'name == "NODE_TLS_REJECT_UNAUTHORIZED"')
+mutation("a gitignored, untracked config is a local override", "clean-tls-composer-env",
+         'if shipped[rel]:', 'if True:')
+mutation("multi-line pip trusted-host is read", "registry-tls-pip-conf",
+         'cur[2] = (cur[2] + " " + line.strip()).strip()', 'pass')
+mutation("a [[tool.uv.index]] url is read", "registry-tls-uv-toml",
+         '"index", "index.url")', '"index")')
+mutation("composer update-no-dev", "clean-deploy-composer-update-no-dev", '"--update-no-dev"', '"--mutant-update-no-dev"')
+mutation("composer no-dev env", "clean-deploy-composer-env",
+         'obj(active_env).get("COMPOSER_NO_DEV")', 'False')
+mutation("legacy facts lookup", "legacy-node-sass",
+         'table = self.facts.get("legacy_packages")', 'table = self.facts.get("mutant_legacy_packages")')
+# legacy.package takes its id from the facts entry, so renaming the literal (the loop above)
+# cannot break it; breaking the table lookup does.
+mutation("an unlocked legacy package is judged by its declared range", "legacy-package-unlocked",
+         'return overlaps(spec, "npm", versions)', 'return False')
+mutation("legacy.package facts lookup", "legacy-package",
+         'table = self.facts.get("legacy_packages")', 'table = self.facts.get("mutant_legacy_packages")')
+mutation("local composite action", "deploy-local-uses",
+         'if not raw.startswith("./"):', 'if True:')
+mutation("a pin is not judged by its line's lowest version", "clean-engine-floor-partial-pin",
+         'admits(spec, lo, hi, dialect) is False', 'admits(spec, (lo[0], 0, 0), (lo[0], 0, 1), dialect) is False')
+mutation("a partial pin stands for its newest release", "js-engine-floor-partial-upper",
+         'lo = (parts[0], top, 0) if len(parts) == 1 else (parts[0], parts[1], top)',
+         'lo = (parts[0], 0, 0) if len(parts) == 1 else (parts[0], parts[1], 0)')
+mutation("bundles are ordered by execution, not line", "deploy-local-action-bundle",
+         'if brel != rel or bat <= at or ctx is None or scope(bn) != scope(n):',
+         'if brel != rel or bn <= n or ctx is None or scope(bn) != scope(n):')
+mutation("rm then zip on one line is ordered", "clean-bundle-rm-same-line",
+         'for words in simple_commands(line):\n                    seq += 1', 'for words in simple_commands(line):\n                    pass')
+mutation("a piped .npmrc write is assumed to carry a secret", "deploy-bundle-envsubst",
+         'or re.search(r"(?<!\\|)\\|(?!\\|)\\s*(?!tee\\b)[\\w./-]", line)', 'or False')
+mutation("dev Dockerfile is not a production PHP pin", "clean-php-floor-dev-dockerfile",
+         'if re.search(r"dev|test", path.name, re.I):', 'if False:')
+mutation("vite partners judged by peers, not majors", "clean-paired-peers-valid",
+         'peer_check("vite", "@vitejs/")', 'compare("vite", {n for n in root if n.startswith("@vitejs/")}, 1)')
+mutation("vue-template-compiler must equal vue exactly", "js-dep-vue2-compiler-patch",
+         'compare("vue", {"vue-template-compiler"}, 3)', 'compare("vue", {"vue-template-compiler"}, 2)')
+mutation("cross-root drift is major-only", "clean-nested-minor-drift",
+         'if len({version[0] for _path, version in rows}) > 1:', 'if len({version for _path, version in rows}) > 1:')
+mutation("yarn npm-alias names its target", "clean-yarn-alias-source",
+         'name = real_name(key[:at], key[at + 1:]) if at > 0 else key', 'name = key[:at] if at > 0 else key')
+mutation("lockfileVersion 1 tree is read", "js-lockfile-source-v1",
+         'v1_tree(obj(lock).get("dependencies"), filename)\n', 'pass\n')
+mutation("local tooling keeps CI-only rules out", "install-sites",
+         '        if kind == "automation":\n            return\n', '')
+mutation(".npmrc without a token is not a credential", "clean-bundle-npmrc-scope-only",
+         'if m and not (m.group(2) == ".npmrc" and not npmrc_write_has_secret(line)):', 'if m:')
+mutation("rm before the bundle removes the credential", "clean-bundle-credential-removed",
+         'if ci and words[0] == "rm":', 'if False:')
+mutation("zip -x@list exclusions are read", "clean-bundle-exclude-list",
+         'for a in [a for a in args if a.startswith("-x@")]:', 'for a in []:')
+mutation("a called reusable workflow is reported at its callers only", "deploy-reusable-callers",
+         'if ci and rel in called and self._reusable_only(text):', 'if False:')
+mutation("each caller of a reusable workflow is evaluated", "deploy-reusable-callers",
+         'visit(body, effective, seen | {key})', 'visit(body, effective, seen | {key}); seen |= {key}')
+mutation("additional install sites", "install-sites",
+         '("package.json", "composer.json", "justfile", "Makefile")', '("never",)')
+
+# A check that raises must not lose the report: _check contains it, so the run still exits
+# 0/10 with valid JSON and names the family skipped with the error. Injected into legacy().
+crashing = mutants / "check-raises.py"
+crashing.write_text(source.replace("    def legacy(self):\n",
+                                   "    def legacy(self):\n        raise RuntimeError('injected')\n", 1), encoding="utf-8")
+proc = run_mutant(crashing, "2026-10-05", tmp / "m" / "clean")
+try:
+    legacy_row = next(c for c in json.loads(proc.stdout)["meta"]["checks"] if c["check"] == "legacy")
+except Exception:  # noqa: BLE001 - unparseable output is the failure this guards
+    legacy_row = None
+contained = (proc.returncode == 0 and legacy_row is not None and legacy_row["status"] == "skipped"
+             and "internal error in legacy: RuntimeError" in legacy_row["reason"] and "injected" in proc.stderr)
+# One row = one line: the bash reader scores any extra line as a failed row.
+row(contained, "a check that raises is contained (legacy skipped with the error, report kept)" + (
+    "" if contained else f" - exit {proc.returncode}, legacy {legacy_row}, stderr {' '.join(proc.stderr.split())[-160:]}"))
+
+# Every id the audit documents must have a fixture that produces it.
+doc_ids = set()
+for line in Path(audit).read_text(encoding="utf-8").splitlines():
+    s = line.strip()
+    if s and all(tok.count(".") >= 1 and tok.replace(".", "").replace("-", "").isalnum() for tok in s.split()) \
+            and s.split()[0].split(".")[0] in {"js", "php", "node", "ddev", "npx", "legacy", "registry", "deploy"}:
+        doc_ids.update(s.split())
+row(doc_ids and doc_ids <= covered, f"every documented finding id has a fixture ({len(doc_ids)} ids)"
+    + ("" if doc_ids <= covered else f" - uncovered: {sorted(doc_ids - covered)}"))
+# ...and a row in the diagnostics table, which the docstring promises explains each id.
+# A new id can otherwise ship with a fixture but nothing telling the reader what to fix.
+diag_text = diagnostics.read_text(encoding="utf-8") if diagnostics.is_file() else ""
+rowless = sorted(i for i in doc_ids if f"| `{i}` |" not in diag_text)
+row(doc_ids and not rowless, f"every documented finding id has a diagnostics.md row ({len(doc_ids)} ids)"
+    + (f" - missing: {rowless}" if rowless else ""))
+
+# pm-audit never prints a secret. Every fixture that holds a fake one (a committed token,
+# credentials in a registry or tarball URL) runs in both output modes, and the value must
+# appear nowhere in stdout or stderr.
+SECRETS = ("FIXTURE-LITERAL-VALUE", "FIXTURE-URL-SECRET")
+leaky = [c for c in cases if any(s in f.read_text(encoding="utf-8", errors="replace")
+                                 for f in c.rglob("*.fx") for s in SECRETS)]
+row(len(leaky) >= 3, f"{len(leaky)} fixture case(s) carry a fake secret")
+for case in leaky:
+    for mode in (["--json"], []):
+        proc = subprocess.run([sys.executable, audit, *mode, "--as-of", "2026-10-05", str(tmp / "m" / case.name)],
+                              capture_output=True, encoding="utf-8", errors="replace")
+        shown = [s for s in SECRETS if s in proc.stdout + proc.stderr]
+        row(proc.returncode in (0, 10) and not shown,
+            f"{case.name}: no secret printed ({'json' if mode else 'tsv'}, exit {proc.returncode})"
+            + (f" - printed {shown}" if shown else ""))
+dest = tmp / "m" / "registry-token-committed"
+proc = subprocess.run([sys.executable, audit, "--as-of", "2026-10-05", str(dest)], capture_output=True, text=True)
+rows = [r for r in proc.stdout.splitlines() if r]
+row(rows and all(len(r.split("\t")) == 5 for r in rows), f"plain output: {len(rows)} TSV row(s), 5 columns each")
+
+# --no-docs must still read package.json scripts but skip the docs walk.
+dest = tmp / "m" / "npx-unpinned-docs"
+proc = subprocess.run([sys.executable, audit, "--json", "--no-docs", "--as-of", "2026-10-05", str(dest)], capture_output=True, text=True)
+row(proc.returncode == 0, f"--no-docs skips README npx (exit {proc.returncode})")
+dest = tmp / "m" / "npx-unpinned-script"
+proc = subprocess.run([sys.executable, audit, "--json", "--no-docs", "--as-of", "2026-10-05", str(dest)], capture_output=True, text=True)
+row(proc.returncode == 10, f"--no-docs still checks package.json scripts (exit {proc.returncode})")
+# The engine-strict note is npm advice: present for an npm repo without it, absent for pnpm.
+def notes_of(case):
+    d = tmp / "m" / case
+    (d / ".npmrc").unlink(missing_ok=True)
+    p = subprocess.run([sys.executable, audit, "--json", "--as-of", "2026-10-05", str(d)], capture_output=True, text=True)
+    return {n["id"] for n in json.loads(p.stdout)["meta"]["notes"]} if p.stdout.strip().startswith("{") else set()
+row("js.engines.unenforced" in notes_of("clean"), "engines note fires for an npm repo without engine-strict")
+row("js.engines.unenforced" not in notes_of("clean-pnpm"), "engines note stays silent for a pnpm repo (.npmrc advice is npm's)")
+# A project that pins config.platform.php gets a missing require.php as a note, not a finding.
+row("php.require.missing" in notes_of("clean-php-require-platform-pinned"), "missing require.php is a note when config.platform.php is set")
+# A gitignored, untracked .env.local that turns TLS off ships to nobody: a note, never silence.
+row("registry.tls.unshipped" in notes_of("clean-tls-composer-env"), "TLS off in a gitignored local file is a note, not a finding")
+def audit_json(case):
+    d = tmp / "m" / case
+    p = subprocess.run([sys.executable, audit, "--json", "--as-of", "2026-10-05", str(d)], capture_output=True, text=True)
+    return json.loads(p.stdout) if p.stdout.strip().startswith("{") else {"data": [], "meta": {}}
+def found(case, fid):
+    return [f for f in audit_json(case)["data"] if f["id"] == fid]
+abandoned = found("php-package-abandoned", "php.package.abandoned")
+row(abandoned and any("fixture/replacement-package" in f["message"] for f in abandoned),
+    "an abandoned Composer package names the replacement from composer.lock")
+# A Yarn freeze flag on npm is an error: npm 12 refuses the command (EUNKNOWNCONFIG).
+yf = found("deploy-npm-frozen-flag", "deploy.npm.yarn-flag")
+row(yf and all(f["severity"] == "error" and "npm 12 refuses" in f["message"] and "installs unfrozen" in f["message"]
+               and "use npm ci" in f["fix"]["text"] for f in yf),
+    "npm install --frozen-lockfile: an error - npm 12 refuses it, npm up to 11 installs unfrozen, fix npm ci")
+ci = [f for f in found("deploy-npm-ci-yarn-flag", "deploy.npm.yarn-flag") if "npm ci" in f["message"]]
+row(ci and all("already frozen" in f["fix"]["text"] for f in ci), "npm ci --frozen-lockfile: drop the flag, npm ci is already frozen")
+# A bare name and an `@latest`/`@next` spec run what that dist-tag names, which need not be
+# the newest published version (a release published under another tag never moves latest).
+bare = [f["message"] for f in found("npx-unpinned-docs", "npx.unpinned") if f["message"].startswith("`npx create-vite` ")]
+tag = [f["message"] for f in found("npx-unpinned-script", "npx.unpinned") if "eslint@latest" in f["message"]]
+row(bare and tag and all("dist-tag" in m and "newest" not in m for m in bare + tag),
+    f"npx.unpinned names the dist-tag for a bare name and for @latest, never 'newest' ({bare + tag})")
+plain = found("deploy-npm-install", "deploy.install.unfrozen")
+row(plain and not any("Yarn flag" in f["message"] for f in plain), "plain npm install keeps the generic unfrozen message")
+# CI that builds in a subfolder: the finding names that package root, and the root's
+# missing lockfile is only a note when nothing in CI installs the root.
+sub = found("deploy-ci-subfolder-unfrozen", "deploy.install.unfrozen")
+row(sub and all("(in theme/)" in f["message"] for f in sub), "an install under working-directory: names the package root it runs in")
+for case in ("deploy-ci-subfolder-unfrozen", "clean-ci-subfolder-cd", "clean-ci-subfolder-env"):
+    row("js.lockfile.missing" in notes_of(case), f"{case}: root js.lockfile.missing is a note when CI builds only a nested root with a lockfile")
+ul = found("deploy-ci-subfolder-unlocked", "deploy.install.unlocked")
+row(ul and "runs in app/client/" in ul[0]["message"], "an install in a nested folder with no lockfile names that folder")
+# Two root lockfiles: when CI installs with one manager, say which file is live.
+conf = found("js-lockfile-conflict-ci-yarn", "js.lockfile.conflict")
+row(conf and "`yarn install --frozen-lockfile`" in conf[0]["message"] and "package-lock.json is unused" in conf[0]["message"]
+    and conf[0]["fix"]["text"].startswith("delete package-lock.json"), "lockfile conflict names the one CI installs with and the unused one")
+nocif = found("js-lockfile-conflict", "js.lockfile.conflict")
+row(nocif and "CI installs" not in nocif[0]["message"], "without CI the lockfile conflict names no live lockfile")
+stale = found("php-lockfile-stale-dev-only", "php.lockfile.stale")
+row(stale and "fixture/tool (locked only in packages-dev)" in stale[0]["message"],
+    "a require locked only in packages-dev is named as such (Composer reads require from packages)")
+# `composer update --lock` must read the old lock and rethrows its parse error; only a full
+# update regenerates an unparseable one (Installer::doUpdate, Composer 2.10.3).
+broken = found("php-lockfile-invalid", "php.lockfile.stale")
+row(broken and all("--lock" not in f["fix"]["text"] and "`composer update`" in f["fix"]["text"] for f in broken),
+    f"an unparseable composer.lock is fixed from git or a full update, never update --lock ({[f['fix'] for f in broken]})")
+# EOL findings say what the repo pins, not what production runs.
+for case, fid in (("php-eol", "php.eol"), ("js-node-eol", "js.node.eol"), ("php-eol-ci", "php.eol"), ("js-node-eol-ci", "js.node.eol")):
+    fs = found(case, fid)
+    row(fs and all("confirm the server's" in f["message"] for f in fs), f"{case}: {fid} asks to confirm the server's version")
+pins = audit_json("php-eol-ci")["meta"].get("php_pins", {})
+row(pins.get(".github/workflows/test.yml:11 php-version") == "7.1", f"CI setup-php php-version '7.1' is read as a pin ({pins})")
+row("js.node.floating" not in notes_of("clean-ci-pins"), "CI lts/* and matrix node-version values are skipped, not noted as floating pins")
+# The EOL check is date-driven: Node 22 is fine on 2026-10-05 and dead after 2027-04-30.
+dest = tmp / "m" / "node-pin-disagree-nvmrc"
+proc = subprocess.run([sys.executable, audit, "--json", "--as-of", "2027-05-01", str(dest)], capture_output=True, text=True)
+ids = {f["id"] for f in json.loads(proc.stdout)["data"]} if proc.stdout.strip().startswith("{") else set()
+row("js.node.eol" in ids, "--as-of moves the EOL line (Node 22 dead on 2027-05-01)")
+# npx of a bin that is not a package name: the advice names the package that provides it.
+adv = found("npx-unpinned-bin-advice", "npx.unpinned")
+row(adv and "typescript" in adv[0]["fix"]["text"] and "add tsc " not in adv[0]["fix"]["text"],
+    "npx tsc advice names typescript, the package that provides tsc" + (f" (fix: {adv[0]['fix']!r})" if adv else ""))
+# DDEV's own end-of-life pin is ddev-ops' fact: pm-audit names it only as a pointer.
+for case, fid in (("php-eol", "php.eol"), ("js-node-eol", "js.node.eol")):
+    fs = found(case, fid)
+    row(fs and all(not f["file"].startswith(".ddev") and "ddev-ops" in f["message"] for f in fs),
+        f"{case}: {fid} lists the repo's own pins and leaves DDEV's to ddev-ops")
+
+def fresh(name):
+    d = tmp / "d" / name
+    materialise(fixtures / "clean", d)
+    return d
+def run(d, *args, env=None):
+    return subprocess.run([sys.executable, audit, *args, "--as-of", "2026-10-05", str(d)],
+                          capture_output=True, env=env)
+def ids_of(p):
+    try:
+        return {f["id"] for f in json.loads(p.stdout.decode("utf-8"))["data"]}
+    except Exception:  # noqa: BLE001 - any parse failure reads as "no ids"
+        return None
+# Missing research tables are an explicit blind spot, not a crash or a clean legacy pass.
+d = fresh("missing-legacy-facts")
+facts_path = Path(audit).resolve().parent.parent / "assets" / "package-manager-facts.json"
+facts = json.loads(facts_path.read_text(encoding="utf-8")); facts.pop("legacy_packages")
+missing_facts = tmp / "facts-without-legacy.json"; missing_facts.write_text(json.dumps(facts))
+p = run(d, "--json", "--facts", str(missing_facts))
+meta = json.loads(p.stdout.decode("utf-8"))["meta"] if p.stdout.strip().startswith(b"{") else {}
+legacy_check = next((c for c in meta.get("checks", []) if c.get("check") == "legacy"), {})
+row(legacy_check.get("status") == "skipped" and "legacy_packages" in legacy_check.get("reason", ""),
+    f"missing legacy_packages marks the legacy family skipped ({legacy_check})")
+facts = json.loads(facts_path.read_text(encoding="utf-8")); facts.pop("eol_soon_days")
+missing_eol = tmp / "facts-without-eol-window.json"; missing_eol.write_text(json.dumps(facts))
+p = run(fresh("missing-eol-window"), "--json", "--facts", str(missing_eol))
+meta = json.loads(p.stdout.decode("utf-8"))["meta"] if p.stdout.strip().startswith(b"{") else {}
+window_checks = {c.get("check"): c for c in meta.get("checks", [])}
+row(all(window_checks.get(f, {}).get("status") == "skipped" and "eol_soon_days" in window_checks[f].get("reason", "")
+        for f in ("node.pins", "php")), f"missing eol_soon_days skips runtime families ({window_checks})")
+# Encodings: a UTF-8 BOM manifest parses (npm accepts it), a UTF-16 PowerShell script is
+# read, and a non-ASCII file name prints on a cp1252 stdout instead of a traceback.
+d = fresh("bom")
+(d / "package.json").write_bytes(b"\xef\xbb\xbf" + (d / "package.json").read_bytes())
+p = run(d, "--json")
+row(p.returncode == 0, f"a UTF-8 BOM package.json parses (exit {p.returncode}, ids {ids_of(p)})")
+d = fresh("utf16")
+(d / "build.ps1").write_bytes("﻿npx eslint .\r\n".encode("utf-16-le"))
+p = run(d, "--json")
+row(ids_of(p) == {"npx.unpinned"}, f"a UTF-16LE PowerShell script is read (ids {ids_of(p)})")
+d = fresh("cp1252")
+(d / "构建.sh").write_text("npx eslint .\n", encoding="utf-8")
+env = {k: v for k, v in os.environ.items() if k != "PYTHONUTF8"}
+env["PYTHONIOENCODING"] = "cp1252"
+p = run(d, env=env)
+row(p.returncode == 10 and b"Traceback" not in p.stderr,
+    f"a non-ASCII file name prints on a cp1252 stdout (exit {p.returncode})")
+# JSON of the wrong shape inside a valid manifest or lock: findings, never a traceback.
+d = fresh("shapes")
+(d / "package.json").write_text(json.dumps({"name": "x", "dependencies": ["eslint"], "scripts": ["npx eslint"],
+                                            "engines": "24", "bin": ["x"], "workspaces": "packages/*"}))
+(d / "package-lock.json").write_text(json.dumps({"lockfileVersion": 3, "packages": []}))
+(d / "composer.json").write_text(json.dumps({"name": "x/y", "require": ["php"], "require-dev": "x", "config": []}))
+(d / "composer.lock").write_text(json.dumps({"packages": {}, "platform-overrides": []}))
+p = run(d, "--json")
+row(p.returncode in (0, 10) and ids_of(p) is not None and b"Traceback" not in p.stderr,
+    f"maps of the wrong type in valid JSON are skipped (exit {p.returncode})")
+for body in ("[]", "null"):
+    (tmp / "facts-bad.json").write_text(body)
+    p = run(fresh("facts-" + body), "--facts", str(tmp / "facts-bad.json"))
+    row(p.returncode == 4 and b"Traceback" not in p.stderr, f"--facts holding {body} exits 4 (exit {p.returncode})")
+# A tracked auth.json is committed even when .gitignore lists it (git is the authority).
+if shutil.which("git"):
+    d = fresh("git-tracked-authjson")
+    (d / "auth.json").write_text('{"http-basic": {}}\n')
+    subprocess.run(["git", "init", "-q", str(d)], capture_output=True)
+    subprocess.run(["git", "-C", str(d), "add", "-f", "auth.json"], capture_output=True)
+    p = run(d, "--json")
+    hit = [f for f in (json.loads(p.stdout.decode("utf-8"))["data"] if ids_of(p) is not None else [])
+           if f["id"] == "registry.authjson.committed"]
+    row(hit and "tracked by git" in hit[0]["message"] and "git rm --cached" in hit[0]["fix"]["text"],
+        f"a git-tracked auth.json is reported as tracked although .gitignore lists it (ids {ids_of(p)})")
+else:
+    row(True, "git-tracked auth.json case skipped: no git on PATH")
+
+# -- C4: catalogue, output formats, suppression, baseline, profile ---------------------------
+# Every row below was watched failing against the pre-C4 pm-audit (no --rules, no --format,
+# no config), then against a mutant that breaks only its own rule (catches()). A row that
+# reads another row's output is a bug magnet: each builds its own repo copy via clone().
+rules_doc = Path(sys.argv[5]).read_text(encoding="utf-8") if Path(sys.argv[5]).is_file() else ""
+RULES_URL = "references/pm-audit-rules.md"
+SCRIPT_FACTS = ["--facts", facts_file]
+
+def pa(d, *args, as_of="2026-10-05", script=None):
+    return subprocess.run([sys.executable, script or audit, *SCRIPT_FACTS, *args, "--as-of", as_of, str(d)],
+                          capture_output=True, text=True, encoding="utf-8")
+def pj(d, *args, **kw):
+    p = pa(d, "--json", *args, **kw)
+    try:
+        return p, json.loads(p.stdout)
+    except ValueError:
+        return p, None
+_n = [0]
+def clone(case):
+    _n[0] += 1
+    d = tmp / "c4" / f"{case}-{_n[0]}"
+    shutil.copytree(tmp / "m" / case, d)
+    return d
+def doc_sev(doc):
+    return {f["severity"] for f in doc["data"]}
+def ids_in(doc):
+    return {f["id"] for f in doc["data"]} if doc else None
+
+# catalogue <-> docs <-> fixtures: the three places an id lives must agree.
+rp = subprocess.run([sys.executable, audit, "--rules", "--format", "json"], capture_output=True, text=True, encoding="utf-8")
+catalogue = {r["id"]: r for r in json.loads(rp.stdout)["data"]} if rp.returncode == 0 else {}
+row(len(catalogue) >= 50 and rp.returncode == 0, f"--rules lists the catalogue without a PATH ({len(catalogue)} rules, exit {rp.returncode})")
+doc_rows = {m.group(1): m.group(2) for m in re.finditer(r'^\| <a id="([^"]+)"></a>`[^`]+` \| (error|warn|note) \|', rules_doc, re.M)}
+sev = {i: r["severity"] for i, r in catalogue.items()}
+drift = sorted(set(doc_rows) ^ set(sev)) + sorted(i for i in set(doc_rows) & set(sev) if doc_rows[i] != sev[i])
+row(doc_rows and not drift, f"pm-audit-rules.md and the catalogue agree on every id and severity ({len(doc_rows)} rows)" + (f" - drift: {drift}" if drift else ""))
+row(not (covered - set(catalogue)), f"every id a fixture raises is in the catalogue" + (f" - missing: {sorted(covered - set(catalogue))}" if covered - set(catalogue) else ""))
+# Note-severity rules are advisory notes (meta.notes), not findings a fixture's _expect lists;
+# each must still be raised somewhere, so the catalogue never documents a note nothing emits.
+note_ids = {i for i, r in catalogue.items() if r["severity"] == "note"}
+unfixtured = sorted(set(catalogue) - covered - note_ids)
+row(not unfixtured, "every non-note catalogue id has a fixture" + (f" - none for: {unfixtured}" if unfixtured else ""))
+audit_src = Path(audit).read_text(encoding="utf-8")
+unraised = sorted(i for i in note_ids if f'note("{i}"' not in audit_src)
+row(not unraised, f"every note-severity catalogue id is raised by a note() call ({len(note_ids)} notes)" + (f" - never raised: {unraised}" if unraised else ""))
+row(all(r["docs_url"] == f"{RULES_URL}#{i}" for i, r in catalogue.items()), "--rules docs_url is the rules file plus an anchor equal to the id")
+
+# every finding is enriched; a fix is a structured object that never invents a command
+def sound(f):
+    fx = f["fix"]
+    return (isinstance(fx, dict) and set(fx) == {"kind", "text", "command", "safe"} and fx["kind"] in ("command", "edit", "manual")
+            and fx["text"] == f["fix_text"] and isinstance(fx["safe"], bool)
+            and (fx["command"] is None or (fx["kind"] == "command" and f"`{fx['command']}`" in fx["text"]))
+            and f["confidence"] in ("high", "medium", "low") and f["docs_url"] == f"{RULES_URL}#{f['id']}"
+            and re.fullmatch(r"[0-9a-f]{16}", f["fingerprint"]) is not None)
+unsound = sorted({f["id"] for f in seen if not sound(f)})
+row(seen and not unsound, f"every finding has docs_url, confidence, a structured fix and a fingerprint ({len(seen)} checked)" + (f" - bad: {unsound}" if unsound else ""))
+row(any(f["fix"]["command"] for f in seen), "a command-kind fix carries the command its text quotes")
+rn = found("js-root-not-private", "js.root.not-private")
+dc = found("deploy-composer-dev", "deploy.composer.dev")
+row(rn and dc and rn[0]["fix"]["safe"] is True and dc[0]["fix"]["safe"] is False, "fix.safe is true only for a mechanical edit (private flag yes, shipping install no)")
+p = pa(tmp / "m" / "registry-token-committed")
+row(all(len(r.split("\t")) == 5 for r in p.stdout.splitlines() if r) and all(r.split("\t")[4] and not r.split("\t")[4].startswith("{") for r in p.stdout.splitlines() if r),
+    "TSV still ends with the plain fix text, not the JSON fix object")
+
+# --explain
+ep = subprocess.run([sys.executable, audit, "--explain", "js.lockfile.conflict"], capture_output=True, text=True, encoding="utf-8")
+row(ep.returncode == 0 and "Why:" in ep.stdout and "Fix (" in ep.stdout and f"{RULES_URL}#js.lockfile.conflict" in ep.stdout,
+    "--explain prints rationale, fix and the docs anchor")
+bp = subprocess.run([sys.executable, audit, "--explain", "no.such-rule"], capture_output=True, text=True, encoding="utf-8")
+row(bp.returncode == 2 and "unknown rule" in bp.stderr, f"--explain of an unknown id is a usage error (exit {bp.returncode})")
+
+# formats
+p, doc = pj(tmp / "m" / "deploy-composer-dev")
+p2 = pa(tmp / "m" / "deploy-composer-dev", "--format", "json")
+row(p.returncode == 10 and p2.stdout == p.stdout, "--format json is byte-identical to --json")
+row(pa(tmp / "m" / "clean", "--json", "--format", "sarif").returncode == 2, "--json with --format sarif is a usage error")
+row(pa(tmp / "m" / "clean", "--format", "xml").returncode == 2, "an unknown --format is a usage error")
+sp = pa(tmp / "m" / "deploy-composer-dev", "--format", "sarif")
+try:
+    sarif = json.loads(sp.stdout)
+except ValueError:
+    sarif = {}
+def sarif_problems(log):
+    bad = []
+    if log.get("version") != "2.1.0" or not isinstance(log.get("runs"), list) or len(log["runs"]) != 1:
+        return ["log needs version 2.1.0 and one run"]
+    run_ = log["runs"][0]
+    driver = run_.get("tool", {}).get("driver", {})
+    rules = driver.get("rules", [])
+    if not driver.get("name"):
+        bad.append("driver.name")
+    ids = [r.get("id") for r in rules]
+    if len(ids) != len(set(ids)) or set(ids) != set(catalogue):
+        bad.append("one rule per catalogue id")
+    if any(not r.get("shortDescription", {}).get("text") for r in rules):
+        bad.append("rule shortDescription.text")
+    for res in run_.get("results", []):
+        if not res.get("message", {}).get("text"):
+            bad.append("result message.text")
+        if res.get("level") not in ("error", "warning", "note"):
+            bad.append("result level")
+        i = res.get("ruleIndex")
+        if not (isinstance(i, int) and 0 <= i < len(rules) and rules[i]["id"] == res.get("ruleId")):
+            bad.append(f"ruleIndex of {res.get('ruleId')}")
+        for loc in res.get("locations", []):
+            ph = loc.get("physicalLocation", {})
+            if not ph.get("artifactLocation", {}).get("uri") or ("region" in ph and not (isinstance(ph["region"].get("startLine"), int) and ph["region"]["startLine"] >= 1)):
+                bad.append("physicalLocation")
+        if not res.get("partialFingerprints"):
+            bad.append("partialFingerprints")
+    return bad
+row(sp.returncode == 10 and sarif.get("runs", [{}])[0].get("results") and not sarif_problems(sarif), f"--format sarif is SARIF 2.1.0: required fields, one rule per id, ruleIndex points at its rule {sarif_problems(sarif)}")
+cp = pa(tmp / "m" / "clean", "--format", "sarif")
+row(cp.returncode == 0 and json.loads(cp.stdout)["runs"][0]["results"] == [], "a clean repo gives SARIF with an empty results array")
+gp = pa(tmp / "m" / "deploy-composer-dev", "--format", "github")
+gl = [l for l in gp.stdout.splitlines() if l]
+row(gp.returncode == 10 and gl and all(re.match(r"^::(warning|error) file=[^,]+,line=\d+::[a-z.-]+ ", l) for l in gl), f"--format github prints ::warning file=,line=:: annotations ({gl[:1]})")
+gp = pa(tmp / "m" / "registry-token-committed", "--format", "github")
+row(any(l.startswith("::error ") for l in gp.stdout.splitlines()), "an error-severity finding is an ::error annotation")
+d = clone("clean")
+pk = json.loads((d / "package.json").read_text()); pk["dependencies"] = {"fixture-git": "github:example/fixture%25x"}
+(d / "package.json").write_text(json.dumps(pk))
+d_pct = d
+gp = pa(d, "--format", "github")
+row("fixture%2525x" in gp.stdout, "a % in an annotation message is escaped as %25 (GitHub's workflow-command grammar)")
+ns = {}
+exec(compile(re.search(r"(def gh_data.*?)\ndef github_lines", source, re.S).group(1), "gh", "exec"), ns)
+row(ns["gh_data"]("a\r\nb") == "a%0D%0Ab" and ns["gh_prop"]("a:b,c") == "a%3Ab%2Cc" and ns["gh_data"]("a:b,c") == "a:b,c",
+    "CR and LF are escaped in messages; : and , only in property values")
+
+# --fail-on and --profile
+bower = tmp / "m" / "legacy-bower"
+p, doc = pj(bower, "--fail-on", "error")
+row(p.returncode == 0 and ids_in(doc) == {"legacy.bower"}, f"--fail-on error exits 0 for warnings but still reports them (exit {p.returncode})")
+row(pa(bower, "--fail-on", "warn").returncode == 10 and pa(bower).returncode == 10, "--fail-on warn and the default both fail on a warning")
+row(pa(tmp / "m" / "registry-token-committed", "--fail-on", "error").returncode == 10, "--fail-on error still fails on an error")
+row(pa(bower, "--fail-on", "info").returncode == 2, "an unknown --fail-on value is a usage error")
+lib = tmp / "m" / "js-lockfile-missing"
+p, doc = pj(lib, "--profile", "library")
+row(p.returncode == 0 and doc and doc["meta"]["profile_silenced"] >= 1 and doc["meta"]["profile"] == "library", f"--profile library drops the deploy-shaped lockfile rule (exit {p.returncode})")
+row(pa(lib).returncode == 10 and ids_in(pj(lib, "--profile", "site")[1]) == ids_in(pj(lib)[1]), "the default profile is site and silences nothing")
+noted = tmp / "m" / "clean-yarn-alias-source"  # clean, but carries the js.yarn.classic note
+p, doc = pj(noted, "--profile", "pedantic")
+row(p.returncode == 10 and "js.yarn.classic" in (ids_in(doc) or set()) and pa(noted).returncode == 0,
+    f"--profile pedantic turns advisory notes into findings (exit {p.returncode}; site exits {pa(noted).returncode})")
+row(pa(bower, "--profile", "strict").returncode == 2, "an unknown --profile is a usage error")
+d = clone("clean-yarn-alias-source")
+(d / ".pm-audit.json").write_text(json.dumps({"profile": "pedantic"}))
+row(pa(d).returncode == 10 and pa(d, "--profile", "site").returncode == 0, "the config's profile applies and --profile overrides it")
+
+# config: invalid, expired, unused, glob, boundary
+d = clone("legacy-bower")
+(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "path": "bower.json", "reason": "kept until the npm move", "until": "2026-12-31"}, {"id": "legacy.bower"}]}))
+p, doc = pj(d)
+row(ids_in(doc) == {"config.invalid", "legacy.bower"}, f"one bad ignore voids the whole config, so the good one waives nothing ({ids_in(doc)})")
+for bad_cfg, label in (({"ignore": [{"id": "no.such-rule", "reason": "kept until the npm move", "until": "2026-12-31"}]}, "an unknown id"),
+                       ({"ignore": [{"id": "config.invalid", "reason": "kept until the npm move", "until": "2026-12-31"}]}, "an ignore of config.invalid itself"),
+                       ({"ignore": [{"id": "legacy.bower", "reason": "kept until the npm move", "until": "31/12/2026"}]}, "a non-ISO until"),
+                       ({"ignore": [{"id": "legacy.bower", "reason": "  ", "until": "2026-12-31"}]}, "a blank reason"),
+                       ({"ignore": [{"id": "legacy.bower", "reason": ".", "until": "2026-12-31"}]}, "a punctuation-only reason"),
+                       ({"ignore": [{"id": "legacy.bower", "reason": "kept until the npm move", "until": "9999-12-31"}]},
+                        "an until more than a year ahead (a permanent mute)"),
+                       ({"ignore": [{"id": "legacy.bower", "path": "", "reason": "kept until the npm move", "until": "2026-12-31"}]},
+                        "an empty path (it used to widen to every file)"),
+                       ({"profile": "everything"}, "an unknown profile"),
+                       ({"ignores": []}, "an unknown key (a typo that would waive nothing)")):
+    d = clone("legacy-bower")
+    (d / ".pm-audit.json").write_text(json.dumps(bad_cfg))
+    row("config.invalid" in (ids_in(pj(d)[1]) or set()), f"config.invalid for {label}")
+d = clone("legacy-bower")
+(d / ".pm-audit.json").write_text("{not json")
+row("config.invalid" in (ids_in(pj(d)[1]) or set()), "config.invalid for a config that is not JSON")
+row(pa(bower, "--config", str(tmp / "nope.json")).returncode == 3, "an explicit --config that does not exist exits 3")
+d = clone("legacy-bower")
+(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "path": "bower.json", "reason": "kept until the npm move", "until": "2026-10-05"}]}))
+row(pa(d).returncode == 0, "an ignore is still live on its until day")
+row(pa(d, as_of="2026-10-06").returncode == 10, "an ignore is expired the day after its until")
+p, doc = pj(d, as_of="2026-10-06")
+exp = [f for f in doc["data"] if f["id"] == "suppression.expired"] if doc else []
+row(exp and "legacy.bower" in exp[0]["message"] and "2026-10-05" in exp[0]["message"] and exp[0]["file"] == ".pm-audit.json", "suppression.expired names the id, the date and the config file")
+p, doc = pj(d)
+sup = (doc or {"meta": {}})["meta"].get("suppressed", [])
+row(sup == [{"id": "legacy.bower", "file": "bower.json", "line": None, "by": "config", "reason": "kept until the npm move"}], f"a suppressed finding is listed in meta.suppressed with its reason ({sup})")
+d = clone("legacy-bower")
+(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "path": "other/*", "reason": "kept until the npm move", "until": "2026-12-31"}]}))
+p, doc = pj(d)
+row(ids_in(doc) == {"legacy.bower"} and "suppression.unused" in {n["id"] for n in doc["meta"]["notes"]},
+    "an ignore whose path matches nothing leaves the finding and raises suppression.unused (a note)")
+d = clone("clean")
+(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "reason": "kept until the npm move", "until": "2026-12-31"}]}))
+p, doc = pj(d)
+row(p.returncode == 0 and "suppression.unused" in {n["id"] for n in doc["meta"]["notes"]}, "suppression.unused is a note: it never changes the exit code")
+d = clone("deploy-composer-dev")
+(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "deploy.composer.dev", "path": ".github/workflows/*.yml", "reason": "kept until the npm move", "until": "2026-12-31"}]}))
+row(pa(d).returncode == 0, "a path glob with a leading dot directory matches (.github/workflows/*.yml)")
+d = clone("legacy-bower")
+alt = tmp / "c4" / "alt-config.json"
+alt.write_text(json.dumps({"ignore": [{"id": "legacy.bower", "reason": "kept until the npm move", "until": "2026-12-31"}]}))
+row(pa(d, "--config", str(alt)).returncode == 0, "--config reads a file outside the repo; a path-less ignore matches every file")
+
+# inline ignores
+d = clone("clean-suppression-inline")
+p, doc = pj(d)
+row(p.returncode == 0 and doc["meta"]["suppressed"][0]["by"] == "inline", "an inline ignore on the line above waives the finding and is recorded")
+d = clone("clean-suppression-inline")
+(d / "scripts" / "bootstrap.sh").write_text("#!/bin/sh\nnpx eslint . # pm-audit: ignore[npx.unpinned] pinned by the image\n")
+row(pa(d).returncode == 0, "an inline ignore on the flagged line itself waives it")
+d = clone("clean-suppression-inline")
+(d / "scripts" / "bootstrap.sh").write_text("#!/bin/sh\n# pm-audit: ignore[legacy.bower] wrong rule\nnpx eslint .\n")
+row(pa(d).returncode == 10, "an inline ignore for a different id waives nothing")
+d = clone("suppression-inline-no-reason")
+p, doc = pj(d)
+row(ids_in(doc) == {"npx.unpinned"} and "suppression.inline-no-reason" in {n["id"] for n in doc["meta"]["notes"]}, "an inline ignore with no reason waives nothing and says why")
+
+# baseline
+d = clone("deploy-bundle-credentials")
+p, doc = pj(d)
+base = tmp / "c4" / "baseline.json"
+base.write_text(p.stdout, encoding="utf-8")
+row(doc and doc["data"] and pa(d, "--baseline", str(base)).returncode == 0, "--baseline hides every finding already in the baseline (exit 0)")
+bp_, bdoc = pj(d, "--baseline", str(base))
+row(bdoc and bdoc["data"] == [] and bdoc["meta"]["baseline"]["known"] == len(doc["data"]), "meta.baseline counts the findings the baseline absorbed")
+for wf in (d / ".github" / "workflows").glob("*.yml"):
+    wf.write_text("# a comment that shifts every line below it\n" + wf.read_text(encoding="utf-8"), encoding="utf-8")
+shifted_line = {(f["file"], f["line"]) for f in pj(d)[1]["data"]} != {(f["file"], f["line"]) for f in doc["data"]}
+row(shifted_line and pa(d, "--baseline", str(base)).returncode == 0, "a baselined finding stays hidden when its line moves (fingerprint is id+file+subject, not line)")
+stripped = json.loads(p.stdout)
+for f in stripped["data"]:
+    f.pop("fingerprint", None)
+base2 = tmp / "c4" / "baseline-old.json"
+base2.write_text(json.dumps(stripped), encoding="utf-8")
+row(pa(tmp / "m" / "deploy-bundle-credentials", "--baseline", str(base2)).returncode == 0,
+    "a baseline from before fingerprints existed still matches findings at the same line (id, file, line, message)")
+row(pa(d, "--baseline", str(base2)).returncode == 10,
+    "a legacy baseline resurfaces a finding whose line moved (no line text to prove it is the same one)")
+d = clone("legacy-bower")
+pb = pj(d)[0].stdout
+base3 = tmp / "c4" / "baseline-bower.json"
+base3.write_text(pb, encoding="utf-8")
+pk = json.loads((d / "package.json").read_text()); pk.setdefault("devDependencies", {})["node-sass"] = "^9.0.0"
+(d / "package.json").write_text(json.dumps(pk))
+nb = ids_in(pj(d, "--baseline", str(base3))[1]) or set()
+row("legacy.node-sass" in nb and "legacy.bower" not in nb, f"--baseline reports only the finding that is new ({sorted(nb)})")
+row(pa(d, "--baseline", str(tmp / "nope.json")).returncode == 3, "a missing --baseline file exits 3")
+(tmp / "c4" / "garbage.json").write_text("{not json")
+row(pa(d, "--baseline", str(tmp / "c4" / "garbage.json")).returncode == 4, "an unparseable --baseline file exits 4")
+
+# refute-ux findings: suppression and baselines must not hide debt
+d = clone("clean-suppression-inline")
+(d / "scripts" / "bootstrap.sh").write_text("#!/bin/sh\nnpx eslint . # pm-audit: ignore[npx.unpinned] pinned by the image\nnpx prettier .\n")
+p, doc = pj(d)
+row(any(f["id"] == "npx.unpinned" and f["line"] == 3 for f in (doc or {"data": []})["data"]),
+    "a trailing inline ignore covers its own line, not the next one")
+d = clone("registry-token-committed")
+(d / ".npmrc").write_text((d / ".npmrc").read_text().replace(
+    "\n//npm.example.com/:_authToken", "\n# pm-audit: ignore[registry.token.committed] it is fine\n//npm.example.com/:_authToken", 1))
+p, doc = pj(d)
+row(p.returncode == 10 and "registry.token.committed" in (ids_in(doc) or set())
+    and "suppression.inline-error" in {n["id"] for n in doc["meta"]["notes"]},
+    "an inline ignore cannot mute an error (no expiry, no reviewer): the finding stays and a note says why")
+d = clone("deploy-composer-update")
+(d / "Dockerfile").write_text("FROM php:8.4-fpm\nWORKDIR /app\nRUN composer require acme/tool:5\n", encoding="utf-8")
+base4 = tmp / "c4" / "baseline-require.json"
+base4.write_text(pj(d)[0].stdout, encoding="utf-8")
+(d / "Dockerfile").write_text("FROM php:8.4-fpm\nWORKDIR /app\nRUN composer require acme/tool:5\n"
+                              "RUN composer require evil/backdoor\n", encoding="utf-8")
+new_rows = [f for f in (pj(d, "--baseline", str(base4))[1] or {"data": []})["data"] if f["id"] == "deploy.composer.adhoc"]
+row([f["line"] for f in new_rows] == [4],
+    f"--baseline reports a new `composer require` whose message matches a baselined one (lines {[f['line'] for f in new_rows]})")
+d = clone("clean")
+(d / ".github" / "actions" / "setup").mkdir(parents=True)
+(d / ".github" / "actions" / "setup" / "action.yml").write_text(
+    "runs:\n  using: composite\n  steps:\n    - run: npm install -g serve\n      shell: bash\n")
+(d / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
+(d / ".github" / "workflows" / "ci.yml").write_text("name: ci\non: push\njobs:\n  ci:\n    runs-on: ubuntu-latest\n    steps:\n"
+                                                 "      - uses: ./.github/actions/setup # pm-audit: ignore[deploy.global.unpinned] serve only\n")
+row("deploy.global.unpinned" in (ids_in(pj(d)[1]) or set()),
+    "an inline ignore on a local `uses:` line is not honoured (its findings come from the called file)")
+d = clone("clean")
+pk = json.loads((d / "package.json").read_text()); pk["engines"] = {"node": "16"}
+(d / "package.json").write_text(json.dumps(pk, indent=2))
+(d / ".nvmrc").unlink()  # leave engines.node as the pin, so the finding's file is "package.json engines.node"
+p, doc = pj(d)
+eol = [f for f in (doc or {"data": []})["data"] if f["id"] == "js.node.eol"]
+(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "js.node.eol", "path": "package.json", "reason": "the server runs Node 22", "until": "2026-12-31"}]}))
+p2, doc2 = pj(d)
+row(eol and "js.node.eol" not in (ids_in(doc2) or set()) and "package.json" in {f.get("path") for f in eol},
+    f"a config glob matches a finding whose file is a location like 'package.json engines.node' ({[f['file'] for f in eol]})")
+d = clone("clean")
+(d / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
+(d / ".github" / "workflows" / "de,ploy.yml").write_text("name: d\non: push\njobs:\n  d:\n    runs-on: ubuntu-latest\n    steps:\n"
+                                                      "      - run: npm install -g serve\n")
+gh = pa(d, "--format", "github").stdout
+sar = json.loads(pa(d, "--format", "sarif").stdout or "{}")
+uris = [loc["physicalLocation"]["artifactLocation"]["uri"] for r in sar.get("runs", [{}])[0].get("results", []) for loc in r.get("locations", [])]
+row("file=.github/workflows/de%2Cploy.yml" in gh and ".github/workflows/de%2Cploy.yml" in uris,
+    f"a comma in a file name survives into annotations and SARIF ({uris})")
+d = clone("clean")
+pk = json.loads((d / "package.json").read_text()); pk.setdefault("dependencies", {})["x\n::error file=README.md::pwned 100%"] = "github:a/b"
+(d / "package.json").write_text(json.dumps(pk, indent=2))
+out = pa(d).stdout
+row(out and not any(line.startswith("::") for line in out.splitlines()) and all(line.count("\t") == 4 for line in out.splitlines() if line),
+    "a newline in repo text cannot forge a workflow command through TSV (one escaped row per finding)")
+ex = subprocess.run([sys.executable, audit, "--explain", "js.lockfile.missing", "--format", "json"], capture_output=True, text=True, encoding="utf-8")
+exr = json.loads(ex.stdout)["data"][0] if ex.returncode == 0 else {}
+row(isinstance(exr.get("fix"), dict) and exr["fix"].get("text") == exr.get("fix_text"), "--explain JSON uses the same fix object as a finding")
+p, doc = pj(tmp / "m" / "js-engine-floor", "--profile", "library")
+row("js.engine.floor" in (ids_in(doc) or set()), "--profile library still reports js.engine.floor (it fires only on a literal pin)")
+row("silenced by profile library" in pa(tmp / "m" / "js-lockfile-missing", "--profile", "library").stderr,
+    "what a profile silences is counted on stderr in every format")
+
+# refute-ux-fix findings (Codex re-refute)
+d = clone("deploy-composer-update")
+(d / "Dockerfile").write_text("FROM php:8.4-fpm\nRUN composer require acme/tool:5\n", encoding="utf-8")
+legacy = json.loads(pj(d)[0].stdout)
+for f in legacy["data"]:
+    f.pop("fingerprint", None)
+base5 = tmp / "c4" / "baseline-legacy-require.json"
+base5.write_text(json.dumps(legacy), encoding="utf-8")
+(d / "Dockerfile").write_text("FROM php:8.4-fpm\nRUN composer require acme/tool:5\nRUN composer require evil/backdoor\n", encoding="utf-8")
+lines5 = [f["line"] for f in (pj(d, "--baseline", str(base5))[1] or {"data": []})["data"] if f["id"] == "deploy.composer.adhoc"]
+row(lines5 == [3], f"a fingerprint-less (legacy) baseline cannot hide a new twin either (lines {lines5})")
+d = clone("clean")
+(d / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
+(d / ".github" / "workflows" / "my job.yml").write_text("name: j\non: push\njobs:\n  j:\n    runs-on: ubuntu-latest\n    steps:\n"
+                                                      "      - uses: actions/setup-node@v4\n        with:\n          node-version: '16'\n")
+paths = {f.get("path") for f in (pj(d)[1] or {"data": []})["data"] if f["file"].startswith(".github/workflows/my job.yml")}
+row(paths == {".github/workflows/my job.yml"}, f"a file name with a space keeps its whole path ({paths})")
+sar = json.loads(pa(noted, "--profile", "pedantic", "--format", "sarif").stdout or "{}")
+results = sar.get("runs", [{}])[0].get("results", [])
+row(results and all("ruleIndex" in r for r in results)
+    and subprocess.run([sys.executable, audit, "--explain", "js.yarn.classic"], capture_output=True).returncode == 0,
+    "a note promoted by pedantic is a catalogued rule (SARIF ruleIndex, --explain)")
+d = clone("clean")
+(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "reason": "kept until the npm move", "until": "2026-12-31"}]}))
+p, doc = pj(d, "--profile", "pedantic")
+row(p.returncode == 10 and "suppression.unused" in (ids_in(doc) or set()), "pedantic also promotes the notes the suppression pass raises")
+d = clone("clean")
+(d / "README.md").write_text((d / "README.md").read_text() + "\n* pm-audit: ignore[npx.unpinned] ordinary prose list item\n`npx cowsay hi`\n")
+row("npx.unpinned" in (ids_in(pj(d)[1]) or set()), "Markdown prose or a list item cannot carry an ignore (only an HTML comment)")
+d_mdh = clone("clean")
+(d_mdh / "README.md").write_text((d_mdh / "README.md").read_text() + "\n# pm-audit: ignore[npx.unpinned] a heading, not a comment\n`npx cowsay hi`\n")
+row("npx.unpinned" in (ids_in(pj(d_mdh)[1]) or set()), "a Markdown heading is not a comment line for an ignore")
+d_mdc = clone("clean")
+(d_mdc / "README.md").write_text((d_mdc / "README.md").read_text()
+                                 + "\n<!-- pm-audit: ignore[npx.unpinned] the docs example is illustrative only -->\n`npx cowsay hi`\n")
+row("npx.unpinned" not in (ids_in(pj(d_mdc)[1]) or set()), "an HTML comment above a Markdown line does carry an ignore")
+d = clone("clean-suppression-inline")
+(d / "scripts" / "bootstrap.sh").write_text("#!/bin/sh\n# pm-audit: ignore[npx.unpinned] .\nnpx eslint .\n")
+p, doc = pj(d)
+row(p.returncode == 10 and "suppression.inline-no-reason" in {n["id"] for n in doc["meta"]["notes"]},
+    "an inline reason must say something too ('.' is no reason)")
+d = clone("clean")
+(d / "scripts").mkdir(exist_ok=True)
+(d / "scripts" / "large.sh").write_text("#" * (513 * 1024) + "\nnpx eslint .\n")
+npx_row = next((c for c in (pj(d)[1] or {"meta": {"checks": []}})["meta"]["checks"] if c["check"] == "npx"), {})
+row(npx_row.get("status") == "skipped" and "large.sh" in npx_row.get("reason", ""), f"an oversized script makes the npx check skipped, not pass ({npx_row})")
+d = clone("legacy-bower")
+(d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "reason": "等待迁移完成以后删除", "until": "2026-12-31"}]}, ensure_ascii=False), encoding="utf-8")
+row(pa(d).returncode == 0, "a reason written in a non-Latin script is a reason")
+
+# the new formats print no secret either
+for case in leaky:
+    for fmt in ("sarif", "github"):
+        proc = subprocess.run([sys.executable, audit, "--format", fmt, "--as-of", "2026-10-05", str(tmp / "m" / case.name)],
+                              capture_output=True, encoding="utf-8", errors="replace")
+        shown = [s for s in SECRETS if s in proc.stdout + proc.stderr]
+        row(proc.returncode in (0, 10) and not shown, f"{case.name}: no secret printed ({fmt}, exit {proc.returncode})" + (f" - printed {shown}" if shown else ""))
+
+# Mutation proof for the rules the fixtures cannot name by id. catches(): the real audit must
+# behave (probe True) and a mutant that breaks only this rule must not (probe False). A mutant
+# that fails to run proves nothing, so it fails the row.
+def catches(label, old, new, probe):
+    if source.count(old) != 1:
+        row(False, f"mutation {label}: source token matches {source.count(old)} times, want 1")
+        return
+    mutant = mutants / (re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") + ".py")
+    mutant.write_text(source.replace(old, new), encoding="utf-8")
+    try:
+        real, broken = probe(Path(audit)), probe(mutant)
+    except Exception as exc:  # noqa: BLE001 - a mutant that cannot run must fail loudly
+        row(False, f"mutation {label}: did not run ({' '.join(str(exc).split())[-140:]})")
+        return
+    row(real and not broken, f"mutation {label}: " + ("caught" if real and not broken else f"MISSED (real={real}, mutant={broken})"))
+
+def runs(proc):
+    if proc.returncode not in (0, 10):
+        raise RuntimeError(f"exit {proc.returncode}: {proc.stderr.strip()[-120:]}")
+    return proc
+def sc(case_dir, *args, **kw):
+    return lambda script: runs(pa(case_dir, *args, script=script, **kw))
+d_exp = tmp / "m" / "suppression-expired"
+catches("an expired ignore must not waive", 'live = [e for e in entries if e["until"] >= as_of]', "live = list(entries)",
+        lambda s: "legacy.bower" in {f["id"] for f in json.loads(runs(pa(d_exp, "--json", script=s)).stdout)["data"]})
+d_day = clone("clean-suppression-config")
+(d_day / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "reason": "kept until the npm move", "until": "2026-10-05"}]}))
+catches("an ignore is live on its until day", 'e["until"] >= as_of]', 'e["until"] > as_of]', lambda s: runs(pa(d_day, script=s)).returncode == 0)
+d_unused = clone("clean")
+(d_unused / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "reason": "kept until the npm move", "until": "2026-12-31"}]}))
+catches("an unused ignore raises a note", 'elif not any(f["id"] == e["id"] and ignore_matches(e, f) for f in raw):', "elif False:",
+        lambda s: "suppression.unused" in {n["id"] for n in json.loads(runs(pa(d_unused, "--json", script=s)).stdout)["meta"]["notes"]})
+d_in = tmp / "m" / "clean-suppression-inline"
+catches("an inline ignore reads the line above", "for idx in (line - 1, line - 2):", "for idx in (line - 1,):", lambda s: runs(pa(d_in, script=s)).returncode == 0)
+d_nr = tmp / "m" / "suppression-inline-no-reason"
+catches("an inline ignore needs a reason", 'return ("ok", reason) if reason_ok(reason) else ("noreason", None)', 'return ("ok", reason)', lambda s: runs(pa(d_nr, script=s)).returncode == 10)
+d_bad = clone("legacy-bower")
+(d_bad / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "legacy.bower", "path": "bower.json", "reason": "kept until the npm move", "until": "2026-12-31"}, {"id": "legacy.bower"}]}))
+catches("an invalid config applies none of itself", 'if not problems else (None, problems)', 'if True else (None, problems)',
+        lambda s: "legacy.bower" in {f["id"] for f in json.loads(runs(pa(d_bad, "--json", script=s)).stdout)["data"]})
+d_b = clone("deploy-bundle-credentials")
+for wf in (d_b / ".github" / "workflows").glob("*.yml"):
+    wf.write_text("# shifts every line\n" + wf.read_text(encoding="utf-8"), encoding="utf-8")
+base_b = tmp / "c4" / "baseline-bundle.json"
+base_b.write_text(pj(tmp / "m" / "deploy-bundle-credentials")[0].stdout, encoding="utf-8")
+catches("a fingerprint masks line numbers in the message", 'subject = re.sub(r"(?i)\\bline \\d+\\b", "line N", f.get("message", ""))',
+        'subject = f.get("message", "")', lambda s: runs(pa(d_b, "--baseline", str(base_b), script=s)).returncode == 0)
+catches("a baseline row without a fingerprint is matched", '{legacy_key(r) for r in rows if not r.get("fingerprint")})', 'set())',
+        lambda s: runs(pa(tmp / "m" / "deploy-bundle-credentials", "--baseline", str(base2), script=s)).returncode == 0)
+catches("--fail-on error lets warnings through", 'if fail_on == "error":', 'if False:', lambda s: runs(pa(bower, "--fail-on", "error", script=s)).returncode == 0)
+catches("the library profile drops deploy-shaped rules", 'kept = [f for f in raw if f["id"] not in LIBRARY_SILENCED]', "kept = list(raw)",
+        lambda s: runs(pa(lib, "--profile", "library", script=s)).returncode == 0)
+catches("the pedantic profile promotes notes to findings",
+        'a.add("warn", n["id"], n["file"], n["message"], rule["fix"] if rule else "see --rules")\n'
+        '            a.findings[-1]["path"] = real_path(root, n["file"])', 'pass',
+        lambda s: runs(pa(noted, "--profile", "pedantic", script=s)).returncode == 10)
+catches("a % in an annotation is escaped", 'return s.replace("%", "%25")', "return s",
+        lambda s: "fixture%2525x" in runs(pa(d_pct, "--format", "github", script=s)).stdout)
+catches("a SARIF result points at its own rule", 'res["ruleIndex"] = index[f["id"]]', 'res["ruleIndex"] = 0',
+        lambda s: not sarif_problems(json.loads(runs(pa(tmp / "m" / "deploy-composer-dev", "--format", "sarif", script=s)).stdout)))
+catches("a command-kind fix quotes the command", 'if command is None:\n            kind = "manual"', 'if command is None:\n            kind = "command"',
+        lambda s: all(f["fix"]["command"] or f["fix"]["kind"] != "command" for f in json.loads(runs(pa(tmp / "m" / "js-lockfile-stale", "--json", script=s)).stdout)["data"]))
+
+# refute-ux guards: each mutant restores one way debt could hide.
+# Not "fresh": fresh(name) above is in this same program, and a second def would shadow it.
+def fresh_edited(case, edit):
+    d = clone(case)
+    edit(d)
+    return d
+d_trail = fresh_edited("clean-suppression-inline", lambda d: (d / "scripts" / "bootstrap.sh").write_text(
+    "#!/bin/sh\nnpx eslint . # pm-audit: ignore[npx.unpinned] pinned by the image\nnpx prettier .\n"))
+catches("a trailing inline ignore covers its own line only",
+        'if idx == line - 2 and not COMMENT_ONLY.match(rows[idx]):',
+        'if False:',
+        lambda s: runs(pa(d_trail, script=s)).returncode == 10)
+d_err = fresh_edited("registry-token-committed", lambda d: (d / ".npmrc").write_text((d / ".npmrc").read_text().replace(
+    "\n//npm.example.com/:_authToken", "\n# pm-audit: ignore[registry.token.committed] it is fine\n//npm.example.com/:_authToken", 1)))
+catches("an inline ignore cannot mute an error", 'if hit and hit[0] == "ok" and f["severity"] == "error":', 'if False:',
+        lambda s: runs(pa(d_err, script=s)).returncode == 10)
+def uses_repo(d):
+    (d / ".github" / "actions" / "setup").mkdir(parents=True)
+    (d / ".github" / "actions" / "setup" / "action.yml").write_text(
+        "runs:\n  using: composite\n  steps:\n    - run: npm install -g serve\n      shell: bash\n")
+    (d / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
+    (d / ".github" / "workflows" / "ci.yml").write_text("name: ci\non: push\njobs:\n  ci:\n    runs-on: ubuntu-latest\n    steps:\n"
+                                                     "      - uses: ./.github/actions/setup # pm-audit: ignore[deploy.global.unpinned] serve only\n")
+d_uses = fresh_edited("clean", uses_repo)
+catches("an inline ignore on a local uses: line is not honoured",
+        'if 0 < line <= len(rows) and LOCAL_USES_LINE.search(rows[line - 1]):', 'if False:',
+        lambda s: runs(pa(d_uses, script=s)).returncode == 10)
+d_req0 = fresh_edited("deploy-composer-update", lambda d: (d / "Dockerfile").write_text("FROM php:8.4-fpm\nRUN composer require acme/tool:5\n"))
+d_req1 = fresh_edited("deploy-composer-update", lambda d: (d / "Dockerfile").write_text(
+    "FROM php:8.4-fpm\nRUN composer require acme/tool:5\nRUN composer require evil/backdoor\n"))
+def new_require_lines(s):
+    b = tmp / "c4" / f"req-base-{abs(hash(str(s)))}.json"
+    b.write_text(runs(pa(d_req0, "--json", script=s)).stdout, encoding="utf-8")
+    data = json.loads(runs(pa(d_req1, "--json", "--baseline", str(b), script=s)).stdout)["data"]
+    return [f["line"] for f in data if f["id"] == "deploy.composer.adhoc"] == [3]
+catches("a fingerprint includes the flagged line's text", '" ".join(line_text.split())', '""', new_require_lines)
+d_inj = fresh_edited("clean", lambda d: (d / "package.json").write_text(json.dumps({**json.loads((d / "package.json").read_text()),
+    "dependencies": {"x\n::error file=README.md::pwned": "github:a/b"}}, indent=2)))
+catches("TSV fields escape newlines", 'return str(s).replace("\\\\", "\\\\\\\\").replace("\\t", "\\\\t").replace("\\r", "\\\\r").replace("\\n", "\\\\n")',
+        "return str(s)", lambda s: not any(l.startswith("::") for l in runs(pa(d_inj, script=s)).stdout.splitlines()))
+d_loc = fresh_edited("clean", lambda d: (
+    (d / "package.json").write_text(json.dumps({**json.loads((d / "package.json").read_text()), "engines": {"node": "16"}}, indent=2)),
+    (d / ".nvmrc").unlink(),
+    (d / ".pm-audit.json").write_text(json.dumps({"ignore": [{"id": "js.node.eol", "path": "package.json",
+                                                              "reason": "the server runs Node 22", "until": "2026-12-31"}]}))))
+catches("a config glob matches the real file of a location", 'f["path"] = real_path(root, f.get("file") or "")', 'f["path"] = f.get("file")',
+        lambda s: "js.node.eol" not in {f["id"] for f in json.loads(runs(pa(d_loc, "--json", script=s)).stdout)["data"]})
+catches("the library profile keeps js.engine.floor", 'LIBRARY_SILENCED = {"js.lockfile.missing"', 'LIBRARY_SILENCED = {"js.engine.floor", "js.lockfile.missing"',
+        lambda s: "js.engine.floor" in {f["id"] for f in json.loads(runs(pa(tmp / "m" / "js-engine-floor", "--json", "--profile", "library", script=s)).stdout)["data"]})
+d_dot = fresh_edited("legacy-bower", lambda d: (d / ".pm-audit.json").write_text(json.dumps(
+    {"ignore": [{"id": "legacy.bower", "reason": ".", "until": "2026-12-31"}]})))
+catches("a config reason must say something", "IGNORE_REASON_MIN = 8", "IGNORE_REASON_MIN = 0",
+        lambda s: "config.invalid" in {f["id"] for f in json.loads(runs(pa(d_dot, "--json", script=s)).stdout)["data"]})
+d_far = fresh_edited("legacy-bower", lambda d: (d / ".pm-audit.json").write_text(json.dumps(
+    {"ignore": [{"id": "legacy.bower", "reason": "kept until the npm move", "until": "9999-12-31"}]})))
+catches("a Markdown ignore needs an HTML comment", 'if markdown and "<!--" not in rows[idx][:m.start()]:', "if False:",
+        lambda s: runs(pa(d_mdh, script=s)).returncode == 10)
+d_big = fresh_edited("clean", lambda d: ((d / "scripts").mkdir(exist_ok=True), (d / "scripts" / "large.sh").write_text("#" * (513 * 1024) + "\nnpx eslint .\n")))
+catches("an oversized script marks the npx check skipped",
+        'self.blind("npx", f"skipped a file over {MAX_DOC_BYTES // 1024} KiB: {rel(self.root, p)}")', "pass",
+        lambda s: next(c for c in json.loads(runs(pa(d_big, "--json", script=s)).stdout)["meta"]["checks"] if c["check"] == "npx")["status"] == "skipped")
+def legacy_twin(s):
+    b = tmp / "c4" / f"legacy-base-{abs(hash(str(s)))}.json"
+    rows = json.loads(runs(pa(d_req0, "--json", script=s)).stdout)
+    for f in rows["data"]:
+        f.pop("fingerprint", None)
+    b.write_text(json.dumps(rows), encoding="utf-8")
+    data = json.loads(runs(pa(d_req1, "--json", "--baseline", str(b), script=s)).stdout)["data"]
+    return [f["line"] for f in data if f["id"] == "deploy.composer.adhoc"] == [3]
+catches("a legacy baseline row matches on its line too", 'return (f.get("id"), f.get("file"), f.get("line"), f.get("message"))',
+        'return (f.get("id"), f.get("file"), f.get("message"))', legacy_twin)
+d_sp = fresh_edited("clean", lambda d: ((d / ".github" / "workflows").mkdir(parents=True, exist_ok=True),
+                                 (d / ".github" / "workflows" / "my job.yml").write_text(
+                                     "name: j\non: push\njobs:\n  j:\n    runs-on: ubuntu-latest\n    steps:\n"
+                                     "      - uses: actions/setup-node@v4\n        with:\n          node-version: '16'\n")))
+catches("real_path keeps a file name with a space", "for k in range(len(words), 0, -1):", "for k in range(1, 0, -1):",
+        lambda s: {f.get("path") for f in json.loads(runs(pa(d_sp, "--json", script=s)).stdout)["data"]
+                   if f["file"].startswith(".github/workflows/my job.yml")} == {".github/workflows/my job.yml"})
+catches("a config ignore expires within a year", "elif day > as_of + dt.timedelta(days=IGNORE_MAX_DAYS):", "elif False:",
+        lambda s: "config.invalid" in {f["id"] for f in json.loads(runs(pa(d_far, "--json", script=s)).stdout)["data"]})
+PY
+)
+
+# A local action directory symlinked OUTSIDE the checkout must not be read: containment is
+# tested on the resolved path. Needs a real symlink - Git Bash copies unless MSYS asks for a
+# native one, and Windows without symlink rights cannot make one, so that host prints SKIP.
+SL="$TMP/symlink-action"
+mkdir -p "$SL/repo/.github/workflows" "$SL/repo/.github/actions" "$SL/outside"
+printf 'runs:\n  using: composite\n  steps:\n    - run: npm install -g outside-repo-tool\n      shell: bash\n' > "$SL/outside/action.yml"
+printf 'name: build\non: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: ./.github/actions/setup\n' \
+  > "$SL/repo/.github/workflows/build.yml"
+if MSYS=winsymlinks:nativestrict ln -s "$SL/outside" "$SL/repo/.github/actions/setup" 2>/dev/null \
+    && [ -L "$SL/repo/.github/actions/setup" ]; then
+  sl="$("$PY" "$AUDIT" --json "$SL/repo" 2>/dev/null | "$PY" -c '
+import json, sys
+d = json.load(sys.stdin)
+leak = [f["id"] for f in d["data"] if "outside-repo-tool" in f["message"]]
+dep = next((c for c in d["meta"]["checks"] if c["check"] == "deploy"), {})
+print("ok" if not leak and dep.get("status") == "skipped" and "outside the repo" in dep.get("reason", "")
+      else f"bad: leak={leak} deploy={dep}")' 2>&1)"
+  [[ "$sl" == ok ]] && ok "symlinked local action outside the repo is not read (deploy skipped)" \
+    || no "symlinked local action outside the repo: $sl"
+else
+  echo "  SKIP  symlinked local action: this host cannot make a real symlink" >&2
+fi
+
+# -- 4. version-range parser (npm semver vs Composer dialects) -----------------------
+rng="$(cd "$(dirname "$AUDIT")" && "$PY" -c '
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("a", sys.argv[1])
+a = importlib.util.module_from_spec(spec); spec.loader.exec_module(a)
+N = lambda m: ((m, 0, 0), (m + 1, 0, 0))
+P = lambda x, y: ((x, y, 0), (x, y + 1, 0))
+V = lambda x, y, z: ((x, y, z), (x, y, z + 1))
+cases = [
+  ("^24.1.0", N(24), "npm", True), ("^24.1.0", N(25), "npm", False),
+  (">=22 <25", N(24), "npm", True), (">=22 <25", N(25), "npm", False),
+  ("22.x || 24.x", N(24), "npm", True), ("22.x || 24.x", N(23), "npm", False),
+  ("20 - 22", N(22), "npm", True), ("20 - 22", N(23), "npm", False),
+  (">= 18.17", N(24), "npm", True), ("18.x", N(20), "npm", False),
+  ("~8.2", P(8, 3), "composer", True), ("~8.2", P(8, 3), "npm", False),
+  ("^8.2", P(8, 4), "composer", True), (">=8.1 <8.4", P(8, 4), "composer", False),
+  ("8.2.* || 8.3.*", P(8, 3), "composer", True), ("^7.4 | ^8.0", P(8, 1), "composer", True),
+  ("^7.4", P(8, 1), "composer", False), (">=8.2,<8.5", P(8, 4), "composer", True),
+  ("^8.4@dev", P(8, 4), "composer", True), ("^0.3", N(0), "npm", True),
+  # Composer pads a partial version for a plain comparator (>8.2 is >8.2.0.0, admitting
+  # 8.2.1) where npm reads an X-range (>8.2 is >=8.3.0); a bare 8.2 is exactly 8.2.0.
+  (">8.2", P(8, 2), "composer", True), (">8.2", P(8, 2), "npm", False),
+  ("<=8.2", P(8, 2), "composer", True), ("<=8.2", V(8, 2, 5), "composer", False), ("<=8.2", V(8, 2, 5), "npm", True),
+  ("8.2", V(8, 2, 3), "composer", False), ("8.2", V(8, 2, 3), "npm", True),
+  # != excludes one version (Composer only), and <> is its alias.
+  ("!=8.3.0", V(8, 3, 0), "composer", False), ("!=8.3.0", P(8, 3), "composer", True),
+  ("8.3.0 !=8.3.0", P(8, 3), "composer", False), ("<>8.3.0", V(8, 3, 0), "composer", False),
+  (">=8.2 !=8.2.5", V(8, 2, 5), "composer", False),
+]
+bad = [f"{s!r}/{d}" for s, iv, d, want in cases if a.admits(s, iv[0], iv[1], d) is not want]
+bad += ["unparseable returns None"] if a.admits("banana", (1,0,0), (2,0,0)) is not None else []
+bad += ["npm has no != (None)"] if a.admits("!=1.0.0", (1,0,0), (2,0,0), "npm") is not None else []
+bad += ["partial pin spans its newest release"] if a.pin_span("20") != ((20,10**6,0), (21,0,0), "20") else []
+bad += ["exact pin spans itself"] if a.pin_span("8.2", exact=True) != ((8,2,0), (8,2,1), "8.2") else []
+print("ok" if not bad else "bad:" + "; ".join(bad))' "$AUDIT" 2>&1)"
+[[ "$rng" == ok ]] && ok "range parser: npm + Composer dialects (34 cases)" || no "range parser: $rng"
+
+# -- 5. facts verifier contract (§7) -------------------------------------------------
+if [[ -f "$V" ]]; then
+  ec 0 "verifier py_compile"           "$PY" -m py_compile "$V"
+  ec 0 "verifier --help"               "$PY" "$V" --help
+  ec 0 "verifier --offline consistent" "$PY" "$V" --offline --skill "$SKILL" --facts "$FACTS"
+  ec 2 "verifier bad flag -> 2"        "$PY" "$V" --bogus
+  ec 2 "verifier conflicting modes -> 2" "$PY" "$V" --offline --live
+  ec 3 "verifier missing facts -> 3"   "$PY" "$V" --offline --facts "$TMP/nope.json"
+  jout="$("$PY" "$V" --offline --json --skill "$SKILL" 2>/dev/null)"
+  case "$jout" in *'"claude-mods.package-manager-ops.facts/v1"'*) ok "verifier --json envelope schema";; *) no "verifier --json envelope schema missing";; esac
+  "$PY" - "$FACTS" "$TMP" <<'PY'
+import json, sys
+from pathlib import Path
+facts = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+tmp = Path(sys.argv[2])
+uncited = json.loads(json.dumps(facts)); uncited["packages"]["zzz-not-real"] = {"registry": "npm", "documented_major": 1, "prose": ["zzznotreal"]}
+(tmp / "uncited.json").write_text(json.dumps(uncited))
+dated = json.loads(json.dumps(facts)); dated["dated_facts"]["x"] = "31 Smarch 1999"
+(tmp / "dated.json").write_text(json.dumps(dated))
+badtype = json.loads(json.dumps(facts)); badtype["packages"]["npm"]["documented_major"] = "12"
+(tmp / "badtype.json").write_text(json.dumps(badtype))
+order = json.loads(json.dumps(facts)); order["php"]["releases"]["8.4"]["active_end"] = "2030-01-01"
+(tmp / "order.json").write_text(json.dumps(order))
+def variant(name, edit):
+    d = json.loads(json.dumps(facts)); edit(d)
+    (tmp / name).write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+(tmp / "list.json").write_text("[]"); (tmp / "null.json").write_text("null")
+variant("prose-int.json", lambda d: d["packages"]["npm"].__setitem__("prose", [123]))
+variant("release-null.json", lambda d: d["node"]["releases"].__setitem__("22", None))
+variant("node-equal.json", lambda d: d["node"]["releases"]["22"].__setitem__("maintenance", d["node"]["releases"]["22"]["lts"]))
+variant("php-equal.json", lambda d: d["php"]["releases"]["8.4"].__setitem__("active_end", d["php"]["releases"]["8.4"]["initial"]))
+variant("unicode.json", lambda d: d["packages"]["npm"]["prose"].append("安装"))
+PY
+  ec 10 "uncited package -> 10"        "$PY" "$V" --offline --skill "$SKILL" --facts "$TMP/uncited.json"
+  ec 10 "unstated dated fact -> 10"    "$PY" "$V" --offline --skill "$SKILL" --facts "$TMP/dated.json"
+  ec 10 "active_end after security_end -> 10" "$PY" "$V" --offline --skill "$SKILL" --facts "$TMP/order.json"
+  ec 4 "non-integer major -> 4"        "$PY" "$V" --offline --skill "$SKILL" --facts "$TMP/badtype.json"
+  ec 4 "facts holding [] -> 4"         "$PY" "$V" --offline --skill "$SKILL" --facts "$TMP/list.json"
+  ec 4 "facts holding null -> 4"       "$PY" "$V" --offline --skill "$SKILL" --facts "$TMP/null.json"
+  ec 4 "a prose token that is not a string -> 4" "$PY" "$V" --offline --skill "$SKILL" --facts "$TMP/prose-int.json"
+  ec 4 "a null release entry -> 4"     "$PY" "$V" --offline --skill "$SKILL" --facts "$TMP/release-null.json"
+  ec 10 "node lts == maintenance (strict order) -> 10" "$PY" "$V" --offline --skill "$SKILL" --facts "$TMP/node-equal.json"
+  ec 10 "php initial == active_end (strict order) -> 10" "$PY" "$V" --offline --skill "$SKILL" --facts "$TMP/php-equal.json"
+  ec 2 "--timeout -1 -> 2"             "$PY" "$V" --live --timeout -1
+  ec 2 "--timeout 0 -> 2"              "$PY" "$V" --live --timeout 0
+  out="$(PYTHONIOENCODING=cp1252 "$PY" "$V" --offline --skill "$SKILL" --facts "$TMP/unicode.json" 2>&1)"; rc=$?
+  [[ "$rc" == 10 && "$out" != *Traceback* ]] && ok "a non-ASCII drift row prints on a cp1252 stdout (exit $rc)" \
+    || no "a non-ASCII drift row on a cp1252 stdout (want 10, no traceback; got $rc)"
+  # A directory named like a reference is not a reference: skipped, not a crash.
+  mkdir -p "$TMP/dirref" && cp -R "$SKILL/SKILL.md" "$SKILL/references" "$TMP/dirref/" && mkdir -p "$TMP/dirref/references/zz-folder.md"
+  ec 0 "a directory named *.md under references/ is skipped" "$PY" "$V" --offline --skill "$TMP/dirref" --facts "$FACTS"
+  # Live classification without the network: a php.net page that is gone (404) is drift,
+  # and a schedule.json date in a new format is drift with a message, not a traceback.
+  live="$("$PY" - "$V" "$FACTS" <<'PY' 2>&1
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("v", sys.argv[1])
+v = importlib.util.module_from_spec(spec); spec.loader.exec_module(v)
+facts = json.load(open(sys.argv[2], encoding="utf-8"))
+bad = []
+v.fetch = lambda url, timeout, accept="": ("notfound", 404)
+d, u = v.live_php(facts, 1.0)
+if not d or u:
+    bad.append(f"php.net 404: drift={d} unreach={u}")
+v.fetch_json = lambda url, timeout: ("ok", {"v24": {"start": "2024-04-24T00:00:00Z", "lts": "2024-10-29", "end": "2027-04-30"}})
+try:
+    d, u = v.live_node(facts, 1.0, v.dt.date(2026, 10, 5))
+    if not any("format" in x["issue"] for x in d):
+        bad.append(f"schedule date format: drift={d}")
+except Exception as exc:  # noqa: BLE001 - the point is that nothing escapes
+    bad.append(f"schedule date format raised {exc!r}")
+print("ok" if not bad else "bad:" + "; ".join(bad))
+PY
+)"
+  [[ "$live" == ok ]] && ok "live: php.net 404 is drift; an upstream date-format change is drift, not a traceback" \
+    || no "live classification: $live"
+else
+  no "verifier missing: scripts/check-pm-facts.py"
+fi
+
+# -- 6. focused behavioural sub-suites -----------------------------------------------
+# These suites stay separately runnable for mutation work, but the skill gate must not
+# silently omit their C1 catalogue and estate-tool coverage.
+ec 0 "facts behavioural sub-suite" bash "$HERE/facts.sh"
+ec 0 "estate tools sub-suite"       bash "$HERE/tools.sh"
+# facts.sh feeds its tally from a process substitution; its excepthook must turn a producer
+# crash into a FAIL row. FACTS_HARNESS_CRASH=1 raises inside that producer: the sub-suite
+# has to fail, or its green means nothing.
+FACTS_HARNESS_CRASH=1 bash "$HERE/facts.sh" >/dev/null 2>&1 \
+  && no "facts.sh stays green when its row producer crashes" || ok "facts.sh fails when its row producer crashes"
+
+# -- 7. copy-alone portability: the folder runs with nothing beside it ---------------
+ALONE="$TMP/alone/package-manager-ops"
+mkdir -p "$TMP/alone" && cp -R "$SKILL" "$ALONE"
+grep -rq '\.\./\.\./' "$ALONE/scripts" && no "scripts reach outside the skill folder (../../)" || ok "no ../../ dependency in scripts"
+ec 0 "standalone run-python.sh --which"  bash "$ALONE/scripts/run-python.sh" --which
+ec 0 "standalone pm-audit --help"        bash "$ALONE/scripts/run-python.sh" "$ALONE/scripts/pm-audit.py" --help
+ec 0 "standalone pm-audit on clean copy" bash -c "mkdir -p '$TMP/alone/repo' && bash '$ALONE/scripts/run-python.sh' '$ALONE/scripts/pm-audit.py' --as-of 2026-10-05 '$TMP/alone/repo'"
+if [[ -f "$ALONE/scripts/check-pm-facts.py" ]]; then
+  ec 0 "standalone verifier --offline"   bash "$ALONE/scripts/run-python.sh" "$ALONE/scripts/check-pm-facts.py" --offline
+fi
+
+finish

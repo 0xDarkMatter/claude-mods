@@ -12,13 +12,17 @@ Claude Code hooks allow you to run custom scripts at key workflow points.
 | `enforce-uv.sh` | PreToolUse | Enforce uv over pip/bare tools in uv-managed projects (`pip install` → `uv add`, bare `pytest`/`ruff`/`mypy` → `uv run`) |
 | `pre-install-scan.sh` | PreToolUse | Advisory on dependency installs (npm/pnpm/yarn/bun/pip/uv/poetry/composer/gem/cargo, incl. `composer update`) — route through Socket, respect the release-age cooldown. `SUPPLY_CHAIN_BLOCK=1` for a hard gate. |
 | `manifest-dep-scan.sh` | PostToolUse (Write\|Edit) | Advisory when the agent edits a dependency manifest (package.json/requirements/composer.json/Cargo.toml/go.mod/Gemfile/pyproject.toml) — depscore + cooldown the added package. High-signal (silent on version bumps). |
-| `check-mail.sh` | PreToolUse | Check for unread pigeon pmail via signal file (zero-cost when empty) |
+| `check-mail.sh` | PreToolUse | Deliver unread pigeon pmail, one stat when nothing is new. Delivery is per session (stdin `session_id`): each session is told about each message once and never about mail it sent itself, so a worktree lane's report reaches the coordinator in the main checkout instead of the lane. The shared signal file is a timestamp it never deletes. Inside a worktree the footer warns that a bare `pigeon read` marks the coordinator's mail read too. |
 | `config-change-guard.sh` | ConfigChange | Worm-persistence tripwire: when a Claude settings file changes mid-session, scan just that file for the vetted IOC set (curl\|sh, base64-decode eval, Invoke-Expression+Download, /dev/tcp, reads of `.claude/settings` / `.aws/credentials`). Silent on clean; on a finding, a desktop notification (`terminalSequence`, interactive sessions only - ConfigChange discards `systemMessage`, so no text reaches you or the model). `SUPPLY_CHAIN_BLOCK=1` blocks the change (exit 2). Fast single-file sibling of `supply-chain-defense`'s `integrity-audit.sh`. |
-| `worktree-guard.sh` | PreToolUse (Bash) | Enforce `rules/worktree-boundaries.md`: flags `rm` on `.claude/worktrees`, `git worktree remove/prune` against worktrees, `git rm` on worktree gitlinks, and `git add -A`/`.` in a repo that has a `.claude/worktrees` dir. Sessions whose cwd is inside their own worktree are exempt. Advisory by default; `WORKTREE_GUARD_BLOCK=1` hard-denies (exit 2). |
-| `session-start-unicode-scan.sh` | SessionStart | One-shot hidden-Unicode scan of the project's instruction files (CLAUDE.md/AGENTS.md/SKILL.md/.cursorrules) at session boot. Silent on clean; advisory on a finding. Pairs with `prompt-injection-defense`. |
+| `worktree-guard.sh` | PreToolUse (Bash) | Enforce `rules/worktree-boundaries.md`: flags `rm` on `.claude/worktrees`, `git worktree remove/prune` against worktrees, `git rm` on worktree gitlinks, and `git add -A`/`.` in a repo that has a `.claude/worktrees` dir. With `WORKTREE_ROOT` set, lanes under `$WORKTREE_ROOT` get the same `rm`/`git rm`/`worktree remove`/`prune` guard. Sessions whose cwd is inside their own worktree are exempt. Advisory by default; `WORKTREE_GUARD_BLOCK=1` hard-denies (exit 2). |
+| `worktree-create.sh` | WorktreeCreate | Put Claude Code's own worktrees (`--worktree`, `isolation: worktree`, background sessions) at `$WORKTREE_ROOT/<repo>/<name>` instead of `<repo>/.claude/worktrees/`. Replaces Claude Code's git logic: branch `worktree-<name>`, `worktree.baseRef`, reopen by name, `.worktreeinclude`. A cwd outside any git repo gets an empty workspace from Claude Desktop and a failure from the CLI. Opt-in, machine-specific, wired **by absolute path** (Claude Desktop runs it through `cmd.exe`, where `~` and `$HOME` don't expand): see [Worktree placement](#worktree-placement-worktreecreate--worktreeremove). |
+| `worktree-remove.sh` | WorktreeRemove | Pair of `worktree-create.sh`: `git worktree remove` without `--force` (a dirty tree is kept, exit 1), then `git branch -d` on its `worktree-*` branch (never `-D`). An empty non-git workspace (Desktop, plain folder) is rmdir'd; any other non-git dir is left in place. |
+| `session-start-unicode-scan.sh` | SessionStart | One-shot hidden-Unicode scan of the project's instruction files (CLAUDE.md/AGENTS.md/SKILL.md/.cursorrules) at session boot. Silent on clean; advisory on a finding, and a separate "NOT scanned" advisory naming any file the scanner could not read. Pairs with `prompt-injection-defense`. |
 | `pre-write-peer-guard.sh` | PreToolUse (Edit\|Write) | Mid-session peer-writer guard (`rules/worktree-boundaries.md`): before writing a file, warn if it was freshly modified by something that isn't this session — the signature of a live peer session sharing the checkout. Uses the touched-ledger to tell own edits apart. Advisory by default; `GUARD_BLOCK=1` denies the write. Auto-wired with its ledger companion. |
 | `session-touched-ledger.sh` | PostToolUse (Edit\|Write) | Companion to `pre-write-peer-guard.sh`: records every file this session writes to `~/.claude/.session-touched/<session_id>.list` so the guard can distinguish this session's edits from a peer's. Silent, never blocks. Auto-wired with the peer guard. |
-| `pre-commit-unicode-scan.sh` | git pre-commit | Refuse commits that ADD hidden Unicode to instruction files. Silent on clean, warn on `high`, **block on `critical`** (tag-block / bidi override). Override once with `PROMPT_INJECTION_ALLOW=1`. |
+| `pre-tls-verify-ask.sh` | PreToolUse (Bash\|PowerShell) | Ask before a command turns TLS certificate verification off: `curl -k`/`--insecure`, `wget --no-check-certificate`, `NODE_TLS_REJECT_UNAUTHORIZED=0`, `PYTHONHTTPSVERIFY=0`, `GIT_SSL_NO_VERIFY`, `git -c http.sslVerify=false`, npm/pnpm/yarn `strict-ssl false`, pip/uv `--trusted-host`, Composer `disable-tls`/`secure-http`, PowerShell `-SkipCertificateCheck` and trust-all callbacks. Persistent switches (`git config`, `npm config set`, `pip config set`, `composer config`, `setx`) say they outlive the session. curl, wget and the package managers count only at command position, through a quote- and heredoc-aware lexer, so a commit message or `rg` pattern that quotes `curl -k` stays silent. See [Why the TLS guard asks](#why-the-tls-guard-asks-instead-of-denying). |
+| `post-tls-verify-scan.sh` | PostToolUse (Write\|Edit) | Advisory when an edit turns verification off in code or config: Python `verify=False`/`CERT_NONE`, Node `rejectUnauthorized: false`, Guzzle `'verify' => false`, `CURLOPT_SSL_VERIFYPEER` 0, Go `InsecureSkipVerify`, Ruby `VERIFY_NONE`, Rust `danger_accept_invalid_certs`, Java trust-all managers and verifiers, .NET callbacks returning true, and committed `.npmrc`/`.yarnrc.yml`/pip/`composer.json`/`.gitconfig` settings. Skips prose (`.md .mdx .markdown .rst .adoc .txt`). |
+| `pre-commit-unicode-scan.sh` | git pre-commit | Refuse commits that ADD hidden Unicode to instruction files. Scans the **staged (index) copy**, not the file on disk, including renamed and non-ASCII-named files. Silent on clean, warn on `high`, **block on `critical`** (tag-block / bidi override) **or on a staged instruction file it could not scan**. Override once with `PROMPT_INJECTION_ALLOW=1`. |
 
 ## Auto-wired vs opt-in
 
@@ -28,8 +32,8 @@ paths resolved via `${CLAUDE_PLUGIN_ROOT}`:
 
 | Set | Hooks | Why |
 |-----|-------|-----|
-| **Auto-wired (security advisory)** | `pre-install-scan.sh` (PreToolUse Bash), `worktree-guard.sh` (PreToolUse Bash), `manifest-dep-scan.sh` (PostToolUse Write\|Edit), `session-start-unicode-scan.sh` (SessionStart), `config-change-guard.sh` (ConfigChange), `pre-write-peer-guard.sh` (PreToolUse Write\|Edit), `session-touched-ledger.sh` (PostToolUse Write\|Edit) | Silent-on-clean guardrails: zero noise until something is actually wrong, so they're safe to ship on by default. |
-| **Opt-in (opinionated / formatting)** | `pre-commit-lint.sh`, `post-edit-format.sh`, `dangerous-cmd-warn.sh`, `enforce-uv.sh`, `check-mail.sh`, `pre-commit-unicode-scan.sh` (a *git* hook) | Workflow opinions — wire them yourself per the examples below. |
+| **Auto-wired (security advisory)** | `pre-install-scan.sh` (PreToolUse Bash), `worktree-guard.sh` (PreToolUse Bash), `pre-tls-verify-ask.sh` (PreToolUse Bash\|PowerShell, asks), `manifest-dep-scan.sh` (PostToolUse Write\|Edit), `post-tls-verify-scan.sh` (PostToolUse Write\|Edit), `session-start-unicode-scan.sh` (SessionStart), `config-change-guard.sh` (ConfigChange), `pre-write-peer-guard.sh` (PreToolUse Write\|Edit), `session-touched-ledger.sh` (PostToolUse Write\|Edit) | Silent-on-clean guardrails: zero noise until something is actually wrong, so they're safe to ship on by default. |
+| **Opt-in (opinionated / formatting)** | `pre-commit-lint.sh`, `post-edit-format.sh`, `dangerous-cmd-warn.sh`, `enforce-uv.sh`, `check-mail.sh`, `pre-commit-unicode-scan.sh` (a *git* hook), `worktree-create.sh` + `worktree-remove.sh` (machine-specific; never auto-wired) | Workflow opinions — wire them yourself per the examples below. |
 
 Plugin installs resolve auto-wired commands through `${CLAUDE_PLUGIN_ROOT}`. Script
 installs copy the hook scripts into `${CLAUDE_DIR:-~/.claude}/hooks/` and merge the
@@ -45,6 +49,20 @@ Escalate to a hard gate per concern:
 |----------|---------|-----------------|
 | `SUPPLY_CHAIN_BLOCK` | `pre-install-scan.sh`, `config-change-guard.sh` | Block the install / settings change (exit 2) until reviewed |
 | `WORKTREE_GUARD_BLOCK` | `worktree-guard.sh` | Deny the boundary-violating command (exit 2) |
+
+### Why the TLS guard asks instead of denying
+
+Turning certificate verification off to get past a certificate error lets anyone on
+the network path impersonate the server and read or change the traffic, credentials
+included, and a download or package fetched that way can be swapped in transit. An
+agent reaches for `curl -k` or `verify=False` mid-task without saying so, which is the
+behaviour `pre-tls-verify-ask.sh` interrupts. It asks rather than denies because a
+self-signed certificate on a local development host is the one legitimate case, and
+only the person at the keyboard knows whether this is it. The ask costs nothing unless
+one of the switches is present. In auto mode the hook's ask still forces the prompt;
+under `claude -p` nobody can answer, so Claude Code denies the call and Claude reads the
+reason. The code advisory never blocks: the edit has already happened, so it asks
+Claude to revert it or to scope it to the local host and say so.
 
 ### ConfigChange coverage note
 
@@ -108,13 +126,124 @@ These two are wired differently from the `Bash`/`Write|Edit` matchers above.
 
 ```bash
 ln -sf ../../hooks/pre-commit-unicode-scan.sh .git/hooks/pre-commit
+# Git Bash's `ln -s` copies unless symlinks are enabled. The copy still finds this
+# repo's scanner but keeps the hook code it was copied with; use a wrapper there:
+#   printf '#!/bin/sh\nexec bash hooks/pre-commit-unicode-scan.sh\n' > .git/hooks/pre-commit
 # already have a pre-commit hook? call it from yours instead:
 #   bash hooks/pre-commit-unicode-scan.sh || exit 1
 ```
 
 Both resolve the scanner relative to themselves, so they work whether claude-mods is
-run from the repo or installed under `~/.claude/`. Blocks only on `critical`; override
-a single commit with `PROMPT_INJECTION_ALLOW=1 git commit ...`.
+run from the repo or installed under `~/.claude/`. The pre-commit gate blocks on
+`critical`, or when a staged instruction file could not be scanned (unreadable blob,
+broken scanner) - a gate that could not look does not report clean. Override a single
+commit with `PROMPT_INJECTION_ALLOW=1 git commit ...`.
+
+A hook run through a symlink resolves the link first, so it finds the `skills/` beside
+its real path, not beside `.git/hooks/`. If the pre-commit gate still finds no scanner,
+it says so on every commit and lets the commit through: a broken install is never
+silent. The SessionStart hook stays silent then, because it is auto-wired and a setup
+without the skill is legitimate.
+
+### Worktree placement (WorktreeCreate + WorktreeRemove)
+
+Claude Code has no setting for where `claude --worktree`, `isolation: worktree`
+subagents and background sessions put their worktrees (`<repo>/.claude/worktrees/<name>`).
+A `WorktreeCreate` hook is the only lever, and it **replaces** git's worktree logic
+entirely. On a machine whose `settings.json` `env` sets `WORKTREE_ROOT`, this pair moves
+those worktrees to `$WORKTREE_ROOT/<repo>/<name>`, the same root `new-lane.sh` and
+`fleet init` use (`rules/worktree-boundaries.md` "Lane location"). Wire it in the
+**user** settings of that machine only, **by absolute path**:
+
+```json
+{
+  "env": { "WORKTREE_ROOT": "<absolute path outside every repo>" },
+  "hooks": {
+    "WorktreeCreate": [
+      { "hooks": [{ "type": "command", "command": "bash <your-home>/.claude/hooks/worktree-create.sh" }] }
+    ],
+    "WorktreeRemove": [
+      { "hooks": [{ "type": "command", "command": "bash <your-home>/.claude/hooks/worktree-remove.sh" }] }
+    ]
+  }
+}
+```
+
+`<your-home>` is your home directory written out in full, with forward slashes:
+
+| OS | `WorktreeCreate` command |
+|----|--------------------------|
+| Windows | `bash C:/Users/<you>/.claude/hooks/worktree-create.sh` |
+| macOS | `bash /Users/<you>/.claude/hooks/worktree-create.sh` |
+| Linux | `bash /home/<you>/.claude/hooks/worktree-create.sh` |
+
+`WorktreeRemove` is the same with `worktree-remove.sh`.
+
+**Never `~` or `$HOME` in these two commands.** Claude Desktop runs WorktreeCreate and
+WorktreeRemove itself, not through Claude Code, and on Windows it hands the command to
+`cmd.exe /d /s /c` (read from its app bundle, builds 2.26454 and 2.31226). cmd.exe
+expands neither `~` nor `$HOME`, so with `bash ~/.claude/...` or
+`bash "$HOME/.claude/..."` bash looks for a file literally named that, the hook exits
+127, and Desktop aborts every worktree session and chip on the machine (its `main.log`
+says `worktree_hook_failed, aborting session`). The CLI runs hook commands through Git
+Bash or `sh`, so the `~` form works there and hides the break until Desktop starts a
+session. An absolute path works in both. To reproduce, run
+`cmd /d /s /c 'bash "$HOME/.claude/hooks/worktree-create.sh"'` from PowerShell: exit 127.
+
+**Desktop doesn't pass the settings `env` block either.** It starts the hook with its own
+environment (`PATH`, `CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PROJECT_DIR`), so
+`WORKTREE_ROOT` set in `settings.json` never reaches the hook as a variable. When the
+variable is missing, the hook reads `env.WORKTREE_ROOT` from
+`${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json` itself, so keep the root in the user
+settings file above. A real environment variable wins, including one set in the command
+(`bash -c "WORKTREE_ROOT=<root> exec bash <your-home>/.claude/hooks/worktree-create.sh"`),
+but neither is needed. Before this fallback, Desktop's worktrees silently landed in
+`<repo>/.claude/worktrees/`.
+
+**A folder that is not a git repository has nothing to isolate**, and Desktop still
+calls the hook for it (`no repository anchor` in its log). Desktop aborts the session if
+the hook fails, and refuses the folder itself as the result (`hook printed the base
+repository path ...; it must create a separate workspace`). So for Desktop the hook
+makes an **empty** workspace at `$WORKTREE_ROOT/_no-repo/<folder>/<name>` and the
+session works on the folder by absolute path, unisolated. `_no-repo/` keeps it out of
+the lane scans (`fleet sweep`, `worktree-survey.sh`) that walk `$WORKTREE_ROOT/<repo>/`.
+`worktree-remove.sh` rmdirs it while it is still empty and leaves it otherwise. The hook
+tells Desktop's calls apart by their `"transcript_path": ""`. For the CLI the hook fails
+instead, and Claude Code then runs a background session in the folder itself, its
+documented fallback. An empty dir would strand that session, and any
+`isolation: worktree` subagent, away from the files.
+
+**Two calls for one name can arrive at once.** When the source folder fails Claude
+Code's trust check (it was never opened and trusted as a project), Desktop retries the
+start within the same second, so its log shows two `Creating worktree for session ...`
+lines. Two CLI sessions asking for the same `--worktree` name race the same way.
+Unserialised, both runs `git worktree add` one branch and the loser exits 1, which fails
+that start. The hook takes a per-name lock in the git common dir, so the second call
+waits and reopens the first call's worktree. The lock doesn't fix an untrusted folder:
+open the folder once in Claude Code and accept the trust prompt.
+
+Trade-offs, stated plainly:
+
+- **No automatic sweep.** Claude Code's periodic cleanup keeps any worktree without its
+  own git marker, so hook-made worktrees stay until removed. `WorktreeRemove` covers a
+  session you exit or delete; everything else is `fleet sweep` / `fleet prune`, which
+  see these trees (`git worktree list`) and say "hook-made" on them.
+- **A broken hook blocks every worktree creation on the machine.** Claude Code has no
+  fallback: any non-zero exit, or no path on stdout, fails creation, and Claude Desktop
+  then aborts the session. Needs `jq` and `git`. With `WORKTREE_ROOT` unset the hook
+  falls back to Claude Code's own location rather than fail, but still loses the sweep,
+  so install it only where the root is set.
+- **A fresh base can cost up to 5 s.** Like Claude Code, the hook fetches the default
+  branch when `FETCH_HEAD` is missing or over 24 h old, capped at 5 s and never
+  prompting. On a private HTTPS remote that can't authenticate silently, the session
+  start waits out the cap, then uses the cached `origin/HEAD`.
+- **The hook owns what Claude Code did.** It copies `.worktreeinclude` matches, reads
+  `worktree.baseRef` (or `WORKTREE_BASE_REF`), names branches `worktree-<name>` and
+  reopens a worktree by name, at its old tip (Claude Code's reset of an untouched
+  worktree to the default branch is not emulated). `WorktreeRemove` never forces:
+  a tree with changed or untracked files is kept and the removal reports failure.
+
+`tests/hooks.sh` pins both contracts against throwaway repos.
 
 ## Hook Types
 
@@ -287,7 +416,8 @@ context. The hooks here use:
 
 | Intent | Channel | Used by |
 |--------|---------|---------|
-| Advise, don't block (PreToolUse / PostToolUse) | exit 0 + **one** JSON value on stdout: `{"hookSpecificOutput":{"hookEventName":"<event>","additionalContext":"..."}}` (capped at 10,000 chars) | `pre-install-scan`, `worktree-guard`, `manifest-dep-scan`, `pre-write-peer-guard`, `check-mail` |
+| Advise, don't block (PreToolUse / PostToolUse) | exit 0 + **one** JSON value on stdout: `{"hookSpecificOutput":{"hookEventName":"<event>","additionalContext":"..."}}` (capped at 10,000 chars) | `pre-install-scan`, `worktree-guard`, `manifest-dep-scan`, `post-tls-verify-scan`, `pre-write-peer-guard`, `check-mail` |
+| Ask the user (PreToolUse) | exit 0 + one JSON value: `permissionDecision: "ask"`, `permissionDecisionReason` (shown to the user in the prompt) and `additionalContext` (for the model) | `pre-tls-verify-ask` |
 | Block | exit 2 + reason on **stderr** | `dangerous-cmd-warn`, `enforce-uv`, `pre-commit-lint`, and the `*_BLOCK=1` modes |
 | SessionStart advisory | plain stdout (delivered for this event) | `session-start-unicode-scan` |
 | ConfigChange | no text channel: `systemMessage` is discarded and even a block is silent. Only `terminalSequence` (a desktop notification, interactive sessions only) reaches a person | `config-change-guard` |

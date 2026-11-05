@@ -15,6 +15,7 @@ this file covers the **driver surface** and the traps that differ per host.
 - [Cloudflare D1](#cloudflare-d1)
 - [libSQL / Turso](#libsql--turso)
 - [Host comparison](#host-comparison)
+- [Hosts at a glance](#hosts-at-a-glance)
 
 ---
 
@@ -338,6 +339,21 @@ await replica.sync();     // pull latest before a read that must be fresh
 | Cloudflare Workers | D1 |
 | Multi-region reads, embedded replicas | libSQL / Turso |
 | Many concurrent writers, large dataset | **Not SQLite** — see `postgres-ops` |
+
+---
+
+## Hosts at a glance
+
+| Host | Connection model | Watch out for |
+|---|---|---|
+| `sqlite3` CLI | Direct file | `.timer on` for real timings; `.mode`/`.headers` for output |
+| Python `sqlite3` | Direct file, per-connection pragmas | Implicit transaction handling; `check_same_thread` |
+| Python `aiosqlite` | Thread-backed async wrapper | Still one writer; see `./references/async-patterns.md` |
+| `node:sqlite` | Synchronous, built into Node | No external dependency; API still stabilising |
+| `better-sqlite3` | Synchronous, native addon | Fastest Node option; prepared statements are the unit of reuse |
+| `bun:sqlite` | Synchronous, built into Bun | API close to better-sqlite3, not identical |
+| **Cloudflare D1** | HTTP/RPC to a managed SQLite | Billed on **rows read**; 100-parameter cap; no `PRAGMA` surface |
+| libSQL / Turso | Server or embedded replica | Replica staleness; syntax extensions beyond stock SQLite |
 
 ---
 

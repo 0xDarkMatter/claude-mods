@@ -1,0 +1,3 @@
+registry.tls.disabled uv.toml:1
+registry.url.http uv.toml:5
+registry.url.http uv.toml:8

@@ -63,20 +63,33 @@ is noise).
 
 - **One `AGENTS.md` per repo, and it is the single source of truth.** It carries: what
   the repo is (2–4 lines), run/test/check commands (exact, tested), a structure map
-  (folder → what lives there), conventions, and — mandatory — a **Landmines** section:
-  the specific things that break non-obviously (coupled golden fixtures, generated files
-  you must not hand-edit, ordering-sensitive registries). Landmines are the highest-value
-  lines in the file.
+  (only what folder names don't say), conventions, deploy notes when the repo ships,
+  and — mandatory — a **Landmines** section: the specific things that break
+  non-obviously (coupled golden fixtures, generated files you must not hand-edit,
+  ordering-sensitive registries). Landmines are the highest-value lines in the file.
 - **Keep it lean.** An agent re-reads this every session; every line is a recurring
-  token cost. Target under ~150 lines; push walkthroughs and rationale into `docs/` and
-  link them. Setup guides for humans go in README or CONTRIBUTING, not AGENTS.md.
-- **CLAUDE.md**: only as a one-line pointer to AGENTS.md (tool compatibility), or when
-  there are genuinely Claude-specific deltas — and then it holds *only* the deltas,
-  never a copy. If both exist, a change to a shared rule updates both in one commit.
+  token cost. Target ~150 lines; **200 is the ceiling** (Claude Code's documented target:
+  longer files consume more context and reduce adherence). Split by moving detail to
+  what loads on demand (a nested AGENTS.md, path-scoped `.claude/rules/`, linked
+  `docs/`), never to `@` imports, which load at launch anyway. Setup guides for humans go
+  in README or CONTRIBUTING, not AGENTS.md.
+- **CLAUDE.md shadows AGENTS.md.** Claude Code reads AGENTS.md only when no `CLAUDE.md`,
+  `.claude/CLAUDE.md` or `CLAUDE.local.md` sits in the working directory or above it. So:
+  no CLAUDE.md at all, or one whose **first line is `@AGENTS.md`** (an import; a sentence
+  pointing at AGENTS.md loads nothing) with *only* Claude-specific deltas below it. A
+  personal `CLAUDE.local.md` silently hides AGENTS.md from that developer, and a symlink
+  breaks on Windows clones.
+- **Create, audit and upgrade it with tools, not by eye**: repo-doctor's
+  `agents-md.py scaffold` (a draft from sourced facts), `audit --diff` (shadowing, dead
+  commands, size, staleness in commits) and `survey --org` (read-only, many repos). The
+  full protocol is repo-doctor's `references/agents-md-protocol.md`.
 - **Nested AGENTS.md** only where a subsystem has its own contract (a design-system
   package, an engine with determinism laws, a per-tool CLI). Nested files carry deltas
   and their own landmines; the root file links each one in an ownership table.
-  Never blanket-nest — duplicated rules rot into contradictions.
+  Never blanket-nest — duplicated rules rot into contradictions. A large repo spreads
+  its entry docs across three layers: a root router, nested AGENTS.md files, and one
+  ARCHITECTURE.md for the codemap and the invariants between layers. repo-doctor checks
+  all three.
 
 ## Structure — folders an agent can guess
 
@@ -111,6 +124,17 @@ directives reward the signal instead.
   unfixed code, or a deliberately broken version of it. A test that cannot fail is
   noise. Characterisation tests written before a refactor are fine: they must fail when
   the behaviour changes.
+- **Two checks, not one.** Breaking the behaviour must turn the test red, and a refactor
+  that leaves what callers observe untouched must leave it green. A test that fails the
+  second check is tied to how the code works: each refactor forces an edit to it, yet it
+  guards nothing. Tests go hollow when:
+  - the expected value came from running the code itself, not from the requirement
+  - the unit under test is mocked
+  - exact error wording is asserted where callers only branch on the error type
+  - call counts or order are asserted instead of the outcome (unless the call *is* the
+    promised external effect)
+  - the fixture already holds the asserted value, so the assertion passes by
+    construction
 - **Named for the bug it prevents** (`returns_404_for_unknown_slug`, not
   `test_generate_2`). Adversarial tests are named for the adversary
   (`double-bill-nudge.test.ts`, not `billing2.test.ts`) — the name tells the next agent
@@ -169,7 +193,11 @@ The full playbook is `repo-doctor`'s [monorepo-structure reference](../skills/re
   Same-commit fix.
 - Did I create a file > 400 lines, or push one past 800? → Markers / split / guard.
 - Did I leave anything in repo root that isn't permanent? → Move or delete.
-- Did I add or change a test? → Have I seen it fail against the unfixed or broken code?
+- Did I add or change a test? → Have I seen it fail against the unfixed or broken code,
+  and would it survive a refactor that keeps the behaviour?
+- Am I reporting back? → Each claim says, in the same sentence, whether it was measured,
+  inferred or a guess (a forecast, or a cause nobody observed, counts as a guess). Any
+  check I could run myself, I ran: the human gets results, not homework.
 - Would `repo-doctor` flag what I just did? When in doubt, run it.
 
 ## When to bend the rule
@@ -184,11 +212,11 @@ creative repos modifiable later.
 ## Cross-reference
 
 - `~/.claude/skills/repo-doctor/SKILL.md` — the auditor: scores any repo against this
-  doctrine; references own the depth (comment-doctrine, entry-docs, monorepo-structure,
-  scoring-rubric).
+  doctrine, and creates, audits, upgrades and org-surveys AGENTS.md files; references own
+  the depth (agents-md-protocol, comment-doctrine, monorepo-structure, scoring-rubric).
 - `~/.claude/skills/adr-ops/SKILL.md` — decision records (when-to-write rule lives there).
-- `~/.claude/skills/doc-scanner/SKILL.md` — reads/synthesizes/generates entry docs;
-  repo-doctor audits them.
+- `~/.claude/skills/doc-scanner/SKILL.md` — finds and consolidates scattered platform
+  docs; repo-doctor drafts and audits the resulting AGENTS.md.
 - `~/.claude/skills/refactor-ops/SKILL.md` — the remediation path for monster files.
 - `naming-conventions.md` — claude-mods component naming; this rule owns cross-repo
   code/doc quality.

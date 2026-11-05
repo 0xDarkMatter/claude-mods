@@ -1,0 +1,2 @@
+registry.tls.disabled pnpm-workspace.yaml:1
+registry.url.http pnpm-workspace.yaml:4

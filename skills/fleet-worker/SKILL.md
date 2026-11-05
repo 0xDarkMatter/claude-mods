@@ -6,7 +6,7 @@ allowed-tools: "Read Bash Glob Grep AskUserQuestion"
 metadata:
   author: claude-mods
   status: beta
-  related-skills: fleet-ops, git-ops, push-gate, claude-code-ops
+  related-skills: fleet-ops, git-ops, push-preflight, claude-code-ops
 ---
 
 # fleet-worker
@@ -16,7 +16,7 @@ Opus orchestrator (this session) fan workers out in parallel, then verify and
 land their work. The worker keeps Claude Code's *entire tool harness*
 (Read/Write/Edit/Bash/Glob/Grep/Task/MCP/hooks) — only the **brain** is swapped
 to a cheaper model via env — a cheaper Anthropic model (Sonnet/Haiku) or a
-non-Anthropic endpoint. GLM-5.3 on z.ai is the default worked example; the
+non-Anthropic endpoint. GLM-5.3 (`glm-5.3`) on z.ai is the default worked example; the
 mechanism is provider- and model-agnostic (any Anthropic-compatible endpoint).
 
 > **Want to offload to Grok (xAI's `grok` CLI)? That's not this skill.** Every
@@ -83,15 +83,18 @@ same on-demand, progressively-disclosed procedural knowledge your orchestrator h
    - `export FLEET_WORKER_KEYRING_SERVICE=<svc> FLEET_WORKER_KEYRING_KEY=<name>` (uses `keyring get`), or
    - `export ZHIPU_API_KEY=<key>` (or `GLM_API_KEY`).
 3. **Preflight** — `bash scripts/fleet-doctor.sh --offline` (structural) or
-   `--live` (pings the endpoint; warns about the §4 oauth trap).
+   `--live` (pings the endpoint, then runs one real `claude` turn through the
+   launcher — the endpoint can accept a model id the CLI refuses; warns about the
+   §4 oauth trap). The doctor and the launcher share one key resolver
+   (`scripts/fleet-lib.sh`), so `--live` resolves exactly the key a lane would.
 
 ### Config knobs (env, all optional)
 
 | Var | Default | Purpose |
 |---|---|---|
 | `FLEET_WORKER_BASE_URL` | `https://api.z.ai/api/anthropic` | Anthropic-compatible endpoint |
-| `FLEET_WORKER_MODEL` | `GLM-5.3` | main model (opus+sonnet mapping); 5.3 reasoning levels are low/high/max via `FLEET_WORKER_EFFORT` (thinking cannot be disabled on 5.3) |
-| `FLEET_WORKER_SMALL_MODEL` | `GLM-4.5-Air` | background/cheap model (haiku mapping) |
+| `FLEET_WORKER_MODEL` | `glm-5.3` | main model (opus+sonnet mapping); 5.3 reasoning levels are low/high/max via `FLEET_WORKER_EFFORT` (thinking cannot be disabled on 5.3) |
+| `FLEET_WORKER_SMALL_MODEL` | `glm-4.5-air` | background/cheap model (haiku mapping) |
 | `FLEET_WORKER_CONFIG_DIR` | `~/.fleet-worker/cfg` | isolated config dir — **one per parallel worker** |
 | `FLEET_WORKER_EFFORT` | `high` | seeded `effortLevel` in the worker's settings |
 | `FLEET_WORKER_PERMISSION_MODE` | `bypassPermissions` | worker `--permission-mode`; use `dontAsk` + an allowlist to spawn from an auto-mode orchestrator (see *Permission posture*) |
@@ -134,8 +137,8 @@ routing needs a separate process, which is fleet-worker. Hence two loci:
 
 | Work class | Locus | Model | Effort |
 |---|---|---|---|
-| **mechanical** | fleet-worker (GLM) or in-proc | `haiku` / GLM-4.5-Air | low |
-| **scout** | in-proc (fleet-worker if wide) | `sonnet` / GLM-5.3 | low |
+| **mechanical** | fleet-worker (GLM) or in-proc | `haiku` / `glm-4.5-air` | low |
+| **scout** | in-proc (fleet-worker if wide) | `sonnet` / `glm-5.3` | low |
 | **build** | in-proc | `sonnet`→`opus` | medium |
 | **synthesize** | in-proc only | inherit (session = Fable/Opus) | high |
 | **judge** | in-proc only | inherit (session = Fable/Opus) | high–max |
@@ -169,12 +172,18 @@ N workers never clobber each other. Spawn from the orchestrator's Bash tool with
 `run_in_background: true`, then collect by output file.
 
 ```bash
+# Where the worker trees go: the machine-wide lane root when set
+# ($WORKTREE_ROOT/<repo>/fleet-<id>, <repo> = the main checkout's dir name),
+# else in-repo scratch (.fleet-work/<id>). rules/worktree-boundaries.md "Lane location".
+main=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
+if [ -n "${WORKTREE_ROOT:-}" ]; then FW="${WORKTREE_ROOT%/}/$(basename "$main")"; pre=fleet-
+else FW=.fleet-work; pre=; fi
 delegate() {                     # $1 = task-id, $2 = prompt
-  local id="$1" prompt="$2" wt=".fleet-work/$1"
+  local id="$1" prompt="$2" wt="$FW/$pre$1"
   git worktree add -q -b "fleet/$id" "$wt" HEAD
   ( cd "$wt"
     FLEET_WORKER_CONFIG_DIR="$HOME/.fleet-worker/cfg-$id" \
-      fleet-worker --output-format json "$prompt" > "../$id.result.json" 2> "../$id.err"
+      fleet-worker --output-format json "$prompt" > "../$pre$id.result.json" 2> "../$pre$id.err"
   )
 }
 delegate task-a "Add tests for the auth module"      &
@@ -183,12 +192,13 @@ delegate task-c "Refactor utils.py duplications"     &
 wait                                                  # barrier
 
 for id in task-a task-b task-c; do
-  if fleet-collect.sh ".fleet-work/$id.result.json" >/dev/null; then echo "fleet/$id OK"; fi
+  if fleet-collect.sh "$FW/$pre$id.result.json" >/dev/null; then echo "fleet/$id OK"; fi
 done
 ```
 
 Keep concurrency modest (≤ 4–6) — the binding constraint is endpoint quota, not
-local CPU. `.gitignore` the scratch dirs (`.fleet-work/`, `.fleet-worker/`).
+local CPU. `.gitignore` the scratch dirs (`.fleet-work/`, `.fleet-worker/`); with
+`WORKTREE_ROOT` set, `.fleet-work/` is never created.
 
 ## Hand off to fleet-ops (test-gated landing)
 
@@ -278,8 +288,13 @@ provider's** terms for your own use. Two specifics worth knowing:
   `fleet-worker --help` for the full env/flag contract.
 - `scripts/fleet-collect.sh` — gate a `--output-format json` result; exit 0 success /
   10 worker-failed; prints the final text. `fleet-collect.sh --help`.
+- `scripts/fleet-lib.sh` — sourced, not run: the endpoint/model defaults and the
+  key-resolution chain, shared by the launcher and the doctor so they cannot
+  diverge (`fleet-worker.ps1` mirrors it by hand).
 - `scripts/fleet-doctor.sh` — `--offline` structural preflight + doc-consistency
-  (CI-safe); `--live` pings the endpoint to confirm the model still resolves and
+  (CI-safe); `--live` pings the endpoint, then runs one real `claude` turn through
+  the launcher (judged on the JSON result — the `[claude-code:unrecognized_model]`
+  stderr notice Claude Code prints for every non-catalog id is not a failure), and
   flags the §4 oauth trap. `fleet-doctor.sh --help`.
 
 ## References & assets

@@ -8,26 +8,564 @@ feature releases live in the README "Recent Updates" section.
 
 ### Added
 
-- **`test-engineering` skill** (replaces `testgen` and `testing-ops`) - tests that are proven
-  able to fail. Five modes behind one router: **design** (failure modes first, from a gap-class
-  checklist), **write** (TDD or test-after; every test proved against a planted mutant or the
-  unfixed code, else marked `unverified`), **audit** (blind review plus mutation, authored and
-  predicted results never blended), **gate** (v1 blocks only on what a tool detects exactly:
-  lost Python tests via ruff F811, and assertion-free PHP tests via PHPUnit's `failOnRisky`) and **triage** (red tests, survivors, flakes, and AI
-  reviewer comments about tests, closed with evidence). Ships `scripts/mutate.mjs`, a
-  zero-dependency harness (vitest, jest, pytest, go, phpunit, pest, any command; React and
-  Vue through vitest/jest, Laravel through pest/phpunit, Twig through a PHP render test) that
-  syntax-checks PHP mutants with `php -l`, restores files from
-  memory rather than `git checkout`, refuses red or incomplete baselines, brackets batches with
-  null controls and strips secret-looking env vars from test runs; a per-repo
-  `.test-profile.yml` (strictness, posture, risk zones); slop (S1-S18) and gap (G1-G13)
-  catalogues; and Greptile guidance. Grounded in a 13-repo survey: suites that were all green
-  killed 74% of authored mutants, and 20 of 20 behaviours a blind reviewer predicted were
-  untested survived.
-- **`test-review-agent`** - blind, read-only (Read, Grep, Glob) test-suite reviewer spawned by
-  test-engineering's audit and triage modes.
-- **`security-ops`: optional discovery companion** - `cloudflare/security-audit-skill`,
-  referenced at a pinned, reviewed commit rather than vendored.
+- **`fleet queue` and `/conduct`: the coordinator's landing ritual as a command.**
+  `fleet queue <lane> <tip>...` lands reviewed lanes one at a time. Before each land it
+  waits for the base to settle, checks the tip is the reviewed one (or a rebase with the
+  same outcome), trial-merges it and audits the would-be merge: a changelog line dropped by
+  a merge resolution, a glued entry, a change to a released section, a new duplicate
+  definition, or a deny-listed name (`--deny-file`, a private list). It retries a live owner
+  or a held landing marker quietly and stops at the first failure. `/conduct` walks the
+  whole ritual (`skills/fleet-ops/references/conduct.md`): pin the coordinator, inventory,
+  intake, review each diff against its brief, land, write the wave's changelog entry, ask
+  before pushing, then sweep, prune and archive. The lane brief gains COORDINATOR and
+  CHANGELOG fields.
+
+- **A TLS-verification guard.** `hooks/pre-tls-verify-ask.sh` asks before a command turns
+  certificate checks off (`curl -k`, `wget --no-check-certificate`,
+  `NODE_TLS_REJECT_UNAUTHORIZED=0`, git `http.sslVerify false`, npm `strict-ssl false`, pip
+  `--trusted-host`, composer `secure-http false`, PowerShell `-SkipCertificateCheck` and
+  more), and says when a switch outlives the session. It asks rather than denies, because a
+  self-signed certificate on a local dev host is the one legitimate case, and it reads the
+  command with a quote- and heredoc-aware lexer, so a commit message or a search that
+  quotes `curl -k` stays silent. `hooks/post-tls-verify-scan.sh` advises when an edit
+  switches verification off in code or config (`verify=False`, `rejectUnauthorized:
+  false`, `CURLOPT_SSL_VERIFYPEER`, `InsecureSkipVerify`, trust-all managers and more);
+  prose files are skipped. Both are in the plugin's default hook set. `rules/supply-chain.md`
+  gains the matching directive and security-ops' audit checklist names the code patterns.
+  187 hook contract tests; every case was seen failing against missing and over-broad hooks.
+
+- **pm-audit flags TLS switched off in committed package-manager config.** New errors
+  `registry.tls.disabled` (`.npmrc` / `.yarnrc` strict-ssl off, `.yarnrc.yml`
+  enableStrictSsl, pnpm strictSsl, pip trusted-host, uv allow-insecure-host, composer
+  secure-http / disable-tls / ssl verify options, `.env*` files that switch it off) and
+  `registry.url.http` (a plain-http registry or index). Loopback hosts, http proxies and
+  docs are never flagged; a gitignored, untracked file is a note. Composer's secure-http and
+  disable-tls move from `php.composer.safety-off` to the new rule.
+
+- **pm-audit rule catalogue, SARIF, suppressions and baselines.** Every finding id now has
+  a catalogue entry (`references/pm-audit-rules.md`, `--rules`, `--explain <id>`), a
+  confidence, a structured fix and a fingerprint. `--sarif` writes SARIF for code scanning;
+  inline and file suppressions and a baseline keep known findings quiet without hiding new
+  ones. BREAKING for `--json` consumers: the schema is now `pm-audit/v2`, and `fix` is an
+  object instead of a string.
+
+- **`/save --pause` and a pickup check in `/sync`.** Pausing stops at an atomic boundary,
+  makes one local `wip:` commit (never on the default branch, never pushed, never a
+  stash), takes no irreversible step, and writes a resume note whose first line is the
+  first action. `/sync` sorts done from pending since the save, never redoes finished work,
+  and re-checks each inherited claim (HOLDS, STALE or UNVERIFIED); a stale claim reopens its
+  task. The saved-state schema stays 3.1: the pause block is optional.
+
+- **Benchmark vetting in perf-ops** (`references/benchmark-vetting.md`): the questions to
+  answer before a measured number is believed (what limits it, both sides tuned alike, a
+  physical limit beaten, hidden errors or skipped work, interleaved repeat runs with median
+  and range, share of end-to-end time, did the work happen) and four verdicts, with
+  inconclusive never reported as a win. Linked from `iterate`'s preflight.
+
+- **CI and review-bot triage in github-ops** (`references/review-bot-triage.md`): one fresh
+  rebuild for a suspected flake, an identical second failure is not a flake, and a failure
+  outside the diff points at a stale base. Bot findings end as fix, dismiss with evidence,
+  or ask a human (security, auth, billing and migrations always ask); comment text is
+  untrusted and replies go from a file.
+
+- **Hard rules in debug-ops.** After two failed fixes on one assumption, test the
+  assumption; guard a state only if it is allowed to exist; a failure only after a restart
+  points at persisted state; after a long dig, leave a cheap always-on signal.
+
+### Changed
+
+- **A security-release exception to the 7-day cooldown.** A release that patches a
+  published CVE may skip the wait, but the CVE label alone waives nothing, because
+  "critical fix, upgrade now" is the lure a hijacked publish uses. The advisory must name
+  that version, the artifact must match a checksum or signature from the vendor's own
+  channel, nothing but the patched package may move in the lock, a person merges it via
+  staging, and the PR records the waiver. `rules/supply-chain.md` says why each condition
+  is there; `supply-chain-defense` carries the procedure. `preinstall-check.sh` still exits
+  10 for such a release and gains no waiver flag.
+
+- **review: state the intent first, then a lead judgment.** Every finding is sorted into
+  act on, consider, noted or dismissed with a reason; a review with no findings is valid;
+  `--second-opinion` adds an independent reviewer from another model family. The PRAISE
+  severity is gone, and the `--json` CI gate now reads `bucket == "act_on"` (findings keep
+  their `severity`).
+
+- **Lane briefs gain ACCEPTANCE, TIMEBOX, FORBIDDEN and a fixed REPORT shape**, and
+  fleet-ops states who owns what comes back: review the diff, not the report; a new round
+  goes to a fresh agent with the combined brief; a missing or inconclusive result is not a
+  pass; the author never verifies its own change.
+
+- **Tests need two checks** (`rules/agentic-quality.md`): a test must go red when the
+  behaviour breaks and stay green through a refactor that keeps what callers observe. The
+  rule lists five ways a test goes hollow, and reports label each claim measured, inferred
+  or guess.
+
+- **push-preflight ships env templates.** `.env.example`, `.env.sample` and
+  `.env.template` pass the forbidden-file check; their content is still secret-scanned in
+  Step 6, and real env files stay forbidden.
+
+- **The weekly Freshness job now runs every skill's live fact check, and a PR can no longer
+  ship one it skips.** Eight skills (cloudflare-ops, mcp-ops, migrate-ops, pypi-ops, react-ops,
+  rust-ops, tailwind-ops, vue-ops) shipped an `--offline`/`--live` verifier that
+  `.github/workflows/freshness.yml` never called, so their drift could never fail a run. Each
+  now has a `freshness-step.sh` step; pypi-ops checks its `assets/publish.yml` pins against the
+  GitHub API. `tests/check-resources.sh` finds every `skills/*/scripts/` file naming both flags
+  and fails the PR when no step runs it, unless it is in an `__fv_exempt` list with a reason
+  (fleet-doctor and loop-doctor check the local machine, not shipped facts); it also fails a
+  stale exemption and a step naming a script no longer on disk.
+
+- **mcp-ops teaches the v2 MCP ecosystem.** Spec revision 2026-07-28 (sessionless requests,
+  `server/discover`, no server-to-client requests), the Python SDK 2.x (`FastMCP` renamed
+  `MCPServer`, transport settings on `run()`, `ToolError` vs `MCPError`), FastMCP 4, and the
+  TypeScript SDK v2 split packages (`registerTool`, `serveStdio`, `createMcpHandler`, and a
+  codemod). A new `references/v2-migration.md` maps the version boundary with its sources and
+  lists what was not verified; the five references were ported, dropping several v1-era errors
+  on the way, and the verifier labels PyPI rows as PyPI.
+
+- **migrate-ops targets Python 3.15, TypeScript 7 and Go 1.27.** New guidance covers Python's
+  UTF-8 default encoding and lazy imports, TypeScript 7's native compiler (no compiler API
+  until 7.1, so tools that consume it stay on 6.0), and Go 1.26/1.27's generic methods,
+  json/v2 backing and removed GODEBUG settings.
+
+- **react-ops and vue-ops teach Jotai 3, Vitest 5, Pinia 4 and VueUse 15.** Their `--live`
+  verifiers had tripped on all four new majors; the prose was checked against each project's
+  release notes or migration guide (cited inline) before the facts moved. Jotai gets a v2-to-v3
+  change table (`atomFamily` to `jotai-family`, `loadable` removed, ESM only, a mount-timing
+  change); both testing references get Vitest 5's floors (Node 22.12, Vite 6.4 as a required
+  peer) and the changes that break suites (`clearMocks` on by default, unawaited `.resolves`
+  failing, top-level `vi.mock`, the `>` test-name separator, the `.vitest/` artifact
+  directory); Pinia 4 gets its install line (`@vue/devtools-api` is now a required peer) and
+  VueUse 15 its breaking changes. The facts files now carry major-bearing prose tokens ("Vitest
+  5", "Pinia 4", ...), so `--offline` fails if the prose stops naming the documented major.
+
+- **The README leads with what the plugin does, shown in real runs.** A "What you get" list,
+  then "See it work": `fleet status` and `fleet sweep` in a throwaway repo, the live staleness
+  verifiers catching drift, `push-preflight` refusing a commit that carries a key, and
+  `docker-audit` on its own bad fixture, with light and dark screenshots under
+  `docs/screenshots/`. Installation moves up, and the long inventories fold into expandable
+  blocks.
+
+### Fixed
+
+- **`docker-doctor.py` tests no longer depend on the host having Docker.** The doctor
+  checked whether the engine socket exists on the real filesystem even under its fake-host
+  test hook. GitHub's Ubuntu runners ship Docker, so `/var/run/docker.sock` exists there
+  and the "no runtime at all" case reported a `cli-missing` finding (exit 10) instead of
+  exit 3: red on Linux CI, green on Windows and Docker-less machines. The socket check now
+  goes through the fake host (`paths`), the fixture pins the socket absent, and a new
+  `socket-present` case pins the other side. The new tests failed on the old doctor.
+
+- **`postinstall-audit.py` no longer passes unread PyPI packages as clean.** It found a
+  package's code only through `top_level.txt` and skipped any dist-info without one, with
+  no message: a real venv printed "45 packages (45 scanned)" beside 93 dist-infos, so
+  most modern wheels (protobuf among them) were never read. It now falls back to
+  `RECORD` (narrowing a shared namespace dir such as `google/` to the dist's own
+  children), resolves `top_level.txt` names that are single-file modules, and names any
+  package it still cannot locate on stderr and in `meta.unscanned` with exit 5, never a
+  `clean:` line; findings still win with 10. The reference's exit-code table now matches
+  the script (no exit 7; `--deep` without GuardDog does not change the code). The new
+  tests failed on the old script.
+
+- **push-preflight scans what a new branch's first push sends, not the whole branch.**
+  When `<remote>/<branch>` did not exist yet, the scan covered every commit on the branch,
+  so a feature branch's first push re-scanned the main it was cut from and could be refused
+  over lines an earlier PR had already published. `scripts/push-scope.sh` now defines the
+  scope once for Steps 4, 6 and 7: an update scans `<remote>/<branch>..<branch>`, a new
+  branch scans `<branch> --not --remotes=<remote>` (scoped to the pushed-to remote, so a
+  base that exists only on another remote is still scanned), and only a remote with no refs
+  gets the full-branch scan. 29 new assertions against a local bare remote.
+
+- **mac-ops audits and the git-ops land plan no longer read a failed probe as a result.**
+  `disk-health.sh` turned a failed `diskutil list` into no SMART check and no FAIL, a
+  failed `mount` into skipped checks and a failed `df` into "100% free"; each is now a FAIL
+  or a `NOT checked` WARN, because a check that cannot run reports the worst result it
+  could have given. `quickrun.sh` read an audit that crashed before its SUMMARY as green; it
+  is now a FAIL naming the script. `land-all.sh` turned a failed `rev-list` into "MERGED,
+  prune candidate"; a failed probe is now an `ERROR` row with exit 3, and a failed
+  `git worktree list` exits 2. 16 of 19 new assertions guard a fix and were seen failing.
+
+- **mac-ops scripts honour `--json`, `--redact` and `--quiet`.** 21 of 23 scripts ran their
+  own option loop and then handed an empty argv to the common flag parser, so `--quiet`
+  printed banners, `--json` printed text and `--redact` output kept private IPs, serials
+  and hostnames. Each now restores its argv after the loop. `disk-health.sh` read a failed
+  `log show` as "0 IO errors", a PASS; it is now a `NOT checked` FAIL. 41 new assertions:
+  the 34 guarding a fix were each seen failing, and 7 are controls.
+
+- **Two supply-chain scanner blind spots no longer read as clean.** `scan-extensions.sh`
+  dated items with GNU-only `find -printf`, so on BSD and macOS every item read
+  `recent=no` and `--deep` scanned nothing; it now uses `-mmin`, and a probe that still
+  fails reads `recent=unknown` and is scanned. `integrity-audit.sh` grepped UTF-16
+  PowerShell profiles as ASCII and read them clean; a BOM file is now decoded first, and
+  one that cannot be decoded is reported `NOT scanned`. 17 new assertions, each seen failing.
+
+- **fleet-ops: the pre-land scrub no longer refuses embedded base64 fonts.** Random base64
+  matched the scrub's X-marker term often enough to refuse any HTML report with an embedded
+  font. `scrub_diff` now cuts each `data:<type>;base64,<payload>` run on an added line to
+  its prefix before matching; a marker in prose, or beside a data URI, still refuses.
+
+- **`postinstall-audit.py` no longer treats loopback addresses as exfil endpoints.**
+  `http://127.0.0.1:*` or `http://0.0.0.0:8000` beside a credential-path or env read raised
+  HIGH `cred-exfil` / `env-exfil`; loopback and `0.0.0.0` are now excluded, and a public raw
+  IP still fires.
+
+- **push-preflight's docs call `push-scope.sh` by its skill path**, so running it from a
+  project root no longer fails or runs that project's own script.
+
+- **pm-audit tests: a second `fresh()` no longer shadows the first** in the same embedded
+  program (found by `fleet queue`'s duplicate-definition audit).
+
+- **Coloured panels no longer lose columns to their own colour codes.** `term.sh` measured
+  text that already carried ANSI escapes, so every escape byte counted as a column: with colour
+  on, `term_panel_close` drew the `fleet status` footer 62 cells wide under an 80-cell header,
+  `term_truncate` cut `loop-check`'s verdict row inside `ESC[33m` and mangled short coloured
+  labels, and printf `%-14s` / `%-10s` shifted the fleet leaf rows' columns. `term.sh` now
+  strips colour before it takes any width (`term_strip`, `term_vis_width`, `term_pad`,
+  fork-free inside); panel bars measure their rendered strings, and a cut copies escapes whole
+  and resets colour before the marker. A coloured render with its escapes stripped now equals
+  the plain render, and UTF-8 rails pad to 14 columns, not 14 bytes.
+
+- **Terminal panels count wide glyphs as two cells.** `term.sh` measured characters, so the
+  ⚡ brand left `fleet status`'s header a cell past its footer, and MSYS bash (16-bit
+  `wchar_t`) counted 🔁 as two characters and could cut it in half. Widths are now terminal
+  cells from Unicode's East Asian Width table, counted on UTF-8 bytes so Linux, macOS and MSYS
+  agree, and `term_truncate` never splits a glyph. In `term.ps1`, `Get-TermDisplayWidth`'s
+  wide-glyph branch had never run, so `windows-ops` headers ran a cell long too; it now shares
+  `term.sh`'s table (a gate keeps the two equal), and `Get-TermTruncated` copies colour
+  escapes and emoji whole instead of cutting the raw string.
+
+- **react-ops' Vitest setup type-checks again.** `import '@testing-library/jest-dom'` types
+  its matchers on `jest.Matchers`, which Vitest 5 no longer reads, so every jest-dom matcher was
+  a TS2339. The setup now calls `expect.extend(matchers)` and ships a `Matchers<R, T>`
+  augmentation until jest-dom ships Vitest 5 types (testing-library/jest-dom#738). The same
+  file's `jest-axe` example called `toHaveNoViolations()` instead of passing the matcher, and
+  named Playwright's `--update-snapshots` flag where Vitest's is `-u`.
+
+- **vue-ops' persisted-state example uses `pick`.** pinia-plugin-persistedstate v4 renamed
+  `paths` to `pick`, so the old option no longer limited what was persisted.
+
+- **Every PowerShell script now parses under Windows PowerShell 5.1.** 5.1, still the
+  default shell on Windows, reads a script without a byte-order mark in the ANSI code page, so
+  the em dashes, box rules and emoji in 13 of the 31 tracked `.ps1` files broke their parse,
+  among them `skills/_lib/term.ps1`, which every PowerShell skill script loads; pwsh 7 reads
+  UTF-8 and hid it. Tracked PowerShell files are now plain ASCII: decorative characters use
+  the ASCII stand-ins `docs/TERMINAL-DESIGN.md` registers, `term.ps1` builds its glyphs from
+  code points (its output is unchanged), and `phone-home-monitor.ps1` drops its PowerShell
+  7-only `??`. A new gate, `tests/check-ps51-parse.sh`, fails on any non-ASCII byte and, on
+  Windows, runs the real 5.1 parser over every file; it runs in `just check` and in both CI
+  jobs.
+
+- **fleet-ops: sweep and prune no longer call at-risk work removable.** `fleet sweep` no
+  longer hides a tree's uncommitted files behind an earlier verdict: KEEP, REMOVE, PARK, a
+  diff INSPECT and COMPETING rows now end `N uncommitted: <files>`, and their action says to
+  commit or review that work first; an OVERLAP pair with an uncommitted side says so before
+  "drop the other". `fleet prune` treats a lane with no commit of its own as *unstarted*, not
+  merged: REVIEW until an archived owner is proven or it has sat unclaimed for
+  `FLEET_PRUNE_UNSTARTED_DAYS` (30), shown by the sweep as the new informational `UNSTARTED`
+  verdict. The new `sessions.sh named` makes a transcript whose `EnterWorktree` or
+  `git worktree add` tool call names a tree a keep-only claim on it, pending calls included
+  (window `FLEET_SESSION_NAMED_DAYS`, 7; the session running prune is exempt). Both came from
+  a zero-commit lane that read SAFE / REMOVE while its session waited on its EnterWorktree
+  prompt.
+
+## [3.9.0] - 2026-10-14
+
+The Docker family rebuilt around the engine as well as the files, DDEV and package-manager
+skills for agency PHP sites, AGENTS.md tooling end to end, lanes that live outside the
+project, and the gates that keep 112 skills honest. Two skills were renamed:
+`container-orchestration` is now `kubernetes-ops` and `push-gate` is now `push-preflight`;
+the installers remove the old installed copies.
+
+### Added
+
+- **ddev-ops round 3: what an agent should know before it runs `ddev`.**
+  - **Routes back to the host.** The auditor reports `exec-host` hook tasks (`host-hook`:
+    a pre-start one runs on the first `ddev start` of a fresh clone), project host commands
+    (`host-command`), compose mounts of the Docker socket (`docker-socket-mounted`) or of
+    the home directory or a credential store in it (`home-mounted`), and credential files
+    under `.ddev/`, such as an agent add-on's login or a key in `homeadditions/`
+    (`credential-file`; high once git tracks one).
+  - **More places for a committed secret.** `committed-secret` also reads committed
+    `web_environment`, compose `environment:` blocks and nginx/Apache snippets.
+  - **`unknown-key`** checks top-level keys against DDEV's own config schema (52 keys at
+    v1.25.4), which DDEV doesn't enforce: it ignores a key it doesn't know. The weekly
+    `--live` run re-reads the schema.
+  - **Findings carry `file:line`** (`line` in `--json`), as docker-ops' auditor prints them.
+  - **New guidance:** `ddev exec --dir` (DDEV doesn't follow the folder you run it from),
+    OAuth callback URLs and webhooks per checkout, showing uploads from production instead
+    of pulling them, keeping dumps out of an agent's context, AI agents inside DDEV, and
+    `#ddev-silent-no-warn`.
+  - SKILL.md runs its scripts as `"<skill-dir>/scripts/..."`, so its skill-hygiene
+    baseline line is gone.
+
+- **A machine-wide lane root: `WORKTREE_ROOT`.** Set it in Claude Code's `settings.json`
+  `env` and lanes live at `$WORKTREE_ROOT/<repo>/<slug>`, outside every project dir, so
+  `rg`, `fd`, `tokei` and `git add -A` in a project never see one. Unset, nothing changes.
+  - `new-lane.sh` and `fleet init` place lanes there by default (an explicit fleet
+    `worktree_root` still wins); the fleet-worker fan-out recipe uses `fleet-<id>` there.
+  - The tools that find lanes see them there: `worktree-survey.sh`, `status.sh`,
+    `fleet prune` and `fleet sweep` scan the root, and skip a same-named repo's lanes.
+    `worktree-guard.sh` guards `rm`, `git rm` and `git worktree remove/prune` on it.
+  - New opt-in hooks `worktree-create.sh` + `worktree-remove.sh` move Claude Code's own
+    worktrees there too. The remove hook never forces and deletes only a merged
+    `worktree-*` branch. Claude Code's sweep keeps hook-made trees, so `fleet sweep` marks
+    them "hook-made" and `fleet prune` gives them the same care as `.claude/worktrees/`.
+  - Fixed on the way: fleet.sh kept its default in a variable named `WORKTREE_ROOT`,
+    which overwrote the machine's value for itself and every child it ran.
+
+- **`tests/skill-hygiene.sh`: a ratchet against four quiet skill failures.**
+  - **A side file SKILL.md never names.** The router can't find it. A named folder covers
+    its files, and `_lib/` helpers are exempt.
+  - **A `related-skills` entry the body never mentions.** The model never sees frontmatter
+    metadata, so that hand-off never happens.
+  - **`python scripts/x.py` run relative to the cwd.** From a project root it exits 127, or
+    runs the project's own script (docker/skills #102).
+  - **Two skills claiming one `metadata.owns` token.**
+
+  The 159 violations that predate the gate are listed in `tests/skill-hygiene-baseline.txt`:
+  a new violation fails, and so does a baseline line whose violation was fixed, so the list
+  only shrinks. Each run starts with a self-test on a throwaway skills tree. The gate runs in
+  `just check`, `check-fast` and CI. The Skill Resource Protocol now names the
+  `"<skill-dir>/scripts/..."` form. docker-ops and kubernetes-ops name every related skill;
+  portless-ops and process-compose-ops gain `owns`.
+
+- **windows-ops: a WSL reference** (`references/wsl.md`), replacing the old "WSL issues -
+  separate domain" line. It covers:
+  - `.wslconfig` versus `wsl.conf`, and the 8-second rule: a setting applies only after
+    the VM fully stops, and a malformed file is ignored without a word.
+  - the keys that matter, and which networking mode ignores which (`localhostForwarding`
+    in mirrored mode, `dnsProxy` outside NAT);
+  - NAT versus mirrored reachability, the Hyper-V firewall, and DNS tunnelling;
+  - why `/mnt/c` is slow and why file watchers miss Windows-side edits there;
+  - each distro's `ext4.vhdx` (found through the `Lxss` key), and resizing, sparse and
+    compacting per WSL version. `--set-sparse` needs `--allow-unsafe` on 2.5.6 to 3.0.1,
+    and `--compact` arrived in 2.9.8 / 3.0.1;
+  - the UTF-16 output trap of `wsl.exe` (`WSL_UTF8=1`).
+
+  Facts come from Microsoft's WSL docs and WSL's own usage strings. net-ops' WSL DNS notes
+  are corrected: with DNS tunnelling on, Windows resolves WSL's names, so NRPT and VPN
+  hooks apply. Its notes and docker-ops' WSL mentions now link to the new reference.
+
+- **docker-ops: Docker on your machine and in your repo** - the engine layer is folded in
+  rather than split into a separate runtime skill, because a broken-engine prompt says
+  "docker" and would collide with docker-ops anyway. The new SKILL.md opens with ten hard
+  rules: destructive commands are tiered (a sweep stays a sweep even when everything is
+  stopped); no bare `docker compose config`, which prints interpolated secrets and
+  `env_file` contents; no secrets in layers; datastore ports bound to loopback; scanners
+  pinned by SHA after March 2026's trivy-action compromise (GHSA-69fq-xp46-6x23); current
+  base lines only; non-root verified with `docker inspect`; never start or reconfigure the
+  engine for the user. Nine re-cut references: dockerfile, compose, supply chain and
+  scanning, a destructive-command index covering Docker, Compose, kubectl, Helm and DDEV,
+  providers and contexts, ports and networking, disk reclaim (Docker Desktop 4.59 stopped
+  compacting its WSL disk), VM backends and emulation, and debugging. Stale advice is gone:
+  `trivy-action@master`, an everyday `system prune -a --volumes`, `node:20`,
+  `rm -rf /var/lib/apt/lists` (now cache mounts with `docker-clean` removed), and `version:`
+  lines. Four tools, each with an offline suite (243 checks, 8/8 mutants killed):
+  `docker-audit.py` (Dockerfile families D1-D11, Compose C1-C9, cross-tool IDs, inline
+  pragmas that need a reason and may expire), `docker-doctor.py` (endpoint-first provider
+  detection, engine down or hung, two providers running, missing credential helpers, VM disk
+  far above engine data, Windows-reserved and WSL-side ports; it starts, prunes and
+  compacts nothing), `check-image-tags.py` (do the pinned tags still exist for
+  amd64+arm64?) and `check-docker-facts.py` (the weekly freshness job; its first live run
+  caught Python 3.10's end of life on 2026-10-01).
+
+- **`fleet sweep`: post-wave housekeeping in one ordered pass** - after a wave of chips,
+  background agents or fleet lanes, `fleet prune` refused correctly but could not drain:
+  a real 36-tree backlog read 0 SAFE, 31 REVIEW, with no next step for any of them. The
+  sweep (`fleet-ops/scripts/sweep.sh`, `references/sweep.md`) reads prune's buckets and adds
+  what prune cannot see. It finds lanes landed by content (`git merge-tree`: squash,
+  cherry-pick) and competing lanes, i.e. the same files committed in one and uncommitted in
+  another (shared ledgers and per-tree config excluded). It lists merged worktree-less
+  branches, ghost entries, unregistered dirs and stale stashes, and names the sessions to
+  archive. Each row carries the exact next action, and re-running after each step resumes
+  the procedure, since nothing is cached. Archiving is agent-driven, one gated call each:
+  a finished, idle session gets a `send_message` asking it to archive itself, while a
+  session whose lane dir is gone is archived directly and never messaged, because a
+  message would resume it into a dead tree. The live run found 7 such sessions, and 2 of
+  22 empty orphan dirs still in use as an open session's cwd. `--apply` acts only on the
+  zero-loss classes (ghost entries, merged unheld branches deleted by compare-and-swap,
+  unclaimed empty dirs), each re-verified before it acts. A private never-push list
+  (`~/.claude/never-push.txt`, never in a repo) parks branches whose history must not
+  leave the machine and flags any with a remote copy as `LEAKED`. `parallel-ops` routes
+  "clean up after a wave" to it, and git-ops' stale-branch hygiene check now points at it
+  instead of a `git branch cleanup` command that does not exist. 32 fixture assertions in
+  `fleet-ops/tests/sweep.sh`; nine guards, each seen failing against a mutant first.
+
+- **pm-audit reads CI and deploy configs** - `package-manager-ops`' audit now covers the
+  places a lockfile is actually installed: GitHub/GitLab/Bitbucket/CodeBuild configs,
+  Dockerfiles and AWS CodeDeploy `appspec.yml` hook scripts. New findings:
+  `deploy.install.unfrozen` (`npm install`, unfrozen Yarn/pnpm/Bun, `composer update`
+  in CI or a deploy), `deploy.composer.dev` (a deploy without `--no-dev`, including the
+  ramsey/composer-install action), `php.composer.v1` (end of life since 2026-05-30), and
+  `registry.credentials.image` (CI writes `auth.json` or `.npmrc` into a Docker build
+  context that a Dockerfile copies whole). `js.manager.mixed` flags nested package roots
+  that use another manager than the root, and a `js.nested.roots` note lists them.
+  Running the audit over real agency repositories found each gap and three false
+  positives, now fixed: YAML is read only inside command keys (a command quoted in a
+  release body is text), lockfile-only refreshes pass, and a stub `composer.json` with
+  no packages no longer asks for PHP pins. The engine-strict note is now npm-only.
+  11 new fixture cases (48 in all), each seen failing first; 10 mutants killed.
+
+- **`ddev-ops` skill** - DDEV local environments, owned in one place. A 2026-10-05 read of
+  36 DDEV-based agency repositories shaped it: `scripts/audit-ddev-config.py` runs 20
+  checks, most seen there and each with its reason from DDEV's docs or source (v1.25.4):
+  unpinned PHP and database versions, end-of-life PHP and Node.js, per-developer settings
+  committed for the team (`performance_mode`, router ports, Xdebug), keys DDEV now
+  ignores, a committed `name:` in a git worktree, `upload_dirs` written from the project
+  root when DDEV resolves them from the docroot, project commands that shadow DDEV's
+  built-ins, CRLF command files, host SSH-agent forwarding into containers, provider
+  recipes that can push or whose files stanza fetches nothing (DDEV then empties the
+  upload directory), credentials in committed env files (named, never printed), and
+  per-developer `.local` files in git. It merges `config.*.y*ml` overrides the way DDEV
+  does (lists append) and skips DDEV's own generated recipes. Eight references cover
+  configuration, CI parity and env files,
+  scripting DDEV (`-j` output, commands that destroy data, several git worktrees),
+  database workflows and sanitised pulls (with a database-only recipe asset), Mutagen,
+  WSL2 and Docker providers, add-ons, commands, hooks, web-server config and networking,
+  Node and dev-server ports, Xdebug and sharing, and a troubleshooting runbook. Three
+  independent reviews (coverage against DDEV's docs, a claim-by-claim accuracy check
+  against v1.25.4 source, 14 cold-start scenarios) fed the final version. `check-ddev-facts.py` keeps
+  the facts the auditor uses (defaults, end-of-life floors, built-in command names)
+  current: `--offline` in PR CI, `--live` weekly in `freshness.yml`. The skill runs when
+  copied alone and follows the team-plugin port limits (description starts "Use when ",
+  no project-hostname placeholders). Generic DDEV material moved out of `craftcms-ops`'
+  `ddev.md`, which now holds only Craft-specific facts; `security-ops`,
+  `frontend-upgrade-ops` and `docker-ops` link to it. Throwaway projects on DDEV v1.25.4
+  (Docker Desktop, WSL2) then confirmed what they could reach, including the emptied
+  upload directory, and corrected four claims:
+  - a reused `ddev snapshot` name saves nothing yet exits 0, so `fail_on_hook_fail` can't
+    catch a fixed-name pre-pull hook;
+  - git ignores `.local` files only once DDEV has written its untracked
+    `.ddev/.gitignore`. The skill now has teams add `.ddev/config*.local.y*ml` and
+    `.ddev/.env*.local` to their own `.gitignore`. The `local-file-committed` check flags
+    tracked ones from git's index, judging the staged copy as well as the disk: high
+    for credentials, including a local config's `web_environment`;
+  - a host SSH-agent forwarding file that also sets `SSH_AUTH_SOCK` breaks `ddev auth ssh`
+    on Docker Desktop for Windows;
+  - the router publishes Mailpit, XHGui and Traefik-monitor ports besides 80/443.
+
+  Two three-model review rounds (Codex, Gemini, Claude Opus) found the rest; each finding
+  was checked against source or a live run before acting, and three were disproved. The
+  one serious bug: on a stock Windows setup the auditor ran a `git.exe` committed to the
+  repository it audited. It now resolves git from `PATH` outside the project, disables
+  the repository's `core.fsmonitor`, drops an inherited `GIT_DIR` or `GIT_INDEX_FILE`,
+  and names any check it could not run (stderr and `--json` `meta.skipped`). Credential
+  detection now treats `${VAR:-literal}` and single-quoted values as literals, but
+  `${A}_${B}` as references. The suite gained 31 checks, each seen failing first, and
+  all 21 mutants of the new code were killed.
+
+- **AGENTS.md create / audit / upgrade / survey in `repo-doctor`** - an extension of
+  the skill that already owned the entry-doc standard, not a new skill (decision record:
+  `docs/plans/AGENTS-MD-2026-10.md`). `references/agents-md-protocol.md` supersedes
+  `entry-docs.md`: what an AGENTS.md holds and leaves out, a 150-line target with a
+  200-line ceiling, splitting into things that load on demand (never `@` imports), and
+  CLAUDE.md shadowing as verified against Claude Code's memory docs (2026-10-05).
+  `scripts/repo-scan.py` is a deterministic, read-only deep scan: every fact cites
+  `file:line` or a command, it follows CodeDeploy hooks into the scripts they call, never
+  opens secret files, never runs repo tooling, and mines git history for landmine
+  *questions* (co-change coupling, hot spots, fix and revert clusters, config edits
+  followed by rebuilds or migrations). `scripts/agents-md.py` drafts an AGENTS.md from
+  those facts through four archetype templates (`scaffold`; `--write` only creates),
+  audits one (`audit`; `--diff` prints a `git apply`-able patch that never moves or drops
+  the Landmines section), and surveys a GitHub org through GET-only `gh api` calls
+  (`survey --org`). `scripts/check-memory-docs.py` is the staleness tripwire for the
+  encoded Claude Code facts: offline in PR CI, live in `freshness.yml`. doc-scanner hands
+  AGENTS.md generation to the scaffold, and its contradicting generation templates are
+  gone.
+
+- **`package-manager-ops` skill** - day-to-day npm, Yarn, pnpm, Bun and Composer for
+  server-rendered sites, in eleven one-topic references (each 300 lines or fewer,
+  Contents-listed, verified 2026-10-05 against the tools' own docs): detecting the
+  manager and resolving two lockfiles without losing resolved versions; `packageManager`,
+  Corepack (no longer shipped with Node since 25.0.0) and `devEngines`; frozen installs
+  for CI and deploy; Node and PHP pins (`.nvmrc`, `engines`, `config.platform.php`,
+  `require.php`) that agree with DDEV; npx, dlx and `composer exec` safety, including
+  never routing a native CLI through npm; upgrades and ERESOLVE; scripts, workspaces and
+  the now-default blocking of dependency install scripts in npm 12, pnpm, Yarn 4.14+ and
+  Bun; registries and auth; caches and CI; Windows, DDEV and Apple Silicon gotchas; and
+  exits from Bower, node-sass, Yarn 1, lockfile v1 and end-of-life Node and PHP.
+  `scripts/pm-audit.py` is a read-only repo audit (25 finding ids; exit 10 on findings),
+  tested against 37 fixture cases that were each seen failing first.
+  `scripts/check-pm-facts.py` guards the Node and PHP end-of-life tables pm-audit reads,
+  offline in PR CI and live (nodejs.org, php.net, npm, Composer, GitHub) in
+  `freshness.yml`. The skill runs copied alone, so it joins the portable skills and
+  carries its own byte-identical `run-python.sh`. DDEV's own config stays with
+  `ddev-ops`' auditor: pm-audit reads DDEV's PHP and Node only to check that they agree
+  with the repo's other pins. `javascript-ops` drops its stale package-manager section for
+  a pointer; `supply-chain-defense`, `frontend-upgrade-ops`, `javascript-ops`,
+  `docker-ops` and `ddev-ops` link to it.
+
+- **Agent Skills spec gate (`tests/spec.sh`)** - every skill is checked by the spec's
+  own reference validator, `skills-ref` (pinned 0.1.1, run through `uv` with its whole
+  dependency tree frozen past a 7-day cooldown), in `just check`, `check-fast` and CI.
+  The one deliberate deviation is now written policy: Claude Code's 14 documented
+  fields (`when_to_use`, `argument-hint`, `effort`, ...) stay top-level, because Claude
+  Code reads them nowhere else. Anything else outside the spec's six is rejected, which
+  catches typos like `when-to-use` that Claude Code ignores silently. The gate also
+  checks that `metadata` values are strings (a spec rule `skills-ref` can't see) and
+  lists the skills that can't be uploaded to claude.ai as-is. Skill size stays with
+  `tests/skill-size.sh`. A fixture self-test runs first, so a validator that passes
+  everything fails the gate.
+  The frontmatter docs (`rules/naming-conventions.md`, `docs/SKILL-SUBAGENT-REFERENCE.md`,
+  `docs/SKILL-CREATION-PROTOCOL.md`) now state one rule. They had contradicted each other,
+  and two of them called `claude plugin validate` authoritative for skills, though it
+  never reads SKILL.md.
+
+- **`security-ops` covers PHP 8, Twig and Craft CMS** - fourteen one-topic references
+  (each 300 lines or fewer, Contents-listed, cited inline to Craft, Twig, PHP manual and
+  OWASP sources): Twig escaping and template injection; Craft CSRF/Formie, access control
+  and `allowAnonymous`, config and security-key hardening, uploads, GraphQL, and an
+  advisories reference that leads with Craft 3 and 4 being past security end of life;
+  PHP input validation, SQL via the query builder versus raw SQL, deserialisation,
+  password hashing, and Composer audit (behavioural supply-chain work stays in
+  `supply-chain-defense`); DDEV-versus-production drift. `security-scan.sh` gains PHP,
+  Twig/Craft-template and Craft-config checks and stops flagging committed
+  `.env.example.*` files; `dependency-audit.sh` runs `composer audit --locked`. A
+  stack-routing table in SKILL.md maps detection to references.
+
+- **`security-ops` speaks OWASP Top 10:2025** - findings, agent prompts, the
+  consolidation step and the report template now tag `Axx:2025` IDs, verified against
+  top10.owasp.org/2025. The OWASP references gain an A03 Software Supply Chain Failures
+  section (routing behavioural work to `supply-chain-defense` and Composer to
+  `php-composer-supply-chain.md`), an A10 Mishandling of Exceptional Conditions section
+  (fail-closed handlers, rollback, generic errors, unchecked PHP returns), SSRF folded
+  into A01, and a review checklist of `rg` patterns each. `audit-quickref.md` carries a
+  2021-to-2025 crosswalk so older reports stay readable. Filenames are unchanged - they
+  name ID ranges, which 2025 kept.
+
+- **`web-perf-ops` skill** - frontend page speed and Core Web Vitals, method first:
+  field data (CrUX, RUM) decides whether there is a problem, lab data (Lighthouse,
+  WebPageTest) explains it, and each fix targets the failing metric's dominant subpart.
+  Eleven one-topic references: field vs lab, LCP, INP, CLS, images, fonts,
+  JavaScript and third-party tags, CSS, caching/CDN, CI budgets, and a Craft CMS map
+  (Blitz, `{% cache %}`, eager loading, transforms, craft-vite, SEOmatic, Formie, the
+  queue). `triage-vitals.py` rates a Lighthouse, PSI or CrUX report and routes each
+  finding to the reference that holds the fix. It normalises the APIs' three CLS
+  encodings and flags the dominant field LCP subpart. `check-web-perf-facts.py` keeps
+  the threshold table and its catalog in step offline, and its `--live` mode reads the
+  thresholds from web-vitals' own source and watches the tool majors. That check caught
+  `@builder.io/partytown`'s deprecation and the fact that `@lhci/cli` still bundles
+  Lighthouse 12. `perf-ops` routes Core Web Vitals questions here.
+
+- **`frontend-upgrade-ops` skill** - the two front-end upgrades a Craft CMS/Twig
+  site keeps meeting, as one portable unit. Laravel Mix or raw Webpack to Vite via
+  craft-vite: a Mix-API translation table, source rewrites, Tailwind v3 kept as-is,
+  legacy builds, the DDEV dev server (one port in four places, and the `cors` /
+  `allowedHosts` defaults that broke `*.ddev.site` setups in Vite 6.0.9), Twig tags and
+  asset URLs. Vue 2 to Vue 3 via `@vue/compat`: warning burn-down, the breaking
+  changes that bite on Twig pages (`inline-template`, the mount container), Vuex to
+  Pinia, a plugin replacement table, and mounting Vue islands in Twig - including the
+  landmine that removing compat removes the template compiler, and client-side
+  template injection through in-DOM templates. Leads with a migrate-or-replace table
+  (Alpine, vanilla, native HTML) and a bundler-first sequencing rule. Its verifier
+  probes npm and Packagist, and watches `@vitejs/plugin-vue2`'s peer range because
+  the upgrade order depends on it stopping at Vite 7.
+
+- **`tests/skill-size.sh` gate** - warns when a SKILL.md body passes ~5,000
+  estimated tokens (characters / 3.6, frontmatter excluded). After auto-compaction
+  Claude Code re-attaches each invoked skill but keeps only its first 5,000 tokens,
+  so anything later in a long body silently vanishes mid-session. Warn-only in
+  `just check` and `check-fast`; `--strict` fails instead and `--report` lists every
+  skill. A built-in self-test must see an oversized fixture and ignore a huge
+  frontmatter on every run, and an empty scan exits 2, so the gate cannot pass blind.
 
 - **`deploy-gating` rule** - a child session never deploys. Background agents, chips,
   workflow/fleet workers, headless and scheduled runs, and CI-autofix or review-triage
@@ -61,7 +599,587 @@ feature releases live in the README "Recent Updates" section.
   what the rule exists to avoid normalising. The scanner keeps per-line file
   attribution now, and the self-test grows eight allowlist assertions.
 
+- **`a11y-ops` server-rendered templates reference** - WCAG 2.2 for Craft CMS
+  and Twig sites, where no single file owns the page. Covers heading levels
+  passed into partials, landmarks owned by the layout, alt text when the asset
+  carries it but the placement decides it (`getImg()` drops an empty `alt`),
+  what Formie 3 and the CKEditor plugin actually render (read from source,
+  including Formie's server-rendered errors arriving as a CSS class only), and
+  `lang`/`hreflang` on multi-site. Testing runs axe through Playwright or
+  Cypress and pa11y-ci against a DDEV URL, keeping `best-practice` in the axe
+  tags because `heading-order` and the landmark rules live there. The skill
+  description is trimmed to a 500-character "Use when" form, now pinned by the
+  skill's own suite.
+
+- **Contents-list gate (`tests/reference-contents.sh`)** - warns when a reference
+  over 100 lines has no `## Contents` list in its first 15 lines, or has a list that
+  misses a `##` heading, as the size rule requires. It is warn-only (`--strict` fails,
+  `--report` lists files) and runs in `just check` and `check-fast`, not the landing
+  chain. A fixture self-test runs first. Today it flags 351 of 427 long references
+  in 83 skills: 280 with no contents heading at all, 48 with another heading such as
+  "Table of Contents", 2 with the list too low, and 21 with a stale list. The parser
+  is security-ops' own, moved into `skills/security-ops/tests/reference-contents.awk`
+  and shared so the two checks can't disagree. It now reads CRLF, ignores link markup
+  in numbered lists and checks every file in one process. The portable skills
+  (a11y-ops, supply-chain-defense, security-ops, prompt-injection-defense,
+  craftcms-ops, web-perf-ops, frontend-upgrade-ops) are clean; the rest get their
+  lists when next touched.
+
+- **Nested AGENTS.md, ARCHITECTURE.md and per-tool loading in `repo-doctor`** - the
+  AGENTS.md tools now cover a large repo's whole set of entry docs
+  (`docs/plans/NESTED-ENTRY-DOCS-2026-10.md`). `repo-scan.py` adds three sections:
+  - `nesting`: which folders have a contract of their own. Contract signals, never size;
+    one doc for a farm; never a parent for its child's contract.
+  - `gates`: dependency-cruiser, import-linter, tach, eslint boundaries, Nx, ArchUnit,
+    deptrac, Go `internal/` and check scripts, each with its scope and whether `check`
+    runs it.
+  - `architecture`: whether a codemap is warranted, the layout fingerprint, and the entry
+    points.
+
+  `agents-md.py` adds:
+  - `scaffold --dir` (a nested draft that holds only deltas, with the commands in their
+    root-runnable workspace form)
+  - `scaffold --architecture` (matklad's shape: entry points and codemap named, never
+    linked, then a layout fingerprint)
+  - `explain <folder>`: what each of nine tool profiles loads there, in order, with
+    reasons and sizes. The profiles are source-cited facts in
+    `assets/agents-md/tool-profiles.json`, checked by `check-tool-profiles.py --live`.
+
+  The audit now:
+  - checks every nested doc against its own folder: budget, root pointer, scope line,
+    commands against its own manifest, staleness in its own commits
+  - routes each landmine candidate to the doc that owns its files
+  - checks ARCHITECTURE.md for stale names (with the rename git history shows) and
+    layout drift
+  - reports load budgets per tool
+  - flags prose invariants no gate covers, and dead paths with their renames
+  - patches a generated entry doc at its source
+  - replaces a CLAUDE.md that copies AGENTS.md with the import and the lines that differ
+  - explains any finding (`--explain <id>`)
+  - honours `docs/agents/ruled-out.md`, one line per "not a landmine" decision. A line
+    stays honoured only while the evidence stays at or below its `@count`, and an
+    agent's `(proposed)` line never counts.
+
+  `scaffold --json` splits owner questions into guided (a recommended answer with its
+  source) and assisted, for the interview in `references/owner-interview.md`. The scorer
+  credits detected gates (half when nothing runs them) and warns on recommended nesting
+  that is absent. The survey reports nested coverage, `flat-monorepo`, and the share at
+  the bar plus the five weakest repos.
+
 ### Fixed
+
+- **The opt-in worktree hooks no longer break Claude Desktop.** Desktop runs
+  WorktreeCreate and WorktreeRemove itself: on Windows through `cmd.exe /d /s /c`, with
+  its own environment instead of the settings `env` block. Wired the documented way
+  (`bash ~/.claude/hooks/...`), the hook exited 127 and Desktop aborted every worktree
+  session and chip on the machine.
+  - `hooks/README.md` wires the pair by absolute path, with per-OS examples, and says
+    why `~` and `$HOME` can't be used there.
+  - `worktree-create.sh` reads `WORKTREE_ROOT` from the user `settings.json` when the
+    variable is missing, so Desktop's worktrees stop landing in `<repo>/.claude/worktrees/`.
+  - A Desktop session in a folder that is not a git repo gets an empty workspace at
+    `$WORKTREE_ROOT/_no-repo/<folder>/<name>`. Desktop aborts on a failed hook and
+    refuses the folder itself. The CLI still gets a failure there, so its background
+    sessions keep their documented in-place fallback. Desktop's calls are the ones with
+    `"transcript_path": ""`. `worktree-remove.sh` rmdirs the workspace while it is empty.
+  - `tests/hooks.sh` pins each case, seen failing on the old hooks. The claude-code-ops
+    hooks reference gains the Desktop note and names WorktreeCreate's input field
+    `name`, not `worktree_id`.
+
+- **`worktree-create.sh` survives two calls for the same name at once.** Desktop retries
+  a start within the same second when the source folder fails its trust check, and two
+  CLI sessions can ask for one `--worktree` name. Both runs raced to `git worktree add`
+  the same branch, and the loser's exit 1 failed that start. A per-name lock in the git
+  common dir now makes the second call wait and reopen the first call's worktree; a lock
+  older than 2 minutes is broken, and after 30 s the hook continues unlocked. The hooks
+  README says the untrusted folder itself still needs trusting. `tests/hooks.sh` runs
+  three concurrent calls, which failed on the unpatched hook every time.
+
+- **repo-scan keeps the leading dot on appspec hooks and build outputs** - `repo-scan.py`
+  normalised two paths with `str.lstrip("./")`, which strips every leading `.` and `/`
+  rather than a `./` prefix. A CodeDeploy hook at `.deploy/hook.sh` was looked up as
+  `deploy/hook.sh`, so its `script_exists` read false and its commands were never
+  followed, and a Vite `outDir: './.output/public'` became `output/public`, so the
+  tracked `.output/` lost the config that declares it. Both paths now go through
+  `posixpath.normpath`, which drops `./` and keeps the dot. Three assertions in
+  `repo-doctor/tests/repo-scan.sh`: the two dotfile cases, seen failing on the old code,
+  and a `./`-prefixed hook, seen failing against a fix that dropped the `./` handling.
+
+- **Test gates no longer pass when a process-substitution producer dies** - a
+  `while read ...; done < <(producer)` loop never sees the producer's exit status, so a
+  producer that crashed part-way just ended the loop early and the suite passed on
+  whatever rows had arrived: one suite reported "164 passed, 0 failed" with 52 of its 100
+  cases never run. Every such loop in the repo gates and skill suites outside
+  package-manager-ops was classified. Three hid a real failure and now capture the
+  producer, check its exit status, then loop: frontend-upgrade-ops' Python shape check (a
+  crash dropped every later row), security-ops' repo-wide citation scan (`rg ...
+  2>/dev/null` also hid the error, so a failed scan read as "every citation resolves")
+  and `tests/check-exec-bits.sh`'s `git ls-files` (its zero-candidate check caught only a
+  git that printed nothing). The clean tallies are unchanged. A new gate,
+  `tests/procsub-guard.sh` (in `just check` and CI), keeps them honest. For each guarded
+  site it shims the real tool on PATH to keep half its output and exit 70, and the
+  owning suite must then fail with that guard's own message. Against the unguarded
+  suites it failed 3/3, with the suites still green: 28 of 40 rows, a dead citation
+  scan read as "every citation resolves", and 137 of 184 scripts checked. The 18 loops
+  that stay carry a one-line `# procsub ok:` reason, such as a `find` over a directory
+  checked to exist or a `grep` with no failure exit to lose; the fixed sites are tagged
+  `# procsub guard:`.
+
+- **`sessions.sh main` names the coordinator from inside a lane** - run from a lane at
+  `.claude/worktrees/<x>`, it answered with the session sitting in that lane, usually the
+  caller itself, instead of the one in the main checkout (2026-10-06). It took "the repo
+  root" from `git rev-parse --show-toplevel`, which in a linked worktree is the worktree,
+  and read the `.claude/fleet/main` pin from there too. `fleet main` and `fleet sweep`
+  hid it by changing to the main checkout first; a lane resolving MAIN directly, the
+  use `sessions.sh` is deployed beside `signal.sh` for, did not. A new
+  `main_checkout_root` resolves the main checkout from any tree. The obvious one-liners
+  fail in two layouts: in a submodule, `git worktree list`'s first entry and the common
+  dir's parent both point into the superproject's `.git/modules`, and a bare repo's
+  parent is just the folder it sits in, where an unrelated session may be working. A
+  submodule now reads the main checkout from `core.worktree`, and a bare repo has no
+  MAIN (exit 3). Four fixture assertions in `fleet-ops/tests/run.sh`, each seen failing
+  on the old code: a real nested `git worktree add`, the pin read from it, a submodule's
+  worktree, and a bare repo's.
+
+- **Skill scanners and verifiers no longer read a dead producer as clean** - a loop fed
+  by `< <(producer)` never sees the producer's exit status, so a find, grep or jq that
+  died part-way just ended the loop, and the script reported what arrived. Every such
+  site under `skills/*/scripts/` (fleet-ops aside, in its own lane) now captures the
+  producer, checks its status, then loops, or carries a `# procsub ok:` line saying why
+  a failure cannot change its result. Fail-closed fixes: `integrity-audit.sh` read
+  project MCP configs through `find` (Windows `find.exe` ahead of GNU find answered
+  "Clean"), workflows through `grep -rl`, and settings through a `jq` whose parse errors
+  were discarded, so an unparseable `settings.json`, or no jq at all, hid its hooks.
+  `scan-extensions.sh` closed "inventory done" over a plugin list jq could not read and,
+  without jq, skipped every extension as nameless. Both now report the surface as `NOT
+  scanned`/`NOT read`, list it in `meta.unscanned`, and exit 5 where they would have
+  exited 0; a finding's exit 10 still wins. `scan-extensions --json` also stopped
+  printing recently-changed skill rows ahead of its JSON. `check-action-refs.sh` exits 5
+  on a workflow grep cannot read and greps with `-a`: one NUL byte made GNU grep 3.5+
+  print nothing, so a malformed `uses:` passed. `verify-commands.sh` (ffmpeg-ops) and
+  `check-ytdlp-version.sh` exit 1 when their SKILL.md link scan cannot run, and git-ops
+  `land-all.sh` exits 2, not "nothing landable", when it cannot list branches. 25 new
+  assertions across five suites, mostly PATH shims that break one producer; each one
+  guarding a fix was seen failing against the unfixed script, and four pin baselines
+  (clean input still 0, a finding still 10).
+
+- **fleet-ops no longer reads a dead producer as "safe to proceed"** - the same
+  `< <(producer)` blind spot, in the land machinery. `live_many`, the liveness read the
+  land gate and prune's pre-delete check re-do every time, walked the session stores and
+  transcript roots through `find` and read a failed walk as "session idle", the one
+  direction that lets the gate through. A walk that fails now reads every asked-for
+  session live, the cautious answer for every caller, and prints `liveness walk
+  incomplete (find exit N: <error>)`, so a run of all-live readings is diagnosable with
+  `sessions.sh live <id>`. A file that vanished mid-walk (a wrapper rewrite) is a race,
+  not a gap, and changes nothing. `fleet prune` read a failed `rev-parse --git-path` as
+  "no rebase or bisect in progress"; the detached tree now reads REVIEW, "could not read
+  its git state". `fleet sweep` read a lane it could not diff as non-competing, so it
+  could say LAND beside a lane holding edits to the same files; it now reads INSPECT.
+  The claim lookups the gate ignores failures of (`branch_worktrees`, the transcript
+  probes) carry a `# procsub gap:` line; making the gate refuse on them is its own lane.
+  Every other site is tagged `# procsub ok:` with its reason. Seven new assertions in
+  `fleet-ops/tests/` (PATH shims that fail one `find` or `git` call): the five guarding
+  a fix were seen failing first, and two pin that a race and a healthy git change nothing.
+
+- **A lane's pigeon report reaches the coordinator** - a repo's worktrees share its
+  pigeon identity (the git root commit), so a lane that sent `READY` to the coordinator
+  in the main checkout was shown its own message by its `check-mail` hook, which then
+  deleted the shared `/tmp` signal: the coordinator's hook never fired, although the
+  rows stayed unread. Delivery is now per session. The signal is a timestamp nothing
+  deletes, and each session keeps its own seen marker beside it, so one session looking
+  hides nothing from another. Messages record their sender's `CLAUDE_CODE_SESSION_ID`
+  (`from_session`), and the hook, `read`, `count`, `unread` and `status` skip the
+  caller's own mail. `read` marks only the messages it showed and no longer deletes the
+  signal. Inside a worktree the hook's footer warns that a bare `pigeon read` takes the
+  coordinator's mail too. A name shared by two projects now warns, lists both hashes,
+  and resolves to the sender's own project when it is one of them, instead of silently
+  picking the most recently registered. 12 new cases in `pigeon/tests/run.sh`, each
+  seen failing against the old scripts or a mutant of the new hook.
+
+- **`fleet owner` and the land gate see a session that moved into a lane** - a Desktop
+  session `EnterWorktree`'d into a lane, committed there and stayed live, yet `fleet
+  owner` and `sessions.sh at --fresh` called the lane unowned, and a second session ported
+  its work as an orphan while `fleet sweep` kept the same tree as a live session's. Three
+  causes. Since about 2026-09-24 Desktop writes each `writtenBranches` entry as
+  `<worktreePath>\0<branch>`, and `sessions.sh` read the pair as one branch name, so the
+  name join matched no session on the new format; the pair is now split, the branch
+  feeding the index and the path a new `written` claim on that worktree, which holds
+  while the session is idle. A Desktop resume files the transcript back under the launch
+  dir, so only the cwd its records carry still names the lane, and the index keeps that
+  only for a session live when it was built; `at --fresh` now reads every live
+  transcript's last recorded cwd, wherever it is filed (a Git Bash `/x/...` cwd folds to
+  `x:/...`). And `owner` joined on the branch name alone: it is now the winning row of a
+  new `sessions.sh claimants`, which joins by name and by the worktree the branch is
+  checked out in, the claims prune and sweep already used. The land gate reads
+  `claimants --fresh` once instead of three separate joins, and `at` resolves a relative
+  path, which before matched nothing. A fixture block in `fleet-ops/tests/run.sh`
+  reproduces the incident; each of its 11 ownership and refusal assertions fails on the
+  old code. Expect more refusals than in the two weeks before: a lane is again refused
+  while any session that wrote its branch is live, as the gate always intended.
+
+- **The pre-commit hidden-Unicode gate scanned the working tree, not the commit.**
+  `hooks/pre-commit-unicode-scan.sh` took names from `git diff --cached` but passed
+  the files on disk to the scanner and skipped names missing there. A file staged
+  with a bidi override or tag-block payload, then rewritten clean or deleted on disk,
+  was committed poisoned. Its name list also missed two cases: non-ASCII filenames,
+  which git C-quotes without `-z`, and renamed files, which are status `R` and fell
+  outside its `A`/`M` filter. It now copies each staged blob out of the index
+  (`git cat-file blob :0:<name>`, names from `-z --no-renames --diff-filter=ACMRT`)
+  and scans them in one scanner run. It also blocks a staged instruction file it
+  could not scan (an unreadable blob, a file in the scanner's `meta.unscanned`, a
+  crashed scanner) instead of calling exit 5 a "benign-severity" advisory and
+  allowing it. `PROMPT_INJECTION_ALLOW=1` still overrides once. The SessionStart
+  hook now reads the `--json` envelope. A file it could not scan gets a plain "NOT
+  scanned" advisory naming the file and the reason, instead of a findings header
+  over an empty body.
+
+- **package-manager-ops docs and routing review** - a second facts pass, each claim
+  re-checked against its primary source, plus SKILL.md design fixes. Offline installs:
+  `npm ci --offline` is offline, `--prefer-offline` still fetches cache misses.
+  Committing `.yarn/cache` is Yarn's offline mirror; zero-installs also needs PnP and a
+  committed `.pnp.cjs`. A build that differs with and without a cache can be pnpm's
+  `sideEffectsCache` replaying a postinstall, not only an unfrozen install. Composer's
+  dump-autoload spells the flags `--optimize` and `--apcu`, not the install-side names.
+  A stale `content-hash` only warns on `composer install`; a missing or unsatisfied
+  required package fails with exit 4, and `composer validate` exits 2 on a stale lock
+  by default, so run it before a deploy install. ERESOLVE's *while resolving* line names
+  the package npm was placing (often your project or a workspace), not the one with the
+  peer range. Also: pnpm links by hard link or copy-on-write clone, Yarn's global folder
+  differs on Windows and under `XDG_DATA_HOME`, and a fresh job per run holds only on
+  GitHub-hosted runners. In SKILL.md, the two-lockfile rule is scoped to one JS lockfile
+  per package root (a `composer.lock` beside it is normal), Bun's built-in trusted list
+  is named, a missing native binary is checked against platform and optional packages
+  before install-script policy, and ERESOLVE, EINTEGRITY, merge conflicts and "works on
+  my machine" each route to their own section. New rows cover switching managers,
+  offline CI, Composer autoload, duplicate versions (a new dedupe section in
+  `upgrades.md`) and one-workspace installs. The description gains those triggers and
+  names what the skill is not for. The facts-maintenance procedure moved to
+  `version-pinning.md`, and a note gives the `${CLAUDE_SKILL_DIR}` form of the script
+  paths.
+
+- **pm-audit and check-pm-facts, from a cross-model code review** - every claim was first
+  reproduced in a throwaway repo, and each fix is now pinned by a test seen failing first,
+  then killed by a mutant. pm-audit: credentials in a quoted command or package URL
+  (`--registry=https://user:token@host`) are masked at the one place findings are recorded,
+  and a test greps all output of every fake-secret fixture. npx counts a bin a declared
+  package provides (`tsc`, `mix`, `playwright`, `commitlint`) as local, read from the
+  lockfile, `node_modules/` or a small alias table. `--no`/`--no-install` never fire, and
+  every `-p` is checked. A declared package at a dist-tag, or at a range its installed
+  version misses, is reported. CI commands are read as the shell gets them: quoted and
+  folded YAML, backslash continuations (Dockerfile `RUN` too) and Jenkinsfile `sh` strings.
+  An install counts only as the command word (`echo "npm install"` is text). Options before
+  the subcommand, `--prefix`/`--dir`/`--cwd`/`--working-dir`, workspace members sharing the
+  root lockfile and Yarn's `enableImmutableInstalls: false` are honoured. `require.php` is
+  read in Composer's dialect (`>8.2` admits 8.2.1, `!=` excludes one version). A BOM'd
+  manifest parses, UTF-16 scripts are read, and output survives a cp1252 pipe. A manifest
+  or facts file that is JSON but not an object is a finding or exit 4, not a traceback.
+  `auth.json` asks git (tracked means committed), else matches `.gitignore` as git does.
+  `registry.credentials.image` needs a later `docker build` in the same job whose context
+  holds the file; it skips `COPY --from` and matches `.dockerignore` as Docker does. An
+  empty `_authToken=""` is not a token. DDEV's own end-of-life pin is left to `ddev-ops`.
+  check-pm-facts: a php.net 404 is drift, an upstream date-format change is drift instead of
+  a traceback, the catalogue is type-checked (exit 4), dates must strictly increase,
+  `--timeout` must be positive, and stdout is encoding-safe.
+
+- **A land's untested merge read as landed, whether the land was live or dead** -
+  `fleet land` merges first and gates second, so for the whole gate (20-45 minutes on
+  this repo) `main`'s tip is a `merge: <lane>` commit that a red gate hard-resets. On
+  2026-10-06 two peer sessions read such a tip as landed: one branched from it, and one
+  rebased onto it and started a second gate beside the first. Only the daemon wrote
+  `.claude/fleet/landing`, and `fleet status` said nothing about `main`. A land that died
+  mid-gate (kill -9, a crash, Ctrl-C, an agent's Bash tool timeout) was worse: the next
+  land took the "already up to date" path and marked its untested merge `LANDED`. Now
+  every land (`fleet land`, each lane of `land --all`, the daemon) holds the marker until
+  its verdict, recording the base tip. It is created exclusively, so a second concurrent
+  land refuses and names the holder. `fleet status` leads with
+  `main <sha> is PROVISIONAL - gate for <lane> running since HH:MM (pid N); red resets to <base>`.
+  The new `fleet landing` exits 10 until `main` is settled. `fleet sweep` turns every action into
+  "wait", lists only WAIT as the next step, and refuses `--apply`. The lane brief and
+  `signal.sh`'s handoff tell lanes to check before they branch or rebase. A marker whose
+  process is gone is examined before any land. An untested merge turns the lane
+  `CONFLICT` with an `UNTESTED MERGE` warning, a rebase left half-done in another lane's
+  worktree flags that lane, and a main checkout left mid-merge refuses with the abort
+  command. A reused PID cannot pass a dead land off as live, and every marker delete
+  retries a briefly-held file. Supersedes the unlanded `lane/stale-landing`. Of the 64
+  checks in the new blocks, 44 fail on the old code, and 12 fail with only the
+  dead-land half in place.
+
+- **pm-audit wording matched to the sources** - `npx.unpinned` said a bare name runs "the
+  newest published version" and that `npx eslint@latest` runs the "newest in range
+  'latest'". Both run what a dist-tag names (npm-pick-manifest, pnpm, `yarn add` and bunx
+  all resolve a bare name through `latest`), so the message now says that, and a range
+  reads "lets the registry pick any version in range". The `js.yarn.classic` note no
+  longer says Yarn 1 takes security fixes only: its recent releases were hotfixes. The fix
+  for an unparseable `composer.lock` suggested `composer update --lock`, which reads the
+  old lock and rethrows the parse error (Composer 2.10.3 `Installer::doUpdate`); it now
+  points to git or a full `composer update`. `install-semantics.md` says `update --lock`
+  also runs the install step unless `--no-install`, and `legacy-exits.md` gives the Yarn 1
+  hotfix picture. `diagnostics.md` gains the missing `registry.pnpm.placeholder-ignored`
+  row, and the suite now fails when a documented finding id has no diagnostics row. New
+  fixture `php-lockfile-invalid`; the three new assertions were each seen failing first.
+  The facts store also watches the Yarn README's "occasional hotfix" line.
+
+- **Freshness job no longer passes when a verifier crashes** - every step in
+  `.github/workflows/freshness.yml` mapped only exit 10 (fail) and 7 (warn), then ended in
+  a bare `exit 0`. Any other code passed green with no annotation: an uncaught exception
+  (1), a usage slip (2), facts missing or unparseable (3/4), a missing tool (5, 127). A
+  real route was package-manager-ops' `check-pm-facts.py`: an upstream Node date gaining a
+  time part (`2027-04-20T00:00:00Z`) raises an uncaught ValueError, and the weekly job
+  would report green while checking nothing. All 19 steps now hand their verifier to one
+  helper, `.github/scripts/freshness-step.sh`, which keeps each step's drift and warning
+  messages and fails any other code as `<skill> verifier crashed or was misused (exit N)`,
+  naming its protocol class. The ffmpeg and yt-dlp installs now warn when they fail; the
+  verifier's exit 7 still keeps a mirror blip advisory. `tests/check-resources.sh` pins the
+  mapping for 0, 7, 10, 1-6 and a missing command, and fails a PR whose freshness step
+  reads `$?` itself or runs a `--live` verifier outside the helper. Its 10 new checks
+  fail against the old workflow and against a helper with the old catch-all restored.
+  SKILL-RESOURCE-PROTOCOL.md section 7 states the rule.
+
+- **package-manager-ops facts review** - two model reviewers read eight references, and
+  every disputed claim was checked against primary sources (npm/cli 12.2.0, Composer
+  2.10.3, pnpm.io, yarnpkg.com, bun.com). 30 corrections, the ones that change advice
+  first. Plain `yarn up <pkg>` ignores the manifest range and can cross majors; the
+  in-range form is `yarn up -R`. `pnpm update` moves package.json ranges too, unless
+  `--no-save`. npm's `${VAR?}` makes a missing variable an empty string, not an error.
+  Since pnpm 11.5.3 (backported to 10.34.2), a committed
+  `//host/:_authToken=${NPM_TOKEN}` is ignored, so pnpm auth silently fails. The
+  Composer 1 to 2 steps add `composer update --lock --no-install`, because `install`
+  never rewrites a lock. Packagist ended Composer 1 metadata on 2025-09-01.
+  `engine-strict` in `.npmrc` is npm-only; pnpm 11 wants `engineStrict` in
+  `pnpm-workspace.yaml`. npm rewrites an existing `yarn.lock` on every save. Other
+  entries cover npx resolving the `latest` dist-tag, `--no` accepting the npx cache,
+  `bunx --no-install`, extensions under `config.platform`, `plugin-optional`, the pnpm
+  12 workspace-settings rule and Yarn 4 lockfile contents. New pm-audit check
+  `registry.pnpm.placeholder-ignored` (warn) reports those `.npmrc` lines in pnpm repos
+  and leaves npm repos alone. Two new fixture cases (a pnpm positive with pinned lines,
+  an npm control), each seen failing first; four mutants killed. The facts store watches
+  pnpm's `.npmrc` docs and Packagist's Composer 1 notice.
+
+- **`fleet sweep` from its first real run** - acting on the report exposed five gaps.
+  (1) Sessions in other Desktop instances: `sessions.sh` reads every instance's store
+  (the primary and each `--user-data-dir` profile), but `archive_session` and
+  `send_message` reach only the caller's own instance. A coordinator in one profile
+  saw 5 of 9 `ARCHIVE-DIRECT` calls fail "Session ... not found". Every session row
+  now opens with `[instance]` (read off the store path at run time, never written
+  down). A session that lives elsewhere gets "do it from the <instance> Desktop window",
+  never a tool call, and the next-steps line counts those rows. The new
+  `sessions.sh where <id>` names a session's store. (2) Held lanes were offered `LAND`.
+  A private hold list (`~/.claude/held-lanes.txt`, `<glob> <reason>` per line) makes
+  them `ON-HOLD`, with the reason, in place of `LAND`, `REBASE`, `UNLANDED` and
+  `STALE`. It is a separate list, not a never-push annotation: a held lane still
+  competes for files, and its review copy on a remote is expected, where never-push
+  would call it `LEAKED`. (3) The branch phase judged `HELD` on the 15-minute cached
+  index, so a session archived since still held its branch while the hygiene phase,
+  reading fresh, already treated it as gone. Its open namers now join the same fresh
+  read. (4) `fleet prune --remove` on Windows reported `FAILED` when git had emptied and
+  unregistered the tree but a process still held the empty directory. Prune now
+  reports it removed, plus an empty leftover that `fleet sweep --apply` clears. (5) The
+  sweep asked `fleet landing` once, at the start, so a land that began mid-run left a
+  report of live actions on a tip about to move. It now asks again just before it
+  prints, and the report turns to `wait`. 12 new checks in
+  `fleet-ops/tests/sweep.sh`: 8 fail on the old code, 2 fail with the second ask
+  removed, and the 2 controls each fail against a mutant.
+
+- **pm-audit matched to what the tools do, from a finding-by-finding check of a sweep** -
+  real repositories showed four places where `package-manager-ops`' audit misled. (1)
+  `php.lockfile.stale` follows Composer's own lock check: a requirement met by a locked
+  package's `replace` or `provide` (a renamed plugin, `symfony/symfony` replacing a
+  component, a client providing `psr/http-client-implementation`) is satisfied, and a
+  root `require` locked only in `packages-dev` is now reported, as Composer refuses it.
+  (2) CI that builds in a subfolder: a literal `working-directory:` (step, or job
+  `defaults.run`), `${{ env.X }}` from the workflow or job `env:`, and `cd` inside a
+  command block place each install in its package root. Findings name that root, the
+  root's `js.lockfile.missing` becomes a note when CI installs only nested roots that have
+  a lockfile, and the new `deploy.install.unlocked` reports CI installing in a folder with
+  a manifest but no lockfile. (3) `js.lockfile.conflict` names the lockfile CI installs
+  from and the unused one. (4) `php.eol` and `js.node.eol` say what the repo pins and ask
+  to confirm the server's version; literal `node-version` (actions/setup-node) and
+  `php-version` (shivammathur/setup-php) in workflows now feed the pin agreement and
+  end-of-life checks. Also new: `deploy.global.unpinned`, an unpinned `npm install -g` in
+  CI or a Dockerfile, which fetches the newest version on every run; and
+  `deploy.npm.yarn-flag`, an error for a Yarn flag (`--frozen-lockfile`, `--immutable`)
+  on `npm ci` or `npm install`. npm's own source: v11.1.0 drops it silently, v11.2.0
+  warns "Unknown cli config", and npm 12 refuses the command (EUNKNOWNCONFIG), so the
+  build fails. `npm install --frozen-lockfile` moved there from `deploy.install.unfrozen`.
+  `references/diagnostics.md` gains "Auditing many repos": read-only sparse partial
+  clones, Windows notes, auditing the branch that deploys, and the shapes to verify by
+  hand. 17 new fixture cases; every new check failed against the old code, and each of
+  35 mutants was killed.
+
+- **pm-audit judged deploys per file, not per job** - a read-only run over 88 real agency
+  repositories found three accuracy problems in `package-manager-ops`' audit. (1)
+  `deploy.composer.dev` flagged the lint job of a common GitHub Actions template
+  (front-end build, backend lint, tag, deploy) in 27 repositories, all false: the deploy
+  job ships with `--no-dev`. GitHub Actions workflows are now split into jobs (any
+  indent width) and only a job that ships is asked for `--no-dev`; an `aws s3 cp` upload
+  now counts as shipping. GitLab CI and Bitbucket Pipelines stay whole-file, because
+  their later jobs receive every earlier artifact by default. `deploy.install.unfrozen`
+  stays in every job: a front-end job whose build is deployed ships its install. (2)
+  `npm install --frozen-lockfile` gets its own message. The flag is Yarn's: npm up to 11.1
+  ignores it, 11.2 and later warn and install unfrozen, and npm 12 refuses the command.
+  (3) `php.require.missing` is a note, not a warning, in a project that sets
+  `config.platform.php`. Per Composer 2.10.3, install checks `require.php` against the
+  pretended PHP, and `platform_check.php` already enforces the packages' PHP floor. A
+  library still gets the warning. Six new fixture cases and an optional `_lines` pin
+  that asserts which line fires; each case was seen failing first, and 8 mutants were
+  killed.
+
+- **`fleet stop` SIGKILLed the daemon mid-gate** - its fixed "5s grace, then
+  SIGKILL" did not know a land was running, and the daemon defers SIGTERM until
+  the land finishes. With any `test_cmd` slower than 5s, the merge stayed on the
+  base branch untested and the lane stayed `READY`. The next pass then hit the
+  "already up to date" path and marked it `LANDED`, blessing a merge no gate had
+  passed. The daemon now records the lane it is landing in
+  `.claude/fleet/landing`, and `fleet stop` waits out that land, printing
+  progress. Its 5s SIGKILL backstop runs only while the daemon is idle, and a
+  marker stranded by a dead daemon cannot disarm it.
+
+- **Six security-skill checks reported clean when they had not run** (found by an
+  automated code review). Each fix has a test that failed on the old code first. Rule
+  now written into both skills: a check that could not run exits 5 or 7 and names what
+  it skipped, never 0.
+  - `preinstall-check.sh` mangled scoped npm names: `@scope/pkg` queried the registry
+    with an empty name, and `@scope/pkg@1.2.3` checked `latest` instead of 1.2.3.
+  - Without `jq`, `preinstall-check.sh` dropped every registry answer and exited 0 in
+    all five ecosystems, so a package published that day passed. It now exits 5. Any
+    package whose age stays unknown exits 7, and `--json` no longer drops that record.
+  - `config-drift-check.py --staged` took names from the index but read the working
+    tree, so a poisoned config could be committed while a clean copy on disk was
+    scanned. It now reads the staged blob. Unreadable configs exit 5.
+  - `scan-hidden-unicode.py` skipped non-UTF-8 and unreadable files and could exit 0
+    having scanned nothing. Non-UTF-8 is now a `high` finding (`non-utf8-encoding`),
+    and UTF-16/32 files are decoded and scanned too. Missing paths and empty directory
+    walks exit 3, unreadable files 5, and `--quiet` stays silent only when clean.
+  - `phone-home-monitor.ps1` suppressed collection errors, so a TCP-table or Sysmon
+    read that failed looked like a quiet machine. Windows also reports an unreadable
+    log queried by `-FilterHashtable` as "no events". Failed reads now exit 7, refused
+    ones 5, and `-Watch` logs each poll it could not collect. Live modes are gated on
+    `[Environment]::OSVersion.Platform`.
+  - `postinstall-audit.py --live` could never reach its documented exit 7, because
+    `--live` only checks flagged packages. Findings keep exit 10, and a registry outage
+    now shows as `meta.live: "unavailable"` with a stderr line.
+
+- **The pre-commit hidden-Unicode gate allowed every commit when installed as
+  documented.** `hooks/pre-commit-unicode-scan.sh` looked for its scanner beside
+  `dirname "${BASH_SOURCE[0]}"`. Git runs the documented
+  `ln -sf ../../hooks/pre-commit-unicode-scan.sh .git/hooks/pre-commit` as
+  `.git/hooks/pre-commit`, so the hook searched `.git/skills/`. Without a `~/.claude`
+  install to fall back on, it exited 0 silently, critical bidi overrides included.
+  Git Bash's `ln -s` makes a copy, with the same result. Both unicode hooks now
+  resolve their real path first: `readlink -f`, or a bounded manual walk where `-f`
+  is missing (macOS before 12.3). A copied pre-commit hook falls back to the repo
+  it commits to, only when that repo also ships the hook, so a planted `skills/`
+  folder never runs. If the gate still finds no scanner, it warns "NOT scanned" on
+  every commit and allows it. The auto-wired SessionStart hook stays silent in that
+  case. The install docs add a one-line wrapper for Git Bash, where a copy would
+  keep stale hook code.
+
+- **Vite 8 chunking advice named a removed option.** Vite 8 (2026-03-12) bundles with
+  Rolldown: `build.rollupOptions` is now `build.rolldownOptions`, the object form of
+  `output.manualChunks` is no longer supported, and its function form is deprecated in
+  favour of `output.codeSplitting.groups`. web-perf-ops, astro-ops (Astro 7 ships
+  Vite 8) and perf-ops all recommended the object form. They now give the key for each
+  Vite major, with sources dated 2026-10-05. javascript-ops' library example and
+  bundler table, and frontend-upgrade-ops' `.extract()` row, follow suit. The
+  web-perf-ops facts catalog now tracks `vite` (major 8), so the weekly `--live` check
+  flags Vite 9 before its config keys go stale too.
+
+- **"Task tool" is now "Agent tool"** in explain, review, testgen, spawn and
+  tool-discovery (Claude Code renamed it in 2.1.63; `Task(...)` still aliases). spawn
+  no longer promises a new agent is available at once in every case: the first agent in
+  a new `agents/` directory needs a session restart.
+
+- **`fleet prune` kept the worktrees of archived sessions as "live session"** - archiving
+  a Desktop session stops it, and the stop appends records to its transcript ~2s before
+  Desktop rewrites the wrapper with `isArchived: true`. `sessions.sh` read that write as
+  activity, so for ten minutes after every archive (longer through the 15-minute index
+  cache) prune kept the session's trees and the land gate refused its lane. After ten
+  sessions were archived, all 17 of their merged, clean worktrees stayed KEEP and had to
+  be removed by hand. Now an archived session is live only if its transcript was written
+  after the archive (the wrapper's mtime, plus 60s), so a terminal `claude --resume`
+  still counts. `fleet prune` re-reads every claimant fresh (new `sessions.sh state`)
+  rather than trusting a cache built before the archive. An `isArchived` that is missing
+  or not a boolean reads `?`, is treated as live/open (never archived), and the reason
+  says so. Archived + dirty or unmerged stays REVIEW, naming the owner as archived.
+  Two kinds of leftover become removable on exact evidence. One is a lane the session
+  `EnterWorktree`'d into, proven by the cwd its transcript last recorded (the lossy
+  directory key alone still proves nothing). The other is a detached tree archiving
+  left behind: SAFE only when clean, with HEAD in base, no rebase/bisect in progress,
+  and an archived owner placed there by path. Each of the eleven new cases was seen
+  failing, either on the old code or against a deliberately broken guard.
+
+- **CLAUDE.md beside AGENTS.md is a shadow, not a pattern** - Claude Code reads AGENTS.md
+  only when no `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` is present (unless
+  the CLAUDE.md imports `@AGENTS.md`). `rules/agentic-quality.md` recommended a one-line
+  CLAUDE.md *pointer*, which hides the file it points to; it now requires the import.
+  repo-doctor's scorer warned only "fine if deltas-only" and now flags the shadow, and its
+  entry-doc budget drops from 250 to Claude Code's 200 lines.
+
+- **The reserved-name waiver counted only the first validated file.** CI's Claude Code
+  validates `marketplace.json` and `plugin.json` and prints one error block per file;
+  `tests/plugin-validate.sh` read only the first count, so CI went red while the local
+  CLI (which stops after the marketplace) passed. It now sums every block, and new
+  self-test cases feed it CI's two-block output; both failed against the old counting.
+
+- **`fleet release` no longer flakes on Windows when a state file is briefly held.**
+  The MAIN pin and the daemon PID files were removed with a bare `rm -f`, which fails
+  (EBUSY) while another process has the file open; the test discarded that error, so it
+  read as a resolution bug. A `remove_state_file` helper now retries for up to
+  `FLEET_RM_RETRY_SECS` (default 5) and counts success only when the file is gone, else
+  exits 1 naming it. New cases hold the pin open for real and failed against the old code.
+
+- **Gates went red when Claude Code reserved the plugin name** - Claude Code 2.1.287
+  launched Claude Mods and reserved plugin names that pass as Anthropic's own, naming
+  `claude-mods` explicitly. `claude plugin validate` now rejects it (install and load
+  still work), which failed `tests/validate.sh` and CI on an untouched `main` and blocked
+  every landing. `tests/plugin-validate.sh` now runs the validator and waives ONLY that
+  error, as a dated WARN, until 2026-10-31. Any other validator error still fails, and the
+  waiver itself fails after its expiry so the rename can't be forgotten. It self-tests
+  against fixtures before judging the repo; a waive-everything mutation fails that
+  self-test. `validate.sh` and the CI step both route through it. TODO(rename): rename
+  the plugin, then delete the waiver.
+
+- **`fleet-worker` doctor said "no API key" on hosts where the launcher ran fine** -
+  `fleet-doctor.sh --live` carried its own if/elif copy of the key chain, so with
+  `FLEET_WORKER_KEYRING_SERVICE`/`_KEY` set but an empty keyring entry it never fell
+  through to `ZHIPU_API_KEY`/`GLM_API_KEY` (fleetflow surfaced it as
+  `glm-endpoint unreachable (rc=7)`). Defaults and the resolver now live once in
+  `scripts/fleet-lib.sh`, sourced by both; the suite fails if a second `keyring get`
+  copy appears. `--live` also gains a `live-cli` probe that runs one real `claude`
+  turn through the launcher, so a model the endpoint accepts but the CLI cannot run
+  is reported as drift instead of passed. It judges the JSON result, not stderr:
+  Claude Code 2.1.280 prints `[claude-code:unrecognized_model]` for every
+  non-catalog id, healthy runs included. Default model ids move to the canonical
+  lowercase `glm-5.3` / `glm-4.5-air` (both verified live; the uppercase ids also
+  still work).
+
+- **`prompt-injection-defense` left terminal controls and most default-ignorables
+  unbanded** - the hidden-Unicode catalog now covers every Default_Ignorable code
+  point (4174 in UCD 18.0) and every C0/C1 control except TAB, LF and CR, and the
+  self-test pins both sets, so a gap fails the build instead of passing silently.
+  New `high` bands: ESC (an `ESC[8m` run is concealed in a terminal `git diff`), the
+  other C0 controls (BS overprints; a single NUL turns `git diff` into "Binary files
+  differ"), DEL, the C1 controls (`U+009B` is an 8-bit CSI), the deprecated format
+  characters `U+206A`-`U+206F`, the musical format characters and the reserved
+  default-ignorable ranges; US joins the FS-RS band. New `medium` bands, stripped
+  only at `aggressive`: the Mongolian free variation selectors and the Duployan
+  shorthand format controls. Catalog v0.3.0 adds an optional `ranges` field for
+  bands the code chart splits, and the self-test fails if two bands overlap, since
+  the scanner and the sanitizer would then name different bands.
+
+- **`supply-chain-defense` `preinstall-check.sh` never exited 7 on an unreachable
+  registry** - `fetch()` set the unavailable flag inside `$(...)`, a subshell, so the
+  assignment died with it and a dead registry looked like "outside cooldown" (exit 0).
+  Callers now set the flag from fetch's exit status. Found by the new copy-alone test,
+  which also caught `integrity-audit.sh` printing em dashes in its zizmor lines (its
+  plain fallback framing is now 7-bit ASCII, as is its `TERM_ASCII=1` output).
+
+- **The unicode hooks could pick a Python too old to run the scanner** -
+  `session-start-unicode-scan.sh` and `pre-commit-unicode-scan.sh` probed candidates
+  with a bare `import sys`, which a pre-3.8 interpreter passes. With one ahead on PATH
+  the SessionStart hook printed an empty advisory for a clean project, and the
+  pre-commit gate let a critical bidi override through. Both now take the first of
+  `python3`/`python`/`py` that is really 3.8+, and their fix hints use the launcher.
 
 - **`prompt-injection-defense` missed line separators and invisible fillers** -
   `scan-hidden-unicode.py` reported `ok<U+2028>=== FORGED ===` as clean, though a
@@ -92,6 +1210,7 @@ feature releases live in the README "Recent Updates" section.
   channel (8 new assertions fail against the old hooks) and the hooks README
   gains an "Output channels" table; its "output goes to Claude's context"
   best-practice line was wrong and is gone.
+
 - **`pigeon send`, `reply` and `broadcast` no longer fail on Windows for bodies
   over ~32 KB.** The escaped body went to `sqlite3.exe` as a command-line argument,
   and Windows caps a command line at 32,767 chars, so a large message died with
@@ -101,6 +1220,7 @@ feature releases live in the README "Recent Updates" section.
   raw Ctrl-Z (0x1A) means end-of-file, so `sql_escape` now splices that byte back
   in as `char(26)`. The pigeon suite gains four Windows regressions (40 KB send,
   reply and broadcast round-trips, plus Ctrl-Z), each seen failing first.
+
 - **doc-drift link checks are now case-exact, and CI's doc-drift step passes
   again.** `fleet-worker` linked `docs/auto-mode-classifier.md`, but the file is
   `docs/AUTO-MODE-CLASSIFIER.md`. The gate tested links with `[ -e ]`, which is
@@ -110,6 +1230,7 @@ feature releases live in the README "Recent Updates" section.
   against the real on-disk spelling (directory listings cached, pure-bash
   comparison), so a wrong-case link fails locally too; the three wrong-case
   references are corrected.
+
 - **windows-ops suite no longer fails on Linux CI.** It skipped its PowerShell
   checks only when `pwsh` was missing, but GitHub's Ubuntu runners ship `pwsh`, so
   the Windows-only scripts (robocopy, CIM, process ancestry) were executed there
@@ -191,13 +1312,155 @@ feature releases live in the README "Recent Updates" section.
   had always claimed - 11 of 13 hooks were tracked 100644 (harmless while every
   wiring calls `bash hooks/x.sh`, but the documented gate did not exist).
 
+- **`fleet prune` classified live sessions' worktrees SAFE** - a real dry run
+  marked 12 of 17 worktrees removable, five of them the cwd of an open session
+  and two of those running; `--remove` would have stranded both in the silent
+  CPU spin the skill documents. `sessions.sh` read only the first Desktop
+  session store it found, while the owners lived in a second Desktop
+  instance's (`--user-data-dir`) store; it joined ownership on branch alone,
+  never on the session's cwd; and it took liveness from a wrapper timestamp
+  Desktop only rewrites at turn boundaries. It now reads every instance's
+  store, attributes worktrees by branch, cwd, worktreePath, transcript
+  directory and live cwd, and takes liveness from the transcript too - which
+  also arms `fleet land`'s live-owner gate against mid-turn and
+  other-instance sessions. A `.claude/worktrees/` tree no session record
+  claims is now REVIEW, never SAFE; `--remove` re-classifies against a
+  forced-fresh scan before deleting; and the index cache is keyed by the
+  stores it scanned, so a fixture run can no longer poison a real one.
+  `sessions.sh stores` and `fleet config` now say which stores answered.
+
+- **`fleet land` merged under a live session working in the lane's worktree** -
+  the live-owner gate still joined owners on branch alone, so the two shapes
+  the prune fix cured - wrapper branch drift (a session in worktree
+  `vigilant-grothendieck` recording branch `claude/keen-mccarthy`) and a session
+  that `EnterWorktree`'d into a lane, which only its transcript records - left
+  a live writer invisible: the land merged, then rebased its tree. The gate
+  now also treats any live directory claim on the lane branch's worktree as an
+  owner, read through the new `sessions.sh at --fresh`: the cached index may
+  nominate claimants but every one's liveness is re-read, and transcripts
+  being written in the worktree are read straight off disk (seconds, against
+  60s for a fresh full scan). The self-exemption holds only when self is the
+  sole live claimant by either join. Liveness re-reads are batched
+  (`live_many`, one walk for any number of sessions, where each used to cost
+  ~3s), and `worktree_path_for` no longer cuts a worktree path at its first
+  space.
+
+- **The `fleet start` daemon ignored SIGTERM and SIGHUP and kept landing as a
+  ghost** - its handler removed `daemon.pid` and then resumed, because a trapped
+  signal returns to the script. A daemon whose session ended (SIGHUP) kept
+  polling, invisible to `fleet stop` ("no daemon running") and to the
+  double-start guard, and landed a lane 3s later; every `fleet stop` was really
+  its SIGKILL escalation. A signal is now a stop request honoured between
+  lands: a land in progress finishes through its gate, no new one starts, and
+  an idle daemon answers during its poll sleep instead of after it. The
+  fleet-ops e2e (`tests/skills/functional/fleet-ops/e2e.sh`), which no gate
+  ran and which had drifted to 7 FAILs, is repaired and now runs in
+  `tests/run-skill-tests.sh`.
+
+- **Skills and docs pointed at files that don't exist.** `windows-ops` told the agent
+  to run `startup-audit.ps1` and `event-search.ps1`, which never existed; it now names
+  the scripts that do the job. `skill-creator` told it to run `init_skill.py` and
+  `package_skill.py`, which this copy never bundled (upstream has since dropped
+  `init_skill.py`); Steps 3 and 5 now scaffold by hand and list the pre-zip checks.
+  `docs/ARCHITECTURE.md` said subagents have no MCP access (they inherit the session's
+  tools), showed a hooks config Claude Code rejects and a plugin manifest
+  `components` key that doesn't exist, and called the Agent tool by its old Task name.
+
+- **`docs/ARCHITECTURE.md` contradicted the AGENTS.md protocol.** It said a CLAUDE.md
+  overrides AGENTS.md and told Claude-only teams to use CLAUDE.md. Any CLAUDE.md stops
+  AGENTS.md loading at all, so the section now gives the two portable shapes and links
+  the protocol. `docs/PLAN.md` dropped its second docs index, which had drifted from
+  `docs/00_INDEX.md`, and gained the AGENTS.md follow-ups. The build plan records what
+  shipped and five gaps found by running the tools on this repo.
+
+- **`repo-doctor`'s AGENTS.md tools passed this repo's own 199-line, 16,744-character entry doc**
+  (one line ran 2,313 characters). Running them on this repo found five gaps, now
+  fixed, each with a test seen failing first:
+  - Size: a 16,000-character ceiling and 12,000 target (200 and 150 lines at 80
+    characters) in `agents-md.py audit`, the scorer and `survey` (new `over-size`
+    status, size column), a long-line finding, and `check-memory-docs.py` checking the
+    scripts and protocol agree.
+  - Split order: setup prose moves first at any size and the Structure map last, where
+    the largest section used to go first. "Quick reference" no longer counts as a
+    Commands heading, so tips under it can move.
+  - Landmine questions: only tracked files raise them, not test fixtures, not a file
+    changing with its own tests, and one question per file. Each names its `paths`, and
+    the audit lists the questions the doc never answers.
+  - Scaffold: a `generic` archetype for repos with no web manifest (static-site now
+    needs a marker such as `mkdocs.yml`), the Structure table keeps large areas, the
+    title comes from the origin remote or main checkout rather than a worktree folder,
+    and `just default` is skipped.
+  - `repo-scan.py` finds shell suites and their runner, Bats, `go test` and
+    `cargo test` by convention.
+  This repo's AGENTS.md went to 172 lines / 13,293 characters with Landmines untouched.
+
 ### Changed
 
-- **BREAKING: `testgen` and `testing-ops` are merged into `test-engineering`.** `/testgen`
-  survives for one release as a command alias for `/test-engineering write`; installers remove
-  the old skill directories. `coverage-check.sh` is now report-only by default (`--threshold`
-  restores the old gate), and the mocking guidance no longer says to always mock databases
-  and the file system.
+- **`container-orchestration` renamed `kubernetes-ops`, Kubernetes and Helm only.** Its
+  Dockerfile and Compose material moved to docker-ops. Its examples move to Gateway API:
+  ingress-nginx was retired (no releases or security fixes since 2026-03, repository
+  archived), and InGate went with it. Also: Helm 4 (server-side apply by default,
+  `--rollback-on-failure` and `--force-replace`, plugin post-renderers), pods that meet the
+  restricted Pod Security Standard, what changed in Kubernetes 1.33-1.37, and a pod
+  debugging table. The ECS reference is thinned to the choice and the basics, and points to
+  AWS's own `aws-containers` skill; Flux points to fluxcd/agent-skills. The old
+  `build-push.sh` is retired: it wrapped plain `docker build`/`push` and defaulted to
+  `:latest`, which the new auditor reports. docker-ops documents `docker buildx build --push`
+  instead. Both installers remove an installed `container-orchestration`.
+
+- **`push-gate` renamed `push-preflight`.** It runs six checks before a push (secret
+  scan, clean tree, forbidden files, fast-forward, size and open-issue advisories), so
+  the name now matches `scripts/preflight.sh`. `secret-scan` was rejected: it would
+  undersell the skill and imply a history audit, which stays with `security-ops`. The
+  description leads with the secret scan, because the description is what selects the
+  skill. The regex layer's allowlist is now `.push-preflight-allow`; `.pushgate-allow`
+  is still read, with a one-line deprecation notice on stderr, and when both exist their
+  entries are combined so a half-migrated repo keeps every allow. The installers remove
+  the old `skills/push-gate`. **Migration:** `git mv .pushgate-allow
+  .push-preflight-allow` in each repo that has one, and point scripts at
+  `skills/push-preflight/scripts/preflight.sh`.
+
+- **`craftcms-ops` refreshed for real agency builds.** Ten new one-topic references -
+  SEOmatic, Blitz, Formie, CKEditor, DDEV, Codeception, Twig output security,
+  craft-vite, the 3 → 4 → 5 upgrade path, and Craft-side performance - plus the old
+  two-topic files split into element queries, GraphQL, and plugin development. Facts
+  checked against the vendor docs and Packagist on 2026-10-05, which corrected several
+  common assumptions: Blitz Hints was removed in 5.10, Blitz won't cache pages with
+  pending transform URLs, CKEditor plugin 5.x dropped global configs, Craft 5 GraphQL
+  types lost their section prefix, and Vite 5+ moved the manifest under `.vite/`.
+  A new `check-craft-facts.py` verifier keeps the Craft and plugin majors honest
+  (offline in PR CI, live against Packagist in the weekly freshness job). The
+  description now carries its own "Use when" trigger, with no separate `when_to_use`.
+
+- **`security-ops` fits the compaction budget.** The three T2 audit-agent prompts, the
+  T3 remediation preflight and the report template moved verbatim to
+  `references/audit-agent-prompts.md`; `SKILL.md` keeps routing, tiers, detection,
+  consolidation and a one-table summary of what each agent reads and reports. The body
+  drops from about 5,200 to 3,400 estimated tokens, under the 5,000 Claude Code keeps
+  after auto-compaction, so the orchestration no longer falls off the end.
+
+- **`security-ops` references split to a 300-line ceiling.** The OWASP guide is now
+  `owasp-top10-a01-a05.md` + `owasp-top10-a06-a10.md` (the `review`, `testgen` and
+  `techdebt` preloads point at both), MFA/rate-limiting/lockout moved to
+  `auth-account-protection.md`, and every reference over 100 lines opens with a
+  Contents list. The skill's suite now fails on an over-length reference, a stale
+  Contents list, a repo citation of a reference that no longer exists, or a
+  secret-shaped example value.
+
+- **`supply-chain-defense` and `prompt-injection-defense` are self-contained and
+  portable** - each folder now runs when copied alone into another plugin. Both ship
+  `scripts/run-python.sh`, which runs the `.py` scripts with the first of
+  `python3`/`python`/`py` that is really Python 3.8+ (on Windows `python3` is often the
+  Microsoft Store alias, which exits 49 without running anything); the copies are
+  duplicated on purpose and `tests/check-resources.sh` fails if they drift. Every doc
+  example launches through it. Each suite gains a "standalone" block that copies the
+  folder alone and runs every script's `--help` and offline mode. Both SKILL.md files
+  now lead with the procedure and decision tables and push depth into references
+  (supply-chain-defense ~9.6k -> ~3.6k estimated tokens), with no content dropped: workflows A-L and the script / hook /
+  portability detail move to new references, and the three references over 300 lines
+  split by topic (`tooling-by-layer.md`, `repo-integrity-response.md`,
+  `line-breaks-and-controls.md`, `codepoint-bands.md`). Every reference over 100 lines
+  carries a table of contents, and both descriptions carry a "Use when" clause.
 
 - **Rules made machine- and person-agnostic.** Rules ship in a public plugin, so
   author-specific incidents, repos and phrasing ("the user corrected this on…") are
@@ -206,11 +1469,13 @@ feature releases live in the README "Recent Updates" section.
   `worktree-boundaries` also stops asserting that chips never isolate - whether a
   chip gets its own worktree depends on how it is started, so the directive is to
   seed every chip prompt to create its own lane rather than to assume either way.
+
 - **`public-posts` exempts replies on an automated reviewer's threads** - answering
   an AI code-review bot's finding with evidence on a PR you are working on is the
   PR's working record, not a statement to a third party, and a review-triage or
   CI-autofix flow depends on it. Human-started threads and other people's PRs still
   need the preview.
+
 - **`agentic-quality` rule gains a Tests section** - "evidence, not ceremony". Agents
   over-produce tests that restate the code they were written after: they always pass,
   catch nothing, and break on every refactor. The section rewards signal over count:
@@ -222,6 +1487,32 @@ feature releases live in the README "Recent Updates" section.
   one module per PR with revert-and-run evidence, never a repo-wide sweep. Test naming
   moved here from the Structure section so it is stated once; the self-check gains
   "have I seen it fail?".
+
+- **Twelve over-budget skills restructured to survive compaction** - fleet-ops,
+  windows-ops, github-ops, loop-ops, ffmpeg-ops, claude-api-ops, summon, git-ops,
+  isometric-ops, mac-ops, tailwind-ops and sqlite-ops each had a SKILL.md body past
+  the 5,000 tokens compaction keeps (fleet-ops was ~10,000). Background, long
+  examples and catalogues moved verbatim into topic files under `references/`
+  (tables of contents where over 100 lines); procedures, decision tables and hard
+  rules stayed, and every moved section leaves a pointer that restates any rule it
+  carried. Nothing was cut: a line-by-line check against the previous tree proves
+  every original line still exists in the skill, and each skill's own suite stays
+  green. Bodies now sit at ~4,000-4,800 tokens. supply-chain-defense and the
+  vendored skill-creator were left alone.
+
+- **One skill size rule, stated once.** The docs disagreed (500 lines with no token
+  budget and a contents list past 300 lines in one, under 300 lines in the template).
+  "The size rule" in `docs/SKILL-SUBAGENT-REFERENCE.md` now holds it with its sources -
+  body under 500 lines and ~5,000 tokens, references one level deep, a Contents list
+  on any reference past 100 lines - and the other docs point there. `skill-creator`,
+  the last skill over budget, now leads with its procedure and keeps anatomy and
+  progressive-disclosure detail in references, so `tests/skill-size.sh` reports clean.
+
+- **Craft-stack skills cross-linked** - `craftcms-ops`, `web-perf-ops`,
+  `frontend-upgrade-ops` and `tailwind-ops` route to each other where the work crosses
+  (Mix-to-Vite cutovers take a lab metrics baseline; Tailwind v4 waits until after the
+  Vite move). `docs/00_INDEX.md` indexes `docs/`, and `AGENTS.md` gains a landmine for
+  "keep both sides" conflict resolutions that drop a line both sides added.
 
 ## [3.8.0] - 2026-08-31
 
@@ -1189,7 +2480,16 @@ underneath them.
   agents, Python skill family, tech-debt scanner, modern CLI toolkit, validation
   suite
 
-[Unreleased]: https://github.com/0xDarkMatter/claude-mods/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/0xDarkMatter/claude-mods/compare/v3.9.0...HEAD
+[3.9.0]: https://github.com/0xDarkMatter/claude-mods/compare/v3.8.0...v3.9.0
+[3.8.0]: https://github.com/0xDarkMatter/claude-mods/compare/v3.7.0...v3.8.0
+[3.7.0]: https://github.com/0xDarkMatter/claude-mods/compare/v3.6.0...v3.7.0
+[3.6.0]: https://github.com/0xDarkMatter/claude-mods/compare/v3.5.0...v3.6.0
+[3.5.0]: https://github.com/0xDarkMatter/claude-mods/compare/v3.4.0...v3.5.0
+[3.4.0]: https://github.com/0xDarkMatter/claude-mods/compare/v3.3.0...v3.4.0
+[3.3.0]: https://github.com/0xDarkMatter/claude-mods/compare/v3.2.0...v3.3.0
+[3.2.0]: https://github.com/0xDarkMatter/claude-mods/compare/v3.1.0...v3.2.0
+[3.1.0]: https://github.com/0xDarkMatter/claude-mods/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/0xDarkMatter/claude-mods/compare/v2.10.1...v3.0.0
 [2.10.1]: https://github.com/0xDarkMatter/claude-mods/compare/v2.10.0...v2.10.1
 [2.10.0]: https://github.com/0xDarkMatter/claude-mods/compare/v2.9.0...v2.10.0

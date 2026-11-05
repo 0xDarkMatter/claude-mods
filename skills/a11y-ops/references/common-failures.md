@@ -5,6 +5,15 @@ rather than the instance. Most of these have the same root cause: a native
 element was replaced by a `<div>`, and everything the native element gave you for
 free had to be rebuilt and wasn't.
 
+## Contents
+
+- [The one rule that prevents most of this](#the-one-rule-that-prevents-most-of-this)
+- [1. Form fields without a programmatic label](#1-form-fields-without-a-programmatic-label) · [2. Errors that only exist in colour](#2-errors-that-only-exist-in-colour) · [3. Icon-only controls with no accessible name](#3-icon-only-controls-with-no-accessible-name)
+- [4. Custom controls that are keyboard-dead](#4-custom-controls-that-are-keyboard-dead) · [5. Focus you cannot see, or cannot escape](#5-focus-you-cannot-see-or-cannot-escape) · [6. Headings used for size](#6-headings-used-for-size)
+- [7. Images whose alt text is wrong rather than missing](#7-images-whose-alt-text-is-wrong-rather-than-missing) · [8. Link text that means nothing out of context](#8-link-text-that-means-nothing-out-of-context) · [9. ARIA that lies](#9-aria-that-lies)
+- [10. Touch targets under 24×24 (2.5.8, new AA)](#10-touch-targets-under-2424-258-new-aa) · [11. Motion that cannot be stopped](#11-motion-that-cannot-be-stopped) · [12. Skipped structure](#12-skipped-structure)
+- [Cross-reference](#cross-reference)
+
 ---
 
 ## The one rule that prevents most of this

@@ -12,6 +12,15 @@ last tripwire, and the one that works even when you don't know what landed.
 `scripts/phone-home-monitor.ps1` is the operational tool. This reference is the
 tooling evaluation behind it and the wiring guide for the preferred capture source.
 
+## Contents
+
+1. [Tooling evaluation (tool-first: what already exists)](#tooling-evaluation-tool-first-what-already-exists)
+2. [Wiring Sysmon (one-time, elevated)](#wiring-sysmon-one-time-elevated)
+3. [What the script flags (rules → severity)](#what-the-script-flags-rules--severity)
+4. [Continuous capture (the daemon question)](#continuous-capture-the-daemon-question)
+5. [Triage — a finding is not yet an incident](#triage--a-finding-is-not-yet-an-incident)
+6. [Known limitations (honest list)](#known-limitations-honest-list)
+
 ## Tooling evaluation (tool-first: what already exists)
 
 | Source | What it gives | Cost / friction | Verdict |
@@ -61,6 +70,16 @@ sysmon64 -accepteula -i sysmonconfig.xml
 Exit `10` on any **medium+** finding; `-Strict` counts `low` too. Loopback and
 RFC1918 destinations are skipped except for IOC matching. The catalog is meant to
 be extended from advisories exactly like `exposure-catalog.json`.
+
+**"No connections" is not "could not look."** A capture source that fails exits
+`7` (TCP table, process table or Sysmon log unreadable) or `5` (this session was
+refused - run elevated), naming the source on stderr; it never reports the empty
+result as clean. Two Windows traps the script handles: `Get-NetTCPConnection`
+reports "nothing in this state" as an `ObjectNotFound` error (a real empty answer),
+and `Get-WinEvent -FilterHashtable` reports a log the session may not read as "No
+events were found" - so the Sysmon read uses `-LogName -FilterXPath`, which raises
+the access denial. A non-elevated `-ListLog` also fails on an installed Sysmon, so
+`-Status` and `-Sysmon` tell "not installed" from "installed, not readable".
 
 ## Continuous capture (the daemon question)
 

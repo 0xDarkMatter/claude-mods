@@ -22,6 +22,7 @@ Automated test suite for validating all 16 skills.
 |------|--------|---------|
 | Trigger validation | `validate-triggers.sh` | Validates frontmatter and trigger keywords |
 | Functional | `functional/*.sh` | Tests CLI tools work correctly |
+| End-to-end | `functional/<skill>/e2e.sh` | A skill's mechanisms composed over a real throwaway repo. **Gated**: `tests/run-skill-tests.sh` globs these, so `just check`, CI and the fleet landing gate all run them |
 
 ## Directory Structure
 
@@ -39,7 +40,8 @@ tests/skills/
     ├── data-processing.sh    # jq, yq tests
     ├── code-stats.sh         # tokei, difft tests
     ├── git-cli-tools.sh      # gh, delta, lazygit tests
-    └── structural-search.sh  # ast-grep tests
+    ├── structural-search.sh  # ast-grep tests
+    └── fleet-ops/e2e.sh      # lane lifecycle end to end (gated)
 ```
 
 ## Running Tests

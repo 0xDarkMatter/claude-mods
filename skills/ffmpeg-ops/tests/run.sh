@@ -129,6 +129,15 @@ grep -E '^[0-9]' "$SB/luts/tri_split_classic.cube" | awk 'NR==4913{ok=($1>$3)} E
 # ── structural: offline staleness verifier + assets ─────────────────────────
 echo "-- verify-commands --offline / assets --"
 bash "$S/verify-commands.sh" --offline >/dev/null 2>&1; expect_exit "verifier --offline clean" 0 $?
+# A link scan whose grep dies checked no links: a crash (1), never clean (0).
+# The links came from a loop fed by `< <(grep ...)`, which hid grep's status.
+mkdir -p "$SB/shim"
+printf '#!/bin/sh\ncase "$*" in *"references|assets"*) echo "grep: simulated read error" >&2; exit 2 ;; esac\nexec "%s" "$@"\n' \
+  "$(command -v grep)" > "$SB/shim/grep"
+chmod +x "$SB/shim/grep"
+out="$(PATH="$SB/shim:$PATH" bash "$S/verify-commands.sh" --offline 2>&1)"; rc=$?
+expect_exit "verifier --offline, link grep dies -> 1, not clean" 1 "$rc"
+case "$out" in *"could not read SKILL.md links"*) ok "link-grep crash is named";; *) no "link-grep crash is named";; esac
 for a in "$SKILL"/assets/*.json; do
   "$PYTHON" -c "import json,sys; json.load(open(sys.argv[1], encoding='utf-8'))" "$a" \
     >/dev/null 2>&1 && ok "asset parses: $(basename "$a")" || no "asset parses: $(basename "$a")"

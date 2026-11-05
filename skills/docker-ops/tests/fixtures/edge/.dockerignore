@@ -1,0 +1,3 @@
+# the edge fixture's COPY secrets/ names an excluded path
+secrets
+**/*.log

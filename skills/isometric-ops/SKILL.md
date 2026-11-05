@@ -145,85 +145,19 @@ skipping the spec is how sets drift.
 
 ### Route C — AI pipeline (generate → control → refine → vectorize)
 
-Fast, but perspective drifts without structure control. Pick the model by what the output
-must *be*, then hold the geometry with ControlNet.
-
-1. **Climb the decision ladder** ([`ai-generation.md`](references/ai-generation.md) §1):
-   editable vectors → Recraft (vector-native); hero raster → Midjourney `--sref`/`--sw`
-   (+ Firefly for brand-safe vector with Content Credentials); local control / tilesets →
-   Flux/SDXL + iso LoRA + ControlNet; consistent large sets → a custom-trained model
-   (Scenario/Layer) on 10–20 on-style refs.
-2. **Prompt** from the ready scaffolds in [`assets/prompt-library.md`](assets/prompt-library.md)
-   — subject + projection + material language + simplification rule + lighting rule +
-   output intent, plus the universal negative-prompt block (vanishing points, perspective
-   distortion, dramatic shadows, text, watermarks). Doctrine in
-   [`ai-generation.md`](references/ai-generation.md) §6.
-3. **Control the structure.** For anything that must tessellate or hold true perspective,
-   condition with ControlNet: depth (massing), MLSD (architecture lines), lineart/canny
-   (exact outlines). The gold-standard workflow is Blender blockout → depth + normal pass →
-   dual-ControlNet generation ([`ai-generation.md`](references/ai-generation.md) §4;
-   blockout export via Route D or iso-studio, Route E).
-4. **Refine.** Upscale with the *creative* camp at resemblance-high / creativity-low to
-   sharpen edges without inventing perspective-breaking geometry; need >4× → regenerate at
-   a higher base instead. Clean AI edge-halos (semi-transparent fringe) mechanically —
-   `tile-validate.py` detects them ([`ai-refinement.md`](references/ai-refinement.md)).
-5. **Vectorize** if you need scalable output: Recraft (cleanest) → Vectorizer.AI →
-   SVGcode/potrace → Illustrator Image Trace + Expand; re-impose the three-tone plane
-   system after tracing ([`ai-refinement.md`](references/ai-refinement.md) §4,
-   [`style-guide.md`](references/style-guide.md)).
-6. **Check licences before delivery** — LoRA and model licences bite (see Route F and the
-   gotcha index).
+Model by output type, scaffolded prompts, ControlNet structure control, refine, vectorize, licence check: [task-routes.md](references/task-routes.md).
 
 ### Route D — Pre-render from 3D (Blender / three.js)
 
-Model once, bake sprites for eight directions. The web-native alternative to Blender is a
-three.js scene.
-
-1. **Rig the ortho camera** at the correct rotation for your projection — **both** rigs are
-   in [`blender-prerender.md`](references/blender-prerender.md) §1 (60/0/45 dimetric vs
-   54.736/0/45 true iso) with the cube-top verification test.
-2. **Blender route.** Drive it headless:
-   `blender -b -P assets/blender-iso-rig.py -- --projection dimetric21 --directions 8 --out ./sheet`.
-   A parented empty spins the model for N-direction batching; transparent film; one render
-   per direction. Add `--passes` for the depth + camera-space normal maps that feed
-   ControlNet (Route C).
-3. **three.js route.** Owns only the iso delta ([`threejs-orthographic.md`](references/threejs-orthographic.md)):
-   exact-rotation idiom (`camera.rotation.order='YXZ'; y=-π/4; x=atan(-1/√2)`),
-   frustum sizing with the resize-recompute gotcha, pixel-perfect world→CSS-px mapping,
-   render-to-target sprite export at 1×/2×/4×, constrained `OrbitControls`, and 8-direction
-   sprite baking in the browser. General scene scaffolding → [`genart-ops`](../genart-ops/SKILL.md).
-4. **Feed the tileset pipeline.** Baked sprites re-enter Route B at step 3 (validate) → 4
-   (pack) → 5 (engine).
+Ortho rig per projection, bake N-direction sprites (Blender or three.js), re-enter Route B at validate: [task-routes.md](references/task-routes.md).
 
 ### Route E — Compose a scene (iso-studio)
 
-The companion **iso-studio** scene composer (standalone app, local checkout
-github.com/0xDarkMatter/iso-studio) stages assets on a snap-to-grid isometric canvas with automatic
-depth sorting and a blockout-to-ControlNet export path. See §5 below for the launch
-command and status.
-
-1. **Launch** the app (§5), pick a projection, set tile width and grid extent.
-2. **Import** PNG/SVG/WebP by drag-drop, paste, or file picker; assets land in the tray.
-3. **Place & snap** with full / half / quarter / free snap modes; set each asset's anchor
-   and footprint so snapping and sorting stay correct.
-4. **Depth** sorts automatically by `(tileX + tileY)`, then elevation, then zBias, across
-   ground / props / overlay layers.
-5. **Export** PNG at 1×/2×/4× (transparent, cropped) or save the scene as JSON conforming
-   to the app repo's `scene-schema.json` (version "1.0").
-6. **Blockout → ControlNet** (v2 feature): place flat-shaded grey primitives and export a
-   depth-map / lineart render that conditions the AI pipeline (Route C, step 3).
+Snap-grid staging, automatic depth sort, PNG/scene-JSON export, blockout to ControlNet in the standalone app: [iso-studio.md](references/iso-studio.md).
 
 ### Route F — Source existing assets (licences)
 
-Do not draw what you can legally reuse — but check the licence *before* delivery.
-
-1. **CC0 first** — Kenney iso packs, itch.io CC0 sets (Screaming Brain's 1,008 floors,
-   etc.), OpenGameArt ([`asset-sourcing.md`](references/asset-sourcing.md)).
-2. **Marketplaces** — IconScout, Flaticon (attribution on free), Icons8, Streamline,
-   Iconify, DrawKit, Blush, Storyset, Icograms.
-3. **The procurement rule** — before client delivery verify current plan + current licence +
-   **AI-training clause**. "Commercial use permitted" ≠ "dataset use permitted" (DrawKit
-   explicitly forbids AI training). Track attribution; prefer SVG source over PNG.
+CC0 first, then marketplaces; verify plan, licence and **AI-training clause** before delivery: [task-routes.md](references/task-routes.md).
 
 ---
 
@@ -253,43 +187,7 @@ Pure-stdlib scripts run with `python`; Pillow scripts use PEP 723 inline metadat
 
 ## 5. iso-studio — the scene composer (standalone app)
 
-**iso-studio** is a zero-dependency, no-build isometric scene composer that grew out of
-this skill and now lives in its own repository — clone it wherever you keep checkouts,
-remote `github.com/0xDarkMatter/iso-studio` (`index.html` + `server.mjs`, no npm deps).
-Launch it, then work the docked palettes:
-
-```
-node <iso-studio>/server.mjs            # then open http://localhost:4323
-PORT=8080 node <iso-studio>/server.mjs
-```
-
-- **Canvas + Grid** — projection selector (2:1 dimetric / true isometric / custom angle),
-  tile W×H (H is derived-and-locked for the two named projections), grid extent, and a
-  full / half / quarter / free snap segmented control.
-- **Asset tray** — drag-drop, clipboard-paste, or file-picker import (PNG/SVG/WebP, stored
-  as data URIs so scenes are self-contained); click-to-place, stays armed for rapid
-  placement.
-- **Depth sorting** — automatic `(x+y) → elevation → layer → zBias` sort across
-  ground / props / overlay, matching the doctrine in
-  [`coordinates-depth.md`](references/coordinates-depth.md) exactly.
-- **Inspector, Scene, Export palettes** — anchor/footprint/elevation/scale/flip/zBias
-  editing; background/checkerboard/canvas size; PNG export at 1×/2×/4× (crop-to-content,
-  transparent), SVG export (gated — every placed asset must be SVG-sourced), and scene
-  JSON save/load conforming to the app repo's `scene-schema.json` (version "1.0").
-- **Blockout mode (signature feature)** — place flat-shaded three-tone grey primitives
-  (box / slab / ramp / cylinder) and export a **depth map** and a **lineart** render sized
-  to the canvas; both condition the ControlNet step of the AI pipeline
-  ([`ai-generation.md`](references/ai-generation.md) §4) without touching Blender.
-- **Undo/redo** (`Ctrl+Z` / `Ctrl+Y`, ≥50 steps, drag-moves and rapid nudges coalesced
-  into single entries) and the full hotkey legend via `?` in-app.
-
-The full manual — workspace tour, projection/snap configuration, anchor-at-feet
-discipline, the complete hotkey table, the scene-JSON schema walkthrough, the
-blockout → depth/lineart → ControlNet round trip step by step, and a "known limits"
-section (depth export is per-instance flat grey, elevation-aware but not per-face;
-`flipX` mirrors a ramp's slope, no-op on symmetric primitives) — lives in the app repo
-at `docs/MANUAL.md`; this skill's [`references/iso-studio.md`](references/iso-studio.md)
-is the quickstart pointer.
+Standalone zero-dependency app (github.com/0xDarkMatter/iso-studio), run with `node <iso-studio>/server.mjs`. Palettes, blockout mode, manual pointer: [iso-studio.md](references/iso-studio.md).
 
 ---
 

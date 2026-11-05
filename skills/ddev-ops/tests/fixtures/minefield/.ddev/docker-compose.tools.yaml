@@ -1,0 +1,9 @@
+# Fixture: mounts that hand containers the host (docker-socket-mounted, home-mounted).
+services:
+  web:
+    volumes:
+      - ~/.aws:/home/.aws:ro                        # home-mounted: AWS credentials
+      - ~/.composer/cache:/home/.composer/cache     # a cache: must NOT be named
+  logs:
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro   # docker-socket-mounted

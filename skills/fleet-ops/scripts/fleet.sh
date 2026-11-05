@@ -12,6 +12,8 @@
 #   status views        fleet_view_panel, fleet_view_verbose, cmd_main, cmd_config
 #   SESSION AWARENESS   who owns a lane, and are they still writing (sessions.sh)
 #   PRUNE               worktree housekeeping — the only part that DELETES
+#   LANDING MARKER      one land at a time; recovering a land that died mid-way;
+#                       is the base tip provisional (fleet landing, status line)
 #   landing             land_one, rebase_others, cmd_land, cmd_land_all, revert
 #   daemon              cmd_start / cmd_stop, PID file lifecycle
 #   dispatch            the subcommand case at the bottom
@@ -47,6 +49,9 @@ LANES_DIR="$FLEET_DIR/lanes"
 LOG="$FLEET_DIR/activity.log"
 CONFIG="$FLEET_DIR/config"
 PID_FILE="$FLEET_DIR/daemon.pid"
+# The land in progress right now, by any fleet process. Format at claim_landing;
+# why it exists at the LANDING MARKER banner.
+LANDING_FILE="$FLEET_DIR/landing"
 
 # defaults (overridable via .claude/fleet/config — see load_config below)
 MODE="auto"
@@ -55,7 +60,12 @@ MODE="auto"
 # enforces the global .claude/ sensitive-file guard, so worktrees nested
 # under .claude/ can't be written to by lane sessions. See SKILL.md
 # "Headless agent compatibility".
-WORKTREE_ROOT=".fleet-worktrees"
+# NOT named WORKTREE_ROOT: that is the machine-wide lane root from the env
+# (rules/worktree-boundaries.md "Lane location"). Assigning to it here once
+# overwrote the env value and, since an imported var stays exported, handed
+# ".fleet-worktrees" to every child (test_cmd, new-lane.sh) as THEIR root.
+FLEET_WT_ROOT=".fleet-worktrees"
+FLEET_WT_SET=0   # 1 once the config names worktree_root explicitly
 TEST_CMD=""
 # Scrub default. BUILT by string concatenation so this line never contains a
 # contiguous marker token — the scrub gate greps every ADDED diff line, so a
@@ -65,7 +75,15 @@ TEST_CMD=""
 # mktemp template (push-gate-paths. plus six X's — false-refused a landing,
 # 2026-09-01), not a marker; a lone triple-X followed by a non-letter
 # (space, colon) still refuses.
+# Base64 data-URI payloads are stripped from each added line BEFORE this
+# pattern is applied (SCRUB_DATA_URI, scrub_diff): random base64 holds a
+# triple-X followed by a digit or +/ often enough to refuse any embedded font
+# (an HTML report with an embedded font hit it 6 times). A custom forbidden_pattern
+# gets the same strip.
 FORBIDDEN_PATTERN='TODO_''SCRUB|(^|[^X])X{3}[^a-zX]|FIXME_''BEFORE_LAND'
+# data:<mediatype>[;param=v...];base64,<payload>. Not configurable: it removes
+# only payload bytes, which can never be a deliberate marker.
+SCRUB_DATA_URI='data:[^,[:space:]]*;base64,[A-Za-z0-9+/=]+'
 BASE_BRANCH="main"
 POLL_INTERVAL=5
 ICONS="${icons:-}"   # env seed; config `icons=ascii` overrides below
@@ -165,7 +183,7 @@ load_config() {
 
     case "$key" in
       mode)              MODE="$val" ;;
-      worktree_root)     WORKTREE_ROOT="$val" ;;
+      worktree_root)     FLEET_WT_ROOT="$val"; FLEET_WT_SET=1 ;;
       test_cmd)          TEST_CMD="$val" ;;
       forbidden_pattern) FORBIDDEN_PATTERN="$val" ;;
       base_branch)       BASE_BRANCH="$val" ;;
@@ -202,6 +220,17 @@ load_config() {
   return 0
 }
 load_config "$CONFIG"
+# Machine-wide lane root: with WORKTREE_ROOT set and no explicit worktree_root
+# in the config, lanes go to $WORKTREE_ROOT/<repo> (<repo> = the main checkout's
+# dir name), outside the project. An explicit config key still wins: it is a
+# deliberate per-repo choice. FLEET_WT_EXTERNAL marks the outside case, where
+# no .fleet-worktrees/ gitignore entry is needed.
+FLEET_WT_EXTERNAL=0
+if [[ $FLEET_WT_SET -eq 0 && -n "${WORKTREE_ROOT:-}" && -n "${REPO_ROOT:-}" ]]; then
+  FLEET_WT_ROOT="${WORKTREE_ROOT//\\//}"
+  FLEET_WT_ROOT="${FLEET_WT_ROOT%/}/$(basename "$REPO_ROOT")"
+  FLEET_WT_EXTERNAL=1
+fi
 # === END CONFIG ===============================================================
 
 # Shared terminal-output helpers (see docs/TERMINAL-DESIGN.md).
@@ -282,7 +311,7 @@ ensure_fleet_dir() {
   chmod +x "$FLEET_DIR/sessions.sh" 2>/dev/null || true
   # Auto-ignore fleet-ops runtime state in git so it doesn't show as "dirty"
   # or get committed. Two paths:
-  #   .claude/fleet/      — lanes/, daemon.pid, activity.log, signal.sh, config
+  #   .claude/fleet/      — lanes/, daemon.pid, landing, activity.log, signal.sh, config
   #   .fleet-worktrees/   — default worktree root (top-level so headless
   #                         Claude lane sessions can write there)
   if git rev-parse --git-dir >/dev/null 2>&1; then
@@ -299,7 +328,7 @@ ensure_fleet_dir() {
       echo '.claude/fleet/' >> .gitignore
       appended=1
     fi
-    if ! grep -qxE '\.fleet-worktrees/\*?' .gitignore 2>/dev/null; then
+    if [[ $FLEET_WT_EXTERNAL -eq 0 ]] && ! grep -qxE '\.fleet-worktrees/\*?' .gitignore 2>/dev/null; then
       echo '.fleet-worktrees/' >> .gitignore
       appended=1
     fi
@@ -328,14 +357,53 @@ set_lane_state() {
   fi
 }
 
+# Delete a fleet state file (the MAIN pin, the daemon PID file) and PROVE it is
+# gone, or fail out loud. These files are read back with `[[ -f ]]`, so one that
+# survives its delete keeps meaning exactly what it meant before.
+#
+# One bare `rm -f` is not enough on Windows. A process holding the file open
+# WITHOUT delete-sharing (the Win32/.NET default; antivirus and the search
+# indexer do it for a moment after a write) makes the delete fail with EBUSY.
+# `-f` does not hide that error, but a single attempt loses a race that a short
+# wait wins. On 2026-10-05 the fleet-ops suite failed once under load with
+# "release did not restore heuristic" and passed on rerun. A held pin reproduces
+# that exactly (tests/run.sh "held-pin-release"): the pin survives and MAIN
+# stays pinned. So: retry for up to FLEET_RM_RETRY_SECS (default 5, 0 = one try),
+# judge success by the path being gone rather than by rm's status, and when
+# giving up name the file, say why, and return 1.
+# Callers print "cleared" only AFTER this returns 0.
+remove_state_file() {
+  local f=$1 what=$2 err="" warned=0 wait=${FLEET_RM_RETRY_SECS:-5}
+  [[ "$wait" =~ ^[0-9]+$ ]] || wait=5
+  local deadline=$(( SECONDS + wait ))
+  while :; do
+    if err=$(rm -f -- "$f" 2>&1) && [[ ! -e "$f" ]]; then return 0; fi
+    (( SECONDS < deadline )) || break
+    if (( ! warned )); then
+      echo "fleet: $what is held open by another process; retrying for up to ${wait}s (${err:-still present after rm})" >&2
+      warned=1
+    fi
+    sleep 0.2
+  done
+  echo "fleet: ERROR: could not remove $what ($f): ${err:-still present after rm}" >&2
+  echo "fleet:   another process is holding it open (antivirus, the search indexer, an editor). Close it and re-run." >&2
+  return 1
+}
+
 scrub_diff() {
   # echoes hits (one per line) for given branch's diff vs base. Empty = clean.
   # ADDED lines only ('+…', not the '+++' file header): deletion lines, context
   # lines, and @@ hunk-header function-context must not trip the gate — removing
   # a forbidden marker is a fix, and a marker merely NEAR an edit is not one
   # (both false-positived here, 2026-07).
+  # Each data:<type>;base64,<payload> run is cut to its prefix before the match,
+  # so an embedded font or image never trips the gate but a marker elsewhere on
+  # the same line still does. Do NOT skip whole lines carrying a data URI
+  # instead: a minified HTML/CSS file is one line, and skipping it would wave
+  # through any marker in it (tests/run.sh pins both directions).
   local branch=$1
-  git diff "$BASE_BRANCH"..."$branch" 2>/dev/null | grep -E '^\+' | grep -vE '^\+\+\+ ' | grep -nE "$FORBIDDEN_PATTERN" || true
+  git diff "$BASE_BRANCH"..."$branch" 2>/dev/null | grep -E '^\+' | grep -vE '^\+\+\+ ' \
+    | sed -E "s#$SCRUB_DATA_URI#data:;base64,#g" | grep -nE "$FORBIDDEN_PATTERN" || true
 }
 
 refuse_if_shared_tree() {
@@ -389,11 +457,11 @@ cmd_init() {
       log "created branch: $name"
     fi
     if [[ "$mode" == "worktree" ]]; then
-      local wt="$WORKTREE_ROOT/$name"
+      local wt="$FLEET_WT_ROOT/$name"
       if [[ -d "$wt" ]]; then
         log "skip worktree (exists): $wt"
       else
-        mkdir -p "$WORKTREE_ROOT"
+        mkdir -p "$FLEET_WT_ROOT"
         git worktree add "$wt" "$name"
         log "created worktree: $wt"
       fi
@@ -525,6 +593,8 @@ fleet_view_panel() {
 
   echo ""
   term_panel_open fleet fleet "$TERM_GLYPH_BRANCH $BASE_BRANCH"
+  # First, above every lane: whether the base tip is safe to act on at all.
+  landing_status_row
 
   if [[ $total -eq 0 ]]; then
     term_panel_vert
@@ -603,6 +673,7 @@ fleet_view_verbose() {
 
   echo ""
   term_panel_open fleet "fleet ${TERM_DOT} verbose" "$TERM_GLYPH_BRANCH $BASE_BRANCH"
+  landing_status_row
 
   if [[ $total -eq 0 ]]; then
     term_panel_vert
@@ -749,8 +820,11 @@ cmd_main() {
       printf '%s\n' "$id"
       ;;
     release)
-      if [[ -f "$pin" ]]; then rm -f "$pin"; echo "MAIN pin cleared" >&2
-      else echo "no MAIN pin to clear" >&2; fi
+      if [[ ! -f "$pin" ]]; then echo "no MAIN pin to clear" >&2; return 0; fi
+      # A pin that survives keeps overriding the heuristic, so a failed delete
+      # is a failed release (exit 1), never a "cleared".
+      remove_state_file "$pin" "MAIN pin" || return 1
+      echo "MAIN pin cleared" >&2
       ;;
     *) echo "usage: fleet main [show|claim [<sessionId>]|release]" >&2; return 2 ;;
   esac
@@ -759,14 +833,24 @@ cmd_main() {
 cmd_config() {
   # Print the RESOLVED config — the observability that was missing while every
   # documented key was a silent no-op. stdout is data only (key=value, parseable);
-  # advice and warnings go to stderr.
-  if [[ -f "$CONFIG" ]]; then
+  # advice and warnings go to stderr. --quiet prints the keys alone: the session
+  # diagnostics below read every session store, which takes tens of seconds on a
+  # busy machine, and a script that wants one key (queue.sh: base_branch) must
+  # not pay that on every run.
+  local quiet=0
+  case "${1:-}" in
+    --quiet) quiet=1 ;;
+    "") : ;;
+    *) echo "usage: fleet config [--quiet]" >&2; return 2 ;;
+  esac
+  if [[ $quiet -eq 1 ]]; then :
+  elif [[ -f "$CONFIG" ]]; then
     echo "# source: $CONFIG" >&2
   else
     echo "# source: none ($CONFIG absent) — all defaults" >&2
   fi
   echo "mode=$MODE"
-  echo "worktree_root=$WORKTREE_ROOT"
+  echo "worktree_root=$FLEET_WT_ROOT"
   echo "test_cmd=$TEST_CMD"
   echo "forbidden_pattern=$FORBIDDEN_PATTERN"
   echo "base_branch=$BASE_BRANCH"
@@ -775,6 +859,7 @@ cmd_config() {
   echo "session_check=$SESSION_CHECK"
   echo "session_live_secs=$SESSION_LIVE_SECS"
   echo "prune_hint=$PRUNE_HINT"
+  if [[ $quiet -eq 1 ]]; then return 0; fi
   if [[ -z "$TEST_CMD" ]]; then
     echo "WARNING: no test_cmd — 'fleet land' will not run a test gate" >&2
   fi
@@ -794,6 +879,14 @@ cmd_config() {
     else
       echo "# session awareness: ON but no sessions resolved — store missing, jq missing, or terminal-only host" >&2
     fi
+    # Which stores answered. The 2026-09-28 prune misclassification came from
+    # reading one Desktop instance's store out of four, and nothing said so.
+    local kind dir
+    # procsub ok: a diagnostic listing only; whether the gate is armed was decided
+    # above from main_session_row, and an empty list reads as no stores.
+    while IFS=$'\t' read -r kind dir; do
+      [[ -n "$kind" ]] && echo "#   $kind: $dir" >&2
+    done < <(bash "$SESSIONS_SH" stores 2>/dev/null || true)
   else
     echo "# session awareness: OFF — 'fleet land' will not check for live lane owners" >&2
   fi
@@ -831,8 +924,9 @@ session_enabled() {
     && [[ -f "$SESSIONS_SH" ]]
 }
 
-# TSV row for the session owning $1, or empty. $2=--fresh forces an
-# authoritative liveness read (used by the land gate).
+# TSV row for the session owning $1 (by name, or by a claim on its worktree:
+# `sessions.sh owner`), or empty. $2=--fresh forces an authoritative liveness
+# read; `fleet owner` and prune's pre-delete re-check use it.
 lane_owner() {
   session_enabled || return 0
   local branch=$1 fresh=${2:-}
@@ -862,14 +956,55 @@ SESSION_INDEX_LOADED=0
 # evidence at all, and the two are indistinguishable from an empty index alone.
 # Anything that can't tell them apart must not classify a worktree removable.
 SESSION_STORE_OK=0
+# Directory claims (sessions.sh `paths`): key, path, sessionId, title, lastMs,
+# archived, live, via. Prune needs these as well as the branch index, because
+# the branch join is blind in two ways that both occurred on 2026-09-28: a
+# wrapper's branch can differ from what its worktree has checked out (a session
+# ran branch `claude/keen-mccarthy` in worktree `vigilant-grothendieck`), and a
+# session that moved into a lane via EnterWorktree never records that lane in
+# its wrapper at all — only its transcript's directory says where it went.
+SESSION_PATHS_CACHE=""
+# load_session_index [fresh] — `fresh` forces a re-scan even when already
+# loaded, for the one caller that must not act on a cached read: prune's
+# pre-removal re-classification.
 load_session_index() {
   session_enabled || return 0
-  [[ $SESSION_INDEX_LOADED -eq 1 ]] && return 0
+  local fresh=${1:-}
+  [[ $SESSION_INDEX_LOADED -eq 1 && "$fresh" != fresh ]] && return 0
   SESSION_INDEX_LOADED=1
-  local rc=0
-  SESSION_INDEX_CACHE=$(FLEET_SESSION_LIVE_SECS="$SESSION_LIVE_SECS" \
-    bash "$SESSIONS_SH" index 2>/dev/null) || rc=$?
-  [[ $rc -eq 0 ]] && SESSION_STORE_OK=1
+  SESSION_STORE_OK=0
+  local rc=0 views="" nocache="${FLEET_SESSION_NOCACHE:-}"
+  [[ "$fresh" == fresh ]] && nocache=1
+  # One process, one scan, both projections (tagged I/P): a second sessions.sh
+  # process costs ~200ms on Windows on every `fleet status`.
+  views=$(FLEET_SESSION_LIVE_SECS="$SESSION_LIVE_SECS" FLEET_SESSION_NOCACHE="$nocache" \
+    bash "$SESSIONS_SH" views 2>/dev/null) || rc=$?
+  SESSION_INDEX_CACHE=""; SESSION_PATHS_CACHE=""
+  # Both views, or neither: prune reads "no claim" as evidence, which is only
+  # true when the claims were actually read.
+  if [[ $rc -eq 0 ]]; then
+    SESSION_INDEX_CACHE=$(printf '%s\n' "$views" | awk '/^I\t/ { print substr($0, 3) }')
+    SESSION_PATHS_CACHE=$(printf '%s\n' "$views" | awk '/^P\t/ { print substr($0, 3) }')
+    SESSION_STORE_OK=1
+  fi
+  return 0
+}
+
+# Claude Code's project-dir encoding, lowercased — the key a transcript's
+# directory is filed under. MIRRORS path_key() in sessions.sh; a drift between
+# the two silently loses transcript claims (tests/run.sh pins the pair).
+path_key() {
+  printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C sed 's/[^a-z0-9]/-/g'
+}
+
+# Every claim on worktree $1 (git's path form): an exact normalised-path match,
+# or a transcript filed under its encoded key. Same TSV as `sessions.sh paths`.
+path_claims() {
+  [[ -z "$SESSION_PATHS_CACHE" ]] && return 0
+  local n k
+  n=$(prune_norm "$1"); k=$(path_key "$n")
+  printf '%s\n' "$SESSION_PATHS_CACHE" \
+    | awk -F'\t' -v n="$n" -v k="$k" 'NF && (($2 != "" && $2 == n) || $1 == k)'
   return 0
 }
 
@@ -918,32 +1053,62 @@ session_is_self() {
   session_enabled || return 1
   if [[ $SELF_SESSION_LOADED -eq 0 ]]; then
     SELF_SESSION_LOADED=1
-    SELF_SESSION_ID=$(bash "$SESSIONS_SH" self 2>/dev/null) || SELF_SESSION_ID=""
+    SELF_SESSION_ID=$(bash "$SESSIONS_SH" self 2>/dev/null </dev/null) || SELF_SESSION_ID=""
   fi
   [[ -n "$SELF_SESSION_ID" && "$1" == "$SELF_SESSION_ID" ]]
 }
 
-# Every OTHER live session that also owns branch $1 (excluding session $2), as
-# "id<TAB>title" rows. Liveness is re-read per candidate rather than taken from
-# the cached index — same standard as `owner --fresh`, because this decides a
-# refusal, and the index cache has a 15-minute TTL.
-peer_live_owners() {
-  local branch=$1 self=$2 row id
-  load_session_index
-  [[ -z "$SESSION_INDEX_CACHE" ]] && return 0
-  while IFS= read -r row; do
-    [[ -z "$row" ]] && continue
-    id=$(sfield "$row" 2)
-    [[ "$id" == "$self" ]] && continue
-    [[ "$(bash "$SESSIONS_SH" live "$id" 2>/dev/null)" == "1" ]] || continue
-    printf '%s\t%s\n' "$id" "$(sfield "$row" 3)"
-  done < <(printf '%s\n' "$SESSION_INDEX_CACHE" | awk -F'\t' -v w="$branch" '$1 == w')
+# Every LIVE claim on branch $1, one row per session and worktree:
+# "id<TAB>title<TAB>how" — "owns <branch>" for a claim by name, "working in
+# <worktree> (by <routes>)" for a claim on the worktree it is checked out in.
+# This is `sessions.sh claimants --fresh`: the same claim logic as `fleet owner`
+# and prune, with every claimant's liveness re-read, because this decides a
+# refusal and the index is up to 15 minutes old. Joining on the name alone was
+# blind three ways, each of which merged and then rebased under a live session:
+# a wrapper's branch drifting from its worktree's (2026-09-28), a session that
+# EnterWorktree'd into the lane (the same day), and Desktop's writtenBranches
+# turning into "<path>\0<branch>" pairs no lane name equalled (2026-10-06).
+live_claims_on() {
+  session_enabled || return 0
+  FLEET_SESSION_LIVE_SECS="$SESSION_LIVE_SECS" \
+    bash "$SESSIONS_SH" claimants --fresh "$1" 2>/dev/null </dev/null \
+    | awk -F'\t' -v OFS='\t' -v b="$1" '
+        NF && $7 == "1" {
+          k = $2 SUBSEP (($8 == "branch") ? "" : $9)
+          if (!(k in t)) { o[++n] = k; id[k] = $2; t[k] = $3; p[k] = $9; nm[k] = ($8 == "branch") }
+          if ($8 != "branch" && index("," r[k] ",", "," $8 ",") == 0) r[k] = r[k] (r[k] == "" ? "" : ",") $8
+        }
+        END { for (i = 1; i <= n; i++) { k = o[i]
+                print id[k], t[k], nm[k] ? "owns " b : "working in " p[k] " (by " r[k] ")" } }' || true
+}
+
+# Collapse "id<TAB>title<TAB>how" rows ($1) to one per session, first-seen
+# order, the hows joined with "; ".
+merge_claimants() {
+  printf '%s\n' "$1" | awk -F'\t' -v OFS='\t' '
+    NF >= 3 && $1 != "" {
+      if (!($1 in t)) { o[++n] = $1; t[$1] = $2; h[$1] = $3 } else h[$1] = h[$1] "; " $3
+    }
+    END { for (i = 1; i <= n; i++) print o[i], t[o[i]], h[o[i]] }'
+}
+
+log_claimants() {
+  local id title how
+  while IFS=$'\t' read -r id title how; do
+    [[ -n "$id" ]] && log "    '$title' ($id) - $how"
+  done <<< "$1"
   return 0
 }
 
-# The gate itself. Refuses to land a lane whose owning session is still live —
+# The gate itself. Refuses to land a lane any LIVE session is working on —
 # landing under a session that is mid-turn means merging a branch it may still
 # be committing to, and then rebasing its worktree out from under it.
+#
+# "Working on" is the union of two joins, because each is blind where the
+# other sees: the NAME join (every session that checked out or wrote the lane
+# branch) and the DIRECTORY join (any session claiming the worktree the branch
+# is checked out in). Both come from one `claimants --fresh` read
+# (live_claims_on), which never trusts the cached index's liveness.
 #
 # SELF-OWNERSHIP IS EXEMPT, and the reason is the whole design: that hazard is
 # about a CONCURRENT writer. A session landing its own lane is not one — it is
@@ -954,35 +1119,40 @@ peer_live_owners() {
 # for the peers it genuinely protects. A narrow exemption beats a blunt one.
 #
 # It stays conservative in both directions: unresolvable self never matches,
-# and self must be the ONLY live owner. A second live session writing the same
-# branch is the real hazard, and refuses exactly as before.
+# and self must be the ONLY live claimant — by either join, and the name join
+# lists every session that wrote the branch, not just the newest. A second
+# live session is the real hazard, and refuses exactly as before. A CLI or
+# headless session has no store record, so it can never prove it is self:
+# working in the lane's worktree, it refuses even its own land.
 # Returns 0 = safe to land, 1 = refuse.
 session_land_gate() {
   local branch=$1
   session_enabled || return 0
-  local row; row=$(lane_owner "$branch" --fresh)
-  [[ -z "$row" ]] && return 0            # unknown owner → no opinion → allow
-  local live; live=$(sfield "$row" 7)
-  [[ "$live" != "1" ]] && return 0       # idle → allow
-  local title; title=$(sfield "$row" 3)
-  local id;    id=$(sfield "$row" 2)
-  if session_is_self "$id"; then
-    local peers pid ptitle
-    peers=$(peer_live_owners "$branch" "$id")
-    if [[ -z "$peers" ]]; then
-      log "landing own lane: $branch is owned by THIS session ($id) — not a concurrent writer"
+  local claimants
+  claimants=$(merge_claimants "$(live_claims_on "$branch")")
+  [[ -z "$claimants" ]] && return 0      # nobody live → allow
+
+  local id title how others="" self_in=0
+  while IFS=$'\t' read -r id title how; do
+    [[ -z "$id" ]] && continue
+    if session_is_self "$id"; then self_in=1; else others+="$id"$'\t'"$title"$'\t'"$how"$'\n'; fi
+  done <<< "$claimants"
+
+  if [[ $self_in -eq 1 ]]; then
+    others=$(printf '%s' "$others" | awk 'NF')
+    if [[ -z "$others" ]]; then
+      log "landing own lane: $branch is claimed only by THIS session ($SELF_SESSION_ID) — not a concurrent writer"
       return 0
     fi
     # Self plus someone else: the someone else is the hazard, so say who.
-    log "REFUSE LAND: $branch is owned by this session AND another LIVE session:"
-    while IFS=$'\t' read -r pid ptitle; do
-      [[ -n "$pid" ]] && log "    '$ptitle' ($pid)"
-    done <<< "$peers"
+    log "REFUSE LAND: $branch is claimed by this session AND another LIVE session:"
+    log_claimants "$others"
     log "  a peer may still be committing to it — coordinate before landing."
     return 1
   fi
-  log "REFUSE LAND: $branch is owned by a LIVE session — '$title' ($id)"
-  log "  that session was active within ${SESSION_LIVE_SECS}s and may still be committing."
+  log "REFUSE LAND: $branch has a LIVE session on it:"
+  log_claimants "$claimants"
+  log "  active within ${SESSION_LIVE_SECS}s, so it may still be committing."
   log "  wait for it to finish, or override with: session_check=off (or FLEET_SKIP_SESSION_CHECK=1)"
   return 1
 }
@@ -1009,14 +1179,47 @@ session_land_gate() {
 #   1  primary / locked / the caller's own tree   KEEP    structurally untouchable
 #   1b git says the directory is gone             REVIEW  git's own bookkeeping —
 #                                                         `git worktree prune`
-#   2  owning session is LIVE                     KEEP    someone is writing here
+#   2  any claiming session is LIVE               KEEP    someone is writing here
 #   3  session store unreadable, or awareness     REVIEW  no evidence of anything
 #      switched off                                       => nothing can be SAFE
-#   4  detached HEAD                              REVIEW  no branch to attribute
+#   4  detached HEAD                              REVIEW  unless: clean, no git op
+#                                                         in flight, HEAD in <base>,
+#                                                         no open claim, and an
+#                                                         archived owner proven => SAFE
 #   5  uncommitted or untracked changes           REVIEW  removal would destroy them
 #   6  commits not yet in <base>                  REVIEW  unintegrated work
-#   7  merged + clean + owner archived or absent  SAFE    finished and recoverable
+#   7  merged + clean, and no OPEN session        SAFE    finished and recoverable
+#      claims it; for .claude/worktrees/ also a
+#      positive archived claim; for an UNSTARTED
+#      lane (no commit of its own) that claim,
+#      or PRUNE_UNSTARTED_DAYS unclaimed
 #   8  anything else                              REVIEW  default deny
+#
+# Under `fleet prune` a transcript whose EnterWorktree or `git worktree add`
+# tool call names a tree is one more claim (prune_named_probe), keep-only like
+# the transcript-key claim. Both 2026-10-22: a zero-commit lane read "merged"
+# and unclaimed under a session waiting on its EnterWorktree prompt.
+#
+# A session CLAIMS a worktree by any of: its branch (checked-out or written),
+# its wrapper cwd or worktreePath, its transcript's project directory, or —
+# while live — the last cwd its transcript recorded (sessions.sh `paths`).
+# Until 2026-09-28 only the branch join existed, and it read one session store
+# out of several; 12 worktrees came back SAFE, five of them the cwd of an OPEN
+# session and two of those RUNNING. Rule 7's positive-claim clause is the
+# backstop for whatever the joins still miss: a .claude/worktrees/ tree nobody
+# claims is "unknown", and unknown is REVIEW.
+#
+# ARCHIVED OWNERS (2026-10-05). Ten sessions archived after their lanes landed
+# left 17 merged, clean worktrees that prune kept as "live session": archiving
+# writes the transcript one last time, and that write read as activity. Now
+# (sessions.sh header, "ARCHIVED IS NOT LIVE") an archived session is live only
+# on a write AFTER its archive, and `fleet prune` re-reads every claimant fresh
+# (prune_freshen_sessions) rather than trusting a pre-archive cache. An archive
+# flag that cannot be read is "?": treated as live/open, never as archived, and
+# every reason it decides says so. POSITIVE archived evidence is an exact path:
+# a wrapper cwd/worktreePath, or the cwd an archived session's transcript last
+# recorded — that last one is what proves a lane it EnterWorktree'd into, which
+# its wrapper (cwd and gitAnchors alike) never names.
 #
 # Rule 6 deliberately folds together two readings that cannot both apply to one
 # row — "unmerged commits => KEEP" and "unmerged with no live owner => REVIEW".
@@ -1026,6 +1229,15 @@ session_land_gate() {
 # meaning only: hands off, not yours to judge.
 
 PRUNE_ROWS=""   # accumulated TSV: path \t branch \t bucket \t reason
+PRUNE_FRESHEN=0     # 1 under `fleet prune` only — see prune_freshen_sessions
+SESSION_LASTCWD=""  # sessionId \t normalised last transcript cwd (archived only)
+PRUNE_NAMED=0       # 1 under single-repo `fleet prune` only — see prune_named_probe
+NAMED_CLAIMS=""     # `at`-shaped rows, via=named, from prune_named_probe
+# How long an unstarted lane (prune_unstarted) must sit unclaimed before rule 7
+# may call it SAFE. Long on purpose: a session can wait a day or more on one
+# permission prompt, and an empty tree costs nothing to keep.
+PRUNE_UNSTARTED_DAYS=${FLEET_PRUNE_UNSTARTED_DAYS:-30}
+[[ "$PRUNE_UNSTARTED_DAYS" =~ ^[0-9]+$ ]] || PRUNE_UNSTARTED_DAYS=30
 
 # Normalise a path for comparison: forward slashes, no trailing slash,
 # lowercased (Windows paths are case-insensitive and git's casing of the drive
@@ -1041,6 +1253,23 @@ prune_norm() {
 # tree containing them anyway.
 prune_dirty_count() {
   git -C "$1" status --porcelain 2>/dev/null | grep -c '.' || true
+}
+
+# After a FAILED `git worktree remove`: did git finish everything but the
+# directory itself? True only when the path is no longer a registered worktree
+# AND is an empty directory, so a real failure (dirty, locked, half-deleted)
+# still reads as one.
+prune_left_empty() {
+  local want regs w
+  [[ -d "$1" && -z "$(ls -A "$1" 2>/dev/null)" ]] || return 1
+  want=$(prune_norm "$(prune_native "$1")")
+  # Captured, then compared: an early-exiting `grep -q` at the end of a pipe
+  # turns the whole pipe into SIGPIPE under pipefail.
+  regs=$(git -C "$REPO_ROOT" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p') || return 1
+  while IFS= read -r w; do
+    [[ -n "$w" && "$(prune_norm "$w")" == "$want" ]] && return 1
+  done <<< "$regs"
+  return 0
 }
 
 prune_row() {
@@ -1081,8 +1310,192 @@ prune_log() {
 # was readable AND it says the owner is archived or gone, which rules 3 and 7
 # already require. The flag exists to mark them loudly in the table and to
 # trigger the re-verify before removal.
+#
+# With WORKTREE_ROOT set, hooks/worktree-create.sh puts those session worktrees
+# at $WORKTREE_ROOT/<repo>/<name> on branch worktree-<name>, and Claude Code's
+# own sweep never removes them. Same hazard, different place: a tree under the
+# root on a worktree-* branch is native too. A new-lane.sh or fleet lane there
+# (lane/*, fleet names) is not, exactly as under .claude/worktrees/ it would be.
+# $2 = branch (optional; without it only the path rule applies).
 prune_is_native() {
-  case "$(prune_norm "$1")" in */.claude/worktrees/*) return 0 ;; *) return 1 ;; esac
+  case "$(prune_norm "$1")" in */.claude/worktrees/*) return 0 ;; esac
+  [[ -n "${WORKTREE_ROOT:-}" && "${2:-}" == worktree-* ]] || return 1
+  local r
+  r=$(prune_norm "$(prune_native "${WORKTREE_ROOT}")")
+  case "$(prune_norm "$(prune_native "$1")")/" in "$r"/?*) return 0 ;; esac
+  return 1
+}
+
+# Re-read, fresh, every session that claims one of this repo's worktrees
+# (sessions.sh `state`): liveness, the archive flag, and an archived session's
+# last transcript cwd, patched over the cached index before anything is
+# classified. WHY: the index is cached for 15 minutes and `fleet land` builds
+# it, so the usual sequence — land, archive, prune — classified against rows
+# written before the archive. Every just-archived owner still read open, nothing
+# was SAFE, and --remove stopped at "nothing to remove" before its own fresh pass.
+# Targeted, not a re-scan: one sessions.sh process over the claimants only (a
+# few seconds), where a fresh scan of every store takes a minute. A failed read
+# changes nothing: the cached values can only be staler, and --remove still
+# re-classifies against a full fresh scan. `fleet prune` only (PRUNE_FRESHEN);
+# the status-panel hint stays on the cache, where staleness costs a REVIEW.
+# The awk's np/enc MIRROR prune_norm and path_key — path_claims' join. The first
+# porcelain record is the primary, which prune never classifies.
+prune_freshen_sessions() {
+  local raw=$1 ids=() id state="" rc=0
+  SESSION_LASTCWD=""
+  [[ $SESSION_STORE_OK -eq 1 ]] || return 0
+  # procsub ok: awk over in-memory caches; if it yields nothing, the cached values
+  # stand (staler, never less safe: see above) and --remove re-reads in full.
+  while IFS= read -r id; do [[ -n "$id" ]] && ids+=("$id"); done < <(LC_ALL=C awk -F'\t' '
+      function np(p) { gsub(/\\/, "/", p); sub(/\/+$/, "", p); return tolower(p) }
+      function enc(p) { p = np(p); gsub(/[^a-z0-9]/, "-", p); return p }
+      FILENAME == ARGV[1] {
+        if (substr($0, 1, 9) == "worktree ") { if (w++) { p = np(substr($0, 10)); N[p] = 1; K[enc(p)] = 1 } }
+        else if (w > 1 && substr($0, 1, 18) == "branch refs/heads/") B[substr($0, 19)] = 1
+        next
+      }
+      FILENAME == ARGV[2] { if (NF && (($2 != "" && ($2 in N)) || ($1 in K)) && !s[$3]++) print $3; next }
+      NF && ($1 in B) && !s[$2]++ { print $2 }' \
+    <(printf '%s\n' "$raw") <(printf '%s\n' "$SESSION_PATHS_CACHE") <(printf '%s\n' "$SESSION_INDEX_CACHE"))
+  [[ ${#ids[@]} -gt 0 ]] || return 0
+  state=$(FLEET_SESSION_LIVE_SECS="$SESSION_LIVE_SECS" \
+    bash "$SESSIONS_SH" state "${ids[@]}" 2>/dev/null </dev/null) || rc=$?
+  [[ $rc -eq 0 && -n "$state" ]] || return 0
+  # state: id live archived(1|0|?|-) lastCwd. '-' = no wrapper read: keep the
+  # cached flag rather than invent one.
+  local patch='FILENAME == ARGV[1] { if ($1 != "") { L[$1] = $2; if ($3 != "-" && $3 != "") A[$1] = $3 }; next }'
+  SESSION_PATHS_CACHE=$(awk -F'\t' -v OFS='\t' "$patch"'
+      NF { if ($3 in L) $7 = L[$3]; if ($3 in A) $6 = A[$3]; print }' \
+    <(printf '%s\n' "$state") <(printf '%s\n' "$SESSION_PATHS_CACHE"))
+  SESSION_INDEX_CACHE=$(awk -F'\t' -v OFS='\t' "$patch"'
+      NF { if ($2 in L) $7 = L[$2]; if ($2 in A) $6 = A[$2]; print }' \
+    <(printf '%s\n' "$state") <(printf '%s\n' "$SESSION_INDEX_CACHE"))
+  SESSION_LASTCWD=$(printf '%s\n' "$state" | awk -F'\t' -v OFS='\t' 'NF >= 4 && $4 != "" { print $1, $4 }')
+  return 0
+}
+
+# Does an ARCHIVED session positively claim the tree normalised as $1, among
+# claims $2? Positive means an exact path: its wrapper cwd/worktreePath is the
+# tree, or (after prune_freshen_sessions) the cwd its transcript last recorded
+# is the tree or inside it. The bare transcript KEY never counts: every
+# non-alphanumeric encodes to '-', so `lane.x` and `lane-x` share one, and a
+# neighbour's session would condemn this tree. Prints which proof held.
+prune_archived_proof() {
+  local n=$1 claims=$2
+  if printf '%s\n' "$claims" | awk -F'\t' -v n="$n" '
+       NF && $2 == n && $6 == "1" && ($8 == "cwd" || $8 == "worktree") { f = 1 } END { exit !f }'; then
+    printf 'cwd'; return 0
+  fi
+  [[ -n "$SESSION_LASTCWD" ]] || return 1
+  if awk -F'\t' -v n="$n" '
+       FILENAME == ARGV[1] { if ($1 != "") lc[$1] = $2; next }
+       NF && $8 == "transcript" && $6 == "1" && ($3 in lc) && (lc[$3] == n || index(lc[$3], n "/") == 1) { f = 1 }
+       END { exit !f }' <(printf '%s\n' "$SESSION_LASTCWD") <(printf '%s\n' "$claims"); then
+    printf 'transcript cwd'; return 0
+  fi
+  return 1
+}
+
+# The tree's birth, epoch seconds: the mtime of the `commondir` file that
+# `git worktree add` writes into the tree's admin dir. move, repair, lock,
+# commits and status leave it alone (measured on git 2.49, 2026-10-22). 1 when
+# there is none to read.
+prune_tree_made() {
+  local gd
+  gd=$(git -C "$1" rev-parse --git-dir 2>/dev/null) || return 1
+  case "$gd" in /*|[A-Za-z]:[\\/]*) ;; *) gd="$1/$gd" ;; esac
+  [[ -f "$gd/commondir" ]] || return 1
+  stat -c %Y "$gd/commondir" 2>/dev/null || stat -f %m "$gd/commondir" 2>/dev/null || return 1
+}
+
+# prune_unstarted <worktree> <branch> — exit 0, printing the tree's age in
+# seconds, when the lane has no commit of its own; 1 when it has one, or when
+# the tree's birth cannot be read (it then classifies as before).
+# Ancestry cannot tell "landed" from "nothing to land": a lane forked from base
+# that never got a commit has its tip in base, exactly like a lane whose commits
+# merged, and rule 7 called such a tree SAFE under a session waiting 30+ hours
+# on its EnterWorktree prompt (2026-10-22). Two signals, both erring toward
+# "unstarted" (REVIEW), never toward "landed":
+#   reflog   a commit-creating entry (commit, commit (amend|merge|initial),
+#            cherry-pick, revert, am, "Merge made by") is work of its own. Every
+#            other entry (Created from, renamed, Fast-forward, reset, a rebase's
+#            finish) only moves the ref to commits made elsewhere, so a reflog of
+#            nothing but those is unstarted. A fast-forward-landed lane keeps its
+#            own commit: entries, so it stays landed.
+#   tip age  with NO reflog at all (a Desktop chip's branch is made without one,
+#            measured 2026-10-22): unstarted when the tip commit is older than the
+#            tree, i.e. nothing was committed after the tree was made. Strict <:
+#            a commit in the tree's first second counts as work.
+prune_unstarted() {
+  local wt=$1 br=$2 made log tip
+  made=$(prune_tree_made "$wt") || return 1
+  log=$(git -C "$wt" reflog show --format=%gs "refs/heads/$br" -- 2>/dev/null) || log=""
+  if LC_ALL=C grep -qiE '^(commit|cherry-pick|revert|am)( \([^)]*\))?:|: merge made by' <<< "$log"; then return 1; fi
+  if [[ -z "$log" ]]; then
+    tip=$(git -C "$wt" log -1 --format=%ct "refs/heads/$br" -- 2>/dev/null) || return 1
+    [[ "$tip" =~ ^[0-9]+$ ]] && (( tip < made )) || return 1
+  fi
+  printf '%s' "$(( $(date +%s) - made ))"
+}
+
+# Seconds -> "40m" / "30h" / "12d", for reasons.
+prune_age() {
+  if (( $1 < 3600 )); then printf '%dm' $(( $1 / 60 ))
+  elif (( $1 < 172800 )); then printf '%dh' $(( $1 / 3600 ))
+  else printf '%dd' $(( $1 / 86400 )); fi
+}
+
+# The `named` claims (sessions.sh header, "named") on this repo's worktrees,
+# read once per classification into NAMED_CLAIMS, before any tree is judged:
+# the read greps transcript content, so one call for every tree, never one per
+# tree. Its window opens at the OLDEST tree's birth (a call naming a tree cannot
+# predate it), less two minutes of mtime slack; sessions.sh caps it at its own
+# NAMED_DAYS. The calling session's rows are dropped: what it named itself is
+# not a peer's claim (a coordinator prunes the lanes it made for peers that
+# have finished), and a tree it stands in is KEEP by rule 1 anyway. A failed
+# read leaves NAMED_CLAIMS empty, which is the behaviour before this claim
+# existed: it only ever keeps a tree.
+prune_named_probe() {
+  local raw=$1 wt m since="" wts=() out
+  NAMED_CLAIMS=""
+  [[ $SESSION_STORE_OK -eq 1 ]] || return 0
+  while IFS= read -r wt; do
+    [[ -n "$wt" && -d "$wt" ]] || continue
+    wts+=("$wt")
+    if m=$(prune_tree_made "$wt"); then [[ -z "$since" || $m -lt $since ]] && since=$m; fi
+  done <<< "$(printf '%s\n' "$raw" | awk 'substr($0, 1, 9) == "worktree " { if (n++) print substr($0, 10) }')"
+  [[ ${#wts[@]} -gt 0 ]] || return 0
+  out=$(FLEET_SESSION_LIVE_SECS="$SESSION_LIVE_SECS" \
+    bash "$SESSIONS_SH" named --since "$(( ${since:-0} - 120 ))" "${wts[@]}" 2>/dev/null </dev/null) || return 0
+  session_is_self "" || true     # resolves SELF_SESSION_ID once
+  NAMED_CLAIMS=$(printf '%s\n' "$out" | awk -F'\t' -v s="$SELF_SESSION_ID" 'NF && (s == "" || $3 != s)')
+  return 0
+}
+
+# The git operation parked in worktree $1 (rebase, bisect, ...), nothing, or "?"
+# when its git state could not be read. A paused rebase or a bisect leaves HEAD
+# detached in a CLEAN tree, so the dirty check passes it — and removing the tree
+# discards the operation's state. One rev-parse resolves every state path,
+# per-worktree, in a single process.
+prune_op_in_progress() {
+  local wt=$1 p i=0 f args=() paths rc=0
+  local files=(rebase-merge rebase-apply BISECT_LOG MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD sequencer)
+  local words=(rebase rebase bisect merge cherry-pick revert sequencer)
+  for f in "${files[@]}"; do args+=(--git-path "$f"); done
+  # procsub guard: rev-parse's status is checked before its paths are tested. Fed
+  # straight into the loop via `< <(git rev-parse ...)`, a rev-parse that failed
+  # printed no paths, which read as "no operation in progress", and a tree with a
+  # parked rebase could come back SAFE for --remove. "?" makes the caller REVIEW.
+  paths=$(git -C "$wt" rev-parse "${args[@]}" 2>/dev/null) || rc=$?
+  if [[ $rc -ne 0 ]]; then printf '?'; return 0; fi
+  while IFS= read -r p; do
+    if [[ -n "$p" ]]; then
+      [[ "$p" == /* || "$p" == [A-Za-z]:* ]] || p="$wt/$p"
+      if [[ -e "$p" ]]; then printf '%s' "${words[$i]}"; return 0; fi
+    fi
+    i=$((i + 1))
+  done <<< "$paths"
+  return 0
 }
 
 # prune_emit <repo> <base> <path> <branch> <detached> <locked> <gone> <merged_list>
@@ -1106,16 +1519,48 @@ prune_emit() {
     prune_row "$wt" "${br:-<detached>}" REVIEW "directory missing - run 'git worktree prune'"; return 0
   fi
 
-  # 2 — a live owner outranks every other consideration
+  # 2 — a live claim outranks every other consideration. Two joins, because
+  #     they fail differently: the branch owner (lane-level, sees
+  #     writtenBranches) and the directory claims (see the header). Either one
+  #     being live is enough.
   local orow="" olive="0" oarch="0" otitle=""
-  if [[ -n "$br" && $SESSION_STORE_OK -eq 1 ]]; then
-    orow=$(owner_row_cached "$br")
-    if [[ -n "$orow" ]]; then
-      olive=$(sfield "$orow" 7); oarch=$(sfield "$orow" 6); otitle=$(sfield "$orow" 3)
+  local claims="" live_claim="" open_claim="" open_flag="" who="no owner in store"
+  local unread="archive flag unreadable - treated as live"
+  if [[ $SESSION_STORE_OK -eq 1 ]]; then
+    if [[ -n "$br" ]]; then
+      orow=$(owner_row_cached "$br")
+      if [[ -n "$orow" ]]; then
+        olive=$(sfield "$orow" 7); oarch=$(sfield "$orow" 6); otitle=$(sfield "$orow" 3)
+      fi
     fi
+    # First match without `exit`: an early-exiting reader can SIGPIPE the
+    # printf, and under pipefail + set -e that kills the whole command.
+    claims=$(path_claims "$wt")
+    # Plus the transcript-named claims on this tree (prune_named_probe): a claim
+    # like the others, except that prune_archived_proof never takes one as proof.
+    if [[ -n "$NAMED_CLAIMS" ]]; then
+      claims=$(printf '%s\n%s\n' "$claims" "$NAMED_CLAIMS" | awk -F'\t' -v n="$wtn" 'NF && ($8 != "named" || $2 == n)')
+    fi
+    live_claim=$(printf '%s\n' "$claims" | awk -F'\t' -v u="$unread" '
+      NF && $7 == "1" && !f { print $4 " (by " $8 ($6 == "?" ? "; " u : "") ")"; f = 1 }')
+    # OPEN = anything not provably archived: 0, and ? — an unreadable flag is
+    # never presumed archived. "title<TAB>flag", preferring a plainly open one.
+    open_claim=$(printf '%s\n' "$claims" | awk -F'\t' '
+      NF && $6 != "1" { t = $4 ($8 == "named" ? " (named this tree in a tool call)" : "")
+                        if ($6 == "0") { if (!z) { zt = t; z = 1 } } else if (!q) { qt = t; q = 1 } }
+      END { if (z) print zt "\t0"; else if (q) print qt "\t?" }')
+    if [[ -n "$open_claim" ]]; then open_flag=${open_claim##*$'\t'}; open_claim=${open_claim%$'\t'*}; fi
+    # Who owns it, for the REVIEW reasons below.
+    if [[ ( -n "$orow" && "$oarch" == "0" ) || "$open_flag" == "0" ]]; then who="owner idle"
+    elif [[ ( -n "$orow" && "$oarch" == "?" ) || "$open_flag" == "?" ]]; then who="owner's archive flag unreadable"
+    elif [[ -n "$orow" || -n "$claims" ]]; then who="owner archived"; fi
   fi
   if [[ "$olive" == "1" ]]; then
-    prune_row "$wt" "$br" KEEP "live session: ${otitle:-?}"; return 0
+    local note=""; [[ "$oarch" == "?" ]] && note=" ($unread)"
+    prune_row "$wt" "${br:-<detached>}" KEEP "live session: ${otitle:-?}$note"; return 0
+  fi
+  if [[ -n "$live_claim" ]]; then
+    prune_row "$wt" "${br:-<detached>}" KEEP "live session: $live_claim"; return 0
   fi
 
   # 3 — no session evidence at all. "The store says nobody owns this" is
@@ -1125,9 +1570,35 @@ prune_emit() {
     prune_row "$wt" "${br:-<detached>}" REVIEW "no session info - cannot prove abandoned"; return 0
   fi
 
-  # 4 — detached HEAD: no branch, so nothing to attribute an owner to
+  # 4 — detached HEAD. No branch, so only a DIRECTORY claim can name an owner,
+  #     and what Desktop's archive leaves behind is exactly this: the session's
+  #     own tree, HEAD detached, its branch deleted. SAFE needs every guard:
+  #     clean; no git operation parked in it (a paused rebase or a bisect sits
+  #     detached in a clean tree); HEAD already in base, so nothing committed
+  #     is lost; no open claim; and an archived owner proven by exact path.
   if [[ $det -eq 1 || -z "$br" ]]; then
-    prune_row "$wt" "<detached>" REVIEW "detached HEAD - no branch to attribute"; return 0
+    local ddirty op
+    ddirty=$(prune_dirty_count "$wt")
+    if [[ "${ddirty:-0}" -gt 0 ]]; then
+      prune_row "$wt" "<detached>" REVIEW "detached HEAD, DIRTY - $ddirty uncommitted/untracked ($who)"; return 0
+    fi
+    op=$(prune_op_in_progress "$wt")
+    if [[ "$op" == "?" ]]; then
+      prune_row "$wt" "<detached>" REVIEW "detached HEAD - could not read its git state (rev-parse failed)"; return 0
+    fi
+    if [[ -n "$op" ]]; then
+      prune_row "$wt" "<detached>" REVIEW "detached HEAD - git $op in progress"; return 0
+    fi
+    if ! git -C "$wt" merge-base --is-ancestor HEAD "$base" 2>/dev/null; then
+      prune_row "$wt" "<detached>" REVIEW "detached HEAD - commit not in $base ($who)"; return 0
+    fi
+    if [[ -n "$open_claim" ]]; then
+      prune_row "$wt" "<detached>" REVIEW "detached HEAD in $base, but $who: $open_claim"; return 0
+    fi
+    if prune_archived_proof "$wtn" "$claims" >/dev/null; then
+      prune_row "$wt" "<detached>" SAFE "detached + clean, HEAD in $base, owner archived"; return 0
+    fi
+    prune_row "$wt" "<detached>" REVIEW "detached HEAD - no archived session provably owns it"; return 0
   fi
 
   local is_merged=0
@@ -1139,31 +1610,74 @@ prune_emit() {
   if [[ "${dirty:-0}" -gt 0 ]]; then
     local mstate="unmerged"
     [[ $is_merged -eq 1 ]] && mstate="merged"
-    prune_row "$wt" "$br" REVIEW "$mstate but DIRTY - $dirty uncommitted/untracked"; return 0
+    prune_row "$wt" "$br" REVIEW "$mstate but DIRTY - $dirty uncommitted/untracked ($who)"; return 0
   fi
 
   # 6 — committed but not yet in base
   local ahead
   ahead=$(git -C "$repo" rev-list --count "$base..$br" 2>/dev/null || echo 0)
   if [[ $is_merged -ne 1 || "${ahead:-0}" != "0" ]]; then
-    local who="no owner in store"
-    if [[ -n "$orow" ]]; then
-      if [[ "$oarch" == "1" ]]; then who="owner archived"; else who="owner idle"; fi
-    fi
     prune_row "$wt" "$br" REVIEW "unmerged - ${ahead:-?} ahead of $base ($who)"; return 0
   fi
 
-  # 7 — merged, clean, and nobody is coming back for it
-  if [[ -z "$orow" ]]; then
-    prune_row "$wt" "$br" SAFE "merged + clean, no session owns it"; return 0
-  fi
-  if [[ "$oarch" == "1" ]]; then
-    prune_row "$wt" "$br" SAFE "merged + clean, owner archived"; return 0
+  # UNSTARTED (2026-10-22) — in base only because nothing was ever added to it
+  #     (prune_unstarted). Every reason below opens "unstarted" for such a lane:
+  #     `fleet sweep` reads that prefix (sweep.sh, W_UNST) rather than deriving
+  #     it again, so it must stay first in each of them.
+  local mclean="merged + clean" unstarted=0 uage=0
+  if uage=$(prune_unstarted "$wt" "$br"); then
+    unstarted=1
+    mclean="unstarted (no commit since its worktree was made, $(prune_age "$uage") ago) + clean"
   fi
 
-  # 8 — default deny. Merged and clean, but a non-archived session still owns
-  #     the branch: idle now, and free to wake up. Not ours to remove.
-  prune_row "$wt" "$br" REVIEW "merged + clean, but owner still open: ${otitle:-?}"
+  # 8 (checked before 7) — an OPEN session claims it, by branch or by
+  #     directory: idle now, and free to wake up. A session resumed into a
+  #     deleted cwd does not error — it spins a core indefinitely (SKILL.md,
+  #     "Landmine"). Not ours to remove. An unreadable archive flag lands here
+  #     too, and says so.
+  local still="owner still open" unopen="owner's archive flag unreadable, treated as open"
+  if [[ -n "$orow" && "$oarch" != "1" ]]; then
+    [[ "$oarch" == "?" ]] && still=$unopen
+    prune_row "$wt" "$br" REVIEW "$mclean, but $still: ${otitle:-?}"; return 0
+  fi
+  if [[ -n "$open_claim" ]]; then
+    [[ "$open_flag" == "?" ]] && still=$unopen
+    prune_row "$wt" "$br" REVIEW "$mclean, but $still: $open_claim"; return 0
+  fi
+
+  # 7 — merged, clean, and every claim is archived. POSITIVE evidence means an
+  #     archived branch owner, or an archived session placed EXACTLY in this
+  #     tree by path (prune_archived_proof). A transcript-directory claim alone
+  #     does not count: its key is lossy, so it may keep a tree but never
+  #     condemn one — only the cwd that transcript recorded can.
+  local proven=0 how=""
+  [[ -n "$orow" && "$oarch" == "1" ]] && proven=1
+  if [[ $proven -eq 0 ]] && how=$(prune_archived_proof "$wtn" "$claims"); then proven=1; fi
+  if [[ $proven -eq 1 ]]; then
+    local by=""; [[ "$how" == "transcript cwd" ]] && by=" (by its transcript cwd)"
+    prune_row "$wt" "$br" SAFE "$mclean, owner archived$by"; return 0
+  fi
+  # An unstarted lane nobody is proven done with: its session may be about to
+  # start, or be waiting on the user to approve its EnterWorktree. REVIEW until
+  # it has sat unclaimed for PRUNE_UNSTARTED_DAYS; then the rules below apply.
+  if [[ $unstarted -eq 1 ]] && (( uage < PRUNE_UNSTARTED_DAYS * 86400 )); then
+    prune_row "$wt" "$br" REVIEW "$mclean - not landed, and its session may not have started yet (removable once its owner is archived, or after ${PRUNE_UNSTARTED_DAYS}d unclaimed)"; return 0
+  fi
+  # No positive claim. For a .claude/worktrees/ tree that is the ABSENCE of a
+  # signal, not evidence: Claude Code made it for a session, and the store we
+  # read did not mention that session — a store we cannot see, a session
+  # outside the scan window, a claim the joins cannot express. That is the
+  # 2026-09-28 failure in general form, so it resolves to REVIEW. A
+  # `.fleet-worktrees/` lane or a hand-made tree is not created per session;
+  # any session working in one is found by the cwd and transcript joins, so
+  # there "nobody claims it" means what it says.
+  if prune_is_native "$wt" "$br"; then
+    if [[ -n "$claims" ]]; then
+      prune_row "$wt" "$br" REVIEW "$mclean, but no archived session provably worked here - cannot prove abandoned"; return 0
+    fi
+    prune_row "$wt" "$br" REVIEW "$mclean, but no session record claims it - cannot prove abandoned"; return 0
+  fi
+  prune_row "$wt" "$br" SAFE "$mclean, no session owns it"
 }
 
 # prune_classify <repo> <base>  — fills PRUNE_ROWS. The PRIMARY worktree is
@@ -1181,6 +1695,9 @@ prune_classify() {
   local raw
   raw=$(git -C "$repo" worktree list --porcelain 2>/dev/null || true)
   [[ -z "$raw" ]] && return 0
+  if [[ $PRUNE_FRESHEN -eq 1 ]]; then prune_freshen_sessions "$raw"; fi
+  NAMED_CLAIMS=""
+  if [[ $PRUNE_FRESHEN -eq 1 && $PRUNE_NAMED -eq 1 ]]; then prune_named_probe "$raw"; fi
 
   # Porcelain records are blank-line separated. Command substitution ate the
   # trailing newlines, so append one blank line to flush the final record.
@@ -1238,7 +1755,7 @@ prune_render() {
   term_summary_line "$total worktree(s), $safe safe, $review review, $keep keep"
   term_panel_vert
 
-  local b n rows p br bucket reason label short mark
+  local b n rows p br bucket reason label short mark any_native=0
   for b in SAFE REVIEW KEEP; do
     n=$(prune_count "$b")
     [[ $n -eq 0 ]] && continue
@@ -1254,7 +1771,7 @@ prune_render() {
       # ASCII-only marker: these rows must survive TERM_ASCII=1 on a non-UTF-8
       # Windows console (SKILL.md "Compatibility").
       mark="  "
-      prune_is_native "$p" && mark="! "
+      prune_is_native "$p" "$br" && { mark="! "; any_native=1; }
       label="$mark$short"
       printf '%s   %s %-30s %-26s %s\n' \
         "$(term_color dim "$TERM_TREE_VERT")" \
@@ -1271,8 +1788,10 @@ prune_render() {
   else health="$(term_health healthy "nothing removable")"; fi
   term_panel_close "$(term_hotkey '?' help)" "$health"
   echo ""
-  # '!' marks a native .claude/worktrees/ lane — see rules/worktree-boundaries.md
-  if printf '%s' "$PRUNE_ROWS" | cut -f1 | grep -qi '/\.claude/worktrees/'; then
+  # '!' marks a native session worktree — see rules/worktree-boundaries.md
+  if [[ $any_native -eq 1 && -n "${WORKTREE_ROOT:-}" ]]; then
+    echo "  ! = Claude Code session worktree (.claude/worktrees/, or worktree-* under \$WORKTREE_ROOT) - owned by a session, not by you" >&2
+  elif [[ $any_native -eq 1 ]]; then
     echo "  ! = Claude Code session worktree (.claude/worktrees/) - owned by a session, not by you" >&2
   fi
   return 0
@@ -1287,14 +1806,36 @@ prune_recovery_note() {
 
 prune_remove_safe() {
   local removed=0 skipped=0 failed=0
-  local p br bucket reason rows fresh dirty
+  local p br bucket reason rows fresh dirty fresh_rows now_row
   rows=$(printf '%s' "$PRUNE_ROWS" | awk -F'\t' 'NF && $3=="SAFE"')
+
+  # Re-classify against a FORCED-FRESH scan before touching anything. The table
+  # the operator confirmed may rest on a cached index up to 15 minutes old, and
+  # in that window a session can wake, be unarchived, or move into a tree.
+  # Re-running the SAME classifier, rather than a narrower re-check, is the
+  # point: the removal gate can never drift out of step with the rules that
+  # produced the SAFE row. A store that has become unreadable reclassifies
+  # every row REVIEW, and nothing is removed.
+  prune_log "re-reading every session store before removal (a fresh scan can take a minute)..."
+  local confirmed_rows=$PRUNE_ROWS
+  load_session_index fresh
+  prune_classify "$REPO_ROOT" "$BASE_BRANCH"
+  fresh_rows=$PRUNE_ROWS
+  PRUNE_ROWS=$confirmed_rows
+
   while IFS=$'\t' read -r p br bucket reason; do
     [[ -z "$p" ]] && continue
 
-    # Re-verify immediately before deleting. Classification read a session index
-    # with a long TTL (15 min); a session can wake between the table and the delete, and
-    # this is the one operation where being one poll behind destroys data.
+    now_row=$(printf '%s' "$fresh_rows" | awk -F'\t' -v p="$p" '$1 == p && !f { print $3 "\t" $4; f = 1 }')
+    [[ -n "$now_row" ]] || now_row=$'MISSING\tabsent from the fresh classification'
+    if [[ "${now_row%%$'\t'*}" != "SAFE" ]]; then
+      prune_log "SKIP $p - no longer SAFE on a fresh read: ${now_row#*$'\t'}"
+      skipped=$((skipped + 1)); continue
+    fi
+
+    # And once more per row, immediately before its delete: the fresh scan
+    # above took time, and this is the one operation where being one poll
+    # behind destroys data.
     fresh=$(lane_owner "$br" --fresh)
     if [[ -n "$fresh" && "$(sfield "$fresh" 7)" == "1" ]]; then
       prune_log "SKIP $p - owning session went LIVE since classification"
@@ -1315,6 +1856,13 @@ prune_remove_safe() {
     local err=""
     if err=$(git -C "$REPO_ROOT" worktree remove "$p" 2>&1); then
       prune_log "removed worktree: $p (branch $br)"
+      removed=$((removed + 1))
+    elif prune_left_empty "$p"; then
+      # Windows: git emptied and unregistered the tree, then could not delete
+      # the directory itself because a process still holds it (a shell or an
+      # editor standing in it). The worktree IS gone; only an empty dir is left,
+      # and calling that "FAILED" sent the operator looking for lost work.
+      prune_log "removed worktree: $p (branch $br) - but the empty directory is still held by another process (${err##*: }). It is an empty leftover now: 'fleet sweep' lists it, and 'fleet sweep --apply' removes it once nothing holds it."
       removed=$((removed + 1))
     else
       prune_log "FAILED to remove $p - left in place: ${err:-unknown error}"
@@ -1460,8 +2008,14 @@ fleet prune — classify (and optionally remove) finished lane worktrees
 Buckets:
   SAFE    merged into $BASE_BRANCH, clean, and the owning session is archived or
           gone from the session store. Removable; committed work is recoverable.
-  REVIEW  reported, never removed: dirty, unmerged, detached, or no session
-          info at all. Your call.
+          A detached tree qualifies only with HEAD in $BASE_BRANCH, no git
+          operation in progress, and an archived owner placed there by path.
+  REVIEW  reported, never removed: dirty, unmerged, detached without proof, an
+          owner whose archive flag cannot be read, no session info at all, or
+          an unstarted lane (no commit of its own) younger than
+          FLEET_PRUNE_UNSTARTED_DAYS (default 30) with no archived owner.
+          A transcript whose EnterWorktree / git worktree add call names a
+          tree is a claim on it. Your call.
   KEEP    a live session owns it, git has it locked, or it is the tree you are
           standing in. Not touched under any flag.
 
@@ -1488,6 +2042,10 @@ cmd_prune() {
     esac
   done
 
+  # Classify against a fresh read of every claimant (prune_freshen_sessions),
+  # not the 15-minute cache the status hint uses.
+  PRUNE_FRESHEN=1
+
   # --porcelain is report-only by construction: a machine-readable mode that
   # could also delete is one typo away from an unattended sweep.
   if [[ $porcelain -eq 1 && $do_remove -eq 1 ]]; then
@@ -1508,6 +2066,10 @@ cmd_prune() {
     return 0
   fi
 
+  # One repo: also read the transcript-named claims (prune_named_probe). Not for
+  # --all-repos above (a transcript grep per repo, for counts) nor the status
+  # hint, which may therefore count a named tree SAFE that this run keeps.
+  PRUNE_NAMED=1
   prune_classify "$REPO_ROOT" "$BASE_BRANCH"
 
   if [[ $porcelain -eq 1 ]]; then
@@ -1581,6 +2143,452 @@ prune_status_hint() {
   return 0
 }
 # === END PRUNE ================================================================
+
+# === LANDING MARKER ===========================================================
+# One land at a time per repo, and the evidence when a land dies half-way.
+#
+# Every land holds $LANDING_FILE: the daemon's, `fleet land`, and each lane of
+# `fleet land --all`. It is taken just before land_one and given back once that
+# land's rebase_others pass is done, and ONLY then. So a marker whose process is
+# gone means a land was cut short: kill -9, a crash, OOM, a harness tearing down
+# the process tree, Ctrl-C, or an agent's Bash tool timing out a slow gate.
+#
+# The dangerous cut falls after `git merge` and before the gate's PASS/FAIL. The
+# merge then sits on $BASE_BRANCH untested while the lane is still READY (or,
+# for an untracked branch, has no lane file at all). The next land takes
+# land_one's "Already up to date" path and marks it LANDED, which blesses a merge
+# no gate ever passed. recover_stranded_landing runs before every land so that
+# cannot happen.
+#
+# Never give the marker back from an EXIT trap or a signal handler. An exit in
+# the middle of a land is exactly when it must survive (see daemon_cleanup).
+
+# The marker, one line, built here and nowhere else:
+#
+#   <pid> TAB <start, epoch seconds> TAB <base tip SHA, or -> TAB <branch>
+#
+#   pid     whose land it is. cmd_stop trusts it only when this equals the live
+#           daemon's PID (landing_of). Recovery treats it as live only while it
+#           names a running fleet process (landing_pid_live).
+#   start   for the elapsed times cmd_stop and the warnings print.
+#   base    $BASE_BRANCH's tip when the land began: the discriminator for a dead
+#           land. Tip unchanged means nothing merged and the lane can re-land.
+#           A "merge: <branch>" commit after it means a merge no gate judged.
+#           "-" when the branch did not resolve, never empty: TAB is IFS
+#           whitespace to `read`, so an empty field would collapse and shift
+#           the branch into this slot.
+#   branch  last, so it is everything after the third TAB. TAB is a safe
+#           separator because git refuses control characters in ref names.
+#
+# Created under noclobber (O_EXCL), so of two lands racing for it exactly one
+# wins; the other sees the winner's marker and refuses or waits. It is written
+# before land_one touches git, so a marker that stays empty (its writer killed
+# between the open and the write) proves that land never began.
+claim_landing() {
+  local base
+  base=$(git rev-parse -q --verify "refs/heads/$BASE_BRANCH" 2>/dev/null) || base="-"
+  ( set -C; printf '%s\t%s\t%s\t%s\n' "$$" "$(date +%s)" "$base" "$1" > "$LANDING_FILE" ) 2>/dev/null
+}
+# Give the marker back once a land reached its verdict. Through remove_state_file,
+# never a bare `rm -f`: a briefly-held marker (antivirus, the indexer) fails a
+# single delete with EBUSY on Windows, and the daemon loop runs under errexit.
+# Never fails. A marker that survives the retry is logged and left: it names
+# this process, and once we exit, the next land's recovery finds the lane's
+# verdict recorded (or the base unmoved) and clears it.
+release_landing() {
+  remove_state_file "$LANDING_FILE" "landing marker" \
+    || log "WARNING: landing marker $LANDING_FILE survived (held open); the next land examines and clears it" \
+    || true
+}
+
+# Remove the marker only if it is still the line $1 that recovery examined. Two
+# fleet commands can recover the same stranded marker at once; the first one
+# done may already have claimed a fresh marker for its own land, and a plain rm
+# from the second would delete that live claim and let both land together.
+# Status 1 when the examined marker cannot be removed (held open past the
+# retry): the caller refuses, rather than misreading it as a live land.
+release_examined() {
+  local now=""
+  { IFS= read -r now < "$LANDING_FILE"; } 2>/dev/null || true
+  [[ "$now" == "$1" ]] || return 0
+  remove_state_file "$LANDING_FILE" "examined landing marker" && return 0
+  log "REFUSE: cannot clear the examined landing marker $LANDING_FILE (held open); rerun once it is free"
+  return 1
+}
+
+# Parse $LANDING_FILE into M_PID / M_START / M_BASE / M_LANE. Status 1 when there
+# is no marker. Globals rather than output, so cmd_stop's once-a-second poll
+# costs no subshell.
+M_PID="" M_START="" M_BASE="" M_LANE=""
+read_landing_marker() {
+  M_PID="" M_START="" M_BASE="" M_LANE=""
+  [[ -f "$LANDING_FILE" ]] || return 1
+  # Grouped so the redirect's own "No such file" goes to /dev/null too: the
+  # writer can delete the marker between the test above and this read.
+  { IFS=$'\t' read -r M_PID M_START M_BASE M_LANE < "$LANDING_FILE"; } 2>/dev/null || true
+  # Three fields: the form before the base tip was recorded (pid, start, branch).
+  if [[ -z "$M_LANE" && -n "$M_BASE" ]]; then M_LANE=$M_BASE M_BASE=""; fi
+  if [[ "$M_BASE" == "-" ]]; then M_BASE=""; fi
+  return 0
+}
+
+# Is the daemon with PID $1 mid-land? Status 0 with LANDING_LANE / LANDING_START
+# set when it is; 1, both empty, when there is no marker or it belongs to some
+# other process (a manual land, or a dead daemon).
+LANDING_LANE=""
+LANDING_START=""
+landing_of() {
+  LANDING_LANE="" LANDING_START=""
+  read_landing_marker || return 1
+  [[ -n "$M_LANE" && "$M_PID" == "$1" ]] || return 1
+  LANDING_LANE=$M_LANE LANDING_START=$M_START
+}
+
+# Is PID $1 a live fleet process? kill -0 alone is not enough. A stranded marker
+# can sit for hours and Windows reuses PIDs fast, so a dead land's PID may now
+# name some unrelated process. Trusting it would make the dead land look like
+# one in progress: every land refused, and what it left never examined. So the
+# command line must mention fleet as well. /proc covers Linux and Git Bash (MSYS
+# has /proc but no `ps -o`); `ps -o` covers macOS. When neither can say, assume
+# live: a wrong "live" refuses loudly, while a wrong "dead" would recover a land
+# that is still running. Never our own PID: we ask before we hold any marker.
+landing_pid_live() {
+  local p=$1 cmd=""
+  [[ "$p" =~ ^[0-9]+$ && "$p" != "$$" ]] || return 1
+  kill -0 "$p" 2>/dev/null || return 1
+  if [[ -r "/proc/$p/cmdline" ]]; then
+    cmd=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null) || cmd=""
+  else
+    cmd=$(ps -p "$p" -o command= 2>/dev/null) || cmd=""
+  fi
+  [[ -z "$cmd" || "$cmd" == *fleet* ]]
+}
+
+# Log, prefixed $1, which live land holds the marker (M_* already read).
+log_landing_busy() {
+  local who="pid $M_PID" age=""
+  if [[ "$(cat "$PID_FILE" 2>/dev/null)" == "$M_PID" ]]; then who="the daemon (pid $M_PID)"; fi
+  if [[ "$M_START" =~ ^[0-9]+$ ]]; then age=", started $(format_age $(( $(date +%s) - M_START ))) ago"; fi
+  log "$1: another land is in progress: $who on ${M_LANE:-?}$age. One land at a time, so rerun once it finishes"
+}
+
+# Did a dead land's merge of $3 reach $BASE_BRANCH? $1 is the base tip its marker
+# recorded (empty if none), $2 the tip now.
+landing_merged() {
+  local before=$1 now=$2 lane=$3 subj merges
+  [[ -n "$now" && "$now" != "$before" ]] || return 1   # never moved: nothing merged
+  if [[ -n "$before" ]] && git cat-file -e "$before^{commit}" 2>/dev/null; then
+    # The only merge that land could make is land_one's own, subject exactly
+    # "merge: <lane>" (matched exactly, as revert_find_merges explains), and
+    # only after the tip it began from. Captured, not piped: SIGPIPE under
+    # pipefail (see cmd_revert).
+    merges=$(git log --merges --format=%s "$before..$now" 2>/dev/null) || merges=""
+    while IFS= read -r subj; do
+      if [[ "$subj" == "merge: $lane" ]]; then return 0; fi
+    done <<< "$merges"
+    return 1
+  fi
+  # No usable tip recorded. Fall back to "the lane's tip is in the base branch",
+  # which over-flags only a lane that was already there; one `fleet land` of it
+  # clears that.
+  git rev-parse -q --verify "refs/heads/$lane" >/dev/null 2>&1 \
+    && git merge-base --is-ancestor "refs/heads/$lane" "$now" 2>/dev/null
+}
+
+# --- reading the marker: is $BASE_BRANCH provisional? ---------------------------
+# `fleet land` merges first and gates second, so for the whole gate (20-45 min on
+# a big suite) the base tip is a "merge: <lane>" commit that a red gate
+# hard-resets. On 2026-10-06 two peer sessions saw such a merge and read it as
+# landed: one branched from it, the other rebased onto it and started a second
+# gate. Nothing on disk said "provisional". landing_status is the ONE reader of
+# that fact, behind `fleet status`'s top line, `fleet landing` and `fleet sweep`.
+# It never recovers or clears a marker; that is a land's job (begin_land), so a
+# status call cannot race a live land.
+#
+# Sets LS_STATE, LS_TIP (the base tip now) and M_* (the marker, if any):
+#   CLEAR        nothing landing, nothing untested: act on the tip freely
+#   LANDING      a live land that has merged nothing (before its merge, or a red
+#                gate already rewound it). The tip is tested but about to move
+#   PROVISIONAL  a live land merged and its gate has not ruled. The tip is
+#                untested; a red gate resets it to M_BASE
+#   SETTLING     its gate passed (lane LANDED) and its rebase pass is rewriting
+#                the other lanes. The tip is tested; lane branches are moving
+#   UNTESTED     a land died between merge and verdict, so the tip holds a merge
+#                no gate judged: from a dead marker, or from the lane recovery
+#                flagged (marker cleared, lane CONFLICT until a human settles it)
+#   STALE        a land died and left nothing untested; the next land clears it
+# Live = landing_pid_live, or our own pid: a reader inside the land itself
+# (cmd_fleet at the end of land --all) is looking at a live land. An empty
+# marker is a claim caught between its open and its write, so it is live too.
+LS_STATE="CLEAR" LS_TIP=""
+landing_status() {
+  local state="" f s note
+  LS_STATE="CLEAR"
+  LS_TIP=$(git rev-parse -q --verify "refs/heads/$BASE_BRANCH" 2>/dev/null) || LS_TIP=""
+  if ! read_landing_marker; then
+    # Read with builtins, not head/sed: one fork per lane file is ~10ms each on
+    # Windows, and this runs on every `fleet status`.
+    for f in "$LANES_DIR"/*; do
+      [[ -f "$f" ]] || continue
+      s="" note=""
+      { IFS= read -r s; IFS= read -r note; } < "$f" 2>/dev/null || true
+      if [[ "${s%$'\r'}" == "CONFLICT" && "$note" == "UNTESTED MERGE"* ]]; then
+        M_LANE=$(decode_lane "$(basename "$f")") LS_STATE="UNTESTED"
+        return 0
+      fi
+    done
+    return 0
+  fi
+  if [[ -n "$M_LANE" ]]; then state=$(lane_state "$M_LANE"); fi
+  if [[ -z "$M_PID" || "$M_PID" == "$$" ]] || landing_pid_live "$M_PID"; then
+    if [[ -z "$M_PID" || "$state" == "FAILED" ]]; then LS_STATE="LANDING"
+    elif [[ "$state" == "LANDED" ]]; then LS_STATE="SETTLING"
+    # No recorded base (a marker from before the base was recorded): cannot
+    # prove nothing merged, so claim the worse case.
+    elif [[ -z "$M_BASE" || "$LS_TIP" != "$M_BASE" ]]; then LS_STATE="PROVISIONAL"
+    else LS_STATE="LANDING"
+    fi
+  elif [[ -n "$M_LANE" && "$state" != "LANDED" && "$state" != "FAILED" ]] \
+       && landing_merged "$M_BASE" "$LS_TIP" "$M_LANE"; then
+    LS_STATE="UNTESTED"
+  else
+    LS_STATE="STALE"
+  fi
+  return 0
+}
+
+# Epoch seconds -> local HH:MM. GNU date first, then BSD (macOS).
+clock_of() { date -d "@$1" +%H:%M 2>/dev/null || date -r "$1" +%H:%M 2>/dev/null || printf '?'; }
+
+# The one-line verdict for LS_* (call landing_status first); empty for CLEAR.
+# ASCII only: it renders on the same non-UTF-8 consoles as the status panel, and
+# sweep.sh carries it verbatim. The PROVISIONAL wording is the contract peers
+# grep for; tests/run.sh asserts it.
+landing_line() {
+  local tip=${LS_TIP:0:7} base=${M_BASE:0:7} lane=${M_LANE:-?} since="?" ago=""
+  if [[ "$M_START" =~ ^[0-9]+$ ]]; then
+    since=$(clock_of "$M_START")
+    ago=", $(format_age $(( $(date +%s) - M_START ))) ago"
+  fi
+  case "$LS_STATE" in
+    PROVISIONAL)
+      printf '%s %s is PROVISIONAL - gate for %s running since %s (pid %s); red resets to %s\n' \
+        "$BASE_BRANCH" "$tip" "$lane" "$since" "${M_PID:-?}" "${base:-its pre-merge tip}" ;;
+    LANDING)
+      printf 'land of %s in progress since %s (pid %s); %s %s is about to move - wait for its verdict\n' \
+        "$lane" "$since" "${M_PID:-?}" "$BASE_BRANCH" "$tip" ;;
+    SETTLING)
+      printf '%s %s landed %s (gate green); its rebase pass is still running (pid %s) - wait before rebasing a lane\n' \
+        "$BASE_BRANCH" "$tip" "$lane" "${M_PID:-?}" ;;
+    UNTESTED)
+      if [[ -n "$M_PID" ]]; then
+        printf '%s %s holds an UNTESTED merge of %s - its land (pid %s, from %s%s) died before the gate ruled; the next land flags it\n' \
+          "$BASE_BRANCH" "$tip" "$lane" "$M_PID" "$since" "$ago"
+      else
+        printf '%s %s holds an UNTESTED merge of %s - verify, then fleet land %s (green) or fleet revert %s (red)\n' \
+          "$BASE_BRANCH" "$tip" "$lane" "$lane" "$lane"
+      fi ;;
+    STALE)
+      printf 'a land of %s (pid %s, from %s%s) died; nothing of it is untested on %s %s - the next land clears its marker\n' \
+        "$lane" "${M_PID:-?}" "$since" "$ago" "$BASE_BRANCH" "$tip" ;;
+  esac
+}
+
+# `fleet status`'s top line. Nothing at all when CLEAR.
+landing_status_row() {
+  landing_status
+  [[ "$LS_STATE" == "CLEAR" ]] && return 0
+  term_panel_vert
+  case "$LS_STATE" in
+    STALE) term_panel_line "$(term_mark skip) $(term_color dim "$(landing_line)")" ;;
+    UNTESTED|PROVISIONAL) term_panel_line "$(term_mark warn) $(term_color red "$(landing_line)")" ;;
+    *)     term_panel_line "$(term_mark warn) $(term_color yellow "$(landing_line)")" ;;
+  esac
+}
+
+# `fleet landing [--porcelain]`: may a session act on the base tip right now?
+# Read-only, so any session may poll it: peers run it (or `fleet status`) before
+# branching from or rebasing onto the base. Exit 0 for CLEAR and STALE (the tip
+# is tested and nothing is landing); 10 for the rest, the domain signal "wait".
+# stdout is the one-line verdict, or with --porcelain one TSV row, read by
+# sweep.sh (so the marker has one parser):
+#   state TAB tip TAB base TAB lane TAB pid TAB start TAB verdict-line
+# with "-" for an empty field (TAB is IFS whitespace to `read`, and an empty
+# field would collapse and shift the rest).
+cmd_landing() {
+  local porcelain=0 line
+  case "${1:-}" in
+    --porcelain) porcelain=1 ;;
+    "") : ;;
+    *) echo "usage: fleet landing [--porcelain]" >&2; return 2 ;;
+  esac
+  landing_status
+  line=$(landing_line)
+  if [[ "$LS_STATE" == "CLEAR" ]]; then line="$BASE_BRANCH ${LS_TIP:0:7}: no land in progress, nothing untested"; fi
+  if [[ $porcelain -eq 1 ]]; then
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$LS_STATE" "${LS_TIP:--}" "${M_BASE:--}" \
+      "${M_LANE:--}" "${M_PID:--}" "${M_START:--}" "$line"
+  else
+    printf '%s\n' "$line"
+  fi
+  case "$LS_STATE" in CLEAR|STALE) return 0 ;; *) return 10 ;; esac
+}
+
+# Lanes recover_stranded_landing flagged in THIS process, one per line.
+RECOVERY_FLAGGED=""
+
+# A dead land's rebase_others may have left another lane's worktree stuck
+# mid-rebase onto $2 (the base tip it had just landed). worktree_path_for cannot
+# find that worktree: mid-rebase, `git worktree list` reports it as "detached".
+# So this reads each worktree's own git dir under $1. The rebase is NOT aborted:
+# the lane's session may be resolving that conflict right now, and its worktree
+# is not fleet's to reset. CONFLICT keeps the lane out of every land until its
+# owner finishes or aborts and signals READY again.
+recover_stranded_rebases() {
+  local gd=$1 tip=$2 wgd rd hb onto wt
+  for wgd in "$gd"/worktrees/*; do
+    if [[ -d "$wgd/rebase-merge" ]]; then rd="$wgd/rebase-merge"
+    elif [[ -d "$wgd/rebase-apply" ]]; then rd="$wgd/rebase-apply"
+    else continue
+    fi
+    hb="" onto="" wt=""
+    { read -r hb < "$rd/head-name"; } 2>/dev/null || true
+    { read -r onto < "$rd/onto"; } 2>/dev/null || true
+    hb=${hb#refs/heads/}
+    [[ -n "$hb" && -f "$LANES_DIR/$(encode_lane "$hb")" ]] || continue
+    case "$(lane_state "$hb")" in LANDED|FAILED) continue ;; esac
+    # rebase_others rebases onto the tip it just landed. A rebase onto anything
+    # else is the lane session's own business.
+    [[ -z "$onto" || "$onto" == "$tip" ]] || continue
+    { read -r wt < "$wgd/gitdir"; } 2>/dev/null || true
+    wt=${wt%/.git}
+    [[ -n "$wt" ]] || wt=$wgd
+    set_lane_state "$hb" "CONFLICT" "rebase onto $BASE_BRANCH cut short by a land that died; finish or abort it in $wt, then signal READY"
+    RECOVERY_FLAGGED+="$hb"$'\n'
+    log "WARNING: $hb is stuck mid-rebase onto $BASE_BRANCH in $wt"
+    log "         The dead land's rebase pass started it and never finished. Marked CONFLICT."
+    log "         Look:     git -C \"$wt\" status"
+    log "         Undo it:  git -C \"$wt\" rebase --abort   (puts the lane back exactly as it was)"
+    log "         then signal READY again from the lane."
+  done
+}
+
+# Examine a marker left by a land that never reached a verdict, before any new
+# land may start. Status:
+#   0  no marker now: there was none, or a stranded one was examined and cleared
+#   1  refuse: the main checkout is mid-merge or mid-rebase. The marker stays,
+#      so the next run examines it again once a human has dealt with that.
+#   2  a live fleet process holds it: a land is in progress right now (M_* set)
+#
+# What a dead land can leave, and what each finding gets:
+#   base tip unchanged      nothing merged (it died before the merge, or after a
+#                           red gate's rewind). Lane untouched; it re-lands.
+#   "merge: <lane>" since   THE hazard: a merge no gate judged, lane not LANDED
+#                           or FAILED. Loud WARNING with the verify / revert
+#                           commands, and lane -> CONFLICT. Left READY (or
+#                           untracked), the next land would bless it.
+#   lane worktree mid-rebase  see recover_stranded_rebases.
+#   main checkout mid-merge or mid-rebase  refuse, naming the abort command.
+#                           Never aborted here: it is the integration tree, and
+#                           a human may be resolving it.
+# Every finding is re-derived from git each time, so a recovery that is itself
+# interrupted is simply redone.
+recover_stranded_landing() {
+  read_landing_marker || return 0
+  if [[ -z "$M_PID" ]]; then
+    # Caught between a claim's open and its write; give that writer a moment.
+    sleep 1
+    read_landing_marker || return 0
+  fi
+  if landing_pid_live "$M_PID"; then return 2; fi
+  local seen=""
+  { IFS= read -r seen < "$LANDING_FILE"; } 2>/dev/null || true
+  if [[ -z "$M_LANE" ]]; then
+    log "NOTE: clearing an unreadable landing marker (pid ${M_PID:-?}); its land died before touching git"
+    release_examined "$seen" || return 1
+    return 0
+  fi
+
+  local age="" tip state shown gd hb=""
+  if [[ "$M_START" =~ ^[0-9]+$ ]]; then age=", started $(format_age $(( $(date +%s) - M_START ))) ago"; fi
+  # NOTE, not WARNING: only the findings below that need a human say WARNING.
+  log "NOTE: a land of $M_LANE (pid $M_PID$age) died before finishing; checking what it left"
+  tip=$(git rev-parse -q --verify "refs/heads/$BASE_BRANCH" 2>/dev/null) || tip=""
+  state=$(lane_state "$M_LANE")
+  shown=$state
+  if [[ "$state" == "MISSING" ]]; then shown="untracked"; fi
+
+  case "$state" in
+    LANDED|FAILED)
+      log "  $M_LANE is $state: land_one recorded its verdict before the process died" ;;
+    *)
+      if landing_merged "$M_BASE" "$tip" "$M_LANE"; then
+        set_lane_state "$M_LANE" "CONFLICT" "UNTESTED MERGE on $BASE_BRANCH: its land died before the gate passed or failed. Verify, then fleet land $M_LANE (green) or fleet revert $M_LANE (red)"
+        RECOVERY_FLAGGED+="$M_LANE"$'\n'
+        log "WARNING: UNTESTED MERGE on $BASE_BRANCH: $M_LANE"
+        log "         Its land merged it, then died before the gate passed or failed: no gate has judged it."
+        log "         $BASE_BRANCH moved ${M_BASE:0:12}${M_BASE:+ }-> ${tip:0:12} since that land began."
+        log "         $M_LANE is now CONFLICT (was $shown), so nothing lands it as-is. Every other"
+        log "         land's gate runs over it too until it is settled. Verify it by hand:"
+        log "           cd \"$REPO_ROOT\" && git checkout $BASE_BRANCH && ${TEST_CMD:-<test_cmd>}"
+        log "         green: fleet land $M_LANE     marks it LANDED, rebases the other lanes"
+        log "         red:   fleet revert $M_LANE   reverts the merge; the lane goes back to RUNNING"
+      elif [[ -n "$M_BASE" && "$tip" == "$M_BASE" ]]; then
+        log "  $BASE_BRANCH has not moved since that land began, so nothing merged; $M_LANE ($shown) lands normally"
+      else
+        log "  $BASE_BRANCH holds no merge of $M_LANE from that land; $M_LANE ($shown) lands normally"
+      fi ;;
+  esac
+
+  gd=$(git rev-parse --absolute-git-dir 2>/dev/null) || gd=""
+  if [[ -n "$gd" ]]; then
+    recover_stranded_rebases "$gd" "$tip"
+    # The main checkout is where every land runs. A merge or a plain lane's
+    # rebase left half-done there makes the next land refuse with "uncommitted
+    # tracked changes", which names the symptom and hides the cause.
+    if git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+      log "REFUSE: $REPO_ROOT is mid-merge; the dead land's \`git merge\` never finished"
+      log "        Nothing of it was committed. Undo it, then rerun:"
+      log "          git -C \"$REPO_ROOT\" merge --abort"
+      return 1
+    fi
+    if [[ -d "$gd/rebase-merge" || -d "$gd/rebase-apply" ]]; then
+      { read -r hb < "$gd/rebase-merge/head-name"; } 2>/dev/null \
+        || { read -r hb < "$gd/rebase-apply/head-name"; } 2>/dev/null || true
+      log "REFUSE: $REPO_ROOT is mid-rebase of ${hb#refs/heads/}; the dead land's rebase pass never finished"
+      log "        Undo it, then rerun:"
+      log "          git -C \"$REPO_ROOT\" rebase --abort"
+      log "          git -C \"$REPO_ROOT\" checkout $BASE_BRANCH"
+      return 1
+    fi
+  fi
+  release_examined "$seen" || return 1
+}
+
+# Examine any stranded marker, then take the marker for a land of $1. Status:
+#   0  taken: run the land, then release_landing
+#   1  refused, reason already logged
+#   2  another fleet process is landing right now (M_* describe it)
+begin_land() {
+  local branch=$1 rc=0
+  recover_stranded_landing || rc=$?
+  if [[ $rc -ne 0 ]]; then return "$rc"; fi
+  # Never land a lane recovery just flagged. This same call would otherwise take
+  # land_one's "Already up to date" path and mark it LANDED right under the
+  # warning. A LATER `fleet land` of it is the operator's verified decision.
+  if [[ $'\n'"$RECOVERY_FLAGGED" == *$'\n'"$branch"$'\n'* ]]; then
+    log "REFUSE LAND: $branch was flagged above. Settle it first, then rerun: fleet land $branch"
+    return 1
+  fi
+  mkdir -p "$FLEET_DIR"
+  if claim_landing "$branch"; then return 0; fi
+  # Lost a race: another land claimed it between the check and the claim.
+  if read_landing_marker && [[ -n "$M_PID" ]]; then return 2; fi
+  log "REFUSE LAND: $branch: cannot create $LANDING_FILE"
+  return 1
+}
+
+# === END LANDING MARKER =======================================================
 
 # LAND_RESULT — how the last land_one() call finished, for callers that need a
 # distinction the exit code cannot carry. land_one returns 0 for "this lane's
@@ -1680,10 +2688,11 @@ land_one() {
     # FLEET_SKIP_SESSION_CHECK is already consumed at startup; strip the rest
     # of the family here for depth.
     if ( unset FLEET_SKIP_SESSION_CHECK FLEET_SESSION_STORE FLEET_SESSION_NOCACHE \
-               FLEET_SESSION_LIVE_SECS FLEET_SESSION_CACHE_TTL \
+               FLEET_TRANSCRIPT_ROOTS FLEET_SESSION_LIVE_SECS FLEET_SESSION_CACHE_TTL \
                FLEET_SESSION_MAX_AGE_DAYS FLEET_SELF_SESSION_ID \
                FLEET_NO_PRUNE_HINT FLEET_PRUNE_ROOTS FLEET_PRUNE_MAX_REPOS \
-               FLEET_ASCII
+               FLEET_ASCII FLEET_RM_RETRY_SECS FLEET_QUEUE_COMMIT_PCT \
+               FLEET_PRUNE_UNSTARTED_DAYS FLEET_SESSION_NAMED_DAYS
          eval "$TEST_CMD" ) >>"$LOG" 2>&1; then
       log "PASS: $branch landed"
     else
@@ -1717,13 +2726,17 @@ land_one() {
   fi
 }
 
+# Every worktree with branch $1 checked out, in git's own path form (normally
+# one — git refuses a second checkout without --force); empty when none.
+# The path is everything after "worktree ", never awk's $2: that cut a path
+# containing a space at the space, which would point rebase_others at the
+# wrong directory and leave the land gate's directory join matching nothing.
 worktree_path_for() {
-  # Echo the worktree path for branch $1, or empty if branch isn't in a worktree
   local branch=$1
-  git worktree list --porcelain 2>/dev/null | awk -v want="refs/heads/$branch" '
-    /^worktree /{p=$2}
-    /^branch /{ if ($2==want) print p }
-  '
+  git worktree list --porcelain 2>/dev/null | awk -v want="branch refs/heads/$branch" '
+    /^worktree / { p = substr($0, 10) }
+    $0 == want   { print p }
+  ' || true
 }
 
 rebase_others() {
@@ -1762,9 +2775,16 @@ rebase_others() {
 }
 
 cmd_land() {
-  local branch=${1:-}
+  local branch=${1:-} rc=0
   [[ -z "$branch" ]] && { echo "usage: fleet land <branch>" >&2; exit 1; }
-  land_one "$branch" && rebase_others "$branch"
+  begin_land "$branch" || rc=$?
+  if [[ $rc -eq 2 ]]; then log_landing_busy "REFUSE LAND: $branch"; fi
+  if [[ $rc -ne 0 ]]; then return 1; fi
+  # The marker is released only after a verdict. If this process dies anywhere
+  # in between, it stays behind for the next land's recovery to examine.
+  if ! land_one "$branch"; then release_landing; return 1; fi
+  rebase_others "$branch"
+  release_landing
 }
 
 # Batch-land every landable lane in one pass. Default: READY lanes only
@@ -1784,6 +2804,12 @@ cmd_land_all() {
     esac
   done
   ensure_fleet_dir
+
+  # Before choosing candidates, so a dead land's lane is flagged, not picked.
+  local rrc=0
+  recover_stranded_landing || rrc=$?
+  if [[ $rrc -eq 2 ]]; then log_landing_busy "land --all: REFUSED"; fi
+  if [[ $rrc -ne 0 ]]; then return 1; fi
 
   # Collect candidate lanes with their tip-commit time, so we can order them.
   local candidates=() f b state ts
@@ -1812,9 +2838,23 @@ cmd_land_all() {
   local ordered
   ordered=$(printf '%s\n' "${candidates[@]}" | sort -n)
 
-  local landed=0 already=0 conflict=0 failed=0
+  local landed=0 already=0 conflict=0 failed=0 brc stopped=""
   while IFS=$'\t' read -r ts b; do
     [[ -z "$b" ]] && continue
+    # Re-read: the scan above is a snapshot, and recovery or a concurrent land
+    # can have moved this lane since. Only what is landable NOW is landed.
+    case "$(lane_state "$b")" in
+      READY)   : ;;
+      RUNNING) [[ $include_running -eq 1 ]] || continue ;;
+      *)       continue ;;
+    esac
+    brc=0
+    begin_land "$b" || brc=$?
+    if [[ $brc -ne 0 ]]; then
+      if [[ $brc -eq 2 ]]; then log_landing_busy "land --all: stopping before $b"; fi
+      stopped=$b
+      break
+    fi
     if land_one "$b"; then
       rebase_others "$b"
       # A no-op land — the branch was already in $BASE_BRANCH, another session
@@ -1831,6 +2871,7 @@ cmd_land_all() {
         *)        failed=$((failed+1)) ;;
       esac
     fi
+    release_landing
   done <<< "$ordered"
 
   # The "already" clause appears only when it is non-zero, so an ordinary batch
@@ -1840,12 +2881,35 @@ cmd_land_all() {
   # runs with errexit live (dispatched directly, not from an `if`) — see the same
   # trap noted in ensure_fleet_dir.
   if [[ $already -gt 0 ]]; then summary="$summary, $already already in $BASE_BRANCH"; fi
-  log "$summary, $conflict conflict, $failed failed"
+  summary="$summary, $conflict conflict, $failed failed"
+  if [[ -n "$stopped" ]]; then summary="$summary; stopped before $stopped, the rest not tried"; fi
+  log "$summary"
   cmd_fleet
   # Non-zero exit when anything didn't land, so orchestrators can branch on it.
-  [[ $((conflict + failed)) -eq 0 ]]
+  [[ $((conflict + failed)) -eq 0 && -z "$stopped" ]]
 }
 
+# `fleet stop` asks, then waits, and NEVER SIGKILLs a daemon that is mid-land.
+#
+# The daemon defers SIGTERM to a safe point (see daemon_request_stop), so during
+# a land the signal only queues. The old fixed "5s grace, then SIGKILL" fired
+# straight through that: with any test_cmd slower than 5s (this repo's own gate
+# takes minutes) it killed the daemon mid-gate. The merge stayed on $BASE_BRANCH
+# untested because the gate's rewind never ran, the lane stayed READY, and
+# test_cmd ran on orphaned. Worse, the next pass took land_one's "Already up to
+# date" path and marked the lane LANDED, blessing a merge no gate ever passed.
+#
+# So the grace clock runs only while the daemon is NOT landing, judged by the
+# landing marker (format at claim_landing). Mid-land, this waits as long
+# as the gate takes, printing progress, and the clock restarts from zero once
+# the land is done. Do not "simplify" this back to a fixed deadline: there is no
+# deadline that is safe for every repo's test_cmd. SIGKILL stays only as the
+# backstop for a daemon that is idle and still ignoring SIGTERM.
+#
+# Interrupting `fleet stop` itself is always safe: the request is already
+# delivered, and the daemon exits after the land either way. To abort a hung
+# gate, kill test_cmd's process, never the daemon: the gate then fails and
+# land_one rewinds the merge before the daemon exits.
 cmd_stop() {
   if [[ ! -f "$PID_FILE" ]]; then
     echo "no daemon running (no $PID_FILE)" >&2
@@ -1855,20 +2919,35 @@ cmd_stop() {
   pid=$(cat "$PID_FILE")
   if ! kill -0 "$pid" 2>/dev/null; then
     log "stale PID file (pid $pid not alive) — clearing"
-    rm -f "$PID_FILE"
+    remove_state_file "$PID_FILE" "stale PID file" || return 1
     return 0
   fi
   log "sending SIGTERM to daemon (pid $pid)"
   kill -TERM "$pid" 2>/dev/null || true
-  # Wait up to 5s for graceful exit
-  local i
-  for i in 1 2 3 4 5; do
+  local idle=0 waited=0 told=""
+  while kill -0 "$pid" 2>/dev/null; do
     sleep 1
-    kill -0 "$pid" 2>/dev/null || { log "daemon stopped"; return 0; }
+    waited=$((waited + 1))
+    kill -0 "$pid" 2>/dev/null || break
+    if landing_of "$pid"; then
+      idle=0
+      if [[ "$told" != "$LANDING_LANE" ]]; then
+        log "daemon is mid-land on $LANDING_LANE (started $(( $(date +%s) - LANDING_START ))s ago) — waiting for its gate; it exits once that land finishes. Interrupting this command is safe"
+        told=$LANDING_LANE
+      elif (( waited % 15 == 0 )); then
+        echo "  ...still landing $LANDING_LANE ($(( $(date +%s) - LANDING_START ))s)" >&2
+      fi
+    else
+      idle=$((idle + 1))
+      if (( idle >= 5 )); then
+        log "daemon didn't exit on SIGTERM, sending SIGKILL"
+        kill -KILL "$pid" 2>/dev/null || true
+        remove_state_file "$PID_FILE" "daemon PID file" || return 1
+        return 0
+      fi
+    fi
   done
-  log "daemon didn't exit on SIGTERM, sending SIGKILL"
-  kill -KILL "$pid" 2>/dev/null || true
-  rm -f "$PID_FILE"
+  log "daemon stopped"
 }
 
 # Every merge commit on $BASE_BRANCH whose subject is EXACTLY "merge: <branch>",
@@ -1976,9 +3055,54 @@ cmd_revert() {
   fi
 }
 
+# A signal is a STOP REQUEST, never an exit from inside the handler. Two ways to
+# get this wrong, the first shipped until 2026-09-28:
+#
+#   1. `trap daemon_cleanup INT TERM HUP` with a handler that did not exit. A
+#      trapped signal runs its handler and then RESUMES the script, so the daemon
+#      logged "daemon stopping", deleted its PID file, and kept polling. SIGHUP is
+#      what it gets when its Claude session ends: the ghost landed a lane 3s
+#      later, invisible to `fleet stop` ("no daemon running") and to the
+#      double-start guard, both of which trust the PID file.
+#   2. Calling `exit` in the handler instead. bash runs a trap between commands,
+#      so the exit can fall between land_one's `git merge` and its test gate —
+#      an untested merge left on $BASE_BRANCH, the landmine require_test_cmd
+#      exists to prevent.
+#
+# So the handler only records the request and cuts the poll sleep short; the
+# loop checks it at two safe points (before starting a land, and before
+# sleeping) and returns normally, and the EXIT trap does the cleanup. A land
+# already in progress always finishes, test gate included.
+DAEMON_STOP=""
+DAEMON_SLEEP_PID=""
+
+daemon_request_stop() {
+  DAEMON_STOP=$1
+  # The poll `sleep` is a child the loop waits on with the `wait` builtin, which
+  # a trapped signal interrupts at once; kill the child too so it does not
+  # outlive the daemon holding the repo as its cwd (on Windows that blocks
+  # deleting the directory).
+  if [[ -n "$DAEMON_SLEEP_PID" ]]; then kill "$DAEMON_SLEEP_PID" 2>/dev/null || true; fi
+}
+
 daemon_cleanup() {
-  log "daemon stopping (pid $$)"
-  rm -f "$PID_FILE"
+  # PID file first: it is the one step that must happen. `log` can fail (its
+  # stderr may be gone after a SIGHUP), and under errexit that ends the handler.
+  # The helper's stderr is dropped for the same reason: its retry notice must
+  # not be what kills the handler. A file that survives anyway is recorded in
+  # activity.log. The next start/stop sees a dead pid and clears it as stale,
+  # unless that pid has been reused by then.
+  remove_state_file "$PID_FILE" "daemon PID file" 2>/dev/null \
+    || log "WARNING: daemon PID file survived exit (held open); next fleet start/stop clears it as stale" \
+    || true
+  # The landing marker is deliberately NOT removed here, not even with a bare
+  # `rm -f`. Every path out of the loop releases it first, so it is only still
+  # present when the daemon exits in the middle of a land, e.g. errexit in
+  # rebase_others when `log` loses its stderr. That is exactly when it is
+  # evidence: removing it would hide an untested merge or a half-done rebase
+  # from the next run's recovery (see the LANDING MARKER banner).
+  if [[ -n "$DAEMON_SLEEP_PID" ]]; then kill "$DAEMON_SLEEP_PID" 2>/dev/null || true; fi
+  log "daemon stopping (pid $$)" || true
 }
 
 cmd_start() {
@@ -1998,28 +3122,72 @@ cmd_start() {
       exit 1
     else
       log "stale PID file (pid $existing_pid not alive) — clearing"
-      rm -f "$PID_FILE"
+      remove_state_file "$PID_FILE" "stale PID file" || exit 1
     fi
   fi
 
+  # A daemon killed mid-land leaves its marker behind. Examine it before
+  # anything runs, and refuse to start over a main checkout that needs a human,
+  # the way require_test_cmd refuses an unarmed gate. A live land elsewhere
+  # (status 2) is no reason not to start: the loop waits for it.
+  local rrc=0
+  recover_stranded_landing || rrc=$?
+  if [[ $rrc -eq 1 ]]; then exit 1; fi
+
+  # Cleanup on EXIT only; the signals merely request a stop (see daemon_cleanup).
+  # Installed BEFORE the PID file exists, so no signal can hit the default
+  # action and leave a stale PID file behind. SIGINT is untrappable when the
+  # daemon runs as a non-interactive background job (bash ignores it there), so
+  # TERM and HUP are the ones that matter.
+  trap daemon_cleanup EXIT
+  trap 'daemon_request_stop SIGTERM' TERM
+  trap 'daemon_request_stop SIGINT' INT
+  trap 'daemon_request_stop SIGHUP' HUP
   echo "$$" > "$PID_FILE"
-  trap daemon_cleanup EXIT INT TERM HUP
   log "daemon start (pid $$, poll: ${POLL_INTERVAL}s, test_cmd: ${TEST_CMD:-<none>})"
 
-  while true; do
+  local halt="" waiting_on=""
+  while [[ -z "$DAEMON_STOP" ]]; do
     local ready=()
-    for f in "$LANES_DIR"/*; do
-      [[ -f "$f" && "$(head -n1 "$f")" == "READY" ]] && ready+=("$(decode_lane "$(basename "$f")")")
-    done
+    # Every pass, not just at start: a `fleet land` run beside the daemon can
+    # die mid-land too, and the daemon's next land would bless what it left.
+    rrc=0
+    recover_stranded_landing || rrc=$?
+    if [[ $rrc -eq 1 ]]; then
+      log "daemon stopping: a land that died left the main checkout needing a human (see above)"
+      halt=1
+      break
+    elif [[ $rrc -eq 2 ]]; then
+      # Logged once per holder, not once per poll.
+      if [[ "$waiting_on" != "$M_PID" ]]; then log_landing_busy "daemon: waiting"; waiting_on=$M_PID; fi
+    else
+      waiting_on=""
+      for f in "$LANES_DIR"/*; do
+        [[ -f "$f" && "$(head -n1 "$f")" == "READY" ]] && ready+=("$(decode_lane "$(basename "$f")")")
+      done
+    fi
 
     if [[ ${#ready[@]} -gt 0 ]]; then
       for branch in "${ready[@]}"; do
+        # Safe point 1: never START a land once a stop was requested. Checked
+        # again AFTER the marker is taken, so a stop request that slips in
+        # between finds either no land (second check) or the marker already in
+        # place (cmd_stop then waits). No land ever runs unmarked.
+        if [[ -n "$DAEMON_STOP" ]]; then break; fi
+        # Re-read: a land earlier in this pass may have moved this lane.
+        [[ "$(lane_state "$branch")" == "READY" ]] || continue
+        # Another fleet process took the marker first: never land beside it.
+        # The next pass waits for it, or recovers it if it died.
+        claim_landing "$branch" || break
+        if [[ -n "$DAEMON_STOP" ]]; then release_landing; break; fi
         if land_one "$branch"; then
           rebase_others "$branch"
         fi
+        release_landing
       done
       cmd_fleet
     fi
+    if [[ -n "$DAEMON_STOP" ]]; then break; fi
 
     local active=0
     for f in "$LANES_DIR"/*; do
@@ -2033,8 +3201,21 @@ cmd_start() {
       cmd_fleet
       break
     fi
-    sleep "$POLL_INTERVAL"
+    # Safe point 2: an interruptible sleep. A foreground `sleep` defers the trap
+    # until it returns — up to poll_interval, which at the default is the whole
+    # of `fleet stop`'s 5s grace, so SIGTERM raced the SIGKILL escalation.
+    # The flag is re-checked AFTER the sleep is spawned: a signal that arrives
+    # before that point finds no sleep to kill, and would otherwise cost a full
+    # interval (measured 5.3s — the lane scan above forks per lane, so the
+    # window is wide on Windows). One that arrives after it kills the sleep.
+    sleep "$POLL_INTERVAL" & DAEMON_SLEEP_PID=$!
+    if [[ -z "$DAEMON_STOP" ]]; then wait "$DAEMON_SLEEP_PID" 2>/dev/null || true; fi
+    DAEMON_SLEEP_PID=""
   done
+  if [[ -n "$halt" ]]; then exit 1; fi
+  if [[ -n "$DAEMON_STOP" ]]; then
+    log "daemon: $DAEMON_STOP received — stopped between lands, none interrupted"
+  fi
 }
 
 case "${1:-}" in
@@ -2046,8 +3227,19 @@ case "${1:-}" in
   land)         shift
                 if [[ "${1:-}" == "--all" ]]; then shift; cmd_land_all "$@"; else cmd_land "$@"; fi ;;
   revert)       shift; cmd_revert "$@" ;;
+  landing)      shift; cmd_landing "$@" ;;
   scrub-check)  shift; cmd_scrub_check "$@" ;;
   prune)        shift; cmd_prune "$@" ;;
+  # The post-wave sweep lives in its own script (scripts/sweep.sh) and builds
+  # on prune rather than inside it. Back to the caller's dir first: the cd at
+  # the top of this file would otherwise make prune's "you are standing in it"
+  # guard protect the main checkout instead of the tree the caller is in.
+  sweep)        shift; cd "$INVOKED_FROM" 2>/dev/null || true
+                exec bash "$SCRIPT_DIR/sweep.sh" "$@" ;;
+  # The audited, one-at-a-time landing chain (scripts/queue.sh). It drives `fleet
+  # land` per lane rather than land_one, so the marker, gate and rebase pass stay
+  # in this file alone.
+  queue)        shift; exec bash "$SCRIPT_DIR/queue.sh" "$@" ;;
   config)       shift; cmd_config "$@" ;;
   main)         shift; cmd_main "$@" ;;
   owner)        shift; [[ -z "${1:-}" ]] && { echo "usage: fleet owner <branch>" >&2; exit 1; }
@@ -2060,18 +3252,29 @@ Usage:
   fleet init <name>...        Create branch + worktree per name (manual spawn)
   fleet track <branch>...     Register existing branches as lanes (native spawn)
   fleet start                 Run the daemon (writes pid to $PID_FILE)
-  fleet stop                  Signal the running daemon to exit cleanly
+  fleet stop                  Stop the daemon; a land in progress finishes first
   fleet status                One-shot status view
   fleet land <branch>         Manual land + rebase others
   fleet land --all [--running]  Batch-land all READY lanes (oldest-first);
                               --running also lands vetted RUNNING lanes
+  fleet queue <lane> <tip>... Land reviewed lanes one at a time: wait for
+                              $BASE_BRANCH to settle, audit each would-be merge,
+                              retry live-owner refusals. --dry-run audits only.
+                              (fleet queue --help)
   fleet revert <branch>       Revert merge commit on $BASE_BRANCH
+  fleet landing [--porcelain] Is $BASE_BRANCH safe to branch from / rebase onto?
+                              Exit 0 yes; 10 = a land holds it (PROVISIONAL
+                              while its gate runs) or it holds an untested merge
   fleet scrub-check <branch>  Dry-run forbidden-pattern check
   fleet prune [--remove]      Classify finished lane worktrees. DRY RUN by
                               default; --remove deletes only the SAFE ones,
                               after a typed confirmation. --all-repos reports
                               sibling repos and can never remove.
-  fleet config                Print resolved config (is the test gate actually on?)
+  fleet sweep [--apply]       Post-wave housekeeping, in procedure order:
+                              landed? competing? leftovers? who is done?
+                              Report by default; --apply = zero-loss only.
+  fleet config [--quiet]      Print resolved config (is the test gate actually on?);
+                              --quiet: the keys only, no session-store diagnostics
   fleet main [show|claim|release]
                               The coordinator session for this repo (lands,
                               deploys, triages). Lanes address it to hand off.

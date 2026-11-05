@@ -367,6 +367,15 @@ expect_has "local L3 bypass still demands isolation" "isolated VM/container" "$o
 out="$(bash "$DOCTOR" --offline "$SB/desk-l2.yaml" 2>/dev/null)"
 expect_has "desktop-task flags the out-of-band worktree toggle" "toggle is on" "$out"
 
+# R5. The cloud boundary regex must match each element ALONE. cloud-ok names connectors
+# AND environment, so a dead `connectors?` alternative (its word boundary once landed as
+# a raw 0x08 byte, which no text can match) hid behind `environment`. Name connectors only.
+sed 's|^escalation:.*|escalation: "connectors pruned to GitHub read only; never merge"|' \
+  "$SB/cloud-1h.yaml" > "$SB/cloud-connectors-only.yaml"
+out="$(bash "$DOCTOR" --offline "$SB/cloud-connectors-only.yaml" 2>/dev/null)"; rc=$?
+expect_exit "cloud boundary naming only connectors is accepted -> 0" 0 "$rc"
+expect_has  "connectors-only boundary reports the ok row" "boundary names repos/environment/connectors" "$out"
+
 # ── loop-estimate: validation errors ───────────────────────────────────────────
 "$PYTHON" "$COST" --pattern pr-watch --cadence 10m --model claude-nope >/dev/null 2>&1; expect_exit "unknown model -> 4" 4 $?
 "$PYTHON" "$COST" --pattern not-a-pattern --cadence 10m --model claude-haiku-4-5 >/dev/null 2>&1; expect_exit "unknown pattern -> 4" 4 $?
@@ -420,6 +429,29 @@ grep -q 'BRAND::loop' "$SKILL/../_lib/term.sh" && ok "term.sh registers the loop
 # Piped audit findings stay plain (no ANSI in the data stream).
 po="$(bash "$AUDIT" "$SB/l2-nogate.yaml" 2>/dev/null)"
 case "$po" in *$'\033'*) no "piped audit leaked ANSI into data";; *) ok "piped audit stays plain data";; esac
+# Regression: the verdict label carries a coloured pip bar, and term_status_row's
+# term_truncate counted its escape bytes as columns, so every coloured run cut the
+# bar mid-escape ("ESC[33m▰ESC[0mESC[…"). A cut escape is a lone ESC that the SGR
+# stripper below cannot consume. The fixture is the one that first showed it.
+mkdir -p "$SB/vrow/.loops/x"
+printf 'name: x\npattern: custom\ntier: L3\npermission_mode: bypassPermissions\ncadence: 10m\ngoal: "g"\nscope:\n  - "*"\nescalation: ""\n' \
+  > "$SB/vrow/.loops/x/loop.config.yaml"
+sgr_esc=$'\033'
+vpanel="$(LC_ALL=en_US.UTF-8 FORCE_COLOR=1 bash "$AUDIT" "$SB/vrow/.loops/x/loop.config.yaml" 2>&1 >/dev/null)"
+vrow="$(printf '%s\n' "$vpanel" | grep 'READY' | sed "s/${sgr_esc}\[[0-9;]*m//g")"
+case "$vrow" in
+  "") no "verdict row missing from the coloured panel" ;;
+  *"$sgr_esc"*) no "verdict row never cuts an escape sequence ($(printf '%q' "$vrow"))" ;;
+  *) ok "verdict row never cuts an escape sequence" ;;
+esac
+# ...and the label is padded on visible columns, so the value lines up with the
+# rows below it. ASCII mode makes the column arithmetic exact.
+vpanel="$(TERM_ASCII=1 FORCE_COLOR=1 bash "$AUDIT" "$SB/vrow/.loops/x/loop.config.yaml" 2>&1 >/dev/null | sed "s/${sgr_esc}\[[0-9;]*m//g")"
+vrow="$(printf '%s\n' "$vpanel" | grep 'READY')"; erow="$(printf '%s\n' "$vpanel" | grep 'error(s)')"
+vlead="${vrow%%score *}"; elead="${erow%%must be*}"
+if [[ -n "$vrow" && "$vlead" != "$vrow" && "${#vlead}" -eq "${#elead}" ]]; then
+  ok "verdict row value column aligns with the rows below (col ${#vlead})"
+else no "verdict row value column aligns with the rows below (verdict col ${#vlead}, errors col ${#elead})"; fi
 
 # ── check-native-facts: the native-scheduling staleness guard ──────────────
 # Asserts the guard actually detects drift, not just that it exits 0 today: a

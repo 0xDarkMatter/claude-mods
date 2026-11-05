@@ -12,8 +12,10 @@ Exit:    0 report produced (grade >= B, or --strict not set and repo readable),
          10 --strict and grade below B (CI gate), 2 usage error, 3 not a git repo
 
 Dimensions scored (0-5 each, weighted into the grade):
-  entry_docs   AGENTS.md/CLAUDE.md presence, Landmines section, length budget,
-               freshness measured in commits-since-touched (never days)
+  entry_docs   AGENTS.md/CLAUDE.md presence, Landmines section, 200-line / 16,000-char budget,
+               freshness measured in commits-since-touched (never days), and a
+               CLAUDE.md that shadows AGENTS.md (no @AGENTS.md import); the deep
+               AGENTS.md audit is scripts/agents-md.py
   docs_health  README, docs/ index when >6 files, ghost/missing index entries
   comments     contract blocks on the largest source files; section markers in
                files >400 lines
@@ -85,9 +87,23 @@ SECTION_PAT = re.compile(r"^\s*(#|//|/\*|<!--|--)\s*.{0,8}([=─-]{4,}|SECTION|�
 FEATFIX_PAT = re.compile(r"^(feat|fix|refactor|perf)\b", re.I)
 
 MONSTER_WARN, MONSTER_CRIT = 800, 1500
-ENTRY_LEAN_LINES = 250
+# Claude Code's memory docs: "target under 200 lines per CLAUDE.md file. Longer files
+# consume more context and reduce adherence." The house target is 150
+# (references/agents-md-protocol.md section 3); this scorer warns at the ceiling.
+ENTRY_LEAN_LINES = 200
+# Size too: the line budget assumes wrapped prose, so 200 lines at 80 characters. Must
+# equal agents-md.py's CEILING_CHARS (check-memory-docs.py gates both).
+ENTRY_LEAN_CHARS = 16000
+# A CLAUDE.md (or .claude/CLAUDE.md) imports AGENTS.md with an `@path` line. Keep in
+# lockstep with classify_claude() in agents-md.py, which owns the full shadowing audit.
+AGENTS_IMPORT = re.compile(r"(?:^|\s)@(?:\./|\.\./)?AGENTS\.md\b")
 FRESH_COMMITS = 15
 DOCS_INDEX_THRESHOLD = 6
+# Nested AGENTS.md budget (agents-md-protocol.md section 6): 40-line target, 60-line
+# ceiling, characters at 80 a line. Keep in lockstep with agents-md.py's NESTED_* values.
+NESTED_TARGET_LINES = 40
+NESTED_CEILING_LINES = 60
+NESTED_CEILING_CHARS = 4800
 WEIGHTS = {"entry_docs": 2.0, "docs_health": 1.5, "comments": 2.0,
            "structure": 2.0, "enforcement": 1.5, "doc_pairing": 1.0}
 
@@ -172,10 +188,37 @@ class Audit:
         self.findings: list[dict] = []
         self.scores: dict[str, float] = {}
         self.facts: dict = {}
+        self._scan: dict | None = None
 
     def add(self, dim: str, severity: str, msg: str, path: str = "") -> None:
         self.findings.append({"dim": dim, "severity": severity,
                               "msg": msg, "path": path})
+
+    def scan_facts(self) -> dict | None:
+        """Gates, nesting and architecture facts from the sibling repo-scan.py, run once.
+        The scorer stays usable copied alone: without the scanner, those checks are
+        skipped with one info finding and the old rules apply (agents-md.py runs the
+        scanner the same way). The scan only reads files; it never runs repo code."""
+        if self._scan is not None:
+            return self._scan or None
+        self._scan = {}
+        scan = Path(__file__).resolve().parent / "repo-scan.py"
+        data = None
+        if scan.is_file():
+            try:
+                r = subprocess.run([sys.executable, str(scan), "--repo", str(self.repo),
+                                    "--only", "gates,nesting,architecture", "--json", "--no-tokei"],
+                                   capture_output=True, timeout=300, encoding="utf-8", errors="replace")
+                data = json.loads(r.stdout).get("data") if r.returncode == 0 else None
+            except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, AttributeError):
+                data = None
+        if not data:
+            self.add("enforcement", "info",
+                     "repo-scan.py unavailable beside the scorer: gate, nesting and "
+                     "ARCHITECTURE.md checks skipped")
+            return None
+        self._scan = data
+        return data
 
     # -- dimension: entry docs ------------------------------------------------
     def check_entry_docs(self) -> None:
@@ -192,7 +235,7 @@ class Audit:
             return
         score += 2
         text = entry.read_text(encoding="utf-8", errors="replace")
-        lines = text.count("\n") + 1
+        lines = len(text.splitlines())   # as agents-md.py counts; newlines + 1 overcounted by one
         self.facts["entry_doc_lines"] = lines
         if LANDMINE_PAT.search(text):
             score += 1
@@ -200,13 +243,21 @@ class Audit:
             self.add("entry_docs", "warn",
                      f"{entry.name} has no Landmines/gotchas section — the "
                      "highest-value lines for agents are missing", entry.name)
-        if lines <= ENTRY_LEAN_LINES:
+        chars = len(text.replace("\r\n", "\n"))
+        self.facts["entry_doc_chars"] = chars
+        if lines <= ENTRY_LEAN_LINES and chars <= ENTRY_LEAN_CHARS:
             score += 1
-        else:
+        elif lines > ENTRY_LEAN_LINES:
             self.add("entry_docs", "warn",
                      f"{entry.name} is {lines} lines (budget ~{ENTRY_LEAN_LINES}) — "
                      "agents pay this token cost every session; push walkthroughs "
                      "into docs/ and link them", entry.name)
+        else:
+            self.add("entry_docs", "warn",
+                     f"{entry.name} is {chars:,} characters in {lines} lines (budget "
+                     f"~{ENTRY_LEAN_CHARS:,} characters, {ENTRY_LEAN_LINES} lines at 80) — "
+                     "long lines cost what wrapped ones do; wrap them or push detail "
+                     "into docs/ and link it", entry.name)
         since = commits_since_touch(self.repo, entry.name)
         self.facts["entry_doc_commits_since"] = since
         if since is not None and since <= FRESH_COMMITS:
@@ -216,22 +267,68 @@ class Audit:
                      f"{entry.name} last touched {since} commits ago — verify it "
                      "still describes the code, then touch it in the fixing commit",
                      entry.name)
-        if agents.exists() and claude.exists():
-            ctext = claude.read_text(encoding="utf-8", errors="replace")
-            if len(ctext) > 400 and ctext[:400] in text:
+        dot_claude = self.repo / ".claude" / "CLAUDE.md"
+        for cfile in (claude, dot_claude):
+            if not (agents.exists() and cfile.is_file()):
+                continue
+            rel = str(cfile.relative_to(self.repo)).replace("\\", "/")
+            ctext = cfile.read_text(encoding="utf-8", errors="replace")
+            code_free = re.sub(r"(?ms)^\s*```.*?^\s*```[^\n]*$|`[^`\n]*`", "", ctext)
+            if not AGENTS_IMPORT.search(code_free):
+                # Claude Code reads AGENTS.md only when no CLAUDE.md is present, so this
+                # file hides it from every Claude session (a prose pointer included).
+                score -= 1
                 self.add("entry_docs", "warn",
-                         "CLAUDE.md appears to duplicate AGENTS.md — keep deltas "
-                         "only, or reduce CLAUDE.md to a pointer", "CLAUDE.md")
+                         f"{rel} shadows AGENTS.md: Claude Code reads only the CLAUDE.md "
+                         "files when one exists. Put `@AGENTS.md` on its first line or "
+                         "delete it (agents-md.py audit --diff)", rel)
+            elif len(ctext) > 400 and ctext[-400:] in text:
+                self.add("entry_docs", "warn",
+                         f"{rel} imports AGENTS.md but also duplicates it: keep Claude-only "
+                         "deltas below the import", rel)
             else:
                 self.add("entry_docs", "info",
-                         "both AGENTS.md and CLAUDE.md present — fine if CLAUDE.md "
-                         "is deltas-only (Gather pattern); shared rule changes must "
-                         "update both in one commit")
-        self.scores["entry_docs"] = score
+                         f"{rel} imports AGENTS.md: fine while it holds Claude-only deltas")
+        facts = self.scan_facts()
+        if facts is not None:
+            missing = [r["dir"] for r in (facts.get("nesting") or {}).get("recommend", [])
+                       if not (r.get("existing") or {}).get("agents_md")]
+            if missing:
+                score -= 0.5
+                self.add("entry_docs", "warn",
+                         f"the scan recommends nesting for {len(missing)} folder(s) with their own "
+                         f"contract and none has an AGENTS.md: {', '.join(missing[:5])} — draft one "
+                         "with agents-md.py scaffold --dir", entry.name)
+        over = False
+        for rel in sorted(git(self.repo, "ls-files", "*AGENTS.md").splitlines()):
+            if "/" not in rel or re.match(r"(.*/)?(node_modules|vendor|\.claude)/", rel):
+                continue
+            ntext = (self.repo / rel).read_text(encoding="utf-8", errors="replace") \
+                if (self.repo / rel).is_file() else ""
+            # splitlines, like agents-md.py: a trailing newline ends a line, it doesn't add one
+            nlines, nchars = len(ntext.splitlines()), len(ntext.replace("\r\n", "\n"))
+            if nlines > NESTED_CEILING_LINES or nchars > NESTED_CEILING_CHARS:
+                over = True
+                self.add("entry_docs", "warn",
+                         f"{rel} is {nlines} lines / {nchars:,} characters, over the nested budget "
+                         f"({NESTED_CEILING_LINES} lines / {NESTED_CEILING_CHARS:,} characters) — keep "
+                         "local deltas and landmines only", rel)
+            elif nlines > NESTED_TARGET_LINES:
+                self.add("entry_docs", "info",
+                         f"{rel} is {nlines} lines, over the {NESTED_TARGET_LINES}-line nested target", rel)
+        if over:
+            score -= 0.5
+        self.scores["entry_docs"] = max(score, 0)
 
     # -- dimension: docs health -----------------------------------------------
     def check_docs_health(self) -> None:
         score = 5.0
+        arch = (self.scan_facts() or {}).get("architecture") or {}
+        if arch.get("warranted") and not arch.get("path"):
+            reasons = "; ".join((arch.get("reasons") or [])[:3])
+            self.add("docs_health", "info",
+                     f"an ARCHITECTURE.md is warranted ({reasons}) and missing — draft one "
+                     "with agents-md.py scaffold --architecture")
         if not (self.repo / "README.md").exists():
             score -= 1
             self.add("docs_health", "warn", "no README.md — humans enter blind")
@@ -417,14 +514,36 @@ class Audit:
             self.add("enforcement", "warn",
                      "no single `check` entry point (npm run check / just check) — "
                      "if it isn't one command, agents won't run it")
-        gates = [p.name for p in (self.repo / "scripts").glob("check-*")] \
-            if (self.repo / "scripts").is_dir() else []
-        gates += [p.name for p in (self.repo / "tests").glob("*drift*")] \
+        drift = [p.name for p in (self.repo / "tests").glob("*drift*")] \
             if (self.repo / "tests").is_dir() else []
-        if gates:
-            score += 1
-            self.facts["invariant_gates"] = gates[:5]
+        facts = self.scan_facts()
+        if facts is not None:
+            # A gate counts in full only when `check` or CI runs it (repo-scan's `wired`);
+            # one nothing runs counts half, because a gate no session runs enforces nothing.
+            scanned = facts.get("gates") or []
+            self.facts["gates"] = [{"tool": g["tool"], "config": g.get("scope", "") + g["config"],
+                                    "wired": g.get("wired")} for g in scanned]
+            wired = [g for g in scanned if g.get("wired")]
+            unwired = [g for g in scanned if g.get("wired") is False]
+            gates = [g.get("scope", "") + g["config"] for g in wired] + drift
+            if wired or drift:
+                score += 1
+            elif unwired:
+                score += 0.5
+            if unwired:
+                names = ", ".join(sorted(g.get("scope", "") + g["config"] for g in unwired)[:5])
+                self.add("enforcement", "info" if (wired or drift) else "warn",
+                         f"{len(unwired)} gate(s) the check entry point never runs: {names} — "
+                         "fold them into `check` so every session runs them")
         else:
+            gates = [p.name for p in (self.repo / "scripts").glob("check-*")] \
+                if (self.repo / "scripts").is_dir() else []
+            gates += drift
+            if gates:
+                score += 1
+        if gates:
+            self.facts["invariant_gates"] = gates[:5]
+        elif not (facts and facts.get("gates")):
             self.add("enforcement", "info",
                      "no invariant gate scripts (scripts/check-*.mjs pattern) — "
                      "prose rules rot; 30-line scripts don't")

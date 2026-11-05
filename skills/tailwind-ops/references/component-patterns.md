@@ -2,6 +2,66 @@
 
 Complete, accessible component patterns with Tailwind CSS. All examples include dark mode support and accessibility attributes.
 
+## Component Patterns Quick Reference
+
+```html
+<!-- Card -->
+<div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+  <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Title</h3>
+  <p class="text-gray-600 dark:text-gray-400">Content here.</p>
+</div>
+
+<!-- Button variants -->
+<button class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 transition-colors">Primary</button>
+<button class="bg-gray-200 text-gray-800 px-4 py-2 rounded-lg hover:bg-gray-300 transition-colors">Secondary</button>
+<button class="border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors">Outline</button>
+<button class="text-blue-600 px-4 py-2 rounded-lg hover:bg-blue-50 transition-colors">Ghost</button>
+
+<!-- Form input -->
+<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email</label>
+<input type="email"
+  class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
+         bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100
+         focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+  placeholder="you@example.com">
+
+<!-- Navbar -->
+<nav class="bg-white dark:bg-gray-900 shadow">
+  <div class="max-w-7xl mx-auto px-4 flex items-center justify-between h-16">
+    <a href="/" class="text-xl font-bold text-gray-900 dark:text-white">Logo</a>
+    <div class="hidden md:flex items-center gap-6">
+      <a href="#" class="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">Home</a>
+      <a href="#" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">CTA</a>
+    </div>
+  </div>
+</nav>
+
+<!-- Modal overlay -->
+<div class="fixed inset-0 z-50 flex items-center justify-center">
+  <div class="fixed inset-0 bg-black/50" aria-hidden="true"></div>
+  <div class="relative bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 w-full max-w-md mx-4" role="dialog" aria-modal="true">
+    <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Modal Title</h2>
+    <p class="text-gray-600 dark:text-gray-400 mb-6">Modal content goes here.</p>
+    <div class="flex justify-end gap-3">
+      <button class="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg">Cancel</button>
+      <button class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- Badge -->
+<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">Active</span>
+
+<!-- Alert -->
+<div class="flex items-start gap-3 p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800" role="alert">
+  <span class="text-red-600 dark:text-red-400 mt-0.5" aria-hidden="true">&#10007;</span>
+  <div>
+    <h4 class="text-sm font-medium text-red-800 dark:text-red-300">Error</h4>
+    <p class="text-sm text-red-700 dark:text-red-400 mt-1">Something went wrong. Please try again.</p>
+  </div>
+</div>
+```
+
 ## Cards
 
 ### Basic Card

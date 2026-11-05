@@ -24,11 +24,29 @@ echo "=== a11y-ops self-test ==="
 echo "-- resources --"
 [ -f "$SCAN" ]      && ok "scan-a11y.py present"                  || no "scan-a11y.py missing"
 [ -f "$STATEMENT" ] && ok "accessibility-statement template present" || no "statement template missing"
-for r in references/wcag-conformance.md references/audit-workflow.md references/common-failures.md; do
+for r in references/wcag-conformance.md references/audit-workflow.md references/common-failures.md \
+         references/server-rendered-templates.md; do
   [ -f "$SKILL/$r" ] && ok "$r present" || no "$r missing"
   # An uncited resource is dead weight the router never finds (resource protocol §1).
-  grep -q "$(basename "$r")" "$SKILL/SKILL.md" && ok "$r cited from SKILL.md" || no "$r not cited from SKILL.md"
+  # Require a real markdown link target, not a passing mention of the filename.
+  grep -qF "]($r)" "$SKILL/SKILL.md" && ok "$r linked from SKILL.md" || no "$r not linked from SKILL.md"
 done
+
+# FRONTMATTER CONTRACT - this suite asserts on SKILL.md's own `description`.
+# a11y-ops ships in a curated plugin pack that caps a skill description at 500
+# characters and requires a "Use when ..." trigger clause; the repo-wide
+# validate.sh cap is 1000, so nothing else catches a trigger list that creeps back
+# over. Bytes are counted (>= chars), so this errs strict.
+desc="$(sed -n 's/^description: "\(.*\)"[[:space:]]*$/\1/p' "$SKILL/SKILL.md")"
+dlen="$(printf '%s' "$desc" | wc -c | tr -d ' ')"
+[ -n "$desc" ] && [ "$dlen" -le 500 ] && ok "description is $dlen <= 500 bytes" \
+                                      || no "description is $dlen bytes (pack cap 500, or unparsed)"
+printf '%s' "$desc" | grep -q 'Use when' && ok "description carries a 'Use when' clause" \
+                                         || no "description lacks a 'Use when' clause"
+# Same pack's size rule for references: <= 300 lines, table of contents past 100.
+srt="$SKILL/references/server-rendered-templates.md"
+[ -f "$srt" ] && [ "$(wc -l < "$srt")" -le 300 ] && ok "server-rendered-templates.md <= 300 lines" \
+                                                  || no "server-rendered-templates.md missing or over 300 lines"
 grep -q 'scan-a11y.py' "$SKILL/SKILL.md" && ok "script cited from SKILL.md" || no "script not cited"
 grep -q 'accessibility-statement.template.md' "$SKILL/SKILL.md" && ok "asset cited from SKILL.md" || no "asset not cited"
 

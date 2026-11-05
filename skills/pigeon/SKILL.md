@@ -32,6 +32,7 @@ Parse the user's input after `pigeon` (or `/pigeon`) and run the matching comman
 |-----------|-----|
 | `pigeon read` | `bash "$MAIL" read` |
 | `pigeon read 42` | `bash "$MAIL" read 42` |
+| `pigeon thread 42` | `bash "$MAIL" thread 42` (shows, does not mark read) |
 | `pigeon send <project> "<subject>" "<body>"` | `bash "$MAIL" send "<project>" "<subject>" "<body>"` |
 | `pigeon send --urgent <project> "<subject>" "<body>"` | `bash "$MAIL" send --urgent "<project>" "<subject>" "<body>"` |
 | `pigeon send --attach <path> <project> "<subject>" "<body>"` | `bash "$MAIL" send --attach "<path>" "<project>" "<subject>" "<body>"` |
@@ -67,6 +68,8 @@ Each project gets a stable 6-character hash ID derived from its **git root commi
 
 For non-git directories, falls back to a hash of the canonical path (`pwd -P`).
 
+A repo's git worktrees share its root commit, so they share its ID: every session in the repo, the main checkout and each lane alike, reads one inbox. See [Shared Inboxes](#shared-inboxes-worktrees).
+
 Use `pigeon id` to see your project's name and hash:
 
 ```
@@ -101,7 +104,18 @@ Login and refresh are live on staging.
 === To reply: pigeon reply <id> "message" ===
 ```
 
-The JSON form is required. For PreToolUse, plain stdout goes to Claude Code's debug log and never reaches the model. Claude Code caps `additionalContext` at 10,000 chars, so the hook truncates message bodies at about 9,000 and points at `pigeon read`. The header and footer are always kept. Delivery does not mark mail read. The signal file is cleared, so each new send triggers one notice.
+The JSON form is required. For PreToolUse, plain stdout goes to Claude Code's debug log and never reaches the model. Claude Code caps `additionalContext` at 10,000 chars, so the hook truncates message bodies at about 9,000 and points at `pigeon read`. The header and footer are always kept. Delivery does not mark mail read.
+
+Each session is told about each message once. The signal file `/tmp/pigeon_signal_<hash>` is a timestamp that every send touches and nothing deletes. Each session keeps its own marker, `/tmp/pigeon_seen_<hash>_<session_id>`, holding the last message id it was shown. The fast path compares the two file times, so an empty inbox still costs one stat. The session id comes from the hook's stdin JSON; without one (a manual run), callers share an `anon` marker.
+
+## Shared Inboxes (Worktrees)
+
+Every session in a project reads one inbox, and a repo's worktrees are the same project. That is what makes lane-to-coordinator reporting work (`pigeon send claude-mods "READY lane/<x> <sha>"` from a lane reaches the session in the main checkout), and pigeon keeps it safe:
+
+- **You are never handed your own mail.** Each message stores its sender's session (`CLAUDE_CODE_SESSION_ID`, the same id the hook gets). The hook and `read`, `count`, `unread` and `status` skip mail the calling session sent, so a lane's report waits for the others.
+- **One session looking never hides mail from another.** Delivery is tracked per session (above). Earlier versions cleared the shared signal on delivery, so the lane that sent a report consumed the coordinator's wake-up.
+- **Reading is still shared.** `pigeon read` marks mail read for the whole project. Inside a worktree the hook's footer says so: mark only mail meant for you, one at a time (`pigeon read <id>`); `pigeon thread <id>` shows a message without marking it.
+- **Names can collide.** A name is a directory basename, so two repos can share one. Pigeon then warns on stderr, lists each candidate hash, and uses the sender's own project if it is one of them. Send by hash to choose (`pigeon projects` lists them).
 
 ## Attachments
 
@@ -203,6 +217,8 @@ Without this step, pigeon still works but you have to check manually (`pigeon re
 
 ### Verify
 
+Run these in a terminal. Inside a Claude Code session, `read` skips mail that session sent, so a message to yourself stays unread.
+
 ```bash
 # Check your project identity
 bash ~/.claude/pigeon/mail-db.sh id
@@ -237,7 +253,10 @@ CREATE TABLE messages (
     body TEXT NOT NULL,
     timestamp TEXT DEFAULT (datetime('now')),
     read INTEGER DEFAULT 0,
-    priority TEXT DEFAULT 'normal'
+    priority TEXT DEFAULT 'normal',
+    thread_id INTEGER REFERENCES messages(id),
+    attachments TEXT DEFAULT '',  -- newline-separated absolute paths
+    from_session TEXT DEFAULT ''  -- sender's CLAUDE_CODE_SESSION_ID, '' outside a session
 );
 
 CREATE TABLE projects (
@@ -257,6 +276,8 @@ CREATE TABLE projects (
 | Hook fires but no notification | Working as intended - hook is silent when inbox is empty |
 | Mail is unread but Claude never mentions it | The hook must print JSON `additionalContext`, because plain PreToolUse stdout only reaches the debug log. Reinstall `check-mail.sh` from this repo and check `jq --version` |
 | Messages not arriving | Target must be a known name, hash, or path. Use `pigeon projects` to see registered projects |
+| A lane's report never reached the coordinator | Install the current `check-mail.sh` and `mail-db.sh` together. Older hooks cleared the shared signal when the lane saw its own report, and an older `read` marked it read |
+| `Warning: 2 projects are named '...'` | Two directories share a basename. Send by the hash the warning lists |
 | Upgraded from basename IDs | Run `pigeon migrate` to convert old messages to hash-based IDs |
 | Changed display name | Use `pigeon alias old-name new-name` to update the project's display name |
 | Want to disable for one project | `touch .claude/pigeon.disable` in that project's root |

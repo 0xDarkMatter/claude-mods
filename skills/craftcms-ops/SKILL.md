@@ -1,195 +1,167 @@
 ---
 name: craftcms-ops
-description: "Craft CMS 5 development - content modeling, Twig templating, element queries, GraphQL, plugins, and the Craft 4-to-5 Matrix-as-entries change. Use for: craft cms, craftcms, craft 5, twig, pixel & tonic, matrix field, entry types, sections, element query, eager loading, blitz, project config, headless craft, craft graphql, craft plugin, craft 4 to 5 upgrade."
-when_to_use: "Use when building on Craft CMS 5 — e.g. 'model content with Matrix-as-entries', 'write a Twig template or element query', 'set up headless Craft with GraphQL', 'migrate Craft 4 to 5'. Covers sections, entry types, eager loading, project config, and plugins."
+description: "Craft CMS 3/4/5 agency site builds: Matrix-as-entries content modeling, Twig and element queries, eager loading, output escaping and CSRF, and the usual plugin stack - SEOmatic, Blitz, Formie, CKEditor, craft-vite - plus DDEV, Codeception, image transforms, the queue, and 3-to-4-to-5 upgrades. Use when building, debugging, securing, speeding up, or upgrading a Craft site, or editing its Twig templates, config/project, or any of those plugins."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:
   author: claude-mods
-  related-skills: laravel-ops, sql-ops, nginx-ops
+  related-skills: "ddev-ops, laravel-ops, sql-ops, nginx-ops, perf-ops, web-perf-ops, frontend-upgrade-ops, tailwind-ops, playwright-ops, a11y-ops, security-ops"
 ---
 
 # Craft CMS Operations
 
-> Facts verified as of 2026-07.
+> Versions verified 2026-10-05 against Packagist and the official docs. Craft 5.x is
+> current (5.11); Craft 4 and 3 are past security support; Craft 6 is in alpha.
+> `scripts/check-craft-facts.py --live` re-checks the plugin majors on a schedule.
 
-Authoritative reference for **Craft CMS 5.x** development: content modeling, Twig templating, element-query optimization, GraphQL/headless setups, plugin development, and the Craft 4 → 5 migration. Craft is a self-hosted PHP application built on Yii 2, backed by MySQL or PostgreSQL.
+The recurring agency shape: Craft 5 (or a 4/3 site awaiting upgrade) on DDEV, with
+SEOmatic, Blitz, Formie, and CKEditor, a Vite (or legacy Laravel Mix) front end, and
+modules tested with Codeception and ECS. This file is the procedure and the router;
+each topic lives in one reference.
 
-> **Version note (verified against craftcms.com/docs/5.x, 2026-06):** Craft 5 is current; Craft 6 exists. The defining Craft 5 change is that **Matrix is now an entries-based field** — Matrix "blocks" are gone, replaced by nested **entries** with **entry types**. Fields are **globally reusable** across all field layouts. Don't ship Craft 3/4 "Matrix block" guidance.
+## Step 1 - Orient before touching anything
 
----
+| Check | Where | Tells you |
+|-------|-------|-----------|
+| Craft + plugin versions | `composer.json`, `ddev composer show craftcms/cms` | Which line of the [version matrix](#version-matrix) applies - Craft 4 and 5 APIs differ |
+| Local environment | `.ddev/config.yaml` | PHP/DB versions; run everything as `ddev craft`, `ddev composer`, `ddev npm` |
+| Schema | `config/project/*.yaml` | Source of truth for sections, fields, entry types, plugin settings |
+| Config | `config/general.php`, `config/<plugin>.php`, `.env` | Environment-specific behaviour (`devMode`, `allowAdminChanges`, caching) |
+| Front-end build | `package.json` + `config/vite.php`, or `webpack.mix.js` | craft-vite or Laravel Mix |
+| Templates | `templates/_layouts`, `_partials`, `_partials/entry/<type>.twig` | Layout inheritance and element partials |
+| PHP | `modules/`, `tests/`, `codeception.yml`, `ecs.php` | Where logic and tests live |
+| Page cache | `config/blitz.php`, Blitz utility | Whether what you see is cached HTML - check before debugging "my change isn't showing" |
 
-## Craft 5 architecture at a glance
+## Step 2 - Route the task
+
+| Task | Read |
+|------|------|
+| Listing pages, relations, Matrix/nested entries, pagination, multi-site | [element-queries.md](references/element-queries.md) |
+| Printing anything user-influenced, forms that POST, JS data, rich text output | [twig-security.md](references/twig-security.md) |
+| Meta tags, JSON-LD, sitemaps, robots.txt, hreflang | [seomatic.md](references/seomatic.md) |
+| Static caching, "changes don't show", cache warming, dynamic bits on cached pages | [blitz.md](references/blitz.md) |
+| Building, theming, or debugging forms; spam; form emails not sending | [formie.md](references/formie.md) |
+| Rich-text fields, nested entries inside rich text, Redactor conversion | [ckeditor.md](references/ckeditor.md) |
+| Craft on DDEV: the `craftcms` type, `ddev craft`, Craft's `upload_dirs` (generic DDEV: `ddev-ops`) | [ddev.md](references/ddev.md) |
+| Tests for modules/plugins, fixtures, ECS/PHPStan | [codeception.md](references/codeception.md) |
+| Front-end assets, Vite dev server, critical CSS | [craft-vite.md](references/craft-vite.md) |
+| Moving off Laravel Mix/Webpack, or Vue 2 to Vue 3 | `frontend-upgrade-ops` (the full migration playbook) |
+| Upgrading Craft 3 → 4 → 5, plugin version lines, Craft 6 status | [upgrades.md](references/upgrades.md) |
+| Slow pages, images, queue setup, production config | [performance.md](references/performance.md) |
+| Core Web Vitals failing (LCP, INP, CLS), PageSpeed or Search Console flags | `web-perf-ops` (field data first; its `references/craft.md` maps the Craft levers) |
+| Headless front ends, GraphQL schemas and tokens | [graphql.md](references/graphql.md) |
+| Modules, plugins, events, migrations, queue jobs | [plugin-development.md](references/plugin-development.md) |
+| Modeling a new flexible page type | [assets/entry-type-field-layout.md](assets/entry-type-field-layout.md) |
+
+## Step 3 - Hold the non-negotiables
+
+1. **Eager-load before you loop.** `.with([...])` up front; `.eagerly()` inside shared
+   partials (Craft 5 only). One query per card is the most common Craft perf bug.
+2. **Escape by context.** Never `|raw` user-influenced values; `|e('js')` inside JS
+   strings; `{{ csrfInput() }}` in every POST form - `csrfInput({ async: true })` on
+   cached pages.
+3. **Schema only through Project Config.** Change it in the CP locally, commit
+   `config/project/`, run `php craft up` on deploy. Production runs
+   `allowAdminChanges => false`; never hand-edit the YAML.
+4. **Data changes are content migrations** (`php craft migrate/create`), tested on a
+   copy of production - not CP clicking on live.
+5. **Production runs a queue worker.** Blitz regeneration, Formie emails and
+   integrations, transform pre-generation, and resaves are all queue jobs.
+6. **Fix queries, then cache.** Blitz for public pages; on Blitz-cached pages drop
+   `{% cache %}` (or set `enableTemplateCaching` false).
+7. **Logic lives in module services**, not Twig - services are testable.
+8. **Stay on the latest Craft 5 patch.** Craft ships regular Twig/RCE security fixes.
+
+## Version matrix
+
+| Package | Craft 3 | Craft 4 | Craft 5 (current) |
+|---------|---------|---------|-------------------|
+| `craftcms/cms` | 3.9 (EOL) | 4.18 (EOL Apr 2026) | Craft 5.x (5.11); Craft 6 in alpha |
+| `nystudio107/craft-seomatic` | 3.x | 4.x | SEOmatic 5 |
+| `putyourlightson/craft-blitz` | 3.x | 4.x | Blitz 5 (5.13 needs Craft 5.6+) |
+| `verbb/formie` | 1.x | 2.x | Formie 3 (Formie 4 in beta) |
+| Rich text | Redactor | Redactor or `craftcms/ckeditor` 3.x | CKEditor plugin 5.x (needs Craft 5.10+; 4.x below that) |
+| `nystudio107/craft-vite` | 1.x | 4.x | craft-vite 5 |
+| `nystudio107/craft-imageoptimize` | 1.x | 4.x | ImageOptimize 5 |
+| `spacecatninja/imager-x` | 3.x | 4.x | Imager-X 6 (5.x still maintained) |
+| `codeception/codeception` | match core's `require-dev` | match core's `require-dev` | Codeception 5 |
+
+Requirements for Craft 5: PHP 8.2+, MySQL 8.0.17+ / MariaDB 10.4.6+ / PostgreSQL 13+.
+Details and plugin upgrade notes: [upgrades.md](references/upgrades.md).
+
+## Everyday commands
+
+| Command (prefix `ddev` locally) | Does |
+|---------------------------------|------|
+| `craft up` | Pending migrations + Project Config - run on every deploy |
+| `craft project-config/apply` / `project-config/rebuild` | Apply YAML to the DB / rebuild YAML from the DB |
+| `craft clear-caches/all` | Data, template, and asset caches |
+| `craft queue/run` / `queue/info` / `queue/retry all` | Work and inspect the queue |
+| `craft blitz/cache/refresh` | Refresh Blitz after template deploys (Blitz tracks content, not templates) |
+| `craft migrate/create <name>` | New content migration |
+| `craft make <type>` | Scaffold modules/plugins/components (`craftcms/generator`) |
+| `craft entrify/categories <group>` | Convert categories (or `tags`, `global-set`) to entries |
+
+## Craft 5 content model
 
 | Concept | What it is | Craft 5 change |
 |---------|-----------|----------------|
-| **Section** | Container exposing entry types + URL rules | Three kinds: Single, Channel, Structure |
-| **Entry Type** | Atomic unit of content (fields, title, slug) | Now **global + reusable** across sections, with per-section aliases |
-| **Entry** | An instance of an entry type | Can be top-level or **nested** (inside Matrix/CKEditor) |
-| **Field** | Reusable input attached via field layouts | **Globally reusable** — no per-field-instance duplication |
-| **Matrix field** | Repeatable nested content | **Now stores entries** (entry types), not "blocks". Nesting supported natively |
-| **Project Config** | Version-controlled schema (`config/project/`) | Source of truth for sections/fields/settings |
+| **Section** | Single, Channel, or Structure; holds entry types + URI formats | - |
+| **Entry type** | The unit of content shape | **Global and reusable** across sections and Matrix fields |
+| **Field** | Reusable input | **Global**, with multi-instance use in one layout |
+| **Matrix field** | Repeatable nested content | Stores **nested entries**, not blocks |
+| **CKEditor field** | Rich text | Can hold **nested entries** inline |
+| **Element partials** | `_partials/entry/<typeHandle>.twig` | `.render()` renders nested entries through them |
+| **Project Config** | `config/project/` YAML | Source of truth - commit it |
 
-### Section types
+Pick the section type by shape: **Single** for one-off pages (home, contact),
+**Channel** for streams (news, events), **Structure** for hierarchies (pages, docs).
+Prefer flat entry types plus a Matrix "page builder" field over many near-identical
+sections. Starter shape: [entry-type-field-layout.md](assets/entry-type-field-layout.md).
 
-| Type | Use for | Has URLs? | Hierarchy? |
-|------|---------|-----------|-----------|
-| **Single** | One-off pages (home, about) | Optional fixed URI | No |
-| **Channel** | Streams (blog, news, products) | Yes, per-entry-type URI format | No |
-| **Structure** | Nested/ordered content (docs, nav) | Yes | Yes (drag-to-order, levels) |
+## Gotchas
 
----
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Listing page runs hundreds of queries | Relation fetched per item | `.with()` / `.eagerly()` |
+| Change visible in CP, not on site | Blitz/CDN serving cached HTML | [blitz.md](references/blitz.md#debugging-my-change-isnt-showing) |
+| Form submissions save, emails never send | Queue not running in production | Queue daemon ([performance.md](references/performance.md#queue)) |
+| Assets unstyled in production only | Vite 5+ manifest is in `dist/.vite/` | Set `manifestPath` ([craft-vite.md](references/craft-vite.md)) |
+| `{% set seomatic.meta.seoTitle = ... %}` does nothing | `set` only reads | `{% do seomatic.meta.seoTitle('...') %}` |
+| Staging copy of the site got indexed / prod de-indexed | SEOmatic environment wrong | Check robots in view-source ([seomatic.md](references/seomatic.md#environments)) |
+| Project Config conflicts between developers | CP edits on shared/prod environments | `allowAdminChanges` false outside local; one schema change per PR |
+| Event handler fires several times per save | Drafts, revisions, propagation | Guard with `ElementHelper::isDraftOrRevision()` + `propagating` |
+| `craft.matrixBlocks()` errors after upgrade | Removed in Craft 5 | `craft.entries().field(...).owner(...)` |
 
-## Element queries (the 80/20)
-
-Everything readable in Craft is an *element* (entries, assets, users, categories, tags). You fetch them with element queries.
-
-```twig
-{# Channel entries, newest first #}
-{% set posts = craft.entries()
-  .section('blog')
-  .type('article')
-  .orderBy('postDate DESC')
-  .limit(10)
-  .all() %}
-
-{# Eager-load relations to kill N+1 #}
-{% set posts = craft.entries()
-  .section('blog')
-  .with(['author', 'featuredImage', 'categories'])
-  .all() %}
-
-{# Single entry by slug #}
-{% set page = craft.entries().section('pages').slug('about').one() %}
-
-{# Relations: entries related to a given category #}
-{% set related = craft.entries().relatedTo(category).all() %}
-```
-
-| Need | Method |
-|------|--------|
-| Filter by section | `.section('handle')` |
-| Filter by entry type | `.type('handle')` |
-| Eager-load relations | `.with(['field', 'field.subfield'])` |
-| Status | `.status('live')` / `.status(['live','expired'])` |
-| One vs many | `.one()` / `.all()` / `.count()` / `.exists()` |
-| Pagination | `{% paginate query as pageInfo, entries %}` |
-| Eager-load nested Matrix entries | `.with(['matrixField'])` then loop nested entries |
-
-**Eager-loading nested entries (Craft 5):** because Matrix content is now entries, eager-load the Matrix field then iterate the nested entries by their entry type:
-
-```twig
-{% set page = craft.entries().section('pages').with(['body']).one() %}
-{% for block in page.body.all() %}
-  {% switch block.type.handle %}
-    {% case 'text' %}{{ block.richText }}
-    {% case 'image' %}{{ block.image.one().url }}
-  {% endswitch %}
-{% endfor %}
-```
-
-See `references/twig-and-queries.md` for the full query parameter catalog, pagination, and Twig patterns.
-
----
-
-## Twig conventions
-
-| Pattern | Rule |
-|---------|------|
-| Private templates | Prefix with `_` (`_layouts/`, `_partials/`) so they're not directly routable |
-| Layout inheritance | `{% extends '_layouts/base' %}` + `{% block content %}` |
-| Reusable markup | `{% include '_partials/card' with { entry: entry } %}` or `{{ include() }}` |
-| Avoid logic in templates | Push business logic to a module/plugin service, not Twig |
-| Caching | `{% cache %}` — **only after** queries are optimized, never to mask N+1 |
-
----
-
-## Headless / GraphQL
-
-Craft ships a GraphQL API for decoupled frontends (Next.js, Nuxt, Astro, etc.).
-
-| Concern | Approach |
-|---------|----------|
-| Schema | Define **GraphQL schemas** + scopes in Control Panel; generate a token per schema |
-| Auth | Bearer token per schema; public schema for anonymous reads |
-| Alternative | Element API plugin for custom JSON endpoints when GraphQL is overkill |
-| CORS | Configure allowed origins for the headless frontend |
-| Eager loading | GraphQL resolves relations efficiently; still design queries to avoid over-fetching |
-
-See `references/graphql-and-plugins.md` for schema setup, query shape, and plugin/module development.
-
----
-
-## Performance decision table
-
-| Symptom | Fix |
-|---------|-----|
-| Slow listing pages | Eager-load with `.with([...])` — the #1 Craft perf bug is N+1 inside loops |
-| Repeated identical render | `{% cache %}` tag (after query optimization) |
-| Whole-site cache needed | **Blitz** plugin (static page caching, granular invalidation) |
-| Slow `orderBy` on custom field | Ensure the underlying column/field is indexed |
-| Heavy asset transforms | Pre-generate transforms; use Imgix/CDN |
-
----
-
-## Project Config & deployment
-
-- **Project Config** (`config/project/*.yaml`) is the version-controlled source of truth for sections, fields, entry types, settings. Commit it.
-- Apply on deploy: `php craft up` (runs migrations + applies project config).
-- Environment-specific values go in `.env` and `config/general.php` (use `App::env()` / `getenv()`).
-- Data transformations belong in **content migrations**, not manual DB edits.
-
----
-
-## Craft 4 → 5 upgrade checklist
-
-| Area | What changed | Action |
-|------|--------------|--------|
-| Matrix | Blocks → **entries with entry types** | Templates iterating `.type.handle` mostly survive; re-check block-type field handles |
-| Fields | Now **globally reusable** | Expect field/entry-type proliferation post-upgrade — consolidate duplicates |
-| Content storage | Reworked internal storage | Run `php craft up`; test queries on staging |
-| PHP/DB | Craft 5 needs PHP 8.2+ | Verify host before upgrading |
-| Plugins | Many need a Craft 5-compatible release | Audit plugin compatibility first |
-
-Full upgrade guidance: <https://craftcms.com/docs/5.x/upgrade.html>
-
----
-
-## Common gotchas
-
-| Gotcha | Why | Fix |
-|--------|-----|-----|
-| N+1 queries in loops | Element relations lazy-load | Always `.with([...])` before iterating |
-| `{% cache %}` masking slow queries | Cache hides, doesn't fix | Optimize queries first, cache second |
-| Business logic in Twig | Hard to test/reuse | Move to a module/plugin service |
-| Project Config drift in teams | Out-of-band CP edits | Treat `config/project/` as source of truth; `php craft up` on deploy |
-| Untested migrations to prod | Data loss risk | Test on staging clone first |
-| Over-using Matrix | Complexity + perf cost | Use simpler structures when nesting isn't needed |
-| Calling old "Matrix block" APIs | Removed in Craft 5 | Use entry/entry-type APIs |
-
----
-
-## Assets
+## Bundled resources
 
 | File | Use |
 |------|-----|
-| `assets/entry-type-field-layout.md` | Annotated content-modeling starter: section + entry type + field layout + Matrix-as-entries shape, mapped to Project Config |
-
----
+| `assets/entry-type-field-layout.md` | Content-modeling starter: section + entry type + Matrix-as-entries, mapped to Project Config |
+| `assets/craft-facts.json` | The version facts this skill documents (package, major, prose token) |
+| `scripts/check-craft-facts.py` | Staleness verifier: `--offline` (prose still states the facts) / `--live` (Packagist majors) |
 
 ## See also
 
-- `laravel-ops` — shared PHP/Composer/Twig-adjacent tooling, Eloquent patterns for comparison
-- `sql-ops` — index strategy behind slow `orderBy`/relation queries
-- `nginx-ops` — serving Craft, caching headers, reverse proxy for headless
+- `ddev-ops` (generic DDEV: version pinning, env files, snapshots and sanitised pulls,
+  Mutagen, add-ons, Xdebug, and an auditor for `.ddev/` mistakes)
+- `laravel-ops` (Composer/PHP tooling; Craft 6 is Laravel-based) · `sql-ops` (indexes behind
+  slow `orderBy`) · `nginx-ops` (serving Craft, Blitz rewrites) · `perf-ops` (profiling) ·
+  `tailwind-ops` · `playwright-ops` (browser tests against the DDEV URL)
+- `web-perf-ops` (Core Web Vitals: CrUX/RUM first, then the failing subpart; Blitz, transforms,
+  craft-vite critical CSS and SEOmatic/Formie script placement as INP/LCP levers)
+- `frontend-upgrade-ops` (Laravel Mix or Webpack to Vite via craft-vite, Vue 2 to Vue 3,
+  Vue islands in Twig, and when a widget should become Alpine instead)
+- `a11y-ops` (WCAG 2.2 for Twig sites: heading levels across partials, asset alt text, Formie
+  and CKEditor markup, multi-site `lang`; see its `references/server-rendered-templates.md`)
+- `security-ops` (Craft/Twig/PHP security: CSRF and Formie, `allowAnonymous`, devMode and the
+  security key, GraphQL scoping, uploads, advisories and Craft 3/4 end of life; its
+  `references/craft-*.md`, `twig-*.md`, `php-*.md`)
+- [Craft 5 docs](https://craftcms.com/docs/5.x/) · [Plugin Store](https://plugins.craftcms.com/) ·
+  [Craft security advisories](https://github.com/craftcms/cms/security/advisories)
 
-### Key external resources
-
-- [Craft CMS 5.x Docs](https://craftcms.com/docs/5.x/)
-- [Entries reference](https://craftcms.com/docs/5.x/reference/element-types/entries.html)
-- [Matrix fields (Craft 5)](https://craftcms.com/docs/5.x/reference/field-types/matrix.html)
-- [Eager-loading](https://craftcms.com/docs/5.x/development/eager-loading.html)
-- [GraphQL API](https://craftcms.com/docs/5.x/development/graphql.html)
-- [Upgrading from Craft 4](https://craftcms.com/docs/5.x/upgrade.html)
-- [Coding guidelines](https://craftcms.com/docs/5.x/extend/coding-guidelines.html)
-- [Blitz plugin](https://putyourlightson.com/plugins/blitz) · [nystudio107 blog](https://nystudio107.com/blog) · [Craft Stack Exchange](https://craftcms.stackexchange.com/)
+**Why this shape:** a 2026 survey of 57 Craft-agency repositories found Craft in 36
+(Craft 5 ×17, 4 ×13, 3 ×6), DDEV in 36, SEOmatic in 33, Blitz 21, Formie 18,
+CKEditor 18, Laravel Mix 18 versus craft-vite 12, Tailwind 12, ECS 11, and Codeception
+10. The references follow that frequency; upgrades matter because half the Craft sites
+were on an EOL major.

@@ -80,6 +80,7 @@ Gather context from T1 diagnosis, then dispatch a `general-purpose` agent preloa
 | Rust (Cargo.toml, .rs files) | general-purpose | `skills/rust-ops/SKILL.md` + perf-ops references | cargo-flamegraph, samply, DHAT, criterion |
 | TypeScript/JavaScript (backend, package.json + server) | general-purpose | `skills/javascript-ops/SKILL.md` + perf-ops references | clinic flame/doctor/bubbleprof, 0x |
 | TypeScript/JavaScript (frontend, bundle issues) | general-purpose | `skills/typescript-ops/SKILL.md` + perf-ops references | webpack-bundle-analyzer, Lighthouse, source-map-explorer |
+| Page speed / Core Web Vitals (LCP, INP, CLS, PageSpeed, CrUX) | route, don't dispatch | `skills/web-perf-ops/SKILL.md` | field-vs-lab method, `triage-vitals.py`, Lighthouse CI budgets |
 | SQL / PostgreSQL | general-purpose | `skills/postgres-ops/SKILL.md` + perf-ops references | EXPLAIN ANALYZE, pg_stat_statements, pgbench |
 | SQL / SQLite, Cloudflare D1, libSQL/Turso (`*.db`, `*.sqlite`, `wrangler.toml` with a d1_databases binding) | general-purpose | `skills/sqlite-ops/SKILL.md` + perf-ops references | EXPLAIN QUERY PLAN, `sqlite-ops/scripts/eqp-triage.py`, `sqlite3 .timer/.stats`, `wrangler d1 insights`, `sql_duration_ms` + `rows_read` |
 | General / unknown / CLI benchmarking | general-purpose | perf-ops references | hyperfine, perf, strace |
@@ -164,6 +165,7 @@ User confirmed the optimization. Proceed with execution.
 {exact changes from preflight report}
 
 ## Before/After Protocol
+Vet both numbers per skills/perf-ops/references/benchmark-vetting.md (interleaved runs, errors and work counted) and lead with its verdict; inconclusive is never a win.
 1. Record the current benchmark baseline: {specific command from T2}
 2. Apply the approved changes
 3. Run the same benchmark again
@@ -298,6 +300,7 @@ When a performance-related request arrives:
 | `references/load-testing.md` | k6, Artillery, vegeta, wrk, Locust methodology and CI integration |
 | `references/optimization-patterns.md` | Caching, database, frontend, API, concurrency, memory optimization strategies |
 | `references/ci-integration.md` | Performance budgets, regression detection, CI pipeline patterns, benchmark baselines |
+| `references/benchmark-vetting.md` | Seven questions before trusting a measured number, interleaved repeat runs, the four verdicts |
 
 Load reference files when deeper tool-specific guidance is needed beyond what the dispatch prompt provides.
 
@@ -305,10 +308,11 @@ Load reference files when deeper tool-specific guidance is needed beyond what th
 
 | Skill | When to Combine |
 |-------|----------------|
+| `web-perf-ops` | Frontend page speed - Core Web Vitals diagnosis, field vs lab data, image/font/JS/CSS fixes, Lighthouse CI |
 | `debug-ops` | Root cause analysis for performance regressions |
 | `monitoring-ops` | Production metrics, alerting on latency/throughput |
 | `test-engineering` | Performance regression tests in CI, benchmark suites |
 | `code-stats` | Identify complex code that may be performance-sensitive |
 | `postgres-ops` | PostgreSQL-specific query optimization, indexing, EXPLAIN |
 | `sqlite-ops` | SQLite/D1/libSQL query plans, covering indexes, rows-read economics, `eqp-triage.py` |
-| `container-orchestration` | Resource limits, pod scaling, container performance |
+| `kubernetes-ops` | Resource limits, pod scaling, container performance |

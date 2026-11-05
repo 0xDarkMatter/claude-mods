@@ -106,6 +106,21 @@ announce_main() {
     echo "    pigeon send $(basename "$MAIN_REPO_ROOT") \"lane $BRANCH $state\" \"Requesting land.\""
   } >&2
 }
+
+# The other half of a handoff: what the lane must NOT do while MAIN lands.
+# `fleet land` merges first and gates second, so for the whole gate the base
+# tip is a merge a red gate resets. On 2026-10-06 two lanes read such a tip as
+# landed, one branching from it and one rebasing onto it. Printed whether or not
+# a MAIN session resolved: a terminal-only lane needs it just as much.
+provisional_note() {
+  {
+    echo
+    echo "  Before you branch from or rebase onto the base branch (a new lane, or"
+    echo "  fixing a CONFLICT), run 'fleet status' (or 'fleet landing', exit 0 = go):"
+    echo "  a tip marked PROVISIONAL is a merge still under its land's gate - NOT"
+    echo "  landed, and a red gate resets it. Wait for the verdict."
+  } >&2
+}
 # === END HANDOFF ==============================================================
 
 STATE=${1:-}
@@ -157,6 +172,7 @@ case "$STATE" in
     { echo "READY"; [[ -n "$LOG" ]] && echo "log=$LOG"; } > "$LANE_FILE"
     echo "signal: $BRANCH → READY"
     announce_main READY "tests green"
+    provisional_note
     ;;
   CONFLICT)
     REASON=${2:-"unspecified"}
@@ -165,6 +181,7 @@ case "$STATE" in
     # A CONFLICT is exactly the case where silence costs most: the lane cannot
     # land itself and MAIN is the only session that can triage it.
     announce_main CONFLICT "$REASON"
+    provisional_note
     ;;
   RUNNING)
     echo "RUNNING" > "$LANE_FILE"

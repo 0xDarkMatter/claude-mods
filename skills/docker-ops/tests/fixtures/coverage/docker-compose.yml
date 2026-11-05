@@ -1,0 +1,4 @@
+# Fixture: the legacy Compose filename.
+services:
+  web:
+    image: ghcr.io/example/web:1.0.0

@@ -180,6 +180,47 @@ That UI counts purgeable space as "Other" and rounds. APFS snapshots are user-de
 
 ---
 
+## Worked example
+
+A user reports "my Mac wakes itself at 3am and is slow during the day." Running `scripts/health-audit.sh` produces a panel that follows the [Terminal Panel Design System](../../../docs/TERMINAL-DESIGN.md):
+
+```
+╭── 🩺 mac-ops · health-audit ───────────────────────────────────── macks-mbp ───●
+│
+├── 3 volumes · 1 panic · 4 wakes/24h · 12 startup items
+│
+├── failing (4)
+│   ├── [panic] 2026-05-14 03:14    Sleep wake failure (com.kext.example.AcmeUSB)
+│   ├── [wake]  3 wakes from BT.HID    Bluetooth keyboard activity at night
+│   ├── [tcc]   Slack denied Screen Recording   (granted previously, lost after update)
+│   └── [start] 12 login items, 3 disabled, 2 unsigned
+│   │   ▲ remove AcmeUSB kext; pair BT keyboard to phone for night; re-grant Slack TCC
+│
+├── warn (2) · pass (9) · info (3)
+│
+╰── R refresh · D drill · ? help ─────────────────── ⬤ panic  • bt-wake  • tcc ───●
+```
+
+Three commands solve it: `panic-triage.sh` decodes the panic; `wake-reasons.sh` shows BT.HID is the dominant wake class; `tcc-audit.sh -a slack` confirms denied. The data was always there — this skill just asks for it correctly *and renders it like a proper instrument*.
+
+### Legacy / non-panel mode
+
+All scripts accept `--json` for NDJSON output (parses with `jq`) and `--redact` for opsec-clean diagnostic dumps. When stdout is not a TTY, panel chrome auto-disables and plain text emits.
+
+Full command sequence for the example:
+
+```bash
+scripts/health-audit.sh                            # diagnose
+scripts/panic-triage.sh                            # decode most recent panic
+scripts/wake-reasons.sh --since 7d                 # weekly wake pattern
+scripts/tcc-audit.sh -a Slack                      # check denied permissions
+scripts/safe-disable-startup.sh --list             # audit startup state
+scripts/safe-disable-startup.sh -n 'Adobe*'        # cull bloat
+sudo launchctl disable system/com.kext.example.AcmeUSB.daemon
+# (then reboot to confirm panic doesn't return)
+scripts/health-audit.sh                            # verify clean
+```
+
 ## General pattern: walking the ladder
 
 For any "my Mac is doing X weird" complaint:

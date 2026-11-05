@@ -1,0 +1,10 @@
+{
+  "name": "widget",
+  "private": true,
+  "scripts": {
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "vite": "^8.0.10"
+  }
+}

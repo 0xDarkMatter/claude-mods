@@ -2,22 +2,62 @@
 
 Essential security patterns for rapid triage during code review and audit.
 
-## OWASP Top 10 (2021) Quick Reference
+## Contents
 
-> A newer OWASP revision may exist — re-verify the current list at owasp.org.
+- OWASP Top 10:2025 Quick Reference
+- OWASP 2021 to 2025 Crosswalk
+- Input Validation
+- Output Encoding
+- Authentication
+- Authorization
+- Secrets Management
+- Security Headers
+- Quick Grep Patterns
 
-| Rank | Vulnerability | Prevention |
-|------|--------------|------------|
-| A01 | Broken Access Control | Check permissions server-side, deny by default |
-| A02 | Cryptographic Failures | Use TLS, hash passwords, encrypt sensitive data |
-| A03 | Injection | Parameterized queries, validate input |
-| A04 | Insecure Design | Threat modeling, secure defaults |
-| A05 | Security Misconfiguration | Harden configs, disable unused features |
-| A06 | Vulnerable Components | Update dependencies, audit regularly |
-| A07 | Auth Failures | MFA, rate limiting, secure session management |
-| A08 | Data Integrity Failures | Verify signatures, use trusted sources |
-| A09 | Logging Failures | Log security events, protect logs |
-| A10 | SSRF | Validate URLs, allowlist destinations |
+## OWASP Top 10:2025 Quick Reference
+
+> Verified 2026-10-05 against https://top10.owasp.org/2025/, the current release. A later
+> revision will renumber again - re-check owasp.org before trusting this table.
+
+| ID | Category | Prevention |
+|----|----------|------------|
+| A01:2025 | Broken Access Control (incl. SSRF, CSRF) | Server-side checks, deny by default, allowlist outbound URLs |
+| A02:2025 | Security Misconfiguration | Harden configs, debug off, named CORS origins, cookie flags |
+| A03:2025 | Software Supply Chain Failures | Lockfiles, advisory + behavioural scans, SBOM, hardened CI |
+| A04:2025 | Cryptographic Failures | TLS, slow password hashes, AEAD modes, keys out of source |
+| A05:2025 | Injection (incl. XSS) | Parameterized queries, contextual output encoding |
+| A06:2025 | Insecure Design | Threat modeling, abuse cases, quotas on costly flows |
+| A07:2025 | Authentication Failures | MFA, rate limiting, no hard-coded credentials, session hygiene |
+| A08:2025 | Software or Data Integrity Failures | Verify signatures, SRI, no untrusted deserialization |
+| A09:2025 | Security Logging and Alerting Failures | Log security events, alert on them, keep secrets out |
+| A10:2025 | Mishandling of Exceptional Conditions | Fail closed, roll back, generic errors, global handler |
+
+Depth: `owasp-top10-a01-a05.md`, `owasp-top10-a06-a10.md`.
+
+## OWASP 2021 to 2025 Crosswalk
+
+Older reports, tickets and scanner output still carry 2021 IDs. Translate by ID through
+this table - never compare bare numbers across revisions (A03 was Injection in 2021 and is
+Software Supply Chain Failures in 2025). Source: "What's changed" in
+https://top10.owasp.org/2025/0x00_2025-Introduction/.
+
+| 2021 | 2021 category | 2025 | Change |
+|------|---------------|------|--------|
+| A01:2021 | Broken Access Control | A01:2025 | Same; now also holds SSRF |
+| A02:2021 | Cryptographic Failures | A04:2025 | Renumbered |
+| A03:2021 | Injection | A05:2025 | Renumbered; XSS still here |
+| A04:2021 | Insecure Design | A06:2025 | Renumbered |
+| A05:2021 | Security Misconfiguration | A02:2025 | Renumbered; XXE still here |
+| A06:2021 | Vulnerable and Outdated Components | A03:2025 | Expanded to Software Supply Chain Failures |
+| A07:2021 | Identification and Authentication Failures | A07:2025 | Renamed Authentication Failures |
+| A08:2021 | Software and Data Integrity Failures | A08:2025 | Renamed Software or Data Integrity Failures |
+| A09:2021 | Security Logging and Monitoring Failures | A09:2025 | Renamed Security Logging and Alerting Failures |
+| A10:2021 | Server-Side Request Forgery (SSRF) | A01:2025 | Folded into Broken Access Control |
+| - | (none) | A10:2025 | New: Mishandling of Exceptional Conditions |
+
+Some CWEs changed category on their own: verbose error messages (CWE-209) sat under
+A04:2021 Insecure Design and now belong to A10:2025. When a finding cites a CWE, tag it by
+that CWE's 2025 home rather than by translating its old ID.
 
 ## Input Validation
 
@@ -111,15 +151,15 @@ def delete_post(post_id):
 
 ## Secrets Management
 
-```bash
-# WRONG - Hardcoded secrets
-API_KEY = "sk-1234567890abcdef"
+```python
+# WRONG - the secret is a literal in source (and so in git history forever)
+client = PaymentClient(key="<live-key-pasted-here>")
 
-# CORRECT - Environment variables
-API_KEY = os.environ["API_KEY"]
+# CORRECT - read from the environment at runtime
+client = PaymentClient(key=os.environ["PAYMENT_KEY"])
 
-# BETTER - Secrets manager
-API_KEY = secrets_client.get_secret("api-key")
+# BETTER - fetch from a secrets manager
+client = PaymentClient(key=secrets_client.get_secret("payment-key"))
 ```
 
 ### Secret Handling Rules

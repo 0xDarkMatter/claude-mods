@@ -2,6 +2,17 @@
 
 Detailed guides for debugging tools across languages and environments.
 
+## Contents
+
+- [Browser DevTools](#browser-devtools)
+- [Node.js Debugging](#nodejs-debugging)
+- [Python Debugging](#python-debugging)
+- [Go Debugging](#go-debugging)
+- [Rust Debugging](#rust-debugging)
+- [Database Debugging](#database-debugging)
+- [Network Debugging](#network-debugging)
+- [Docker Debugging](#docker-debugging)
+
 ## Browser DevTools
 
 ### Elements Panel

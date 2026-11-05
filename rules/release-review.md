@@ -44,7 +44,7 @@ When invoking the github-ops `update` mode (or any equivalent flow):
 
 1. Bump the version, update CHANGELOG / README "Recent Updates"
 2. `git commit` + `git tag` (these stay local until step 4)
-3. Run push-gate preflight on the commit
+3. Run push-preflight on the commit
 4. `git push origin <branch>` + `git push origin <tag>` — OK to do
    without separate confirmation when the user has authorised the publish
 5. **Stop here.** Surface the pushed state to the user:
@@ -95,5 +95,5 @@ release is real.
 ## Cross-reference
 
 - `~/.claude/skills/github-ops/SKILL.md` — release flow modes
-- `~/.claude/skills/push-gate/scripts/preflight.sh` — pre-push secret scan
+- `~/.claude/skills/push-preflight/scripts/preflight.sh` — pre-push secret scan
 - `~/.claude/rules/cli-tools.md` — `gh` CLI usage patterns

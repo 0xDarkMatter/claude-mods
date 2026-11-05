@@ -190,7 +190,9 @@ case "$HOST" in
     if [[ -n "$CAD_MIN" ]] && [[ "$CAD_MIN" -lt 60 ]]; then
       row bad "cadence" "cloud-routine minimum interval is 1 hour - '$CADENCE' is rejected at creation"
     fi
-    if printf '%s %s' "$ESCAL" "$(cfg_list_items scope | tr '\n' ' ')" | grep -Eqi 'connectors?|environment|network access|repositor'; then
+    # `\b` here is the two-char text escape (word boundary). Tools that turn the
+    # escape into a raw 0x08 byte silently kill the connectors branch (tests/run.sh R5).
+    if printf '%s %s' "$ESCAL" "$(cfg_list_items scope | tr '\n' ' ')" | grep -Eqi 'connectors?\b|environment|network access|repositor'; then
       row ok "boundary" "cloud-routine boundary names repos/environment/connectors"
     else
       row bad "boundary" "cloud-routine has NO permission mode - the boundary must be repos + environment network policy + connectors (ALL connectors attach by default); name it in scope/escalation"

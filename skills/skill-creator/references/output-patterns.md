@@ -2,6 +2,20 @@
 
 Effective patterns for achieving specific output formats and quality standards.
 
+## Contents
+
+- Template-Based Generation
+- Example-Driven Specification
+- Quality Criteria
+- Iterative Refinement with Feedback
+- Layered Verbosity
+- Before/After Comparison
+- Structured Alternatives
+- Incremental Disclosure
+- Visual Representations
+- Annotated Examples
+- Constraint-Driven Format
+
 ## Template-Based Generation
 
 Provide templates with clear placeholders:

@@ -1,0 +1,9 @@
+# Fixture (clean): look-alikes the round-3 checks must leave alone.
+services:
+  web:
+    volumes:
+      - ~/.composer/cache:/home/.composer/cache          # a cache, not a credential store
+      - ~/.ssh/known_hosts:/home/.ssh/known_hosts:ro     # public host keys only
+    environment:
+      - DB_PASSWORD=db                                   # DDEV's local-only credentials
+      - PAYMENT_API_TOKEN=${PAYMENT_API_TOKEN}           # a reference, set outside git

@@ -11,11 +11,19 @@
 #                 (structural isolation; use for a repo that can't gitignore
 #                  .claude/worktrees/, or just before destructive cleanups)
 #
-# Default is IN-REPO: <main>/.claude/worktrees/<slug> — the native Claude Code worktree
-# location: tidy (no sibling dirs littering the parent), and gitignored so `git add -A`
-# can't stage its gitlinks (the precondition is verified/ensured below). Committed lane work
-# lives in the shared object store and survives even directory deletion; only UNCOMMITTED work
-# is at risk from `git clean -ff` / `rm -rf`, so land early/often. See rules/worktree-boundaries.md.
+# Placement, first match wins (rules/worktree-boundaries.md "Lane location"):
+#   1. $WORKTREE_ROOT set  -> $WORKTREE_ROOT/<repo>/<slug>, <repo> = the MAIN checkout's dir
+#      name. A machine-wide lane root keeps every project dir free of lanes, so rg/fd/tokei/
+#      `git add -A` in the project never see them. Wins over --sibling (the machine said
+#      where lanes live). No .gitignore entry is needed or written: the lane is outside.
+#   2. --sibling           -> <main>/../<repo>-<slug>
+#   3. default             -> IN-REPO <main>/.claude/worktrees/<slug> — the native Claude Code
+#      location, gitignored so `git add -A` can't stage its gitlinks (the precondition is
+#      verified/ensured below).
+# Committed lane work lives in the shared object store and survives even directory deletion;
+# only UNCOMMITTED work is at risk from `git clean -ff` / `rm -rf`, so land early/often.
+#
+# Env: WORKTREE_ROOT  machine-wide lane root (unset = rules 2/3, byte-for-byte as before)
 #
 # Output contract (SKILL-RESOURCE-PROTOCOL): the new worktree's absolute path is the ONLY thing on
 # stdout (so a caller can `cd "$(new-lane.sh foo)"`); all human-facing messages go to stderr.
@@ -25,9 +33,10 @@
 #   new-lane.sh auth-refactor            # lane/auth-refactor in .claude/worktrees/auth-refactor
 #   new-lane.sh hotfix main              # lane/hotfix off main, in-repo
 #   new-lane.sh --sibling big-migration  # lane/big-migration in ../<repo>-big-migration
+#   WORKTREE_ROOT=/w new-lane.sh fix-x   # lane/fix-x in /w/<repo>/fix-x
 set -euo pipefail
 
-show_help() { sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//' >&2; }
+show_help() { sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//' >&2; }
 
 SIBLING=0
 ARGS=()
@@ -62,11 +71,17 @@ REPO=$(basename "$MAIN")
 BRANCH="lane/$SLUG"
 BASE="${2:-$(git -C "$MAIN" rev-parse --abbrev-ref HEAD 2>/dev/null)}"
 
-# Resolve the lane path (no side effects yet).
-if [ "$SIBLING" -eq 1 ]; then
+# Resolve the lane path (no side effects yet). INREPO gates the .gitignore step below.
+INREPO=0
+if [ -n "${WORKTREE_ROOT:-}" ]; then
+  WROOT="${WORKTREE_ROOT//\\//}"   # a Windows settings.json value may use backslashes
+  WT="${WROOT%/}/$REPO/$SLUG"
+  [ "$SIBLING" -eq 1 ] && echo "new-lane: WORKTREE_ROOT is set — it wins over --sibling" >&2
+elif [ "$SIBLING" -eq 1 ]; then
   WT="$(dirname "$MAIN")/${REPO}-${SLUG}"
 else
   WT="$MAIN/.claude/worktrees/$SLUG"
+  INREPO=1
 fi
 
 # Validate EVERYTHING before mutating anything — a bad base or a conflict must
@@ -80,7 +95,7 @@ git -C "$MAIN" show-ref --verify --quiet "refs/heads/$BRANCH" && { echo "new-lan
 # `git add -A` from the main checkout stages worktree gitlinks (the 2026-04-19
 # incident). Ensure the ignore now that all checks have passed, so the in-repo
 # default is safe in ANY repo — not just one someone already tidied.
-if [ "$SIBLING" -ne 1 ] && ! git -C "$MAIN" check-ignore -q ".claude/worktrees/.probe" 2>/dev/null; then
+if [ "$INREPO" -eq 1 ] && ! git -C "$MAIN" check-ignore -q ".claude/worktrees/.probe" 2>/dev/null; then
   printf '\n# git worktrees / lanes — never tracked (new-lane.sh)\n.claude/worktrees/\n' >> "$MAIN/.gitignore"
   echo "new-lane: '.claude/worktrees/' was not gitignored — added it to .gitignore (commit this)" >&2
 fi

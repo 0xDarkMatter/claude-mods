@@ -62,10 +62,13 @@ All skills follow the official Anthropic pattern with bundled resources:
 **Deliberate exceptions:** `supply-chain-defense`, `prompt-injection-defense` and `test-engineering` are named for a discipline that cuts across every domain, where `-ops` would misdescribe them. Extend this list deliberately; do not invent new suffixes case by case.
 
 **Frontmatter:** field placement is owned by
-[SKILL-SUBAGENT-REFERENCE.md](../docs/SKILL-SUBAGENT-REFERENCE.md) (the Agent Skills
-spec). Only `name`, `description`, `license`, `compatibility`, `allowed-tools`, and
-`metadata` are legal at the top level; `depends-on` / `related-skills` go **inside
-`metadata` as comma-separated strings, not arrays**.
+[SKILL-SUBAGENT-REFERENCE.md](../docs/SKILL-SUBAGENT-REFERENCE.md). A top-level key must be
+one of the six Agent Skills spec fields (`name`, `description`, `license`, `compatibility`,
+`allowed-tools`, `metadata`) **or** one of Claude Code's documented fields (`when_to_use`,
+`argument-hint`, `effort`, ... the full list is in that doc). Claude Code reads its fields
+only at the top level, so never move them under `metadata`. Anything else, including
+`depends-on` / `related-skills`, goes **inside `metadata` as comma-separated strings, not
+arrays**. `bash tests/spec.sh` enforces this with the spec's own validator.
 
 ```yaml
 ---
@@ -174,13 +177,17 @@ run_tests() { ... }
 ```yaml
 # Keys: kebab-case
 name: skill-name
-depends-on: [other-skill]
 allowed-tools: "Read Write"
+metadata:
+  depends-on: "other-skill"   # comma-separated string, never a list
 
 # NOT these:
-dependsOn: [bad]      # camelCase wrong
-depends_on: [bad]     # snake_case wrong
+dependsOn: "bad"      # camelCase wrong
+depends_on: "bad"     # snake_case wrong
 ```
+
+One exception: Claude Code spells its own field `when_to_use` (snake_case). Spell it
+exactly like that. Claude Code silently ignores `when-to-use`, and `tests/spec.sh` rejects it.
 
 ### Markdown
 

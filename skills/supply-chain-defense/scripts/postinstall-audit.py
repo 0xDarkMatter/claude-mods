@@ -12,7 +12,14 @@ Incremental: per-package fingerprint cache means a daily re-run only rescans
 changed trees. Optional --deep confirms flagged npm packages with GuardDog when
 installed (never a false-clean: absent engine = loud skip). Optional --live
 checks each flagged npm version still exists on the registry (an unpublished
-version is a takedown IOC); network errors exit 7, never fake a finding.
+version is a takedown IOC); a registry it cannot reach never fakes a finding.
+
+--live precedence: it only checks packages that are ALREADY flagged, so any run
+that reaches the registry has findings and exits 10. A registry outage cannot
+change that code (it must not hide the findings), so it is reported beside it:
+meta.live = "unavailable" plus meta.live_unchecked in the JSON envelope, a
+"[live] registry: unavailable" line under each record, and an ERROR line on
+stderr. meta.live is "off" without --live, "complete" when every check answered.
 
 Usage: postinstall-audit.py [--root DIR]... [--json] [--findings-only]
                             [--cache PATH|--no-cache] [--min-severity LEVEL]
@@ -21,9 +28,15 @@ Usage: postinstall-audit.py [--root DIR]... [--json] [--findings-only]
 Input:   --root dirs (default: cwd)
 Output:  stdout = findings report (JSON envelope with --json)
 Stderr:  progress, summary, errors
-Exit:    0 clean, 2 usage, 3 root-not-found, 5 missing-dep (--deep w/o engine
-         is a loud SKIP not an error), 7 registry unavailable (--live only),
-         10 FINDINGS at/above --min-severity
+PyPI code is located from each dist-info: top_level.txt (a package dir or a
+single-file module), else RECORD (namespace dirs narrowed to this dist's own
+children). A dist-info whose code neither names is UNSCANNED: named on stderr
+and in meta.unscanned, exit 5, never counted clean (the config-drift-check rule).
+
+Exit:    0 clean, 2 usage, 3 root-not-found, 5 a package NOT scanned (code not
+         located; --deep w/o engine is a loud SKIP that does not change the
+         exit), 10 FINDINGS at/above --min-severity (wins over 5; --live
+         registry outages ride on 10 as meta.live, see above)
 
 Examples:
   postinstall-audit.py --root ~/code
@@ -48,7 +61,9 @@ for _stream in (sys.stdout, sys.stderr):
     if _reconfig:
         _reconfig(encoding="utf-8", errors="replace")
 
-EXIT_OK, EXIT_USAGE, EXIT_NOT_FOUND, EXIT_MISSING_DEP, EXIT_UNAVAILABLE, EXIT_FINDINGS = 0, 2, 3, 5, 7, 10
+# No EXIT_UNAVAILABLE (7): --live only runs on flagged packages, so 7 could never
+# be reached - see the --live precedence note in the docstring.
+EXIT_OK, EXIT_USAGE, EXIT_NOT_FOUND, EXIT_MISSING_DEP, EXIT_FINDINGS = 0, 2, 3, 5, 10
 SKIP_DIRS = {".git", ".hg", ".svn", "worktrees", "__pycache__"}
 SEVERITIES = ("low", "medium", "high")
 SCHEMA = "claude-mods.supply-chain-defense.postinstall-audit/v1"
@@ -114,10 +129,16 @@ PAT_CRED = re.compile(
     r"\.npmrc|\.pypirc|\.aws[/\\]credentials|\.config[/\\]gcloud|\.kube[/\\]config"
     r"|\.ssh[/\\]id_|\.claude[/\\]|\.claude\.json|claude_desktop_config"
     r"|Login Data|Local State|keychain|wallet\.dat|\.docker[/\\]config\.json", re.I)
+# Raw-IP URLs count as exfil endpoints EXCEPT loopback (127.0.0.0/8) and the
+# unspecified address (0.0.0.0): neither leaves the machine, and both are routine
+# in dev-server binds and origin allow-lists. Counting them paired mcp 1.30.0's
+# "http://127.0.0.1:*" allow-list with its own installer's claude_desktop_config
+# write into a HIGH cred-exfil (2026-10-18). Lookahead, not a post-filter: a file
+# naming loopback AND a public IP still matches on the public one.
 PAT_NET = re.compile(
     r"webhook\.site|discord(app)?\.com/api/webhooks|api\.telegram\.org"
     r"|pastebin\.com|hastebin|transfer\.sh|requestbin|burpcollaborator|oast\."
-    r"|interactsh|https?://\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", re.I)
+    r"|interactsh|https?://(?!127\.|0\.0\.0\.0(?!\d))\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", re.I)
 PAT_ENV = re.compile(r"JSON\.stringify\s*\(\s*process\.env\s*\)|Object\.(entries|keys)\s*\(\s*process\.env\s*\)"
                      r"|dict\s*\(\s*os\.environ\s*\)|os\.environ\.items\s*\(\)", re.I)
 PAT_PERSIST = re.compile(r"settings\.json|\.claude[/\\]settings|mcpServers|\.bashrc|\.zshrc"
@@ -197,11 +218,14 @@ def iter_package_dirs(roots):
 
 
 def fingerprint(pkg_dir: Path, max_files: int):
-    """Cheap stat-walk: (n_files, total_size, max_mtime). No content reads."""
+    """Cheap stat-walk: (n_files, total_size, max_mtime). No content reads.
+    `pkg_dir` may be a single file (a PyPI top-level module like six.py)."""
     n = size = 0
     max_mtime = 0.0
     src = []
-    for dirpath, dirnames, filenames in os.walk(pkg_dir):
+    walk = ([(str(pkg_dir.parent), [], [pkg_dir.name])] if pkg_dir.is_file()
+            else os.walk(pkg_dir))
+    for dirpath, dirnames, filenames in walk:
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and d != "node_modules"]
         for f in filenames:
             fp = Path(dirpath) / f
@@ -239,7 +263,62 @@ def scan_npm_manifest(pkg_dir: Path):
     return name, version, findings
 
 
+def _record_targets(base: Path, rels):
+    """Scan targets for RECORD paths (tuples of parts) relative to `base`.
+
+    A top-level file (module, .pth, extension) is its own target. A top-level dir
+    is one target when it is a regular package; a PEP 420 namespace dir (no
+    __init__.py, e.g. protobuf's google/) is shared with other dists, so descend
+    and target only the children this RECORD lists - google/protobuf, not google/.
+    """
+    groups = {}
+    for parts in rels:
+        groups.setdefault(parts[0], []).append(parts[1:])
+    out = []
+    for head, tails in sorted(groups.items()):
+        cand = base / head
+        subs = [t for t in tails if t]
+        if not subs:
+            if cand.is_file():
+                out.append(cand)
+        elif cand.is_dir():
+            if (cand / "__init__.py").is_file():
+                out.append(cand)
+            else:
+                out.extend(_record_targets(cand, subs))
+    return out
+
+
+def record_targets(dist_dir: Path):
+    """Package code named by the dist-info's RECORD (PEP 376/627: every installer
+    writes one). Rows are `path,hash,size`, path relative to site-packages and
+    `/`-separated. Skipped: `..`/absolute paths (console scripts installed
+    outside site-packages), metadata dirs, and __pycache__ byproducts.
+    Returns None when there is no readable RECORD, [] when it names nothing on disk."""
+    import csv
+    record = dist_dir / "RECORD"
+    if not record.is_file():
+        return None
+    rels = []
+    try:
+        for row in csv.reader(read_text_tolerant(record).splitlines()):
+            if not row or not row[0]:
+                continue
+            parts = tuple(p for p in row[0].replace("\\", "/").split("/") if p)
+            if (not parts or row[0].startswith("/") or ":" in parts[0] or ".." in parts
+                    or "__pycache__" in parts
+                    or parts[0].endswith((".dist-info", ".egg-info", ".data"))):
+                continue
+            rels.append(parts)
+    except (OSError, csv.Error):
+        return None
+    return _record_targets(dist_dir.parent, rels)
+
+
 def scan_pypi_dist_info(dist_dir: Path):
+    """Returns (name, version, targets, reason). targets are dirs or files beside
+    the dist-info; reason says why targets is empty (the package is then
+    reported unscanned, never clean)."""
     name = ver = "?"
     try:
         for line in read_text_tolerant(dist_dir / "METADATA").splitlines():
@@ -251,18 +330,31 @@ def scan_pypi_dist_info(dist_dir: Path):
                 break
     except OSError:
         pass
-    # the actual package dirs live beside the dist-info
-    pkg_dirs = []
+    # The code lives beside the dist-info. top_level.txt first (setuptools writes
+    # it; a name is a package dir or a single-file module), then RECORD, which
+    # most modern wheels carry without a top_level.txt.
+    targets = []
     top = dist_dir / "top_level.txt"
     if top.is_file():
         try:
             for mod in read_text_tolerant(top).split():
-                cand = dist_dir.parent / mod
-                if cand.is_dir():
-                    pkg_dirs.append(cand)
+                for cand in (dist_dir.parent / mod, dist_dir.parent / f"{mod}.py"):
+                    if cand.is_dir() or (cand.suffix == ".py" and cand.is_file()):
+                        targets.append(cand)
+                        break
         except OSError:
             pass
-    return name, ver, pkg_dirs
+    reason = ""
+    if not targets:
+        rec = record_targets(dist_dir)
+        if rec:
+            targets = rec
+        elif rec is None:
+            reason = ("top_level.txt names nothing on disk and no readable RECORD"
+                      if top.is_file() else "no top_level.txt and no readable RECORD")
+        else:
+            reason = "RECORD names no package files present on disk"
+    return name, ver, list(dict.fromkeys(targets)), reason
 
 
 def scan_sources(src_files, max_kb: int):
@@ -407,16 +499,21 @@ def main():
     scanned = cached = 0
     packages = []
     findings = []
-    live_unavailable = False
+    live_unchecked = []  # name@version whose registry check could not run
+    unscanned = []  # [{"package", "path", "reason"}] - reported, and never part of a clean verdict
 
     for eco, pkg_dir, marker in iter_package_dirs(roots):
         if eco == "npm":
             name, version, pkg_findings = scan_npm_manifest(pkg_dir)
             scan_dirs = [pkg_dir]
         else:
-            name, version, scan_dirs = scan_pypi_dist_info(pkg_dir)
+            name, version, scan_dirs, reason = scan_pypi_dist_info(pkg_dir)
             pkg_findings = []
             if not scan_dirs:
+                # Dropping these silently once printed "45 packages (45 scanned)"
+                # over a venv with 93 dist-infos: an unread package is not clean.
+                label = f"{name}@{version}" if name != "?" else pkg_dir.name
+                unscanned.append({"package": label, "path": str(pkg_dir), "reason": reason})
                 continue
         key = str(pkg_dir.resolve())
         fp_info, src = fingerprint(scan_dirs[0], args.max_files)
@@ -454,21 +551,34 @@ def main():
                 rec["findings"].append({"severity": "high", "kind": "registry-unpublished",
                                         "detail": f"{name}@{version} no longer served by registry (takedown IOC)"})
             elif status == "unavailable":
-                live_unavailable = True
+                live_unchecked.append(f"{name}@{version}")
         findings.append(rec)
 
     if not args.no_cache:
         save_cache(cache_path, cache)
 
     elapsed = round(time.time() - t0, 1)
-    log(TERM.c("cyan", f"=== postinstall-audit: {len(packages)} packages ({scanned} scanned, "
-                       f"{cached} cache hits) in {elapsed}s - {len(findings)} flagged ==="))
+    log(TERM.c("cyan", f"=== postinstall-audit: {len(packages) + len(unscanned)} packages "
+                       f"({scanned} scanned, {cached} cache hits, {len(unscanned)} NOT scanned) "
+                       f"in {elapsed}s - {len(findings)} flagged ==="))
+    if unscanned:
+        log(TERM.c("red", f"ERROR: {len(unscanned)} package(s) NOT scanned - code not located via "
+                          f"top_level.txt or RECORD; not checked, not clean:"))
+        for u in unscanned:
+            log(f"  {u['package']}  {u['path']}: {u['reason']}")
+    live_state = ("off" if not args.live else "unavailable" if live_unchecked else "complete")
+    if live_unchecked:
+        log(TERM.c("red", f"ERROR: --live registry check unavailable for {len(live_unchecked)} "
+                          f"flagged package(s) - unpublished-version (takedown) check NOT done: "
+                          f"{', '.join(live_unchecked[:5])}{' ...' if len(live_unchecked) > 5 else ''}"))
 
     if args.json:
         print(json.dumps({"data": {"findings": findings,
                                    "packages": [] if args.findings_only else packages},
                           "meta": {"count": len(findings), "packages": len(packages),
                                    "scanned": scanned, "cache_hits": cached,
+                                   "unscanned": unscanned,
+                                   "live": live_state, "live_unchecked": live_unchecked,
                                    "elapsed_s": elapsed, "schema": SCHEMA}}, indent=2))
     else:
         for rec in findings:
@@ -477,15 +587,17 @@ def main():
                 print(f"   [{f['severity']}] {f['kind']}: {f['detail']}")
             if rec.get("guarddog"):
                 print(f"   [deep] guarddog indicators: {rec['guarddog']['indicators']}")
-        if not findings and not args.findings_only:
+            if rec.get("registry") == "unavailable":
+                print("   [live] registry: unavailable - takedown check not done")
+        if not findings and not unscanned and not args.findings_only:
             print("clean: no behavioural findings at/above "
                   f"severity '{args.min_severity}'")
 
+    # Findings win: a registry outage or an unscanned package must never downgrade
+    # or hide them. Both are still reported (stderr + meta), see the docstring.
     if findings:
         sys.exit(EXIT_FINDINGS)
-    if args.live and live_unavailable:
-        sys.exit(EXIT_UNAVAILABLE)
-    sys.exit(EXIT_OK)
+    sys.exit(EXIT_MISSING_DEP if unscanned else EXIT_OK)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,3 @@
+# Copy to .env
+APP_ENV=local
+NODE_TLS_REJECT_UNAUTHORIZED=0

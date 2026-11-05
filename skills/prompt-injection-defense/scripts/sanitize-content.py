@@ -12,12 +12,16 @@ Strip levels (default: standard):
   minimal     bidi overrides + tag-block only        (never touches emoji/multilingual)
   standard    + zero-width, word-joiner, isolates,    (preserves emoji + legit ZWNJ/ZWJ)
               marks, mid-file BOM, VS-supplement,
-              soft hyphen, CGJ, line separators
-  aggressive  + ZWNJ, MVS, PUA, variation selectors   (MAY alter emoji / icon-fonts /
-                                                        Persian-Arabic-Indic-Mongolian)
+              soft hyphen, CGJ, line separators,
+              C0/C1 controls, ESC, DEL, deprecated
+              + musical format characters, reserved
+              default-ignorables
+  aggressive  + ZWNJ, MVS, Mongolian FVS, shorthand   (MAY alter emoji / icon-fonts /
+              format controls, PUA, variation          Persian-Arabic-Indic-Mongolian /
+              selectors                                Duployan)
 
 Bands with a catalog 'replace_with' are REPLACED, not deleted: line/paragraph
-separators, NEL, VT/FF, FS-RS and the spacing Hangul fillers become a space, so
+separators, NEL, VT/FF, FS-US and the spacing Hangul fillers become a space, so
 a forged line can't survive and the words either side never fuse.
 
 Examples:
@@ -72,12 +76,14 @@ def load_bands(path: Path, as_json: bool) -> list[dict]:
     bands = []
     for b in raw.get("bands", []):
         repl = b.get("replace_with")
-        bands.append({
-            "id": b["id"], "start": parse_cp(b["start"]), "end": parse_cp(b["end"]),
-            "strip_level": b.get("strip_level", "standard"),
-            # None = delete the code point; otherwise substitute this character.
-            "replace_with": chr(parse_cp(repl)) if repl else None,
-        })
+        # One entry per span: a band is a start/end pair or a 'ranges' list of them.
+        for start, end in b.get("ranges") or [(b["start"], b["end"])]:
+            bands.append({
+                "id": b["id"], "start": parse_cp(start), "end": parse_cp(end),
+                "strip_level": b.get("strip_level", "standard"),
+                # None = delete the code point; otherwise substitute this character.
+                "replace_with": chr(parse_cp(repl)) if repl else None,
+            })
     return bands
 
 
@@ -105,8 +111,9 @@ def sanitize(text: str, strip_bands: list[dict], nfkc: bool) -> tuple[str, dict,
     replaced: dict[str, int] = {}
     for i, ch in enumerate(text):
         cp = ord(ch)
-        # Printable ASCII, tab and CR/LF always pass. Other C0 controls go to the
-        # catalog: VT/FF/FS-RS are bands and must not slip through as "ASCII".
+        # Printable ASCII, tab and CR/LF always pass. Every other C0 control and
+        # DEL goes to the catalog, which bands them all: none may slip through as
+        # "ASCII" (NUL hides a git diff, ESC and BS rewrite a terminal).
         if 0x20 <= cp < 0x7F or ch in "\t\r\n":
             out_chars.append(ch)
             continue

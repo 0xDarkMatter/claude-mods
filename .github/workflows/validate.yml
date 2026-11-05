@@ -15,7 +15,7 @@ jobs:
       - name: Install jq + ripgrep + gitleaks (security suites need them)
         run: |
           sudo apt-get update && sudo apt-get install -y jq ripgrep
-          # gitleaks: fetch the release binary (not in apt) so push-gate's
+          # gitleaks: fetch the release binary (not in apt) so push-preflight's
           # scan-secrets.sh and its suite run for real instead of skipping.
           GL_VER=8.21.2
           curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GL_VER}/gitleaks_${GL_VER}_linux_x64.tar.gz" \
@@ -26,15 +26,30 @@ jobs:
         run: npm install -g @anthropic-ai/claude-code
 
       - name: Validate plugin + marketplace manifests
+        # tests/plugin-validate.sh waives only the reserved plugin-name error (exit 3) until
+        # 2026-10-31; any other error still fails. TODO(rename): revert to plain
+        # `claude plugin validate` once the plugin is renamed.
         run: |
-          claude plugin validate .
+          bash tests/plugin-validate.sh --self-test
+          bash tests/plugin-validate.sh . || [ $? -eq 3 ]
           tmp="$(mktemp -d)"
           mkdir -p "$tmp/.claude-plugin"
           cp .claude-plugin/plugin.json "$tmp/.claude-plugin/plugin.json"
-          claude plugin validate "$tmp"
+          bash tests/plugin-validate.sh "$tmp" || [ $? -eq 3 ]
 
       - name: Validate extensions (frontmatter, naming, structure)
         run: bash tests/validate.sh
+
+      # The spec gate runs the Agent Skills reference validator (skills-ref) through uv.
+      # Third-party action pinned by commit SHA (v10.2.0, 2026-09-21), and uv itself
+      # pinned, per rules/supply-chain.md - a moved tag can't change what runs here.
+      - name: Install uv (for the Agent Skills spec gate)
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.11.2"
+
+      - name: Agent Skills spec gate (official skills-ref + Claude Code fields)
+        run: bash tests/spec.sh
 
       - name: Doc-drift gate (docs must match disk)
         run: bash tests/doc-drift.sh
@@ -42,14 +57,26 @@ jobs:
       - name: Agnostic gate (no author-specific identifiers in a public repo)
         run: bash tests/agnostic.sh
 
+      - name: Skill hygiene ratchet (orphan side files, unnamed related skills, relative script calls, duplicate owns)
+        run: bash tests/skill-hygiene.sh
+
       - name: Hook contract tests (stdin JSON in, exit 2 + stderr to block)
         run: bash tests/hooks.sh
 
       - name: Executable-bit gate (tracked scripts must be executable)
         run: bash tests/check-exec-bits.sh
 
+      # Static half only here: Linux has no Windows PowerShell 5.1, so the real parse
+      # runs in the windows-latest job below. pwsh on this runner would not reproduce
+      # the bug (it reads UTF-8), so the gate never uses it.
+      - name: PowerShell 5.1 encoding gate (tracked .ps1/.psm1/.psd1 are ASCII)
+        run: bash tests/check-ps51-parse.sh
+
       - name: Run skill behavioural test suites
         run: bash tests/run-skill-tests.sh
+
+      - name: Process-substitution guards (break each producer, the suite must fail)
+        run: bash tests/procsub-guard.sh
 
       - name: Offline resource checks (verifier scripts)
         run: bash tests/check-resources.sh
@@ -59,6 +86,8 @@ jobs:
   # doctor can only be exercised honestly on a Windows runner. Running it on
   # ubuntu would create files literally named "dir\skills\alpha" and the suite
   # would pass or fail for the wrong reasons.
+  # This is also the only CI job with Windows PowerShell 5.1, so the real 5.1 parse
+  # of tests/check-ps51-parse.sh runs here.
   install-guard:
     runs-on: windows-latest
     steps:
@@ -70,3 +99,9 @@ jobs:
       - name: Install guard + doctor behavioural tests
         shell: bash
         run: bash tests/install-guard.sh
+
+      # The real Windows PowerShell 5.1 parser over every tracked PowerShell file.
+      # --require-parse turns a missing 5.1 host into a failure, not a skip.
+      - name: PowerShell 5.1 parse gate (powershell.exe parses every .ps1)
+        shell: bash
+        run: bash tests/check-ps51-parse.sh --require-parse

@@ -3,6 +3,14 @@
 # Global mail database at ~/.claude/pmail.db
 # Project identity: 6-char ID derived from git root commit (stable across
 # renames, moves, clones) with fallback to canonical path hash for non-git dirs.
+# One project = one inbox, shared by every session in it - a repo's worktrees
+# included. Each message records its sender's session (from_session), and a
+# session's inbox commands never show or mark its own mail (self_session).
+#
+# Sections (search "# ===" headers): SQLite access (the sqlite3 shadow, stdin
+# exec) | Identity (project hash, main-repo resolution, session id) | Database
+# (schema + migrations, escaping, name resolution) | Identicon display | Mail
+# operations (one function per command) | Dispatch.
 
 set -euo pipefail
 
@@ -116,6 +124,30 @@ project_name() {
   basename "$(resolve_main_repo "${1:-$PWD}")"
 }
 
+# The Claude Code session running this command, or nothing. Claude Code exports
+# CLAUDE_CODE_SESSION_ID to tool subprocesses, and it is the same id the
+# check-mail hook reads from its stdin JSON (.session_id - both name the
+# transcript). Stored with each message as from_session so a session is never
+# handed its own mail: a repo's worktrees share its project hash, so a lane's
+# report to the coordinator otherwise came straight back to the lane. Empty in
+# a plain terminal. Not id-shaped -> empty, because it lands in SQL literals.
+self_session() {
+  local sid="${CLAUDE_CODE_SESSION_ID:-}"
+  if [[ $sid =~ ^[A-Za-z0-9_-]{1,128}$ ]]; then
+    printf '%s' "$sid"
+  fi
+}
+
+# SQL clause that keeps the calling session's own sent mail out of its inbox
+# queries (count, unread, read, status). Empty outside a session.
+not_mine() {
+  local sid
+  sid=$(self_session)
+  if [ -n "$sid" ]; then
+    printf " AND COALESCE(from_session,'')<>'%s'" "$sid"
+  fi
+}
+
 # ============================================================================
 # Database
 # ============================================================================
@@ -155,6 +187,9 @@ SQL
   # Migration: add attachments column if missing
   sqlite3 "$MAIL_DB" "SELECT attachments FROM messages LIMIT 0;" 2>/dev/null || \
     sqlite3 "$MAIL_DB" "ALTER TABLE messages ADD COLUMN attachments TEXT DEFAULT '';" 2>/dev/null
+  # Migration: add from_session (sender's session id, see self_session) if missing
+  sqlite3 "$MAIL_DB" "SELECT from_session FROM messages LIMIT 0;" 2>/dev/null || \
+    sqlite3 "$MAIL_DB" "ALTER TABLE messages ADD COLUMN from_session TEXT DEFAULT '';" 2>/dev/null
 }
 
 # Escape text for a single-quoted SQL literal: double every ', and splice any
@@ -222,11 +257,28 @@ resolve_target() {
     fi
   fi
 
-  # 2. Name match (case-insensitive)
+  # 2. Name match (case-insensitive). A name is a directory basename, so two
+  # different repos can share one (two checkouts both called claude-mods), and
+  # the old "most recently registered" pick sent mail to whichever had last run
+  # any pigeon command. Ambiguous -> the sender's own project wins (the name it
+  # most likely means: a lane reporting to its coordinator), else the most
+  # recent; either way stderr names every candidate so a hash can pick one.
   local by_name
-  by_name=$(sqlite3 "$MAIL_DB" "SELECT hash FROM projects WHERE LOWER(name)=LOWER('${safe_target}') ORDER BY registered DESC LIMIT 1;")
+  by_name=$(sqlite3 -separator '|' "$MAIL_DB" "SELECT hash, path FROM projects WHERE LOWER(name)=LOWER('${safe_target}') ORDER BY registered DESC;")
   if [ -n "$by_name" ]; then
-    echo "$by_name"
+    local pick="${by_name%%|*}" own n=0 h p listing=""
+    own=$(get_project_id)
+    while IFS='|' read -r h p; do
+      [ -z "$h" ] && continue
+      n=$((n + 1))
+      if [ "$h" = "$own" ]; then pick="$own"; fi
+      listing="${listing}  ${h}  ${p}"$'\n'
+    done <<< "$by_name"
+    if [ "$n" -gt 1 ]; then
+      printf "Warning: %s projects are named '%s'; using %s. Address one by hash instead:\n%s" \
+        "$n" "$target" "$pick" "$listing" >&2
+    fi
+    echo "$pick"
     return 0
   fi
 
@@ -279,7 +331,7 @@ count_unread() {
   register_project
   local pid
   pid=$(get_project_id)
-  sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${pid}' AND read=0;"
+  sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${pid}' AND read=0$(not_mine);"
 }
 
 list_unread() {
@@ -289,7 +341,7 @@ list_unread() {
   pid=$(get_project_id)
   local rows
   rows=$(sqlite3 -separator '|' "$MAIL_DB" \
-    "SELECT id, from_project, subject, timestamp FROM messages WHERE to_project='${pid}' AND read=0 ORDER BY timestamp DESC;")
+    "SELECT id, from_project, subject, timestamp FROM messages WHERE to_project='${pid}' AND read=0$(not_mine) ORDER BY timestamp DESC;")
   [ -z "$rows" ] && return 0
   while IFS='|' read -r id from_hash subj ts; do
     local from_name
@@ -305,12 +357,24 @@ read_mail() {
   pid=$(get_project_id)
   # Use ASCII record separator (0x1E) to avoid splitting on pipes/newlines in body
   local RS=$'\x1e'
+  # Mail this session sent to its own project (a lane's report to the
+  # coordinator) is the other sessions' to read: never shown or marked here.
+  local sid mine
+  sid=$(self_session)
+  mine=$(not_mine)
+  if [ -n "$sid" ]; then
+    local waiting
+    waiting=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${pid}' AND read=0 AND from_session='${sid}';")
+    if [ "${waiting:-0}" -gt 0 ]; then
+      echo "(${waiting} message(s) this session sent to its own project stay unread for the other sessions sharing it)" >&2
+    fi
+  fi
   local count
-  count=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${pid}' AND read=0;")
+  count=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${pid}' AND read=0${mine};")
   [ "${count:-0}" -eq 0 ] && return 0
   # Query each message individually to preserve multi-line bodies
   local ids
-  ids=$(sqlite3 "$MAIL_DB" "SELECT id FROM messages WHERE to_project='${pid}' AND read=0 ORDER BY timestamp ASC;")
+  ids=$(sqlite3 "$MAIL_DB" "SELECT id FROM messages WHERE to_project='${pid}' AND read=0${mine} ORDER BY timestamp ASC;")
   echo "id | from_project | subject | body | timestamp"
   while read -r msg_id; do
     [ -z "$msg_id" ] && continue
@@ -331,10 +395,13 @@ read_mail() {
       done <<< "$attachments"
     fi
   done <<< "$ids"
+  # Mark exactly what was shown: a blanket "to_project AND read=0" also took
+  # this session's own sent mail and anything that arrived mid-display.
   sqlite3 "$MAIL_DB" \
-    "UPDATE messages SET read=1 WHERE to_project='${pid}' AND read=0;"
-  # Clear signal file
-  rm -f "/tmp/pigeon_signal_${pid}"
+    "UPDATE messages SET read=1 WHERE id IN (${ids//$'\n'/,});"
+  # The signal file is NOT cleared. It is shared by every session with this
+  # project hash (worktrees included), and each one's check-mail hook keeps its
+  # own seen marker against it; deleting it here hid unread mail from them.
 }
 
 read_one() {
@@ -404,8 +471,9 @@ send() {
   fi
   safe_attachments=$(sql_escape "$attachments")
   sql_exec \
-    "INSERT INTO messages (from_project, to_project, subject, body, priority, attachments) VALUES ('${from_id}', '${to_id}', '${safe_subject}', '${safe_body}', '${priority}', '${safe_attachments}');"
-  # Signal the recipient
+    "INSERT INTO messages (from_project, to_project, subject, body, priority, attachments, from_session) VALUES ('${from_id}', '${to_id}', '${safe_subject}', '${safe_body}', '${priority}', '${safe_attachments}', '$(self_session)');"
+  # Signal the recipient: a timestamp every session of that project compares
+  # its own seen marker against (hooks/check-mail.sh) - touched, never deleted.
   touch "/tmp/pigeon_signal_${to_id}"
   local to_name
   to_name=$(display_name "$to_id")
@@ -534,7 +602,7 @@ reply() {
   fi
   safe_attachments=$(sql_escape "$attachments")
   sql_exec \
-    "INSERT INTO messages (from_project, to_project, subject, body, thread_id, attachments) VALUES ('${from_id}', '${orig_from_hash}', '${safe_subject}', '${safe_body}', ${thread_id}, '${safe_attachments}');"
+    "INSERT INTO messages (from_project, to_project, subject, body, thread_id, attachments, from_session) VALUES ('${from_id}', '${orig_from_hash}', '${safe_subject}', '${safe_body}', ${thread_id}, '${safe_attachments}', '$(self_session)');"
   # Signal the recipient
   touch "/tmp/pigeon_signal_${orig_from_hash}"
   local orig_name
@@ -608,7 +676,7 @@ broadcast() {
   while IFS= read -r target_hash; do
     [ -z "$target_hash" ] && continue
     sql_exec \
-      "INSERT INTO messages (from_project, to_project, subject, body) VALUES ('${from_id}', '${target_hash}', '${safe_subject}', '${safe_body}');"
+      "INSERT INTO messages (from_project, to_project, subject, body, from_session) VALUES ('${from_id}', '${target_hash}', '${safe_subject}', '${safe_body}', '$(self_session)');"
     touch "/tmp/pigeon_signal_${target_hash}"
     count=$((count + 1))
   done <<< "$targets"
@@ -620,14 +688,15 @@ status() {
   register_project
   local pid
   pid=$(get_project_id)
-  local unread total
-  unread=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${pid}' AND read=0;")
+  local unread total mine
+  mine=$(not_mine)
+  unread=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${pid}' AND read=0${mine};")
   total=$(sqlite3 "$MAIL_DB" "SELECT COUNT(*) FROM messages WHERE to_project='${pid}';")
   echo "Inbox: ${unread} unread / ${total} total"
   if [ "${unread:-0}" -gt 0 ]; then
     local senders
     senders=$(sqlite3 -separator '|' "$MAIL_DB" \
-      "SELECT from_project, COUNT(*) FROM messages WHERE to_project='${pid}' AND read=0 GROUP BY from_project ORDER BY COUNT(*) DESC;")
+      "SELECT from_project, COUNT(*) FROM messages WHERE to_project='${pid}' AND read=0${mine} GROUP BY from_project ORDER BY COUNT(*) DESC;")
     while IFS='|' read -r from_hash cnt; do
       local from_name
       from_name=$(display_name "$from_hash")

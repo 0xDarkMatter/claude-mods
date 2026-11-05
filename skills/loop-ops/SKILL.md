@@ -15,14 +15,7 @@ engineering* inverts it: you design a **recurring process with memory, verificat
 boundaries** that discovers work, hands it to agents, verifies the result, and decides —
 on a schedule or until a goal is met — whether to **land it or escalate to a human**.
 
-> "You shouldn't be prompting coding agents anymore. You should be designing the loops
-> that prompt your agents." — Peter Steinberger
-
-This skill is the **outer loop**: the orchestration layer *above* a single agent run. It
-is the twin of [`iterate`](../iterate/SKILL.md) — `iterate` is the *inner* loop (one
-metric, one session, git-as-memory); `loop-ops` is the design discipline for the loop
-that *schedules and gates* inner runs. It does not reimplement spawning or landing; it
-**composes** what this repo already ships.
+This is the **outer loop** above a single agent run, the twin of [`iterate`](../iterate/SKILL.md) (the inner loop); it composes what this repo already ships rather than reimplementing it: [references/composition-map.md](references/composition-map.md).
 
 ## Native primitives schedule; loop-ops governs
 
@@ -31,12 +24,7 @@ a native host, declare it as `host:` in the config, and spend the discipline whe
 primitives leave a hole. Verified surface, parameters and limits (2026-08-30):
 [references/native-scheduling.md](references/native-scheduling.md).
 
-| Native primitive | What it gives you | What it does NOT give you |
-|---|---|---|
-| **`/loop`** — a *bundled* skill ([docs](https://code.claude.com/docs/en/scheduled-tasks)), driving `CronCreate`/`CronList`/`CronDelete`; `ScheduleWakeup` for its self-paced mode | Fixed-cron or Claude-paced ticks (delay clamped 60 s–1 h), a built-in maintenance prompt, `.claude/loop.md` to override it, `Esc` to stop | **Session-scoped and in-memory** — fires only while the session is idle, dies with the conversation, and every recurring job **self-deletes after 7 days**. No state spine, no budget, no gate. L1-supervised only. |
-| **Desktop scheduled tasks** — the `scheduled-tasks` MCP server ([docs](https://code.claude.com/docs/en/desktop-scheduled-tasks)) | Durable local ticks (≥1 min) with local files, a **fresh session per run**, a per-task permission mode with saved approvals, a task folder, run history, an Active/Paused toggle | The worktree toggle is **off by default** (runs against uncommitted changes); one catch-up only for a missed window; a Manual-mode task **stalls** on an unapproved tool. No STATE spine, no token budget, no verify gate. |
-| **Cloud routines** — `/schedule` ([docs](https://code.claude.com/docs/en/routines)) | Machine-off ticks (≥1 h), plus **native event triggers**: an API `/fire` endpoint and GitHub `pull_request`/`release` events with filters. A real push guard on non-`claude/` branches | **No permission mode at all** and **every connector attaches by default**; no local files (fresh clone); green run status ≠ task success. The boundary must come from repos + environment + connectors. |
-| **`/goal`** ([docs](https://code.claude.com/docs/en/goal)) | A native *completion* gate — keep going until a fast model confirms the condition | Not a cadence, and not an audit trail. |
+`/loop` (session-scoped, 7-day expiry, L1 only) · Desktop scheduled tasks (durable local, worktree toggle off by default) · cloud routines (machine-off, 1 h floor, no permission mode, every connector attached) · `/goal` (a completion gate, not a cadence). Gives vs lacks: [references/native-primitives-at-a-glance.md](references/native-primitives-at-a-glance.md).
 
 What **none** of them provide — and what this skill is for: a **state spine** that survives
 ticks, a **token budget**, a **verify gate** you can trust, an **escalation rule**, and the
@@ -161,10 +149,6 @@ read/write contract in [references/state-spine.md](references/state-spine.md)):
 - **`loop.config.yaml`** — the loop's definition (goal, tier, cadence, **host**, scope,
   gate, budget, escalation). Scaffolded by `loop-scaffold`, scored by `loop-check`.
 
-A native host gives you a *place* for this spine (a Desktop task's folder) but never the
-spine itself: no host writes `STATE.md`, enforces a token budget, or records what the loop
-*decided*. Run history says a tick happened; the run-log says what it did and cost.
-
 ## Pattern catalog (a morphology, not a fixed list)
 
 Patterns are **compositions of three axes** — `trigger` (cadence / **event** via a Channel
@@ -172,21 +156,7 @@ Patterns are **compositions of three axes** — `trigger` (cadence / **event** v
 The named patterns are well-trodden points in that space; compose your own from the axes.
 Full recipes + the morphology in [references/pattern-catalog.md](references/pattern-catalog.md):
 
-| Pattern | Trigger · Locus | Tier | One-line job |
-|---|---|---|---|
-| `daily-scan` | cadence · local | L1 | discover + prioritize, report only |
-| `pr-watch` | event\|cadence · connector | L1 | watch review state, surface stuck PRs |
-| `ci-watch` | **event** · local | L2 | triage build failures, propose a fix |
-| `dep-bump` | cadence · local | L2 | patch-only bumps behind cooldown + guard |
-| `changelog-gen` | event(tag)\|cadence · local | L1 | draft release notes for approval |
-| `merge-hygiene` | cadence · local | L1 | dead branches, stale flags |
-| `issue-sort` | cadence · connector | L1 | classify + label, propose only |
-| `metric-chase` | **goal** · local | L2 | drive a metric (coverage/latency/eval) via `iterate` |
-| `regression-watch` | cadence\|event · local | L1 | run a benchmark/eval, flag a regression |
-| `digest` | cadence · **connector** | L1 | summarize email/Asana/news (cloud routine) |
-| `backfill` | **goal** · local | L2 | drain a migration/queue **to completion** |
-| `monitor` | **event** · local | L1 | error/deploy webhook → triage + page |
-| `freshness` | cadence · local | L1 | re-check docs/data/deps vs reality |
+Named patterns, L1: `daily-scan`, `pr-watch`, `changelog-gen`, `merge-hygiene`, `issue-sort`, `regression-watch`, `digest`, `monitor`, `freshness`. L2: `ci-watch`, `dep-bump`, `metric-chase` (goal), `backfill` (goal). Trigger, locus and job for each: [references/pattern-catalog.md](references/pattern-catalog.md).
 
 Start any pattern at L1. Graduate to L2 only after the L1 reports prove its judgment.
 **Prefer `event` over `cadence`** where a webhook exists (cheaper, faster than polling).
@@ -205,19 +175,7 @@ Running several loops? Two non-negotiables (detail in
 
 ## Composition map — don't rebuild what exists
 
-| You need to… | Use | Not |
-|---|---|---|
-| improve one metric in one session | [`iterate`](../iterate/SKILL.md) | a hand-rolled inner loop |
-| spawn cheap parallel makers | [`fleet-worker`](../fleet-worker/SKILL.md) | bespoke `claude -p` plumbing |
-| route models across a fan-out (cheap finders, Opus judges) | [`fleet-worker` model-routing](../fleet-worker/references/model-routing.md) | every agent on the orchestrator's model |
-| test-gate + land winning branches | [`fleet-ops`](../fleet-ops/SKILL.md) | a manual merge step |
-| fire on a cadence or an event | a native `host:` — `/loop`, Desktop scheduled task, cloud routine (schedule/API/GitHub triggers); `/goal` for completion | a custom cron in this skill |
-| trust the `verify` gate's judgement | the **`evals-ops`** skill — a gate is an eval (golden set, judge bias, `pass^k`, blocking vs advisory) | eyeballing a few runs and calling it proven |
-| reason about per-tick prompt-cache cost | [`claude-api-ops` caching-and-cost](../claude-api-ops/references/caching-and-cost.md) | a TTL number memorised from a blog post |
-| commit / PR / release | [`git-ops`](../git-ops/SKILL.md), [`github-ops`](../github-ops/SKILL.md) | raw `git push` |
-| signal between loops | [`pigeon`](../pigeon/SKILL.md) | a shared scratch file |
-
-`loop-ops` is the **design layer**; these are the **execution layers**.
+Compose, don't rebuild: `iterate` (one metric, one session), `fleet-worker` (cheap parallel makers, model routing), `fleet-ops` (test-gated landing), a native `host:` for cadence and events, **`evals-ops`** to trust the verify gate, `claude-api-ops` for per-tick cache cost, `git-ops`/`github-ops` for commits and PRs, `pigeon` between loops. Table: [references/composition-map.md](references/composition-map.md).
 
 ---
 
@@ -231,139 +189,7 @@ preflights whether it will actually *run* (host-aware), **cost** estimates spend
 **check-native-facts** for the native-scheduling limits. The discipline before scheduling
 is `init → fill → cost → audit → doctor --live`.
 
-### `scripts/loop-scaffold.sh` — scaffold a loop's state spine
-
-Writes `<dir>/<name>/` with five files from the bundled templates:
-`loop.config.yaml` ([assets/loop.config.template.yaml](assets/loop.config.template.yaml)),
-`STATE.md` ([assets/STATE.template.md](assets/STATE.template.md)), `run-log.md`, `run.md`
-(the headless run prompt, [assets/run.template.md](assets/run.template.md)), and an
-executable **`loop-run.sh`** ([assets/run.sh.template](assets/run.sh.template)) — the
-runner-agnostic tick wrapper any scheduler invokes (cron / Windows Task Scheduler /
-systemd / by hand), **no GitHub Actions required**. Pass a known `--pattern`
-(pr-watch, ci-watch, dep-bump, …) and the config is **seeded** with that
-pattern's scope/goal/escalation — and, at L2+, its gate — so you get a near-ready config to
-review, not blank placeholders (it audits clean immediately). Doctrine holds: it still
-scaffolds at L1 by default with a graduation block.
-
-`--host` records where ticks will execute (`local` default, or `session-cron` /
-`desktop-task` / `cloud-routine` / `external`) so `loop-doctor` checks that host's real
-constraints instead of assuming a local `claude -p`.
-
-```bash
-# Create .loops/pr-watch/ with config + STATE.md + run-log.md + run.md from templates:
-bash scripts/loop-scaffold.sh --name pr-watch --pattern pr-watch --tier L1
-
-# A connector-driven loop bound for a cloud routine (>=1h floor, no permission mode):
-bash scripts/loop-scaffold.sh --name digest --pattern digest --host cloud-routine --cadence 1h
-
-# Custom dir + cadence, preview without writing:
-bash scripts/loop-scaffold.sh --name dep-bump --pattern dep-bump \
-  --tier L2 --cadence 1d --dir .loops --dry-run
-```
-
-Refuses to overwrite a populated `<dir>/<name>/` (exit 5) unless `--force`. Atomic
-writes. `--dry-run` prints what it would create and writes nothing. stdout = the created
-config path.
-
-### `scripts/loop-check.sh` — readiness scorer (run before you schedule)
-
-The question this answers: *is this loop safe to turn on at its declared tier?* It scores
-a `loop.config.yaml` against the readiness rubric — gate present, scope bounded,
-escalation defined, guard + worktree at L2+, budget + kill switch set, permission mode
-consistent with tier — and refuses a green light if any **critical** gap exists.
-
-```bash
-bash scripts/loop-check.sh .loops/pr-watch/loop.config.yaml   # exit 0 ready, 10 not ready
-bash scripts/loop-check.sh --json .loops/dep-bump/loop.config.yaml | jq '.data[] | select(.severity=="error")'
-bash scripts/loop-check.sh --min 80 .loops/ci-watch/loop.config.yaml   # raise the score bar
-```
-
-Exit **0** = ready (no errors, score ≥ `--min`), **10** = not ready (findings on stdout),
-`2` usage, `3` config not found, `4` config unparseable. `--strict` counts warnings
-toward the not-ready signal.
-
-### `scripts/loop-doctor.sh` — live preflight (will it actually run?)
-
-`loop-check` proves the config is *well-formed*; `loop-doctor` proves the loop will
-*execute* — catching the "blocked at 3am" failures audit can't see. `--offline` (CI-safe):
-the budget fits a tick's estimated tokens, the permission mode is achievable (not
-interactive), an L3 bypass declares an isolation boundary. `--live` adds runtime preflight:
-the `verify`/`guard` gate's leading binary resolves on PATH, `claude`/`git` are present,
-the kill-switch sentinel's parent dir exists.
-
-**It is host-aware.** `host:` changes what "will it run" even means, so the doctor checks
-against the declared surface: a `cloud-routine` faster than its 1-hour floor is rejected at
-creation; a routine with no named repos/environment/connector boundary has no gate at all
-(it has no permission mode either, so demanding one there would be a false finding); a
-`session-cron` host at L2+ can't run unattended and is called a predicted failure; and
-`--live` is **skipped, not passed**, for a cloud routine — this machine's PATH says nothing
-about a fresh cloud clone, and a green check there would be false confidence.
-
-```bash
-bash scripts/loop-doctor.sh --offline .loops/pr-watch/loop.config.yaml   # CI gate
-bash scripts/loop-doctor.sh --live .loops/ci-watch/loop.config.yaml          # before scheduling
-bash scripts/loop-doctor.sh --live --json .loops/dep-bump/loop.config.yaml | jq '.data[] | select(.state=="bad")'
-bash scripts/loop-doctor.sh --offline .loops/digest/loop.config.yaml   # host: cloud-routine -> floor + boundary
-```
-
-Exit **0** = will run, **10** = a check predicts a runtime failure (gate binary missing,
-bypass on host without isolation, budget too small for a tick), `2` usage, `3` not found,
-`4` unparseable, `5` missing core dep. Run it **after** `loop-check` and before scheduling.
-
-### `scripts/loop-estimate.py` — token/$ estimate by pattern × cadence × model (caching-aware)
-
-Estimate spend **before** committing to a cadence — the cost of an outer loop is
-runs/day × tokens/run × price, and sub-agents multiply it. It also models **prompt
-caching**: a loop re-sends the same `run.md`+system prefix every tick (the Ralph
-property), so the prefix should be cache-written once then read (~0.1×) — *but only if the
-tick interval fits the cache TTL*. **The TTL is a choice, not a constant:** 5 minutes by
-default (1.25× write) or 1 hour with `"ttl": "1h"` (2× write), so the daemon window is
-~4.5 min *or* ~55 min — not a fixed 270 s. The estimator picks the cheapest TTL that stays
-warm at your cadence and names it; past 1 h nothing caches at all. Mechanics and
-break-even: [`claude-api-ops` caching-and-cost](../claude-api-ops/references/caching-and-cost.md).
-The estimate itself is **host-agnostic** — tokens are tokens wherever the tick fires; the
-host-dependent limit is the *minimum cadence*, which `loop-doctor` enforces. Pricing reads from
-`assets/model-pricing.json` (date-stamped; [`claude-api-ops`](../claude-api-ops/SKILL.md)
-is the source of truth — run its `check-model-table.py` if you suspect drift).
-
-```bash
-python scripts/loop-estimate.py --pattern pr-watch --cadence 10m --model claude-haiku-4-5
-python scripts/loop-estimate.py --pattern ci-watch --cadence 15m --model claude-sonnet-5 --days 30 --json
-python scripts/loop-estimate.py --list-models      # the pricing table + its as-of date
-```
-
-Exit `0` ok, `2` usage, `3` pricing file missing, `4` bad cadence/model. Output names
-every assumption (runs/day, tokens/run, sub-agent multiplier) — it's an estimate, and it
-says so.
-
-### `scripts/check-pricing-sync.py` — offline drift guard (CI)
-
-`model-pricing.json` is a *copy* of claude-api-ops's authoritative model table, and a copy
-drifts silently. This offline verifier asserts every model in
-[assets/model-pricing.json](assets/model-pricing.json) matches claude-api-ops's "Current
-Models" table (prices included). Both files are in-repo, so it's network-free and gates PR
-CI via `tests/check-resources.sh`; live model-id drift is owned by claude-api-ops's
-`check-model-table.py`.
-
-```bash
-python scripts/check-pricing-sync.py --offline   # exit 0 in sync, 10 drift, 3 a file missing
-```
-
-### `scripts/check-native-facts.py` — native-scheduling staleness guard
-
-[references/native-scheduling.md](references/native-scheduling.md) encodes a **fast-moving
-external surface**, and `loop-doctor` refuses configs on those numbers — so a silently
-stale limit becomes a wrong refusal. `--offline` (PR CI) proves internal consistency: the
-host vocabulary is *one* set across the config template, `loop-scaffold --host`,
-`loop-doctor`'s case arm and the reference; the reference still carries its `Verified
-<date>` stamp; and every limit the doctor enforces is still stated in the prose that
-justifies it. `--live` (scheduled, never a PR gate) fetches the three published docs pages
-and checks our numbers still appear in them.
-
-```bash
-python scripts/check-native-facts.py --offline   # exit 0 in sync, 10 drift, 3 file missing
-python scripts/check-native-facts.py --live      # exit 7 = docs unreachable (advisory)
-```
+Scripts: `scripts/loop-scaffold.sh` (init), `scripts/loop-check.sh` (audit; exit 10 = not ready), `scripts/loop-doctor.sh` (doctor; exit 10 = predicted runtime failure), `scripts/loop-estimate.py` (cost), `scripts/check-pricing-sync.py` and `scripts/check-native-facts.py` (drift guards). Flags, examples and host-specific behaviour: [references/tools.md](references/tools.md).
 
 ---
 
@@ -384,15 +210,8 @@ python scripts/check-native-facts.py --live      # exit 7 = docs unreachable (ad
 6. **Doctor it:** `bash scripts/loop-doctor.sh --live .loops/<n>/loop.config.yaml` — prove
    it will actually *run* (gate binary on PATH, budget fits a tick). Audit = well-formed;
    doctor = will-run.
-7. **Schedule** the L1 run on the declared host — the **recipe selector** in
-   [references/claude-code-loops.md](references/claude-code-loops.md) prescribes which,
-   because they're not interchangeable: connector-driven (email/Asana, no local code) →
-   **cloud routine**; touches local code → **Desktop scheduled task**; sustained &
-   token-sensitive → a **cache-warm daemon** (`claude -p` inside the cache TTL you paid
-   for), *not* `/loop` (which grows a session and chews tokens); fixed-criteria long task →
-   **`/goal`**; quick supervised polling → `/loop`. Per-primitive limits:
-   [references/native-scheduling.md](references/native-scheduling.md). (L1 is read-only —
-   it just writes `STATE.md` + a report.)
+7. **Schedule** the L1 run on the declared host, picked with the recipe selector in [references/claude-code-loops.md](references/claude-code-loops.md): connector-driven → cloud routine; local code → Desktop scheduled task; sustained and token-sensitive → cache-warm daemon, not `/loop`; fixed criteria → `/goal`; quick supervised polling → `/loop`. L1 is read-only: it writes `STATE.md` + a report.
+
 8. **Read the reports.** Only after the loop's judgment is proven do you graduate it to
    **L2** (worktree + guard + `fleet-ops` landing), change `host:` if the proving host was
    `session-cron`, and re-audit at the higher tier. If the gate's verdict is a judgement
@@ -401,17 +220,7 @@ python scripts/check-native-facts.py --live      # exit 7 = docs unreachable (ad
 
 ## Worked example
 
-A complete, **audit + doctor-clean** L1 loop ships at
-[assets/examples/pr-watch/](assets/examples/pr-watch/): a filled
-`loop.config.yaml`, a *populated* `STATE.md`, the `run.md` run prompt, a sample
-`run-log.md`, the runner-agnostic **`loop-run.sh`** (the tick wrapper, with the
-kill-switch gate and `dontAsk` + allowlist baked in — point cron / Task Scheduler at it),
-and an *optional* `github-actions.yml` for repos already on GitHub. Copy the dir, adjust
-scope/cadence, run `loop-check` + `loop-doctor --live`, then wire `loop-run.sh` to your
-scheduler. The other patterns don't ship as
-static dirs that rot — `loop-scaffold --pattern <name>` *generates* the same, seeded and
-gate-clean, for any pattern at any tier. CI runs `loop-check` + `loop-doctor` on this
-example every build, so it can't drift out of validity.
+A complete, audit- and doctor-clean L1 loop ships at [assets/examples/pr-watch/](assets/examples/pr-watch/): copy it, adjust scope and cadence, run `loop-check` + `loop-doctor --live`, then point your scheduler at its `loop-run.sh`. Detail: [references/tools.md](references/tools.md).
 
 ## Anti-patterns (these are detected and wrong)
 
@@ -444,11 +253,4 @@ gate reward-hacking, and the native-host trio — the **expired** 7-day loop, th
 
 ## See also
 
-- [references/risk-tiers.md](references/risk-tiers.md) — L1/L2/L3 ↔ permission modes, headless profiles, enumerate-vs-isolate.
-- [references/pattern-catalog.md](references/pattern-catalog.md) — the seven patterns, full skeletons + escalation rules.
-- [references/state-spine.md](references/state-spine.md) — STATE.md / run-log / budget schemas, multi-loop coordination.
-- [references/native-scheduling.md](references/native-scheduling.md) — the native primitives themselves (verified 2026-08-30): `CronCreate`/`/loop` + its dynamic mode, the `scheduled-tasks` MCP, cloud routines — parameters, limits, failure semantics, and what each still doesn't give you.
-- [references/claude-code-loops.md](references/claude-code-loops.md) — which mechanism and how to wire it: the recipe selector, event triggers, hooks, the external-scheduler shape.
-- [references/failure-modes.md](references/failure-modes.md) — how loops break (incident-shaped) and the control that catches each.
-- [assets/loop.config.template.yaml](assets/loop.config.template.yaml) — the loop definition starter; [assets/STATE.template.md](assets/STATE.template.md) — the state-spine starter; [assets/run.template.md](assets/run.template.md) — the headless run prompt.
-- Lineage (public sources): the [Ralph loop](https://ghuntley.com/ralph/) (fresh-context inner brute-force) and the broader *loop engineering* discipline framed by Peter Steinberger and Addy Osmani.
+References: [risk-tiers](references/risk-tiers.md) · [pattern-catalog](references/pattern-catalog.md) · [state-spine](references/state-spine.md) · [native-scheduling](references/native-scheduling.md) · [claude-code-loops](references/claude-code-loops.md) · [failure-modes](references/failure-modes.md) · [native-primitives-at-a-glance](references/native-primitives-at-a-glance.md) · [composition-map](references/composition-map.md) · [tools](references/tools.md). Starters: [loop.config.template.yaml](assets/loop.config.template.yaml), [STATE.template.md](assets/STATE.template.md), [run.template.md](assets/run.template.md). What each covers: [references/reference-index.md](references/reference-index.md).

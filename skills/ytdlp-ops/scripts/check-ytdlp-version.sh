@@ -43,7 +43,8 @@
 # Output:  stdout = findings ("DRIFT:"/"STRUCT:" lines), or with --json one
 #          envelope (schema claude-mods.ytdlp-ops.version-check/v1)
 # Stderr:  progress, warnings
-# Exit:    0 clean, 2 usage, 7 advisory (--live: network/API/yt-dlp unavailable,
+# Exit:    0 clean, 1 crashed (a check could not read its input - nothing
+#          verified), 2 usage, 7 advisory (--live: network/API/yt-dlp unavailable,
 #          or the smoke test could not verify extraction — blocked / no JS
 #          runtime / unclassified failure), 10 drift (>60 days behind latest,
 #          a documented flag vanished, an extractor-internal smoke failure, or
@@ -55,7 +56,7 @@
 #   check-ytdlp-version.sh --live --json | jq '.data.days_behind'
 set -uo pipefail
 
-EXIT_OK=0; EXIT_USAGE=2; EXIT_UNAVAILABLE=7; EXIT_DRIFT=10
+EXIT_OK=0; EXIT_ERROR=1; EXIT_USAGE=2; EXIT_UNAVAILABLE=7; EXIT_DRIFT=10
 MAX_AGE_DAYS=60
 RELEASES_API="https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
 # "Me at the zoo" — the first video ever uploaded to YouTube; the most
@@ -154,11 +155,25 @@ offline_checks() {
   done
 
   # 3. every relative resource link in SKILL.md resolves
+  # procsub guard: the pipeline's status (pipefail) is checked before its rows
+  # are used. Fed straight into the loop via `< <(grep ...)`, a grep that could
+  # not read SKILL.md checked no links and the verifier said clean. grep exit 1
+  # is "no links", a legitimate empty result.
+  local links rc=0
+  links="$(grep -oE '\]\((references|assets|scripts|tests)/[^)#]+\)' "$SKILL_MD" \
+           | sed -E 's/^\]\(//; s/\)$//' | sort -u)" || rc=$?
+  if (( rc > 1 )); then
+    echo "ERROR: could not read SKILL.md links (grep pipeline exit $rc) - nothing was verified" >&2
+    if [[ "$JSON" -eq 1 ]]; then
+      printf '{ "error": { "code": "ERROR", "message": "could not read SKILL.md links (grep pipeline exit %s)", "details": {} } }\n' "$rc"
+    fi
+    exit "$EXIT_ERROR"
+  fi
   while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
     [[ -e "$SKILL_DIR/$path" ]] \
       || finding "STRUCT: SKILL.md links to missing file: $path"
-  done < <(grep -oE '\]\((references|assets|scripts|tests)/[^)#]+\)' "$SKILL_MD" \
-           | sed -E 's/^\]\(//; s/\)$//' | sort -u)
+  done <<< "$links"
 }
 
 # ── live: installed yt-dlp vs latest release + smoke extraction ─────────────

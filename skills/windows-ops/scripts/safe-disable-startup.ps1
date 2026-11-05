@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Disable (or re-enable) Windows startup entries via the StartupApproved
-    registry mechanism — no admin required, fully reversible.
+    registry mechanism - no admin required, fully reversible.
 
 .DESCRIPTION
     Equivalent of Task Manager's "Disable" button: writes a 12-byte binary
@@ -13,7 +13,7 @@
       - HKCU/HKLM\...\CurrentVersion\Run                    (64-bit)
       - HKLM\...\WOW6432Node\Microsoft\...\Run              (32-bit)
       - Startup folders (user + all-users)
-    Services and scheduled tasks are NOT touched by this script — those
+    Services and scheduled tasks are NOT touched by this script - those
     need Set-Service / Disable-ScheduledTask respectively.
 
 .PARAMETER Name
@@ -120,9 +120,9 @@ function Get-CurrentState {
     else { return "unknown(0x{0:X2})" -f $val[0] }
 }
 
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 # Mode: List
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 if ($List) {
     $allEntries = Get-RunEntries
     $rows = foreach ($e in $allEntries) {
@@ -150,8 +150,8 @@ if ($List) {
 
     Write-TermLine (New-TermPanelOpen -Brand 'windows-ops' -Name 'windows-ops' -Subtitle 'safe-disable-startup' -Indicator "$($rows.Count) entries")
     Write-TermLine (New-TermPanelVert)
-    $summary = "$($enabled.Count) active · $($disabled.Count) disabled"
-    if ($unknown.Count -gt 0) { $summary += " · $($unknown.Count) unknown" }
+    $summary = "$($enabled.Count) active | $($disabled.Count) disabled"
+    if ($unknown.Count -gt 0) { $summary += " | $($unknown.Count) unknown" }
     Write-TermLine (New-TermSummary -Text $summary)
     Write-TermLine (New-TermPanelVert)
 
@@ -181,7 +181,7 @@ if ($List) {
         foreach ($e in $unknown) {
             $variant = switch ($e.Variant) { 'Run' { 'HKCU/HKLM' } 'Run32' { 'WOW64' } 'StartupFolder' { 'startup folder' } default { $e.Variant } }
             Write-TermLine (New-TermLeaf -Name $e.Name -Meta $variant -Age $e.State -IsLast:($e -eq $last))
-            Write-TermLine (New-TermAlert -Severity warning -Text 'partial/corrupt StartupApproved entry — verify with Task Manager')
+            Write-TermLine (New-TermAlert -Severity warning -Text 'partial/corrupt StartupApproved entry - verify with Task Manager')
         }
         Write-TermLine (New-TermPanelVert)
     }
@@ -199,9 +199,9 @@ if ($List) {
     exit $script:EXIT_OK
 }
 
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 # Mode: Disable/Enable
-# ─────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------
 if (-not $Name) {
     Write-Log -Level ERROR -Message "Must provide -Name or -List. See -? for help."
     exit $script:EXIT_USAGE

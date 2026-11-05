@@ -12,7 +12,8 @@ metadata:
 
 Comprehensive React skill covering hooks, component architecture, state management, Server Components, and performance optimization.
 
-> React 19 ecosystem facts verified as of 2026-07.
+> React 19 ecosystem facts verified as of 2026-10 (Jotai 3, Vitest 5; what changed in
+> each is in the references below).
 
 ## Hook Selection Decision Tree
 
@@ -262,10 +263,10 @@ Does this component need...?
 |------|-------------|
 | `./references/hooks-patterns.md` | Deep hook usage: custom hooks, React 19 hooks, useEffect patterns, hook composition |
 | `./references/component-architecture.md` | Compound components, HOC, render props, portals, forwardRef, polymorphic components |
-| `./references/state-management.md` | Context API, Zustand, Jotai, Redux Toolkit, TanStack Query, React Hook Form |
+| `./references/state-management.md` | Context API, Zustand, Jotai (v3 changes), Redux Toolkit, TanStack Query, React Hook Form |
 | `./references/server-components.md` | RSC architecture, Server Actions, Next.js App Router, caching, streaming, metadata |
 | `./references/performance.md` | React.memo, code splitting, virtualization, React Compiler, Web Vitals, profiling |
-| `./references/testing.md` | RTL queries, user-event, MSW, renderHook, Vitest setup, accessibility testing |
+| `./references/testing.md` | RTL queries, user-event, MSW, renderHook, Vitest 5 setup (jest-dom types, breaking changes), accessibility testing |
 
 ## Staleness Verifier
 

@@ -1,0 +1,8 @@
+{
+  "js.lockfile": {"status": "pass", "reason_contains": ""},
+  "node.pins": {"status": "pass", "reason_contains": ""},
+  "php": {"status": "pass", "reason_contains": ""},
+  "npx": {"status": "pass", "reason_contains": ""},
+  "legacy": {"status": "pass", "reason_contains": ""},
+  "registry": {"status": "pass", "reason_contains": ""}
+}

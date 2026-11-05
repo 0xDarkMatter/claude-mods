@@ -1,0 +1,12 @@
+[
+  {"name": "README.txt", "type": "file"},
+  {"name": "admin-watch", "type": "file"}, {"name": "artisan", "type": "file"}, {"name": "asterios", "type": "file"},
+  {"name": "autocomplete", "type": "dir"},
+  {"name": "blackfire", "type": "file"}, {"name": "cake", "type": "file"}, {"name": "console", "type": "file"},
+  {"name": "craft", "type": "file"}, {"name": "dr", "type": "file"}, {"name": "drush", "type": "file"},
+  {"name": "magento", "type": "file"}, {"name": "maho", "type": "file"}, {"name": "npm", "type": "file"},
+  {"name": "npx", "type": "file"}, {"name": "php", "type": "file"}, {"name": "pint", "type": "file"},
+  {"name": "sake", "type": "file"}, {"name": "shopware-cli", "type": "file"}, {"name": "spark", "type": "file"},
+  {"name": "storefront-watch", "type": "file"}, {"name": "typo3", "type": "file"}, {"name": "wp", "type": "file"},
+  {"name": "xdebug", "type": "file"}, {"name": "xhprof", "type": "file"}, {"name": "yarn", "type": "file"}
+]

@@ -1,27 +1,60 @@
 # Testing and Debugging
 
+Samples target the v2 SDKs (Python `mcp` 2.x, TypeScript `@modelcontextprotocol/server`
+and `/client` 2.x) and MCP Inspector 2.x; v1 differences are in
+[v2-migration.md](v2-migration.md).
+
+## Contents
+
+- [MCP Inspector](#mcp-inspector)
+- [Unit Testing Tools (Python)](#unit-testing-tools-python)
+- [Unit Testing Tools (TypeScript)](#unit-testing-tools-typescript)
+- [Integration Testing](#integration-testing)
+- [Mock Clients](#mock-clients)
+- [Protocol Debugging](#protocol-debugging)
+- [Common Issues and Solutions](#common-issues-and-solutions)
+- [CI Testing](#ci-testing)
+- [Performance Testing](#performance-testing)
+- [Debugging Tools](#debugging-tools)
+- [Error Reproduction](#error-reproduction)
+
 ## MCP Inspector
 
-The MCP Inspector is an interactive debugging tool for testing MCP servers without a full client setup.
+The MCP Inspector is an interactive debugging tool for testing MCP servers without a
+full client setup. v2 (one package, Node `>=22.19.0`) has three modes: web UI (default),
+`--cli` (scriptable), and `--tui`. The v1 line is `@modelcontextprotocol/inspector@v1-latest`.
 
 ### Installation and Usage
 
 ```bash
-# Run directly with npx (no install needed)
-npx @modelcontextprotocol/inspector
+# Web UI (no install needed); pass the stdio server command after the package
+npx @modelcontextprotocol/inspector uv run python server.py
+npx @modelcontextprotocol/inspector npx tsx src/index.ts
 
-# Connect to a stdio server
-npx @modelcontextprotocol/inspector -- uv run python server.py
+# Python SDK shortcut: runs your server under the Inspector
+uv run mcp dev server.py
 
-# Connect to a stdio server with env vars
-npx @modelcontextprotocol/inspector -e API_KEY=sk-key -- uv run python server.py
+# Stdio server with env vars
+npx @modelcontextprotocol/inspector -e API_KEY=sk-key uv run python server.py
 
-# Connect to an SSE server
-npx @modelcontextprotocol/inspector --url http://localhost:8000/sse
+# CLI mode: connect-only probe, then list tools as JSON
+npx @modelcontextprotocol/inspector --cli uv run python server.py --method initialize
+npx @modelcontextprotocol/inspector --cli uv run python server.py --method tools/list --format json
 
-# Connect to a Streamable HTTP server
-npx @modelcontextprotocol/inspector --url http://localhost:8000/mcp
+# CLI mode against a Streamable HTTP (or legacy SSE) server
+npx @modelcontextprotocol/inspector --cli --transport http --server-url http://localhost:8000/mcp --method tools/list
+npx @modelcontextprotocol/inspector --cli --transport sse --server-url http://localhost:8000/sse --method tools/list
+
+# Call a tool with JSON arguments (no key=value coercion)
+npx @modelcontextprotocol/inspector --cli uv run python server.py \
+  --method tools/call --tool-name search --tool-args-json '{"query":"test"}' --format json
 ```
+
+If a server flag collides with an Inspector flag, put `--` before the Inspector flags
+that follow the server command. In v2 the Inspector keeps secrets (OAuth tokens, stdio
+`env:` values) in the OS keychain, or falls back to `~/.mcp-inspector/secrets.json` on
+headless machines. Source: [Inspector README](https://github.com/modelcontextprotocol/inspector)
+and its [CLI smoke-testing guide](https://github.com/modelcontextprotocol/inspector/blob/main/docs/cli-smoke-testing.md).
 
 ### What You Can Do with Inspector
 
@@ -33,8 +66,9 @@ npx @modelcontextprotocol/inspector --url http://localhost:8000/mcp
 | Read resources | Click any resource to see its contents |
 | List prompts | Click "Prompts" tab |
 | Get prompts | Fill in arguments and see rendered prompt |
-| View messages | "Messages" tab shows raw JSON-RPC traffic |
+| View messages | The message log shows raw JSON-RPC traffic |
 | Test notifications | See server notifications in real-time |
+| Script it | `--cli ... --format json`, then `jq -e` to assert; exit codes 0-5 map to failure classes |
 
 ### Inspecting Protocol Messages
 
@@ -46,33 +80,38 @@ The Inspector shows raw JSON-RPC messages. Use this to verify:
 - Notifications are sent at the right times
 
 ```
-Example Inspector message log:
+2025-era session (handshake):
 
-→ {"jsonrpc":"2.0","id":1,"method":"initialize","params":{...}}
+→ {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25",...}}
 ← {"jsonrpc":"2.0","id":1,"result":{"capabilities":{"tools":{}},...}}
 → {"jsonrpc":"2.0","method":"notifications/initialized"}
 → {"jsonrpc":"2.0","id":2,"method":"tools/list"}
 ← {"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"search",...}]}}
 → {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search","arguments":{"query":"test"}}}
 ← {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"..."}]}}
+
+2026-07-28 (no handshake): every request carries protocol version + client
+capabilities in params._meta; server/discover is an optional first call.
 ```
 
 ## Unit Testing Tools (Python)
 
-### Testing with pytest
+### Testing Tool Functions Directly
+
+Decorated tool functions are still plain functions, so test the logic directly and
+mock only external services (never the unit under test):
 
 ```python
 # test_tools.py
-import pytest
-import json
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-# Test tool functions directly (they're just functions)
-from my_server.server import search_docs, create_ticket
+import pytest
+
+from my_server.server import create_ticket, search_docs
 
 class TestSearchDocs:
     def test_basic_search(self):
-        """Test search returns formatted results."""
+        """Search returns formatted results."""
         with patch("my_server.server.perform_search") as mock_search:
             mock_search.return_value = [
                 MagicMock(title="Doc 1", snippet="First result"),
@@ -81,300 +120,284 @@ class TestSearchDocs:
             result = search_docs("test query")
             assert "Doc 1" in result
             assert "Doc 2" in result
-            mock_search.assert_called_once_with("test query")
 
     def test_empty_search(self):
-        """Test search with no results."""
-        with patch("my_server.server.perform_search") as mock_search:
-            mock_search.return_value = []
-            result = search_docs("nonexistent")
-            assert result == ""
+        """Search with no results."""
+        with patch("my_server.server.perform_search", return_value=[]):
+            assert search_docs("nonexistent") == ""
 
     def test_search_error(self):
-        """Test search handles errors gracefully."""
-        with patch("my_server.server.perform_search") as mock_search:
-            mock_search.side_effect = ConnectionError("API down")
+        """Upstream failure propagates."""
+        with patch("my_server.server.perform_search", side_effect=ConnectionError("API down")):
             with pytest.raises(ConnectionError):
                 search_docs("test")
 
 
 class TestCreateTicket:
     def test_create_ticket(self):
-        """Test ticket creation returns confirmation."""
+        """Ticket creation returns confirmation."""
         with patch("my_server.server.api") as mock_api:
             mock_api.create.return_value = MagicMock(id=42, url="https://example.com/42")
             result = create_ticket("Bug report", "Something broke", "high")
             assert "#42" in result
             assert "https://example.com/42" in result
 
-    def test_create_ticket_validation(self):
-        """Test ticket creation validates required fields."""
-        # FastMCP validates types before calling the function
-        # Test the function's own validation
-        with pytest.raises(ValueError):
-            create_ticket("", "body", "medium")  # Empty title
+    def test_create_ticket_rejects_empty_title(self):
+        """The function's own validation (MCPServer validates types before the call)."""
+        from mcp.server.mcpserver.exceptions import ToolError
+        with pytest.raises(ToolError):
+            create_ticket("", "body", "medium")
 ```
+
+### Testing Through the Protocol: the in-memory `Client`
+
+`Client(mcp)` connects to the server object in process, with no transport. It replaces
+v1's `create_connected_server_and_client_session()`. It negotiates **2026-07-28** by
+default, so a tool that still calls `ctx.elicit()` fails here (`NoBackChannelError`);
+pass `mode="legacy"` to test 2025-era behaviour. The SDK docs run tests on anyio:
+
+```python
+# test_server.py
+import pytest
+from mcp import Client
+
+from server import mcp
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+@pytest.fixture
+async def client():
+    async with Client(mcp, raise_exceptions=True) as c:
+        yield c
+
+
+@pytest.mark.anyio
+async def test_add_tool(client: Client):
+    result = await client.call_tool("add", {"a": 2, "b": 3})
+    assert not result.is_error
+    assert result.content[0].text == "5"
+    assert result.structured_content == {"result": 5}
+
+
+@pytest.mark.anyio
+async def test_tool_is_listed(client: Client):
+    tools = await client.list_tools()
+    assert any(t.name == "add" for t in tools.tools)
+
+
+@pytest.mark.anyio
+async def test_resource(client: Client):
+    content = await client.read_resource("config://test")
+    assert '"key"' in content.contents[0].text
+
+
+@pytest.mark.anyio
+async def test_tool_error_reaches_model(client: Client):
+    result = await client.call_tool("get_author", {"title": "Nothing"})
+    assert result.is_error                       # a ToolError, not an exception
+```
+
+Results are v2 types with snake_case attributes (`is_error`, `structured_content`).
+Assert on the outcome, not on the `_meta` server-identity stamp, which every 2026-era
+result carries. Source: [Python SDK Testing](https://py.sdk.modelcontextprotocol.io/get-started/testing/).
 
 ### Testing Async Tools
 
 ```python
-import pytest
-import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 
-@pytest.mark.asyncio
+import pytest
+
+@pytest.mark.anyio
 async def test_async_tool():
-    """Test an async tool handler."""
-    with patch("my_server.server.httpx.AsyncClient") as mock_client:
-        mock_response = AsyncMock()
-        mock_response.text = '{"data": "test"}'
-        mock_response.raise_for_status = MagicMock()
-        mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
+    """Test an async tool handler with a mocked HTTP client."""
+    mock_response = MagicMock(text='{"data": "test"}')
+    mock_response.raise_for_status = MagicMock()
+    mock_instance = AsyncMock()
+    mock_instance.get.return_value = mock_response
 
-        # Better: use a real mock client
-        mock_instance = AsyncMock()
-        mock_instance.get.return_value = mock_response
+    with patch("my_server.server.httpx.AsyncClient") as MockClient:
+        MockClient.return_value.__aenter__.return_value = mock_instance
+        MockClient.return_value.__aexit__.return_value = False
 
-        with patch("my_server.server.httpx.AsyncClient") as MockClient:
-            MockClient.return_value.__aenter__.return_value = mock_instance
-            MockClient.return_value.__aexit__.return_value = False
-
-            result = await fetch_data("https://example.com/api")
-            assert "test" in result
-```
-
-### Testing with FastMCP Test Client
-
-```python
-import pytest
-from mcp.server.fastmcp import FastMCP
-
-# Create a test server
-mcp = FastMCP("test-server")
-
-@mcp.tool()
-def add(a: int, b: int) -> str:
-    """Add two numbers."""
-    return str(a + b)
-
-@mcp.resource("config://test")
-def get_config() -> str:
-    return '{"key": "value"}'
-
-@pytest.mark.asyncio
-async def test_tool_via_mcp():
-    """Test tools through the MCP protocol layer."""
-    async with mcp.test_client() as client:
-        # List tools
-        tools = await client.list_tools()
-        assert any(t.name == "add" for t in tools)
-
-        # Call a tool
-        result = await client.call_tool("add", {"a": 2, "b": 3})
-        assert result[0].text == "5"
-
-@pytest.mark.asyncio
-async def test_resource_via_mcp():
-    """Test resources through the MCP protocol layer."""
-    async with mcp.test_client() as client:
-        resources = await client.list_resources()
-        assert any(r.uri == "config://test" for r in resources)
-
-        content = await client.read_resource("config://test")
-        assert '"key"' in content[0].text
+        result = await fetch_data("https://example.com/api")
+        assert "test" in result
 ```
 
 ## Unit Testing Tools (TypeScript)
 
-### Testing with vitest
+### Testing with vitest: in-process HTTP handler (both eras)
+
+The SDK's own testing guide drives `createMcpHandler` in process through a
+`StreamableHTTPClientTransport` whose `fetch` never touches the network:
 
 ```typescript
 // tools.test.ts
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { z } from "zod";
+import { describe, it, expect, beforeEach } from "vitest";
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
+import * as z from "zod/v4";
+
+function createServer() {
+  const server = new McpServer({ name: "test", version: "1.0.0" });
+  server.registerTool(
+    "search",
+    { description: "Search docs", inputSchema: z.object({ query: z.string() }) },
+    async ({ query }) => ({ content: [{ type: "text", text: (await mockSearch(query)).join("\n") }] })
+  );
+  return server;
+}
 
 describe("search tool", () => {
-  let server: McpServer;
   let client: Client;
 
   beforeEach(async () => {
-    server = new McpServer({ name: "test", version: "1.0.0" });
-
-    server.tool("search", "Search docs", { query: z.string() }, async ({ query }) => {
-      // In real code, this calls an external service
-      const results = await mockSearch(query);
-      return {
-        content: [{ type: "text", text: results.join("\n") }],
-      };
+    const handler = createMcpHandler(createServer);
+    const transport = new StreamableHTTPClientTransport(new URL("http://test.local/mcp"), {
+      fetch: (url, init) => handler.fetch(new Request(url, init)),
     });
-
-    // Connect via in-memory transport
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    await server.connect(serverTransport);
-
-    client = new Client({ name: "test-client", version: "1.0.0" });
-    await client.connect(clientTransport);
+    client = new Client({ name: "test-client", version: "1.0.0" }, { versionNegotiation: { mode: "auto" } });
+    await client.connect(transport);
   });
 
-  it("should return search results", async () => {
+  it("returns search results", async () => {
     const result = await client.callTool({ name: "search", arguments: { query: "test" } });
     expect(result.content).toHaveLength(1);
     expect(result.content[0].type).toBe("text");
   });
 
-  it("should list tools", async () => {
-    const tools = await client.listTools();
-    expect(tools.tools).toHaveLength(1);
-    expect(tools.tools[0].name).toBe("search");
+  it("lists tools", async () => {
+    const { tools } = await client.listTools();
+    expect(tools.map((t) => t.name)).toEqual(["search"]);
   });
 });
 ```
+
+For 2025-era-only tests, `InMemoryTransport.createLinkedPair()` still works. Take
+**both** halves from the same package (`@modelcontextprotocol/server` or `/client`), since
+the two packages bundle separate copies. Source:
+[TS SDK Test a server](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/testing.md).
 
 ### Testing Error Handling
 
 ```typescript
 describe("error handling", () => {
-  it("should return isError for invalid input", async () => {
-    const result = await client.callTool({
-      name: "query_db",
-      arguments: { sql: "DELETE FROM users" },
-    });
+  it("returns isError for invalid input", async () => {
+    const result = await client.callTool({ name: "query_db", arguments: { sql: "DELETE FROM users" } });
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("Only SELECT queries");
   });
 
-  it("should handle tool not found", async () => {
-    await expect(
-      client.callTool({ name: "nonexistent", arguments: {} })
-    ).rejects.toThrow();
+  it("rejects an unknown tool", async () => {
+    await expect(client.callTool({ name: "nonexistent", arguments: {} })).rejects.toThrow();
   });
 });
 ```
 
 ## Integration Testing
 
-### Full Server Integration Test (Python)
+### Full Server Integration Test (Python, stdio subprocess)
+
+`Client` takes `StdioServerParameters` to spawn the server as a subprocess. It replaces
+v1's `stdio_client` + `ClientSession` + `initialize()` layering:
 
 ```python
 import pytest
-import asyncio
-from mcp import ClientSession
-from mcp.client.stdio import stdio_client
+from mcp import Client, StdioServerParameters
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_server_integration():
     """Test the full server by spawning it as a subprocess."""
-    async with stdio_client(
-        command="uv",
-        args=["run", "python", "server.py"],
-        env={"API_KEY": "test-key"},
-    ) as (read, write):
-        async with ClientSession(read, write) as session:
-            # Initialize
-            await session.initialize()
+    params = StdioServerParameters(command="uv", args=["run", "python", "server.py"],
+                                   env={"API_KEY": "test-key"})
+    async with Client(params) as client:
+        tools = await client.list_tools()
+        assert "search" in [t.name for t in tools.tools]
 
-            # List tools
-            tools = await session.list_tools()
-            tool_names = [t.name for t in tools.tools]
-            assert "search" in tool_names
+        result = await client.call_tool("search", {"query": "test"})
+        assert result.content and result.content[0].type == "text"
 
-            # Call a tool
-            result = await session.call_tool("search", {"query": "test"})
-            assert len(result.content) > 0
-            assert result.content[0].type == "text"
+        resources = await client.list_resources()
+        assert resources.resources
 
-            # List resources
-            resources = await session.list_resources()
-            assert len(resources.resources) > 0
-
-            # Read a resource
-            content = await session.read_resource("config://app")
-            assert len(content.contents) > 0
+        content = await client.read_resource("config://app")
+        assert content.contents
 ```
 
 ### Integration Test with HTTP Transport
 
+Use the SDK `Client` against the URL rather than hand-written JSON-RPC. It negotiates
+the era and sends the required headers, which raw `httpx` posts get wrong:
+
 ```python
-import pytest
-import httpx
+import os
 import subprocess
 import time
 
+import httpx
+import pytest
+from mcp import Client
+
+PORT = 8765
+
 @pytest.fixture(scope="module")
 def server_process():
-    """Start the MCP server as a subprocess."""
-    proc = subprocess.Popen(
-        ["uv", "run", "python", "server.py", "--transport", "streamable-http", "--port", "8765"],
-        env={**os.environ, "API_KEY": "test-key"},
-    )
-    time.sleep(2)  # Wait for server to start
+    """Start the MCP server (it calls mcp.run(transport="streamable-http", port=PORT))."""
+    proc = subprocess.Popen(["uv", "run", "python", "server.py"],
+                            env={**os.environ, "API_KEY": "test-key", "PORT": str(PORT)})
+    deadline = time.time() + 15
+    while time.time() < deadline:          # poll instead of a fixed sleep
+        try:
+            httpx.get(f"http://127.0.0.1:{PORT}/mcp", timeout=0.5)
+            break
+        except httpx.TransportError:
+            time.sleep(0.2)
     yield proc
     proc.terminate()
     proc.wait()
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_http_server(server_process):
-    """Test the server via HTTP transport."""
-    async with httpx.AsyncClient(base_url="http://localhost:8765") as client:
-        # Initialize
-        resp = await client.post("/mcp", json={
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2025-03-26",
-                "capabilities": {},
-                "clientInfo": {"name": "test", "version": "1.0.0"},
-            },
-        })
-        assert resp.status_code == 200
-        result = resp.json()["result"]
-        assert "capabilities" in result
-
-        # List tools
-        resp = await client.post("/mcp", json={
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/list",
-        })
-        tools = resp.json()["result"]["tools"]
-        assert len(tools) > 0
+    async with Client(f"http://127.0.0.1:{PORT}/mcp") as client:
+        tools = await client.list_tools()
+        assert tools.tools
+        assert client.protocol_version            # negotiated era, e.g. "2026-07-28"
 ```
 
 ## Mock Clients
 
 ### Python Mock Client
 
+For code that *consumes* an MCP client (a gateway, an agent loop), mock the client
+with real v2 result types:
+
 ```python
 from unittest.mock import AsyncMock
-from mcp.types import TextContent, CallToolResult
 
-def create_mock_session():
-    """Create a mock MCP session for testing."""
-    session = AsyncMock()
+from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
-    # Mock tool listing
-    session.list_tools.return_value = MockToolList(tools=[
-        MockTool(name="search", description="Search docs", inputSchema={
+def create_mock_client():
+    """Create a mock MCP client for testing code that calls MCP servers."""
+    client = AsyncMock()
+    client.list_tools.return_value = ListToolsResult(tools=[
+        Tool(name="search", description="Search docs", input_schema={
             "type": "object",
             "properties": {"query": {"type": "string"}},
             "required": ["query"],
         }),
     ])
 
-    # Mock tool calls
     async def mock_call_tool(name, arguments):
         if name == "search":
-            return CallToolResult(
-                content=[TextContent(type="text", text="Mock result for: " + arguments["query"])]
-            )
-        raise ValueError(f"Unknown tool: {name}")
+            return CallToolResult(content=[TextContent(type="text", text="Mock result for: " + arguments["query"])])
+        return CallToolResult(content=[TextContent(type="text", text=f"Unknown tool: {name}")], is_error=True)
 
-    session.call_tool = AsyncMock(side_effect=mock_call_tool)
-    return session
+    client.call_tool = AsyncMock(side_effect=mock_call_tool)
+    return client
 ```
 
 ## Protocol Debugging
@@ -382,14 +405,14 @@ def create_mock_session():
 ### Logging JSON-RPC Messages
 
 ```python
-import logging
 import json
+import logging
+import sys
 
-# Enable protocol-level logging
-logging.basicConfig(level=logging.DEBUG)
+# stdio servers: log to stderr only
+logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
 logger = logging.getLogger("mcp.protocol")
 
-# Custom message logger
 class MessageLogger:
     def log_request(self, method: str, params: dict, id: int):
         logger.debug(f"→ [{id}] {method}: {json.dumps(params, indent=2)}")
@@ -404,11 +427,15 @@ class MessageLogger:
         logger.error(f"← [{id}] Error: {json.dumps(error, indent=2)}")
 ```
 
+Python v2 also traces every request with OpenTelemetry by default (a server span per
+request, joined to the client's span when both ends run the SDK). Configure an exporter
+to see them.
+
 ### Capturing Messages for Replay
 
 ```python
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 class MessageCapture:
     """Capture MCP messages for debugging and replay."""
@@ -419,7 +446,7 @@ class MessageCapture:
 
     def capture(self, direction: str, message: dict):
         entry = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "direction": direction,  # "sent" or "received"
             "message": message,
         }
@@ -438,11 +465,15 @@ class MessageCapture:
 | Issue | Symptom | Diagnosis |
 |-------|---------|-----------|
 | Missing `jsonrpc` field | Server returns parse error | Check all messages include `"jsonrpc": "2.0"` |
-| Wrong method name | Method not found error | Verify against spec: `tools/call` not `tool/call` |
+| Wrong method name | `-32601` Method not found | Verify against spec: `tools/call` not `tool/call` (v2 returns `-32601` for any unknown method) |
 | Missing `id` on request | No response received | All requests need unique `id`; notifications don't |
-| `params` vs `arguments` | Tool gets empty args | `tools/call` uses `params.arguments` for tool args |
-| Content format wrong | Client shows raw object | Must be `[{"type": "text", "text": "..."}]` |
-| Protocol version mismatch | Initialize fails | Use `"2025-03-26"` (check spec for latest) |
+| `params` vs `arguments` | Tool gets empty args | `tools/call` uses `params.arguments` for tool args; v2 low-level handlers may receive `None` |
+| Content format wrong | Result fails validation | v2 validates results before sending: `{"content": [{"type": "text", "text": "..."}]}` |
+| Protocol version mismatch | `-32022` unsupported protocol version | 2025-era: `"2025-11-25"` in `initialize`; 2026: `"2026-07-28"` per request. Let the SDK `Client` negotiate |
+| `421 Invalid Host header` | HTTP server rejects the request | DNS-rebinding protection: add the host to `transport_security` allowed hosts, include the port |
+| `-32021` missing client capability | Elicitation/sampling call rejected | The client never declared `elicitation` / `sampling`; set the callback on the client |
+| Resource not found code | Client expects `-32002` | v2 returns `-32602` with the URI in `error.data` |
+| `ping` fails on a modern connection | `Method not found` | `ping` was removed at 2026-07-28. Pin `mode="legacy"` for health checks that need it |
 
 ## Common Issues and Solutions
 
@@ -455,60 +486,55 @@ uv run python server.py
 
 # Check 2: Does the command path exist?
 which uv    # or: which python, which npx
-# Ensure the command is on PATH
 
-# Check 3: Are dependencies installed?
-cd /path/to/server && uv pip list | grep mcp
+# Check 3: Which SDK major is installed? (v2 renamed FastMCP to MCPServer)
+uv pip show mcp
 
 # Check 4: Check stderr for errors (stdio servers)
 # Add to server.py:
-import sys
-print("Server starting...", file=sys.stderr)
+#   import sys; print("Server starting...", file=sys.stderr)
 ```
+
+`ModuleNotFoundError: No module named 'mcp.server.fastmcp'` means v1 code met a v2
+install. Port it (`from mcp.server import MCPServer`) or pin `mcp<2`.
 
 ### Tool Not Appearing in Client
 
 ```python
-# Check 1: Does list_tools work?
-# Use MCP Inspector to verify
-npx @modelcontextprotocol/inspector -- uv run python server.py
+# Check 1: Does tools/list work? Use the Inspector:
+#   npx @modelcontextprotocol/inspector --cli uv run python server.py --method tools/list
 
-# Check 2: Is the tool registered correctly?
-# Verify with a simple test:
+# Check 2: Is the tool registered correctly? Verify with a trivial tool:
 @mcp.tool()
 def test_tool() -> str:
     """A test tool that always works."""
     return "Tool is working!"
 
-# Check 3: Invalid inputSchema
-# Ensure schema is valid JSON Schema
-# Common mistake: using Python types instead of JSON Schema types
-# BAD: {"type": "str"}
-# GOOD: {"type": "string"}
+# Check 3: Invalid inputSchema on a hand-built Tool
+# v2 fails tools/list if a schema lacks "type": "object"
+# BAD:  {"type": "str"} or {}
+# GOOD: {"type": "object", "properties": {"q": {"type": "string"}}}
 ```
 
 ### Auth Failures
 
 ```python
 # Check 1: Are env vars set in the CLIENT config, not just your shell?
-# Claude Desktop reads env from claude_desktop_config.json, NOT your shell profile
+# Claude Desktop reads env from claude_desktop_config.json, NOT your shell profile.
+# Python v2 no longer reads MCP_* variables or .env files for server settings.
 
-# Check 2: Verify env vars are accessible
+# Check 2: Verify env vars are accessible (debugging only; never return secret values)
 @mcp.tool()
 def debug_env() -> str:
-    """Show environment variables (for debugging only)."""
+    """Show which app env vars are set."""
     import os
-    return json.dumps({
-        k: v[:5] + "..." if len(v) > 5 else v
-        for k, v in os.environ.items()
-        if k.startswith("MY_")  # Only show your app's vars
-    })
+    return json.dumps({k: "set" for k in os.environ if k.startswith("MY_")})
 
-# Check 3: Token expiration
-# Add logging to token refresh:
-import sys
-print(f"Token expires at: {expires_at}", file=sys.stderr)
+# Check 3: Token expiration - log refresh times to stderr
 ```
+
+`token_verifier=` and `auth=` must be passed together, or `MCPServer(...)` raises
+`ValueError` at startup.
 
 ### Timeout Errors
 
@@ -517,7 +543,7 @@ print(f"Token expires at: {expires_at}", file=sys.stderr)
 async with httpx.AsyncClient(timeout=30.0) as client:
     resp = await client.get(url)
 
-# Check 2: Break long operations into steps
+# Check 2: Break long operations into steps, with progress
 @mcp.tool()
 async def process_large_dataset(dataset_id: str, ctx: Context) -> str:
     """Process a large dataset in chunks with progress."""
@@ -528,8 +554,7 @@ async def process_large_dataset(dataset_id: str, ctx: Context) -> str:
         results.append(await process_chunk(chunk))
     return json.dumps({"processed": len(results)})
 
-# Check 3: Use streaming for large responses
-# Return a summary instead of full data
+# Check 3: Return a summary instead of full data
 @mcp.tool()
 def query_large_table(table: str) -> str:
     """Query a table, returning summary + sample."""
@@ -542,24 +567,22 @@ def query_large_table(table: str) -> str:
     }, default=str)
 ```
 
+Client timeouts are `float` seconds in Python v2 (not `timedelta`). A timed-out request
+now cancels the server-side handler and raises `-32001` (`REQUEST_TIMEOUT`).
+
 ### JSON Parse Errors
 
 ```python
-# Check 1: Don't print to stdout in stdio servers!
-# stdout IS the protocol channel. Use stderr for logging.
+# Check 1: Don't print to stdout in stdio servers - stdout IS the protocol channel.
+# (Python v2 diverts stray prints to stderr while serving; TypeScript does not.)
 import sys
 print("Debug info", file=sys.stderr)  # Correct
-# print("Debug info")  # WRONG - corrupts protocol stream
 
 # Check 2: Ensure tool results are serializable
 @mcp.tool()
 def get_data() -> str:
     result = db.query("SELECT * FROM users")
-    # BAD: datetime objects aren't JSON serializable by default
-    # return json.dumps(result)
-
-    # GOOD: handle non-serializable types
-    return json.dumps(result, default=str)
+    return json.dumps(result, default=str)   # datetimes etc. need default=str
 ```
 
 ## CI Testing
@@ -583,7 +606,7 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Run unit tests
+      - name: Run unit + in-memory protocol tests
         run: uv run pytest tests/ -v
 
       - name: Run integration tests
@@ -591,28 +614,30 @@ jobs:
         env:
           API_KEY: ${{ secrets.TEST_API_KEY }}
 
-      - name: Test server starts
-        run: |
-          uv run python server.py &
-          SERVER_PID=$!
-          sleep 3
-          # Verify server is running
-          kill -0 $SERVER_PID 2>/dev/null && echo "Server started successfully"
-          kill $SERVER_PID
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
 
-      - name: Test with MCP Inspector
+      - name: Smoke-test with the Inspector CLI (pin an exact version in CI)
         run: |
-          npx @modelcontextprotocol/inspector --test -- uv run python server.py
+          npx --yes @modelcontextprotocol/inspector@2.12.0 --cli uv run python server.py \
+            --method tools/list --format json | jq -e '.result.tools | length > 0'
 ```
+
+`--yes` suppresses the first-run install prompt that would hang an unattended job. A
+range like `@2` is not a pin. The Inspector CLI exits `0`-`5` by failure class, so
+branch on the code rather than parsing stderr. `2.12.0` was the latest release on
+2026-10-22.
 
 ### Docker-Based Testing
 
 ```dockerfile
 # Dockerfile.test
 FROM python:3.12-slim
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 WORKDIR /app
 COPY . .
-RUN pip install uv && uv sync
+RUN uv sync
 RUN uv run pytest tests/ -v
 ```
 
@@ -639,80 +664,80 @@ services:
 docker compose -f docker-compose.test.yml up --build --abort-on-container-exit
 ```
 
+The Python SDK v2 verifies TLS through the OS trust store (`truststore`). A minimal image
+with no CA store fails outbound HTTPS from the SDK client, so install `ca-certificates`
+or set `SSL_CERT_FILE`.
+
 ## Performance Testing
 
 ### Concurrent Tool Calls
 
 ```python
-import pytest
 import asyncio
 import time
 
-@pytest.mark.asyncio
-async def test_concurrent_tool_calls():
-    """Test server handles concurrent requests correctly."""
-    async with mcp.test_client() as client:
-        start = time.time()
+import pytest
+from mcp import Client
 
-        # Fire 20 concurrent tool calls
-        tasks = [
-            client.call_tool("search", {"query": f"test-{i}"})
-            for i in range(20)
-        ]
-        results = await asyncio.gather(*tasks)
+@pytest.mark.anyio
+async def test_concurrent_tool_calls():
+    """Server handles concurrent requests correctly."""
+    async with Client(mcp) as client:
+        start = time.time()
+        results = await asyncio.gather(*[
+            client.call_tool("search", {"query": f"test-{i}"}) for i in range(20)
+        ])
         elapsed = time.time() - start
 
         assert len(results) == 20
-        assert all(len(r) > 0 for r in results)
+        assert all(not r.is_error for r in results)
         print(f"20 concurrent calls completed in {elapsed:.2f}s")
 ```
+
+v2 runs sync `def` tools on worker threads, so they can now run concurrently with each
+other. A thread-unsafe tool that passed this test on v1 can fail it on v2.
 
 ### Large Payload Handling
 
 ```python
-@pytest.mark.asyncio
-async def test_large_response():
-    """Test server handles large responses without issues."""
-    async with mcp.test_client() as client:
-        result = await client.call_tool("generate_report", {
-            "size": "large",  # Generates a multi-KB response
-        })
-        assert len(result[0].text) > 10000
-        # Verify it's valid JSON
-        data = json.loads(result[0].text)
-        assert "report" in data
+import json
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
+async def test_large_response():
+    """Server handles large responses without issues."""
+    async with Client(mcp) as client:
+        result = await client.call_tool("generate_report", {"size": "large"})
+        text = result.content[0].text
+        assert len(text) > 10000
+        assert "report" in json.loads(text)
+
+@pytest.mark.anyio
 async def test_response_size_limit():
-    """Verify server truncates oversized responses."""
-    async with mcp.test_client() as client:
+    """Server paginates or truncates oversized responses."""
+    async with Client(mcp) as client:
         result = await client.call_tool("get_all_data", {})
-        text = result[0].text
-        # Server should paginate or truncate
-        assert len(text) < 1_000_000  # Under 1MB
+        assert len(result.content[0].text) < 1_000_000  # Under 1MB
 ```
+
+The Python v2 Streamable HTTP server also rejects **request** bodies over 4 MiB (HTTP 413).
 
 ### Memory Usage
 
 ```python
 import tracemalloc
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_memory_usage():
-    """Test that tool calls don't leak memory."""
+    """Tool calls don't leak memory."""
     tracemalloc.start()
 
-    async with mcp.test_client() as client:
+    async with Client(mcp) as client:
         snapshot1 = tracemalloc.take_snapshot()
-
-        # Run 100 tool calls
         for i in range(100):
             await client.call_tool("search", {"query": f"test-{i}"})
-
         snapshot2 = tracemalloc.take_snapshot()
         stats = snapshot2.compare_to(snapshot1, "lineno")
 
-        # Check no single allocation grew more than 10MB
         for stat in stats[:5]:
             assert stat.size_diff < 10 * 1024 * 1024, f"Memory leak detected: {stat}"
 
@@ -726,24 +751,24 @@ async def test_memory_usage():
 ```bash
 # macOS
 tail -f ~/Library/Logs/Claude/mcp-server-*.log
-
-# Windows
-Get-Content "$env:APPDATA\Claude\Logs\mcp-server-*.log" -Wait
-
-# Look for:
-# - Server startup errors
-# - Tool call failures
-# - Transport disconnections
 ```
 
-### Custom Debug Server
+```powershell
+# Windows
+Get-Content "$env:APPDATA\Claude\Logs\mcp-server-*.log" -Wait
+```
+
+Look for server startup errors, tool call failures, and transport disconnections.
+
+### Custom Debug Tool
 
 Add a debug tool to your server for troubleshooting:
 
 ```python
-import sys
+import json
 import os
 import platform
+import sys
 
 @mcp.tool()
 def server_debug_info() -> str:
@@ -763,10 +788,9 @@ def server_debug_info() -> str:
 Since stdout is the protocol channel, use stderr for all debugging:
 
 ```python
-import sys
 import logging
+import sys
 
-# Configure logging to stderr
 logging.basicConfig(
     stream=sys.stderr,
     level=logging.DEBUG,
@@ -792,6 +816,7 @@ def my_tool(query: str) -> str:
 
 ```python
 import json
+import time
 
 class ProtocolRecorder:
     """Record MCP protocol messages for reproduction."""
@@ -813,33 +838,29 @@ class ProtocolRecorder:
 
 
 class ProtocolReplayer:
-    """Replay recorded messages against a server."""
+    """Replay recorded tools/call requests against a server via an SDK Client."""
 
     def __init__(self, recording_path: str):
         with open(recording_path) as f:
             self.entries = [json.loads(line) for line in f]
 
-    async def replay(self, session):
-        """Replay recorded messages and compare responses."""
-        sent = [e for e in self.entries if e["direction"] == "sent"]
-        received = [e for e in self.entries if e["direction"] == "received"]
+    async def replay(self, client):
+        sent = [e["message"] for e in self.entries if e["direction"] == "sent"]
+        received = {e["message"].get("id"): e["message"]
+                    for e in self.entries if e["direction"] == "received"}
 
-        for i, entry in enumerate(sent):
-            msg = entry["message"]
-            if "id" in msg:
-                # It's a request
-                method = msg["method"]
+        for msg in sent:
+            if msg.get("method") == "tools/call":
                 params = msg.get("params", {})
-                if method == "tools/call":
-                    result = await session.call_tool(
-                        params["name"],
-                        params.get("arguments", {}),
-                    )
-                    # Compare with recorded response
-                    expected = received[i] if i < len(received) else None
-                    if expected:
-                        print(f"[{method}] Match: {result == expected['message']['result']}")
+                result = await client.call_tool(params["name"], params.get("arguments") or {})
+                expected = received.get(msg.get("id"))
+                if expected:
+                    got = result.model_dump(by_alias=True, exclude_none=True)   # camelCase wire shape
+                    print(f"[tools/call {params['name']}] match: {got == expected.get('result')}")
 ```
+
+Responses are matched by JSON-RPC `id`, not by list position. Strip `_meta` before
+comparing 2026-era results, because they carry a server-identity stamp.
 
 ### Minimal Reproduction Script
 
@@ -849,19 +870,18 @@ When filing bug reports, create a minimal reproduction:
 #!/usr/bin/env python3
 """Minimal reproduction for MCP issue #XXX.
 
-Run: uv run python repro.py
-Test: npx @modelcontextprotocol/inspector -- uv run python repro.py
+Run:  uv run python repro.py
+Test: npx @modelcontextprotocol/inspector uv run python repro.py
+Env:  mcp==<exact version from `uv pip show mcp`>
 """
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 
-mcp = FastMCP("repro-server")
+mcp = MCPServer("repro-server")
 
 @mcp.tool()
 def trigger_bug(input: str) -> str:
     """This tool demonstrates the bug."""
-    # Minimal code that triggers the issue
-    result = problematic_operation(input)
-    return result
+    return problematic_operation(input)
 
 if __name__ == "__main__":
     mcp.run()

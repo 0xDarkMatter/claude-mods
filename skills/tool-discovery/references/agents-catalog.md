@@ -1,6 +1,7 @@
 # Agents Catalog
 
-Complete reference for all available agents in the Task tool.
+Complete reference for all agents available to the Agent tool (named Task before Claude
+Code 2.1.63; `Task(...)` still works as an alias).
 
 **Note:** Language and framework domains (Python, JavaScript, TypeScript, Go, Rust, React, Vue, Laravel, Astro, SQL, PostgreSQL) are covered by `-ops` skills, not agents — see `skills-catalog.md`. When subagent work is needed in those domains, dispatch `general-purpose` with an instruction to first read the relevant skill's SKILL.md and references (skill preloading).
 
@@ -11,7 +12,7 @@ Complete reference for all available agents in the Task tool.
 | `cloudflare-expert`, `wrangler-expert` | `cloudflare-ops` skill |
 | `cypress-expert` | `cypress-ops` skill |
 | `bash-expert` | `bash-ops` skill |
-| `aws-fargate-ecs-expert` | `container-orchestration` skill |
+| `aws-fargate-ecs-expert` | `kubernetes-ops` skill (ECS choice notes; AWS's aws-containers skill for depth) |
 | `claude-architect` | `claude-code-ops` skill |
 | `craftcms-expert` | `craftcms-ops` skill |
 | `payloadcms-expert` | `payloadcms-ops` skill |

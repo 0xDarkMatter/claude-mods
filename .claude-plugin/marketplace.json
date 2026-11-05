@@ -1,14 +1,14 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "claude-mods",
-  "description": "Custom commands, skills, agents, and rules for Claude Code",
+  "description": "Skills, rules, hooks and agents for Claude Code that ship their own gates",
   "owner": {
     "name": "0xDarkMatter"
   },
   "plugins": [
     {
       "name": "claude-mods",
-      "description": "Expert agents, skills, commands, rules, hooks, and output styles for Claude Code - session continuity and modern CLI tooling",
+      "description": "Skills, rules, hooks, agents and output styles for Claude Code: test-gated landing for parallel agent work, framework knowledge with staleness verifiers, and security checks aimed at the agent itself",
       "source": "./"
     }
   ]

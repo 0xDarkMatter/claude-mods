@@ -101,7 +101,7 @@ Scan {scope} for {category} issues.
 
 ## Domain Knowledge
 Before scanning, read the relevant skill for deeper patterns:
-- Security scanner: Read skills/security-ops/references/owasp-detailed.md
+- Security scanner: Read skills/security-ops/references/owasp-top10-a01-a05.md and owasp-top10-a06-a10.md
 - Complexity scanner: Read skills/refactor-ops/SKILL.md
 
 Scope: {file_list or "entire codebase"}

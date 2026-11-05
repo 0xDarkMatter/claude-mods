@@ -4,9 +4,9 @@
 # skill/command docs (security-ops, techdebt, testgen, review, security-patterns)
 # that teach secure-coding / secret-detection patterns — not live credentials.
 # Plus historical .claude/settings.local.json entries (local config, not part of
-# any feature change). None are in current feature work. The push-safety gate
-# scans full branch history on a first push to a new remote branch, which re-flags
-# these long-standing entries; allowlisting them here keeps the gate meaningful.
+# any feature change). None are in current feature work. A full-history scan
+# re-flags these long-standing entries (a security-ops audit, or push-preflight's
+# first push to an empty remote); allowlisting them here keeps those scans meaningful.
 #
 # Format: <commit>:<file>:<rule>:<startline>
 cb575e7888f19eef36ec279169d2267f9aa50dad:skills/security-ops/SKILL.md:generic-api-key:181
@@ -24,3 +24,11 @@ abe6bce3b9a1277bf40a08db1dd2be8dc3bdb115:skills/techdebt/references/severity-gui
 2c603fdb1f9f757408be3e47e4d90dff2e2d8b01:commands/testgen.md:generic-api-key:395
 # reason: recall-probe test fixture - a deliberately unguessable planted fact the probe asks the model to recall; not a credential (variable is named SECRET_VALUE by design)
 f829a8e4454fcbfca767a3a46eb0ceec131444fb:skills/claude-api-ops/assets/recall-probe.py:generic-api-key:55
+# security-ops audit prompt checklist line ("Session tokens: cryptographically random,
+# sufficient length?"), moved verbatim from SKILL.md (allowlisted above at cb575e7) into
+# references/audit-agent-prompts.md: prose, not a credential. Fingerprints pin the file.
+d9bc420cb123a2f9b6205d8c0ae6f4f9fa20bea3:skills/security-ops/references/audit-agent-prompts.md:generic-api-key:142
+# docker-ops docker-doctor test fixture: the "creds" case writes a docker config.json with an
+# inline "auths" entry for registry.example.com so the probe can prove it flags inline registry
+# credentials. The value is a fake stub, base64 of a placeholder user:pass; not a credential.
+910a82398f81c71f291b9aba24d070ffeee3e820:skills/docker-ops/tests/fixtures/doctor/run_doctor.py:generic-api-key:59

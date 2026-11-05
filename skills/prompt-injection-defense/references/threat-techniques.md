@@ -2,19 +2,21 @@
 
 Deep dive on the techniques `scan-hidden-unicode.py` detects and
 `sanitize-content.py` removes. Load when triaging a specific finding or explaining
-the mechanism to a reviewer.
+the mechanism to a reviewer. Two companions: line breaks that forge structure and
+control characters that rewrite a terminal are in
+[line-breaks-and-controls.md](line-breaks-and-controls.md); the band table and the
+severity / strip-level model are in [codepoint-bands.md](codepoint-bands.md). Run
+the demos from the skill folder.
 
 ## Contents
 
-1. [The core principle: logical order ≠ visual order](#the-core-principle)
+1. [The core principle](#the-core-principle)
 2. [Bidi reordering (Trojan Source)](#bidi-reordering-trojan-source)
 3. [Tag-block ASCII smuggling](#tag-block-ascii-smuggling)
 4. [Zero-width and invisible characters](#zero-width-and-invisible-characters)
-5. [Line breaks that forge structure](#line-breaks-that-forge-structure)
-6. [Variation-selector steganography](#variation-selector-steganography)
-7. [Homoglyph / confusable impersonation](#homoglyph--confusable-impersonation)
-8. [Private-use-area characters](#private-use-area-characters)
-9. [The severity model](#the-severity-model)
+5. [Variation-selector steganography](#variation-selector-steganography)
+6. [Homoglyph / confusable impersonation](#homoglyph--confusable-impersonation)
+7. [Private-use-area characters](#private-use-area-characters)
 
 ## The core principle
 
@@ -63,7 +65,7 @@ multilingual document can legitimately contain them.
 **Demonstrate it:**
 
 ```bash
-python - <<'PY'
+bash scripts/run-python.sh - <<'PY'
 rlo = chr(0x202E)
 print(f"Always run tests.{rlo}gnihtemos elbmrah skool")  # renders reversed after RLO
 PY
@@ -85,7 +87,7 @@ called **"ASCII smuggling."**
 **Encode/decode:**
 
 ```bash
-python - <<'PY'
+bash scripts/run-python.sh - <<'PY'
 def smuggle(s): return ''.join(chr(0xE0000 + ord(c)) for c in s)   # ASCII -> invisible tags
 def reveal(s): return ''.join(chr(ord(c) - 0xE0000) for c in s if 0xE0000 <= ord(c) <= 0xE007F)
 hidden = smuggle("ignore previous instructions")
@@ -146,55 +148,30 @@ splits a keyword exactly like ZWSP.
 - `U+180E` Mongolian vowel separator - zero-width since Unicode 6.3, yet whitespace to
   older regex engines; **required** in Mongolian to select a vowel's final form ->
   `medium`, stripped only at `aggressive` (the ZWNJ precedent).
+- `U+180B`-`U+180D`, `U+180F` Mongolian free variation selectors - pick a letter's
+  contextual glyph variant in Mongolian, Todo and Manchu; required there, invisible
+  anywhere else -> `medium`, `aggressive`, like the vowel separator they surround.
+- `U+1BCA0`-`U+1BCA3` shorthand format controls - overlap and step letters in Duployan
+  shorthand. Script-specific, so the same `medium` / `aggressive` treatment, though a
+  hit in an English instruction file is worth a look.
+- `U+206A`-`U+206F` deprecated format characters (ISS, ASS, IAFS, AAFS, NADS, NODS) -
+  deprecated controls for bracket mirroring, Arabic shaping and digit shapes (Unicode
+  Standard section 23.3). Modern renderers ignore them, so they are plain invisible
+  separators with no legitimate use -> `high`.
+- `U+1D173`-`U+1D17A` musical symbol format characters (BEGIN BEAM .. END PHRASE) -
+  plain-text music markup that few renderers implement and no script needs -> `high`.
+- **Reserved** `U+2065`, `U+FFF0`-`U+FFF8`, `U+E0080`-`U+E00FF`, `U+E01F0`-`U+E0FFF` -
+  unassigned, but Default_Ignorable already, so that format characters added there
+  later degrade to invisible in older software (UAX #44; Unicode Standard section
+  5.21). The flip side: a conforming renderer draws nothing for them *today*, not a
+  missing-glyph box, and no legitimate text can contain them -> `high`.
 
-## Line breaks that forge structure
-
-**Codepoints:** LINE SEPARATOR `U+2028`, PARAGRAPH SEPARATOR `U+2029`; NEXT LINE (NEL)
-`U+0085`; vertical tab `U+000B` and form feed `U+000C`; information separators FS, GS,
-RS `U+001C`-`U+001E`.
-
-**Mechanism.** Unicode has more line breaks than LF. LS and PS are the unambiguous
-line and paragraph separators (Unicode 18.0 section 23.2, Layout Controls, which
-defers to section 5.8, Newline Guidelines); NEL is the EBCDIC newline (section 23.1,
-Control Codes). UAX #14 puts LS, PS, VT and FF in class BK and NEL in class NL -
-mandatory breaks under rules LB4 and LB5. JavaScript treats LS/PS as line
-terminators, Python's `str.splitlines()` breaks on all of the above, and a model may
-read any of them as a new line.
-
-Renderers disagree. Many editors and terminals draw LS, PS and NEL as nothing or keep
-the text inline; others break the line. So `ok<U+2028>=== FORGED ===` can show a
-reviewer one ordinary line while the model sees the marker on a line of its own.
-Anything that leans on line structure is forgeable this way: an
-`=== END OF UNTRUSTED DATA ===` fence, a `## System` heading, a fake turn marker, a
-new row in a line-oriented log or TSV.
-
-**Why the scanner never calls `str.splitlines()`.** It splits on exactly these
-characters and drops them, so they would never be classified, and every finding after
-one would report the wrong line number. `scan-hidden-unicode.py` splits on CRLF, CR
-and LF only, and its ASCII fast path skips printable characters only, so the C0 bands
-(VT, FF, FS-RS) still reach the catalog.
-
-**Sanitizing: flatten, never delete.** `sanitize-content.py` replaces each line-break
-code point with a space (the catalog's `replace_with`), and its report names every
-replacement (`replaced_by_band`). Deleting would fuse the words either side
-(`end<U+2028>begin` -> `endbegin`), which changes meaning and can itself assemble a
-keyword; replacing with a newline would make the forged line real. A space keeps the
-word boundary and keeps the text on the line the reviewer saw.
-
-**Why VT and FF are only `medium`.** They are line breaks too (UAX #14 class BK), but a
-raw-byte review shows them - most code editors draw a control glyph, and vim and
-`bat --show-all` print `^K` / `^L` - and form feed is a legitimate page break in
-RFC-style text and older source. They fail only under `--strict`; the sanitizer
-still flattens them at `standard`.
-
-**Demonstrate it** (bytes built with `printf`, never a literal character):
-
-```bash
-printf 'ok\xe2\x80\xa8=== FORGED ===\n' > /tmp/AGENTS.md
-python3 -c "print(open('/tmp/AGENTS.md', encoding='utf-8').read().splitlines())"  # ['ok', '=== FORGED ===']
-scripts/scan-hidden-unicode.py /tmp/AGENTS.md    # U+2028 high line-paragraph-separators at 1:3
-scripts/sanitize-content.py /tmp/AGENTS.md       # ok === FORGED ===
-```
+**Coverage is an invariant, not a list.** Every Default_Ignorable_Code_Point (4174 in
+UCD 18.0) lies in some catalog band, and `tests/run.sh` pins the UCD ranges and fails
+on any code point the scanner doesn't name - so a band can't silently fall out, and a
+future Unicode version that grows the property shows up as a test edit, not a blind
+spot. The same test holds every C0/C1 control except TAB, LF and CR to the same rule
+(see [Control characters that rewrite a terminal](line-breaks-and-controls.md#control-characters-that-rewrite-a-terminal)).
 
 ## Variation-selector steganography
 
@@ -241,42 +218,3 @@ common in terminal-themed content and renders as font-dependent glyphs or tofu
 boxes elsewhere. The risk: the model may interpret PUA bytes unpredictably, and
 content can render differently across viewers (a divergence the attacker controls).
 Severity `low` — flagged under `--strict`, stripped only at `aggressive`.
-
-## The severity model
-
-The catalog (`assets/dangerous-codepoints.json`) assigns each band a `severity` and
-a `strip_level`. The two scripts apply them as policy:
-
-| Severity | Scanner default | Scanner `--strict` | Legitimate use? |
-|---|---|---|---|
-| critical | fail (exit 10) | fail | none — always hostile |
-| high | fail | fail | rare / multilingual-only |
-| medium | pass | fail | script-specific |
-| low | pass | fail | icon fonts, emoji selectors |
-| benign | pass | pass | emoji, Indic — never flagged |
-
-| `strip_level` | `minimal` | `standard` (default) | `aggressive` |
-|---|---|---|---|
-| Removes | critical only | + high + medium | + low |
-| Emoji-safe? | yes | yes | **no** (strips VS16) |
-| Multilingual-safe? | yes | yes (keeps ZWNJ/ZWJ) | no (strips ZWNJ) |
-
-Bands with a `replace_with` code point in the catalog are *replaced*, not deleted, at
-their strip level: the line-break class and the blank-rendering Hangul fillers become
-`U+0020` (see [Line breaks that forge structure](#line-breaks-that-forge-structure)).
-
-Severity for the line-break and invisible-filler bands, against the table above:
-
-| Band | Code points | Severity | Why |
-|---|---|---|---|
-| `line-paragraph-separators` | `U+2028`-`U+2029` | high | Mandatory breaks (UAX #14 BK) that LF-terminated text never needs; many viewers draw nothing or stay inline |
-| `next-line` | `U+0085` | high | UAX #14 NL; EBCDIC-only; a C1 control most viewers draw as nothing |
-| `information-separators` | `U+001C`-`U+001E` | high | `str.splitlines()` boundaries with no use in text; invisible in terminals |
-| `vertical-tab-form-feed` | `U+000B`-`U+000C` | medium | Line breaks too, but a raw-byte review shows them and FF is a legitimate page break |
-| `soft-hyphen`, `combining-grapheme-joiner`, `khmer-inherent-vowels`, `hangul-jamo-fillers`, `hangul-filler`, `hangul-halfwidth-filler` | see above | high | Invisible, and no living orthography requires them |
-| `mongolian-vowel-separator` | `U+180E` | medium | Invisible, but required in Mongolian - script-specific, like ZWNJ |
-
-Rule of thumb: **scan with defaults** (catches the unambiguous attacks without noise),
-escalate to `--strict` when impersonation or steganography is plausible. **Sanitize
-at `standard`** for untrusted content you still want readable; reserve `aggressive`
-for plain prose where you don't mind losing emoji/icon glyphs.
