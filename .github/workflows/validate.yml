@@ -4,13 +4,68 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One live run per PR or ref: a new push cancels the superseded run. main is the
+# exception - every main commit gets its own full run to completion, so a red main
+# is always attributable to one commit.
+concurrency:
+  group: validate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  validate:
+  # Decides how much work this run needs. Only a pull_request can shrink it; a push to
+  # main, a manual dispatch, or a tree without tests/check-changed.sh runs the full sweep.
+  # The landing gate (AGENTS.md Landmines) is the local full sweep plus the main push run,
+  # so a PR-only reduction never weakens what lands.
+  scope:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      full: ${{ steps.plan.outputs.full }}
+      windows: ${{ steps.plan.outputs.windows }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0   # the diff against the base branch needs its history
+          persist-credentials: false
+
+      - name: Plan
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          full=true; windows=true
+          if [ "$EVENT" = pull_request ] && [ -f tests/check-changed.sh ] && git rev-parse -q --verify "origin/$BASE_REF^{commit}" >/dev/null; then
+            full=false
+            # The Windows job covers the installer and PowerShell parsing only. Workflow
+            # edits and an unreadable diff keep it on.
+            changed="$(git diff --name-only --no-renames "origin/$BASE_REF...HEAD")" || changed=".github/"
+            if grep -qE '(^|/)(install-guard\.sh|install\.ps1)$|\.(ps1|psm1|psd1)$|^\.github/' <<< "$changed"; then
+              windows=true
+            else
+              windows=false
+            fi
+          fi
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+          echo "windows=$windows" >> "$GITHUB_OUTPUT"
+          echo "plan: full=$full windows=$windows"
+
+  validate:
+    needs: scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0   # check-changed diffs against origin/<base> on pull requests
+          persist-credentials: false
 
       - name: Install jq + ripgrep + gitleaks (security suites need them)
         run: |
@@ -49,18 +104,23 @@ jobs:
           version: "0.11.2"
 
       - name: Agent Skills spec gate (official skills-ref + Claude Code fields)
+        if: needs.scope.outputs.full == 'true'
         run: bash tests/spec.sh
 
       - name: Doc-drift gate (docs must match disk)
+        if: needs.scope.outputs.full == 'true'
         run: bash tests/doc-drift.sh
 
       - name: Agnostic gate (no author-specific identifiers in a public repo)
+        if: needs.scope.outputs.full == 'true'
         run: bash tests/agnostic.sh
 
       - name: Skill hygiene ratchet (orphan side files, unnamed related skills, relative script calls, duplicate owns)
+        if: needs.scope.outputs.full == 'true'
         run: bash tests/skill-hygiene.sh
 
       - name: Hook contract tests (stdin JSON in, exit 2 + stderr to block)
+        if: needs.scope.outputs.full == 'true'
         run: bash tests/hooks.sh
 
       - name: Executable-bit gate (tracked scripts must be executable)
@@ -70,16 +130,29 @@ jobs:
       # runs in the windows-latest job below. pwsh on this runner would not reproduce
       # the bug (it reads UTF-8), so the gate never uses it.
       - name: PowerShell 5.1 encoding gate (tracked .ps1/.psm1/.psd1 are ASCII)
+        if: needs.scope.outputs.full == 'true'
         run: bash tests/check-ps51-parse.sh
 
       - name: Run skill behavioural test suites
+        if: needs.scope.outputs.full == 'true'
         run: bash tests/run-skill-tests.sh
 
       - name: Process-substitution guards (break each producer, the suite must fail)
+        if: needs.scope.outputs.full == 'true'
         run: bash tests/procsub-guard.sh
 
       - name: Offline resource checks (verifier scripts)
+        if: needs.scope.outputs.full == 'true'
         run: bash tests/check-resources.sh
+
+      # Pull requests: run only what can see the change (tests/changed-map.tsv). Anything
+      # unmapped, or under tests/, hooks/, scripts/, .github/ ..., makes check-changed
+      # fall back to the full sweep itself. Replaces the gated steps above.
+      - name: Change-aware checks (pull requests)
+        if: needs.scope.outputs.full == 'false'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: bash tests/check-changed.sh -j 2 "origin/$BASE_REF"
 
   # scripts/install.ps1 builds its destination paths with backslashes and is a
   # Windows-targeted installer (install.sh is the POSIX one), so its guard and
@@ -89,12 +162,16 @@ jobs:
   # This is also the only CI job with Windows PowerShell 5.1, so the real 5.1 parse
   # of tests/check-ps51-parse.sh runs here.
   install-guard:
+    needs: scope
+    if: needs.scope.outputs.windows == 'true'
     runs-on: windows-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0   # the staleness guard compares HEAD against main
+          persist-credentials: false
 
       - name: Install guard + doctor behavioural tests
         shell: bash
