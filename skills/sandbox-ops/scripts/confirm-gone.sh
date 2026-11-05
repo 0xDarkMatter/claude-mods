@@ -5,7 +5,7 @@
 # Input:   box ids in argv. --provider is boat (default), e2b, vercel, daytona or fly
 #          (Modal has no CLI list: confirm it in its SDK). boat ids are bx_ + lowercase
 #          letters/digits; others letters, digits, _ and -. The CLI comes from BOAT_BIN /
-#          E2B_BIN / VERCEL_SANDBOX_BIN / DAYTONA_BIN / FLY_BIN, else `boat` / `e2b` /
+#          E2B_BIN / VERCEL_BIN (`vercel sandbox`, preferred) / VERCEL_SANDBOX_BIN / DAYTONA_BIN / FLY_BIN, else `boat` / `e2b` /
 #          `sandbox` / `daytona` / `fly` on PATH. fly reads its app from FLY_APP. Needs jq.
 # Output:  stdout = one TSV row per id, "<id><TAB>gone|present", or with --json the
 #          envelope {data:[{id, gone, info, listed}], meta:{...}}. Data only.
@@ -30,7 +30,7 @@
 # Other providers have no per-id read this script relies on, so "gone" means the id no
 # longer appears anywhere in the provider's widest list, polled until --timeout:
 #   e2b      e2b sandbox list --state running,paused --format json   (paused never expire)
-#   vercel   sandbox list -a                                         (plain list hides stopped)
+#   vercel   vercel sandbox list -a, else sandbox list -a                                       (plain list hides stopped)
 #   daytona  daytona list -f json
 #   fly      fly machine list --json                                 (app from FLY_APP)
 # Any appearance of the id counts as present, so a reshaped output can only err towards
@@ -108,7 +108,11 @@ envelope() { # present-count
 if [ "$PROVIDER" != boat ]; then
   case "$PROVIDER" in
     e2b)     var=E2B_BIN;            cmd=e2b;     args=(sandbox list --state running,paused --format json) ;;
-    vercel)  var=VERCEL_SANDBOX_BIN; cmd=sandbox; args=(list -a) ;;
+    # `vercel sandbox` reads VERCEL_TOKEN (documented); the standalone `sandbox` CLI's env
+    # support is not, so prefer `vercel` and fall back to the standalone one.
+    vercel)  if [ -n "${VERCEL_BIN:-}" ] || { [ -z "${VERCEL_SANDBOX_BIN:-}" ] && command -v vercel >/dev/null 2>&1; }; then
+               var=VERCEL_BIN; cmd=vercel; args=(sandbox list -a)
+             else var=VERCEL_SANDBOX_BIN; cmd=sandbox; args=(list -a); fi ;;
     daytona) var=DAYTONA_BIN;        cmd=daytona; args=(list -f json) ;;
     fly)     var=FLY_BIN;            cmd=fly;     args=(machine list --json) ;;
   esac

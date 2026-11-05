@@ -9,7 +9,7 @@
 #       FAKE_LIST_FAIL  1 = the list prints nothing and exits 1 (API unreachable)
 set -u
 [ -n "${FAKE_LOG:-}" ] && printf '%s\n' "$*" >> "$FAKE_LOG"
-[ "$*" = "list -a" ] || { echo "fake-vercel: unsupported: $*" >&2; exit 3; }
+case "$*" in "list -a"|"sandbox list -a") ;; *) echo "fake-vercel: unsupported: $*" >&2; exit 3 ;; esac
 [ "${FAKE_LIST_FAIL:-0}" = 1 ] && exit 1
 printf "ID                        STATUS    CREATED\n"
 for id in ${FAKE_LISTED:-}; do printf "%-25s stopped   1h ago\n" "$id"; done

@@ -256,6 +256,7 @@ if command -v jq >/dev/null 2>&1; then
     if grep -qv -- 'list' "$plog"; then bad "confirm-gone --provider $prov ran a non-list command: $(tr '\n' ';' < "$plog")"
     else ok "confirm-gone --provider $prov only ever lists"; fi
   done
+  expect "confirm-gone --provider vercel: VERCEL_BIN runs 'vercel sandbox list -a'" 10     env VERCEL_BIN="$tests_dir/fake-vercel.sh" FAKE_LISTED="abc123" bash "$gone" --provider vercel --timeout 2 --interval 1 abc123
   out="$(env E2B_BIN="$tests_dir/fake-e2b.sh" FAKE_LISTED="" bash "$gone" --provider e2b --json --timeout 1 --interval 1 abc123 2>/dev/null)"
   printf '%s' "$out" | "$PY" -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d["data"]==[{"id":"abc123","gone":True,"info":"skipped","listed":False}] and d["meta"]["provider"]=="e2b" else 1)' 2>/dev/null \
     && ok "confirm-gone --provider e2b --json envelope" || bad "confirm-gone --provider e2b --json envelope: $out"

@@ -1,5 +1,5 @@
 {
-  "_comment": "Fast-moving facts the sandbox-ops provider cards state, one entry per provider (boat has its own facts-boat.json). scripts/check-sandbox-facts.py guards this file: --offline checks that each card (references/<card>) still states every fact's skill_text and that its 'Facts verified' date equals the provider's `verified`; --live checks each fact's pattern (a regex) against the page's url, after confirming the page still carries its title line. When a fact changes, re-read the page, then change pattern, skill_text, the card and `verified` together. Record a fresh fixture under tests/fixtures/live/<provider>/ at the same time.",
+  "_comment": "Fast-moving facts the sandbox-ops provider cards state, one entry per provider (boat has its own facts-boat.json). scripts/check-sandbox-facts.py guards this file: --offline checks that each card (references/<card>) still states every fact's skill_text and that its 'Facts verified' date equals the provider's `verified`; --live checks each fact's pattern (a regex) against the page's url, after confirming the page still carries its title line. When a fact changes, re-read the page, then change pattern, skill_text, the card and `verified` together. Re-record the fixtures at the same time with tests/record-fixtures.py (never hand-edit one).",
   "providers": {
     "e2b": {
       "verified": "2026-11-05",
