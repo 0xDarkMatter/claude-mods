@@ -50,7 +50,7 @@ Priority: `0` none, `1` urgent, `2` high, `3` medium, `4` low. Not customisable.
 `neq: 0`. Initiatives use the same scale. `CustomerNeed.priority` differs: `0` not important, `1` important.
 
 Estimates: `issueEstimationType` is `notUsed`, `exponential`, `fibonacci`, `linear` or `tShirt`. T-shirt points are XS 1, S 2, M 3,
-L 5, XL 8, XXL 13, XXXL 21, so a T-shirt team still writes numbers `[I]`. `issueEstimationAllowZero` and `issueEstimationExtended`
+L 5, XL 8, XXL 13, and 21 for the size above that, so a T-shirt team still writes numbers `[I]`. `issueEstimationAllowZero` and `issueEstimationExtended`
 widen the scale.
 
 ## Labels
