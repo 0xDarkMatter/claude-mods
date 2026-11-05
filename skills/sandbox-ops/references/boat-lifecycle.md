@@ -3,6 +3,7 @@
 ## Contents
 
 - Create and wait for ready
+- Name every box
 - Run commands: exec, detach, ssh
 - Copy files in and out
 - Lifetime: TTL, extend, stop
@@ -34,6 +35,43 @@ boat --no-update new --type default --ttl 3600 --no-env --no-snapshots --no-moni
   (`python3` only, no `python`), Docker 29.7, jq, curl, and the claude and codex CLIs
   preinstalled. The CPU was an AMD Ryzen 9 9950X on bare metal (OVH or Hetzner, FR/DE/FI).
   Check versions on the box, never assume them: the kernel differed between two boxes.
+
+## Name every box
+
+Name every box you create `<who>-<what>-<MMDD-HHMM>`, matching
+`^[a-z0-9-]+-[a-z0-9-]+-[0-9]{4}-[0-9]{4}$`. Example: `jdoe-php83-golden-1029-1301`.
+
+- **who** is the GitHub login, lowercased, from `gh api user --jq .login`. If that fails,
+  ask the user; never guess from a git email or a folder name. A box a tool creates takes
+  the tool's name instead: `ci` for CI runners.
+- **what** is a short purpose slug: `php83-golden`, `ddev`, a ticket key (`abc-123`).
+- **MMDD-HHMM** is the UTC date and time of the create: `date -u +%m%d-%H%M`.
+
+```bash
+who="$(gh api user --jq .login | tr 'A-Z' 'a-z' | tr -d '\r')"
+boat --no-update new ... --name "$who-ddev-$(date -u +%m%d-%H%M)" --json > new.jsonl
+```
+
+Why: org boxes are visible to every member of the org that pays for them [docs], and
+nothing on a box says whose it is. Boxes left with boat's default name (`Box <date>`)
+could not be traced to their owner from the dashboard [field]. The name carries
+ownership (who to ask before a delete), cost attribution (`boat usage <id>` gives
+dollars; the name says whose they are) and orphan cleanup (a sweeper can list boxes by
+owner and age without opening them).
+
+- `--name` takes up to 120 characters [cli]. A GitHub login is at most 39 characters and
+  the date 9, so what has about 70 left. Shorten what, never who or the date.
+- A box started with `--from` takes the snapshot's name unless you pass `--name`
+  [docs: cli-reference], so pass one there too. `--count N` gives every box the same name.
+- boat does not require unique names; the box id stays the handle for every command. A
+  script that finds its box again by name, or uses the name as an `Idempotency-Key`,
+  puts a unique part into what: `ci-<sha12>-<random>-<MMDD-HHMM>`.
+- A box already running under a bad name can be renamed with `boat rename` [cli].
+- To enforce the convention, a PreToolUse hook can ask before a `boat new` whose
+  `--name` does not match the pattern. Parse the command rather than grepping the raw
+  string (so a commit message that mentions `boat new` stays silent), and let a name
+  built at run time (holding `$` or a backquote) pass, since a hook cannot read it.
+  Such a hook does not see REST creates or `boat run`.
 
 ## Run commands: exec, detach, ssh
 

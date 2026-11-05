@@ -97,7 +97,7 @@ Docker build: that needs the root daemon and sudo [field].
 ## boat-down: always delete
 
 `if: always()`, so it also runs on a cancel. Read `GET /sandboxes/{id}/usage` first, then
-delete and confirm as in [box-lifecycle](box-lifecycle.md#delete-and-confirm), then delete
+delete and confirm as in [boat-lifecycle](boat-lifecycle.md#delete-and-confirm), then delete
 the runner registration if it still exists (a 404 means the one-time runner already
 removed itself). Write timings and the list-price cost to the step summary.
 
@@ -130,7 +130,7 @@ starter jobs until a third repo wants boat [field].
 4. Narrow the boat key to what CI needs, and note both credentials' expiry dates.
 5. Prove pass/fail parity per repo before trusting a new runner (the capability lesson).
 6. Keep boat to repos whose data may leave your region, with no deploy secrets: never
-   run deploy jobs on a box. See [security-model](security-model.md).
+   run deploy jobs on a box. See [boat-security](boat-security.md).
 
 ## What it measured
 

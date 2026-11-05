@@ -32,7 +32,7 @@ ff host up boat                     # one box for a wave; then give every lane -
   `ANTHROPIC_API_KEY` is unset so it cannot outrank the token. Claude lanes only;
   `bypassPermissions` is refused [ff].
 - `FLEETFLOW_REMOTE=0` (the default) refuses every `--host`. Which repo may go to a box is
-  a data decision, not a flag: see [security-model](security-model.md).
+  a data decision, not a flag: see [boat-security](boat-security.md).
 - Keep lane ids to 10 characters or fewer (the Bash sandbox socket-path limit; SKILL.md,
   Naming).
 - Auto mode refuses an agent step that puts a credential on a third-party VM. The fix is
@@ -91,7 +91,7 @@ removes the tool from the registry.
 Full gates, land checks, renders, pose tracking and test fan-outs froze a 32-core desk
 when they stacked [field]. Route them to a box:
 1. Bundle the exact commit (only committed content crosses; build a throwaway ref for
-   gitignored inputs, see [box-lifecycle](box-lifecycle.md#copy-files-in-and-out)).
+   gitignored inputs, see [boat-lifecycle](boat-lifecycle.md#copy-files-in-and-out)).
 2. Create a box sized to the job (`large` for CPU-bound work), provision the tools, run
    the command from the repo root.
 3. Bring outputs back through the log (gzip + base64 + sha256 between markers) or a

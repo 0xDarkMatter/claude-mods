@@ -117,7 +117,7 @@ for id in "${IDS[@]}"; do
 done
 if [ "$JSON" = 1 ]; then
   jq -n --argjson data "[$rows]" --argjson present "$present" \
-    '{data:$data, meta:{count:($data|length), present:$present, schema:"claude-mods.boat-ops.confirm-gone/v1"}}'
+    '{data:$data, meta:{count:($data|length), present:$present, schema:"claude-mods.sandbox-ops.confirm-gone/v1"}}'
 fi
 
 if [ "$present" -gt 0 ]; then

@@ -22,7 +22,7 @@ Source tags as in SKILL.md; [docs] pages are `security`, `data-retention` and
 - Every process `boat exec` starts also inherits `CAP_DAC_READ_SEARCH` from boat's agent
   service (`AmbientCapabilities` in its drop-in), so file permissions do not stop reads
   [field, measured]. Drop it per process with `setpriv` when a job must not read
-  everything; see [ci-runner](ci-runner.md#the-boxs-setup-script).
+  everything; see [boat-ci-runner](boat-ci-runner.md#the-boxs-setup-script).
 - Containers inside a box share its kernel and are not isolated from each other [docs].
 
 ## What a box can reach

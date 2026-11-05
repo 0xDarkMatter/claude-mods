@@ -72,6 +72,7 @@ deprecated_items=(
     "$CLAUDE_DIR/skills/claude-code-hooks"       # Merged into claude-code-ops (v3.0)
     "$CLAUDE_DIR/skills/dsp-launch"              # Superseded by fleet-worker + native background agents (2026-07)
     "$CLAUDE_DIR/skills/push-gate"               # Renamed to push-preflight (2026-10)
+    "$CLAUDE_DIR/skills/boat-ops"                # Renamed to sandbox-ops (2026-11)
 
     # Deprecated agents (v3.0): folded into their -ops skill twins
     "$CLAUDE_DIR/agents/python-expert.md"

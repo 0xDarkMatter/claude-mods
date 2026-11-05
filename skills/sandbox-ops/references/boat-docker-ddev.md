@@ -22,7 +22,7 @@ secrets on the box [field]. The DDEV findings come from a DDEV v1.25.4 test on a
   NAT (inferred), which widened the composer times.
 - **No `.dockerignore`** sends the whole tree to BuildKit: one site sent 480 MB, mostly
   `vendor/`, for a 220 MB image [field]. Check before blaming the box.
-- Don't apply the CI capability drop (see [ci-runner](ci-runner.md#the-boxs-setup-script))
+- Don't apply the CI capability drop (see [boat-ci-runner](boat-ci-runner.md#the-boxs-setup-script))
   to a Docker build: the build runs in the root daemon and needs the sudo and docker
   access the drop removes [field].
 - Containers inside one box share its kernel; boat does not isolate them from each other

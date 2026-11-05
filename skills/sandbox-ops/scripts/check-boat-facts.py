@@ -2,7 +2,7 @@
 """Staleness verifier for boat-ops: the boat.dev facts and CLI flags it states must stay true.
 
 boat-ops quotes prices, plan limits, retention periods, security defaults and the CLI
-flags its recipes depend on (assets/boat-facts.json). boat ships CLI releases often and
+flags its recipes depend on (assets/facts-boat.json). boat ships CLI releases often and
 its docs move with them, so these drift silently (SKILL-RESOURCE-PROTOCOL.md section 7).
 
   --offline (default, PR CI, no network):
@@ -33,7 +33,7 @@ Exit:    0 ok, 2 usage, 3 catalog/skill missing, 4 catalog malformed,
 Examples:
   check-boat-facts.py --offline                        # PR CI
   check-boat-facts.py --live                           # weekly drift check
-  check-boat-facts.py --live --fixtures tests/fixtures/live
+  check-boat-facts.py --live --fixtures tests/fixtures/live/boat
   check-boat-facts.py --live --json | jq '.data[] | select(.status=="drift")'
 """
 from __future__ import annotations
@@ -57,7 +57,7 @@ EX_UNAVAILABLE = 7
 EX_DRIFT = 10
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_CATALOG = HERE.parent / "assets" / "boat-facts.json"
+DEFAULT_CATALOG = HERE.parent / "assets" / "facts-boat.json"
 DEFAULT_SKILL = HERE.parent
 SCHEMA = "claude-mods.boat-ops.boat-facts/v1"
 VERIFIED_RE = re.compile(r"Facts verified (\d{4}-\d{2}-\d{2})")

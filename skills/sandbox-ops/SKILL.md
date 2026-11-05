@@ -1,5 +1,5 @@
 ---
-name: boat-ops
+name: sandbox-ops
 description: "Run work on boat.dev cloud sandboxes (ephemeral Linux VMs, bx_ ids) without leaking boxes, losing work or credentials: create and size a box, exec or ssh, copy files in and out, delete and confirm the 404. Covers boat as a fleetflow remote-lane host, as a one-time GitHub Actions runner with fallback to GitHub's runner, heavy-job offload, Docker and DDEV on a box, web tools on lanes, cost and start limits, and what a box can reach. Triggers: boat, boat.dev, boat new, boat exec, bx_, cloud sandbox, remote lane, offload to boat, boat CI runner, JIT runner."
 license: MIT
 metadata:
@@ -7,7 +7,7 @@ metadata:
   related-skills: "fleet-ops, ci-cd-ops, docker-ops, ddev-ops, supply-chain-defense"
 ---
 
-# boat-ops: ephemeral boat.dev boxes as lanes, runners and offload
+# sandbox-ops: hosted cloud sandboxes (boat.dev in depth)
 
 A boat box is a full Ubuntu VM you rent by the second, drive with the `boat` CLI or the
 REST API (`https://boat.dev/api/v1`), and throw away. It is the right tool when the
@@ -24,7 +24,8 @@ boat's docs and `boat help`; `scripts/check-boat-facts.py` re-checks them.
    `--no-env` keeps the account's stored secrets out of the box; `--no-snapshots` means
    nothing survives the box (a stop erases it); `--no-monitoring` means boat keeps no
    command output. Without it boat keeps command history for 90 days [docs:
-   data-retention].
+   data-retention]. The one exception, a golden base image with no client code, is in
+   [boat-snapshots](references/boat-snapshots.md).
 3. **The TTL is a data-loss trap.** Auto-stop defaults to 1 hour [docs: limits], and exec
    and SSH do not extend it [docs: cli-reference]. On a `--no-snapshots` box auto-stop
    erases everything. Set `--ttl` above the whole job plus fetch-back, or
@@ -43,14 +44,14 @@ boat's docs and `boat help`; `scripts/check-boat-facts.py` re-checks them.
    company's account looks identical, and nothing on the box says whose it is [field].
    To work for a second company, do not switch the login: put that company's key in
    `BOAT_API_KEY` for the job's process, which overrides the stored login for that process
-   only. See [security-model](references/security-model.md#policy-and-accounts).
+   only. See [boat-security](references/boat-security.md#policy-and-accounts).
 6. **Credentials never travel in argv.** Other users on a host can read process
    arguments. Pass a key on stdin (`boat login --key-stdin`, or `boat ssh` stdin into
    env), or as an API header from a file; never as a flag value or in an exec string.
 7. **A box is readable by everything on it.** The box user has passwordless sudo, and
    every `boat exec` child inherits `CAP_DAC_READ_SEARCH` from boat's agent, so even a
    `chmod 000` directory is readable [field, measured]. Never leave a credential file on
-   a box; never put production data on one. See [security-model](references/security-model.md).
+   a box; never put production data on one. See [boat-security](references/boat-security.md).
 
 ## Lifecycle at a glance
 
@@ -74,12 +75,12 @@ bash "<skill-dir>/scripts/confirm-gone.sh" "$id"              # exit 0 = gone, 1
   1.5 s and costs nothing when none is [cli].
 - **Seed a box at create:** `--file SANDBOX_PATH=LOCAL_FILE` (text, 256KB in total) and
   `--setup-file` (a 64KB script, runs in the background; watch `setupStatus` in `info`).
-- **Copy in and out:** see [box-lifecycle](references/box-lifecycle.md). Short version:
+- **Copy in and out:** see [boat-lifecycle](references/boat-lifecycle.md). Short version:
   small files go over `ssh`/`exec` with a sha256 check; `scp` costs 10-15 s fixed per
   call; `boat push` sends only git-tracked or unignored files.
 
 Full lifecycle, every CLI fact the docs do not spell out, and copy recipes:
-[references/box-lifecycle.md](references/box-lifecycle.md).
+[references/boat-lifecycle.md](references/boat-lifecycle.md).
 
 ## Naming
 
@@ -109,18 +110,18 @@ Billed per second while running; no GPU on any size. The $20 plan includes 555 h
 `default`, 100 at once and 12 / 60 / 200 starts per minute / hour / day; seats multiply
 the limits [docs]. Starts are the limit you hit first: pace bulk creates under 12 a
 minute. Measured costs (a CI gate about $0.0033, a Docker build under $0.001) and the
-limits and error codes: [references/cost-and-limits.md](references/cost-and-limits.md).
+limits and error codes: [references/boat-cost-and-limits.md](references/boat-cost-and-limits.md).
 
 ## What to use a box for
 
 | Use | Start here |
 |---|---|
-| A fleetflow lane on a remote box (`--host boat:new`), lanes per box, Codex on a box | [references/fleetflow-lanes.md](references/fleetflow-lanes.md) |
-| Offload a heavy gate, render or test fan-out from a strained machine | [references/fleetflow-lanes.md](references/fleetflow-lanes.md#heavy-job-offload) |
-| A one-time GitHub Actions runner, with fallback to GitHub's runner | [references/ci-runner.md](references/ci-runner.md) |
-| Docker builds or DDEV on a box | [references/docker-ddev.md](references/docker-ddev.md) |
-| WebSearch/WebFetch missing on a remote lane | [references/fleetflow-lanes.md](references/fleetflow-lanes.md#web-tools-on-lanes) |
-| Can this code or data go on a box? What can a box reach? | [references/security-model.md](references/security-model.md) |
+| A fleetflow lane on a remote box (`--host boat:new`), lanes per box, Codex on a box | [references/boat-fleetflow-lanes.md](references/boat-fleetflow-lanes.md) |
+| Offload a heavy gate, render or test fan-out from a strained machine | [references/boat-fleetflow-lanes.md](references/boat-fleetflow-lanes.md#heavy-job-offload) |
+| A one-time GitHub Actions runner, with fallback to GitHub's runner | [references/boat-ci-runner.md](references/boat-ci-runner.md) |
+| Docker builds or DDEV on a box | [references/boat-docker-ddev.md](references/boat-docker-ddev.md) |
+| WebSearch/WebFetch missing on a remote lane | [references/boat-fleetflow-lanes.md](references/boat-fleetflow-lanes.md#web-tools-on-lanes) |
+| Can this code or data go on a box? What can a box reach? | [references/boat-security.md](references/boat-security.md) |
 
 ## Security model in five lines
 
@@ -160,7 +161,7 @@ limits and error codes: [references/cost-and-limits.md](references/cost-and-limi
 ## Scripts
 
 - **`check-boat-facts.py`** - the staleness verifier (SKILL-RESOURCE-PROTOCOL section 7)
-  for `assets/boat-facts.json`, the rates, limits, retention and security facts and the
+  for `assets/facts-boat.json`, the rates, limits, retention and security facts and the
   CLI flags this skill relies on.
   - `python "<skill-dir>/scripts/check-boat-facts.py" --offline` (PR CI): the prose still
     states every catalogued fact and flag, and SKILL.md's "Facts verified" date matches.
@@ -176,7 +177,7 @@ limits and error codes: [references/cost-and-limits.md](references/cost-and-limi
 ## Related skills
 
 - `fleet-ops` lands the branches remote lanes bring home; fleetflow (its own repo) owns
-  the remote-lane runtime described in [fleetflow-lanes](references/fleetflow-lanes.md).
+  the remote-lane runtime described in [boat-fleetflow-lanes](references/boat-fleetflow-lanes.md).
 - `ci-cd-ops` for GitHub Actions in general; this skill only covers the boat runner.
 - `docker-ops` and `ddev-ops` for the tools themselves; this skill covers running them on
   a box.
