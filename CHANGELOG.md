@@ -13,9 +13,16 @@ feature releases live in the README "Recent Updates" section.
   returns an empty list, so a typo reads as "no work", and a default 50-row list is 67 KB. A gate
   table covers the writes that reach further than they look: `merge_diff` is a real GitHub merge,
   cancelling an issue closes linked PRs, delegating to the Linear agent can spend AI credits, and
-  batch-trashing archived issues is reported to destroy them for good. Fourteen references hold all
+  batch-trashing archived issues is reported to destroy them for good. Fifteen references hold all
   84 MCP tools, GraphQL recipes for each job, per-object restore paths, webhooks and OAuth, magic
-  words, and how to claim, hand off, ask, decide, report and close as an agent. Ships
+  words, and how to claim, hand off, ask, decide, report and close as an agent. One of them,
+  `agent-operations.md`, is for a coordinator running Linear for a swarm of agent sessions and
+  people: the MCP connector writes as the human, so the agent needs its own user and key, read
+  before the first card; lanes with no Linear tool report to one writer; the card's state is the
+  claim lock; reading states misses comments; and Linear normalises Markdown, so re-read and
+  assert one match before patching. Each lesson is tagged measured, inferred or untested. Ships
+  `watch-comments.py` (one stdout line per new comment by anyone but the agent, so a Monitor wakes
+  a session without spending model tokens; read-only, tested against a loopback stand-in only),
   `linear-gql.py` (right auth header per token, a 200 with `errors` fails, refuses mutations unless
   allowed, keeps the token on `linear.app`, and `--validate` checks a shape against the live schema
   with no credentials), `scan-magic-words.py` (what a PR body would close on merge), a standing-rules

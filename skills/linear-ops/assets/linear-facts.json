@@ -22,7 +22,10 @@
       "Rate-limited to 30 requests per minute",
       "skip the grace period of 30 days",
       "\"triage\", \"backlog\", \"unstarted\", \"started\", \"completed\", \"canceled\", \"duplicate\"",
-      "branchName: String!"
+      "branchName: String!",
+      "input CommentFilter {",
+      "issueRelationUpdate(",
+      "commentUpdate("
     ]
   },
   "docs_liveness": [
@@ -47,6 +50,17 @@
     {"url": "https://linear.app/docs/github.md", "contains": ["contributes to", "externally-merged"]},
     {"url": "https://linear.app/docs/mcp.md", "contains": ["mcp.linear.app/mcp/readonly"]},
     {"url": "https://linear.app/developers/oauth-2-0-authentication.md", "contains": ["April 1, 2026"]}
+  ],
+  "agent_ops": [
+    {"key": "connector-writes-as-human", "prose_token": "writes as the **human**", "evidence": "measured", "note": "MCP whoami returned the signed-in person; the fix was a separate agent user and key (references/agent-operations.md)"},
+    {"key": "comment-bumps-updatedat", "prose_token": "bumps its issue's `updatedAt`", "evidence": "measured", "note": "a comment moves the issue in a recent-activity list but the list shows neither author nor text"},
+    {"key": "new-comments-query", "prose_token": "new-comments.graphql", "evidence": "measured", "file": "assets/queries/new-comments.graphql", "note": "comments filter on createdAt gt and user id neq the agent; validated against the live schema by linear-gql.py --validate"},
+    {"key": "comment-watcher", "prose_token": "watch-comments.py", "evidence": "untested", "file": "scripts/watch-comments.py", "note": "tested against a loopback stand-in only, not the live API; the model-backed gate (WATCH_GATE_CMD) is untested"},
+    {"key": "markdown-normalised-on-save", "prose_token": "Linear normalises Markdown on save", "evidence": "measured", "note": "a bare domain is stored as a link, so exact-string patches must match the stored text"},
+    {"key": "relation-update", "prose_token": "issueRelationUpdate", "evidence": "schema", "note": "offered by the schema with a type string; delete-then-create is the route actually used; the one-call update is untested"},
+    {"key": "comment-update", "prose_token": "commentUpdate", "evidence": "measured", "note": "an agent-owned comment can be corrected in place"},
+    {"key": "router-session", "prose_token": "cheap router session", "evidence": "measured", "note": "a smallest-model, low-effort session ran the watcher under a Monitor and relayed events; savings not measured"},
+    {"key": "claim-collision", "prose_token": "The tie-break has never run against a real collision", "evidence": "untested", "note": "the CLAIM / BACK OFF tie-break is a design; no collision occurred"}
   ],
   "mcp_tools": [
     "create_attachment", "create_attachment_from_upload", "create_initiative_label", "create_issue_label",

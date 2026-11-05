@@ -54,7 +54,8 @@ for ref in "$here"/references/*.md; do
 done
 for asset in agent-standing-rules.md linear-facts.json queries/ground.graphql queries/create-issue.graphql \
              queries/comment.graphql queries/relation.graphql queries/link-github-pr.graphql \
-             queries/project-update.graphql queries/team-issues.graphql queries/issue-batch-update.graphql; do
+             queries/project-update.graphql queries/team-issues.graphql queries/issue-batch-update.graphql \
+             queries/new-comments.graphql; do
   grep -qF "$(basename "$asset")" "$skill" && [ -f "$here/assets/$asset" ] && ok "asset cited and present: $asset" \
     || bad "asset missing or uncited: $asset"
 done
@@ -100,7 +101,7 @@ has "github_updates_word_is_bare" "bare"
 # --- facts verifier, offline ---
 ec 0 "facts --help" "$PY" "$FACTS" --help
 ec 0 "facts --offline consistent" "$PY" "$FACTS" --offline
-drift_copy() { rm -rf "$tmp/skill"; mkdir -p "$tmp/skill"; cp -r "$here/SKILL.md" "$here/references" "$tmp/skill/"; }
+drift_copy() { rm -rf "$tmp/skill"; mkdir -p "$tmp/skill"; cp -r "$here/SKILL.md" "$here/references" "$here/assets" "$here/scripts" "$tmp/skill/"; }
 drift_copy
 "$PY" - "$tmp/skill/references" <<'EOF'
 import pathlib, re, sys
@@ -123,6 +124,26 @@ p = pathlib.Path(sys.argv[1])
 p.write_text(p.read_text(encoding="utf-8").replace("all 84", "all 83"), encoding="utf-8")
 EOF
 ec 10 "wrong_tool_count_is_drift" "$PY" "$FACTS" --offline --skill "$tmp/skill"
+drift_copy
+"$PY" - "$tmp/skill/references" <<'EOF'
+import pathlib, sys
+for f in pathlib.Path(sys.argv[1]).glob("*.md"):
+    f.write_text(f.read_text(encoding="utf-8").replace("issueRelationUpdate", "gone_op"), encoding="utf-8")
+EOF
+ec 10 "agent_ops_fact_dropped_from_prose_is_drift" "$PY" "$FACTS" --offline --skill "$tmp/skill"
+has "names the dropped agent_ops fact" "agent-ops:relation-update"
+drift_copy
+rm "$tmp/skill/scripts/watch-comments.py"
+ec 10 "agent_ops_fact_with_missing_file_is_drift" "$PY" "$FACTS" --offline --skill "$tmp/skill"
+has "names the missing script" "agent-ops:comment-watcher"
+drift_copy
+"$PY" - "$tmp/cat.json" "$here/assets/linear-facts.json" <<'EOF'
+import json, sys
+c = json.load(open(sys.argv[2], encoding="utf-8"))
+c["agent_ops"][0]["evidence"] = "certain"
+json.dump(c, open(sys.argv[1], "w", encoding="utf-8"))
+EOF
+ec 10 "agent_ops_evidence_tag_must_be_honest" "$PY" "$FACTS" --offline --catalog "$tmp/cat.json" --skill "$tmp/skill"
 ec 3 "missing_catalog_exit_3" "$PY" "$FACTS" --catalog "$tmp/nope.json"
 printf '{"schema":"wrong"}' >"$tmp/badcat.json"
 ec 4 "wrong_schema_exit_4" "$PY" "$FACTS" --catalog "$tmp/badcat.json"
@@ -145,6 +166,8 @@ ec 5 "no_token_exit_5" "$PY" "$GQL" --query '{ a }'
 ec 2 "paginate_needs_after_variable" "$PY" "$GQL" --dry-run --paginate issues --query '{ issues { nodes { id } } }'
 ec 0 "dry_run_works_on_shipped_query" "$PY" "$GQL" --dry-run --query-file "$here/assets/queries/team-issues.graphql" --vars '{"teamKey":"ENG"}'
 hasnt "dry run prints no secret" "fake-secret"
+ec 0 "dry_run_works_on_comment_watch_query" "$PY" "$GQL" --dry-run --query-file "$here/assets/queries/new-comments.graphql" --vars '{"since":"-PT5M","me":"x"}'
+grep -qF 'watch-comments.py' "$skill" && ok "watch-comments.py cited from SKILL.md" || bad "watch-comments.py not cited from SKILL.md"
 
 # --- GraphQL client against the loopback stand-in ---
 "$PY" "$here/tests/fixtures/mock-linear.py" >"$tmp/port" &
@@ -195,6 +218,67 @@ mutation M { a }'
   has "schema fields returned" '"issueId"'
   ec 3 "schema_type_unknown_exit_3" "$PY" "$GQL" --schema-type Nope --endpoint "$URL"
   ec 2 "schema_type_rejects_non_name" "$PY" "$GQL" --schema-type 'a b' --endpoint "$URL"
+
+  # --- watch-comments.py against the stand-in. This proves the plumbing (viewer id -> $me, $since, state,
+  # ordering, sanitising, alerts). It does NOT prove Linear's own filter: the stand-in only answers for $me. ---
+  WATCH="$here/scripts/watch-comments.py"
+  ec 0 "watch --help" "$PY" "$WATCH" --help
+  has "watch help has an examples section" "Examples:"
+  ec 2 "watch_rejects_a_zero_poll" "$PY" "$WATCH" --poll 0
+  ec 5 "watch_without_a_token_exit_5" "$PY" "$WATCH" --once --endpoint "$URL"
+  export LINEAR_API_KEY=fake-secret
+  ws="$tmp/ws.json"
+  seed() { printf '{"last":"%s"}' "$1" >"$ws"; }
+  seed 2026-11-05T09:00:00.000Z
+  ec 0 "watch_once_prints_new_comments" "$PY" "$WATCH" --once --endpoint "$URL" --state "$ws"
+  has "viewer_id_reaches_the_query_and_a_person_comment_prints" "comment | Alice | Card one | https://linear.app/team/issue/ENG-1 | first line second line"
+  has "comment_with_no_user_or_card_does_not_crash" "comment | (app or deleted user) | (not on a card) |"
+  if grep -qF fake-secret "$tmp/out" "$tmp/err"; then bad "watch leaked the token"; else ok "watch_never_prints_the_token"; fi
+  if "$PY" - "$tmp/out" <<'EOF'
+import sys
+text = open(sys.argv[1], encoding="utf-8").read()
+lines = text.splitlines()
+ok = (len(lines) == 3 and "Alice" in lines[0] and "Bob" in lines[2] and chr(27) not in text
+      and all(len(l.split(" | ")[-1]) <= 200 for l in lines))
+sys.exit(0 if ok else 1)
+EOF
+  then ok "oldest_first_no_escape_bytes_excerpt_capped"; else bad "order, escape stripping or excerpt cap wrong: $(head -c 400 "$tmp/out")"; fi
+  if grep -qF '2026-11-05T10:00:03.000Z' "$ws"; then ok "state_file_holds_newest_createdAt"; else bad "state not advanced: $(cat "$ws")"; fi
+  ec 0 "watch_second_run_has_nothing_new" "$PY" "$WATCH" --once --endpoint "$URL" --state "$ws"
+  if [ -s "$tmp/out" ]; then bad "watch printed on a quiet poll: $(head -c 200 "$tmp/out")"; else ok "watch_is_silent_when_nothing_is_new"; fi
+
+  seed 2026-11-05T09:00:00.000Z
+  ec 0 "watch_json_lines" "$PY" "$WATCH" --once --json --endpoint "$URL" --state "$ws"
+  if "$PY" - "$tmp/out" <<'EOF'
+import json, sys
+rows = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
+sys.exit(0 if len(rows) == 3 and all(r["kind"] == "comment" and "excerpt" in r for r in rows) else 1)
+EOF
+  then ok "json_mode_is_one_object_per_line"; else bad "json lines wrong: $(head -c 300 "$tmp/out")"; fi
+
+  # The gate: a stub stands in for the model-backed one, which stays UNTESTED. Quotes built without backslashes.
+  q='"'
+  gate_code="import sys; print('SKIP' if 'FILTERED' in sys.stdin.read() else 'WAKE')"
+  seed 2026-11-05T09:00:00.000Z
+  WATCH_GATE_CMD="$PY -c ${q}${gate_code}${q}" ec 0 "watch_gate_skips_a_filtered_line" "$PY" "$WATCH" --once --endpoint "$URL" --state "$ws"
+  hasnt "skipped line is not printed" "FILTERED"
+  has "other lines still print" "Alice"
+  seed 2026-11-05T09:00:00.000Z
+  WATCH_GATE_CMD="no-such-gate-command-xyz" ec 0 "watch_gate_failure_fails_open" "$PY" "$WATCH" --once --endpoint "$URL" --state "$ws"
+  has "broken gate still prints the comment" "Bob"
+
+  seed 1999-01-01T00:00:00.000Z
+  ec 0 "watch_full_page_alerts" "$PY" "$WATCH" --once --endpoint "$URL" --state "$ws"
+  has "full page raises an alert" "alert | a full page of 50"
+  if [ "$(wc -l <"$tmp/out" | tr -d ' ')" = 51 ]; then ok "alert_plus_fifty_comments"; else bad "line count: $(wc -l <"$tmp/out")"; fi
+
+  seed 2001-01-01T00:00:00.000Z
+  ec 0 "watch_survives_failed_polls" "$PY" "$WATCH" --poll 1 --run 4 --endpoint "$URL" --state "$ws"
+  if [ "$(grep -c 'alert | three failed polls' "$tmp/out")" = 1 ]; then ok "one_alert_per_outage_not_per_poll"; else bad "alert count: $(cat "$tmp/out")"; fi
+  seed 2002-01-01T00:00:00.000Z
+  ec 5 "watch_exits_5_when_the_token_is_rejected" "$PY" "$WATCH" --once --endpoint "$URL" --state "$ws"
+  ec 7 "watch_exit_7_when_unreachable_at_start" "$PY" "$WATCH" --once --timeout 15 --endpoint "http://127.0.0.1:9/graphql" --state "$ws"
+  unset LINEAR_API_KEY
 
   # --- facts verifier, live, pointed at the stand-in ---
   base="http://127.0.0.1:$port"

@@ -46,6 +46,9 @@ on a throwaway issue.
 
 An agent acts for one person, the one whose account it writes with. It doesn't answer for anyone else.
 
+A coordinator that writes for many lanes should not use a person's account at all: it gets an agent user and its own key. That setup, the single-writer pattern and
+the claim line format are in [agent-operations.md](agent-operations.md).
+
 ## What belongs in Linear
 
 The tracker owns coordination: goals, progress, the next step, who owns what, what blocks what, what needs deciding. The code host owns substance: code, reproduction

@@ -8,6 +8,8 @@ drift silently (SKILL-RESOURCE-PROTOCOL.md section 7). Two modes:
     * assets/linear-facts.json parses, with the schema and an as_of date
     * SKILL.md carries a dated "Verified against the Linear MCP ... (YYYY-MM)" note
     * every prose_token and every MCP tool name is still named in the skill prose
+    * every agent_ops fact (practice learned running agents in Linear) still names its prose_token,
+      carries a valid evidence tag, and points at a shipped file that exists
     * SKILL.md's stated tool count matches the catalog
   --live (scheduled freshness job, never a PR gate):
     * each npm package resolves. A version change is NOT drift: @linear/sdk's major
@@ -50,6 +52,7 @@ EX_DRIFT = 10
 
 SCHEMA = "claude-mods.linear-ops.facts/v1"
 REQUIRED_KEYS = ("packages", "endpoints", "schema_sdl", "docs_liveness", "docs_tripwires", "mcp_tools")
+EVIDENCE_TAGS = ("measured", "schema", "inferred", "untested")  # how sure the skill is of an agent_ops fact
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_CATALOG = HERE.parent / "assets" / "linear-facts.json"
@@ -116,6 +119,13 @@ def check_offline(catalog: dict, skill_dir: Path) -> list[dict]:
     # Word boundaries so `get_issue` is not satisfied by `get_issue_status`.
     missing = [t for t in tools if not re.search(rf"(?<![A-Za-z0-9_]){re.escape(t)}(?![A-Za-z0-9_])", corpus)]
     add("mcp-tools", not missing, f"all {len(tools)} named", "not named in prose: " + ", ".join(missing))
+    # agent_ops is optional so an older catalog still loads. It holds practice, not Linear's contract:
+    # a fact stays only while the prose names it, its evidence tag is honest, and its shipped file exists.
+    for fact in catalog.get("agent_ops", []):
+        token, tag, rel = str(fact["prose_token"]), fact.get("evidence"), fact.get("file")
+        add(f"agent-ops:{fact['key']}", token in corpus and tag in EVIDENCE_TAGS and (not rel or (skill_dir / rel).is_file()),
+            f"{token} named ({tag})",
+            f"{token} not named in prose, or evidence {tag!r} not one of {EVIDENCE_TAGS}, or missing file {rel}")
     return findings
 
 
