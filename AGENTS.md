@@ -32,6 +32,7 @@ and usage live in [README.md](README.md); this file is for agents working on the
 | `tests/` | Validation scripts + justfile |
 | `scripts/` | Install scripts |
 | `docs/` | Design docs and protocols, indexed one line each in `docs/00_INDEX.md`; to build a skill start at SKILL-CREATION-PROTOCOL.md |
+| `evals/` | Trigger evals (`claude plugin eval`), one folder per case; spends plan usage, so not in CI (`evals/AGENTS.md`) |
 
 ## Session Init
 

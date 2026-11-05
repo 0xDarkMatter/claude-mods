@@ -54,3 +54,6 @@ skills/svg-brand-tint-ops/assets/gallery/
 # Session-local state and scratch (nothing under these is ever tracked)
 .claude/
 /dev/
+
+# claude plugin eval output (evals/AGENTS.md)
+/evals/results/
