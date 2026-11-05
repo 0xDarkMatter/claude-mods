@@ -39,6 +39,9 @@ boat's docs and `boat help`; `scripts/check-boat-facts.py` re-checks them.
 5. **Check which account the CLI is on before any work.** `boat status` and `boat org`
    show the account and the wallet that new boxes bill. A CLI signed in to another
    company's account looks identical, and nothing on the box says whose it is [field].
+   To work for a second company, do not switch the login: put that company's key in
+   `BOAT_API_KEY` for the job's process, which overrides the stored login for that process
+   only. See [security-model](references/security-model.md#policy-and-accounts).
 6. **Credentials never travel in argv.** Other users on a host can read process
    arguments. Pass a key on stdin (`boat login --key-stdin`, or `boat ssh` stdin into
    env), or as an API header from a file; never as a flag value or in an exec string.
@@ -147,6 +150,7 @@ limits and error codes: [references/cost-and-limits.md](references/cost-and-limi
 | `CAP_DAC_READ_SEARCH` on exec children | `chmod 000` still readable: permission tests fail, Codex's bwrap refuses to start [field] | `setpriv --inh-caps=-all --ambient-caps=-all --` (see references) |
 | Repo denies WebFetch/WebSearch by bare name | the tool vanishes from a lane even when allowed [field] | fleetflow's refusal or `FLEETFLOW_REMOTE_WEB_LIFT=1` |
 | Long lane ids | Bash sandbox fails to start on the box | ids of 10 characters or fewer |
+| Switching company with `boat login` | rewrites the one machine-wide login under every shell and session; the config path is fixed (Windows `%AppData%\ascii\boat\config.json`), a redirected `APPDATA` does not move it, and there is no config-path variable [field] | `BOAT_API_KEY` in the job's environment |
 | A new API key made on the dashboard | scoped to a personal account despite the org banner; `org` in a create gave 403 `not_org_member` [field] | `GET /api/v1/orgs` once before wiring a key into CI |
 | Auto mode | refuses agent steps that put a credential on a third-party VM [driver] | a permission rule for the exact command, or leave auto mode |
 | Parallel workers on a fresh box | race on a first model or package download [field] | one-worker warm-up pass first |
@@ -188,4 +192,4 @@ Every fact above carries its source tag:
 - **[field]** field reports from 2026-10-23 to 10-27, generalised: fleetflow's Codex
   sandbox reports, a CI runner trial and benchmark on two private repos, build-only Docker
   benchmarks of two client sites, a web-tools lane fix, DDEV on a box, and heavy-job
-  offload.
+  offload; and a per-process `BOAT_API_KEY` test on 2026-11-05.

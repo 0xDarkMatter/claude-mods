@@ -90,6 +90,21 @@ The decisions this skill was written from [field, 2026-10-25 to 10-27], as a tem
   boat account; work for a second company ran there unnoticed, because nothing in the CLI
   or on a box says whose account it is [field]. Run `boat status`, `boat org` and
   `boat api-key list` first; keep one account per company.
+- **One key per company, per process; never switch the login.** `boat login` rewrites the
+  one stored login the whole machine shares, so a switch made for one company's job
+  silently re-bills every other shell, session and lane driver. Instead give the job's
+  process that company's API key: with `BOAT_API_KEY` in its environment the CLI acts as
+  the key's account and org, and the stored login is untouched for everyone else
+  [field: `boat status` and `boat org list` showed the key's account while a plain shell
+  still showed the stored one, 2026-11-05; the account docs list `BOAT_API_KEY` as a CLI
+  sign-in]. Keep the key out of argv (hard rule 6): have your secrets runner inject it as
+  an environment variable for one wrapped command.
+  - Wrap the whole job (create, exec, delete) in one secrets-runner call, not each `boat`
+    call: a secret manager whose every read is a full login can rate-limit a loop of them.
+  - Measured on `status` and `org list` only. `boat ssh` and `scp` may also rely on SSH keys
+    registered per account; check them under the key before a job depends on them.
+  - Name the key in the secret store by company, and label its field `BOAT_API_KEY`, so
+    the runner sets the variable directly and nothing renames it in between.
 
 ## Supply chain
 
