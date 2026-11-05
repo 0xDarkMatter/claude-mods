@@ -87,8 +87,33 @@ fi
 
 findings=0
 candidates=0
-# Bytes 0x80-0xFF as a bracket expression; LC_ALL=C makes grep match raw bytes.
-HIGH=$'[\x80-\xff]'
+# One awk over every file finds the non-ASCII lines: head|od + tail|grep|cut per file was
+# ~8 process starts each (~450 a run), which is what made this gate slow on Git Bash.
+# LC_ALL=C makes awk match raw bytes; \200-\377 is 0x80-0xFF. A leading UTF-8 BOM is
+# tolerated (see header): stripped from line 1 only, so line numbers are unaffected.
+# Rows: "<path>\037<first bad line>\037<bad line count>". \037 because paths may hold tabs.
+existing=()
+while IFS= read -r path; do
+    case "$path" in ''|\"*) continue ;; esac
+    [ -f "$path" ] && existing+=("$path")
+done <<< "$files"
+declare -A HIGH_FIRST=() HIGH_COUNT=()
+if [ "${#existing[@]}" -gt 0 ]; then
+    rc=0
+    rows="$(LC_ALL=C awk '
+        FNR == 1 { sub(/^\357\273\277/, "") }
+        /[\200-\377]/ { n[FILENAME]++; if (!(FILENAME in first)) first[FILENAME] = FNR }
+        END { for (f in n) printf "%s\037%d\037%d\n", f, first[f], n[f] }
+    ' "${existing[@]}")" || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "check-ps51-parse: non-ASCII scan failed (awk exit $rc) - scan incomplete" >&2
+        exit 2
+    fi
+    while IFS=$'\037' read -r p first n; do
+        [ -n "$p" ] || continue
+        HIGH_FIRST[$p]="$first"; HIGH_COUNT[$p]="$n"
+    done <<< "$rows"
+fi
 while IFS= read -r path; do
     [ -n "$path" ] || continue
     candidates=$((candidates + 1))
@@ -101,13 +126,8 @@ while IFS= read -r path; do
         echo "$path: tracked but missing from the working tree (restore it or stage the deletion)"
         findings=$((findings + 1)); continue
     fi
-    # Skip a leading UTF-8 BOM (tolerated, see header); line numbers are unaffected.
-    if [ "$(head -c 3 -- "$path" | od -An -tx1 | tr -d ' \n')" = "efbbbf" ]; then skip=4; else skip=1; fi
-    bad="$(tail -c +"$skip" -- "$path" | LC_ALL=C grep -n -- "$HIGH" | cut -d: -f1)"
-    if [ -n "$bad" ]; then
-        nlines="$(printf '%s\n' "$bad" | wc -l | tr -d ' ')"
-        first="$(printf '%s\n' "$bad" | head -n 1)"
-        echo "$path:$first: non-ASCII byte(s) on $nlines line(s) (use an ASCII equivalent, or [char]0xNNNN for an output glyph)"
+    if [ -n "${HIGH_FIRST[$path]+set}" ]; then
+        echo "$path:${HIGH_FIRST[$path]}: non-ASCII byte(s) on ${HIGH_COUNT[$path]} line(s) (use an ASCII equivalent, or [char]0xNNNN for an output glyph)"
         findings=$((findings + 1))
     fi
 done <<< "$files"

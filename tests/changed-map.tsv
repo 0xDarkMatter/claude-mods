@@ -1,0 +1,68 @@
+# changed-map.tsv - which checks cover which paths, for `just check-changed` (tests/check-changed.sh).
+#
+# WHY THIS EXISTS: the full gate (`just check`) runs every root gate and all ~60 suites, which
+# takes many minutes on Windows. During development you only need the checks that can see
+# what you changed. This file is that mapping, in one place. It is for DEVELOPMENT ONLY:
+# suites assert on sibling files in ways no map can fully capture, so `just check` and the
+# fleet-ops landing gate always run everything (AGENTS.md Landmines).
+#
+# FORMAT: one rule per line, <path pattern><TAB><targets>. Every rule whose pattern matches a
+# changed path adds its targets. A path that matches NO rule triggers the full sweep, so an
+# unmapped area is never silently skipped. Patterns are bash `[[ == ]]` globs (`*` crosses /).
+#
+# TARGETS (space-separated):
+#   FULL           run the full sweep instead (shared or unknown territory)
+#   own            for skills/<name>/...: skills/<name>/tests/run.sh and
+#                  tests/skills/functional/<name>/e2e.sh, when they exist
+#   gate:<name>    tests/<name>.sh
+#   suite:<skill>  skills/<skill>/tests/run.sh
+#   -              known path, nothing beyond the always-run gates
+#
+# Two rules are applied by check-changed.sh itself, not listed here:
+#   - CROSS-READERS: for every changed skills/<name>/..., any suite, e2e or root gate whose
+#     text names `skills/<name>/` or `../<name>/` also runs (suites that read a sibling skill).
+#   - @always / @serial lines below.
+#
+# @always: cheap whole-repo static gates, run on every check-changed (a few seconds each).
+# @serial: suites too heavy to share the machine; run alone after the parallel batch
+#          (two concurrent fleet-ops runs flake - AGENTS.md Landmines, land-gate-contention).
+@always	gate:spec gate:doc-drift gate:agnostic gate:skill-hygiene gate:skill-size gate:reference-contents
+@serial	suite:fleet-ops e2e:fleet-ops
+
+# --- shared territory: anything here can break anything, so run it all --------------
+tests/*	FULL
+skills/_lib/*	FULL
+hooks/*	FULL
+.claude-plugin/*	FULL
+scripts/*	FULL
+justfile	FULL
+.gitattributes	FULL
+.gitignore	FULL
+.github/*	FULL
+
+# --- skills ---------------------------------------------------------------------------
+skills/*	own
+skills/*/SKILL.md	gate:validate
+skills/*/scripts/*	gate:check-resources gate:check-exec-bits
+*.sh	gate:check-exec-bits
+*.ps1	gate:check-ps51-parse
+*.psm1	gate:check-ps51-parse
+# procsub-guard re-runs these suites with a broken producer (its case table)
+skills/frontend-upgrade-ops/*	gate:procsub-guard
+skills/security-ops/*	gate:procsub-guard
+
+# --- other components: frontmatter + naming (validate), counts (doc-drift, always) ---
+agents/*	gate:validate
+commands/*	gate:validate
+output-styles/*	gate:validate
+templates/*	gate:validate
+
+# --- prose: the always-run gates (doc-drift links and counts, agnostic) cover it -----
+README.md	-
+AGENTS.md	-
+CHANGELOG.md	-
+CONTRIBUTING.md	-
+LICENSE	-
+docs/*	-
+rules/*	-
+tools/*	-
