@@ -178,7 +178,7 @@ and needs the gate above.
 | Claim, hand off, ask, decide, report, close, attribution, collisions | [references/working-with-agents.md](references/working-with-agents.md) |
 | Webhook receivers and OAuth apps | [references/webhooks-oauth.md](references/webhooks-oauth.md) |
 | Magic words, branches, PR automation, GitLab, release pipelines | [references/git-integration.md](references/git-integration.md) |
-| Delegation, agent sessions, Linear Agent, Loops, credits | [references/agents.md](references/agents.md) |
+| Delegation, agent sessions, Linear Agent, Loops, credits | [references/agent-platform.md](references/agent-platform.md) |
 | Writing issues, cycles, project updates, triage practice | [references/linear-method.md](references/linear-method.md) |
 | Bulk changes, importers, export, archive vs trash vs delete, restore paths, the team cap | [references/bulk-import-export.md](references/bulk-import-export.md) |
 
