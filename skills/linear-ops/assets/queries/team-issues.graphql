@@ -1,0 +1,26 @@
+# Open issues in one team, newest update first. Paginate with:
+#   linear-gql.py --query-file team-issues.graphql --vars '{"teamKey":"ENG"}' --paginate issues
+# `first: 50` costs about 66 complexity points for each page of three-field rows.
+# `duplicate` is its own state type, so "open" must exclude it as well as `canceled`.
+query TeamIssues($teamKey: String!, $after: String) {
+  issues(
+    first: 50
+    after: $after
+    orderBy: updatedAt
+    filter: {
+      team: { key: { eq: $teamKey } }
+      state: { type: { nin: ["completed", "canceled", "duplicate"] } }
+    }
+  ) {
+    nodes {
+      id
+      identifier
+      title
+      priority
+      branchName
+      state { name type }
+      assignee { name }
+    }
+    pageInfo { hasNextPage endCursor }
+  }
+}

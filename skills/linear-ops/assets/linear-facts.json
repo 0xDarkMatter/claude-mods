@@ -1,0 +1,69 @@
+{
+  "schema": "claude-mods.linear-ops.facts/v1",
+  "as_of": "2026-11-05",
+  "comment": "External facts this skill states as current. check-linear-facts.py --offline asserts each prose_token and every MCP tool name is still in the prose. --live asserts packages resolve, endpoints exist, the published GraphQL schema still says what the skill says, and docs tripwires hold. @linear/sdk's major moves about weekly by design, so a version change is not drift; only a package going missing is. mcp_tools cannot be checked live without auth: recount it from a connected client when refreshing.",
+  "packages": [
+    {"key": "sdk", "prose_token": "@linear/sdk", "package": "@linear/sdk", "seen_version": "101.1.0"},
+    {"key": "importer", "prose_token": "@linear/import", "package": "@linear/import", "seen_version": "4.0.7"}
+  ],
+  "endpoints": [
+    {"key": "graphql", "prose_token": "https://api.linear.app/graphql", "url": "https://api.linear.app/graphql"},
+    {"key": "mcp", "prose_token": "https://mcp.linear.app/mcp", "url": "https://mcp.linear.app/mcp"},
+    {"key": "mcp_readonly", "prose_token": "https://mcp.linear.app/mcp/readonly", "url": "https://mcp.linear.app/mcp/readonly"},
+    {"key": "oauth_authorize", "prose_token": "https://linear.app/oauth/authorize", "url": "https://linear.app/oauth/authorize"}
+  ],
+  "schema_sdl": {
+    "url": "https://raw.githubusercontent.com/linear/linear/master/packages/sdk/src/schema.graphql",
+    "assert_contains": [
+      "enum IssueRelationType",
+      "0 = No priority, 1 = Urgent, 2 = High, 3 = Medium, 4 = Low",
+      "Can't be more than 50 at a time",
+      "Up to 50 issues can be created in a single batch",
+      "Rate-limited to 30 requests per minute",
+      "skip the grace period of 30 days",
+      "\"triage\", \"backlog\", \"unstarted\", \"started\", \"completed\", \"canceled\", \"duplicate\"",
+      "branchName: String!"
+    ]
+  },
+  "docs_liveness": [
+    "https://linear.app/llms.txt",
+    "https://linear.app/docs/mcp.md",
+    "https://linear.app/docs/github.md",
+    "https://linear.app/docs/gitlab.md",
+    "https://linear.app/docs/conceptual-model.md",
+    "https://linear.app/docs/triage.md",
+    "https://linear.app/docs/releases.md",
+    "https://linear.app/docs/diffs.md",
+    "https://linear.app/docs/delete-archive-issues.md",
+    "https://linear.app/docs/team-issue-limit.md",
+    "https://linear.app/developers/graphql.md",
+    "https://linear.app/developers/agents.md",
+    "https://linear.app/developers/how-to-upload-a-file-to-linear.md",
+    "https://linear.app/developers/file-storage-authentication.md"
+  ],
+  "docs_tripwires": [
+    {"url": "https://linear.app/developers/rate-limiting.md", "contains": ["2,500", "5,000", "3,000,000", "2,000,000", "10,000", "RATELIMITED"]},
+    {"url": "https://linear.app/developers/webhooks.md", "contains": ["Linear-Signature", "1 minute", "6 hours"]},
+    {"url": "https://linear.app/docs/github.md", "contains": ["contributes to", "externally-merged"]},
+    {"url": "https://linear.app/docs/mcp.md", "contains": ["mcp.linear.app/mcp/readonly"]},
+    {"url": "https://linear.app/developers/oauth-2-0-authentication.md", "contains": ["April 1, 2026"]}
+  ],
+  "mcp_tools": [
+    "create_attachment", "create_attachment_from_upload", "create_initiative_label", "create_issue_label",
+    "delete_attachment", "delete_comment", "delete_customer", "delete_customer_need", "delete_diff_comment",
+    "delete_status_update", "extract_images", "get_agent_skill", "get_attachment", "get_diff", "get_diff_threads",
+    "get_document", "get_initiative", "get_issue", "get_issue_status", "get_milestone", "get_notifications",
+    "get_project", "get_release", "get_release_note", "get_status_updates", "get_team", "get_template",
+    "get_triage_responsibility", "get_user", "get_workspace", "list_agent_skills", "list_comments",
+    "list_custom_views", "list_customer_needs", "list_customers", "list_cycles", "list_diffs", "list_documents",
+    "list_initiative_labels", "list_initiatives", "list_issue_labels", "list_issue_statuses", "list_issues",
+    "list_milestones", "list_project_labels", "list_projects", "list_release_notes", "list_release_pipelines",
+    "list_releases", "list_teams", "list_templates", "list_users", "mark_notification", "merge_diff",
+    "prepare_attachment_upload", "prepare_file_upload", "resolve_diff_thread", "restore_initiative_label",
+    "restore_issue_label", "restore_project_label", "retire_initiative_label", "retire_issue_label",
+    "retire_project_label", "save_comment", "save_customer", "save_customer_need", "save_diff_comment",
+    "save_document", "save_initiative", "save_initiative_label", "save_issue", "save_issue_label", "save_milestone",
+    "save_project", "save_project_label", "save_release", "save_release_note", "save_status_update",
+    "search_documentation", "share_issue", "submit_diff_review", "unshare_issue", "update_diff", "whoami"
+  ]
+}

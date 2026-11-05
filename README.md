@@ -20,11 +20,11 @@
 
 </div>
 
-**claude-mods** is a Claude Code plugin built on one premise: a skill that only *tells* the model something is a suggestion, and a skill that ships a gate is a guarantee. Its 112 skills carry the expert depth you'd expect - React, Rust, PostgreSQL, Cloudflare Workers, Next.js - but the ones that earn the install are the ones that run *agents*: a headless-worker spawner, a test-gated landing queue for parallel branches, a graduated-autonomy ladder for scheduled loops, and a security layer pointed at the agent itself. 63 skills ship executable tooling, 58 ship their own test suites, and 28 carry staleness verifiers that trip when the world moves under them.
+**claude-mods** is a Claude Code plugin built on one premise: a skill that only *tells* the model something is a suggestion, and a skill that ships a gate is a guarantee. Its 113 skills carry the expert depth you'd expect - React, Rust, PostgreSQL, Cloudflare Workers, Next.js - but the ones that earn the install are the ones that run *agents*: a headless-worker spawner, a test-gated landing queue for parallel branches, a graduated-autonomy ladder for scheduled loops, and a security layer pointed at the agent itself. 63 skills ship executable tooling, 58 ship their own test suites, and 28 carry staleness verifiers that trip when the world moves under them.
 
 Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms) and Anthropic's [patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), it installs as a standard plugin and toggles off as easily as it toggles on.
 
-**4 agents. 112 skills. 13 styles. 17 hooks. 15 rules. One install.**
+**4 agents. 113 skills. 13 styles. 17 hooks. 15 rules. One install.**
 
 ## What you get
 
@@ -254,7 +254,7 @@ Each one is a **currency layer over the model's priors** - React, Vue, Next.js, 
 - **Production-mined, not tutorial-shaped.** 200 KB on SQLite/D1 carries the migration that times out but applies and the `.batch()` semantics that bite; 152 KB on Postgres; 104 KB on TypeScript's TS 7 adoption path; `hono-ops` distilled from a live multi-tenant Worker. The gotchas the docs don't mention are the ones an agent walks straight into.
 - **Version-aware, not newest-wins.** `nextjs-ops`' audit reads the project's installed major and gates its rules on *that* - it won't demand a v16 idiom of a v14 codebase. A skill that only knows the latest is a liability on any repo older than a month.
 - **Pinned and verified.** Eleven stack skills carry an `assets/*-facts.json` with an `as_of` date, and pillar 3's verifiers check it against the world. The claim "modern TypeScript" is machine-enforced, not asserted.
-- **Nearly free to carry.** ~100 tokens per skill until one triggers, then references load on demand. 112 skills cost roughly 10k tokens of descriptions; the 5.6 MB behind them costs nothing until you're actually in that stack.
+- **Nearly free to carry.** ~100 tokens per skill until one triggers, then references load on demand. 113 skills cost roughly 10k tokens of descriptions; the 5.6 MB behind them costs nothing until you're actually in that stack.
 
 And the payoff loops back to pillar 1. A `fleet-worker`'s isolated config dir starts clean - you *provision* skills into it. A GLM worker with `hono-ops` loaded writes better Hono than GLM alone, which is why the skill's own docs call provisioning *"often the cheapest way to lift a weak model's output on a specialized task."* The stack skills are what turn "a cheaper brain" from a cost-cut into a real option: the discipline layers decide *what* an agent may do, and the stack layers decide whether what it does is any good.
 
@@ -420,6 +420,7 @@ Everything in the plugin, grouped. Each block expands.
 | [python-env](skills/python-env/) | Fast Python environment management with uv |
 | [task-runner](skills/task-runner/) | Run project commands with just |
 | [screenshot](skills/screenshot/) | Find and display recent screenshots from common screenshot directories |
+| [linear-ops](skills/linear-ops/) | Operate Linear over its MCP server or GraphQL API, and coordinate agents in it - empty results that are really bad filters, bounded reads and query cost, the write gate (merges, PR-closing cancels, billed delegation), every MCP tool's parameters, schema-validated GraphQL recipes, per-object restore paths and the retention trap, magic words, webhooks and OAuth, and how to claim, hand off, ask, decide, report and close as an agent; `linear-gql.py` client with no-token schema validation, `scan-magic-words.py` PR text checker, a standing-rules template, staleness verifier |
 | [pigeon](skills/pigeon/) | Inter-session pmail - send/receive messages between Claude Code sessions across projects. SQLite-backed (`~/.claude/pmail.db`), git-rooted project identity, threading, attachments, broadcast, search. Hook-driven notifications. Per-project disable. |
 
 </details>
@@ -637,7 +638,7 @@ claude-mods/
 ├── .claude-plugin/     # Plugin metadata
 ├── agents/             # Expert subagents (4)
 ├── commands/           # Slash commands (5)
-├── skills/             # Custom skills (112)
+├── skills/             # Custom skills (113)
 ├── output-styles/      # Response personalities
 ├── hooks/              # Hook examples & docs
 ├── rules/              # Claude Code rules
@@ -681,7 +682,7 @@ Requires a model that supports `tool_reference` blocks: Sonnet 4.5, Haiku 4.5, O
 
 ### Skill Description Budget
 
-With 90+ skills installed (this plugin alone ships 112), skill descriptions can overflow the listing budget. All skill names are always listed, but descriptions share a budget of **1% of the model context window** — on overflow, least-invoked skills lose their descriptions first and **silently stop auto-triggering** (explicit `/name` invocation still works). Each skill's combined `description` + `when_to_use` is also truncated at **1,536 chars**, so trigger phrases belong at the front.
+With 90+ skills installed (this plugin alone ships 113), skill descriptions can overflow the listing budget. All skill names are always listed, but descriptions share a budget of **1% of the model context window** — on overflow, least-invoked skills lose their descriptions first and **silently stop auto-triggering** (explicit `/name` invocation still works). Each skill's combined `description` + `when_to_use` is also truncated at **1,536 chars**, so trigger phrases belong at the front.
 
 - **Check:** run `/doctor` — it shows whether the budget is overflowing and which skills are affected.
 - **Fix:** demote or disable skills you don't use via `skillOverrides` in settings (`"on"` / `"name-only"` / `"user-invocable-only"` / `"off"` per skill, or `/skills` + `Space`). Plugin skills are managed via `/plugin` instead.

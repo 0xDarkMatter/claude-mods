@@ -8,6 +8,21 @@ feature releases live in the README "Recent Updates" section.
 
 ### Added
 
+- **`linear-ops` skill**: run Linear over its MCP server or GraphQL API, and coordinate agents in
+  it. The hard rules lead with what bites first: an unknown `team` or `state` on `list_issues`
+  returns an empty list, so a typo reads as "no work", and a default 50-row list is 67 KB. A gate
+  table covers the writes that reach further than they look: `merge_diff` is a real GitHub merge,
+  cancelling an issue closes linked PRs, delegating to the Linear agent can spend AI credits, and
+  batch-trashing archived issues is reported to destroy them for good. Fourteen references hold all
+  84 MCP tools, GraphQL recipes for each job, per-object restore paths, webhooks and OAuth, magic
+  words, and how to claim, hand off, ask, decide, report and close as an agent. Ships
+  `linear-gql.py` (right auth header per token, a 200 with `errors` fails, refuses mutations unless
+  allowed, keeps the token on `linear.app`, and `--validate` checks a shape against the live schema
+  with no credentials), `scan-magic-words.py` (what a PR body would close on merge), a standing-rules
+  template for a project's `AGENTS.md`, and a staleness verifier wired into the weekly Freshness job.
+  MCP reads were measured and every GraphQL operation validated against the live schema; writes come
+  from schemas and docs and were not exercised.
+
 - **`test-engineering` skill** (replaces `testgen` and `testing-ops`): tests that earn
   their CI seconds. A test's value is what it catches divided by what it costs, and seven
   modes work one side or both. **design** lists the failure modes first, from a gap-class

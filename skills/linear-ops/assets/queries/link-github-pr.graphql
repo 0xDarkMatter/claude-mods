@@ -1,0 +1,9 @@
+# Writes: needs --allow-mutation. Attach a pull request as a first-class object instead of a URL
+# in prose. Linear documents attachment URL plus issue as idempotent, so a rerun updates in place.
+#   --vars '{"issueId":"<uuid>","url":"https://github.com/owner/repo/pull/1","title":"owner/repo#1"}'
+mutation LinkPr($issueId: String!, $url: String!, $title: String) {
+  attachmentLinkGitHubPR(issueId: $issueId, url: $url, title: $title) {
+    success
+    attachment { id url title }
+  }
+}

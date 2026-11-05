@@ -1,0 +1,14 @@
+# Writes: needs --allow-mutation. For `blocks`, issueId is the BLOCKER and relatedIssueId the
+# blocked issue. Swapped, Linear records a valid relation pointing the wrong way and nothing errors.
+#   --vars '{"input":{"type":"blocks","issueId":"<blocker>","relatedIssueId":"<blocked>"}}'
+mutation CreateRelation($input: IssueRelationCreateInput!) {
+  issueRelationCreate(input: $input) {
+    success
+    issueRelation {
+      id
+      type
+      issue { identifier }
+      relatedIssue { identifier }
+    }
+  }
+}

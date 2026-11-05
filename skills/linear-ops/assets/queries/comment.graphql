@@ -1,0 +1,9 @@
+# Writes and notifies: needs --allow-mutation and the user's OK on the exact body.
+# A personal key attributes this to its owner, so end agent-written bodies with a sign-off.
+#   --vars '{"input":{"issueId":"<uuid or ENG-123>","body":"...\n\n-- agent"}}'
+mutation CreateComment($input: CommentCreateInput!) {
+  commentCreate(input: $input) {
+    success
+    comment { id url }
+  }
+}

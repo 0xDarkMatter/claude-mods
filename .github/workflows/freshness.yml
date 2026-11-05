@@ -133,6 +133,13 @@ jobs:
             --unavailable "hono-ops live check unreachable (npm registry) — skipped" \
             -- python skills/hono-ops/scripts/check-hono-facts.py --live
 
+      - name: linear-ops facts vs npm, endpoints, published schema and docs
+        run: |
+          bash .github/scripts/freshness-step.sh --name linear-ops \
+            --drift "linear-ops drift - a package, endpoint, schema sentence or docs fact the skill states has changed" \
+            --unavailable "linear-ops live check unreachable (npm, Linear or GitHub) - skipped" \
+            -- python skills/linear-ops/scripts/check-linear-facts.py --live
+
       - name: nextjs-ops packages vs npm registry (existence + Next.js/React majors)
         run: |
           bash .github/scripts/freshness-step.sh --name nextjs-ops \
