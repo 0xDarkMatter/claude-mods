@@ -1,0 +1,5 @@
+<?xml version="1.0"?><testsuites><testsuite name="s">
+<testcase classname="t" name="always_green" time="0.1"/>
+<testcase classname="t" name="sometimes_red" time="0.1"></testcase>
+<testcase classname="t" name="always_red" time="0.1"><failure>x</failure></testcase>
+</testsuite></testsuites>

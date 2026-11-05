@@ -1,0 +1,8 @@
+{"meta": {"version": "7.6.0", "show_contexts": true}, "files": {
+  "src/invoice.py": {"contexts": {
+    "1": [""],
+    "10": ["tests/test_invoice.py::test_total|run", "tests/test_invoice.py::test_total_again|run", "tests/test_invoice.py::test_total_and_refund|run", "tests/test_invoice.py::test_twin_a|run", "tests/test_invoice.py::test_twin_b|run"],
+    "11": ["tests/test_invoice.py::test_total|run", "tests/test_invoice.py::test_total_and_refund|run", "tests/test_invoice.py::test_twin_a|run", "tests/test_invoice.py::test_twin_b|run"],
+    "20": ["tests/test_invoice.py::test_total_and_refund|run", "tests/test_invoice.py::test_refund_only|run"],
+    "30": ["tests/test_invoice.py::test_twin_a|run", "tests/test_invoice.py::test_twin_b|run", "tests/test_invoice.py::test_refund_only|run"]
+  }}}}

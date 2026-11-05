@@ -1,0 +1,14 @@
+name: deploy
+on:
+  push:
+    branches: [main]
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+jobs:
+  ship:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - run: echo deploying

@@ -284,3 +284,4 @@ per-cron branching): [references/workers-runtime.md](references/workers-runtime.
 - `typescript-ops` — generics, Zod 4, type-narrowing the payloads you validate
 - `rest-ops` / `api-design-ops` — endpoint and contract design above the framework
 - `auth-ops` — JWT/session/token theory behind the auth middleware patterns
+- `test-engineering` — which route tests catch real bugs, and running only the ones a change touches

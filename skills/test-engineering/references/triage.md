@@ -36,7 +36,9 @@ keep the signature) and re-run before believing anything.
 ## Flaky tests
 
 - "Passed on retry" is **flaky**, never green. Browser drivers and CI actions both retry by
-  default; read their retry counts.
+  default; read their retry counts. `suite-profile.py flakes run1/ run2/ run3/` finds them
+  across runs, and `profile` counts pass-on-retry inside one run's JUnit.
+- A flake also costs every run it reruns: fix it before tuning anything else for speed.
 - A guard whose only test is flaky is treated as **unguarded**.
 - Fix order: remove real nondeterminism (clock, randomness, ordering, shared state, network)
   before adding waits. Quarantine only with an owner and a date.

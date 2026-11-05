@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="nextest-run" tests="2" time="3.0">
+  <testcase name="parses_header" classname="lib" time="0.5"/>
+  <testcase name="downloads_with_retry" classname="lib" time="2.5">
+    <flakyFailure message="connection reset">first attempt failed</flakyFailure>
+  </testcase>
+</testsuite>

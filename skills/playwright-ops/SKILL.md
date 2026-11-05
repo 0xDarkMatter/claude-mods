@@ -328,3 +328,5 @@ automation — distinct from the test runner; don't conflate browsing automation
 | [references/flake-hunting.md](references/flake-hunting.md) | Systematic flake diagnosis: traces, repro loops, common causes + fixes |
 | [scripts/triage-flakes.py](scripts/triage-flakes.py) | Parse a Playwright JSON report and rank flaky/failing tests (exit 10 = findings); see Flake diagnosis above |
 | [assets/playwright.config.template.ts](assets/playwright.config.template.ts) | Commented production config template |
+
+Whether a journey belongs in e2e at all, and which tier runs it: `test-engineering`. This skill is the driver mechanics.

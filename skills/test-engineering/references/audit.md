@@ -1,7 +1,22 @@
-# Audit mode: what does this suite actually catch?
+# Audit mode: what does this suite catch, and what does it cost?
 
-**Output:** a report with an inventory, blind-review findings, mutation results classified
-honestly, and a verdict per file. An audit measures; it never edits the code it audits.
+**Output:** a report with an inventory, a cost profile, blind-review findings, mutation
+results classified honestly, and a **ledger**: per file, its catch beside its cost. An audit
+measures; it never edits the code it audits. Prune and speed modes act on the ledger.
+
+A quick audit (`cost` only: "why is CI slow", "what does a PR cost") runs the cost half
+and stops. A full audit runs both.
+
+## Contents
+
+- [Guardrails](#guardrails-before-anything-runs)
+- [The cost half](#the-cost-half)
+- [The catch half](#the-catch-half)
+- [The ledger](#the-ledger)
+- [Status taxonomy](#status-taxonomy)
+- [Harness traps](#harness-traps-each-one-has-produced-a-false-result)
+- [Mutation engines](#mutation-engines-as-of-2026-10-01)
+- [Report skeleton](#report-skeleton)
 
 ## Guardrails (before anything runs)
 
@@ -14,14 +29,35 @@ honestly, and a verdict per file. An audit measures; it never edits the code it 
   suite into real external writes. For unattended or scheduled batches, run inside a
   network-less container (`docker run --network none ...`), with local simulators only.
 - **Read the repo's test doctrine first** (AGENTS.md, CONTRIBUTING, any red-proof table).
+- **Run it somewhere else.** Full runs and mutation batches go to an offload target
+  (`run-plan.py targets`); locally, cap workers with `run-plan.py local` ([speed.md](speed.md)).
 
-## Steps
+## The cost half
 
-1. **Inventory.** Runner, test count (from a real run, not a grep), test-to-source ratio,
-   mocking style (boundary or deep), snapshots, existing red-proof tables and whether CI runs
-   them, which linters actually run over `tests/`.
-2. **Baseline.** `mutate.mjs --baseline`: green and complete, or stop. A red baseline means
+1. **Inventory.** Runner (`run-plan.py stack`), test count (from a real run, not a grep),
+   test-to-source ratio, mocking style (boundary or deep), snapshots, existing red-proof
+   tables and whether CI runs them, which linters actually run over `tests/`.
+2. **Profile a full run from JUnit XML** (`run-plan.py stack` prints each runner's JUnit flag):
+   ```bash
+   python "<skill-dir>/scripts/suite-profile.py" profile reports/ --top 20 --json > full.json
+   ```
+   Total time, the slowest tests and files, skips, and pass-on-retry flakes.
+3. **Flakes.** Run the suite three times, or read the last N CI reports:
+   `suite-profile.py flakes run1/ run2/ run3/` (exit 10 when any test is flaky).
+4. **CI cost and waste.** `ci-audit.py cost --limit 50` gives billed minutes per run and
+   per change, by OS and workflow, and what cancelled runs cost. `ci-audit.py lint` covers
+   the free savings, CI1-CI4 ([ci.md](ci.md)).
+5. **Overlap** (Python with pytest-cov, or any per-test coverage map):
+   `coverage-overlap.py cov.json --profile full.json` lists redundancy candidates, ranked
+   by seconds. Candidates only: prune mode decides.
+
+## The catch half
+
+1. **Baseline.** `mutate.mjs --baseline`: green and complete, or stop. A red baseline means
    every mutant will look killed.
+2. **Copied logic.** `oracle-scan.py --repo .` lists tests that re-type the source's
+   formulas, re-declare its functions, or call it on both sides of an assertion (S3, S15).
+   Hand the hits to the reviewer as flags to adjudicate.
 3. **Blind review.** Spawn the `test-review-agent` (read-only: Read, Grep, Glob) once per
    repo or package. It has not seen any mutation results and must not. It adjudicates
    heuristic flags, finds slop ([slop-patterns.md](slop-patterns.md)) and predicts 3-5
@@ -44,6 +80,19 @@ honestly, and a verdict per file. An audit measures; it never edits the code it 
    on invoicing mutants, not on what else it happens to touch.
 8. **Report** (skeleton below). Authored and predicted kill rates are reported separately,
    always; blending them hides the most useful number.
+
+## The ledger
+
+One row per test file: what it catches beside what it costs. It is the hand-off to prune
+mode (worst catch per second first) and speed mode (slowest unique catches first).
+
+| File | Tests | Seconds | Flaky | Mutants killed | Unique kills | Overlap candidates | Verdict |
+|---|---|---|---|---|---|---|---|
+| tests/test_invoice.py | 42 | 31.0 | 0 | 9/11 | 3 | 14 | protected; prune candidates |
+
+**Unique kills** are mutants no other file kills. A file with high seconds and no unique
+kills is the first prune target. A file with unique kills is never pruned whole, however
+slow: it goes to speed mode.
 
 ## Status taxonomy
 
@@ -88,6 +137,7 @@ generate mutants at scale and are worth pairing with it for large audits. None i
 | gremlins 0.6 | Go | fast, coverage-guided |
 | go-mutesting 2.x | Go | AST operators |
 | Infection 0.35.x | PHP | runs PHPUnit, Pest or Codeception; reports a mutation score per file |
+| cargo-mutants 25.x | Rust | runs `cargo test` or nextest; `--in-diff` for changed code only |
 | `pest --mutate` | PHP | ships with Pest 5 (pest-plugin-mutate); the quickest start in a Laravel repo already on Pest |
 
 Pin any engine to a release more than 7 days old and run it through the supply-chain checks
@@ -98,12 +148,15 @@ before adding it to a repo.
 ```
 # Test audit: <repo> @ <sha> (<date>)
 Inventory: runner, N tests, ratio, mocking style, snapshots, red-proof tables (wired?)
+Cost: full run Ns (shards), slowest 10, flaky K, CI billed min per change M ($), CI1-CI4 findings
 Baseline: green, N tests, Ns.  Null controls: opening green / closing green (trusted)
 Authored: K/N killed (x%)   Predicted: K/N survived (shown separately, never blended)
 Survivors: id, file, bug, class, reachable?, equivalent?, masked?
 Slop found (reviewer, confirmed by reading): S-id, file, one line each
 Per-file verdicts: file - declared subject - protected / partly / vacuous
+Ledger: one row per file (catch beside cost)
 Recommended next tests: the survivors, as rows for write mode
+Recommended prunes / speed-ups: the ledger's top rows, for prune and speed modes
 ```
 
 Run on a schedule, an audit is a report-only loop (loop-ops, L1): it posts the report and

@@ -15,9 +15,9 @@
 
 | Component | Count | Notes |
 |-----------|-------|-------|
-| Agents | 3 | Pure context-isolation/worker roles only: git-agent (background commits/PRs), firecrawl-expert (noisy scrapes), project-organizer (bulk restructure) |
-| Skills | 112 | Operational skills, CLI tools, workflows, diagnostics, security |
-| Commands | 4 | Session management + git orchestration + wave coordination (sync, save, git-ops, conduct) |
+| Agents | 4 | Pure context-isolation/worker roles only: git-agent (background commits/PRs), firecrawl-expert (noisy scrapes), project-organizer (bulk restructure), test-review-agent (blind read-only test review) |
+| Skills | 111 | Operational skills, CLI tools, workflows, diagnostics, security |
+| Commands | 5 | Session management + git orchestration + wave coordination (sync, save, git-ops, conduct) + /testgen alias (one release) |
 | Rules | 15 | agentic-quality, cli-tools, commit-style, deploy-gating, dev-servers, loop-engineering, modern-tools, naming-conventions, prompt-injection, public-posts, release-review, shell-preference, skill-agent-updates, supply-chain, worktree-boundaries |
 | Output Styles | 13 | Vesper, Spartan, Mentor, Executive, Pair, Atlas, Coach, Harbour, Meridian, Noir, Roast, Sage, Scout |
 | Hooks | 17 | lint, format, safety, uv, install-scan, manifest-scan, TLS-verify ask + code scan, pmail, unicode-scan ×2, config-change guard, worktree guard, worktree create/remove (WORKTREE_ROOT placement), peer-writer guard, touched-files ledger |

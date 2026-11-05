@@ -316,3 +316,5 @@ export default defineConfig({
 | [references/component-testing.md](references/component-testing.md) | Per-framework `cy.mount`, store/router/context mocking, slots/events, Vite vs webpack config |
 | [references/ci-and-flake.md](references/ci-and-flake.md) | Full GH Actions workflows, sharding, Test Replay, retry config, systematic flake playbook |
 | [assets/cypress.config.template.ts](assets/cypress.config.template.ts) | Commented production config template (E2E + component) |
+
+Whether a test earns its place, and which tier it runs on: `test-engineering`. This skill is the driver mechanics.

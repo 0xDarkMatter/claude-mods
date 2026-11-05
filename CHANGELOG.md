@@ -8,6 +8,43 @@ feature releases live in the README "Recent Updates" section.
 
 ### Added
 
+- **`test-engineering` skill** (replaces `testgen` and `testing-ops`): tests that earn
+  their CI seconds. A test's value is what it catches divided by what it costs, and seven
+  modes work one side or both. **design** lists the failure modes first, from a gap-class
+  checklist. **write** proves every test against a planted mutant. **audit** puts a mutation
+  and blind-review catch half beside a JUnit and CI cost half, and writes a per-file ledger.
+  **prune** deletes what catches nothing, one module per PR, with revert-and-run evidence.
+  **speed** offloads first, then runs only what changed, then runs in parallel within
+  machine limits, then runs faster. **gate** blocks on exact checks only (ruff F811 lost
+  tests, PHPUnit `failOnRisky`) plus a measured time budget. **triage** rules on red tests,
+  survivors, flakes and AI-reviewer comments, each with evidence. Ships `mutate.mjs`, a
+  zero-dependency harness (vitest, jest, pytest, go, phpunit, pest, any command) that
+  restores files from memory, refuses red or incomplete baselines, brackets batches with
+  null controls and strips secret-looking env vars. It also ships seven stdlib Python
+  scripts:
+  - `suite-profile.py`: JUnit from any runner gives time, the slowest tests, flakes
+    (pass-on-retry included) and a before/after comparison.
+  - `budget-gate.py`: a ratchet. The suite may not get slower, and no new slow test gets in.
+  - `ci-audit.py`: billed minutes per change, each job rounded up as GitHub bills it, and
+    workflow waste CI1-CI4 (no cancel-in-progress, no timeout, no path filter, no cache).
+  - `coverage-overlap.py`: per-test coverage subsets, as prune candidates.
+  - `oracle-scan.py`: tests that re-type the source's formula, re-declare its functions or
+    call it on both sides of an assertion. Advisory.
+  - `affected.py`: a committed path map turns a diff into the test commands it needs, and
+    falls back to the full suite on any change it cannot scope.
+  - `run-plan.py`: offload targets ranked with cost notes (own machines, CI, metered
+    sandboxes), local workers sized to free CPU and memory, and each runner's
+    parallel/changed/shard/JUnit commands.
+  The skill also ships a per-repo `.test-profile.yml`, slop (S1-S18) and gap (G1-G13)
+  catalogues, a tiered CI template and an AGENTS.md Testing section. The catch side rests on
+  a 13-repo survey: suites that were all green killed 74% of authored mutants, and 20 of 20
+  behaviours a blind reviewer predicted were untested survived. Every new script check was
+  watched failing against a planted mutant before it was kept.
+- **`test-review-agent`**: blind, read-only (Read, Grep, Glob) test-suite reviewer, spawned by
+  test-engineering's audit, prune and triage modes.
+- **`security-ops`: optional discovery companion**: `cloudflare/security-audit-skill`,
+  referenced at a pinned, reviewed commit rather than vendored.
+
 - **`fleet queue` and `/conduct`: the coordinator's landing ritual as a command.**
   `fleet queue <lane> <tip>...` lands reviewed lanes one at a time. Before each land it
   waits for the base to settle, checks the tip is the reviewed one (or a rebase with the
@@ -73,6 +110,12 @@ feature releases live in the README "Recent Updates" section.
   points at persisted state; after a long dig, leave a cheap always-on signal.
 
 ### Changed
+
+- **BREAKING: `testgen` and `testing-ops` are merged into `test-engineering`.** `/testgen`
+  survives for one release as a command alias for `/test-engineering write`; installers remove
+  the old skill directories. `coverage-check.sh` is now report-only by default (`--threshold`
+  restores the old gate), and the mocking guidance no longer says to always mock databases
+  and the file system.
 
 - **A security-release exception to the 7-day cooldown.** A release that patches a
   published CVE may skip the wait, but the CVE label alone waives nothing, because

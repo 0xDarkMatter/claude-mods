@@ -84,6 +84,13 @@ in playwright-ops or cypress-ops. This skill decides whether and how strictly.
   at `critical`, a named human approves it.
 - Visual and e2e suites are too slow for per-mutant audit runs; they take part in bug-fix proofs.
 
+## Budget: a separate, generated file
+
+The profile holds policy a human writes; `.test-budget.json` holds measurements a script
+writes (`budget-gate.py baseline`) and CI checks. Keep them apart: a regenerated baseline
+must never rewrite hand-written policy. Strictness does not change the budget: a slow test
+is slow in every zone ([gate.md](gate.md)).
+
 ## Posture
 
 `tdd` and `test-after` are developer preferences, not policy: the repo default lives here, any

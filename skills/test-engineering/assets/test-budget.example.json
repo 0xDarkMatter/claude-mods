@@ -1,0 +1,17 @@
+{
+  "schema": "claude-mods.test-engineering.budget/v1",
+  "policy": {
+    "tolerance_pct": 15,
+    "floor_s": 5,
+    "max_test_s": 2,
+    "shrink_ok": 0
+  },
+  "suite": {
+    "tests": 1240,
+    "time_s": 312.4
+  },
+  "slow": {
+    "tests.e2e.test_checkout::test_guest_checkout_pays_and_emails_receipt": 9.81,
+    "tests.integration.test_import::test_imports_a_10k_row_file": 4.2
+  }
+}

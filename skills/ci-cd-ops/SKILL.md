@@ -329,3 +329,5 @@ jobs:
 | `references/github-actions.md` | Complete workflow syntax, reusable workflows, composite actions, OIDC, runners, debugging |
 | `references/release-automation.md` | Semantic versioning, semantic-release, changesets, goreleaser, changelog, publishing |
 | `references/testing-pipelines.md` | Test stages, parallelism, coverage, service containers, e2e in CI, deployment pipelines |
+
+What a test pipeline costs per change, which tests a diff needs, and a time-budget gate: `test-engineering` (speed mode, `ci-audit.py`, `affected.py`).

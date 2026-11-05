@@ -297,3 +297,5 @@ than on scaffolding:
 - `references/regression-gating.md` - blocking vs advisory, noise floor, McNemar, CI shape, cost/latency attribution
 - `references/hillclimbing.md` - optimising against an eval without destroying it: noise, overfitting, frontiers, optimizers
 - `references/tooling-landscape.md` - platform comparison with verification datestamps
+
+Deterministic code around the model is ordinary testing: `test-engineering`. This skill covers output quality.

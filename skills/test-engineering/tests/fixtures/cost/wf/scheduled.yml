@@ -1,0 +1,10 @@
+name: nightly
+on:
+  schedule:
+    - cron: "0 3 * * *"
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - run: echo hi

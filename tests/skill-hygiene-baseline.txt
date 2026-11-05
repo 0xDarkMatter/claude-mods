@@ -17,7 +17,6 @@ bash-ops	related-not-named	ci-cd-ops
 bash-ops	related-not-named	cli-ops
 ci-cd-ops	related-not-named	docker-ops
 ci-cd-ops	related-not-named	git-ops
-ci-cd-ops	related-not-named	testing-ops
 claude-api-ops	related-not-named	mcp-ops
 claude-code-ops	related-not-named	mcp-ops
 claude-code-ops	related-not-named	parallel-ops
@@ -32,12 +31,10 @@ color-ops	relative-script-call	scripts/contrast-check.js
 color-ops	relative-script-call	scripts/harmony-gen.js
 color-ops	relative-script-call	scripts/palette-gen.js
 cypress-ops	related-not-named	ci-cd-ops
-cypress-ops	related-not-named	testing-ops
 doc-scanner	related-not-named	adr-ops
 doc-scanner	relative-script-call	scripts/agents-md.py
 evals-ops	related-not-named	claude-api-ops
 evals-ops	related-not-named	loop-ops
-evals-ops	related-not-named	testing-ops
 evals-ops	relative-script-call	scripts/eval-baseline.py
 evals-ops	relative-script-call	scripts/goldenset-audit.py
 evals-ops	relative-script-call	scripts/judge-calibration.py
@@ -66,7 +63,6 @@ github-ops	relative-script-call	scripts/check-issues.sh
 github-ops	relative-script-call	scripts/check-security-posture.sh
 github-ops	relative-script-call	scripts/repo-scorecard.sh
 go-ops	related-not-named	api-design-ops
-hono-ops	related-not-named	testing-ops
 hono-ops	relative-script-call	scripts/check-hono-facts.py
 isometric-ops	relative-script-call	scripts/check-iso-facts.py
 isometric-ops	relative-script-call	scripts/iso-math.py
@@ -114,7 +110,6 @@ package-manager-ops	relative-script-call	scripts/run-python.sh
 pigeon	orphan-side-file	scripts/test-mail.sh
 pigeon	related-not-named	sqlite-ops
 playwright-ops	related-not-named	ci-cd-ops
-playwright-ops	related-not-named	testing-ops
 prompt-injection-defense	related-not-named	doc-scanner
 prompt-injection-defense	related-not-named	mcp-ops
 prompt-injection-defense	related-not-named	security-ops

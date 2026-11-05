@@ -1,7 +1,8 @@
 # Gate mode: what CI enforces (v1: deliberately small)
 
-**Output:** a CI job that blocks only on what a tool detects with no false positives, plus the
-repo's `## Testing` section in AGENTS.md so every agent and reviewer works to the same rule.
+**Output:** CI checks that block only on what a tool measures or detects with no false
+positives: lost tests, assertion-free PHP tests, and the **test-time budget**. Plus the
+repo's `## Testing` section in AGENTS.md, so every agent and reviewer works to the same rule.
 
 ## Why the gate is small
 
@@ -37,6 +38,35 @@ Common failure: the repo's ruff config already selects `F811`, but no CI job run
 Strictness does not change the v1 gate. It changes how much proof write mode demands and how
 dense audits are ([profile.md](profile.md)).
 
+## The budget ratchet: the suite may not get slower
+
+Agents add tests at the rate they add code, and a suite that grows one second per change
+takes minutes within a quarter. Time is measured, not guessed, so this check may block.
+It is the mechanical half of "stop bloat at the source".
+
+```bash
+# once, from a full run on the CI runner class (local timings are not comparable)
+python "<skill-dir>/scripts/budget-gate.py" baseline full.json --tolerance-pct 15 --max-test-s 2 > .test-budget.json
+# every PR, in the job that ran the FULL suite (it refuses a subset run's profile)
+python "<skill-dir>/scripts/budget-gate.py" check full.json --baseline .test-budget.json
+```
+
+| Rule | Blocks when | Why |
+|---|---|---|
+| B1 suite time | the total exceeds the baseline by more than the tolerance AND by more than `floor_s` (default 5 s) | the floor absorbs runner noise; the tolerance absorbs honest growth |
+| B2 new slow test | a test not on the baseline's slow list takes more than `max_test_s` | a new slow test belongs in a slower tier, or needs a faster fixture |
+| B3 slower slow test | a grandfathered slow test got slower than its record plus tolerance | grandfathered tests may stay; they may not grow |
+
+- **The ratchet turns one way.** Re-baseline after a speed-up or prune, and the budget
+  tightens. Re-baselining to absorb a slowdown needs a line in the PR body saying why
+  (a new tier of e2e, say), and a reviewer who agrees.
+- **Test count is reported, never blocked.** A count is not value. "Many new tests" is a
+  question for review: were they each seen failing (write mode)?
+- **Where the full suite runs only on merge**, run the check there and alert rather than block;
+  the PR tier's own budget is its job's `timeout-minutes`.
+- Template step: [`assets/ci-tiers.yml`](../assets/ci-tiers.yml); example baseline:
+  [`assets/test-budget.example.json`](../assets/test-budget.example.json).
+
 ## The AGENTS.md section
 
 Add [`assets/agents-testing-section.md`](../assets/agents-testing-section.md) to the repo's
@@ -65,4 +95,5 @@ today carries straight into the deferred levels below.
 | **Diff-scoped generated mutants per PR**, time-boxed (15 minutes, adaptive count, sharded) | a mutation-engine spike shows mutants fit the budget on the slowest suite |
 | **Network denial inside the harness** | a container or WSL spike on Windows; until then, containers for unattended runs |
 | Policy read from the base branch, waivers with owner and expiry, a rebaseline protocol, a snapshot-only-kill status, a flake ledger, reviewer calibration, a pilot window | any heuristic check starts blocking: these keep a blocking gate honest, and are cost without benefit before then |
-| Detector, profile-proposal and report-render scripts | the reviewer agent and the written procedures prove too slow or inconsistent in practice |
+| A *blocking* slop detector (oracle-scan.py stays advisory), profile-proposal scripts | the reviewer agent and the written procedures prove too slow or inconsistent in practice |
+| A blocking "new test must be proved" check | L1 seen-failing replay exists; until then the budget blocks on time and review blocks on proof |

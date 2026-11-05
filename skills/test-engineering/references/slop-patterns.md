@@ -29,6 +29,26 @@ paths or bug text belongs here (see the note in gap-classes.md).
 | S17 | **Lost test** - two Python test functions with the same name in one module or class; Python keeps the last, the first never runs and the count silently shrinks | (mechanical) | Rename. Gate it with ruff/pyflakes `F811` over `tests/` (see gate.md) |
 | S18 | **Coverage filler** - written to satisfy a percentage: import checks, `isinstance` on a constant, a call with no assertion | What bug would make this fail? | Delete it; drop the coverage target that created it |
 
+## Finding copied logic (S3, S15)
+
+Agents write the test from the implementation they just wrote, so the commonest slop is a
+test that re-types the implementation: the same formula for the expected value, a pasted
+copy of the function, or the function called on both sides of the assertion. It passes, it
+even kills some mutants (the copy no longer matches the mutated code), and it protects no
+behaviour, because a wrong formula is wrong in both places. It also breaks on every refactor.
+
+```bash
+python "<skill-dir>/scripts/oracle-scan.py" --repo .   # O1 copied expression, O2 shadow definition, O3 self-oracle
+```
+
+Each hit is a question. In a two-repo pilot (after tuning out shared constants, signatures and
+equivalence tests), 6 hits on one repo held one clear S15 (a test re-implementing the
+production HMAC signer to forge a valid link) and two setup idioms copied from the source;
+the other repo had none. Expect roughly that precision: read every hit. The fix is always the same: replace the copy with a value derived
+from the requirement (show the arithmetic in a comment), then prove the test against a
+planted mutant (write mode). A test that cannot get a requirement-derived value is
+usually testing the wrong thing.
+
 ## Notes on the dangerous ones
 
 **S1 is the costliest pattern** because it wears the label of protection. Typical shapes: a

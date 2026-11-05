@@ -1,0 +1,10 @@
+{
+  "full": "just check",
+  "always_full": ["justfile", "tests/**", "**/*.lock", "**/package.json", ".github/**", "**/tests/fixtures/**"],
+  "ignore": ["**/*.md", "docs/**", "**/*.png"],
+  "rules": [
+    {"paths": ["packages/*/**"], "run": "bash packages/{1}/tests/run.sh"},
+    {"paths": ["hooks/**"], "run": "bash tests/hooks.sh"},
+    {"paths": ["scripts/*.ps1"], "run": "bash tests/install-guard.sh"}
+  ]
+}
