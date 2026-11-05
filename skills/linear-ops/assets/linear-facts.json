@@ -60,6 +60,14 @@
     {"key": "relation-update", "prose_token": "issueRelationUpdate", "evidence": "schema", "note": "offered by the schema with a type string; delete-then-create is the route actually used; the one-call update is untested"},
     {"key": "comment-update", "prose_token": "commentUpdate", "evidence": "measured", "note": "an agent-owned comment can be corrected in place"},
     {"key": "router-session", "prose_token": "cheap router session", "evidence": "measured", "note": "a smallest-model, low-effort session ran the watcher under a Monitor and relayed events; savings not measured"},
+    {"key": "list-comments-newest-first", "prose_token": "returns comments newest first", "evidence": "measured", "note": "MCP list_comments pages toward older comments; a fresh comment can lag a notification by seconds, so retry once"},
+    {"key": "tick-by-substring", "prose_token": "Tick a box by a distinctive substring", "evidence": "measured", "note": "Linear links a hostname inside a box, so exact-line ticks miss; assert exactly one match"},
+    {"key": "renamed-card-old-slug", "prose_token": "keeps its old slug in the URL", "evidence": "measured", "note": "links still work but quote as stale"},
+    {"key": "relayed-approval-refused", "prose_token": "Approvals do not cross sessions", "evidence": "measured", "note": "a safety layer refused a write whose approval was relayed through another session"},
+    {"key": "closing-unseen-infra", "prose_token": "Closing a card you cannot check", "evidence": "inferred", "note": "In Review with nothing ticked until the agent has its own probe; practice, one night"},
+    {"key": "thread-as-protocol-channel", "prose_token": "A cross-team thread as a protocol channel", "evidence": "inferred", "note": "post answers as written, name earlier answers in corrections, verify one-command claims; practice, one night"},
+    {"key": "drift-check-session-list", "prose_token": "needs only the session list", "evidence": "measured", "note": "with nothing running the periodic check costs one call"},
+    {"key": "dedupe-before-carding", "prose_token": "Search for an existing card before carding", "evidence": "inferred", "note": "comment on the owning card instead of opening a duplicate"},
     {"key": "claim-collision", "prose_token": "The tie-break has never run against a real collision", "evidence": "untested", "note": "the CLAIM / BACK OFF tie-break is a design; no collision occurred"}
   ],
   "mcp_tools": [

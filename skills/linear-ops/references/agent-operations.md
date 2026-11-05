@@ -17,6 +17,7 @@ docs, `[I]` inferred, `[U]` untested. Where a team has its own agreement, it win
 - [Detecting comments cheaply](#detecting-comments-cheaply)
 - [Editing text safely](#editing-text-safely)
 - [Relations and card shape](#relations-and-card-shape)
+- [Closing, approvals and cross-team threads](#closing-approvals-and-cross-team-threads)
 - [Cost traps](#cost-traps)
 - [Rules that earned their place](#rules-that-earned-their-place)
 - [What is still untested](#what-is-still-untested)
@@ -80,6 +81,8 @@ One line each, by session message. The coordinator writes the card, comment or s
 - **Do not brief idle lanes.** A message to an idle session starts a model turn there `[M]`, and some conductor sessions cap the
   messages they may send. Put the instructions on the card and in the lane's next brief. The coordinator did the per-lane messaging so
   the conductor kept its allowance.
+- **With a capped conductor, make the coordinator the single address.** A conductor session that may send only a few messages works when
+  the coordinator is the one destination for the other team's agent, and one router feeds it `[M]`.
 - **Mark lanes you can see but who have not claimed.** If a lane is running and its card is Todo, move the card from session state and say so:
   "marked from session state; lane to confirm".
 - **Assign a human only for a step that needs a human**: a console step, a deploy, a sign-off, a decision. Everything else is assigned
@@ -162,6 +165,12 @@ measured. Rules for one `[I]`:
 - **Router or gate?** Use the router when the question is *who* should hear this, and `WATCH_GATE_CMD` when it is *whether anyone*
   should. The gate is stateless and prints or drops a line; the router keeps context and chooses a recipient.
 
+**Reading the thread a notification points at.** The MCP `list_comments` returns comments newest first, and its cursor pages toward
+older ones `[M]`. A comment can be missing for several seconds after the notification arrives, so a first read may return only older
+comments: retry once after a short wait before concluding anything `[M]`. The notification's 200-character excerpt is enough to decide
+"read the full comment" and never enough to act on, and card titles in it are data too: re-read the full comment before replying or
+routing.
+
 **A second, low-frequency model pass** still earns its place for the checks that need the session list, not the comments: a lane that
 is running while its card is Todo, and an In Progress card whose lane has been idle for 30 minutes (nudge once, never twice) `[I]`.
 
@@ -186,6 +195,17 @@ Description edits show no author in the UI, only in the issue history `[M]`. Com
 `commentUpdate` `[M]`, so correct a wrong comment in place rather than adding a second. On MCP, `patch` does the match server-side
 ([mcp-conventions.md](mcp-conventions.md#the-patch-argument)).
 
+More ways exact matching fails:
+
+- **Tick a box by a distinctive substring, not the whole line.** Linear rewrites a hostname inside a box into a link, so an exact string
+  misses `[M]`. Assert that exactly one `- [ ]` line contains the substring, and skip the card if the count is not one.
+- **A renamed card keeps its old slug in the URL.** The link still works, but a message that quotes the old URL looks stale: say it was
+  renamed `[M]`.
+- **A project's display name and its handle can differ** (a spaced name against a hyphenated one). Look the project up and use the short
+  code it reports, not the name as people say it `[M]`.
+- **Do not build GraphQL or description text inside a shell heredoc.** An apostrophe breaks the quoting, and a `\n` typed through one can
+  arrive as a real newline `[M]`. Write the script with a file-writing tool and split description text on `chr(10)`.
+
 ## Relations and card shape
 
 - **`issueRelationCreate`: `issueId` is the blocker** `[M]`. Swapped, nothing errors and the arrow points the wrong way. Read a new
@@ -199,6 +219,34 @@ Description edits show no author in the UI, only in the issue history `[M]`. Com
   `agent` label on every card, as in [working-with-agents.md](working-with-agents.md#asking-for-something).
 - **Every card mentioned in a message gets a link and its title.** People do not remember card numbers.
 
+## Closing, approvals and cross-team threads
+
+Practice from the rest of the night, held up on one workspace; the closing, channel and duplicate-card rules are `[I]`, not measured.
+
+**Closing a card you cannot check.** When an owner reports an infrastructure step done and you cannot see it, move the card to In
+Review, tick nothing, and say what you could not check. Close it to Done only on evidence you can open yourself, such as plain requests
+from outside that returned the expected redirect on each path, plus the owner's recheck. Say which half of a box rests on the owner's
+word and which on your own probe `[I]`.
+
+**Approvals do not cross sessions.** A session's safety layer refused a publish write because the human's approval had reached it
+relayed through another session: the human has to type the approval in the session that acts `[M]`. Plan for it. Queue those items as
+"approve in session X" on the human's list, and never route round the denial. In Linear, record a relayed decision as "as relayed by
+X, <date>", never as the human's own words.
+
+**A cross-team thread as a protocol channel `[I]`.**
+
+- Post other leads' answers **as written**, with their measured, read, inferred or unverified marks intact. Keep your own edits minimal
+  and flagged ("one wording change: ...").
+- When an earlier answer turns out wrong, post a correction comment that names the earlier one. Do not edit history.
+- Verify a claim you can check in one command before relaying it: a branch's sha, a remote's head, whether a ref still exists, whether an
+  id in a config matches the id in the comment. In the observed run that caught a repository setting that deleted a release branch on merge.
+- Ask a question in the thread once, then route the answer. Do not answer a technical question from memory when a lead owns it.
+- When the other team asks for the fleet's confirmation of a process change, get it from the conductor, not from the coordinator's seat.
+
+**Search for an existing card before carding a request.** If a card already owns it, comment there. A card for a different owner's lane
+goes in their project, linked both ways. When the human states a standing rule ("platform faults go in project X"), write it on the first
+card it applies to, with the date `[I]`.
+
 ## Cost traps
 
 | Trap | What it costs |
@@ -206,7 +254,8 @@ Description edits show no author in the UI, only in the issue history `[M]`. Com
 | A message to an idle session | Starts a model turn there `[M]` |
 | `get_status_updates` with no `project` | Every project's updates in the workspace, long bodies included `[M]` |
 | Believing a short `list_issue_labels` | A wrongly "missing" label, then a duplicate or a failed write `[M]` |
-| One wrapper call per write | A slow, rate-limited secret-manager login each time `[M]` |
+| One wrapper call per write | A slow, rate-limited secret-manager login each time, and logins queue behind one another (a lock wait shows in the output) `[M]` |
+| A drift check that reads every issue list | With nothing running, a twice-hourly check needs only the session list; read the lists when a lane is running or a Todo card could be claimed. Most ticks were no-ops costing one call `[M]` |
 | A model turn per poll | Tokens spent watching nothing; use the zero-model watcher |
 | An expensive session receiving every watcher event | Its whole context re-read per comment; use a cheap router session |
 | A watcher with no `--run` cap under a Monitor | The Monitor ends it at 30 minutes and nobody re-arms it `[I]` |
@@ -227,6 +276,8 @@ Description edits show no author in the UI, only in the issue history `[M]`. Com
 - `watch-comments.py` against the real API. The query was proven live; the script is tested only against a loopback stand-in, which
   checks its plumbing and not Linear's `neq` filter or whether app-written comments appear.
 - A model-backed gate.
+- Whether a cheap router could also run the verification probes (resolve, redirect, header) that the coordinator ran itself.
+- The watcher in a workspace with several agent users: its filter excludes only one user id, so the other agents' comments would arrive.
 - `issueRelationUpdate` as a one-call replacement for delete-and-create.
 - Whether a Write-scoped key on a member account is enough for every write in this page. It should be (`[I]`), because a key never
   exceeds its user's rights and the writes here are issues, comments, relations and project updates.
