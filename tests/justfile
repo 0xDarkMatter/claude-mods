@@ -22,6 +22,11 @@ validate-names:
 validate-spec:
     @bash tests/spec.sh
 
+# Mapped by tests/changed-map.tsv; `just check` stays the landing gate.
+# Dev gate: only the checks covering what changed vs [base] (default main)
+check-changed *args:
+    @bash tests/check-changed.sh {{args}}
+
 # Windows test runner
 test-win:
     powershell -ExecutionPolicy Bypass -File tests/validate.ps1

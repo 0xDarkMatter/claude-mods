@@ -34,6 +34,12 @@ check-fast:
     @bash tests/skill-size.sh
     @bash tests/reference-contents.sh
 
+# Map: tests/changed-map.tsv; shared or unmapped paths run everything; `--list` previews.
+# NOT a landing gate: `just check` still runs the full sweep.
+# Dev gate: only the checks covering what changed vs [base] (default main), 4 at a time
+check-changed *args:
+    @bash tests/check-changed.sh {{args}}
+
 # Everything in tests/justfile is reachable from root too
 test:
     @just --justfile tests/justfile test
