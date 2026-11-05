@@ -1,7 +1,9 @@
 # Worked case: Astro on Cloudflare Workers
 
-Evidence labels are defined in `SKILL.md`. Read against `@sentry/astro` 11.10.0,
-`@sentry/cloudflare` 11.10.0 and `astro` 7.4.5, on 2026-11-06.
+Evidence labels are defined in `SKILL.md`. Code read against `@sentry/astro` 11.10.0,
+`@sentry/cloudflare` 11.10.0 and `astro` 7.4.5, on 2026-11-06. **[measured]** here means one real
+setup: Route B on Astro 7.3.5, `@sentry/cloudflare` 11.10.0 and wrangler 4.139.0, production build
+under local workerd on Windows. No event from that setup has yet been sent to real Sentry.
 
 ## Contents
 
@@ -11,6 +13,7 @@ Evidence labels are defined in `SKILL.md`. Read against `@sentry/astro` 11.10.0,
 - Route B: server only, no client SDK
 - Landmines
 - Open questions
+- Size
 
 ## Pick the route
 
@@ -41,14 +44,21 @@ The composable `astro/fetch` pipeline is different. It rethrows errors from the 
 framework can handle them [code], so a custom fetch handler may reach `withSentry` directly.
 
 And `withSentry` only captures throws. A returned 500 sends nothing [measured with a stand-in
-handler]. So **render errors never reach a bare `withSentry`**: capture has to happen in middleware
-[inferred from the two above]. This is what `@sentry/astro` adds: its integration registers a `pre`
-middleware that captures errors thrown by `next()`, unless `autoInstrumentation.requestHandler` is
-`false` [code].
+handler]. So **render errors never reach a bare `withSentry`**. On a real Worker build, a throw in a
+page or API route produced no event with `withSentry` alone, while a throw at Worker level, on a
+route Astro doesn't handle, and in `scheduled` did reach it [measured]. Capture has to happen in
+middleware as well.
 
-Treat that as well supported but unrun until you see it in step 3 of
-`references/prove-without-traffic.md`. A throw during streaming, after the response has started, is
-a separate case that nobody here has checked [open].
+`@sentry/astro` adds that: its integration registers a `pre` middleware that captures errors thrown
+by `next()`, unless `autoInstrumentation.requestHandler` is `false` [code; not run on Workers]. A throw
+during streaming, after the response has started, is a separate case nobody here has checked [open].
+
+**A page throw can reach middleware twice.** On that build, one page throw hit the middleware's catch
+twice, as two distinct `Error` objects about 9 ms apart, because Astro re-enters for its error page.
+Sentry's dedupe didn't merge them, and neither did an identity check. An API throw was caught once
+[measured]. If you write the middleware yourself, drop a repeat of the same name and message within a
+short window. Route A's middleware has a `__sentry_wrapped__` guard on `locals` [code], but whether it
+prevents this is [open]: look for duplicates in your canary run.
 
 ## Route A: the official integration
 
@@ -95,42 +105,64 @@ cron is yours to add.
 ## Route B: server only, no client SDK
 
 `@sentry/cloudflare` alone, no `@sentry/astro`, gives you a smaller install and no browser bundle.
-Then you write the capture in your own Astro middleware, since nothing else catches render errors:
+Then you write the capture in your own Astro middleware, since nothing else catches render errors.
+This is the route that was measured.
+
+The middleware also runs in Astro's Node target, so it must not import the Cloudflare SDK. The
+measured setup has the module the Worker entry loads set a hook on `globalThis`, and the middleware
+calls the hook if it exists. Elsewhere there is no hook, and nothing happens:
 
 ```ts
-// src/middleware.ts: wrap next() so a throw is seen before Astro renders the 500 page
-import { captureException } from "@sentry/core";  // see the landmine below
+// In the module the Worker entry loads, which is the only place that imports the SDK
+import * as Sentry from "@sentry/cloudflare";
+globalThis.__reportError = (error: unknown) => Sentry.captureException(error);
+```
+
+```ts
+// src/middleware.ts: the catch sees the throw before Astro renders the 500 page
 import { defineMiddleware } from "astro:middleware";
+
+const SEEN_WINDOW_MS = 2000;  // a page throw can arrive twice, as two distinct Error objects
+let last = { key: "", at: 0 };
 
 export const onRequest = defineMiddleware(async (_ctx, next) => {
   try {
     return await next();
   } catch (error) {
-    captureException(error);
+    const key = error instanceof Error ? `${error.name}:${error.message}` : String(error);
+    const now = Date.now();
+    if (key !== last.key || now - last.at > SEEN_WINDOW_MS) {
+      globalThis.__reportError?.(error);
+    }
+    last = { key, at: now };
     throw error;  // keep Astro's normal 500 handling
   }
 });
 ```
 
-[open] This exact shape is a sketch, not something we've run. `@sentry/core` is the package both
-SDKs build on, and `captureException` does nothing without a client [inferred]. It must resolve to
-the same copy `@sentry/cloudflare` uses, so pin it to the same exact version.
+The approach is measured: report, rethrow, and a 2 s drop on name and message. This listing is a
+reduced version of it, so test your own. The module-level `last` is shared by concurrent requests in
+an isolate, so two requests hitting the same error within the window report once, which is usually
+fine for a low-traffic site [inferred].
 
-Wait for the build's own results before you rely on this route over Route A.
+Choosing no DSN: the measured setup skips the `withSentry` wrap per request when `SENTRY_DSN` is unset,
+so the SDK is never initialised. Seven requests sent nothing [measured].
 
 ## Landmines
 
-- **Middleware also runs in `astro dev` and in any Node target.** Importing `@sentry/cloudflare` in
-  middleware pulls a Worker SDK into those [hypothesis from a real setup; not verified here]. Keep
-  that import in the Worker entry only.
+- **Middleware also runs in any Node target.** So keep `@sentry/cloudflare` out of it, as in Route B
+  [measured in a real setup].
+- **A crash can look like a 404.** With a root catch-all route and no `500.astro`, production Astro
+  matched `/500` against the catch-all, which answered 404. Dev matches exactly and answers 500, so
+  dev hides it [measured]. Add a `500.astro`, and test crashes on the production build.
 - **`@sentry/astro` resolves differently by runtime.** Its exports map offers `node`, `browser` and
   `import` conditions and none for workerd, so plain `import "@sentry/astro"` in server code on
   Workers may give you the client build [inferred from the exports map]. On the server, call Sentry
   through `@sentry/cloudflare`.
 - **`@sentry/astro` depends on `@sentry/node` and `@sentry/browser`**, and its middleware imports
   from `@sentry/node` [code]. That is expected on this route. Measure your bundle.
-- **`astro dev` doesn't prove this setup.** The integration skips wrapping the Worker under `dev`
-  [code]. Use the production build.
+- **`astro dev` doesn't prove this setup.** It doesn't exercise the Worker entry [measured], and the
+  integration skips wrapping under `dev` [code]. Use the production build under `wrangler dev`.
 - **Installing the integration on Cloudflare without `@sentry/cloudflare` exits the build** with an
   error [code]. Install both.
 
@@ -146,5 +178,10 @@ Wait for the build's own results before you rely on this route over Route A.
 - [open] Whether `getClient()` inside the auto middleware finds the client `withSentry` created.
   The middleware passes through silently without one [code], so a missing capture would look like no
   error. A canary thrown from a page answers this at once.
-- [open] A real before/after bundle size for this setup, from your build output. The figures in
-  `SKILL.md` are minimal entries, not this stack.
+
+## Size
+
+Route B on a real site added about 411 KB raw and 100 KB gzipped: 17,286,807 to 17,698,166 bytes raw,
+and 4,220,785 to 4,320,522 bytes gzipped [measured]. That sums the `.js`, `.mjs` and `.wasm` files
+under `dist/server`, gzipped per file, so it isn't wrangler's final bundle. Startup time wasn't
+measured. Measure yours from build output.

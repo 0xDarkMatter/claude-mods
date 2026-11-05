@@ -18,7 +18,7 @@ result by reading the bytes the SDK would send.
 > measurements are in `assets/sentry-facts.json` and the references.
 
 **Evidence labels used here.** Keep them when you repeat a claim:
-**[measured]** we ran it and saw the result. **[code]** read from published package code,
+**[measured]** we, or a real setup we name as such, ran it and saw the result. **[code]** read from published package code,
 not run. **[docs]** Sentry's docs say so. **[inferred]** reasoned from the above.
 **[open]** nobody has checked yet.
 
@@ -55,8 +55,9 @@ Sentry's snippets are a demo. Treat each default as a question:
 | Client SDK at all | Server-only setups don't need it. **The wizard's Verify step uses a client-side button, so its page may keep waiting** [inferred] | Add it only if browser errors matter |
 | Source map upload | Sends your source to Sentry and adds a credential to the build | Its own decision, see `references/credentials-and-source-maps.md` |
 
-Bytes, as minified / gzipped from a minimal entry with esbuild [measured, 11.10.0]. These
-are indicative, so measure your own build before and after:
+Bytes, as minified / gzipped from a minimal entry with esbuild [measured, 11.10.0]. A real
+Astro Worker gained about 411 KB raw and 100 KB gzipped, summed per file under `dist/server`
+[measured]. Measure your own build before and after:
 
 | Bundle | Minified | Gzipped |
 |---|---|---|
@@ -130,7 +131,8 @@ patterns: `references/credentials-and-source-maps.md`.
 
 ## Prove it without sending traffic
 
-`astro dev` and unit tests don't prove the real build. `"<skill-dir>/scripts/envelope-sink.py"`
+`astro dev` and unit tests don't prove the real build. The method below has worked on a
+production Worker build under local workerd [measured]. `"<skill-dir>/scripts/envelope-sink.py"`
 records what the SDK would send, on loopback:
 
 ```bash
@@ -150,7 +152,11 @@ throwaway range, killed before finishing.
 - **`sendDefaultPii: false` is a silent no-op on v11.** See above. Search for it when
   upgrading from v10 or copying an older guide.
 - **A returned 500 is not captured, only a throw** [measured]. Frameworks that turn errors
-  into responses need capture inside the framework. Astro does this: see the worked case.
+  into responses need capture inside the framework. On a real Astro Worker, page and API throws
+  never reached a bare `withSentry` [measured], and a page throw reached middleware twice. See
+  the worked case.
+- **Dev servers hide production error handling.** A crash on an Astro site with a catch-all
+  route and no `500.astro` answered 404 in production and 500 in dev [measured].
 - **A new `dataCollection` category defaults to on.** `mcp` arrived in 11.9.0 [docs]. An
   explicit list can go stale, and `--live` on the verifier below trips when one appears.
 - **Spans, logs and metrics skip `beforeSend`.** They have their own hooks [docs]. If you

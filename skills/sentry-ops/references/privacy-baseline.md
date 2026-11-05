@@ -69,10 +69,21 @@ strict setting.
   lines too.
 - **Drops the event if scrubbing throws.** Losing one report beats sending it unscrubbed.
 
+It removes known fields, so a field a future SDK adds would pass through. A stricter design, used
+on one real setup with 0 canary hits [measured], rebuilds the event from an allow-list instead. Choose
+that if a surprise field would be costly, and re-check it when you upgrade.
+
 It is pure, with no SDK import, so it can be tested without Sentry. Its tests are in
 `tests/scrub-event.test.mjs` and were each seen failing against a broken copy. Copy them along
 with the file, and add your own routes and any identifiers your app uses. An email regex won't
 find a customer number.
+
+### Paths in stack frames
+
+Frames carry the build machine's absolute paths [measured in a real setup], which can include a
+username. Without source maps, they also point at minified chunks. The scrubber leaves them alone,
+because source map matching depends on those names [inferred]. Build in CI or a neutral directory, or
+use the SDK's `rewriteFramesIntegration` [code: exported; not tested here].
 
 ### What stays
 

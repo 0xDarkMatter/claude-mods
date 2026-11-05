@@ -25,9 +25,18 @@ Against `@sentry/cloudflare` 11.10.0, `withSentry` on Node 22 with a stand-in ha
 | No DSN | No request |
 | Handler **returns** a 500 | No request |
 
-**Not measured:** the same run inside workerd, and the browser SDK against this listener. Run on
-Node this proves the SDK's behaviour, not your Worker's. So do step 3 against your real build, and
-treat anything that differs as a finding.
+The method has also run on a real Astro Worker: production build under `wrangler dev` (local workerd,
+Windows), wrangler 4.139.0, with that project's own listener [measured]:
+
+| Case | Result |
+|---|---|
+| 6 triggers | 6 envelopes, so workerd reaches a plain-HTTP loopback DSN |
+| Cookie, auth header, JSON body with an email, emails in query strings; allow-list `beforeSend` | 0 hits in the raw bytes |
+| No DSN, same 7 requests | 0 POSTs |
+
+**Not measured:** the browser SDK against this listener, and `envelope-sink.py` itself on workerd,
+since that project used its own listener. Do step 3 against your real build, and treat anything that
+differs as a finding.
 
 ## Steps
 
@@ -54,6 +63,9 @@ values in every channel:
 Use documentation values only (`example.com`, `203.0.113.0/24`). Remove the route afterwards, or
 guard it so it can't ship.
 
+Also forbid your build machine's username or home path: stack frames carry the build machine's
+absolute paths [measured in a real setup].
+
 ### 3. Real build, real runtime
 
 Build the artifact that deploys and run that. A dev server often has a different entry point:
@@ -77,9 +89,9 @@ a loaded machine]. Check that the listener's "received" count matches what you s
 The port range is the throwaway one, 8190 to 8199. The script binds to loopback only and exits by
 itself on `--timeout`. Make sure it has gone before you finish.
 
-[open] That workerd under `wrangler dev` reaches a plain-HTTP loopback address the way Node does. We
-expect it to, but if nothing arrives, that's the first thing to rule out: try it with a route that
-only calls `fetch` on the listener.
+If nothing arrives, first confirm the trigger really reaches a capture point. In a framework that
+turns errors into responses, `withSentry` alone won't send anything, as in
+`references/astro-on-workers.md`.
 
 ### 4. Read the bytes
 
