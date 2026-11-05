@@ -107,7 +107,10 @@ Two controls:
 - **`budget_tokens`** in the config — a per-run output ceiling. The loop stops the run
   when it's reached (the same discipline as a dynamic `/loop` watching `budget.remaining()`).
 - **The run-log** — the actual spend, line by line. Reconcile estimate (`loop-estimate`)
-  against actual periodically; if they diverge, the loop's scope crept.
+  against actual periodically; if they diverge, the loop's scope crept. One blind spot: an
+  interactive session's background subagents also make status-line calls that never reach
+  the session JSONL. A loop that runs as `claude -p` makes none. For an interactive one,
+  reconcile against OTel `api_request` events, not the transcript.
 
 Estimate before you schedule: [../scripts/loop-estimate.py](../scripts/loop-estimate.py). The
 cheapest lever is **cadence** — halving the frequency halves the cost. The next is

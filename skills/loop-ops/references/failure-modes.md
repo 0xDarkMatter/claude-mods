@@ -42,6 +42,9 @@ judgment has earned.
 - **Catch:** keep `run.md` byte-identical (the template enforces this — fresh context,
   same prompt). `loop-estimate` tells you whether the cadence can cache at all and which TTL;
   if it can't, don't pay the write multiplier — run uncached.
+- **Not the cache?** If the loop runs interactively with background subagents, their
+  status-line calls are billed but never written to the JSONL, so a transcript-based
+  tally reads low. Check OTel `query_source=agent_summary` before blaming the cache.
 
 ## 4. The force-push / push-to-main loop
 

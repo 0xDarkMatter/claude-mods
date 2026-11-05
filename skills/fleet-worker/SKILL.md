@@ -258,6 +258,10 @@ headless sessions).
 - **Cost figures are notional:** `total_cost_usd` is Claude Code's internal
   pricing table applied to a model it doesn't know — ignore it; account by
   `usage.*_tokens` and your provider's plan.
+- **No status-line overhead, then or now:** `claude -p` workers don't start the
+  background-subagent summary timer, so they never paid that cost. As of v2.1.316
+  (2026-11-05), a native background subagent pays only a short Haiku call for it,
+  so the case for a worker rests on the cheaper brain alone.
 - Re-dispatch is clean (the worktree makes retries idempotent).
 
 ## Security
