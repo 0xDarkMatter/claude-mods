@@ -5,3 +5,6 @@ skip ENG-12
 This does not fix ENG-13
 uses SHA-256 hashes
 Contributes to ENG-14.
+Fixes DOC-NEW
+Part of OPS-NEW
+Also QA-NEW

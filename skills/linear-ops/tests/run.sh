@@ -83,6 +83,9 @@ row ENG-12 opt-out "skip_is_opt_out"
 row ENG-13 negated-closing "does_not_fix_is_flagged_not_trusted"
 row SHA-256 bare "hash_name_is_not_closed"
 row ENG-14 non-closing "contributes_to_with_trailing_dot"
+row DOC-NEW closing "fixes_new_creates_and_closes_on_merge"
+row OPS-NEW create "part_of_new_creates_without_closing"
+row QA-NEW create "bare_new_creates_an_issue"
 printf 'Part of ENG-1\n' >"$tmp/safe.md"
 ec 0 "non_closing_text_exits_0" "$PY" "$MW" "$tmp/safe.md"
 printf 'Fixes ENG-1\n' >"$tmp/comment.md"
@@ -91,8 +94,8 @@ has "comment reference marked ignored" "ignored"
 printf 'Updates ENG-1\n' >"$tmp/gl.md"
 ec 0 "gitlab_updates_word_links" "$PY" "$MW" --gitlab "$tmp/gl.md"
 has "updates is non-closing on gitlab" "non-closing"
-ec 0 "github_updates_word_is_bare" "$PY" "$MW" "$tmp/gl.md"
-has "updates is not a magic word on github" "bare"
+ec 0 "github_updates_text_exits_0" "$PY" "$MW" "$tmp/gl.md"
+has "github_updates_word_is_bare" "bare"
 
 # --- facts verifier, offline ---
 ec 0 "facts --help" "$PY" "$FACTS" --help
@@ -172,11 +175,11 @@ else
 
   PAGES='# scenario: pages
 query P($after: String) { issues(first: 1, after: $after) { nodes { id } pageInfo { hasNextPage endCursor } } }'
-  ec 0 "paginate_walks_every_page" "$PY" "$GQL" --endpoint "$URL" --query "$PAGES" --paginate issues
-  has "all three pages merged" '"count": 3'
-  has "complete walk not truncated" '"truncated": false'
-  ec 0 "max_pages_stops_early" "$PY" "$GQL" --endpoint "$URL" --query "$PAGES" --paginate issues --max-pages 2
-  has "says it stopped early" '"truncated": true'
+  ec 0 "paginate_exits_0" "$PY" "$GQL" --endpoint "$URL" --query "$PAGES" --paginate issues
+  has "paginate_walks_every_page" '"count": 3'
+  has "complete_walk_not_truncated" '"truncated": false'
+  ec 0 "max_pages_exits_0" "$PY" "$GQL" --endpoint "$URL" --query "$PAGES" --paginate issues --max-pages 2
+  has "max_pages_reports_truncated" '"truncated": true'
   ec 2 "paginate_wrong_path_refused" "$PY" "$GQL" --endpoint "$URL" --query "$PAGES" --paginate nope
 
   # The mock answers with data if any credential arrives, so exit 0 here proves none was sent.

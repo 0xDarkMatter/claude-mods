@@ -82,8 +82,9 @@ def scan(text: str, source: str, kind: str, pattern: re.Pattern) -> list[dict]:
                 final = effect
                 if effect == "closing" and NEGATION_RE.search(line[: m.start(1)]):
                     final = "negated-closing"
-                if idm.group().endswith("-NEW") and effect in ("closing", "non-closing"):
-                    final = "closing" if final != "negated-closing" and effect == "closing" else "create"
+                # `Fixes ENG-NEW` creates an issue AND closes it on merge, so it stays closing.
+                if idm.group().endswith("-NEW") and effect == "non-closing":
+                    final = "create"
                 if kind == "comment":
                     final = "ignored"
                 rows.append({"source": source, "line": lineno, "effect": final, "id": idm.group(), "word": word})
