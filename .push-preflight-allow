@@ -1,0 +1,23 @@
+# push-preflight regex-layer allowlist. One entry per line: <repo-relative path>:<line regex>.
+# Each entry needs a reason comment above it. See skills/push-preflight/SKILL.md
+# section "False-positive handling".
+
+# reason: reads a fact-file field named prose_token; no literal value
+skills/craftcms-ops/scripts/check-craft-facts.py:^        token = str\(fact\["prose_token"\]\)$
+# reason: reads a package field named prose_token; no literal value
+skills/web-perf-ops/scripts/check-web-perf-facts.py:^        token = str\(pkg\["prose_token"\]\)$
+
+# reason: documentation example that fetches a token through a function call; no literal value
+skills/mcp-ops/references/server-architecture.md:^    token = get_access_token\(\)$
+# reason: documentation example that fetches a token through a function call; no literal value
+skills/mcp-ops/references/transport-auth.md:^    token = get_access_token\(\)$
+
+# reason: documentation example that generates a random token at runtime; no literal value
+skills/security-ops/references/auth-account-protection.md:^    token = secrets\.token_urlsafe\(32\)$
+# reason: OWASP example contrasting a weak token generator with secrets.token_urlsafe; no literal value
+skills/security-ops/references/owasp-top10-a01-a05.md:^token = str\(random\.random\(\)\)$
+# reason: OWASP example of the secure token generator; no literal value
+skills/security-ops/references/owasp-top10-a01-a05.md:^token = secrets\.token_urlsafe\(32\)$
+
+# reason: contents-list link to a heading about disk-to-drive-letter mapping
+skills/windows-ops/references/manual-queries.md:^  - \[Disk . drive letter mapping\]\(#disk--drive-letter-mapping\)$
