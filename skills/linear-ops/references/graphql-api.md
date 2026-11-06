@@ -1,7 +1,7 @@
 # GraphQL API
 
 For field-selective reads, reports, bulk changes and apps. `[O]` Linear's developer docs, `[S]` read from the published schema,
-`[M]` measured, `[I]` inferred. Seen 2026-11-05.
+`[M]` measured, `[I]` inferred, `[R]` reported by a team in production and not re-tested here. Seen 2026-11-05.
 
 ## Contents
 
@@ -87,7 +87,9 @@ query Urgent($teamKey: String!) {
 
 ## Bulk writes
 
-- `issueBatchUpdate(ids, input)`: up to 50 UUIDs, one partial input for all `[S]`.
+- `issueBatchUpdate(ids, input)`: up to 50 UUIDs, one partial input for all `[S]`. Teams report that
+  more than 50 fails validation with `arrayMaxSize`, and that trashing an active issue fails with
+  "cannot be trashed without being archived" `[R]`: read the error, don't retry.
 - `issueBatchCreate(input: {issues})`: atomic, up to 50 `[S]`.
 - For more, loop in batches, read `success` and `errors` each time, and honour `Retry-After`. Dry-run the id list with the user first.
 
@@ -120,8 +122,9 @@ description is uploaded automatically `[O]`.
 `@linear/sdk` is generated from the schema. **Its major number moves about weekly** (73.0.0 in January 2026 to 101.1.0 in November
 2026 `[M]`), which signals schema churn, not hand-written breaking changes `[I]`. Pin an exact version, and expect the 7-day cooldown
 from `rules/supply-chain.md` to apply to each bump. Errors are `LinearError` and `InvalidInputLinearError` with `.errors[].userError`,
-`.type` and `.status` `[O]`. Linear's docs neither advise nor warn against it compared with raw GraphQL `[O]`. For a one-off script,
-`linear-gql.py` needs no dependency.
+`.type` and `.status` `[O]`. Linear's rate-limiting page does advise against leaning on it for heavy reads: when fetching many
+entities, "especially if you're using our SDK", write your own GraphQL queries and filter narrowly `[O]`
+(`/developers/rate-limiting`). For a one-off script, `linear-gql.py` needs no dependency.
 
 ## Using linear-gql.py
 

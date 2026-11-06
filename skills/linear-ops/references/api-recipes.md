@@ -37,6 +37,17 @@ a write.
 - Labels are a tree. Use child ids, never a group's.
 - `projectStatuses` and `workflowStates` are connections, so they need `first` and `nodes`.
 
+To find an issue you already know by its exact title, ask for a few and require exactly one. Zero means it's missing; more than one is a
+duplicate to resolve before you write anything:
+
+```graphql
+query IssueByTitle($team: String!, $title: String!) {
+  issues(first: 10, filter: { team: { key: { eq: $team } }, title: { eq: $title } }) {
+    nodes { id identifier title state { name } }
+  }
+}
+```
+
 ## Reads
 
 ```graphql
@@ -182,6 +193,9 @@ python "$G" --validate --query-file "$Q/relation.graphql"
 
 This catches plausible-looking mistakes such as `projectStatuses { id }` (a connection, so it needs `first` and `nodes`) or `issueRelationCreate { relation { id } }`
 (the field is `issueRelation`). It can't check permissions or behaviour.
+
+Doing this by hand instead, use `curl -q`, which skips `~/.curlrc`, and never a wrapper that may add a stored credential: a check meant to send
+nothing should provably send nothing.
 
 ## Keep the cost down
 

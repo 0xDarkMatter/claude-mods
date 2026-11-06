@@ -78,6 +78,13 @@ Three routes, all official `[O]`:
 Prefer one of these for audits, reports and unattended loops. It removes a whole class of accident
 instead of relying on the agent's care. `whoami` reports `connection.access`, so check it `[M]`.
 
+That a read-only key or scope **rejects** a write is Linear's statement, not something measured here. If
+anything depends on it, prove it once with a write you expect to fail, and keep the error.
+
+The OAuth metadata needs no credential, which helps tell a bad endpoint from a bad token `[M]`:
+`https://mcp.linear.app/.well-known/oauth-protected-resource/mcp` answers 200, and the `/mcp/readonly`
+variant advertises `"scopes_supported":["read"]` only.
+
 ## Several workspaces
 
 Each workspace is its own auth context, and reconnecting alone does not switch workspace `[O]`. Add one
