@@ -27,10 +27,6 @@ cli-ops	related-not-named	python-cli-ops
 cloudflare-ops	related-not-named	nginx-ops
 cloudflare-ops	related-not-named	terraform-ops
 cloudflare-ops	relative-script-call	scripts/check-cloudflare-facts.py
-color-ops	relative-script-call	scripts/color-convert.js
-color-ops	relative-script-call	scripts/contrast-check.js
-color-ops	relative-script-call	scripts/harmony-gen.js
-color-ops	relative-script-call	scripts/palette-gen.js
 cypress-ops	related-not-named	ci-cd-ops
 cypress-ops	related-not-named	testing-ops
 doc-scanner	related-not-named	adr-ops

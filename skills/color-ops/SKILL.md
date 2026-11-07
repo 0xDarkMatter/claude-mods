@@ -304,14 +304,53 @@ color: oklch(0.7 0.3 150);  /* if out of sRGB, browser reduces chroma */
 
 ## Scripts
 
-Zero-dependency Node.js tools. Run directly or let Claude invoke them during color tasks.
+Zero-dependency Node.js tools. Run them from any directory; `<skill-dir>` is this
+skill's folder. All OKLCH maths lives in `scripts/lib/oklch-core.js` (Ottosson's OKLab
+matrices, chroma-only gamut fitting, WCAG contrast, Machado 2009 CVD simulation):
+require it, never copy the matrices into a new script.
+
+### OKLCH Tools (data on stdout, `--json` envelopes, semantic exit codes)
+
+These hold OKLCH lightness and chroma fixed and move hue, so no colour dominates. Where
+a hue cannot reach the chroma inside sRGB, chroma is lowered (lightness never is) and the
+row says `clipped`.
+
+```bash
+# Harmony: complementary, split-complementary, triadic, analogous, golden (137.5 deg), monochrome (golden-ratio L steps)
+node "<skill-dir>/scripts/hue-harmony.js" '#E0675F'
+node "<skill-dir>/scripts/hue-harmony.js" '#E0675F' --rule golden --count 6 --l 0.6 --c 0.12 --json
+node "<skill-dir>/scripts/hue-harmony.js" '#3B82F6' --svg > harmony.svg
+
+# Brand analysis: hue arc between every pair and the nearest rule (within --tolerance, default 8 deg)
+node "<skill-dir>/scripts/brand-analyse.js" '#14283A' '#E0675F' '#17716F' --json
+
+# Chart series: light + dark current/previous pair (same hue and C, L 0.45/0.72 light, 0.80/0.62 dark) + golden-angle categorical set
+node "<skill-dir>/scripts/series-palette.js" '#17716F' --css > series.css
+node "<skill-dir>/scripts/series-palette.js" '#17716F' --svg > series.svg
+
+# Checks: contrast vs --bg (default 3:1), deltaE under protan/deutan/tritan (default 10), gamut. Exit 10 = a check failed
+node "<skill-dir>/scripts/palette-check.js" '#1F77B4' '#FF7F0E' '#2CA02C' --bg '#121212'
+```
+
+| Script | Output modes | Exit codes |
+|--------|--------------|------------|
+| `scripts/hue-harmony.js` | TSV, `--json`, `--css`, `--svg` | 0 ok, 2 usage, 4 bad colour |
+| `scripts/brand-analyse.js` | TSV, `--json` | 0 ok, 2 usage, 4 bad colour |
+| `scripts/series-palette.js` | TSV, `--json`, `--css` (light `:root` + dark via `prefers-color-scheme` and `[data-theme="dark"]`), `--svg` | 0 ok, 2 usage, 4 bad colour |
+| `scripts/palette-check.js` | TSV, `--json` | 0 pass, 2 usage, 4 bad colour, 10 a check failed |
+
+Colours are `#rgb`, `#rrggbb` or `oklch(L C H)`. `--svg` previews are static SVG with no
+script or web font, so they render in a file preview, an `<img>` or a PR comment. Gate a
+palette with `palette-check.js`; `series-palette.js` reports its checks but never fails
+on them, because the muted "previous" line sits under 3:1 on white by design (draw it
+dashed). deltaE here is OKLab distance x100: about 2 is just noticeable, and 10 is a
+working floor for chart marks, not a standard.
 
 ### Contrast Checker
 
 ```bash
-node scripts/contrast-check.js <color1> <color2>
-node scripts/contrast-check.js "#1a1a2e" "#e0e0e0"
-node scripts/contrast-check.js "oklch(0.15 0.02 250)" "oklch(0.9 0.01 250)"
+node "<skill-dir>/scripts/contrast-check.js" "#1a1a2e" "#e0e0e0"
+node "<skill-dir>/scripts/contrast-check.js" "oklch(0.15 0.02 250)" "oklch(0.9 0.01 250)"
 ```
 
 Returns WCAG 2.x contrast ratio with AA/AAA pass/fail for normal and large text.
@@ -319,10 +358,9 @@ Returns WCAG 2.x contrast ratio with AA/AAA pass/fail for normal and large text.
 ### Palette Generator
 
 ```bash
-node scripts/palette-gen.js <hue> [name] [--neutral] [--json]
-node scripts/palette-gen.js 250 blue              # 10-step blue scale
-node scripts/palette-gen.js 250 blue --neutral     # + matching neutral scale
-node scripts/palette-gen.js 30 orange --json       # JSON output
+node "<skill-dir>/scripts/palette-gen.js" 250 blue              # 10-step blue scale
+node "<skill-dir>/scripts/palette-gen.js" 250 blue --neutral     # + matching neutral scale
+node "<skill-dir>/scripts/palette-gen.js" 30 orange --json       # JSON output
 ```
 
 Generates a perceptually uniform 10-step OKLCH scale (100-1000) as CSS custom properties. Chroma peaks at midtones via sine curve. Flags out-of-gamut sRGB values.
@@ -330,32 +368,29 @@ Generates a perceptually uniform 10-step OKLCH scale (100-1000) as CSS custom pr
 ### Color Converter
 
 ```bash
-node scripts/color-convert.js <color>
-node scripts/color-convert.js "#3b82f6"
-node scripts/color-convert.js "oklch(0.62 0.18 250)"
-node scripts/color-convert.js "hsl(217, 91%, 60%)"
+node "<skill-dir>/scripts/color-convert.js" "#3b82f6"
+node "<skill-dir>/scripts/color-convert.js" "oklch(0.62 0.18 250)"
+node "<skill-dir>/scripts/color-convert.js" "hsl(217, 91%, 60%)"
 ```
 
 Converts any color to all formats: hex, rgb, hsl, oklch, oklab. Shows relative luminance and sRGB gamut status.
 
-### Harmony Generator
+### Harmony Generator (styled palettes)
 
 ```bash
-node scripts/harmony-gen.js <color|hue> [scheme] [--css] [--json] [--tokens] [--tints]
-node scripts/harmony-gen.js "#3b82f6" triadic      # Triadic palette from hex
-node scripts/harmony-gen.js 250 complementary --tokens  # Design tokens
-node scripts/harmony-gen.js 30 earth               # Earth tone palette
-node scripts/harmony-gen.js random                  # Curated random palette
+node "<skill-dir>/scripts/harmony-gen.js" "#3b82f6" triadic      # Triadic palette from hex
+node "<skill-dir>/scripts/harmony-gen.js" 250 complementary --tokens  # Design tokens
+node "<skill-dir>/scripts/harmony-gen.js" 30 earth               # Earth tone palette
 ```
 
-12 harmony schemes: `complementary`, `analogous`, `triadic`, `split`, `tetradic`, `monochromatic`, `warm`, `cool`, `earth`, `pastel`, `vibrant`, `random`. All output gamut-clamped to sRGB. Use `--tokens` for semantic design tokens (primary, secondary, accent, surface), `--tints` for tint/shade/muted variants per color.
+12 schemes: `complementary`, `analogous`, `triadic`, `split`, `tetradic`, `monochromatic`, `warm`, `cool`, `earth`, `pastel`, `vibrant`, `random`. Unlike `hue-harmony.js` it varies lightness and chroma deliberately for UI palettes. `--tokens` emits semantic design tokens, `--tints` adds tint/shade/muted variants.
 
 ## Agent Dispatch
 
 For complex color work beyond this skill's scope, dispatch to specialized agents:
 
 - **Palette generation algorithms** (RampenSau, Poline, IQ cosine): Route to `frontend-design` skill or a dedicated subagent with `references/tools-and-libraries.md` preloaded
-- **Accessibility audits** (full APCA + CVD simulation): Route to a subagent that runs contrast checks across all component/token combinations
+- **Accessibility audits** (full APCA + CVD simulation): run `palette-check.js` per token set, or route to a subagent that runs it across all component/token combinations
 - **Design system color architecture**: Route to `tailwind-ops` for Tailwind-specific implementation, or handle directly for CSS custom properties
 
 ## Reference Files

@@ -6,7 +6,26 @@ All notable changes to claude-mods are documented here. Format follows
 feature releases live in the README "Recent Updates" section.
 ## [Unreleased]
 
+### Added
+
+- **color-ops gains four OKLCH tools that hold lightness and chroma fixed.**
+  `hue-harmony.js` builds complementary, split-complementary, triadic, analogous,
+  golden-angle and golden-ratio monochrome sets from one anchor. `brand-analyse.js`
+  reports the hue arc between brand colours and the rule each pair is nearest.
+  `series-palette.js` makes light and dark current/previous chart pairs plus a
+  categorical set. `palette-check.js` gates contrast, colour-blind deltaE and gamut
+  (exit 10 on a failure). All four follow the resource protocol (`--json`, `--help`
+  with EXAMPLES, exit codes), and three render CSS custom properties or a static SVG
+  preview. The maths lives once, in `scripts/lib/oklch-core.js`. A new
+  `tests/run.sh` covers them, and each assertion was seen failing against a mutant.
+
 ### Fixed
+
+- **`harmony-gen.js` read every hex colour at the wrong hue.** Its sRGB-to-LMS row
+  multiplied blue where green belonged (`0.2817188376 * lb`), so `#14283A` came out at
+  hue 261 instead of 247. It now uses the shared `oklch-core.js`, and a regression test
+  pins the value. color-ops' SKILL.md now calls its scripts through `<skill-dir>`, which
+  clears its four `relative-script-call` baseline entries.
 
 - **`docker-doctor.py` tests no longer depend on the host having Docker.** The doctor
   checked whether the engine socket exists on the real filesystem even under its fake-host
