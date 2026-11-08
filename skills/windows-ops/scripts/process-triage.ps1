@@ -83,6 +83,7 @@ param(
 )
 
 . "$PSScriptRoot\_lib\common.ps1"
+. "$PSScriptRoot\_lib\cpu-rate.ps1"
 
 if ($Help) {
     Write-Output 'process-triage.ps1 - find processes burning CPU now, by rate not lineage.'
@@ -237,31 +238,22 @@ if ($Tree -gt 0) {
     # --- SAMPLE MODE --------------------------------------------------------
     if (-not $Quiet) { Write-Section "CPU RATE SAMPLE (${Sample}s)" }
 
-    if ($Name) {
-        $target = Get-Process -Name $Name -ErrorAction SilentlyContinue
-    } else {
-        $target = Get-Process -ErrorAction SilentlyContinue
-    }
-    if (-not $target) {
+    # Two whole-table snapshots; rates divide by each PID's own measured elapsed time
+    # and skip reused PIDs. Why not per-PID re-reads over -Sample: _lib/cpu-rate.ps1.
+    $before = Get-CpuSnapshot -Name $Name
+    if ($before.Count -eq 0) {
         Write-Log WARN 'no matching processes'
         if ($Json) {
             Write-Output '{"data":[],"meta":{"count":0,"findings":0,"mode":"sample","schema":"claude-mods.windows-ops.process-triage/v1"}}'
         }
         exit $script:EXIT_OK
     }
-
-    $first = @{}
-    foreach ($p in $target) { try { $first[$p.Id] = $p.CPU } catch { } }
     Start-Sleep -Seconds $Sample
+    $after = Get-CpuSnapshot -Name $Name
 
-    foreach ($id in @($first.Keys)) {
-        $now = Get-Process -Id $id -ErrorAction SilentlyContinue
-        if (-not $now) { continue }
-        $before = $first[$id]
-        if ($null -eq $before -or $null -eq $now.CPU) { continue }
-
-        $delta = [double]$now.CPU - [double]$before
-        $pct   = [math]::Round(($delta / $Sample) * 100, 1)
+    foreach ($rate in @(Measure-CpuRate -Before $before -After $after)) {
+        $id    = $rate.pid
+        $pct   = $rate.core_pct
         $cim   = $byPid[$id]
         $ppid  = if ($cim) { [int]$cim.ParentProcessId } else { 0 }
         # A dead parent is reported but is never the primary signal: the spinner
@@ -278,9 +270,10 @@ if ($Tree -gt 0) {
         [void]$rows.Add([pscustomobject]@{
             pid         = $id
             parent      = $ppid
-            name        = $now.ProcessName
+            name        = $after[$id].Name
             core_pct    = $pct
-            cpu_total_s = [math]::Round([double]$now.CPU, 0)
+            window_s    = $rate.window_s
+            cpu_total_s = [math]::Round($rate.cpu_total_s, 0)
             commit_mb   = $(if ($cim) { [math]::Round($cim.PageFileUsage / 1KB, 0) } else { 0 })
             age_hours   = $ageH
             orphan      = $orphan

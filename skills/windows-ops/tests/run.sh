@@ -219,6 +219,38 @@ awk '/selfChain = New-Object/{c=NR} /TREE MODE/{t=NR} END{exit !(c && t && c<t)}
   && ok "self-ancestry resolved before any reporting path" \
   || no "self-ancestry resolved after a reporting path"
 
+# CPU rate (2026-10-26): the old sample pass re-read each PID with Get-Process -Id,
+# a lookup that scales with the whole process table, then divided by -Sample. On a
+# ~1,200-process box the pass ran far past the window and one process read 5,135%
+# of a core on 32 threads. One enumeration per snapshot, a per-PID measured window,
+# and a start-time check against PID reuse fix it; _lib/cpu-rate.ps1 holds the why.
+CPURATE="$SCRIPTS/_lib/cpu-rate.ps1"
+if grep -hv '^\s*#' "$PT" "$CPURATE" 2>/dev/null | grep -q 'Get-Process -Id'; then
+  no "sample pass re-reads PIDs one by one (Get-Process -Id scales with the process table)"
+else ok "sample pass takes each snapshot in one enumeration"; fi
+
+# The rate math is pure, so it runs on every PowerShell, Linux included. Frequency 1
+# makes stopwatch ticks seconds. Expected values come from the definition (CPU
+# seconds / that PID's elapsed seconds), never from the function: pid 1 burned 30 s
+# over 60 s = 50%, which the old divide-by-window formula (window 10) called 300%.
+# The script is single-quoted, so it holds no single quote.
+rout="$(CPURATE_W="$(winpath "$CPURATE")" "$PWSH" -NoProfile -Command '
+. $env:CPURATE_W
+function Say([string]$what, [bool]$okay, [string]$why) { if ($okay) { "ok|$what" } else { "FAIL|${what}: $why" } }
+function Snap($cpu, $start, $ts) { [pscustomobject]@{ Name = "p"; Cpu = $cpu; StartTicks = $start; Ts = $ts } }
+$before = @{ 1 = (Snap 10 500 0); 2 = (Snap 0 500 40); 3 = (Snap 5 500 0); 4 = (Snap 5 500 0); 5 = (Snap $null 500 0) }
+$after  = @{ 1 = (Snap 40 500 60); 2 = (Snap 10 500 50); 3 = (Snap 900 777 10); 5 = (Snap $null 500 10) }
+$rows = @{}; foreach ($r in @(Measure-CpuRate -Before $before -After $after -Frequency 1)) { $rows[$r.pid] = $r }
+Say "rate divides by each PID own elapsed time, not the nominal window" (($rows[1].core_pct -eq 50) -and ($rows[2].core_pct -eq 100)) "pid 1 $($rows[1].core_pct) (want 50), pid 2 $($rows[2].core_pct) (want 100)"
+Say "a PID reused mid-window (start time changed) is not reported" (-not $rows.ContainsKey(3)) "reported $($rows[3].core_pct)%"
+Say "exited and unreadable processes are not reported" (-not ($rows.ContainsKey(4) -or $rows.ContainsKey(5))) "rows for pids $(@($rows.Keys) -join ",")"
+"END"
+' 2>&1 | tr -d '\r')"
+case "$rout" in *$'\nEND') ;; *) no "cpu-rate probe ended early: $(printf '%s' "$rout" | tail -n3 | tr '\n' ' ')" ;; esac
+while IFS= read -r line; do
+  case "$line" in ok\|*) ok "${line#ok|}" ;; FAIL\|*) no "${line#FAIL|}" ;; esac
+done <<< "$rout"
+
 grep -q 'EXAMPLES' "$PT" && ok "help includes EXAMPLES section" || no "help has no EXAMPLES section"
 grep -q 'claude-mods.windows-ops.process-triage/v1' "$PT" && ok "JSON envelope declares a schema" || no "no schema in JSON envelope"
 grep -q 'exit 10' "$PT" && ok "findings exit 10 (domain signal)" || no "findings do not exit 10"
@@ -246,6 +278,31 @@ if [ -n "$ONWIN" ]; then
   if printf '%s' "$jout" | grep -q '"protected":true'; then
     ok "self PID marked protected=true at runtime"
   else no "self PID NOT marked protected at runtime (safety guard broken)"; fi
+
+  # The whole-table sample, for real: a one-thread burner must read near one core
+  # over a measured window, and no row may exceed the machine (100% x logical CPUs).
+  # Bounds are loose on purpose (25-130): a busy box starves the burner, and PowerShell's
+  # own JIT/GC threads add a little; the old bug overshot by multiples, not percent.
+  # The burner is this test's own child and is always stopped in finally.
+  bout="$(PT_W="$WPT" "$PWSH" -NoProfile -Command '
+function Say([string]$what, [bool]$okay, [string]$why) { if ($okay) { "ok|$what" } else { "FAIL|${what}: $why" } }
+$enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes("`$e = [DateTime]::Now.AddSeconds(45); while ([DateTime]::Now -lt `$e) { }"))
+$burn = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList "-NoProfile", "-EncodedCommand", $enc -PassThru -WindowStyle Hidden
+try {
+    Start-Sleep -Milliseconds 1500
+    $j = & $env:PT_W -Sample 3 -IncludeIdle -Json -Quiet | ConvertFrom-Json
+    $row = @($j.data | Where-Object { $_.pid -eq $burn.Id })[0]
+    $cap = 100 * [Environment]::ProcessorCount
+    $max = ($j.data | Measure-Object core_pct -Maximum).Maximum
+    Say "a one-thread burner reads near one core over a measured window" ($row -and $row.core_pct -ge 25 -and $row.core_pct -le 130 -and $row.window_s -ge 3) "core_pct $($row.core_pct), window_s $($row.window_s)"
+    Say "no process reads above the machine (100% x logical CPUs)" ($max -le $cap) "max $max vs cap $cap"
+} finally { Stop-Process -Id $burn.Id -ErrorAction SilentlyContinue }
+"END"
+' 2>&1 | tr -d '\r')"
+  case "$bout" in *$'\nEND') ;; *) no "process-triage burner probe ended early: $(printf '%s' "$bout" | tail -n3 | tr '\n' ' ')" ;; esac
+  while IFS= read -r line; do
+    case "$line" in ok\|*) ok "${line#ok|}" ;; FAIL\|*) no "${line#FAIL|}" ;; esac
+  done <<< "$bout"
 fi
 
 echo "=== $PASS passed, $FAIL failed ==="

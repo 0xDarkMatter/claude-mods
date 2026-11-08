@@ -288,6 +288,17 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **windows-ops `process-triage.ps1` reports real CPU rates.** The sample pass re-read
+  every PID with `Get-Process -Id`, which scales with the whole process table, then
+  divided by `-Sample`. On a ~1,200-process machine the pass ran far past the window,
+  and one process read 5,135% of a core on 32 threads. Each snapshot is now one
+  enumeration, each rate divides by that process's own measured elapsed time, and a PID
+  whose start time changed between snapshots (reused) is dropped. The math moved into a
+  pure `scripts/_lib/cpu-rate.ps1`. JSON rows gain `window_s`. New tests probe the math
+  with synthetic snapshots on every PowerShell. On Windows, a real one-thread burner
+  must read near one core and no row may exceed 100% x logical CPUs. Against the old
+  script the burner read 418%.
+
 - **`docker-doctor.py` tests no longer depend on the host having Docker.** The doctor
   checked whether the engine socket exists on the real filesystem even under its fake-host
   test hook. GitHub's Ubuntu runners ship Docker, so `/var/run/docker.sock` exists there
