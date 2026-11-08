@@ -353,6 +353,92 @@ printf '{"source":"user_settings"}' | HOME="$tmp/cg" SUPPLY_CHAIN_BLOCK=1 bash "
   && ok "IOC block exits 2 and still notifies" \
   || bad "IOC block exits 2 and still notifies - exit $rc"
 
+# --- tool-loop-guard: Droid's loop rule, nudge at 3, deny at 6 ------------------
+# Post* counts runs of identical calls (input AND result) and nudges through
+# additionalContext; Pre denies call 6. A poll whose output changes is progress,
+# not a loop, and one session's run must never deny another session's call.
+echo "-- tool-loop-guard (nudge at 3, deny at 6, result-aware, per session) --"
+unset LOOP_GUARD LOOP_GUARD_NUDGE LOOP_GUARD_DENY LOOP_GUARD_EXEMPT
+lg="$tmp/lg"   # LOOP_GUARD_DIR: never the real ~/.claude/.loop-guard
+lg_call() {    # $1 event, $2 session, $3 result, $4 agent_id -> $tmp/out, $lgrc
+  jq -cn --arg e "$1" --arg s "$2" --arg r "${3:-}" --arg a "${4:-}" '
+    {hook_event_name:$e, session_id:$s, tool_name:"Bash",
+     tool_input:{command:"npm test", description:"run the tests"}}
+    + (if $a == "" then {} else {agent_id:$a} end)
+    + (if $e == "PostToolUse" then {tool_response:{stdout:$r, stderr:"", durationMs:(now * 1e6 | floor)}}
+       elif $e == "PostToolUseFailure" then {error:$r} else {} end)' \
+    | LOOP_GUARD_DIR="$lg" bash "$H/tool-loop-guard.sh" >"$tmp/out" 2>"$tmp/err"; lgrc=$?
+}
+lg_ctx()    { jq -r '.hookSpecificOutput.additionalContext // empty' "$tmp/out" 2>/dev/null | tr -d '\r'; }
+lg_denied() { [ "$(jq -r '.hookSpecificOutput.permissionDecision // empty' "$tmp/out" 2>/dev/null | tr -d '\r')" = deny ]; }
+lg_one()    { [ "$(jq -s 'length' "$tmp/out" 2>/dev/null | tr -d '\r')" = 1 ]; }   # one JSON value
+lg_pairs() {   # $1 session, $2 calls, $3 result ('%d' = the call number); Pre then Post each.
+  # Sets lg_nudges (call numbers whose Post advised) and lg_denies (whose Pre denied).
+  local i r; lg_nudges=""; lg_denies=""
+  for i in $(seq "$2"); do
+    lg_call PreToolUse "$1"; [ "$lgrc" -eq 0 ] || lg_denies="$lg_denies rc$lgrc"
+    if lg_denied; then lg_denies="$lg_denies $i"; continue; fi
+    printf -v r "$3" "$i"; lg_call PostToolUse "$1" "$r"
+    [ "$lgrc" -eq 0 ] || lg_nudges="$lg_nudges rc$lgrc"
+    [ -s "$tmp/out" ] && lg_nudges="$lg_nudges $i"
+  done
+}
+
+lg_pairs s-loop 3 "FAIL: 1 test"
+[ "$lg_nudges" = " 3" ] && [ -z "$lg_denies" ] && lg_one \
+  && [[ "$(lg_ctx)" == "LOOP GUARD: this exact Bash call has now run 3 times"* ]] \
+  && ok "nudge: silent on calls 1-2, one additionalContext envelope on call 3" \
+  || bad "nudge: silent on calls 1-2, one additionalContext envelope on call 3 - nudged at '$lg_nudges', denied '$lg_denies', out: $(head -c 120 "$tmp/out")"
+lg_call PreToolUse s-loop; lg_denied && n5=deny || n5=allow   # call 4: 3 in state
+lg_call PostToolUse s-loop "FAIL: 1 test"
+lg_call PreToolUse s-loop; lg_denied && n5="$n5 deny" || n5="$n5 allow"   # call 5: 4 in state
+lg_call PostToolUse s-loop "FAIL: 1 test"
+[[ "$(lg_ctx)" == *"The next identical call will be denied."* ]] && n5="$n5 warned"
+lg_call PreToolUse s-loop   # call 6: 5 identical in state
+if [ "$n5" = "allow allow warned" ] && [ "$lgrc" -eq 0 ] && lg_denied && lg_one \
+   && jq -e '.hookSpecificOutput.permissionDecisionReason | startswith("LOOP GUARD: denied")' "$tmp/out" >/dev/null 2>&1; then
+  ok "deny: calls 4-5 run (5 warns), call 6 is denied with a reason"
+else
+  bad "deny: calls 4-5 run (5 warns), call 6 is denied with a reason - calls 4/5: '$n5', exit $lgrc, out: $(head -c 120 "$tmp/out")"
+fi
+lg_call PreToolUse s-loop
+lg_denied && ok "deny: a retry of the same call stays denied" \
+  || bad "deny: a retry of the same call stays denied"
+
+lg_pairs s-poll 8 "build 4%d%% done"
+[ -z "$lg_nudges$lg_denies" ] \
+  && ok "poll: 8 identical calls whose output changes are never nudged or denied" \
+  || bad "poll: 8 identical calls whose output changes are never nudged or denied - nudged '$lg_nudges', denied '$lg_denies'"
+
+lg_call PreToolUse s-other; o="$(lg_denied && echo deny)"
+lg_call PostToolUse s-other "FAIL: 1 test"; o="$o$(cat "$tmp/out")"
+lg_call PreToolUse s-loop "" sub-1; o="$o$(lg_denied && echo deny)"
+[ -z "$o" ] \
+  && ok "sessions: s-loop's run (denied) neither denies nor nudges another session or its subagent" \
+  || bad "sessions: s-loop's run (denied) neither denies nor nudges another session or its subagent - got: $(printf '%s' "$o" | head -c 120)"
+
+for i in 1 2 3; do
+  lg_call PreToolUse s-fail; lg_call PostToolUseFailure s-fail "Exit code 1"$'\n'"Error: Cannot find module"
+done
+[ "$(jq -r '.hookSpecificOutput.hookEventName' "$tmp/out" 2>/dev/null | tr -d '\r')" = PostToolUseFailure ] \
+  && [[ "$(lg_ctx)" == *"3 times"* ]] \
+  && ok "failure: 3 identical failing calls nudge on PostToolUseFailure" \
+  || bad "failure: 3 identical failing calls nudge on PostToolUseFailure - out: $(head -c 120 "$tmp/out")"
+
+printf 'not json' | LOOP_GUARD_DIR="$lg" bash "$H/tool-loop-guard.sh" >"$tmp/out" 2>&1; rc=$?
+jq -cn '{hook_event_name:"PreToolUse", tool_name:"Bash", tool_input:{command:"x"}}' \
+  | LOOP_GUARD_DIR="$lg" bash "$H/tool-loop-guard.sh" >>"$tmp/out" 2>&1; rc=$((rc + $?))
+[ "$rc" -eq 0 ] && [ ! -s "$tmp/out" ] \
+  && ok "fail-open: bad JSON or no session_id -> exit 0, silent" \
+  || bad "fail-open: bad JSON or no session_id -> exit 0, silent - exit $rc: $(head -c 80 "$tmp/out")"
+
+mkdir -p "$lg"; printf 'x 1 5\n' > "$lg/gone-session.state"; touch -d '3 days ago' "$lg/gone-session.state"
+lg_call PostToolUse s-new "ok"
+[ ! -e "$lg/gone-session.state" ] && [ -f "$lg/s-loop.state" ] && [ -f "$lg/s-new.state" ] \
+  && [ -z "$(find "$lg" -name '.tmp.*')" ] \
+  && ok "state: a new session prunes 2-day-old state, keeps live ones, leaves no temp files" \
+  || bad "state: a new session prunes 2-day-old state, keeps live ones, leaves no temp files - $(ls -A "$lg" | tr '\n' ' ')"
+
 # --- worktree-create / worktree-remove ------------------------------------------
 # WorktreeCreate prints ONLY the worktree path (last stdout line); any non-zero
 # exit fails creation. WorktreeRemove: non-zero keeps the directory. The hooks

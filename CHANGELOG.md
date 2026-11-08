@@ -90,6 +90,15 @@ feature releases live in the README "Recent Updates" section.
     `pipefail`, `printf | grep -q` failed on a long list. It also runs on macOS's bash
     3.2, and a box that `list --all` shows counts as present even when `info` never
     answered.
+- **A tool loop guard (opt-in).** `hooks/tool-loop-guard.sh` moves Factory Droid 1.0's
+  loop rule into the harness. The 3rd identical tool call in a row gets a nudge, and the
+  6th is denied. A call is identical when its input and its result both match the last
+  one, so a poll whose output changes keeps running. The count is kept per session and
+  per subagent, and the hook fails open. It is wired by hand on PreToolUse, PostToolUse
+  and PostToolUseFailure, not through `hooks.json`, because a hook that denies calls is
+  the user's choice to turn on. `tests/hooks.sh` covers the nudge, the deny, a changing
+  poll, separate sessions and pruning, and each case fails against a broken copy of the
+  hook.
 
 - **`fleet queue` and `/conduct`: the coordinator's landing ritual as a command.**
   `fleet queue <lane> <tip>...` lands reviewed lanes one at a time. Before each land it
