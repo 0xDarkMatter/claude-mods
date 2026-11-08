@@ -1,0 +1,16 @@
+# Apply one partial update to up to 50 issues. `ids` must be UUIDs, not ENG-123.
+# Writes: needs --allow-mutation and the user's OK. Read `success` and the returned rows,
+# and don't blindly retry after a timeout: check the state first.
+#   linear-gql.py --allow-mutation --query-file issue-batch-update.graphql \
+#     --vars '{"ids":["<uuid>"],"input":{"priority":2}}'
+mutation IssueBatchUpdate($ids: [UUID!]!, $input: IssueUpdateInput!) {
+  issueBatchUpdate(ids: $ids, input: $input) {
+    success
+    issues {
+      identifier
+      title
+      priority
+      state { name type }
+    }
+  }
+}

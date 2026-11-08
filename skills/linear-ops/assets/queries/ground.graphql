@@ -1,0 +1,11 @@
+# Resolve everything a session needs in one request, once a session rather than once a write.
+# `viewer` is the account every write is attributed to: check it before the first mutation.
+# Raise `first` on a large workspace. Labels are a tree: use child ids, never a group id.
+query Ground {
+  viewer { id name email }
+  teams(first: 25) { nodes { id key name } }
+  workflowStates(first: 100) { nodes { id name type position team { key } } }
+  issueLabels(first: 100) { nodes { id name isGroup parent { name } team { key } } }
+  projects(first: 25) { nodes { id name url } }
+  projectStatuses(first: 20) { nodes { id name type } }
+}

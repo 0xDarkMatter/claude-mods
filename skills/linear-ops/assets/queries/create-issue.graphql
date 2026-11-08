@@ -1,0 +1,9 @@
+# Writes: needs --allow-mutation and the user's OK. Search for an existing issue first:
+# no idempotency key exists, so a retried create can duplicate. teamId is required.
+#   --vars '{"input":{"teamId":"<uuid>","title":"...","description":"...","priority":3}}'
+mutation CreateIssue($input: IssueCreateInput!) {
+  issueCreate(input: $input) {
+    success
+    issue { id identifier url title state { name } }
+  }
+}

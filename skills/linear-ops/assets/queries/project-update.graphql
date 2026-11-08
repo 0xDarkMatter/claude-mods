@@ -1,0 +1,10 @@
+# Writes and notifies: needs --allow-mutation and the user's OK on the exact body.
+# health is onTrack, atRisk or offTrack. Milestones have no status field, so state the
+# current milestone in the body: the latest update is where readers look for it.
+#   --vars '{"input":{"projectId":"<uuid>","health":"onTrack","body":"..."}}'
+mutation PostProjectUpdate($input: ProjectUpdateCreateInput!) {
+  projectUpdateCreate(input: $input) {
+    success
+    projectUpdate { id url health }
+  }
+}

@@ -135,6 +135,16 @@ run "hono-facts --help"               0 "$PY" skills/hono-ops/scripts/check-hono
 run "route-inventory --help"          0 "$PY" skills/hono-ops/scripts/route-inventory.py --help
 run "route-inventory fixture scan"    0 "$PY" skills/hono-ops/scripts/route-inventory.py skills/hono-ops/tests/fixtures/sample-app.ts
 
+echo "== linear-ops: Linear fact/staleness verifier + client and scanner contracts"
+run "linear-facts --offline consistent" 0 "$PY" skills/linear-ops/scripts/check-linear-facts.py --offline
+run "linear-facts --help"               0 "$PY" skills/linear-ops/scripts/check-linear-facts.py --help
+run "linear-gql --help"                 0 "$PY" skills/linear-ops/scripts/linear-gql.py --help
+run "scan-magic-words --help"           0 "$PY" skills/linear-ops/scripts/scan-magic-words.py --help
+run "watch-comments --help"             0 "$PY" skills/linear-ops/scripts/watch-comments.py --help
+# No token in the environment: the watcher must refuse with exit 5, not a stack trace and not a network call.
+run "watch-comments needs a token"      5 env -u LINEAR_API_KEY -u LINEAR_OAUTH_TOKEN "$PY" skills/linear-ops/scripts/watch-comments.py --once
+run "scan-magic-words finds a closer"   10 "$PY" skills/linear-ops/scripts/scan-magic-words.py skills/linear-ops/tests/fixtures/pr-body.md
+
 echo "== nextjs-ops: Next.js fact/staleness verifier + app-router audit contract"
 run "nextjs-facts --offline consistent" 0 "$PY" skills/nextjs-ops/scripts/check-nextjs-facts.py --offline
 run "nextjs-facts --help"               0 "$PY" skills/nextjs-ops/scripts/check-nextjs-facts.py --help
@@ -234,6 +244,10 @@ for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/isometric-ops/scripts/check-iso-facts.py \
          skills/hono-ops/scripts/check-hono-facts.py \
          skills/hono-ops/scripts/route-inventory.py \
+         skills/linear-ops/scripts/check-linear-facts.py \
+         skills/linear-ops/scripts/linear-gql.py \
+         skills/linear-ops/scripts/scan-magic-words.py \
+         skills/linear-ops/scripts/watch-comments.py \
          skills/nextjs-ops/scripts/check-nextjs-facts.py \
          skills/nextjs-ops/scripts/audit-app-router.py \
          skills/craftcms-ops/scripts/check-craft-facts.py \
