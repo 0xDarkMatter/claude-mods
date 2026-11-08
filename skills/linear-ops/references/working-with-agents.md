@@ -19,6 +19,8 @@ Facts about Linear here are from its docs and schema. Everything else is a habit
 - [Reporting without a meeting](#reporting-without-a-meeting)
 - [Finishing](#finishing)
 - [Alongside other agents](#alongside-other-agents)
+- [Starting a project](#starting-a-project)
+- [A new agent's first hour](#a-new-agents-first-hour)
 - [What an agent proposes and does not do](#what-an-agent-proposes-and-does-not-do)
 
 ## The idea
@@ -108,6 +110,9 @@ options, and which you'd pick.
 No answer after a working day: comment again on the same item saying what it now costs. Still nothing: carry it as an ask with an owner into the next project update. Don't open a second
 item or move to chat. State what you'll do by default, which is legitimate only where it's reversible and on your own side.
 
+The responder owes something too. When you're mentioned, answer in your next working session the same day, or say when you will. A question
+about the rules, rather than the work, isn't answered in passing: it becomes a decision item (see [Deciding](#deciding)).
+
 ## Deciding
 
 Choices binding several people need a record. Open an item with the proposed rule written **exactly as it would read after the change**, so agreeing costs one word. Name the situation that
@@ -115,6 +120,15 @@ exposed the gap. Each party states a position in a comment, and **silence isn't 
 disagreement stays marked open, with what would change someone's mind.
 
 An agent proposes these. It doesn't decide them.
+
+- **What one party may decide alone:** its own implementation and priorities, claiming or releasing an item, its own project update, and raising a
+  proposal. Deciding alone isn't the same as deciding silently, so say it in the item.
+- **Moving before agreement:** when waiting would block real work, a party may make an exception to a rule alone and in the open. Record it in a project
+  update with the decision marker: which rule, why, and what would make it permanent. It lapses after a fixed term (some teams use 14 days) unless everyone
+  ratifies it, and the rule is unchanged meanwhile. An exception that expires loudly can't harden into an unwritten rule.
+- **Check an agreement's status** before treating it as binding: it may be proposed, not active. Summaries defer to the authoritative document, and where
+  they disagree the summary is the bug. Change the document first and any guide after it.
+- **Keep rules and practice apart.** Cite the clause for a rule and label a habit as practice. Promoting a habit to a rule is a decision, not an edit.
 
 ## Reporting without a meeting
 
@@ -135,6 +149,14 @@ anyone may post a catch-up or flag it at risk.
 
 For a status read-out: read shared views over ad-hoc searches, and **name the view you read**, which keeps your report and a human's screen in agreement. Cross-check labels against real `blocks`
 relations. Report a table of item, project, owner, state and next step, then list anything unowned and anything blocked over a week. Writes nothing.
+
+A read order that surfaces problems first:
+
+1. Unowned items, which is where things rot.
+2. Cross-project items, checked against real `blocks` relations.
+3. What each member is waiting on.
+4. Items agents filed, where an unreviewed misunderstanding shows up first.
+5. Each active project's milestones, then its latest update. Flag any active project whose latest update is more than seven days old.
 
 ## Finishing
 
@@ -158,6 +180,27 @@ Nothing in Linear locks, and the later write silently wins.
 5. Search before creating. Two agents filing the same outcome is the commonest noise, and the pair is expensive to merge.
 
 Failure prevented: an item whose history is coherent and whose current state nobody chose.
+
+## Starting a project
+
+Creating one is a proposal (see below), but a well-shaped draft makes the yes cheap.
+
+- **Description:** goal, what's in and out of scope, the repositories, audience-facing URLs only, the current lead, and what "ready" means.
+- **Leave the lead unset** until a human accepts it. A lead is a coordination contact that can change, and never follows from who owns a repository or
+  wrote the code.
+- **Milestones are gates.** Each has an exit criterion someone can check from evidence, names who declares it passed, and has a name a non-engineer
+  understands. Cut any you can't justify in one line. Projects needn't share one ladder: fit it to how each reaches its audience.
+
+## A new agent's first hour
+
+1. Prove the connection with a read.
+2. Confirm who the connection says you are (`whoami` or `viewer`).
+3. Make one small, marked write on an item the team agreed for this, saying which harness and connection you used. That record is the useful part: the
+   next agent copies a setup that's known to work.
+
+Teams that write their own prompts tend to settle on a short standing block that stays loaded (`assets/agent-standing-rules.md` is a template), plus one
+self-contained prompt per task with its inputs in brackets. Every prompt that writes shows the object first and restates the attribution marker, because
+a prompt gets pasted without the rest.
 
 ## What an agent proposes and does not do
 
