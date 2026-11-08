@@ -62,14 +62,16 @@ note() { echo "${DIM}  $*${OFF}"; }
 
 # Poll until "$@" succeeds or $1 seconds pass. Never a fixed sleep: the daemon
 # is fast on Linux and slow on Windows, and a fixed sleep is wrong on both.
+# $SECONDS, not $(date +%s): on Git Bash each poll's date was two more processes.
 wait_for() {
-  local deadline=$(( $(date +%s) + $1 )); shift
+  local deadline=$(( SECONDS + $1 )); shift
   until "$@"; do
-    [[ $(date +%s) -ge $deadline ]] && return 1
+    [[ $SECONDS -ge $deadline ]] && return 1
     sleep 0.2
   done
 }
-lane()        { head -n1 "$REPO/.claude/fleet/lanes/$1" 2>/dev/null || echo MISSING; }
+# A lane's state line, read with builtins (was head -n1); MISSING when unreadable.
+lane()        { local s=""; if [[ -r "$REPO/.claude/fleet/lanes/$1" ]]; then { IFS= read -r s || true; } < "$REPO/.claude/fleet/lanes/$1"; printf '%s\n' "$s"; else echo MISSING; fi; }
 on_main()     { git -C "$REPO" cat-file -e "main:$1" 2>/dev/null; }   # is path $1 in main's tree?
 main_log()    { git -C "$REPO" log --oneline main; }                  # captured, never piped to grep -q (SIGPIPE under pipefail)
 pid_file()    { cat "$REPO/.claude/fleet/daemon.pid" 2>/dev/null; }

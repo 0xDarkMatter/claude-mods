@@ -91,7 +91,7 @@
 # Exit: 0 ok · 2 usage · 3 unavailable (no store / no jq) — advisory, not error.
 set -uo pipefail
 
-SELF=$(basename "$0")
+SELF=${0##*/}   # was $(basename "$0"): two processes on every call
 
 # Liveness threshold: a session touched within this many seconds counts as a
 # live writer. Desktop refreshes lastActivityAt per turn, so a session that is
@@ -350,13 +350,6 @@ load_dirs() {
     return 0
 }
 
-# The wrapper file for session $1, from ANY store. Empty when not found.
-find_wrapper() {
-    load_dirs
-    (( ${#STORES[@]} )) || return 0
-    find "${STORES[@]}" -name "${1}.json" -type f 2>/dev/null | head -n1
-}
-
 # --- scan --------------------------------------------------------------------
 # One pass over every store and transcript root yields WIDE rows, one per
 # session; `index` (branch-keyed) and `paths` (directory-keyed) are both
@@ -482,7 +475,7 @@ scan_transcripts() {
     load_dirs
     (( ${#TROOTS[@]} )) || return 0
     local age_days=${FLEET_SESSION_MAX_AGE_DAYS:-60} now_s listing
-    now_s=$(date +%s)
+    printf -v now_s '%(%s)T' -1 2>/dev/null || now_s=$(date +%s)
     stat_flavour
     listing=$(find "${TROOTS[@]}" -mindepth 2 -maxdepth 2 -type f -name '*.jsonl' -mtime "-${age_days}" \
                 -exec stat "${_STATFMT[@]}" {} + 2>/dev/null)
@@ -523,7 +516,8 @@ scan_all() {
     wrappers=$(scan_wrappers "${STORES[@]}") || return 3
     tx=$(scan_transcripts)
     wmt=$(scan_wrapper_mtimes "${STORES[@]}")
-    local now_ms=$(( $(date +%s) * 1000 )) win_ms=$(( LIVE_SECS * 1000 ))
+    local now_ms; printf -v now_ms '%(%s)T' -1 2>/dev/null || now_ms=$(date +%s)
+    local win_ms; now_ms=$(( now_ms * 1000 )); win_ms=$(( LIVE_SECS * 1000 ))
     awk -F'\t' -v now="$now_ms" -v win="$win_ms" -v grace="$(( ARCHIVE_GRACE_SECS * 1000 ))" '
         FILENAME == ARGV[1] { if ($1 != "") { tm[$1] = $2 + 0; td[$1] = $3; tc[$1] = $4 }; next }
         FILENAME == ARGV[2] { if ($1 != "" && (!($1 in wm) || $2 + 0 < wm[$1])) wm[$1] = $2 + 0; next }
@@ -780,7 +774,7 @@ live_many() {
             END { for (c in b) printf "%s\t%.0f\t%s\n", c, b[c] * 1000, op[c] }')
     fi
 
-    local now_s rows; now_s=$(date +%s)
+    local now_s rows; printf -v now_s '%(%s)T' -1 2>/dev/null || now_s=$(date +%s)
     rows=$(awk -F'\t' -v now="$(( now_s * 1000 ))" -v win="$(( LIVE_SECS * 1000 ))" \
                -v grace="$(( ARCHIVE_GRACE_SECS * 1000 ))" -v failed="$walk_failed" '
         FILENAME == ARGV[1] { if ($1 != "") { t[$1] = $2 + 0; tp[$1] = $3 }; next }
@@ -863,7 +857,7 @@ self_session_id() {
     # populated with DIFFERENT ids — the former is the CLI session, the latter
     # the host session the store is keyed by — so a first-set-wins chain
     # resolves nothing on exactly the surface this matters most on.
-    local raw cand f
+    local raw cand f cands=() names=() found=""
     for raw in "${CLAUDE_CODE_HOST_SESSION_ID:-}" "${CLAUDE_CODE_SESSION_ID:-}" \
                "${CLAUDE_SESSION_ID:-}"; do
         [[ -n "$raw" ]] || continue
@@ -872,12 +866,21 @@ self_session_id() {
         # future id shape that isn't uuid-based still resolves.
         # Searched across EVERY store: a session running in a --user-data-dir
         # instance has its wrapper in that instance's store, not the primary's.
-        for cand in "$raw" "local_$raw"; do
-            f=$(find_wrapper "$cand")
-            [[ -n "$f" ]] || continue
-            basename "$f" .json
+        cands+=("$raw" "local_$raw"); names+=(-o -name "$raw.json" -o -name "local_$raw.json")
+    done
+    (( ${#cands[@]} )) || return 3
+    # ONE walk for every candidate (was a find | head per candidate: ~16 processes
+    # inside Desktop). Same answer: candidates in the order above, and for each the
+    # first file in find's order, which filtering on several names does not change.
+    found=$(find "${STORES[@]}" -type f \( "${names[@]:1}" \) 2>/dev/null)
+    for cand in "${cands[@]}"; do
+        while IFS= read -r f; do
+            # Unquoted on purpose: matched as find's -name matched it (a glob).
+            # shellcheck disable=SC2053
+            [[ -n "$f" && "${f##*/}" == $cand.json ]] || continue
+            f=${f##*/}; printf '%s\n' "${f%.json}"
             return 0
-        done
+        done <<< "$found"
     done
     return 3
 }
@@ -1006,7 +1009,7 @@ live_transcripts_under() {
     while IFS= read -r d; do [[ -n "$d" ]] && dirs+=("$d"); done \
         < <(find "${TROOTS[@]}" -mindepth 1 -maxdepth 1 -type d -iname "$key" 2>/dev/null)
     (( ${#dirs[@]} )) || return 0
-    now_s=$(date +%s)
+    printf -v now_s '%(%s)T' -1 2>/dev/null || now_s=$(date +%s)
     stat_flavour
     find "${dirs[@]}" -mindepth 1 -maxdepth 3 -type f -name '*.jsonl' \
             -mmin "-$(( LIVE_SECS / 60 + 2 ))" -exec stat "${_STATFMT[@]}" {} + 2>/dev/null \
@@ -1040,7 +1043,7 @@ live_cwd_in() {
     [[ -n "$n" ]] || return 0
     load_dirs
     (( ${#TROOTS[@]} )) || return 0
-    now_s=$(date +%s)
+    printf -v now_s '%(%s)T' -1 2>/dev/null || now_s=$(date +%s)
     stat_flavour
     # procsub gap: a find that fails reads as "no live cwd here", losing the probe's
     # cwd route; the gate ignores sessions.sh's status. Closed by lane/procsub-gate.
@@ -1237,7 +1240,7 @@ cmd_named() {
         targets+="$n"$'\t'"$t"$'\n'
     done
     (( ${#pats[@]} )) || return 0
-    now=$(date +%s); floor=$(( now - NAMED_DAYS * 86400 ))
+    printf -v now '%(%s)T' -1 2>/dev/null || now=$(date +%s); floor=$(( now - NAMED_DAYS * 86400 ))
     (( since > floor )) || since=$floor
     local files f cli ms calls=""
     files=$(find "${TROOTS[@]}" -mindepth 2 -maxdepth 4 -type f -name '*.jsonl' \

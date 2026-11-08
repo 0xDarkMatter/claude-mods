@@ -198,10 +198,33 @@ term_color() {
   printf '%s%s%s' "$code" "$*" "$TERM_C_OFF"
 }
 
+# __term_c <name> <text...>  — sets __TERM_C to exactly what "$(term_color ...)"
+# would hold, trailing newlines stripped as command substitution strips them.
+# Fork-free: the panel functions below colour a dozen fragments per row, and a
+# $(...) is a whole process on Windows (one `fleet status` once cost ~60 of
+# them in colouring alone). Keep its case list identical to term_color's.
+__term_c() {
+  local name=$1; shift
+  case "$name" in
+    green)   __TERM_C="$TERM_C_GREEN" ;;
+    yellow)  __TERM_C="$TERM_C_YELLOW" ;;
+    orange)  __TERM_C="$TERM_C_ORANGE" ;;
+    red)     __TERM_C="$TERM_C_RED" ;;
+    cyan)    __TERM_C="$TERM_C_CYAN" ;;
+    magenta) __TERM_C="$TERM_C_MAGENTA" ;;
+    dim)     __TERM_C="$TERM_C_DIM" ;;
+    *)       __TERM_C="" ;;
+  esac
+  __TERM_C="$__TERM_C$*$TERM_C_OFF"
+  while [[ $__TERM_C == *$'\n' ]]; do __TERM_C=${__TERM_C%$'\n'}; done
+}
+
 # ─── Registry lookup ──────────────────────────────────────────────────────
 # term_emoji <registry_name> <key>  — returns Unicode glyph or ASCII fallback.
 # Internal helper; pass "BRAND", "HEALTH_GLYPH", "DIAGRAM_ICON".
-__term_lookup() {
+__term_lookup() { __term_lookup_v "$1" "$2"; printf '%s' "$__TERM_GLYPH"; }
+# __term_lookup_v: the same lookup, setting __TERM_GLYPH instead of printing.
+__term_lookup_v() {
   local map=$1 key=$2 entry="" uni ascii
   case "${map}::${key}" in
     BRAND::fleet)               entry="⚡|[F]" ;;
@@ -244,11 +267,11 @@ __term_lookup() {
     DIAGRAM_ICON::hook)         entry="🪝|(H)" ;;
     DIAGRAM_ICON::log)          entry="📄|(F)" ;;
   esac
-  [[ -z "$entry" ]] && { printf '%s' "?"; return; }
+  [[ -z "$entry" ]] && { __TERM_GLYPH="?"; return 0; }
   uni="${entry%|*}"
   ascii="${entry#*|}"
-  if [[ "$TERM_ASCII_MODE" -eq 1 ]]; then printf '%s' "$ascii"
-  else printf '%s' "$uni"; fi
+  if [[ "$TERM_ASCII_MODE" -eq 1 ]]; then __TERM_GLYPH=$ascii
+  else __TERM_GLYPH=$uni; fi
 }
 
 term_brand_glyph()    { __term_lookup BRAND        "$1"; }
@@ -294,10 +317,12 @@ term_mark() {
 # ─── Primitives ───────────────────────────────────────────────────────────
 
 # term_repeat <char> <n>
-term_repeat() {
+term_repeat() { __term_rep "$1" "$2"; printf '%s' "$__TERM_REP"; }
+# __term_rep <char> <n>  — sets __TERM_REP instead of printing (no subshell).
+__term_rep() {
   local ch=$1 n=$2 i out=""
   for (( i=0; i<n; i++ )); do out="$out$ch"; done
-  printf '%s' "$out"
+  __TERM_REP=$out
 }
 
 # ─── Visible width (colour is zero-width, wide glyphs are two) ────────────
@@ -511,7 +536,12 @@ term_pad() { __term_pad "$1" "$2"; printf '%s' "$__TERM_PADDED"; }
 # marker so the cut cannot leave the terminal mid-colour. Characters are copied
 # whole too: a wide glyph that would straddle the limit is left out, so the
 # result can be one cell short of <max_cols> (callers pad with __term_pad).
-term_truncate() {
+term_truncate() { __term_truncate "$1" "$2"; printf '%s' "$__TERM_TRUNC"; }
+# __term_chomp_trunc: drop __TERM_TRUNC's trailing newlines, as "$(term_truncate ...)"
+# would, for callers swapping the substitution for the setter.
+__term_chomp_trunc() { while [[ $__TERM_TRUNC == *$'\n' ]]; do __TERM_TRUNC=${__TERM_TRUNC%$'\n'}; done; }
+# __term_truncate: the same cut, setting __TERM_TRUNC instead of printing.
+__term_truncate() {
   local text=$1 max=$2 sw=0 ell="" keep s out run params n esc=$'\033' coloured=0
   if [[ $text == *[$__TERM_HI]* ]]; then __term_bytes_on; sw=$__TERM_LC_SW; fi
   __term_vis_width "$text"
@@ -554,7 +584,7 @@ term_truncate() {
     [[ $coloured -eq 1 ]] && out="$out"$'\033[0m'
   fi
   __term_bytes_off "$sw"
-  printf '%s%s' "$out" "$ell"
+  __TERM_TRUNC="$out$ell"
 }
 
 # ─── Panel ────────────────────────────────────────────────────────────────
@@ -570,18 +600,21 @@ __term_panel_bar() {
   __term_vis_width "$2"
   local fill=$(( TERM_WIDTH - lw - __TERM_VIS_WIDTH ))
   [[ $fill -lt 4 ]] && fill=4
-  printf '%s%s%s\n' "$1" "$(term_color cyan "$(term_repeat "$TERM_PANEL_HRULE" "$fill")")" "$2"
+  __term_rep "$TERM_PANEL_HRULE" "$fill"; __term_c cyan "$__TERM_REP"
+  printf '%s%s%s\n' "$1" "$__TERM_C" "$2"
 }
 
 # term_panel_open <emoji_key> <name> [right_indicator]
 #   ╭── ⚡ name ─────────  <indicator> ───●
 term_panel_open() {
   local key=$1 name=$2 indicator=${3:-}
-  local emoji
-  emoji=$(term_brand_glyph "$key")
-  local left="${TERM_PANEL_TL}${TERM_PANEL_HRULE}${TERM_PANEL_HRULE} ${emoji} $(term_color cyan "$name") "
-  local right="${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}$(term_color cyan "$TERM_PANEL_TERM")"
-  [[ -n "$indicator" ]] && right=" $(term_color dim "$indicator") ${right}"
+  local emoji left right
+  __term_lookup_v BRAND "$key"; emoji=$__TERM_GLYPH
+  __term_c cyan "$name"
+  left="${TERM_PANEL_TL}${TERM_PANEL_HRULE}${TERM_PANEL_HRULE} ${emoji} $__TERM_C "
+  __term_c cyan "$TERM_PANEL_TERM"
+  right="${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}$__TERM_C"
+  if [[ -n "$indicator" ]]; then __term_c dim "$indicator"; right=" $__TERM_C ${right}"; fi
   __term_panel_bar "$left" "$right"
 }
 
@@ -593,14 +626,15 @@ term_panel_open() {
 term_panel_close() {
   local hotkeys=${1:-} healths=${2:-}
   local left="${TERM_PANEL_BL}${TERM_PANEL_HRULE}${TERM_PANEL_HRULE} ${hotkeys} "
-  local right="${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}$(term_color cyan "$TERM_PANEL_TERM")"
+  __term_c cyan "$TERM_PANEL_TERM"
+  local right="${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}${TERM_PANEL_HRULE}$__TERM_C"
   [[ -n "$healths" ]] && right=" ${healths} ${right}"
   __term_panel_bar "$left" "$right"
 }
 
 # term_panel_vert  — emit a single body-line spacer "│"
 term_panel_vert() {
-  printf '%s\n' "$(term_color dim "$TERM_TREE_VERT")"
+  __term_c dim "$TERM_TREE_VERT"; printf '%s\n' "$__TERM_C"
 }
 
 # term_panel_line <text>  — a generic body row on the rail:  │   <text>
@@ -608,7 +642,7 @@ term_panel_vert() {
 # is the open-ended counterpart for any panel body. `text` may already carry colored
 # marks (term_mark / term_color) — it is printed verbatim so the caller owns styling.
 term_panel_line() {
-  printf '%s   %s\n' "$(term_color dim "$TERM_TREE_VERT")" "$*"
+  __term_c dim "$TERM_TREE_VERT"; printf '%s   %s\n' "$__TERM_C" "$*"
 }
 
 # ─── Body components ──────────────────────────────────────────────────────
@@ -624,22 +658,22 @@ term_section() {
     FAILED|ERROR|critical|alarm)           color="red" ;;
     *)                                     color="" ;;
   esac
-  local rendered_label="$label"
-  [[ -n "$color" ]] && rendered_label=$(term_color "$color" "$label")
-  printf '%s%s %s %s\n' \
-    "$(term_color dim "$TERM_TREE_VERT")" \
-    "$(term_color dim "$TERM_TREE_BRANCH$TERM_PANEL_HRULE")" \
-    "$rendered_label" \
-    "$(term_color dim "($count)")"
+  local rendered_label="$label" v b
+  if [[ -n "$color" ]]; then __term_c "$color" "$label"; rendered_label=$__TERM_C; fi
+  __term_c dim "$TERM_TREE_VERT"; v=$__TERM_C
+  __term_c dim "$TERM_TREE_BRANCH$TERM_PANEL_HRULE"; b=$__TERM_C
+  __term_c dim "($count)"
+  printf '%s%s %s %s\n' "$v" "$b" "$rendered_label" "$__TERM_C"
 }
 
 # term_summary_line <text>  — dim metadata branch
 #   ├── text
 term_summary_line() {
-  printf '%s%s %s\n' \
-    "$(term_color dim "$TERM_TREE_VERT")" \
-    "$(term_color dim "$TERM_TREE_BRANCH$TERM_PANEL_HRULE")" \
-    "$(term_color dim "$*")"
+  local v b
+  __term_c dim "$TERM_TREE_VERT"; v=$__TERM_C
+  __term_c dim "$TERM_TREE_BRANCH$TERM_PANEL_HRULE"; b=$__TERM_C
+  __term_c dim "$*"
+  printf '%s%s %s\n' "$v" "$b" "$__TERM_C"
 }
 
 # term_leaf_line <connector> <name> <leaf_glyph> <meta> <age>
@@ -650,17 +684,16 @@ term_summary_line() {
 # wandered with the commit count (docs/TERMINAL-DESIGN.md §3.3 grid).
 term_leaf_line() {
   local conn=$1 name=$2 leaf=$3 meta=${4:-} age=${5:-}
-  local name_col leaf_col
-  __term_pad "$(term_truncate "$name" 28)" 28; name_col=$__TERM_PADDED
+  local name_col leaf_col v c
+  __term_truncate "$name" 28; __term_chomp_trunc
+  __term_pad "$__TERM_TRUNC" 28; name_col=$__TERM_PADDED
   __term_pad "$leaf" 14; leaf_col=$__TERM_PADDED
-  __term_pad "$(term_color dim "$meta")" 10
-  printf '%s   %s %s  %s %s %s\n' \
-    "$(term_color dim "$TERM_TREE_VERT")" \
-    "$(term_color dim "$conn$TERM_PANEL_HRULE")" \
-    "$name_col" \
-    "$leaf_col" \
-    "$__TERM_PADDED" \
-    "$(term_color dim "$age")"
+  __term_c dim "$TERM_TREE_VERT"; v=$__TERM_C
+  __term_c dim "$conn$TERM_PANEL_HRULE"; c=$__TERM_C
+  __term_c dim "$meta"
+  __term_pad "$__TERM_C" 10
+  __term_c dim "$age"
+  printf '%s   %s %s  %s %s %s\n' "$v" "$c" "$name_col" "$leaf_col" "$__TERM_PADDED" "$__TERM_C"
 }
 
 # term_toast <emoji_key> <text>  — ├── ⚡ text   (dim cyan)
@@ -718,37 +751,40 @@ term_alert() {
 #   term_rail 1 HEAD     → ●─◉
 #   term_rail 3 CONFLICT → ●─●─⊗
 #   term_rail 0 EMPTY    → ─
-term_rail() {
+term_rail() { __term_rail_v "$@"; printf '%s' "$__TERM_RAIL"; }
+# __term_rail_v: the same rail, setting __TERM_RAIL instead of printing.
+__term_rail_v() {
   local n=$1 head=${2:-HEAD}
   local commit="●"; [[ "$TERM_ASCII_MODE" -eq 1 ]] && commit="*"
   local link="─";   [[ "$TERM_ASCII_MODE" -eq 1 ]] && link="-"
   local headg="◉";  [[ "$TERM_ASCII_MODE" -eq 1 ]] && headg="@"
   local conflict="⊗"; [[ "$TERM_ASCII_MODE" -eq 1 ]] && conflict="X"
 
-  if [[ $n -le 0 && "$head" == "EMPTY" ]]; then printf '%s' "$link"; return; fi
+  if [[ $n -le 0 && "$head" == "EMPTY" ]]; then __TERM_RAIL=$link; return 0; fi
 
   local out=""
-  local i
+  local i g
+  __term_c green "$commit"; g=$__TERM_C
   # n landed commits, joined by links
   for (( i=0; i<n-1; i++ )); do
-    out="${out}$(term_color green "$commit")${link}"
+    out="${out}${g}${link}"
   done
 
   # final glyph
   case "$head" in
     HEAD)
-      if [[ $n -ge 1 ]]; then out="${out}$(term_color green "$commit")${link}"; fi
-      out="${out}$(term_color yellow "$headg")"
+      if [[ $n -ge 1 ]]; then out="${out}${g}${link}"; fi
+      __term_c yellow "$headg"; out="${out}$__TERM_C"
       ;;
     CONFLICT)
-      if [[ $n -ge 1 ]]; then out="${out}$(term_color green "$commit")${link}"; fi
-      out="${out}$(term_color red "$conflict")"
+      if [[ $n -ge 1 ]]; then out="${out}${g}${link}"; fi
+      __term_c red "$conflict"; out="${out}$__TERM_C"
       ;;
     *)
-      [[ $n -ge 1 ]] && out="${out}$(term_color green "$commit")"
+      [[ $n -ge 1 ]] && out="${out}${g}"
       ;;
   esac
-  printf '%s' "$out"
+  __TERM_RAIL=$out
 }
 
 # term_pip_bar <metric_type> <filled> <total>
@@ -794,10 +830,12 @@ term_pip_bar() {
 
 # term_health <state> <text>  — • text (colored bullet, with ⬤ for busted)
 # state: healthy|pending|warning|critical|busted|unknown
-term_health() {
+term_health() { __term_health_v "$@"; printf '%s' "$__TERM_HEALTH"; }
+# __term_health_v: the same fragment, setting __TERM_HEALTH instead of printing.
+__term_health_v() {
   local state=$1; shift
   local glyph
-  glyph=$(term_health_glyph "$state")
+  __term_lookup_v HEALTH_GLYPH "$state"; glyph=$__TERM_GLYPH
   local color=""
   case "$state" in
     healthy)  color="green" ;;
@@ -807,12 +845,12 @@ term_health() {
     busted)   color="dim" ;;
     *)        color="dim" ;;
   esac
-  printf '%s %s' "$(term_color "$color" "$glyph")" "$*"
+  __term_c "$color" "$glyph"; __TERM_HEALTH="$__TERM_C $*"
 }
 
 # term_hotkey <key> <verb>  — "R refresh"  (key in cyan)
 term_hotkey() {
-  printf '%s %s' "$(term_color cyan "$1")" "$2"
+  __term_c cyan "$1"; printf '%s %s' "$__TERM_C" "$2"
 }
 
 # ─── Spinners (live mode) ─────────────────────────────────────────────────

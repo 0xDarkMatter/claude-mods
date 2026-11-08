@@ -252,7 +252,13 @@ q_owner(){ # lane ageSecs: the lane's owner, active ageSecs ago
 }
 q_lane ql; echo l > "$QW/l.txt"; q_commit "$QW" "lane l"
 q_owner lane/ql 0
-q_run --poll 1s --deadline 4s --mem-limit off lane/ql "$(q_tip ql)"
+# The deadline has to expire DURING a land attempt, or the row reads "deadline passed before
+# the land could start" and never names the refusal under test. A wall-clock deadline cannot
+# promise that: a fixed 4s lost the race on a loaded machine (2026-11-05), and so did one
+# sized from a timed dry run, because the load changes between probe and run. So the queue's
+# clock is told (FLEET_QUEUE_EXPIRE_AFTER_LANDS, scripts/queue.sh) that the deadline has
+# passed once the first `fleet land` attempt has returned. No timing assumption is left.
+FLEET_QUEUE_EXPIRE_AFTER_LANDS=1 q_run --poll 1s --deadline 60s --mem-limit off lane/ql "$(q_tip ql)"
 ee "live owner: an owner live past the deadline ends retryable, not failed" 6 $QX
 case "$(q_row 1 4)" in *"LIVE session"*) ok "live owner: the timeout row names fleet's live-owner refusal";;
   *) no "live owner: row $(cat "$SB/q.out")";; esac

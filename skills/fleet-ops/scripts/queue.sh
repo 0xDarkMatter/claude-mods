@@ -178,13 +178,29 @@ git rev-parse -q --verify "refs/heads/$BASE" >/dev/null || { echo "fleet queue: 
 LOG_DIR=".claude/fleet/queue"   # one log per lane, the last land attempt's output
 WORK="$(mktemp -d)" || exit 5
 trap 'rm -rf "$WORK"' EXIT
-START=$(date +%s)
+# The deadline clock. FLEET_QUEUE_EXPIRE_AFTER_LANDS=N makes the deadline read as passed
+# once N `fleet land` attempts have returned, whatever the wall clock says. It is a test
+# seam, unset in real use (same family as FLEET_QUEUE_COMMIT_PCT). WHY: the case "a live
+# owner outlasts the deadline" needs the deadline to expire DURING a land attempt, so the
+# row can say what fleet refused. No wall-clock deadline does that reliably: too short and
+# it passes before the first attempt ("deadline passed before the land could start"), as a
+# fixed 4s did on a loaded machine (2026-11-05) and a deadline sized from a timed dry run
+# did when the load changed; too long and the case waits it out.
+LAND_TRIES=0
+now_s() {
+  printf -v NOW_S '%(%s)T' -1 2>/dev/null || NOW_S=$(date +%s)
+  if [[ "${FLEET_QUEUE_EXPIRE_AFTER_LANDS:-}" =~ ^[1-9][0-9]*$ ]]      && (( LAND_TRIES >= FLEET_QUEUE_EXPIRE_AFTER_LANDS )); then
+    NOW_S=$(( ${START:-0} + DEADLINE + 1 ))
+  fi
+}
+now_s; START=$NOW_S
 
 say() { echo "[$(date '+%H:%M:%S')] queue: $*" >&2; }
-past_deadline() { (( $(date +%s) - START >= DEADLINE )); }
+past_deadline() { now_s; (( NOW_S - START >= DEADLINE )); }
 # Sleep one poll, never past the deadline.
 nap() {
-  local left=$(( START + DEADLINE - $(date +%s) ))
+  now_s
+  local left=$(( START + DEADLINE - NOW_S ))
   (( left > 0 )) || return 0
   sleep $(( left < POLL ? left : POLL ))
 }
@@ -587,6 +603,7 @@ queue_one() {
     before=$(git rev-parse "refs/heads/$BASE")
     say "$lane: fleet land (attempt log: $log)"
     bash "$FLEET" land "$lane" > "$log" 2>&1; rc=$?
+    LAND_TRIES=$((LAND_TRIES + 1))
     after=$(git rev-parse "refs/heads/$BASE")
     if [[ $rc -ne 0 ]] && grep -Eq "$RETRYABLE" "$log"; then
       if past_deadline; then

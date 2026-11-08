@@ -166,6 +166,16 @@ On "INIT:" message at session start:
   rows="$(producer)" || rc=$?`, then `done <<< "$rows"` skipping empty rows. Tag each
   site `# procsub guard:` (fixed) or `# procsub ok: <why it cannot stop early>`, and give
   each new guard in tests/ or a skill suite a row in `tests/procsub-guard.sh`.
+- **On Git Bash a process start IS the runtime** (~15-20 ms each; the fleet-ops suite
+  spent 84% of its 37 minutes creating them). fleet-ops' hot paths therefore read and
+  write through fork-free setters (`lower_v`, `now_v`, `decode_lane_v`, `prune_count_v`,
+  `claims_of_v` ... in fleet.sh/sweep.sh, `__term_c`, `__term_rail_v` ... in
+  `_lib/term.sh`) that return through `printf -v`. Their locals are `__`-prefixed on
+  purpose: `printf -v` resolves the target name dynamically, so a helper local called `s`
+  swallows a caller's `s` (a real bug, found while writing them). Each setter must stay
+  byte-identical to the `$(...)` pipeline it replaced, trailing-newline strip included;
+  prove a change with an old-vs-new output diff, not by eye. Count a change's cost with a
+  job object (`QueryInformationJobObject` class 1, `TotalProcesses`), not wall time.
 - **`pwsh` on PATH does not mean Windows.** GitHub's Ubuntu runners ship `pwsh`, so
   a suite that runs Windows-only scripts whenever `command -v pwsh` succeeds goes
   red on Linux CI (windows-ops, supply-chain-defense). Gate runtime checks on the
