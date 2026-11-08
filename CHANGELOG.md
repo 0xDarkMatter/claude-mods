@@ -157,6 +157,11 @@ feature releases live in the README "Recent Updates" section.
 
 ### Changed
 
+- **Skill descriptions trimmed by about 2,750 chars across 36 skills.** Cuts are prose that
+  restated a skill's own trigger list; trigger phrases stay. The README's budget section and
+  `claude-code-ops` now use the current docs: `skillListingMaxDescChars` replaces
+  `maxSkillDescriptionChars`, plugin skills sit outside `skillOverrides`, and a skill with no
+  description may be `"name-only"` rather than over budget.
 - **BREAKING: `testgen` and `testing-ops` are merged into `test-engineering`.** `/testgen`
   survives for one release as a command alias for `/test-engineering write`; installers remove
   the old skill directories. `coverage-check.sh` is now report-only by default (`--threshold`

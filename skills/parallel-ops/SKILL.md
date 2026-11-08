@@ -1,7 +1,7 @@
 ---
 name: parallel-ops
-description: "Router for parallel or recurring agent work across six skills. Covers: parallel agents, fan out work, delegate to workers, run overnight, scheduled loop, land branches, mixed-model fleet, orchestrate workers, background agents at scale. Triggers on: which skill for parallel work, fan out agents, spawn workers, run this overnight, schedule a loop, land my branches, clean up after a wave, heterogeneous fleet, delegate to cheaper model, autonomous loop."
-when_to_use: "Use first when parallel or recurring agent work is needed but the right skill among fleet-ops, fleet-worker, fleetflow, loop-ops, iterate, spawn is unclear - e.g. run several agents at once, set up something that runs overnight, delegate this cheaply."
+description: "Router for parallel or recurring agent work across six skills. Triggers on: which skill for parallel work, parallel agents, fan out agents or work, spawn or delegate to workers, orchestrate workers, background agents at scale, run this overnight, scheduled loop, schedule a loop, land my branches, clean up after a wave, mixed-model or heterogeneous fleet, delegate to cheaper model, autonomous loop."
+when_to_use: "Use first when the right skill among fleet-ops, fleet-worker, fleetflow, loop-ops, iterate, spawn is unclear - e.g. run several agents at once."
 license: MIT
 allowed-tools: "Read"
 metadata:

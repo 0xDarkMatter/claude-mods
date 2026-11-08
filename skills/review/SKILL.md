@@ -1,7 +1,7 @@
 ---
 name: review
 description: "Code review with semantic diffs, expert routing, and auto-TaskCreate. Triggers on: code review, review changes, check code, review PR, security audit."
-when_to_use: "Use when the user asks for a code review of staged changes, specific files, or a PR — e.g. 'review my changes', 'check this code before commit', 'security audit this diff', 'review PR 12'."
+when_to_use: "Use for a code review of staged changes, specific files, or a PR - e.g. 'review my changes', 'check this code before commit'."
 argument-hint: "[target|--all|--pr N] [--security|--perf|--types|--tests|--style] [--quick|--thorough] [--base <branch>] [--second-opinion] [--json]"
 effort: high
 license: MIT

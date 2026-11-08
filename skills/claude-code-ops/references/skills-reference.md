@@ -100,8 +100,8 @@ Rules:
 ## Description Budget (why skills stop triggering)
 
 - All skill names always listed; descriptions fit a budget of **1% of the model context window** (raise via `skillListingBudgetFraction` setting, e.g. `0.02`, or `SLASH_COMMAND_TOOL_CHAR_BUDGET` env var for a fixed char count).
-- Per-skill cap: combined `description` + `when_to_use` truncated at 1,536 chars (configurable via `maxSkillDescriptionChars`). **Put key trigger phrases first.**
-- On overflow, least-invoked skills lose their descriptions first. `/doctor` shows whether the budget is overflowing and which skills are affected.
+- Per-skill cap: combined `description` + `when_to_use` truncated at 1,536 chars (configurable via `skillListingMaxDescChars`). **Put key trigger phrases first.**
+- On overflow, least-used skills lose their descriptions first: Claude can still invoke them but is less likely to pick one on its own. `/doctor` estimates the listing's cost, `/skill-doctor` compares cost with use, and `claude --debug` logs an over-budget warning. `"name-only"` in `skillOverrides` renders identically, so check it before blaming the budget; it does not reach plugin skills.
 - `skillOverrides` in settings (or `/skills` + `Space`): `"on"` / `"name-only"` / `"user-invocable-only"` / `"off"` per skill. Plugin skills are managed via `/plugin` instead.
 
 ## Permission Control over Skills

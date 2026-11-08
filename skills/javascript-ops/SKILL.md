@@ -1,6 +1,6 @@
 ---
 name: javascript-ops
-description: "JavaScript and Node.js patterns, async programming, modules, runtime internals, and modern ES2024+ features. Use for: javascript, js, node, nodejs, esm, commonjs, promise, async await, event loop, v8, npm, es6, es2024, worker threads, streams, event emitter, prototype, closure."
+description: "JavaScript and Node.js patterns, modules, runtime internals, modern features. Use for: javascript, js, node, nodejs, esm, commonjs, promise, async await, event loop, v8, npm, es6, es2024, worker threads, streams, event emitter, prototype, closure."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:

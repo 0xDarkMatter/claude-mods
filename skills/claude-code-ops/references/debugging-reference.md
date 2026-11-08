@@ -45,7 +45,7 @@ Core principle: when something you configured doesn't take effect, the cause is 
 | Not in `/skills` | File at `.claude/skills/name.md` instead of a folder | Must be `.claude/skills/name/SKILL.md` |
 | Not in `/skills` | New top-level skills dir created mid-session | Restart (existing dirs are live-watched; new top-level dirs are not) |
 | In `/skills`, Claude never invokes it | `disable-model-invocation: true` ("user-only" badge), or description doesn't match request phrasing | Check badge; add natural trigger keywords to `description`/`when_to_use` |
-| Used to trigger, stopped | Description budget overflow (1% of context window) | `/doctor` shows affected skills. Raise `skillListingBudgetFraction`, set noise skills to `"name-only"` in `skillOverrides`, front-load key triggers (1,536-char per-skill cap) |
+| Used to trigger, stopped | Description budget overflow (1% of context window) | `claude --debug` logs the overflow; `/doctor` shows the biggest contributors. Raise `skillListingBudgetFraction`, set noise skills to `"name-only"` in `skillOverrides`, front-load key triggers (1,536-char per-skill cap) |
 | Triggers too often | Description too broad | Tighten description or `disable-model-invocation: true` |
 | Stops influencing behavior mid-session | Content usually still present; model preferring other approaches — or dropped by compaction (5k/skill, 25k combined budget) | Strengthen description/instructions, enforce with hooks, or re-invoke after compaction |
 | Frontmatter ignored | YAML error (e.g. unquoted `:` in description) | Quote strings; validate YAML |

@@ -1,7 +1,7 @@
 ---
 name: claude-code-ops
 description: "Claude Code internals - hooks, skill frontmatter, headless mode, and extension debugging, current as of June 2026. Triggers: hooks, hook events, hook not firing, PreToolUse/PostToolUse/SessionStart, skill frontmatter, SKILL.md, skill not triggering, headless, claude -p, CI/CD scripting, plugin validate, MCP server not connecting, agent vs skill vs command vs hook."
-when_to_use: "Use for questions about Claude Code itself - e.g. my hook is not firing, why won't this skill trigger, run claude headless in CI, plugin fails to validate, should this be an agent or a skill."
+when_to_use: "Use for questions about Claude Code itself - e.g. why won't this skill trigger, should this be an agent or a skill."
 license: MIT
 compatibility: "Claude Code CLI v2.1.x (June 2026 docs)"
 allowed-tools: "Bash Read Grep"
@@ -82,7 +82,7 @@ Hook types: `command` (sync/`async`/`asyncRewake`), `http`, `mcp_tool`, `prompt`
 - Substitutions: `$ARGUMENTS`, `$ARGUMENTS[N]`, `$N` (0-based!), `$name`, `${CLAUDE_SKILL_DIR}`, `${CLAUDE_SESSION_ID}`, `${CLAUDE_EFFORT}`.
 - `` !`command` `` runs at load time and inlines output (dynamic context injection).
 - Body persists all session, but auto-compaction re-attaches only its first 5,000 tokens (25,000 across skills); keep SKILL.md < 500 lines and ~5k tokens, details in supporting files.
-- Description + `when_to_use` capped at 1,536 chars in the listing; listing budget = 1% of context window — `/doctor` reports overflow.
+- Description + `when_to_use` capped at 1,536 chars in the listing; listing budget = 1% of context window — `claude --debug` logs overflow, `/doctor` shows the biggest contributors.
 
 ## Headless in 30 Seconds
 

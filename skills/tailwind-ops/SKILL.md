@@ -1,6 +1,6 @@
 ---
 name: tailwind-ops
-description: "Tailwind CSS utility patterns, responsive design, component patterns, v4 migration, and configuration. Use for: tailwind, tailwindcss, utility classes, responsive design, dark mode, tailwind v4, tailwind config, tw, container queries, @apply, prose, typography, animation."
+description: "Tailwind CSS utility and component patterns, v4 migration. Use for: tailwind, tailwindcss, utility classes, responsive design, dark mode, tailwind v4, tailwind config, tw, container queries, @apply, prose, typography, animation."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:

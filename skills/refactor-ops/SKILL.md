@@ -1,6 +1,6 @@
 ---
 name: refactor-ops
-description: "Safe refactoring patterns - extract, rename, restructure with test-driven methodology and dead code detection. Use for: refactor, refactoring, extract function, extract component, rename, move file, restructure, dead code, unused imports, code smell, duplicate code, long function, god object, feature envy, DRY, technical debt, cleanup, simplify, decompose, inline, pull up, push down, strangler fig, parallel change."
+description: "Safe, test-driven refactoring patterns. Use for: refactor, refactoring, extract function, extract component, rename, move file, restructure, dead code, unused imports, code smell, duplicate code, long function, god object, feature envy, DRY, technical debt, cleanup, simplify, decompose, inline, pull up, push down, strangler fig, parallel change."
 license: MIT
 allowed-tools: "Read Edit Write Bash Glob Grep Agent"
 metadata:

@@ -1,6 +1,6 @@
 ---
 name: nginx-ops
-description: "Nginx configuration, reverse proxy, SSL/TLS, load balancing, and performance tuning. Use for: nginx, reverse proxy, load balancer, proxy_pass, ssl certificate, lets encrypt, web server, location block, upstream, server block, nginx config, certbot, hsts, gzip, rate limiting."
+description: "Nginx configuration, SSL/TLS, and performance tuning. Use for: nginx, reverse proxy, load balancer, proxy_pass, ssl certificate, lets encrypt, web server, location block, upstream, server block, nginx config, certbot, hsts, gzip, rate limiting."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:

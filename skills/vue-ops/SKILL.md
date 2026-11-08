@@ -1,6 +1,6 @@
 ---
 name: vue-ops
-description: "Vue 3 development patterns, Composition API, Pinia state management, Vue Router, and Nuxt 4. Use for: vue, vuejs, composition api, pinia, vue router, nuxt, nuxt4, nuxt3, script setup, composable, reactive, defineProps, defineEmits, defineModel, v-model, provide inject, vue3."
+description: "Vue 3 development patterns and state management. Use for: vue, vuejs, composition api, pinia, vue router, nuxt, nuxt4, nuxt3, script setup, composable, reactive, defineProps, defineEmits, defineModel, v-model, provide inject, vue3."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:

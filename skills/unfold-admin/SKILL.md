@@ -1,6 +1,6 @@
 ---
 name: unfold-admin
-description: "Django Unfold admin theme - build, configure, and enhance modern Django admin interfaces with Unfold. Use when working with: (1) Django admin UI customisation or theming, (2) Unfold ModelAdmin, inlines, actions, filters, widgets, or decorators, (3) Admin dashboard components and KPI cards, (4) Sidebar navigation, tabs, or conditional fields, (5) Any mention of 'unfold', 'django-unfold', or 'unfold admin'. Covers the full Unfold feature set: site configuration, actions system, display decorators, filter types, widget overrides, inline variants, dashboard components, datasets, sections, theming, and third-party integrations."
+description: "Django Unfold admin theme for modern Django admin interfaces. Use when working with: Django admin UI customisation or theming; Unfold ModelAdmin, inlines, actions, filters, widgets, decorators; admin dashboard components, KPI cards, datasets; sidebar navigation, tabs, sections, conditional fields; site configuration, third-party integrations; any mention of 'unfold', 'django-unfold', 'unfold admin'."
 license: MIT
 metadata:
   author: claude-mods

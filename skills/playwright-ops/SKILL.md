@@ -1,6 +1,6 @@
 ---
 name: playwright-ops
-description: "Playwright end-to-end testing operations - selectors, fixtures, network mocking, auth, parallelism, CI, visual regression, flake hunting. Use for: playwright, e2e test, end-to-end testing, browser test, getByRole, page object, storageState, trace viewer, flaky test, test sharding, visual regression, toHaveScreenshot, playwright config, codegen."
+description: "Playwright end-to-end testing: selectors, fixtures, network mocking, auth, parallelism, CI. Use for: playwright, e2e test, end-to-end testing, browser test, getByRole, page object, storageState, trace viewer, flaky test, test sharding, visual regression, toHaveScreenshot, playwright config, codegen."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:

@@ -1,6 +1,6 @@
 ---
 name: monitoring-ops
-description: "Observability patterns - metrics, logging, tracing, alerting, and infrastructure monitoring. Use for: monitoring, observability, prometheus, grafana, metrics, alerting, structured logging, distributed tracing, opentelemetry, SLO, SLI, dashboard, health check, loki, jaeger, datadog, pagerduty."
+description: "Observability patterns and infrastructure monitoring. Use for: monitoring, observability, prometheus, grafana, metrics, alerting, structured logging, distributed tracing, opentelemetry, SLO, SLI, dashboard, health check, loki, jaeger, datadog, pagerduty."
 license: MIT
 allowed-tools: "Read Write Bash"
 metadata:

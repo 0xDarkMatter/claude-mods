@@ -1,6 +1,6 @@
 ---
 name: introspect
-description: "Analyze Claude Code session logs and surface productivity improvements. Extracts thinking blocks, tool usage stats, error patterns, debug trajectories - then generates friendly, actionable recommendations. Triggers on: introspect, session logs, trajectory, analyze sessions, what went wrong, tool usage, thinking blocks, session history, my reasoning, past sessions, what did I do, how can I improve."
+description: "Analyze Claude Code session logs and surface productivity improvements. Extracts thinking blocks, tool usage stats, error patterns, debug trajectories. Triggers on: introspect, session logs, trajectory, analyze sessions, what went wrong, tool usage, thinking blocks, session history, my reasoning, past sessions, what did I do, how can I improve."
 license: MIT
 allowed-tools: "Bash Read Grep Glob"
 metadata:
