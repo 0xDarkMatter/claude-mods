@@ -216,6 +216,13 @@ jobs:
             --unavailable "package-manager-ops live check unreachable (nodejs.org / php.net / npm / getcomposer.org / GitHub) - skipped" \
             -- python skills/package-manager-ops/scripts/check-pm-facts.py --live
 
+      - name: sentry-ops packages, privacy baseline and docs vs npm and docs.sentry.io
+        run: |
+          bash .github/scripts/freshness-step.sh --name sentry-ops \
+            --drift "sentry-ops drift - a Sentry package is gone or shipped a new major, the SDK gained a dataCollection category the strict baseline does not turn off, or a cited doc page moved" \
+            --unavailable "sentry-ops live check unreachable (npm, unpkg or docs.sentry.io) - skipped" \
+            -- python skills/sentry-ops/scripts/check-sentry-facts.py --live
+
       - name: sandbox-ops provider facts (boat, E2B, Modal, Vercel, Daytona, Fly) vs their docs
         run: |
           # No boat CLI on the runner, so boat's CLI-help half is skipped and the docs decide.

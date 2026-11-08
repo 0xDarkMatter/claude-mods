@@ -1,0 +1,3 @@
+{"event_id": "ffffffffffffffffffffffffffffffff", "sdk": {"name": "sentry.javascript.cloudflare", "version": "0.0.0"}}
+{"type": "event"}
+{"event_id": "ffffffffffffffffffffffffffffffff", "level": "error", "platform": "javascript", "environment": "production", "exception": {"values": [{"type": "Error", "value": "boom"}]}, "request": {"method": "POST", "url": "http://app.test/contact"}}

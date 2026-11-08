@@ -66,6 +66,14 @@ feature releases live in the README "Recent Updates" section.
   test-engineering's audit, prune and triage modes.
 - **`security-ops`: optional discovery companion**: `cloudflare/security-audit-skill`,
   referenced at a pinned, reviewed commit rather than vendored.
+- **`sentry-ops`: Sentry error reporting that sends only what you decided.** SDK choice by
+  runtime, with Astro on Cloudflare Workers as the worked case, and each onboarding default
+  treated as a cost, privacy or performance decision. Sentry's v11 removed `sendDefaultPii`, so
+  older advice now does nothing while an unset `dataCollection` collects everything. Ships a
+  strict baseline and a tested `beforeSend` scrubber, `envelope-sink.py` (a loopback fake-DSN
+  listener with a byte-level leak check, for proving a setup without traffic to Sentry), and a
+  staleness verifier whose `--live` mode trips when the SDK gains a `dataCollection` category
+  the baseline doesn't turn off. Every claim is labelled measured, code, docs, inferred or open.
 - **`sandbox-ops`: hosted cloud sandboxes, with boat.dev in depth.** One skill for running
   work on rented boxes without leaking them, losing work or leaking keys. boat.dev, the
   provider in production use, keeps its full profile from fleetflow's host driver and a

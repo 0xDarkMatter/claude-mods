@@ -222,6 +222,13 @@ run "lock-replay bad args"          2 "$PY" skills/package-manager-ops/scripts/l
 # suffix (so scanners never read them as real manifests) and must be materialised first.
 # pm-rollup / lock-replay behaviour (grouped report, conflict replay) lives in tests/tools.sh.
 
+echo "== sentry-ops: Sentry fact/staleness verifier + envelope sink contract"
+run "sentry-facts --offline consistent" 0 "$PY" skills/sentry-ops/scripts/check-sentry-facts.py --offline
+run "sentry-facts --help"               0 "$PY" skills/sentry-ops/scripts/check-sentry-facts.py --help
+run "envelope-sink --help"              0 "$PY" skills/sentry-ops/scripts/envelope-sink.py --help
+run "envelope-sink clean fixture"       0 "$PY" skills/sentry-ops/scripts/envelope-sink.py inspect skills/sentry-ops/tests/fixtures/clean.envelope --strict
+run "envelope-sink leaky fixture"      10 "$PY" skills/sentry-ops/scripts/envelope-sink.py inspect skills/sentry-ops/tests/fixtures/leaky.envelope --strict
+
 echo "== sandbox-ops: provider facts staleness verifier + deletion confirmer contract"
 run "sandbox-facts --offline consistent" 0 "$PY" skills/sandbox-ops/scripts/check-sandbox-facts.py --offline
 run "sandbox-facts --help"               0 "$PY" skills/sandbox-ops/scripts/check-sandbox-facts.py --help
@@ -256,6 +263,8 @@ for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/frontend-upgrade-ops/scripts/check-frontend-upgrade-facts.py \
          skills/ddev-ops/scripts/check-ddev-facts.py \
          skills/ddev-ops/scripts/audit-ddev-config.py \
+         skills/sentry-ops/scripts/check-sentry-facts.py \
+         skills/sentry-ops/scripts/envelope-sink.py \
          skills/sandbox-ops/scripts/check-sandbox-facts.py \
          skills/repo-doctor/scripts/check-memory-docs.py \
          skills/repo-doctor/scripts/check-tool-profiles.py \
@@ -303,6 +312,7 @@ purity "frontend-upgrade-facts" "$PY" skills/frontend-upgrade-ops/scripts/check-
 purity "ddev-facts"    "$PY" skills/ddev-ops/scripts/check-ddev-facts.py --offline
 purity "ddev-audit"    "$PY" skills/ddev-ops/scripts/audit-ddev-config.py skills/ddev-ops/tests/fixtures/minefield
 purity "pm-facts"      "$PY" skills/package-manager-ops/scripts/check-pm-facts.py --offline
+purity "sentry-facts"  "$PY" skills/sentry-ops/scripts/check-sentry-facts.py --offline
 purity "sandbox-facts" "$PY" skills/sandbox-ops/scripts/check-sandbox-facts.py --offline
 __pr="$(mktemp -d)"
 printf '{"packages":[{"name":"a/a","version":"1"}]}' > "$__pr/ours.lock"
