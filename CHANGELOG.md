@@ -99,6 +99,22 @@ feature releases live in the README "Recent Updates" section.
   the user's choice to turn on. `tests/hooks.sh` covers the nudge, the deny, a changing
   poll, separate sessions and pruning, and each case fails against a broken copy of the
   hook.
+- **`ca-trust-ops`: check a machine against a CA distrust event.** A read-only checker for
+  macOS, Linux and WSL (`check-ca-trust.sh`, bash 3.2) and Windows (`check-ca-trust.ps1`,
+  PowerShell 5.1 and 7) reports, per client and per CA bundle, whether the machine still
+  trusts a compromised CA's keys: curl, git, Python, Node, the Windows store, `curl.exe`
+  and WSL are probed against the incident's test hosts, and system, Homebrew, certifi,
+  pip, Node, Git for Windows, Composer and WSL bundles are matched by public key. A
+  client's refusal counts as PASS only after its own control page opened and the checker's
+  own handshake confirmed the test chain, so a blocked host, a filtering proxy, a reset or
+  an expired leaf reads UNKNOWN, never PASS. It writes nothing, uses no proxy and contacts
+  only the incident's hosts. Everything incident-specific lives in a validated pack
+  (`assets/incidents/<id>.conf`); the first is the eMudhra compromise of October 2026, and
+  `references/incident-packs.md` with `scripts/pack-keys.sh` is how to add the next. The
+  bash bundle scan finds candidates in one awk pass and hashes only those, where hashing
+  every certificate took 5 s per bundle. The suite (stand-in clients, real clients against
+  local test servers, a PowerShell environment-restore test) is backed by 57 deliberate
+  mutants, each caught by a named test.
 
 - **`fleet queue` and `/conduct`: the coordinator's landing ritual as a command.**
   `fleet queue <lane> <tip>...` lands reviewed lanes one at a time. Before each land it
