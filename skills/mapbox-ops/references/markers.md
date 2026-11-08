@@ -15,7 +15,7 @@ Two ways to put a custom marker on the map:
 - [Circular image markers](#circular-image-markers) — mask correctly
 - [Atlas aliasing at low zoom](#atlas-aliasing-at-low-zoom) — keep edges chunky
 - [High pixelRatio, never upscale](#high-pixelratio-never-upscale)
-- [Anchoring: tip / centre / offset](#anchoring-tip--centre--offset) — data-driven offset is ignored
+- [Anchoring: tip / centre / offset](#anchoring-tip--centre--offset) — offsets scale with icon-size
 
 ## Namespace every image name
 
@@ -122,15 +122,17 @@ map.addImage(name, bmp, {pixelRatio: F}); // declare the 6×
 
 ## Anchoring: tip / centre / offset
 
-**Data-driven `icon-offset` is silently ignored in GL JS v3.** A `["get", …]` or
-`["case", …]` expression for `icon-offset` does nothing — no error, no offset. Two
-working approaches:
+`icon-offset` is data-driven in GL JS v3: `["get", "offset"]` or a `["case", …]` that
+returns an array works, so a per-feature offset can fan out pins that share a
+coordinate. (An earlier version of this file said data-driven offsets were
+silently ignored; the style spec marks the property data-driven, and a headless render
+on GL JS 3.29.0 showed them applied.) The offset is in icon units and **scales with
+`icon-size`**, so one value works across zooms. Two ways to anchor marker families:
 
-1. **Constant `icon-offset`** — it's a layout constant that **scales with
-   `icon-size`**, so one value works across zooms. Pair it with matched padding baked
-   into every icon of that layer.
-2. **Split into separate symbol layers**, each with its own *constant* anchor/offset.
-   This is what to do when marker families need different anchors. Example: glyph
+1. **Constant or per-feature `icon-offset`** in one layer, paired with matched padding
+   baked into every icon of that layer.
+2. **Separate symbol layers**, each with its own anchor and offset, when families differ
+   in more than the offset (different anchors, sizes or collision rules). Example: glyph
    badges centred on the point vs photo bubbles whose tip sits on the point —
 
 ```js

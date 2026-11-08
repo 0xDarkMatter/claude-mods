@@ -391,6 +391,19 @@ feature releases live in the README "Recent Updates" section.
   (window `FLEET_SESSION_NAMED_DAYS`, 7; the session running prune is exempt). Both came from
   a zero-commit lane that read SAFE / REMOVE while its session waited on its EnterWorktree
   prompt.
+- **mapbox-ops no longer says a data-driven `icon-offset` is ignored.** `markers.md` and
+  SKILL.md's third gotcha said GL JS v3 silently drops a `["get", …]` or `["case", …]`
+  offset. The style spec marks `icon-offset` data-driven (since GL JS 0.29.0), and a
+  headless render on GL JS 3.29.0 applied both forms. The anchoring section now says so,
+  and the third gotcha is now `setStyle` wiping custom sources, layers and images.
+  `three-custom-layer.md` gains the `## Contents` list a reference past 100 lines needs.
+
+- **The mapbox-ops suite runs where only the `py` launcher exists, and leaves no
+  bytecode.** It tried `python3` and `python` only, so a Windows machine with just `py`
+  skipped every check and still passed; it now tries `py` too. Its `py_compile` checks
+  wrote `scripts/__pycache__/` into the skill folder, which git doesn't ignore and
+  `install.ps1` copies; it now compiles in memory with `PYTHONDONTWRITEBYTECODE=1`. Both
+  were seen failing on the old suite.
 
 ## [3.9.0] - 2026-10-14
 

@@ -94,6 +94,6 @@ Read the matching reference file only when the task needs it:
 2. **Register icons as premultiplied `createImageBitmap()`**, not a raw
    `HTMLImageElement`/`ImageData` — straight-alpha sources make Mapbox **fringe a
    white halo** around anti-aliased edges. `updateImage(name, bmp)` recolours in place.
-3. **Data-driven `icon-offset` is silently ignored in GL JS v3.** Use a *constant*
-   `icon-offset` (it scales with `icon-size`) or split markers into separate symbol
-   layers, each with its own constant anchor/offset.
+3. **`setStyle` wipes every custom source, layer and image.** Re-add them on
+   `'style.load'` from one guarded installer, or a style switch silently empties the
+   map (see [lifecycle.md](references/lifecycle.md)).

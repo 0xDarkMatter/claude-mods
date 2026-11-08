@@ -10,6 +10,10 @@
 #   tests/run.sh
 #   bash skills/mapbox-ops/tests/run.sh
 set -uo pipefail
+# Compile-check without py_compile: it writes __pycache__/ into the skill folder,
+# which then ships with an install.
+export PYTHONDONTWRITEBYTECODE=1
+compile_only='import sys; compile(open(sys.argv[1], encoding="utf-8").read(), sys.argv[1], "exec")'
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fail=0
@@ -18,10 +22,11 @@ note() { printf '  %s %s\n' "$1" "$2" >&2; }
 ok()   { pass=$((pass+1)); note "ok  " "$1"; }
 bad()  { fail=$((fail+1)); note "FAIL" "$1"; }
 
-# Resolve a *working* python (python3, else python). The bare `command -v` is not
-# enough on Windows, where `python3` is a Microsoft Store stub that exits nonzero.
+# Resolve a *working* python (python3, python, then the Windows `py` launcher). The
+# bare `command -v` is not enough on Windows, where `python3` is a Microsoft Store
+# stub that exits nonzero.
 PY=""
-for cand in python3 python; do
+for cand in python3 python py; do
   if command -v "$cand" >/dev/null 2>&1 && "$cand" --version >/dev/null 2>&1; then
     PY="$cand"; break
   fi
@@ -61,7 +66,7 @@ done
 # 5. screenshot_map.py — script contract (§10)
 py="$here/scripts/screenshot_map.py"
 if [ -f "$py" ]; then
-  "$PY" -m py_compile "$py" && ok "py_compile clean" || bad "py_compile failed"
+  "$PY" -c "$compile_only" "$py" && ok "py_compile clean" || bad "py_compile failed"
   # Captured, not `head | grep -q`: under `set -o pipefail` grep -q's early exit
   # SIGPIPEs the producer (141) and flakes the assert even on a match.
   py_head="$(head -25 "$py")"
@@ -78,7 +83,7 @@ fi
 facts="$here/scripts/check-mapbox-facts.py"
 if [ -f "$facts" ]; then
   ok "resource present: scripts/check-mapbox-facts.py"
-  "$PY" -m py_compile "$facts" && ok "facts: py_compile clean" || bad "facts: py_compile failed"
+  "$PY" -c "$compile_only" "$facts" && ok "facts: py_compile clean" || bad "facts: py_compile failed"
   facts_head="$(head -30 "$facts")"   # captured, not piped — see SIGPIPE note above
   grep -Eq '^# +Examples:' <<<"$facts_head" && ok "facts: has Examples block" || bad "facts: no Examples block"
   "$PY" "$facts" --help >/dev/null 2>&1 && ok "facts: --help exits 0" || bad "facts: --help nonzero"

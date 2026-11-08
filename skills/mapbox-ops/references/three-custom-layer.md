@@ -6,6 +6,13 @@ context. Distilled from a production ambient-vessels layer and from reviewing
 [Threebox](https://github.com/jscastro76/threebox) v2.2.7 internals (`CameraSync.js`,
 `Threebox.js`) — the de-facto mapbox↔three bridge library.
 
+## Contents
+- [Decide the architecture FIRST — two incompatible approaches](#decide-the-architecture-first--two-incompatible-approaches)
+- [Recipe A — minimal baked-matrix layer (display-only actors)](#recipe-a--minimal-baked-matrix-layer-display-only-actors)
+- [Recipe B — the CameraSync math worth stealing (when you need picking)](#recipe-b--the-camerasync-math-worth-stealing-when-you-need-picking)
+- [Lifecycle & hygiene (either recipe)](#lifecycle--hygiene-either-recipe)
+- [Extras Threebox ships that pair well](#extras-threebox-ships-that-pair-well)
+
 ## Decide the architecture FIRST — two incompatible approaches
 
 | | A. Baked matrix (Mapbox docs pattern) | B. Reconstructed camera (Threebox `CameraSync`) |
