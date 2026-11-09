@@ -259,6 +259,14 @@ printf '%s\n' "$txt" | grep -q $'^medium\tunpinned-cli\tREADME.md:4\t' \
   && ok "text rows carry severity, id and file:line" || bad "text row shape wrong: $txt"
 [ "$(printf '%s\n' "$txt" | grep -c 'unpinned-cli')" = 4 ] \
   && ok "unpinned-docs: @latest, unversioned dlx, retired shadcn-ui and a range all reported" || bad "unpinned-docs hits: $txt"
+# The fix names the project's OWN runner: an npm project was once told to use `pnpm exec shadcn`.
+cp -r "$tmp/cases/unpinned-docs" "$tmp/unpinned-npm"
+rm -f "$tmp/unpinned-npm/pnpm-lock.yaml" "$tmp/unpinned-npm/yarn.lock" "$tmp/unpinned-npm/bun.lock" "$tmp/unpinned-npm/bun.lockb"
+printf '{"lockfileVersion":3,"packages":{}}\n' > "$tmp/unpinned-npm/package-lock.json"
+# Capture first: the audit exits 10 on findings, and under pipefail `audit | grep` would fail anyway.
+npm_out="$("${run_py[@]}" "$audit" "$tmp/unpinned-npm" --json 2>/dev/null)"
+printf '%s' "$npm_out" | grep -q 'runner (npx --no shadcn' \
+  && ok "unpinned-docs fix names npm's local runner (npx --no shadcn), not pnpm" || bad "npm project's unpinned-cli fix does not name npx --no shadcn"
 
 # === 6. Verifier: offline consistency, live drift through recorded sources ===
 ec 0 "verifier --offline consistent" "${run_py[@]}" "$verify" --offline --skill "$here" --catalog "$facts"

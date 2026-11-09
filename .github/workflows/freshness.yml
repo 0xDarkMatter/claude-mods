@@ -237,7 +237,9 @@ jobs:
           # verifier can compare its --help, migrate --list and init values with the facts.
           # An install failure leaves no shadcn on PATH, which the verifier reports as exit 7.
           PIN="$(python -c 'import json; print(json.load(open("skills/shadcn-ops/assets/shadcn-facts.json"))["cli"]["version"])')"
-          npm install -g --ignore-scripts "shadcn@$PIN" \
+          # --before holds shadcn's ~30 dependencies to the same 7-day cooldown as the pin: a
+          # global install has no lockfile, and `--help` below executes that code.
+          npm install -g --ignore-scripts --before "$(date -u -d '7 days ago' +%Y-%m-%d)" "shadcn@$PIN" \
             || echo "::warning::npm could not install shadcn@$PIN - the --help comparison will report unavailable"
           bash .github/scripts/freshness-step.sh --name shadcn-ops \
             --drift "shadcn-ops drift - the pinned shadcn CLI is older than the age limit while a newer release has cooled, a new major shipped, a release gained install scripts, the pinned CLI's commands/migrations/bases/templates changed, or TanStack Table/Recharts/Tailwind/React/Zod/a base library shipped a new major; bump the pin (references/cli-and-pinning.md#bumping-the-pin) or re-verify the reference the finding names" \

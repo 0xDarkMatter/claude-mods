@@ -74,6 +74,13 @@ CHECK_IDS = (
 )
 SEV_ORDER = {"high": 0, "medium": 1, "low": 2}
 LOCKFILES = ("pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb", "package-lock.json", "npm-shrinkwrap.json")
+# The local runner a fix should name, per lockfile. Keep in step with shadcn-cmd.sh's
+# project prefixes: a fix that says `pnpm exec shadcn` in an npm project is wrong advice.
+LOCAL_RUNNER = {
+    "pnpm-lock.yaml": "pnpm exec shadcn", "yarn.lock": "yarn run shadcn",
+    "bun.lock": "bunx --no-install shadcn", "bun.lockb": "bunx --no-install shadcn",
+    "package-lock.json": "npx --no shadcn", "npm-shrinkwrap.json": "npx --no shadcn",
+}
 EXACT_RE = re.compile(r"^\d+\.\d+\.\d+$")
 # `shadcn@<spec>` not preceded by a name character (so @shadcn/button and foo-shadcn@ stay out).
 SPEC_RE = re.compile(r"(?<![\w/@.-])(shadcn(?:-ui)?)@([^\s\"'`),;]+)")
@@ -531,7 +538,8 @@ class Audit:
             for no, line in enumerate(f.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
                 for hit in unpinned_in(line):
                     self.add("medium", "unpinned-cli", rel, no, f"{hit!r} floats to whatever release is newest",
-                             f"document the project's runner (pnpm exec shadcn ...) or shadcn@{pin}")
+                             f"document the project's runner ({LOCAL_RUNNER.get(lockfile, '<pm> exec shadcn')} ...) "
+                             f"or shadcn@{pin}")
         for rel in MCP_FILES:
             f = p / rel
             j = load_json(f) if f.is_file() else None
