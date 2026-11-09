@@ -1,0 +1,54 @@
+{
+  "schema": "claude-mods.shadcn-ops.facts/v1",
+  "as_of": "2026-11-10",
+  "_note": "The one place shadcn-ops pins fast-moving facts. scripts/shadcn-cmd.sh reads cli.version to build the dlx prefix; scripts/shadcn-audit.py reads cli, bases, styles and dist_tags; scripts/check-shadcn-facts.py --offline checks the prose still states every prose_tokens entry and that SKILL.md's allowed-tools pins cli.version, and --live compares cli and ecosystem with npm and the pinned CLI's --help. Bump the pin with the procedure in references/cli-and-pinning.md#bumping-the-pin: version, published, as_of, the allowed-tools line, the prose tokens and the Versions verified note move together.",
+  "cli": {
+    "package": "shadcn",
+    "version": "4.23.0",
+    "major": "4",
+    "published": "2026-10-27",
+    "install_scripts": false,
+    "socket_supply_chain": 97
+  },
+  "policy": {
+    "cooldown_days": 7,
+    "max_pin_age_days": 60
+  },
+  "commands": ["init", "apply", "add", "diff", "docs", "view", "search", "migrate", "eject", "info", "build", "mcp", "preset", "registry"],
+  "deprecated_commands": ["diff"],
+  "migrations": ["cn", "icons", "base-color", "radix", "rtl"],
+  "templates": ["next", "start", "vite", "react-router", "laravel", "astro"],
+  "bases": {
+    "base": "@base-ui/react",
+    "radix": "radix-ui",
+    "aria": "react-aria-components"
+  },
+  "default_base": "base",
+  "style_names": ["vega", "nova", "maia", "lyra", "mira", "luma", "sera", "rhea"],
+  "legacy_styles": ["default", "new-york"],
+  "dist_tags": ["latest", "next", "canary", "beta", "rc"],
+  "ecosystem": {
+    "@tanstack/react-table": "9",
+    "recharts": "3",
+    "tailwindcss": "4",
+    "react": "19",
+    "react-hook-form": "7",
+    "zod": "4",
+    "sonner": "2",
+    "@base-ui/react": "1",
+    "radix-ui": "1",
+    "react-aria-components": "1"
+  },
+  "prose_tokens": [
+    {"key": "pin", "token": "shadcn 4.23.0", "value_of": "cli.version"},
+    {"key": "published", "token": "published 2026-10-27", "value_of": "cli.published"},
+    {"key": "cooldown", "token": "7-day cooldown", "value_of": "policy.cooldown_days"},
+    {"key": "pin-age", "token": "older than 60 days", "value_of": "policy.max_pin_age_days"},
+    {"key": "default-base", "token": "`--base base` (the default)", "value_of": "default_base"},
+    {"key": "tanstack-table", "token": "TanStack Table v9", "value_of": "ecosystem.@tanstack/react-table"},
+    {"key": "recharts", "token": "Recharts v3", "value_of": "ecosystem.recharts"},
+    {"key": "tailwind", "token": "Tailwind CSS v4", "value_of": "ecosystem.tailwindcss"},
+    {"key": "react", "token": "React 19", "value_of": "ecosystem.react"},
+    {"key": "zod", "token": "Zod 4", "value_of": "ecosystem.zod"}
+  ]
+}

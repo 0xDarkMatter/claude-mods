@@ -1,0 +1,32 @@
+Usage: shadcn init|create [options] [components...]
+
+initialize your project and install dependencies
+
+Arguments:
+  components                 names, url or local path to component
+
+Options:
+  -t, --template <template>  the template to use. (next, start, vite,
+                             react-router, laravel, astro)
+  -b, --base <base>          the component library to use. (base, radix, aria)
+  --monorepo                 scaffold a monorepo project.
+  --no-monorepo              skip the monorepo prompt.
+  -p, --preset [name]        use a preset configuration
+  -y, --yes                  skip confirmation prompt. (default: true)
+  -d, --defaults             use default configuration: --template=next
+                             --preset=base-nova (default: false)
+  -f, --force                force overwrite of existing configuration.
+                             (default: false)
+  -c, --cwd <cwd>            the working directory. defaults to the current
+                             directory. (default: "/work")
+  -n, --name <name>          the name for the new project.
+  -s, --silent               mute output. (default: false)
+  --css-variables            use css variables for theming. (default: true)
+  --no-css-variables         do not use css variables for theming.
+  --rtl                      enable RTL support.
+  --no-rtl                   disable RTL support.
+  --pointer                  enable pointer cursor for buttons.
+  --no-pointer               disable pointer cursor for buttons.
+  --reinstall                re-install existing UI components.
+  --no-reinstall             do not re-install existing UI components.
+  -h, --help                 display help for command

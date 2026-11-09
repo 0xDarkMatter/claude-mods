@@ -46,6 +46,7 @@ Is this a reference/lookup task?
 | **postgres-ops** | postgresql, postgres, EXPLAIN ANALYZE, vacuum, pgbouncer, JSONB, RLS, replication |
 | **sqlite-ops** | sqlite, EXPLAIN QUERY PLAN, covering index, rows_read, D1, wrangler d1, node:sqlite, better-sqlite3, bun:sqlite, aiosqlite, libsql, fts5 |
 | **tailwind-ops** | tailwind, tw classes, dark mode, responsive |
+| **shadcn-ops** | shadcn/ui, components.json, shadcn add, registries, admin dashboard, data table |
 | **mcp-ops** | mcp server, fastmcp, tool handler, transport |
 | **react-ops** | react, hooks, useState, next.js, RSC, zustand |
 | **vue-ops** | vue, composition api, pinia, nuxt, script setup |

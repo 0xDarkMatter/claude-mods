@@ -238,6 +238,19 @@ run "confirm-gone --help"                0 bash skills/sandbox-ops/scripts/confi
 run "confirm-gone no id"                 2 bash skills/sandbox-ops/scripts/confirm-gone.sh
 # Its verdicts (gone / still listed / unreachable, per provider) run against fake CLIs in the skill's tests/run.sh.
 
+echo "== shadcn-ops: pinned-CLI facts verifier + project audit + runner resolver contracts"
+run "shadcn-facts --offline consistent" 0 "$PY" skills/shadcn-ops/scripts/check-shadcn-facts.py --offline
+run "shadcn-facts --help"               0 "$PY" skills/shadcn-ops/scripts/check-shadcn-facts.py --help
+# Live comparisons exercised offline against recorded npm documents and the pinned CLI's
+# --help output (no network in PR CI). The recording is coupled to the pin: bump both together.
+run "shadcn-facts --live vs fixtures"   0 "$PY" skills/shadcn-ops/scripts/check-shadcn-facts.py --live --today 2026-11-10 --fixtures skills/shadcn-ops/tests/fixtures/live
+run "shadcn-audit --help"               0 "$PY" skills/shadcn-ops/scripts/shadcn-audit.py --help
+run "shadcn-audit no components.json"   3 "$PY" skills/shadcn-ops/scripts/shadcn-audit.py skills/shadcn-ops
+run "shadcn-cmd --help"                 0 bash skills/shadcn-ops/scripts/shadcn-cmd.sh --help
+run "shadcn-cmd bad args"               2 bash skills/shadcn-ops/scripts/shadcn-cmd.sh --bogus
+# The audit's fixture matrix (.fx files, materialised at test time) and the resolver's
+# project/global/dlx cases (fake tools on PATH) live in the skill's own tests/run.sh.
+
 echo "== protocol: every new verifier is executable + compiles"
 for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/claude-api-ops/scripts/context-budget.py \
@@ -266,6 +279,8 @@ for s in skills/claude-api-ops/scripts/check-model-table.py \
          skills/sentry-ops/scripts/check-sentry-facts.py \
          skills/sentry-ops/scripts/envelope-sink.py \
          skills/sandbox-ops/scripts/check-sandbox-facts.py \
+         skills/shadcn-ops/scripts/check-shadcn-facts.py \
+         skills/shadcn-ops/scripts/shadcn-audit.py \
          skills/repo-doctor/scripts/check-memory-docs.py \
          skills/repo-doctor/scripts/check-tool-profiles.py \
          skills/repo-doctor/scripts/repo-scan.py \
@@ -284,6 +299,8 @@ bash -n skills/fleet-worker/scripts/fleet-doctor.sh 2>/dev/null \
     && pass "bash -n fleet-doctor.sh" || bad "bash -n fleet-doctor.sh"
 bash -n skills/sandbox-ops/scripts/confirm-gone.sh 2>/dev/null \
     && pass "bash -n confirm-gone.sh" || bad "bash -n confirm-gone.sh"
+bash -n skills/shadcn-ops/scripts/shadcn-cmd.sh 2>/dev/null \
+    && pass "bash -n shadcn-cmd.sh" || bad "bash -n shadcn-cmd.sh"
 
 echo "== terminal design: verifier framing adopts term.sh and is ASCII-pure"
 # Each verifier renders its human framing on stderr; under TERM_ASCII=1 every
@@ -314,6 +331,8 @@ purity "ddev-audit"    "$PY" skills/ddev-ops/scripts/audit-ddev-config.py skills
 purity "pm-facts"      "$PY" skills/package-manager-ops/scripts/check-pm-facts.py --offline
 purity "sentry-facts"  "$PY" skills/sentry-ops/scripts/check-sentry-facts.py --offline
 purity "sandbox-facts" "$PY" skills/sandbox-ops/scripts/check-sandbox-facts.py --offline
+purity "shadcn-facts"  "$PY" skills/shadcn-ops/scripts/check-shadcn-facts.py --offline
+purity "shadcn-audit"  "$PY" skills/shadcn-ops/scripts/shadcn-audit.py skills/shadcn-ops
 __pr="$(mktemp -d)"
 printf '{"packages":[{"name":"a/a","version":"1"}]}' > "$__pr/ours.lock"
 printf '{"packages":[{"name":"a/a","version":"2"}]}' > "$__pr/theirs.lock"

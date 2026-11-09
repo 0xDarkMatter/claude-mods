@@ -1,0 +1,24 @@
+Usage: shadcn [options] [command]
+
+build your component library
+
+Options:
+  -v, --version                          display the version number
+  -h, --help                             display help for command
+
+Commands:
+  init|create [options] [components...]  initialize your project and install dependencies
+  apply [options] [preset]               apply a preset to an existing project
+  add [options] [components...]          add a component to your project
+  diff [options] [component]             [DEPRECATED] Use `add [component] --diff` instead.
+  docs [options] <components...>         get docs, api references and usage examples for components
+  view [options] <items...>              view items from the registry
+  search|list [options] [registries...]  search items from registries
+  migrate [options] [migration] [path]   run a migration.
+  eject [options]                        inline shadcn/tailwind.css and remove the shadcn dependency
+  info [options]                         get information about your project
+  build [options] [registry]             build components for a shadcn registry
+  mcp [options]                          MCP server and configuration commands
+  preset                                 manage presets
+  registry                               manage registries
+  help [command]                         display help for command

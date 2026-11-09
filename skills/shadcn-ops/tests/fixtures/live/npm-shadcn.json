@@ -1,0 +1,79 @@
+{
+  "_note": "Trimmed from https://registry.npmjs.org/shadcn (dist-tags, a few versions' scripts/deprecated, their times).",
+  "dist-tags": {
+    "latest": "4.23.0"
+  },
+  "time": {
+    "4.21.5": "2026-10-14T13:07:50.604Z",
+    "4.22.2": "2026-10-27T09:44:11.755Z",
+    "4.23.0": "2026-10-27T12:33:51.724Z"
+  },
+  "versions": {
+    "4.21.5": {
+      "version": "4.21.5",
+      "scripts": {
+        "dev": "tsup --watch",
+        "test": "vitest run",
+        "build": "tsup",
+        "clean": "rimraf dist && rimraf components",
+        "start": "node dist/index.js",
+        "pub:rc": "pnpm --filter=shadcn... build && node scripts/check-registry-published.mjs && pnpm publish --no-git-checks --access public --tag rc",
+        "release": "changeset version",
+        "pub:beta": "pnpm --filter=shadcn... build && node scripts/check-registry-published.mjs && pnpm publish --no-git-checks --access public --tag beta",
+        "pub:next": "pnpm --filter=shadcn... build && node scripts/check-registry-published.mjs && pnpm publish --no-git-checks --access public --tag next",
+        "test:dev": "REGISTRY_URL=http://localhost:4000/r SHADCN_TEMPLATE_DIR=../../templates vitest run",
+        "start:dev": "cross-env REGISTRY_URL=http://localhost:4000/r SHADCN_TEMPLATE_DIR=../../templates node dist/index.js",
+        "typecheck": "tsc --noEmit",
+        "start:prod": "cross-env REGISTRY_URL=https://ui.shadcn.com/r node dist/index.js",
+        "mcp:inspect": "pnpm dlx @modelcontextprotocol/inspector node dist/index.js mcp",
+        "pub:release": "pnpm --filter=shadcn... build && node scripts/check-registry-published.mjs && pnpm publish --access public",
+        "format:check": "prettier --check \"**/*.{ts,tsx,mdx}\" --cache",
+        "format:write": "prettier --write \"**/*.{ts,tsx,mdx}\" --cache"
+      }
+    },
+    "4.22.2": {
+      "version": "4.22.2",
+      "scripts": {
+        "dev": "tsup --watch",
+        "test": "vitest run",
+        "build": "tsup",
+        "clean": "rimraf dist && rimraf components",
+        "start": "node dist/index.js",
+        "pub:rc": "pnpm --filter=shadcn... build && node scripts/check-registry-published.mjs && pnpm publish --no-git-checks --access public --tag rc",
+        "release": "changeset version",
+        "pub:beta": "pnpm --filter=shadcn... build && node scripts/check-registry-published.mjs && pnpm publish --no-git-checks --access public --tag beta",
+        "pub:next": "pnpm --filter=shadcn... build && node scripts/check-registry-published.mjs && pnpm publish --no-git-checks --access public --tag next",
+        "test:dev": "REGISTRY_URL=http://localhost:4000/r SHADCN_TEMPLATE_DIR=../../templates vitest run",
+        "start:dev": "cross-env REGISTRY_URL=http://localhost:4000/r SHADCN_TEMPLATE_DIR=../../templates node dist/index.js",
+        "typecheck": "tsc --noEmit",
+        "start:prod": "cross-env REGISTRY_URL=https://ui.shadcn.com/r node dist/index.js",
+        "mcp:inspect": "pnpm dlx @modelcontextprotocol/inspector node dist/index.js mcp",
+        "pub:release": "pnpm --filter=shadcn... build && node scripts/check-registry-published.mjs && pnpm publish --access public",
+        "format:check": "prettier --check \"**/*.{ts,tsx,mdx}\" --cache",
+        "format:write": "prettier --write \"**/*.{ts,tsx,mdx}\" --cache"
+      }
+    },
+    "4.23.0": {
+      "version": "4.23.0",
+      "scripts": {
+        "dev": "tsup --watch",
+        "test": "vitest run",
+        "build": "tsup",
+        "clean": "rimraf dist && rimraf components",
+        "start": "node dist/index.js",
+        "pub:rc": "pnpm --filter=shadcn... build && node scripts/check-registry-published.mjs && pnpm publish --no-git-checks --access public --tag rc",
+        "release": "changeset version",
+        "pub:beta": "pnpm --filter=shadcn... build && node scripts/check-registry-published.mjs && pnpm publish --no-git-checks --access public --tag beta",
+        "pub:next": "pnpm --filter=shadcn... build && node scripts/check-registry-published.mjs && pnpm publish --no-git-checks --access public --tag next",
+        "test:dev": "REGISTRY_URL=http://localhost:4000/r SHADCN_TEMPLATE_DIR=../../templates vitest run",
+        "start:dev": "cross-env REGISTRY_URL=http://localhost:4000/r SHADCN_TEMPLATE_DIR=../../templates node dist/index.js",
+        "typecheck": "tsc --noEmit",
+        "start:prod": "cross-env REGISTRY_URL=https://ui.shadcn.com/r node dist/index.js",
+        "mcp:inspect": "pnpm dlx @modelcontextprotocol/inspector node dist/index.js mcp",
+        "pub:release": "pnpm --filter=shadcn... build && node scripts/check-registry-published.mjs && pnpm publish --access public",
+        "format:check": "prettier --check \"**/*.{ts,tsx,mdx}\" --cache",
+        "format:write": "prettier --write \"**/*.{ts,tsx,mdx}\" --cache"
+      }
+    }
+  }
+}
