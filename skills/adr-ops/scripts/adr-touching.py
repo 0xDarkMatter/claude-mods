@@ -13,6 +13,9 @@ is governed by query `src/`; touches `src/` governs query `src/auth.py`).
 Config-key entries (`file.yaml:db.host`) match by exact-or-prefix on the whole
 string. Pragmatic, not exhaustive.
 
+Files read from --dir: `ADR-NNN-slug.md` and MADR-style `NNNN-slug.md` (exactly
+four digits). Anything else (README.md, 00_INDEX.md, a template) is not an ADR.
+
 Usage:   adr-touching.py [--dir DIR] [--json] <path-or-glob-or-key>...
 Input:   one OR MORE positional queries + argv flags (no stdin). The ADR set is
          parsed once and every query is matched against it, so a caller with N
@@ -130,8 +133,17 @@ EX_USAGE = 2
 EX_NOTFOUND = 3
 EX_FOUND = 10
 
-FILENAME_RE = re.compile(r"^ADR-(\d+)-.+\.md$")
-TITLE_RE = re.compile(r"^# ADR-(\d+):\s+(\S.*)$")
+# Two filename styles are ADRs: this skill's `ADR-NNN-slug.md` and MADR's
+# `NNNN-slug.md` (exactly four digits, then a hyphen). Accepting only the first
+# once made every query in a MADR-named repo report "no ADR governs" (a silent
+# false negative for fleetflow's plan-lint adr-constraints check, 2026-11-09).
+# The four-digit rule is what keeps README.md, 00_INDEX.md, index.md and
+# template.md out: an index that carries a touches: list is not a decision.
+FILENAME_RE = re.compile(r"^(?:ADR-(?P<adr>\d+)|(?P<madr>\d{4}))-.+\.md$")
+# The first H1 is the title. An "ADR-NNN:" / "ADR NNNN:" prefix is stripped when
+# present (this skill's template, and repos that write "# ADR 0001: ..."); a MADR
+# record's bare "# Title" is taken whole.
+TITLE_RE = re.compile(r"^#\s+(?:ADR[-\s]?\d+:\s+)?(\S.*)$")
 GLOB_CHARS_RE = re.compile(r"[*?\[]")
 
 try:
@@ -289,16 +301,18 @@ def find_title(body: str) -> str:
     for line in body.splitlines():
         m = TITLE_RE.match(line.strip())
         if m:
-            return m.group(2).strip()
+            return m.group(1).strip()
     return ""
 
 
 def load_adrs(adr_dir: Path) -> list[dict]:
-    """Parse every ADR-*.md once. Returns records sorted by number, each carrying
-    the parsed `touches:` list; a file that fails to parse is skipped with a
-    stderr warning (not fatal — one broken record must not blind the guard)."""
+    """Parse every ADR file (FILENAME_RE: ADR-NNN-slug.md or NNNN-slug.md) once.
+    Returns records sorted by filename, each carrying the parsed `touches:`
+    list; a file that fails to parse is skipped with a stderr warning (not
+    fatal — one broken record must not blind the guard). `number` is always
+    "ADR-<digits>" so callers reading `.data[].number` see one shape."""
     adrs: list[dict] = []
-    files = sorted(p for p in adr_dir.glob("ADR-*.md") if FILENAME_RE.match(p.name))
+    files = sorted(p for p in adr_dir.glob("*.md") if FILENAME_RE.match(p.name))
     for path in files:
         fn = FILENAME_RE.match(path.name)
         if fn is None:
@@ -312,7 +326,7 @@ def load_adrs(adr_dir: Path) -> list[dict]:
             continue
         adrs.append(
             {
-                "number": f"ADR-{fn.group(1)}",
+                "number": f"ADR-{fn.group('adr') or fn.group('madr')}",
                 "status": str(fm.get("status", "")),
                 "title": find_title(body),
                 "file": path.name,
