@@ -352,6 +352,33 @@ printf '%s' "$out" | jq -e '
 out="$("$PYTHON" "$TOUCHING" --dir "$TCH" src/auth.py other/unrelated.txt 2>/dev/null)"
 expect_has "touching multi-query text rows carry the query column" "src/auth.py | ADR-001 |" "$out"
 
+# ── adr-touching.py: MADR-style NNNN-slug.md filenames (2026-11-09) ─────────
+# The loader once globbed only ADR-*.md, so a repo naming its records
+# docs/adr/0001-slug.md got "no ADR governs" for every path, and fleetflow's
+# plan-lint adr-constraints check went silently blind there. Both styles must
+# load from one dir; index/README markdown carrying a touches: list must not.
+MADR="$SB/madr"; mkdir -p "$MADR"
+madr_rec() {  # madr_rec <file> <touches-entry> <h1-line>
+  printf -- '---\nstatus: accepted\ndate: 2026-10-26\ntouches:\n  - "%s"\n---\n\n%s\n\n## Decision (one sentence)\nRule.\n' "$2" "$3" > "$MADR/$1"
+}
+madr_rec 0001-interim-token.md   "packages/github/**" "# ADR 0001: Interim Token"
+madr_rec 0002-console-on-ui.md   "apps/dashboard/**"  "# Console On UI"
+madr_rec ADR-003-legacy-style.md "legacy/**"          "# ADR-003: Legacy Style"
+# Decoys: not ADRs, even though they carry frontmatter with touches:.
+madr_rec README.md     "decoy/**" "# ADR directory"
+madr_rec 00_INDEX.md   "decoy/**" "# Index"
+madr_rec 12-short.md   "decoy/**" "# Too few digits"
+madr_rec template.md   "decoy/**" "# Template"
+out="$("$PYTHON" "$TOUCHING" --dir "$MADR" packages/github/src/token.ts 2>/dev/null)"; rc=$?
+expect_exit "touching MADR 0001-slug.md governs its path -> 10" 10 "$rc"
+expect_has  "touching MADR row names the record and its 'ADR 0001:' title" "ADR-0001 | accepted | Interim Token | packages/github/**" "$out"
+out="$("$PYTHON" "$TOUCHING" --dir "$MADR" apps/dashboard/x.tsx 2>/dev/null)"
+expect_has  "touching MADR bare '# Title' H1 is read as the title" "ADR-0002 | accepted | Console On UI |" "$out"
+"$PYTHON" "$TOUCHING" --dir "$MADR" legacy/x.py >/dev/null 2>&1
+expect_exit "touching ADR-NNN-slug.md still loads beside MADR files -> 10" 10 $?
+"$PYTHON" "$TOUCHING" --dir "$MADR" decoy/x.py >/dev/null 2>&1
+expect_exit "touching ignores README/index/short-prefix/template markdown -> 0" 0 $?
+
 # ── non-Latin-1 text must not break the exit contract (regression) ──────────
 # Both Python tools print ADR titles / touches: entries / field values verbatim.
 # On Windows those streams default to cp1252 whenever redirected, so a title

@@ -50,6 +50,9 @@ Write one decision per ADR. If a change bundles two separable decisions, write t
 ## Naming, location, numbering
 
 - Path: `<adr-dir>/ADR-NNN-slug.md` (default `<adr-dir>` = `docs/adr`).
+- Repos already using MADR's `NNNN-slug.md` (exactly four digits) are read by
+  `adr-touching.py` too, so discovery works there; `adr-new`, `adr-index` and `adr-lint`
+  handle only `ADR-NNN-slug.md`.
 - `NNN` is zero-padded three digits, assigned **sequentially**: the next number is
   `highest existing + 1`. **Numbers are never reused, never reordered** — a superseded
   ADR keeps its number forever.
@@ -216,7 +219,9 @@ instead of stdout — for a README pointer that you regenerate rather than hand-
 
 The `touches:` frontmatter is the grep target answering "is there an ADR about the thing
 I'm changing?". This tool *is* that grep, done properly — match a path, glob, or config
-key against every ADR's `touches:` list.
+key against every ADR's `touches:` list. It loads both `ADR-NNN-slug.md` and MADR
+`NNNN-slug.md` files (a README or index in the same dir is ignored) and reports either as
+`ADR-<digits>`.
 
 ```bash
 # Before editing src/auth.py, ask what decisions constrain it:

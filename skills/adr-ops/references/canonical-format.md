@@ -103,6 +103,9 @@ a new ADR rather than inventing per-record keys.
 ## Naming, location, numbering
 
 - Path: `<adr-dir>/ADR-NNN-slug.md` (default `<adr-dir>` is `docs/adr`, configurable).
+  `adr-touching.py` also reads MADR-style `NNNN-slug.md` (exactly four digits), so a repo
+  that already numbers its records that way keeps its discovery surface; the other
+  scripts expect `ADR-NNN-slug.md`.
 - `NNN` is zero-padded three digits, assigned sequentially. **The next number is
   `highest existing + 1`. Numbers are never reused, never reordered** — a superseded
   ADR keeps its number forever.
