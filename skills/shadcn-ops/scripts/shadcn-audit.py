@@ -69,6 +69,11 @@ Examples:
 """
 # Sections: constants | JSON helpers | workspaces and the install root | tsconfig paths |
 # alias resolution | lockfiles | the audit | main.
+# One file by choice, not constraint (~1,100 lines): each script in this folder is a
+# self-contained CLI with its contract in the docstring above. A sibling module WOULD import
+# (run-python.sh runs the script by path, without -I), so splitting is allowed: do it by
+# section when one passes ~300 lines, and keep this map and the "# === <section> ==="
+# markers in step either way.
 from __future__ import annotations
 
 import argparse
