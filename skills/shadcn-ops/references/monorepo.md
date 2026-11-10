@@ -44,15 +44,22 @@ The CLI routes `ui` items into `packages/ui` and app-level blocks into `apps/web
 rewrites imports to `@workspace/ui/components/...`. At the monorepo root, `add`, `apply`,
 `init`, `info`, `preset` and `eject` stop and list the workspaces instead.
 
-The resolver looks for shadcn from the folder you name up to the lockfile. If only
-`packages/ui` declares it, `--cwd apps/web` falls through to the pinned dlx form, which is
-still the pinned version. To use the locked copy from the app as well, add the same exact
-version to the app's devDependencies (`pnpm --filter web add -D -E shadcn@4.23.0`).
+The resolver looks for shadcn from the folder you name up to the install root. The root
+lockfile counts for `apps/web` only because the workspace patterns list it, and the walk
+never crosses the git root. If only `packages/ui` declares shadcn, `--cwd apps/web`
+resolves to a global or the pinned dlx form, reports `"workspace": "packages/ui"`, and
+notes on stderr to run the CLI from that workspace with `--cwd` pointing back at the app.
+The audit agrees: in `apps/web`, `cli-not-installed` drops to low, names the sibling
+workspace that declares shadcn, and suggests `<runner> <command> --cwd <path>` from there
+(or notes that its components.json already routes components into the app). To use a
+locked copy from the app itself, add the same exact version to its devDependencies
+(`pnpm --filter web add -D -E shadcn@4.23.0`).
 
 ## Gotchas
 
 - **One lockfile, at the root.** Install shadcn as a devDependency where `init` put it (the
-  ui package) and let the resolver find it through the lockfile's folder.
+  ui package). The root lockfile counts for a workspace only when the root's workspace
+  patterns list it; a lockfile above the git root never counts.
 - **Tailwind must see the app's classes.** The shared `globals.css` needs `@source` lines
   that cover the apps (`@source "../../../apps/**/*.{ts,tsx}";`), or utilities used only in
   an app are never generated.

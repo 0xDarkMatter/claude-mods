@@ -72,9 +72,11 @@ Radix-based: `new-york` (still served) and `default` (retired). `$SHADCN info --
 Aliases are import specifiers, and the CLI turns them into file paths through the same
 mappings TypeScript uses:
 
-- `compilerOptions.paths` in `tsconfig.json` / `jsconfig.json`. A Vite app has two
-  configs; shadcn's Vite guide puts `"@/*": ["./src/*"]` in both `tsconfig.json` and
-  `tsconfig.app.json`.
+- `compilerOptions.paths` in `tsconfig.json`, else `jsconfig.json`, following `extends`
+  (a path, an array of paths, or a package such as `@workspace/tsconfig/web.json`). The
+  CLI never reads `tsconfig.app.json`: paths that exist only there leave the alias
+  unresolved (`alias-unresolved`), which is why shadcn's Vite guide puts
+  `"@/*": ["./src/*"]` in both `tsconfig.json` and `tsconfig.app.json`.
 - `package.json#imports` (`"#components/*": "./src/components/*.tsx"`), supported since
   May 2026; a target with an extension makes the CLI write extensionless imports.
 - In a monorepo, a workspace package name (`@workspace/ui/components`) through paths or the
@@ -101,11 +103,25 @@ reverse, produces silently wrong styling: upgrade first (migrations-and-eject.md
 
 ## Reading it as an agent
 
-Run `$SHADCN info --json` before writing code and use its fields, never assumptions:
+Run `$SHADCN info --json` before writing code and use its fields, never assumptions. The
+output is nested: `project` (what the CLI detected), `config` (components.json, resolved),
+`preset`, `components` and `links`.
 
-- `aliases` / `resolvedPaths`: import prefixes and where files live.
-- `isRSC`: components with state, effects, handlers or browser APIs need `"use client"`.
-- `tailwindVersion` and `tailwindCssFile`: where and how to add tokens (theming.md).
-- `base`: `asChild` (radix) vs `render` (base) vs React Aria's own props (bases.md).
-- `iconLibrary`: which package icons come from. Never assume `lucide-react`.
-- installed components: don't import what isn't installed, don't re-add what is.
+- `config.aliases` / `config.resolvedPaths`: import prefixes and the absolute folders
+  files land in.
+- `project.rsc` (also `config.rsc`): when true, components with state, effects, handlers
+  or browser APIs need `"use client"`.
+- `project.tailwindVersion` (`"v3"` or `"v4"`) and `project.tailwindCss` (the global CSS
+  file; `config.resolvedPaths.tailwindCss` is its absolute path): where and how to add
+  tokens (theming.md).
+- `config.base`: `asChild` (radix) vs `render` (base) vs React Aria's own props (bases.md);
+  `config.style` is the full `<base>-<style>` name.
+- `config.iconLibrary`: which package icons come from. Never assume `lucide-react`.
+- `components`: what is installed. Don't import what isn't, don't re-add what is.
+- `project.framework`, `project.srcDirectory`, `project.importAlias`, `config.rtl` and
+  `config.registries` fill in the rest.
+
+At a monorepo root without a components.json, `info --json` prints
+`{"error": "monorepo_root", "message": ..., "targets": [...]}` and exits 1: rerun with
+`-c <workspace>` from `targets`. Source: `packages/shadcn/src/commands/info.ts` at the
+`shadcn@4.23.0` tag.

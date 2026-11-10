@@ -88,6 +88,14 @@ description, type })` from `@/components/ui/toast`; Radix and React Aria use Son
 (`toast.success(...)` from `sonner`). Either way render `<Toaster />` once in the root
 layout, inside `<body>`.
 
+The `sonner` item depends on `next-themes` in every base, and its `Toaster` reads the theme
+from next-themes' `useTheme`, so `add sonner` installs next-themes even in a Vite app. With
+the Vite ThemeProvider below, either wrap the app in next-themes' provider as well or edit
+the copied `components/ui/sonner.tsx` to take its theme from your own provider. Without
+either, `useTheme` finds no provider and the toasts follow the OS (`system`), not the app's
+theme toggle. (Served `sonner` item for base-nova, radix-nova and
+aria-nova, checked 2026-11-10.)
+
 Toast results of actions the user just took (saved, deleted with Undo, failed with a reason).
 Don't toast page-load errors (show them in the page), and don't put the only copy of
 important information in a toast that disappears.

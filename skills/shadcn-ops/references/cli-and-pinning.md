@@ -1,7 +1,8 @@
 # The shadcn CLI, pinned
 
-Every command and flag below was read from `shadcn --help` of shadcn 4.23.0 and checked
-against ui.shadcn.com/docs/cli on 2026-11-10. Parts are adapted from the official shadcn
+Every command and flag below was read from `shadcn --help` of shadcn 4.23.0, checked
+against ui.shadcn.com/docs/cli and, for `init` and `info`, the CLI source at the
+`shadcn@4.23.0` tag, on 2026-11-10. Parts are adapted from the official shadcn
 skill (shadcn-ui/ui, `skills/shadcn/`, MIT licence).
 
 ## Contents
@@ -33,12 +34,20 @@ locked copy of the CLI: use it.
 
 | Order | Source | Prefix it prints |
 |---|---|---|
-| a | the project's own dependency (package.json chain up to the lockfile's folder) | npm `npx --no shadcn`, pnpm `pnpm exec shadcn`, Yarn `yarn run shadcn`, Bun `bunx --no-install shadcn` |
+| a | the project's own dependency (package.json chain up to the install root) | npm `npx --no shadcn`, pnpm `pnpm exec shadcn`, Yarn `yarn run shadcn`, Bun `bunx --no-install shadcn` |
 | b | a global `shadcn` whose major matches the pin | `shadcn` |
 | c | the package manager's one-off runner at the exact pin | `npx shadcn@4.23.0`, `pnpm dlx shadcn@4.23.0`, `yarn dlx shadcn@4.23.0` (Yarn 2+), `bunx shadcn@4.23.0` |
 
 The local forms never download: `npx --no` and `bunx --no-install` fail instead of fetching,
 and `pnpm exec` only runs installed bins. Yarn 1 has no `dlx`, so (c) uses npx there.
+
+The install root is the nearest folder whose lockfile really locks the project: the
+project's own package folder, or a workspace root whose patterns (pnpm-workspace.yaml
+`packages`, package.json `workspaces`) list it. The walk stops at the git root, so a stray
+lockfile in a parent folder never counts. The package manager comes from `--pm`, then
+package.json `packageManager`, then that lockfile, then npm. When the project doesn't
+declare shadcn but another workspace of its monorepo does, the JSON's `workspace` names
+that workspace (relative to the monorepo root): run the CLI from there.
 
 ```bash
 bash "<skill-dir>/scripts/shadcn-cmd.sh"                  # {"prefix":"pnpm exec shadcn","source":"project",...}
@@ -63,23 +72,27 @@ file and write nothing. Everything that writes (`add`, `init`, `apply`, `migrate
 `eject`, `build`) and every `<pm> dlx shadcn@<pin>` download asks first: that prompt is the
 point, not a gap to work around.
 
-Exit 10 means the project declares shadcn but `node_modules` lacks it: run the frozen
-install first (`npm ci`, `pnpm install --frozen-lockfile`, `yarn install --immutable`,
-`bun ci`). Exit 5 means nothing pinned is available; `--no-dlx` makes that the answer instead
-of a one-off download. Inside package.json scripts, write plain `shadcn ...`: the package
+Exit 10 means the project declares shadcn but it is not installed: no
+`node_modules/shadcn`, or under Yarn PnP (no node_modules) no `shadcn@npm:` resolution in
+yarn.lock, where the prefix is `yarn run shadcn`. Run the frozen install first (`npm ci`,
+`pnpm install --frozen-lockfile`, `yarn install --immutable`, `bun ci`). Exit 5 means
+nothing pinned is available; `--no-dlx` makes that the answer instead of a one-off
+download, and its error names the install command for the project's package manager
+(`pnpm add -D -E`, `npm install -D -E`, `yarn add -D -E` or `bun add -d --exact`, each with
+`shadcn@<pin>`). Inside package.json scripts, write plain `shadcn ...`: the package
 manager already puts `node_modules/.bin` on PATH.
 
 ## Commands
 
 | Command | What it does | Notes |
 |---|---|---|
-| `init` (alias `create`) | sets up components.json, CSS, utils; with `--name` scaffolds a new app | `--base base|radix|aria`, `--template`, `--preset`, `--monorepo`, `--force`, `--rtl`, `--no-css-variables` |
+| `init` (alias `create`) | sets up components.json, CSS, utils; with `--name` scaffolds a new app | `--base base|radix|aria`, `--template`, `--preset`, `-d/--defaults`, `--monorepo`, `--force`, `--reinstall`/`--no-reinstall`, `--rtl`, `--pointer`, `--no-css-variables` |
 | `add` | copies registry items into the project and installs their npm dependencies | `--dry-run`, `--diff [path]`, `--view [path]`, `-o/--overwrite`, `-a/--all`, `-p/--path` |
 | `view` | prints registry items (metadata and file contents) without a project | for browsing before an `add` |
 | `search` (alias `list`) | fuzzy search across registries | `-q`, `-t ui,block,hook`, `--json`; namespaces, `owner/repo` and URLs |
 | `docs` | prints docs, example and API URLs for components | `--base` to read another base's API, `--json` |
 | `info` | project facts: framework, Tailwind version, aliases, resolved paths, installed components | `--json`; run it first |
-| `apply` | applies a preset to an existing project; overwrites detected components | `--only theme,font` for a partial apply |
+| `apply` | applies a preset to an existing project; overwrites detected components | the preset as an argument or `--preset <code>`; `--only theme,font` for a partial apply |
 | `preset` | `decode <code>`, `resolve` (alias `info`), `url <code>`, `open <code>` | never decode a preset code by hand |
 | `migrate` | codemods: `cn`, `icons`, `base-color`, `radix`, `rtl` | `--list`, `-f/--from`, `-t/--to`; see migrations-and-eject.md |
 | `eject` | inlines `shadcn/tailwind.css` into your CSS and removes the shadcn dependency | irreversible; see migrations-and-eject.md |
@@ -96,14 +109,26 @@ invent flags; `$SHADCN <command> --help` is the authority for the pinned version
 - **`-y/--yes`** skips the confirmation. `init` defaults it to true; `add`, `apply`,
   `migrate` and `eject` default it to false. Never pass `-y` to `apply`, `eject` or
   `add --overwrite` without the user's OK.
-- **`init` without `--preset` or `--base` stops at an interactive library prompt** even with
-  `-y`. In scripts and agents pass one of them, plus `--no-monorepo` (or `--monorepo`).
+- **`init` without `--preset` stops at an interactive preset picker**, even with `-y` and
+  even with `--base`, so an unattended run stalls or exits 1. In scripts and agents pass
+  `--preset <name|code|url>` (or `-d`), `--base`, and for a new app `--template`, `--name`
+  and `--no-monorepo` (or `--monorepo`).
+- **Named presets are the eight style names:** `nova`, `vega`, `maia`, `lyra`, `mira`,
+  `luma`, `sera`, `rhea`. A base-prefixed name such as `base-nova` exits 1 with "Invalid
+  preset"; the base comes from `--base` (default `base`). Codes and ui.shadcn.com/init URLs
+  pass through as they are.
+- **`-d/--defaults`** means `--template next`, `--base base` (unless given), the `nova`
+  preset, and no reinstall.
+- **`--reinstall` / `--no-reinstall`** answers the "re-install existing UI components?"
+  question a re-init (`--force` over an existing components.json) asks; yes overwrites them.
+- **`--pointer` / `--no-pointer`** adds or skips a base-layer rule giving enabled buttons
+  `cursor: pointer`. Like `--rtl`, it is a setup option, not part of a preset code.
 - **`--dry-run` / `--diff` / `--view`** write nothing. `--diff` and `--view` imply
   `--dry-run`; without a path they show the first five files.
 - **`-c/--cwd`** runs against another folder (a monorepo workspace).
 
 ```bash
-$SHADCN init --base base --template vite --name admin --no-monorepo   # new app, Base UI
+$SHADCN init --preset nova --base base --template vite --name admin --no-monorepo   # new app, Base UI
 $SHADCN add button card dialog table
 $SHADCN add --dry-run @shadcn/sidebar
 $SHADCN add --dry-run button --diff button.tsx   # --dry-run first; --diff and its path after the item
@@ -120,10 +145,10 @@ A preset is a short code (or a named style, or a ui.shadcn.com/init URL) that pa
 colours, fonts, radius and icon library. Pass it through untouched:
 
 ```bash
-$SHADCN init --preset base-nova --template next --name admin --no-monorepo
+$SHADCN init --preset nova --base base --template next --name admin --no-monorepo
 $SHADCN preset decode a2r6bw          # what a code contains
 $SHADCN preset resolve --json         # what this project uses
-$SHADCN apply a2r6bw --only theme     # colours only, components untouched
+$SHADCN apply a2r6bw --only theme     # colours only, components untouched (same as --preset a2r6bw)
 ```
 
 Switching presets is a project-wide rewrite: theming.md covers the four ways (overwrite,

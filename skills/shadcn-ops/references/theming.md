@@ -18,8 +18,8 @@ custom-colour steps are adapted from the official shadcn skill's `customization.
 
 ## The global CSS file
 
-Edit the file `tailwind.css` points at (`$SHADCN info --json`: `tailwindCssFile`); never
-create a second theme file.
+Edit the file `tailwind.css` points at (`$SHADCN info --json`: `project.tailwindCss`, or
+the absolute `config.resolvedPaths.tailwindCss`); never create a second theme file.
 
 ```css
 @import "tailwindcss";

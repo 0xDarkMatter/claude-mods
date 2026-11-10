@@ -5,7 +5,7 @@ license: MIT
 allowed-tools: "Read, Edit, Write, Glob, Grep, Bash(bash *shadcn-ops/scripts/*), Bash(pnpm exec shadcn info *), Bash(pnpm exec shadcn docs *), Bash(pnpm exec shadcn view *), Bash(pnpm exec shadcn search *), Bash(pnpm exec shadcn add --dry-run *), Bash(npx --no shadcn info *), Bash(npx --no shadcn docs *), Bash(npx --no shadcn view *), Bash(npx --no shadcn search *), Bash(npx --no shadcn add --dry-run *), Bash(yarn run shadcn info *), Bash(yarn run shadcn docs *), Bash(yarn run shadcn view *), Bash(yarn run shadcn search *), Bash(yarn run shadcn add --dry-run *), Bash(bunx --no-install shadcn info *), Bash(bunx --no-install shadcn docs *), Bash(bunx --no-install shadcn view *), Bash(bunx --no-install shadcn search *), Bash(bunx --no-install shadcn add --dry-run *), Bash(shadcn info *), Bash(shadcn docs *), Bash(shadcn view *), Bash(shadcn search *), Bash(shadcn add --dry-run *)"
 metadata:
   author: claude-mods
-  related-skills: "react-ops, tailwind-ops, nextjs-ops, supply-chain-defense, a11y-ops, figma-ops, package-manager-ops"
+  related-skills: "react-ops, tailwind-ops, nextjs-ops, supply-chain-defense, a11y-ops, figma-ops, package-manager-ops, test-engineering, playwright-ops"
 ---
 
 # shadcn/ui Operations
@@ -38,9 +38,12 @@ are about to install, and goes deep on the admin dashboards most projects build 
    pinned is available. Only `info`, `docs`, `view`, `search` and `add --dry-run` (flag
    first) are pre-approved on a local or global runner: every write and every one-off
    download asks first, by design.
-2. **Read the project before writing code:** `$SHADCN info --json` gives the base, style,
-   Tailwind version, aliases, resolved paths, `iconLibrary`, `isRSC` and installed
-   components. Never assume the base, the icon library or the import alias.
+2. **Read the project before writing code:** `$SHADCN info --json` nests its answers:
+   `config.base`, `config.style`, `config.iconLibrary`, `config.aliases`,
+   `config.resolvedPaths`, `project.tailwindVersion`, `project.tailwindCss`, `project.rsc`,
+   and `components` (installed). At a monorepo root it exits 1 with
+   `"error": "monorepo_root"` and the workspaces in `targets`: rerun with `-c <workspace>`.
+   Never assume the base, the icon library or the import alias.
 3. **Third-party registries are untrusted code.** For anything not from `@shadcn`: `view`,
    then `add --dry-run <item>`, then `add --dry-run <item> --diff <file>` (or `--view
    <file>`) per file, and read the dependencies, target paths and network calls before the
@@ -78,7 +81,8 @@ are about to install, and goes deep on the admin dashboards most projects build 
    ```
 
    Exit 10 means findings (severity, id, `file:line`, message, fix; high first), 0 clean,
-   3 no components.json (at a monorepo root it names the workspaces), 4 invalid JSON.
+   3 no components.json or not shadcn's (at a monorepo root it names the workspaces), 4
+   invalid JSON or a facts file missing a key.
 3. `$SHADCN info --json`, then `$SHADCN docs <component>` and fetch the URLs it prints
    before using a component whose API you haven't read in this session.
 4. Find before you build: `$SHADCN search @shadcn -q "<need>"`, and blocks before pages.
@@ -103,6 +107,7 @@ are about to install, and goes deep on the admin dashboards most projects build 
 | Monorepos (`init --monorepo`, two components.json files) | [monorepo.md](references/monorepo.md) |
 | Publishing your own registry (`registry.json`, `build`, GitHub registries) | [registry-authoring.md](references/registry-authoring.md) |
 | The shadcn MCP server | [mcp.md](references/mcp.md) |
+| Testing components: Vitest, Testing Library, jsdom gaps, real-browser runs | [testing.md](references/testing.md) |
 
 ## Admin dashboards at a glance
 
@@ -126,7 +131,7 @@ told otherwise; check an existing project's lines with the audit before writing 
 
 | Resource | Use |
 |---|---|
-| `scripts/shadcn-cmd.sh [--cwd DIR] [--prefix \| --json] [--pm PM] [--no-dlx]` | the pinned runner; default output is JSON `{prefix, source, version, pm, pin, installed}` |
+| `scripts/shadcn-cmd.sh [--cwd DIR] [--prefix \| --json] [--pm PM] [--no-dlx]` | the pinned runner; default output is JSON `{prefix, source, version, pm, pin, installed, workspace}`; `workspace` is null, or the monorepo workspace that declares shadcn (`"packages/ui"`): run the CLI from there |
 | `scripts/shadcn-audit.py [DIR] [--json] [--ignore ID] [--checks]` | read-only audit; `--checks` lists the 20 check ids |
 | `scripts/check-shadcn-facts.py --offline` | after editing the facts, SKILL.md or a reference: pin, read-only allowed-tools, code blocks and prose agree |
 | `scripts/check-shadcn-facts.py --live` | weekly: npm (pin age, majors, install scripts, ecosystem majors) and the pinned CLI's `--help`; exit 7 is advisory |
@@ -135,13 +140,15 @@ told otherwise; check an existing project's lines with the audit before writing 
 | `assets/mcp.json.example` | a pinned, project-scoped `.mcp.json` for those who use the MCP server anyway |
 
 The audit's checks: components.json shape (`config-missing-field`, `style-unknown`,
-`style-deprecated`), files (`css-missing`, `tailwind-config-missing`, `tailwind-mismatch`),
-aliases (`alias-unresolved`, `alias-missing`), the CLI pin (`shadcn-css-orphan`,
-`cli-not-installed`, `cli-range-open`, `cli-unlocked`, `cli-old-major`), unpinned runs in
-package.json scripts, README, AGENTS.md, CLAUDE.md and MCP configs (`unpinned-cli`,
-`unpinned-mcp`), registries (`third-party-registry`, `registry-insecure-url`,
-`registry-literal-secret`, values never printed), `react-pre-19` and `monorepo-mismatch`.
-`--ignore <id>` records a deliberate exception.
+`style-deprecated`), files (`css-missing`, `tailwind-config-missing`, `tailwind-mismatch`;
+v4 CSS with `@config` is fine), aliases resolved as the CLI does (`alias-unresolved`,
+`alias-missing`), the CLI pin (`shadcn-css-orphan`, `cli-range-open`, `cli-unlocked`,
+`cli-old-major`, and `cli-not-installed`: runs use a global or downloaded copy; low when a
+sibling workspace declares shadcn), unpinned runs in package.json scripts, README,
+AGENTS.md, CLAUDE.md and MCP configs read as JSONC (`unpinned-cli`, `unpinned-mcp`),
+registries (`third-party-registry`, `registry-insecure-url`, `registry-literal-secret` in
+headers, params, URL queries or URL passwords; values never printed), `react-pre-19` and
+`monorepo-mismatch`. `--ignore <id>` records a deliberate exception.
 
 ## Boundaries
 
@@ -154,13 +161,16 @@ package.json scripts, README, AGENTS.md, CLAUDE.md and MCP configs (`unpinned-cl
 | Lockfiles, package managers, workspaces, npx discipline | package-manager-ops |
 | Accessibility audits and WCAG | a11y-ops |
 | Figma designs to shadcn code (Figma MCP, Code Connect) | figma-ops |
+| Test strategy: what deserves a test, mocking, flaky and slow suites | test-engineering |
+| End-to-end and real-browser suites | playwright-ops |
 
 ## Sources
 
 - ui.shadcn.com/docs (the llms.txt page index): CLI, components.json, theming, Tailwind v4,
   forms, data table, sidebar, chart, toast, sonner, dark mode, monorepo, registry, MCP, and
   the changelog through October 2026.
-- `shadcn --help` for every command of 4.23.0; npm registry metadata; Socket's score.
+- `shadcn --help` for every command of 4.23.0, and the CLI source at the `shadcn@4.23.0` tag
+  (`info --json` shape, `init` preset handling); npm registry metadata; Socket's score.
 - shadcn-ui/ui source: the init templates, the registry base definitions (which packages
   `init` installs, including the `shadcn` devDependency) and the `eject` command.
 - The official shadcn skill (shadcn-ui/ui `skills/shadcn/`, MIT licence, last changed

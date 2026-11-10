@@ -27,7 +27,7 @@ Next.js/SSR), the app name, and the base (`base` unless the user asks for `radix
 $SHADCN init --preset <code> --template vite --name <app> --no-monorepo        # with a preset code
 $SHADCN init --base base --preset <style> --template vite --name <app> --no-monorepo   # without one
 $SHADCN add --all -y          # every component; count them from disk, never from memory
-$SHADCN info --json           # base, style, iconLibrary, tailwindCssFile, aliases
+$SHADCN info --json           # config.base/style/iconLibrary/aliases, project.tailwindCss
 ```
 
 Without a preset, pick the style whose geometry the CSS variables can't change (padding,

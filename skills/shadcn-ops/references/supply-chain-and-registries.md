@@ -3,13 +3,16 @@
 `shadcn add` is an installer. It writes source files into your project, can add CSS and
 environment variables, and runs your package manager to install the npm packages an item
 declares. Treat each part by who wrote it. Facts checked against ui.shadcn.com/docs
-(registry, namespaces, authentication, components-json, changelog) on 2026-11-10. The
+(registry, namespaces, authentication, components-json, changelog), the served registry
+items and the CLI's dependency installer (`packages/registry/src/updaters/
+update-dependencies.ts`) on 2026-11-10. The
 behavioural vetting of npm packages is owned by the supply-chain-defense skill; this file
 says where it applies, not how it works.
 
 ## Contents
 
 - [What one add can change](#what-one-add-can-change)
+- [Where files land: targets](#where-files-land-targets)
 - [Trust by source](#trust-by-source)
 - [Reviewing an item before you add it](#reviewing-an-item-before-you-add-it)
 - [The npm packages behind components](#the-npm-packages-behind-components)
@@ -31,6 +34,33 @@ A registry item (registry-item.json) can carry:
 
 So an item from an unknown source is code that runs in your build and your users' browsers,
 plus packages that run at install time (lifecycle scripts) and at build time.
+
+## Where files land: targets
+
+Each file's `target` decides where `add` writes it. Three forms exist:
+
+| Target | Lands in | Review |
+|---|---|---|
+| none (`registry:ui`, `registry:component`, `registry:hook`, `registry:lib`) | the matching alias folder from components.json | normal |
+| `@ui/...`, `@components/...`, `@lib/...`, `@hooks/...` | that alias folder, with the rest of the path kept (`@ui/ai/prompt-input.tsx`) | normal; reject a `..` in the rest |
+| `~/...` | that path from the project root | **high risk**: read every one |
+
+A `~/` target can write any project file, and an item whose files all carry explicit
+targets is "universal": it installs without a components.json or framework detection. The
+docs' own GitHub-registry examples write `~/AGENTS.md`, `~/.editorconfig`,
+`~/.cursor/rules/*.mdc` and `~/.github/workflows/ci.yml`. That makes two attacks one `add`
+away:
+
+- **Agent-instruction injection:** a `~/AGENTS.md`, `~/CLAUDE.md`, `~/.cursor/rules/*` or
+  `~/.claude/*` target rewrites what every later agent session obeys. Diff it against the
+  current file and scan it for hidden Unicode (the prompt-injection rule) before accepting.
+- **CI takeover:** a `~/.github/workflows/*` target runs with the repository's tokens on
+  the next push. Treat it like a workflow pull request from a stranger.
+
+Also high risk: `~/.env*`, `~/package.json` and lockfiles, `~/.npmrc`, `~/.vscode/*`,
+and config files that execute (`~/vite.config.*`, `~/next.config.*`, `~/eslint.config.*`).
+Sources: ui.shadcn.com/docs/registry/examples (target placeholders, universal items),
+/docs/registry/github, /schema/registry-item.json, checked 2026-11-10.
 
 ## Trust by source
 
@@ -60,8 +90,9 @@ Read, in order:
 
 1. **Dependencies.** Every new npm package goes through the supply-chain-defense checks
    below before the real `add`.
-2. **Targets.** Files outside `components/`, `lib/`, `hooks/` (config files, `.env*`,
-   scripts, CI files, `.claude/` or other agent folders) need a reason.
+2. **Targets.** Every `~/` target, and any file outside `components/`, `lib/`, `hooks/`
+   (config files, `.env*`, scripts, CI files, `AGENTS.md`, `.claude/` or other agent
+   folders), needs a reason ([targets](#where-files-land-targets)).
 3. **Code that reaches out.** `fetch` to hosts the item doesn't need, `eval`,
    `dangerouslySetInnerHTML`, reads of `process.env` or `document.cookie`, analytics.
 4. **CSS and env changes** that the `--diff` of your global CSS and env file shows.
@@ -76,16 +107,23 @@ Even first-party components pull packages: `@base-ui/react`, `radix-ui` or
 `react-aria-components` (by base), `class-variance-authority`, `cn`, `lucide-react` (or the
 configured icon library), and, depending on the component and base, packages such as
 `recharts` (chart), `cmdk` (command), `sonner`, `react-day-picker` (calendar),
-`embla-carousel-react` (carousel), `input-otp` and `react-resizable-panels`. Guides add
-more that you install yourself (`@tanstack/react-table`, `react-hook-form`, `zod`,
-`next-themes`), and a third-party item can name anything. `view` shows an item's list.
+`embla-carousel-react` (carousel), `input-otp`, `react-resizable-panels`, `shiki` (code-block,
+through its hook) and `@shadcn/react` (questionnaire, message-scroller). The `sonner` item
+also pulls `next-themes`, in every base and even in a Vite app. Guides add more that you
+install yourself (`@tanstack/react-table`, `react-hook-form`, `zod`), and a third-party item
+can name anything. `view` shows an item's list.
 
 They follow this repository's supply-chain rule (rules/supply-chain.md, the
 supply-chain-defense skill): a 7-day cooldown after a release before it reaches a build, and a
 behavioural scan (Socket score or the depscore MCP), not only `npm audit`. In practice:
 
-- Prefer letting the lockfile decide: `add` uses your package manager, so an existing locked
-  version stays. A new package arrives at its newest version: check it before committing.
+- Prefer letting the lockfile decide: `add` skips a bare package name your package.json
+  already declares, so that locked version stays. A new package arrives at its newest
+  version: check it before committing.
+- An explicit spec is always installed, even over a declared one. The first-party
+  `calendar` item names `react-day-picker@latest`, so every `add calendar` (and any item
+  that depends on it) asks for the newest react-day-picker, cooldown or not.
+  Read the `--dry-run` dependency list, and pin it back in package.json if it moved.
 - pnpm 11+ applies `minimumReleaseAge` (default one day) to installs; raise it in
   `pnpm-workspace.yaml` to match the cooldown if the team agrees.
 - Commit the lockfile change with the component, so review sees both.

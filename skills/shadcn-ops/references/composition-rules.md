@@ -82,12 +82,21 @@ re-exports it. Older projects with `clsx` + `tailwind-merge` keep working
 | 2 to 7 exclusive options | `ToggleGroup` + `ToggleGroupItem`, not looped Buttons with active state |
 | Dates | `Calendar`, `DatePicker` (Popover + Calendar) |
 | Data display | `Table` (simple), the data-table guide (sorting, filters, pages), `Card`, `Badge`, `Avatar`, `Item`, `Kbd` |
-| Navigation | `Sidebar`, `NavigationMenu`, `Breadcrumb`, `Tabs`, `Pagination` |
+| Navigation | `Sidebar`, `NavigationMenu` (not in the aria base), `Breadcrumb`, `Tabs`, `Pagination` |
 | Overlays | `Dialog`, `AlertDialog` (confirm destructive), `Sheet` (side panel), `Drawer` (mobile bottom), `Popover`, `HoverCard`, `Tooltip` |
-| Menus | `DropdownMenu`, `ContextMenu`, `Menubar`, `Command` (palette, inside a Dialog) |
+| Menus | `DropdownMenu`, `ContextMenu`, `Menubar` (not in the aria base), `Command` (palette, inside a Dialog) |
+| Multi-step intake, onboarding, setup wizards, surveys | `Questionnaire` (single, multiple, freeform and skippable answers; standalone, in a Card or a Dialog) |
+| Logs, request and webhook payloads, diffs, terminal output | `CodeBlock` (`add code-block`; header actions, line numbers, wrap, diff and highlighted lines; highlights with `shiki`) |
+| Rendered HTML or Markdown: help text, CMS previews, release notes, model output | Typeset: one `typeset.css` you copy in from the builder, then a `typeset` class on the wrapper |
 | Feedback | `Alert`, `Progress`, `Skeleton`, `Spinner`, `Empty`, toasts (bases.md) |
 | Layout | `Card`, `Separator`, `Resizable`, `ScrollArea`, `Accordion`, `Collapsible`, `AspectRatio` |
 | Charts | `Chart` (Recharts; charts.md) |
+
+Questionnaire (August 2026) and CodeBlock (October 2026) ship for all three bases.
+Questionnaire depends on `@shadcn/react`, its headless core, and CodeBlock pulls `shiki`
+through its `use-highlighted-code` hook: both are new packages for the supply-chain check. Sources:
+ui.shadcn.com/docs/components/base/questionnaire, /components/base/code-block, /docs/typeset
+and the changelog entries of those months, checked 2026-11-10.
 
 ## Chat interfaces
 

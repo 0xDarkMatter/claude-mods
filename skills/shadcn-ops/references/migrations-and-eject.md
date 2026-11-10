@@ -89,8 +89,10 @@ shared variants, utilities and RTL rules that ship in that file no longer reach 
   build-time imports from a CLI package, or a heavily customised copy of those rules.
 - It also removes the pinned CLI from devDependencies, so afterwards `shadcn-cmd.sh`
   falls back to the pinned one-off runner. Re-add the devDependency if the team still uses
-  the CLI: `<pm> add -D -E shadcn@<pin>` (the import is gone, so it is a tool again, not a
-  build dependency).
+  the CLI (the import is gone, so it is a tool again, not a build dependency):
+  `pnpm add -D -E shadcn@<pin>`, `npm install -D -E shadcn@<pin>`,
+  `yarn add -D -E shadcn@<pin>` or `bun add -d --exact shadcn@<pin>`. The audit's
+  `cli-not-installed` fix names the one for the project's package manager.
 - In a monorepo, run it in the workspace that holds the CSS (`packages/ui`); at the root it
   stops and lists workspaces.
 - Undoing it means restoring the commit before it. Commit first.

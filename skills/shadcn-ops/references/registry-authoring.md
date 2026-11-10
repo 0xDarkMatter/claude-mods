@@ -11,8 +11,11 @@ registry.json, registry-item.json, namespaces, authentication, GitHub registries
 - [Source and built registries](#source-and-built-registries)
 - [registry.json](#registryjson)
 - [Items](#items)
+- [Targets](#targets)
 - [Dependencies and addresses](#dependencies-and-addresses)
 - [Build, serve, validate](#build-serve-validate)
+- [Dynamic search](#dynamic-search)
+- [Programmatic API](#programmatic-api)
 - [GitHub registries](#github-registries)
 - [Publishing responsibly](#publishing-responsibly)
 
@@ -68,6 +71,22 @@ registry.json, registry-item.json, namespaces, authentication, GitHub registries
 dependencies, CSS variables, fonts and config; it can also pin which primitive library
 (base) its items use. `registry:font` installs a font as a first-class item.
 
+## Targets
+
+A file without a `target` lands in the consumer's folder for its type. Set one only when it
+must land somewhere specific, and prefer a placeholder:
+
+- `@ui/`, `@components/`, `@lib/`, `@hooks/` resolve to the consumer's aliases from
+  components.json, keeping the rest of the path (`"target": "@ui/ai/prompt-input.tsx"`), so
+  the item works whatever folders the consumer chose. Registry dependencies can use them
+  too.
+- `~/` is the consumer's project root (`"target": "~/docs/conventions.md"`). An item whose
+  files all have explicit targets is universal: it installs with no components.json at
+  all. Consumers are told to treat every `~/` target as high risk (see
+  supply-chain-and-registries.md), so use one only when nothing else fits, and say why in
+  the item's `description`. Never target agent-instruction files, CI workflows, env files
+  or lockfiles unless that is the item's whole, stated purpose.
+
 ## Dependencies and addresses
 
 | Address | Means |
@@ -93,6 +112,32 @@ $SHADCN add --dry-run http://localhost:3000/r/stat-card.json
 
 Test in a throwaway consumer project for each base you claim to support; a block built
 against Radix props fails in a Base UI project.
+
+## Dynamic search
+
+By default `search` downloads the whole `registry.json` and filters locally. A large
+registry can search on the server instead: the CLI sends `q`, `type` (comma-separated item
+types), `limit` and `offset` as query parameters on the `registry.json` request, and a
+response that carries a `pagination` object (`total`, `offset`, `limit`, `hasMore`) is used
+as-is. It is opt-in: a static file ignores the parameters and keeps working. A request with
+no `q` or `type` should return every item, paginated.
+
+## Programmatic API
+
+The `shadcn` package exposes the registry as code, under subpath imports:
+
+- `shadcn/registry`: `getRegistry`, `getRegistryItems`, `resolveRegistryItems`,
+  `searchRegistries`, `addRegistryItems`, and `loadRegistry` / `loadRegistryItem` for
+  serving a source registry from route handlers (`app/r/[name].json/route.ts`);
+  `RegistryError` and `RegistryNotFoundError` to catch.
+- `shadcn/schema`: `registrySchema` and `registryItemSchema`, to validate JSON in your own
+  tooling or CI.
+- `shadcn/preset`: `encodePreset` and `decodePreset`.
+
+The CLI version a project locks is the API version it gets, so the pin rules apply.
+
+Sources for targets, dynamic search and the API: ui.shadcn.com/docs/registry/examples,
+/registry/dynamic-search and /registry/api-reference, checked 2026-11-10.
 
 ## GitHub registries
 
