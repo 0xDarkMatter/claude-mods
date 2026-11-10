@@ -7,7 +7,10 @@
 #   - the resolver hands back an unpinned runner (`@latest`, an unversioned dlx), skips the
 #     project's own locked CLI, or ignores the pin in assets/shadcn-facts.json;
 #   - the audit misses a landmine, or flags a correct project (each clean case is the
-#     false-positive guard), or prints a registry credential it should only name;
+#     false-positive guard), or prints a credential (a registry, an MCP command line, a
+#     dependency spec) it should only name;
+#   - the resolver and the audit disagree on the install root (a stray parent lockfile, the
+#     git root) or the package manager (packageManager first, then the lockfile);
 #   - the verifier stops noticing drift, so a stale pin or an unpinned code block looks fine;
 #   - a reference grows unlinked, oversized or loses its Contents list.
 #
@@ -173,8 +176,58 @@ else
   out="$(R "$none" --cwd "$tmp/ra" --pm npm --prefix)"
   [ "$out" = "npx --no shadcn" ] && ok "project + npm -> 'npx --no shadcn' (local only, never fetches)" || bad "project npm prefix: $out"
   mkdir -p "$tmp/ra/apps/web"; printf '{"name":"web"}\n' > "$tmp/ra/apps/web/package.json"
+  printf 'packages:\n  - "apps/*"\n' > "$tmp/ra/pnpm-workspace.yaml"
   out="$(R "$none" --cwd "$tmp/ra/apps/web" --prefix)"
   [ "$out" = "pnpm exec shadcn" ] && ok "a workspace finds the root's declaration up to the lockfile" || bad "workspace walk-up: $out"
+  # A lockfile above the project is its install root only inside its git repo AND as a
+  # workspace root listing it: a stray one (a home folder, a parent checkout) once chose
+  # the package manager for an unrelated project.
+  stub "$tmp/bin-pn" pnpm x; stub "$tmp/bin-pn" npx x
+  mkdir -p "$tmp/stray/proj"; : > "$tmp/stray/pnpm-lock.yaml"; printf '{"name":"p"}\n' > "$tmp/stray/proj/package.json"
+  out="$(R "$tmp/bin-pn" --cwd "$tmp/stray/proj" --prefix)"
+  [ "$out" = "npx shadcn@$PIN" ] && ok "a stray lockfile above the project is ignored -> npm" || bad "stray lockfile chose the runner: $out"
+  mkdir -p "$tmp/stray-git/proj/.git"; : > "$tmp/stray-git/pnpm-lock.yaml"
+  printf '{"name":"outer","workspaces":["proj"]}\n' > "$tmp/stray-git/package.json"; printf '{"name":"p"}\n' > "$tmp/stray-git/proj/package.json"
+  out="$(R "$tmp/bin-pn" --cwd "$tmp/stray-git/proj" --prefix)"
+  [ "$out" = "npx shadcn@$PIN" ] && ok "the git root stops the lockfile walk" || bad "lockfile walk crossed the git root: $out"
+  # Git Bash: MSYS_NO_PATHCONV=1 hands node.exe a POSIX /x/... path unconverted, so the
+  # script must pass node Windows-form paths itself (a no-op on Linux and macOS).
+  out="$(MSYS_NO_PATHCONV=1 R "$none" --cwd "$tmp/ra" --prefix)"
+  [ "$out" = "pnpm exec shadcn" ] && ok "MSYS_NO_PATHCONV=1 -> still the project's runner" || bad "MSYS_NO_PATHCONV=1 project case: $out"
+  out="$(MSYS_NO_PATHCONV=1 R "$tmp/bin-all" --cwd "$tmp/ra/apps/web" --prefix)"
+  [ "$out" = "pnpm exec shadcn" ] && ok "MSYS_NO_PATHCONV=1 -> the workspace walk still finds the root" || bad "MSYS_NO_PATHCONV=1 workspace case: $out"
+  # A workspace without shadcn in a monorepo where apps/web declares it: the JSON names the
+  # workspace to run from (the one whose components.json routes components into this one
+  # beats one that merely declares shadcn).
+  mm="$tmp/rmono"; mkdir -p "$mm/apps/web" "$mm/apps/docs" "$mm/packages/ui"; : > "$mm/pnpm-lock.yaml"
+  printf 'packages:\n  - "apps/*"\n  - "packages/*"\n' > "$mm/pnpm-workspace.yaml"; printf '{"name":"root"}\n' > "$mm/package.json"
+  printf '{"name":"docs","devDependencies":{"shadcn":"^4.1.0"}}\n' > "$mm/apps/docs/package.json"
+  printf '{"name":"web","devDependencies":{"shadcn":"^4.1.0"}}\n' > "$mm/apps/web/package.json"
+  printf '{"style":"base-nova","aliases":{"ui":"@ws/ui/components","utils":"@ws/ui/lib/utils"}}\n' > "$mm/apps/web/components.json"
+  printf '{"name":"@ws/ui"}\n' > "$mm/packages/ui/package.json"
+  stub "$tmp/bin-gh" shadcn "$PIN"
+  out="$(R "$tmp/bin-gh" --cwd "$mm/packages/ui")"; rc=$?
+  [ "$rc" = 0 ] && [ "$(field "$out" workspace)" = apps/web ] && [ "$(field "$out" source)" = global ] \
+    && ok "workspace hint names apps/web (routes into packages/ui), not apps/docs" || bad "workspace hint: rc=$rc out=$out"
+  out="$(R "$tmp/bin-gh" --cwd "$tmp/stray/proj")"
+  [ "$(field "$out" workspace)" = None ] && ok "no monorepo sibling -> workspace null" || bad "workspace should be null: $out"
+  # A UTF-8 BOM (Windows editors write one) once made JSON.parse throw inside a swallowed
+  # catch: the declared CLI vanished (dlx, or exit 5 under --no-dlx) and a BOM facts file gave 4.
+  mkproj "$tmp/rbom" pnpm-lock.yaml
+  printf '\xef\xbb\xbf{"name":"p","devDependencies":{"shadcn":"%s"}}\n' "$PIN" > "$tmp/rbom/package.json"
+  mkdir -p "$tmp/rbom/node_modules/shadcn"; printf '\xef\xbb\xbf{"version":"%s"}\n' "$PIN" > "$tmp/rbom/node_modules/shadcn/package.json"
+  out="$(R "$none" --cwd "$tmp/rbom" --no-dlx)"; rc=$?
+  [ "$rc" = 0 ] && [ "$(field "$out" source)" = project ] && [ "$(field "$out" version)" = "$PIN" ] \
+    && ok "a BOM package.json still declares shadcn -> project" || bad "BOM package.json: rc=$rc out=$out"
+  # Yarn PnP keeps packages in .pnp.cjs and the cache, never node_modules; the frozen
+  # install advice never creates node_modules, so "installed" must come from yarn.lock.
+  mkdir -p "$tmp/rpnp"; : > "$tmp/rpnp/.pnp.cjs"; : > "$tmp/rpnp/.yarnrc.yml"
+  printf '{"name":"p","packageManager":"yarn@4.5.0","devDependencies":{"shadcn":"%s"}}\n' "$PIN" > "$tmp/rpnp/package.json"
+  printf '__metadata:\n  version: 8\n\n"shadcn@npm:%s":\n  version: %s\n  resolution: "shadcn@npm:%s"\n' "$PIN" "$PIN" "$PIN" > "$tmp/rpnp/yarn.lock"
+  out="$(R "$none" --cwd "$tmp/rpnp")"; rc=$?
+  [ "$rc" = 0 ] && [ "$(field "$out" prefix)" = "yarn run shadcn" ] && [ "$(field "$out" installed)" = True ] \
+    && [ "$(field "$out" version)" = "$PIN" ] \
+    && ok "Yarn PnP (.pnp.cjs, no node_modules) -> 'yarn run shadcn', version from yarn.lock" || bad "Yarn PnP: rc=$rc out=$out"
 
   # a') declared but not installed: still the project's runner, exit 10 (install first)
   mkproj "$tmp/rb" pnpm-lock.yaml "$PIN"
@@ -217,6 +270,9 @@ else
   [ "$out" = "pnpm dlx shadcn@9.9.9" ] && ok "the dlx pin is read from assets/shadcn-facts.json" || bad "pin not from the asset: $out"
   sed "s/\"version\": \"$PIN\"/\"version\": \"latest\"/" "$facts" > "$tmp/facts-latest.json"
   ec 4 "a facts pin of 'latest' is refused -> 4" R "$tmp/bin-p" --cwd "$tmp/rc" --facts "$tmp/facts-latest.json"
+  { printf '\xef\xbb\xbf'; cat "$facts"; } > "$tmp/facts-bom.json"
+  out="$(R "$tmp/bin-p" --cwd "$tmp/rc" --facts "$tmp/facts-bom.json" --prefix)"
+  [ "$out" = "pnpm dlx shadcn@$PIN" ] && ok "a facts file with a BOM still parses" || bad "BOM facts file: $out"
   ec 5 "no dependency, no global, no pnpm -> 5" R "$none" --cwd "$tmp/rc"
   ec 5 "--no-dlx with nothing local -> 5" R "$tmp/bin-p" --cwd "$tmp/rc" --no-dlx
   out="$(R "$tmp/bin-p" --cwd "$tmp/rc" --json)"
@@ -260,13 +316,52 @@ printf '%s\n' "$txt" | grep -q $'^medium\tunpinned-cli\tREADME.md:4\t' \
 [ "$(printf '%s\n' "$txt" | grep -c 'unpinned-cli')" = 4 ] \
   && ok "unpinned-docs: @latest, unversioned dlx, retired shadcn-ui and a range all reported" || bad "unpinned-docs hits: $txt"
 # The fix names the project's OWN runner: an npm project was once told to use `pnpm exec shadcn`.
+# The manager comes from package.json "packageManager" first, then the lockfile, the same
+# precedence as shadcn-cmd.sh (the two once disagreed).
 cp -r "$tmp/cases/unpinned-docs" "$tmp/unpinned-npm"
 rm -f "$tmp/unpinned-npm/pnpm-lock.yaml" "$tmp/unpinned-npm/yarn.lock" "$tmp/unpinned-npm/bun.lock" "$tmp/unpinned-npm/bun.lockb"
+grep -v '"packageManager"' "$tmp/cases/unpinned-docs/package.json" > "$tmp/unpinned-npm/package.json"
 printf '{"lockfileVersion":3,"packages":{}}\n' > "$tmp/unpinned-npm/package-lock.json"
 # Capture first: the audit exits 10 on findings, and under pipefail `audit | grep` would fail anyway.
 npm_out="$("${run_py[@]}" "$audit" "$tmp/unpinned-npm" --json 2>/dev/null)"
 printf '%s' "$npm_out" | grep -q 'runner (npx --no shadcn' \
   && ok "unpinned-docs fix names npm's local runner (npx --no shadcn), not pnpm" || bad "npm project's unpinned-cli fix does not name npx --no shadcn"
+cp -r "$tmp/cases/unpinned-docs" "$tmp/unpinned-pmfield"
+sed 's/"packageManager": "pnpm@[^"]*"/"packageManager": "npm@10.9.0"/' "$tmp/cases/unpinned-docs/package.json" > "$tmp/unpinned-pmfield/package.json"
+pmf_out="$("${run_py[@]}" "$audit" "$tmp/unpinned-pmfield" --json 2>/dev/null)"
+printf '%s' "$pmf_out" | grep -q 'runner (npx --no shadcn' \
+  && ok "packageManager npm beats a pnpm-lock.yaml (shadcn-cmd.sh's precedence)" || bad "unpinned-cli fix ignores packageManager: $pmf_out"
+# The install advice names the real command for the detected manager, never `<pm> add`.
+for pair in "npm@10.9.0|npm install -D -E shadcn@$PIN" "yarn@4.5.0|yarn add -D -E shadcn@$PIN" \
+            "bun@1.3.0|bun add -d --exact shadcn@$PIN"; do
+  pmv="${pair%%|*}"; want="${pair#*|}"; d="$tmp/no-cli-${pmv%%@*}"
+  rm -rf "$d"; cp -r "$tmp/cases/no-cli" "$d"
+  sed "s/\"packageManager\": \"pnpm@[^\"]*\"/\"packageManager\": \"$pmv\"/" "$tmp/cases/no-cli/package.json" > "$d/package.json"
+  o="$("${run_py[@]}" "$audit" --json "$d" 2>/dev/null)"
+  case "$o" in *"$want"*) ok "cli-not-installed fix for ${pmv%%@*}: $want" ;; *) bad "cli-not-installed fix for ${pmv%%@*} lacks '$want': $o" ;; esac
+done
+# `shadcn-audit.py .` inside a workspace: a relative "." has no parent to walk to, so the
+# lockfile at the monorepo root was once never found (and a range read as cli-unlocked).
+o="$(cd "$tmp/cases/monorepo-web/apps/web" && "${run_py[@]}" "$audit" --json . 2>/dev/null)"
+printf '%s' "$o" | "${run_py[@]}" -c 'import json,sys; assert json.load(sys.stdin)["meta"]["project"]["shadcn_locked"] == sys.argv[1]' "$PIN" 2>/dev/null \
+  && ok "audit of '.' inside a workspace walks up to the root lockfile" || bad "audit of '.' did not walk up: $o"
+# A components.json that is not shadcn's (another tool's manifest) is not audited as one.
+mkdir -p "$tmp/notshadcn"
+printf '{"schemaVersion":"other-tool/v1","components":[{"id":"Button","path":"components/Button.json"}]}\n' > "$tmp/notshadcn/components.json"
+err="$("${run_py[@]}" "$audit" "$tmp/notshadcn" 2>&1 >/dev/null)"; rc=$?
+[ "$rc" = 3 ] && case "$err" in *"not a shadcn components.json"*) true ;; *) false ;; esac \
+  && ok "another tool's components.json -> exit 3, not a shadcn components.json" || bad "foreign components.json: rc=$rc err=$err"
+# A facts file missing a key the audit reads is a VALIDATION error (4), never a traceback (1).
+for k in cli.major legacy_styles; do
+  "${run_py[@]}" -c 'import json,sys
+d = json.load(open(sys.argv[1], encoding="utf-8")); node = d; *path, last = sys.argv[3].split(".")
+for p in path: node = node[p]
+del node[last]; open(sys.argv[2], "w").write(json.dumps(d))' "$facts" "$tmp/facts-no-$k.json" "$k"
+  ec 4 "audit: facts without $k -> 4" "${run_py[@]}" "$audit" --facts "$tmp/facts-no-$k.json" "$tmp/cases/style-default"
+done
+o="$("${run_py[@]}" "$audit" --json --facts "$tmp/facts-no-cli.major.json" "$tmp/cases/style-default" 2>/dev/null)"
+printf '%s' "$o" | "${run_py[@]}" -c 'import json,sys; assert json.load(sys.stdin)["error"]["code"] == "VALIDATION"' 2>/dev/null \
+  && ok "audit --json: a bad facts file gives the VALIDATION error envelope" || bad "audit --json bad facts envelope: $o"
 
 # === 6. Verifier: offline consistency, live drift through recorded sources ===
 ec 0 "verifier --offline consistent" "${run_py[@]}" "$verify" --offline --skill "$here" --catalog "$facts"
@@ -288,6 +383,21 @@ assert d["pin-cooled"] == "drift", d' \
   && ok "pin 3 days old at as_of -> the pin-cooled row is drift" || bad "pin-cooled did not report a pin recorded inside its cooldown"
 sed 's/"token": "Recharts v3"/"token": "Recharts v3 forever"/' "$facts" > "$tmp/c2.json"
 ec 10 "prose token no longer stated -> 10" "${run_py[@]}" "$verify" --offline --catalog "$tmp/c2.json" --skill "$here"
+# A value change that is a prefix of the stated number (60 -> 6, 19 -> 1) once passed as a
+# substring of the token: the value must match on digit boundaries.
+fmut() { # out-file, python statement on d (the catalog)
+  "${run_py[@]}" -c "import json,sys; d=json.load(open(sys.argv[1], encoding='utf-8')); $2; open(sys.argv[2],'w').write(json.dumps(d))" "$facts" "$1"
+}
+fmut "$tmp/c-age.json" 'd["policy"]["max_pin_age_days"] = int(str(d["policy"]["max_pin_age_days"])[:-1])'
+ec 10 "max_pin_age_days loses a digit (60 -> 6) -> 10" "${run_py[@]}" "$verify" --offline --catalog "$tmp/c-age.json" --skill "$here"
+fmut "$tmp/c-react.json" 'd["ecosystem"]["react"] = d["ecosystem"]["react"][:-1]'
+ec 10 "ecosystem react loses a digit (19 -> 1) -> 10" "${run_py[@]}" "$verify" --offline --catalog "$tmp/c-react.json" --skill "$here"
+# A catalog missing a key the checks read is a VALIDATION error (4), never a traceback (1).
+fmut "$tmp/c-nomajor.json" 'del d["cli"]["major"]'
+ec 4 "catalog without cli.major -> 4" "${run_py[@]}" "$verify" --offline --catalog "$tmp/c-nomajor.json" --skill "$here"
+o="$("${run_py[@]}" "$verify" --offline --json --catalog "$tmp/c-nomajor.json" --skill "$here" 2>/dev/null)"
+printf '%s' "$o" | "${run_py[@]}" -c 'import json,sys; assert json.load(sys.stdin)["error"]["code"] == "VALIDATION"' 2>/dev/null \
+  && ok "verifier --json: a bad catalog gives the VALIDATION error envelope" || bad "verifier --json bad catalog envelope: $o"
 # Mutated copies of the skill text: an @latest in allowed-tools, and one in a code block.
 mut() { rm -rf "$tmp/m-$1"; mkdir -p "$tmp/m-$1"; cp -R "$here/SKILL.md" "$here/references" "$here/assets" "$tmp/m-$1/"; }
 mut tools; sed "s/Bash(pnpm dlx shadcn@$PIN \\*)/Bash(pnpm dlx shadcn@latest *)/" "$here/SKILL.md" > "$tmp/m-tools/SKILL.md"
@@ -295,6 +405,17 @@ cmp -s "$here/SKILL.md" "$tmp/m-tools/SKILL.md" && bad "allowed-tools mutation d
 ec 10 "allowed-tools with @latest -> 10" "${run_py[@]}" "$verify" --offline --catalog "$facts" --skill "$tmp/m-tools"
 mut fence; printf '\n```bash\nnpx shadcn@latest add button\n```\n' >> "$tmp/m-fence/references/forms.md"
 ec 10 "@latest in a reference code block -> 10" "${run_py[@]}" "$verify" --offline --catalog "$facts" --skill "$tmp/m-fence"
+# Forms the checker once missed: the retired shadcn-ui package, a ~~~ fence, and an
+# unversioned npx/bunx in allowed-tools (they fetch the newest release when none is local).
+mut uiold; printf '\n```bash\nnpx shadcn-ui@latest init\n```\n' >> "$tmp/m-uiold/references/forms.md"
+ec 10 "retired shadcn-ui@latest in a code block -> 10" "${run_py[@]}" "$verify" --offline --catalog "$facts" --skill "$tmp/m-uiold"
+mut tilde; printf '\n~~~bash\nnpx shadcn@latest add button\n~~~\n' >> "$tmp/m-tilde/references/forms.md"
+ec 10 "@latest in a ~~~ fence -> 10" "${run_py[@]}" "$verify" --offline --catalog "$facts" --skill "$tmp/m-tilde"
+for r in npx bunx; do
+  mut "$r"; sed "s/Bash($r shadcn@$PIN \\*)/Bash($r shadcn *)/" "$here/SKILL.md" > "$tmp/m-$r/SKILL.md"
+  cmp -s "$here/SKILL.md" "$tmp/m-$r/SKILL.md" && bad "allowed-tools $r mutation did not apply (pattern drifted)" || ok "allowed-tools $r mutation applied"
+  ec 10 "unversioned Bash($r shadcn *) in allowed-tools -> 10" "${run_py[@]}" "$verify" --offline --catalog "$facts" --skill "$tmp/m-$r"
+done
 
 # COUPLED GOLDEN FIXTURES: tests/fixtures/live was recorded from npm and the pinned CLI on
 # 2026-11-10 (--today below). The dates and versions in these mutations (4.30.0, 5.0.0,

@@ -12,10 +12,15 @@ React and Zod (SKILL-RESOURCE-PROTOCOL.md section 7). Two modes:
       had already passed the cooldown when it was recorded (published + cooldown <= as_of)
     * SKILL.md carries "Versions verified YYYY-MM-DD" equal to as_of
     * SKILL.md's allowed-tools never says @latest and every shadcn@ in it is the pin
-    * no fenced code block in SKILL.md or references/ runs shadcn at anything but the pin
-      (no @latest, no tag or range, no unversioned pnpm/yarn dlx)
-    * every prose token is still stated; every CLI command and migration in the catalog is
-      named in its reference; assets/mcp.json.example never runs an unpinned shadcn
+    * SKILL.md's allowed-tools has no unversioned npx/bunx/npm exec shadcn (they fetch the
+      newest release when no local copy exists) unless it says --no / --no-install
+    * no fenced code block (``` or ~~~) in SKILL.md or references/ runs shadcn at anything
+      but the pin (no @latest, no tag or range, no retired shadcn-ui, no unversioned
+      pnpm/yarn dlx)
+    * every prose token is still stated, its catalog value matching on digit boundaries
+      (max_pin_age_days 6 is not "older than 60 days"); every CLI command and migration in
+      the catalog is named in its reference; assets/mcp.json.example never runs an
+      unpinned shadcn
   --live (scheduled freshness job, never a PR gate):
     * npm: the pin exists, is not deprecated, was published on cli.published and has no
       install lifecycle scripts; no newer major; the pin is not older than
@@ -36,9 +41,10 @@ Input:   argv flags only. --fixtures (live only) reads npm-shadcn.json,
          npm-latest-<name>.json (scope "@" dropped, "/" as "__"), version.txt, help.txt,
          init-help.txt and migrate-list.txt from DIR instead of the network and the CLI.
 Output:  stdout = findings (check<TAB>status<TAB>detail rows, or the --json envelope,
-         schema claude-mods.shadcn-ops.facts/v1). Data only.
+         schema claude-mods.shadcn-ops.facts/v1). Data only. Exits 3 and 4 print the
+         {error:{code,message}} envelope under --json.
 Stderr:  the verdict line, errors.
-Exit:    0 ok, 2 usage, 3 catalog/skill missing, 4 catalog unparseable,
+Exit:    0 ok, 2 usage, 3 catalog/skill missing, 4 catalog unparseable or missing a key,
          7 a source was unreachable (live, advisory - never a real failure), 10 drift
 
 Examples:
@@ -69,8 +75,15 @@ REGISTRY = "https://registry.npmjs.org"
 ISO_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 EXACT_RE = re.compile(r"^\d+\.\d+\.\d+$")
 NOTE_RE = re.compile(r"Versions verified (\d{4}-\d{2}-\d{2})")
-SPEC_RE = re.compile(r"(?<![\w/@.-])shadcn@([^\s\"'`),;*]+)")
-DLX_RE = re.compile(r"\b(?:pnpm\s+dlx|pnpx|pnx|yarn\s+dlx)\s+(?:-{1,2}\S+\s+)*shadcn(?![@\w-])")
+# shadcn@<spec> and the retired shadcn-ui@<spec>; the spec stops at Markdown punctuation and
+# TRAILING is stripped, so "shadcn@4.23.0." reads as the pin.
+SPEC_RE = re.compile(r"(?<![\w/@.-])(shadcn(?:-ui)?)@([^\s\"'`),;*\]]+)")
+TRAILING = ".,:;*])"
+DLX_RE = re.compile(r"\b(?:pnpm\s+dlx|pnpx|pnx|yarn\s+dlx)\s+(?:-{1,2}\S+\s+)*shadcn(?:-ui)?(?![@\w-])")
+# Runners that use a local copy when there is one and fetch the newest release when not.
+LOCAL_FIRST_RE = re.compile(r"\b(?:npx|bunx|bun\s+x|npm\s+exec)\s+((?:-{1,2}\S+\s+)*)shadcn(?:-ui)?(?![@\w-])")
+NO_FETCH_RE = re.compile(r"(?:^|\s)--no(?:-install)?(?=\s|$)")
+FENCE_RE = re.compile(r"\s*(`{3,}|~{3,})(.*)$")
 LIFECYCLE = ("preinstall", "install", "postinstall")
 
 
@@ -80,6 +93,14 @@ class Unavailable(Exception):
 
 class Drift(Exception):
     pass
+
+
+class Fatal(Exception):
+    """A catalog or skill problem that stops the run: (protocol code, exit code, message)."""
+
+    def __init__(self, code: str, rc: int, msg: str):
+        super().__init__(msg)
+        self.code, self.rc = code, rc
 
 
 # === Catalog ===
@@ -94,11 +115,12 @@ def lookup(cat: dict, dotted: str):
 
 
 def load_catalog(path: Path) -> dict:
+    """The parsed catalog; raises Fatal (3 missing, 4 unparseable or missing a key) - every
+    key the checks read is validated here, so a bad catalog is never a traceback (exit 1)."""
     if not path.is_file():
-        print(f"error: facts catalog not found: {path}", file=sys.stderr)
-        raise SystemExit(EX_NOTFOUND)
+        raise Fatal("NOT_FOUND", EX_NOTFOUND, f"facts catalog not found: {path}")
     try:
-        cat = json.loads(path.read_text(encoding="utf-8"))
+        cat = json.loads(path.read_text(encoding="utf-8-sig"))
         if not isinstance(cat, dict) or cat.get("schema") != SCHEMA:
             raise ValueError(f"schema must be {SCHEMA!r}")
         for dotted in ("as_of", "cli.published"):
@@ -106,6 +128,8 @@ def load_catalog(path: Path) -> dict:
                 raise ValueError(f"{dotted} must be YYYY-MM-DD")
         if not EXACT_RE.match(str(lookup(cat, "cli.version"))):
             raise ValueError("cli.version must be an exact x.y.z (never a tag or range)")
+        if not str(lookup(cat, "cli.major")).isdigit():
+            raise ValueError("cli.major must be a major number")
         if not isinstance(lookup(cat, "cli.install_scripts"), bool):
             raise ValueError("cli.install_scripts must be true or false")
         for dotted in ("policy.cooldown_days", "policy.max_pin_age_days"):
@@ -132,11 +156,9 @@ def load_catalog(path: Path) -> dict:
             lookup(cat, t["value_of"])
         return cat
     except KeyError as exc:
-        print(f"error: could not parse catalog {path}: missing {exc}", file=sys.stderr)
-        raise SystemExit(EX_UNPARSEABLE)
+        raise Fatal("VALIDATION", EX_UNPARSEABLE, f"could not parse catalog {path}: missing {exc}")
     except (json.JSONDecodeError, TypeError, ValueError, AttributeError) as exc:
-        print(f"error: could not parse catalog {path}: {exc}", file=sys.stderr)
-        raise SystemExit(EX_UNPARSEABLE)
+        raise Fatal("VALIDATION", EX_UNPARSEABLE, f"could not parse catalog {path}: {exc}")
 
 
 def row(check: str, status: str, detail: str) -> dict:
@@ -150,20 +172,42 @@ def days(a: str, b: str) -> int:
 # === Offline ===
 
 def fenced_lines(text: str):
-    fence = False
+    """Lines inside fenced code blocks: ``` or ~~~ fences (CommonMark), each closed only by
+    a bare run of the same character at least as long as the opener."""
+    fence = None
     for no, line in enumerate(text.splitlines(), 1):
-        if line.lstrip().startswith("```"):
-            fence = not fence
-            continue
+        m = FENCE_RE.match(line)
+        if m:
+            run = m.group(1)
+            if fence is None:
+                fence = (run[0], len(run))
+                continue
+            if run[0] == fence[0] and len(run) >= fence[1] and not m.group(2).strip():
+                fence = None
+                continue
         if fence:
             yield no, line
+
+
+def off_pin(text: str, pin: str) -> list[str]:
+    """Every shadcn@<spec> in text that is not the pin, and every shadcn-ui@ (retired)."""
+    bad = []
+    for pkg, spec in SPEC_RE.findall(text):
+        spec = spec.rstrip(TRAILING)
+        if pkg == "shadcn-ui" or spec != pin:
+            bad.append(f"{pkg}@{spec}")
+    return bad
+
+
+def stated(value: str, token: str) -> bool:
+    """value appears in token on digit boundaries: 6 is not in "60 days", 4.23 not in 4.23.0."""
+    return re.search(rf"(?<!\d)(?<!\d\.){re.escape(value)}(?!\.?\d)", token) is not None
 
 
 def check_offline(cat: dict, skill_dir: Path) -> list[dict]:
     doc = skill_dir / "SKILL.md"
     if not doc.is_file():
-        print(f"error: SKILL.md not found under {skill_dir}", file=sys.stderr)
-        raise SystemExit(EX_NOTFOUND)
+        raise Fatal("NOT_FOUND", EX_NOTFOUND, f"SKILL.md not found under {skill_dir}")
     skill_md = doc.read_text(encoding="utf-8", errors="replace")
     refs = {p.name: p.read_text(encoding="utf-8", errors="replace") for p in sorted((skill_dir / "references").glob("*.md"))}
     corpus = "\n".join([skill_md, *refs.values()])
@@ -186,9 +230,11 @@ def check_offline(cat: dict, skill_dir: Path) -> list[dict]:
         out.append(row("allowed-tools", "drift", "SKILL.md frontmatter has no allowed-tools line"))
     else:
         specs = SPEC_RE.findall(at.group(1))
-        bad = [s for s in specs if s != pin]
-        if "@latest" in at.group(1) or bad or DLX_RE.search(at.group(1)):
-            out.append(row("allowed-tools", "drift", f"allowed-tools runs shadcn unpinned or off-pin: {bad or '@latest/dlx'}"))
+        bad = off_pin(at.group(1), pin)
+        fetching = [m.group(0) for m in LOCAL_FIRST_RE.finditer(at.group(1)) if not NO_FETCH_RE.search(m.group(1))]
+        if "@latest" in at.group(1) or bad or DLX_RE.search(at.group(1)) or fetching:
+            out.append(row("allowed-tools", "drift", f"allowed-tools runs shadcn unpinned or off-pin: "
+                                                     f"{bad or fetching or '@latest/dlx'}"))
         elif not specs:
             out.append(row("allowed-tools", "drift", f"allowed-tools names no shadcn@{pin} form"))
         else:
@@ -197,14 +243,14 @@ def check_offline(cat: dict, skill_dir: Path) -> list[dict]:
     stray = []
     for name, text in [("SKILL.md", skill_md), *refs.items()]:
         for no, line in fenced_lines(text):
-            if any(s != pin for s in SPEC_RE.findall(line)) or DLX_RE.search(line):
+            if off_pin(line, pin) or DLX_RE.search(line):
                 stray.append(f"{name}:{no}")
     out.append(row("code-blocks", "drift" if stray else "ok",
                    f"unpinned shadcn in code blocks: {', '.join(stray)}" if stray else "every fenced shadcn run is the pin or a local runner"))
 
     for t in cat["prose_tokens"]:
         value = str(lookup(cat, t["value_of"]))
-        if value not in t["token"]:
+        if not stated(value, t["token"]):
             out.append(row(f"token:{t['key']}", "drift", f"token {t['token']!r} no longer contains {t['value_of']} = {value!r}"))
         elif t["token"] not in corpus:
             out.append(row(f"token:{t['key']}", "drift", f"{t['token']!r} no longer stated in the skill prose"))
@@ -224,7 +270,7 @@ def check_offline(cat: dict, skill_dir: Path) -> list[dict]:
     try:
         servers = json.loads(ex.read_text(encoding="utf-8")).get("mcpServers", {})
         cmdlines = [" ".join([s.get("command", "")] + list(s.get("args", []))) for s in servers.values()]
-        bad = [c for c in cmdlines if "@latest" in c or any(s != pin for s in SPEC_RE.findall(c)) or DLX_RE.search(c)]
+        bad = [c for c in cmdlines if "@latest" in c or off_pin(c, pin) or DLX_RE.search(c)]
         out.append(row("mcp-example", "drift" if bad or not cmdlines else "ok",
                        f"unpinned: {bad}" if bad else ("no servers" if not cmdlines else f"{len(cmdlines)} pinned server(s)")))
     except (OSError, json.JSONDecodeError, AttributeError, TypeError) as exc:
@@ -432,11 +478,17 @@ def main(argv: list[str]) -> int:
         print(f"error: fixtures directory not found: {fixtures}", file=sys.stderr)
         return EX_NOTFOUND
 
-    cat = load_catalog(Path(args.catalog))
-    if args.live:
-        findings = check_live(cat, Sources(fixtures, args.timeout, args.shadcn_bin or shutil.which("shadcn")), today)
-    else:
-        findings = check_offline(cat, Path(args.skill))
+    try:
+        cat = load_catalog(Path(args.catalog))
+        if args.live:
+            findings = check_live(cat, Sources(fixtures, args.timeout, args.shadcn_bin or shutil.which("shadcn")), today)
+        else:
+            findings = check_offline(cat, Path(args.skill))
+    except Fatal as exc:
+        if args.json:
+            print(json.dumps({"error": {"code": exc.code, "message": str(exc)}}))
+        print(f"error: {exc}", file=sys.stderr)
+        return exc.rc
     drift = [f for f in findings if f["status"] == "drift"]
     unavailable = [f for f in findings if f["status"] == "unavailable"]
     if args.json:

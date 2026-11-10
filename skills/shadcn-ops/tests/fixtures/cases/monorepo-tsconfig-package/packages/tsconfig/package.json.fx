@@ -1,0 +1,1 @@
+{ "name": "@workspace/tsconfig", "version": "0.0.0", "private": true }
