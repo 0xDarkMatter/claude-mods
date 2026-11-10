@@ -88,7 +88,7 @@ $SHADCN build                                  # registry.json -> public/r/*.jso
 $SHADCN build registry.json --output public/r
 $SHADCN registry validate ./registry.json      # also takes owner/repo
 $SHADCN view http://localhost:3000/r/stat-card.json
-$SHADCN add http://localhost:3000/r/stat-card.json --dry-run
+$SHADCN add --dry-run http://localhost:3000/r/stat-card.json
 ```
 
 Test in a throwaway consumer project for each base you claim to support; a block built

@@ -11,7 +11,9 @@ React and Zod (SKILL-RESOURCE-PROTOCOL.md section 7). Two modes:
     * the catalog parses; the pin is an exact x.y.z whose major matches cli.major, and it
       had already passed the cooldown when it was recorded (published + cooldown <= as_of)
     * SKILL.md carries "Versions verified YYYY-MM-DD" equal to as_of
-    * SKILL.md's allowed-tools never says @latest and every shadcn@ in it is the pin
+    * SKILL.md's allowed-tools pre-approves only read-only shadcn commands (info, docs, view,
+      search, add --dry-run) on a local runner or a global shadcn: no shadcn@ at all (a
+      versioned runner downloads), no dlx, no write command
     * SKILL.md's allowed-tools has no unversioned npx/bunx/npm exec shadcn (they fetch the
       newest release when no local copy exists) unless it says --no / --no-install
     * no fenced code block (``` or ~~~) in SKILL.md or references/ runs shadcn at anything
@@ -84,6 +86,13 @@ DLX_RE = re.compile(r"\b(?:pnpm\s+dlx|pnpx|pnx|yarn\s+dlx)\s+(?:-{1,2}\S+\s+)*sh
 LOCAL_FIRST_RE = re.compile(r"\b(?:npx|bunx|bun\s+x|npm\s+exec)\s+((?:-{1,2}\S+\s+)*)shadcn(?:-ui)?(?![@\w-])")
 NO_FETCH_RE = re.compile(r"(?:^|\s)--no(?:-install)?(?=\s|$)")
 FENCE_RE = re.compile(r"\s*(`{3,}|~{3,})(.*)$")
+# The only shadcn grants allowed-tools may carry: a runner that never downloads, then a
+# read-only verb. Writes (add, init, apply, migrate, eject) and downloads must prompt; hard
+# rules 3, 5 and 6 rely on that prompt, so a wider grant is drift.
+GRANT_RE = re.compile(r"Bash\(([^)]*)\)")
+READONLY_GRANT_RE = re.compile(
+    r"^(?:pnpm exec shadcn|npx --no shadcn|yarn run shadcn|bunx --no-install shadcn|shadcn)"
+    r" (?:info|docs|view|search|add --dry-run) \*$")
 LIFECYCLE = ("preinstall", "install", "postinstall")
 
 
@@ -229,16 +238,20 @@ def check_offline(cat: dict, skill_dir: Path) -> list[dict]:
     if not at:
         out.append(row("allowed-tools", "drift", "SKILL.md frontmatter has no allowed-tools line"))
     else:
-        specs = SPEC_RE.findall(at.group(1))
-        bad = off_pin(at.group(1), pin)
+        specs = [f"{p}@{s.rstrip(TRAILING)}" for p, s in SPEC_RE.findall(at.group(1))]
         fetching = [m.group(0) for m in LOCAL_FIRST_RE.finditer(at.group(1)) if not NO_FETCH_RE.search(m.group(1))]
-        if "@latest" in at.group(1) or bad or DLX_RE.search(at.group(1)) or fetching:
-            out.append(row("allowed-tools", "drift", f"allowed-tools runs shadcn unpinned or off-pin: "
-                                                     f"{bad or fetching or '@latest/dlx'}"))
-        elif not specs:
-            out.append(row("allowed-tools", "drift", f"allowed-tools names no shadcn@{pin} form"))
+        grants = [g.strip() for g in GRANT_RE.findall(at.group(1))
+                  if "shadcn" in g and not g.strip().startswith("bash ")]
+        wide = [g for g in grants if not READONLY_GRANT_RE.match(g)]
+        if "@latest" in at.group(1) or specs or DLX_RE.search(at.group(1)) or fetching:
+            out.append(row("allowed-tools", "drift", f"allowed-tools pre-approves a shadcn download: "
+                                                     f"{specs or fetching or '@latest/dlx'}"))
+        elif wide:
+            out.append(row("allowed-tools", "drift", f"allowed-tools pre-approves a shadcn write or unknown form: {wide}"))
+        elif not grants:
+            out.append(row("allowed-tools", "drift", "allowed-tools grants no read-only shadcn command"))
         else:
-            out.append(row("allowed-tools", "ok", f"{len(specs)} pinned form(s), all shadcn@{pin}"))
+            out.append(row("allowed-tools", "ok", f"{len(grants)} read-only grant(s), no download"))
 
     stray = []
     for name, text in [("SKILL.md", skill_md), *refs.items()]:

@@ -52,6 +52,17 @@ call, and only the literal forms match the skill's pre-approved `allowed-tools`.
 script or CI job that runs in one shell, `SHADCN="$(bash .../shadcn-cmd.sh --prefix)"` is
 fine.
 
+`allowed-tools` pre-approves only read-only commands, and only on the four local runners
+and a global `shadcn`: `info`, `docs`, `view`, `search` and `add --dry-run`. Start every
+preview with `--dry-run`, or the command won't match and will ask: `add --dry-run <item>`,
+and for a review `add --dry-run <item> --diff <file>` or `--view <file>`. `--diff` and
+`--view` take an optional path, so they go after the item (`add --diff button` would read
+`button` as the path); the explicit `--dry-run` is redundant for the CLI and harmless.
+Both review forms were run on 4.23.0 against a real project: they print the diff or the
+file and write nothing. Everything that writes (`add`, `init`, `apply`, `migrate`,
+`eject`, `build`) and every `<pm> dlx shadcn@<pin>` download asks first: that prompt is the
+point, not a gap to work around.
+
 Exit 10 means the project declares shadcn but `node_modules` lacks it: run the frozen
 install first (`npm ci`, `pnpm install --frozen-lockfile`, `yarn install --immutable`,
 `bun ci`). Exit 5 means nothing pinned is available; `--no-dlx` makes that the answer instead
@@ -75,7 +86,7 @@ manager already puts `node_modules/.bin` on PATH.
 | `build` | turns `registry.json` into served JSON files (default `./public/r`) | registry-authoring.md |
 | `registry` | `add [registries...]` writes registries into components.json; `validate [registry]` | |
 | `mcp` | starts the MCP server; `mcp init --client claude|cursor|vscode|codex|opencode` writes a config | mcp.md explains why not for Claude Code |
-| `diff` | deprecated | use `add <item> --diff` |
+| `diff` | deprecated | use `add --dry-run <item> --diff` |
 
 There is no `--package-manager` flag: the CLI detects the manager from the lockfile. Don't
 invent flags; `$SHADCN <command> --help` is the authority for the pinned version.
@@ -94,8 +105,8 @@ invent flags; `$SHADCN <command> --help` is the authority for the pinned version
 ```bash
 $SHADCN init --base base --template vite --name admin --no-monorepo   # new app, Base UI
 $SHADCN add button card dialog table
-$SHADCN add @shadcn/sidebar --dry-run
-$SHADCN add button --diff button.tsx
+$SHADCN add --dry-run @shadcn/sidebar
+$SHADCN add --dry-run button --diff button.tsx   # --dry-run first; --diff and its path after the item
 $SHADCN search @shadcn -q "chart" -t block
 $SHADCN docs data-table field --json
 ```
@@ -122,8 +133,8 @@ partial, merge, skip) and which to choose.
 
 Installed components are your source code. Never re-add over local edits blind:
 
-1. `$SHADCN add <item> --dry-run` lists every file it would touch.
-2. `$SHADCN add <item> --diff <file>` per file: upstream versus local.
+1. `$SHADCN add --dry-run <item>` lists every file it would touch.
+2. `$SHADCN add --dry-run <item> --diff <file>` per file: upstream versus local.
 3. No local edits in a file: overwrite it. Local edits: apply the upstream change by hand and
    keep yours.
 4. `--overwrite` only when the user says so, after a commit.
@@ -141,8 +152,9 @@ ships, or when a release gains install scripts. To bump:
 2. Check it: `npm view shadcn@<v> scripts` (no `preinstall`/`install`/`postinstall`), a
    Socket score (the depscore MCP, or supply-chain-defense's `preinstall-check.sh`), and
    the changelog at ui.shadcn.com/docs/changelog for removed commands or flags.
-3. In one commit: `cli.version`, `cli.published`, `as_of` in the facts file; the pinned forms
-   in SKILL.md's `allowed-tools`; the prose tokens; the "Versions verified" note.
+3. In one commit: `cli.version`, `cli.published`, `as_of` in the facts file; the prose
+   tokens; the "Versions verified" note. `allowed-tools` names no version (it grants only
+   local runners), so it doesn't move.
 4. Run `check-shadcn-facts.py --offline`, then `--live` with that version installed
    (`npm install -g --ignore-scripts shadcn@<v>`) so the `--help` comparison runs.
 5. Re-record the coupled test fixtures in `tests/fixtures/live/` from that version:

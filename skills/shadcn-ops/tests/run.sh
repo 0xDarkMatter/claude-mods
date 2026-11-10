@@ -51,8 +51,8 @@ trap 'rm -rf "$tmp"' EXIT
 # === 1. Layout + frontmatter house rules ===
 # CONTRACT (asserts on SKILL.md's own frontmatter): `name: shadcn-ops`, `license: MIT`,
 # `metadata.author: claude-mods`, a SINGLE-LINE quoted `description:` and a single-line
-# `allowed-tools:` that runs shadcn only in pinned or local forms. A frontmatter edit must
-# keep these, or update this block.
+# `allowed-tools:` that pre-approves shadcn only for read-only verbs on local runners (no
+# download, no write). A frontmatter edit must keep these, or update this block.
 for d in scripts references assets tests; do
   [ -d "$here/$d" ] && ok "dir $d/ exists" || bad "missing dir $d/"
 done
@@ -65,9 +65,11 @@ desc="${desc_line#description: }"; desc="${desc#\"}"; desc="${desc%\"}"
 [ -n "$desc" ] && [ "${#desc}" -le 1000 ] && ok "description ${#desc} chars (<=1000)" || bad "description missing, multi-line or >1000 chars"
 tools="$(grep -m1 '^allowed-tools: ' "$skill" || true)"
 case "$tools" in
-  *@latest*|*"dlx shadcn "*|*"dlx shadcn)"*) bad "allowed-tools pre-approves an unpinned shadcn: $tools" ;;
-  *"shadcn@"*) ok "allowed-tools runs shadcn only pinned or local" ;;
-  *) bad "allowed-tools has no pinned shadcn form" ;;
+  *@latest*|*"dlx shadcn"*|*"shadcn@"*) bad "allowed-tools pre-approves a shadcn download: $tools" ;;
+  *"Bash(shadcn add *)"*|*" shadcn add *)"*|*" shadcn init"*|*" shadcn apply"*|*" shadcn eject"*|*" shadcn migrate"*)
+    bad "allowed-tools pre-approves a shadcn write: $tools" ;;
+  *"shadcn info *)"*) ok "allowed-tools pre-approves shadcn read-only, with no download" ;;
+  *) bad "allowed-tools grants no read-only shadcn command" ;;
 esac
 # The official skill's form must not come back through a later "sync with upstream" edit.
 grep -q 'npx shadcn@latest' "$skill" && bad "SKILL.md tells the agent to run npx shadcn@latest" || ok "SKILL.md never instructs npx shadcn@latest"
@@ -398,11 +400,18 @@ ec 4 "catalog without cli.major -> 4" "${run_py[@]}" "$verify" --offline --catal
 o="$("${run_py[@]}" "$verify" --offline --json --catalog "$tmp/c-nomajor.json" --skill "$here" 2>/dev/null)"
 printf '%s' "$o" | "${run_py[@]}" -c 'import json,sys; assert json.load(sys.stdin)["error"]["code"] == "VALIDATION"' 2>/dev/null \
   && ok "verifier --json: a bad catalog gives the VALIDATION error envelope" || bad "verifier --json bad catalog envelope: $o"
-# Mutated copies of the skill text: an @latest in allowed-tools, and one in a code block.
+# Mutated copies of the skill text: an @latest, a pinned download and a write verb in
+# allowed-tools, and an @latest in a code block.
 mut() { rm -rf "$tmp/m-$1"; mkdir -p "$tmp/m-$1"; cp -R "$here/SKILL.md" "$here/references" "$here/assets" "$tmp/m-$1/"; }
-mut tools; sed "s/Bash(pnpm dlx shadcn@$PIN \\*)/Bash(pnpm dlx shadcn@latest *)/" "$here/SKILL.md" > "$tmp/m-tools/SKILL.md"
+mut tools; sed "s/Bash(pnpm exec shadcn info \\*)/Bash(pnpm dlx shadcn@latest info *)/" "$here/SKILL.md" > "$tmp/m-tools/SKILL.md"
 cmp -s "$here/SKILL.md" "$tmp/m-tools/SKILL.md" && bad "allowed-tools mutation did not apply (pattern drifted)" || ok "allowed-tools mutation applied"
 ec 10 "allowed-tools with @latest -> 10" "${run_py[@]}" "$verify" --offline --catalog "$facts" --skill "$tmp/m-tools"
+mut pinned; sed "s/Bash(pnpm exec shadcn info \\*)/Bash(pnpm dlx shadcn@$PIN info *)/" "$here/SKILL.md" > "$tmp/m-pinned/SKILL.md"
+cmp -s "$here/SKILL.md" "$tmp/m-pinned/SKILL.md" && bad "pinned-download mutation did not apply (pattern drifted)" || ok "pinned-download mutation applied"
+ec 10 "allowed-tools pre-approving a pinned download -> 10" "${run_py[@]}" "$verify" --offline --catalog "$facts" --skill "$tmp/m-pinned"
+mut write; sed "s/Bash(shadcn add --dry-run \\*)/Bash(shadcn add *)/" "$here/SKILL.md" > "$tmp/m-write/SKILL.md"
+cmp -s "$here/SKILL.md" "$tmp/m-write/SKILL.md" && bad "write-grant mutation did not apply (pattern drifted)" || ok "write-grant mutation applied"
+ec 10 "allowed-tools pre-approving add -> 10" "${run_py[@]}" "$verify" --offline --catalog "$facts" --skill "$tmp/m-write"
 mut fence; printf '\n```bash\nnpx shadcn@latest add button\n```\n' >> "$tmp/m-fence/references/forms.md"
 ec 10 "@latest in a reference code block -> 10" "${run_py[@]}" "$verify" --offline --catalog "$facts" --skill "$tmp/m-fence"
 # Forms the checker once missed: the retired shadcn-ui package, a ~~~ fence, and an
@@ -412,9 +421,9 @@ ec 10 "retired shadcn-ui@latest in a code block -> 10" "${run_py[@]}" "$verify" 
 mut tilde; printf '\n~~~bash\nnpx shadcn@latest add button\n~~~\n' >> "$tmp/m-tilde/references/forms.md"
 ec 10 "@latest in a ~~~ fence -> 10" "${run_py[@]}" "$verify" --offline --catalog "$facts" --skill "$tmp/m-tilde"
 for r in npx bunx; do
-  mut "$r"; sed "s/Bash($r shadcn@$PIN \\*)/Bash($r shadcn *)/" "$here/SKILL.md" > "$tmp/m-$r/SKILL.md"
+  mut "$r"; sed -E "s/Bash\\($r --no(-install)? shadcn info \\*\\)/Bash($r shadcn info *)/" "$here/SKILL.md" > "$tmp/m-$r/SKILL.md"
   cmp -s "$here/SKILL.md" "$tmp/m-$r/SKILL.md" && bad "allowed-tools $r mutation did not apply (pattern drifted)" || ok "allowed-tools $r mutation applied"
-  ec 10 "unversioned Bash($r shadcn *) in allowed-tools -> 10" "${run_py[@]}" "$verify" --offline --catalog "$facts" --skill "$tmp/m-$r"
+  ec 10 "unversioned Bash($r shadcn info *) in allowed-tools -> 10" "${run_py[@]}" "$verify" --offline --catalog "$facts" --skill "$tmp/m-$r"
 done
 
 # COUPLED GOLDEN FIXTURES: tests/fixtures/live was recorded from npm and the pinned CLI on

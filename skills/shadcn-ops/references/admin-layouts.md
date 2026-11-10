@@ -24,7 +24,7 @@ variants), `login-01` to `login-05`, `signup-01` to `signup-05`, and more at
 ui.shadcn.com/blocks.
 
 ```bash
-$SHADCN add dashboard-01 --dry-run      # see every file and component it brings
+$SHADCN add --dry-run dashboard-01      # see every file and component it brings
 $SHADCN add dashboard-01
 ```
 

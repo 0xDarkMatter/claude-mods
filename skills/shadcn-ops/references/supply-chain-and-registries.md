@@ -51,9 +51,9 @@ people with write access to that repository.
 
 ```bash
 $SHADCN view @acme/data-grid                      # metadata, dependencies, file contents
-$SHADCN add @acme/data-grid --dry-run             # the files it would write in THIS project
-$SHADCN add @acme/data-grid --diff                # diffs of the first five files
-$SHADCN add @acme/data-grid --view lib/fetcher.ts # one file in full
+$SHADCN add --dry-run @acme/data-grid             # the files it would write in THIS project
+$SHADCN add --dry-run @acme/data-grid --diff      # diffs of the first five files
+$SHADCN add --dry-run @acme/data-grid --view lib/fetcher.ts   # one file in full
 ```
 
 Read, in order:

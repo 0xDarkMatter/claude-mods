@@ -50,7 +50,7 @@ The upgrade order from the shadcn docs:
    "tw-animate-css";`, delete the `@plugin` line).
 6. Set `tailwind.config` to `""` in components.json.
 7. Update the primitive packages and re-add components you haven't customised
-   (`add <item> --diff` first for those you have).
+   (`add --dry-run <item> --diff <file>` first for those you have).
 
 Only new projects start on Tailwind CSS v4 and React 19; existing v3 apps keep working on the
 `new-york` components. Don't half-migrate: one project, one line.
@@ -72,7 +72,7 @@ React 19 yet: fix or replace the package rather than reaching for `--legacy-peer
 - **Recharts v3:** the chart notes in charts.md.
 - **TanStack Table v9:** a v8 data table keeps working; a v9 rewrite is its own change
   (data-tables.md).
-- **`diff` command:** deprecated; use `add <item> --diff`.
+- **`diff` command:** deprecated; use `add --dry-run <item> --diff`.
 
 ## Eject
 

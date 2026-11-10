@@ -1,7 +1,7 @@
 {
   "schema": "claude-mods.shadcn-ops.facts/v1",
   "as_of": "2026-11-10",
-  "_note": "The one place shadcn-ops pins fast-moving facts. scripts/shadcn-cmd.sh reads cli.version to build the dlx prefix; scripts/shadcn-audit.py reads cli, bases, styles and dist_tags; scripts/check-shadcn-facts.py --offline checks the prose still states every prose_tokens entry and that SKILL.md's allowed-tools pins cli.version, and --live compares cli and ecosystem with npm and the pinned CLI's --help. Bump the pin with the procedure in references/cli-and-pinning.md#bumping-the-pin: version, published, as_of, the allowed-tools line, the prose tokens and the Versions verified note move together.",
+  "_note": "The one place shadcn-ops pins fast-moving facts. scripts/shadcn-cmd.sh reads cli.version to build the dlx prefix; scripts/shadcn-audit.py reads cli, bases, styles and dist_tags; scripts/check-shadcn-facts.py --offline checks the prose still states every prose_tokens entry and that SKILL.md's allowed-tools pre-approves only read-only shadcn commands on local runners (no download, no version), and --live compares cli and ecosystem with npm and the pinned CLI's --help. Bump the pin with the procedure in references/cli-and-pinning.md#bumping-the-pin: version, published, as_of, the prose tokens and the Versions verified note move together.",
   "cli": {
     "package": "shadcn",
     "version": "4.23.0",

@@ -2,7 +2,7 @@
 name: shadcn-ops
 description: "Use when building or fixing UI with shadcn/ui or in any project with a components.json: init, add, view, search, docs, info, presets and apply, Base UI vs Radix vs React Aria, Tailwind v4 theming with CSS variables, dark mode, admin dashboards (sidebar, dashboard and login blocks, data tables on TanStack Table, forms with Field and React Hook Form or TanStack Form, dialogs, sheets, toasts, charts, empty and loading states), monorepos, migrate, eject, registry authoring (registry.json, shadcn build), third-party registries and the shadcn MCP server. Runs the CLI pinned, never @latest; ships a project audit."
 license: MIT
-allowed-tools: "Read, Edit, Write, Glob, Grep, Bash(bash *shadcn-ops/scripts/*), Bash(pnpm exec shadcn *), Bash(npx --no shadcn *), Bash(yarn run shadcn *), Bash(bunx --no-install shadcn *), Bash(shadcn *), Bash(npx shadcn@4.23.0 *), Bash(pnpm dlx shadcn@4.23.0 *), Bash(yarn dlx shadcn@4.23.0 *), Bash(bunx shadcn@4.23.0 *)"
+allowed-tools: "Read, Edit, Write, Glob, Grep, Bash(bash *shadcn-ops/scripts/*), Bash(pnpm exec shadcn info *), Bash(pnpm exec shadcn docs *), Bash(pnpm exec shadcn view *), Bash(pnpm exec shadcn search *), Bash(pnpm exec shadcn add --dry-run *), Bash(npx --no shadcn info *), Bash(npx --no shadcn docs *), Bash(npx --no shadcn view *), Bash(npx --no shadcn search *), Bash(npx --no shadcn add --dry-run *), Bash(yarn run shadcn info *), Bash(yarn run shadcn docs *), Bash(yarn run shadcn view *), Bash(yarn run shadcn search *), Bash(yarn run shadcn add --dry-run *), Bash(bunx --no-install shadcn info *), Bash(bunx --no-install shadcn docs *), Bash(bunx --no-install shadcn view *), Bash(bunx --no-install shadcn search *), Bash(bunx --no-install shadcn add --dry-run *), Bash(shadcn info *), Bash(shadcn docs *), Bash(shadcn view *), Bash(shadcn search *), Bash(shadcn add --dry-run *)"
 metadata:
   author: claude-mods
   related-skills: "react-ops, tailwind-ops, nextjs-ops, supply-chain-defense, a11y-ops, figma-ops, package-manager-ops"
@@ -35,18 +35,22 @@ are about to install, and goes deep on the admin dashboards most projects build 
    between tool calls nor matches the pre-approved forms in `allowed-tools`. Order: the
    project's own devDependency, then a global `shadcn` of the pin's major, then
    `<pm> dlx shadcn@<pin>`. Exit 10 means run the frozen install first; exit 5 means nothing
-   pinned is available.
+   pinned is available. Only `info`, `docs`, `view`, `search` and `add --dry-run` (flag
+   first) are pre-approved on a local or global runner: every write and every one-off
+   download asks first, by design.
 2. **Read the project before writing code:** `$SHADCN info --json` gives the base, style,
    Tailwind version, aliases, resolved paths, `iconLibrary`, `isRSC` and installed
    components. Never assume the base, the icon library or the import alias.
 3. **Third-party registries are untrusted code.** For anything not from `@shadcn`: `view`,
-   then `add --dry-run`, then `add --diff` / `--view` per file, and read the dependencies,
-   target paths and network calls before the real `add`. Never pick a registry for the user.
+   then `add --dry-run <item>`, then `add --dry-run <item> --diff <file>` (or `--view
+   <file>`) per file, and read the dependencies, target paths and network calls before the
+   real `add`. Never pick a registry for the user.
 4. **`add` installs npm packages.** New ones follow the supply-chain rule: a 7-day cooldown
    and a behavioural scan (supply-chain-defense owns how), with the lockfile change committed
    beside the component.
-5. **Installed components are the user's code.** Update with `add --dry-run` and `--diff`,
-   merge by hand, and use `--overwrite` only with the user's OK, after a commit.
+5. **Installed components are the user's code.** Update with `add --dry-run <item>` and
+   `add --dry-run <item> --diff <file>`, merge by hand, and use `--overwrite` only with the
+   user's OK, after a commit.
 6. **Ask, and commit first, before project-wide rewrites:** `apply` (overwrites
    components), `init --force`, `migrate`, `add --all --overwrite`, and `eject`, which is
    irreversible.
@@ -104,7 +108,7 @@ are about to install, and goes deep on the admin dashboards most projects build 
 
 | Need | Use | Notes |
 |---|---|---|
-| The whole shell | `$SHADCN add dashboard-01 --dry-run`, then adapt | or a `sidebar-01`..`sidebar-16` block |
+| The whole shell | `$SHADCN add --dry-run dashboard-01`, then adapt | or a `sidebar-01`..`sidebar-16` block |
 | Navigation | `Sidebar` (`collapsible="icon"`, tooltips on items), `Breadcrumb` | Cmd/Ctrl+B toggles |
 | Lists | the data-table guide (TanStack Table v9) on `Table` | server-side paging when data is large |
 | Create and edit | `Dialog` + `Field` forms; `Sheet` for side panels | validate on client and server |
@@ -124,7 +128,7 @@ told otherwise; check an existing project's lines with the audit before writing 
 |---|---|
 | `scripts/shadcn-cmd.sh [--cwd DIR] [--prefix \| --json] [--pm PM] [--no-dlx]` | the pinned runner; default output is JSON `{prefix, source, version, pm, pin, installed}` |
 | `scripts/shadcn-audit.py [DIR] [--json] [--ignore ID] [--checks]` | read-only audit; `--checks` lists the 20 check ids |
-| `scripts/check-shadcn-facts.py --offline` | after editing the facts, SKILL.md or a reference: pin, allowed-tools, code blocks and prose agree |
+| `scripts/check-shadcn-facts.py --offline` | after editing the facts, SKILL.md or a reference: pin, read-only allowed-tools, code blocks and prose agree |
 | `scripts/check-shadcn-facts.py --live` | weekly: npm (pin age, majors, install scripts, ecosystem majors) and the pinned CLI's `--help`; exit 7 is advisory |
 | `scripts/run-python.sh` | launches the `.py` scripts with the first real Python 3.8+ |
 | `assets/shadcn-facts.json` | the pin, cooldown and age policy, commands, migrations, bases, styles, ecosystem majors |

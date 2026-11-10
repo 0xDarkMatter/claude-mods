@@ -118,7 +118,7 @@ first:
 |---|---|---|
 | Overwrite | `$SHADCN apply <code>` | config, fonts, CSS variables and every detected component |
 | Partial | `$SHADCN apply <code> --only theme,font` | colours and/or fonts only; components untouched (`icon` is not a partial option) |
-| Merge | `$SHADCN init --preset <code> --force --no-reinstall`, then per component `add --dry-run` / `--diff` | new config and CSS; components merged one by one, keeping local edits |
+| Merge | `$SHADCN init --preset <code> --force --no-reinstall`, then per component `add --dry-run <item>` and `add --dry-run <item> --diff <file>` | new config and CSS; components merged one by one, keeping local edits |
 | Skip | `$SHADCN init --preset <code> --force --no-reinstall` | config and CSS only |
 
 `apply` needs an existing components.json and keeps the project's base; preset codes don't
