@@ -14,7 +14,7 @@ Practical patterns for creative coding and generative art. Covers three.js, p5.j
 
 > Color-ops handles CSS color, accessibility, and design tokens. This skill focuses on generative/procedural color techniques (palette algorithms, shader color, gradient interpolation in perceptual space).
 >
-> Application/game-scale three.js — GLTF asset pipelines, AnimationMixer, fixed-timestep game loops, physics (rapier/cannon-es), react-three-fiber, instancing/disposal at scale — is [threejs-ops](../threejs-ops/SKILL.md). This skill owns the creative/shader side of three.js.
+> Application/game-scale three.js — GLTF asset pipelines, AnimationMixer, fixed-timestep game loops, physics (rapier/cannon-es), react-three-fiber, instancing/disposal at scale, game-grade render pipelines (HDR post chain, PCSS, volumetrics), GPU-baked procedural PBR and code-built game worlds — is [threejs-ops](../threejs-ops/SKILL.md). This skill owns the creative/shader side of three.js: sketches, shader toys, art-piece particles and post.
 
 The detailed code, technique walkthroughs, and parameter tables live in the
 references below. This body holds the decisions: which surface, which algorithm,

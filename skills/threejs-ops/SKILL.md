@@ -1,6 +1,6 @@
 ---
 name: threejs-ops
-description: "Application/game-scale three.js: ES modules, GLTF pipeline (DRACO/KTX2/meshopt), AnimationMixer, physics (rapier/cannon-es), react-three-fiber, and performance at scale (InstancedMesh, LOD, draw calls). Triggers on: three.js, GLTFLoader, r3f, game loop, WebGL memory leak, boids."
+description: "Application/game-scale three.js: ES modules, GLTF pipeline (DRACO/KTX2/meshopt), AnimationMixer, physics (rapier/cannon-es), react-three-fiber, performance at scale (InstancedMesh, LOD, draw calls), and high-fidelity games built entirely from code: HDR post stack, PCSS shadows, volumetric fog, GPU-baked procedural PBR materials, procedural worlds and audio. Triggers on: three.js, GLTFLoader, r3f, game loop, WebGL memory leak, boids, browser FPS, AAA look, procedural textures, no-asset game."
 license: MIT
 compatibility: "Web three.js r150+ (ES modules only — UMD builds removed in r160). check-three-facts.py is stdlib-only Python 3.10+."
 metadata:
@@ -18,9 +18,9 @@ fast (and leak-free) as scene complexity grows.
 
 | Concern | Owner |
 |---|---|
-| Creative/generative three.js — scene scaffolding, GLSL shaders, particles, post-processing | [genart-ops](../genart-ops/SKILL.md) |
+| Creative/generative three.js — sketches, generative art, shader toys, art-piece particles and post | [genart-ops](../genart-ops/SKILL.md) |
 | three.js inside a Mapbox GL custom layer (`CustomLayerInterface`, threebox) | [mapbox-ops](../mapbox-ops/SKILL.md) |
-| App/game-scale three.js — modules, assets, animation, loops, physics, R3F, scale | **this skill** |
+| App/game-scale three.js — modules, assets, animation, loops, physics, R3F, scale, and the game-grade render pipeline, procedural materials and worlds (§9) | **this skill** |
 
 ---
 
@@ -248,6 +248,30 @@ self-explanatory reference implementations.
 
 ---
 
+## 9. High-fidelity games built from code
+
+Distilled from a reference build: a rain-soaked port FPS that Claude made in one shot as a
+single-file artifact on plain `WebGLRenderer` r180, with zero downloaded assets. Its
+look comes from discipline, not features:
+
+| Lever | Rule of thumb | Reference |
+|---|---|---|
+| Light | One art-directed sun + procedural sky PMREM-baked (sun removed) as the only ambient | [render-pipeline.md](references/render-pipeline.md) |
+| Atmosphere | Shadow-mapped volumetric fog; far haze uses the sky's horizon colour so nothing seams | [render-pipeline.md](references/render-pipeline.md) |
+| Finishing | Own HDR chain (RGBA16F, no EffectComposer): AO on ambient only, bloom, auto-exposure, ACES/AgX + grade, FXAA + grain | [render-pipeline.md](references/render-pipeline.md) |
+| Surfaces | GPU-bake layered PBR sets from periodic noise once; add world-space variation + weather at runtime | [procedural-materials.md](references/procedural-materials.md) |
+| Density | Merge statics by material, bake weathering into vertex colours, one-draw backdrops; ~100-150 calls | [procedural-world.md](references/procedural-world.md) |
+| Robustness | Module stubs, per-module try/catch, self-test + tiered fallback, test hooks an agent can drive | [game-architecture.md](references/game-architecture.md) |
+
+**Shadow version gate:** since **r182** PCF shadow maps are hardware-compare samplers with no
+raw depth, so the PCSS patch moves to `BasicShadowMap`; render-pipeline.md section 3 has both splices.
+
+Where a quick human pass paid off most on top of the one-shot build: hero
+assets the player stares at (weapon + hands), weapon sound, and gameplay variety. Spend review
+time there first.
+
+---
+
 ## Bundled resources
 
 | Resource | Load when |
@@ -259,6 +283,10 @@ self-explanatory reference implementations.
 | [references/r3f-drei.md](references/r3f-drei.md) | React Three Fiber apps, drei helpers, R3F pitfalls |
 | [references/scale-and-disposal.md](references/scale-and-disposal.md) | Instancing, LOD, culling, draw-call budgets, disposal/leaks |
 | [references/actors-and-steering.md](references/actors-and-steering.md) | Boids, steering, waypoint actors, ambient life |
+| [references/render-pipeline.md](references/render-pipeline.md) | HDR post chain, sky/PMREM, PCSS, SSAO, volumetric fog, exposure/tonemap, dynamic resolution |
+| [references/procedural-materials.md](references/procedural-materials.md) | Texture-free PBR: GPU bake, noise kit, wear layers, chunk patching, procedural AA |
+| [references/procedural-world.md](references/procedural-world.md) | Code-built levels, merge-by-material, authored LOD, sea, rain, flocks, particles, AABB collision |
+| [references/game-architecture.md](references/game-architecture.md) | Module contract + stubs, fault isolation, test hooks, input fallbacks, HUD, procedural audio |
 | [assets/importmap-starter.html](assets/importmap-starter.html) | Starting a no-bundler project — copy and edit |
 | [assets/three-facts.json](assets/three-facts.json) | Canonical version gates + package facts (verifier input) |
 

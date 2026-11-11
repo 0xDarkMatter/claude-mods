@@ -6,7 +6,8 @@
     "examples_js_removed": "r148",
     "umd_builds_removed": "r160",
     "webgpu_build_added": "r167",
-    "_comment": "r148 (Dec 2022) dropped examples/js non-module loaders; r160 (Dec 2023) dropped build/three.js + build/three.min.js UMD builds; r167 (Jul 2024) added the three.webgpu.js build + three/webgpu + three/tsl exports. The skill assumes r150+ and ES modules only."
+    "pcf_shadow_compare_sampler": "r182",
+    "_comment": "r148 (Dec 2022) dropped examples/js non-module loaders; r160 (Dec 2023) dropped build/three.js + build/three.min.js UMD builds; r167 (Jul 2024) added the three.webgpu.js build + three/webgpu + three/tsl exports; r182 made PCF shadow maps hardware-compare sampler2DShadow, deprecated PCFSoftShadowMap and dropped cubeToUV from shadowmap_pars_fragment (checked 2026-11-11 against the r181.2 and r182.0 sources), which moves the render-pipeline.md PCSS patch to BasicShadowMap. The skill assumes r150+ and ES modules only."
   },
   "npm_scheme": {
     "package": "three",
