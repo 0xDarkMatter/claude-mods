@@ -182,6 +182,19 @@ feature releases live in the README "Recent Updates" section.
 
 ### Changed
 
+- **pigeon's database runs in WAL mode, so a reader never blocks a writer.** In SQLite's
+  default rollback journal one open reader stops every write until it finishes, and a reader
+  that hangs (eight did, for up to 48 h) blocks sends past any busy timeout. `mail-db.sh`
+  switches `pmail.db` to WAL once, retrying on later commands while other connections keep it
+  busy, and records the switch in `user_version`. A database switched back on purpose
+  (`PRAGMA journal_mode=DELETE`, for `~/.claude` on a network drive) stays switched back.
+  `pmail.db-wal` and `-shm` now sit beside the database while sessions use it, and on macOS
+  they stay after the last one closes. A new case holds a read transaction open during a send:
+  it fails against the old scripts and against a mutant without the switch. The suite and a
+  WAL probe pass on Windows 11 (Git Bash, sqlite 3.46), Linux (Ubuntu 24.04 on a boat.dev box,
+  ext4, sqlite 3.45) and macOS 15.8 (Apple silicon, APFS, the system's bash 3.2 and sqlite
+  3.43, no GNU timeout). WSL was not run: virtualization is off on the test machine.
+
 - **Skill descriptions trimmed by about 2,750 chars across 36 skills.** Cuts are prose that
   restated a skill's own trigger list; trigger phrases stay. The README's budget section and
   `claude-code-ops` now use the current docs: `skillListingMaxDescChars` replaces

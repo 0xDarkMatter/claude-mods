@@ -123,6 +123,7 @@ Every session in a project reads one inbox, and a repo's worktrees are the same 
 
 - **A failed write is safe to retry.** `send`, `reply` and `broadcast` commit everything or nothing. A broadcast reaches every project or none, so retrying a failed one never delivers twice.
 - **Queries wait for locks.** Each one waits up to 5 s for another connection's lock (the hook 2 s) instead of failing at once with `database is locked`.
+- **Readers never block writers.** The database switches itself to WAL mode once, so a slow or stuck reader can't hold up a send. `pmail.db-wal` and `pmail.db-shm` sit beside it while sessions use it; on macOS they stay there between uses.
 - **No query runs for long.** Where GNU `timeout` is on PATH (Linux, Git Bash), a query is killed after 30 s, or 4 s in the hook, which runs under a 5 s hook timeout. The hook makes the same few queries however much mail is waiting.
 
 ## Attachments
@@ -218,6 +219,7 @@ Without this step, pigeon still works but you have to check manually (`pigeon re
 ~/.claude/
   settings.json            # Hook config (you edit this)
   pmail.db                 # Message store (auto-created on first use)
+  pmail.db-wal, -shm       # WAL files: present while in use (macOS keeps them)
   pigeon/
     mail-db.sh             # All pmail commands (send, read, reply, etc.)
     check-mail.sh          # PreToolUse hook (silent when inbox empty)
@@ -244,13 +246,13 @@ bash ~/.claude/pigeon/mail-db.sh purge --all
 ### Uninstall
 
 ```bash
-rm -rf ~/.claude/pigeon ~/.claude/pmail.db
+rm -rf ~/.claude/pigeon ~/.claude/pmail.db ~/.claude/pmail.db-wal ~/.claude/pmail.db-shm
 # Then remove the hooks.PreToolUse entry from ~/.claude/settings.json
 ```
 
 ## Database
 
-Single SQLite file at `~/.claude/pmail.db`. Auto-created on first `init` or `send`.
+Single SQLite file at `~/.claude/pmail.db`, in WAL mode (see Concurrency). Auto-created on first `init` or `send`. To copy it, use `sqlite3 ~/.claude/pmail.db ".backup pmail-copy.db"`, not `cp`: the newest writes can still sit in `pmail.db-wal`.
 
 ```sql
 CREATE TABLE messages (
@@ -287,6 +289,7 @@ CREATE TABLE projects (
 | A lane's report never reached the coordinator | Install the current `check-mail.sh` and `mail-db.sh` together. Older hooks cleared the shared signal when the lane saw its own report, and an older `read` marked it read |
 | `Warning: 2 projects are named '...'` | Two directories share a basename. Send by the hash the warning lists |
 | `database is locked` | A connection held a lock past the 5 s wait. Look for a stuck `sqlite3` (`tasklist /FI "IMAGENAME eq sqlite3.exe"` on Windows, `pgrep -l sqlite3` elsewhere) or a database browser with `pmail.db` open. The failed command sent nothing, so retry it |
+| `~/.claude` is on a network drive | WAL needs shared memory that network filesystems don't provide. Switch back once with `sqlite3 ~/.claude/pmail.db "PRAGMA journal_mode=DELETE"`; pigeon won't switch it again. Never share one `pmail.db` between WSL and Windows |
 | Upgraded from basename IDs | Run `pigeon migrate` to convert old messages to hash-based IDs |
 | Changed display name | Use `pigeon alias old-name new-name` to update the project's display name |
 | Want to disable for one project | `touch .claude/pigeon.disable` in that project's root |

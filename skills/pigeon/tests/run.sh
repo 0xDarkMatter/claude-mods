@@ -335,7 +335,9 @@ delivery() {
 }
 
 # send and broadcast start together while another connection holds the write lock
-# for 3 s, then race each other for it.
+# for 3 s, then race each other for it. 3 s, because in WAL mode their reads pass
+# the lock and each needs about 1 s of process starts on Git Bash before its first
+# write: a 1 s hold was already gone by then, so busy_timeout 0 passed too.
 if hold_db "BEGIN EXCLUSIVE;" "$SB/release"; then
   (sleep 3; touch "$SB/release") &
   bash "$MAIL" send "$(pwd)" "under a write lock" "waited" </dev/null >/dev/null 2>"$SB/send.err" &
@@ -370,6 +372,20 @@ expect_eq "a broadcast that fails part-way sends to no project" "$peers 0 0" "$(
 sqlite3 "$DB" "DROP TRIGGER inject_failure;"
 bash "$MAIL" broadcast "atomic" "all or nothing" </dev/null >/dev/null 2>&1
 expect_eq "retrying a failed broadcast sends exactly one copy to every other project" "$peers $peers $peers" "$(delivery atomic)"
+
+# A reader that hangs with its transaction open (eight hung for up to 48 h on
+# 2026-11-11) blocked every writer in rollback-journal mode, past any busy timeout.
+# In WAL mode a writer passes it. This reader stays open until the send returns.
+if hold_db "BEGIN; SELECT COUNT(*) FROM messages;" "$SB/release"; then
+  if bash "$MAIL" send "$(pwd)" "past a reader" "not blocked" </dev/null >/dev/null 2>"$SB/lock.err"; then
+    ok "send succeeds while another connection holds a read transaction open"
+  else
+    no "send blocked by an open reader: $(head -c 200 "$SB/lock.err")"
+  fi
+  touch "$SB/release"; wait
+else
+  no "setup: could not open the reader"; wait
+fi
 
 echo ""
 echo "=== $PASS passed, $FAIL failed ==="

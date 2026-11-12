@@ -9,14 +9,15 @@
 #
 # Sections (search "# ===" headers): SQLite access (busy timeout, wall-clock
 # guard, the sqlite3 shadow, stdin exec) | Identity (project hash, main-repo
-# resolution, session id) | Database (schema + migrations, escaping, name
-# resolution) | Identicon display | Mail operations (one function per command) |
-# Dispatch.
+# resolution, session id) | Database (schema + migrations incl. WAL, escaping,
+# name resolution) | Identicon display | Mail operations (one function per
+# command) | Dispatch.
 #
 # Concurrency contract: pmail.db is shared by every session on the machine, and
 # the check-mail hook reads it on every tool call. So every query waits for locks
-# (SQLITE_BUSY_MS), and a command that writes either commits everything or
-# nothing - a failed send, reply or broadcast is always safe to retry.
+# (SQLITE_BUSY_MS), the database runs in WAL mode (readers never block writers),
+# and a command that writes either commits everything or nothing - a failed
+# send, reply or broadcast is always safe to retry.
 
 set -euo pipefail
 
@@ -184,7 +185,10 @@ not_mine() {
 
 init_db() {
   mkdir -p "$(dirname "$MAIL_DB")"
-  sqlite3 "$MAIL_DB" <<'SQL'
+  # The trailing PRAGMA user_version feeds the WAL migration at the end; reading
+  # it here costs no extra sqlite3 start.
+  local user_version
+  user_version=$(sqlite3 "$MAIL_DB" <<'SQL'
 CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     from_project TEXT NOT NULL,
@@ -204,7 +208,9 @@ CREATE TABLE IF NOT EXISTS projects (
     path TEXT NOT NULL,
     registered TEXT DEFAULT (datetime('now'))
 );
+PRAGMA user_version;
 SQL
+)
   # Migration: add priority column if missing
   sqlite3 "$MAIL_DB" "SELECT priority FROM messages LIMIT 0;" 2>/dev/null || \
     sqlite3 "$MAIL_DB" "ALTER TABLE messages ADD COLUMN priority TEXT DEFAULT 'normal';" 2>/dev/null
@@ -220,6 +226,22 @@ SQL
   # Migration: add from_session (sender's session id, see self_session) if missing
   sqlite3 "$MAIL_DB" "SELECT from_session FROM messages LIMIT 0;" 2>/dev/null || \
     sqlite3 "$MAIL_DB" "ALTER TABLE messages ADD COLUMN from_session TEXT DEFAULT '';" 2>/dev/null
+  # Migration (once per database): WAL journal mode, so readers never block a
+  # writer. In the default rollback journal one open reader stopped every write
+  # until it finished - for 48 h when a reader hung (2026-11-11) - and no busy
+  # timeout waits that out. The mode is stored in the file, so every client
+  # (older scripts included) follows it. The switch fails while any other
+  # connection is open; it is retried on the next command until it succeeds.
+  # user_version 1 records that the switch was made. Guard: don't re-apply WAL
+  # when user_version is 1: a database switched back on purpose (PRAGMA
+  # journal_mode=DELETE, e.g. for ~/.claude on a network drive, where WAL's
+  # shared memory does not work) must stay switched back. Leaves -wal and -shm
+  # files beside pmail.db while connections are open; macOS's system SQLite
+  # keeps them after the last one closes (seen on 15.8), Linux removes them.
+  if [ "$user_version" = "0" ] \
+    && [ "$(sqlite3 "$MAIL_DB" "PRAGMA journal_mode=WAL;" 2>/dev/null)" = "wal" ]; then
+    sqlite3 "$MAIL_DB" "PRAGMA user_version=1;" >/dev/null 2>&1 || true
+  fi
 }
 
 # Escape text for a single-quoted SQL literal: double every ', and splice any
