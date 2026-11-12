@@ -7,10 +7,16 @@
 # included. Each message records its sender's session (from_session), and a
 # session's inbox commands never show or mark its own mail (self_session).
 #
-# Sections (search "# ===" headers): SQLite access (the sqlite3 shadow, stdin
-# exec) | Identity (project hash, main-repo resolution, session id) | Database
-# (schema + migrations, escaping, name resolution) | Identicon display | Mail
-# operations (one function per command) | Dispatch.
+# Sections (search "# ===" headers): SQLite access (busy timeout, wall-clock
+# guard, the sqlite3 shadow, stdin exec) | Identity (project hash, main-repo
+# resolution, session id) | Database (schema + migrations, escaping, name
+# resolution) | Identicon display | Mail operations (one function per command) |
+# Dispatch.
+#
+# Concurrency contract: pmail.db is shared by every session on the machine, and
+# the check-mail hook reads it on every tool call. So every query waits for locks
+# (SQLITE_BUSY_MS), and a command that writes either commits everything or
+# nothing - a failed send, reply or broadcast is always safe to retry.
 
 set -euo pipefail
 
@@ -21,6 +27,26 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # SQLite access - the one choke point every query goes through
 # ============================================================================
 
+# Guard: every sqlite3 call gets a busy timeout AND a wall-clock limit. Don't
+# drop either one.
+# - Busy timeout: SQLite's default is 0, so a write that met any other connection
+#   failed at once with "database is locked (5)". On 2026-11-11 a broadcast died
+#   that way part-way through, and its retry left 239 copies across 65 projects.
+#   Locks are held for milliseconds, so 5 s waits out any healthy connection.
+# - Wall clock: bounds a sqlite3 process that hangs. Eight one-row SELECTs were
+#   found hung for 52 min to 48 h with their parents gone; the cause was not
+#   found (a dead pipe did not reproduce it). 30 s is far past the busy timeout,
+#   so it never cuts off a call that is only waiting for a lock.
+# Only GNU timeout is used, found by its --version: Windows' own timeout.exe
+# (System32) takes other arguments and would run nothing. Without GNU timeout
+# (stock macOS) calls run unguarded. --foreground keeps sqlite3 in the caller's
+# process group, so Ctrl-C still reaches it.
+SQLITE_BUSY_MS=5000
+SQLITE_RUN=(command sqlite3)
+if timeout --version >/dev/null 2>&1; then
+  SQLITE_RUN=(timeout --foreground -k 5 30 sqlite3)
+fi
+
 # Guard: this function deliberately SHADOWS the sqlite3 binary. Windows' native
 # sqlite3.exe (the one Git Bash finds at C:\Windows\sqlite3) writes its output in
 # text mode, so every "\n" - row separators AND newlines stored inside a value -
@@ -29,9 +55,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # with four attachments showed the first three as "(missing)" although the stored
 # paths were clean. Stripping CR here fixes every read site at once; `pipefail`
 # (set above) keeps sqlite3's own exit status, which the `|| ALTER TABLE`
-# migrations depend on. Don't bypass it with `command sqlite3` at a call site.
+# migrations depend on. Don't bypass it with `command sqlite3` at a call site:
+# that would also skip the busy timeout and the wall-clock guard above.
 sqlite3() {
-  command sqlite3 "$@" | tr -d '\r'
+  "${SQLITE_RUN[@]}" -cmd ".timeout ${SQLITE_BUSY_MS}" "$@" | tr -d '\r'
 }
 
 # Run SQL that carries user text (subjects, bodies, attachment lists) by feeding
@@ -42,8 +69,11 @@ sqlite3() {
 # the quoted literal of an already-open statement, and the sqlite3 shell only
 # reads meta-commands at a statement boundary. Routed through the sqlite3()
 # shadow above like every other query.
+# -bail stops at the first failed statement. Without it the shell runs on: after
+# a failed BEGIN IMMEDIATE, broadcast's INSERT would run in autocommit and its
+# COMMIT would then fail, so mail that went out was reported as not sent.
 sql_exec() {
-  printf '%s\n' "$1" | sqlite3 "$MAIL_DB"
+  printf '%s\n' "$1" | sqlite3 -bail "$MAIL_DB"
 }
 
 # ============================================================================
@@ -299,16 +329,27 @@ resolve_target() {
   echo "$hash"
 }
 
-# Look up display name for a hash
+# Look up display name for a hash, falling back to the hash itself. Never fails:
+# send, reply and broadcast call it AFTER their INSERT has committed, and a
+# failure there (set -e) would exit non-zero for mail that went out - the
+# caller retries and the mail is delivered twice.
 display_name() {
   local hash="$1"
   local name
-  name=$(sqlite3 "$MAIL_DB" "SELECT name FROM projects WHERE hash='${hash}';")
+  name=$(sqlite3 "$MAIL_DB" "SELECT name FROM projects WHERE hash='${hash}';" 2>/dev/null) || name=""
   if [ -n "$name" ]; then
     echo "$name"
   else
     echo "$hash"
   fi
+}
+
+# Wake a project's sessions: /tmp/pigeon_signal_<hash> is a timestamp every
+# session of that project compares its own seen marker against
+# (hooks/check-mail.sh) - touched, never deleted. Runs after the INSERT has
+# committed, so it never fails the command (see display_name).
+signal_project() {
+  touch "/tmp/pigeon_signal_$1" 2>/dev/null || true
 }
 
 # ============================================================================
@@ -472,9 +513,7 @@ send() {
   safe_attachments=$(sql_escape "$attachments")
   sql_exec \
     "INSERT INTO messages (from_project, to_project, subject, body, priority, attachments, from_session) VALUES ('${from_id}', '${to_id}', '${safe_subject}', '${safe_body}', '${priority}', '${safe_attachments}', '$(self_session)');"
-  # Signal the recipient: a timestamp every session of that project compares
-  # its own seen marker against (hooks/check-mail.sh) - touched, never deleted.
-  touch "/tmp/pigeon_signal_${to_id}"
+  signal_project "$to_id"
   local to_name
   to_name=$(display_name "$to_id")
   local attach_note=""
@@ -603,8 +642,7 @@ reply() {
   safe_attachments=$(sql_escape "$attachments")
   sql_exec \
     "INSERT INTO messages (from_project, to_project, subject, body, thread_id, attachments, from_session) VALUES ('${from_id}', '${orig_from_hash}', '${safe_subject}', '${safe_body}', ${thread_id}, '${safe_attachments}', '$(self_session)');"
-  # Signal the recipient
-  touch "/tmp/pigeon_signal_${orig_from_hash}"
+  signal_project "$orig_from_hash"
   local orig_name
   orig_name=$(display_name "$orig_from_hash")
   local attach_note=""
@@ -666,18 +704,31 @@ broadcast() {
   register_project
   local from_id
   from_id=$(get_project_id)
-  local targets
-  targets=$(sqlite3 "$MAIL_DB" \
-    "SELECT hash FROM projects WHERE hash != '${from_id}' ORDER BY name;")
-  local count=0
   local safe_subject safe_body
   safe_subject=$(sql_escape "$subject")
   safe_body=$(sql_escape "$body")
+  # Guard: ONE transaction delivers to every project, or to none. Don't go back
+  # to an INSERT per project: on 2026-11-11 a locked database failed that loop
+  # part-way, the retry re-sent to the projects already done, and 239 copies
+  # landed across 65 of 160 projects. BEGIN IMMEDIATE takes the write lock (or
+  # waits for it) before anything is written; with sql_exec's -bail, any failed
+  # statement exits and the open transaction rolls back. The SELECT prints the
+  # rows this INSERT made (AUTOINCREMENT ids are consecutive under the write
+  # lock), so the signals touched are exactly the projects that got the mail.
+  local targets
+  if ! targets=$(sql_exec "BEGIN IMMEDIATE;
+INSERT INTO messages (from_project, to_project, subject, body, from_session)
+  SELECT '${from_id}', hash, '${safe_subject}', '${safe_body}', '$(self_session)'
+  FROM projects WHERE hash <> '${from_id}' ORDER BY name;
+SELECT to_project FROM messages WHERE id > last_insert_rowid() - changes() AND id <= last_insert_rowid();
+COMMIT;"); then
+    echo "Error: broadcast not sent - no project received it, so a retry is safe." >&2
+    return 1
+  fi
+  local count=0 target_hash
   while IFS= read -r target_hash; do
     [ -z "$target_hash" ] && continue
-    sql_exec \
-      "INSERT INTO messages (from_project, to_project, subject, body, from_session) VALUES ('${from_id}', '${target_hash}', '${safe_subject}', '${safe_body}', '$(self_session)');"
-    touch "/tmp/pigeon_signal_${target_hash}"
+    signal_project "$target_hash"
     count=$((count + 1))
   done <<< "$targets"
   echo "Broadcast to ${count} project(s): ${subject}"

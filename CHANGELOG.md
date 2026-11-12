@@ -288,6 +288,20 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **pigeon no longer fails or double-sends when `pmail.db` is busy.** Every sqlite3 call ran
+  with SQLite's default busy timeout of 0, so any concurrent reader (the check-mail hook runs
+  in dozens of sessions) failed a write at once with `database is locked`. `broadcast` sent one
+  INSERT per project, died part-way, and its retry re-sent to the projects already done: 239
+  copies across 65 of 160 projects. Now every query waits up to 5 s for a lock (the hook 2 s),
+  `broadcast` is one transaction that reaches every project or none, and steps after a
+  commit can't fail the command. With GNU `timeout` on PATH each query is killed after 30 s
+  (the hook 4 s); eight readers had been found hung for up to 48 h. The hook now renders all
+  waiting mail with one query instead of about nine per message: 20 messages took 9.4 s
+  against its 5 s timeout, and 15,664 stamp files in `/tmp` showed how often it was killed
+  and re-run; it now takes about 1 s whatever the count. Ten new cases in
+  `pigeon/tests/run.sh`: the six aimed at these bugs fail against the old scripts, and a
+  mutant with busy timeout 0 fails only the lock-wait cases.
+
 - **windows-ops `process-triage.ps1` reports real CPU rates.** The sample pass re-read
   every PID with `Get-Process -Id`, which scales with the whole process table, then
   divided by `-Sample`. On a ~1,200-process machine the pass ran far past the window,
