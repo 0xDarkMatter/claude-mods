@@ -628,7 +628,7 @@ validate_plugin() {
         rc=0; bash "$pv" "$PROJECT_DIR" >/dev/null 2>&1 || rc=$?
         case "$rc" in
             0) log_pass "marketplace.json - claude plugin validate passed" ;;
-            3) log_warn "marketplace.json - passed except the reserved plugin name \"claude-mods\": WAIVED until 2026-10-31, rename pending (tests/plugin-validate.sh)" ;;
+            3) log_warn "marketplace.json - passed except the reserved plugin name \"claude-mods\": WAIVED until 2026-12-31, rename pending (tests/plugin-validate.sh)" ;;
             *) log_fail "marketplace.json - claude plugin validate failed (run: bash tests/plugin-validate.sh .)" ;;
         esac
 
@@ -642,7 +642,7 @@ validate_plugin() {
             rc=0; bash "$pv" "$tmp" >/dev/null 2>&1 || rc=$?
             case "$rc" in
                 0) log_pass "plugin.json - claude plugin validate passed" ;;
-                3) log_warn "plugin.json - passed except the reserved plugin name \"claude-mods\": WAIVED until 2026-10-31, rename pending (tests/plugin-validate.sh)" ;;
+                3) log_warn "plugin.json - passed except the reserved plugin name \"claude-mods\": WAIVED until 2026-12-31, rename pending (tests/plugin-validate.sh)" ;;
                 *) log_fail "plugin.json - claude plugin validate failed (unrecognized keys or wrong field types)" ;;
             esac
             rm -rf "$tmp"
