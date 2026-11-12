@@ -187,7 +187,7 @@ On "INIT:" message at session start:
   ASCII stand-in, or `[char]0x2500` for an output glyph; `tests/check-ps51-parse.sh` gates it.
 - **The plugin name `claude-mods` is reserved** by Claude Code 2.1.287+ (Claude Mods).
   `claude plugin validate` rejects it, so call the validator only through
-  `tests/plugin-validate.sh`, which waives that one error until 2026-10-31 and fails on
+  `tests/plugin-validate.sh`, which waives that one error until 2026-12-31 and fails on
   any other. Never widen the waiver; the fix is renaming the plugin. Scripts here run
   under `set -e`, so capture its exit 3 with `|| rc=$?`, never `; rc=$?`.
 - **Portable skills must run copied alone.** `supply-chain-defense`,

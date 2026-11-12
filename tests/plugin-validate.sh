@@ -26,7 +26,11 @@
 
 set -uo pipefail
 
-WAIVER_UNTIL="20261031"
+# Renewed once, on 2026-11-12, from 20261031: the maintainer chose renewal over an immediate
+# rename after the expiry turned main red and held the landing queue. The rename is still the
+# fix. When you move this date, also move the dates in tests/validate.sh's two WAIVED messages
+# and in AGENTS.md's landmine. The self-test's "waived" cases run against this same date.
+WAIVER_UNTIL="20261231"
 RESERVED_RE='Plugin name "claude-mods" is reserved: it passes as one of Anthropic'
 
 strip_ansi() { sed 's/\x1b\[[0-9;]*m//g'; }
