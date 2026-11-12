@@ -35,9 +35,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #   that way part-way through, and its retry left 239 copies across 65 projects.
 #   Locks are held for milliseconds, so 5 s waits out any healthy connection.
 # - Wall clock: bounds a sqlite3 process that hangs. Eight one-row SELECTs were
-#   found hung for 52 min to 48 h with their parents gone; the cause was not
-#   found (a dead pipe did not reproduce it). 30 s is far past the busy timeout,
-#   so it never cuts off a call that is only waiting for a lock.
+#   found hung for 52 min to 48 h with their parents gone (2026-11-11). By their
+#   command lines, every one was a check-mail.sh query (its old per-field
+#   render loop, or its from_session column check), so all were left by hook
+#   runs killed at the 5 s hook timeout; none came from this script. How they outlived the kill is not known: a dead
+#   pipe did not reproduce it. The guard applies here as well, because any
+#   orphaned query hangs the same way. 30 s is far past the busy timeout, so it
+#   never cuts off a call that is only waiting for a lock.
 # Only GNU timeout is used, found by its --version: Windows' own timeout.exe
 # (System32) takes other arguments and would run nothing. Without GNU timeout
 # (stock macOS) calls run unguarded. --foreground keeps sqlite3 in the caller's

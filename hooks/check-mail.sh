@@ -57,8 +57,12 @@ MAX_CONTEXT=9000
 # Every call waits up to SQLITE_BUSY_MS for a lock (SQLite's default is 0: any
 # writer mid-commit failed the read at once) and, once GNU timeout is found
 # below, is killed after 4 s - under the 5 s hook timeout, so a query left
-# running by a killed hook can't outlive it for long (see mail-db.sh's SQLite
-# access section for the hung readers this bounds).
+# running by a killed hook can't outlive it for long. Guard: keep both. The
+# eight readers found hung for 52 min to 48 h on 2026-11-11 were all this
+# hook's queries (by their command lines: the old per-field render loop and the
+# from_session column check), so they were children of runs killed at the 5 s
+# timeout. How they survived the kill is
+# not known (a dead pipe did not reproduce it); the 4 s limit holds anyway.
 SQLITE_BUSY_MS=2000
 SQLITE_RUN=(command sqlite3)
 sqlite3() {
