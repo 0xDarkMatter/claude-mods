@@ -335,6 +335,185 @@ for eco in npm pip composer cargo go; do
   expect_has  "--$eco without jq names jq" "jq" "$err"
 done
 
+# Waiver evidence (rules/supply-chain.md, security-release exception). A CVE hotfix
+# inside the cooldown held exactly like any other release: nobody looked up whether
+# a published advisory names it as the fix. The shim answers OSV from a fixture
+# (or fails, with FAIL) and every registry URL with the packument above, where
+# `pkg` resolves to 2.0.0, published today.
+mkosv() {  # dir osv-fixture|FAIL -> curl shim in dir
+  mkdir -p "$1"
+  cat > "$1/curl" <<SH
+#!/bin/sh
+for a in "\$@"; do u="\$a"; done
+printf '%s\n' "\$u" >> "$1/urls.log"
+case "\$u" in
+  *api.osv.dev*) [ "$2" = FAIL ] && exit 7; cat "$2" ;;
+  *) printf '%s' '$PACKUMENT' ;;
+esac
+SH
+  chmod +x "$1/curl"
+}
+osv_vuln() {  # id aliases-json fixed-version -> one OSV vuln object for npm `pkg`
+  printf '{"id":"%s","aliases":%s,"published":"2026-11-10T00:00:00Z","affected":[{"package":{"name":"pkg","ecosystem":"npm"},"ranges":[{"type":"SEMVER","events":[{"introduced":"0"},{"fixed":"%s"}]}]}]}' \
+    "$1" "$2" "$3"
+}
+OSV="$SB/osv"; mkdir -p "$OSV"
+printf '{"vulns":[%s]}' "$(osv_vuln GHSA-aaaa-bbbb-cccc '["CVE-2026-11111"]' 2.0.0)" > "$OSV/cve-fixed-here.json"
+printf '{"vulns":[%s]}' "$(osv_vuln GHSA-dddd-eeee-ffff '["CVE-2026-22222"]' 1.9.9)" > "$OSV/cve-fixed-elsewhere.json"
+printf '{"vulns":[%s]}' "$(osv_vuln GHSA-gggg-hhhh-iiii '[]' 2.0.0)" > "$OSV/no-cve-id.json"
+printf '<html>502 Bad Gateway</html>' > "$OSV/garbled.json"
+mkosv "$OSV/qual" "$OSV/cve-fixed-here.json"
+out="$(PATH="$OSV/qual:$PATH" bash "$SCRIPTS/preinstall-check.sh" pkg 2>"$SB/osv-qual.err")"; rc=$?
+expect_exit "security release whose CVE fix names this version -> 11 (waiver recommended)" 11 "$rc"
+expect_has  "recommendation shows in the TSV record" $'\tpkg\t2.0.0\t0\ttrue\trecommended' "$out"
+expect_has  "recommendation names the CVE on stderr" "CVE-2026-11111" "$(cat "$SB/osv-qual.err")"
+out="$(PATH="$OSV/qual:$PATH" bash "$SCRIPTS/preinstall-check.sh" -q --json pkg 2>/dev/null)"
+printf '%s' "$out" | jq -e '.data[0].waiver | .status == "recommended" and .cves == ["CVE-2026-11111"]
+  and (.advisories[0].url | endswith("/GHSA-aaaa-bbbb-cccc")) and (.still_required | length > 0)' >/dev/null 2>&1
+expect_exit "--json carries the CVE, its source URL and what a person still checks" 0 $?
+printf '%s' "$out" | jq -e '.meta.waiver_recommended == 1' >/dev/null 2>&1
+expect_exit "--json meta counts the recommendation" 0 $?
+for phrase in "safe to install" "ok to install" "approved"; do
+  expect_lacks "a recommendation never reads as approval ('$phrase')" "$phrase" "$(tr 'A-Z' 'a-z' < "$SB/osv-qual.err")"
+done
+# Outside the cooldown there is nothing to waive, so OSV is not asked.
+: > "$OSV/qual/urls.log"
+PATH="$OSV/qual:$PATH" bash "$SCRIPTS/preinstall-check.sh" -q pkg@1.2.3 >/dev/null 2>&1
+expect_lacks "no advisory lookup outside the cooldown" "api.osv.dev" "$(cat "$OSV/qual/urls.log")"
+# A fix for a CVE in a neighbouring version, or an advisory with no CVE ID, is no
+# evidence for this version: both stay a plain hold.
+mkosv "$OSV/else" "$OSV/cve-fixed-elsewhere.json"
+out="$(PATH="$OSV/else:$PATH" bash "$SCRIPTS/preinstall-check.sh" -q pkg 2>/dev/null)"; rc=$?
+expect_exit "CVE fixed in another version stays a plain hold -> 10" 10 "$rc"
+expect_has  "no-evidence record says none" $'\ttrue\tnone' "$out"
+mkosv "$OSV/nocve" "$OSV/no-cve-id.json"
+PATH="$OSV/nocve:$PATH" bash "$SCRIPTS/preinstall-check.sh" -q pkg >/dev/null 2>&1
+expect_exit "advisory naming this version but no CVE ID stays a plain hold -> 10" 10 $?
+# OSV down, or an answer that is not OSV JSON, must never become a recommendation.
+mkosv "$OSV/down" FAIL
+out="$(PATH="$OSV/down:$PATH" bash "$SCRIPTS/preinstall-check.sh" -q --json pkg 2>/dev/null)"; rc=$?
+expect_exit "OSV unreachable gives no recommendation -> 10" 10 "$rc"
+printf '%s' "$out" | jq -e '.data[0].waiver.status == "unavailable"' >/dev/null 2>&1
+expect_exit "OSV unreachable: waiver status is unavailable" 0 $?
+mkosv "$OSV/garb" "$OSV/garbled.json"
+PATH="$OSV/garb:$PATH" bash "$SCRIPTS/preinstall-check.sh" -q pkg >/dev/null 2>&1
+expect_exit "OSV answer that is not JSON gives no recommendation -> 10" 10 $?
+# One plain hold in the run outranks another package's recommendation, and a
+# package that was not checked at all outranks it too: 11 never hides either.
+PATH="$OSV/qual:$PATH" bash "$SCRIPTS/preinstall-check.sh" -q pkg other >/dev/null 2>&1
+expect_exit "plain hold beside a recommendation -> 10" 10 $?
+PATH="$OSV/qual:$PATH" bash "$SCRIPTS/preinstall-check.sh" -q pkg left-pad@9.9.9 >/dev/null 2>&1
+expect_exit "unchecked package beside a recommendation -> 7" 7 $?
+
+# ── release-check.sh (GitHub-release tools: Git for Windows and kin) ───────
+echo "-- release-check.sh --"
+RC="$SCRIPTS/release-check.sh"
+bash "$RC" --help >/dev/null 2>&1;      expect_exit "--help" 0 $?
+bash "$RC" --bogus >/dev/null 2>&1;     expect_exit "bad flag -> 2" 2 $?
+bash "$RC" acme/tool v1 >/dev/null 2>&1; expect_exit "missing file argument -> 2" 2 $?
+bash "$RC" acme/tool v1 "$SB/no-such.exe" >/dev/null 2>&1; expect_exit "file not found -> 3" 3 $?
+# Offline release: a curl shim answers the GitHub API from a fixture (or fails),
+# and a PowerShell shim answers Get-AuthenticodeSignature for the file and the
+# reference with canned rows, so the signer logic runs on any OS.
+RCD="$SB/rc"; mkdir -p "$RCD/dl" "$RCD/inst"
+printf 'fake installer bytes\n' > "$RCD/dl/Tool-1.2.3-64-bit.exe"
+printf 'installed tool\n' > "$RCD/inst/tool.exe"
+sha256_of() { if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi | cut -d' ' -f1; }
+RCSUM="$(sha256_of < "$RCD/dl/Tool-1.2.3-64-bit.exe")"
+OTHERSUM="$(printf 'something else' | sha256_of)"
+mkrel() {  # out-file published-iso body digest-hex
+  jq -n --arg p "$2" --arg b "$3" --arg d "sha256:$4" \
+    '{tag_name:"v1.2.3", name:"Tool 1.2.3", published_at:$p, prerelease:false, draft:false,
+      html_url:"https://github.com/acme/tool/releases/tag/v1.2.3", body:$b,
+      assets:[{name:"Tool-1.2.3-64-bit.exe", digest:$d}]}' > "$1"
+}
+NOTES_CVE="Security fixes: CVE-2026-11111 (RCE via recursive clone) and CVE-2026-22222.
+
+Filename | SHA-256
+-------- | -------
+Tool-1.2.3-64-bit.exe | $RCSUM"
+mkrel "$RCD/rel-qual.json"     "$NOW_ISO" "$NOTES_CVE" "$RCSUM"
+mkrel "$RCD/rel-nocve.json"    "$NOW_ISO" "This release contains important security fixes. Update now.
+
+Tool-1.2.3-64-bit.exe | $RCSUM" "$RCSUM"
+mkrel "$RCD/rel-mismatch.json" "$NOW_ISO" "${NOTES_CVE/$RCSUM/$OTHERSUM}" "$OTHERSUM"
+mkrel "$RCD/rel-old.json"      "2020-01-01T00:00:00Z" "$NOTES_CVE" "$RCSUM"
+mkgh() {  # dir release-fixture|FAIL -> curl shim answering like `curl -w '\n%{http_code}'`
+  mkdir -p "$1"
+  printf '#!/bin/sh\n[ "%s" = FAIL ] && exit 7\ncat "%s"\nprintf "\\n200"\n' "$2" "$2" > "$1/curl"
+  chmod +x "$1/curl"
+}
+mkps() {  # dir file-status file-thumb ref-status ref-thumb | dir FAIL -> pwsh + powershell shims
+  mkdir -p "$1"
+  if [ "$2" = FAIL ]; then
+    printf '#!/bin/sh\necho "Get-AuthenticodeSignature: not recognized" >&2\nexit 1\n' > "$1/pwsh"
+  else
+    cat > "$1/pwsh" <<SH
+#!/bin/sh
+cat <<'JSON'
+[{"role":"file","status":"$2","thumbprint":"$3","subject":"CN=Acme Signer"},{"role":"reference","status":"$4","thumbprint":"$5","subject":"CN=Acme Signer"}]
+JSON
+SH
+  fi
+  cp "$1/pwsh" "$1/powershell"; chmod +x "$1/pwsh" "$1/powershell"
+}
+mkgh "$RCD/gh-qual" "$RCD/rel-qual.json";     mkgh "$RCD/gh-nocve" "$RCD/rel-nocve.json"
+mkgh "$RCD/gh-mis" "$RCD/rel-mismatch.json";  mkgh "$RCD/gh-old" "$RCD/rel-old.json"
+mkgh "$RCD/gh-down" FAIL
+mkps "$RCD/ps-same" Valid AAAA1111 Valid AAAA1111
+mkps "$RCD/ps-changed" Valid BBBB2222 Valid AAAA1111
+mkps "$RCD/ps-fail" FAIL
+rc_run() {  # gh-shim ps-shim [args...] -> release-check on the fixture file
+  local gh=$1 ps=$2; shift 2
+  PATH="$RCD/$gh:$RCD/$ps:$PATH" bash "$RC" acme/tool v1.2.3 "$RCD/dl/Tool-1.2.3-64-bit.exe" "$@"
+}
+out="$(rc_run gh-qual ps-same --reference "$RCD/inst/tool.exe" 2>"$SB/rc-qual.err")"; rc=$?
+expect_exit "tool release naming CVEs, published hash, same signer -> 11 (waiver recommended)" 11 "$rc"
+expect_has  "TSV record carries the verdict and CVEs" $'waiver-recommended\tCVE-2026-11111,CVE-2026-22222' "$out"
+for phrase in "safe to install" "ok to install" "approved"; do
+  expect_lacks "tool recommendation never reads as approval ('$phrase')" "$phrase" "$(tr 'A-Z' 'a-z' < "$SB/rc-qual.err")"
+done
+out="$(rc_run gh-qual ps-same --reference "$RCD/inst/tool.exe" --json 2>/dev/null)"
+printf '%s' "$out" | jq -e '.data[0] | .verdict == "waiver-recommended" and .file.hash == "match"
+  and .signature.state == "same-signer" and (.cves | length == 2) and (.still_required | length > 0)' >/dev/null 2>&1
+expect_exit "--json: verdict, hash match, same signer, still_required" 0 $?
+# The hijack shape: CVE IDs in the notes and a matching hash, but a new signer.
+rc_run gh-qual ps-changed --reference "$RCD/inst/tool.exe" >/dev/null 2>"$SB/rc-chg.err"
+expect_exit "CVE IDs with a changed signer refuse -> 12" 12 $?
+expect_has  "refusal names the signer change" "signer changed" "$(cat "$SB/rc-chg.err")"
+rc_run gh-mis ps-same --reference "$RCD/inst/tool.exe" >/dev/null 2>&1
+expect_exit "file hash differs from the published hash -> 12" 12 $?
+# A notes row is the file's only when a token IS its name, and a SHA-512 is not a
+# SHA-256: a substring match let MyTool-...exe's row claim Tool-...exe, and the
+# first 64 hex digits of a SHA-512 read as a different SHA-256. Both refused a
+# file whose asset digest matches.
+mkrel "$RCD/rel-lookalike.json" "$NOW_ISO" "Fixes CVE-2026-11111.
+
+MyTool-1.2.3-64-bit.exe | $OTHERSUM" "$RCSUM"
+mkrel "$RCD/rel-sha512.json" "$NOW_ISO" "Fixes CVE-2026-11111.
+
+Tool-1.2.3-64-bit.exe | $OTHERSUM$OTHERSUM" "$RCSUM"
+mkgh "$RCD/gh-look" "$RCD/rel-lookalike.json"; mkgh "$RCD/gh-512" "$RCD/rel-sha512.json"
+rc_run gh-look ps-same --reference "$RCD/inst/tool.exe" >/dev/null 2>&1
+expect_exit "a longer file name's row in the notes does not refuse this file -> 11" 11 $?
+rc_run gh-512 ps-same --reference "$RCD/inst/tool.exe" >/dev/null 2>&1
+expect_exit "a SHA-512 on the file's row is not read as a SHA-256 mismatch -> 11" 11 $?
+# "Security fixes" with no CVE IDs is the lure, not evidence.
+out="$(rc_run gh-nocve ps-same --reference "$RCD/inst/tool.exe" 2>/dev/null)"; rc=$?
+expect_exit "'security fixes' notes with no CVE IDs stay a plain hold -> 10" 10 "$rc"
+expect_has  "no-CVE record says hold" $'\thold\t-' "$out"
+# Every check the tool cannot run keeps the plain hold.
+rc_run gh-qual ps-same >/dev/null 2>&1
+expect_exit "no --reference: signers not compared, plain hold -> 10" 10 $?
+rc_run gh-qual ps-fail --reference "$RCD/inst/tool.exe" >/dev/null 2>&1
+expect_exit "signature unreadable (no Authenticode here) never recommends -> 10" 10 $?
+rc_run gh-down ps-same --reference "$RCD/inst/tool.exe" >/dev/null 2>&1
+expect_exit "GitHub unreachable gives no recommendation -> 7" 7 $?
+rc_run gh-old ps-same --reference "$RCD/inst/tool.exe" >/dev/null 2>&1
+expect_exit "release older than the cooldown, nothing contradicts it -> 0" 0 $?
+rc_run gh-old ps-changed --reference "$RCD/inst/tool.exe" >/dev/null 2>&1
+expect_exit "a changed signer still refuses outside the cooldown -> 12" 12 $?
+
 # ── pre-install-scan.sh hook (both input modes) ────────────────────────────
 echo "-- pre-install-scan.sh hook --"
 if [[ -f "$HOOK" ]]; then
@@ -871,7 +1050,7 @@ chmod 644 "$CDU/vite.config.js"
 
 # ── terminal design system (term.sh adoption + ASCII purity) ───────────────
 echo "-- terminal design system --"
-for s in integrity-audit preinstall-check scan-extensions; do
+for s in integrity-audit preinstall-check scan-extensions release-check; do
   grep -q '_lib/term.sh' "$SCRIPTS/$s.sh" && ok "$s.sh sources _lib/term.sh" || no "$s.sh does not source _lib/term.sh"
 done
 for s in exposure-check config-drift-check postinstall-audit; do
@@ -892,6 +1071,7 @@ ascii_pure "scan-extensions" env HOME="$TDE" SC_EXT_DIRS="$TDE/none" bash "$SCAN
 ascii_pure "exposure-check"  env HOME="$TDE" "$PYTHON" "$SCRIPTS/exposure-check.py" --root "$TDE" --no-extensions
 ascii_pure "config-drift"    "$PYTHON" "$SCRIPTS/config-drift-check.py" --root "$TDE"
 ascii_pure "postinstall"     "$PYTHON" "$SCRIPTS/postinstall-audit.py" --root "$TDE"
+ascii_pure "release-check"   env PATH="$RCD/gh-qual:$RCD/ps-same:$PATH" bash "$RC" acme/tool v1.2.3 "$RCD/dl/Tool-1.2.3-64-bit.exe" --reference "$RCD/inst/tool.exe"
 # stdout data stays plain even under FORCE_COLOR (the pipeable contract).
 tdo="$(FORCE_COLOR=1 env HOME="$TDE" "$PYTHON" "$SCRIPTS/exposure-check.py" --root "$TDE" --no-extensions 2>/dev/null)"
 case "$tdo" in *$'\033'*) no "exposure-check stdout leaked ANSI";; *) ok "exposure-check stdout stays plain data";; esac
@@ -922,7 +1102,7 @@ printf '{"publisher":"pub","name":"tool","version":"1.0.0"}' > "$SB/alone-ext/pu
 printf '#!/bin/sh\nexit 0\n' > "$SB/alone-zizmor/zizmor"
 printf '#!/bin/sh\nexit 6\n' > "$SB/alone-nonet/curl"
 chmod +x "$SB/alone-zizmor/zizmor" "$SB/alone-nonet/curl"
-for s in integrity-audit preinstall-check scan-extensions; do
+for s in integrity-audit preinstall-check scan-extensions release-check; do
   bash "$AS/$s.sh" --help >/dev/null 2>&1; expect_exit "alone: $s.sh --help" 0 $?
 done
 for s in exposure-check config-drift-check postinstall-audit; do
@@ -934,6 +1114,12 @@ for fc in "" 1; do   # FORCE_COLOR=1 is the branch that would open a term.sh pan
     env FORCE_COLOR="$fc" HOME="$TDE" APPDATA="$TDE" PATH="$SB/alone-zizmor:$PATH" bash "$AS/integrity-audit.sh" "$AW"
   plain_ascii "$t: preinstall-check, registry down -> 7" 7 \
     env FORCE_COLOR="$fc" PATH="$SB/alone-nonet:$PATH" bash "$AS/preinstall-check.sh" lodash@4.17.21
+  plain_ascii "$t: preinstall-check, waiver recommended -> 11" 11 \
+    env FORCE_COLOR="$fc" PATH="$OSV/qual:$PATH" bash "$AS/preinstall-check.sh" pkg
+  plain_ascii "$t: release-check, waiver recommended -> 11" 11 \
+    env FORCE_COLOR="$fc" PATH="$RCD/gh-qual:$RCD/ps-same:$PATH" bash "$AS/release-check.sh" acme/tool v1.2.3 "$RCD/dl/Tool-1.2.3-64-bit.exe" --reference "$RCD/inst/tool.exe"
+  plain_ascii "$t: release-check, GitHub down -> 7" 7 \
+    env FORCE_COLOR="$fc" PATH="$SB/alone-nonet:$PATH" bash "$AS/release-check.sh" acme/tool v1.2.3 "$RCD/dl/Tool-1.2.3-64-bit.exe"
   plain_ascii "$t: scan-extensions inventory" 0 \
     env FORCE_COLOR="$fc" HOME="$TDE" SC_EXT_DIRS="$SB/alone-ext" bash "$AS/scan-extensions.sh"
 done

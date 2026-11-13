@@ -74,9 +74,14 @@ cooldown. The conditions make the release prove where it came from instead.
 
 The behavioural scan still runs. The exception waives the *wait*, nothing else. If any
 condition fails or cannot be checked, the default holds: wait out the 7 days.
-`preinstall-check.sh` still exits 10 for such a release, because release age is a fact
-it reports. It has no flag to waive the cooldown; the waiver is a human decision recorded
-in the PR, or in the install note for a tool.
+
+The supply-chain-defense tools gather the evidence and may **recommend** a waiver; they
+never grant one, and neither has a flag to waive the cooldown. `preinstall-check.sh` exits
+11 instead of 10 when OSV lists a CVE whose fixed version is exactly the one asked for.
+`release-check.sh` does the same for a tool from a GitHub release: CVE IDs in the notes, a
+SHA-256 that matches the release, and the installed version's Authenticode signer. It
+exits 12 to refuse a file whose hash or signer contradicts them. Either way, the waiver
+is a human decision recorded in the PR, or in the install note for a tool.
 
 **Worked example (generic).** A CMS ships core `X.Y.4`, a security point release whose
 advisory fixes a CVE in `X.Y.3`. The site's lock moves the core package and its paired

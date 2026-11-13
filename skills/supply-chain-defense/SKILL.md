@@ -30,11 +30,14 @@ routine below is the point.
 2. **Age it**: `bash scripts/preinstall-check.sh <pkg>[@ver] ...` (`--pip`,
    `--composer`, `--cargo`, `--go`); exit 10 = published inside the 7-day cooldown.
    Never suggest a day-zero (`@latest`) release for a production path. The one
-   exception is a security release that patches a published CVE, and only when its
-   advisory names that version, a vendor-published checksum matches, nothing else
-   moves in the lock, a person merges it via staging and the PR records the waiver
-   (`references/hardening-checklist.md` section 5). The script still exits 10: the
-   waiver is a recorded human decision, never a flag.
+   exception is a security release, and only when published CVEs are named by ID for
+   that exact version (an advisory, or the vendor's own release notes), a
+   vendor-published checksum matches, a signed binary keeps the installed version's
+   signer, nothing else moves in the lock, a person approves it (via staging for a
+   dependency) and the waiver is recorded (`references/hardening-checklist.md`
+   section 5). Exit 11 = OSV names a CVE fixed in exactly this version, so a waiver
+   may be *requested*; the rest is the person's check. Neither script waives, and
+   neither has a flag to.
 3. **Install behind a gate**: `socket npm install <pkg>`, or no lifecycle scripts at
    all (`npm config set ignore-scripts true`).
 4. **Pin it**: commit the lockfile; exact versions for anything in CI/prod.
@@ -47,6 +50,7 @@ Step-by-step for each letter: `references/workflows.md`.
 | Situation | Workflow | First move |
 |---|---|---|
 | About to add or bump a dependency | A, E | The routine above |
+| Updating a standalone tool from a GitHub release (Git for Windows, a CLI installer) | E | `release-check.sh` with `--reference` (exit 11 = waiver may be requested, 12 = refuse) |
 | A teammate or CI just pulled a fresh version (axios 1.14.1 was live ~3 h) | A, I | Score it, then `exposure-check.py` |
 | `npm audit` / `pip-audit` clean but you're uneasy | A, K | Behavioural score + `postinstall-audit.py` |
 | Rolling out Socket.dev on a budget | B | GitHub app + depscore MCP (both free) |
@@ -73,14 +77,17 @@ Paths are relative to this skill folder. Launch the `.py` scripts through
 is Python 3.8+ (on Windows `python3` is often the Microsoft Store alias, which exits
 49 and runs nothing - the scripts' shebang hits it too). Shared exit codes: 0 ok,
 2 usage, 3 not found, 5 missing dependency, 7 unavailable, **10 = finding** (review
-item / inside cooldown / exposed / behavioural hit). **5 and 7 mean part of the
+item / inside cooldown / exposed / behavioural hit), **11 = inside the cooldown, a
+waiver may be requested**, **12 = refuse** (`release-check.sh`: the hash or signer
+contradicts the release). **5 and 7 mean part of the
 check did not run** (no `jq`, registry down, log unreadable without elevation) and
 are never a pass: the script names what it could not check on stderr. Every script
 takes `--json`; stdout is data, stderr is progress.
 
 | Script | Answers | Run |
 |---|---|---|
-| `preinstall-check.sh` | Is this release inside the cooldown? | `bash scripts/preinstall-check.sh --pip requests fastapi@0.110.0` |
+| `preinstall-check.sh` | Is this release inside the cooldown? Does a published CVE fix name it? | `bash scripts/preinstall-check.sh --pip requests fastapi@0.110.0` |
+| `release-check.sh` | The same for a GitHub-release tool, plus: does the file match the published hash and the installed version's signer? | `bash "<skill-dir>/scripts/release-check.sh" git-for-windows/git v2.56.1.windows.1 Git-2.56.1-64-bit.exe --reference "C:\Program Files\Git\cmd\git.exe"` |
 | `integrity-audit.sh` | Has a worm persisted in AI-tool, editor, shell or package-manager config? Live OIDC publish trust? | `bash scripts/integrity-audit.sh --json \| jq '.data.review[]'` |
 | `exposure-check.py` | Is a named-bad package or extension installed? (`assets/exposure-catalog.json`) | `bash scripts/run-python.sh scripts/exposure-check.py --root ~/code` |
 | `postinstall-audit.py` | Is any installed package *behaving* like malware? | `bash scripts/run-python.sh scripts/postinstall-audit.py --root . [--deep] [--live]` |
@@ -165,7 +172,7 @@ Layer 6 playbook: `references/repo-integrity.md`.
 | "We run `npm audit` in CI, we're covered." | Advisory-driven; blind to malware in the publish-to-CVE window — the exact gap the 2026 worms exploit. | Add a behavioural scan (Socket / GuardDog) gating the merge, not just a CVE check. |
 | Trusting valid provenance / SLSA attestation as proof of safety. | Mini Shai-Hulud minted **valid Build L3 attestations** from stolen OIDC tokens. Valid ≠ safe. | Treat provenance as one signal; require behavioural verdict too. |
 | Auto-updating production deps the day a release lands. | Poisoned versions live for hours; you become an early victim. | 7-day release-age cooldown (Renovate `minimumReleaseAge`). |
-| Waiving the cooldown because a release says "security fix". | Urgency is the lure for a hijacked publish; the label costs an attacker nothing. | Waive only with the advisory naming the version, a vendor-channel checksum, a lock diff confined to the patched package, a human merge via staging, and the waiver recorded. |
+| Waiving the cooldown because a release says "security fix". | Urgency is the lure for a hijacked publish; the label costs an attacker nothing. | Waive only with CVE IDs named for the version, a vendor-channel checksum, an unchanged signer on a signed binary, a change confined to the patched package, a person's approval, and the waiver recorded. Exit 11 is a recommendation, not the waiver. |
 | Treating a verified-publisher VS Code extension as trustworthy. | Nx Console: verified publisher, 2.2M installs, backdoored. | Check publication recency; pause <7-day non-verified; audit on a schedule. |
 | Leaving `id-token: write` on workflows that no longer publish. | The orphaned-OIDC entry point — a token minted from a stale workflow. | Revoke registry trust + drop the permission. Run `zizmor`. |
 | Deleting a found persistence hook and moving on. | The worm stole credentials *before* it persisted; the hook is the symptom. | Treat as an incident: isolate, rotate every reachable credential, then investigate. |
@@ -173,7 +180,7 @@ Layer 6 playbook: `references/repo-integrity.md`.
 ## Verification checklist
 
 - [ ] A behavioural verdict (not just `npm audit`) exists for every newly added/bumped dependency
-- [ ] Production deps respect a release-age cooldown (≥7 days); every security-release waiver is recorded in its PR with its evidence
+- [ ] Production deps and installed tools respect a release-age cooldown (≥7 days); every security-release waiver is recorded in its PR or install note with its evidence
 - [ ] Lockfiles committed; exact pins for anything in CI/prod
 - [ ] No workflow carries `id-token: write` it doesn't need (`zizmor` clean)
 - [ ] Long-lived publish tokens rotated or replaced with short-lived OIDC

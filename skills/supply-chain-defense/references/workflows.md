@@ -88,6 +88,23 @@ versions were live ~3 hours — a 7-day lag would have caught it.) A security re
 that patches a published CVE may skip the wait only under the conditions in
 [hardening-checklist.md section 5](hardening-checklist.md#5-dependency-pinning--cooldown-policy).
 
+The same cooldown covers standalone tools installed from a GitHub release (Git for
+Windows, a CLI's `.exe` or `.msi`). For one of those, inside the cooldown:
+
+1. Download the file, then run
+   `bash scripts/release-check.sh <owner/repo> <tag> <file> --reference <installed-binary>`.
+2. **Exit 12 (refuse)**: the hash or the signer contradicts the release or the installed
+   version. Do not install that file; find out why first.
+3. **Exit 11 (waiver recommended)**: the notes name CVE IDs, the hash matches, and the
+   Authenticode signer is the installed version's. Show the person the evidence (stderr,
+   or `--json`) and ask. Confirm each CVE is fixed in this release, not just mentioned.
+   If they OK it, record the CVE IDs, hash and signer in the install note.
+4. **Exit 10 (hold)**: something is missing (no CVE IDs, no published hash, no signature
+   this host can check). Wait the 7 days.
+
+For a dependency, `preinstall-check.sh` exit 11 means OSV names a CVE fixed in exactly
+that version: ask the person, who still checks the vendor checksum and the lock diff.
+
 ## F. Rotate publish tokens → short-lived OIDC
 
 Audit who holds standing npm/PyPI publish tokens. Prefer short-lived OIDC trusted
