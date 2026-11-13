@@ -33,6 +33,12 @@
 #     same id Claude Code passes this hook as stdin .session_id.
 #   - Without a session id (a manual run, another harness) the marker key is
 #     "anon", shared by every such caller - the old one-notice-per-send behaviour.
+#
+# Cost contract: the hook runs under Claude Code's hook timeout (5 s in the
+# documented config), and a killed hook never reaches mark_seen, so the next
+# tool call runs it again. So the slow path makes a FIXED number of sqlite3
+# calls, whatever the inbox holds (one query fetches every message), and each
+# call is bounded by a busy timeout and a wall clock under that 5 s.
 
 PMAIL_DB="$HOME/.claude/pmail.db"
 
@@ -48,8 +54,19 @@ MAX_CONTEXT=9000
 # "(missing)" although the file existed), and multi-line bodies reached the model
 # with CRs. Don't bypass it with `command sqlite3` at a call site. It returns
 # sqlite3's own status, not tr's: a failed query must not read as "no mail".
+# Every call waits up to SQLITE_BUSY_MS for a lock (SQLite's default is 0: any
+# writer mid-commit failed the read at once) and, once GNU timeout is found
+# below, is killed after 4 s - under the 5 s hook timeout, so a query left
+# running by a killed hook can't outlive it for long. Guard: keep both. The
+# eight readers found hung for 52 min to 48 h on 2026-11-11 were all this
+# hook's queries (by their command lines: the old per-field render loop and the
+# from_session column check), so they were children of runs killed at the 5 s
+# timeout. How they survived the kill is
+# not known (a dead pipe did not reproduce it); the 4 s limit holds anyway.
+SQLITE_BUSY_MS=2000
+SQLITE_RUN=(command sqlite3)
 sqlite3() {
-  command sqlite3 "$@" | tr -d '\r'
+  "${SQLITE_RUN[@]}" -cmd ".timeout ${SQLITE_BUSY_MS}" "$@" | tr -d '\r'
   return "${PIPESTATUS[0]}"
 }
 
@@ -115,98 +132,94 @@ mark_seen() {
   rm -f "$STAMP" "$STAMP.new"
 }
 
+# Wall clock for every query below (see the sqlite3 shadow above). GNU timeout
+# only, found by --version: Windows' System32 timeout.exe takes other arguments
+# and would run nothing, so every read would look failed. Probed here, past the
+# fast path, so an idle tool call never pays for the extra process.
+timeout --version >/dev/null 2>&1 && SQLITE_RUN=(timeout --foreground -k 1 4 sqlite3)
+
 # New for this session: unread, above its marker, and not sent by it. The
 # from_session column arrives with mail-db.sh's migration; a database that
 # predates it (an older mail-db.sh install) can hold no session ids, so the
 # filter is skipped there rather than failing the query.
-WHERE="to_project='${PROJECT_HASH}' AND read=0 AND id>${LAST}"
+WHERE="m.to_project='${PROJECT_HASH}' AND m.read=0 AND m.id>${LAST}"
 if [ -n "$SID" ]; then
   HAS_FROM_SESSION=$(sqlite3 "$PMAIL_DB" "SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name='from_session';" 2>/dev/null)
-  [ "${HAS_FROM_SESSION:-0}" -gt 0 ] && WHERE="${WHERE} AND COALESCE(from_session,'')<>'${SID}'"
+  [ "${HAS_FROM_SESSION:-0}" -gt 0 ] && WHERE="${WHERE} AND COALESCE(m.from_session,'')<>'${SID}'"
 fi
+
+# Guard: ONE query fetches every field of every new message. Don't go back to a
+# query per field: that was about nine sqlite3 calls per message, so 10 messages
+# took 4.6 s and 20 took 9.4 s on Git Bash (2026-11-12), past the 5 s hook
+# timeout - and a killed hook is re-run on the next tool call (15,664 abandoned
+# .t0 stamps were in /tmp). Record format: fields end at US (0x1F), rows at RS
+# (0x1E), set by .separator in octal; both bytes are stripped from stored text,
+# so user text can't split a record. Body comes last. The name falls back to
+# the hash; the thread count is only fetched for a message in a thread.
+US=$'\x1f'
+RS=$'\x1e'
+QUERY="SELECT m.id, m.from_project,
+  replace(replace(COALESCE(NULLIF(p.name, ''), m.from_project), char(30), ''), char(31), ''),
+  m.priority, m.timestamp, m.thread_id,
+  CASE WHEN m.thread_id IS NULL THEN 0
+    ELSE (SELECT COUNT(*) FROM messages t WHERE t.id = m.thread_id OR t.thread_id = m.thread_id) END,
+  replace(replace(m.attachments, char(30), ''), char(31), ''),
+  replace(replace(m.subject, char(30), ''), char(31), ''),
+  replace(replace(m.body, char(30), ''), char(31), '')
+FROM messages m LEFT JOIN projects p ON p.hash = m.from_project
+WHERE ${WHERE}
+ORDER BY m.priority DESC, m.timestamp ASC, m.id ASC;"
 
 # A failed query (database busy, unreadable) leaves the marker untouched, so the
 # signal stays newer and the next tool call retries instead of skipping the mail.
-if ! IDS=$(sqlite3 -cmd ".timeout 2000" "$PMAIL_DB" \
-    "SELECT id FROM messages WHERE ${WHERE} ORDER BY priority DESC, timestamp ASC;" 2>/dev/null); then
+if ! ROWS=$(sqlite3 -cmd '.separator "\037" "\036"' "$PMAIL_DB" "$QUERY" 2>/dev/null); then
   rm -f "$STAMP"
   exit 0
 fi
 
+# Render each message with thread context into MESSAGES, never straight to
+# stdout (see the output contract at the top). Same text the old echo-per-line
+# loop printed: a blank line before each message and before each extra block,
+# trailing newlines of a subject or body dropped. The `|| [ -n ... ]` keeps a
+# last row that arrived without its RS; the id check drops the here-string's
+# trailing newline.
 UNREAD=0
 MAX_ID=$LAST
-while read -r msg_id; do
-  [ -z "$msg_id" ] && continue
+MESSAGES=""
+NL=$'\n'
+while IFS="$US" read -r -d "$RS" msg_id from_hash from_name priority timestamp \
+    thread_id thread_count attachments subject body || [ -n "$msg_id" ]; do
+  [[ $msg_id =~ ^[0-9]+$ ]] || continue
   UNREAD=$((UNREAD + 1))
   [ "$msg_id" -gt "$MAX_ID" ] && MAX_ID=$msg_id
-done <<< "$IDS"
+  while [[ $subject == *"$NL" ]]; do subject=${subject%"$NL"}; done
+  while [[ $body == *"$NL" ]]; do body=${body%"$NL"}; done
+  urgent=""
+  [ "$priority" = "urgent" ] && urgent=" [URGENT]"
+
+  MESSAGES+="${MESSAGES:+$NL}${NL}--- #${msg_id} from ${from_name} (${from_hash})${urgent} @ ${timestamp} ---"
+  MESSAGES+="${NL}Subject: ${subject}${NL}${body}"
+
+  if [ -n "$attachments" ]; then
+    MESSAGES+="$NL"
+    while IFS= read -r apath; do
+      [ -z "$apath" ] && continue
+      if [ -e "$apath" ]; then
+        MESSAGES+="${NL}[Attached: ${apath} ($(wc -c < "$apath" | tr -d ' ') bytes)] <-- Use Read tool to view"
+      else
+        MESSAGES+="${NL}[Attached: ${apath} (missing)]"
+      fi
+    done <<< "$attachments"
+  fi
+
+  if [ -n "$thread_id" ] && [ "${thread_count:-0}" -gt 1 ]; then
+    MESSAGES+="${NL}${NL}[Thread #${thread_id} - ${thread_count} messages. Run: pigeon thread ${thread_id}]"
+  fi
+done <<< "$ROWS"
 
 # Nothing new for this session (its own send, or mail it was already shown)
 if [ "$UNREAD" -eq 0 ]; then
   mark_seen "$LAST"
-  exit 0
-fi
-
-# Resolve display name for a hash
-show_from() {
-  local hash="$1"
-  local name
-  name=$(sqlite3 "$PMAIL_DB" "SELECT name FROM projects WHERE hash='${hash}';" 2>/dev/null)
-  [ -n "$name" ] && echo "$name" || echo "$hash"
-}
-
-# Print each message with thread context. Captured into MESSAGES below, not
-# sent to stdout directly (see the output contract at the top).
-render_messages() {
-  while read -r msg_id; do
-    [ -z "$msg_id" ] && continue
-    from_hash=$(sqlite3 "$PMAIL_DB" "SELECT from_project FROM messages WHERE id=${msg_id};" 2>/dev/null)
-    priority=$(sqlite3 "$PMAIL_DB" "SELECT priority FROM messages WHERE id=${msg_id};" 2>/dev/null)
-    subject=$(sqlite3 "$PMAIL_DB" "SELECT subject FROM messages WHERE id=${msg_id};" 2>/dev/null)
-    body=$(sqlite3 "$PMAIL_DB" "SELECT body FROM messages WHERE id=${msg_id};" 2>/dev/null)
-    timestamp=$(sqlite3 "$PMAIL_DB" "SELECT timestamp FROM messages WHERE id=${msg_id};" 2>/dev/null)
-    thread_id=$(sqlite3 "$PMAIL_DB" "SELECT thread_id FROM messages WHERE id=${msg_id};" 2>/dev/null)
-    from_name=$(show_from "$from_hash")
-    urgent=""
-    [ "$priority" = "urgent" ] && urgent=" [URGENT]"
-
-    attachments=$(sqlite3 "$PMAIL_DB" "SELECT COALESCE(attachments,'') FROM messages WHERE id=${msg_id};" 2>/dev/null)
-
-    echo ""
-    echo "--- #${msg_id} from ${from_name} (${from_hash})${urgent} @ ${timestamp} ---"
-    echo "Subject: ${subject}"
-    echo "${body}"
-
-    # Show attachments
-    if [ -n "$attachments" ]; then
-      echo ""
-      while IFS= read -r apath; do
-        [ -z "$apath" ] && continue
-        if [ -e "$apath" ]; then
-          echo "[Attached: ${apath} ($(wc -c < "$apath" | tr -d ' ') bytes)] <-- Use Read tool to view"
-        else
-          echo "[Attached: ${apath} (missing)]"
-        fi
-      done <<< "$attachments"
-    fi
-
-    # Show thread context if this is part of a conversation
-    if [ -n "$thread_id" ]; then
-      thread_root="$thread_id"
-      thread_count=$(sqlite3 "$PMAIL_DB" "SELECT COUNT(*) FROM messages WHERE id=${thread_root} OR thread_id=${thread_root};" 2>/dev/null)
-      if [ "${thread_count:-0}" -gt 1 ]; then
-        echo ""
-        echo "[Thread #${thread_root} - ${thread_count} messages. Run: pigeon thread ${thread_root}]"
-      fi
-    fi
-  done <<< "$IDS"
-}
-
-MESSAGES=$(render_messages)
-
-# Rows vanished between the id query and the render (read elsewhere) - nothing to say
-if [ -z "$MESSAGES" ]; then
-  mark_seen "$MAX_ID"
   exit 0
 fi
 

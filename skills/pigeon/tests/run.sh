@@ -241,6 +241,47 @@ else
   else
     echo "  SKIP  worktree footer (git without --path-format, needs 2.31+)"
   fi
+
+  echo "-- hook cost does not grow with the inbox --"
+  # Regression (2026-11-12): the hook ran about nine sqlite3 calls per message (one
+  # per field), so 10 messages took 4.6 s and 20 took 9.4 s on Git Bash, past the
+  # 5 s hook timeout. A killed hook never marks mail seen, so the next tool call ran
+  # it again: 15,664 abandoned stamp files in /tmp. Counted through a PATH shim, the
+  # number of sqlite3 calls for ten messages must equal the number for one.
+  mkdir -p "$SB/many" "$SB/shim"
+  real_sqlite="$(command -v sqlite3)"
+  printf '#!/bin/bash\necho x >> "%s"\nexec "%s" "$@"\n' "$SB/sqlite3.calls" "$real_sqlite" > "$SB/shim/sqlite3"
+  chmod +x "$SB/shim/sqlite3"
+  hook_many() {
+    rm -f "$SB/sqlite3.calls"
+    (cd "$SB/many" && printf '{"session_id":"%s"}' "$1" | PATH="$SB/shim:$PATH" bash "$HOOK")
+  }
+  (cd "$SB/many" && bash "$MAIL" send "$SB/many" "first of many" "the thread root" </dev/null >/dev/null)
+  many_hash="$(cd "$SB/many" && bash "$MAIL" id </dev/null)"; many_hash="${many_hash##* }"
+  hook_many count-one >/dev/null
+  calls_one="$(wc -l < "$SB/sqlite3.calls" | tr -d ' ')"
+  # Nine more rows straight into the table (eight plain, one urgent reply to the
+  # first, so ordering and the thread line are rendered too).
+  root_id="$(sqlite3 "$DB" "SELECT MAX(id) FROM messages WHERE to_project='${many_hash}';" | tr -d '\r')"
+  sqlite3 "$DB" "WITH RECURSIVE n(i) AS (SELECT 2 UNION ALL SELECT i+1 FROM n WHERE i<9)
+    INSERT INTO messages (from_project, to_project, subject, body) SELECT '${many_hash}', '${many_hash}', 'many ' || i, 'body ' || i FROM n;
+    INSERT INTO messages (from_project, to_project, subject, body, priority, thread_id)
+      VALUES ('${many_hash}', '${many_hash}', 'urgent reply', 'jump the queue', 'urgent', ${root_id});"
+  touch "/tmp/pigeon_signal_${many_hash}"
+  many_out="$(hook_many count-ten)"
+  calls_ten="$(wc -l < "$SB/sqlite3.calls" | tr -d ' ')"
+  expect_eq "hook spends as many sqlite3 calls on ten messages as on one" "$calls_one" "$calls_ten"
+  ctx="$(envelope_ctx "$many_out")"
+  case "$ctx" in
+    *"INCOMING PMAIL (10 message(s))"*) ok "hook delivers all ten messages";;
+    *) no "hook lost messages (got: ${ctx:0:200})";;
+  esac
+  expect_eq "urgent mail is rendered first" "Subject: urgent reply" "$(printf '%s\n' "$ctx" | grep -m1 '^Subject: ')"
+  case "$ctx" in
+    *"jump the queue"*"[Thread #${root_id} - 2 messages. Run: pigeon thread ${root_id}]"*"Subject: first of many"*"the thread root"*"Subject: many 9"*"body 9"*)
+      ok "each message keeps its subject, body and thread line";;
+    *) no "rendered messages lost a field (got: ${ctx:0:400})";;
+  esac
 fi
 
 echo "-- ambiguous project names --"
@@ -259,6 +300,92 @@ twin_err="$(cat "$SB/twin.err")"
 [[ "$twin_err" == *"2 projects are named 'twin'"* && "$twin_err" == *"$hash_a"* && "$twin_err" == *"$hash_b"* ]] \
   && ok "ambiguous name warns and lists every candidate hash" \
   || no "ambiguous name sent without a warning (stderr: ${twin_err:-empty})"
+
+echo "-- lock contention --"
+# Regression (2026-11-11): every sqlite3 call ran with busy_timeout 0 on a
+# rollback-journal database, so one concurrent reader (the check-mail hook runs in
+# dozens of sessions) failed a write at once with "database is locked". broadcast
+# sent one INSERT per project, so it died part-way, and the retry re-sent to the
+# projects already done: 239 copies across 65 of 160 projects.
+#
+# hold_db <begin-sql> <release-file>: a second sqlite3 connection runs <begin-sql>
+# and keeps its transaction open until <release-file> exists (10 s cap). It returns
+# once the lock is really held: the holder writes its marker only after <begin-sql>
+# succeeded (-bail), and `.output stdout` closes, so flushes, the marker file.
+native_path() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
+hold_db() {
+  local marker="$SB/held.$RANDOM" release="$2" i
+  rm -f "$release"
+  {
+    printf '%s\n.output %s\n.print held\n.output stdout\n' "$1" "$(native_path "$marker")"
+    for i in $(seq 100); do [ -f "$release" ] && break; sleep 0.1; done
+    printf 'COMMIT;\n'
+  } | sqlite3 -bail -cmd ".timeout 5000" "$DB" >/dev/null 2>&1 &
+  HOLDER=$!
+  for i in $(seq 200); do [ -s "$marker" ] && return 0; sleep 0.05; done
+  return 1
+}
+self_id="$(bash "$MAIL" id </dev/null)"; self_hash="${self_id##* }"
+peers="$(sqlite3 "$DB" "SELECT COUNT(*) FROM projects WHERE hash<>'${self_hash}';" | tr -d '\r')"
+# "<projects> <distinct recipients> <copies>" for one subject: all equal = one copy each.
+delivery() {
+  sqlite3 "$DB" "SELECT (SELECT COUNT(*) FROM projects WHERE hash<>'${self_hash}') || ' ' ||
+    (SELECT COUNT(DISTINCT to_project) FROM messages WHERE subject='$1') || ' ' ||
+    (SELECT COUNT(*) FROM messages WHERE subject='$1');" | tr -d '\r'
+}
+
+# send and broadcast start together while another connection holds the write lock
+# for 3 s, then race each other for it. 3 s, because in WAL mode their reads pass
+# the lock and each needs about 1 s of process starts on Git Bash before its first
+# write: a 1 s hold was already gone by then, so busy_timeout 0 passed too.
+if hold_db "BEGIN EXCLUSIVE;" "$SB/release"; then
+  (sleep 3; touch "$SB/release") &
+  bash "$MAIL" send "$(pwd)" "under a write lock" "waited" </dev/null >/dev/null 2>"$SB/send.err" &
+  send_pid=$!
+  bash "$MAIL" broadcast "broadcast under lock" "waited" </dev/null >/dev/null 2>"$SB/broadcast.err" &
+  broadcast_pid=$!
+  if wait "$send_pid"; then ok "send waits out a write lock another connection holds"
+  else no "send failed under a held write lock: $(head -c 200 "$SB/send.err")"; fi
+  if wait "$broadcast_pid"; then ok "broadcast waits out a write lock another connection holds"
+  else no "broadcast failed under a held write lock: $(head -c 200 "$SB/broadcast.err")"; fi
+  wait
+  expect_eq "broadcast under a lock sends one copy to every other project" "$peers $peers $peers" "$(delivery 'broadcast under lock')"
+else
+  no "setup: could not take the write lock"; wait
+fi
+
+# broadcast_is_all_or_nothing: a broadcast that fails part-way must send nothing,
+# so a retry can't double-send. A trigger stands in for the lock: it fails the
+# INSERT for one project late in the alphabet, after a per-project loop has
+# already sent to every project before it.
+mkdir -p "$SB/zz-late"
+late_id="$(cd "$SB/zz-late" && bash "$MAIL" id </dev/null)"; late_hash="${late_id##* }"
+peers="$(sqlite3 "$DB" "SELECT COUNT(*) FROM projects WHERE hash<>'${self_hash}';" | tr -d '\r')"
+sqlite3 "$DB" "CREATE TRIGGER inject_failure BEFORE INSERT ON messages
+  WHEN NEW.to_project='${late_hash}' AND NEW.subject='atomic' BEGIN SELECT RAISE(ABORT, 'injected failure'); END;"
+if bash "$MAIL" broadcast "atomic" "all or nothing" </dev/null >/dev/null 2>&1; then
+  no "broadcast reported success although one project's insert failed"
+else
+  ok "broadcast exits non-zero when one project's insert fails"
+fi
+expect_eq "a broadcast that fails part-way sends to no project" "$peers 0 0" "$(delivery atomic)"
+sqlite3 "$DB" "DROP TRIGGER inject_failure;"
+bash "$MAIL" broadcast "atomic" "all or nothing" </dev/null >/dev/null 2>&1
+expect_eq "retrying a failed broadcast sends exactly one copy to every other project" "$peers $peers $peers" "$(delivery atomic)"
+
+# A reader that hangs with its transaction open (eight hung for up to 48 h on
+# 2026-11-11) blocked every writer in rollback-journal mode, past any busy timeout.
+# In WAL mode a writer passes it. This reader stays open until the send returns.
+if hold_db "BEGIN; SELECT COUNT(*) FROM messages;" "$SB/release"; then
+  if bash "$MAIL" send "$(pwd)" "past a reader" "not blocked" </dev/null >/dev/null 2>"$SB/lock.err"; then
+    ok "send succeeds while another connection holds a read transaction open"
+  else
+    no "send blocked by an open reader: $(head -c 200 "$SB/lock.err")"
+  fi
+  touch "$SB/release"; wait
+else
+  no "setup: could not open the reader"; wait
+fi
 
 echo ""
 echo "=== $PASS passed, $FAIL failed ==="

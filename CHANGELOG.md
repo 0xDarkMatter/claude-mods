@@ -182,6 +182,19 @@ feature releases live in the README "Recent Updates" section.
 
 ### Changed
 
+- **pigeon's database runs in WAL mode, so a reader never blocks a writer.** In SQLite's
+  default rollback journal one open reader stops every write until it finishes, and a reader
+  that hangs (eight did, for up to 48 h) blocks sends past any busy timeout. `mail-db.sh`
+  switches `pmail.db` to WAL once, retrying on later commands while other connections keep it
+  busy, and records the switch in `user_version`. A database switched back on purpose
+  (`PRAGMA journal_mode=DELETE`, for `~/.claude` on a network drive) stays switched back.
+  `pmail.db-wal` and `-shm` now sit beside the database while sessions use it, and on macOS
+  they stay after the last one closes. A new case holds a read transaction open during a send:
+  it fails against the old scripts and against a mutant without the switch. The suite and a
+  WAL probe pass on Windows 11 (Git Bash, sqlite 3.46), Linux (Ubuntu 24.04 on a boat.dev box,
+  ext4, sqlite 3.45) and macOS 15.8 (Apple silicon, APFS, the system's bash 3.2 and sqlite
+  3.43, no GNU timeout). WSL was not run: virtualization is off on the test machine.
+
 - **Skill descriptions trimmed by about 2,750 chars across 36 skills.** Cuts are prose that
   restated a skill's own trigger list; trigger phrases stay. The README's budget section and
   `claude-code-ops` now use the current docs: `skillListingMaxDescChars` replaces
@@ -287,6 +300,20 @@ feature releases live in the README "Recent Updates" section.
   blocks.
 
 ### Fixed
+
+- **pigeon no longer fails or double-sends when `pmail.db` is busy.** Every sqlite3 call ran
+  with SQLite's default busy timeout of 0, so any concurrent reader (the check-mail hook runs
+  in dozens of sessions) failed a write at once with `database is locked`. `broadcast` sent one
+  INSERT per project, died part-way, and its retry re-sent to the projects already done: 239
+  copies across 65 of 160 projects. Now every query waits up to 5 s for a lock (the hook 2 s),
+  `broadcast` is one transaction that reaches every project or none, and steps after a
+  commit can't fail the command. With GNU `timeout` on PATH each query is killed after 30 s
+  (the hook 4 s); eight readers had been found hung for up to 48 h. The hook now renders all
+  waiting mail with one query instead of about nine per message: 20 messages took 9.4 s
+  against its 5 s timeout, and 15,664 stamp files in `/tmp` showed how often it was killed
+  and re-run; it now takes about 1 s whatever the count. Ten new cases in
+  `pigeon/tests/run.sh`: the six aimed at these bugs fail against the old scripts, and a
+  mutant with busy timeout 0 fails only the lock-wait cases.
 
 - **windows-ops `process-triage.ps1` reports real CPU rates.** The sample pass re-read
   every PID with `Get-Process -Id`, which scales with the whole process table, then
