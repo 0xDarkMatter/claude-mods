@@ -93,14 +93,16 @@ Windows, a CLI's `.exe` or `.msi`). For one of those, inside the cooldown:
 
 1. Download the file, then run
    `bash scripts/release-check.sh <owner/repo> <tag> <file> --reference <installed-binary>`.
-2. **Exit 12 (refuse)**: the hash or the signer contradicts the release or the installed
-   version. Do not install that file; find out why first.
+2. **Exit 12 (refuse)**: the hash contradicts the release, or a different signer (or no
+   signature, where the installed version has one) signed the file. Do not install that
+   file; find out why first.
 3. **Exit 11 (waiver recommended)**: the notes name CVE IDs, the hash matches, and the
    Authenticode signer is the installed version's. Show the person the evidence (stderr,
    or `--json`) and ask. Confirm each CVE is fixed in this release, not just mentioned.
    If they OK it, record the CVE IDs, hash and signer in the install note.
 4. **Exit 10 (hold)**: something is missing (no CVE IDs, no published hash, no signature
-   this host can check). Wait the 7 days.
+   this host can check, or a renewed certificate the vendor has not yet confirmed). Wait
+   the 7 days.
 
 For a dependency, `preinstall-check.sh` exit 11 means OSV names a CVE fixed in exactly
 that version: ask the person, who still checks the vendor checksum and the lock diff.

@@ -173,8 +173,10 @@ must pass. If one fails or cannot be run, the release waits the 7 days.
    **For a signed binary**, its code signature must also be valid and come from the same
    signing identity as the version already installed. A hijacked release account can
    rewrite the notes and the hashes beside the asset, but it does not hold the
-   code-signing key. A new or missing signer sends the release back under the cooldown,
-   and a renewed certificate is confirmed out of band first.
+   code-signing key. A renewed certificate (same subject, new thumbprint, which happens
+   about yearly) sends the release back under the cooldown until the vendor confirms the
+   renewal. A different signer, or no signature where the installed version has one, is
+   refused until the vendor confirms the change.
 3. **Change confined to the patched package(s).** `git diff -- <lockfile>` must move
    only the advised package and any sibling the vendor ships with it (a core package and
    its core-files package, say). Anything else moving sends the whole change back under
@@ -204,8 +206,10 @@ for a tool, step 2) and say when a waiver may be requested. The person still dec
 | `scripts/preinstall-check.sh` (a package) | OSV lists a non-withdrawn advisory with a CVE ID whose fixed version is exactly this one. The CVE IDs and advisory URLs are in stderr and in `--json` `.data[].waiver` | The vendor checksum, the lock diff, staging, the record. Exit 10 stays the plain hold, also when OSV is unreachable |
 | `scripts/release-check.sh` (a tool from a GitHub release) | The notes name CVE IDs, the file's SHA-256 matches the release's asset digest or notes, and its Authenticode signature is valid with the same certificate as `--reference` (the installed binary) | Whether each CVE is fixed rather than mentioned; signatures other than Authenticode, so a non-Windows host or a non-PE file only ever holds |
 
-`release-check.sh` exits 12 (refuse) at any age when the hash or the signer contradicts
-the release or the installed version: do not install that file. Both exit 7 when they
+`release-check.sh` exits 12 (refuse) at any age when the hash contradicts the release,
+or the signer is a different subject (or missing where the installed version is signed):
+do not install that file. A renewed certificate is not a refusal: it holds (10) inside
+the cooldown, passes outside it, and never reaches 11. Both scripts exit 7 when they
 could not check at all, which is never a pass.
 
 **Example (dependency).** A CMS ships core `X.Y.4`, a security point release whose
@@ -221,8 +225,9 @@ and GitHub holds the same value as the asset digest. `release-check.sh git-for-w
 v2.56.1.windows.1 Git-2.56.1-64-bit.exe --reference "C:\Program Files\Git\cmd\git.exe"`
 reads all of that; when the installer's signer certificate matches the installed
 `git.exe`'s, it exits 11. The workstation owner OKs the install, and the install note
-records the CVE IDs, the hash and the signer. Had the signer changed, it would exit 12;
-had the notes said only "security fixes", it would exit 10.
+records the CVE IDs, the hash and the signer. Had the certificate been renewed, it would
+exit 10 until the vendor confirmed the renewal; had a different signer signed it, 12; had
+the notes said only "security fixes", 10.
 
 ---
 

@@ -15,7 +15,10 @@ feature releases live in the README "Recent Updates" section.
   Windows its Authenticode status and signer beside `--reference`, the installed binary.
   Verdicts: `hold` (10) while any evidence is missing, `waiver-recommended` (11) when CVE
   IDs, hash and the same signer certificate are all there, and `refuse` (12) at any age when
-  the hash or signer contradicts the release. It recommends and never waives; a person
+  the hash contradicts the release or a different signer (or none, where the installed
+  version is signed) signed the file. A renewed certificate, same subject and new
+  thumbprint, holds instead: refusing every release after a yearly renewal would teach
+  people to ignore 12. A renewal never reaches 11. It recommends and never waives; a person
   decides and records it. Only Authenticode is checked, so other hosts and file types can
   at best hold. Live-checked on Windows against the 2.56.1 release and real Authenticode
   signatures (not on the installer itself); the suite runs offline on shims.

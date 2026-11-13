@@ -25,8 +25,9 @@
 #          10 hold: inside the cooldown and some evidence is missing,
 #          11 waiver recommended: inside the cooldown and every check this tool can
 #             run passed - a person still decides,
-#          12 refuse: the hash or the signer contradicts the release or the
-#             installed version - do not install this file, whatever its age
+#          12 refuse: the hash contradicts the release, or the signer is a
+#             different subject (or none where the installed version has one) -
+#             do not install this file, whatever its age
 #
 # Guard: there is no flag to waive or skip any check, the same deliberate design
 # as preinstall-check.sh: a flag is the first thing a "critical fix, install now"
@@ -39,8 +40,16 @@
 # signature with the SAME certificate thumbprint as the installed --reference.
 # Only Authenticode (.exe .msi .msix .appx .dll, read by PowerShell's
 # Get-AuthenticodeSignature, which exists on Windows only) is checked; any other
-# file type, or a host without it, can at best hold. A new thumbprint refuses even
-# when the subject matches: a certificate renewal is confirmed out of band.
+# file type, or a host without it, can at best hold.
+#
+# Renewal holds, it does not refuse. Code-signing certificates renew about once a
+# year: same subject, new thumbprint. Refusing that would put every later release
+# at 12 until someone installed past the refusal, which teaches people to ignore
+# 12, the one code that must stay credible. So a renewal is missing evidence (hold
+# inside the cooldown, ok outside it, never 11), confirmed with the vendor before
+# anyone asks for a waiver. A different subject, or an unsigned file where the
+# installed version is signed, still refuses (rules/supply-chain.md: "a new or
+# missing signer sends the release back under the cooldown").
 #
 # Examples:
 #   release-check.sh git-for-windows/git v2.56.1.windows.1 ~/Downloads/Git-2.56.1-64-bit.exe \
@@ -237,6 +246,7 @@ else
   [[ -n "$REF" ]] && { SIG_REF=$(jq -c 'first(.[] | select(.role == "reference")) // null' <<<"${sig:-[]}" 2>/dev/null) || SIG_REF="null"; }
   fstat=$(jq -r '.status // empty' <<<"$SIG_FILE"); rstat=$(jq -r '.status // empty' <<<"$SIG_REF")
   fthumb=$(jq -r '.thumbprint // empty | ascii_upcase' <<<"$SIG_FILE"); rthumb=$(jq -r '.thumbprint // empty | ascii_upcase' <<<"$SIG_REF")
+  fsubj=$(jq -r '.subject // empty' <<<"$SIG_FILE"); rsubj=$(jq -r '.subject // empty' <<<"$SIG_REF")
   case "$fstat" in
     "")
       SIG_STATE="unavailable"; MISSING+=("the Authenticode signature could not be read (Get-AuthenticodeSignature runs on Windows only)") ;;
@@ -253,6 +263,8 @@ else
         SIG_STATE="valid-uncompared"; MISSING+=("the reference binary's signature is ${rstat:-unreadable}, so the signers were not compared")
       elif [[ -n "$fthumb" && "$fthumb" == "$rthumb" ]]; then
         SIG_STATE="same-signer"
+      elif [[ -n "$fsubj" && "$fsubj" == "$rsubj" ]]; then
+        SIG_STATE="renewed"; MISSING+=("certificate renewed: same subject, new thumbprint (the file ${fthumb:-none}, the installed version ${rthumb:-none}); confirm the renewal with the vendor before asking for a waiver")
       else
         SIG_STATE="signer-changed"; REFUSE+=("signer changed: the file is signed by $(who "$SIG_FILE"), the installed version by $(who "$SIG_REF")")
       fi ;;
@@ -307,6 +319,7 @@ case "$HASH_STATE" in
 esac
 case "$SIG_STATE" in
   same-signer)      prow ok "[signer]" "valid, same certificate as the installed version: $(who "$SIG_FILE")" ;;
+  renewed)          prow warn "[signer]" "renewed: $(who "$SIG_FILE"), the installed version $(who "$SIG_REF")" ;;
   signer-changed|invalid) prow bad "[signer]" "$SIG_STATE" ;;
   *)                prow unknown "[signer]" "$SIG_STATE" ;;
 esac

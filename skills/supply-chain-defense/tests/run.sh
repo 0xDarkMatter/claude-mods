@@ -443,7 +443,7 @@ mkgh() {  # dir release-fixture|FAIL -> curl shim answering like `curl -w '\n%{h
   printf '#!/bin/sh\n[ "%s" = FAIL ] && exit 7\ncat "%s"\nprintf "\\n200"\n' "$2" "$2" > "$1/curl"
   chmod +x "$1/curl"
 }
-mkps() {  # dir file-status file-thumb ref-status ref-thumb | dir FAIL -> pwsh + powershell shims
+mkps() {  # dir file-status file-thumb ref-status ref-thumb [file-subject] | dir FAIL -> pwsh + powershell shims
   mkdir -p "$1"
   if [ "$2" = FAIL ]; then
     printf '#!/bin/sh\necho "Get-AuthenticodeSignature: not recognized" >&2\nexit 1\n' > "$1/pwsh"
@@ -451,7 +451,7 @@ mkps() {  # dir file-status file-thumb ref-status ref-thumb | dir FAIL -> pwsh +
     cat > "$1/pwsh" <<SH
 #!/bin/sh
 cat <<'JSON'
-[{"role":"file","status":"$2","thumbprint":"$3","subject":"CN=Acme Signer"},{"role":"reference","status":"$4","thumbprint":"$5","subject":"CN=Acme Signer"}]
+[{"role":"file","status":"$2","thumbprint":"$3","subject":"${6:-CN=Acme Signer}"},{"role":"reference","status":"$4","thumbprint":"$5","subject":"CN=Acme Signer"}]
 JSON
 SH
   fi
@@ -461,7 +461,9 @@ mkgh "$RCD/gh-qual" "$RCD/rel-qual.json";     mkgh "$RCD/gh-nocve" "$RCD/rel-noc
 mkgh "$RCD/gh-mis" "$RCD/rel-mismatch.json";  mkgh "$RCD/gh-old" "$RCD/rel-old.json"
 mkgh "$RCD/gh-down" FAIL
 mkps "$RCD/ps-same" Valid AAAA1111 Valid AAAA1111
-mkps "$RCD/ps-changed" Valid BBBB2222 Valid AAAA1111
+mkps "$RCD/ps-renewed" Valid BBBB2222 Valid AAAA1111
+mkps "$RCD/ps-other" Valid CCCC3333 Valid AAAA1111 "CN=Someone Else"
+mkps "$RCD/ps-unsigned" NotSigned "" Valid AAAA1111
 mkps "$RCD/ps-fail" FAIL
 rc_run() {  # gh-shim ps-shim [args...] -> release-check on the fixture file
   local gh=$1 ps=$2; shift 2
@@ -477,10 +479,21 @@ out="$(rc_run gh-qual ps-same --reference "$RCD/inst/tool.exe" --json 2>/dev/nul
 printf '%s' "$out" | jq -e '.data[0] | .verdict == "waiver-recommended" and .file.hash == "match"
   and .signature.state == "same-signer" and (.cves | length == 2) and (.still_required | length > 0)' >/dev/null 2>&1
 expect_exit "--json: verdict, hash match, same signer, still_required" 0 $?
-# The hijack shape: CVE IDs in the notes and a matching hash, but a new signer.
-rc_run gh-qual ps-changed --reference "$RCD/inst/tool.exe" >/dev/null 2>"$SB/rc-chg.err"
-expect_exit "CVE IDs with a changed signer refuse -> 12" 12 $?
+# The hijack shape: CVE IDs in the notes and a matching hash, but another signer,
+# or no signature where the installed version has one.
+rc_run gh-qual ps-other --reference "$RCD/inst/tool.exe" >/dev/null 2>"$SB/rc-chg.err"
+expect_exit "CVE IDs with a different signer refuse -> 12" 12 $?
 expect_has  "refusal names the signer change" "signer changed" "$(cat "$SB/rc-chg.err")"
+rc_run gh-qual ps-unsigned --reference "$RCD/inst/tool.exe" >/dev/null 2>&1
+expect_exit "unsigned file where the installed version is signed refuses -> 12" 12 $?
+# A yearly certificate renewal (same subject, new thumbprint) once refused at any
+# age, so every release after a renewal read "do not install" and 12 lost its
+# meaning. It holds inside the cooldown, passes outside it, and never reaches 11.
+out="$(rc_run gh-qual ps-renewed --reference "$RCD/inst/tool.exe" --json 2>"$SB/rc-ren.err")"; rc=$?
+expect_exit "renewed certificate (same subject) holds, never recommends -> 10" 10 "$rc"
+printf '%s' "$out" | jq -e '.data[0].signature.state == "renewed"' >/dev/null 2>&1
+expect_exit "renewed certificate: --json signature state is renewed" 0 $?
+expect_has  "renewal asks for vendor confirmation" "confirm the renewal with the vendor" "$(cat "$SB/rc-ren.err")"
 rc_run gh-mis ps-same --reference "$RCD/inst/tool.exe" >/dev/null 2>&1
 expect_exit "file hash differs from the published hash -> 12" 12 $?
 # A notes row is the file's only when a token IS its name, and a SHA-512 is not a
@@ -511,8 +524,10 @@ rc_run gh-down ps-same --reference "$RCD/inst/tool.exe" >/dev/null 2>&1
 expect_exit "GitHub unreachable gives no recommendation -> 7" 7 $?
 rc_run gh-old ps-same --reference "$RCD/inst/tool.exe" >/dev/null 2>&1
 expect_exit "release older than the cooldown, nothing contradicts it -> 0" 0 $?
-rc_run gh-old ps-changed --reference "$RCD/inst/tool.exe" >/dev/null 2>&1
-expect_exit "a changed signer still refuses outside the cooldown -> 12" 12 $?
+rc_run gh-old ps-renewed --reference "$RCD/inst/tool.exe" >/dev/null 2>&1
+expect_exit "renewed certificate outside the cooldown -> 0" 0 $?
+rc_run gh-old ps-other --reference "$RCD/inst/tool.exe" >/dev/null 2>&1
+expect_exit "a different signer still refuses outside the cooldown -> 12" 12 $?
 
 # ── pre-install-scan.sh hook (both input modes) ────────────────────────────
 echo "-- pre-install-scan.sh hook --"
