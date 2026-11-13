@@ -48,8 +48,8 @@
 # 12, the one code that must stay credible. So a renewal is missing evidence (hold
 # inside the cooldown, ok outside it, never 11), confirmed with the vendor before
 # anyone asks for a waiver. A different subject, or an unsigned file where the
-# installed version is signed, still refuses (rules/supply-chain.md: "a new or
-# missing signer sends the release back under the cooldown").
+# installed version is signed, still refuses. The policy is the checksum-and-signer
+# row of rules/supply-chain.md, "Security-release exception".
 #
 # Examples:
 #   release-check.sh git-for-windows/git v2.56.1.windows.1 ~/Downloads/Git-2.56.1-64-bit.exe \
