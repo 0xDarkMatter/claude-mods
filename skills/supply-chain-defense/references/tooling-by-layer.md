@@ -78,6 +78,17 @@ osv-scanner scan -r .            # recursive, all manifests; exit 1 when vulns f
 **Use as** the CVE-side complement to `security-ops` — broader and faster than
 `npm audit`/`pip-audit`. Pair with a behavioural scanner; do not rely on it alone.
 
+The same OSV data answers the cooldown's security-release question.
+`preinstall-check.sh` asks the OSV API (no install, no key) for any package inside
+the cooldown: an advisory whose `fixed` event is exactly that version and that carries
+a CVE ID makes it exit 11, "a waiver may be requested". Gotchas: a query **with** the
+version returns what that version is *affected* by, never its own fix, so the script
+queries by package and matches the `fixed` events itself. An advisory can trail the
+fix: git's GHSA-vp2w-7xxj-jvxr still read "patches are being discussed", with no fixed
+version, when Git for Windows 2.56.1 shipped. That is why the rule also accepts CVE
+IDs in the vendor's own release notes, which `release-check.sh` reads for
+GitHub-release tools.
+
 ### `npm audit signatures`
 
 Verifies that installed packages match the registry's signatures and (where

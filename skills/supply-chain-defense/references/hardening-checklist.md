@@ -147,6 +147,8 @@ Check publish age ad-hoc before any add:
 
 ```bash
 bash scripts/preinstall-check.sh axios react@19.0.0
+# a standalone tool from a GitHub release (an installer, a CLI binary):
+bash scripts/release-check.sh <owner/repo> <tag> <downloaded-file> --reference <installed-binary>
 ```
 
 ### Security-release exception
@@ -156,37 +158,76 @@ a known, exploitable hole is the bigger risk. "Security fix, upgrade now" is als
 lure a hijacked publish uses, so the label alone waives nothing. **Every** check below
 must pass. If one fails or cannot be run, the release waits the 7 days.
 
-1. **Advisory names this version.** Find the CVE or vendor security advisory and confirm
-   it lists this exact version as the fix. A changelog line or commit message claiming a
-   security fix is not an advisory.
+1. **CVE IDs named for this version.** Published CVEs must be named by ID for this exact
+   version, in a CVE or vendor advisory or in the vendor's own release notes for it.
+   Upstream advisories often go public before they name a fixed version (git's
+   GHSA-vp2w-7xxj-jvxr still read "patches are being discussed" when Git for Windows
+   2.56.1 shipped the fix), which is why the notes count. A changelog that says only
+   "security fixes", with no IDs, is the lure, not evidence. A note can also cite an older
+   CVE as background, so confirm each ID is fixed in this release, not just mentioned.
 2. **Vendor checksum or signature, from the vendor's own channel.** Fetch the published
    checksum or signature from the vendor (its download site, checksum API, or signed
    release page), not from the registry entry, and compare it with the artifact you
    actually installed (the archive in the package cache, or the `dist` URL your lockfile
    resolved). Registry metadata alone proves nothing: a stolen publish token can rewrite it.
-3. **Lock diff confined to the patched package(s).** `git diff -- <lockfile>` must move
+   **For a signed binary**, its code signature must also be valid and come from the same
+   signing identity as the version already installed. A hijacked release account can
+   rewrite the notes and the hashes beside the asset, but it does not hold the
+   code-signing key. A renewed certificate (same subject, new thumbprint, which happens
+   about yearly) sends the release back under the cooldown until the vendor confirms the
+   renewal. A different signer, or no signature where the installed version has one, is
+   refused until the vendor confirms the change.
+3. **Change confined to the patched package(s).** `git diff -- <lockfile>` must move
    only the advised package and any sibling the vendor ships with it (a core package and
    its core-files package, say). Anything else moving sends the whole change back under
-   the cooldown.
-4. **A person merges, staging first.** No agent or bot merges or deploys a waived
-   release. It runs on staging (or the equivalent) before production.
-5. **Record the waiver** in the PR body or commit message:
+   the cooldown. A single tool installer is confined by nature.
+4. **A person approves, staging first for a dependency.** A person merges the PR, or OKs
+   the tool install. No agent or bot merges, deploys or installs a waived release. A
+   dependency runs on staging (or the equivalent) before production.
+5. **Record the waiver** in the PR body or commit message, or in the install note for a
+   tool:
 
    ```text
    Cooldown waived: security release.
-   Advisory: <CVE or vendor advisory ID + URL>, names <version> as the fix.
+   CVEs: <CVE IDs>, named for <version> in <advisory ID + URL | release notes URL>.
    Checksum: <algorithm> <value>, from <vendor URL>, matches the installed artifact.
-   Lock: only <package(s)> changed.
+   Signer: <subject> [<thumbprint>], same as the installed <version>.   (signed binaries)
+   Lock: only <package(s)> changed.                                     (dependencies)
    ```
 
 The behavioural scan still runs; the exception waives only the wait.
-`preinstall-check.sh` keeps reporting exit 10 for the release, by design: it has no
-waiver flag, because a flag would be the first thing a lure asks for.
 
-**Example.** A CMS ships core `X.Y.4`, a security point release whose advisory fixes a
-CVE in `X.Y.3`. The lock moves the core package and its core-files package, and nothing
-else. The archive's SHA-1 matches the checksum on the vendor's own download API. The PR
-records all of that, a person merges it to staging, then promotes it the same day.
+**What the tools report.** Neither script waives anything, and neither has a flag to:
+a flag would be the first thing a lure asks for. They gather the evidence for step 1 (and,
+for a tool, step 2) and say when a waiver may be requested. The person still decides.
+
+| Tool | Exit 11 means | It cannot check |
+|---|---|---|
+| `scripts/preinstall-check.sh` (a package) | OSV lists a non-withdrawn advisory with a CVE ID whose fixed version is exactly this one. The CVE IDs and advisory URLs are in stderr and in `--json` `.data[].waiver` | The vendor checksum, the lock diff, staging, the record. Exit 10 stays the plain hold, also when OSV is unreachable |
+| `scripts/release-check.sh` (a tool from a GitHub release) | The notes name CVE IDs, the file's SHA-256 matches the release's asset digest or notes, and its Authenticode signature is valid with the same certificate as `--reference` (the installed binary) | Whether each CVE is fixed rather than mentioned; signatures other than Authenticode, so a non-Windows host or a non-PE file only ever holds |
+
+`release-check.sh` exits 12 (refuse) at any age when the hash contradicts the release,
+or the signer is a different subject (or missing where the installed version is signed):
+do not install that file. A renewed certificate is not a refusal: it holds (10) inside
+the cooldown, passes outside it, and never reaches 11. Both scripts exit 7 when they
+could not check at all, which is never a pass.
+
+**Example (dependency).** A CMS ships core `X.Y.4`, a security point release whose
+advisory fixes a CVE in `X.Y.3`. The lock moves the core package and its core-files
+package, and nothing else. The archive's SHA-1 matches the checksum on the vendor's own
+download API. The PR records all of that, a person merges it to staging, then promotes it
+the same day.
+
+**Example (tool).** Git for Windows 2.56.1 shipped 3 days after 2.56.0(4). Its notes
+name six CVEs fixed in it, and also cite CVE-2019-1348 as background, which is why the
+person confirms each ID. They publish the installer's SHA-256 in a `file | hash` table,
+and GitHub holds the same value as the asset digest. `release-check.sh git-for-windows/git
+v2.56.1.windows.1 Git-2.56.1-64-bit.exe --reference "C:\Program Files\Git\cmd\git.exe"`
+reads all of that; when the installer's signer certificate matches the installed
+`git.exe`'s, it exits 11. The workstation owner OKs the install, and the install note
+records the CVE IDs, the hash and the signer. Had the certificate been renewed, it would
+exit 10 until the vendor confirmed the renewal; had a different signer signed it, 12; had
+the notes said only "security fixes", 10.
 
 ---
 

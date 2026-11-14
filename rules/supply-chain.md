@@ -66,17 +66,23 @@ cooldown. The conditions make the release prove where it came from instead.
 
 | Condition (all must hold) | Why it is there |
 |---|---|
-| It fixes a **published** CVE or vendor security advisory, and that advisory names **this exact version** as the fix. | A version that merely claims to be a security release in its changelog or commit message is the lure. The advisory, published by the vendor or a CVE authority, is the evidence. A version the advisory does not name gets the cooldown. |
-| The artifact matches a checksum or signature the vendor publishes **on its own channel** (its website, signed release page, or checksum API), compared with what you actually installed. | A hijacked registry account can rewrite the registry's own metadata, so checking the registry against itself proves nothing. A second, vendor-controlled channel is what an attacker with one stolen token does not also control. |
-| The change is **confined to the patched package(s)**. If any other package moves in the lockfile, stop: the whole change goes back under the cooldown. | A security bump that drags in an unrelated new transitive version is the exact shape of a worm piggy-backing on urgency. A diff that touches only the patched package is small enough to review. |
-| A **person merges** it, and it runs on **staging** (or the equivalent) before production. | Skipping the cooldown removes the week in which the ecosystem would have caught a bad release. A human decision and a staging soak are the cheap stand-ins for that week. The waiver never lets an agent or bot merge or deploy unattended. |
-| The PR or commit **records the waiver**: the advisory ID, the vendor checksum or signature and where it came from, and confirmation that nothing else moved in the lock. | The next reader, or the incident review if it goes wrong, must see that the cooldown was skipped on purpose and on what evidence. An unrecorded waiver looks the same as a missed check. |
+| It fixes **published** CVEs that are named by ID **for this exact version**, either in a CVE or vendor advisory or in the vendor's own release notes for the version. | The CVE IDs are the evidence; a changelog that only says "security fixes" is the lure. Vendor release notes count because upstream advisories often go public before they name a fixed version. Git's GHSA-vp2w-7xxj-jvxr still read "patches are being discussed" when Git for Windows 2.56.1 shipped the fix, with the CVE IDs in its release notes. The next condition is what makes the notes trustworthy. |
+| The artifact matches a checksum or signature the vendor publishes **on its own channel** (its website, signed release page, or checksum API), compared with what you actually installed. For a signed binary, its code signature must also be valid and come from **the same signing identity as the version already installed**. | A hijacked registry account can rewrite the registry's own metadata, so checking the registry against itself proves nothing. A hijacked release account can rewrite the notes and the hashes beside the asset. Neither attacker also holds the vendor's code-signing key, so an unchanged signer is the strongest second channel there is. A renewed certificate (same subject) sends the release back under the cooldown; a different signer, or none where there was one, is refused until the vendor confirms the change. |
+| The change is **confined to the patched package(s)**. If any other package moves in the lockfile, stop: the whole change goes back under the cooldown. A single tool installer is confined by nature. | A security bump that drags in an unrelated new transitive version is the exact shape of a worm piggy-backing on urgency. A diff that touches only the patched package is small enough to review. |
+| A **person approves** it: they merge the PR, or OK the tool install. A dependency change also runs on **staging** (or the equivalent) before production. | Skipping the cooldown removes the week in which the ecosystem would have caught a bad release. A human decision and a staging soak are the cheap stand-ins for that week. The waiver never lets an agent or bot merge, deploy or install unattended. |
+| The **waiver is recorded** in the PR or commit, or in the install note for a tool. Record the CVE IDs and where they were named, the checksum and signer and where they came from, and, for a dependency, confirmation that nothing else moved in the lock. | The next reader, or the incident review if it goes wrong, must see that the cooldown was skipped on purpose and on what evidence. An unrecorded waiver looks the same as a missed check. |
 
 The behavioural scan still runs. The exception waives the *wait*, nothing else. If any
 condition fails or cannot be checked, the default holds: wait out the 7 days.
-`preinstall-check.sh` still exits 10 for such a release, because release age is a fact
-it reports. It has no flag to waive the cooldown; the waiver is a human decision recorded
-in the PR.
+
+The supply-chain-defense tools gather the evidence and may **recommend** a waiver; they
+never grant one, and neither has a flag to waive the cooldown. `preinstall-check.sh` exits
+11 instead of 10 when OSV lists a CVE whose fixed version is exactly the one asked for.
+`release-check.sh` does the same for a tool from a GitHub release: CVE IDs in the notes, a
+SHA-256 that matches the release, and the installed version's Authenticode signer. A
+renewed certificate holds, and a different signer or a missing signature refuses (exit
+12), as does a hash that contradicts the release. Either way, the waiver is a human
+decision recorded in the PR, or in the install note for a tool.
 
 **Worked example (generic).** A CMS ships core `X.Y.4`, a security point release whose
 advisory fixes a CVE in `X.Y.3`. The site's lock moves the core package and its paired
@@ -86,6 +92,15 @@ registry entry. The PR states the advisory ID, the checksum and its source URL, 
 the two core packages changed in the lock". A person merges it to staging, checks the
 site, then promotes it to production the same day. Had a third package moved in the lock,
 or had the checksum come only from the registry, the PR would wait the 7 days.
+
+**Worked example (tool).** Git for Windows 2.56.1 shipped 3 days after 2.56.0(4). Its
+release notes name six CVEs by ID, one of them remote code execution through a recursive
+clone. The installer's SHA-256 matches the table in the vendor's release notes. Its
+Authenticode signature is valid and has the same signer certificate as the installed
+2.56.0(4). The workstation owner OKs the install, and the install note records the CVE IDs,
+the hash and the signer. Had the certificate been renewed, or had the notes said only
+"security fixes", it would wait the 7 days; had a different signer signed it, it would be
+refused until the vendor confirmed the change.
 
 ## Self-check before generating install/setup commands
 

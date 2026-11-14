@@ -8,6 +8,21 @@ feature releases live in the README "Recent Updates" section.
 
 ### Added
 
+- **`supply-chain-defense` `release-check.sh`: the cooldown for tools no registry covers.**
+  Given a GitHub release (owner/repo and tag) and the file downloaded from it, such as a
+  Git for Windows installer, it reports the release's age, the CVE IDs its notes name,
+  whether the file's SHA-256 matches the asset digest or the notes' hash table, and on
+  Windows its Authenticode status and signer beside `--reference`, the installed binary.
+  Verdicts: `hold` (10) while any evidence is missing, `waiver-recommended` (11) when CVE
+  IDs, hash and the same signer certificate are all there, and `refuse` (12) at any age when
+  the hash contradicts the release or a different signer (or none, where the installed
+  version is signed) signed the file. A renewed certificate, same subject and new
+  thumbprint, holds instead: refusing every release after a yearly renewal would teach
+  people to ignore 12. A renewal never reaches 11. It recommends and never waives; a person
+  decides and records it. Only Authenticode is checked, so other hosts and file types can
+  at best hold. Live-checked on Windows against the 2.56.1 release and real Authenticode
+  signatures (not on the installer itself); the suite runs offline on shims.
+
 - **`linear-ops` skill**: run Linear over its MCP server or GraphQL API, and coordinate agents in
   it. The hard rules lead with what bites first: an unknown `team` or `state` on `list_issues`
   returns an empty list, so a typo reads as "no work", and a default 50-row list is 67 KB. A gate
@@ -231,12 +246,24 @@ feature releases live in the README "Recent Updates" section.
 
 - **A security-release exception to the 7-day cooldown.** A release that patches a
   published CVE may skip the wait, but the CVE label alone waives nothing, because
-  "critical fix, upgrade now" is the lure a hijacked publish uses. The advisory must name
-  that version, the artifact must match a checksum or signature from the vendor's own
-  channel, nothing but the patched package may move in the lock, a person merges it via
-  staging, and the PR records the waiver. `rules/supply-chain.md` says why each condition
-  is there; `supply-chain-defense` carries the procedure. `preinstall-check.sh` still exits
-  10 for such a release and gains no waiver flag.
+  "critical fix, upgrade now" is the lure a hijacked publish uses. Published CVEs must be
+  named by ID for that exact version, in an advisory or in the vendor's own release notes
+  (git's GHSA still read "patches are being discussed" when Git for Windows 2.56.1 shipped
+  the fix). The artifact must match a checksum or signature from the vendor's own channel,
+  and a signed binary must keep the installed version's signer: a hijacked release account
+  can rewrite notes and hashes, not the signing key. Nothing but the patched package may
+  move in the lock, a person approves it (a dependency via staging), and the PR or install
+  note records the waiver. `rules/supply-chain.md` says why each condition is there;
+  `supply-chain-defense` carries the procedure and the tooling below.
+
+- **`preinstall-check.sh` recommends a waiver when OSV backs it (exit 11).** For a package
+  inside the cooldown it asks OSV whether a non-withdrawn advisory with a CVE ID names
+  exactly this version as its fix. If one does, the record says a waiver may be requested,
+  with the CVE IDs, advisory URLs and what a person still checks (vendor checksum, lock
+  diff, staging, the record). It never waives and still has no flag to: OSV down or
+  unreadable, a fix in another version, or an advisory with no CVE ID all stay the plain
+  hold (10), and 10 and 7 both outrank 11 in a mixed run. The TSV record gains a sixth
+  column, `waiver`; `--json` records gain a `waiver` object and `meta.waiver_recommended`.
 
 - **review: state the intent first, then a lead judgment.** Every finding is sorted into
   act on, consider, noted or dismissed with a reason; a review with no findings is valid;
