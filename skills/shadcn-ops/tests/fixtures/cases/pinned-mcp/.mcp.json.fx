@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "shadcn": {
+      "command": "pnpm",
+      "args": [
+        "exec",
+        "shadcn",
+        "mcp"
+      ]
+    }
+  }
+}

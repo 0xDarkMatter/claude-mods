@@ -1,0 +1,2 @@
+run the CLI from apps/docs (shadcn ^4.1.0)
+--cwd ../../packages/ui

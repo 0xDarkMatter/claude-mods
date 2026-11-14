@@ -20,11 +20,11 @@
 
 </div>
 
-**claude-mods** is a Claude Code plugin built on one premise: a skill that only *tells* the model something is a suggestion, and a skill that ships a gate is a guarantee. Its 115 skills carry the expert depth you'd expect - React, Rust, PostgreSQL, Cloudflare Workers, Next.js - but the ones that earn the install are the ones that run *agents*: a headless-worker spawner, a test-gated landing queue for parallel branches, a graduated-autonomy ladder for scheduled loops, and a security layer pointed at the agent itself. 64 skills ship executable tooling, 59 ship their own test suites, and 29 carry staleness verifiers that trip when the world moves under them.
+**claude-mods** is a Claude Code plugin built on one premise: a skill that only *tells* the model something is a suggestion, and a skill that ships a gate is a guarantee. Its 116 skills carry the expert depth you'd expect - React, Rust, PostgreSQL, Cloudflare Workers, Next.js - but the ones that earn the install are the ones that run *agents*: a headless-worker spawner, a test-gated landing queue for parallel branches, a graduated-autonomy ladder for scheduled loops, and a security layer pointed at the agent itself. 68 skills ship executable tooling, 63 ship their own test suites, and 33 carry staleness verifiers that trip when the world moves under them.
 
 Built on the [Agent Skills specification](https://agentskills.io/specification) (an open standard backed by Anthropic, Vercel, Google, Microsoft, and 40+ agent platforms) and Anthropic's [patterns for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents), it installs as a standard plugin and toggles off as easily as it toggles on.
 
-**4 agents. 115 skills. 13 styles. 18 hooks. 15 rules. One install.**
+**4 agents. 116 skills. 13 styles. 18 hooks. 15 rules. One install.**
 
 ## What you get
 
@@ -32,7 +32,7 @@ Built on the [Agent Skills specification](https://agentskills.io/specification) 
 - **Cheap workers you can hand a task to.** [`fleet-worker`](skills/fleet-worker/) runs a headless `claude -p` on GLM, Sonnet or Haiku in its own git worktree and config directory, so it can't reach your credentials, then passes its branch to the landing queue.
 - **Scheduled loops earn their autonomy.** [`loop-ops`](skills/loop-ops/) puts every loop on an L1 report → L3 unattended ladder, and `loop-check` won't pass a loop with an unbounded scope, no gate or no kill switch.
 - **A guard on the agent's own attack surface.** Behavioural dependency checks with a 7-day cooldown, a hidden-Unicode scan for instruction files, and a pre-push secret scan with no override flag.
-- **Stale knowledge trips an alarm instead of rotting.** 29 skills ship a verifier that checks their version claims against npm, crates.io and the rest. CI runs it offline on every push and live every Monday.
+- **Stale knowledge trips an alarm instead of rotting.** 33 skills ship a verifier that checks their version claims against npm, crates.io and the rest. CI runs it offline on every push and live every Monday.
 - **Stack depth written for agents, not tutorials.** Production-mined gotchas, version-aware audits (`nextjs-ops` won't demand a v16 idiom of a v14 codebase), and about 100 tokens per skill until one is relevant.
 - **Sessions you can hand over.** `/save` and `/sync` keep task state in a file in your repo, so work resumes on another machine or with a teammate.
 
@@ -241,9 +241,9 @@ An agent that installs packages, reads web pages and edits its own settings has 
 
 ### 3. Its knowledge knows when it's stale
 
-A skill that says "modern R" or "Hono v4" is making a claim that will be false within a year. claude-mods makes those claims **machine-checked**: 28 skills ship a staleness verifier with an `--offline` mode (does the prose still match the catalogue?) and a `--live` mode (does the catalogue still match the world?). CI runs the first on every push; a scheduled workflow runs the second every Monday. When TypeScript ships a native compiler or ADA deadlines move, a tripwire fires instead of a reference quietly rotting.
+A skill that says "modern R" or "Hono v4" is making a claim that will be false within a year. claude-mods makes those claims **machine-checked**: 33 skills ship a staleness verifier with an `--offline` mode (does the prose still match the catalogue?) and a `--live` mode (does the catalogue still match the world?). CI runs the first on every push; a scheduled workflow runs the second every Monday. When TypeScript ships a native compiler or ADA deadlines move, a tripwire fires instead of a reference quietly rotting.
 
-The same instinct runs through the tooling: 64 skills ship real scripts, 58 ship their own `tests/run.sh`, more than 40 use exit-10 as a machine-readable findings signal, and 5.5 MB of references load progressively - ~100 tokens per skill until one is relevant.
+The same instinct runs through the tooling: 68 skills ship real scripts, 63 ship their own `tests/run.sh`, more than 40 use exit-10 as a machine-readable findings signal, and 5.5 MB of references load progressively - ~100 tokens per skill until one is relevant.
 
 ### 4. The stacks are fuel, not filler
 
@@ -254,7 +254,7 @@ Each one is a **currency layer over the model's priors** - React, Vue, Next.js, 
 - **Production-mined, not tutorial-shaped.** 200 KB on SQLite/D1 carries the migration that times out but applies and the `.batch()` semantics that bite; 152 KB on Postgres; 104 KB on TypeScript's TS 7 adoption path; `hono-ops` distilled from a live multi-tenant Worker. The gotchas the docs don't mention are the ones an agent walks straight into.
 - **Version-aware, not newest-wins.** `nextjs-ops`' audit reads the project's installed major and gates its rules on *that* - it won't demand a v16 idiom of a v14 codebase. A skill that only knows the latest is a liability on any repo older than a month.
 - **Pinned and verified.** Eleven stack skills carry an `assets/*-facts.json` with an `as_of` date, and pillar 3's verifiers check it against the world. The claim "modern TypeScript" is machine-enforced, not asserted.
-- **Nearly free to carry.** ~100 tokens per skill until one triggers, then references load on demand. 115 skills cost roughly 10k tokens of descriptions; the 5.6 MB behind them costs nothing until you're actually in that stack.
+- **Nearly free to carry.** ~100 tokens per skill until one triggers, then references load on demand. 116 skills cost roughly 10k tokens of descriptions; the 5.6 MB behind them costs nothing until you're actually in that stack.
 
 And the payoff loops back to pillar 1. A `fleet-worker`'s isolated config dir starts clean - you *provision* skills into it. A GLM worker with `hono-ops` loaded writes better Hono than GLM alone, which is why the skill's own docs call provisioning *"often the cheapest way to lift a weak model's output on a specialized task."* The stack skills are what turn "a cheaper brain" from a cost-cut into a real option: the discipline layers decide *what* an agent may do, and the stack layers decide whether what it does is any good.
 
@@ -299,6 +299,7 @@ Everything in the plugin, grouped. Each block expands.
 | [bash-ops](skills/bash-ops/) | Defensive Bash - strict mode, traps, safe argument parsing, semantic exit codes, shellcheck, CI scripts |
 | [cypress-ops](skills/cypress-ops/) | Cypress e2e + component testing - data-test selectors, cy.intercept, cy.session, Test Replay, flake diagnosis |
 | [tailwind-ops](skills/tailwind-ops/) | Tailwind CSS patterns, v4 migration, components, configuration |
+| [shadcn-ops](skills/shadcn-ops/) | shadcn/ui with the CLI pinned, never `@latest` - a resolver that prefers the project's locked devDependency, then a matching global, then `<pm> dlx shadcn@<pin>`; third-party registries treated as untrusted code (view, `--dry-run`, `--diff` before any add); admin dashboards in depth (TanStack Table v9 data tables with server-side paging, Field forms with React Hook Form or TanStack Form, sidebar and dashboard blocks, dialogs, toasts by base, charts, page states, dark mode); Base UI vs Radix vs React Aria, Tailwind v4 theming and presets, monorepos, `migrate`, `eject`, registry authoring, and why not the MCP server; read-only `shadcn-audit.py` (20 checks, exit 10) and an npm + `--help` staleness verifier |
 | [a11y-ops](skills/a11y-ops/) | Web accessibility end to end - WCAG 2.2 conformance and the legal map (EAA supervision from 2026, ADA Title II deadlines extended to 2027/2028), the four audit passes and what each can actually detect (automation finds ~30-40%), the twelve recurring failures with class-level fixes, an honest accessibility-statement template, and a server-rendered Craft CMS/Twig reference (headings across partials, asset alt text, Formie/CKEditor markup, multi-site `lang`, axe/pa11y-ci against DDEV); `scan-a11y.py` static pre-flight over HTML/JSX/Vue/Svelte/Astro with exit-10 CI signal |
 | [color-ops](skills/color-ops/) | Color spaces, WCAG/APCA contrast checker, palette + harmony generators, CSS color functions, design tokens, color converter |
 | [icon-ops](skills/icon-ops/) | SVG icons for web UI end-to-end - set selection (grid/family/stroke-width lock-in), licence and trademark traps (brand marks are not cleared by a CC0 file licence; aggregators hide the originating set), currentColor theming, sprite vs inline vs component delivery, the external-`<use>` CORS trap, and the two accessibility cases; `normalize-icon.py` strips vendor cruft and rebinds paints (`--check` as a CI gate, `--symbol` for sprite assembly) |
@@ -630,7 +631,7 @@ skill-name/
 2. SKILL.md body - Loaded when skill triggers (< 5,000 tokens; after auto-compaction Claude Code keeps only the first 5,000)
 3. Bundled resources - Loaded only when Claude needs them
 
-Skills carry the full layout by convention - a directory may sit empty until it's needed, so bundled resources always have an obvious home. In practice 100 skills ship references and 64 ship scripts.
+Skills carry the full layout by convention - a directory may sit empty until it's needed, so bundled resources always have an obvious home. In practice 103 skills ship references and 68 ship scripts.
 
 See [skill-creator](skills/skill-creator/) for the complete guide.
 
@@ -641,7 +642,7 @@ claude-mods/
 ├── .claude-plugin/     # Plugin metadata
 ├── agents/             # Expert subagents (4)
 ├── commands/           # Slash commands (5)
-├── skills/             # Custom skills (115)
+├── skills/             # Custom skills (116)
 ├── output-styles/      # Response personalities
 ├── hooks/              # Hook examples & docs
 ├── rules/              # Claude Code rules
@@ -685,7 +686,7 @@ Requires a model that supports `tool_reference` blocks: Sonnet 4.5, Haiku 4.5, O
 
 ### Skill Description Budget
 
-With 90+ skills installed (this plugin alone ships 115), skill descriptions can overflow the listing budget. All skill names are always listed, but descriptions share a budget of **1% of the model context window, counted in characters**. On overflow, the least-used skills lose their descriptions first: Claude can still invoke them and explicit `/name` always works, but Claude is **less likely to pick one on its own**. Each skill's combined `description` + `when_to_use` is also truncated at **1,536 chars**, so trigger phrases belong at the front.
+With 90+ skills installed (this plugin alone ships 116), skill descriptions can overflow the listing budget. All skill names are always listed, but descriptions share a budget of **1% of the model context window, counted in characters**. On overflow, the least-used skills lose their descriptions first: Claude can still invoke them and explicit `/name` always works, but Claude is **less likely to pick one on its own**. Each skill's combined `description` + `when_to_use` is also truncated at **1,536 chars**, so trigger phrases belong at the front.
 
 - **Check:** run `/doctor` for the listing's context cost and biggest contributors, and `/skill-doctor` for what each skill costs against how often it is used. `claude --debug` logs a warning when the listing is over budget. `/context` shows the listing's size after the budget is applied.
 - **Fix:** demote or disable skills you don't use via `skillOverrides` in settings (`"on"` / `"name-only"` / `"user-invocable-only"` / `"off"` per skill, or `/skills` + `Space`). `skillOverrides` does not reach plugin skills, so this plugin's skills are managed via `/plugin` instead.

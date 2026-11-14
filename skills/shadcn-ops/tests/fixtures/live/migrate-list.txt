@@ -1,0 +1,6 @@
+Available migrations:
+- cn: migrate clsx and tailwind-merge to cn.
+- icons: migrate your ui components to a different icon library.
+- base-color: migrate your theme to a different base color.
+- radix: migrate to radix-ui.
+- rtl: migrate your components to support RTL (right-to-left).
