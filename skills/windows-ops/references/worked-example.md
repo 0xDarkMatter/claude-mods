@@ -69,7 +69,7 @@ scripts/crash-triage.ps1                            # decode most recent crash
 scripts/drive-dependencies.ps1 -DriveLetter Y       # verify safe to disconnect
 scripts/copy-tree.ps1 Y:\ Z:\rescue -Mode Rescue     # salvage data
 scripts/safe-disable-startup.ps1 -List              # audit startup state
-scripts/safe-disable-startup.ps1 -Name 'Adobe*','Granola','MuseHub'  # cull bloat
+scripts/safe-disable-startup.ps1 -Name 'Adobe*','Granola','MuseHub'  # cull bloat (HKLM entries: elevated shell)
 Set-Service AdobeARMservice -StartupType Manual     # service-tier (admin)
 # (physical) disconnect failing drive, reboot
 scripts/health-audit.ps1                            # verify clean

@@ -19,7 +19,7 @@ Load this when auditing what auto-launches on a Windows system at boot or login.
 
 | # | Mechanism | Scope | Trigger | Visible in Task Manager? | Disable without admin? |
 |---|-----------|-------|---------|--------------------------|------------------------|
-| 1 | Registry Run keys | User or Machine | Logon | Yes | Yes (StartupApproved trick) |
+| 1 | Registry Run keys | User or Machine | Logon | Yes | Yes (user, HKCU StartupApproved); No (machine: the HKLM flag needs admin) |
 | 2 | Services | Machine | Boot | No | No (admin required) |
 | 3 | Scheduled Tasks at logon/boot | Variable | Logon or boot or event | No (mostly) | Yes (for user tasks); No for system |
 | 4 | Startup folder shortcuts | User or All Users | Logon | Yes (user-folder ones) | Yes (user); No (all-users without admin) |
@@ -69,8 +69,8 @@ foreach ($p in $paths) {
 
 ### Disable
 
-For HKCU entries: delete the registry value (user has permission to write their own hive).
-For HKLM entries: either use the StartupApproved mechanism (no admin needed, works for the current user only) or delete the value (needs admin, affects all users).
+For HKCU entries: set the HKCU StartupApproved flag (reversible), or delete the registry value. Neither needs admin.
+For HKLM entries: set the HKLM StartupApproved flag (reversible, all users), or delete the value. Both need admin. An HKCU flag is not a per-user, no-admin alternative: nothing shows Explorer honouring it for an HKLM entry (see [The StartupApproved mechanism](#the-startupapproved-mechanism)).
 
 ## 2. Services
 
@@ -214,7 +214,7 @@ foreach ($d in $startupDirs) {
 ### Disable
 
 For user folder: delete the `.lnk` file (user has write permission to their own folder).
-For all-users folder: needs admin to modify; OR use StartupApproved mechanism via `HKCU\...\StartupApproved\StartupFolder` to disable for current user only.
+For all-users folder: needs admin either way. Delete the `.lnk`, or set its flag in `HKLM\...\StartupApproved\StartupFolder` (Task Manager's choice). An HKCU flag is not a per-user, no-admin alternative.
 
 ## 5. Group Policy startup scripts
 
@@ -243,52 +243,74 @@ For audit purposes the registry paths and filesystem locations are usually the f
 
 ## The StartupApproved mechanism
 
-How Task Manager's "Disable" button works — and why a non-admin user can disable HKLM entries for themselves.
+How Task Manager's "Disable" button works. Explorer runs the Run keys and Startup folders at logon and skips any entry whose StartupApproved value of the same name says disabled. Nothing is deleted, so it is fully reversible.
 
-### Locations
+### Locations: the flag lives in the entry's own hive
 
-| Path | Disables entries in |
-|------|---------------------|
-| `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run` | HKCU\...\Run AND HKLM\...\Run (64-bit) |
-| `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32` | HKLM\...\WOW6432Node\Run (32-bit) |
-| `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder` | Startup folder shortcuts |
-| `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\...` | Machine-wide disables (admin only) |
+| Entry lives in | Its flag goes in | Admin to write? |
+|----------------|------------------|-----------------|
+| `HKCU\...\CurrentVersion\Run` | `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run` | No |
+| User Startup folder (`%APPDATA%\...\Startup`) | `HKCU\...\Explorer\StartupApproved\StartupFolder` | No |
+| `HKLM\...\CurrentVersion\Run` (64-bit) | `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run` | **Yes** |
+| `HKLM\SOFTWARE\WOW6432Node\...\Run` (32-bit) | `HKLM\...\Explorer\StartupApproved\Run32` | **Yes** |
+| All-users Startup folder (`%ProgramData%\...\StartUp`) | `HKLM\...\Explorer\StartupApproved\StartupFolder` | **Yes** |
 
-The value name matches the original Run key entry name. The value is 12 bytes binary:
+The value name is the Run value's name, or the shortcut's file name (`Tailscale.lnk`). A Run entry with no StartupApproved value runs: "no value" means enabled. A value added by hand with RegEdit or `reg.exe` gets no StartupApproved entry, and deleting a Run value leaves its StartupApproved value behind as an orphan (H. Carvey, [windowsir, 2022-07-17](https://windowsir.blogspot.com/2022/07/startupapprovedrun-pt-ii.html)).
+
+### Value layout
+
+The value is 12 bytes of REG_BINARY:
 
 ```
 Offset  Length  Meaning
-0       1       Status: 0x02 = enabled, 0x03 = disabled
+0       1       Status: low bit set = disabled, clear = enabled
 1       3       Reserved (00 00 00)
-4       8       FILETIME timestamp of last enable/disable
+4       8       FILETIME of the disable (all zero on an enable)
 ```
 
-### Writing the disable marker
+| First byte | Meaning | Where it comes from |
+|------------|---------|---------------------|
+| `0x02` | enabled | What Task Manager writes on re-enable, with eleven zero bytes |
+| `0x03` | disabled | What Task Manager writes on disable, with a FILETIME |
+| `0x01` | disabled | Seen in the wild with a FILETIME, in both hives. Which component writes `0x01` rather than `0x03` is not established. Explorer skips it (measured below) |
+| `0x04`, `0x06` | enabled | `0x04` seen on `SecurityHealth`, which Explorer starts; `0x06` per H. Carvey ([windowsir, 2022-07-09](https://windowsir.blogspot.com/2022/07/does-autostart-really-mean-autostart.html)) |
+
+Decode by the low bit, not by `0x02`/`0x03` alone: a decoder that knows only those two reports every `0x01` entry as unknown. Lansweeper's startup-status report uses the same rule (first digit 2, 4, 6 enabled; 1, 3, 5, 9 disabled). Write an enable as `02` plus eleven zero bytes, as Task Manager does. Velociraptor's `Windows.Sys.StartupItems` treats any non-zero tail as disabled, so an enable that carries a timestamp reads as disabled there.
+
+### Writing the flag
+
+`scripts/safe-disable-startup.ps1` picks the hive per entry, and refuses (exit 5, nothing written) when a batch includes a machine entry and the shell is not elevated. By hand:
 
 ```powershell
-$timestamp = [BitConverter]::GetBytes([DateTime]::Now.ToFileTime())
-$disabledValue = [byte[]]@(0x03, 0x00, 0x00, 0x00) + $timestamp
-
-# Ensure the StartupApproved\Run key exists
-$key = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
+# Disable: 03 + FILETIME. Machine entry -> HKLM (elevated shell); user entry -> HKCU.
+$disabled = [byte[]](@(0x03, 0, 0, 0) + [BitConverter]::GetBytes([DateTime]::Now.ToFileTime()))
+$key = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'   # entry is in HKLM\...\Run
 if (-not (Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
+Set-ItemProperty -Path $key -Name 'MuseHub' -Value $disabled -Type Binary -Force
 
-# Write disable marker (matches the value name in the original Run key)
-Set-ItemProperty -Path $key -Name 'Slack' -Value $disabledValue -Type Binary -Force
+# Re-enable: 02 + eleven zero bytes.
+Set-ItemProperty -Path $key -Name 'MuseHub' -Value ([byte[]](@(0x02) + (,0 * 11))) -Type Binary -Force
 ```
 
-Re-enable: change first byte to `0x02`:
+Elevate from the same account (UAC consent). Over-the-shoulder elevation as a different administrator makes `HKCU` that administrator's hive.
+
+### Evidence, and the open question
+
+**Measured: the HKLM flag governs HKLM entries.** On a Windows 11 22H2 workstation, one sitting of disables in the Windows startup UI wrote the flags for HKLM Run, WOW64 Run and all-users Startup-folder entries to `HKLM\...\StartupApproved\{Run,Run32,StartupFolder}`, and the flags for HKCU entries to HKCU, seconds apart. So the UI routes by hive. `Microsoft-Windows-Shell-Core/Operational` event 9707 logs each Run entry Explorer launches at logon. Over five logons it showed every HKLM entry flagged `0x01` in HKLM being skipped, while entries flagged `0x02`/`0x04`, and unflagged ones, started. Read it yourself:
 
 ```powershell
-$enabledValue = [byte[]]@(0x02, 0x00, 0x00, 0x00) + $timestamp
-Set-ItemProperty -Path $key -Name 'Slack' -Value $enabledValue -Type Binary -Force
+Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Shell-Core/Operational'; Id = 9707 } -MaxEvents 60 |
+    ForEach-Object { '{0:u} {1}' -f $_.TimeCreated, $_.Properties[0].Value }
 ```
 
-### Why this works without admin
+**Unproven: an HKCU flag for an HKLM entry.** No Microsoft document, DFIR write-up or test found shows Explorer honouring an HKCU value for a machine entry. Carvey's tests were HKCU-only, and Hexacorn ("Beyond good ol' Run key, Part 104") shows Explorer checking the list without naming the hive. Task Manager never writes such a value. An earlier version of this skill wrote all flags to HKCU on the belief that it worked, and its "disabled" HKLM entries may have kept starting. Treat it as not working.
 
-The StartupApproved key under HKCU is writable by the current user. Windows' Explorer reads both the Run keys and the StartupApproved overlay at logon — if the StartupApproved entry says `0x03` for an entry name, that entry is skipped, regardless of which Run key (HKCU or HKLM) it lives in.
+**Settling it takes one logon.** Use three harmless HKLM Run probes (for example `conhost.exe --headless cmd.exe /d /c echo %TIME%>"%LOCALAPPDATA%\probe-X.txt"`):
+- **Control:** no flag. It must start, which proves the probe works.
+- **HKLM:** an HKLM `03` flag. It should be skipped.
+- **HKCU:** an HKCU `03` flag. This is the question.
 
-This means: a non-admin user can disable any HKLM startup entry for their own session, even ones an administrator installed for all users. Useful for cleaning up vendor bloat without going through "Run as Administrator."
+Sign out and back in, wait two minutes, then check the marker files and event 9707 since the last logon. Winlogon event 7001 in the System log gives the logon time. If the control starts and the HKLM probe is skipped, the HKCU probe's result answers the question. Remove all three Run values and both flags afterwards.
 
 ## Edge cases
 
@@ -370,7 +392,7 @@ Get-ScheduledTask | Where-Object {
 )
 ```
 
-Cross-reference each entry with the StartupApproved overlay (mechanisms 1 and 4 only) to determine current enabled/disabled state.
+Cross-reference each entry with the StartupApproved flag in its own hive (mechanisms 1 and 4 only) to determine current enabled/disabled state.
 
 ## Why disabling-by-mechanism matters
 

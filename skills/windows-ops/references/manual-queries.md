@@ -10,7 +10,7 @@ The queries, event catalogues and decoding tables behind SKILL.md's storage, boo
   - [Disk → drive letter mapping](#disk--drive-letter-mapping)
   - [SMART reliability counters](#smart-reliability-counters)
 - [Boot](#boot)
-  - [The StartupApproved trick (disable HKLM entries without admin)](#the-startupapproved-trick-disable-hklm-entries-without-admin)
+  - [The StartupApproved flag (Task Manager's disable)](#the-startupapproved-flag-task-managers-disable)
   - [Boot duration measurement](#boot-duration-measurement)
 - [Crash](#crash)
   - [Event 41 (Kernel-Power) decoding](#event-41-kernel-power-decoding)
@@ -70,17 +70,19 @@ Returns blank on some NVMe drives due to Windows driver limitations — fall bac
 
 ## Boot
 
-### The StartupApproved trick (disable HKLM entries without admin)
+### The StartupApproved flag (Task Manager's disable)
 
-Task Manager's "Disable" button writes a binary flag to:
+Task Manager's "Disable" button writes a binary flag in the **same hive as the entry**:
 
 ```
-HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run    (HKLM 64-bit entries)
-HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32  (HKLM WOW6432 entries)
-HKCU\...\StartupApproved\StartupFolder                                          (startup folder shortcuts)
+HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run            (HKCU Run entries)
+HKCU\...\Explorer\StartupApproved\StartupFolder                                        (user Startup folder)
+HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run            (HKLM Run, 64-bit)      admin
+HKLM\...\Explorer\StartupApproved\Run32                                                (HKLM WOW6432Node Run)  admin
+HKLM\...\Explorer\StartupApproved\StartupFolder                                        (all-users Startup)     admin
 ```
 
-The value is 12 bytes: `[status byte] [00 00 00] [8-byte FILETIME timestamp]`. Status = `0x02` enabled, `0x03` disabled. Writing this to HKCU lets a non-admin user disable HKLM startup entries for themselves. The script `scripts/safe-disable-startup.ps1` automates this.
+The value is 12 bytes: `[status byte] [00 00 00] [8-byte FILETIME, zero on an enable]`. The status byte's low bit decides: set = disabled (`0x03`, and `0x01` seen in the wild), clear = enabled (`0x02`, `0x04`, `0x06`). Disabling an HKLM entry needs an elevated shell. No source or test shows an HKCU flag disabling an HKLM entry, so don't use one as a no-admin shortcut. `scripts/safe-disable-startup.ps1` automates this. Evidence, and a one-logon test for the open question: [startup-mechanisms.md](startup-mechanisms.md#the-startupapproved-mechanism).
 
 ### Boot duration measurement
 

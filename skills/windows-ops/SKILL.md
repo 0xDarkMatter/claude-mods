@@ -73,8 +73,8 @@ Produces a verdict block: hardware errors, storage health per disk, recent crash
 
 | Action | Script |
 |---|---|
-| Disable startup app — Run keys (HKCU + HKLM + WOW64) | `scripts/safe-disable-startup.ps1 -Name <pattern>` (no admin needed; supports wildcards) |
-| Disable startup folder shortcut | `scripts/safe-disable-startup.ps1 -Name '*.lnk'` (covered by same script via StartupFolder variant) |
+| Disable startup app — Run keys (HKCU + HKLM + WOW64) | `scripts/safe-disable-startup.ps1 -Name <pattern>` (wildcards; HKCU entries need no admin, HKLM entries need an elevated shell, else exit 5 and nothing written) |
+| Disable startup folder shortcut | `scripts/safe-disable-startup.ps1 -Name '*.lnk'` (same script, StartupFolder variant; the all-users folder needs elevation) |
 | List current state of all startup entries | `scripts/safe-disable-startup.ps1 -List` |
 | Re-enable previously disabled | `scripts/safe-disable-startup.ps1 -Name <pattern> -Enable` |
 | Set service to Manual (admin) | `Set-Service <name> -StartupType Manual; Stop-Service <name>` |
@@ -102,10 +102,10 @@ Windows has **five separate startup mechanisms**, each requiring different tooli
 | Registry Run keys | `HKCU/HKLM\...\Run` (+ WOW6432) | `Get-ItemProperty` | `StartupApproved` binary flag |
 | Services | Service Control Manager | `Get-Service` | `Set-Service -StartupType Manual` (admin) |
 | Scheduled Tasks at logon | Task Scheduler | `Get-ScheduledTask` | `Disable-ScheduledTask` |
-| Startup folder shortcuts | `%APPDATA%\...\Startup\` + AllUsers | `Get-ChildItem` | Delete or rename .lnk |
+| Startup folder shortcuts | `%APPDATA%\...\Startup\` + AllUsers | `Get-ChildItem` | `StartupApproved` flag, or delete the .lnk |
 | Group Policy startup scripts | `HKLM\...\Policies\Scripts` | Group Policy Editor / `gpresult` | (rare on workstations) |
 
-Task Manager's Disable writes a 12-byte `StartupApproved` flag under HKCU (`0x02` enabled, `0x03` disabled), so a non-admin can disable HKLM entries for themselves; `scripts/safe-disable-startup.ps1` does it. Boot timing lives in the admin-only Diagnostics-Performance log (`scripts/boot-perf.ps1` falls back to kernel events): healthy SSD 15–25 s to login, failing storage 60 s and up. Detail: [references/manual-queries.md](references/manual-queries.md).
+Task Manager's Disable writes a 12-byte `StartupApproved` flag **in the entry's own hive**: HKCU entries under HKCU, HKLM Run, WOW64 Run and all-users Startup-folder entries under `HKLM\...\Explorer\StartupApproved` (admin). An HKCU flag for an HKLM entry has no evidence behind it, so never write one to get around elevation. First byte: low bit set = disabled (`0x03`, also `0x01`), clear = enabled (`0x02`, `0x04`, `0x06`). `scripts/safe-disable-startup.ps1` routes and decodes this way. Boot timing lives in the admin-only Diagnostics-Performance log (`scripts/boot-perf.ps1` falls back to kernel events): healthy SSD 15–25 s to login, failing storage 60 s and up. Detail: [references/manual-queries.md](references/manual-queries.md).
 
 ## Crash Analysis & Dump Triage
 

@@ -56,26 +56,89 @@ function Write-Data {
     process { $Object | Out-String -Stream | Where-Object { $_ -ne '' } | ForEach-Object { [Console]::Out.WriteLine($_) } }
 }
 
-function ConvertTo-Bytes12 {
-    # Build a 12-byte StartupApproved value: [status][3-byte pad][8-byte FILETIME]
-    param(
-        [Parameter(Mandatory)][ValidateRange(0,255)][byte]$StatusByte
+# === STARTUPAPPROVED ===
+# Explorer skips a Run-key or Startup-folder entry at logon when the StartupApproved value
+# of the same name says "disabled". The overlay lives in the SAME hive as the entry:
+# machine entries (HKLM Run, HKLM WOW6432Node Run, the all-users Startup folder) are
+# governed by HKLM\...\Explorer\StartupApproved, user entries by HKCU. Task Manager routes
+# its writes that way, and Explorer was measured skipping HKLM-flagged machine entries at
+# logon. No source or test shows an HKCU value disabling a machine entry, so never route a
+# machine entry to HKCU to dodge the admin requirement. Evidence and the logon test:
+# references/startup-mechanisms.md, "The StartupApproved mechanism".
+
+function Get-StartupApprovedSources {
+    # The startup sources the overlay governs, one row per source. Scope is whose entries
+    # they are ('User' or 'Machine') and picks the overlay hive; Variant is the
+    # StartupApproved subkey Explorer checks for that source (WOW6432Node Run -> Run32).
+    # Folder paths are built by concatenation, not Join-Path, so the rows still load
+    # where APPDATA/ALLUSERSPROFILE are unset (the suite runs this on Linux pwsh).
+    $sm = 'Microsoft\Windows\Start Menu\Programs'
+    @(
+        [pscustomobject]@{ Kind = 'Run';    Scope = 'User';    Variant = 'Run';           Label = 'HKCU Run';                 Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' }
+        [pscustomobject]@{ Kind = 'Run';    Scope = 'Machine'; Variant = 'Run';           Label = 'HKLM Run';                 Path = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' }
+        [pscustomobject]@{ Kind = 'Run';    Scope = 'Machine'; Variant = 'Run32';         Label = 'HKLM WOW64 Run';           Path = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run' }
+        [pscustomobject]@{ Kind = 'Folder'; Scope = 'User';    Variant = 'StartupFolder'; Label = 'user Startup folder';      Path = "$env:APPDATA\$sm\Startup" }
+        [pscustomobject]@{ Kind = 'Folder'; Scope = 'Machine'; Variant = 'StartupFolder'; Label = 'all-users Startup folder'; Path = "$env:ALLUSERSPROFILE\$sm\StartUp" }
     )
-    $ts = [BitConverter]::GetBytes([DateTime]::Now.ToFileTime())
-    [byte[]](@($StatusByte, 0, 0, 0) + $ts)
+}
+
+function Get-StartupApprovedOverlayPath {
+    # The StartupApproved key Explorer checks for a source row from
+    # Get-StartupApprovedSources: HKLM for Scope 'Machine' (admin to write), HKCU for 'User'.
+    param([Parameter(Mandatory)]$Source)
+    $hive = switch ($Source.Scope) {
+        'User'    { 'HKCU' }
+        'Machine' { 'HKLM' }
+        default   { throw "Unknown startup source scope '$($Source.Scope)'" }
+    }
+    "${hive}:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\$($Source.Variant)"
 }
 
 function Get-StartupApprovedKey {
-    # Ensure the StartupApproved key exists; return its registry path
-    param(
-        [Parameter(Mandatory)][ValidateSet('Run','Run32','StartupFolder')]$Variant,
-        [ValidateSet('HKCU','HKLM')]$Hive = 'HKCU'
-    )
-    $key = "${Hive}:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\$Variant"
+    # Ensure the overlay key for a source row exists; return its registry path.
+    # Throws (access denied) for a Machine row in a non-elevated shell.
+    param([Parameter(Mandatory)]$Source)
+    $key = Get-StartupApprovedOverlayPath -Source $Source
     if (-not (Test-Path $key)) {
         New-Item -Path $key -Force -ErrorAction Stop | Out-Null
     }
     return $key
+}
+
+function ConvertFrom-StartupApprovedStatus {
+    # Decode a StartupApproved value (the raw registry data, or $null when absent).
+    # The low bit of the first byte decides: set = disabled, clear = enabled. Task Manager
+    # writes 0x02 / 0x03 today. 0x01 (disabled, carrying a FILETIME) and 0x04 / 0x06
+    # (enabled) also appear in the wild: Explorer skipped 0x01 entries and started 0x02 and
+    # 0x04 ones at logon (measured with Shell-Core events 9707, Windows 11 22H2); 0x06 as
+    # enabled is from H. Carvey, windowsir.blogspot.com, 2022-07-09. Other values follow
+    # the same bit rule unobserved (Lansweeper's startup report maps 1/3/5/9 to disabled).
+    # Returns 'unmanaged' (no value: the entry runs, the default), 'enabled', 'disabled',
+    # or 'unknown(...)' for data that is not a status byte.
+    param([AllowNull()][object]$Value)
+    if ($null -eq $Value) { return 'unmanaged' }
+    if ($Value -isnot [byte[]] -or $Value.Length -lt 1) { return "unknown($($Value.GetType().Name))" }
+    $b = $Value[0]
+    if ($b -eq 0) { return 'unknown(0x00)' }
+    if ($b -band 1) { return 'disabled' }
+    return 'enabled'
+}
+
+function ConvertTo-Bytes12 {
+    # Build a 12-byte StartupApproved value: [status][3-byte pad][8-byte FILETIME].
+    # Matches what Task Manager writes: a disable (odd status) carries the FILETIME of the
+    # disable, an enable (even status) is the status byte and eleven zero bytes. An enable
+    # carrying a timestamp reads as disabled to tools that key on the zero tail
+    # (Velociraptor's Windows.Sys.StartupItems artifact).
+    param(
+        [Parameter(Mandatory)][ValidateRange(0,255)][byte]$StatusByte
+    )
+    if ($StatusByte -band 1) {
+        $tail = [BitConverter]::GetBytes([DateTime]::Now.ToFileTime())
+    } else {
+        $tail = [byte[]]::new(8)
+    }
+    [byte[]](@($StatusByte, 0, 0, 0) + $tail)
 }
 
 function Test-IsElevated {

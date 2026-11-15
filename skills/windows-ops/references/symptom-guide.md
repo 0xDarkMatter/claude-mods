@@ -12,7 +12,7 @@ Crashes with no obvious cause. Event 41 (Kernel-Power) carries the BugCheck code
 
 "My PC is slow" diagnosed by chasing the wrong symptom. Task Manager shows what's running NOW; the System log shows what failed at boot, what's been crashing, and what storage events preceded each crash. Always audit before treating.
 
-Unable to disable an HKLM startup entry because the user isn't an Administrator. The `StartupApproved` registry mechanism — what Task Manager's "Disable" button actually does — flips one byte in `HKCU\...\Explorer\StartupApproved\Run` and works without elevation, even for HKLM entries.
+A startup entry that keeps launching after it was "disabled". The `StartupApproved` flag (what Task Manager's "Disable" button writes) only counts in the entry's own hive. An HKLM Run entry flagged under `HKCU\...\Explorer\StartupApproved\Run` has no evidence of being skipped. Its flag belongs in `HKLM\...\StartupApproved`, which needs an elevated shell. Check what Explorer actually launched with Shell-Core/Operational event 9707.
 
 BSOD analysis without a dump file. Pagefile too small, or hard power loss skipped the dump-write. `CrashDumpEnabled` registry key + pagefile size + free space on system drive determine whether the next crash gets diagnosed at all.
 
