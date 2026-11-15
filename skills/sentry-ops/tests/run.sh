@@ -172,6 +172,22 @@ for port in 8195 8194; do
   break
 done
 
+# A port another process is already listening on must be refused with exit 7. On Windows,
+# two sockets that both set SO_REUSEADDR can listen on the same address and port, so the
+# sink used to print `listening` while the incumbent got the traffic. The holder sets
+# SO_REUSEADDR as Python's http.server does, because only such a holder let the old sink
+# in: one without it (a Node dev server, say) already refused it. Port 0 lets the OS pick
+# a free port, so this check can't collide with whatever holds the throwaway range.
+ec 7 "listen: port held by another process -> 7, no co-bind" "$PY" - "$sink" "$tmp/held" <<'PY'
+import socket,subprocess,sys
+holder=socket.socket()
+holder.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+holder.bind(("127.0.0.1",0))
+holder.listen()
+port=str(holder.getsockname()[1])
+sys.exit(subprocess.run([sys.executable,sys.argv[1],"listen","--port",port,"--out",sys.argv[2],"--timeout","1"]).returncode)
+PY
+
 # The bind address is loopback, in code: a flag can't widen it.
 grep -q '^LOOPBACK = "127.0.0.1"' "$sink" && ok "listen: binds loopback" || bad "listen: LOOPBACK changed"
 "$PY" "$sink" listen --help 2>/dev/null | grep -qE -- '--(host|bind)' && bad "listen: grew a bind flag" || ok "listen: no bind flag"

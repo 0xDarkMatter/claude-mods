@@ -51,6 +51,7 @@ EX_FINDING = 10
 SCHEMA = "claude-mods.sentry-ops.envelope/v1"
 LOOPBACK = "127.0.0.1"  # never configurable: see the module docstring
 MAX_BODY = 64 * 1024 * 1024
+EXCLUSIVE_BIND = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)  # Windows only
 
 # Event fields that carry request or user data. Finding one is not always a bug,
 # which is why these only fail under --strict: a project can choose to send them.
@@ -141,6 +142,29 @@ def summarise(path: Path, forbid: list[str]) -> dict:
             "bytes": len(data), "exposed_fields": sorted(set(exposure)), "leaks": leaks}
 
 
+class LoopbackServer(HTTPServer):
+    """HTTPServer that refuses a port another process is already listening on.
+
+    Guard: don't put SO_REUSEADDR back on Windows (HTTPServer sets it by default). There,
+    two sockets that both set it can listen on the same address and port, and any other
+    Python http.server sets it too. With one of those on the port, the sink printed
+    `listening` while the incumbent got the SDK's traffic, and exit 7 never fired.
+    Without the option Windows refuses the bind.
+    SO_EXCLUSIVEADDRUSE is Microsoft's documented guard against any later socket binding
+    over this one while it listens. Linux and macOS keep SO_REUSEADDR: there it never
+    lets a second socket listen on the same address and port (Linux socket(7)), and
+    back-to-back runs on one port need it to re-bind past TIME_WAIT. tests/run.sh holds
+    a port to prove the refusal.
+    """
+
+    allow_reuse_address = EXCLUSIVE_BIND is None
+
+    def server_bind(self) -> None:
+        if EXCLUSIVE_BIND is not None:
+            self.socket.setsockopt(socket.SOL_SOCKET, EXCLUSIVE_BIND, 1)
+        super().server_bind()
+
+
 def make_handler(out: Path, state: dict):
     class Handler(BaseHTTPRequestHandler):
         def _reply(self, code: int, body: bytes = b"{}") -> None:
@@ -183,9 +207,10 @@ def cmd_listen(args: argparse.Namespace) -> int:
     out.mkdir(parents=True, exist_ok=True)
     state = {"count": 0}
     try:
-        server = HTTPServer((LOOPBACK, args.port), make_handler(out, state))
+        server = LoopbackServer((LOOPBACK, args.port), make_handler(out, state))
     except OSError as exc:
-        print(f"error: cannot bind {LOOPBACK}:{args.port}: {exc}", file=sys.stderr)
+        print(f"error: cannot bind {LOOPBACK}:{args.port} (in use, or reserved by the OS): {exc}",
+              file=sys.stderr)
         return EX_UNAVAILABLE
     server.timeout = 0.25
     print(f"listening: use DSN http://publickey@{LOOPBACK}:{args.port}/1 "
