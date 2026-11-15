@@ -117,7 +117,8 @@ PY
 ec 10 "inspect: leak inside gzip still found -> 10" "$PY" "$sink" inspect "$tmp/gz.envelope" --forbid person@example.com
 
 # 6. listen: end to end on loopback, in the throwaway range. A busy port is skipped,
-# since another process may hold one.
+# since another process may hold one. The last candidate is a port the OS picks, so a
+# machine whose other sessions hold the whole range still runs these checks.
 post() { # port file
   "$PY" - "$1" "$2" <<'PY'
 import sys,urllib.request
@@ -138,8 +139,12 @@ wait_bound() { # pid errfile
   done
   return 1
 }
+# Prints a free port from the OS. It is released before the sink binds it, so another
+# process can take it in between; the sink then exits 7, which the loops treat as busy.
+os_port() { "$PY" -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()'; }
 ran_listen=""
-for port in 8197 8198 8199 8196; do
+for port in 8197 8198 8199 8196 os; do
+  [ "$port" = os ] && port="$(os_port)"
   out="$tmp/listen-$port"
   "$PY" "$sink" listen --port "$port" --out "$out" --count 1 --timeout 20 >"$tmp/listen.out" 2>"$tmp/listen.err" &
   pid=$!
@@ -162,15 +167,19 @@ for port in 8197 8198 8199 8196; do
   [ "$rc" = "10" ] && ok "listen: --expect-none with traffic -> 10" || bad "listen: --expect-none exit $rc"
   break
 done
-[ -n "$ran_listen" ] || bad "listen: no free port in 8196-8199"
+[ -n "$ran_listen" ] || bad "listen: no free port, in 8196-8199 or from the OS"
 
 # It stops by itself and reports zero: an orphan would hold the port for good.
-for port in 8195 8194; do
+ran_quiet=""
+for port in 8195 8194 os; do
+  [ "$port" = os ] && port="$(os_port)"
   "$PY" "$sink" listen --port "$port" --out "$tmp/quiet" --timeout 1 --expect-none >/dev/null 2>&1; rc=$?
   [ "$rc" = "7" ] && continue
+  ran_quiet=1
   [ "$rc" = "0" ] && ok "listen: self-stops, no traffic -> 0" || bad "listen: quiet exit $rc"
   break
 done
+[ -n "$ran_quiet" ] || bad "listen: self-stop unchecked: no free port, in 8194-8195 or from the OS"
 
 # A port another process is already listening on must be refused with exit 7. On Windows,
 # two sockets that both set SO_REUSEADDR can listen on the same address and port, so the

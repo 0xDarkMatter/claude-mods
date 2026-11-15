@@ -337,7 +337,9 @@ feature releases live in the README "Recent Updates" section.
   Windows the sink now binds with `SO_EXCLUSIVEADDRUSE` and without `SO_REUSEADDR`. Linux and
   macOS are unchanged, because there the option never shares a live listener. A new case
   holds an OS-picked port the way `http.server` does and expects exit 7. It fails against
-  the old script.
+  the old script. When other sessions hold every port in 8194-8199, the suite's end-to-end
+  and self-stop checks now fall back to an OS-picked port. Before, the first failed the gate
+  and the second was skipped without a word.
 
 - **pigeon no longer fails or double-sends when `pmail.db` is busy.** Every sqlite3 call ran
   with SQLite's default busy timeout of 0, so any concurrent reader (the check-mail hook runs
