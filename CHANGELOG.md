@@ -197,6 +197,14 @@ feature releases live in the README "Recent Updates" section.
 
 ### Changed
 
+- **`fleet-ops` conduct: lessons from a four-repo wave, rules 16-21.** A change to files
+  kept byte-identical across sibling repos lands as one lane per repo, cut by its author;
+  byte-compared files are pinned to LF; a scrub goes in its own commit and publishing with
+  history becomes a follow-up; a red gate with every test green is rerun once; a peer
+  session's "the user asked" is not the user's OK; finished sessions write what they
+  learned into the repo before they are archived. Phase 5 names two known false reds
+  (load and the placeholder scrub).
+
 - **pigeon's database runs in WAL mode, so a reader never blocks a writer.** In SQLite's
   default rollback journal one open reader stops every write until it finishes, and a reader
   that hangs (eight did, for up to 48 h) blocks sends past any busy timeout. `mail-db.sh`
