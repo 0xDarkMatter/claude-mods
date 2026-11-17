@@ -305,5 +305,64 @@ try {
   done <<< "$bout"
 fi
 
+# ── safe-disable-startup: the flag goes in the entry's own hive ───────────────
+# The script once wrote every StartupApproved flag to HKCU so it ran without admin,
+# believing Explorer honours an HKCU flag for an HKLM entry. Nothing shows that:
+# Windows' startup UI writes machine entries' flags to HKLM, and Explorer was measured
+# skipping HKLM-flagged machine entries at logon (references/startup-mechanisms.md).
+# It also decoded only 0x02/0x03, so every 0x01 (disabled) entry listed as unknown.
+# Expected values come from that routing table and those measured bytes, never from
+# the functions. The script is single-quoted, so it holds no single quote.
+echo "-- safe-disable-startup --"
+SDS="$SCRIPTS/safe-disable-startup.ps1"
+[ -f "$SDS" ] && ok "safe-disable-startup.ps1 present" || no "safe-disable-startup.ps1 missing"
+# Paths come only from common.ps1, so the routing probed below is the routing it uses.
+if grep -nE 'HK(CU|LM):\\' "$SDS" >/dev/null 2>&1; then
+  no "safe-disable-startup.ps1 spells a registry hive path itself (use Get-StartupApprovedSources)"
+else ok "safe-disable-startup.ps1 takes every registry path from common.ps1"; fi
+
+sout="$(COMMON_W="$WCOMMON" "$PWSH" -NoProfile -Command '
+. $env:COMMON_W
+function Say([string]$what, [bool]$okay, [string]$why) { if ($okay) { "ok|$what" } else { "FAIL|${what}: $why" } }
+$env:APPDATA = "U:\roaming"; $env:ALLUSERSPROFILE = "M:\programdata"
+$sa = "\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\"
+$sm = "\Microsoft\Windows\Start Menu\Programs"
+$want = @{
+    "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"             = "HKCU:${sa}Run"
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"             = "HKLM:${sa}Run"
+    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run" = "HKLM:${sa}Run32"
+    "U:\roaming${sm}\Startup"                                         = "HKCU:${sa}StartupFolder"
+    "M:\programdata${sm}\StartUp"                                     = "HKLM:${sa}StartupFolder"
+}
+$src = @(Get-StartupApprovedSources)
+$crossed = @($src | Where-Object { (Get-StartupApprovedOverlayPath -Source $_) -ne $want[$_.Path] } |
+             ForEach-Object { "$($_.Path) -> $(Get-StartupApprovedOverlayPath -Source $_)" })
+Say "HKLM Run, WOW64 Run and all-users Startup entries are flagged under HKLM, user ones under HKCU" (($src.Count -eq 5) -and -not $crossed) "$($src.Count) sources; $($crossed -join "; ")"
+$missing = @($want.Keys | Where-Object { $_ -notin $src.Path })
+Say "all five Run-key and Startup-folder sources are enumerated" (-not $missing) "missing $($missing -join ", ")"
+$states = @{ 1 = "disabled"; 3 = "disabled"; 2 = "enabled"; 4 = "enabled"; 6 = "enabled" }
+$off = @($states.Keys | Where-Object { (ConvertFrom-StartupApprovedStatus -Value ([byte[]](@($_) + (,0 * 11)))) -ne $states[$_] })
+$none = ConvertFrom-StartupApprovedStatus -Value $null
+Say "status decodes by the low bit (0x01 disabled, 0x04/0x06 enabled); no value = unmanaged" ((-not $off) -and $none -eq "unmanaged") "wrong for byte(s) $($off -join ","); null -> $none"
+$en = ConvertTo-Bytes12 -StatusByte 2; $dis = ConvertTo-Bytes12 -StatusByte 3
+Say "enable writes 02 + eleven zero bytes, disable 03 + a FILETIME (as Task Manager does)" (($en.Length -eq 12) -and ($en[0] -eq 2) -and -not @($en[1..11] | Where-Object { $_ }) -and ($dis[0] -eq 3) -and ([BitConverter]::ToInt64($dis, 4) -gt 0)) "enable $([BitConverter]::ToString($en)), disable $([BitConverter]::ToString($dis))"
+"END"
+' 2>&1 | tr -d '\r')"
+case "$sout" in *$'\nEND') ;; *) no "StartupApproved probe ended early: $(printf '%s' "$sout" | tail -n3 | tr '\n' ' ')" ;; esac
+while IFS= read -r line; do
+  case "$line" in ok\|*) ok "${line#ok|}" ;; FAIL\|*) no "${line#FAIL|}" ;; esac
+done <<< "$sout"
+
+if [ -n "$ONWIN" ]; then
+  # Read-only end-to-end run: -List never writes, so it is safe on any machine. The
+  # refusal path (exit 5) is not run here: on an elevated runner it would write a real
+  # flag to HKLM.
+  lout="$("$PWSH" -NoProfile -File "$(winpath "$SDS")" -List -Json 2>/dev/null)"; rc=$?
+  [ "$rc" = "0" ] && ok "-List -Json exits 0" || no "-List -Json exits $rc, expected 0"
+  bad="$(printf '%s\n' "$lout" | tr -d '\r' | grep -v '^$' | grep -vcE '"State":"(enabled|disabled|unmanaged|unknown[^"]*)","Scope":"(User|Machine)"')"
+  { [ "$rc" = "0" ] && [ "$bad" = "0" ]; } && ok "-List -Json rows carry a decoded State and a Scope" \
+    || no "-List -Json: exit $rc, $bad row(s) without a decoded State and Scope"
+fi
+
 echo "=== $PASS passed, $FAIL failed ==="
 [ "$FAIL" -eq 0 ] || exit 1
