@@ -197,6 +197,17 @@ feature releases live in the README "Recent Updates" section.
 
 ### Changed
 
+- **`threejs-ops` gains a high-fidelity games half (sections 9 and 10).** Eight new references,
+  each distilled from a teardown of a real build. Four come from a single-file FPS made wholly in
+  code on plain `WebGLRenderer`, with no downloaded assets: `render-pipeline` (an HDR chain without
+  EffectComposer, PCSS with its r182 `BasicShadowMap` splice, volumetric fog, auto-exposure),
+  `procedural-materials`, `procedural-world` and `game-architecture`. Four come from blendi's Oil
+  paint on patch.gg (MIT): `stylised-rendering` (world-pinned dabs, pixel clamps, alpha-to-coverage,
+  looks that never shimmer), `character-locomotion`, `terrain-and-foliage` and
+  `verification-harness` (an in-game test API, a GPU fence, PSNR stability, cold start).
+  `three-facts.json` gains the r182 `pcf_shadow_compare_sampler` gate, and `genart-ops` now hands
+  game-grade rendering to `threejs-ops`.
+
 - **`fleet-ops` conduct: lessons from a four-repo wave, rules 16-21.** A change to files
   kept byte-identical across sibling repos lands as one lane per repo, cut by its author;
   byte-compared files are pinned to LF; a scrub goes in its own commit and publishing with
