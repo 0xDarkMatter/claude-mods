@@ -87,7 +87,9 @@ loses the event quietly, which looks exactly like a pass [measured: one of our r
 a loaded machine]. Check that the listener's "received" count matches what you sent.
 
 The port range is the throwaway one, 8190 to 8199. The script binds to loopback only and exits by
-itself on `--timeout`. Make sure it has gone before you finish.
+itself on `--timeout`. Make sure it has gone before you finish. If another process already holds
+the port, it exits 7 rather than share it: pick another port in the range with `--port`, and
+point the DSN at that.
 
 If nothing arrives, first confirm the trigger really reaches a capture point. In a framework that
 turns errors into responses, `withSentry` alone won't send anything, as in

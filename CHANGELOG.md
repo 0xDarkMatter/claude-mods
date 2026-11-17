@@ -336,6 +336,19 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **sentry-ops `envelope-sink.py listen` refuses a port another process holds, on Windows
+  too.** Python's `HTTPServer` sets `SO_REUSEADDR`, and on Windows two sockets that both set
+  it can listen on the same address and port. So with another Python `http.server` on the
+  port, the sink printed `listening`, the SDK's traffic went to that server, and exit 7
+  ("port busy") never fired. `just check` failed sentry-ops this way while other sessions
+  held 8194-8199. Node's servers don't set the option and already refused the sink. On
+  Windows the sink now binds with `SO_EXCLUSIVEADDRUSE` and without `SO_REUSEADDR`. Linux and
+  macOS are unchanged, because there the option never shares a live listener. A new case
+  holds an OS-picked port the way `http.server` does and expects exit 7. It fails against
+  the old script. When other sessions hold every port in 8194-8199, the suite's end-to-end
+  and self-stop checks now fall back to an OS-picked port. Before, the first failed the gate
+  and the second was skipped without a word.
+
 - **pigeon no longer fails or double-sends when `pmail.db` is busy.** Every sqlite3 call ran
   with SQLite's default busy timeout of 0, so any concurrent reader (the check-mail hook runs
   in dozens of sessions) failed a write at once with `database is locked`. `broadcast` sent one
