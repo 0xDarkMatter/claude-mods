@@ -129,7 +129,9 @@ feature releases live in the README "Recent Updates" section.
   bash bundle scan finds candidates in one awk pass and hashes only those, where hashing
   every certificate took 5 s per bundle. The suite (stand-in clients, real clients against
   local test servers, a PowerShell environment-restore test) is backed by 57 deliberate
-  mutants, each caught by a named test.
+  mutants, each caught by a named test. Its test certificates carry the keyUsage and key
+  identifiers that Python 3.13+'s strict verification demands; without them every real
+  Python case read UNKNOWN on Linux CI only, and a first check now names the offending chain.
 
 - **`fleet queue` and `/conduct`: the coordinator's landing ritual as a command.**
   `fleet queue <lane> <tip>...` lands reviewed lanes one at a time. Before each land it
