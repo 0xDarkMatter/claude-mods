@@ -499,11 +499,19 @@ EOF
 }
 
 new_key_csr() { openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$1.key" -out "$1.csr" -subj "/CN=$2" -addext "subjectAltName=$3" 2>/dev/null; }
+# Test CAs and leaves carry the extensions RFC 5280 strict checking wants: keyUsage on the
+# CA, AKI/SKI, basicConstraints and keyUsage on the leaf. Python 3.13+ verifies with
+# VERIFY_X509_STRICT by default and refuses a CA without keyUsage (OpenSSL error 92), which
+# the checker rightly reads as a network error, so every real_python3 case went UNKNOWN on
+# a Linux runner with Python 3.14. Spelled out, not left to openssl's config defaults.
 new_ca() {
-  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$1.key" -out "$1.pem" -days 30 -subj "/CN=$2" 2>/dev/null
+  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$1.key" -out "$1.pem" -days 30 -subj "/CN=$2" \
+    -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign" 2>/dev/null
   mkdir -p "$1.db"; : >"$1.db/index.txt"; echo 01 >"$1.db/serial"
   printf '%s\n' "[ca]" "default_ca = d" "[d]" "database = $1.db/index.txt" "serial = $1.db/serial" "new_certs_dir = $1.db" \
-    "default_md = sha256" "policy = p" "copy_extensions = copy" "unique_subject = no" "[p]" "commonName = supplied" >"$1.cnf"
+    "default_md = sha256" "policy = p" "copy_extensions = copy" "unique_subject = no" "x509_extensions = x" "[p]" "commonName = supplied" \
+    "[x]" "basicConstraints = critical,CA:FALSE" "keyUsage = critical,digitalSignature" "extendedKeyUsage = serverAuth" \
+    "subjectKeyIdentifier = hash" "authorityKeyIdentifier = keyid" >"$1.cnf"
 }
 sign() { local ca=$1 out=$2; shift 2; openssl ca -batch -config "$ca.cnf" -cert "$ca.pem" -keyfile "$ca.key" -in "$out.csr" -out "$out.pem" -notext "$@" >/dev/null 2>&1; }
 
@@ -620,9 +628,21 @@ local_run() {
   OUT=$(cd "$SB/cwd" && env -i HOME="$SB/home2" PATH="/usr/local/bin:/usr/bin:/bin" CA_TRUST_LOCAL_PORTS="${2:-8191,8192,8193}" \
     SSL_CERT_FILE="$1" CURL_CA_BUNDLE="$1" GIT_SSL_CAINFO="$1" NODE_EXTRA_CA_CERTS="$1" bash "$SH" --incident "$EM" 2>&1)
 }
+# real_case ID NAME PATTERN [ABSENT]: one client's case. A failure quotes the line that
+# client printed, so a CI log says why (UNKNOWN on the control page, say), not only "no match".
+# It leaves WHY empty: has_line keeps a WHY already set, so a stale one would become the
+# reason of the next check (user_site_certifi_is_found runs straight after a loop).
+real_case() {
+  local said
+  WHY=""
+  if has_line "$3" && { [ -z "${4:-}" ] || lacks_line "$4"; }; then ok "real_$1: $2"; return; fi
+  said=$(printf '%s\n' "$OUT" | grep -E "^(PASS|FAIL|UNKNOWN) +$1 " | head -n 1)
+  no "real_$1: $2 - $WHY; it printed: ${said:-no $1 line}"
+  WHY=""
+}
 
 run_real_group() {
-  local clients="curl git python3" id usersite
+  local clients="curl git python3" id usersite pair err strict=""
   command -v node >/dev/null 2>&1 && clients="$clients node" || skip "node is not installed, so its real probe is not run here"
   L="$SB/local"; mkdir -p "$L" "$SB/home2"
   new_ca "$L/controlca" control-ca
@@ -634,6 +654,13 @@ run_real_group() {
   cat "$L/canaryca.pem" "$SB/certs/listed.pem" >"$L/chain.pem"
   cat "$L/controlca.pem" >"$L/trust-control.pem"
   cat "$L/controlca.pem" "$L/canaryca.pem" >"$L/trust-both.pem"
+  # The chains must pass strict verification for any client, whatever Python this host has:
+  # -x509_strict is the flag Python 3.13+ turns on (see new_ca). -no_check_time for "old".
+  for pair in control:controlca good:canaryca wrong:canaryca old:canaryca; do
+    err=$(openssl verify -x509_strict -no_check_time -CAfile "$L/${pair#*:}.pem" "$L/${pair%%:*}.pem" 2>&1) ||
+      strict="${strict:+$strict; }${pair%%:*}: $(printf '%s\n' "$err" | grep -m 1 '^error ')"
+  done
+  [ -z "$strict" ] && ok "local_test_chains_pass_x509_strict" || no "local_test_chains_pass_x509_strict - $strict"
   # A user-site certifi that points at a dirty bundle: python -I hides it unless asked.
   usersite=$(env -i HOME="$SB/home2" PATH="/usr/local/bin:/usr/bin:/bin" python3 -c 'import site; print(site.getusersitepackages())')
   mkdir -p "$usersite/certifi"
@@ -641,20 +668,20 @@ run_real_group() {
 
   if start_canaries good; then
     local_run "$L/trust-control.pem"
-    for id in $clients; do has_line "^PASS +$id " && ok "real_$id: an untrusted test chain reads PASS" || no "real_$id: an untrusted test chain reads PASS - $WHY"; WHY=""; done
+    for id in $clients; do real_case "$id" "an untrusted test chain reads PASS" "^PASS +$id "; done
     has_line '^FAIL +certifi .*listed-roots\.crt' && ok "user_site_certifi_is_found" || no "user_site_certifi_is_found - $WHY"; WHY=""
     local_run "$L/trust-both.pem"
-    for id in $clients; do has_line "^FAIL +$id .*emSign path and AAA path" && ok "real_$id: a trusted test chain reads FAIL" || no "real_$id: a trusted test chain reads FAIL - $WHY"; WHY=""; done
+    for id in $clients; do real_case "$id" "a trusted test chain reads FAIL" "^FAIL +$id .*emSign path and AAA path"; done
   else
     no "the local test servers did not start on 8191-8193"
   fi
   if start_canaries wrong; then
     local_run "$L/trust-both.pem"
-    for id in $clients; do has_line "^UNKNOWN +$id .*does not name localhost" && ok "real_$id: a leaf for another name is UNKNOWN" || no "real_$id: a leaf for another name is UNKNOWN - $WHY"; WHY=""; done
+    for id in $clients; do real_case "$id" "a leaf for another name is UNKNOWN" "^UNKNOWN +$id .*does not name localhost"; done
   fi
   if start_canaries old; then
     local_run "$L/trust-control.pem"
-    for id in $clients; do has_line "^UNKNOWN +$id .*has expired" && ok "real_$id: an expired test leaf is UNKNOWN" || no "real_$id: an expired test leaf is UNKNOWN - $WHY"; WHY=""; done
+    for id in $clients; do real_case "$id" "an expired test leaf is UNKNOWN" "^UNKNOWN +$id .*has expired"; done
   fi
   stop_servers
   serve 8191 "$L/control" "$L/controlca.pem"
@@ -665,7 +692,7 @@ while True:
   SERVERS="$SERVERS $!"
   if wait_port 8191 && wait_port 8194; then
     local_run "$L/trust-control.pem" 8191,8194,8194
-    for id in $clients; do has_line "^UNKNOWN +$id " && lacks_line "^PASS +$id " && ok "real_$id: a test host that resets the handshake is UNKNOWN, not PASS" || no "real_$id: a test host that resets the handshake is UNKNOWN, not PASS - $WHY"; WHY=""; done
+    for id in $clients; do real_case "$id" "a test host that resets the handshake is UNKNOWN, not PASS" "^UNKNOWN +$id " "^PASS +$id "; done
   fi
   stop_servers
 }
