@@ -83,7 +83,11 @@ skills/ca-trust-ops/tests/run.sh` (also run by `just check`); its `--group` flag
   checker refuses Git Bash); on Windows the suite runs the pack, bundle and PowerShell groups
   and their mutants. Two PowerShell mutants need a host quirk (pwsh 7's empty variable,
   case-insensitive names) and are skipped where the quirk is absent. Real-client cases need
-  `python3` and `openssl s_server`, and test `node` when it is installed. Under Git Bash,
+  `python3` and `openssl s_server`, and test `node` when it is installed. Their test
+  certificates must pass strict verification (`new_ca` spells out keyUsage, AKI/SKI and
+  basicConstraints): Python 3.13+ verifies with `VERIFY_X509_STRICT`, so a CA without
+  keyUsage made every `real_python3` case read UNKNOWN on Linux CI only, while curl, git and
+  node passed. `local_test_chains_pass_x509_strict` checks this first. Under Git Bash,
   pass a `/mnt/...` path to `wsl.exe` with `MSYS_NO_PATHCONV=1`.
 - **On Windows, `python` can read FAIL while `windows-store` reads PASS.** That is real:
   Python's `urllib` loads the Windows root store into OpenSSL, which ignores Microsoft's
