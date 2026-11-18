@@ -630,12 +630,15 @@ local_run() {
 }
 # real_case ID NAME PATTERN [ABSENT]: one client's case. A failure quotes the line that
 # client printed, so a CI log says why (UNKNOWN on the control page, say), not only "no match".
+# It leaves WHY empty: has_line keeps a WHY already set, so a stale one would become the
+# reason of the next check (user_site_certifi_is_found runs straight after a loop).
 real_case() {
   local said
   WHY=""
   if has_line "$3" && { [ -z "${4:-}" ] || lacks_line "$4"; }; then ok "real_$1: $2"; return; fi
   said=$(printf '%s\n' "$OUT" | grep -E "^(PASS|FAIL|UNKNOWN) +$1 " | head -n 1)
   no "real_$1: $2 - $WHY; it printed: ${said:-no $1 line}"
+  WHY=""
 }
 
 run_real_group() {
