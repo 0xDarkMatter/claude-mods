@@ -21,3 +21,31 @@ skills/security-ops/references/owasp-top10-a01-a05.md:^token = secrets\.token_ur
 
 # reason: contents-list link to a heading about disk-to-drive-letter mapping
 skills/windows-ops/references/manual-queries.md:^  - \[Disk . drive letter mapping\]\(#disk--drive-letter-mapping\)$
+
+# ca-trust-ops: the regex layer flags every `-----BEGIN CERTIFICATE-----` line. A certificate is
+# public by design (no private key material); these are public CA fixtures and the awk/printf
+# lines that split or fake PEM blocks. Scoping the pattern to private keys is an open proposal.
+# reason: prose describing the PEM fixtures; no certificate or key material
+skills/ca-trust-ops/AGENTS.md:^  material\. They still contain `-----BEGIN CERTIFICATE-----` lines, which secret scanners$
+# reason: awk that extracts certificate blocks from a chain; no literal value
+skills/ca-trust-ops/scripts/check-ca-trust.sh:^  leaf=\$\(printf '%s\\n' "\$chain" \| awk '/-----BEGIN CERTIFICATE-----/ \{ on = 1 \} on \{ print \} /-----END CERTIFICATE-----/ \{ exit \}'\)$
+# reason: awk that extracts certificate blocks from a chain; no literal value
+skills/ca-trust-ops/scripts/pack-keys.sh:^  pems=\$\(awk '/\^-----BEGIN CERTIFICATE-----/ \{ on = 1 \} on \{ print \} /\^-----END CERTIFICATE-----/ \{ on = 0; print "--next--" \}' "\$file" \| tr -d '\\r'\)$
+# reason: public eMudhra CA certificate fixture (certificate blocks only, no key)
+skills/ca-trust-ops/tests/fixtures/emudhra-2026-10/listed-cross-signs.crt:^-----BEGIN CERTIFICATE-----$
+# reason: public eMudhra CA certificate fixture (certificate blocks only, no key)
+skills/ca-trust-ops/tests/fixtures/emudhra-2026-10/listed-intermediates.crt:^-----BEGIN CERTIFICATE-----$
+# reason: public eMudhra CA certificate fixture (certificate blocks only, no key)
+skills/ca-trust-ops/tests/fixtures/emudhra-2026-10/listed-roots.crt:^-----BEGIN CERTIFICATE-----$
+# reason: public eMudhra CA certificate fixture (certificate blocks only, no key)
+skills/ca-trust-ops/tests/fixtures/emudhra-2026-10/unlisted.crt:^-----BEGIN CERTIFICATE-----$
+# reason: test code that splits PEM blocks or writes a garbled one (base64 of "not a certificate")
+skills/ca-trust-ops/tests/run.sh:^  \{ cat "\$FIX/unlisted\.crt"; printf '%s\\n' '-----BEGIN CERTIFICATE-----' 'bm90IGEgY2VydGlmaWNhdGU=' '-----END CERTIFICATE-----'; \} >"\$SB/garbled\.pem"$
+# reason: test code that splits PEM blocks or writes a garbled one (base64 of "not a certificate")
+skills/ca-trust-ops/tests/run.sh:^  awk -v d="\$dir" '/-----BEGIN CERTIFICATE-----/\{n\+\+; f=d "/" n "\.pem"\} f\{print > f\} /-----END CERTIFICATE-----/\{close\(f\); f=""\}' "\$1"$
+# reason: test code that splits PEM blocks or writes a garbled one (base64 of "not a certificate")
+skills/ca-trust-ops/tests/run.sh:^first_cert\(\) \{ awk '/-----BEGIN CERTIFICATE-----/\{on=1\} on\{print\} /-----END CERTIFICATE-----/\{exit\}' "\$1"; \}$
+# reason: reads a fact-file field named prose_token; no literal value
+skills/linear-ops/scripts/check-linear-facts.py:^        token = str\(fact\["prose_token"\]\)$
+# reason: reads a fact-file field named prose_token; no literal value
+skills/sentry-ops/scripts/check-sentry-facts.py:^        token = str\(fact\["prose_token"\]\)$
