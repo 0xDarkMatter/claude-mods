@@ -32,3 +32,7 @@ d9bc420cb123a2f9b6205d8c0ae6f4f9fa20bea3:skills/security-ops/references/audit-ag
 # inline "auths" entry for registry.example.com so the probe can prove it flags inline registry
 # credentials. The value is a fake stub, base64 of a placeholder user:pass; not a credential.
 910a82398f81c71f291b9aba24d070ffeee3e820:skills/docker-ops/tests/fixtures/doctor/run_doctor.py:generic-api-key:59
+# ca-trust-ops suite: EM_DV_KEY is the SHA-256 key hash of the public eMudhra "EM DV TLS CA - G3B"
+# certificate, the same value as the key record in assets/incidents/*emudhra*.conf. A public CA
+# identifier the suite looks up, not a credential.
+770dfeec61c2cd15b4ddc6817ab84bc9437318ee:skills/ca-trust-ops/tests/run.sh:generic-api-key:113
