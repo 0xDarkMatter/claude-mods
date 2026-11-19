@@ -477,11 +477,20 @@ echo "== terminal design: wide glyphs take two cells in term.sh's layout maths"
 # term.sh: python's unicodedata, East Asian Width W or F = 2 cells, SGR
 # stripped, and invalid UTF-8 means a cut split a character. Each probe line is
 # "<cells wanted, or = for the line above's>\t<what>\t<rendered>". The probe
-# runs once in a UTF-8 locale and once in C, where bash counts bytes.
+# runs once in a UTF-8 locale and once in C, where bash counts bytes (Git
+# Bash's C locale does too, so a local run covers the C pass).
+# The probe pins TERM, because the glyph mode must not come from the host. With
+# no TERM in the environment, bash sets TERM=dumb itself (a shell variable, so
+# `env` never shows it), and term_init reads a non-UTF locale on a dumb
+# terminal as ASCII. GitHub's runners set no TERM, so there the C pass drew
+# the ".." marker, one cell wider than the "…" the cut rows want, and failed
+# while every desktop shell passed. `env -u TERM` reproduces it. ASCII mode's
+# cuts are the colour probe's job (TERM_ASCII=1, above).
 __uprobe="$(mktemp)"
 cat > "$__uprobe" <<'PROBE'
 . skills/_lib/term.sh
 unset TERM_ASCII FLEET_ASCII
+TERM=xterm-256color   # never the host's: see "pins TERM" above
 if [ "$1" = C ]; then LC_ALL=C
 else # C.UTF-8 on Linux CI; macOS and MSYS have en_US.UTF-8
     for l in C.UTF-8 en_US.UTF-8; do LC_ALL=$l; s='⚡'; [ "${#s}" -eq 1 ] && break; done 2>/dev/null
