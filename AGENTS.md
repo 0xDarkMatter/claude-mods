@@ -182,6 +182,10 @@ On "INIT:" message at session start:
   a suite that runs Windows-only scripts whenever `command -v pwsh` succeeds goes
   red on Linux CI (windows-ops, supply-chain-defense). Gate runtime checks on the
   host: `[Environment]::OSVersion.Platform` = `Win32NT` (works in 5.1 and 7).
+- **GitHub's runners set no TERM, so bash sets `TERM=dumb` itself** (`env` never shows
+  it), and term.sh reads a non-UTF locale on a dumb terminal as ASCII. Probes of
+  term.sh's Unicode output pin `TERM` (`env -u TERM` reproduces CI), or they pass
+  locally and fail there.
 - **PowerShell files stay ASCII.** Windows PowerShell 5.1 reads a BOM-less `.ps1` in the
   ANSI code page, so one em dash or box glyph breaks the parse, and pwsh 7 hides it. Use an
   ASCII stand-in, or `[char]0x2500` for an output glyph; `tests/check-ps51-parse.sh` gates it.

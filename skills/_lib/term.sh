@@ -95,7 +95,11 @@ term_init() {
   local fd=${1:-1}
   if [[ -t "$fd" ]]; then TERM_TTY=1; else TERM_TTY=0; fi
 
-  # ASCII fallback: explicit env, or non-UTF locale.
+  # ASCII fallback: explicit env, or non-UTF locale. An absent TERM counts as
+  # dumb here even though the test reads ${TERM:-}: bash sets TERM=dumb itself
+  # when the environment has none (cron, GitHub's runners), so LC_ALL=C there
+  # means ASCII glyphs and the ".." cut marker. term.ps1 reads $env:TERM, which
+  # pwsh never defaults, so there an absent TERM is not dumb.
   if [[ "${TERM_ASCII:-}" == "1" ]] || [[ "${FLEET_ASCII:-}" == "1" ]]; then
     TERM_ASCII_MODE=1
   elif [[ "${LC_ALL:-${LANG:-}}" != *[Uu][Tt][Ff]* ]] && [[ -z "${LC_ALL:-${LANG:-}}" || "${TERM:-}" == "dumb" ]]; then
