@@ -471,7 +471,9 @@ feature releases live in the README "Recent Updates" section.
   agree, and `term_truncate` never splits a glyph. In `term.ps1`, `Get-TermDisplayWidth`'s
   wide-glyph branch had never run, so `windows-ops` headers ran a cell long too; it now shares
   `term.sh`'s table (a gate keeps the two equal), and `Get-TermTruncated` copies colour
-  escapes and emoji whole instead of cutting the raw string.
+  escapes and emoji whole instead of cutting the raw string. The gate's wide-glyph probe pins
+  `TERM`: GitHub's runners set none, bash then defaults it to `dumb`, and the probe's C-locale
+  pass fell into ASCII mode and failed only in CI.
 
 - **react-ops' Vitest setup type-checks again.** `import '@testing-library/jest-dom'` types
   its matchers on `jest.Matchers`, which Vitest 5 no longer reads, so every jest-dom matcher was
