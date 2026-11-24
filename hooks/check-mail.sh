@@ -73,16 +73,30 @@ sqlite3() {
 # Skip if disabled for this project
 [ -f ".claude/pigeon.disable" ] && exit 0
 
-# No jq, no way to build the envelope - stay silent (and leave the signal set)
-command -v jq >/dev/null 2>&1 || exit 0
-
-# Project identity: git root commit hash, fallback to path hash
-ROOT_COMMIT=$(git rev-list --max-parents=0 HEAD 2>/dev/null | head -1)
-if [ -n "$ROOT_COMMIT" ]; then
-  PROJECT_HASH="${ROOT_COMMIT:0:6}"
-else
-  CANONICAL=$(cd "$PWD" && pwd -P)
-  PROJECT_HASH=$(printf '%s' "$CANONICAL" | shasum -a 256 | cut -c1-6)
+# Project identity: git root commit hash, fallback to path hash.
+# Cached per directory: this hook runs on nearly every tool call, and git + head
+# were 2 of the fast path's 3 processes. On Windows each process costs ~100 ms
+# idle and seconds under load, past the 5 s timeout (hooks/README.md
+# "Hook start cost"). Cache line: "<hash>\t<dir>"; the
+# dir is checked on read, so a sanitised-name collision can't misroute mail.
+# Only a git hash is cached (a root commit never changes); a directory that is
+# not a repo yet recomputes every time, so a later `git init` is picked up.
+PROJ_CACHE="/tmp/pigeon_proj_${PWD//[\/\\:]/_}"
+PROJECT_HASH=""
+if [ -f "$PROJ_CACHE" ]; then
+  IFS=$'\t' read -r C_HASH C_DIR < "$PROJ_CACHE" 2>/dev/null
+  [ "${C_DIR:-}" = "$PWD" ] && [[ ${C_HASH:-} =~ ^[0-9a-f]{6}$ ]] && PROJECT_HASH="$C_HASH"
+fi
+if [ -z "$PROJECT_HASH" ]; then
+  ROOT_COMMIT=$(git rev-list --max-parents=0 HEAD 2>/dev/null | head -1)
+  if [ -n "$ROOT_COMMIT" ]; then
+    PROJECT_HASH="${ROOT_COMMIT:0:6}"
+    printf '%s\t%s\n' "$PROJECT_HASH" "$PWD" > "$PROJ_CACHE.$$" 2>/dev/null \
+      && mv -f "$PROJ_CACHE.$$" "$PROJ_CACHE" 2>/dev/null
+  else
+    CANONICAL=$(cd "$PWD" && pwd -P)
+    PROJECT_HASH=$(printf '%s' "$CANONICAL" | shasum -a 256 | cut -c1-6)
+  fi
 fi
 
 SIGNAL="/tmp/pigeon_signal_${PROJECT_HASH}"
@@ -96,7 +110,7 @@ SIGNAL="/tmp/pigeon_signal_${PROJECT_HASH}"
 # matching. jq parses anything else, so a reordered payload still filters.
 SID=""
 if [ ! -t 0 ]; then
-  INPUT=$(cat)
+  IFS= read -r -d '' INPUT || true   # builtin, not $(cat): no fork
   sid_re='^[[:space:]]*\{[[:space:]]*"session_id"[[:space:]]*:[[:space:]]*"([^"]*)"'
   if [[ $INPUT =~ $sid_re ]]; then
     SID="${BASH_REMATCH[1]}"
@@ -113,6 +127,10 @@ SEEN="/tmp/pigeon_seen_${PROJECT_HASH}_${SID:-anon}"
 [ "$SEEN" -nt "$SIGNAL" ] && exit 0
 
 [ -f "$PMAIL_DB" ] || exit 0
+
+# No jq, no way to build the envelope - stay silent (and leave the signal set).
+# Checked past the fast path: the PATH search cost ~30 ms on every idle call.
+command -v jq >/dev/null 2>&1 || exit 0
 
 # Stamp the START of this check before querying. The marker written at the end
 # takes this mtime, so a send that lands mid-query leaves the signal newer than

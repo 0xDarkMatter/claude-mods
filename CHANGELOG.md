@@ -349,6 +349,18 @@ feature releases live in the README "Recent Updates" section.
 
 ### Fixed
 
+- **`worktree-guard`, `pre-install-scan` and `check-mail` time out far less under load.**
+  A PreToolUse hook that outruns its timeout is cancelled and the call goes ahead
+  unchecked. One busy Windows workstation logged 25,299 cancelled PreToolUse hooks in a
+  week. Each of these three hooks now reads stdin with a builtin and exits before its first
+  process when the command cannot match: `worktree-guard` and `pre-install-scan` through a
+  pure-bash pre-filter (a superset of their checks), `check-mail` by caching the project
+  hash per directory. On `git status` at about 30% CPU: worktree-guard 1.1-2.1 s to
+  0.12-0.14 s, pre-install-scan 0.9-1.2 s to 0.11-0.12 s. The plugin `hooks.json` gives
+  `worktree-guard`, `pre-tls-verify-ask` and `pre-write-peer-guard` a 30 s timeout.
+  `tests/hooks.sh` checks with PATH shims that none of the three starts a process on a
+  non-matching call. Background: `hooks/README.md` "Hook start cost".
+
 - **sentry-ops `envelope-sink.py listen` refuses a port another process holds, on Windows
   too.** Python's `HTTPServer` sets `SO_REUSEADDR`, and on Windows two sockets that both set
   it can listen on the same address and port. So with another Python `http.server` on the
