@@ -35,7 +35,18 @@ INPUT="$1"
 # ({"tool_input":{"command":"..."}}); older configs pass it as $TOOL_INPUT/$1.
 # Support both so the hook works regardless of harness version.
 if [[ -z "$INPUT" && ! -t 0 ]]; then
-  RAW="$(cat 2>/dev/null)"
+  RAW=""; IFS= read -r -d '' RAW || true   # builtin, not $(cat): no fork
+  # Pre-filter, no fork: every verb below names install, add, composer, or npm/pnpm i.
+  # A command naming none of them exits before jq. This lets settings.json run the
+  # hook once per Bash/PowerShell call instead of through ten `if` rules, which all
+  # fire (up to 5 copies at once) on any command Claude Code can't parse
+  # (hooks/README.md "Hook start cost"). Guard: keep it a SUPERSET of
+  # the ecosystem checks below.
+  # Regex in a variable: bash 3.2 and 5 read an inline regex differently.
+  RE_PRE='install|add|composer|npm[[:space:]]+i'
+  shopt -s nocasematch
+  [[ "$RAW" =~ $RE_PRE ]] || exit 0
+  shopt -u nocasematch
   if [[ -n "$RAW" ]] && command -v jq >/dev/null 2>&1; then
     INPUT="$(printf '%s' "$RAW" | jq -r '.tool_input.command // .tool_input // empty' 2>/dev/null)"
   fi

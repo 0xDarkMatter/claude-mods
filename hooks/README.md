@@ -485,6 +485,34 @@ Build the envelope with `jq -nc --arg c "$MSG" '...'`, never by string
 concatenation, and print nothing else to stdout. `tests/hooks.sh` asserts each
 channel; run it with `HOOKS_DIR=<dir>` to point it at another copy of the hooks.
 
+### Hook start cost
+
+A PreToolUse hook that runs past its `timeout` is cancelled and **the tool call goes
+ahead unchecked**: a guard that times out fails open. On Windows (Git Bash/MSYS) every
+process a hook starts (`bash`, `jq`, `git`, `grep`, `sed`) costs about 110-130 ms on an
+idle machine and seconds under load. One week on a busy workstation (2026-11, about 30
+sessions) logged 25,299 cancelled PreToolUse hooks, recorded at a median of 7-18 s against
+limits of 5-10 s. `worktree-guard` alone started about 25 processes on every Bash call.
+
+So the hooks that run on most calls exit before their first fork when they can:
+
+- Read stdin with `IFS= read -r -d '' RAW || true` (a builtin), not `RAW=$(cat)`.
+- Pre-filter in pure bash: `[[ "$RAW" =~ $RE_PRE ]] || exit 0`, the regex in a variable.
+  `worktree-guard` needs `worktree`, `clean`, `add` or the last part of `$WORKTREE_ROOT`;
+  `pre-install-scan` needs `install`, `add`, `composer` or `npm i`. **Keep each pre-filter
+  a superset of the checks after it**: a new check adds its word, or it silently never runs.
+- `check-mail` caches the project hash per directory, so its fast path is one process.
+
+Measured on the same machine at about 30% CPU, per call on a command that is not a
+match: `worktree-guard` 1.1-2.1 s -> 0.12-0.14 s, `pre-install-scan` 0.9-1.2 s ->
+0.11-0.12 s, `check-mail` 0.25-0.45 s -> 0.11-0.15 s.
+
+If you wire these with settings.json `if` rules instead, note that on a command Claude
+Code cannot parse (`$(...)`, heredocs, loops) **every** rule fires, so one hook behind
+five rules runs five times at once. With the pre-filter, one unfiltered entry is cheaper.
+The guards that must not fail open (`worktree-guard`, `pre-tls-verify-ask`,
+`pre-write-peer-guard`) get a 30 s timeout in `hooks.json`.
+
 ## Best Practices
 
 1. **Keep hooks fast** - They run synchronously and block Claude

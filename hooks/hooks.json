@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-write-peer-guard.sh\"",
-            "timeout": 10
+            "timeout": 30
           }
         ]
       },
@@ -22,7 +22,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/worktree-guard.sh\"",
-            "timeout": 10
+            "timeout": 30
           }
         ]
       },
@@ -32,7 +32,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-tls-verify-ask.sh\"",
-            "timeout": 10
+            "timeout": 30
           }
         ]
       }

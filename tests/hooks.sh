@@ -581,6 +581,43 @@ else
   skip "worktree-create / worktree-remove (git not installed)"
 fi
 
+# --- start cost: no process on a command that cannot match --------------------
+# A PreToolUse hook that outruns its timeout is cancelled and the call goes ahead
+# unchecked. On Windows each process a hook starts costs ~120 ms idle and seconds
+# under load, so the hooks that run on nearly every call must exit before their
+# first fork when nothing can match (hooks/README.md "Hook start cost"). Shims on
+# PATH log every external command a hook starts; the log must stay empty.
+echo "-- start cost (no external command on a non-matching call) --"
+shim="$tmp/shim"; mkdir -p "$shim"; : > "$tmp/forks"
+for c in cat jq git head grep sed tr cygpath shasum; do
+  real="$(command -v "$c" 2>/dev/null)" || continue
+  printf '#!/bin/bash\necho %s >> "%s"\nexec "%s" "$@"\n' "$c" "$tmp/forks" "$real" > "$shim/$c"
+  chmod +x "$shim/$c"
+done
+no_forks() {   # $1 label, $2 payload, $3.. command; run in $tmp/plain with shims first
+  local label="$1" payload="$2"; shift 2; : > "$tmp/forks"
+  printf '%s' "$payload" | (cd "$tmp/plain" && PATH="$shim:$PATH" "$@") >"$tmp/out" 2>/dev/null; local rc=$?
+  if [ "$rc" -ne 0 ] || [ -s "$tmp/out" ]; then bad "$label - exit $rc / output: $(head -c 60 "$tmp/out")"
+  elif [ -s "$tmp/forks" ]; then bad "$label - started: $(tr '\n' ' ' < "$tmp/forks")"
+  else ok "$label"; fi
+}
+wt_status="$(jq -cn --arg d "$tmp/plain" '{tool_input:{command:"git status --short"},cwd:$d}')"
+no_forks "worktree-guard starts nothing on 'git status'" "$wt_status" bash "$H/worktree-guard.sh"
+no_forks "pre-install-scan starts nothing on 'git status'" "$wt_status" bash "$H/pre-install-scan.sh"
+if command -v git >/dev/null 2>&1; then
+  # check-mail's idle path: the second call in a repo reuses the cached project hash.
+  git -C "$tmp/plain" init -q 2>/dev/null
+  git -C "$tmp/plain" -c user.name=t -c user.email=t@t commit -q --allow-empty -m root 2>/dev/null
+  pm_home="$tmp/pmhome"; mkdir -p "$pm_home/.claude"
+  sid_json='{"session_id":"hooks-test","tool_input":{"command":"ls"}}'
+  (cd "$tmp/plain" && printf '%s' "$sid_json" | HOME="$pm_home" bash "$H/check-mail.sh") >/dev/null 2>&1
+  no_forks "check-mail starts nothing on an idle call (project hash cached)" "$sid_json" \
+    env HOME="$pm_home" bash "$H/check-mail.sh"
+  rm -f "/tmp/pigeon_proj_${tmp//[\/\:]/_}_plain" 2>/dev/null
+else
+  skip "check-mail start cost (git not installed)"
+fi
+
 echo
 echo "=== $PASS passed, $FAIL failed, $SKIP skipped ==="
 [ "$FAIL" -eq 0 ]

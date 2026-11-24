@@ -49,13 +49,35 @@
 
 set -uo pipefail
 
-CMD="${1:-}"; CWD=""
+CMD="${1:-}"; CWD=""; RAW=""
 if [[ -z "$CMD" && ! -t 0 ]]; then
-  RAW="$(cat 2>/dev/null)"
-  if [[ -n "${RAW:-}" ]] && command -v jq >/dev/null 2>&1; then
-    CMD="$(printf '%s' "$RAW" | jq -r '.tool_input.command // empty' 2>/dev/null)"
-    CWD="$(printf '%s' "$RAW" | jq -r '.cwd // empty' 2>/dev/null)"
-  fi
+  IFS= read -r -d '' RAW || true   # builtin, not $(cat): no fork
+fi
+
+# Pre-filter, no fork. Every check below needs one of these words in the
+# command: "worktree" (.claude/worktrees, $WORKTREE_ROOT, git worktree ...),
+# "clean", "add", or the last path part of $WORKTREE_ROOT when it is named
+# something else. A command naming none of them exits here, before jq, cygpath,
+# sed and the grep chain: about 25 processes, 1.4-2.5 s on Windows at 26% CPU,
+# and the hook's 10 s timeout under load (hooks/README.md "Hook start cost").
+# Guard: keep this a SUPERSET of the checks below. A new check adds its word here,
+# or the check silently never runs.
+WT_LEAF="${WORKTREE_ROOT:-}"; WT_LEAF="${WT_LEAF%[/\\]}"; WT_LEAF="${WT_LEAF##*[/\\]}"
+RE_PRE='worktree|clean|add'
+[[ -n "$WT_LEAF" ]] && RE_PRE+="|${WT_LEAF//[^A-Za-z0-9_-]/.}"
+shopt -s nocasematch
+[[ "${CMD:-$RAW}" =~ $RE_PRE ]] || exit 0
+shopt -u nocasematch
+
+if [[ -z "$CMD" && -n "$RAW" ]] && command -v jq >/dev/null 2>&1; then
+  # One jq call: line 1 = cwd (one line), the rest = the command (may span lines).
+  # Strip \r: Windows jq.exe writes -r output in text mode (\r\n). MSYS bash drops
+  # only the LAST one in $(...), so without this the cwd line would end in \r and
+  # every [[ -d "$CWD/.claude/worktrees" ]] below would be false.
+  out="$(printf '%s' "$RAW" | jq -r '(.cwd // ""), (.tool_input.command // "")' 2>/dev/null)"
+  out="${out//$'\r'/}"
+  CWD="${out%%$'\n'*}"
+  [[ "$out" == *$'\n'* ]] && CMD="${out#*$'\n'}"
 fi
 [[ -z "$CMD" ]] && exit 0
 [[ -z "$CWD" ]] && CWD="${CLAUDE_PROJECT_DIR:-$PWD}"
